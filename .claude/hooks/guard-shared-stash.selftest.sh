@@ -107,6 +107,30 @@ expect allow 'echo \" ; git stash apply abc1234'
 expect allow 'echo a\ b'
 expect allow 'echo \\ ; git status'
 
+echo "== an escaped \\\" INSIDE a double-quoted word does NOT close it (#10406 half) =="
+# The other direction of the same missing rule. Inside "…" a `\"` is a literal quote and the
+# quoted region stays OPEN; reading it as closing flipped the pass to "outside quotes" while
+# bash was still inside, so separators behind it split where bash would not and the tail of a
+# pure READ became a segment of its own — a false BLOCK on a command that touches no stash.
+# Both allow-cases below were BLOCKED before the in-quote branch existed, while the
+# single-level control next door (`grep -rn "cd x && git stash pop" .claude/`) passed
+# throughout: the guard was reached and the nested escape alone is the difference.
+expect allow 'grep -rn "he said \"cd x && git stash pop\" once" .claude/'
+expect allow 'echo "he said \"x && git stash pop\" once"'
+# Precision twins — the branch must not become a blanket "ignore whatever follows a backslash".
+# Once the quoted region really is closed, the stash behind it is still caught. The first two
+# were ALLOWED before the branch existed (the same missing rule fails OPEN once the escapes
+# pair up and the region is left hanging); the rest were blocked before and stay blocked.
+expect block 'echo "he said \"x\"" && git stash pop'
+expect block 'echo "he said \"x\"" ; git stash drop'
+expect block 'echo "quoted" && git stash pop'
+# `\\` inside "…" is an escaped backslash, so the NEXT `"` still closes the region. Without the
+# `\` arm of the case list that closing quote is eaten as an escapee and the stash rides through.
+expect block 'echo "a \\" ; git stash pop'
+# Inside '…' nothing is special, which is why the branch is gated on q='"'. Applied to single
+# quotes it would swallow the closing `'` and let the stash behind it through.
+expect block "echo 'a \\' ; git stash pop"
+
 echo "== escape hatch =="
 expect allow 'git stash pop' OS_ALLOW_STASH=1
 

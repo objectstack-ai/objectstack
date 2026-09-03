@@ -37,7 +37,6 @@ import {
 // re-bundling. We defer the actual `createRequire(...)` call so that the
 // CJS build (where `import.meta.url` is empty) doesn't blow up at module
 // init; the CJS path uses `globalThis.require` directly anyway.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let cachedEsmRequire: any = null;
 function getEsmRequire(): any {
   if (cachedEsmRequire) return cachedEsmRequire;
@@ -168,7 +167,6 @@ export function statementMutatesDatabase(sql: string, method?: string): boolean 
  * Wrapped in a function so the bundler cannot execute it at module init.
  */
 function resolveKnexSqlite3Dialect(): any {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const g = globalThis as any;
   if (typeof g.require === 'function') {
     try {
@@ -184,7 +182,6 @@ function resolveKnexSqlite3Dialect(): any {
   return getEsmRequire()('knex/lib/dialects/sqlite3');
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let cachedDialect: any = null;
 
 /**
@@ -193,7 +190,6 @@ let cachedDialect: any = null;
  * code so downstream re-bundlers (e.g. `packages/runtime`) cannot collapse
  * it into a Dynamic-require stub.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function getClient_WasmSqlite(): any {
   if (cachedDialect) return cachedDialect;
   const Client_SQLite3 = resolveKnexSqlite3Dialect();
@@ -317,7 +313,6 @@ export function getClient_WasmSqlite(): any {
  * in some bundlers, which defeats the lazy pattern. New code should call
  * `getClient_WasmSqlite()` directly.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const Client_WasmSqlite: any = new Proxy(function () {} as any, {
   get(_t, prop) {
     return (getClient_WasmSqlite() as any)[prop];

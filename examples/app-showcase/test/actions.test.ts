@@ -106,7 +106,8 @@ describe('showcase actions — the object-less (`global`) specimen', () => {
   const runner = new QuickJSScriptRunner();
 
   it('declares no object, so it keys at `global` (framework#3913)', () => {
-    // This mirrors ObjectQLPlugin.actionObjectKey / AppPlugin's
+    // This mirrors `standaloneActionOwnerKey` (`@objectstack/objectql`, the
+    // helper the ObjectQL plugin calls) / AppPlugin's
     // `action.object || 'global'`: neither field set → the 'global' bucket.
     const a = PortfolioSnapshotAction as { objectName?: string; object?: string };
     expect(a.objectName).toBeUndefined();

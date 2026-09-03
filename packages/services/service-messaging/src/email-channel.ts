@@ -13,9 +13,10 @@ import {
     renderNotification,
     DEFAULT_LOCALE,
 } from './template-renderer.js';
+import { RECIPIENT_LOCALE_FIELD, USER_OBJECT, resolveRecipientLocale } from './recipient-locale.js';
 
-/** The user identity object a recipient id is resolved to an address against. */
-export const USER_OBJECT = 'sys_user';
+/** The user identity object a recipient id is resolved to an address against (re-exported from the locale seam, #13881). */
+export { USER_OBJECT };
 
 /**
  * Structural view of the email service (`@objectstack/plugin-email`'s
@@ -84,17 +85,18 @@ export interface EmailChannelOptions {
     /** Locale used when the delivery carries none (default {@link DEFAULT_LOCALE}). */
     defaultLocale?: string;
     /**
-     * The recipient locale for `sys_email_template` resolution (#9205) —
-     * probed lazily at delivery time so it tracks live settings changes.
+     * The DEPLOYMENT DEFAULT locale — `II18nService.getDefaultLocale()`,
+     * probed lazily at delivery time so it tracks live settings changes and
+     * a late-registered i18n service.
      *
-     * The measured source, and its limits, spelled out: the platform has no
-     * per-user locale today (`sys_user` carries no locale column; the
-     * 2026-08-13 ruling defers one until measured pull), and request-scoped
-     * locale (`Accept-Language` → `ExecutionContext.requestLocale`) does not
-     * exist at async delivery time. So "recipient locale" resolves to the
-     * deployment default — `II18nService.getDefaultLocale()`, the same ruled
-     * source the auth emails use (#8195) — and a per-user locale, when it
-     * lands, plugs in here.
+     * Since #13881 (maintainer ruling 2026-09-01) this is the SECOND rung of
+     * the recipient-locale chain, not the whole of it: the first is the
+     * recipient's own `sys_user.locale`, read off the same row the address
+     * comes from, and the two are composed in ONE place —
+     * `recipient-locale.ts` (`resolveRecipientLocale`). The 2026-08-13
+     * deferral that made this the whole answer lifted when hotcrm measured
+     * the pull. Request-scoped locale (`Accept-Language`) still does not
+     * exist at async delivery time and is not a rung.
      */
     getDefaultTemplateLocale?(): string | undefined;
 }
@@ -122,9 +124,16 @@ const EMAIL_SHAPE = (s: string): boolean => {
  * A delivery whose payload carries a `template` reference (a `notify` node's
  * localizable path, #9205) takes precedence over both: it routes through
  * `IEmailService.sendTemplate({ template, locale, data })`, which resolves the
- * `sys_email_template` bundle by `(name, recipient locale)` — the locale being
- * `payload.locale` if the producer set one, else the deployment default from
- * {@link EmailChannelOptions.getDefaultTemplateLocale}.
+ * `sys_email_template` bundle by `(name, recipient locale)`.
+ *
+ * The recipient locale is resolved HERE, per recipient, after fan-out
+ * (#13881, maintainer ruling 2026-09-01): the recipient's own
+ * `sys_user.locale` — read off the same row the address comes from — else the
+ * deployment default from {@link EmailChannelOptions.getDefaultTemplateLocale};
+ * absent/empty/malformed always falls back and never dead-letters. Both arms
+ * of this channel (the `sendTemplate` path and the `sys_notification_template`
+ * path) use that one resolution. A producer-set `payload.locale` — the
+ * pre-ruling single value for the whole notification — is no longer consulted.
  *
  * Degrades like the inbox channel: no email service ⇒ logged no-op success
  * (capability not installed); a recipient with no resolvable address ⇒ a
@@ -134,21 +143,63 @@ export function createEmailChannel(opts: EmailChannelOptions): MessagingChannel 
     const userObject = opts.userObject ?? USER_OBJECT;
     const defaultLocale = opts.defaultLocale ?? DEFAULT_LOCALE;
 
-    async function resolveAddress(
+    const deploymentLocale = (): string | undefined => opts.getDefaultTemplateLocale?.();
+
+    /**
+     * The recipient, resolved ONCE per delivery: the address to send to and
+     * the locale to render in (#13881 — one `sys_user` read yields both, so
+     * the per-recipient locale costs no second query).
+     */
+    interface ResolvedRecipient {
+        address: string;
+        /** Already composed with the deployment default; `undefined` ⇒ the ladders' documented floor. */
+        locale: string | undefined;
+    }
+
+    async function resolveRecipient(
         ctx: MessagingChannelContext,
         data: IDataEngine | undefined,
         recipient: string,
-    ): Promise<string | undefined> {
-        if (EMAIL_SHAPE(recipient)) return recipient; // already an address
-        if (!data) return undefined;
-        try {
-            const user = await data.findOne(userObject, { where: { id: recipient }, fields: ['email'] });
-            const email = user?.email;
-            return typeof email === 'string' && EMAIL_SHAPE(email) ? email : undefined;
-        } catch (err) {
-            ctx.logger.warn(`[email] address lookup for '${recipient}' failed (${(err as Error).message})`);
-            return undefined;
+    ): Promise<ResolvedRecipient | undefined> {
+        if (EMAIL_SHAPE(recipient)) {
+            // A literal address has no `sys_user` row to read a locale from —
+            // for it the deployment default is the whole chain.
+            return { address: recipient, locale: resolveRecipientLocale(undefined, deploymentLocale) };
         }
+        if (!data) return undefined;
+        let user: Record<string, unknown> | null | undefined;
+        // Set only when the row was read WITH the locale projection: after a
+        // retry the column was never asked for, so whatever the row carries
+        // under that key is not a read — rung 2 applies.
+        let localeRead = false;
+        try {
+            user = await data.findOne(userObject, {
+                where: { id: recipient },
+                fields: ['email', RECIPIENT_LOCALE_FIELD],
+            });
+            localeRead = true;
+        } catch (err) {
+            // Ruling item 3: NO path may dead-letter because of the locale
+            // read. A `userObject` override that lacks the column must still
+            // deliver — retry the address alone and fall to the deployment
+            // default. Said once per delivery, at `warn`, because the loss is
+            // functional (a language), not durability.
+            ctx.logger.warn(
+                `[email] recipient lookup for '${recipient}' with '${RECIPIENT_LOCALE_FIELD}' failed (${(err as Error).message}); retrying address-only`,
+            );
+            try {
+                user = await data.findOne(userObject, { where: { id: recipient }, fields: ['email'] });
+            } catch (retryErr) {
+                ctx.logger.warn(`[email] address lookup for '${recipient}' failed (${(retryErr as Error).message})`);
+                return undefined;
+            }
+        }
+        const email = user?.email;
+        if (!(typeof email === 'string' && EMAIL_SHAPE(email))) return undefined;
+        return {
+            address: email,
+            locale: resolveRecipientLocale(localeRead ? user?.[RECIPIENT_LOCALE_FIELD] : undefined, deploymentLocale),
+        };
     }
 
     return {
@@ -162,10 +213,11 @@ export function createEmailChannel(opts: EmailChannelOptions): MessagingChannel 
             }
 
             const n = delivery.notification;
-            const address = await resolveAddress(ctx, opts.getData(), delivery.recipient);
-            if (!address) {
+            const resolved = await resolveRecipient(ctx, opts.getData(), delivery.recipient);
+            if (!resolved) {
                 return { ok: false, error: `no email address for recipient '${delivery.recipient}'` };
             }
+            const { address, locale: recipientLocale } = resolved;
 
             const payload = (n.payload ?? {}) as Record<string, unknown>;
 
@@ -175,7 +227,9 @@ export function createEmailChannel(opts: EmailChannelOptions): MessagingChannel 
             // happens HERE, per recipient, because this is the first moment a
             // single recipient exists: `sendTemplate` picks the
             // `(name, recipient locale)` row with its documented en-US ladder
-            // and renders `templateData` into the `{{var}}` holes.
+            // and renders `templateData` into the `{{var}}` holes. The
+            // recipient locale is the one resolved above (#13881): the
+            // recipient's own `sys_user.locale`, else the deployment default.
             const templateName =
                 typeof payload.template === 'string' && payload.template.trim()
                     ? payload.template.trim()
@@ -189,9 +243,7 @@ export function createEmailChannel(opts: EmailChannelOptions): MessagingChannel 
                         error: `TEMPLATE_UNSUPPORTED: notify template '${templateName}' needs an email service with sendTemplate(); the registered 'email' service does not provide it`,
                     };
                 }
-                const templateLocale = typeof payload.locale === 'string' && payload.locale.trim()
-                    ? payload.locale.trim()
-                    : opts.getDefaultTemplateLocale?.();
+                const templateLocale = recipientLocale;
                 const data = (payload.templateData ?? undefined) as Record<string, unknown> | undefined;
                 try {
                     const result = (await email.sendTemplate({
@@ -221,7 +273,10 @@ export function createEmailChannel(opts: EmailChannelOptions): MessagingChannel 
                 }
             }
 
-            const locale = typeof payload.locale === 'string' ? payload.locale : defaultLocale;
+            // Same per-recipient resolution on the `sys_notification_template`
+            // arm (#13881); the store walks its own ladder (`zh-CN` → `zh` →
+            // DEFAULT_LOCALE) underneath, so a tag with no row still renders.
+            const locale = recipientLocale ?? defaultLocale;
             const template = await opts.store.load(n.topic ?? '', 'email', locale);
             const rendered = renderNotification(template, {
                 topic: n.topic ?? '',

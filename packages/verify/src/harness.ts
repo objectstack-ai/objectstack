@@ -64,7 +64,6 @@ class SimulatedOrgScopingPlugin {
   readonly type = 'standard';
   readonly providesServices = ['org-scoping'];
   readonly supportedPostures = ['group', 'isolated'] as const;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async init(ctx: any): Promise<void> {
     ctx.registerService('org-scoping', this);
   }
@@ -320,7 +319,6 @@ export interface BootOptions {
  * bootstrap provisions a known, loginable admin (mirrors `objectstack dev`).
  */
 export async function bootStack(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   config: any,
   opts: BootOptions = {},
 ): Promise<VerifyStack> {
@@ -557,7 +555,6 @@ export async function bootStack(
   // Caller-supplied optional service pairs (see BootOptions.extraPlugins).
   // Before SecurityPlugin, mirroring the CLI's ordering for service pairs.
   for (const plugin of opts.extraPlugins ?? []) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await kernel.use(plugin as any);
   }
 
@@ -627,9 +624,7 @@ export async function bootStack(
   // assuming it: no `sys_member` row for the harness admin, no stack.
   if (opts.orgContext) {
     const sys = { isSystem: true } as const;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const engine = await kernel.getServiceAsync<any>('objectql');
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const rowsOf = (r: any): any[] => (Array.isArray(r) ? r : Array.isArray(r?.records) ? r.records : []);
     const users = rowsOf(
       await engine?.find('sys_user', { where: { email: admin.email }, limit: 1, context: sys }),
@@ -639,7 +634,6 @@ export async function bootStack(
       ? rowsOf(await engine.find('sys_member', { where: { user_id: adminUserId }, limit: 1, context: sys }))
       : [];
     if (!members[0]?.organization_id) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (kernel as any).shutdown?.().catch?.(() => {});
       throw new Error(
         `verify: orgContext:true did not bind the harness admin (${admin.email}) to an organization. ` +
@@ -693,7 +687,6 @@ export async function bootStack(
    */
   const inviteForAudienceGate = async (email: string): Promise<void> => {
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const engine = await kernel.getServiceAsync<any>('objectql');
       if (!engine || typeof engine.insert !== 'function') return;
       await engine.insert(
@@ -803,7 +796,6 @@ export async function bootStack(
       /* best-effort */
     }
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (kernel as any).shutdown?.();
     } catch {
       /* best-effort */

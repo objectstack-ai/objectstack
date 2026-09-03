@@ -139,6 +139,8 @@
  * directly after a `const` in this file.
  */
 
+// dispatch-gates: whole-tree-population -- `audit(walk(REPO_ROOT))` reads every authored JS/TS file in the tree; ROOT_DIR_WATCH_HINTS below is where this gate's FINDINGS have so far lived, not the population it walks.
+
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, relative, resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';

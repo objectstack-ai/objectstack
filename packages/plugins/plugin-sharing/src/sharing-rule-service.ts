@@ -1012,6 +1012,16 @@ export class SharingRuleService implements ISharingRuleService {
    * different axes (`ObjectQLEngine.buildDriverOptions` reads them separately):
    * the evaluator must still see rows no individual recipient could, it must
    * just stop seeing rows the RULE has no business in.
+   *
+   * ## [#14484] The same context is what the grant is WRITTEN under
+   *
+   * `reconcile` / `reconcileForRecord` hand this context to
+   * `SharingService.grant`, which stamps `sys_record_share.organization_id`
+   * from it (ruled 2026-09-02: a rule-materialised grant carries the rule's
+   * organization). One context for the sweep and for the write is what keeps
+   * the two agreeing — the grant lands in the organization whose records the
+   * rule was allowed to sweep. A platform-global rule threads none, and its
+   * grants belong where each record does; `grant` derives that from the record.
    */
   private criteriaContext(rule: SharingRuleRow): ExecutionContext {
     const orgId = rule.organization_id;
@@ -1264,7 +1274,7 @@ export class SharingRuleService implements ISharingRuleService {
               sourceId: rule.id,
               reason: `rule:${rule.name}`,
             } as any,
-            SYSTEM_CTX,
+            this.criteriaContext(rule),
           );
           updated += 1;
         }
@@ -1281,7 +1291,7 @@ export class SharingRuleService implements ISharingRuleService {
             sourceId: rule.id,
             reason: `rule:${rule.name}`,
           } as any,
-          SYSTEM_CTX,
+          this.criteriaContext(rule),
         );
         created += 1;
       }
@@ -1337,7 +1347,7 @@ export class SharingRuleService implements ISharingRuleService {
                 sourceId: rule.id,
                 reason: `rule:${rule.name}`,
               } as any,
-              SYSTEM_CTX,
+              this.criteriaContext(rule),
             );
             updated += 1;
           }
@@ -1354,7 +1364,7 @@ export class SharingRuleService implements ISharingRuleService {
               sourceId: rule.id,
               reason: `rule:${rule.name}`,
             } as any,
-            SYSTEM_CTX,
+            this.criteriaContext(rule),
           );
           created += 1;
         }

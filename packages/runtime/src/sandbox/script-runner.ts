@@ -482,11 +482,9 @@ export interface ScriptRunner {
  * and be unit-tested ahead of the engine landing.
  */
 export class UnimplementedScriptRunner implements ScriptRunner {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   evalExpression(_body: ExpressionBody, _ctx: ScriptContext, _opts: ScriptRunOptions): Promise<ScriptResult> {
     return Promise.reject(new Error('ScriptRunner not configured: install a quickjs engine first.'));
   }
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   runScript(_body: ScriptBody, _ctx: ScriptContext, _opts: ScriptRunOptions): Promise<ScriptResult> {
     return Promise.reject(new Error('ScriptRunner not configured: install a quickjs engine first.'));
   }

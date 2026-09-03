@@ -96,14 +96,12 @@ export async function loadArtifactBundle(
         // artifact (malformed JSON, bad permissions, HTTP error) is a real
         // fault and keeps the loud warning.
         if (err?.code === 'ENOENT') {
-            // eslint-disable-next-line no-console
             console.log(
                 `${tag} no compiled artifact at '${absArtifactPath}' — booting without one ` +
                 `(run 'os compile' to build it)`,
             );
             return null;
         }
-        // eslint-disable-next-line no-console
         console.warn(`${tag} artifact read FAILED: path='${absArtifactPath}' error=${err?.message ?? err}`);
         return null;
     }
@@ -114,7 +112,6 @@ export async function loadArtifactBundle(
         // want to execute remote code by default). Hooks/flow handlers must
         // be carried in the JSON itself (declarative bodies, sandbox-eval).
         if (typeof bundle?.runtimeModule === 'string' && bundle.runtimeModule.length > 0) {
-            // eslint-disable-next-line no-console
             console.warn(
                 `${tag} ignoring runtimeModule='${bundle.runtimeModule}' for remote artifact ${absArtifactPath} ` +
                 `(remote ESM imports are not supported; embed handlers in the JSON instead)`,
@@ -138,7 +135,6 @@ export async function mergeRuntimeModule(bundle: any, artifactAbsPath: string, t
         const mod: any = await import(pathToFileURL(moduleAbsPath).href);
         const fns = (mod && (mod.functions ?? mod.default?.functions)) ?? null;
         if (!fns || typeof fns !== 'object') {
-            // eslint-disable-next-line no-console
             console.warn(`${tag} runtime module '${moduleAbsPath}' exported no \`functions\` map`);
             return;
         }
@@ -191,7 +187,6 @@ export async function mergeRuntimeModule(bundle: any, artifactAbsPath: string, t
         }
         bundle.functions = merged;
     } catch (err: any) {
-        // eslint-disable-next-line no-console
         console.warn(`${tag} runtime module load FAILED: path='${moduleAbsPath}' error=${err?.message ?? err}`);
     }
 }
