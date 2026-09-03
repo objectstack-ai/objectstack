@@ -564,6 +564,35 @@ export const NOT_DRIVER_MANAGED = Object.freeze([
       + 'prevents both more likely and harder to see: at that size a recomputed number reads as '
       + 'plausible, and the per-signature keys underneath it would be silently rewritten with it.',
   },
+  // ── #14613: `packages/core`'s starting ledger, same instrument ─────────────
+  //
+  // The package declared NO `typecheck` script at all until this PR, so this row
+  // both opens the ledger and is the reason `pnpm --filter @objectstack/core
+  // typecheck` now exists.
+  {
+    path: 'packages/core/test-typecheck-debt.json',
+    gen: 'gen:test-typecheck-debt',
+    owner: '@objectstack/core',
+    why:
+      'a SHRINK-ONLY ratchet — see `packages/plugins/plugin-approvals/test-typecheck-debt.json` '
+      + 'above; same generator, same per-package ledger, same reason a merge must never recompute '
+      + 'it: the half-merged tree is not the tree whose type errors this file records, so a file '
+      + 'that GAINED errors would enter the ledger as merge noise instead of as red. This file also '
+      + 'carries the family\'s clearest instance of the second thing at stake, in its hand-authored '
+      + '`_note` (never written by `gen:test-typecheck-debt` — `--update` only ever preserves an '
+      + 'EXISTING `_note` verbatim, it never invents or edits one): a human triaged all 4 entries '
+      + 'and decided to fix NONE of them in the PR that opened this gate — 2 are one defect twice '
+      + 'over (a mock `PluginContext` literal missing three methods) deliberately left for a '
+      + "shared-fixture repair already in flight on `@objectstack/metadata`'s own ledger, 1 is a "
+      + "genuine open question about whether a test's assertion or a parameter's type is wrong, and "
+      + 'the 4th — though mechanical — was left beside them on purpose so the diff that opens this '
+      + 'gate stays readable. It also records WHY the ledger opens at 4 and not the 98 the retired '
+      + '`check:type-check-coverage` DEBT entry once measured: 94 of those 98 were `tsconfig.json`\'s '
+      + 'NodeNext judging vitest-executed ESM, a config-tier artifact this PR\'s `tsconfig.test.json` '
+      + 'fixes, not a test repair. None of that triage is reconstructable from source — a mid-merge '
+      + 'regeneration can only recompute COUNTS from whatever the half-merged tree compiles to, '
+      + 'never re-derive which of those counts a human already chose to defer, or why.',
+  },
   {
     path: 'packages/sdui-parser/objectui-lockstep.json',
     gen: 'gen:sdui-lockstep',
