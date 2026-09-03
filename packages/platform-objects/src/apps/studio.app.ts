@@ -43,11 +43,27 @@ export const STUDIO_APP: App = {
     reason: 'Core developer workbench shipped by @objectstack/platform-objects — see ADR-0010.',
     docsUrl: 'https://objectstack.ai/docs/references/shared/protection',
   },
-  // Studio is the metadata-authoring host, so its ambient copilot is
-  // pinned to the schema-architect agent. Resolved by the ambient chat
-  // endpoint via `app.defaultAgent` — no UI-side `?agent=` override
-  // needed. Every other app falls back to the data-query agent.
-  defaultAgent: 'metadata_assistant',
+  // Studio is the metadata-authoring host, so its ambient copilot is pinned
+  // to `build`, the authoring agent. Resolved by the ambient chat endpoint
+  // via `app.defaultAgent` — no UI-side `?agent=` override needed. Every
+  // other app falls back to `ask`, the data-query agent.
+  //
+  // [#14461] This spelled `'metadata_assistant'` until the maintainer ruling
+  // (2026-09-03): the legacy alias that `skills/objectstack-ai` tells authors
+  // is "not vocabulary", taught from the repo's ONLY live `defaultAgent`
+  // example. `build` is not a rename in flight — it is the record's canonical
+  // id today (`cloud` `service-ai-studio/src/agents/metadata-assistant-agent.ts:40`
+  // ships `name: BUILD_AGENT_NAME` = `'build'`, and `plugin.ts:58` registers
+  // `metadata_assistant` as a ONE-WAY legacy alias, resolution-only).
+  //
+  // Nor is the re-pin cosmetic. The alias resolves only if an in-memory
+  // `registerAgentAlias` call has actually run, and cloud carries two
+  // defensive docblocks about that registration silently no-op'ing under
+  // bundle load ordering (`service-ai-studio/src/plugin.ts:44-57`,
+  // `service-ai/src/agent-runtime.ts:30-41`). The canonical id never touches
+  // the alias table, so this drops a load-order dependency from the
+  // platform's own flagship authoring surface.
+  defaultAgent: 'build',
   branding: {
     primaryColor: '#6366f1', // Indigo-500 — distinct from Setup's slate
   },

@@ -623,6 +623,7 @@ export {
   validateAiAgentAuthoring,
   AGENT_AUTHORING_WITHDRAWN,
   DEFAULT_AGENT_OUTSIDE_ROSTER,
+  DEFAULT_AGENT_LEGACY_ALIAS,
 } from './validate-ai-agent-authoring.js';
 export type {
   AiAgentAuthoringFinding,
