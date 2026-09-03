@@ -19,6 +19,12 @@ is one package ASSEMBLED (manifest fields plus the collections that package
 owns), declared by `AssembledPackageBodySchema`. `GET /api/v1/packages` on a
 booted instance lists both rows.
 
-`orders` carries **no `scope` key** on purpose; the App's navigation lives with
-the App package because a package's own navigation may not point at a foreign
-object, while cross-package lookups (which `crm_order.account` is) are accepted.
+Both rows are served with **`scope: "project"`**. `defineStack` parses every
+`packages[]` entry through `ManifestSchema`, whose `scope` defaults to
+`project`, so no package of a compiled artifact is ever scope-less — what marks
+these two read-only is the server's own **`writable: false`** verdict (ADR-0070
+D2), which reads `engine.manifests` before it reads any scope.
+
+The App's navigation lives with the App package because a package's own
+navigation may not point at a foreign object, while cross-package lookups (which
+`crm_order.account` is) are accepted.
