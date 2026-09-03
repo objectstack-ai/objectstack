@@ -85,6 +85,26 @@ function generateToken(length: number = TOKEN_LENGTH): string {
   return out;
 }
 
+/**
+ * [#14637] Is `publicSharing` switched ON for this object schema?
+ *
+ * The ONE reading of the standing switch, exported so the HTTP probe that sits
+ * ABOVE `resolveToken` asks the same question the gate INSIDE it asks. It was
+ * a private expression here while the route layer answered from the token row
+ * with no knowledge of the object's block, which re-opened the existence
+ * oracle this service's redemption gate closes (maintainer ruling 2026-09-03,
+ * decision batch #17 item 1, verbatim 「同意」 — option A).
+ *
+ * An absent block, an absent schema, and an engine that cannot answer
+ * `getSchema` at all are one answer: `false`. `enabled` defaults to off, so a
+ * caller that cannot read the policy must refuse rather than answer from the
+ * row — the same definition {@link getPolicy} has always used.
+ */
+export function isPublicSharingEnabled(schema: unknown): boolean {
+  return (schema as { publicSharing?: { enabled?: unknown } } | null | undefined)
+    ?.publicSharing?.enabled === true;
+}
+
 /** Internal helper — extract publicSharing policy from an object schema. */
 function getPolicy(schema: any): {
   enabled: boolean;
@@ -95,7 +115,7 @@ function getPolicy(schema: any): {
   eligibility?: string;
 } {
   const raw = schema?.publicSharing;
-  if (!raw || raw.enabled !== true) {
+  if (!isPublicSharingEnabled(schema)) {
     return {
       enabled: false,
       allowedAudiences: [],
