@@ -309,7 +309,28 @@ describe('[#13160] §1 the production supplier fulfils with `undefined` rather t
 // ---------------------------------------------------------------------------
 
 describe('[#13160] §2 the consumer surface, counted from the tree', () => {
-    it('75 invocation sites, 95 mentions — the thread\'s two control numbers hold', () => {
+    it('76 invocation sites, 97 mentions — the thread\'s two control numbers hold', () => {
+        // [#13753] 75 → 76 sites / 95 → 97 mentions. `GET /meta/diagnostics`
+        // resolved NO identity, so the Studio governance sweep could not state
+        // which organization's partition it was reading and reported clean
+        // tiles over one it never read. It joins as a LOCALLY CAUGHT site (the
+        // continuation-line `.catch(rethrowAuthzStoreUnavailable)` spelling),
+        // like the `/history` and `/diff` doors before it: this door does not
+        // sit behind the shared anonymous floor either.
+        //
+        // ⚠️ +1 and +2 again, for the same reason as below: one call site, and
+        // one prose mention in the door's new comment recording that
+        // `resolveExecCtx` is memoised per request so this is not a new
+        // org-resolution seam.
+        //
+        // ⚠️ The site is resolved INSIDE an `if (diagnosticsType)` block rather
+        // than in a ternary, and the shape is load-bearing for this census: a
+        // ternary puts the `.catch(…)` on a continuation line with NO trailing
+        // `;`, which is a THIRD layout {@link catchArguments} cannot read — it
+        // would have counted 23 caught sites and found 22 arguments, i.e. the
+        // §7 CONTROL failing rather than a silent hole. Conforming to the
+        // house spelling was preferred over teaching the reader a layout.
+        //
         // [#13406] 73 → 75 sites / 92 → 95 mentions. The `/meta/:type/:name/
         // history` and `/diff` read doors resolved NO identity, so neither
         // could state which organization's `sys_metadata_history` partition it
@@ -340,11 +361,11 @@ describe('[#13160] §2 the consumer surface, counted from the tree', () => {
         // `enforceAuth` was measured NOT to be the repair). A mention count
         // that tracked the site count exactly would be measuring one thing
         // twice.
-        expect(SITES.length).toBe(75);
-        expect(SOURCE.split('resolveExecCtx').length - 1).toBe(95);
+        expect(SITES.length).toBe(76);
+        expect(SOURCE.split('resolveExecCtx').length - 1).toBe(97);
     });
 
-    it('the split is 22 locally caught / 53 bare — NOT 16 / 53, which does not add to 75', () => {
+    it('the split is 23 locally caught / 53 bare — NOT 16 / 53, which does not add to 76', () => {
         // 16 sites spell the catch on the invocation line; 4 more spell it on
         // the continuation line. A single-line grep sees 16 and the arithmetic
         // silently loses four sites.
@@ -354,12 +375,12 @@ describe('[#13160] §2 the consumer surface, counted from the tree', () => {
         // be the first of its kind and would break the structural claim below.
         const sameLine = CAUGHT.filter((s) => SOURCE.split('\n')[s.line - 1].includes('.catch('));
         expect(sameLine.length).toBe(16);
-        expect(CAUGHT.length).toBe(22);
+        expect(CAUGHT.length).toBe(23);
         expect(BARE.length).toBe(53);
         expect(CAUGHT.length + BARE.length).toBe(SITES.length);
     });
 
-    it('⭐ every one of the 53 bare sites is guarded on the VERY NEXT LINE, and none of the 22 caught ones is', () => {
+    it('⭐ every one of the 53 bare sites is guarded on the VERY NEXT LINE, and none of the 23 caught ones is', () => {
         // This inverts the reason the thread gave for doing the bare sites
         // first ("no local signal that a fault becomes an anonymous subject").
         // The bare sites are bare BECAUSE the shared anonymous floor is the
