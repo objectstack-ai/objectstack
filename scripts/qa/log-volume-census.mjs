@@ -188,7 +188,9 @@ function writeLedger(stateDir, ledger) {
  * stdout+stderr. Nothing about how the package runs its tests is altered: the
  * only environment this adds is a memory ceiling and a worker cap, both of
  * which bound resource use on a shared box without changing which lines are
- * emitted.
+ * emitted. ⚠️ Nothing else: `CI` in particular is passed through as the
+ * caller has it and never forced, because code that branches on `CI` would
+ * then be measured in a mode no one runs the suite in.
  */
 export function runPackage(pkg, stateDir, repoRoot = REPO_ROOT) {
   const logFile = path.join(stateDir, 'logs', `${pkg.name.replace(/[^\w.-]/g, '_')}.log`);
@@ -202,7 +204,6 @@ export function runPackage(pkg, stateDir, repoRoot = REPO_ROOT) {
       ...process.env,
       NODE_OPTIONS: `${process.env.NODE_OPTIONS || ''} --max-old-space-size=4096`.trim(),
       VITEST_MAX_WORKERS: process.env.VITEST_MAX_WORKERS || '2',
-      CI: process.env.CI || '1',
     },
   });
   const text = (res.stdout || '') + (res.stderr || '');
