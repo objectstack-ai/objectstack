@@ -392,7 +392,8 @@ const STACK_DEFINITION_COLLECTIONS_SHAPE = {
     + 'by the object it is written on, not by its own objectName). '
     + "One global and one object-bound action may share "
     + "a name; on that object's route the object's own actions take precedence for by-name readers. "
-    + 'composeStacks runs the same check across its input stacks and names both source stacks on a collision.',
+    + 'composeStacks runs the same key rule across its input stacks (counting distinct stacks, not sites) '
+    + 'and names both source stacks on a collision.',
   ),
   // `themes` was REMOVED in 17.1 (#10485, ADR-0049 enforce-or-remove — ruled
   // 退役授权面, 2026-08-21). The pipeline was live from authoring gate through
@@ -2805,7 +2806,12 @@ function collectComposedActionKeyCollisions(
     const declared = (stack as Record<string, unknown>).actions;
     if (!Array.isArray(declared)) continue;
     for (const [j, action] of (declared as Action[]).entries()) {
-      note(action.objectName ?? GLOBAL_ACTION_SCOPE, action.name, i, `stack.actions[${j}]`);
+      // Truthiness, not nullish: an empty-string `objectName` (type-legal;
+      // refused by ActionSchema's regex only under strict parse) keys as
+      // global here exactly as `collectDuplicateActionKeyErrors`,
+      // `mergeActionsIntoObjects` and objectql's `standaloneActionOwnerKey`
+      // resolve it.
+      note(action.objectName || GLOBAL_ACTION_SCOPE, action.name, i, `stack.actions[${j}]`);
     }
   }
   for (const obj of composedObjects ?? []) {

@@ -135,6 +135,19 @@ describe('composeStacks - two stacks declaring one global action key', () => {
     );
   });
 
+  it("keys an empty-string objectName as global — the sibling walk, the merge and the runtime ladder all resolve '' by truthiness", () => {
+    // Type-legal, refused by ActionSchema's regex only under a strict parse,
+    // so reachable through `strict: false`; `??` would have keyed it as ':dup_g'.
+    const a = defineStack({ manifest: mf('com.example.a'), actions: [act('dup_g', { objectName: '' })] }, { strict: false });
+    const b = defineStack({ manifest: mf('com.example.b'), actions: [act('dup_g')] }, { strict: false });
+    const msg = refusal(() => composeStacks([a, b]));
+    expect(msg).toContain(ENVELOPE_ONE);
+    expect(msg).toContain(
+      "  ✗ Action key 'global:dup_g' is declared by 2 stacks: " +
+        "'com.example.a' (stack #0) at stack.actions[0] and 'com.example.b' (stack #1) at stack.actions[0].",
+    );
+  });
+
   it('names a manifest-less input by position', () => {
     const a = defineStack({ actions: [act('dup_n')] }, { strict: false });
     const b = defineStack({ actions: [act('dup_n')] }, { strict: false });
@@ -295,6 +308,10 @@ describe('composeStacks - what stays accepted', () => {
     const out = composeStacks([orders, core], { manifest: 'preserve' });
     expect(out.packages).toHaveLength(2);
     expect(keysOf(out).top).toEqual(['crm_order:ship_order']);
-    expect(keysOf(out).embedded).toEqual({ crm_order: ['ship_order/BOUND', 'ship_order/BOUND'], crm_account: ['archive_account/EMB'] });
+    // #14847: the bound action appears twice on `crm_order` today — the measured
+    // shape, not the contract — so the pin asks only that it is carried, and
+    // that the other package's embedded action is carried exactly once.
+    expect(keysOf(out).embedded.crm_order).toContain('ship_order/BOUND');
+    expect(keysOf(out).embedded.crm_account).toEqual(['archive_account/EMB']);
   });
 });
