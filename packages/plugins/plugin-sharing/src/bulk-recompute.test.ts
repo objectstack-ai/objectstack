@@ -40,7 +40,11 @@ import {
 interface Row { [k: string]: any }
 
 const SYS = { isSystem: true, positions: [], permissions: [] } as any;
-/** A non-system session — the hooks deliberately skip `isSystem` writes. */
+/**
+ * The default session for this suite: an interactive admin. [#13533] It is no
+ * longer the only session the hooks act on — a system write takes the same
+ * path — so this is a default, not a precondition.
+ */
 const ADMIN_SESSION = { isSystem: false, userId: 'admin' };
 
 type HookEntry = { event: string; handler: (ctx: any) => any; options: Row };
@@ -343,16 +347,37 @@ describe('#4779 predicate (multi) writes recompute sharing rules', () => {
     expect(ruleShares(engine)).toEqual([]);
   });
 
-  it('leaves system-context bulk writes to the boot backfill, as before', async () => {
+  /**
+   * [#13533] REVERSED, not deleted. This test used to read:
+   *
+   *   it('leaves system-context bulk writes to the boot backfill, as before')
+   *   … expect(ruleShares(engine)).toHaveLength(2);   // untouched by the hooks
+   *
+   * and it pinned a real behaviour: `bindRuleHooks` skipped `session.isSystem`
+   * on `afterUpdate` (and on the `before*` stash that fed it), so a system bulk
+   * write changed no grants and `kernel:bootstrapped`'s backfill owned the
+   * repair. The maintainer reversed that on 2026-08-31 (verbatim, untranslated:
+   * 「裁定:系统写参与逐记录共享物化 —— 删除 `plugin-sharing` 两个钩子里的
+   * `isSystem` 跳过,⛔ 不加声明式开关、不以文档代修。」), on the ground that a
+   * rule's declared semantics is a published promise and `isSystem` names the
+   * OPERATOR, never a consequence that need not happen.
+   *
+   * So the same write is now expected to do what the identical user-context
+   * write two tests up does — and the assertion below is deliberately the same
+   * shape as that one, because "the same" is the whole content of the ruling.
+   */
+  it('recomputes system-context bulk writes too — identically to a user write (#13533)', async () => {
     seed(2, 'east');
     await rules.evaluateRule('srule_east', SYS);
+    expect(ruleShares(engine)).toHaveLength(2);
 
     await engine.simulateBulkUpdate(
       'opportunity', { region: 'east' }, { region: 'west' }, { isSystem: true },
     );
 
-    // Untouched by the hooks — `kernel:bootstrapped`'s backfill owns seeds.
-    expect(ruleShares(engine)).toHaveLength(2);
+    // Moved OUT of the criteria, so the grants are revoked — exactly as the
+    // user-context twin above revokes them.
+    expect(ruleShares(engine)).toEqual([]);
   });
 
   it('does not touch manual shares — only rule-materialised ones', async () => {

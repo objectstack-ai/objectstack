@@ -205,13 +205,17 @@ export function writeCanChangeExpansion(objectName: string, event: string, hookC
  * nothing here needs the pre-write state. What the revoke needs is the tree as
  * it is NOW, and the write is what makes that true.
  *
- * **System writes are NOT skipped**, which is the opposite of what
- * `bindRuleHooks` does and is deliberate. Its skip is about grant
- * MATERIALISATION, which the boot backfill re-does anyway. Here the payload is
- * REVOCATION, and the realistic production trigger for a re-parent is an HRIS
- * or directory sync — a system write. Skipping those would leave the hole open
- * on the very path most likely to open it. `primary-bu-projection.ts` reached
- * the same conclusion for the same table.
+ * **System writes are NOT skipped**, and this file's hooks never carried an
+ * `isSystem` branch to skip them with. `bindRuleHooks` no longer skips them
+ * either: its `afterInsert` / `afterUpdate` materialisation skips, and the
+ * `before*` stash skip that fed them, were removed by the 2026-08-31 ruling on
+ * #13533, so a system write there materialises grants exactly as a user write
+ * does — the one skip it keeps is `afterDelete` revocation, which
+ * `record-share-cascade.ts` delivers instead. Here the payload is REVOCATION,
+ * and the realistic production trigger for a re-parent is an HRIS or directory
+ * sync — a system write. Skipping those would leave the hole open on the very
+ * path most likely to open it. `primary-bu-projection.ts` reached the same
+ * conclusion for the same table.
  */
 export function bindBusinessUnitTreeRecompute(
   engine: MinimalEngine,
