@@ -37,11 +37,13 @@ export default class I18nCheck extends Command {
   // command's own `--help` has room for the set. So the short line goes in
   // `summary` (the parenthetical simply dropped — never a five-item sample of
   // fifteen), and the full derived set goes in `description`, where the reader
-  // asking what this command covers is actually looking.
+  // asking what this command covers is actually looking. oclif prints the two
+  // one after the other, so `description` elaborates the summary rather than
+  // restating it.
   static override summary = 'Detect missing translation keys across all configured locales';
 
   static override description =
-    `Detect missing translation keys across all configured locales, for every translatable surface the coverage report carries: ${COVERAGE_SURFACE_PHRASE}.`;
+    `Every translatable surface the coverage report carries is checked: ${COVERAGE_SURFACE_PHRASE}.`;
 
   static override examples = [
     '$ os i18n check',
