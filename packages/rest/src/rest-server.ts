@@ -4565,10 +4565,84 @@ export class RestServer {
                         if (refuseRepeatedQueryParams(req, res, ['severity', 'type', 'package'])) return;
                         const severityParam = (req.query?.severity as string | undefined) ?? 'error';
                         const severity = severityParam === 'warning' ? 'warning' : 'error';
+                        const diagnosticsType = (req.query?.type as string | undefined) || undefined;
+                        // [#13753] STATE THE ORG PARTITION — but only on the
+                        // arm where ONE organization is the whole truth.
+                        //
+                        // `getMetaDiagnostics` reads each type through
+                        // `getMetaItems({ type: t, organizationId })`, and
+                        // `getMetaItems` applies NO registry gate of its own:
+                        // whatever organization arrives is used for the type it
+                        // is handed, overridable or not (measured — the only
+                        // `organizationIdForMetaRead` call inside
+                        // `metadata-protocol` is the `page` read in
+                        // `protocol.ts`, nothing on this path). The scope is
+                        // therefore decided HERE, per type, by the caller.
+                        //
+                        // ⇒ The `?type=` arm is exactly one type
+                        // (`targetTypes = [request.type]`), so the predicate
+                        // over that one type IS the request's whole scope and
+                        // the answer is correct by construction. That is the
+                        // arm Studio's per-type directory drill-down uses, and
+                        // it is the arm repaired here.
+                        //
+                        // ⛔ The UNTYPED sweep is deliberately left env-wide,
+                        // and this is a recorded gap rather than an oversight
+                        // (#13753 reports the shape). `targetTypes` is then the
+                        // whole registry — five `allowOrgOverride: true` types
+                        // and every other declared type together — while the
+                        // request carries ONE `organizationId`. Naming the
+                        // tenant there does not merely over-reach: `getMetaItems`
+                        // UNIONs the env-wide rows with the named org's rows,
+                        // so a non-overridable type's org-scoped rows — the
+                        // pre-#6190 phantoms `reportUnhydratableOrgScopedRows`
+                        // warns about, which boot hydration walks past — would
+                        // be read back INTO the governance report as `stats`
+                        // counts and diagnostic entries. A dashboard whose job
+                        // is reporting what is wrong would report rows that do
+                        // not survive a restart. One org id cannot express a
+                        // per-type scope, and inventing one at this call site
+                        // (a fan-out per overridable type, plus a REST-side
+                        // re-aggregation of `total`/`stats`/`scannedTypes`)
+                        // would make this door a second owner of the sweep's
+                        // arithmetic. The decision belongs where the type is
+                        // known — see the card.
+                        //
+                        // ⚠️ NOT a new org-resolution seam: `resolveExecCtx` is
+                        // memoised per request (WeakMap keyed by `req`), the
+                        // same result 40+ handlers here already share. It is
+                        // resolved only on the typed arm so the untyped sweep
+                        // keeps its exact behaviour today, authz-store failure
+                        // modes included — which is why this reads as a
+                        // statement rather than a ternary: the LOCALLY CAUGHT
+                        // continuation-line spelling is the one the sibling
+                        // doors use and the one `execctx-consumer-census`
+                        // reads, and a third layout would be invisible to it.
+                        let diagnosticsOrganizationId: string | undefined;
+                        if (diagnosticsType) {
+                            const diagnosticsCtx = await this.resolveExecCtx(environmentId, req)
+                                .catch(rethrowAuthzStoreUnavailable);
+                            diagnosticsOrganizationId = organizationIdForMetaRead(
+                                // [#10340] FOLDED, not raw — see the PUT door's
+                                // org-scope comment for the measurement. The
+                                // protocol keeps receiving the caller's own
+                                // spelling (it normalises, and refuses an
+                                // unrecognised one with its own 400); only the
+                                // scope decision reads the canonical singular.
+                                canonicalMetaUrlType(diagnosticsType), diagnosticsCtx?.tenantId,
+                            );
+                        }
                         const result = await (p as any).getMetaDiagnostics({
-                            type: (req.query?.type as string | undefined) || undefined,
+                            type: diagnosticsType,
                             severity,
                             packageId: (req.query?.package as string | undefined) || undefined,
+                            // SPREAD, never `organizationId: x ?? null` — the
+                            // implementation declares `organizationId?: string`
+                            // (optional plain string, not nullable), and a
+                            // `null` would travel into `getMetaItems` as an
+                            // explicit env-partition statement rather than as
+                            // "unstated".
+                            ...(diagnosticsOrganizationId ? { organizationId: diagnosticsOrganizationId } : {}),
                         });
                         res.json(result);
                     } catch (error: any) {
@@ -5270,6 +5344,57 @@ export class RestServer {
                             });
                             return;
                         }
+                        // [#13753] ⛔ STILL NO `organizationId`, and that is a
+                        // RECORDED GAP, not an omission nobody looked at. Read
+                        // this before adding the one-line repair that looks
+                        // obviously missing here.
+                        //
+                        // The card prescribed the sibling call-site fix —
+                        // `organizationIdForMetaRead(canonicalMetaUrlType(
+                        // req.params.type), ctx?.tenantId)` — on the premise
+                        // that this door "takes one type". Measured on the
+                        // merged tree, it does not: `req.params.type` is the
+                        // TARGET, and `findReferencesToMeta` spends the
+                        // organization on the SOURCES. It resolves
+                        // `REFERENCE_SITES.byTarget.get(target)`, groups the
+                        // sites by `fromType`, and reads each with
+                        // `getMetaItems({ type: matcher.fromType,
+                        // ...(organizationId ? { organizationId } : {}) })`. So
+                        // one request-level organization is applied to a SET of
+                        // types the target's own registry flag says nothing
+                        // about, and `getMetaItems` applies no gate of its own.
+                        //
+                        // Gating on the target would therefore answer a
+                        // question about the wrong type, in both directions:
+                        //
+                        //  • target `allowOrgOverride: true` (`view`,
+                        //    `dashboard`, `report`, `translation`,
+                        //    `email_template`) ⇒ the org is named for EVERY
+                        //    source type, `object` / `flow` / `app` included —
+                        //    the unconditional tenant the read predicate exists
+                        //    to prevent, unioning pre-#6190 phantom rows back
+                        //    into a destructive-action clearance;
+                        //  • target `allowOrgOverride: false` (`object`,
+                        //    `flow`, `app`, `page`, …) ⇒ nothing is named, so
+                        //    an org-scoped `view` that references the object
+                        //    being deleted stays invisible and the "Used by"
+                        //    panel still renders "Nothing in the metadata graph
+                        //    points at this item. Safe to delete." That is the
+                        //    card's own false clearance, on the most common
+                        //    delete there is.
+                        //
+                        // ⇒ The correct scope is per SOURCE type, and no value
+                        // this call site can pass expresses it. The repair
+                        // belongs where the type being read is known — the
+                        // predicate applied per `matcher.fromType` inside
+                        // `findReferencesToMeta`, or once inside `getMetaItems`
+                        // so read scope cannot drift from write scope for ANY
+                        // caller. Both are `metadata-protocol` changes that the
+                        // card fences off (⛔ "Do not change ... in
+                        // `protocol.ts`"), so this door is reported rather than
+                        // half-repaired: an org-awareness this door cannot
+                        // deliver must not be advertised by a gate that happens
+                        // to read `true` (Prime Directive #10).
                         const result = await (p as any).findReferencesToMeta({
                             type: req.params.type,
                             name: req.params.name,
