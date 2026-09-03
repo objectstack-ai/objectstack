@@ -1072,6 +1072,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.recovery-doors-mutation-projector.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.recovery-doors-mutation-projector.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.recovery-doors-mutation-projector.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.reference-derivation.test.ts",
       "verb": "findOne",
       "pinned": 1
