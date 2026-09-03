@@ -164,13 +164,17 @@ the localizable path:
 
 - `template` names the bundle. The delivery path resolves `(name, locale)`
   against `sys_email_template` at delivery time and renders subject/body from
-  that row. **The locale is one value for the whole notification, not one per
-  recipient**: `payload.locale` if the producer set one — interpolated once,
-  before fan-out — else the deployment default (`II18nService.getDefaultLocale()`).
-  The platform has no per-user locale (`sys_user` carries no locale column), so
-  recipients whose personal languages differ all receive the same row. A per-user
-  locale is deferred until measured pull (maintainer ruling, 2026-08-13); it
-  layers in as an override at that same seam when it lands.
+  that row. **The locale is resolved per recipient, after fan-out**: the
+  recipient's own `sys_user.locale` when set, else the deployment default
+  (`II18nService.getDefaultLocale()`) — so two recipients of one notification
+  whose `locale` columns differ receive different rows of the same bundle
+  (maintainer ruling, 2026-09-01). A recipient whose column is empty or unset
+  always falls back to the deployment default; no value ever dead-letters a
+  delivery. A `payload.locale` set by the producer — the pre-ruling single
+  value for the whole notification — is not consulted. The same chain serves
+  the inbox channel's template path and the `sys_notification_template` rows
+  the email and SMS channels render, so one notification cannot arrive in two
+  languages across channels.
 - Inline `title` / `message` are the **non-localizable** path: raw strings sent
   to every recipient verbatim. The two paths cannot be combined on one node —
   the schema refuses the ambiguous shape rather than letting a runtime
