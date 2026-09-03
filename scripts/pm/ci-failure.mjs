@@ -298,6 +298,48 @@ import {
 import { PROXY_FLAG, PROXY_REARM_GUARD, proxyRearmPlan } from './check-governed-merges.mjs';
 import { isEntrypoint } from '../invoked-as.mjs';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'latestPerName: the superseded-run trap': 4,
+  'classifyAnnotation: the four measured shapes': 9,
+  'stepsIntegrity: the pre/post numbering gap is NOT truncation': 8,
+  'assertionStatus: four answers, not two': 11,
+  'the job log (#10141)': 34,
+  'isRosterJob': 5,
+  'runIdOf': 3,
+  'stepBodies / resolveStep': 8,
+  'proxyRearmFor: the transport trap': 7,
+  'usageText: --help tracks the header instead of a line number': 4,
+  'verdictOf: the exit table': 11,
+  'midWalkVerdict: the mid-walk net (#10155)': 12,
+  'probeTransport: the two stages, and the FOURTH container class': 11,
+  'renderFixLines: one remedy is one `fix:` marker (#10362)': 9,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 14;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..', '..');
 // Which board this file reads, resolved by the sweeper's own resolver rather
@@ -1566,13 +1608,28 @@ function render(result, target) {
 const SELF_TEST_VERDICT = 'ci-failure self-test reached its verdict';
 
 async function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const batterySeen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+  };
   const failures = [];
   const t = (label, actual, expected = true) => {
+    registerCase();
     const ok = JSON.stringify(actual) === JSON.stringify(expected);
     if (!ok) failures.push(`${label}\n      expected ${JSON.stringify(expected)}\n      actual   ${JSON.stringify(actual)}`);
   };
 
   // -- latestPerName: the superseded-run trap -------------------------------
+  battery('latestPerName: the superseded-run trap');
   const dupes = [
     { id: 1, name: 'CI', conclusion: 'cancelled', started_at: '2026-08-19T01:00:00Z' },
     { id: 2, name: 'CI', conclusion: 'success', started_at: '2026-08-19T02:00:00Z' },
@@ -1591,6 +1648,7 @@ async function selfTest() {
   t('latestPerName on an empty list yields nothing, not a throw', latestPerName([]).kept.length, 0);
 
   // -- classifyAnnotation: the four measured shapes -------------------------
+  battery('classifyAnnotation: the four measured shapes');
   t(
     'a file-anchored annotation is the assertion',
     classifyAnnotation({
@@ -1653,6 +1711,7 @@ async function selfTest() {
   t('a missing message does not throw', classifyAnnotation({}).kind, 'other');
 
   // -- stepsIntegrity: the pre/post numbering gap is NOT truncation ---------
+  battery('stepsIntegrity: the pre/post numbering gap is NOT truncation');
   const testCoreShard = [
     ...Array.from({ length: 16 }, (_, i) => ({ number: i + 1, name: `step ${i + 1}`, conclusion: 'success' })),
     { number: 30, name: 'Post Setup pnpm cache', conclusion: 'skipped' },
@@ -1693,6 +1752,7 @@ async function selfTest() {
   t('a non-array is `unknown`, never a throw', stepsIntegrity(undefined).verdict, 'unknown');
 
   // -- assertionStatus: four answers, not two -------------------------------
+  battery('assertionStatus: four answers, not two');
   t(
     'a file-anchored annotation means the assertion was retrieved',
     assertionStatus([{ kind: 'exit-status' }, { kind: 'assertion', path: 'a.test.ts' }]).kind,
@@ -1757,6 +1817,7 @@ async function selfTest() {
   // 32436578705, fetched 2026-08-21 (see the header). Runner colour escapes are
   // dropped: this file must stay free of raw control bytes, and no branch here
   // reads them.
+  battery('the job log (#10141)');
   t(
     'the runner timestamp is stripped so the assertion starts at column 1',
     stripLogTimestamp("2026-08-21T01:34:45.6366823Z ##[error]src/x.ts(42,1): error TS2578: Unused '@ts-expect-error' directive."),
@@ -1923,6 +1984,7 @@ async function selfTest() {
   );
 
   // -- isRosterJob ----------------------------------------------------------
+  battery('isRosterJob');
   t('the aggregate roster job is recognised', isRosterJob(['Verify test shard results']), true);
   t('...and the dogfood one', isRosterJob(['Verify dogfood shard results']), true);
   t('a shard job is not a roster job', isRosterJob(["Run this shard's tests"]), false);
@@ -1930,6 +1992,7 @@ async function selfTest() {
   t('no failed steps is not a roster job', isRosterJob([]), false);
 
   // -- runIdOf --------------------------------------------------------------
+  battery('runIdOf');
   t(
     'the run id rides along on details_url, so it costs no request',
     runIdOf({ details_url: 'https://github.com/o/r/actions/runs/32204206019/job/95924070749' }),
@@ -1939,6 +2002,7 @@ async function selfTest() {
   t('a check-run with no urls yields null', runIdOf({}), null);
 
   // -- stepBodies / resolveStep --------------------------------------------
+  battery('stepBodies / resolveStep');
   const wf = [
     'jobs:',
     '  gates:',
@@ -2000,6 +2064,7 @@ async function selfTest() {
   t('the real workflow tree still resolves a known gate step to a runnable command', live.length > 0 && live[0].kind === 'run', true);
 
   // -- proxyRearmFor: the transport trap ------------------------------------
+  battery('proxyRearmFor: the transport trap');
   const proxied = { HTTPS_PROXY: 'http://127.0.0.1:38113' };
   t(
     'a --self-test run never re-execs — it opens no socket',
@@ -2041,6 +2106,7 @@ async function selfTest() {
   );
 
   // -- usageText: --help tracks the header instead of a line number ---------
+  battery('usageText: --help tracks the header instead of a line number');
   const fakeHeader = [
     '#!/usr/bin/env node',
     '// Copyright',
@@ -2075,6 +2141,7 @@ async function selfTest() {
   t('...and --help stops before the header sections', liveUsage.includes('## '), false);
 
   // -- verdictOf: the exit table --------------------------------------------
+  battery('verdictOf: the exit table');
   const withAssertion = { assertions: [{ kind: 'assertion' }] };
   const without = { assertions: [] };
   t('no checks at all is UNDETERMINED, never GREEN', verdictOf({ failing: [], pending: 0, total: 0 }).exit, EXIT_UNDETERMINED);
@@ -2128,6 +2195,7 @@ async function selfTest() {
   // assertion text was retrieved for EVERY failing check". Measured against
   // main at 2e39181a with the probe green and the walk's first page refused:
   // stack trace, EXIT=1. Every pin below exists so that cannot come back.
+  battery('midWalkVerdict: the mid-walk net (#10155)');
   const refusedTransport = { kind: 'repo-scope-refused', headline: 'repo-scoped reads are refused', detail: ['d'], fix: ['f'] };
   const healthyTransport = { kind: 'reachable', headline: 'api.github.com is reachable', detail: [], fix: [] };
   const boom = Object.assign(new Error('GET /repos/o/r/commits/abc/check-runs?per_page=100&page=1 -> HTTP 403'), { status: 403 });
@@ -2211,6 +2279,7 @@ async function selfTest() {
   // no other: `/rate_limit` -> 200 with a real quota and `server: github.com`,
   // `/user` -> 200 with the real login, `GET /repos/objectstack-ai/objectui` ->
   // 403 with no `server: github.com` and no `x-ratelimit-*` headers at all.
+  battery('probeTransport: the two stages, and the FOURTH container class');
   const PLACEHOLDER = 'proxy00000abcd'; // the 14-char proxy placeholder, `unrecognized` shape
   const healthyRate = { status: 200, rateLimitRemaining: 14982 };
   const refusedRepo = { status: 403, rateLimitRemaining: null };
@@ -2295,6 +2364,7 @@ async function selfTest() {
   // pinning is that this file renders what `classifyTransportProbe` actually
   // emits. A fixture would only restate the printer's own assumption about the
   // shape, which is the assumption that was wrong.
+  battery('renderFixLines: one remedy is one `fix:` marker (#10362)');
   const refusedFix = classifyTransportProbe({
     token: 'ghp_x',
     authed: { status: 200, rateLimitRemaining: 4999 },
@@ -2334,6 +2404,50 @@ async function selfTest() {
   t('an empty fix renders nothing at all', renderFixLines([]), []);
   t('an absent fix renders nothing at all', renderFixLines(undefined), []);
   t('a one-line remedy is just the marked line', renderFixLines(['do the thing']), ['  fix: do the thing']);
+
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => { failures.push(message); };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
+  }
 
   if (failures.length > 0) {
     console.error(`✗ ci-failure --self-test (${failures.length} failure(s)):\n`);

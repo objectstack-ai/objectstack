@@ -95,7 +95,12 @@ const BUILTIN_METADATA_CREATE_SEEDS: Partial<Record<MetadataType, unknown>> = {
     object: PLACEHOLDER_OBJECT,
     dimensions: [],
     // A dataset needs at least one measure to be useful; seed a count.
-    measures: [{ name: 'count', label: 'Count', aggregate: 'count' }],
+    // [#14492] No `label` on purpose: an authored label is the author's text
+    // and reaches the wire verbatim (`AnalyticsResult.fields[].label`), which
+    // made this seeded "Count" an English literal on every non-English chart.
+    // Label-less, the measure is the server's built-in default — the response
+    // carries `builtinAggregate: 'count'` and the renderer localizes the name.
+    measures: [{ name: 'count', aggregate: 'count' }],
   },
   object: {
     name: 'new_object',

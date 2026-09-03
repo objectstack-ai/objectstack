@@ -2064,6 +2064,17 @@ function sortActionsByOrder<T extends { order?: number }>(actions: T[]): T[] {
  * top-level `actions` array is preserved for global access (e.g., platform
  * overview, search).
  *
+ * Idempotent over its own output (#14847): a bound action the object already
+ * carries BY IDENTITY is not appended again. That is the shape `composeStacks`
+ * feeds it — inputs built by `defineStack`, each object already carrying the
+ * copy its own build appended while the standalone still sits in `actions` —
+ * and before this the second merge doubled every bound action in the composed
+ * object (three copies for two declarations under `objectConflict: 'override'`
+ * / `'merge'`). Identity, deliberately not equality: an author writing one
+ * action in both positions produces two distinct objects, which #14686's
+ * same-key refusal (run before this merge) rejects and which this merge must
+ * not quietly fold.
+ *
  * After merging, every action group (each object's `actions` and the top-level
  * `actions`) is stable-sorted by `order` via {@link sortActionsByOrder}. Because
  * that sort is a no-op unless an author sets `order`, this is fully backward
@@ -2102,12 +2113,23 @@ function mergeActionsIntoObjects(config: ObjectStackDefinition): ObjectStackDefi
   // references, consistent with mergeObjects() and Zod output).
   let objectsChanged = false;
   const newObjects = config.objects.map((obj) => {
-    const objActions = actionsByObject.get(obj.name);
     const base = obj.actions ?? [];
-    const merged = objActions ? [...base, ...objActions] : base;
+    // Idempotent (#14847): append only the bound actions `base` does not carry
+    // ALREADY — judged by identity, never by equality. The one way an entry of
+    // `config.actions` can be the very same object as an entry of `obj.actions`
+    // is a previous run of this merge having put it there: `defineStack` ends
+    // here, so a BUILT stack carries each bound action in both positions, and
+    // `composeStacks` — which concatenates its inputs' `actions` and hands the
+    // surviving objects through as-is — ran this merge a second time over that
+    // echo and doubled every bound action. A hand-written twin (one action
+    // authored in both positions) is two objects after the strict parse, and
+    // #14686's same-key refusal has already run ahead of this merge to refuse
+    // it; an equality skip here would have swallowed it instead.
+    const fresh = (actionsByObject.get(obj.name) ?? []).filter((action) => !base.includes(action));
+    const merged = fresh.length > 0 ? [...base, ...fresh] : base;
     const sorted = sortActionsByOrder(merged);
-    // Untouched: no top-level actions merged in AND the sort was a no-op.
-    if (!objActions && sorted === base) return obj;
+    // Untouched: nothing new merged in AND the sort was a no-op.
+    if (sorted === base) return obj;
     objectsChanged = true;
     return { ...obj, actions: sorted };
   });
@@ -3148,5 +3170,10 @@ export function composeStacks(
     throw new Error(formatComposedActionKeyCollisions(actionCollisions));
   }
 
+  // 7. Bind every standalone action to its object — ONCE. Each input built by
+  //    `defineStack` already carries its own bound actions on its objects (the
+  //    echo step 6 steps around), and the surviving objects reach here as-is,
+  //    so the merge appends only what an object does not already carry by
+  //    identity (#14847): the other inputs' actions bound to it.
   return mergeActionsIntoObjects(composed as ObjectStackDefinition);
 }
