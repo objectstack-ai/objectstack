@@ -5898,7 +5898,11 @@ export class SqlDriver implements IDataDriver {
     // Run the DDL on the caller's own transaction instead; SQLite permits DDL
     // inside a transaction. We deliberately do NOT route DDL through `parentTrx`
     // on MySQL, where DDL implicitly commits the caller's transaction; there the
-    // roomy pool (max=10) lets a fresh connection create the table safely.
+    // pool has room (max=5) for a fresh connection to create the table safely.
+    // The 5 is `buildSqlPool`'s — service-datasource's
+    // `default-datasource-driver-factory.ts` gives every datasource it composes
+    // `{min:0,max:5}` unless one declares its own `pool` — not knex's roomier
+    // `poolDefaults()` of `{min:2,max:10}`, which the factory never reaches.
     const runner: Knex | Knex.Transaction = parentTrx && this.isSqlite ? parentTrx : this.knex;
     // If we are about to run DDL on a fresh pooled connection while a SQLite
     // transaction holds the only one, fail fast with a clear message instead of
@@ -8201,9 +8205,13 @@ export class SqlDriver implements IDataDriver {
    * turns that into an immediate, actionable error at the call site.
    *
    * No-op in production (zero overhead on the hot path) and on every non-SQLite
-   * dialect, whose roomy pools (max ≥ 10) cannot exhibit the single-connection
-   * dead-lock. Callers that legitimately need the connection during a
-   * transaction must bind the operation to that transaction instead of
+   * dialect, whose pool holds more than one connection and so cannot exhibit the
+   * single-connection dead-lock. That headroom is `max: 5`, from `buildSqlPool`
+   * in service-datasource's `default-datasource-driver-factory.ts`, which gives
+   * every datasource it composes `{min:0,max:5}` unless one declares its own
+   * `pool` — not knex's roomier `poolDefaults()` of `{min:2,max:10}`, which the
+   * factory never reaches. Callers that legitimately need the connection during
+   * a transaction must bind the operation to that transaction instead of
    * `this.knex`.
    */
   protected assertBareKnexSafe(op: string): void {
