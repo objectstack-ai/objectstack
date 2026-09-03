@@ -79,7 +79,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ManifestSchema } from '@objectstack/spec/kernel';
-import { TEMPLATES, sanitizeNamespace } from '../src/commands/init.js';
+import { TEMPLATES, sanitizeNamespace, writeTemplateSrcFiles } from '../src/commands/init.js';
 import { templates as createTemplates } from '../src/commands/create.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -95,42 +95,71 @@ afterAll(() => {
 interface Scaffold {
   /** `<command>:<template key>` — the command a user would have typed. */
   id: string;
-  /** Render this scaffold's `objectstack.config.ts`, through its own emitter. */
-  render: () => string;
+  /**
+   * Write this scaffold's TypeScript into `root`, through its own emitter.
+   *
+   * TypeScript only, and deliberately: a config that imports `./src/objects`
+   * needs that module on disk to load at all, while the `package.json` and
+   * `tsconfig.json` the scaffolders also write are monorepo-relative
+   * (`workspace:*` deps, `extends: '../../tsconfig.json'`) and resolve to
+   * nothing from a throwaway directory. Neither one can change what the
+   * manifest declares, so emitting them would buy a resolution failure and no
+   * coverage. A future template whose config imports a NON-TypeScript file it
+   * emits would fail loudly here, on the resolve, rather than quietly.
+   */
+  emit: (root: string) => void;
 }
 
 /**
  * `os init -t <key>`: every template renders a config, so the whole map
- * contributes.
+ * contributes. Both halves go through `init`'s own emitter — the same
+ * `configContent` / `writeTemplateSrcFiles` pair the command calls, and the
+ * pair `init-scaffold-authoring-rules.test.ts` drives, so neither test can
+ * drift from what `init` really writes.
  */
 const initScaffolds: Scaffold[] = Object.keys(TEMPLATES).map((key) => ({
   id: `init:${key}`,
-  render: () => TEMPLATES[key].configContent(PROJECT_NAME, sanitizeNamespace(PROJECT_NAME)),
+  emit: (root: string) => {
+    const namespace = sanitizeNamespace(PROJECT_NAME);
+    fs.writeFileSync(
+      path.join(root, CONFIG_FILE),
+      TEMPLATES[key].configContent(PROJECT_NAME, namespace),
+    );
+    writeTemplateSrcFiles(TEMPLATES[key].srcFiles, root, PROJECT_NAME, namespace);
+  },
 }));
 
 /**
  * `os create <key> <name>`: only the templates whose file map carries an
  * `objectstack.config.ts` contribute — derived from the map, so a template
- * that grows one later is swept without an edit here.
+ * that grows one later is swept without an edit here. `create` has no
+ * `srcFiles` split; every file it writes lives in one `files` map, keyed by
+ * the path it lands at, and is rendered by calling that entry — which is
+ * exactly what `Create.run()` does.
  */
 const createScaffolds: Scaffold[] = Object.entries(createTemplates)
   .filter(([, template]) => CONFIG_FILE in template.files)
   .map(([key, template]) => ({
     id: `create:${key}`,
-    render: () => {
-      const emit = (template.files as Record<string, (name: string) => unknown>)[CONFIG_FILE];
-      return String(emit(PROJECT_NAME));
+    emit: (root: string) => {
+      const files = template.files as Record<string, (name: string) => unknown>;
+      for (const [filePath, render] of Object.entries(files)) {
+        if (!filePath.endsWith('.ts')) continue;
+        const abs = path.join(root, filePath);
+        fs.mkdirSync(path.dirname(abs), { recursive: true });
+        fs.writeFileSync(abs, String(render(PROJECT_NAME)));
+      }
     },
   }));
 
 const SCAFFOLDS: Scaffold[] = [...initScaffolds, ...createScaffolds];
 
-/** Write one rendered config into a throwaway directory and load it back. */
+/** Emit one scaffold into a throwaway directory and load its config back. */
 async function loadStack(scaffold: Scaffold): Promise<Record<string, unknown>> {
   fs.mkdirSync(TMP_ROOT, { recursive: true });
   const root = fs.mkdtempSync(path.join(TMP_ROOT, `manifest-${scaffold.id.replace(':', '-')}-`));
   roots.push(root);
-  fs.writeFileSync(path.join(root, CONFIG_FILE), scaffold.render());
+  scaffold.emit(root);
 
   const { bundleRequire } = await import('bundle-require');
   const { mod } = await bundleRequire({ filepath: path.join(root, CONFIG_FILE), cwd: root });
