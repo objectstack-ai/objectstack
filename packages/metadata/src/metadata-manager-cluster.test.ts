@@ -1,8 +1,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi } from 'vitest';
-import { MetadataManager } from './metadata-manager';
-import { MemoryLoader } from './loaders/memory-loader';
+import { MetadataManager } from './metadata-manager.js';
+import { MemoryLoader } from './loaders/memory-loader.js';
 import type { MetadataLoader } from './loaders/loader-interface.js';
 import type { MetadataLoaderContract, MetadataLoadResult, MetadataSaveResult, MetadataStats } from '@objectstack/spec/system';
 import type { IPubSub, PubSubMessage } from '@objectstack/spec/contracts';
@@ -172,8 +172,8 @@ describe('MetadataManager — cluster pub/sub bridge', () => {
 
         const a: unknown[] = [];
         const b: unknown[] = [];
-        mgrA.subscribe('object', (e) => a.push(e));
-        mgrB.subscribe('object', (e) => b.push(e));
+        mgrA.subscribe('object', (e) => { a.push(e); });
+        mgrB.subscribe('object', (e) => { b.push(e); });
 
         // Simulate manager A emitting a watch event by going through the
         // public publish surface directly (we don't have a repository
@@ -197,7 +197,7 @@ describe('MetadataManager — cluster pub/sub bridge', () => {
         mgr.attachClusterPubSub(bus, 'node-B');
 
         const received: unknown[] = [];
-        mgr.subscribe('object', (e) => received.push(e));
+        mgr.subscribe('object', (e) => { received.push(e); });
 
         mgr.detachClusterPubSub();
         mgr.detachClusterPubSub(); // idempotent
@@ -220,7 +220,7 @@ describe('MetadataManager — cluster pub/sub bridge', () => {
         const off2 = mgr.attachClusterPubSub(bus, 'node-B'); // should not double-subscribe
 
         const received: unknown[] = [];
-        mgr.subscribe('object', (e) => received.push(e));
+        mgr.subscribe('object', (e) => { received.push(e); });
 
         await bus.publish('metadata.changed', {
             originNode: 'node-A',
@@ -239,7 +239,7 @@ describe('MetadataManager — cluster pub/sub bridge', () => {
         mgr.attachClusterPubSub(bus, 'node-B');
 
         const received: unknown[] = [];
-        mgr.subscribe('object', (e) => received.push(e));
+        mgr.subscribe('object', (e) => { received.push(e); });
 
         await bus.publish('metadata.changed', { originNode: 'node-A' }); // missing type/event
         await bus.publish('metadata.changed', null);
