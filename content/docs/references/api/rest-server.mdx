@@ -29,8 +29,8 @@ Architecture alignment:
 ## TypeScript Usage
 
 ```typescript
-import { BatchEndpointsConfigSchema, CrudEndpointPatternSchema, CrudEndpointsConfigSchema, CrudOperation, EndpointRegistrySchema, GeneratedEndpointSchema, MetadataEndpointsConfigSchema, RestApiConfigSchema, RestServerConfigSchema, RouteGenerationConfigSchema } from '@objectstack/spec/api';
-import type { BatchEndpointsConfig, CrudEndpointPattern, CrudEndpointsConfig, CrudOperation, EndpointRegistry, GeneratedEndpoint, MetadataEndpointsConfig, RestApiConfig, RestServerConfig, RouteGenerationConfig } from '@objectstack/spec/api';
+import { BatchEndpointsConfigSchema, CrudEndpointsConfigSchema, CrudOperation, EndpointRegistrySchema, GeneratedEndpointSchema, MetadataEndpointsConfigSchema, RestApiConfigSchema, RestServerConfigSchema, RouteGenerationConfigSchema } from '@objectstack/spec/api';
+import type { BatchEndpointsConfig, CrudEndpointsConfig, CrudOperation, EndpointRegistry, GeneratedEndpoint, MetadataEndpointsConfig, RestApiConfig, RestServerConfig, RouteGenerationConfig } from '@objectstack/spec/api';
 
 // Validate data
 const result = BatchEndpointsConfigSchema.parse(data);
@@ -46,8 +46,8 @@ const result = BatchEndpointsConfigSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **maxBatchSize** | `integer` | optional (default: `200`) | Maximum records per batch operation |
 | **enableBatchEndpoint** | `boolean` | optional (default: `true`) | Enable POST /data/:object/batch endpoint |
-| **operations** | `{ createMany: boolean; updateMany: boolean; deleteMany: boolean; upsertMany: boolean }` | optional | Enable/disable specific batch operations |
-| **defaultAtomic** | `boolean` | optional (default: `true`) | Default atomic/transaction mode for batch operations |
+| **operations** | `{ createMany: boolean; updateMany: boolean; deleteMany: boolean }` | optional | Enable/disable specific batch operations |
+| **defaultAtomic** | `never` | optional | [REMOVED] `batch.defaultAtomic` was removed in @objectstack/spec 17 (#14691, ADR-0049 enforce-or-remove) — no batch handler ever consulted it: atomicity is decided per request by `options.atomic` in the batch body (`BatchOptions`, ADR-0119 D4, opt-in), and a server-side default that flipped it silently would change the failure semantics of callers who send nothing. Delete the key; a caller that needs all-or-nothing sends `options: { atomic: true }`. |
 
 ### Nested Shape: `BatchEndpointsConfig.operations`
 
@@ -56,21 +56,7 @@ const result = BatchEndpointsConfigSchema.parse(data);
 | **createMany** | `boolean` | optional (default: `true`) | Enable POST /data/:object/createMany |
 | **updateMany** | `boolean` | optional (default: `true`) | Enable POST /data/:object/updateMany |
 | **deleteMany** | `boolean` | optional (default: `true`) | Enable POST /data/:object/deleteMany |
-| **upsertMany** | `boolean` | optional (default: `true`) | Enable POST /data/:object/upsertMany |
-
-
----
-
-## CrudEndpointPattern
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **method** | `Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>` | ✅ | HTTP method |
-| **path** | `string` | ✅ | URL path pattern |
-| **summary** | `string` | optional | Operation summary |
-| **description** | `string` | optional | Operation description |
+| **upsertMany** | `never` | optional | [REMOVED] `batch.operations.upsertMany` was removed in @objectstack/spec 17 (#14691, ADR-0049 enforce-or-remove) — it gated a route that was never built: there is no `POST /data/:object/upsertMany` and no protocol member behind it, so `false` disabled nothing. Delete the key. Upsert is an operation type of the generic `POST /data/:object/batch` endpoint (`BatchOperationType` `'upsert'`, keyed by `externalId`), gated by `batch.enableBatchEndpoint`. |
 
 
 ---
@@ -82,9 +68,9 @@ const result = BatchEndpointsConfigSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **operations** | `{ create: boolean; read: boolean; update: boolean; delete: boolean; … }` | optional | Enable/disable operations |
-| **patterns** | `Record<string, { method: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>; path: string; summary?: string; description?: string }>` | optional | Custom URL patterns for operations |
+| **patterns** | `never` | optional | [REMOVED] `crud.patterns` was removed in @objectstack/spec 17 (#14691, ADR-0049 enforce-or-remove) — nothing ever read it: every CRUD route is mounted from the fixed method/path pairs in the REST server's `registerCrudEndpoints`, so a custom pattern was validated and ignored. Delete the key. The mounted CRUD paths are the contract the client SDK, the discovery document and the served /openapi.json all describe, and `crud.dataPrefix` is the one live knob that moves them; an endpoint on a custom path or method is a declarative `api` endpoint (`type: 'object_operation'`, `ApiEndpoint` in `@objectstack/spec/api`), which is matched, executed and documented. |
 | **dataPrefix** | `string` | optional (default: `"/data"`) | URL prefix for data endpoints |
-| **objectParamStyle** | `Enum<'path' \| 'query'>` | optional (default: `"path"`) | How object name is passed (path param or query param) |
+| **objectParamStyle** | `never` | optional | [REMOVED] `crud.objectParamStyle` was removed in @objectstack/spec 17 (#14691, ADR-0049 enforce-or-remove) — nothing ever read it: every CRUD route takes the object name as a path segment, so `'query'` was validated and mounted exactly what `'path'` mounts. Delete the key; the object name is always a path segment. |
 
 ### Nested Shape: `CrudEndpointsConfig.operations`
 
@@ -95,15 +81,6 @@ const result = BatchEndpointsConfigSchema.parse(data);
 | **update** | `boolean` | optional (default: `true`) | Enable update operation |
 | **delete** | `boolean` | optional (default: `true`) | Enable delete operation |
 | **list** | `boolean` | optional (default: `true`) | Enable list operation |
-
-### Nested Shape: `CrudEndpointsConfig.patterns[string]`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **method** | `Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>` | ✅ | HTTP method |
-| **path** | `string` | ✅ | URL path pattern |
-| **summary** | `string` | optional | Operation summary |
-| **description** | `string` | optional | Operation description |
 
 
 ---
@@ -196,9 +173,9 @@ const result = BatchEndpointsConfigSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **prefix** | `string` | optional (default: `"/meta"`) | URL prefix for metadata endpoints |
 | **enableCache** | `boolean` | optional (default: `true`) | Enable HTTP cache headers (ETag, Last-Modified) |
-| **cacheTtl** | `integer` | optional (default: `3600`) | Cache TTL in seconds |
+| **cacheTtl** | `never` | optional | [REMOVED] `metadata.cacheTtl` was removed in @objectstack/spec 17 (#14691, ADR-0049 enforce-or-remove) — nothing ever read it: `metadata.enableCache` selects the protocol's `getMetaItemCached` read path, which takes no TTL, and no Cache-Control / ETag header was ever built from this value. Delete the key; `metadata.enableCache` is the live switch, and a declarative `api` endpoint's `cacheTtl` is the key that does reach the wire. |
 | **maskObjectFields** | `boolean` | optional (default: `true`) | [ADR-0106 D8] Mask served object schemas to the caller's readable fields |
-| **endpoints** | `{ types: boolean; items: boolean; item: boolean; schema: boolean }` | optional | Enable/disable specific endpoints |
+| **endpoints** | `{ types: boolean; items: boolean; item: boolean }` | optional | Enable/disable specific endpoints |
 
 ### Nested Shape: `MetadataEndpointsConfig.endpoints`
 
@@ -207,7 +184,7 @@ const result = BatchEndpointsConfigSchema.parse(data);
 | **types** | `boolean` | optional (default: `true`) | GET /meta - List all metadata types |
 | **items** | `boolean` | optional (default: `true`) | GET /meta/:type - List items of type |
 | **item** | `boolean` | optional (default: `true`) | GET /meta/:type/:name - Get specific item |
-| **schema** | `boolean` | optional (default: `true`) | GET /meta/:type/:name/schema - Get JSON schema |
+| **schema** | `never` | optional | [REMOVED] `metadata.endpoints.schema` was removed in @objectstack/spec 17 (#14691, ADR-0049 enforce-or-remove) — it gated a route that does not exist: the REST server mounts no `GET /meta/:type/:name/schema`, so `false` removed nothing and `true` added nothing. Delete the key; `endpoints.types` / `items` / `item` are the switches that gate real mounts. |
 
 
 ---
@@ -264,10 +241,10 @@ const result = BatchEndpointsConfigSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **api** | `{ version: string; basePath: string; apiPath?: string; enableCrud: boolean; … }` | optional | REST API configuration |
-| **crud** | `{ operations?: object; patterns?: Record<string, object>; dataPrefix: string; objectParamStyle: Enum<'path' \| 'query'> }` | optional | CRUD endpoints configuration |
-| **metadata** | `{ prefix: string; enableCache: boolean; cacheTtl: integer; maskObjectFields: boolean; … }` | optional | Metadata endpoints configuration |
-| **batch** | `{ maxBatchSize: integer; enableBatchEndpoint: boolean; operations?: object; defaultAtomic: boolean }` | optional | Batch endpoints configuration |
-| **routes** | `{ includeObjects?: string[]; excludeObjects?: string[]; nameTransform: Enum<'none' \| 'plural' \| 'kebab-case' \| 'camelCase'>; overrides?: Record<string, object> }` | optional | Route generation configuration |
+| **crud** | `{ operations?: object; dataPrefix: string }` | optional | CRUD endpoints configuration |
+| **metadata** | `{ prefix: string; enableCache: boolean; maskObjectFields: boolean; endpoints?: object }` | optional | Metadata endpoints configuration |
+| **batch** | `{ maxBatchSize: integer; enableBatchEndpoint: boolean; operations?: object }` | optional | Batch endpoints configuration |
+| **routes** | `{  }` | optional | Route generation configuration |
 | **openApi31** | `never` | optional | [REMOVED] `RestServerConfig.openApi31` was removed in @objectstack/spec 17 (ADR-0049) — no runtime ever read it: the REST server forwards only `api`/`crud`/`metadata`/`batch`/`routes`, and the served /openapi.json is the pre-generated contract enriched with the live server URL and the registered objects, so webhook/callback definitions declared here never appeared in it. Delete the key. Config-driven OpenAPI 3.1 webhooks/callbacks documentation is a new capability and must arrive via the enforce route of ADR-0049 (a new ADR), not by re-declaring the key; for a real outbound webhook use `Webhook` from `@objectstack/spec/automation`. |
 
 ### Nested Shape: `RestServerConfig.api`
@@ -295,9 +272,9 @@ const result = BatchEndpointsConfigSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **operations** | `{ create: boolean; read: boolean; update: boolean; delete: boolean; … }` | optional | Enable/disable operations |
-| **patterns** | `Record<string, { method: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>; path: string; summary?: string; description?: string }>` | optional | Custom URL patterns for operations |
+| **patterns** | `never` | optional | [REMOVED] `crud.patterns` was removed in @objectstack/spec 17 (#14691, ADR-0049 enforce-or-remove) — nothing ever read it: every CRUD route is mounted from the fixed method/path pairs in the REST server's `registerCrudEndpoints`, so a custom pattern was validated and ignored. Delete the key. The mounted CRUD paths are the contract the client SDK, the discovery document and the served /openapi.json all describe, and `crud.dataPrefix` is the one live knob that moves them; an endpoint on a custom path or method is a declarative `api` endpoint (`type: 'object_operation'`, `ApiEndpoint` in `@objectstack/spec/api`), which is matched, executed and documented. |
 | **dataPrefix** | `string` | optional (default: `"/data"`) | URL prefix for data endpoints |
-| **objectParamStyle** | `Enum<'path' \| 'query'>` | optional (default: `"path"`) | How object name is passed (path param or query param) |
+| **objectParamStyle** | `never` | optional | [REMOVED] `crud.objectParamStyle` was removed in @objectstack/spec 17 (#14691, ADR-0049 enforce-or-remove) — nothing ever read it: every CRUD route takes the object name as a path segment, so `'query'` was validated and mounted exactly what `'path'` mounts. Delete the key; the object name is always a path segment. |
 
 ### Nested Shape: `RestServerConfig.metadata`
 
@@ -305,9 +282,9 @@ const result = BatchEndpointsConfigSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **prefix** | `string` | optional (default: `"/meta"`) | URL prefix for metadata endpoints |
 | **enableCache** | `boolean` | optional (default: `true`) | Enable HTTP cache headers (ETag, Last-Modified) |
-| **cacheTtl** | `integer` | optional (default: `3600`) | Cache TTL in seconds |
+| **cacheTtl** | `never` | optional | [REMOVED] `metadata.cacheTtl` was removed in @objectstack/spec 17 (#14691, ADR-0049 enforce-or-remove) — nothing ever read it: `metadata.enableCache` selects the protocol's `getMetaItemCached` read path, which takes no TTL, and no Cache-Control / ETag header was ever built from this value. Delete the key; `metadata.enableCache` is the live switch, and a declarative `api` endpoint's `cacheTtl` is the key that does reach the wire. |
 | **maskObjectFields** | `boolean` | optional (default: `true`) | [ADR-0106 D8] Mask served object schemas to the caller's readable fields |
-| **endpoints** | `{ types: boolean; items: boolean; item: boolean; schema: boolean }` | optional | Enable/disable specific endpoints |
+| **endpoints** | `{ types: boolean; items: boolean; item: boolean }` | optional | Enable/disable specific endpoints |
 
 ### Nested Shape: `RestServerConfig.batch`
 
@@ -315,17 +292,8 @@ const result = BatchEndpointsConfigSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **maxBatchSize** | `integer` | optional (default: `200`) | Maximum records per batch operation |
 | **enableBatchEndpoint** | `boolean` | optional (default: `true`) | Enable POST /data/:object/batch endpoint |
-| **operations** | `{ createMany: boolean; updateMany: boolean; deleteMany: boolean; upsertMany: boolean }` | optional | Enable/disable specific batch operations |
-| **defaultAtomic** | `boolean` | optional (default: `true`) | Default atomic/transaction mode for batch operations |
-
-### Nested Shape: `RestServerConfig.routes`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **includeObjects** | `string[]` | optional | Specific objects to generate routes for (empty = all) |
-| **excludeObjects** | `string[]` | optional | Objects to exclude from route generation |
-| **nameTransform** | `Enum<'none' \| 'plural' \| 'kebab-case' \| 'camelCase'>` | optional (default: `"none"`) | Transform object names in URLs |
-| **overrides** | `Record<string, { enabled?: boolean; basePath?: string; operations?: Record<string, boolean> }>` | optional | Per-object route customization |
+| **operations** | `{ createMany: boolean; updateMany: boolean; deleteMany: boolean }` | optional | Enable/disable specific batch operations |
+| **defaultAtomic** | `never` | optional | [REMOVED] `batch.defaultAtomic` was removed in @objectstack/spec 17 (#14691, ADR-0049 enforce-or-remove) — no batch handler ever consulted it: atomicity is decided per request by `options.atomic` in the batch body (`BatchOptions`, ADR-0119 D4, opt-in), and a server-side default that flipped it silently would change the failure semantics of callers who send nothing. Delete the key; a caller that needs all-or-nothing sends `options: { atomic: true }`. |
 
 
 ---
@@ -336,18 +304,10 @@ const result = BatchEndpointsConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **includeObjects** | `string[]` | optional | Specific objects to generate routes for (empty = all) |
-| **excludeObjects** | `string[]` | optional | Objects to exclude from route generation |
-| **nameTransform** | `Enum<'none' \| 'plural' \| 'kebab-case' \| 'camelCase'>` | optional (default: `"none"`) | Transform object names in URLs |
-| **overrides** | `Record<string, { enabled?: boolean; basePath?: string; operations?: Record<string, boolean> }>` | optional | Per-object route customization |
-
-### Nested Shape: `RouteGenerationConfig.overrides[string]`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | optional | Enable/disable routes for this object |
-| **basePath** | `string` | optional | Custom base path |
-| **operations** | `Record<string, boolean>` | optional | Enable/disable specific operations |
+| **includeObjects** | `never` | optional | [REMOVED] `routes.includeObjects` was removed in @objectstack/spec 17 (#14691, ADR-0049 enforce-or-remove) — nothing ever read it: route registration iterates every registered object, so an include list still mounted all of them. Delete the key. Per-object API exposure is declared on the object and enforced by the REST data surface: `enable.apiEnabled: false` hides the object (404) and `enable.apiMethods` whitelists its operations (405 for the rest). |
+| **excludeObjects** | `never` | optional | [REMOVED] `routes.excludeObjects` was removed in @objectstack/spec 17 (#14691, ADR-0049 enforce-or-remove) — nothing ever read it: route registration iterates every registered object, so an excluded object was still mounted. Delete the key. Per-object API exposure is declared on the object and enforced by the REST data surface: `enable.apiEnabled: false` hides the object (404) and `enable.apiMethods` whitelists its operations (405 for the rest). |
+| **nameTransform** | `never` | optional | [REMOVED] `routes.nameTransform` was removed in @objectstack/spec 17 (#14691, ADR-0049 enforce-or-remove) — nothing ever read it: the enum was validated and every value mounted exactly what `'none'` mounts. Delete the key; the object `name` is the canonical id on every surface, the REST path segment included, so there is no URL transform to configure. |
+| **overrides** | `never` | optional | [REMOVED] `routes.overrides` was removed in @objectstack/spec 17 (#14691, ADR-0049 enforce-or-remove) — nothing ever read the per-object record: `enabled`, `basePath` and `operations` were validated and turned nothing on or off. Delete the key. Per-object exposure lives on the object (`enable.apiEnabled` hides it, `enable.apiMethods` whitelists its operations — both enforced by the REST data surface); the data base path is deployment-wide (`crud.dataPrefix`); and an endpoint on a custom path is a declarative `api` endpoint. |
 
 
 ---

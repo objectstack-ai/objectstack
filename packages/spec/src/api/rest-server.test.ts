@@ -227,7 +227,7 @@ describe('CrudEndpointsConfigSchema', () => {
       patterns: {
         create: { method: 'POST', path: '/objects/{object}' },
       },
-    })).toThrow(/`crud\.patterns` was removed.*never read it.*Delete the key.*declarative `api` endpoint/s);
+    })).toThrow(/`crud\.patterns` was removed.*nothing ever read it.*Delete the key.*declarative `api` endpoint/s);
   });
 
   it('should accept custom data prefix', () => {
@@ -429,7 +429,7 @@ describe('RouteGenerationConfigSchema', () => {
   it('[#14691] REJECTS `nameTransform` — every former enum value, `none` included', () => {
     for (const nameTransform of ['none', 'plural', 'kebab-case', 'camelCase']) {
       expect(() => RouteGenerationConfigSchema.parse({ nameTransform }), nameTransform)
-        .toThrow(/`routes\.nameTransform` was removed.*canonical id.*Delete the key/s);
+        .toThrow(/`routes\.nameTransform` was removed.*Delete the key.*canonical id/s);
     }
   });
 
@@ -679,17 +679,14 @@ describe('Integration Tests', () => {
           delete: true,
           list: true,
         },
-        objectParamStyle: 'path',
       },
       metadata: {
         prefix: '/meta',
         enableCache: true,
-        cacheTtl: 3600,
         endpoints: {
           types: true,
           items: true,
           item: true,
-          schema: true,
         },
       },
       batch: {
