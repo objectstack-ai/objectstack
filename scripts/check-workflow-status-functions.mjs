@@ -300,10 +300,60 @@ function list() {
 // as one that passed (#13798).
 const SELF_TEST_VERDICT = 'check-workflow-status-functions self-test reached its verdict';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  '1. A violating sample must go red': 7,
+  '2. Compliant samples must stay green': 7,
+  '3. Missing input must go red, in all four shapes (#4690)': 6,
+  'and the `needs.*` step case is the one a careless regex would sweep in.': 3,
+  '5. Scope: needs.*.result is a status read, not a data read': 1,
+  '6. A folded expression is read as one expression': 4,
+  '7. Spelling variants the expression language accepts': 3,
+  '8. The real repository is what this gate actually guards': 3,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 8;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const seen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    seen.set(b, (seen.get(b) ?? 0) + 1);
+  };
   const failures = [];
   let checked = 0;
   const assert = (cond, msg) => {
+    registerCase();
     checked++;
     if (!cond) failures.push(msg);
   };
@@ -324,6 +374,7 @@ function selfTest() {
     // ── 1. A violating sample must go red ────────────────────────────────────
     //
     // Verbatim shape of publish-smoke.yml:98 as #5343 found it.
+    battery('1. A violating sample must go red');
     const violating = makeRoot({
       '.github/workflows/publish-smoke.yml': `name: Publish Smoke
 on:
@@ -368,6 +419,7 @@ jobs:
     // All four status functions, the #4928 shape, and the negated form -- a rule
     // that only recognised `success()` would pass this fixture for the wrong
     // reason, so each spelling is asserted separately below.
+    battery('2. Compliant samples must stay green');
     const green = makeRoot({
       '.github/workflows/ci.yml': `name: CI
 on: [push]
@@ -417,6 +469,7 @@ jobs:
     }
 
     // ── 3. Missing input must go red, in all four shapes (#4690) ─────────────
+    battery('3. Missing input must go red, in all four shapes (#4690)');
     const noDir = makeRoot({ 'README.md': '# no workflows here\n' });
     const missing = scan(noDir);
     assert(missing.problems.length === 1, `a missing ${WORKFLOW_DIR}/ is an input problem, got ${missing.problems.length}`);
@@ -445,6 +498,7 @@ jobs:
     // This is the boundary the rule was narrowed to on purpose (#5343). Pinning
     // it here means a later widening has to be deliberate rather than accidental
     // -- and the `needs.*` step case is the one a careless regex would sweep in.
+    battery('and the `needs.*` step case is the one a careless regex would sweep in.');
     const steps = makeRoot({
       '.github/workflows/steps.yml': `name: Steps
 on: [push]
@@ -477,6 +531,7 @@ jobs:
     assert(stepScope.jobIfs === 1, `only the job-level if: is counted, got ${stepScope.jobIfs}`);
 
     // ── 5. Scope: needs.*.result is a status read, not a data read ───────────
+    battery('5. Scope: needs.*.result is a status read, not a data read');
     const resultRead = makeRoot({
       '.github/workflows/guard.yml': `name: Guard
 on: [push]
@@ -502,6 +557,7 @@ jobs:
     // violation below at all -- the `needs.` read and the (absent) status
     // function sit on different source lines. Two workflows in this repo
     // already write `if: >-`.
+    battery('6. A folded expression is read as one expression');
     const folded = makeRoot({
       '.github/workflows/folded.yml': `name: Folded
 on: [push]
@@ -541,6 +597,7 @@ jobs:
     assert(scan(foldedOk).violations.length === 0, 'the same folded expression with !cancelled() is green');
 
     // ── 7. Spelling variants the expression language accepts ─────────────────
+    battery('7. Spelling variants the expression language accepts');
     const variants = makeRoot({
       '.github/workflows/variants.yml': `name: Variants
 on: [push]
@@ -589,6 +646,7 @@ jobs:
     // fixtures above: fixtures prove the detector can go red, this proves the
     // tree it ships with is green. It also fails loudly if the repo's workflow
     // directory ever moves out from under the gate.
+    battery('8. The real repository is what this gate actually guards');
     const real = scan(repoRoot());
     assert(real.problems.length === 0, `the repo's own workflows parse cleanly, got ${real.problems[0]}`);
     assert(real.files > 0 && real.jobs > 0, 'the repo scan actually reads workflows');
@@ -600,6 +658,51 @@ jobs:
     for (const dir of roots) rmSync(dir, { recursive: true, force: true });
   }
 
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    failures.push(message);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of seen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = seen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
+  }
   if (failures.length) {
     console.error(`✗ check-workflow-status-functions --self-test -- ${failures.length} failure(s)\n`);
     for (const f of failures) console.error(`  • ${f}`);
