@@ -1680,6 +1680,54 @@ function compareAuditInstants(a: unknown, b: unknown): number {
     return aToken < bToken ? -1 : aToken > bToken ? 1 : 0;
 }
 
+/**
+ * Canonicalise the ONE driver materialisation {@link listCommits} was
+ * measured to produce for `sys_metadata_commit.created_at` — a valid JS
+ * `Date` — into the ISO-8601 string the return type declares (`createdAt?:
+ * string`). Every other shape, INCLUDING an Invalid `Date`, is returned
+ * UNTOUCHED.
+ *
+ * [#14038] `created_at` is an engine-injected audit column: it is not in
+ * `datetimeFields`, and `SqlDriver#formatOutput` repairs it only inside its
+ * `if (this.isSqlite)` arm (pinned live in driver-sql's
+ * `sql-driver-13567-audit-stamp-materialisation.test.ts`), so Postgres and
+ * MySQL hand it out of the record read door as a JS `Date` while the
+ * mapping below assigned it straight through as `r.created_at` — an
+ * unchecked value from an `any[]` row, never a measurement against the
+ * declared `string` return type.
+ *
+ * ⚠️ Deliberately NOT the `canonicalIsoInstant` spelling next door in
+ * `sys-metadata-repository.ts` / `database-loader.ts` (#14037's sibling
+ * sites): that spelling reaches `value.toISOString()` for ANY `Date`, which
+ * raises `RangeError: Invalid time value` on an Invalid `Date` — measured
+ * reachable on BOTH live dialects (a MySQL zero datetime; any Postgres year
+ * in 275760..294276) and the open subject of #14078, which #13973 is
+ * blocked on. Whether the shared spelling should throw there (option A) or
+ * fall back to a rendering (option B) is a maintainer call across four
+ * packages, so this repair imports NEITHER answer into a new call site: an
+ * Invalid `Date` is returned unchanged, exactly as the raw assignment
+ * passed it through today. When #14078 rules, this helper collapses into
+ * the shared spelling.
+ *
+ * ⛔ NOT a tolerant fallback (#13973's standing prohibition): it teaches no
+ * consumer to accept an off-spec shape; it converts the one measured
+ * producer materialisation at the producer. The
+ * `!Number.isNaN(value.getTime())` guard is the same one #14037 used for
+ * its two sibling sites, not a new spelling.
+ *
+ * ⛔ Not exported and not merged into {@link canonicalVersionInstant} above:
+ * that helper answers a different question (does this token denote AN
+ * instant at all, returning `null` when it does not) and callers of
+ * `listCommits` are promised the RAW value back untouched when it is not a
+ * valid `Date` — an absent/opaque column must still reach `sort`'s fallback
+ * branch and any in-process reader exactly as before. Consolidating the
+ * family's near-identical copies is #14078's call, not this card's.
+ */
+function isoFromValidDate(value: unknown): unknown {
+    if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString();
+    return value;
+}
+
 // Lifecycle columns the engine always owns; the clone path drops them by NAME
 // so the insert re-stamps fresh values instead of copying the source's. Mirrors
 // record-validator's SKIP_FIELDS (system-injected, never author-supplied).
@@ -19051,7 +19099,12 @@ export class ObjectStackProtocolImplementation implements
                 ...(r.parent_commit_id ? { parentCommitId: r.parent_commit_id } : {}),
                 itemCount: typeof r.item_count === 'number' ? r.item_count : 0,
                 items: this.parseCommitItems(r.items),
-                ...(r.created_at ? { createdAt: r.created_at } : {}),
+                // [#14038] Canonicalise the ONE driver materialisation this
+                // column is measured to produce (a valid JS `Date`, on
+                // Postgres/MySQL); every other shape — including an
+                // Invalid `Date` — passes through unchanged. See {@link
+                // isoFromValidDate}.
+                ...(r.created_at ? { createdAt: isoFromValidDate(r.created_at) as string } : {}),
             }));
             // Newest-first; tolerate drivers that don't order by returning
             // insertion order, then sort by the audit instant.
