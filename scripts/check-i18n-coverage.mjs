@@ -181,6 +181,7 @@ import {
   owningPackageOf,
   resolveCliCommandFile,
 } from './cli-build-prerequisite.mjs';
+import { EXIT_FINDINGS, EXIT_PREREQUISITE_NOT_MET } from './import-prerequisite.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** This script lives in `scripts/`, so the repo root is one level up (#10907). */
@@ -1141,9 +1142,15 @@ if (process.argv.includes('--self-test')) {
  * ONE prerequisite and ONE command to satisfy it — never per config, and never
  * phrased so it can be mistaken for a verdict about a config's translations.
  *
- * Exits 1, the same code the real verdict uses: any wrapper that treats non-zero
- * as failure keeps behaving identically, and inventing a second failure code
- * would be a new contract nobody asked for.
+ * Exits `EXIT_PREREQUISITE_NOT_MET` — the constant `import-prerequisite.mjs`
+ * exports, imported rather than re-picked, and printed by the advisory in the
+ * same stroke. ⛔ NOT a second failure code invented here: 3 is what every
+ * other gate in this repo already means by these two words (#13983 moved the
+ * 45-gate shared frame onto it), and this site was one of the last three
+ * contradicting them. Nothing mechanical changes — every consumer of these
+ * gates treats any non-zero as failure — so the whole benefit is that a reader
+ * who sees only the number learns what the text already says: nothing was
+ * measured, and this is NOT a finding.
  *
  * The remedy is stated at TWO widths on purpose. `CLI_BUILD_FIX` is the command
  * that clears exactly what was checked, and nothing more — this probe measures the
@@ -1172,7 +1179,7 @@ function reportPrerequisiteNotMet(headline, detail) {
       `  Nothing was measured: no config was linted and no count was compared, so this\n` +
       `  result says NOTHING about whether any declared label went untranslated — and\n` +
       `  the baseline was left exactly as committed (\`--update\` included).\n` +
-      `  (Exit code 1 — capture it BEFORE any pipe:\n` +
+      `  (Exit code ${EXIT_PREREQUISITE_NOT_MET}, distinct from a finding's ${EXIT_FINDINGS} — capture it BEFORE any pipe:\n` +
       `  \`pnpm check:i18n-coverage > /tmp/i18n-coverage.log 2>&1; echo "EXIT=$?"\`.\n` +
       `  Piped, \`$?\` is the LAST command's status, and \`head\`/\`tail\` essentially never fail — that\n` +
       `  is the false green, and no pipe shape repairs it. \`\${PIPESTATUS[0]}\`/\`pipefail\` do recover\n` +
@@ -1180,7 +1187,7 @@ function reportPrerequisiteNotMet(headline, detail) {
       `  read end early — the gate takes EPIPE, its verdict text is TRUNCATED, and a producer that\n` +
       `  dies on SIGPIPE reports 141 rather than what it meant to say.)`,
   );
-  process.exit(1);
+  process.exit(EXIT_PREREQUISITE_NOT_MET);
 }
 
 /**
@@ -1198,7 +1205,10 @@ function reportPrerequisiteNotMet(headline, detail) {
  * The same invariant `reportPrerequisiteNotMet` states: nothing measured, nothing
  * written.
  *
- * Exits 1, the same code every other verdict here uses.
+ * Exits `EXIT_PREREQUISITE_NOT_MET`, NOT a finding's 1 — the closing paragraph
+ * already says nothing was compared, and the code now says the same thing. A
+ * partial round answered this gate's question about exactly nothing, which is
+ * what that code means everywhere else in this repo.
  */
 function reportUnmeasuredConfigs(failures, measuredCount) {
   const groups = groupFailuresByCause(failures);
@@ -1232,7 +1242,7 @@ function reportUnmeasuredConfigs(failures, measuredCount) {
       `  \`--update\` would freeze the survivors while silently dropping the rest. So this\n` +
       `  result says NOTHING about whether any declared label went untranslated, and the\n` +
       `  baseline was left exactly as committed (\`--update\` included).\n` +
-      `  (Exit code 1 — capture it BEFORE any pipe:\n` +
+      `  (Exit code ${EXIT_PREREQUISITE_NOT_MET}, distinct from a finding's ${EXIT_FINDINGS} — capture it BEFORE any pipe:\n` +
       `  \`pnpm check:i18n-coverage > /tmp/i18n-coverage.log 2>&1; echo "EXIT=$?"\`.\n` +
       `  Piped, \`$?\` is the LAST command's status, and \`head\`/\`tail\` essentially never fail — that\n` +
       `  is the false green, and no pipe shape repairs it. \`\${PIPESTATUS[0]}\`/\`pipefail\` do recover\n` +
@@ -1240,7 +1250,7 @@ function reportUnmeasuredConfigs(failures, measuredCount) {
       `  read end early — the gate takes EPIPE, its verdict text is TRUNCATED, and a producer that\n` +
       `  dies on SIGPIPE reports 141 rather than what it meant to say.)`,
   );
-  process.exit(1);
+  process.exit(EXIT_PREREQUISITE_NOT_MET);
 }
 
 /**
@@ -1253,7 +1263,9 @@ function reportUnmeasuredConfigs(failures, measuredCount) {
  * is to record it. Same invariant the two reports above state, and for the same
  * reason: nothing measured, nothing written.
  *
- * Exits 1, the code every other verdict here uses.
+ * Exits `EXIT_PREREQUISITE_NOT_MET`, NOT a finding's 1 — an empty population is
+ * the sharpest case of "nothing was measured", and that is the code this repo
+ * reserves for it.
  *
  * @param {{ headline: string, detail: string[] }} verdict
  */
@@ -1266,7 +1278,7 @@ function reportEmptyPopulation(verdict) {
       `  Nothing was measured: no config was linted and no count was compared, so this\n` +
       `  result says NOTHING about whether any declared label went untranslated — and\n` +
       `  the baseline was left exactly as committed (\`--update\` included).\n` +
-      `  (Exit code 1 — capture it BEFORE any pipe:\n` +
+      `  (Exit code ${EXIT_PREREQUISITE_NOT_MET}, distinct from a finding's ${EXIT_FINDINGS} — capture it BEFORE any pipe:\n` +
       `  \`pnpm check:i18n-coverage > /tmp/i18n-coverage.log 2>&1; echo "EXIT=$?"\`.\n` +
       `  Piped, \`$?\` is the LAST command's status, and \`head\`/\`tail\` essentially never fail — that\n` +
       `  is the false green, and no pipe shape repairs it. \`\${PIPESTATUS[0]}\`/\`pipefail\` do recover\n` +
@@ -1274,7 +1286,7 @@ function reportEmptyPopulation(verdict) {
       `  read end early — the gate takes EPIPE, its verdict text is TRUNCATED, and a producer that\n` +
       `  dies on SIGPIPE reports 141 rather than what it meant to say.)`,
   );
-  process.exit(1);
+  process.exit(EXIT_PREREQUISITE_NOT_MET);
 }
 
 /**

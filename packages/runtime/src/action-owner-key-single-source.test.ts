@@ -25,6 +25,15 @@
  * copy: a byte-identical second spelling passes every assertion in half A. Half
  * B reads this package's own source and fails if the ladder grows a second
  * body here.
+ *
+ * Half C closes the same hole one level down (#14678). #14422 converged the
+ * LADDER, and the runtime kept three bare `'global'` spellings elsewhere in
+ * `action-execution.ts` that the ladder check could not see: a live comparison
+ * in `seedFlowActionParams`, a warn-once log key in `enforceActionParams`, and
+ * a docblock. All three were equal in value and invisible to every test in the
+ * repo, which is the whole shape #14422 was filed to remove — so the same
+ * convergence needed the same weld, or the next reader re-inlines one and
+ * nothing says so.
  */
 
 import { readFileSync } from 'node:fs';
@@ -89,6 +98,25 @@ function readActionExecutionSource(): string {
     return readFileSync(join(here, 'action-execution.ts'), 'utf8');
 }
 
+/**
+ * Quote spellings of the object-less key as a bare literal, DERIVED from the
+ * constant rather than hard-coded.
+ *
+ * Deriving it is the point, not a flourish. A hard-coded `'global'` here would
+ * be a fourth copy of the very literal this file exists to forbid, and it
+ * would go stale in the same silence the day the constant moves. Derived, the
+ * guard follows the constant: whatever `GLOBAL_ACTION_OBJECT_KEY` becomes,
+ * that is the spelling `action-execution.ts` may not write out by hand. The
+ * re-inlining it catches is caught at the moment it happens, while the two
+ * spellings are still equal — which is the only moment a reader can tell they
+ * were ever meant to be one thing.
+ */
+const BARE_LITERALS: readonly string[] = [
+    `'${GLOBAL_ACTION_OBJECT_KEY}'`,
+    `"${GLOBAL_ACTION_OBJECT_KEY}"`,
+    `\`${GLOBAL_ACTION_OBJECT_KEY}\``,
+];
+
 describe('standalone-action owner key — half B: one spelling (#14422)', () => {
     it('keeps no ladder body of its own in action-execution.ts', () => {
         const src = readActionExecutionSource();
@@ -110,5 +138,29 @@ describe('standalone-action owner key — half B: one spelling (#14422)', () => 
             );
         }
         expect(body[1].trim()).toBe('return standaloneActionOwnerKey(action);');
+    });
+});
+
+describe('standalone-action owner key — half C: no bare literal (#14678)', () => {
+    it('spells the object-less key as the CONSTANT everywhere in action-execution.ts', () => {
+        const src = readActionExecutionSource();
+
+        // Anti-vacuity, twice over. An empty read, or a file that does not
+        // import the constant at all, would make every negative below pass for
+        // exactly the wrong reason — the can-never-fail property this whole
+        // file was written to replace. Both controls are positive assertions
+        // against text the converged file must carry.
+        expect(src).toContain('GLOBAL_ACTION_OBJECT_KEY');
+        expect(src).toContain('objectName !== GLOBAL_ACTION_OBJECT_KEY');
+
+        for (const literal of BARE_LITERALS) {
+            expect(
+                src.includes(literal),
+                `action-execution.ts writes the object-less action key as the bare literal `
+                + `${literal}. It is equal in value to GLOBAL_ACTION_OBJECT_KEY today and parts `
+                + `from it in silence the day the constant moves (#14422, #14678). Import the `
+                + `constant — this file already does — and compare or interpolate that instead.`,
+            ).toBe(false);
+        }
     });
 });
