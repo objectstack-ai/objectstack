@@ -28,6 +28,12 @@
  *    route. The derivation mirrors the production template exactly
  *    (single-occurrence `.replace('-', '_')` included), so a route name the
  *    template would mangle into an invalid code also fails here.
+ * [#14573] The file has since become the home for the approvals door's
+ * live-emission pins generally, not only the #8885 population: the
+ * `FORBIDDEN` → 403 case below pins a row that is registered vocabulary and
+ * whose emission was — contrary to that card's premise — already observed
+ * elsewhere. See its own comment for where, and why it is pinned here too.
+ *
  * 3. The union stays CLOSED — the control case in
  *    `rest-field-visibility-fault-envelope.test.ts` covers this file too (same
  *    schema instance); membership green here is evidence, not vacuity.
@@ -35,6 +41,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { ApiErrorSchema } from '@objectstack/spec/api';
+import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
 // `.js` on purpose — NodeNext resolution requires the extension (#7248).
 import { RestServer } from './rest-server.js';
 
@@ -112,6 +119,64 @@ describe('approvals wire codes are registered vocabulary (#8885)', () => {
         expect(
             ApiErrorSchema.safeParse({ code: answer.body?.code, message: answer.body?.error }).success,
             'THROTTLED must be in StandardErrorCode ∪ ERROR_CODE_LEDGER',
+        ).toBe(true);
+    });
+
+    // [#14573] The `FORBIDDEN` → 403 row is the one EVERY authorisation
+    // refusal rides: recall by a non-submitter, decide by a non-approver,
+    // reassign / remind / sendBack / resubmit by the wrong actor, and
+    // `resolveActor`'s impersonation refusals all reach this table through
+    // the same single row.
+    //
+    // ⚠️ THIS IS A SECOND PIN, NOT THE FIRST — read this before adding a
+    // third. #14573 was filed and triaged on the reading that the row had NO
+    // live-emission pin, and that reading is WRONG: §7 of
+    // `rest-data-door-code-prefix.test.ts` ("[#13095] the approvals door
+    // strips the code it answers") already drives the REAL approve route with
+    // a `FORBIDDEN: …` throw and already asserts 403, `code: 'FORBIDDEN'` and
+    // the strip. Measured, not read: deleting the row from `rest-server.ts`
+    // reds THREE cases — this one and both of §7's. What was true is narrower
+    // than the card: the file that OWNS the approvals wire-code contract did
+    // not pin the row, so a reader auditing wire codes here saw a gap that a
+    // strip-contract file was silently covering. That is the gap this case
+    // closes, and naming §7 here is half the fix — an unlabelled duplicate is
+    // what got the card mis-filed in the first place.
+    //
+    // The service suites (`recall-refusal-user-copy.test.ts`,
+    // `approval-revise.test.ts`) are NOT pins on this row: they assert the
+    // `FORBIDDEN:` MESSAGE PREFIX at the throw site, a different fact from
+    // what the route answers.
+    //
+    // Losing the row FAILS CLOSED, which is why this is a contract pin and not
+    // a security one: `handleApprovalError` returns false on no match, the
+    // caller rethrows, and the terminal catch answers 500
+    // `APPROVAL_RECALL_FAILED`. The caller is still refused — at the wrong
+    // status, with the wrong code, and (because that arm forwards
+    // `String(error?.message ?? error)` verbatim) with the raw `FORBIDDEN: `
+    // token the [#13095] anchored strip exists to remove. Two contract
+    // properties ride this one row, so the third assertion below is NOT
+    // redundant with the first two: it is what catches the degraded shape's
+    // unstripped message. (Ablation: all three reds read
+    // `expected 500 to be 403`.)
+    it('recall by a non-submitter answers 403 FORBIDDEN, prefix stripped — the row every authorisation refusal rides', async () => {
+        // The message the real service throws: `approval-service.ts`'s recall
+        // non-submitter branch is `FORBIDDEN: ${userFacingRefusal(...)}`.
+        // Read from the catalog rather than transcribed so a [#11993] copy
+        // edit cannot red this pin for a reason that is not the wire contract
+        // — the same construction `approval-revise.test.ts` uses.
+        const refusal = BUILTIN_OPERATION_MESSAGES.en.approval_recall_not_submitter;
+        const rest = boot({
+            recall: vi.fn().mockRejectedValue(new Error(`FORBIDDEN: ${refusal}`)),
+        });
+        const answer = await drive(rest, 'POST', `${REQ}/recall`);
+        expect(answer.status).toBe(403);
+        expect(answer.body?.code).toBe('FORBIDDEN');
+        // [#13095] Exactly the `FORBIDDEN:` this row just answered comes off,
+        // and the user-facing sentence reaches the wire whole.
+        expect(answer.body?.error).toBe(refusal);
+        expect(
+            ApiErrorSchema.safeParse({ code: answer.body?.code, message: answer.body?.error }).success,
+            'FORBIDDEN must be in StandardErrorCode ∪ ERROR_CODE_LEDGER',
         ).toBe(true);
     });
 

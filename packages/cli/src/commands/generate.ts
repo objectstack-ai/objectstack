@@ -4,6 +4,11 @@ import { Args, Command, Flags } from '@oclif/core';
 import chalk from 'chalk';
 import fs from 'fs';
 import path from 'path';
+
+// Type-only (erased at runtime): the three field-type vocabularies below are
+// `satisfies Record<FieldType, …>`, which is what makes a field type added to
+// the spec a named compile error here instead of a silent fallback (#14657).
+import type { FieldType } from '@objectstack/spec/data';
 import { printHeader, printSuccess, printError, printInfo, printStep, createTimer, CLI_ALIAS } from '../utils/format.js';
 import { metadataFileName } from '../utils/metadata-file-name.js';
 
@@ -464,9 +469,23 @@ function toSnakeCase(str: string): string {
  * honour. `generate-field-type-vocabulary.pin.test.ts` now fails on any such
  * key, in this table and in the two vocabularies below it.
  *
- * The set is deliberately NOT total: a real member with no entry falls to the
- * `|| 'unknown'` below, which is the intended behaviour for a type this
- * generator has nothing specific to say about.
+ * TOTAL since #14657, and total BY CONSTRUCTION: the `satisfies
+ * Record<FieldType, string>` below makes a missing member a named `tsc` error
+ * (`Property 'x' is missing …`), so the next field type the spec adds cannot
+ * arrive here in silence. Before it, 21 real members had no entry and every one
+ * of them silently generated `unknown` — a plausible-looking wrong type with
+ * nothing to tell the author. The `|| 'unknown'` below stays, and now means
+ * only what it always should have: this generator's answer for a `type` string
+ * that is not a `FieldType` at all, which the UNVALIDATED authoring door (a
+ * plain-object config export, `defineStack(x, { strict: false })`) can still
+ * deliver.
+ *
+ * Values are MEASURED, not invented — each one is the shape the platform
+ * actually implements, read from the spec's ADR-0104 D1 value classes
+ * (`@objectstack/spec/data` `field-value.zod.ts`) and cross-checked against the
+ * `driver-sql` DDL emitter that creates the real columns. The two structured
+ * types point AT the spec's own exported types rather than transcribing them,
+ * so the generated interface cannot drift from the value contract.
  */
 const FIELD_TYPE_MAP: Record<string, string> = {
   text: 'string',
@@ -497,7 +516,48 @@ const FIELD_TYPE_MAP: Record<string, string> = {
   color: 'string',
   rating: 'number',
   vector: 'number[]',
-};
+  // #14657 — the members that used to fall to `|| 'unknown'`. Grouped by the
+  // spec's ADR-0104 D1 value class, which is what decides each answer.
+  // STRING_VALUE_TYPES. `secret` is a string because the ROW holds an opaque
+  // ref, not the credential: the engine encrypts via the ICryptoProvider,
+  // stores the ciphertext handle in `sys_secret`, and masks on read (ADR-0100).
+  secret: 'string',
+  code: 'string',
+  signature: 'string',
+  qrcode: 'string',
+  // BOOLEAN_VALUE_TYPES.
+  toggle: 'boolean',
+  // SINGLE_OPTION_TYPES / MULTI_OPTION_TYPES — an option code, or an array of
+  // them. `tags` is the free-form member of the multi class.
+  radio: 'string',
+  checkboxes: 'string[]',
+  tags: 'string[]',
+  // NUMERIC_VALUE_TYPES — `valueSchemaFor` gives all three `z.number()`.
+  slider: 'number',
+  progress: 'number',
+  summary: 'number',
+  // REFERENCE_VALUE_TYPES — the STORED form of a reference is the related
+  // record's id string; the expanded record is the read shape and is never
+  // stored. `user` stores identically to `lookup` (field.zod says so).
+  user: 'string',
+  tree: 'string',
+  // FILE_REFERENCE_TYPES — the stored form is an opaque `sys_file` id string
+  // (`FileReferenceIdValueSchema`), which is why `file`/`image` above are
+  // already `string`; these three are the same class and take the same answer.
+  avatar: 'string',
+  video: 'string',
+  audio: 'string',
+  // STRUCTURED_JSON_TYPES — embedded structured values stored as JSON on the
+  // parent row. ONE decision for the whole family, not four independent ones.
+  // `location` and `address` name the spec's own exported value types (the
+  // generated file already imports `* as Data`), so the emitted interface is
+  // derived from the value contract instead of transcribing `{lat, lng}` here.
+  composite: 'Record<string, unknown>',
+  repeater: 'Record<string, unknown>[]',
+  record: 'Record<string, Record<string, unknown>>',
+  location: 'Data.LocationValue',
+  address: 'Data.AddressValue',
+} satisfies Record<FieldType, string>;
 
 function fieldTypeToTs(fieldType: string, multiple?: boolean): string {
   const base = FIELD_TYPE_MAP[fieldType] || 'unknown';
@@ -873,9 +933,24 @@ async function runClientGeneration(configPath: string | undefined, flags: { outp
 /**
  * The SQL column type each authored field type generates (#13871).
  *
- * Same invariant as `FIELD_TYPE_MAP`: every key is a `FieldType` member, an
- * unmapped member falls to the `|| 'TEXT'` default on purpose, and the pin test
- * enforces the first half.
+ * Same invariant as `FIELD_TYPE_MAP`, and since #14657 the same totality: every
+ * key is a `FieldType` member AND every `FieldType` member has a key, enforced
+ * by the `satisfies` below. The `|| 'TEXT'` default now covers only a `type`
+ * string that is not a field type at all (the unvalidated authoring door).
+ *
+ * ⚠️ Five entries that PREDATE #14657 disagree with the platform and are
+ * deliberately left exactly as they are — correcting an existing entry changes
+ * emitted DDL for apps that already generated against it, which is a different
+ * card from filling the gaps. They are filed rather than silently mirrored, and
+ * the new entries below do NOT copy them: `multiselect: 'TEXT'` (the driver
+ * stores the multi-option class in a JSON column, and `json: 'JSONB'` in this
+ * same table already says so), `autonumber: 'SERIAL'` (the runtime issues a
+ * RENDERED STRING — prefix, counter, suffix — and `driver-sql` gives it
+ * `table.string`; a SERIAL cannot hold `INV-0001`), `formula: 'TEXT'` (a
+ * formula is virtual: `driver-sql` creates NO column for it), `vector:
+ * 'VECTOR'` (the driver stores vectors in a JSON column), and `lookup` /
+ * `master_detail` at `VARCHAR(36)` (a platform id is a 26-character ULID, so
+ * 36 fits, but the driver's own width is 255).
  */
 const FIELD_TYPE_SQL_MAP: Record<string, string> = {
   text: 'VARCHAR(255)',
@@ -906,7 +981,51 @@ const FIELD_TYPE_SQL_MAP: Record<string, string> = {
   color: 'VARCHAR(7)',
   rating: 'INTEGER',
   vector: 'VECTOR',
-};
+  // #14657 — the members that used to fall to `|| 'TEXT'`. Same ADR-0104 D1
+  // classes as `FIELD_TYPE_MAP`, resolved to this table's own SQL vocabulary.
+  // STRING_VALUE_TYPES. `secret` holds the opaque `sys_secret` ref, not the
+  // credential, so it is an ordinary short string column (ADR-0100).
+  secret: 'VARCHAR(255)',
+  // `code` / `signature` / `qrcode` are the text family in `driver-sql`'s own
+  // DDL switch (#11794, #11875): their values are unbounded unless the field
+  // declares a `maxLength`, which the write seam — not the column — enforces.
+  code: 'TEXT',
+  signature: 'TEXT',
+  qrcode: 'TEXT',
+  // BOOLEAN_VALUE_TYPES.
+  toggle: 'BOOLEAN',
+  // SINGLE_OPTION_TYPES: one option code, exactly like `select`.
+  radio: 'VARCHAR(255)',
+  // MULTI_OPTION_TYPES: arrays, so a JSON column — matching `json` above and
+  // `driver-sql`'s `JSON_COLUMN_TYPES`, which is seeded from this same class.
+  checkboxes: 'JSONB',
+  tags: 'JSONB',
+  // NUMERIC_VALUE_TYPES. `progress` takes `percent`'s narrower shape because it
+  // is the same 0-100 quantity; `slider` and `summary` are open-range.
+  slider: 'DECIMAL(18,2)',
+  progress: 'DECIMAL(5,2)',
+  summary: 'DECIMAL(18,2)',
+  // REFERENCE_VALUE_TYPES: the stored value is the related record's id, so the
+  // width belongs to the TARGET's id column, never to this field.
+  user: 'VARCHAR(36)',
+  tree: 'VARCHAR(36)',
+  // FILE_REFERENCE_TYPES: the ADR-0104 D3 stored form is an opaque `sys_file`
+  // id string, which is why `file` / `image` above are already a varchar; these
+  // three are the same class and take the same answer.
+  avatar: 'VARCHAR(2048)',
+  video: 'VARCHAR(2048)',
+  audio: 'VARCHAR(2048)',
+  // STRUCTURED_JSON_TYPES — the embedded-structured family answered ONCE.
+  // `location` is JSON, NOT `POINT`: the spec's own value contract is
+  // `{lat, lng, altitude?, accuracy?}` and `driver-sql` gives every member of
+  // this class a JSON column. (`POINT` was the invented `geo_point` ghost this
+  // table used to carry, and it is not portable to SQLite.)
+  composite: 'JSONB',
+  repeater: 'JSONB',
+  record: 'JSONB',
+  location: 'JSONB',
+  address: 'JSONB',
+} satisfies Record<FieldType, string>;
 
 function fieldTypeToSql(fieldType: string): string {
   return FIELD_TYPE_SQL_MAP[fieldType] || 'TEXT';
@@ -1003,19 +1122,31 @@ function generateMigrationTs(config: Record<string, unknown>): string {
       switch (fType) {
         case 'text': case 'email': case 'phone': case 'url': case 'select':
         case 'password': case 'color':
+        // #14657 — `secret` holds the opaque `sys_secret` ref, not the
+        // credential (ADR-0100); `radio` is a single option code like `select`.
+        case 'secret': case 'radio':
           colMethod = `table.string('${fieldName}')`;
           break;
         case 'textarea': case 'richtext': case 'html': case 'markdown':
         case 'formula':
+        // #14657 — `driver-sql`'s own DDL switch puts these three in the text
+        // family (#11794, #11875): the declared `maxLength`, when there is one,
+        // is enforced at the write seam rather than by the column.
+        case 'code': case 'signature': case 'qrcode':
           colMethod = `table.text('${fieldName}')`;
           break;
         case 'number': case 'currency': case 'percent':
+        // #14657 — NUMERIC_VALUE_TYPES: `valueSchemaFor` gives all of these
+        // `z.number()`, and `driver-sql` gives them a float column.
+        case 'slider': case 'progress': case 'summary':
           colMethod = `table.decimal('${fieldName}')`;
           break;
         case 'rating':
           colMethod = `table.integer('${fieldName}')`;
           break;
         case 'boolean':
+        // #14657 — BOOLEAN_VALUE_TYPES; `driver-sql` shares one arm for the pair.
+        case 'toggle':
           colMethod = `table.boolean('${fieldName}')`;
           break;
         case 'date':
@@ -1028,6 +1159,16 @@ function generateMigrationTs(config: Record<string, unknown>): string {
           colMethod = `table.time('${fieldName}')`;
           break;
         case 'json': case 'multiselect':
+        // #14657 — the rest of MULTI_OPTION_TYPES, the whole
+        // STRUCTURED_JSON_TYPES family answered ONCE, and `vector`. Every one
+        // of these is a member of `driver-sql`'s `JSON_COLUMN_TYPES`, which is
+        // seeded from these very spec classes, so a JSON column here is what
+        // the runtime already creates. `location` is JSON, not `POINT` — the
+        // spec's value contract is `{lat, lng, altitude?, accuracy?}`, and
+        // `POINT` is not portable to SQLite.
+        case 'checkboxes': case 'tags':
+        case 'composite': case 'repeater': case 'record':
+        case 'location': case 'address': case 'vector':
           colMethod = `table.jsonb('${fieldName}')`;
           break;
         case 'lookup': case 'master_detail':
@@ -1035,10 +1176,21 @@ function generateMigrationTs(config: Record<string, unknown>): string {
           break;
         // `user` references sys_user, whose id is a text identifier (not a uuid),
         // so store it as a string column — consistent with the runtime sql-driver.
-        case 'user':
+        // #14657 — `tree` is the same REFERENCE_VALUE_TYPES class pointing at the
+        // object's own id, and the FILE_REFERENCE_TYPES class stores an opaque
+        // `sys_file` id string (ADR-0104 D3). `autonumber` is a RENDERED string
+        // (prefix + counter + suffix), which is both what `FIELD_TYPE_MAP` says
+        // and what `driver-sql` emits — a SERIAL could not hold `INV-0001`.
+        case 'user': case 'tree':
+        case 'image': case 'file': case 'avatar': case 'video': case 'audio':
+        case 'autonumber':
           colMethod = `table.string('${fieldName}')`;
           break;
         default:
+          // Reachable only through the UNVALIDATED authoring door — a `type`
+          // that is not a `FieldType` at all. Every real member is cased above,
+          // and `generate-field-type-vocabulary.pin.test.ts` fails if one stops
+          // being.
           colMethod = `table.text('${fieldName}')`;
       }
 
