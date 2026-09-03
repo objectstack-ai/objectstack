@@ -365,6 +365,13 @@ function findingMessage({ file, line, name, decl }) {
 // Self-test
 // ---------------------------------------------------------------------------
 
+// Set by `selfTest()` only after its verdict is printed, and read at the
+// dispatch: a `return` that leaves the function above that line prints nothing
+// and still exits 0 — a self-test that never finished, reported as one that
+// passed (#13798). The self-test's own exit code stays load-bearing, so the
+// handshake is a flag rather than a returned sentinel.
+let selfTestReachedVerdict = false;
+
 function selfTest() {
   let failed = 0;
   const t = (label, ok) => {
@@ -481,6 +488,7 @@ function selfTest() {
     PAGE_CARRIER_GLOBS.every((g) => g.includes('/')));
 
   console.log(failed ? `\ncheck-page-declaration-shape --self-test: ${failed} FAILED` : '\ncheck-page-declaration-shape --self-test: all passed');
+  selfTestReachedVerdict = true;
   return failed === 0;
 }
 
@@ -488,7 +496,16 @@ function selfTest() {
 
 if (isEntrypoint(import.meta.url)) {
   if (process.argv.includes('--self-test')) {
-    process.exit(selfTest() ? 0 : 1);
+    const selfTestOk = selfTest();
+    if (!selfTestReachedVerdict) {
+      console.error(
+        '\n✗ check-page-declaration-shape self-test: selfTest() returned without reaching its verdict,\n'
+          + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+          + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
+    process.exit(selfTestOk ? 0 : 1);
   }
   const result = scan();
   const computed = computedCarrierSites();

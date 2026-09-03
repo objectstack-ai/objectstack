@@ -118,6 +118,13 @@ function isBlocked(it) {
 }
 
 // ── self-test ────────────────────────────────────────────────────────────────
+// Set by `selfTest()` only after its verdict is printed, and read at the
+// dispatch: a `return` that leaves the function above that line prints nothing
+// and still exits 0 — a self-test that never finished, reported as one that
+// passed (#13798). The self-test's own exit code stays load-bearing, so the
+// handshake is a flag rather than a returned sentinel.
+let selfTestReachedVerdict = false;
+
 function selfTest() {
   const FIX = [
     { id: 'a.one', status: 'active', priority: 'P0', surface: 'browser', since: 'v16', source: ['packages/foo/bar.ts'] },
@@ -150,6 +157,7 @@ function selfTest() {
   eq(ids('bar.ts'), ['a.one'], 'bare source basename (code ext) → file: mode');
   eq(ids('missing.json'), [], 'unmatched .json name → empty, no throw');
   console.log('✓ checklist-select self-test: 17 cases pass.');
+  selfTestReachedVerdict = true;
   process.exit(0);
 }
 
@@ -197,6 +205,16 @@ function main() {
 // (the skill's front half is a pure resolver), the old top-level CLI printed a
 // usage block to the importer's stderr and killed it with exit 2 mid-import.
 if (isEntrypoint(import.meta.url)) {
-  if (process.argv.includes('--self-test')) selfTest();
+  if (process.argv.includes('--self-test')) {
+    selfTest();
+    if (!selfTestReachedVerdict) {
+      console.error(
+        '\n✗ checklist-select self-test: selfTest() returned without reaching its verdict,\n'
+          + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+          + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
+  }
   main();
 }
