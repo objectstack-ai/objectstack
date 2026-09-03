@@ -80,6 +80,44 @@ import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from './invoked-as.mjs';
 import { workspacePackages } from './workspace-enumerator.mjs';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  '1. The real #4900 repro: spec\'s 17.0.0-rc.2 section': 9,
+  '2. A short entry is passed through untouched': 3,
+  '3. Fence balancing when the cut lands inside a code block': 3,
+  '4. Surrogate pairs are never split': 3,
+  '5. Anchors and fence-aware heading parsing': 6,
+  '6. Target resolution: both producers, and neither': 7,
+  '7. Planning is per package, and a missing entry is loud': 6,
+  '8. Every package gets a release; existing ones are updated, not retried ─': 7,
+  '9. Idempotent re-run': 2,
+  '10. One package\'s failure does not abandon the others': 3,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 10;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..');
 
@@ -682,10 +720,25 @@ function stubFetch({ existing = {}, failCreateFor = new Set() } = {}) {
 const SELF_TEST_VERDICT = 'release-github-releases self-test reached its verdict';
 
 async function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const batterySeen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+  };
+
   /** @type {string[]} */
   const failures = [];
   let assertions = 0;
   const assert = (cond, msg) => {
+    registerCase();
     assertions += 1;
     if (!cond) failures.push(msg);
   };
@@ -698,6 +751,7 @@ async function selfTest() {
   const specChangelog = readFileSync(join(REPO_ROOT, 'packages/spec/CHANGELOG.md'), 'utf8');
 
   // ── 1. The real #4900 repro: spec's 17.0.0-rc.2 section ────────────────────
+  battery('1. The real #4900 repro: spec\'s 17.0.0-rc.2 section');
   const rc2 = getChangelogEntry(specChangelog, '17.0.0-rc.2');
   assert(rc2 !== null, 'the 17.0.0-rc.2 entry is found in packages/spec/CHANGELOG.md');
   assert(
@@ -734,6 +788,7 @@ async function selfTest() {
   );
 
   // ── 2. A short entry is passed through untouched ───────────────────────────
+  battery('2. A short entry is passed through untouched');
   const small = getChangelogEntry(specChangelog, '16.1.0');
   assert(small !== null && measure(small) < BODY_LIMIT, 'the 16.1.0 entry is under the limit to begin with');
   const smallBuilt = buildReleaseBody({
@@ -746,6 +801,7 @@ async function selfTest() {
   assert(smallBuilt.body === small, 'an under-limit entry is byte-identical to the changelog section');
 
   // ── 3. Fence balancing when the cut lands inside a code block ──────────────
+  battery('3. Fence balancing when the cut lands inside a code block');
   const fenced = [
     ...Array.from({ length: 20 }, (_, i) => `line ${i} ${'x'.repeat(44)}`),
     '```ts',
@@ -767,6 +823,7 @@ async function selfTest() {
   );
 
   // ── 4. Surrogate pairs are never split ─────────────────────────────────────
+  battery('4. Surrogate pairs are never split');
   const astral = '🚀'.repeat(5_000);
   const astralBuilt = buildReleaseBody({
     entry: astral,
@@ -784,6 +841,7 @@ async function selfTest() {
 
   // ── 5. Anchors and fence-aware heading parsing ─────────────────────────────
   // Expectations below are github-slugger's own output for these inputs.
+  battery('5. Anchors and fence-aware heading parsing');
   assert(headingAnchor('17.0.0-rc.2') === '1700-rc2', 'the version anchor matches GitHub heading slugs');
   assert(headingAnchor('16.1.0') === '1610', 'a stable version anchor drops its dots');
   assert(headingAnchor('1.2.3-beta.10') === '123-beta10', 'a prerelease anchor keeps only its hyphen');
@@ -798,6 +856,7 @@ async function selfTest() {
   assert(getChangelogEntry(tricky, '2.0.0') === null, 'a missing version yields null rather than a wrong section');
 
   // ── 6. Target resolution: both producers, and neither ──────────────────────
+  battery('6. Target resolution: both producers, and neither');
   const packages = listWorkspacePackages();
   assert(packages.has('@objectstack/spec'), 'the workspace scan finds @objectstack/spec');
   const fromPublished = resolveReleaseTargets({
@@ -828,6 +887,7 @@ async function selfTest() {
   );
 
   // ── 7. Planning is per package, and a missing entry is loud ────────────────
+  battery('7. Planning is per package, and a missing entry is loud');
   const specPlan = planRelease({
     target: { name: '@objectstack/spec', version: '17.0.0-rc.2', dir: join(REPO_ROOT, 'packages/spec') },
     ...CTX,
@@ -856,6 +916,7 @@ async function selfTest() {
   assert(threw, 'a version with no changelog entry fails loudly instead of releasing an empty body');
 
   // ── 8. Every package gets a release; existing ones are updated, not retried ─
+  battery('8. Every package gets a release; existing ones are updated, not retried ─');
   const plans = ['@objectstack/spec', '@objectstack/cli', '@objectstack/runtime'].map((name) => {
     const plan = planRelease({ target: { name, version: '17.0.0-rc.2', dir: packages.get(name).dir }, ...CTX });
     if (!('tagName' in plan)) throw new Error(`fixture package ${name} produced no plan`);
@@ -905,6 +966,7 @@ async function selfTest() {
   );
 
   // ── 9. Idempotent re-run ───────────────────────────────────────────────────
+  battery('9. Idempotent re-run');
   const allExist = stubFetch({
     existing: Object.fromEntries(plans.map((p, i) => [p.tagName, 100 + i])),
   });
@@ -929,6 +991,7 @@ async function selfTest() {
   );
 
   // ── 10. One package's failure does not abandon the others ──────────────────
+  battery('10. One package\'s failure does not abandon the others');
   const partial = stubFetch({ failCreateFor: new Set(['@objectstack/cli@17.0.0-rc.2']) });
   const partialResult = await publishReleases({
     client: createReleasesClient({
@@ -953,6 +1016,52 @@ async function selfTest() {
     partialResult.failed[0].error.includes('422'),
     'the failure carries the API status through to the log',
   );
+
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    failures.push(message);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
+  }
 
   if (failures.length) {
     console.error(`✗ release-github-releases --self-test — ${failures.length} of ${assertions} assertion(s) failed\n`);

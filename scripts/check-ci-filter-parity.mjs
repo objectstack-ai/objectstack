@@ -135,6 +135,41 @@ const { parse } = await requireDependency('yaml', () => import('yaml'), import.m
 import { CROSS_PACKAGE_TEST_INPUTS } from './cross-package-test-inputs.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  '(1) the coverage rule, both limbs and both directions': 7,
+  '(2) THE SAME-ROOT-DIFFERENT-FILE CASE': 3,
+  '(3) the three coverage outcomes, end to end through `judge`': 7,
+  '(4) the reverse direction: a `crosspkg` entry covering nothing': 3,
+  '(5) refusals: never a clean zero over a subject that was not read': 10,
+  '(6) the real tree': 10,
+  '(7) WIRING: the gate and its self-test really run in CI': 2,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 7;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const REPO_ROOT = resolve(HERE, '..');
 
@@ -421,6 +456,20 @@ function list(root = REPO_ROOT, table = CROSS_PACKAGE_TEST_INPUTS) {
 let selfTestReachedVerdict = false;
 
 export async function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const batterySeen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+  };
+
   /** A ci.yml source carrying the two scheduling lists, in the real shape. */
   const REAL_TEST_IF =
     "${{ !cancelled() && (needs.filter.outputs.core != 'false' || needs.filter.outputs.crosspkg != 'false') }}";
@@ -452,6 +501,7 @@ export async function selfTest() {
   const failures = [];
   let checked = 0;
   const assert = (cond, label) => {
+    registerCase();
     checked += 1;
     if (!cond) failures.push(label);
   };
@@ -472,6 +522,7 @@ export async function selfTest() {
   };
 
   // ── (1) the coverage rule, both limbs and both directions ───────────────
+  battery('(1) the coverage rule, both limbs and both directions');
   assert(coverageVerdict('scripts/**', ['scripts/**']).covered, 'a glob a list contains VERBATIM is covered');
   assert(
     coverageVerdict('content/docs/api/error-catalog.mdx', ['content/**']).kind === 'subtree',
@@ -502,6 +553,7 @@ export async function selfTest() {
   // `core` names `.github/workflows/ci.yml`. A rule that asked "is this glob's
   // ROOT mentioned anywhere?" would answer covered for a DIFFERENT file under
   // that root, and the ten declarations #10015 fixed included exactly this one.
+  battery('(2) THE SAME-ROOT-DIFFERENT-FILE CASE');
   const sameRoot = judge(
     fixtureWorkflow({ core: ['packages/**', '.github/workflows/ci.yml'], crosspkg: ['scripts/**'] }),
     table(['.github/workflows/scaffold-e2e.yml']),
@@ -521,6 +573,7 @@ export async function selfTest() {
   assert(uncoveredGlobs(sameRootFixed).length === 0, '-- and naming the file itself in `crosspkg` covers it');
 
   // ── (3) the three coverage outcomes, end to end through `judge` ──────────
+  battery('(3) the three coverage outcomes, end to end through `judge`');
   const viaCore = judge(fixtureWorkflow(), table(['packages/lint/src/**']));
   assert(uncoveredGlobs(viaCore).length === 0, 'a glob covered by `core` PASSES');
   assert(viaCore.covered[0].via === 'packages/**', '-- and the verdict names the entry that covered it');
@@ -545,6 +598,7 @@ export async function selfTest() {
   );
 
   // ── (4) the reverse direction: a `crosspkg` entry covering nothing ───────
+  battery('(4) the reverse direction: a `crosspkg` entry covering nothing');
   const stale = judge(fixtureWorkflow({ crosspkg: ['scripts/**', 'tools/**'] }), table(['scripts/x.mjs']));
   assert(stale.stale.join(',') === 'tools/**', 'a `crosspkg` entry that covers no declaration is reported stale');
   assert(uncoveredGlobs(stale).length === 0, '-- while the declaration it does cover stays covered');
@@ -552,6 +606,7 @@ export async function selfTest() {
   assert(notStale.stale.length === 0, 'an entry covering a declaration through the SUBTREE limb is not stale');
 
   // ── (5) refusals: never a clean zero over a subject that was not read ────
+  battery('(5) refusals: never a clean zero over a subject that was not read');
   const refusal = (source, tbl = table(['packages/a/**'])) => judge(source, tbl).refusal;
   assert(
     /could not be read as YAML/.test(refusal('jobs:\n  filter:\n  \tbad: [') ?? ''),
@@ -593,6 +648,7 @@ export async function selfTest() {
   );
 
   // ── (6) the real tree ───────────────────────────────────────────────────
+  battery('(6) the real tree');
   const real = judge(readFileSync(join(REPO_ROOT, CI_WORKFLOW), 'utf8'), CROSS_PACKAGE_TEST_INPUTS);
   assert(!real.refusal, `the checked-in ci.yml is readable by this gate -- ${real.refusal ?? ''}`);
   assert((real.declarations ?? []).length > 0, 'the checked-in table declares something to judge');
@@ -655,6 +711,7 @@ export async function selfTest() {
   );
 
   // ── (7) WIRING: the gate and its self-test really run in CI ──────────────
+  battery('(7) WIRING: the gate and its self-test really run in CI');
   const SELF = 'scripts/check-ci-filter-parity.mjs';
   let lint = null;
   try {
@@ -665,6 +722,52 @@ export async function selfTest() {
   if (lint !== null) {
     assert(lint.includes(`node ${SELF}\n`), `wiring: lint.yml invokes ${SELF} directly (lint.yml's GATE INVOCATION IDIOM note, not a package.json fence)`);
     assert(lint.includes(`node ${SELF} --self-test`), 'wiring: lint.yml runs the --self-test leg too');
+  }
+
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    failures.push(message);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
   }
 
   if (failures.length > 0) {

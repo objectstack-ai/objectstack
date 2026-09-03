@@ -96,6 +96,113 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from './invoked-as.mjs';
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// This self-test used to decide success by "no failure was recorded" and
+// nothing else, so "every case held" and "the cases never ran" printed the same
+// line. Closed the way PR #13487 validated on check-doc-authoring: what is
+// pinned is the registered NAMES, not a number. Every section opens with
+// `battery('<name>')`, every assertion is attributed to the battery most
+// recently opened, and the floor requires the OPENED set to equal the DECLARED
+// set with each battery at or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3 keeps
+// a total "right" the moment a sibling grows. A set difference says WHICH
+// battery stopped; a count says only that something did.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+//
+// The machinery lives HERE, at module scope, rather than inside the self-test:
+// this self-test's assertion sink is not a block-bodied helper in its body (it
+// is a concise arrow, or a module-scope function), so there is no in-body
+// helper to thread a per-run ledger through. Module scope is safe because the
+// self-test runs once per process, and it is what lets the existing sink route
+// through `registerCase()` with no case rewritten and no assertion changed.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'A DRIFT': 5,
+  'B PROSE': 4,
+  '⭐ THE SPLIT': 9,
+  'refusals': 1,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 4;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
+// ⚠️ None of these helpers is named with a self-test spelling, deliberately and
+// on the record: `check:pm-dispatch-gates` anchors on a top-level declaration
+// whose NAME spells self-test, and every such name owes a row in that gate's
+// COMPOUND_ANCHOR_LEDGER. These are the battery ROSTER's machinery -- they hold
+// no fixtures to mask and read no path literal -- so the accurate name is the
+// one that says `battery`, not the one that would owe a ledger row for a role
+// this code does not have.
+
+/** Cases registered per battery: `battery()` opens one, `registerCase()` files into it. */
+const batteryCases = new Map();
+let openBattery = null;
+
+/** Open a battery. Every assertion after this line is attributed to it. */
+function battery(name) {
+  openBattery = name;
+}
+
+/** Called by the self-test's own assertion sink, once per assertion. */
+function registerCase() {
+  const name = openBattery ?? UNATTRIBUTED_BATTERY;
+  batteryCases.set(name, (batteryCases.get(name) ?? 0) + 1);
+}
+
+/**
+ * The floor: every declared battery RAN, and ran its cases (#13489).
+ *
+ * Evaluated after every battery has had its chance and BEFORE the verdict, so
+ * the success line can only be printed by a run in which the set of batteries
+ * that registered assertions EQUALS the set declared.
+ */
+function batteryFloorFailures() {
+  const declared = Object.keys(SELF_TEST_BATTERIES);
+  const problems = [];
+  if (declared.length < SELF_TEST_BATTERY_FLOOR) {
+    problems.push(
+      `SELF_TEST_BATTERIES declares ${declared.length} batteries, below the pinned `
+        + `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batteryCases) {
+    if (declared.includes(name)) continue;
+    problems.push(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in `
+        + 'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declared) {
+    const count = batteryCases.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    problems.push(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. `
+          + 'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of `
+          + `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (problems.length) {
+    problems.push(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the '
+        + 'number. Find what stopped registering (an early return, a deleted block, a guard that now '
+        + 'skips) and restore it.',
+    );
+  }
+  return problems;
+}
+
 import {
   BEGIN_MARKER,
   COUNTS,
@@ -607,7 +714,11 @@ let selfTestReachedVerdict = false;
 
 export function selfTest() {
   const cases = [];
-  const t = (name, ok, detail) => cases.push({ name, ok: Boolean(ok), detail });
+  const t = (name, ok, detail) => {
+    registerCase();
+    return cases.push({ name, ok: Boolean(ok), detail });
+  };
+  battery('A DRIFT');
 
   const census = runCensus();
   const page = readFileSync(join(ROOT, PAGE), 'utf8');
@@ -649,6 +760,7 @@ export function selfTest() {
   // so a sentence-shaped needle silently replaces NOTHING and the case then
   // passes a clean page off as a drifted one. The gate matches with whitespace
   // collapsed; this self-test edits the raw file, and the two are not the same text.
+  battery('B PROSE');
   const enforcedProse = (n) => `**${n} further sites**`;
   t('a stale hand-written number in the prose is a finding',
     check(page.replace(
@@ -682,6 +794,7 @@ export function selfTest() {
   // unenforced value may move without a finding, and everything around it may
   // not. A gate that got this wrong in either direction would look identical on
   // a clean tree.
+  battery('⭐ THE SPLIT');
   const scaleRow = UNENFORCED_SCALE_ROWS[0];
   const drift = (text, delta) => text.replace(
     scaleRow.pattern,
@@ -731,8 +844,13 @@ export function selfTest() {
       .some((p) => p.startsWith('[unenforced-prose-missing]')));
 
   // ── refusals ───────────────────────────────────────────────────────────────
+  battery('refusals');
   t('an empty census refuses rather than certifying the artefacts',
     checkPage({ ...census, sites: [] }, page, counts).some((p) => p.startsWith('[empty-census]')));
+
+  // The floor runs BEFORE the verdict below, so a success line can only be
+  // printed by a run in which every declared battery registered its cases.
+  for (const message of batteryFloorFailures()) cases.push({ name: message, ok: false });
 
   const failed = cases.filter((c) => !c.ok);
   for (const c of failed) console.error(`  ✗ ${c.name}${c.detail ? ` -- ${c.detail}` : ''}`);

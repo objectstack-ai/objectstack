@@ -167,6 +167,51 @@ import { isEntrypoint } from './invoked-as.mjs';
 import { CORPUS_ROOTS, runCensus, siteKeys } from './isystem-census.mjs';
 import { extractLineAnchors, extractPathCitations, resolveAnchorFile } from './doc-line-anchors.mjs';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'the GREEN control: a page that is correct': 2,
+  '⭐ the RED that matters: a site the page never mentions': 1,
+  'the deletion shape: the row stands, the site is gone': 3,
+  'resolution': 3,
+  'ledger': 3,
+  'counts': 6,
+  '⭐ CRITERION: enforced means CENSUS-DERIVED, pinned over the REAL lists': 2,
+  'the same criterion, behaviourally, on one page': 3,
+  '⛔ and the half that must NOT have moved: the contract still reds': 2,
+  'absence is loud': 1,
+  '--fix': 2,
+  '⭐ #13490: the incident shape -- reads AND ledger citations BOTH shift': 2,
+  '⛔ the dangerous direction: the citation crosses onto a read anchor\'s line ─': 1,
+  '⭐ and the safety property, on the shape that now ACCEPTS': 2,
+  'the refusal has to SHOW its work (both counts, both classes, the diff)': 2,
+  'WIRING: this gate, and its self-test, really run in CI': 2,
+  'POPULATION DECLARATION: what the dispatch derivation is told this gate reads': 6,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 17;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 export const PAGE = 'content/docs/permissions/system-context.mdx';
 
@@ -1216,8 +1261,23 @@ function fixtureUnenforcedTable({ linesTotal = 6, dropTestsRow = false, dated = 
 let selfTestReachedVerdict = false;
 
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const batterySeen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+  };
+
   let failures = 0;
   const t = (name, ok, detail = '') => {
+    registerCase();
     if (!ok) failures += 1;
     process.stdout.write(`${ok ? '  ok  ' : '  FAIL'} ${name}${detail ? ` -- ${detail}` : ''}\n`);
   };
@@ -1234,11 +1294,13 @@ function selfTest() {
     });
 
   // ── the GREEN control: a page that is correct ───────────────────────────────
+  battery('the GREEN control: a page that is correct');
   const green = run(fixturePage());
   t('green control: a correct page reports nothing', green.problems.length === 0, green.problems.join(' | '));
   t('green control: the fenced `pkg/a.ts:999` is not read as an anchor', green.stats.anchors === 2);
 
   // ── ⭐ the RED that matters: a site the page never mentions ──────────────────
+  battery('⭐ the RED that matters: a site the page never mentions');
   const arrived = {
     ...FIXTURE_CENSUS,
     sites: [...FIXTURE_CENSUS.sites, { file: 'pkg/a.ts', line: 4, receiver: 'ctx', package: 'pkg', text: 'return DENY;' }],
@@ -1250,6 +1312,7 @@ function selfTest() {
   );
 
   // ── the deletion shape: the row stands, the site is gone ────────────────────
+  battery('the deletion shape: the row stands, the site is gone');
   const deleted = { ...FIXTURE_CENSUS, sites: [] };
   const gone = run(fixturePage(), deleted);
   t('POPULATION: an empty census refuses rather than passing', gone.problems.some((p) => p.startsWith('[empty-census]')));
@@ -1269,6 +1332,7 @@ function selfTest() {
   t('ROT: a shifted anchor is caught from both sides', rotted.problems.length === 2, rotted.problems.join(' | '));
 
   // ── resolution ─────────────────────────────────────────────────────────────
+  battery('resolution');
   const ambiguous = run(fixturePage({ anchor: 'a.ts:2' }));
   t('RESOLUTION: a bare basename matching two files is refused', ambiguous.problems.some((p) => p.startsWith('[ambiguous-anchor]')));
   const gonefile = run(fixturePage({ anchor: 'pkg/nope.ts:2' }));
@@ -1277,6 +1341,7 @@ function selfTest() {
   t('RESOLUTION: a line past end of file is refused', overrun.problems.some((p) => p.startsWith('[out-of-range-anchor]')));
 
   // ── ledger ─────────────────────────────────────────────────────────────────
+  battery('ledger');
   const ledgerStale = evaluate({
     pageText: fixturePage(),
     census: FIXTURE_CENSUS,
@@ -1309,6 +1374,7 @@ function selfTest() {
   t('LEDGER: a row no anchor uses is a finding', ledgerUnused.problems.some((p) => p.startsWith('[ledger-row-unused]')));
 
   // ── counts ─────────────────────────────────────────────────────────────────
+  battery('counts');
   const countPage =
     fixturePage() + '\nit is a single boolean read at **1\ndistinct sites across 1 packages**.\n';
   const countsOk = run(countPage, FIXTURE_CENSUS, FIXTURE_COUNTS);
@@ -1371,6 +1437,7 @@ function selfTest() {
   // THEMSELVES, not over a fixture stand-in. That is the point: move a text count
   // back into the enforced list and the first case names it by id. A criterion
   // change with nothing watching it is how the next reader undoes it.
+  battery('⭐ CRITERION: enforced means CENSUS-DERIVED, pinned over the REAL lists');
   const textDrifted = {
     ...FIXTURE_CENSUS,
     roleCounts: { ...FIXTURE_CENSUS.roleCounts, key: FIXTURE_CENSUS.roleCounts.key + 1 },
@@ -1395,6 +1462,7 @@ function selfTest() {
   );
 
   // ── the same criterion, behaviourally, on one page ──────────────────────────
+  battery('the same criterion, behaviourally, on one page');
   const countSentence = '\nit is a single boolean read at **1\ndistinct sites across 1 packages**.\n';
   const okPage = fixturePage() + countSentence;
   const staleText = run(
@@ -1432,6 +1500,7 @@ function selfTest() {
   );
 
   // ── ⛔ and the half that must NOT have moved: the contract still reds ────────
+  battery('⛔ and the half that must NOT have moved: the contract still reds');
   const rottedToo = run(
     fixturePage({ anchor: 'pkg/a.ts:4' }) + countSentence + fixtureUnenforcedTable({ linesTotal: 999 }),
     FIXTURE_CENSUS,
@@ -1458,10 +1527,12 @@ function selfTest() {
   );
 
   // ── absence is loud ────────────────────────────────────────────────────────
+  battery('absence is loud');
   const noAnchors = run('---\ntitle: x\n---\n\nnothing here.\n');
   t('ABSENCE: a page with no anchors refuses', noAnchors.problems.some((p) => p.startsWith('[no-anchors]')));
 
   // ── --fix ──────────────────────────────────────────────────────────────────
+  battery('--fix');
   const fixed = fixAnchors({
     pageText: fixturePage({ anchor: 'pkg/a.ts:4' }),
     census: FIXTURE_CENSUS,
@@ -1492,6 +1563,7 @@ function selfTest() {
   // `security-plugin.ts` (7 reads + 1 citation, all +20/+19, zero `isSystem` lines
   // added or removed) refused with "page anchors 8 distinct read line(s), census
   // finds 7", and `rest-server.ts` (6 + 2) with "7 ... finds 6".
+  battery('⭐ #13490: the incident shape -- reads AND ledger citations BOTH shift');
   const bothShifted = fixAnchors({
     pageText: fixturePage({ anchor: 'pkg/a.ts:1', helper: 'pkg/a.ts:6' }),
     census: FIXTURE_CENSUS,
@@ -1533,6 +1605,7 @@ function selfTest() {
   // surviving anchor was mapped onto the read site -- leaving the page GREEN with
   // the two rows pointing at each other's lines. Both spellings survive either
   // way, so this case asserts which ROW holds which line.
+  battery('⛔ the dangerous direction: the citation crosses onto a read anchor\'s line ─');
   const crossed = fixAnchors({
     pageText: crossingPage({ read: 'pkg/b.ts:3', helper: 'pkg/b.ts:2' }),
     census: CROSSING_CENSUS,
@@ -1553,6 +1626,7 @@ function selfTest() {
   // ⛔ The fix must not buy acceptance with the refusal. A read site ARRIVES while
   // the ledger citation shifts: the old counting arm and the new one both refuse
   // here, and that must stay true, or #13490 was closed by deleting the guard.
+  battery('⭐ and the safety property, on the shape that now ACCEPTS');
   const grewWhileShifting = fixAnchors({
     pageText: fixturePage({ anchor: 'pkg/a.ts:2', helper: 'pkg/a.ts:6' }),
     census: arrived,
@@ -1585,6 +1659,7 @@ function selfTest() {
   // site" when nothing had, and the output gave no way to tell which case you were
   // in short of running the census in two trees by hand. `already anchored 8 of 9`
   // + one named target settles it; `0 of 9` says uniform displacement.
+  battery('the refusal has to SHOW its work (both counts, both classes, the diff)');
   const refusalText = grewWhileShifting.refused[0] ?? '';
   t(
     'FIX #13490: the refusal states BOTH counts it compared and the ledger it set aside',
@@ -1618,6 +1693,7 @@ function selfTest() {
   // `check-aggregator-roster` and `check-ci-filter-parity` set -- and, like the second
   // docs root that gate added, this needed NO workflow edit: `lint.yml` already invokes
   // both legs, and it is the repo's busiest file.
+  battery('WIRING: this gate, and its self-test, really run in CI');
   const SELF = 'scripts/check-system-context-census.mjs';
   let lintYml = null;
   try {
@@ -1642,6 +1718,7 @@ function selfTest() {
   // the exact round this declaration was added to end. Both directions are derived
   // from `CORPUS_ROOTS`, never re-spelled: a corpus root added or dropped there has
   // to move this declaration or fail here.
+  battery('POPULATION DECLARATION: what the dispatch derivation is told this gate reads');
   const declaredRoots = ROOT_DIR_WATCH_HINTS.map((h) => h.replace(/\/\*+$/, ''));
   t(
     'POPULATION DECLARATION: every root the census walks is declared',
@@ -1697,6 +1774,53 @@ function selfTest() {
       : `\ncheck-system-context-census --self-test: ${failures} case(s) FAILED\n`
   );
   selfTestReachedVerdict = true;
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    failures += 1;
+      process.stdout.write(`  FAIL ${message}\n`);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
+  }
+
   return failures === 0 ? 0 : 1;
 }
 

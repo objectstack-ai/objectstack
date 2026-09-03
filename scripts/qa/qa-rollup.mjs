@@ -117,6 +117,120 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { isEntrypoint } from '../invoked-as.mjs';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// This self-test used to decide success by "no failure was recorded" and
+// nothing else, so "every case held" and "the cases never ran" printed the same
+// line. Closed the way PR #13487 validated on check-doc-authoring: what is
+// pinned is the registered NAMES, not a number. Every section opens with
+// `battery('<name>')`, every assertion is attributed to the battery most
+// recently opened, and the floor requires the OPENED set to equal the DECLARED
+// set with each battery at or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3 keeps
+// a total "right" the moment a sibling grows. A set difference says WHICH
+// battery stopped; a count says only that something did.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+//
+// The machinery lives HERE, at module scope, rather than inside the self-test:
+// this self-test's assertion sink is not a block-bodied helper in its body (it
+// is a concise arrow, or a module-scope function), so there is no in-body
+// helper to thread a per-run ledger through. Module scope is safe because the
+// self-test runs once per process, and it is what lets the existing sink route
+// through `registerCase()` with no case rewritten and no assertion changed.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'every real shape parses': 5,
+  'the ONE judged/total spelling': 5,
+  'the ONE NOT-RUN spelling': 7,
+  'selector kinds': 3,
+  'every RETIRED phrasing is rejected, by the right reason': 16,
+  'malformed titles are REPORTED, never silently dropped': 5,
+  'the judged cell now has ONE provenance': 2,
+  'the legacy boundary reads created_at, never the title': 4,
+  'freshness is three-valued': 8,
+  'latest-per-selector wins': 4,
+  'the render must never hide a record': 19,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 11;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
+// ⚠️ None of these helpers is named with a self-test spelling, deliberately and
+// on the record: `check:pm-dispatch-gates` anchors on a top-level declaration
+// whose NAME spells self-test, and every such name owes a row in that gate's
+// COMPOUND_ANCHOR_LEDGER. These are the battery ROSTER's machinery -- they hold
+// no fixtures to mask and read no path literal -- so the accurate name is the
+// one that says `battery`, not the one that would owe a ledger row for a role
+// this code does not have.
+
+/** Cases registered per battery: `battery()` opens one, `registerCase()` files into it. */
+const batteryCases = new Map();
+let openBattery = null;
+
+/** Open a battery. Every assertion after this line is attributed to it. */
+function battery(name) {
+  openBattery = name;
+}
+
+/** Called by the self-test's own assertion sink, once per assertion. */
+function registerCase() {
+  const name = openBattery ?? UNATTRIBUTED_BATTERY;
+  batteryCases.set(name, (batteryCases.get(name) ?? 0) + 1);
+}
+
+/**
+ * The floor: every declared battery RAN, and ran its cases (#13489).
+ *
+ * Evaluated after every battery has had its chance and BEFORE the verdict, so
+ * the success line can only be printed by a run in which the set of batteries
+ * that registered assertions EQUALS the set declared.
+ */
+function batteryFloorFailures() {
+  const declared = Object.keys(SELF_TEST_BATTERIES);
+  const problems = [];
+  if (declared.length < SELF_TEST_BATTERY_FLOOR) {
+    problems.push(
+      `SELF_TEST_BATTERIES declares ${declared.length} batteries, below the pinned `
+        + `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batteryCases) {
+    if (declared.includes(name)) continue;
+    problems.push(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in `
+        + 'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declared) {
+    const count = batteryCases.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    problems.push(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. `
+          + 'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of `
+          + `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (problems.length) {
+    problems.push(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the '
+        + 'number. Find what stopped registering (an early return, a deleted block, a guard that now '
+        + 'skips) and restore it.',
+    );
+  }
+  return problems;
+}
+
 /** The verdict vocabulary, in report order. */
 export const VERDICTS = ['PASS', 'PARTIAL', 'FAIL', 'BLOCKED', 'NOT-RUN'];
 
@@ -871,6 +985,7 @@ export const RETIRED_TITLES = [
 ];
 
 function assert(cond, msg, failures) {
+  registerCase();
   if (!cond) failures.push(msg);
   return cond ? 1 : 0;
 }
@@ -886,6 +1001,7 @@ async function selfTest() {
   let checked = 0;
 
   // --- every real shape parses -------------------------------------------
+  battery('every real shape parses');
   for (const title of FIXTURE_TITLES) {
     const p = parseRunTitle(title);
     checked += assert(p.ok, `fixture must parse: ${title}\n    -> ${p.ok ? '' : p.reason}`, failures);
@@ -894,6 +1010,7 @@ async function selfTest() {
   const byIndex = FIXTURE_TITLES.map(parseRunTitle);
 
   // --- the ONE judged/total spelling --------------------------------------
+  battery('the ONE judged/total spelling');
   checked += assert(byIndex[0].judged === 18 && byIndex[0].total === 18, '"(18/18)" -> 18/18', failures);
   checked += assert(byIndex[1].judged === 9 && byIndex[1].total === 20, '"(9/20)" -> 9/20', failures);
   checked += assert(byIndex[2].judged === 1 && byIndex[2].total === 12, '"(1/12)" -> 1/12', failures);
@@ -902,6 +1019,7 @@ async function selfTest() {
   checked += assert(byIndex[3].selector === 'priority:P0', 'non-area selector survives intact', failures);
 
   // --- the ONE NOT-RUN spelling -------------------------------------------
+  battery('the ONE NOT-RUN spelling');
   checked += assert(byIndex[1].counts['NOT-RUN'] === 10, 'segment "10 NOT-RUN" counts as NOT-RUN', failures);
   checked += assert(byIndex[2].counts['NOT-RUN'] === 11, 'segment "11 NOT-RUN" counts as NOT-RUN', failures);
   checked += assert(byIndex[3].counts.BLOCKED === 2, 'BLOCKED parsed', failures);
@@ -914,6 +1032,7 @@ async function selfTest() {
   checked += assert(byIndex[1].counts.FAIL === 0, 'declared 0 FAIL is present AND zero', failures);
 
   // --- selector kinds -----------------------------------------------------
+  battery('selector kinds');
   checked += assert(classifySelector('tier2c:browser-2') === 'tier', 'tier selector classified', failures);
   checked += assert(classifySelector('priority:P0') === 'priority', 'priority selector classified', failures);
   checked += assert(classifySelector('studio-authoring') === 'area', 'area selector classified', failures);
@@ -921,6 +1040,7 @@ async function selfTest() {
   // --- every RETIRED phrasing is rejected, by the right reason -------------
   // This is the half that holds the ruling: a parser re-widened to accept one
   // of these passes every happy-path assertion above.
+  battery('every RETIRED phrasing is rejected, by the right reason');
   for (const [title, expectedReason] of RETIRED_TITLES) {
     const p = parseRunTitle(title);
     checked += assert(
@@ -931,6 +1051,7 @@ async function selfTest() {
   }
 
   // --- malformed titles are REPORTED, never silently dropped --------------
+  battery('malformed titles are REPORTED, never silently dropped');
   const bad = [
     ['', 'empty'],
     ['Some other issue title', 'not a run record'],
@@ -946,16 +1067,19 @@ async function selfTest() {
   // --- the judged cell now has ONE provenance -----------------------------
   // The record's own mandatory parenthetical. Nothing is inferred from the
   // checklist, because there is no longer a record that declares no total.
+  battery('the judged cell now has ONE provenance');
   checked += assert(judgedCell(byIndex[0]) === '18/18', 'judged cell is the declared judged/total', failures);
   checked += assert(judgedCell(byIndex[2]) === '1/12', 'a 1-of-12 run renders as 1/12, never as complete', failures);
 
   // --- the legacy boundary reads created_at, never the title --------------
+  battery('the legacy boundary reads created_at, never the title');
   checked += assert(predatesContract('2026-08-18T03:18:26Z') === true, 'a 2026-08-18 record predates the contract', failures);
   checked += assert(predatesContract(`${CANONICAL_FROM}T00:00:00Z`) === false, 'a record created on the effective date is under the contract', failures);
   checked += assert(predatesContract('2026-09-01T00:00:00Z') === false, 'a later record is under the contract', failures);
   checked += assert(predatesContract(null) === false, 'a missing created_at is not treated as legacy', failures);
 
   // --- freshness is three-valued -----------------------------------------
+  battery('freshness is three-valued');
   const repoShallow = { shallow: true, boundaryDate: '2026-08-16' };
   const repoFull = { shallow: false, boundaryDate: null };
   const target = { sha: 'e4e5c6e3aaaaaaaa', ref: 'origin/main' };
@@ -1014,6 +1138,7 @@ async function selfTest() {
   );
 
   // --- latest-per-selector wins ------------------------------------------
+  battery('latest-per-selector wins');
   const recs = [
     { number: 7695, parsed: { selector: 'studio-authoring', selectorKind: 'area', date: '2026-08-11' } },
     { number: 9353, parsed: { selector: 'studio-authoring', selectorKind: 'area', date: '2026-08-17' } },
@@ -1040,6 +1165,7 @@ async function selfTest() {
   checked += assert(sameDay.latest[0].number === 101, 'same-day tie -> higher issue number wins', failures);
 
   // --- the render must never hide a record --------------------------------
+  battery('the render must never hide a record');
   const md = renderMarkdown({
     computedOn: {
       targetRef: 'origin/main',
@@ -1120,6 +1246,10 @@ async function selfTest() {
     failures,
   );
   checked += assert(emptyMd.includes('#7627'), 'the legacy record is still listed when the table is empty', failures);
+
+  // The floor runs BEFORE the verdict below, so a success line can only be
+  // printed by a run in which every declared battery registered its cases.
+  for (const message of batteryFloorFailures()) failures.push(message);
 
   if (failures.length > 0) {
     console.error(`✗ qa-rollup --self-test — ${failures.length} failure(s)\n`);

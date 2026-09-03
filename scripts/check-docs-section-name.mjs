@@ -217,6 +217,56 @@ import { fencedBlocks } from './check-react-page-adapter-contract.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 import { blank, scanSource } from './js-comment-mask.mjs';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'the happy path: a real tree, real fences, real floors': 3,
+  'THE case: one planted nameless section reds the real sweep': 4,
+  'the spelling that defeated #10709: `sections: [{` on one line': 2,
+  'the spelling that defeated #10579: a multi-line literal': 1,
+  'negative controls: the population must NOT grow by fabrication': 2,
+  'the YAML arm (#11887) — the two cases that used to sit here, INVERTED': 14,
+  '⭐ #13880 selector ③: a singular `section:` mapping, nameless': 7,
+  'a singular `section:` at the document ROOT, not nested': 2,
+  'negative controls: the widened `sections?:` prefilter must not': 2,
+  '⭐ #13880 selector ④: a `sections: [...]` array in a JSON-family fence': 8,
+  'a `jsonc` fence with a `// <-` line comment and a trailing comma': 1,
+  'an ELIDED placeholder array: judged as ZERO entries, not skipped': 4,
+  'negative controls: a `json` fence with no `sections` key': 2,
+  '⭐ a DUPLICATE-KEY fence: a complete tree, judged anyway': 5,
+  '⭐ a SYNTAX-error fence: counted, printed, NEVER judged': 5,
+  'negative controls: the YAML population must not grow by fabrication ─': 4,
+  'classifyYamlFence, directly': 4,
+  'the YAML refusals': 2,
+  'the JSON-family refusals (#13880)': 2,
+  'a quoted key cannot escape the rule': 3,
+  'the refusals: each is a broken selector wearing a pass': 6,
+  'the matcher, directly': 2,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 22;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '..');
 
@@ -1278,10 +1328,25 @@ function baseFixtureFiles(extra = {}) {
 let selfTestReachedVerdict = false;
 
 export function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const batterySeen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+  };
+
   const cases = [];
   const trees = [];
   /** @param {string} name @param {unknown} actual @param {unknown} expected */
   const t = (name, actual, expected) => {
+    registerCase();
     const ok = JSON.stringify(actual) === JSON.stringify(expected);
     cases.push({ name, ok, detail: ok ? '' : `got ${JSON.stringify(actual)}, want ${JSON.stringify(expected)}` });
   };
@@ -1302,6 +1367,7 @@ export function selfTest() {
 
   try {
     // ── the happy path: a real tree, real fences, real floors ───────────────
+    battery('the happy path: a real tree, real fences, real floors');
     const clean = tree(baseFixtureFiles());
     t('a clean corpus passes', run(clean, quiet), EXIT_CLEAN);
     const cleanSweep = sweep(clean);
@@ -1309,6 +1375,7 @@ export function selfTest() {
     t('...over the anchors plus the extras', new Set(cleanSweep.sites.map((s) => s.file)).size, 8);
 
     // ── THE case: one planted nameless section reds the real sweep ──────────
+    battery('THE case: one planted nameless section reds the real sweep');
     const planted = tree(
       baseFixtureFiles({
         [`${DOCS_ROOT}/extra/a.mdx`]:
@@ -1322,6 +1389,7 @@ export function selfTest() {
     t('...carrying its label into the message', plantedSweep.findings[0]?.label ?? NONE, 'Nameless');
 
     // ── the spelling that defeated #10709: `sections: [{` on one line ───────
+    battery('the spelling that defeated #10709: `sections: [{` on one line');
     const inline = tree(
       baseFixtureFiles({
         [`${DOCS_ROOT}/extra/b.mdx`]: `# b\n\n${FENCE}ts\nconst f = { sections: [{ label: 'Inline' }, { name: 'ok', label: 'Ok' }] };\n${FENCE}\n`,
@@ -1331,6 +1399,7 @@ export function selfTest() {
     t('...and the inline page reds', run(inline, quiet), EXIT_VIOLATIONS);
 
     // ── the spelling that defeated #10579: a multi-line literal ─────────────
+    battery('the spelling that defeated #10579: a multi-line literal');
     const multi = tree(
       baseFixtureFiles({
         [`${DOCS_ROOT}/extra/c.mdx`]:
@@ -1340,6 +1409,7 @@ export function selfTest() {
     t('a multi-line literal is judged (the #10579 miss)', sweep(multi).findings.length, 1);
 
     // ── negative controls: the population must NOT grow by fabrication ──────
+    battery('negative controls: the population must NOT grow by fabrication');
     const negatives = tree(
       baseFixtureFiles({
         [`${DOCS_ROOT}/extra/d.mdx`]:
@@ -1363,6 +1433,7 @@ export function selfTest() {
     // The arm makes both of those wrong by design. They are REPLACED rather
     // than deleted, in place, so the inversion is legible to the next reader
     // instead of looking like coverage that quietly went missing.
+    battery('the YAML arm (#11887) — the two cases that used to sit here, INVERTED');
     t('the base fixture clears the YAML floors', cleanSweep.yamlSites.length, 24);
     t('...over two `sections:` fences per anchor page plus two singular-`section:` extras', cleanSweep.yamlFences, 8);
     t('...and the nested `layout: sections:` mappings are reached too', cleanSweep.yamlSites.filter((s) => /^b/.test(String(s.label ?? '').toLowerCase())).length, 9);
@@ -1399,6 +1470,7 @@ export function selfTest() {
     // The exact shape `concept.mdx:426` carried live: `section:` (not
     // `sections:`) whose value is a mapping, nested under an unrelated outer
     // key -- the `- section:` sequence-item cardinality.
+    battery('⭐ #13880 selector ③: a singular `section:` mapping, nameless');
     const yamlSingularNameless = tree(
       baseFixtureFiles({
         [`${DOCS_ROOT}/extra/yaml-case.mdx`]:
@@ -1416,6 +1488,7 @@ export function selfTest() {
     t('...and the real sweep goes RED on it', run(yamlSingularNameless, quiet), EXIT_VIOLATIONS);
 
     // ── a singular `section:` at the document ROOT, not nested ──────────────
+    battery('a singular `section:` at the document ROOT, not nested');
     const yamlSingularRootNameless = tree(
       baseFixtureFiles({
         [`${DOCS_ROOT}/extra/yaml-case.mdx`]: `# e\n\n${FENCE}yaml\nsection:\n  label: Nameless\n  fields: [a]\n${FENCE}\n`,
@@ -1435,6 +1508,7 @@ export function selfTest() {
     // a scalar `section:` value (no mapping to judge -- the doc-pages.mdx:257
     // control this card's own triage named: "...from the previous section:"
     // is prose outside any fence and never reaches this regex at all).
+    battery('negative controls: the widened `sections?:` prefilter must not');
     const yamlSingularNegatives = tree(
       baseFixtureFiles({
         [`${DOCS_ROOT}/extra/yaml-case.mdx`]:
@@ -1450,6 +1524,7 @@ export function selfTest() {
     t('...and no YAML mapping either', yamlSingularNegSweep.yamlSites.length, cleanSweep.yamlSites.length);
 
     // ── ⭐ #13880 selector ④: a `sections: [...]` array in a JSON-family fence
+    battery('⭐ #13880 selector ④: a `sections: [...]` array in a JSON-family fence');
     const jsonNameless = tree(
       baseFixtureFiles({
         [`${DOCS_ROOT}/extra/json-case.mdx`]:
@@ -1476,6 +1551,7 @@ export function selfTest() {
     // ── a `jsonc` fence with a `// <-` line comment and a trailing comma ────
     // (the exact shape `concept.mdx`'s own "Final Merged Layout" fence used)
     // -- proves this arm tolerates what `JSON.parse` would refuse.
+    battery('a `jsonc` fence with a `// <-` line comment and a trailing comma');
     const jsonWithComments = tree(
       baseFixtureFiles({
         [`${DOCS_ROOT}/extra/json-case.mdx`]:
@@ -1486,6 +1562,7 @@ export function selfTest() {
 
     // ── an ELIDED placeholder array: judged as ZERO entries, not skipped ────
     // (`forms.mdx:183`'s real shape: `"sections": [/* … */]`)
+    battery('an ELIDED placeholder array: judged as ZERO entries, not skipped');
     const jsonElided = tree(
       baseFixtureFiles({
         [`${DOCS_ROOT}/extra/json-case.mdx`]: `# e\n\n${FENCE}json\n{\n  "sections": [/* … */]\n}\n${FENCE}\n`,
@@ -1498,6 +1575,7 @@ export function selfTest() {
     t('...so the gate stays clean', run(jsonElided, quiet), EXIT_CLEAN);
 
     // ── negative controls: a `json` fence with no `sections` key ────────────
+    battery('negative controls: a `json` fence with no `sections` key');
     const jsonNegatives = tree(
       baseFixtureFiles({
         [`${DOCS_ROOT}/extra/json-case.mdx`]:
@@ -1513,6 +1591,7 @@ export function selfTest() {
     // into one fence. A `toJS()` walk would collapse these to ONE `layout:`
     // and never see the second block; the AST keeps both pairs. On the real
     // corpus this is not hypothetical — two pages do it.
+    battery('⭐ a DUPLICATE-KEY fence: a complete tree, judged anyway');
     const dupKey = tree(
       baseFixtureFiles({
         [`${DOCS_ROOT}/extra/yaml-case.mdx`]:
@@ -1531,6 +1610,7 @@ export function selfTest() {
     // This is the decision #10830 deferred and #11887 made. It has NO live
     // population on the tree the arm landed against, so this fixture is the
     // only thing holding the boundary — which is exactly why it is here.
+    battery('⭐ a SYNTAX-error fence: counted, printed, NEVER judged');
     const badYaml = tree(
       baseFixtureFiles({
         [`${DOCS_ROOT}/extra/yaml-case.mdx`]:
@@ -1545,6 +1625,7 @@ export function selfTest() {
     t('...and the gate stays clean rather than fabricating from a guessed tree', run(badYaml, quiet), EXIT_CLEAN);
 
     // ── negative controls: the YAML population must not grow by fabrication ─
+    battery('negative controls: the YAML population must not grow by fabrication ─');
     const yamlNegatives = tree(
       baseFixtureFiles({
         [`${DOCS_ROOT}/extra/yaml-case.mdx`]:
@@ -1570,12 +1651,14 @@ export function selfTest() {
     t('...and produces no finding — it carries no key to require', scalarSweep.findings.length, 0);
 
     // ── classifyYamlFence, directly ────────────────────────────────────────
+    battery('classifyYamlFence, directly');
     t('a clean fence is judged', classifyYamlFence('sections:\n  - name: a\n').judged, true);
     t('a duplicate key is judged', classifyYamlFence('a:\n  b: 1\na:\n  b: 2\n').judged, true);
     t('a tab indent is NOT judged', classifyYamlFence('a:\n\tb: 1\n').judged, false);
     t('an empty fence is NOT judged', classifyYamlFence('').judged, false);
 
     // ── the YAML refusals ──────────────────────────────────────────────────
+    battery('the YAML refusals');
     t(
       'a corpus whose YAML fences evaporated refuses',
       run(
@@ -1591,6 +1674,7 @@ export function selfTest() {
     );
 
     // ── the JSON-family refusals (#13880) ────────────────────────────────────
+    battery('the JSON-family refusals (#13880)');
     t(
       'a JSON census anchor kept as a file but emptied of json fences refuses',
       // `YAML_CENSUS_ANCHORS[0]` doubles as `JSON_CENSUS_ANCHORS[0]`; drop
@@ -1608,6 +1692,7 @@ export function selfTest() {
     );
 
     // ── a quoted key cannot escape the rule ────────────────────────────────
+    battery('a quoted key cannot escape the rule');
     const quoted = tree(
       baseFixtureFiles({
         [`${DOCS_ROOT}/extra/a.mdx`]: `# a\n\n${FENCE}ts\nconst f = { 'sections': [{ 'label': 'Quoted' }, { 'name': 'ok', 'label': 'Ok' }] };\n${FENCE}\n`,
@@ -1619,6 +1704,7 @@ export function selfTest() {
     t('...and it is the unnamed one', quotedSweep.findings[0]?.label ?? NONE, 'Quoted');
 
     // ── the refusals: each is a broken selector wearing a pass ──────────────
+    battery('the refusals: each is a broken selector wearing a pass');
     t('a missing docs root refuses', run(join(tree({}), 'nowhere'), quiet), EXIT_REFUSED);
     t('an empty docs root refuses', run(tree({ [`${DOCS_ROOT}/.keep`]: '' }), quiet), EXIT_REFUSED);
     t(
@@ -1650,11 +1736,58 @@ export function selfTest() {
     );
 
     // ── the matcher, directly ──────────────────────────────────────────────
+    battery('the matcher, directly');
     const src = "const a = { s: ['[', {x: 1}] };";
     t('a bracket inside a string does not move the match', matchBracket(project(src).codeOnly, src.indexOf('[')), src.lastIndexOf(']') + 1);
     t('an unbalanced array returns -1', matchBracket(project('const a = [1, 2').codeOnly, 10), -1);
   } finally {
     for (const root of trees) rmSync(root, { recursive: true, force: true });
+  }
+
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    cases.push({ name: message, ok: false, detail: '' });
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
   }
 
   const failed = cases.filter((c) => !c.ok);
