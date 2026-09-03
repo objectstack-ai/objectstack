@@ -1,5 +1,5 @@
 ---
-"@objectstack/metadata-protocol": minor
+"@objectstack/metadata-protocol": patch
 ---
 
 fix(metadata-protocol): `getMetaItems` applies the registry read gate itself, so a sweep that reads more than one type per request is scoped per type (#14683)
@@ -35,19 +35,46 @@ in the admin "Used by" panel and the Studio governance directory, inside a
 clearance rendered before a destructive action — where a resurrected row is worse
 than an omission because it reads as evidence.
 
-**Why `minor` and not `patch`.** No export is added or removed, no declared type
-narrows, and `GetMetaItemsRequest` still accepts `organizationId?: string` — so
-this is not the published-type-narrowing shape that would carry a major bump plus
-an explicit incompatibility marker (#13925). Nothing here is incompatible. But it
-is also not the patch shape: an envelope on an existing refusal or an accept-set widening
-leaves what a successful read *returns* untouched, and this changes it. On a
-deployment carrying pre-#6190 phantom rows, a session with an active organization
-gets **fewer rows** back from published read doors that pass the raw active
-organization — the dispatcher's `GET /metadata/:type` list and the package
-export/manifest doors. A published read door's answer changing without an export
-change is the `minor` precedent, and this is its row-set analogue. ⛔ Not "only a
-refactor of where the predicate lives": the predicate's new position changes which
-rows two published doors serve, and that is the reason for the level.
+**Why `patch`, from this change's own lineage.** A published `/meta` read door's
+row set changing is not a new class here — it is the class this predicate was
+born in, and all three landed instances shipped `patch`:
+
+| commit | what changed | level |
+|:--|:--|:--|
+| `b6c769019` (#9454 / #9727) | the row set every `/meta` read door returns — org rows **added** | `metadata-core`, `metadata-protocol`, `rest`: all `patch` |
+| `26f3588fb` (#10340 / #10519) | which partition two spellings read — rows **moved** | `rest`, `metadata-core`: `patch` |
+| `67ceb9aef` (#11553) | the same fold-before-scope repair on the dispatcher door | `runtime`: `patch` |
+
+The first of those is the commit that introduced `organizationIdForMetaRead`
+itself. Adding the org partition to every read door was `patch`; moving which
+partition two spellings read was `patch`; this change — withholding the org
+partition from types that never had a read channel for it — is the same class,
+one verb further in, and takes the same level.
+
+⛔ Not `minor`, and in this repo that is a statement rather than a rounding
+choice. `scripts/check-changeset-no-major.mjs` refuses `major` outright, so
+during the launch window a genuinely breaking change ships as `minor` (pre-1.0,
+whole-stack lockstep) — #13925 is exactly that, `"@objectstack/core": minor`
+carrying a bolded incompatibility banner and an `adr-0087:` marker for a
+narrowed published accept set. `minor` therefore *means* "breaking" here, and
+claiming it for this change would signal an incompatibility that does not exist.
+
+**Nothing here is incompatible, and the reason is what the withheld rows are.**
+They are the #6190 phantoms: org-scoped rows of types with no per-org read
+channel. The platform has refused to mint them since `ac244ad09` / `6155c3c24`,
+boot hydration skips them, `reportUnhydratableOrgScopedRows` audits them, and
+**every REST `/meta` read door has already withheld them since `b6c769019`**.
+The only doors still serving them were the dispatcher list
+(`runtime/src/domains/meta.ts:921`) and the runtime manifest and publish-flip
+reads (`packages.ts:1160`, `:603`) — so this change aligns those three with the
+published `/meta` surface rather than departing from it. A consumer reading
+those rows was reading through a door inconsistent with `/meta`, on data the
+platform had already ruled dead.
+
+⛔ Not "only a refactor of where the predicate lives" either: the predicate's new
+position does change which rows three doors serve. That is why this is a
+behaviour entry rather than an internal note — and, per the lineage above, why
+the level for it is `patch`.
 
 **Callers that already gate are unaffected, and that is proved rather than
 asserted.** `organizationIdForMetaRead` answers either its argument or
