@@ -15,6 +15,7 @@ import {
 } from '@objectstack/spec';
 import { loadConfig } from '../utils/config.js';
 import { lowerCallables } from '../utils/lower-callables.js';
+import { authoringRuleUnionStack } from '../utils/stack-collections.js';
 import { buildAccessMatrix, diffAccessMatrix } from '@objectstack/lint';
 import { runAuthoringRules, splitBySeverity, authoringRulesFor } from '@objectstack/lint';
 import { resolveSduiManifest } from '../utils/sdui-manifest.js';
@@ -340,9 +341,24 @@ export default class Compile extends Command {
       //     is declared in `lint/authoring-rules.ts`. Do not add a call site here.
       const registered = authoringRulesFor('build');
       if (!flags.json) printStep(`Running author-time rules (${registered.length})...`);
+      //     [ADR-0130 D4 / option B, #15006] The UNION run judges the flattened
+      //     top level. Under option B that top level is gone — `packages[]`
+      //     carries every definition once — so this run's input would be an
+      //     EMPTY stack and `os build` would publish green having judged
+      //     nothing. `authoringRuleUnionStack` folds each absent collection
+      //     back in from `packages[]`, in `resolveArtifactPackageOrder`'s
+      //     dependency order. It changes what the rules JUDGE and nothing this
+      //     command EMITS: the artifact is written from `lowering.lowered` /
+      //     `result.data`, which this does not touch, and a stack that still
+      //     carries its collections is returned by identity.
+      //
+      //     The per-package run below needs no such fold — it already reads
+      //     `packages[]`. The union run is the only one of the two that can see
+      //     a finding spanning packages, which is exactly what an empty input
+      //     silently stops reporting.
       const findings = runAuthoringRules('build', {
-        normalized: normalized as Record<string, unknown>,
-        parsed: result.data as Record<string, unknown>,
+        normalized: authoringRuleUnionStack(normalized as Record<string, unknown>),
+        parsed: authoringRuleUnionStack(result.data as Record<string, unknown>),
         sduiManifest: resolveSduiManifest(),
       });
       const { errors: ruleErrors, advisories } = splitBySeverity(findings);
