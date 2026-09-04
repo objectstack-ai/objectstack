@@ -271,6 +271,10 @@ conversion 是消费者跟的。两个都要写。
       (``.toThrow(/<key>.*removed.*use `<replacement>`/s)`` —— `s` 标志是 house
       style,因为消息跨行),一条阳性,对非 strict 剥除路径断言
       `not.toHaveProperty(key)`。参考 `packages/spec/src/ai/agent.test.ts:69-95`。
+      ⭐ **缺席 pin 一律 tree-scoped,永不 file-scoped**:file-scoped 只看得见作者想得
+      到的那个文件,漏网的恰是他不知道的引用(实测五处、三个包、两张卡,其中两处还
+      是删除**之后**新写的)。排除 `**/CHANGELOG.md`、`.changeset/` 与 pin 自身,理由
+      写在旁边,⛔ 不建允许清单文件;⛔ 缺席断言不是陈旧提及,「修好它」即删掉守卫。
 - [ ] **Examples** —— `examples/app-showcase/**` 必须停止编写该键。墓碑路线上
       `tsc` 替你找齐。
 - [ ] **已发布 skills** —— 教这个键的 `skills/*/SKILL.md`(表格、`defineX` 示例)
