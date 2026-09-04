@@ -561,10 +561,17 @@ describe('renderFileDescription — #10924: the os:check marker is machinery, no
     );
     expect(out).not.toContain('os:check');
     // The block it marked is the content — dropping the marker must not take
-    // the example with it, nor detach the fence from its `@example` tag.
+    // the example with it, and must not strand the fence behind a leftover
+    // line.
     expect(out).toContain('```ts');
     expect(out).toContain('const x = 1;');
-    expect(out).toContain('@example');
+    expect(out).toContain('Studio plugin manifest.\n\n```ts');
+    // The `@example` above the marker is gone too, and that is #14455's verdict
+    // rather than this one's: a tag with no payload is the `@module` case. This
+    // assertion used to require the opposite, which is what a fixture pinning a
+    // line the renderer no longer emits looks like — it kept passing precisely
+    // because the tag was still being published.
+    expect(out).not.toContain('@example');
   });
 
   it('keeps a marker shown INSIDE a fence — there it is an author illustrating the convention', () => {
