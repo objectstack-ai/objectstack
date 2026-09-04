@@ -1108,7 +1108,7 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             'record-validator\'s `fail(code: FieldErrorCode, …)` builds one `{ field, code, def, constraint, ' +
             'messageKey, options, value }` per violated constraint. Its `code` parameter is typed `code: ' +
             'FieldErrorCode`, so the value is a member of the closed ADR-0114 D2 catalog by construction; ' +
-            '\'value_domain\' is one of them \u2014 the field-level `valueDomain` write-path refusal. It ' +
+            '\'value_domain\' is one of them — the field-level `valueDomain` write-path refusal. It ' +
             'reaches `ApiError.details.fields[].code`, never `error.code`, so no ledger row can be owed for it ' +
             '(ADR-0112 D6).',
     },
