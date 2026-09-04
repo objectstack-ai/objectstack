@@ -34,6 +34,7 @@ import {
   checkCoreEntryShape,
   checkSingleOwner,
   checkTransitiveAllowlist,
+  stripInternalIssueIds,
 } from './lib/skill-map-guards';
 
 // ── Paths ────────────────────────────────────────────────────────────────────
@@ -301,11 +302,11 @@ function extractDescription(filePath: string): string {
     const firstLine = lines[0];
     if (firstLine && firstLine.length > 5) {
       const clean = firstLine.replace(/^#+\s*/, '');
-      const sentence = clean.split(/\.\s/)[0];
+      const sentence = stripInternalIssueIds(clean.split(/\.\s/)[0]);
       return sentence.length > 120 ? sentence.slice(0, 117) + '...' : sentence;
     }
   }
-  return exportListDescription(content) ?? '';
+  return stripInternalIssueIds(exportListDescription(content) ?? '');
 }
 
 // ── Index generator ──────────────────────────────────────────────────────────

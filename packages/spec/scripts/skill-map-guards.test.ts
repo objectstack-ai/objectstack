@@ -38,6 +38,7 @@ import {
   checkCoreEntryShape,
   checkSingleOwner,
   checkTransitiveAllowlist,
+  stripInternalIssueIds,
   type SkillCoreMap,
 } from './lib/skill-map-guards';
 
@@ -181,6 +182,37 @@ describe('checkTransitiveAllowlist — a constraint that constrains nothing is r
   });
 });
 
+describe('stripInternalIssueIds — the catalog carries no tracker ids', () => {
+  it('drops a trailing citation and the parenthesis it sat in', () => {
+    expect(
+      stripInternalIssueIds('Config contracts for the flat IO builtins — `notify` and `http` (#4045).'),
+    ).toBe('Config contracts for the flat IO builtins — `notify` and `http`.');
+  });
+
+  it('drops the owner/repo spelling whole', () => {
+    expect(stripInternalIssueIds('removed in objectstack-ai/objectstack#4286 — use the rule'))
+      .toBe('removed in — use the rule');
+  });
+
+  it('drops a mid-sentence id and leaves one space behind', () => {
+    expect(stripInternalIssueIds('Metadata Protection Model — Phase 1 (#1234) and later'))
+      .toBe('Metadata Protection Model — Phase 1 and later');
+  });
+
+  // The other half of the criterion: what must survive. Each of these is a
+  // shape `check:doc-authoring` explicitly allows, so stripping it here would
+  // silently rewrite prose the gate never objected to.
+  it.each([
+    ['the #1 authoring mistake', 'an ordinal is one digit, below the floor'],
+    ['colour #ff00aa is the accent', 'a hex colour starts with no digit'],
+    ['id #123456789 is not a tracker id', 'nine digits is above the ceiling'],
+    ['HTTP 404 is not a citation', 'no # at all'],
+    ['array##4045 is not a citation', 'a doubled # is excluded by the lookbehind'],
+  ])('leaves %j alone (%s)', (text) => {
+    expect(stripInternalIssueIds(text)).toBe(text);
+  });
+});
+
 describe('the generator wires the guards in', () => {
   const source = (): string => fs.readFileSync(GENERATOR, 'utf-8');
 
@@ -203,5 +235,10 @@ describe('the generator wires the guards in', () => {
     // never reads, which is the shape of a constraint that constrains nothing.
     expect(source()).toContain('checkTransitiveAllowlist(SKILL_MAP, TRANSITIVE_ALLOWLIST, closures)');
     expect(source()).toContain('allowed.includes(f)');
+  });
+
+  it('strips internal ids on the description path, not somewhere unreachable', () => {
+    expect(source()).toContain('stripInternalIssueIds(clean.split');
+    expect(source()).toContain('stripInternalIssueIds(exportListDescription(content)');
   });
 });

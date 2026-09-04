@@ -37,6 +37,56 @@
  * in the map.
  */
 
+// ── What the catalog may publish ─────────────────────────────────────────────
+
+/**
+ * The gate's criterion for an internal tracker id, restated.
+ *
+ * Same shape as `scripts/check-doc-authoring.mjs`'s `INTERNAL_ID_SOURCE`: three
+ * to five digits, so the ordinal "the #1 mistake" and a six-digit hex colour
+ * are both below/above it, and neither `##` nor an HTML entity's `&#` counts.
+ * Restated rather than imported because that gate is a `.mjs` in the repo root
+ * `scripts/` tree and exports nothing; the pin in
+ * `skill-map-guards.test.ts` holds the two spellings together by asserting the
+ * shapes that must and must not match.
+ */
+const INTERNAL_ISSUE_ID = /(?<![#&])#[0-9]{3,5}(?![0-9A-Za-z])/g;
+
+/**
+ * Drop internal issue ids from a line about to be published to `skills/**`.
+ *
+ * `skills/**` ships to customer projects and is loaded WHOLE into customer
+ * agent context windows, so `check:doc-authoring` refuses a tracker id there
+ * with no per-passage exemption -- a reader in a customer session has no
+ * tracker, no `git log` and no ADRs, and the token resolves to nothing for the
+ * audience paying for it (maintainer ruling 2026-08-12).
+ *
+ * The index rows are PROJECTED from module doc blocks in `packages/spec/src`,
+ * so a citation written for a repo reader becomes catalog prose the moment its
+ * schema joins a package's list -- which is exactly how
+ * `automation/io-node-config.zod.ts` arrived with `(#4045)` in its opening
+ * sentence. The same sentence is also published to
+ * `content/docs/references/**`, and the gate does NOT flag it there: the rule
+ * is about the skill catalog specifically. So the strip belongs at the BOUNDARY
+ * into that catalog rather than in the source, where it would rewrite a
+ * legitimate repo-facing citation, change bytes the package publishes, and drag
+ * the generated docs tree along.
+ *
+ * Sanitising here rather than refusing is deliberate and is the narrower of the
+ * two: a refusal would be satisfiable only by editing the schema source, which
+ * is what the paragraph above argues against. The class becomes impossible
+ * rather than corrected once -- no future pointer row can carry an id.
+ */
+export function stripInternalIssueIds(text: string): string {
+  return text
+    .replace(/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?=#[0-9]{3,5}(?![0-9A-Za-z]))/g, '')
+    .replace(INTERNAL_ISSUE_ID, '')
+    .replace(/\(\s*[,;·]?\s*\)/g, '')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\s+([.,;:])/g, '$1')
+    .trim();
+}
+
 /** A `SKILL_MAP`-shaped value: skill name → its core schema paths. */
 export type SkillCoreMap = Record<string, readonly string[]>;
 
