@@ -109,18 +109,18 @@ that silently does not happen.
 
 | # | Behaviour when `isSystem` | Package | What you get / what you lose | Anchor |
 |:--|:---|:---|:---|:---|
-| 18 | **`readonly` strip bypassed — UPDATE, single row** | objectql | Get: a `readonly` field CAN be written. Lose: the protection that stops a caller seeding e.g. `approval_status` | `objectql/src/engine.ts:11290` |
-| 19 | **`readonly` strip bypassed — UPDATE, bulk/predicate** | objectql | Same, on the multi-row path | `objectql/src/engine.ts:11473` |
-| 20 | **`readonly` strip bypassed — INSERT (engine pass)** | objectql | Same, on create | `objectql/src/engine.ts:10025` |
+| 18 | **`readonly` strip bypassed — UPDATE, single row** | objectql | Get: a `readonly` field CAN be written. Lose: the protection that stops a caller seeding e.g. `approval_status` | `objectql/src/engine.ts:11373` |
+| 19 | **`readonly` strip bypassed — UPDATE, bulk/predicate** | objectql | Same, on the multi-row path | `objectql/src/engine.ts:11556` |
+| 20 | **`readonly` strip bypassed — INSERT (engine pass)** | objectql | Same, on create | `objectql/src/engine.ts:10106` |
 | 21 | **`readonly` strip bypassed — INSERT (protocol ingress)** | metadata-protocol | `isSystem` is the **only** exemption here. `preserveAudit` is deliberately not read on this path (#6640) — a non-system historical import is still stripped on create | `metadata-protocol/src/protocol.ts:1795` |
-| 22 | Strict-drop refusal never fires | objectql | Lose: a caller that opted into loud refusal gets **silence** — strict refuses exactly what the strip would have taken, and the strip took nothing | `objectql/src/engine.ts:10073`, `readonly-strict-errors.ts:66` |
-| 23 | **Referential-integrity check skipped** | objectql | Get: writes proceed against unreachable/unresolvable targets. Lose: an `isSystem` caller can write a **dangling reference** | `objectql/src/engine.ts:5892` |
-| 24 | Tenant-audit warning silenced; `bypassTenantAudit` threaded to the driver | objectql | Get: unscoped system writes stop warning. Lose: the signal that would flag a genuine user-path scoping bug | `objectql/src/engine.ts:3736`, `:3746`, `:3773` |
+| 22 | Strict-drop refusal never fires | objectql | Lose: a caller that opted into loud refusal gets **silence** — strict refuses exactly what the strip would have taken, and the strip took nothing | `objectql/src/engine.ts:10154`, `readonly-strict-errors.ts:66` |
+| 23 | **Referential-integrity check skipped** | objectql | Get: writes proceed against unreachable/unresolvable targets. Lose: an `isSystem` caller can write a **dangling reference** | `objectql/src/engine.ts:5973` |
+| 24 | Tenant-audit warning silenced; `bypassTenantAudit` threaded to the driver | objectql | Get: unscoped system writes stop warning. Lose: the signal that would flag a genuine user-path scoping bug | `objectql/src/engine.ts:3799`, `:3809`, `:3836` |
 | 25 | Engine-owned / append-only write guard bypassed | plugin-security | Get: generic writes to `managedBy` engine-owned objects | `system-write-guard.ts:96`, `:120` |
 | 26 | Identity write guard bypassed (ADR-0092) | plugin-auth | Get: direct writes to identity tables through the generic data path | `identity-write-guard.ts:99` |
-| 27 | Search-companion column **kept** in a read's rows when it was explicitly requested | objectql | Get: the internal companion column is readable. Lose: nothing for app code — this is the engine reading its own index | `objectql/src/engine.ts:6590` |
-| 28 | Dependent-count disclosure on a blocked delete | objectql | Get: the count of blocking children. Nothing was elevated past the caller, so nothing is withheld | `objectql/src/engine.ts:12085` |
-| 29 | Reference-cleanup log attributes the write to `'system'` | objectql | Get: an honest actor label instead of `anonymous` when the context carries neither `userId` nor `actor` | `objectql/src/engine.ts:12014` |
+| 27 | Search-companion column **kept** in a read's rows when it was explicitly requested | objectql | Get: the internal companion column is readable. Lose: nothing for app code — this is the engine reading its own index | `objectql/src/engine.ts:6671` |
+| 28 | Dependent-count disclosure on a blocked delete | objectql | Get: the count of blocking children. Nothing was elevated past the caller, so nothing is withheld | `objectql/src/engine.ts:12172` |
+| 29 | Reference-cleanup log attributes the write to `'system'` | objectql | Get: an honest actor label instead of `anonymous` when the context carries neither `userId` nor `actor` | `objectql/src/engine.ts:12101` |
 
 ### 3. Sharing (`plugin-sharing`)
 
@@ -160,10 +160,10 @@ The largest single consumer — **17 of the 106 sites**.
 | 49 | Action `requiredPermissions` bypassed | runtime | Get: engine self-invocation runs any action | `action-execution.ts:401` |
 | 50 | `manage_metadata` bypassed on metadata writes | runtime, rest | Get: schema writes without the capability | `domains/meta.ts:471`, `:874`, `rest-server.ts:4888`, `:6302`, `:6550`, `:6981`, `:7174` |
 | 51 | The shared metadata-write verdict itself returns `allowed` | metadata-core | Get: the one function all of row 50's doors consult answers yes before any capability is examined | `meta-write-capability.ts:134` |
-| 52 | Anonymous-deny seam satisfied on the domain dispatchers and the package/federation routes | runtime, rest | Get: passes with no `userId` | `domains/actions.ts:411`, `domains/ai.ts:60`, `domains/automation.ts:989`, `domains/meta.ts:232`, `domains/security.ts:78`, `domains/packages.ts:326`, `external-datasource-routes.ts:302`, `package-routes.ts:97` |
+| 52 | Anonymous-deny seam satisfied on the domain dispatchers and the package/federation routes | runtime, rest | Get: passes with no `userId` | `domains/actions.ts:411`, `domains/ai.ts:60`, `domains/automation.ts:989`, `domains/meta.ts:232`, `domains/security.ts:78`, `domains/packages.ts:422`, `external-datasource-routes.ts:302`, `package-routes.ts:97` |
 | 53 | MCP principal check satisfied | runtime | Get: MCP surface reachable with no user | `domains/mcp.ts:61` |
 | 54 | Package REST route capability gate bypassed | rest | Get: package read/write over REST without `manage_metadata` / `studio.access` / `setup.access` | `package-routes.ts:102` |
-| 55 | Package domain capability gates bypassed | runtime | Get: package management and package-inventory reads without the capability | `domains/packages.ts:145`, `:178` |
+| 55 | Package domain capability gates bypassed | runtime | Get: package management and package-inventory reads without the capability | `domains/packages.ts:241`, `:274` |
 | 56 | Activation write / authoring refusals do not fire | runtime | Get: activation artifacts writable and authorable without the activation-authoring capability | `activation-gate.ts:138`, `:189` |
 | 57 | Automation run-state read, flow-authoring write and unrelated-screen read all pass | runtime | Get: run state, flow writes and screen reads with no grant | `domains/automation.ts:254`, `:545`, `:635` |
 | 58 | Audience-binding suggestion recording skipped | plugin-security | Lose: install-time suggestions are not recorded for system callers | `suggested-audience-bindings.ts:703` |
@@ -179,8 +179,8 @@ a reader tracing where elevation travels needs them.
 
 | # | Site | Package | What it does |
 |:--|:---|:---|:---|
-| 62 | `objectql/src/engine.ts:3543` | objectql | Propagates `isSystem` into the hook session so hooks can tell engine self-writes from user writes |
-| 63 | `objectql/src/engine.ts:14523` | objectql | `ScopedContext.isSystem` getter — re-exposes the underlying execution context's flag |
+| 62 | `objectql/src/engine.ts:3606` | objectql | Propagates `isSystem` into the hook session so hooks can tell engine self-writes from user writes |
+| 63 | `objectql/src/engine.ts:14616` | objectql | `ScopedContext.isSystem` getter — re-exposes the underlying execution context's flag |
 | 64 | `plugin-reports/src/report-service.ts:556` | plugin-reports | Threads the flag into the engine call that runs a report |
 | 65 | `body-runner.ts:279` | runtime | Rebuilds an `ExecutionContext` from a hook session, carrying the flag across |
 
@@ -195,7 +195,7 @@ assuming `isSystem` covers it is a documented source of bugs.
 |:---|:---|:---|
 | "It suppresses triggers / record-change automation" | **No.** Only `skipTriggers` does. A bare `{ isSystem: true }` on a seed write re-fired automation on freshly seeded rows and wedged first boot | `metadata-protocol/src/seed-loader.ts:1971` (rationale at `:1881`–`1883`, #3760), `flow.zod.ts:702` |
 | "It skips the state machine" | **No.** That is `skipStateMachine`, carried by seed replay and by `treatAsHistorical` imports | `objectql/src/engine.ts` FSM gate; see [State Machine](/docs/protocol/objectql/state-machine) |
-| "It skips validation rules" | **No.** Field shape, `format`, `script` and the rest still run. The `readonly` strip runs *before* validation precisely so a discarded value is not judged | `objectql/src/engine.ts:10008`–`10025` |
+| "It skips validation rules" | **No.** Field shape, `format`, `script` and the rest still run. The `readonly` strip runs *before* validation precisely so a discarded value is not judged | `objectql/src/engine.ts:10089`–`10106` |
 | "It preserves a supplied `updated_at` / `updated_by`" | **No.** That is `preserveAudit`, a separate opt-in — and an UPDATE-path exemption only | `field.zod.ts:1580` (#3493 / #6640) |
 | "It stamps `created_by`" | **No.** Audit stamping reads `userId` from the context. A user-less system write stamps nothing — that is today's behaviour, not an error | `runtime-identity.ts:280`–`281` |
 | "It bypasses every guard" | **No.** The last-admin guard applies to **every** context, `isSystem` included — the deprovision path that actually locks an org out is the system one | `last-admin-guard.ts:299` |
