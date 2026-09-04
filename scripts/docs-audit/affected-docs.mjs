@@ -248,11 +248,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the sdk bridge\'s REACH over the declared surface (#9572)': 11,
   '#11178: WHY a row is unreachable, and the two causes that printed as one': 28,
   '`causes` GETS THE SAME TREATMENT, AT BOTH ENDS (#11867)': 16,
+  'the ROUTE SOURCE concept: two kinds, and the runtime-registration guard (#11857)': 21,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 28;
+const SELF_TEST_BATTERY_FLOOR = 29;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -982,7 +983,7 @@ if (args.includes('--bridge-coverage')) {
     // moves it by zero rows. That misreading is the reason this split exists — it aimed a
     // whole card at widening a recognizer that was never the constraint.
     const CAUSE_NOTE = {
-      'no-in-repo-registrar': () => 'NO in-repo registrar for ANY row — discovery cannot reach this surface',
+      'no-in-repo-declaration': () => 'NO in-repo declaration for ANY row — discovery cannot reach this surface',
       'discovery-gap': (l) => `all ${l.remediable} remediable by discovery`,
       'undecided': (l) => `${l.remediable} remediable by discovery, ${l.unwitnessed} undecided`,
       'no-client-surface': () => 'no client-bound rows to reach',
@@ -998,11 +999,11 @@ if (args.includes('--bridge-coverage')) {
     // fraction is: remediable + structural + undecided === UNREACHABLE, so a reader can see
     // it stay whole, and a bucket that starts absorbing another cannot do it quietly.
     if (coverage.causes.measured) {
-      console.log(`    why — against every \`path:\` any packages/** file declares (${coverage.causes.ceilingTails}-tail ceiling vs the ${coverage.tails} the filename convention yields):`);
+      console.log(`    why — against every \`path:\` any packages/** file declares (${coverage.causes.ceilingTails}-tail ceiling vs the ${coverage.tails} the two route-source kinds yield):`);
       const n = (v) => String(v).padStart(4);
-      console.log(`        remediable by discovery ..${n(coverage.causes.remediable)}   an in-repo file declares the row's path; the convention did not scan that file`);
-      console.log(`        NO in-repo registrar .....${n(coverage.causes.structural)}   on a ledger where not ONE row is declared in-repo — declared upstream and catch-all-mounted, so no discovery change reaches it`);
-      console.log(`        undecided ................${n(coverage.causes.undecided)}   no in-repo declaration, on a ledger that HAS in-repo registrars — absence and an unreadable spelling are not distinguishable here`);
+      console.log(`        remediable by discovery ..${n(coverage.causes.remediable)}   an in-repo file declares the row's path; NEITHER route-source kind admitted that file`);
+      console.log(`        NO in-repo declaration ...${n(coverage.causes.structural)}   on a ledger where not ONE row is declared in-repo — declared upstream and catch-all-mounted, so no discovery change reaches it`);
+      console.log(`        undecided ................${n(coverage.causes.undecided)}   no in-repo declaration, on a ledger that HAS in-repo route sources — absence and an unreadable spelling are not distinguishable here`);
     } else {
       console.log(`    why ........................ ${coverage.causes.reason}`);
     }
@@ -1933,14 +1934,14 @@ function bridgeCoverageFrom(ledgers, tails, maximalTails) {
     // and the plugin mounts them with a single catch-all — and it is derived here rather
     // than asserted, so a ledger that grows an in-repo registrar leaves this bucket by
     // itself. Measured on `589758d22`: exactly one ledger of the seven.
-    else if (hit.length === 0 && witnessed.length === 0) cause = 'no-in-repo-registrar';
+    else if (hit.length === 0 && witnessed.length === 0) cause = 'no-in-repo-declaration';
     else if (unwitnessed.length === 0) cause = 'discovery-gap';
     // ⛔ NOT defaulted into either bucket. This ledger HAS in-repo registrars, so its
     // unwitnessed rows are not the auth shape — but nothing here can tell "no registration
     // site" apart from "a registration site whose path this recognizer cannot read", and
     // rendering that ignorance as either verdict is exactly the #9747 false green.
     else cause = 'undecided';
-    if (cause === 'no-in-repo-registrar') structuralRows += unwitnessed.length;
+    if (cause === 'no-in-repo-declaration') structuralRows += unwitnessed.length;
     else undecidedRows += unwitnessed.length;
     remediableRows += witnessed.length;
     byLedger.push({ file, clientRows: bound.length, reachable: hit.length, unreachable: bound.length - hit.length, rowsParsed: rows.length, routesDeclared, clientsDeclared, declined, outsideCode, cause, remediable: censusMeasured ? witnessed.length : null, unwitnessed: censusMeasured ? unwitnessed.length : null });
@@ -1957,7 +1958,7 @@ function bridgeCoverageFrom(ledgers, tails, maximalTails) {
   // answer, and pinning it would be a false red on an accurate ledger.
   const brokenScan = [];
   if (!ledgers.length) brokenScan.push('no route-ledger file was found at all — the ledger walk selected nothing, so every `sdk` anchor is silently unavailable');
-  if (!tailList.length) brokenScan.push('the registrar scan produced no route tail at all — the symbol → route → sdk bridge cannot fire for any change');
+  if (!tailList.length) brokenScan.push('the route-source scan produced no route tail at all — the symbol → route → sdk bridge cannot fire for any change');
   if (censusBroken) brokenScan.push(censusBroken);
   for (const l of byLedger) {
     if (l.rowsParsed === 0) brokenScan.push(`${l.file} matched the ledger convention but parsed 0 rows — the row recognizer no longer reads this file's shape`);
@@ -5170,7 +5171,7 @@ function selfTest() {
   const causeOf = (f) => causeCov.ledgers.find((l) => l.file === f).cause;
   const causeCases = [
     // THE ONE THIS CARD IS ABOUT: not one row of the surface is declared anywhere in-repo.
-    ['a ledger no in-repo file declares ANY row of is structural', 'no-in-repo-registrar', causeOf('structural-route-ledger.ts')],
+    ['a ledger no in-repo file declares ANY row of is structural', 'no-in-repo-declaration', causeOf('structural-route-ledger.ts')],
     ['a ledger whose every unreachable row has an in-repo witness is a discovery gap', 'discovery-gap', causeOf('gap-route-ledger.ts')],
     // ⛔ NOT defaulted into either bucket — the #9747 rule this whole split is an
     // application of: a recognizer narrower than the repo reports "unrecognised".
@@ -5392,6 +5393,181 @@ function selfTest() {
       'code points 0..0x2FFF', '12225 / 12223 / 25', `${admitsB} / ${admitsPrev} / ${admitsLead}`);
   }
 
+
+  // ── The ROUTE SOURCE concept: two kinds, and the guard between them (#11857) ──
+  //
+  // Ruling A, 2026-09-04 batch #31. Everything here defends ONE sentence: a route source
+  // is a file that DECLARES a route, of two kinds — a registration CALL SITE admitted by
+  // its name, and a spec contract DECLARATION admitted by EVIDENCE — and the evidence is
+  // the HTTP method the declaration answers on.
+  //
+  // ⛔ THE GUARD IS THE POINT, NOT THE ADMISSION. Admitting contract declarations without
+  // it also admits every data payload carrying a `path:` key, and the card that measured
+  // this route named the instance: a connector-action INPUT inside an automation fixture.
+  // So the cases below pin the guard from BOTH sides — that it keeps the payload out, and
+  // that it does not cost the real declarations a single tail.
+  battery('the ROUTE SOURCE concept: two kinds, and the runtime-registration guard (#11857)');
+
+  // The shape kind (b) exists to admit: a contract declaring its verb beside its path.
+  const contractDecl = [
+    'export const StorageApiContracts = {',
+    '  getPresignedUrl: {',
+    "    method: 'POST' as const,",
+    "    path: '/api/v1/storage/upload/presigned',",
+    '    input: GetPresignedUrlRequestSchema,',
+    '  },',
+    '};',
+  ].join('\n');
+  check('parseRouteSource', 'a contract declaring its VERB beside its path is a route source',
+    'tails under the guard', JSON.stringify(['/api/v1/storage/upload/presigned']),
+    JSON.stringify([...parseRouteSource(contractDecl, { requireMethodSignal: true }).keys()]));
+
+  // The shape the guard exists to keep out — `packages/spec/src/conversions/registry.ts`'s
+  // own, reduced to the two lines that matter. A path inside a connector-action `input:`
+  // is an ARGUMENT to an action, not a route anything serves.
+  const connectorInput = [
+    '      {',
+    "        id: 'n5',",
+    "        type: 'connector_action',",
+    "        connectorConfig: { connectorId: 'rest', actionId: 'get' },",
+    "        config: { input: { path: '/api/v1/health' } },",
+    '      },',
+  ].join('\n');
+  check('parseRouteSource', 'a connector-action INPUT is not a route source — the guard declines it',
+    'tails under the guard', 0, parseRouteSource(connectorInput, { requireMethodSignal: true }).size);
+  // ⭐ THE COUNTERFACTUAL, and the reason the case above proves anything: the parser DOES
+  // read a tail out of that payload. What declines it is the guard, not a parse failure —
+  // without this pin the case above would keep passing if `path:` scanning broke entirely.
+  check('parseRouteSource', 'counterfactual: unguarded, that same payload DOES yield a tail',
+    'tails without the guard', JSON.stringify(['/api/v1/health']),
+    JSON.stringify([...parseRouteSource(connectorInput).keys()]));
+
+  // `actionId: 'get'` is one masked line from the path and reads like a verb to a human.
+  // It is not an HTTP `method:`, and the signal must not accept it — otherwise the guard
+  // admits the very file the ruling named.
+  check('hasRouteMethodSignal', 'an actionId is not an HTTP method — the signal keys on the KEY too',
+    "actionId: 'get'", false, hasRouteMethodSignal(["  actionId: 'get',", "  path: '/api/v1/health',"], 1));
+  check('hasRouteMethodSignal', 'and a non-HTTP `method:` value is not the signal either',
+    "method: 'cron'", false, hasRouteMethodSignal(["  method: 'cron',", "  path: '/api/v1/health',"], 1));
+  check('hasRouteMethodSignal', 'a one-line property list carries its own signal',
+    "{ method: 'GET', path: '/api/x' }", true, hasRouteMethodSignal(["  { method: 'GET', path: '/api/x' },"], 0));
+  check('hasRouteMethodSignal', 'and the verb is read case-insensitively — a lowercase `get` still registers',
+    "method: 'get'", true, hasRouteMethodSignal(["  method: 'get',", "  path: '/api/x',"], 1));
+
+  // THE MASKED-COMMENT GAP. `plugin-rest-api.zod.ts` has one site whose `method:` sits five
+  // LINES up but zero PROPERTIES up — a JSDoc block sits between them, which `maskComments`
+  // blanks to whitespace without moving a line. Blank-skipping is what makes the lookaround
+  // a property-list test rather than a line-distance one; a naive window misses this site.
+  const jsdocGap = ["      method: 'POST',", '   ', '  ', '     ', '  ', "      path: '/trigger/:name',"];
+  check('hasRouteMethodSignal', 'a JSDoc between the two properties is blank after masking — the site still signals',
+    'method five blank lines up', true, hasRouteMethodSignal(jsdocGap, 5));
+  // …and the lookaround is still BOUNDED: five non-blank properties away is a different
+  // object, and reads as one. The blank-skipping widens what counts as adjacent, never
+  // how many PROPERTIES away the verb may sit.
+  const farMethod = ["      method: 'POST',", '      a: 1,', '      b: 2,', '      c: 3,', '      d: 4,', "      path: '/trigger/:name',"];
+  check('hasRouteMethodSignal', 'but five NON-BLANK properties away is another object — not a signal',
+    'method past the lookaround', false, hasRouteMethodSignal(farMethod, 5));
+
+  // A DROPPED SITE STILL BOUNDS THE PREVIOUS WINDOW (#9503, one card on). The guard changes
+  // what a file CONTRIBUTES, never where another site's handler window ends — so a payload
+  // sitting between two real declarations must not let the first one swallow the second's
+  // handler symbols.
+  const guardedBoundary = [
+    "  { method: 'GET', path: '/api/v1/a',",
+    '    handler: firstImpl },',
+    '  filler1: 1,',
+    '  filler2: 2,',
+    '  filler3: 3,',
+    '  filler4: 4,',
+    "  { config: { input: { path: '/api/v1/payload' } } },",
+    '  filler5: 5,',
+    '  filler6: 6,',
+    '  filler7: 7,',
+    '  filler8: 8,',
+    "  { method: 'GET', path: '/api/v1/b',",
+    '    handler: secondImpl },',
+  ].join('\n');
+  const guarded = parseRouteSource(guardedBoundary, { requireMethodSignal: true });
+  check('parseRouteSource', 'the payload between them contributes no tail of its own',
+    'tails', JSON.stringify(['/api/v1/a', '/api/v1/b']), JSON.stringify([...guarded.keys()]));
+  check('parseRouteSource', 'and the first route does NOT absorb the second route\'s handler symbol',
+    'secondImpl', false, !!guarded.get('/api/v1/a')?.has('secondImpl'));
+  check('parseRouteSource', 'while its own handler symbol still lands in its window',
+    'firstImpl', true, !!guarded.get('/api/v1/a')?.has('firstImpl'));
+
+  // KIND (a) IS UNTOUCHED, which is the no-reach-regression half. A call site admitted by
+  // NAME contributes every tail it declares, guard or no guard — this is the default.
+  check('parseRouteSource', 'kind (a) is unguarded by DEFAULT — the same source yields the payload tail too',
+    'tails without the guard', JSON.stringify(['/api/v1/a', '/api/v1/payload', '/api/v1/b']),
+    JSON.stringify([...parseRouteSource(guardedBoundary).keys()]));
+
+  // ⚠️ THE GUARD'S KNOWN LIMIT, PINNED RATHER THAN LEFT TO BE DISCOVERED. The signal is a
+  // PROPERTY-LIST test, so a payload written INSIDE a real declaration's property list
+  // inherits that declaration's verb and is admitted. That is a bounded over-admission and
+  // an acceptable one: it can only happen inside a file that is a route source already, so
+  // it widens which TAILS one source contributes — never which FILES are sources. It is
+  // also why the connector-action pin above is stated on the REAL file: `registry.ts` has
+  // 61 path sites and not one of them sits beside an HTTP method.
+  check('hasRouteMethodSignal', 'a payload nested INSIDE a declaration\'s property list does inherit its verb',
+    'adjacent payload', true, hasRouteMethodSignal([
+      "  { method: 'GET', path: '/api/v1/a',",
+      "    config: { input: { path: '/api/v1/payload' } } },",
+    ], 1));
+  check('CALL_SITE_FILE_RE', 'and the call-site convention itself is unchanged by the rename',
+    'packages/rest/src/rest-server.ts', true, CALL_SITE_FILE_RE.test('packages/rest/src/rest-server.ts'));
+
+  // ── The isTestFile pin, stated over the ROUTE SOURCE population (#12965 / #11857) ──
+  //
+  // The card measured THREE non-registrars the evidence route admits. Two of them — a
+  // fixture under `test/fixtures/` and a `.bench.ts` benchmark — stopped being admitted
+  // when `isTestFile` grew those arms, so this card re-excludes NEITHER by name. The
+  // ruling's instruction was to PIN that rather than re-state it: these are the two real
+  // repo paths, asserted over the predicate the walk actually calls, so the day either arm
+  // is loosened the fixture and the benchmark come back as contract declarations and THIS
+  // says so — instead of two phantom route sources appearing in the census.
+  for (const [rel, why] of [
+    ['packages/qa/dogfood/test/fixtures/endpoint-policy-fixture.ts', 'the #11857 fixture — kept out by isTestFile, NOT by name'],
+    ['packages/spec/src/benchmark.bench.ts', 'the #11857 benchmark — kept out by isTestFile, NOT by name'],
+  ]) {
+    check('isTestFile', `${why} — so the walk never offers it to EITHER kind`, rel, true, isTestFile(rel));
+  }
+
+  // ── LIVE pins: the three claims this card makes about the real tree ──
+  //
+  // Fixtures cannot carry these: each is a claim about what the REPO contains, and each is
+  // a number the PR body quotes. Read off the same scan the report prints from.
+  {
+    const live = scanRouteSurface();
+    const liveKind = (k) => live.routeSources.filter((r) => r.kind === k).map((r) => r.file);
+
+    // (1) The guard's target, on the real file rather than a reduced fixture.
+    check('scanRouteSurface', 'the connector-action input is NOT admitted as a route source',
+      'packages/spec/src/conversions/registry.ts', false,
+      live.routeSources.some((r) => r.file === 'packages/spec/src/conversions/registry.ts'));
+    const registryText = (() => {
+      try { return readFileSync(join(repoRoot, 'packages/spec/src/conversions/registry.ts'), 'utf8'); } catch { return null; }
+    })();
+    // The same counterfactual as the fixture pair above, on the real file: it is EVIDENCE
+    // that would admit it, and the guard is the only thing that does not.
+    check('scanRouteSurface', 'counterfactual: unguarded, that real file WOULD be admitted — the guard is what excludes it',
+      'registry.ts tails, unguarded', true, registryText === null || parseRouteSource(registryText).size > 0);
+
+    // (2) The five spec contract declarations the ruling admits, each carrying the signal.
+    check('scanRouteSurface', 'every contract declaration admitted is a packages/spec API declaration',
+      'kind=contract', true, liveKind('contract').every((f) => f.startsWith('packages/spec/src/api/')));
+
+    // (3) THE LEDGER EXCLUSION IS A MEASURED NO-OP, not an assumption. Most ledger names
+    // match the call-site convention (`route-ledger.ts` carries `route`), so before this
+    // card every ledger was also parsed as a registrar. Narrowing kind (a) to exclude them
+    // moves a tail only if some ledger declares a `path:` route — none does today, and
+    // this is the assertion that reds the day one starts.
+    let ledgerTails = 0;
+    for (const rel of live.conventionFiles.filter((f) => LEDGER_FILE_RE.test(f))) {
+      try { ledgerTails += parseRouteSource(readFileSync(join(repoRoot, rel), 'utf8')).size; } catch { /* unreadable contributes none */ }
+    }
+    check('scanRouteSurface', 'no route LEDGER declares a route tail — so excluding ledgers from kind (a) moved nothing',
+      'tails declared by the live route ledgers', 0, ledgerTails);
+  }
 
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
   //
