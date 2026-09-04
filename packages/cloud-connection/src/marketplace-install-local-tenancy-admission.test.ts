@@ -218,15 +218,19 @@ async function mount(tenancy: Tenancy, storageDir: string): Promise<Mounted> {
     }
     // 'unregistered' → nothing registered: the branded not-registered rejection.
 
+    // Bound OUT of the `any`-typed literal below: a lookup call nested inside a
+    // `: any` declaration is the #4251 erasure shape, and `check:slot-lookup`
+    // reports it here exactly as it would in source.
+    const getService = kernel.getService.bind(kernel);
     const ctx: any = {
         hook: (e: string, h: any) => hooks.set(e, h),
-        getService: (name: string) => kernel.getService(name),
+        getService,
         registerService: () => undefined,
         logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
         // A `KernelBase`-shaped host exposes `getKernel()` and has NO
         // `getServiceAsync` at all — the shape the seam must answer quietly
         // rather than dereference into a `TypeError`.
-        getKernel: () => (tenancy.kind === 'no-async-registry' ? { getService: kernel.getService.bind(kernel) } : kernel),
+        getKernel: () => (tenancy.kind === 'no-async-registry' ? { getService } : kernel),
     };
 
     const plugin = new MarketplaceInstallLocalPlugin({ controlPlaneUrl: 'off', storageDir });
