@@ -118,7 +118,7 @@ import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.
  * `protocol.rollbackToPackageCommmit` is now a compile error where the `any`
  * handle took any spelling at all.
  */
-type PackagesDomainProtocol =
+export type PackagesDomainProtocol =
     Partial<Pick<MetadataProtocol, 'getMetaItem' | 'getMetaItems' | 'saveMetaItem'>>
     & Partial<Pick<PackageProtocol, 'installPackage'>>
     & {
