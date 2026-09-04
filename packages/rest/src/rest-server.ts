@@ -2411,24 +2411,28 @@ export class RestServer {
             // dereference and every embedder on that wiring would take the loud
             // answer.
             //
-            // [#15256 — maintainer ruling 2026-09-04, decision 1A] ⭐ SUPERSEDED
-            // TEXT, quoted so the correction is legible from this file alone.
-            // The paragraph above used to end:
+            // [#15256 — maintainer ruling 2026-09-04, decision 1A] ⭐ CORRECTED.
+            // This paragraph used to end by asserting that the single-kernel
+            // path carried no posture at all, and that its half of the #13906
+            // ruling (option B′) was handled by a startup refusal over in
+            // `rest-api-plugin.ts`. Both halves of that were FALSE on this tree:
+            // B′ was WITHDRAWN on 2026-09-04, `rest-api-plugin.ts` never carried
+            // such a refusal, and so this file documented a p0 seam as covered
+            // when nothing covered it. ⛔ Do not reintroduce a startup refusal
+            // here in any form.
             //
-            //     "That path carries no posture at all; its half of this
-            //      ruling (decision 1 option B′) is refused at BOOT instead —
-            //      see `rest-api-plugin.ts`."
+            // That sentence is PARAPHRASED above rather than quoted, on purpose:
+            // a verbatim copy goes on answering the greps that look for the
+            // withdrawn remedy, and it already caused this seam to be re-read as
+            // unrepaired once. The pin that forbids the phrase returning lives in
+            // `execctx-authz-input-seam-reachability.test.ts`.
             //
-            // Both halves of that sentence were wrong on this tree. B′ (the
-            // boot refusal) was WITHDRAWN on 2026-09-04 and `rest-api-plugin.ts`
-            // never carried it — a p0 seam documented as covered when it was
-            // not. And "that path carries no posture at all" is no longer true:
-            // the single-kernel branch below DERIVES the posture, from a
-            // provider `rest-api-plugin` wires to the lone local kernel's
-            // `tenancy` service — the same way this method already obtains
-            // `authService`. Measured consequence of the absence, on this exact
-            // wiring under a healthy `isolated` posture, with an API key stamped
-            // with an organization its owner had left:
+            // What is true now: the single-kernel branch below DERIVES the
+            // posture, from a provider `rest-api-plugin` wires to the lone local
+            // kernel's `tenancy` service — the same way this method already
+            // obtains `authService`. Measured consequence of its absence, on this
+            // exact wiring under a healthy `isolated` posture, with an API key
+            // stamped with an organization its owner had left:
             //
             // | wiring                          | before | after |
             // |:--|:--|:--|
