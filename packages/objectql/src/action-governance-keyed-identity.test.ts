@@ -41,13 +41,25 @@
  * ---------------------------------------------------------------------------
  * Reverse verification, direction predicted BEFORE running
  * ---------------------------------------------------------------------------
- * Ordinary red. Reverting the keyed source (dropping `loadStandaloneActionsKeyed`
- * so `collectEngineActionDeclarations` reads `loadMany` again) reds the
- * identity block; reverting the by-name rung (dropping `lookupMetadataAction`)
- * reds the availability block. Each control case — the ones asserting a
- * handler IS still named — must stay GREEN through both reversions, because a
- * fix that silences the audit everywhere would pass a suite that only checked
- * the accusations disappearing. The measured outcome is in the PR body.
+ * Ordinary red, predicted before running and then measured — the two
+ * reversions are independent and their red sets must not overlap:
+ *
+ *  - drop `lookupMetadataAction` from the probe list → predicted 3 red,
+ *    MEASURED **4 red / 11 green**. The extra one is `POSITIVE CONTROL`, and
+ *    it is right to be there: that case asserts exactly WHICH of two handlers
+ *    is cleared, so it is a discriminator as well as a control and it cannot
+ *    survive the rung it discriminates on. The purely-negative controls —
+ *    `CONSERVATIVE` and the ownership test, both asserting a handler IS still
+ *    named — stayed green, which is the property that matters: a "fix" that
+ *    silenced the audit everywhere would red them.
+ *  - make `collectEngineActionDeclarations` ignore the keyed source →
+ *    predicted and MEASURED **6 red / 9 green**, all inside the identity
+ *    block plus the two probe-count cases (with no declarations at all, every
+ *    handler is unaccounted for and every probe fires).
+ *
+ * Two cases stay green under BOTH reversions by construction and say so:
+ * `BEFORE, structurally` (it pins the old behaviour) and `a keyed source that
+ * throws` (it pins a degradation that has no keyed answer either way).
  */
 
 import { describe, it, expect, vi } from 'vitest';
