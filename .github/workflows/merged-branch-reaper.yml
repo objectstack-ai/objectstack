@@ -1,13 +1,46 @@
-name: Merged-Branch Reaper (report-only)
+name: Merged-Branch Reaper
 
 # The standing sweep for #12771: `claude/*` branches that outlived the PR they
 # were the head of.
 #
-# ⛔⛔ THIS WORKFLOW DELETES NOTHING. It classifies and reports. The deleting
-# mode is deliberately ABSENT, not merely switched off — see "Enabling the
-# deleting mode" at the bottom of this header. The maintainer's ruling of
-# 2026-08-28 requires that the first delivery produce the would-delete list for
-# one human look BEFORE deletion is ever enabled.
+# ⚠️⚠️ THIS WORKFLOW DELETES BRANCHES. It was ARMED on 2026-09-04 by the
+# maintainer's ruling on #12771 (decision batch #30), which reaffirmed the
+# ruling of 2026-08-31 once the base-ref guard of #13503 had landed (PR #15144).
+# Before that it classified and reported and the deleting mode was absent; the
+# history below is kept because every fence it records is still load-bearing.
+#
+# Exactly what deletes, and what never does:
+#
+#   DELETES   the `reapable` bucket, and nothing else: a `claude/*` branch whose
+#             OWN pull request reports `merged_at` AND `base.ref === 'main'`,
+#             past the grace window, with no open PR of its own.
+#   NEVER     `mergedElsewhere`, `closedUnmerged`, `noPr`, `open`, `grace`,
+#             `protectedBranch`. All six stay REPORT-ONLY — listed in the run
+#             log every sweep, never touched. Widening past `reapable` is a new
+#             maintainer ruling, ⛔ not an edit to this file.
+#   NEVER     on `pull_request`. The self-exercising run below stays a DRY RUN,
+#             which is what keeps "edit this workflow" from meaning "delete
+#             branches". The `reap` job's `if:` excludes it explicitly.
+#   NEVER     on a `workflow_dispatch` unless the operator sets `dry_run: false`.
+#             That input defaults to TRUE, so the manual path is fail-closed: a
+#             manual run is for LOOKING at the list unless someone says otherwise.
+#
+# The deletion list is printed to the run log BEFORE the first deletion. That
+# log is the audit trail the ruling asks for.
+#
+# ## Two jobs, because `permissions:` is scoped per JOB
+#
+# `sweep` classifies. It runs with `contents: read` + `pull-requests: read` and
+# is structurally incapable of deleting a ref — the same token grant it was
+# reviewed under, and the one every scenario of the contract harness drives.
+# `reap` consumes the `reapable` list `sweep` published as a job output and is
+# the ONLY job in this file holding `contents: write`.
+#
+# The split is the point. Deleting needs a write grant; classifying must not
+# have one. A single job would have handed the write token to the ~140 lines
+# that decide WHICH branches, where a defect turns into a deleted branch. As
+# split, the write token reaches one job that makes no classification decision
+# of its own: it re-checks the prefix, prints the list, and calls DELETE.
 #
 # ## The criterion is PR state MERGED. ⛔⛔ NEVER `is-ancestor`.
 #
@@ -27,6 +60,44 @@ name: Merged-Branch Reaper (report-only)
 #
 # `is-ancestor` proves "nothing would be lost". It does NOT prove the converse,
 # and the converse is what a reaper needs.
+#
+# ## MERGED is not MERGED INTO `main` — the base-ref guard (#13503)
+#
+# `merged_at` says a pull request landed. It does not say WHERE. A stacked PR
+# whose base is another dev branch reports `merged_at` exactly like one that
+# landed on `main`, and its content reaches `main` only if that base branch
+# itself later merged — a second hop this deliberately flat criterion cannot
+# see and must not start guessing at.
+#
+# Measured, not supposed (the #13503 census, 2026-09-02, over the 678
+# `copilot/*` branches): of 575 MERGED, 48 (8.3%) merged into something other
+# than `main`. Walking all 48 — 43 have a base that itself later merged to
+# `main`, so the content lands via a 2-hop chain; 4 have a base that no longer
+# exists and could not be re-verified; and 1, `copilot/check-action-run-status`
+# (based on a PR that closed WITHOUT merging), is a MERGED branch whose content
+# has no confirmed path to `main` at all. Against that last one the unguarded
+# criterion says "safe to delete", and it is wrong.
+#
+# So `reapable` now additionally requires that at least one of the branch's
+# merged PRs reports `base.ref === 'main'`. Everything else that merged goes to
+# `mergedElsewhere`: reported in full, never reaped — the 43 safe-by-chain ones
+# included. That asymmetry is the point. A reaper's two error directions do not
+# cost the same: an unreaped branch costs a line of noise in `ls-remote`, a
+# wrongly reaped one costs work that exists nowhere else. The guard buys the
+# removal of the one false positive with a handful of false negatives, at a
+# measured rate of 48 held per 575 merged.
+#
+# ⛔ THE GUARD ONLY NARROWS, and that is asserted rather than asked for on
+# trust. `scripts/check-merged-branch-reaper-outcome.mjs` extracts THIS script
+# from THIS file and drives it under doubles, holding the invariant
+# `reapable ⇒ that branch has a merged PR whose base is main` over every
+# scenario — so no later edit here can widen what is reaped without turning
+# that check red, and its `--self-test` deletes the guard and requires the
+# battery to notice.
+#
+# ⛔ It is NOT `is-ancestor` wearing a new hat. The base ref is read off the PR
+# RECORD, which is the instrument the section above mandates; nothing here asks
+# git whether a commit is reachable from anything.
 #
 # ## Why a scheduled sweep and NOT `on: pull_request` — measured, 2026-08-30
 #
@@ -74,25 +145,44 @@ name: Merged-Branch Reaper (report-only)
 # NEW RULING (what proves such a branch is abandoned rather than in flight?),
 # not an implementation detail, and is deliberately NOT taken here.
 #
-# ## Report-only is enforced by the TOKEN, not just by the code
+# ## The CLASSIFIER is still report-only by the TOKEN, and that has not changed
 #
-# `permissions: contents: read` below is the whole grant. Deleting a ref needs
-# `contents: write`. So even a defect in the classification cannot delete a
-# branch: the token this job runs with is structurally incapable of it. That is
-# the property to preserve when reviewing changes to this file.
+# The `sweep` job's grant is `contents: read`. Deleting a ref needs
+# `contents: write`. So a defect in the classification still cannot delete a
+# branch by itself: the token that job runs with remains structurally incapable
+# of it, and the deletion is a separate job downstream of an explicit hand-off.
+# That is the property to preserve when reviewing changes to this file — ⛔ do
+# not move the delete call into the `sweep` job, and ⛔ do not raise the
+# top-level `permissions:`.
 #
-# ## Enabling the deleting mode (NOT done here — the maintainer's call)
+# ## The deleting mode, as armed (2026-09-04)
 #
-# Three edits, deliberately left undone so that enabling is a reviewed diff and
-# not a flipped default:
-#   1. raise `permissions:` to `contents: write`;
-#   2. add a step calling `DELETE /repos/{owner}/{repo}/git/refs/heads/{branch}`
-#      over the `reapable` list this job already computes and uploads;
-#   3. decide the CLOSED-unmerged policy. The default here is MERGED-ONLY.
-#      Reaping closed-but-unmerged branches discards work that was never
-#      merged — that is the maintainer's call to make, not this workflow's to
-#      assume.
-# The grace period below should stay in place when that happens.
+# The three edits this header used to list as deliberately-undone, and what each
+# became:
+#   1. `permissions: contents: write` — done, but SCOPED TO THE `reap` JOB, not
+#      raised at the top level. It is the only `contents: write` in the file.
+#   2. `DELETE /repos/{owner}/{repo}/git/refs/heads/{branch}` over the
+#      `reapable` list — done, in `reap`, consuming the list `sweep` publishes
+#      as a job output. ⛔ It consumes no other bucket.
+#   3. the CLOSED-unmerged policy — UNCHANGED and still MERGED-ONLY. Reaping
+#      closed-but-unmerged branches discards work that never landed; the
+#      maintainer's ruling of 2026-09-04 left that exclusion exactly where it
+#      was. `closedUnmerged` remains report-only.
+# The grace period stays in place, as that note required.
+#
+# ## ⛔ What arming did NOT change
+#
+# ⛔ No seat identity gains delete rights — option B of #12771 stays refused.
+# The delete grant lives in this one job and expires with the run; no agent
+# container, credential or workflow elsewhere gains it.
+# ⛔ `PREFIX` is untouched: `copilot/` is on #13503's own release line and this
+# workflow must not reach it.
+# ⛔ `is-ancestor` remains forbidden, and the reverse check against it stays.
+# ⛔ The classifier's contract harness
+# (`scripts/check-merged-branch-reaper-outcome.mjs`) still drives the `sweep`
+# script and still holds `reapable => merged PR based on main` over every
+# scenario. Deletion deliberately lives OUTSIDE the extracted script so that
+# what the harness judges is unchanged in kind: a classification, not an action.
 
 # ## Why this workflow declares no check family
 #
@@ -100,12 +190,24 @@ name: Merged-Branch Reaper (report-only)
 # `check:*` family or declare why it has none. This one genuinely has none: its
 # single step is an API sweep run through `actions/github-script`, not a named
 # local verification, so there is no `check:*` script a card's file surface
-# could ever schedule. The `pull_request` filter below is not a verification
-# step either — it exists so that edits to this file exercise the sweep before
-# they merge, and that is not decoration: it is what produced this workflow's
-# first real dry-run list ("111 of 335 ... would be deleted", run 33318728567),
-# which is the one human look the 2026-08-28 ruling requires before deletion is
-# ever enabled. Removing the filter to satisfy the gate would delete that.
+# could ever schedule.
+#
+# ⚠️ Since #13503 there IS a gate over this file — the classifier's contract,
+# `scripts/check-merged-branch-reaper-outcome.mjs` — and it does NOT change the
+# declaration below, deliberately. That gate does not run HERE; it runs in
+# lint.yml beside its two sibling harnesses (the cross-repo closer, the
+# merge-queue triage bot), where a red blocks and where the toolchain it needs
+# is already installed. This marker answers "does THIS workflow's own steps
+# discover a family", and the answer is still no. A card touching this file
+# still gets that gate scheduled, because the gate names this path in its own
+# source, which is how `dispatch-gates` derives a family in the first place.
+#
+# The `pull_request` filter below is not a verification step either — it exists
+# so that edits to this file exercise the sweep before they merge, and that is
+# not decoration: it is what produced this workflow's first real dry-run list
+# ("111 of 335 ... would be deleted", run 33318728567), which is the one human
+# look the 2026-08-28 ruling requires before deletion is ever enabled. Removing
+# the filter to satisfy the gate would delete that.
 #
 # dispatch-gates: no-check-families -- the only step is an API sweep via actions/github-script; no named local check exists to run
 
@@ -122,6 +224,16 @@ on:
         description: 'Do not list a merged branch until its PR merged this many days ago.'
         required: false
         default: '7'
+      dry_run:
+        # ⛔ Defaults to TRUE, and the default is the point. "workflow_dispatch
+        # kept for a manual run" reads fail-closed: a manual run is for LOOKING
+        # at the list. Deleting by hand is an explicit `dry_run: false`, typed
+        # by whoever wants it, on the one run they want it on. The scheduled
+        # weekly run is the armed path the ruling authorises; this one is not.
+        description: 'Classify and report only. Uncheck to actually delete the reapable branches.'
+        type: boolean
+        required: false
+        default: true
   # Exercise the sweep on changes to itself, the same posture as
   # required-set-patrol.yml. This is what makes the FIRST delivery of this PR a
   # real would-delete list produced by a real runner rather than a claim about
@@ -130,9 +242,12 @@ on:
     paths:
       - '.github/workflows/merged-branch-reaper.yml'
 
-# Least privilege, and load-bearing: see "Report-only is enforced by the TOKEN".
-# `contents: read` lists branches; `pull-requests: read` reads PR state. Neither
-# can delete a ref.
+# Least privilege, and load-bearing: see "Two jobs, because `permissions:` is
+# scoped per JOB". This top-level grant is the DEFAULT and it is READ-ONLY —
+# `contents: read` lists branches, `pull-requests: read` reads PR state, and
+# neither can delete a ref. ⛔ Do not raise it: the one job that deletes
+# overrides it locally, and that override is the only `contents: write` in this
+# file precisely because this one stays read.
 permissions:
   contents: read
   pull-requests: read
@@ -150,6 +265,16 @@ jobs:
     name: Merged-branch sweep (report-only)
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Stated at job level rather than inherited, so that reading THIS job never
+    # requires scrolling to the top of the file to learn that it cannot delete.
+    permissions:
+      contents: read
+      pull-requests: read
+    # The hand-off to `reap`. `reapable_branches` is the machine-readable half
+    # of the list the step above prints; `reap` consumes it and computes nothing.
+    outputs:
+      reapable_count: ${{ steps.sweep.outputs.reapable }}
+      reapable_branches: ${{ steps.sweep.outputs.reapable_branches }}
     steps:
       - name: Classify every claude/* branch by the state of its PR
         id: sweep
@@ -161,6 +286,10 @@ jobs:
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const PREFIX = 'claude/';
+            // The one base a merge has to land on for this reaper to call a
+            // branch reapable. See "MERGED is not MERGED INTO `main`" above:
+            // read off the PR record, never from git reachability.
+            const BASE_REF = 'main';
             const graceDays = Number(process.env.GRACE_DAYS || '7');
             if (!Number.isFinite(graceDays) || graceDays < 0) {
               core.setFailed(`grace_days must be a non-negative number, got ${process.env.GRACE_DAYS}`);
@@ -181,7 +310,7 @@ jobs:
             // --- 2. classify by PR state ------------------------------------------
             // ⛔ NO `is-ancestor` ANYWHERE. The only question asked of each branch is
             // "does a PR whose head ref is this branch report a merged_at?".
-            const buckets = { reapable: [], grace: [], open: [], closedUnmerged: [], noPr: [], protectedBranch: [] };
+            const buckets = { reapable: [], grace: [], open: [], mergedElsewhere: [], closedUnmerged: [], noPr: [], protectedBranch: [] };
 
             for (const branch of candidates) {
               if (branch.protected) {
@@ -206,6 +335,13 @@ jobs:
               const merged = mine.filter((pr) => pr.merged_at);
               const open = mine.filter((pr) => pr.state === 'open');
 
+              // The base-ref guard (#13503). `merged_at` is WHETHER it landed;
+              // `base.ref` is WHERE. A PR record with no `base` at all answers
+              // neither, so it is counted as NOT main — the fail-closed
+              // direction, because the cost of being wrong here is a deleted
+              // branch.
+              const intoMain = merged.filter((pr) => pr.base && pr.base.ref === BASE_REF);
+
               if (merged.length > 0) {
                 // Newest merge wins: a branch reused across two PRs is safe to reap
                 // only once the LAST of them has landed and aged out of the grace
@@ -217,10 +353,30 @@ jobs:
                 // reapable, whatever the merge says.
                 if (open.length > 0) {
                   buckets.open.push({ branch: branch.name, pr: open[0].number, note: 'also has a merged PR' });
+                } else if (intoMain.length === 0) {
+                  // Merged, but never onto `main`. Held and REPORTED, never
+                  // reaped. The grace window is deliberately not consulted:
+                  // this exclusion does not age out, it is answered by a human
+                  // reading the list or by the base branch landing later.
+                  buckets.mergedElsewhere.push({
+                    branch: branch.name,
+                    pr: newest.number,
+                    merged_at: newest.merged_at,
+                    base: (newest.base && newest.base.ref) || '(no base on the PR record)',
+                  });
                 } else if (new Date(newest.merged_at).getTime() > graceCutoff) {
                   buckets.grace.push({ branch: branch.name, pr: newest.number, merged_at: newest.merged_at });
                 } else {
-                  buckets.reapable.push({ branch: branch.name, pr: newest.number, merged_at: newest.merged_at });
+                  // `newest` is still the newest of ALL merged PRs, not of the
+                  // main-based ones: the grace window must not shorten because
+                  // of the guard. The guard only ever REMOVES branches from
+                  // this bucket.
+                  buckets.reapable.push({
+                    branch: branch.name,
+                    pr: newest.number,
+                    merged_at: newest.merged_at,
+                    base_pr: intoMain[0].number,
+                  });
                 }
               } else if (open.length > 0) {
                 buckets.open.push({ branch: branch.name, pr: open[0].number });
@@ -237,10 +393,10 @@ jobs:
               arr.slice(0, k).map(fmt).join('\n') + (arr.length > k ? `\n_...and ${arr.length - k} more_` : '');
 
             const lines = [];
-            lines.push('## Merged-branch reaper — DRY RUN. Nothing was deleted.');
+            lines.push('## Merged-branch reaper — classification. THIS JOB deletes nothing.');
             lines.push('');
             lines.push(`Criterion: **a PR whose head ref is the branch reports \`merged_at\`**. ⛔ Never \`is-ancestor\`.`);
-            lines.push(`Grace period: **${graceDays} day(s)** since merge. Token grant: \`contents: read\` — this job cannot delete a ref.`);
+            lines.push(`Grace period: **${graceDays} day(s)** since merge. Token grant: \`contents: read\` — this job cannot delete a ref; only the \`reap\` job can, and only over the ✅ row below.`);
             lines.push('');
             lines.push(`### Population: ${total} \`${PREFIX}\` branches (of ${allBranches.length} on the remote)`);
             lines.push('');
@@ -249,6 +405,7 @@ jobs:
             lines.push(`| MERGED, past grace | ${n(buckets.reapable)} | ${pct(buckets.reapable)}% | ✅ would delete |`);
             lines.push(`| MERGED, within grace | ${n(buckets.grace)} | ${pct(buckets.grace)}% | held ${graceDays}d |`);
             lines.push(`| OPEN PR | ${n(buckets.open)} | ${pct(buckets.open)}% | ⛔ excluded — in use |`);
+            lines.push(`| MERGED, but not into \`${BASE_REF}\` | ${n(buckets.mergedElsewhere)} | ${pct(buckets.mergedElsewhere)}% | ⛔ excluded — base-ref guard |`);
             lines.push(`| CLOSED, unmerged | ${n(buckets.closedUnmerged)} | ${pct(buckets.closedUnmerged)}% | ⛔ excluded — MERGED-only policy |`);
             lines.push(`| NO PR at all | ${n(buckets.noPr)} | ${pct(buckets.noPr)}% | ⛔ unreachable by construction |`);
             lines.push(`| protected | ${n(buckets.protectedBranch)} | ${pct(buckets.protectedBranch)}% | ⛔ excluded |`);
@@ -264,6 +421,11 @@ jobs:
             lines.push(`**OPEN PR (${n(buckets.open)})** — still in use:`);
             lines.push(n(buckets.open) ? sample(buckets.open, (r) => `- \`${r.branch}\` — PR #${r.pr}${r.note ? ` (${r.note})` : ''}`) : '_none_');
             lines.push('');
+            lines.push(`**MERGED, but not into \`${BASE_REF}\` (${n(buckets.mergedElsewhere)})** — the base-ref guard. \`merged_at\` says it landed, the base says not here; the content reaches \`${BASE_REF}\` only if the base branch itself merged, and that second hop is not a question this criterion can answer. Held for a human look:`);
+            lines.push(n(buckets.mergedElsewhere)
+              ? sample(buckets.mergedElsewhere, (r) => `- \`${r.branch}\` — PR #${r.pr} merged into \`${r.base}\` at ${r.merged_at}`, 40)
+              : '_none_');
+            lines.push('');
             lines.push(`**CLOSED, unmerged (${n(buckets.closedUnmerged)})** — work that never landed; MERGED-only is the default policy:`);
             lines.push(n(buckets.closedUnmerged) ? sample(buckets.closedUnmerged, (r) => `- \`${r.branch}\` — PR #${r.pr}`) : '_none_');
             lines.push('');
@@ -278,9 +440,23 @@ jobs:
             const payload = { generated_at: new Date().toISOString(), grace_days: graceDays, total_branches: allBranches.length, prefix_branches: total, buckets };
             require('fs').writeFileSync(`${process.env.RUNNER_TEMP}/branch-reaper-report.json`, JSON.stringify(payload, null, 2));
 
-            core.notice(`Dry run: ${n(buckets.reapable)} of ${total} ${PREFIX} branches would be deleted. ${n(buckets.noPr)} have no PR and are unreachable by this criterion. Nothing was deleted.`);
+            core.notice(
+              `Sweep: ${n(buckets.reapable)} of ${total} ${PREFIX} branches are reapable and are handed to the \`reap\` job. `
+              + `Report-only, never reaped: ${n(buckets.mergedElsewhere)} merged somewhere other than \`${BASE_REF}\` and held by the base-ref guard; `
+              + `${n(buckets.noPr)} have no PR and are unreachable by this criterion; ${n(buckets.open)} have an open PR; `
+              + `${n(buckets.closedUnmerged)} closed unmerged; ${n(buckets.grace)} merged within the ${graceDays}-day grace window; `
+              + `${n(buckets.protectedBranch)} protected. This job deleted nothing — its token grant is \`contents: read\`.`,
+            );
             core.setOutput('reapable', String(n(buckets.reapable)));
             core.setOutput('no_pr', String(n(buckets.noPr)));
+            core.setOutput('merged_elsewhere', String(n(buckets.mergedElsewhere)));
+            // The machine-readable half of the deletion list, and the ONLY
+            // thing the `reap` job consumes. It is the `reapable` bucket and
+            // nothing else, so what deletes is exactly what was classified
+            // reapable and exactly what the log above printed. The contract
+            // harness pins that equality (scenarios G1/G2/R1, mutations
+            // M13/M14) so no later edit can widen the list without a red.
+            core.setOutput('reapable_branches', JSON.stringify(buckets.reapable.map((r) => r.branch)));
 
       - name: Upload the full classification
         # `always()`: a run whose report is missing because an earlier step died
@@ -291,3 +467,119 @@ jobs:
           name: branch-reaper-report
           path: ${{ runner.temp }}/branch-reaper-report.json
           if-no-files-found: warn
+
+  reap:
+    # ⛔ NOT a required context either, and must never become one.
+    name: Delete the reapable branches
+    needs: sweep
+    # ⛔⛔ The fence that keeps a dry run dry. Three clauses, and the second is
+    # deliberately redundant with the third:
+    #   - `success()` is WRITTEN rather than left to GitHub's implicit wrapper
+    #     (#5343): if `sweep` died there is no classification to act on, and
+    #     "the classifier failed" must never read the same as "nothing to do".
+    #   - `!= 'pull_request'` on its own clause, because it is the one exclusion
+    #     a reader must be able to find without evaluating the rest. Editing
+    #     this workflow exercises the sweep; it must never delete a branch.
+    #   - then an ALLOWLIST of the two armed paths: the weekly `schedule` the
+    #     2026-09-04 ruling authorises, and a `workflow_dispatch` on which the
+    #     operator explicitly unset the `dry_run` default.
+    # An allowlist is used rather than a denylist so that a trigger added to
+    # this workflow later is DRY by default and has to be armed on purpose.
+    if: >-
+      success()
+      && github.event_name != 'pull_request'
+      && (github.event_name == 'schedule'
+      || (github.event_name == 'workflow_dispatch' && inputs.dry_run == false))
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # ⛔ The ONLY `contents: write` in this file, and the only job that can
+    # delete a ref. It expires with the run: no seat identity, container or
+    # credential gains delete rights from it (#12771 option B stays refused).
+    permissions:
+      contents: write
+    steps:
+      - name: Delete every branch in the reapable bucket
+        uses: actions/github-script@v9
+        env:
+          REAPABLE: ${{ needs.sweep.outputs.reapable_branches }}
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            // Re-checked here, not trusted. `sweep` only ever puts prefixed
+            // branches in the bucket, so a violation is a corrupted hand-off
+            // rather than a branch to delete anyway — and the cost of being
+            // wrong in this job is a branch that exists nowhere else.
+            const PREFIX = 'claude/';
+
+            let branches;
+            try {
+              branches = JSON.parse(process.env.REAPABLE || '[]');
+            } catch (err) {
+              core.setFailed(`the reapable list handed over by \`sweep\` is not JSON -- ${err.message}. Nothing was deleted.`);
+              return;
+            }
+            if (!Array.isArray(branches)) {
+              core.setFailed('the reapable list handed over by `sweep` is not an array. Nothing was deleted.');
+              return;
+            }
+            const stray = branches.filter((b) => typeof b !== 'string' || !b.startsWith(PREFIX));
+            if (stray.length > 0) {
+              core.setFailed(
+                `the reapable list contains ${stray.length} entry/entries outside \`${PREFIX}\`: ` +
+                `${stray.join(', ')}. Nothing was deleted -- a hand-off this wrong is not one to act on partially.`,
+              );
+              return;
+            }
+            if (branches.length === 0) {
+              core.info(`The sweep classified nothing as reapable. Nothing to delete.`);
+              return;
+            }
+
+            // The audit trail the ruling asks for: the WHOLE list, in the run
+            // log, before the first deletion — so a run that dies halfway still
+            // leaves behind what it intended to do.
+            core.info(`Deleting ${branches.length} branch(es) classified \`reapable\` by the sweep job:`);
+            for (const branch of branches) core.info(`  - ${branch}`);
+
+            const deleted = [];
+            const alreadyGone = [];
+            const failed = [];
+            for (const branch of branches) {
+              core.info(`deleting ${branch}`);
+              try {
+                await github.rest.git.deleteRef({ owner, repo, ref: `heads/${branch}` });
+                deleted.push(branch);
+              } catch (err) {
+                // A ref already gone is not a failure: `delete_branch_on_merge`
+                // reaps 1385 of every 1386 natively, so losing the race to the
+                // platform is the EXPECTED outcome, not an error.
+                if (err.status === 404 || err.status === 422) {
+                  alreadyGone.push(branch);
+                  core.info(`  already gone: ${branch}`);
+                  continue;
+                }
+                failed.push({ branch, status: err.status, message: err.message });
+                core.warning(`  FAILED ${branch}: ${err.status} ${err.message}`);
+              }
+            }
+
+            const lines = ['## Merged-branch reaper — DELETION PASS', ''];
+            lines.push(`Deleted **${deleted.length}**, already gone **${alreadyGone.length}**, failed **${failed.length}**, of ${branches.length} branch(es) the sweep classified \`reapable\`.`);
+            lines.push('');
+            lines.push(`⛔ Only the \`reapable\` bucket is touched. Every other bucket in the sweep's report is report-only and was not read by this job.`);
+            lines.push('');
+            for (const b of deleted) lines.push(`- ✅ deleted \`${b}\``);
+            for (const b of alreadyGone) lines.push(`- • already gone \`${b}\``);
+            if (failed.length > 0) {
+              lines.push('');
+              lines.push(`### ⛔ ${failed.length} deletion(s) failed`);
+              lines.push('');
+              for (const f of failed) lines.push(`- \`${f.branch}\` — ${f.status} ${f.message}`);
+            }
+            await core.summary.addRaw(lines.join('\n')).write();
+
+            core.notice(`Reaped ${deleted.length} of ${branches.length} ${PREFIX} branches (${alreadyGone.length} already gone, ${failed.length} failed).`);
+            if (failed.length > 0) {
+              core.setFailed(`${failed.length} branch deletion(s) failed -- see the log for each status.`);
+            }

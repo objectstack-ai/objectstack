@@ -79,13 +79,12 @@ one-argument constructor and its own docs, and fixes the discriminator.
 `ObjectStoreActionActivationStore` / `InMemoryActionActivationStore` /
 `ActionActivationRow` / `ActionActivationStore` / `ActionActivationStoreEngine`
 / `ACTION_ACTIVATION_TABLE` are exported from the same modules with the same
-shapes. Row semantics are byte-equivalent: install-level rows only
-(`organization_id` never written), org-carrying rows skipped on read and
-ignored when deciding insert-vs-update, a driver `0` read as false,
-read-then-write rather than a blind upsert, and no `delete` in the engine slice
-because re-enabling rewrites the row.
+shapes. Row semantics are byte-equivalent: deployment-level rows scoped only by
+the `metadata_type` discriminator, a driver `0` read as false, read-then-write
+rather than a blind upsert, and no `delete` in the engine slice because
+re-enabling rewrites the row.
 
 Both existing pin suites stay green **unchanged**, which is what makes them the
-proof the consolidation lost nothing — verified by ablation: removing the
-org-row skip from the one shared implementation turns both of them red on their
-own org-skip assertion, so both really reach it.
+proof the consolidation lost nothing — verified by ablation: mutating the one
+shared implementation turns both of them red on their own assertions, so both
+really reach it.

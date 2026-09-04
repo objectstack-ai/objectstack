@@ -447,7 +447,25 @@ export const CEILINGS = new Map([
   // for a second copy. +10 against a net source decrease of 11, so the map's
   // total falls by one; that is the ruling's own condition and the reason this
   // is a move rather than a raise. Landed count, headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/references/platform-readings.md', 324],
+  // Raised 324 -> 358 by the intake-family ruling — an ORDINARY raise under this
+  // map's own maintainer exit, ⛔ not a cross-file move. Maintainer, live PM chat,
+  // 2026-09-04, decision batch #27, verbatim and untranslated: 「同意」 on option A,
+  // and the sentences that ruling adopts, in the director record's own words:
+  //   the ceiling for `.claude/skills/pm-dispatch/references/platform-readings.md`
+  //   is raised by the measured need, +34, to 358 — a named, sized raise under the
+  //   ratchet's own maintainer exit … The +34 is a ceiling of the raise, not a
+  //   target: if the eight readings land in fewer lines, the raise is the smaller
+  //   number.
+  // Spent in full, and measured per member by writing each reading and wrapping it
+  // rather than estimating: chain head +5 (the page-walk 422 refusal at offset
+  // ~9,900 and the asc + desc partition recipe), payload channel +5, search query
+  // shape +3, channel envelope +6, merge-queue instrument +8, queue progress +2,
+  // end-of-shift report +3, body repair +2 = +34 exactly. Could not be paid in
+  // place: the deletions this file can offer were measured at 0 whole lines (~307
+  // bytes spread over three bullets, none of them completing a line inside its own
+  // bullet), and re-wrap funding is refused per the 2026-08-17 rule. Landed count,
+  // headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/references/platform-readings.md', 358],
   // Per-operation REST/GraphQL/git channel mapping — which fleet operation has
   // a REST twin (each row executed in a real session, provenance date carried
   // per row), the handful that are GraphQL-only, and the queue-routing
@@ -701,7 +719,26 @@ export const CROSS_FILE_MOVES = new Map([
     '.claude/skills/pm-dispatch/references/platform-readings.md',
     {
       ruling: 'per-repo readings consolidation, authorised by #14685 item 5 (comment 5520452691)',
-      was: 314,
+      // CARRIED FORWARD through an ordinary ruled raise on the destination: 348 is
+      // the 314 this move rose from, plus the +34 the 2026-09-04 intake ruling took
+      // on the same entry (quoted beside its ceiling above). The field's only job
+      // is to make THIS move's raise computable from the tree, and carrying it
+      // keeps that number at the +10 the move landed with, against the same net
+      // source decrease of 11. Left at 314 it would price a maintainer's
+      // independent raise as though this move had claimed it — 314 to 358 reads
+      // +44 against −11 — and go red for lines the sources were never asked to
+      // pay, which is the one arithmetic this declaration must not assert.
+      // Nothing it guards moves: a source that grows back still drives the
+      // decrease under 10 and reds, and the destination still reads PAID DOWN at
+      // or below `was`.
+      // ⚠️ The reviewer's completeness check changes shape with it, so it is
+      // stated rather than left to be inferred: the SOURCES' `was` remain their
+      // `origin/main` values at f3ae441fa2 and are held against that diff, while
+      // the DESTINATION's is that value plus every ordinary ruled raise taken
+      // since — each one carrying its own quoted maintainer ruling beside its
+      // ceiling. A raise carrying no such ruling has no business moving this
+      // number.
+      was: 348,
       sources: [
         ['.claude/skills/pm-dispatch/references/lanes/cli.md', 35],
         ['.claude/skills/pm-dispatch/references/lanes/services.md', 30],

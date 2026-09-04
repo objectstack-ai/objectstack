@@ -5707,6 +5707,86 @@ const step18: MigrationStep = {
         + 'oclif-auto-discovered, before and after.',
     },
     {
+      id: 'client-envelope-convergence-analytics-automation',
+      surface:
+        'client.analytics.query / client.analytics.meta / client.analytics.explain / '
+        + 'client.automation.trigger — the resolved value of four published '
+        + '`@objectstack/client` methods: the runtime dispatcher\'s '
+        + '`{ success, data }` envelope before, its `data` member after',
+      replacement:
+        'the payload — `r.data.X` → `r.X` on all four. `client.analytics.query`, called '
+        + 'with a query, now resolves to `AnalyticsResult`: `r.data.rows` → `r.rows`. '
+        + '`client.analytics.meta`, with or without a cube name, resolves to '
+        + '`AnalyticsMetadataResponse[\'data\']`, the bare cube list: `r.data[0].name` → '
+        + '`r[0].name`. `client.analytics.explain` resolves to '
+        + '`AnalyticsSqlResponse[\'data\']`, `{ sql, params }`: `r.data.sql` → `r.sql`. '
+        + '`client.automation.trigger`, given a trigger name and a payload, resolves to '
+        + '`AutomationResult`: `r.data.status` → `r.status` and `r.data.runId` → '
+        + '`r.runId` — the same value '
+        + '`client.automation.execute` already answered for the same handler. Same call, '
+        + 'same wire body, one SDK calling convention',
+      reason:
+        '`ObjectStackClient` had two response readers. `unwrapResponse` strips the runtime '
+        + 'dispatcher\'s `{ success, data }` envelope and hands back `data`; every other '
+        + 'dispatcher-served method already used it, and these four alone ended '
+        + '`return res.json()`, so their callers alone had to read `.data`. All four now end '
+        + '`return this.unwrapResponse(res)` and their return declarations are the payload '
+        + 'types. THE WIRE IS BYTE-IDENTICAL: every route answers exactly the body it '
+        + 'answered before, no Zod schema moves, no `packages/spec` declaration moves, no '
+        + 'authorable key and no stored representation is involved — the landing diff '
+        + 'touches no `packages/spec` path at all — so a raw-HTTP caller is unaffected and '
+        + '`objectstack migrate meta` has nothing to rewrite. This is registered rather than '
+        + 'exempted because the change is NOT wholly compiler-delivered, and the gap is '
+        + 'exact rather than theoretical. For the three analytics methods it is: every old '
+        + 'read is `error TS2339: Property \'data\' does not exist on type …`, so tsc names '
+        + 'each site. `client.automation.trigger` is the exception — `AutomationResult` '
+        + 'itself declares `success: boolean` and `error?: string` '
+        + '(`AutomationResult` in `packages/spec/src/contracts/automation-service.ts`, '
+        + 'byte-identical at the merge base and at this landing), so `r.success` and '
+        + '`r.error` COMPILE ON BOTH SIDES while their meaning moves: before, `r.success` '
+        + 'was the envelope\'s flag — always `true` on a resolved call — and `r.error` was '
+        + 'never set on a 2xx; now they are the run\'s own, and a refusal the door does not '
+        + 'classify as 400 / 409 / 422 is answered 200 carrying `success: false` with '
+        + '`error` set. A consumer branching on either reads a DIFFERENT QUESTION at the '
+        + 'same spelling, with no diagnostic anywhere. And there is no authored source for '
+        + 'the conversion chain to rewrite: this is a published TypeScript surface whose '
+        + 'enforced channel is tsc at the call site, and for an untyped JS caller there is '
+        + 'no constrained channel at all — `.data` simply reads `undefined` — which is why '
+        + 'the ledger entry is the only notification that reaches them. That is the same '
+        + 'argument the two sibling entries on this package make '
+        + '(`client-delete-result-success`, `client-meta-reset-result-reset`), and this one '
+        + 'is the stronger case of the three: those corrected declarations that were '
+        + 'UNINHABITED, revealing a defect rather than breaking working code, whereas this '
+        + 'moves reads that work today. ⛔ Do not write `r.rows ?? r.data.rows`: there is '
+        + 'one producer shape, and a consumer accepting two spellings is what contract-first '
+        + 'exists to prevent. The failure path is unchanged and deliberately so — '
+        + '`ObjectStackClient.fetch` rejects on every non-2xx BEFORE either reader runs, '
+        + 'carrying the ADR-0112 error envelope, and `unwrapResponse` itself never throws. '
+        + 'ADR-0087 D3.',
+      acceptanceCriteria:
+        'No code reads `.data` off a `client.analytics.query`, `client.analytics.meta`, '
+        + '`client.analytics.explain` or `client.automation.trigger` result. For the '
+        + 'three analytics methods `tsc` names every site for a typed caller (TS2339); an '
+        + 'untyped JS caller must be swept by hand for the four spellings, because nothing '
+        + 'will report it. ⚠️ `client.automation.trigger` needs the hand sweep even WITH a '
+        + 'type-checker: every branch on `r.success` or `r.error` off `trigger` has to be '
+        + 're-read one by one, because both compile before and after while their subject '
+        + 'moved from the envelope to the run. A branch that treated `r.success` as "the '
+        + 'call was accepted" now asks "the run succeeded" — the two differ on exactly the '
+        + '200-answered refusals — and a `catch`-only error path now has a resolved '
+        + '`success: false` sibling it never had to consider. Nothing about the request, the '
+        + 'route, the status codes or the thrown error shapes changes, and no server needs '
+        + 'upgrading: the value you may now read is the one that was already arriving, one '
+        + 'level in. `client.analytics.queryDataset` is NOT part of this move — it is served '
+        + 'with no envelope at all and resolved to the bare payload before and after. '
+        + 'Populations: in the ObjectStack repo, zero production call sites and the loud '
+        + 'test pins that ship with this change; in objectui, one production row-extraction '
+        + 'chain that tolerates both spellings today and is tightened to the post-unwrap '
+        + 'spelling once this lands; `objectstack-ai/cloud` is NOT MEASURED — a `.data` read '
+        + 'on any of the four there is a runtime break after this change, and this entry is '
+        + 'the only notice it gets.',
+    },
+    {
       id: 'client-meta-reset-result-reset',
       surface:
         'client.meta.deleteItem(...).deleted / .type / .name (the return of '
@@ -6907,6 +6987,64 @@ const step18: MigrationStep = {
         'Every memory datasource parses with no `${…}` span in `persistence.path` or ' +
         '`persistence.key`; `initialData` record values containing literal `${…}` keep parsing ' +
         'byte-identically.',
+    },
+    {
+      id: 'metadata-changed-event-payload-retired',
+      surface:
+        'kernel.cluster metadata change event payload (`MetadataChangedEventPayloadSchema` '
+        + 'in kernel/cluster.zod.ts — 2 defs, 4 exported names: '
+        + '`MetadataChangedEventPayloadSchema`, `MetadataChangedEventPayload`, '
+        + '`MetadataChangeOperationSchema`, `MetadataChangeOperation`)',
+      replacement:
+        'Nothing to migrate to, because nothing ever emitted or consumed it. The '
+        + 'cluster invalidation channels that actually run are the three lanes '
+        + 'documented in content/docs/kernel/cluster.mdx §6.2: `metadata.changed` '
+        + '(`ClusterMetadataChangedPayload` in `@objectstack/metadata` — the origin '
+        + 'node, the metadata type and the replayed watch event), `metadata.mutated` '
+        + '(`ClusterMetadataMutationPayload` in `@objectstack/metadata-protocol`) and '
+        + '`datasource.mutated` (`ClusterDatasourceMutationPayload` in '
+        + '`@objectstack/service-datasource`). A host that needs cross-node cache '
+        + 'invalidation subscribes to one of those; a host that held the retired type '
+        + 'for a transport of its own keeps a local type — the spec no longer declares '
+        + 'one.',
+      reason:
+        'ADR-0049 enforce-or-remove (triage ruling 2026-09-02 on the spec seat: '
+        + 'remove via the ADR-0087 route, not "make a consumer" — that is contract '
+        + 'growth with no pull). The docblock declared that all metadata persistence '
+        + 'layers MUST emit a `metadata:changed` event with this payload and that '
+        + 'every reader MUST subscribe and compare `version` before invalidating. '
+        + "Measured at the retirement's base commit with positive controls: zero "
+        + 'runtime producers, zero subscribers, zero imports outside packages/spec '
+        + '(its own unit test, the isomorphic alias pin and the generated artifacts) '
+        + 'in objectstack, and nothing in objectui at the pinned sha. It was '
+        + 'unenforceable by construction — the `version` field is `z.bigint()`, '
+        + 'which the standard JSON serializer refuses, so the payload as declared '
+        + 'could not cross any pubsub transport without a codec no driver ships: a '
+        + 'MUST-emit contract no conforming emitter could satisfy. The shipped '
+        + 'channels all carry an address-only signal whose receiver re-reads its own '
+        + 'store (the 2026-09-01 ruling for the registry lane), the opposite of the '
+        + 'declared version-compare receipt, so the one plausible future consumer was '
+        + 'decided against; the 2026-08-27 ruling on transitions removes a staged '
+        + "window. `MetadataChangeOperationSchema` existed only to type the payload's "
+        + '`operation` field and leaves with it as its orphan value schema (the '
+        + '`DistributedStateConfig` precedent). Route 3: not an authorable surface — '
+        + 'no metadata-type binding, stack collection or manifest embed ever carried '
+        + 'it, and nothing parsed it outside its own unit test — so no tombstone and '
+        + 'no D2 conversion; `RETIRED_DEFS_BY_MAJOR[18]` '
+        + '(`kernel/MetadataChangedEventPayload`, `kernel/MetadataChangeOperation`) '
+        + 'plus this entry ARE the declaration.',
+      acceptanceCriteria:
+        'No code imports `MetadataChangedEventPayloadSchema`, '
+        + '`MetadataChangedEventPayload`, `MetadataChangeOperationSchema` or '
+        + '`MetadataChangeOperation` from `@objectstack/spec` or '
+        + '`@objectstack/spec/kernel` — every one is TS2305 after upgrade (pinned by '
+        + 'runtime namespace probes in kernel/cluster.test.ts, with '
+        + '`ClusterCapabilityConfigSchema` as the positive control). No metadata '
+        + 'document needs editing: the schema was reachable from no metadata-type '
+        + 'binding, stack collection or /meta door. ⚠️ Runtime behaviour is '
+        + 'deliberately UNCHANGED: no emitter or subscriber ever existed, and the '
+        + 'three shipped cluster lanes publish the same bytes before and after — the '
+        + 'retirement removes a false declaration, not behaviour.',
     },
     {
       id: 'metadata-customization-protocol-retired',
@@ -10411,6 +10549,61 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `metadata-customization-protocol-retired` ARE the declaration (the #8715
     // route-3 shape).
     'kernel/MergeStrategyConfig',
+    // #14180 — kernel/cluster.zod.ts `MetadataChangeOperationSchema` /
+    // `MetadataChangeOperation` (the `create` / `update` / `delete` / `publish`
+    // enum), the orphan value schema of the retired
+    // `kernel/MetadataChangedEventPayload` def registered beside it: it existed
+    // only to type that payload's `operation` field and had no other consumer
+    // anywhere — measured at the retirement's base commit 2cc461030, every hit
+    // was the payload itself, its own isomorphic alias pin and the generated
+    // artifacts; nothing in objectui at the pinned sha. An exported value schema
+    // with no consumer reads as a capability to whoever finds it (#3950), so it
+    // leaves with the payload (the playbook's orphan-value-schema rule, the
+    // `kernel/DistributedStateConfig` precedent). Unlike the payload this enum
+    // serializes, so it WAS in `json-schema.manifest/kernel.json` and the
+    // manifest deletion gate adjudicates its removal against this entry. Route 3,
+    // same declaration: this table plus the D3 semantic entry
+    // `metadata-changed-event-payload-retired`.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // removal ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look.
+    'kernel/MetadataChangeOperation',
+    // #14180 — kernel/cluster.zod.ts `MetadataChangedEventPayloadSchema` /
+    // `MetadataChangedEventPayload`, retired whole (ADR-0049 enforce-or-remove;
+    // triage ruling 2026-09-02: remove via the ADR-0087 route, ⛔ not "make a
+    // consumer" — that is contract growth with no pull). The docblock declared a
+    // MUST-emit / MUST-subscribe contract for a `metadata:changed` event — `type`
+    // / `name` / `tenantId` / `version: z.bigint()` / `operation` /
+    // `correlationId`, readers comparing `version` before invalidating — that
+    // nothing in the tree ever produced or consumed: zero runtime emitters, zero
+    // subscribers, zero imports outside `packages/spec` (its own unit test, the
+    // isomorphic alias pin and the generated artifacts), measured at the
+    // retirement's base commit 2cc461030 with positive controls in objectstack
+    // and objectui (pinned sha). It was unenforceable by construction: the
+    // `bigint` version field cannot cross a JSON transport (the standard
+    // serializer throws on it) without a codec no pubsub driver ships, so no
+    // conforming emitter could ever have existed. The three cluster channels that
+    // DO run — `metadata.changed` (`ClusterMetadataChangedPayload`,
+    // `@objectstack/metadata`), `metadata.mutated`
+    // (`ClusterMetadataMutationPayload`, `@objectstack/metadata-protocol`) and
+    // `datasource.mutated` — all carry an address-only signal whose receiver
+    // re-reads its own store (ruled 2026-09-01 for the registry lane), the
+    // opposite of the declared version-compare receipt, so the one plausible
+    // future consumer was decided against. Never in `json-schema.manifest/` (the
+    // JSON Schema build skips `bigint`), so the manifest deletion gate has nothing
+    // to adjudicate for this def; the entry is the declaration the retirement
+    // route requires. Route 3: not an authorable surface — no metadata-type
+    // binding, stack collection or manifest embed ever carried it — so no
+    // tombstone and no D2 conversion; this table plus the D3 semantic entry
+    // `metadata-changed-event-payload-retired` ARE the declaration.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // removal ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look.
+    'kernel/MetadataChangedEventPayload',
     // #13135 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
     // #12057: retirement adopted, re-scope rejected; re-charter #13135 executes
     // the widened surface). Part of the whole-module removal of

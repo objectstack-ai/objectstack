@@ -13,6 +13,18 @@ import Lint from '../src/commands/lint';
 import Diff from '../src/commands/diff';
 import Explain, { SCHEMAS } from '../src/commands/explain';
 import { FlowSchema } from '@objectstack/spec/automation';
+// The catalog sweep below resolves each entry's schema BY NAME, so it needs the
+// name surface rather than one binding. `@objectstack/spec`'s root exports none
+// of these Zod schemas (measured: 129 root exports, no `ObjectSchema` /
+// `FieldSchema` / … among them) — every one lives on a subpath, so the four
+// metadata-authoring subpaths the catalog draws on are named here. The named
+// `FlowSchema` import above stays: a value import fails loudly on a broken
+// export where a namespace property read would degrade to `undefined`, and the
+// sweep pays for its namespace form with an explicit resolvability assertion.
+import * as specAi from '@objectstack/spec/ai';
+import * as specAutomation from '@objectstack/spec/automation';
+import * as specData from '@objectstack/spec/data';
+import * as specUi from '@objectstack/spec/ui';
 
 describe('CLI Commands (oclif)', () => {
   it('should have compile command', () => {
@@ -118,9 +130,13 @@ describe('os explain — schema catalog accuracy', () => {
   // drift — it re-derives the truth from the spec on every run, which is what
   // the hand-maintained catalog otherwise has no way to do.
   // The catalog's element shape, stated locally: `SchemaInfo` is not exported,
-  // and these tests must stay honest even where `SCHEMAS` widens to `any`
-  // (this file sits outside every tsc program — see the TEST_DEBT ledger — so
-  // an implicit `any` here would silently stop checking anything).
+  // and these tests must stay honest even where `SCHEMAS` widens to `any`.
+  // ⚠️ The reason recorded here has CHANGED and the discipline has not. This
+  // file no longer sits outside every tsc program: #14710 landed
+  // `packages/cli/tsconfig.test.json`, whose `include: ["test/**/*"]` puts this
+  // file in the program (`tsc --noEmit --listFiles -p tsconfig.test.json`
+  // resolves it), and it carries NO row in `test-typecheck-debt.json` — so any
+  // diagnostic it gains is red on arrival rather than silently unchecked.
   type CatalogField = { name: string; type: string };
   const flowFields = (kind: 'required' | 'optional'): CatalogField[] => SCHEMAS.flow[kind];
 
@@ -159,5 +175,134 @@ describe('os explain — schema catalog accuracy', () => {
     expect(declared).not.toContain('trigger');
     expect(declared).toContain('nodes');
     expect(declared).toContain('edges');
+  });
+});
+
+// ── `os explain` — the WHOLE catalog, swept against the spec (#14811) ──────
+//
+// #14782 pinned one entry (`flow`) by parsing its `example` against the real
+// schema. This generalises that technique to every entry, and derives the entry
+// set from `SCHEMAS` itself: a hand-written list of entries is precisely the
+// place a future entry escapes through unnoticed, which is the same defect this
+// guard closes one level down. Add a catalog entry and this block goes RED
+// until the entry is classified.
+//
+// ⛔ It does NOT fix what it turns red. Rewriting a catalog entry rewrites
+// operator-facing output and is a separate change with a separate review
+// question, so entries whose example does not parse today land as `it.fails`
+// xfails naming the card filed for each. The day one is corrected its xfail
+// fails ("expected to fail but passed") — promote it to a plain `it` then.
+//
+// ⛔ And it does not skip silently. Two entries resolve to no schema at all;
+// they get tests that ASSERT that reason. A guard reporting green over the
+// entries it never looked at is this card's own defect, one layer up.
+describe('os explain — every catalog entry swept against its spec schema (#14811)', () => {
+  type CatalogEntry = { name: string; example: string };
+  const catalog = SCHEMAS as unknown as Record<string, CatalogEntry>;
+
+  // The searched name surface, stated rather than assumed: absence below means
+  // absent from exactly these four subpaths. (`grep` over `packages/spec/src`
+  // finds no `export const TriggerSchema` or `WorkflowSchema` anywhere at all.)
+  const specSurface: Record<string, unknown> = {
+    ...specData,
+    ...specUi,
+    ...specAi,
+    ...specAutomation,
+  };
+
+  type ParseResult = { success: boolean; error?: { issues: unknown[] } };
+  type ZodLike = { safeParse: (value: unknown) => ParseResult };
+
+  // The catalog stores examples as authored source, so evaluate the literal —
+  // the same technique as the `flow` pin above.
+  const evaluate = (key: string): unknown =>
+    new Function(`return (${catalog[key].example});`)() as unknown;
+
+  // Entries with one schema to parse against. `card` marks a known-broken one
+  // and names where its errors are recorded; its absence means "must parse".
+  const BOUND: Record<string, { schema: string; card?: number }> = {
+    object: { schema: 'ObjectSchema', card: 15170 },
+    field: { schema: 'FieldSchema' },
+    view: { schema: 'ViewSchema', card: 15171 },
+    flow: { schema: 'FlowSchema' },
+    agent: { schema: 'AgentSchema', card: 15172 },
+    app: { schema: 'AppSchema', card: 15173 },
+    query: { schema: 'QuerySchema' },
+    dashboard: { schema: 'DashboardSchema', card: 15174 },
+    action: { schema: 'ActionSchema', card: 15175 },
+  };
+
+  // Entries with NO single schema to parse against, and the reason each of the
+  // two tests at the bottom asserts rather than merely states.
+  const UNBOUND: Record<string, string> = {
+    workflow:
+      'there is no standalone Workflow authoring type (ADR-0019) — the entry is a '
+      + 'redirect and its example is commentary, not a literal',
+    trigger:
+      'no `TriggerSchema` exists in the spec, and the sample is not a Hook either (#15176)',
+  };
+
+  it('classifies every entry in SCHEMAS — none is silently unswept', () => {
+    const classified = [...Object.keys(BOUND), ...Object.keys(UNBOUND)].sort();
+    expect(
+      classified,
+      'a new `os explain` catalog entry must be classified here: bind it to a spec '
+        + 'schema, or give it an UNBOUND reason plus a test that asserts that reason',
+    ).toEqual(Object.keys(catalog).sort());
+  });
+
+  // Harness health, asserted separately from the xfails: `it.fails` is green on
+  // ANY failure, so a broken subpath export or an unevaluable example would
+  // otherwise keep six xfails passing while measuring nothing at all.
+  it('resolves every bound entry to a real schema, and every bound example to an object', () => {
+    for (const [key, bound] of Object.entries(BOUND)) {
+      const schema = specSurface[bound.schema] as ZodLike | undefined;
+      expect(typeof schema?.safeParse, `${bound.schema} (for os explain ${key})`).toBe('function');
+      expect(typeof evaluate(key), `os explain ${key} example`).toBe('object');
+    }
+  });
+
+  for (const [key, bound] of Object.entries(BOUND)) {
+    const parses = (): void => {
+      const schema = specSurface[bound.schema] as ZodLike;
+      const result = schema.safeParse(evaluate(key));
+      expect(
+        result.success,
+        `os explain ${key}: its example must parse as ${bound.schema}. Issues: ${
+          result.success ? '' : JSON.stringify(result.error?.issues, null, 2)
+        }`,
+      ).toBe(true);
+    };
+
+    if (bound.card === undefined) {
+      it(`os explain ${key} — example parses as ${bound.schema}`, parses);
+    } else {
+      it.fails(
+        `os explain ${key} — example does NOT parse as ${bound.schema} `
+          + `(known-broken, filed as #${bound.card}; promote to a plain assertion once fixed)`,
+        parses,
+      );
+    }
+  }
+
+  it(`os explain workflow — ${UNBOUND.workflow}`, () => {
+    expect('WorkflowSchema' in specSurface).toBe(false);
+    expect(catalog.workflow.name).toContain('no standalone type');
+    // Its example is commentary about the live mechanisms, not a literal.
+    // Asserted, so "nothing was parsed here" is a property of this file rather
+    // than an omission a reader has to notice.
+    expect(() => evaluate('workflow')).toThrow();
+  });
+
+  it(`os explain trigger — ${UNBOUND.trigger}`, () => {
+    expect('TriggerSchema' in specSurface).toBe(false);
+    // …and it is not `HookSchema` under another name. Ruling the one real
+    // candidate out is what makes the unbound classification a measurement
+    // instead of an assumption: `event` is a strict-object ALIAS of `events`
+    // (the same alias-as-a-documented-key failure the `flow` entry had), and a
+    // hook's code slot is `handler`, so the entry's `flow` key is unrecognised.
+    const hook = specSurface.HookSchema as ZodLike | undefined;
+    expect(typeof hook?.safeParse, 'HookSchema — the candidate this rules out').toBe('function');
+    expect(hook!.safeParse(evaluate('trigger')).success).toBe(false);
   });
 });

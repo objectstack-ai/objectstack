@@ -27,10 +27,10 @@ import type { FlowActivationStore } from './engine.js';
  *
  * ⚠️ The §4 row semantics are NOT written here any more. They live once, in
  * `@objectstack/core`'s {@link ObjectStoreMetadataActivationStore} — read that
- * module for the four load-bearing properties (`organization_id` never
- * written, org-carrying rows skipped on read, absence means ACTIVE, a driver
- * `0` reads as false) and for why `core` is the home rather than the package
- * that declares the object.
+ * module for the load-bearing properties (the ledger is deployment-wide and
+ * carries no tenant column, absence means ACTIVE, a driver `0` reads as false)
+ * and for why `core` is the home rather than the package that declares the
+ * object.
  *
  * This file is now exactly what is FLOW-specific: the `metadata_type`
  * discriminator, and the names the automation engine and its `index.ts` export.

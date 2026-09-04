@@ -153,6 +153,12 @@ function list(root = process.cwd()) {
 
 function assert(cond, msg) { if (!cond) { console.error(`❌ check-adr-symbol-anchors --self-test: ${msg}`); process.exit(1); } }
 
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'check-adr-symbol-anchors self-test reached its verdict';
+
 export function selfTest() {
   // 1. ⭐ The instrument this gate cannot hold about itself on a clean tree: a
   //    synthetic corpus carrying one of EVERY finding class, plus the healthy
@@ -232,10 +238,23 @@ export function selfTest() {
   assert(CENSUS_13556.totalSurface === CENSUS_13556.distinctLineAnchors + CENSUS_13556.continuationAnchors, 'the declared surface must be the sum of its parts');
 
   console.log(`✅ check-adr-symbol-anchors --self-test: every finding class provoked, healthy anchors silent, population live, wiring pinned (${live.counts.anchors} live anchors)`);
+
+  return SELF_TEST_VERDICT;
 }
 
 if (isEntrypoint(import.meta.url)) {
-  if (process.argv.includes('--self-test')) selfTest();
-  else if (process.argv.includes('--list')) list();
+  // The `if` body is BRACED so the trailing `else if` cannot re-bind to the
+  // inner refusal; the `else` arms stay unbraced, per the landed
+  // `scripts/pm/check-label-desc-cap.mjs` precedent.
+  if (process.argv.includes('--self-test')) {
+    if (selfTest() !== SELF_TEST_VERDICT) {
+      console.error(
+        '\n✗ check-adr-symbol-anchors self-test: selfTest() returned without reaching its verdict,\n'
+          + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+          + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
+  } else if (process.argv.includes('--list')) list();
   else runCheck();
 }

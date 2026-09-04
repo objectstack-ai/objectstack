@@ -6,14 +6,14 @@ Comprehensive guide for implementing validation rules in ObjectStack.
 
 The **complete** set of `type` discriminators accepted by `ValidationRuleSchema`:
 
-| Type | Purpose | When Validation Fails |
-|:-----|:--------|:---------------------|
-| `script` | CEL predicate over the record | When predicate evaluates to `true` |
-| `state_machine` | Legal state transitions | When transition not allowed |
-| `format` | Regex or built-in format | When format doesn't match |
-| `cross_field` | CEL predicate comparing fields | When predicate evaluates to `true` |
-| `json_schema` | Validate JSON field | When JSON doesn't match schema |
-| `conditional` | Apply nested rule when a predicate holds | When nested rule fails |
+| Type | Purpose | When Validation Fails | Judged against |
+|:-----|:--------|:---------------------|:---------------|
+| `script` | CEL predicate over the record | When predicate evaluates to `true` | Merged record — prior row plus this write |
+| `state_machine` | Legal state transitions | When transition not allowed | Written value vs the prior row's, only when the write sets the field (insert: `initialStates`) |
+| `format` | Regex or built-in format | When format doesn't match | Write payload only — an omitted field is never judged |
+| `cross_field` | CEL predicate comparing fields | When predicate evaluates to `true` | Merged record — prior row plus this write |
+| `json_schema` | Validate JSON field | When JSON doesn't match schema | Write payload only — an omitted field is never judged |
+| `conditional` | Apply nested rule when a predicate holds | When nested rule fails | Its `when` on the merged record; the nested rule as its own type |
 
 There is no other type. In particular:
 

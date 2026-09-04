@@ -576,6 +576,12 @@ export function formatFindings(findings) {
 
 function assert(cond, msg) { if (!cond) { console.error(`❌ symbol-anchors --self-test: ${msg}`); process.exit(1); } }
 
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'symbol-anchors self-test reached its verdict';
+
 export function selfTest() {
   // 1. Declaration sites, one per supported spelling. Each is provoked in BOTH
   //    directions -- a rule that only ever says "found" is not a rule.
@@ -696,11 +702,23 @@ export function selfTest() {
   assert(threw, 'defineCorpus must refuse an empty docRoots');
 
   console.log('✅ symbol-anchors --self-test: grammar, both resolution classes, comment/substring rejection, every ⛔ line-number spelling, exemption scoping and corpus registration verified');
+
+  return SELF_TEST_VERDICT;
 }
 
 if (isEntrypoint(import.meta.url)) {
-  if (process.argv.includes('--self-test')) selfTest();
-  else {
+  // The `if` body is BRACED so the trailing `else` cannot re-bind to the inner
+  // refusal, per the landed `scripts/pm/check-label-desc-cap.mjs` precedent.
+  if (process.argv.includes('--self-test')) {
+    if (selfTest() !== SELF_TEST_VERDICT) {
+      console.error(
+        '\n✗ symbol-anchors self-test: selfTest() returned without reaching its verdict,\n'
+          + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+          + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
+  } else {
     console.log('symbol-anchors is a library. Anchor grammar:\n  ' + ANCHOR_GRAMMAR);
     console.log('\nRun a corpus gate (e.g. `node scripts/check-adr-symbol-anchors.mjs`) or `--self-test`.');
   }

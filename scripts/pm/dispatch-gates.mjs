@@ -1177,6 +1177,70 @@ export function argvTokens(tail) {
 }
 
 /**
+ * The part of a token this tool could NOT resolve, or null when the token is
+ * whole — a token the tokeniser above had to swallow to the end of the tail
+ * because the construct it opened never closed, or a token left ending in a
+ * bare `$`.
+ *
+ * ## The seam, and why it is one predicate rather than three
+ *
+ * `DIRECT_CHECK_INVOCATION` ends the tail at the first `;|&<>()`, which is the
+ * shell boundary it has always drawn and is right: past one of those the text
+ * belongs to another command or to the shell. What this reads is what the CUT
+ * leaves behind. A value written as a command substitution is cut INSIDE its
+ * own construct — `--base "$(git merge-base origin/main HEAD)"` is cut at the
+ * `(` and leaves the tail `--base "$` — and `argvTokens` handles the unclosed
+ * quote by swallowing the rest into one token. That token carries no
+ * `WORKFLOW_VALUE_SOURCE` hit, so without this it classified as a LITERAL and
+ * the key `scripts/check-x.mjs --base "$` rendered into `--commands`: a
+ * truncated argv that LOOKS runnable, which `renderedArgv`'s docblock below
+ * names as the worst of the outcomes.
+ *
+ * Three spellings reach that state and they are ONE state, so they get one
+ * predicate rather than a list: an unclosed quote (`"$` from a `$(…)`, `'a`
+ * from a terminator inside a quoted value like `--gate 'a;b'`), an unclosed
+ * `${{ … }}` (a GitHub expression holding a terminator, `${{ inputs.x || 'y' }}`
+ * being the live-looking spelling), and a token ending in a bare `$` (the same
+ * cut with the value unquoted, `--base $(…)`). Each is the tokeniser's OWN
+ * unterminated branch, replayed here over the finished token — which is
+ * faithful because that branch copies the remainder verbatim (`text.slice(i)`)
+ * and a closing delimiter is always inside the token that used it, so the
+ * replay reaches the same verdict the tokeniser did.
+ *
+ * ⛔ NOT done here: widening `DIRECT_CHECK_INVOCATION`'s terminator set to
+ * carry the whole `$(…)` through. The cut at `(` is the shell's boundary and a
+ * matcher that reads past it would have to know which parens are a
+ * substitution and which end the command — this reads what the cut left, which
+ * needs no such knowledge.
+ *
+ * Measured when this landed: 114 direct invocations across `.github/workflows`
+ * and ZERO of them reach this branch, so nothing this tool prints today moves.
+ * The shape is latent, and this is here because the day a workflow writes a
+ * `$(…)` value is the day the derivation would otherwise render the truncation
+ * silently.
+ */
+function unresolvedRemainder(token) {
+  const text = String(token ?? '');
+  let i = 0;
+  while (i < text.length) {
+    if (text[i] === "'" || text[i] === '"') {
+      const close = text.indexOf(text[i], i + 1);
+      if (close === -1) return text.slice(i);
+      i = close + 1;
+      continue;
+    }
+    if (text.startsWith('${{', i)) {
+      const close = text.indexOf('}}', i + 3);
+      if (close === -1) return text.slice(i);
+      i = close + 2;
+      continue;
+    }
+    i += 1;
+  }
+  return /\$$/.test(text) ? '$' : null;
+}
+
+/**
  * Every spelling by which a workflow puts a value into an argv WITHOUT writing
  * the value down: a GitHub expression, a shell parameter expansion, a shell
  * special. Anything else in a token is a literal — a value that appears
@@ -1277,6 +1341,14 @@ export function renderedArgv(tail) {
     for (const hit of token.matchAll(WORKFLOW_VALUE_SOURCE)) {
       if (!variables.includes(hit[0])) variables.push(hit[0]);
     }
+    // A remainder this tool could not resolve is a value that comes FROM THE
+    // WORKFLOW just as surely as `${{ … }}` does — it is the visible half of a
+    // construct the cut ran through. Naming it here is the whole fix, and it
+    // rides the channel the classification already has: any entry in
+    // `variables` marks the row NOT RUNNABLE LOCALLY and keeps the key out of
+    // `--commands`, so the truncation is NAMED rather than rendered runnable.
+    const remainder = unresolvedRemainder(token);
+    if (remainder !== null && !variables.includes(remainder)) variables.push(remainder);
   }
   return { args: tokens.join(' '), variables };
 }
@@ -2867,6 +2939,7 @@ const COMPOUND_ANCHOR_LEDGER = [
   ['scripts/check-platform-checklist.mjs', 'selfTestUnreferencedRecipes', false],
   ['scripts/check-platform-checklist.mjs', 'selfTestMetaCallSpelling', false],
   ['scripts/check-platform-checklist.mjs', 'selfTestSourceLineCitations', false],
+  ['scripts/check-platform-checklist.mjs', 'selfTestSymbolAnchors', false],
   ['scripts/check-regen-pending.mjs', 'fixtureSelfTest', false],
   ['scripts/check-regen-pending.mjs', 'prePushIsArmedSelfTest', false],
   ['scripts/check-regen-pending.mjs', 'decisionTableSelfTest', false],
@@ -7955,7 +8028,7 @@ export const CHANGE_KIND_GATES = [
     gates: [
       {
         name: 'check:type-check-debt',
-        why: 'the ROOT ledger entry (@objectstack/spec-monorepo) IS this program, so a file here moves its raw tsc count even though your diff touches no package — measured, one added bench file put it 19 over and cost a CI round. It is a shrink-only ratchet: the repair is to make the file typecheck, and raising the entry is maintainer-only, never the co-equal option. Most of this class is one missing setting rather than real breakage — the root config carries lib ES2020 and no types, so process and console are absent unless the file declares them ambiently. Needs the workspace closure BUILT — on an unbuilt worktree it refuses outright, and that throw means NOT MEASURED, never `not applicable to me`. Build first, exactly as lint.yml does: pnpm exec turbo run build --filter=./packages/* --filter=./packages/*/* (quote the filter values for your shell)',
+        why: 'the ROOT ledger entry (@objectstack/spec-monorepo) IS this program, so a file here moves its raw tsc count even though your diff touches no package — measured, one added bench file put it 19 over and cost a CI round. It is a shrink-only ratchet: the repair is to make the file typecheck, and raising the entry is maintainer-only — ⛔ MAINTAINER-ONLY under the #8435 convention — never the co-equal option. Most of this class is one missing setting rather than real breakage — the root config carries lib ES2020 and no types, so process and console are absent unless the file declares them ambiently. Needs the workspace closure BUILT — on an unbuilt worktree it refuses outright, and that throw means NOT MEASURED, never `not applicable to me`. Build first, exactly as lint.yml does: pnpm exec turbo run build --filter=./packages/* --filter=./packages/*/* (quote the filter values for your shell)',
       },
     ],
   },
@@ -9658,9 +9731,20 @@ export function parseRunRecord(text) {
  * heading) and which deduplicates the two spellings of one family into one
  * command before this function ever sees them. What the tool CAN still meet in
  * a record it classifies itself — a CI-measured-only family, which `commandsFor`
- * subtracts by design, and a pending-changeset family, derived against a path
- * that did not exist at derivation time. Both are matched byte-exactly against
- * sets this same derivation produced.
+ * subtracts by design; a VALUE-BEARING family, which `commandsFor` subtracts for
+ * the same reason one step later because its argv takes a value from the
+ * workflow (#15083); and a pending-changeset family, derived against a path
+ * that did not exist at derivation time. All three are matched byte-exactly
+ * against sets this same derivation produced.
+ *
+ * ⭐ The third bucket is not a convenience: this file's own rule is that an
+ * omission is disclosed WHERE the omission happens, and a class `commandsFor`
+ * deliberately withholds is a class the runner cannot be expected to have
+ * derived. Left in the remainder it reads as a command "named by nothing this
+ * run derived" — the one sentence that is false about it, because this run
+ * derived it and then classified it out. The likeliest recorder is a dev who
+ * writes the bare spelling of one of these scripts out of habit, and what they
+ * are owed is the reason, not a shrug (#15115).
  *
  * What is left for the runner to explain is therefore only what the tool
  * genuinely cannot know: a gate that refused with its own prerequisite. That is
@@ -9679,6 +9763,12 @@ export function parseRunRecord(text) {
 export function runReconciliation({
   derived = [],
   ciOnlyCommands = new Set(),
+  // Beside `ciOnlyCommands` and not after `pendingCommands`, because the file
+  // already groups them: these are the TWO subtractions `commandsFor` makes
+  // from the runnable union, in that order, and the pending families are a
+  // different fact (a path that did not exist at derivation time). Defaulting
+  // to empty keeps every existing caller's verdict byte-identical.
+  notRunnableCommands = new Set(),
   pendingCommands = new Set(),
   record = [],
 } = {}) {
@@ -9720,6 +9810,7 @@ export function runReconciliation({
   }
 
   const explainedCiOnly = [];
+  const explainedNotRunnable = [];
   const explainedPending = [];
   const extra = [];
   const nearMiss = [];
@@ -9730,6 +9821,14 @@ export function runReconciliation({
     if (derivedSet.has(entry.command)) continue;
     if (ciOnlyCommands.has(entry.command)) {
       explainedCiOnly.push(entry.command);
+      continue;
+    }
+    // The order is the precedence, and it is the one `commandsFor` already
+    // states: `ciOnly` is the FIRST subtraction, so a family that were somehow
+    // both is reported as CI-measured — one bucket per command, chosen the same
+    // way in both places rather than two counts for one omission.
+    if (notRunnableCommands.has(entry.command)) {
+      explainedNotRunnable.push(entry.command);
       continue;
     }
     if (pendingCommands.has(entry.command)) {
@@ -9751,6 +9850,7 @@ export function runReconciliation({
     unrun,
     notMeasured,
     explainedCiOnly: explainedCiOnly.sort(),
+    explainedNotRunnable: explainedNotRunnable.sort(),
     explainedPending: explainedPending.sort(),
     extra: extra.sort(),
     nearMiss,
@@ -9812,6 +9912,13 @@ export function runReconciliationLines(recon) {
       `  Classified by this tool, no explanation owed (${recon.explainedCiOnly.length}) — CI-MEASURED ONLY, and outside the derived total by design:`,
     );
     for (const command of recon.explainedCiOnly) lines.push(`    - ${command}`);
+  }
+  if (recon.explainedNotRunnable.length > 0) {
+    lines.push(
+      `  Classified by this tool, no explanation owed (${recon.explainedNotRunnable.length}) — VALUE-BEARING famil(ies):`
+        + ' its argv takes a value from the workflow, so it is recorded, not derived as runnable:',
+    );
+    for (const command of recon.explainedNotRunnable) lines.push(`    - ${command}`);
   }
   if (recon.explainedPending.length > 0) {
     lines.push(
@@ -10087,9 +10194,10 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
   const pending = pendingChangesetFamilies([...byCheck], new Set(matched.keys()));
 
   if (mode === 'ran') {
-    // Built from the SAME three expressions the other renderings read, in this
-    // process, on this tree: the union `--commands` prints, the CI-measured set
-    // that union subtracts, and the pending families it holds back. A second
+    // Built from the SAME four expressions the other renderings read, in this
+    // process, on this tree: the union `--commands` prints, the two sets that
+    // union subtracts — CI-measured, and value-bearing — and the pending
+    // families it holds back. A second
     // traversal here would be a second answer to a question this file already
     // answers once — and it would be the answer the reconciliation is judged
     // against, which is the worst possible place to keep a duplicate.
@@ -10100,6 +10208,11 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
       // makes it a contract rather than a note (#14189).
       derived: commandsFor({ matchedRows, kindGroups, alwaysRunsRows }),
       ciOnlyCommands: ciOnlyCommandSet(matchedRows, alwaysRunsRows),
+      // The SECOND set `commandsFor` subtracts, read from the SAME rows by the
+      // SAME expression it uses — so the union and the reconciliation cannot
+      // drift about which invocations are withheld, exactly as they cannot for
+      // the CI-measured set above it (#15115).
+      notRunnableCommands: notRunnableCommandSet(matchedRows, alwaysRunsRows),
       pendingCommands: new Set(pending.map(({ entry }) => runnableInvocation(entry))),
       record: runRecord,
     });
@@ -11347,11 +11460,100 @@ function selfTest() {
   // a bare backslash or a stray redirection fd is the outcome #14880 refused
   // the whole class to avoid, and rendering is only an improvement while none
   // of them can appear.
+  //
+  // ⭐ The QUOTE half (#15116). `DIRECT_CHECK_INVOCATION` cuts at `(`, so a
+  // value written as a command substitution is cut INSIDE its own construct and
+  // leaves a tail whose quote never closes — `--base "$` from
+  // `--base "$(git merge-base origin/main HEAD)"`. Reading that shape here is
+  // deliberately INDEPENDENT of `argvTokens`: this scans the finished KEY with
+  // the shell's own outermost-quote rule (a `'` inside a `"…"` is text, not a
+  // delimiter), so a bug in the tokeniser cannot make the pin agree with it. A
+  // parity count would not do — measured on this tree zero live keys nest a
+  // quote, and the day one does a parity scan calls a balanced key truncated.
+  const carriesTruncation = (text) => {
+    const s = String(text);
+    let quote = null;
+    let i = 0;
+    while (i < s.length) {
+      if (quote !== null) {
+        if (s[i] === quote) quote = null;
+        i += 1;
+        continue;
+      }
+      if (s[i] === "'" || s[i] === '"') {
+        quote = s[i];
+        i += 1;
+        continue;
+      }
+      if (s.startsWith('${{', i)) {
+        const close = s.indexOf('}}', i + 3);
+        if (close === -1) return true;
+        i = close + 2;
+        continue;
+      }
+      i += 1;
+    }
+    return quote !== null || /\$(?=\s|$)/.test(s);
+  };
+  // The statement is over EVERY derived key and it is the contrapositive rather
+  // than a flat "every key is balanced": under this file's own rule a truncated
+  // tail is NAMED — its unresolved remainder is a value the workflow supplies,
+  // so the row is marked NOT RUNNABLE LOCALLY and the key stays out of
+  // `--commands`. What must never happen is a truncation that RENDERS as a
+  // command a dev can paste, and that is exactly what this says.
   t(
-    '⛔ no derived key is a TRUNCATED argv — no continuation backslash, and no redirection fd survives as an argument',
+    '⛔ no derived key is a TRUNCATED argv — no continuation backslash, no redirection fd surviving as an argument, and ⭐ no key carrying an unclosed quote, an unclosed ${{ … }} or a bare `$` is RUNNABLE (#15116)',
     keyNames.every((n) => !/\\/.test(n))
       && keyNames.includes('scripts/check-prerelease-pin-watch.mjs --verbose')
-      && !keyNames.some((n) => /^scripts\/check-prerelease-pin-watch\.mjs --verbose\s+\d+$/.test(n)),
+      && !keyNames.some((n) => /^scripts\/check-prerelease-pin-watch\.mjs --verbose\s+\d+$/.test(n))
+      && keyInvs.every((i) => !carriesTruncation(i.check) || (i.argvVariables ?? []).length > 0),
+  );
+
+  // ⭐ THE UNRENDERABLE KIND (#15116), and this fixture is the ONLY place the
+  // tree has it. Measured at this commit: 114 direct invocations across
+  // `.github/workflows` and ZERO carry a paren or a terminator inside a quoted
+  // value — the three paren hits in the workflow text are all comment lines. So
+  // unlike `keyWf` above, whose every step is quoted from live workflow text,
+  // this fixture is WRITTEN rather than quoted, and it says so: the shape is
+  // latent, and a fixture is what stands in for a tree that does not have it
+  // yet. The live half at the end of the block asserts the same property over
+  // the workflows and is vacuous today by that measurement, which is the whole
+  // reason these three steps exist.
+  const cutWf = [
+    'jobs:',
+    '  gates:',
+    '    steps:',
+    '      - name: a command substitution in the value position — the tail is cut at the paren',
+    '        run: node scripts/check-x.mjs --base "$(git merge-base origin/main HEAD)"',
+    '      - name: a terminator INSIDE a quoted value — the tail is cut at the semicolon',
+    "        run: node scripts/check-y.mjs --gate 'a;b'",
+    '      - name: CONTROL — the two live spellings, which must classify exactly as before',
+    "        run: node scripts/check-z.mjs --gate 'Test Core' --shard ${{ matrix.shard }}",
+  ].join('\n');
+  const cutInvs = extractCheckInvocations(cutWf, 'x.yml').filter((i) => i.direct);
+  const cutOf = (script) => cutInvs.find((i) => i.script === script);
+  t(
+    'the `$(…)` value really IS cut to a truncation — the fixture reproduces the key this card measured, so the cases below cannot go vacuous',
+    cutOf('scripts/check-x.mjs')?.check === 'scripts/check-x.mjs --base "$',
+  );
+  t(
+    '⭐ …and that truncation is NOT runnable: the unresolved remainder is named as the value the workflow supplies',
+    (cutOf('scripts/check-x.mjs')?.argvVariables ?? []).join(',') === '"$',
+  );
+  t(
+    '⭐ a terminator inside a quoted value lands the same way — named, never rendered as a command a dev could paste',
+    cutOf('scripts/check-y.mjs')?.check === "scripts/check-y.mjs --gate 'a"
+      && (cutOf('scripts/check-y.mjs')?.argvVariables ?? []).join(',') === "'a",
+  );
+  t(
+    "CONTROL: `--gate 'Test Core'` and `--shard ${{ matrix.shard }}` tokenise and classify EXACTLY as today — the expression is the one variable, the quoted literal contributes none",
+    cutOf('scripts/check-z.mjs')?.check === "scripts/check-z.mjs --gate 'Test Core' --shard ${{ matrix.shard }}"
+      && (cutOf('scripts/check-z.mjs')?.argvVariables ?? []).join(',') === '${{ matrix.shard }}',
+  );
+  t(
+    '⛔ …and the shape-level statement over every key this fixture derives: carrying a truncation and rendering as runnable are mutually exclusive — non-vacuously, 2 of the 3 carry one',
+    cutInvs.every((i) => !carriesTruncation(i.check) || i.argvVariables.length > 0)
+      && cutInvs.filter((i) => carriesTruncation(i.check)).length === 2,
   );
   // ...while a REDIRECTION really does end the argv, so the flag run before it
   // is complete and is keyed. Unchanged by #15083, verdict and all: what the
@@ -11372,12 +11574,23 @@ function selfTest() {
       && renderedArgv(' --days 90').variables.length === 0
       && renderedArgv(' --base "$MERGE_BASE"').variables.join(',') === '$MERGE_BASE'
       && renderedArgv(' "$RUNNER_TEMP/test-core.log"').variables.join(',') === '$RUNNER_TEMP'
-      && renderedArgv(' --shard ${{ matrix.shard }}').args === '--shard ${{ matrix.shard }}',
+      && renderedArgv(' --shard ${{ matrix.shard }}').args === '--shard ${{ matrix.shard }}'
+      // ⭐ #15116: the three spellings the CUT leaves unresolved. Each names its
+      // own remainder, which is what keeps the key out of `--commands`.
+      && renderedArgv(' --base "$').variables.join(',') === '"$'
+      && renderedArgv(' --base $').variables.join(',') === '$'
+      && renderedArgv(' --job ${{ inputs.a').variables.join(',') === '${{ inputs.a'
+      // …and the CONTROL, on the same call: a CLOSED quote resolves, so a
+      // quoted literal is still a literal and still renders as runnable.
+      && renderedArgv(" --gate 'Test Core'").args === "--gate 'Test Core'"
+      && renderedArgv(" --gate 'Test Core'").variables.length === 0,
   );
   t(
-    'argvTokens holds a quoted value and a ${{ … }} expression together, spaces and all',
+    'argvTokens holds a quoted value and a ${{ … }} expression together, spaces and all — and ⭐ swallows an UNCLOSED one into a single token, which is the seam #15116 reads',
     argvTokens(' --gate \'Test Core\' --shard ${{ matrix.shard }}').join('|')
-      === "--gate|'Test Core'|--shard|${{ matrix.shard }}",
+      === "--gate|'Test Core'|--shard|${{ matrix.shard }}"
+      && argvTokens(' --base "$').join('|') === '--base|"$'
+      && argvTokens(' --job ${{ inputs.a').join('|') === '--job|${{ inputs.a',
   );
   t(
     'joinLineContinuations splices a continued command into one line, and ⛔ never joins a COMMENT',
@@ -11457,9 +11670,16 @@ function selfTest() {
       !direct.some((i) => i.check === i.script)
         || direct.filter((i) => i.check === i.script).every((bare) => liveInvs.some((i) => i.script === bare.script && i.check === i.script)),
     );
+    // The same property the fixture block asserts, read from the workflows. It
+    // is VACUOUS today and that is the reading, not an oversight: at this commit
+    // no live invocation carries an unclosed quote, an unclosed `${{ … }}` or a
+    // bare `$`, so the non-vacuous subjects live in the fixture above. What this
+    // half adds is the day the tree grows one — the property holds then too,
+    // because the classification names the remainder rather than rendering it.
     t(
-      '⛔ and no live key is truncated: no continuation backslash reaches one',
-      direct.every((i) => !i.check.includes('\\')),
+      '⛔ and no live key is truncated: no continuation backslash reaches one, and ⭐ any key carrying an unclosed quote, an unclosed ${{ … }} or a bare `$` is NOT runnable (#15116)',
+      direct.every((i) => !i.check.includes('\\'))
+        && direct.every((i) => !carriesTruncation(i.check) || (i.argvVariables ?? []).length > 0),
     );
     // A script invoked BOTH ways gets BOTH entries — the card's third clause,
     // read off the live tree. `check-release-section-coverage.mjs` is the
@@ -18591,15 +18811,50 @@ function selfTest() {
     t('the malformed line is reported against its line number too', unexplained.malformed.length === 1 && unexplained.malformed[0].line === 1);
 
     // ── What the TOOL classifies, so no prose has to ────────────────────────
+    // ⭐ The value-bearing spelling is the LIVE one — `pr-automation.yml`
+    // really passes `--base "$MERGE_BASE"` to this script — for the reason the
+    // neighbouring cases take theirs from the live workflows: a fixture
+    // invented here would keep passing after the renderer that produces the
+    // real one changed shape, which is the failure this whole file is about.
+    const valueBearing = 'node scripts/check-empty-changeset.mjs --base "$MERGE_BASE"';
     const explained = runReconciliation({
       derived: ['pnpm check:a'],
       ciOnlyCommands: new Set(['node scripts/check-payload-guard.mjs']),
+      notRunnableCommands: new Set([valueBearing]),
       pendingCommands: new Set(['pnpm check:changeset-shape']),
-      record: parseRunRecord(['pnpm check:a', 'node scripts/check-payload-guard.mjs', 'pnpm check:changeset-shape'].join('\n')),
+      record: parseRunRecord(['pnpm check:a', 'node scripts/check-payload-guard.mjs', valueBearing, 'pnpm check:changeset-shape'].join('\n')),
     });
     t(
       'a CI-measured-only entry and a pending-changeset entry are classified by the tool, not dumped into the remainder',
       explained.ok && explained.explainedCiOnly.length === 1 && explained.explainedPending.length === 1 && explained.extra.length === 0,
+    );
+    // ⭐ #15115: the THIRD class `commandsFor` withholds gets the same
+    // courtesy. Recorded, derived by this run, classified out of the union —
+    // so `extra`'s caption ("named by nothing this run derived") would be the
+    // one sentence that is false about it.
+    t(
+      'a recorded VALUE-BEARING family is classified by the tool too, never folded into the remainder',
+      explained.explainedNotRunnable.length === 1 && explained.explainedNotRunnable[0] === valueBearing && !explained.extra.includes(valueBearing),
+    );
+    // CONTROL, and it is the load-bearing half: the bucket explains the class
+    // it was given and nothing else. A command named by no set is still
+    // `extra` — a third bucket that swallowed unknowns would have deleted the
+    // remainder rather than shrunk it.
+    const unknownBeside = runReconciliation({
+      derived: ['pnpm check:a'],
+      notRunnableCommands: new Set([valueBearing]),
+      record: parseRunRecord(['pnpm check:a', valueBearing, 'pnpm check:not-a-family'].join('\n')),
+    });
+    t(
+      'and an unknown command beside it still reads `extra` — the new bucket explains its class only',
+      unknownBeside.explainedNotRunnable.length === 1 && unknownBeside.extra.length === 1 && unknownBeside.extra[0] === 'pnpm check:not-a-family',
+    );
+    // The bucket is DIAGNOSTIC, exactly like the two beside it: the verdict
+    // reads `unrun` and nothing else, so classifying an entry can never move
+    // it in either direction (#15115).
+    t(
+      'the new bucket cannot move the verdict — it is diagnostic, like the two beside it',
+      unknownBeside.ok && unknownBeside.unrun.length === 0 && unknownBeside.ran.length === 1,
     );
 
     // ── Bookkeeping the classes cannot lose ─────────────────────────────────
@@ -18643,6 +18898,21 @@ function selfTest() {
     t(
       'the near-miss line refuses the pairing out loud rather than quietly',
       runReconciliationLines(nearMiss).join('\n').includes('is NOT paired with it'),
+    );
+    // ⭐ #15115, in the rendering: a bucket that classified an entry and then
+    // printed nothing would leave the runner exactly where `extra` left them.
+    const explainedText = runReconciliationLines(explained).join('\n');
+    t(
+      'the value-bearing bucket gets its OWN labelled line, naming the reason and the command',
+      explainedText.includes('VALUE-BEARING famil(ies)')
+        && explainedText.includes('its argv takes a value from the workflow')
+        && explainedText.includes(valueBearing),
+    );
+    t(
+      'and the two buckets beside it keep their own lines, with the remainder heading absent entirely',
+      explainedText.includes('CI-MEASURED ONLY')
+        && explainedText.includes('pending-changeset famil(ies)')
+        && !explainedText.includes("Outside this card's derivation"),
     );
 
     // ── argv: a two-token flag's value must not become a path ───────────────
@@ -18709,6 +18979,58 @@ function selfTest() {
       t('a valueless run record refuses, and its message does not name the OTHER flag', valueless.status === 2 && !(valueless.stderr ?? '').includes('as an owner and a name'));
     } finally {
       rmSync(ranTmp, { recursive: true, force: true });
+    }
+  }
+
+  // ── END TO END: the VALUE-BEARING bucket is WIRED, not merely present (#15115) ──
+  //
+  // Every unit case above stays green if the `--ran` call site never PASSES
+  // the value-bearing set — a parameter that defaults to empty is exactly the
+  // shape that keeps its own tests green while the live mode still dumps the
+  // class in the remainder, which is the state this card was filed about.
+  // Only a real run reads the wiring.
+  //
+  // The fixture is this tool's OWN answer on this tree, read from `--json`,
+  // rather than an invocation typed here: a hardcoded spelling would keep
+  // passing after the renderer that produces the real one changed shape, and
+  // the two sides of the comparison would stop being the same strings — the
+  // property the whole `--ran` design rests on.
+  {
+    const vbTmp = mkdtempSync(nodePath.join(tmpdir(), 'dg-ran-vb-'));
+    try {
+      // A changeset path, because that is what reaches the live value-bearing
+      // families — and it is the tool's own constant rather than a spelling
+      // this test invented.
+      const vbCard = CHANGESET_PROBE_PATH;
+      const jsonRun = runCli(['--json', vbCard]);
+      const doc = jsonRun.status === 0 ? JSON.parse(jsonRun.stdout ?? '{}') : null;
+      const vbRows = [...(doc?.matched ?? []), ...(doc?.alwaysRunsPopulation ?? [])].filter((row) => row.notRunnable);
+      t('CONTROL: this tree still derives at least one VALUE-BEARING family for a changeset path', Boolean(doc) && vbRows.length >= 1);
+      if (doc && vbRows.length >= 1) {
+        const vbCommand = vbRows[0].command;
+        t('CONTROL: and the runnable union WITHHOLDS it — which is the whole reason the bucket exists', !doc.commands.includes(vbCommand));
+        const vbRecord = nodePath.join(vbTmp, 'ran-value-bearing.list');
+        writeFileSync(vbRecord, `${[...doc.commands, vbCommand].join('\n')}\n`);
+        const vbRun = runCli([RAN_FLAG, vbRecord, vbCard]);
+        const vbOut = vbRun.stdout ?? '';
+        t(
+          '⭐ a real run that RECORDS it lands it in the VALUE-BEARING bucket, with the remainder heading gone entirely',
+          vbRun.status === 0
+            && vbOut.includes('VALUE-BEARING famil(ies)')
+            && vbOut.includes(vbCommand)
+            && !vbOut.includes("Outside this card's derivation"),
+        );
+        t(
+          'and the reason travels with it, so the runner learns why this invocation is not one they could have derived',
+          vbOut.includes('its argv takes a value from the workflow'),
+        );
+        t(
+          'while the verdict is unmoved — the bucket is diagnostic, and every derived family is still accounted for',
+          vbOut.includes(`${doc.commands.length} derived famil(ies) accounted for`),
+        );
+      }
+    } finally {
+      rmSync(vbTmp, { recursive: true, force: true });
     }
   }
 

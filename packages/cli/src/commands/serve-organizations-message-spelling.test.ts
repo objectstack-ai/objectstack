@@ -137,6 +137,8 @@ const UNDECLARED: HostDeclaration = { packageName: PKG, hostRoot: '/srv/app', de
 
 const remedyDeclared = () => formatOrganizationsInstallRemedy('declared-unresolvable', DECLARED, '/srv/app');
 const remedyUndeclared = () => formatOrganizationsInstallRemedy('undeclared', UNDECLARED, '/srv/app');
+const remedyNoLoadableEntry = () =>
+  formatOrganizationsInstallRemedy('declared-no-loadable-entry', DECLARED, '/srv/app');
 
 describe('serve — the multi-org runtime name an operator READS comes from the declaration (#12151)', () => {
   it('site 1 — the "install is broken" remedy names it, with the spacing intact', () => {
@@ -152,6 +154,40 @@ describe('serve — the multi-org runtime name an operator READS comes from the 
     expect(lines(remedyUndeclared())[0]).toBe(
       `      • add ${PKG} (the enterprise multi-org runtime) to THIS APP`,
     );
+  });
+
+  it('site 2b — the `declared-no-loadable-entry` remedy DEFERS, it does not re-prescribe (#14270)', () => {
+    // ── The arm that used to fire, quoted so the flip is legible ──────────
+    // This formatter was a TWO-WAY branch written when only two kinds existed
+    // (`declared-unresolvable` vs everything else). #14041 added a third —
+    // the app DECLARES the package, the install DELIVERED it, and the
+    // package's own `exports` names no runtime entry Node can load — and it
+    // fell into the else leg, rendering the UNDECLARED remedy verbatim:
+    //
+    //       • add @objectstack/organizations (the enterprise multi-org runtime) to THIS APP
+    //         — declare it in the app's package.json and install; the CLI resolves it from the
+    //
+    // i.e. "declare it and install it" to an operator who has already done
+    // both. That superseded wording is what site 2 above still pins for the
+    // kind it is actually right for; here it is the confidently-wrong verdict
+    // #14041 exists to remove, one layer up.
+    expect(lines(remedyNoLoadableEntry())[0]).toBe(
+      `      • this app DECLARES ${PKG} (dependencies: "^1.2.3") and it IS`,
+    );
+
+    const rendered = plain(remedyNoLoadableEntry());
+    // ⛔ NEITHER of the other two arms' instructions may appear. Both are
+    // unfollowable for this kind, and each contradicts the importer's own
+    // message, which is printed as the `cause:` line of the same refusal.
+    expect(rendered).not.toContain("declare it in the app's package.json");
+    expect(rendered).not.toContain('Repair the INSTALL');
+    // What it says instead: where the remedy lives, and that the importer's
+    // message below is the authority on it — a DEFERRAL, deliberately not a
+    // fourth remedy sentence minted here (and in two other consumers).
+    expect(rendered).toContain('publishes no entry Node can load');
+    expect(rendered).toContain('the cause below is the authority');
+    // It still chains into the `Fix one of:` list the fatal assembles.
+    expect(rendered.endsWith(' — or\n')).toBe(true);
   });
 
   it('site 3 — the ADR-0093 D5 fatal refusal names it', () => {
@@ -188,6 +224,7 @@ describe('serve — the multi-org runtime name an operator READS comes from the 
     for (const [label, rendered] of [
       ['remedy (declared)', remedyDeclared()],
       ['remedy (undeclared)', remedyUndeclared()],
+      ['remedy (no loadable entry)', remedyNoLoadableEntry()],
       ['stage-1 fatal', formatOrganizationsAbsentFatal('group', remedyUndeclared(), 'ERR_MODULE_NOT_FOUND')],
       ['degraded warning', formatDegradedTenancyWarning('group')],
       ['stage-2 fatal', formatOrganizationsMountFatal('group', 'refused', undefined)],

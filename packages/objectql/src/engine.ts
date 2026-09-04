@@ -2190,6 +2190,69 @@ function eventUserId(execCtx?: ExecutionContext): string | undefined {
 }
 
 /**
+ * `DataEvent.organizationId` — the organization the RECORD belongs to, read
+ * off that row's own tenant column (#14970).
+ *
+ * The spec declares this member as an obligation on the PRODUCER, and states
+ * it in terms this function exists to honour literally: *"Present = exactly
+ * that organization, never a guess. It names the organization the RECORD
+ * belongs to — not the caller's active organization standing in for the
+ * row's, which would mislabel an administrator's write into another
+ * organization."* Two consequences, neither negotiable:
+ *
+ *  - ⛔ **Never `execCtx.tenantId`.** That is the CALLER's active org — the
+ *    hook-context sense {@link ObjectQL.buildHookUser} publishes, where
+ *    `organizationId` is deliberately "the blessed developer-facing name for
+ *    the caller's". The two coincide on an ordinary tenant write and DIVERGE
+ *    on a system/unscoped one, which is exactly the write this key most needs
+ *    to label correctly. The row is the only truthful source, so this reads
+ *    the row and nothing else. Substituting the caller's org onto a
+ *    permission-boundary column is the defect PR #14726's blocking contract
+ *    review found on a different column.
+ *  - ⛔ **Never a per-event read.** Every call site already holds the row —
+ *    the written record, the post-state, or the delete's pre-image — so this
+ *    is a threading job, not a resolution job. A lookup here would put a query
+ *    on the fan-out path the event exists to keep O(1); triage ruled that out
+ *    for the consumer side on 2026-08-31 and it is equally out here.
+ *
+ * The column is resolved through {@link resolveTenantFieldName} — the write
+ * path's own precedence (`tenancy.enabled: false` opt-out, then a declared
+ * `tenancy.tenantField`, then the kernel-injected `organization_id`) — so an
+ * object the engine does not tenant-scope resolves NOTHING rather than being
+ * mined for a coincidentally-named column, and a disagreement between what the
+ * engine scopes by and what the event names cannot arise. ⚠️ The two spellings
+ * differ on purpose and are easy to conflate: the COLUMN is snake_case
+ * (`organization_id`, machine name), the published KEY is camelCase
+ * (`organizationId`, the blessed developer-facing name).
+ *
+ * Returns `undefined` for every "no organization" case — object not
+ * tenant-scoped, row absent, column absent, `null`, `''`, or a value no id
+ * can be read off — and the caller then OMITS the key. Omission is the
+ * schema's ONE spelling for absence (`z.string().min(1).optional()`): `''` is
+ * refused outright, which would make `parse` throw and drop the event
+ * entirely, and a key set to an explicit `undefined` survives `parse` as a
+ * PRESENT key. Hence the conditional spread at the publish site, not an
+ * assignment.
+ */
+function eventOrganizationId(objectSchema: unknown, row: unknown): string | undefined {
+  const tenantField = resolveTenantFieldName(objectSchema);
+  if (!tenantField) return undefined;
+  const body = eventRecordBody(row);
+  if (!body) return undefined;
+  const value = body[tenantField];
+  // The write path's own "actually supplied" predicate, so producer and
+  // consumer cannot disagree about what counts as an organization.
+  if (!carriesOrganization(value)) return undefined;
+  // Then the same coercion ladder `eventRecordId` uses for the other id on
+  // this event. Deliberately NOT a bare `String(value)`: `String(false)` is a
+  // perfectly valid `min(1)` string, and inventing an organization out of a
+  // malformed column is the "never fabricated" clause's exact failure mode.
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'bigint') return String(value);
+  return undefined;
+}
+
+/**
  * Coerce a multi-row driver result into `BulkDataEvent.matched` (#4639).
  *
  * `IDataDriver.updateMany`/`deleteMany` are contracted to resolve the affected
@@ -5633,6 +5696,15 @@ export class ObjectQL implements IObjectQLEngine {
       recordId: unknown;
       changes?: unknown;
       after?: unknown;
+      /**
+       * The row whose tenant column names this event's `organizationId`
+       * (#14970) — the written record on `created`, the post-state on
+       * `updated`, the PRE-IMAGE on `deleted` (a delete has no post-state, and
+       * `previous` is what every other delete-side consumer already falls back
+       * to). Passed explicitly rather than inferred from `after` so the delete
+       * path, the one with no `after`, cannot silently publish the key absent.
+       */
+      organizationRow?: unknown;
       context?: ExecutionContext;
     },
   ): Promise<void> {
@@ -5655,6 +5727,14 @@ export class ObjectQL implements IObjectQLEngine {
       const changes = eventRecordBody(input.changes);
       const after = eventRecordBody(input.after);
       const userId = eventUserId(input.context);
+      // [#14970] The RECORD's organization, off the row itself — ⛔ never
+      // `input.context.tenantId`, which is the CALLER's. See
+      // {@link eventOrganizationId}; omitted, never `''`/`undefined`, because
+      // absence has exactly one spelling in the schema.
+      const organizationId = eventOrganizationId(
+        this._registry.getObject(object),
+        input.organizationRow,
+      );
       const event: DataEvent = DataEventSchema.parse({
         id: generateEventUuid(),
         type: `data.record.${action}`,
@@ -5663,6 +5743,7 @@ export class ObjectQL implements IObjectQLEngine {
         ...(changes !== undefined ? { changes } : {}),
         ...(after !== undefined ? { after } : {}),
         ...(userId !== undefined ? { userId } : {}),
+        ...(organizationId !== undefined ? { organizationId } : {}),
         timestamp,
       });
 
@@ -10286,6 +10367,8 @@ export class ObjectQL implements IObjectQLEngine {
             await this.publishDataEvent('created', object, {
               recordId: record?.id,
               after: record,
+              // [#14970] The written row names its own organization.
+              organizationRow: record,
               context: opCtx.context,
             });
           }
@@ -11616,6 +11699,10 @@ export class ObjectQL implements IObjectQLEngine {
                  recordId: hookContext.input.id ?? resultId,
                  changes: hookContext.input.data,
                  after: result,
+                 // [#14970] The POST-state's organization, not the pre-image's:
+                 // an update that moves a row between organizations must label
+                 // the event with where the row is NOW.
+                 organizationRow: result,
                  context: opCtx.context,
                });
              }
@@ -13068,6 +13155,12 @@ export class ObjectQL implements IObjectQLEngine {
               const resultId = (typeof result === 'object' && result && 'id' in result) ? (result as any).id : undefined;
               await this.publishDataEvent('deleted', object, {
                 recordId: hookContext.input.id ?? resultId,
+                // [#14970] The pre-image — a delete has no post-state, and
+                // this branch is the by-id one, where `priorRecord` was read
+                // unconditionally by #7867's existence gate and proven
+                // non-null before `beforeDelete` ever fired. So the row is
+                // already in hand and NO new read is bought here.
+                organizationRow: priorRecord,
                 context: opCtx.context,
               });
             }
@@ -14099,9 +14192,36 @@ export class ObjectRepository implements IScopedObjectRepository {
    * and test) found ZERO existing callers of this method anywhere — every
    * `ObjectRepository.execute()` / `ScopedRepo.execute()` hit in the tree was
    * prose describing the shape, never an invocation — so this widens what a
-   * FUTURE caller's write is accepted to do (the static `readonly` strip now
-   * skips this path exactly as it already skips REST `/actions` and MCP
-   * `run_action`) without changing any write anyone ships today.
+   * FUTURE caller's write is accepted to do, without changing any write
+   * anyone ships today.
+   *
+   * [Disclosure completeness] What widens is larger than the static
+   * `readonly` strip named above. `isSystem: true` on `this.context` is read
+   * by ObjectQL's registered security middleware as a TOTAL, unconditional
+   * bypass — `plugin-security/src/security-plugin.ts:1614-1616`, "System
+   * operations bypass security" / `return next()` ahead of every other gate
+   * in that middleware — so every `find`/`insert`/`update`/`delete` this
+   * `ctx.api` drives also skips RLS read scoping (`:4344`) and field-level
+   * security (`:4495`); the CRUD/export permission checks in the same
+   * middleware (`:1616`, `canExport` at `:4573`); the ADR-0103 engine-owned/
+   * append-only write guard (`system-write-guard.ts:96,120`, called at
+   * `security-plugin.ts:1736`); the package-managed / system-row /
+   * curated-capability-name / audience-anchor write gates
+   * (`security-plugin.ts:1690-1724`); the referential-integrity check
+   * (`:5892` in this file) and the tenant-audit mute (`:3773`) — in addition
+   * to the static `readonly`/runtime-owned strip on BOTH update paths
+   * (`:11290`, `:11473`) and the insert path (`:10025`), not the single site
+   * an earlier draft of this note implied. Exactly what REST `/actions` and
+   * MCP `run_action` already give an action body — see
+   * `content/docs/permissions/system-context.mdx` ("Elevation is total, and
+   * it is not granular") for the full catalog this bypass belongs to.
+   *
+   * Bounded on two sides: metadata-plane schema masking
+   * (`metadata-core/object-schema-fls.ts:228`) is a separate REST/GraphQL
+   * dispatch path this `ctx.api` surface never calls into; and
+   * `plugin-sharing/rule-hooks.ts`'s insert/update materialisation skip was
+   * already retired by the maintainer's 2026-08-31 ruling on #13533 (system
+   * and user writes materialise sharing grants identically today).
    */
   async execute(actionName: string, params?: any): Promise<any> {
     if (this.engine.executeAction) {

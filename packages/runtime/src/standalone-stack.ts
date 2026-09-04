@@ -222,8 +222,8 @@ export const StandaloneStackConfigSchema = z.object({
      * Defaults to `true`, and that default is the fix: a standalone kernel
      * OWNS its local platform tables, which is what the gate in
      * `assembleMetadataProtocol` always meant to say. It used to deduce that
-     * from `environmentId === undefined`, and line ~515 below stamps
-     * `'proj_local'` on every boot — so the block never ran and #8686's
+     * from `environmentId === undefined`, and line ~567 below stamps
+     * `'env_local'` on every boot — so the block never ran and #8686's
      * "covers every existing deployment" half covered no self-hosted install
      * at all.
      *
@@ -564,7 +564,7 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
     const { DefaultDatasourcePlugin } = await import('./default-datasource-plugin.js');
     const { AppPlugin } = await import('./app-plugin.js');
 
-    const environmentId = cfg.environmentId ?? process.env.OS_ENVIRONMENT_ID ?? 'proj_local';
+    const environmentId = cfg.environmentId ?? process.env.OS_ENVIRONMENT_ID ?? 'env_local';
     const artifactPath = resolveArtifactPathInput(cfg);
 
     // `databaseAuthToken` / `OS_DATABASE_AUTH_TOKEN` / `TURSO_AUTH_TOKEN` are
@@ -747,7 +747,7 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
             ...(cfg.projectRoot ? { rootDir: cfg.projectRoot } : {}),
         }),
         // [#9380] `runPlatformMigrations` is declared here, not deduced from
-        // `environmentId`: this stack stamps `'proj_local'` above, and the
+        // `environmentId`: this stack stamps `'env_local'` above, and the
         // assembly's old `environmentId === undefined` gate read that as "a
         // per-project cloud kernel" and disarmed the three boot repairs on
         // every self-hosted install. A standalone kernel owns its local
