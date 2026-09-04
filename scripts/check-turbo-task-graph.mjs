@@ -619,6 +619,132 @@ function main() {
   );
 }
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. The floor requires the OPENED set to equal the
+// DECLARED set with each battery at or above its own count.
+//
+// This file declares ONE battery, opened at the top of `selfTest()`'s body. It
+// carries ZERO named section banners — fewer than the two the sectioning
+// criterion needs — and ⛔ a comment is NOT promoted to a section head: that is
+// a judgement per comment this transplant does not make. The hoisted single
+// battery is the shape PRs #14896, #15003 and #15217 landed for this case.
+//
+// ── Why the LEDGER is module-level and the CHECK sits at the verdict site ──
+//
+// This gate splits its self-test in two: `selfTest()` REGISTERS and returns its
+// failures, and `runSelfTest()` DECIDES — it prints the `OK:` line or exits 1.
+// There is no verdict site inside the registering body, so the floor is
+// evaluated where the green line already is (inside `runSelfTest()`, reached
+// only from the `--self-test` branch of the dispatch, so it can never fire on a
+// production run). The ledger it reads therefore has to outlive `selfTest()`'s
+// frame — hence a module-scope `batterySeen` rather than the local map the
+// single-body recipe closes over. Roster, sink and ledger are module-level in
+// the landed recipes already; only the CHECK's location moves, and attribution
+// and scope are untouched.
+//
+// ⛔ The floor is NOT placed at the end of `selfTest()` before its `return`: an
+// early return anywhere above that line would skip the check entirely — the
+// exact defect the #13798 verdict handshake exists to catch — coupling hole 1
+// to hole 2 after the card ruled them orthogonal. Evaluated at the verdict site,
+// the same early return lands as a count BELOW the floor and reds.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The count is a FLOOR, not an equality — adding cases is ordinary work and must
+// not red. A battery BELOW its floor means cases stopped running; the remedy is
+// to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'check-turbo-task-graph self-test': 49,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 1;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
+// The battery ledger, read by `batteryFloorFailures()` below from the OTHER
+// function. `battery()` opens a battery; every assertion registered after that
+// line is attributed to the one most recently opened, so a section that stops
+// running stops registering and names ITSELF at the floor rather than going
+// quiet.
+//
+// ⚠️ Named for the roster's role, deliberately NOT with a self-test spelling:
+// `check:pm-dispatch-gates` anchors on a top-level declaration whose NAME spells
+// self-test and every such name owes a row in its COMPOUND_ANCHOR_LEDGER. This
+// machinery holds no fixtures to mask and reads no path literal, so the accurate
+// name is the one that says `battery`.
+const batterySeen = new Map();
+let openBattery = null;
+
+/** Open a battery. Every assertion registered after this line is attributed to it. */
+function battery(name) {
+  openBattery = name;
+}
+
+/** Called by `selfTest()`'s own assertion sink, once per assertion. */
+function registerCase() {
+  const name = openBattery ?? UNATTRIBUTED_BATTERY;
+  batterySeen.set(name, (batterySeen.get(name) ?? 0) + 1);
+}
+
+/**
+ * The floor: every declared battery RAN, and ran its cases (#13489).
+ *
+ * Guards the registrations made by **`selfTest()`** — the body whose assertion
+ * sink `t()` routes through `registerCase()`. It is called from `runSelfTest()`
+ * immediately before the success line, so that line can only be printed by a run
+ * in which the set of batteries that registered assertions EQUALS the set
+ * declared, each at or above its own count. A set difference says WHICH battery
+ * stopped; a count says only that something did.
+ *
+ * @returns {string[]} floor breaches; empty means the floor held
+ */
+function batteryFloorFailures() {
+  const declared = Object.keys(SELF_TEST_BATTERIES);
+  const problems = [];
+  if (declared.length < SELF_TEST_BATTERY_FLOOR) {
+    problems.push(
+      `SELF_TEST_BATTERIES declares ${declared.length} batteries, below the pinned `
+        + `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declared.includes(name)) continue;
+    problems.push(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in `
+        + 'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declared) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    problems.push(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. `
+          + 'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of `
+          + `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (problems.length) {
+    problems.push(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the '
+        + 'number. Find what stopped registering (an early return, a deleted block, a guard that now '
+        + 'skips) and restore it.',
+    );
+  }
+  return problems;
+}
+
 /**
  * The instrument for a gate whose defect class is its MATCHING RULE: a clean
  * tree cannot tell a working rule from one that stopped matching, because both
@@ -628,8 +754,12 @@ function main() {
  * @returns {string[]} failure descriptions; empty means OK
  */
 export function selfTest() {
+  // The single hoisted battery this body's assertions are attributed to. The
+  // floor that reads them is evaluated at the verdict site in `runSelfTest()`.
+  battery('check-turbo-task-graph self-test');
   const failures = [];
   const t = (label, ok) => {
+    registerCase();
     if (!ok) failures.push(label);
   };
 
@@ -896,6 +1026,22 @@ function runSelfTest() {
     for (const f of failures) console.error(`  - ${f}`);
     process.exit(1);
   }
+
+  // ── The assertion floor, at the verdict site ───────────────────────
+  // `selfTest()` registers but does not decide, so the floor over ITS
+  // registrations is evaluated here, after every battery has had its chance and
+  // immediately before the success line — the only place a run that registered
+  // nothing can still be stopped from reporting that every case held.
+  const floorBreaches = batteryFloorFailures();
+  if (floorBreaches.length) {
+    console.error(
+      `FAIL: check-turbo-task-graph --self-test — the assertion floor over selfTest()'s `
+        + `registrations was breached (${floorBreaches.length} problem(s)); every case that DID run passed.`,
+    );
+    for (const b of floorBreaches) console.error(`  - ${b}`);
+    process.exit(1);
+  }
+
   console.log('OK: check-turbo-task-graph --self-test — all cases passed.');
 
   return SELF_TEST_VERDICT;
