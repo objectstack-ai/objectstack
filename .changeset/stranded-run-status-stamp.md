@@ -37,8 +37,13 @@ repairs to how `restoreConsumedSuspension` finds a stranded run's snapshot:
   object store read that column back as the snapshot's node, so a restore
   from the row (after a restart, or on another replica) re-armed the run at
   the failed node and the next resume skipped it while reporting the run
-  completed. The throwing node stays where the Runs surface reads it: the
-  row's step log and `error`.
+  completed. The throwing node stays in the row's step log and `error`.
+  Visible on the Runs surface: `sys_automation_run`'s row title and highlight
+  set are built from `node_id` (`titleFormat '{flow_name} · {node_id}'`), so a
+  stranded run's row now names the PAUSED node — the one an operator can
+  re-arm — where it named the node that threw; ordinary completed / failed
+  rows are unchanged. The `node_id` and `variables_json` field descriptions
+  carry this carve-out, the way `node_type`'s already did.
 - The verb reads the durable row and its own per-process journal as two
   witnesses of one strand instead of trusting either alone. The hot copy is
   preferred when both describe the same pause (it is the verbatim object the
