@@ -46,6 +46,16 @@
         "types": "./dist/errors.d.cts",
         "default": "./dist/errors.cjs"
       }
+    },
+    "./view-container": {
+      "import": {
+        "types": "./dist/view-container.d.ts",
+        "default": "./dist/view-container.js"
+      },
+      "require": {
+        "types": "./dist/view-container.d.cts",
+        "default": "./dist/view-container.cjs"
+      }
     }
   },
   "files": [
