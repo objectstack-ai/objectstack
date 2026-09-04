@@ -21,6 +21,14 @@ import { BUILTIN_IDENTITY_PLATFORM_ADMIN } from '@objectstack/spec/identity';
 // — one honouring the 1/0 and 'false' storage shapes, one not — is how the
 // enforcement hole this closes gets re-opened one seam over.
 import { isRowActive } from '@objectstack/core';
+// [#14754] The engine's organization refusal for a system write on a
+// tenant-scoped object (#8844). Imported as a TYPE only: the runtime check is a
+// `code` compare, which is the convention that class itself documents ("a
+// caller that catches it identifies it by `code`") so the check survives the
+// package boundary where two copies of that module can exist. Typing the
+// literal FROM the class is what keeps the two spellings from drifting — a
+// typo here would not be a failing test, it would be a catch that never fires.
+import type { SystemWriteOrganizationRequiredError } from '@objectstack/objectql';
 import type { SharingEngine } from './sharing-service.js';
 import type { SharingService } from './sharing-service.js';
 import { normalizeAccessLevel, normalizeStoredAccessLevel } from './access-level.js';
@@ -118,6 +126,35 @@ function rowFromRule(row: any): SharingRuleRow {
     created_at: row.created_at ?? undefined,
     updated_at: row.updated_at ?? undefined,
   };
+}
+
+/**
+ * [#14754] The one engine refusal a reconcile pass absorbs per grant.
+ *
+ * Spelled once, and typed from the engine's own declaration so it cannot drift
+ * from the code the engine actually throws.
+ */
+const ENGINE_ORGANIZATION_REFUSAL_CODE: SystemWriteOrganizationRequiredError['code'] =
+  'ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED';
+
+/**
+ * [#14754] What one reconcile pass did, plus the grants the engine's
+ * organization rule REFUSED in it.
+ *
+ * Extends the spec's {@link SharingRuleEvaluationResult} rather than changing
+ * it: the contract lives in `@objectstack/spec` and is another lane's to move,
+ * and every declared consumer keeps compiling against the six fields it always
+ * had. The seventh is additive and rides along for the callers that want it —
+ * the boot backfill's aggregate and this package's own pins.
+ *
+ * ⛔ `grantsRefused > 0` is NOT "the pass failed". It is the pass reporting that
+ * it met a record it cannot grant on (an organization-less record under a
+ * walled posture) and CONTINUED — which is the whole point: the remaining
+ * grants and, above all, the stale-row revocations still ran.
+ */
+export interface SharingRuleReconcilePassResult extends SharingRuleEvaluationResult {
+  /** Grants the engine's organization rule refused; each one is also logged. */
+  grantsRefused: number;
 }
 
 export interface SharingRuleServiceOptions {
@@ -754,14 +791,15 @@ export class SharingRuleService implements ISharingRuleService {
     } as any);
   }
 
-  async evaluateRule(idOrName: string, context: ExecutionContext): Promise<SharingRuleEvaluationResult> {
+  async evaluateRule(idOrName: string, context: ExecutionContext): Promise<SharingRuleReconcilePassResult> {
     this.assertCanManageRules(context); // [ADR-0111 D6]
     const rule = await this.getRule(idOrName, context);
     if (!rule) throw new Error('RULE_NOT_FOUND');
     if (!rule.active) {
       // Inactive — purge any leftover grants and report revoke count.
       const revoked = await this.purgeRuleGrants(rule.id);
-      return { ruleId: rule.id, matchedRecords: 0, expandedUsers: 0, grantsCreated: 0, grantsUpdated: 0, grantsRevoked: revoked };
+      // [#14754] An inactive rule attempts no grant, so it can refuse none.
+      return { ruleId: rule.id, matchedRecords: 0, expandedUsers: 0, grantsCreated: 0, grantsUpdated: 0, grantsRevoked: revoked, grantsRefused: 0 };
     }
     // [#15072] One whole-rule pass whatever the recipient kind: the desired
     // set is derived per kind ({@link desiredGrantsForRule}) and the diff is
@@ -853,10 +891,10 @@ export class SharingRuleService implements ISharingRuleService {
     object: string,
     recordId: string,
     context: ExecutionContext,
-  ): Promise<SharingRuleEvaluationResult[]> {
+  ): Promise<SharingRuleReconcilePassResult[]> {
     const rules = await this.listRules({ object }, context);
     if (rules.length === 0) return [];
-    const results: SharingRuleEvaluationResult[] = [];
+    const results: SharingRuleReconcilePassResult[] = [];
     // [#8710] ONE pass, so N rules naming the same position pay ONE catalogue
     // read — and the memo dies with this call, so the next pass re-reads and a
     // deactivation is honoured immediately.
@@ -1583,6 +1621,82 @@ export class SharingRuleService implements ISharingRuleService {
   }
 
   /**
+   * [#14754] Materialise ONE rule grant, absorbing the engine's organization
+   * refusal so the pass survives it.
+   *
+   * ## The defect this closes, and which half of it is the security half
+   *
+   * `sys_record_share` is tenant-scoped in the #13491 ledger (#14484), so on a
+   * walled install an organization-less system insert on it is refused loudly
+   * with {@link ENGINE_ORGANIZATION_REFUSAL_CODE}. `SharingService.grant`
+   * resolves the organization on every path that can; a platform-global rule
+   * (`organization_id = null`, its sweep unscoped) materialising onto an
+   * organization-less record resolves none, and meets the refusal.
+   *
+   * Without this catch the refusal propagated out of the reconcile loop and
+   * that rule's pass ABORTED mid-loop. The grants already written stayed; the
+   * remaining grants — and **the stale-row revocations of that pass** — did
+   * not happen. The revocation half is the security-relevant one: a stale
+   * over-grant of that rule persisted across every pass that met the same
+   * record, and that record kept aborting the pass until it was repaired.
+   *
+   * ## Why the catch is narrow, and must stay narrow
+   *
+   * ONLY {@link ENGINE_ORGANIZATION_REFUSAL_CODE} is absorbed; everything else
+   * rethrows unchanged. Two reasons, and the second is measured:
+   *
+   * - A catch-all would swallow real defects — a driver outage, a criteria
+   *   bug, a permission failure — and report a pass that "completed" having
+   *   written nothing, which is the silence #6783 spent a card removing.
+   * - `record-share-organization-stamp.test.ts` DELIBERATELY pins the abort on
+   *   the OTHER error a reconcile pass can meet here: the scoped update half
+   *   answering `RECORD_NOT_FOUND` (404) for a row stamped with a different
+   *   organization. That shape was reviewed on 2026-09-02 and left standing
+   *   ("loud beats a wrong count"). Widening this catch to any error would
+   *   retire that decision as a side effect, and its three pins are what
+   *   notices.
+   *
+   * Returns `true` when the grant landed, `false` when it was refused —
+   * never throws for the refusal, and the caller counts what it is told.
+   */
+  private async grantOrAbsorbOrganizationRefusal(
+    rule: SharingRuleRow,
+    recordId: string,
+    recipientId: string,
+  ): Promise<boolean> {
+    try {
+      await this.sharing.grant(
+        {
+          object: rule.object_name,
+          recordId,
+          recipientType: 'user',
+          recipientId,
+          accessLevel: rule.access_level,
+          source: 'rule',
+          sourceId: rule.id,
+          reason: `rule:${rule.name}`,
+        } as any,
+        this.criteriaContext(rule),
+      );
+      return true;
+    } catch (err: any) {
+      if (err?.code !== ENGINE_ORGANIZATION_REFUSAL_CODE) throw err;
+      this.logger?.warn?.(
+        '[sharing-rule] grant refused by the engine organization rule — counted, pass continues',
+        {
+          rule: rule.name ?? rule.id,
+          object: rule.object_name,
+          record: recordId,
+          recipient: recipientId,
+          code: ENGINE_ORGANIZATION_REFUSAL_CODE,
+        },
+      );
+      return false;
+    }
+  }
+
+
+  /**
    * Diff a whole-rule pass's desired pairs against the rule's materialised
    * grants: upsert what is wanted, revoke the remainder.
    *
@@ -1590,59 +1704,49 @@ export class SharingRuleService implements ISharingRuleService {
    * `(matchedIds, users)`: the product of those two is what a rule-wide
    * recipient wants, and it is built in {@link desiredGrantsForRule} — where
    * a `field` rule builds its per-record pairs instead. The diff below is
-   * unchanged.
+   * unchanged, and since #14754 it attempts each grant individually
+   * ({@link grantOrAbsorbOrganizationRefusal}) — a refused grant is counted
+   * in `grantsRefused` and the pass, including its stale-row revocations,
+   * continues.
    */
-  private async reconcile(rule: SharingRuleRow, want: DesiredGrantSet): Promise<SharingRuleEvaluationResult> {
+  private async reconcile(rule: SharingRuleRow, desiredSet: DesiredGrantSet): Promise<SharingRuleReconcilePassResult> {
     const existing = await this.engine.find('sys_record_share', {
       where: { source: 'rule', source_id: rule.id },
       fields: ['id', 'record_id', 'recipient_id', 'access_level'],
       limit: 100000,
       context: SYSTEM_CTX,
     });
-    const desired = want.desired;
+    const desired = desiredSet.desired;
     const existingMap = new Map<string, any>();
     for (const row of (existing ?? [])) existingMap.set(`${row.record_id}::${row.recipient_id}`, row);
 
     let created = 0;
     let updated = 0;
     let revoked = 0;
+    let refused = 0;
 
-    // Upsert desired.
+    // Upsert desired. [#14754] Per grant, not per pass: a refusal is counted
+    // and the loop goes on, so the revoke loop below is REACHED.
     for (const [k, want] of desired.entries()) {
       const cur = existingMap.get(k);
       if (cur) {
-        if (cur.access_level !== rule.access_level) {
-          await this.sharing.grant(
-            {
-              object: rule.object_name,
-              recordId: want.record_id,
-              recipientType: 'user',
-              recipientId: want.recipient_id,
-              accessLevel: rule.access_level,
-              source: 'rule',
-              sourceId: rule.id,
-              reason: `rule:${rule.name}`,
-            } as any,
-            this.criteriaContext(rule),
-          );
-          updated += 1;
-        }
+        // [#14754] Taken out of the stale set BEFORE the grant is attempted.
+        // The row is DESIRED; a refused level update must leave it standing.
+        // Deleting it only on success would drop it through to the revoke loop
+        // and retract a grant the rule still wants — this card's defect
+        // inverted, and strictly worse than the abort it replaces.
         existingMap.delete(k);
-      } else {
-        await this.sharing.grant(
-          {
-            object: rule.object_name,
-            recordId: want.record_id,
-            recipientType: 'user',
-            recipientId: want.recipient_id,
-            accessLevel: rule.access_level,
-            source: 'rule',
-            sourceId: rule.id,
-            reason: `rule:${rule.name}`,
-          } as any,
-          this.criteriaContext(rule),
-        );
+        if (cur.access_level !== rule.access_level) {
+          if (await this.grantOrAbsorbOrganizationRefusal(rule, want.record_id, want.recipient_id)) {
+            updated += 1;
+          } else {
+            refused += 1;
+          }
+        }
+      } else if (await this.grantOrAbsorbOrganizationRefusal(rule, want.record_id, want.recipient_id)) {
         created += 1;
+      } else {
+        refused += 1;
       }
     }
     // Revoke stale.
@@ -1653,11 +1757,12 @@ export class SharingRuleService implements ISharingRuleService {
 
     return {
       ruleId: rule.id,
-      matchedRecords: want.matchedRecords,
-      expandedUsers: want.expandedUsers,
+      matchedRecords: desiredSet.matchedRecords,
+      expandedUsers: desiredSet.expandedUsers,
       grantsCreated: created,
       grantsUpdated: updated,
       grantsRevoked: revoked,
+      grantsRefused: refused,
     };
   }
 
@@ -1666,7 +1771,7 @@ export class SharingRuleService implements ISharingRuleService {
     recordId: string,
     match: boolean,
     users: string[],
-  ): Promise<SharingRuleEvaluationResult> {
+  ): Promise<SharingRuleReconcilePassResult> {
     const existing = await this.engine.find('sys_record_share', {
       where: { source: 'rule', source_id: rule.id, record_id: recordId },
       fields: ['id', 'record_id', 'recipient_id', 'access_level'],
@@ -1679,43 +1784,30 @@ export class SharingRuleService implements ISharingRuleService {
     let created = 0;
     let updated = 0;
     let revoked = 0;
+    let refused = 0;
 
     if (match) {
+      // [#14754] Per grant, exactly as in {@link reconcile}: one recipient the
+      // engine's organization rule refuses no longer takes the rest of this
+      // record's pass — nor its revoke loop — with it.
       for (const userId of users) {
         const cur = existingMap.get(userId);
         if (cur) {
-          if (cur.access_level !== rule.access_level) {
-            await this.sharing.grant(
-              {
-                object: rule.object_name,
-                recordId,
-                recipientType: 'user',
-                recipientId: userId,
-                accessLevel: rule.access_level,
-                source: 'rule',
-                sourceId: rule.id,
-                reason: `rule:${rule.name}`,
-              } as any,
-              this.criteriaContext(rule),
-            );
-            updated += 1;
-          }
+          // [#14754] Out of the stale set BEFORE the attempt — see the twin
+          // comment in {@link reconcile}: a refused level update must leave the
+          // desired row standing, never fall through to the revoke loop.
           existingMap.delete(userId);
-        } else {
-          await this.sharing.grant(
-            {
-              object: rule.object_name,
-              recordId,
-              recipientType: 'user',
-              recipientId: userId,
-              accessLevel: rule.access_level,
-              source: 'rule',
-              sourceId: rule.id,
-              reason: `rule:${rule.name}`,
-            } as any,
-            this.criteriaContext(rule),
-          );
+          if (cur.access_level !== rule.access_level) {
+            if (await this.grantOrAbsorbOrganizationRefusal(rule, recordId, userId)) {
+              updated += 1;
+            } else {
+              refused += 1;
+            }
+          }
+        } else if (await this.grantOrAbsorbOrganizationRefusal(rule, recordId, userId)) {
           created += 1;
+        } else {
+          refused += 1;
         }
       }
     }
@@ -1733,6 +1825,7 @@ export class SharingRuleService implements ISharingRuleService {
       grantsCreated: created,
       grantsUpdated: updated,
       grantsRevoked: revoked,
+      grantsRefused: refused,
     };
   }
 

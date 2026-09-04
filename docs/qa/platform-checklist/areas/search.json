@@ -32,7 +32,7 @@
           "step": 3,
           "call": "insert a sys_user_position row in system context binding that user id to the `contributor` position",
           "expect": "one row. This is THE step that makes the persona a subset reader: `contributor` resolves to showcase_contributor (auto-bound at boot, see requires), which grants showcase_invoice allowRead/allowCreate/allowEdit, and the RLS rule `invoice_own_rows` (using: `owner == current_user.email`, positions: ['contributor']) narrows every select to rows the caller owns.",
-          "source": "examples/app-showcase/src/security/permission-sets.ts — ContributorPermissionSet.objects.showcase_invoice and rowLevelSecurity['invoice_own_rows']; examples/app-showcase/src/security/positions.ts (the `contributor` position); bind-position-sets.ts for the position→set edge"
+          "source": "examples/app-showcase/src/security/permission-sets.ts#ContributorPermissionSet — ContributorPermissionSet.objects.showcase_invoice and rowLevelSecurity['invoice_own_rows']; examples/app-showcase/src/security/positions.ts#contributor (the `contributor` position); bind-position-sets.ts for the position→set edge"
         },
         {
           "step": 4,
@@ -131,8 +131,8 @@
       "automated": { "kind": "api", "ref": "packages/qa/dogfood/test/showcase-search.dogfood.test.ts" },
       "source": [
         "packages/qa/dogfood/test/search-conformance.ledger.ts (rows search-executor, search-select-label-mapping — the variants list is the enforced behavior set)",
-        "packages/objectql/src/search-filter.ts (docblock 'Matching:' paragraph — matching semantics: terms AND-ed, fields OR-ed, case-insensitive, label mapping; the DECLARATION this item transcribes, honored for textual types by fieldClausesForTerm since #7641 moved it onto `$icontains`)",
-        "packages/objectql/src/engine.ts expandSearchOnAst (the executor site the ledger names)",
+        "packages/objectql/src/search-filter.ts#fieldClausesForTerm (docblock 'Matching:' paragraph — matching semantics: terms AND-ed, fields OR-ed, case-insensitive, label mapping; the DECLARATION this item transcribes, honored for textual types by fieldClausesForTerm since #7641 moved it onto `$icontains`)",
+        "packages/objectql/src/engine.ts#expandSearchOnAst expandSearchOnAst (the executor site the ledger names)",
         "#4706 Q2 = A (the operator ruling that fixes the direction: `$contains` is a case-SENSITIVE substring test and `$icontains` is the case-insensitive one — so 'case-insensitive $search' means $icontains, and the declaration is what the executor must satisfy)"
       ],
       "history": [
@@ -196,8 +196,8 @@
       "automated": { "kind": "api", "ref": "packages/qa/dogfood/test/showcase-search.dogfood.test.ts" },
       "source": [
         "packages/qa/dogfood/test/search-conformance.ledger.ts (row search-fields-override: intersection + ingress gate, #4254)",
-        "packages/metadata-protocol/src/protocol.ts (assertSearchFieldsAreSearchable — 400 INVALID_FIELD; $-spelling normalization)",
-        "packages/objectql/src/search-filter.ts (resolveSearchFields intersection; companion excluded from resolution — 'invisible to $searchFields overrides and to clients')"
+        "packages/metadata-protocol/src/protocol.ts#assertSearchFieldsAreSearchable (assertSearchFieldsAreSearchable — 400 INVALID_FIELD; $-spelling normalization)",
+        "packages/objectql/src/search-filter.ts#resolveSearchFields (resolveSearchFields intersection; companion excluded from resolution — 'invisible to $searchFields overrides and to clients')"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new item from the conformance ledger's override row and the #4254 ingress-gate source, including the companion-invisibility clause from search-filter.ts", "ref": "claude/platform-test-checklist-ocwugl" }
@@ -266,10 +266,10 @@
       ],
       "traps": ["wrong-persona", "seed-data-thin"],
       "source": [
-        "examples/app-showcase/src/security/permission-sets.ts (invoice_own_rows: owner == current_user.email, positions ['contributor'])",
+        "examples/app-showcase/src/security/permission-sets.ts#invoice_own_rows (invoice_own_rows: owner == current_user.email, positions ['contributor'])",
         "examples/app-showcase/src/data/seed/index.ts (INV-1001..1012 owner spread; 'ada sees INV-1001/1002's lines but never linus's INV-1003')",
-        "packages/objectql/src/engine.ts (expandSearchOnAst ANDs into ast.where; count() rides the read middleware — the #2737 total-leak fix)",
-        "packages/metadata-protocol/src/protocol.ts (searched lists: countable = search == null → page-local total from the scoped find)"
+        "packages/objectql/src/engine.ts#expandSearchOnAst (expandSearchOnAst ANDs into ast.where; count() rides the read middleware — the #2737 total-leak fix)",
+        "packages/metadata-protocol/src/protocol.ts#countable (searched lists: countable = search == null → page-local total from the scoped find)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new item: RLS × $search both-personas contract; total-leakage clause grounded in the protocol's page-local total for searched lists and the #2737 count middleware fix, persona provisioning gap recorded honestly", "ref": "claude/platform-test-checklist-ocwugl" },
@@ -371,11 +371,11 @@
       ],
       "traps": ["stale-dist", "seed-data-thin"],
       "source": [
-        "packages/types/src/env.ts (resolveSearchPinyinEnabled — explicit env wins, truthy set {1,true,on,yes}; unset derives from zh-* locales; stampSearchPinyinEnabled at boot)",
+        "packages/types/src/env.ts#resolveSearchPinyinEnabled (resolveSearchPinyinEnabled — explicit env wins, truthy set {1,true,on,yes}; unset derives from zh-* locales; stampSearchPinyinEnabled at boot)",
         "packages/plugins/plugin-pinyin-search/src/pinyin-search-plugin.ts (inert-when-off, before-save hooks, kernel:bootstrapped backfill) — reached only when the host loads the plugin; under the CLI the flag decides `requires` first, which is why the roster, not this file's log line, is the OFF-side oracle",
-        "packages/objectql/src/search-companion.ts (__search companion: display-field-only materialization, FLS/secret eligibility gate)",
+        "packages/objectql/src/search-companion.ts#display (__search companion: display-field-only materialization, FLS/secret eligibility gate)",
         "packages/objectql/src/search-filter.ts (each latin term ORs { __search: { $contains: term } } — purely additive)",
-        "examples/app-showcase/src/data/seed/index.ts (张伟/华宁科技 seeded for exactly this demo) + examples/app-showcase/objectstack.config.ts (supportedLocales ['en','zh-CN'])",
+        "examples/app-showcase/src/data/seed/index.ts (张伟/华宁科技 seeded for exactly this demo) + examples/app-showcase/objectstack.config.ts#supportedLocales (supportedLocales ['en','zh-CN'])",
         "docs/plans/release-15.1-test-plan.md E5/G9 (#3027/#3034)"
       ],
       "history": [
@@ -449,7 +449,7 @@
       ],
       "traps": ["hydration-race", "shared-browser-tab"],
       "source": [
-        "packages/objectql/src/search-filter.ts + packages/objectql/src/engine.ts expandSearchOnAst ($search → $or of $contains ANDed into ast.where at query time — no index artifact for latin search)",
+        "packages/objectql/src/search-filter.ts + packages/objectql/src/engine.ts#expandSearchOnAst expandSearchOnAst ($search → $or of $contains ANDed into ast.where at query time — no index artifact for latin search)",
         "packages/plugins/plugin-pinyin-search/src/pinyin-search-plugin.ts (before-save recompute = write-through; kernel:bootstrapped backfill + rebuildSearchCompanion = the deferred reconcile paths)",
         "packages/qa/dogfood/test/search-conformance.ledger.ts (Tier 2 external engines deliberately absent — there is no FTS index to be stale)"
       ],
@@ -559,7 +559,7 @@
         "objectui packages/app-shell/src/views/SearchResultsPage.tsx (/apps/:appName/search — same searchAll path, record hits grouped by object + nav matches, designed empty state)",
         "objectui packages/react/src/hooks/useRecordSearch.ts (prefers dataSource.searchAll → GET /api/v1/search; per-object find({ $search }) fanout fallback when searchAll is absent)",
         "objectui packages/data-objectstack/src/index.ts (searchAll → GET /api/v1/search?q=, returns { query, hits }; 404 → empty when the search plugin is absent)",
-        "packages/rest/src/rest-route-ledger.ts (GET /api/v1/search, family search, source route-manager, client search) + packages/metadata-protocol/src/protocol.ts (searchAll backing)",
+        "packages/rest/src/rest-route-ledger.ts (GET /api/v1/search, family search, source route-manager, client search) + packages/metadata-protocol/src/protocol.ts#searchAll (searchAll backing)",
         "search.rls-both-personas (the RLS × $search read-path mechanism this item reuses) and search.cross-field-object-search (the /data $search path this item is DISTINCT from — this tests the console global-search UI + the /search route)"
       ],
       "history": [
