@@ -212,7 +212,7 @@ View filter rule
 | **labelField** | `string` | optional | Field rendered as each row's text (default `name`) |
 | **valueField** | `string` | optional | Field whose value is written into the bound page variable (default `id`) |
 | **label** | `string \| Record<string, string>` | optional | Control label rendered above the select |
-| **filter** | `any` | optional | Filter criteria for available records |
+| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter rules narrowing which records the picker offers — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography the array-declared `filter` doors of this map share. The MongoDB-style record form is refused — see migration `element-record-picker-filter-rule-array`. The binding-level `dataSource.filter` wins outright when both are set |
 | **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Row order — synonym of the component-level `dataSource.sort`, which takes precedence when both are set |
 | **limit** | `integer` | optional | Max records offered — synonym of the component-level `dataSource.limit`, which takes precedence when both are set (renderer default 50) |
 | **targetVariable** | `never` | optional | [REMOVED] `element:record_picker` property `targetVariable` was removed in @objectstack/spec 17 (ADR-0049) — it was a declarative hint no renderer ever read: the live binding runs the other direction, resolved from the page variable whose `source` names this component's `id`, so authoring only `targetVariable` bound nothing while reporting success. Delete the key; to bind the picked record id, declare it on the variable — `variables: [{ name: '<var>', type: 'record_id', source: '<this component id>' }]`. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
@@ -222,6 +222,16 @@ View filter rule
 | **searchFields** | `never` | optional | [REMOVED] `element:record_picker` property `searchFields` was removed in @objectstack/spec 17.0.0 (ADR-0049) — the picker renders a plain single-select with no search input, so no renderer ever read it and it narrowed nothing. Delete the key. To restrict which records the picker offers, use `filter` (or the component-level `dataSource.filter`), which the query path does apply. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
 | **multiple** | `never` | optional | [REMOVED] `element:record_picker` property `multiple` was removed in @objectstack/spec 17.0.0 (ADR-0049) — the picker is a single-select `Select` and the bound page variable holds one record id, so `multiple: true` selected nothing extra and reported success. Delete the key; multi-record selection is not implemented on this element. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
+
+### Nested Shape: `ElementRecordPickerProps.filter[number]`
+
+View filter rule
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field name to filter on |
+| **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>` | ✅ | Filter operator |
+| **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. |
 
 ### Nested Shape: `ElementRecordPickerProps.sort[number]`
 

@@ -1667,13 +1667,17 @@ describe('Interactive Elements — element:record_picker', () => {
       labelField: 'name',
       valueField: 'id',
       label: 'Account',
-      filter: { status: 'active' },
+      // The ViewFilterRule array form (ui#6206-B, #14406) — this fixture
+      // authored the record form `{ status: 'active' }` while the entry alone
+      // accepted it.
+      filter: [{ field: 'status', operator: 'equals', value: 'active' }],
       placeholder: 'Search accounts...',
       emptyText: 'No accounts',
     });
     expect(props.labelField).toBe('name');
     expect(props.valueField).toBe('id');
     expect(props.label).toBe('Account');
+    expect(props.filter).toEqual([{ field: 'status', operator: 'equals', value: 'active' }]);
     expect(props.emptyText).toBe('No accounts');
   });
 
@@ -1806,6 +1810,113 @@ describe('Interactive Elements — element:record_picker', () => {
     const props = ElementRecordPickerPropsSchema.parse({ object: 'a' });
     expect(props.limit).toBeUndefined();
     expect(props.sort).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// element:record_picker `filter` — the ViewFilterRule ARRAY orthography (ui#6206-B, #14406)
+// ---------------------------------------------------------------------------
+describe("element:record_picker `filter` — one filter orthography platform-wide (ui#6206 Option B, #14406)", () => {
+  const picker = ComponentPropsMap['element:record_picker'];
+  const number = ComponentPropsMap['element:number'];
+  const relatedList = ComponentPropsMap['record:related_list'];
+  const RULES = [{ field: 'status', operator: 'equals', value: 'active' }];
+  const RECORD_FORM = { status: 'active' };
+  type ParseResult = { success: boolean; error?: { issues: Array<{ path: PropertyKey[]; code: string }> } };
+  /** The issues a parse raised AT `key` (top-level), whatever else it raised. */
+  const issuesAt = (r: ParseResult, key: string) =>
+    r.success ? [] : r.error!.issues.filter((i) => i.path[0] === key);
+
+  it('accepts a ViewFilterRule[] filter — the acceptance criterion', () => {
+    // Before #14406 this exact value was REFUSED here — the entry said
+    // `FilterConditionSchema`, the MongoDB-style record, the LAST one in the
+    // map — while every sibling `filter` input accepted it. Measured at the
+    // objectui pin before the declaration moved: the renderer hands the value
+    // to `query.$filter`, and `adapter.find()` lowers a rule array through
+    // `translateFilterArray`, so the array reaches the query.
+    const r = picker.safeParse({ object: 'account', filter: RULES });
+    expect(r.success).toBe(true);
+    expect(r.data!.filter).toEqual(RULES);
+  });
+
+  it('the array carries the REAL ViewFilterRuleSchema, not a lookalike: operators normalize, value shapes are checked', () => {
+    // `eq` is a legacy spelling `normalizeFilterOperator` lowers to `equals` — a
+    // plain `z.array(z.object(...))` would have echoed it back unchanged.
+    const legacy = picker.safeParse({
+      object: 'account',
+      filter: [{ field: 'status', operator: 'eq', value: 'active' }],
+    });
+    expect(legacy.success).toBe(true);
+    expect(legacy.data!.filter![0].operator).toBe('equals');
+    // `in` takes an array; a scalar is refused at `filter.0.value` by the rule's
+    // own superRefine — the value-shape check rides in with the schema.
+    const scalarIn = picker.safeParse({
+      object: 'account',
+      filter: [{ field: 'status', operator: 'in', value: 'active' }],
+    });
+    expect(scalarIn.success).toBe(false);
+    expect(scalarIn.error!.issues.map((i) => i.path.join('.'))).toContain('filter.0.value');
+  });
+
+  it('the MongoDB-style record form — what this entry alone used to accept — is REFUSED at the `filter` path', () => {
+    // Reverse verification of the convergence, asserted on the issue envelope
+    // rather than on a bare `success === false`: the refusal is located at
+    // `filter` and names the expected kind. Migration:
+    // `element-record-picker-filter-rule-array`.
+    const r = picker.safeParse({ object: 'account', filter: RECORD_FORM });
+    expect(r.success).toBe(false);
+    const atFilter = issuesAt(r, 'filter');
+    expect(atFilter).toHaveLength(1);
+    expect(atFilter[0].code).toBe('invalid_type');
+    expect(atFilter[0]).toMatchObject({ expected: 'array' });
+    // An operator-object record and a `$and` group are the same form and get
+    // the same verdict — no arm accepts any spelling of the record.
+    const opRecord = picker.safeParse({ object: 'account', filter: { amount: { $gt: 100 } } });
+    expect(issuesAt(opRecord, 'filter').map((i) => i.code)).toEqual(['invalid_type']);
+    const group = picker.safeParse({ object: 'account', filter: { $and: [{ status: 'active' }] } });
+    expect(issuesAt(group, 'filter').map((i) => i.code)).toEqual(['invalid_type']);
+  });
+
+  it('shares the array orthography with the sibling `filter` inputs — one value, three doors, the same verdicts', () => {
+    // The ruling is "one filter orthography platform-wide" and this entry was
+    // the last holdout, so the pin is cross-entry: the same rule array raises
+    // no issue at `filter` on any of the three declared doors, and the same
+    // record form is refused at `filter` with the same issue code on all
+    // three. Each door is asked only about ITS `filter`.
+    expect(issuesAt(picker.safeParse({ object: 'account', filter: RULES }), 'filter')).toEqual([]);
+    expect(issuesAt(number.safeParse({ object: 'account', aggregate: 'count', filter: RULES }), 'filter')).toEqual([]);
+    expect(issuesAt(relatedList.safeParse({ filter: RULES }), 'filter')).toEqual([]);
+    const pickerRefusal = issuesAt(picker.safeParse({ object: 'account', filter: RECORD_FORM }), 'filter').map((i) => i.code);
+    expect(pickerRefusal).toEqual(['invalid_type']);
+    expect(issuesAt(number.safeParse({ object: 'account', aggregate: 'count', filter: RECORD_FORM }), 'filter').map((i) => i.code))
+      .toEqual(pickerRefusal);
+    expect(issuesAt(relatedList.safeParse({ filter: RECORD_FORM }), 'filter').map((i) => i.code)).toEqual(pickerRefusal);
+  });
+
+  it('no top-level `filter` door in ComponentPropsMap refuses the rule array any more — the census the card closes', () => {
+    // The card's claim is "the last record-form `filter` in `ComponentPropsMap`".
+    // Asserted over the WHOLE map by shape rather than over the entries named
+    // above, so a future entry declaring `FilterConditionSchema` at `filter`
+    // (which refuses an array outright, `invalid_type`) is caught here by
+    // name. Doors that declare `filter` as `z.unknown()` (the `object-*`
+    // blocks hand it to the wire verbatim) accept both forms and are not
+    // holdouts of this census; the holdout shape is exactly "declares
+    // `filter`, refuses the array".
+    type Door = { shape?: Record<string, unknown>; safeParse: (v: unknown) => ParseResult };
+    const doors = (Object.entries(ComponentPropsMap) as Array<[string, unknown]>)
+      .filter(([, schema]) => {
+        const shape = (schema as Door).shape;
+        return !!shape && 'filter' in shape;
+      })
+      .map(([type]) => type);
+    // Guard the probe: the three doors pinned above must be found, or the
+    // shape read has gone wrong and the loop below is vacuous.
+    expect(doors).toEqual(expect.arrayContaining(['element:record_picker', 'element:number', 'record:related_list']));
+    const holdouts = doors.filter((type) => {
+      const r = (ComponentPropsMap[type as keyof typeof ComponentPropsMap] as unknown as Door).safeParse({ filter: RULES });
+      return issuesAt(r, 'filter').length > 0;
+    });
+    expect(holdouts).toEqual([]);
   });
 });
 
