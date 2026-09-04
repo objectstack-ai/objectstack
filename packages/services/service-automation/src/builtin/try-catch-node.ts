@@ -229,8 +229,9 @@ export function registerTryCatchNode(engine: AutomationEngine, ctx: PluginContex
         // `code` (#14419) is bound alongside but is NOT declared on
         // `TryCatchErrorValueSchema`, so it is spelled as an explicit widening
         // of the declared type rather than dropped — dropping it would regress
-        // a catch region's ability to branch on `{$error.code}`. Filed as a
-        // spec-lane gap; this file is not the place to change the contract.
+        // a catch region's ability to branch on `{$error.code}`. The
+        // divergence is filed as #14954 against the spec lane; this file is
+        // not the place to change the contract.
         const errorValue: TryCatchErrorValue & { code?: string } = {
           nodeId: node.id,
           message: lastError,
