@@ -63,6 +63,17 @@ import {
 } from '../utils/port-contract.js';
 import { BootLogCapture, isVerboseBootLevel } from '../utils/boot-log-capture.js';
 import { graftAuthoredRuntimeMembers, isAppPluginLike } from '../utils/graft-runtime-hooks.js';
+// [ADR-0130 D4 / option B, #15006] Every read below that keys off a
+// PACKAGE-OWNED collection goes through this seam, so an option-B artifact
+// (flattened top level gone, `packages[]` carrying everything once) reaches
+// the same decision — and so the acceptance probe can CALL the decision
+// instead of re-implementing it.
+import {
+  shouldAutoRegisterObjectQL,
+  shouldAutoRegisterStorageDriver,
+  stackDeclaresMetadata,
+  bundleDeclaresTranslations,
+} from '../utils/stack-collections.js';
 import { redactConnectionUrl, describeDriverConnection } from '../utils/connection-display.js';
 // The posture prose `os serve` and `os doctor` BOTH print, declared once
 // (#12492) — and, since #12579, the multi-org runtime SPELLING those two
@@ -2628,8 +2639,12 @@ export default class Serve extends Command {
       }
 
       // 1. Auto-register ObjectQL Plugin if objects define but plugins missing
-      const hasObjectQL = plugins.some((p: any) => p.name?.includes('objectql') || p.constructor?.name?.includes('ObjectQL'));
-      if (config.objects && !hasObjectQL) {
+      // [#15006] The whole gate — the `objects` read AND the already-composed
+      // check — is `shouldAutoRegisterObjectQL`. It answers exactly as the two
+      // inline expressions did for every stack that boots today, and resolves
+      // `packages[]` when the flattened top level is absent, which is the shape
+      // that used to boot with NO QUERY ENGINE and throw nothing.
+      if (shouldAutoRegisterObjectQL(config, plugins)) {
          try {
            const { ObjectQLPlugin } = await import('@objectstack/objectql');
            await kernel.use(new ObjectQLPlugin());
@@ -2661,12 +2676,9 @@ export default class Serve extends Command {
       // at boot through the datasource connection service, so building a
       // storage driver here would construct a duplicate pool the engine then
       // discards as already-registered.
-      const hasDriver = plugins.some((p: any) =>
-        p.name?.includes('driver') ||
-        p.constructor?.name?.includes('Driver') ||
-        p.name === 'com.objectstack.runtime.default-datasource' ||
-        p.constructor?.name === 'DefaultDatasourcePlugin');
-      if (!hasDriver && config.objects) {
+      // [#15006] Same seam, same reason — see the ObjectQL gate above. The
+      // driver-provider duck-typing moved into it with the read it guards.
+      if (shouldAutoRegisterStorageDriver(config, plugins)) {
          const databaseUrl = process.env.OS_DATABASE_URL;
          const driverType = resolveDriverType(process.env.OS_DATABASE_DRIVER, databaseUrl);
          // libSQL/Turso's credential is the only one that does NOT ride inside the
@@ -2799,9 +2811,10 @@ export default class Serve extends Command {
       // already holds an AppPlugin instance — and never on a named app, so it
       // is checked structurally below.
       const hasAppPluginAlready = plugins.some(isAppPluginLike);
-      const configHasMetadata = !!(
-        config.objects || config.manifest || config.apps || config.flows || config.apis
-      );
+      // [#15006] The same predicate `schema-migration-plugins.ts` runs after its
+      // own second `loadConfig` (B4) — folded into one seam rather than left as
+      // two copies whose comment already said they were the same.
+      const configHasMetadata = stackDeclaresMetadata(config);
 
       // ── Decide the dev-only artifact door BEFORE the wrap (#14397) ────
       // On a HOST config `os dev` composes TWO writers over ONE stack: the
@@ -2973,24 +2986,19 @@ export default class Serve extends Command {
       // `plugins` array — a host/aggregator config may define no translations
       // of its own and instead compose several `new AppPlugin(...)` entries,
       // each carrying its own. Keyed on that shape, not on a named app.
-      const pluginBundleHasTranslations = (bundle: any): boolean => {
-        if (!bundle || typeof bundle !== 'object') return false;
-        if (Array.isArray(bundle.translations) && bundle.translations.length > 0) return true;
-        if (bundle.i18n) return true;
-        if (bundle.manifest && (
-          (Array.isArray(bundle.manifest.translations) && bundle.manifest.translations.length > 0)
-          || bundle.manifest.i18n
-        )) return true;
-        return false;
-      };
+      // [#15006] `bundleDeclaresTranslations` is that same shape-keyed check plus
+      // the `packages[]` leg: `translations` is package-owned and `i18n` is an
+      // envelope key a translations-only stack never sets, so an option-B artifact
+      // reached this gate with neither and the REST i18n routes silently did not
+      // exist. MEASURED on the acceptance probe, not inferred.
       const anyAppPluginHasTranslations = plugins.some((p: any) => {
         if (!p) return false;
         // AppPlugin instances expose their bundle on `.bundle`
-        if (p.bundle && pluginBundleHasTranslations(p.bundle)) return true;
+        if (p.bundle && bundleDeclaresTranslations(p.bundle)) return true;
         return false;
       });
       const configHasTranslations = (
-        pluginBundleHasTranslations(config)
+        bundleDeclaresTranslations(config)
         || anyAppPluginHasTranslations
       );
       if (!hasI18nPlugin && configHasTranslations && tierEnabled('i18n')) {
