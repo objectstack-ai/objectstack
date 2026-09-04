@@ -1171,7 +1171,23 @@ export function generateMigrationSql(config: Record<string, unknown>): string {
     const fields = (obj.fields ?? {}) as Record<string, Record<string, unknown>>;
 
     lines.push(`CREATE TABLE IF NOT EXISTS "${tableName}" (`);
-    lines.push('  "id" UUID PRIMARY KEY DEFAULT gen_random_uuid(),');
+    // #15040 — the table's OWN id, corrected to what `driver-sql` emits for it:
+    // `table.string('id').primary()`, i.e. knex's `varchar(255)`
+    // (`SqlDriver.DEFAULT_STRING_VARCHAR_CHARS`). This is the same derivation
+    // `lookup` / `master_detail` / `user` / `tree` above already state — a
+    // reference column holds the TARGET's id — applied one column to the left,
+    // to the id itself. A platform id is not a uuid, so Postgres refused one in
+    // a `uuid` column with `22P02 invalid input syntax for type uuid` on the
+    // FIRST insert.
+    //
+    // The DEFAULT goes with the type, and it is the quieter half: the driver
+    // emits no database-side default because its own insert path always
+    // supplies the id (`create()` takes `_id`, else a caller-supplied `id`,
+    // else mints one). A `DEFAULT gen_random_uuid()` therefore never fires for
+    // a platform write and only fires for an out-of-band one — handing that row
+    // a 36-character uuid this platform's id generator would never mint, so the
+    // table would end up holding two incompatible id shapes with nothing said.
+    lines.push('  "id" VARCHAR(255) PRIMARY KEY,');
 
     const fieldLines: string[] = [];
     for (const [fieldName, fieldDef] of Object.entries(fields)) {
@@ -1228,7 +1244,12 @@ export function generateMigrationTs(config: Record<string, unknown>): string {
     const fields = (obj.fields ?? {}) as Record<string, Record<string, unknown>>;
 
     lines.push(`  await db.schema.createTable('${tableName}', (table: any) => {`);
-    lines.push("    table.uuid('id').primary().defaultTo(db.fn.uuid());");
+    // #15040 — the driver's own line for this column, emitted verbatim:
+    // `table.string('id').primary()`. See `generateMigrationSql` above for the
+    // derivation and for why the `.defaultTo(db.fn.uuid())` half goes with it
+    // (on Postgres `knex.fn.uuid()` compiles to `(gen_random_uuid())`, so the
+    // two generators were emitting one and the same wrong default).
+    lines.push("    table.string('id').primary();");
 
     for (const [fieldName, fieldDef] of Object.entries(fields)) {
       const fType = String(fieldDef.type || 'text');
