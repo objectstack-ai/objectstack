@@ -822,7 +822,8 @@ stamp-and-backfill repair (#12929, #13180, #13527, #13572, #13565, #14726) and #
 **closed unmerged** — PR #14923. Pre-17.2 behaviour (Choice 4A's NULL grant row, the legacy grant anchor,
 #10103 Option C, ADR-0005 overlays) is out of the audit's scope and moves in v18.
 
-- The issue body of #13564 cites the arm at `sql-driver.ts:7320`; on `origin/main` `2514d49f3` the
+- The issue body of #13564 cites the arm by a bare line number (7320) that had drifted by ~4,600 lines
+  before the first census read it; on `origin/main` `2514d49f3` the
   arms are inside `applyTenantScope` (~12016–12066) and there are **two**. This record cites symbols.
 - `ensure-default-organization.ts` cites "ADR-0081 D1" for the Default Organization; in this
   repository `docs/adr/0081` is the trusted React page tier — the "0081" is cloud's numbering. The
