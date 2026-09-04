@@ -8,8 +8,11 @@ inlined below as one sentence, its enforcing hook, and a pointer to the AGENTS.m
 
 Claim it **before any other action**: assign yourself *and* comment your session ID and
 branch — the shared identity makes the assignee field no proof, so re-read the comments.
-No hook enforces this one. Full rule: AGENTS.md → **Multi-agent working discipline**, its
-paragraph **Claim the issue BEFORE you write any code.**
+A card a PM dispatch order sent you to arrives **already assigned** (that is the PM's half
+of the claim, made for you): leave the field alone, still post the comment, and ⛔ never
+yield the card back on the strength of that assignee. No hook enforces this one. Full
+rule: AGENTS.md → **Multi-agent working discipline**, its paragraph **Claim the issue
+BEFORE you write any code.**
 
 ## ⛔ Worktree-first — before your FIRST file edit (AGENTS.md Prime Directive #11)
 

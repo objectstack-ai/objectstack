@@ -457,20 +457,21 @@ lone unstaged `M`.
 proves the window is covered first. `historyHorizon()` is the read-only predicate for
 tools that answer their own question.
 
-**Claim the issue BEFORE you write any code.** Assign it to yourself
-(`gh issue edit <n> --add-assignee @me`, or `issue_write` with `assignees`) as the
-*first* action of the task — before the worktree, before the first read. An unassigned
-issue reads as an open invitation: two agents burn the same hours twice, then race to
-land conflicting shapes for one problem. Already assigned to someone else? It is taken —
-pick another or ask; never reassign it to yourself. And because every agent here shares
-one GitHub identity, the assignee field alone cannot answer "is this claim *mine*?" — a
-claim is two acts: assign, **and a claim comment carrying your session ID and branch
-name** (`claude/issue-<n>-<slug>`). Before writing code, re-read the issue's comments; an
-earlier claim with a different session ID or branch means it is taken whatever the
-assignee field says — skipping that read is how one issue got implemented twice in one
-morning. The claim is also what makes the *finding* rule (Prime Directive #10) safe:
-findings become a real queue other agents read, so file unassigned when merely recording
-and assign at the moment you actually start.
+**Claim the issue BEFORE you write any code.** Assign it to yourself (`gh issue edit <n>
+--add-assignee @me`, or `issue_write` with `assignees`) as the *first* action of the task —
+before the worktree, before the first read. An unassigned issue reads as an open invitation:
+two agents burn the same hours twice, then race to land conflicting shapes for one problem. And
+because every agent here shares one GitHub identity, the assignee field alone cannot answer "is
+this claim *mine*?" — a claim is two acts: assign, **and a claim comment carrying your session
+ID and branch name** (`claude/issue-<n>-<slug>`). So the COMMENTS, not that field, say who owns
+a card: before writing code re-read them, and an earlier claim comment with a different session
+ID or branch means taken — pick another or ask, ⛔ never reassign; skipping that read is how one
+issue got implemented twice in one morning. Assigned with **no** claim comment under it is the
+opposite: a PM dispatch order sets that field as step 1 on your behalf
+(`.claude/skills/pm-dispatch/SKILL.md` 认领, which forbids the dev seat to write it), so ⛔ never
+yield a card you were dispatched to — the PM then waits on a seat that walked away. The claim
+also makes the *finding* rule (#10) safe — findings are a queue others read: file unassigned
+when merely recording, assign the moment you start.
 
 **State on your PR that you did not set belongs to another actor — ask, never "correct"
 it.** Under one shared identity every other participant's write arrives unsigned: the PM
