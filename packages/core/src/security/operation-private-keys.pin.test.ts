@@ -155,13 +155,69 @@ function git(args: string[]): string[] {
   return stdout.split('\0').filter((line) => line.length > 0);
 }
 
-const isScannedSource = (path: string) => /\.tsx?$/.test(path) && !path.endsWith('.d.ts');
+/**
+ * ── The EXTENSION boundary is `.ts` ALONE, and unlike the tree it is not free ──
+ *
+ * `.ts` and NOT `.tsx`, which is what this filter said first (`/\.tsx?$/`, one
+ * character wide). The population this pin JUDGES has to equal the population
+ * turbo RE-RUNS it for, and the second of those is declared somewhere else: the
+ * radius roster entry for `@objectstack/core` in the declaration table at
+ * scripts/cross-package-test-inputs.mjs declares a `packages/**` subtree glob
+ * ending in `.ts`, which does not cover `.tsx`.
+ *
+ * A scanner wider than that glob judges files neither scoping layer of
+ * `check:cross-package-test-inputs` can see. Layer A never unions this package
+ * into the test shard when the diff touches one of them; Layer B never moves
+ * this package's `test` task cache hash for one of them. So a `.tsx` file under
+ * packages/ that declared its own copy would be scanned by this pin and
+ * invisible to both — landing on `main` with every PR reporting green, and then
+ * reddening whichever unrelated PR next touches a `.ts` file. That is #7802's
+ * shape, one extension wide, and it is exactly what the declaration table
+ * exists to prevent.
+ *
+ * ⛔ The repair is to narrow the SCANNER, never to widen the GLOB — the two
+ * directions are not symmetric. Those globs are INHERITED as watch hints by
+ * `check:cross-package-test-inputs`, and a self-test in the dispatch-gates tool
+ * pins that no hint of that family reaches the realtime-hooks test file — the
+ * `.tsx` one — in the client-react package, its live specimen for "a test class
+ * the hint route cannot reach". Measured on b548e438d rather than reasoned:
+ * with that same subtree glob ending in `.tsx` added to this package's roster
+ * entry and that family's hints re-derived, the case flipped from true to false
+ * and the added glob was itself the covering hint. It is a real red and not a
+ * nuisance — the specimen is how that tool proves its residue classes are not
+ * empty — and re-pointing it is an edit in another lane. ⇒ Extensions and glob
+ * widen together or not at all; the sibling pin in `@objectstack/types` records
+ * the same trade from the other side of it.
+ *
+ * (That specimen is named in two halves rather than as one quoted path on
+ * purpose. `check:cross-package-test-inputs` collects quoted whole
+ * repo-relative paths out of this file's source, COMMENTS INCLUDED, into the
+ * roster it demands the declared globs cover — so spelling it here in one
+ * quoted piece would demand the very `.tsx` glob this paragraph exists to
+ * forbid. Measured the same way.)
+ *
+ * ⚠️ What narrowing GIVES UP, measured rather than assumed. Under packages/ on
+ * b548e438d, over this pin's own surface (tracked PLUS untracked, ignored paths
+ * excluded), against this pin's own two symbols:
+ *
+ *     .ts    5408 files, 8 mention a guarded symbol   <- scanned
+ *     .tsx      8 files, 0 mention a guarded symbol   <- excluded
+ *
+ * ⇒ the loss is empty today. ⛔ That reading is not transcribed and then
+ * trusted: the last test below RE-MEASURES it on every run, because a count
+ * with a commit on it is honest and a count without one rots silently. The day
+ * a `.tsx` file under packages/ declares either symbol, that case goes red and
+ * says what the choice actually is — which is not "widen this filter".
+ */
+const isScannedSource = (path: string) => path.endsWith('.ts') && !path.endsWith('.d.ts');
 
 /**
- * The scan surface: every `.ts`/`.tsx` file under `packages/` that a human
- * authored — tracked plus untracked, ignored paths (build output) excluded.
+ * Every file under `packages/` that a human authored — tracked plus untracked,
+ * ignored paths (build output) excluded — BEFORE the extension boundary. Split
+ * out from `scannedFiles()` so the boundary has something to be measured
+ * against: a filter is only an exclusion while the set it filters is non-empty.
  */
-function scannedFiles(): string[] {
+function authoredPaths(): string[] {
   return git([
     'ls-files',
     '-z',
@@ -170,15 +226,22 @@ function scannedFiles(): string[] {
     '--exclude-standard',
     '--',
     'packages',
-  ]).filter(isScannedSource);
+  ]);
+}
+
+/** The scan surface: the authored files the extension boundary above admits. */
+function scannedFiles(): string[] {
+  return authoredPaths().filter(isScannedSource);
 }
 
 /**
- * The subset of the scan surface that so much as mentions either identifier.
- * Fixed-string, so it is an exact superset of `declarationMatcher()`'s matches; the regex
- * still decides which of these — if any — is an actual declaration.
+ * Every path the fixed-string prefilter returns, BEFORE the extension boundary
+ * — so it includes the `.tsx` (and `.md`, and config) files the scan does not
+ * judge. Split out for the same reason as `authoredPaths()`: the trade the
+ * boundary rests on is a claim about the files it drops, and a claim about
+ * dropped files cannot be made from the set they were dropped from.
  */
-function filesMentioningASymbol(): string[] {
+function prefilterHits(): string[] {
   return git([
     'grep',
     '--files-with-matches',
@@ -192,7 +255,16 @@ function filesMentioningASymbol(): string[] {
     HELPER_SYMBOL,
     '--',
     'packages',
-  ]).filter(isScannedSource);
+  ]);
+}
+
+/**
+ * The subset of the scan surface that so much as mentions either identifier.
+ * Fixed-string, so it is an exact superset of `declarationMatcher()`'s matches; the regex
+ * still decides which of these — if any — is an actual declaration.
+ */
+function filesMentioningASymbol(): string[] {
+  return prefilterHits().filter(isScannedSource);
 }
 
 function declaringFiles(): string[] {
@@ -294,6 +366,75 @@ describe('the `__` operation-private-key convention has one owner (#7284)', () =
 
       expect(filesMentioningASymbol()).toContain(self);
       expect(declaringFiles()).not.toContain(self);
+    },
+    SCAN_TIMEOUT_MS,
+  );
+
+  it(
+    'the extension boundary is `.ts` alone, and the trade that buys it has not expired',
+    () => {
+      // The executable half of the EXTENSION boundary section on
+      // `isScannedSource`. That paragraph is the only thing keeping the judged
+      // population equal to the population turbo re-runs this pin for, and
+      // #9763 is the day a radius held by prose alone came unforced by an
+      // innocent reword. Three claims, in the order they can go false.
+
+      // 1. THE EXCLUSION IS REAL. `.tsx` files exist under packages/, so "the
+      //    scan sees none" is an exclusion and not an empty tree describing
+      //    itself — #4690's shape, applied to the boundary rather than to the
+      //    offender set.
+      const excluded = authoredPaths().filter((file) => file.endsWith('.tsx'));
+
+      expect(
+        excluded.length,
+        'No `.tsx` file exists under packages/ at all, so the extension boundary '
+          + 'below excludes nothing and this case proves nothing. Re-measure the '
+          + 'trade in the header before trusting it.',
+      ).toBeGreaterThan(0);
+
+      // 2. …AND THE FILTER REALLY DROPS THEM. Re-widen `isScannedSource` and
+      //    this is what goes red first, in the same run that the offender test
+      //    above stays green — which is the whole point: widening the scanner
+      //    alone reads as coverage while turbo never re-runs this pin for the
+      //    files it has started to judge.
+      expect(
+        scannedFiles().filter((file) => file.endsWith('.tsx')),
+        'The scan surface has grown `.tsx` files back. The declared radius for '
+          + 'this package covers `.ts` only, so these are judged by a pin that '
+          + 'CI will not re-run when they change. Narrow the filter back, or '
+          + 'widen the glob too — and read the header first, because the second '
+          + 'half of that is a trade with another gate, not a formality.',
+      ).toEqual([]);
+
+      // 3. THE TRADE ITSELF, re-measured rather than transcribed. The boundary
+      //    gives up naming a `.tsx` redeclaration as an offender; that costs
+      //    nothing only while no excluded file declares either symbol. The
+      //    header's counts carry a commit precisely because they rot — this is
+      //    the part that cannot.
+      const excludedDeclarations = prefilterHits()
+        .filter((file) => file.endsWith('.tsx'))
+        .filter((file) => declarationMatcher().test(readFileSync(join(REPO_ROOT, file), 'utf8')));
+
+      expect(
+        excludedDeclarations,
+        excludedDeclarations.length === 0
+          ? ''
+          : [
+              'These `.tsx` files declare their own copy of the `__` operation-private-key',
+              'convention, and the extension boundary above means this pin no longer names',
+              'them as offenders:',
+              ...excludedDeclarations.map((f) => `  - ${f}`),
+              '',
+              'The trade recorded in this file\'s header has expired. ⛔ Do NOT simply widen',
+              '`isScannedSource` back to `.tsx`: that rebuilds the exact mismatch it was',
+              'narrowed to remove — a pin judging files CI never re-runs it for. Widening',
+              'the scanner is only HALF the change; this package\'s declared radius has to',
+              'widen with it, and that glob is inherited as a watch hint by a second gate',
+              'whose self-test owns a live `.tsx` specimen. Read the EXTENSION boundary',
+              'section above, then take it to whoever owns that tool — it is a decision,',
+              'not a one-line fix.',
+            ].join('\n'),
+      ).toEqual([]);
     },
     SCAN_TIMEOUT_MS,
   );
