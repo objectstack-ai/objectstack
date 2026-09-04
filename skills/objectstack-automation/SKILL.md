@@ -233,8 +233,9 @@ run reports success. `objectstack validate` names the offending template.
 
 > **Writing a `readonly` field? Set `runAs: 'system'`.** `readonly: true`
 > governs the end-user surface: under the default `runAs: 'user'`, the engine
-> **silently strips** a `readonly` field from an `update_record` payload
-> — the step reports success but the value never lands. A flow that
+> **strips** a `readonly` field from any non-system write — `create_record` and
+> `update_record` alike — the step reports success but the value never lands,
+> and the drop is named in the step's warnings. A flow that
 > maintains a `readonly` field (approval stamps, conversion flags, SLA
 > markers, rollups) must run `runAs: 'system'`, the trusted-writer channel.
 > `os validate` / `os build` fail a `runAs:'user'` `update_record` that writes
