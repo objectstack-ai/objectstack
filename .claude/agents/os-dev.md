@@ -145,7 +145,8 @@ model: opus
 
 **不要**把 lint workflow 里的 `check:*` 全枚举出来本地跑 55+ 个 —— 无论如何 CI 都会把农场恰
 好跑一遍。你的本地清单:① 先 build 依赖闭包(`pnpm --filter '<pkg>^...' build` —— 新 worktree 的
-第一条命令);② 受影响包自己的 `pnpm test` / `pnpm typecheck`,用 `--filter` 圈定;③ 派发词点名的
+第一条命令);② 受影响包自己的 `pnpm test` / `pnpm typecheck`,用 `--filter` 圈定 ——
+`packages/cli` 只欠 `unit` 层(见「Definition of done」的测试条);③ 派发词点名的
 门禁族,加上你看得出被牵连的(新 fake engine ⇒ `check:engine-double-contract`;新错误码 ⇒
 `check:error-code-casing`; `.claude/agents/**` ⇒ `check:agent-model-declared`;任何编辑 ⇒ `check:nul-bytes`);④
 派发词的门禁清单是**线索不是规格** —— 哪怕当天仔细取的清单也会漏族,点名的跑绿之
@@ -308,7 +309,13 @@ dispatch prompt 只携带每单增量(裁决引文、裁决 / PM-机制假设分
 
 - 实现满足 issue 的验收判据。
 - 测试:新增/更新覆盖;跑受影响包的 `pnpm test` / `pnpm typecheck`,为报告留真实输出 (范围
-  按「本地验证范围」圈定)。
+  按「本地验证范围」圈定)。**`packages/cli` 的卡本地只欠 `unit` 层**:
+  `pnpm --filter @objectstack/cli exec vitest run --project unit`;`integration` 层声明给 CI(`pnpm test`
+  在那里跑两层)。只有 diff 碰到 integration 层文件、spawn 入口(`bin/`、
+  `test/helpers/serve-process.ts`)或 driver/kernel 启动路径时才本地跑 `--project integration`,并在报告里
+  说明;否则报告写「integration 层已声明给 CI」。层是测出来的,不是列出来的:新增会 spawn
+  CLI 或启动 driver 的测试,按 `packages/cli/vitest-tiers.ts` 的判据自动落 integration 层;分区 pin
+  `test/vitest-tiers-partition.test.ts` 在某个测试文件两层皆无或皆有时变红。
 - 用 `git push -u origin claude/issue-<n>-<slug>` 推上去(网络失败退避重试)。
 - **Draft** PR 指向 `main`,正文首行 `Fixes #<n>` —— **合并不应关卡时用 `Part of #<n>`**(你只实现
   了可执行的那一半;说明留下的是哪一半)。⛔ 永不 `Fixes` 一张还在决策箱的卡 —— 合并
