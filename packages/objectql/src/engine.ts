@@ -14099,9 +14099,36 @@ export class ObjectRepository implements IScopedObjectRepository {
    * and test) found ZERO existing callers of this method anywhere — every
    * `ObjectRepository.execute()` / `ScopedRepo.execute()` hit in the tree was
    * prose describing the shape, never an invocation — so this widens what a
-   * FUTURE caller's write is accepted to do (the static `readonly` strip now
-   * skips this path exactly as it already skips REST `/actions` and MCP
-   * `run_action`) without changing any write anyone ships today.
+   * FUTURE caller's write is accepted to do, without changing any write
+   * anyone ships today.
+   *
+   * [Disclosure completeness] What widens is larger than the static
+   * `readonly` strip named above. `isSystem: true` on `this.context` is read
+   * by ObjectQL's registered security middleware as a TOTAL, unconditional
+   * bypass — `plugin-security/src/security-plugin.ts:1614-1616`, "System
+   * operations bypass security" / `return next()` ahead of every other gate
+   * in that middleware — so every `find`/`insert`/`update`/`delete` this
+   * `ctx.api` drives also skips RLS read scoping (`:4344`) and field-level
+   * security (`:4495`); the CRUD/export permission checks in the same
+   * middleware (`:1616`, `canExport` at `:4573`); the ADR-0103 engine-owned/
+   * append-only write guard (`system-write-guard.ts:96,120`, called at
+   * `security-plugin.ts:1736`); the package-managed / system-row /
+   * curated-capability-name / audience-anchor write gates
+   * (`security-plugin.ts:1690-1724`); the referential-integrity check
+   * (`:5892` in this file) and the tenant-audit mute (`:3773`) — in addition
+   * to the static `readonly`/runtime-owned strip on BOTH update paths
+   * (`:11290`, `:11473`) and the insert path (`:10025`), not the single site
+   * an earlier draft of this note implied. Exactly what REST `/actions` and
+   * MCP `run_action` already give an action body — see
+   * `content/docs/permissions/system-context.mdx` ("Elevation is total, and
+   * it is not granular") for the full catalog this bypass belongs to.
+   *
+   * Bounded on two sides: metadata-plane schema masking
+   * (`metadata-core/object-schema-fls.ts:228`) is a separate REST/GraphQL
+   * dispatch path this `ctx.api` surface never calls into; and
+   * `plugin-sharing/rule-hooks.ts`'s insert/update materialisation skip was
+   * already retired by the maintainer's 2026-08-31 ruling on #13533 (system
+   * and user writes materialise sharing grants identically today).
    */
   async execute(actionName: string, params?: any): Promise<any> {
     if (this.engine.executeAction) {
