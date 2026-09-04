@@ -599,6 +599,14 @@ export const CEILINGS = new Map([
   // over-120B lines are all `table` rows, structurally exempt and NOT
   // re-wrappable; they are metered instead by MAX_TABLE_ROW_BYTES below.
   ['.claude/skills/pm-dispatch/references/compile-surfaces.md', 26],
+  // The app-vs-platform boundary — the deciding question (could this be written
+  // from the metadata alone, with no knowledge of this company?), the publication
+  // test (one consumer is a use, two is a contract) and the two anti-patterns.
+  // It is on-demand DETAIL by this header's own division of labour: AGENTS.md
+  // carries the one routing row, this file carries the rule and the measurement
+  // behind each clause. A NEW file, so this is not a raise and funds nothing —
+  // set at the landed line count, headroom 0, same convention as above.
+  ['.claude/skills/pm-dispatch/references/app-platform-boundary.md', 66],
   // Lane job descriptions (maintainer ruling 2026-08-19: per-lane PM job
   // descriptions move from seat-post prose into versioned skill references).
   // Set at landed line counts (headroom 0, same convention as above).
@@ -916,6 +924,7 @@ export const MAX_TABLE_ROW_BYTES = new Map([
   ['.claude/skills/pm-dispatch/references/seat-post-protocol.md', 0],
   ['.claude/skills/pm-dispatch/references/true-green.md', 0],
   ['.claude/skills/pm-dispatch/references/compile-surfaces.md', 352],
+  ['.claude/skills/pm-dispatch/references/app-platform-boundary.md', 219],
   ['.claude/skills/pm-dispatch/references/lanes/engine.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/services.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/cli.md', 0],
