@@ -3105,6 +3105,7 @@ const COMPOUND_ANCHOR_LEDGER = [
   ['scripts/check-comment-mask-corpus.mjs', 'runSelfTestCases', false],
   ['scripts/check-doc-authoring.mjs', 'selfTestRule3', false],
   ['scripts/check-doc-authoring.mjs', 'selfTestPackagesProse', false],
+  ['scripts/check-durability-degradation-log-level.mjs', 'checkSelfTestFloor', false],
   ['scripts/check-durability-degradation-log-level.mjs', 'selfTestReadSeams', false],
   ['scripts/check-platform-checklist.mjs', 'selfTestTrapVocabulary', false],
   ['scripts/check-platform-checklist.mjs', 'selfTestProvisioningUse', false],

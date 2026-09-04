@@ -260,6 +260,56 @@ describe('appSecurityPluginOptions over `packages[]` (ADR-0130 D4, #15007)', () 
   });
 
   /**
+   * [#15007 follow-up] "The top level had none" is the resolved NAME coming
+   * back `undefined` — never the `permissions` CONTAINER being absent or empty.
+   *
+   * Branching on the container re-creates the silent loss this card removed,
+   * one shape further along. A flattened level that carries permission sets but
+   * marks none of them `isDefault` is legal today and hand-authorable in any
+   * `objectstack.config.ts`; a container-shaped condition shorts it past the
+   * whole `packages[]` pass and answers `undefined` — nothing thrown, nothing
+   * logged, every member of the app back down to the platform floor alone.
+   */
+  describe('the `packages[]` pass runs wherever the top level named no default', () => {
+    const corePackage = {
+      manifest: {
+        id: CORE_ID, name: 'Core', version: '1.0.0', type: 'app',
+        permissions: [permissionSet(CORE_PROFILE)],
+      },
+    };
+
+    it('an EMPTY flattened array does not short-circuit it', () => {
+      expect(appSecurityPluginOptions({ permissions: [], packages: [corePackage] }))
+        .toEqual({ fallbackPermissionSet: CORE_PROFILE });
+    });
+
+    it('a NON-EMPTY flattened array that marks no default does not either', () => {
+      // A `permissions.length > 0` guard passes the case above and fails this
+      // one — which is the whole reason the condition is the resolved name.
+      expect(
+        appSecurityPluginOptions({
+          permissions: [{ name: 'core_read_only', label: 'Read only', objects: {} }],
+          packages: [corePackage],
+        }),
+      ).toEqual({ fallbackPermissionSet: CORE_PROFILE });
+    });
+
+    it('a `permissions` key that is not an array at all does not either', () => {
+      expect(appSecurityPluginOptions({ permissions: null, packages: [corePackage] }))
+        .toEqual({ fallbackPermissionSet: CORE_PROFILE });
+    });
+
+    it('and once the top level DOES name one, the packages pass cannot change the answer', () => {
+      expect(
+        appSecurityPluginOptions({
+          permissions: [permissionSet('flattened_wins')],
+          packages: [corePackage],
+        }),
+      ).toEqual({ fallbackPermissionSet: 'flattened_wins' });
+    });
+  });
+
+  /**
    * The gate travels with the read: `resolveArtifactPackageOrder` refuses a
    * malformed `packages` with an ADR-0112 envelope, and this reader does not
    * catch it. Swallowing it would resolve a permission surface out of an
@@ -292,6 +342,22 @@ describe('appSecurityPluginOptions over `packages[]` (ADR-0130 D4, #15007)', () 
       const err = refusalOf({ packages: [entry, entry] });
       expect(err.code).toBe('DUPLICATE_ARTIFACT_PACKAGE');
       expect(err.status).toBe(422);
+    });
+
+    it('…and refused just the same when the flattened top level already named a default', () => {
+      // The package order is resolved BEFORE the top level is consulted, so an
+      // artifact is either loadable or refused independently of which level
+      // happens to answer. Move that resolution below the early return and this
+      // pair turns into a silent accept: a permission surface resolved out of an
+      // artifact the manifest service refuses moments later.
+      const notAnArray = refusalOf({ permissions: [permissionSet('flattened_wins')], packages: 'nope' });
+      expect(notAnArray.code).toBe('INVALID_ARTIFACT_PACKAGES');
+      expect(notAnArray.status).toBe(422);
+
+      const entry = { manifest: { id: CORE_ID, name: 'Core', version: '1.0.0', type: 'app', permissions: [permissionSet(CORE_PROFILE)] } };
+      const duplicate = refusalOf({ permissions: [permissionSet('flattened_wins')], packages: [entry, entry] });
+      expect(duplicate.code).toBe('DUPLICATE_ARTIFACT_PACKAGE');
+      expect(duplicate.status).toBe(422);
     });
   });
 });

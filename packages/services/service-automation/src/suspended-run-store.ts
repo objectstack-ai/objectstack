@@ -10,6 +10,7 @@ import type { Logger } from '@objectstack/spec/contracts';
 // be a third answer to a question the codebase already answered two ways.
 import { createRecordOrganizationResolver, type RecordOrganizationResolver } from '@objectstack/metadata-core';
 import type {
+  ConsumedSuspensionDropNotice,
   RunRecord,
   SuspendedRun,
   SuspendedRunStore,
@@ -71,11 +72,25 @@ const MAX_STEPS_JSON_BYTES = 64 * 1024;
  * ⛔ Over budget the snapshot is DROPPED, never truncated — and that asymmetry
  * with `steps_json` above is the whole point. A halved step tail is still an
  * honest, smaller observation; half a variable map is a run that would resume
- * from state it was never in. `restoreConsumedSuspension` then answers
- * `NO_CONSUMED_SUSPENSION` for the run, which is true, instead of restoring a
- * corrupt pause that looks perfectly healthy.
+ * from state it was never in. The drop is RECORDED in the row (#13937,
+ * {@link CONSUMED_SUSPENSION_DROPPED_KEY}): `restoreConsumedSuspension` then
+ * restores from the hot copy in the process that stranded the run, and from
+ * any other replica answers `NO_CONSUMED_SUSPENSION` naming this budget —
+ * both true — instead of restoring a corrupt pause that looks perfectly
+ * healthy, or reading the missing snapshot as a run that moved on.
  */
 const MAX_CONSUMED_SUSPENSION_JSON_BYTES = 256 * 1024;
+
+/**
+ * [#13937] The ONE key a terminal row's `variables_json` holds when the
+ * consumed-suspension snapshot was dropped over
+ * {@link MAX_CONSUMED_SUSPENSION_JSON_BYTES}. It rides the discriminator
+ * column on purpose — "this failed run had a pause and no longer has one"
+ * stays true of the row — and it can never collide with a real variable map:
+ * `$`-prefixed names are the engine's own, and a map holding exactly this one
+ * key is not a state any flow was ever in.
+ */
+const CONSUMED_SUSPENSION_DROPPED_KEY = '$consumedSuspensionDropped';
 
 /** Byte cap for a terminal row's persisted `summary_json` (#4354). Generous
  *  relative to the shape it holds — one entry per node that ran, one per gate
@@ -580,6 +595,10 @@ export class ObjectStoreSuspendedRunStore implements SuspendedRunStore {
       // `restoreConsumedSuspension` reports honestly rather than as a run that
       // never suspended.
       consumedSuspension: deserializeConsumedSuspension(row),
+      // [#13937] …and when the column holds the drop notice instead of the
+      // snapshot, the pause existed and was too large to keep: said as such,
+      // so the engine does not read this row as the run having moved on.
+      consumedSuspensionDropped: readConsumedSuspensionDropNotice(row),
     };
   }
 
@@ -707,11 +726,28 @@ function serializeConsumedSuspension(
   if (bytes > MAX_CONSUMED_SUSPENSION_JSON_BYTES) {
     logger?.warn?.(
       `[automation] run '${run.runId}': the suspension its resume consumed is ${bytes} bytes, over the ` +
-        `${MAX_CONSUMED_SUSPENSION_JSON_BYTES}-byte row budget, so it was NOT persisted and this run cannot be ` +
-        `restored after a restart. It was dropped rather than truncated on purpose — half a variable map would ` +
-        `restore the run into a state it was never in.`,
+        `${MAX_CONSUMED_SUSPENSION_JSON_BYTES}-byte row budget, so it was NOT persisted — this run can be ` +
+        `restored only by the process that stranded it, while that process is running, never after a restart ` +
+        `or from another replica. It was dropped rather than truncated on purpose — half a variable map would ` +
+        `restore the run into a state it was never in. The row records the drop.`,
     );
-    return empty;
+    // [#13937] Say so IN THE ROW, with the pause the snapshot belonged to:
+    // a bare NULL here is indistinguishable from a run that completed or was
+    // cancelled after a restore, and the engine — rightly — reads that as
+    // "moved on" and discards its own hot copy. This notice is what keeps
+    // the hot copy honoured on the replica that has it, and the refusal
+    // honest everywhere else.
+    return {
+      ...empty,
+      variables_json: JSON.stringify({
+        [CONSUMED_SUSPENSION_DROPPED_KEY]: {
+          bytes,
+          budget: MAX_CONSUMED_SUSPENSION_JSON_BYTES,
+          nodeId: run.nodeId,
+          correlation: run.correlation,
+        },
+      }),
+    };
   }
   // `correlation` is part of the resumable state, not decoration: a run parked
   // at a `subflow:`/`map:` node resumes down a DIFFERENT path on it, and a
@@ -739,6 +775,9 @@ function serializeConsumedSuspension(
  */
 function deserializeConsumedSuspension(row: any): SuspendedRun | undefined {
   if (row.variables_json == null || row.variables_json === '') return undefined;
+  // [#13937] The column holds the drop notice, not a snapshot: nothing to
+  // rebuild — `readConsumedSuspensionDropNotice` reports it separately.
+  if (readConsumedSuspensionDropNotice(row)) return undefined;
   const startedAt = row.started_at ?? row.created_at ?? '';
   const rawId = String(row.id ?? '');
   return {
@@ -754,6 +793,27 @@ function deserializeConsumedSuspension(row: any): SuspendedRun | undefined {
     startTime: typeof row.start_time === 'number' ? row.start_time : (Date.parse(startedAt) || Date.now()),
     correlation: row.correlation ?? undefined,
     screen: parseJson<SuspendedRun['screen']>(row.screen_json, undefined as any),
+  };
+}
+
+/**
+ * [#13937] The drop notice a terminal row's `variables_json` carries when the
+ * snapshot was over budget, or `undefined` when the column holds a snapshot
+ * (or nothing). Strict about the shape — exactly one key, the reserved one —
+ * so a real variable map can never be read as a notice.
+ */
+function readConsumedSuspensionDropNotice(row: any): ConsumedSuspensionDropNotice | undefined {
+  const parsed = parseJson<unknown>(row.variables_json, undefined);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+  const keys = Object.keys(parsed as object);
+  if (keys.length !== 1 || keys[0] !== CONSUMED_SUSPENSION_DROPPED_KEY) return undefined;
+  const notice = (parsed as Record<string, unknown>)[CONSUMED_SUSPENSION_DROPPED_KEY] as Record<string, unknown> | null;
+  if (!notice || typeof notice !== 'object') return undefined;
+  return {
+    bytes: typeof notice.bytes === 'number' ? notice.bytes : 0,
+    budget: typeof notice.budget === 'number' ? notice.budget : MAX_CONSUMED_SUSPENSION_JSON_BYTES,
+    nodeId: typeof notice.nodeId === 'string' ? notice.nodeId : undefined,
+    correlation: typeof notice.correlation === 'string' ? notice.correlation : undefined,
   };
 }
 
