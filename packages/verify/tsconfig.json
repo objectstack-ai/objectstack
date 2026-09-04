@@ -2,8 +2,30 @@
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "outDir": "./dist",
-    "rootDir": "./src",
-    "types": ["node"]
+    // [#15229] Widened from `./src` as a CONSEQUENCE of the `paths` rule below,
+    // exactly as `packages/core/tsconfig.json` documents: redirecting
+    // `@objectstack/core` to its source puts `packages/core/src/**` into this
+    // program, and `rootDir` is enforced over every program file even under
+    // `--noEmit`. `..` (= `packages/`) is the directory that contains every
+    // file in the program. Emit is unaffected: this package builds with tsup.
+    "rootDir": "..",
+    "types": ["node"],
+    // [#15229] `@objectstack/core` is imported as a VALUE by
+    // `src/artifact-collections.ts` (`resolveArtifactPackageOrder`, the
+    // ADR-0130 D4+D5 package ordering every reader in this package now resolves
+    // its collections through). Without this rule its types resolve through the
+    // workspace link to `dist/*.d.ts` — a build artifact — so this package's
+    // type verdict would be a function of build state rather than of the source
+    // in the checkout, which `check:type-source-resolution` refuses (its
+    // registry is shrink-only; widening it is not the fix).
+    //
+    // Bare name, no star: core publishes a second subpath (`./logger`) that
+    // deliberately keeps resolving through its own `exports` map, and a star
+    // would swallow it and resolve it THROUGH a file
+    // (`…/core/src/index.ts/logger`, ENOTDIR). Nothing here imports it.
+    "paths": {
+      "@objectstack/core": ["../core/src/index.ts"]
+    }
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "**/*.spec.ts", "**/*.test.ts"]
