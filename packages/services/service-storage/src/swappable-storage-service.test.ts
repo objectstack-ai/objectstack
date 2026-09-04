@@ -12,7 +12,7 @@ import {
   encodeStorageListCursor,
   resolveStorageListLimit,
 } from '@objectstack/spec/contracts';
-import { SwappableStorageService } from './swappable-storage-service';
+import { SwappableStorageService } from './swappable-storage-service.js';
 
 class FakeAdapter implements IStorageService {
   public name: string;

@@ -3101,6 +3101,7 @@ const BARE_ENTRY_POINT_NAME = 'selfTest';
 const COMPOUND_ANCHOR_LEDGER = [
   ['packages/lint/scripts/check-doc-formula-expressions.mjs', 'specSelfTest', false],
   ['packages/lint/scripts/check-doc-formula-expressions.mjs', 'fieldRuleSelfTest', false],
+  ['scripts/audits/14744-before-update-per-row-value-census.mjs', 'runSelfTest', false],
   ['scripts/check-comment-mask-corpus.mjs', 'runSelfTestCases', false],
   ['scripts/check-doc-authoring.mjs', 'selfTestRule3', false],
   ['scripts/check-doc-authoring.mjs', 'selfTestPackagesProse', false],
@@ -11331,6 +11332,57 @@ function selfTest() {
     console.log(`  ${cond ? '✓' : '✗'} ${name}`);
   };
 
+  // ── A subject this TREE cannot decide is not a passing case (#15255) ──────
+  //
+  // A handful of cases below read the REAL corpus rather than a fixture,
+  // because a fixture cannot show that a live specimen still reaches the tree
+  // it names. That is the right shape, and it carries one hazard a fixture does
+  // not: the specimen's population is a property of the tree, and a tree may
+  // legitimately hold none of it. `.changeset/*.md` is the measured instance —
+  // a changesets version pass consumes the whole population by design, so the
+  // Version Packages PR carries a tree the corpus assertions cannot be
+  // evaluated over, and `main` carries one for as long as it takes the next
+  // changesets to land.
+  //
+  // The control that guarded them asserted the population itself
+  // (`length >= 100`), which is a claim about the release cycle rather than
+  // about this tool, and it made a REQUIRED context red on the one PR whose
+  // merge IS the release. ⛔ The repair is not a quiet `if` around them either:
+  // a silent skip is exactly how a specimen rots unnoticed, which is the
+  // failure the population control was reaching for in the first place.
+  //
+  // So an undecidable subject is neither: it prints its own line, states WHY
+  // this tree cannot decide it in words a reader can check, and is counted
+  // apart from `cases` in the verdict. It is never pushed into `cases` — there
+  // it would be one more `✓`, indistinguishable from a case that ran.
+  const notMeasured = [];
+  const unmeasurable = (subject, why) => {
+    notMeasured.push([subject, why]);
+    console.log(`  ⊘ NOT MEASURED — ${subject}`);
+    console.log(`      ${why}`);
+  };
+
+  /**
+   * The verdict's NOT-MEASURED suffix — a pure renderer so the two properties
+   * that matter can be pinned on fixtures instead of on a run of this tree,
+   * which by construction skips nothing: it is EMPTY when nothing was skipped,
+   * so a fully-measured run's verdict line is byte-identical to the one this
+   * file printed before the tally existed; and it NAMES every skipped subject
+   * when there is one, so no skip can reach a reader as a bare pass count.
+   */
+  const notMeasuredSuffix = (entries) =>
+    entries.length ? ` ⊘ ${entries.length} subject(s) NOT MEASURED on this tree — ${entries.map(([s]) => s).join(' · ')}.` : '';
+
+  /**
+   * The `.changeset/*.md` live specimen's population in a corpus, and the whole
+   * decision behind the block far below: with one member the corpus assertions
+   * are real, with none they are vacuous. Named and pure so both of its call
+   * sites ask the same question and so the boundary can be pinned at the sizes
+   * the release cycle really produces, rather than only at the one this tree
+   * happens to be at today.
+   */
+  const changesetSpecimenPop = (corpus) => corpus.filter((f) => /^\.changeset\/[^/]+\.md$/.test(f));
+
   const wf = [
     'jobs:',
     '  lint:',
@@ -13216,14 +13268,86 @@ function selfTest() {
   // `.changeset/*.md` into `.changeset/.md`, so the hint reached ZERO of 548
   // tracked changesets while reading as an ordinary literal, and the residue
   // then named a directory rename as the cause. Read from the REAL corpus: a
-  // fixture cannot show that the tree still holds the population the trap needs,
-  // and this one grows with every merged PR.
+  // fixture cannot show that the hint still reaches the population the trap was
+  // sprung on. What that corpus is NOT is something this file may require: it
+  // grows with every merged PR and a version pass takes all of it back (#15255,
+  // and the docblock under `changesetPop` below).
   const suffixCorpus = trackedFiles();
-  const changesetPop = suffixCorpus.filter((f) => /^\.changeset\/[^/]+\.md$/.test(f));
-  t('the tree really does hold a large `.changeset/*.md` population', changesetPop.length >= 100);
-  t('the live specimen reaches every changeset it names', changesetPop.every((f) => hintCovers('.changeset/*.md', f)));
-  t('and claims nothing else in the whole tree', suffixCorpus.filter((f) => hintCovers('.changeset/*.md', f)).length === changesetPop.length);
-  t('so it is nobody\'s dead literal any more', hintReachesTree('.changeset/*.md', suffixCorpus));
+  const changesetPop = changesetSpecimenPop(suffixCorpus);
+  // ⛔ NOT `changesetPop.length >= 100` (#15255). That control was reaching for
+  // something real — the two assertions under it pass VACUOUSLY over an empty
+  // population, `every` on nothing and `0 === 0` — but it bought the guard with
+  // a claim this tool has no standing to make. The size of that population is
+  // owned by the release cycle: a changesets version pass consumes all of it,
+  // so it is 1 on the Version Packages PR (measured on #11336's head
+  // b8573e843: `.changeset/` holds README.md and config.json and nothing else),
+  // it is whatever has landed since on `main` for the days after, and it is 865
+  // here. A required context that reds at 1 and at 3 blocks the release itself,
+  // and then blocks `main` behind it.
+  //
+  // What a gate CAN require is the specimen's HOME. `.changeset/config.json` is
+  // the changesets tool's own configuration: while it is tracked, an empty
+  // population is this repo mid-cycle and the specimen is merely resting; when
+  // it goes, the specimen has no population to come back to and somebody must
+  // pick a new one for this species. That distinction is the whole difference
+  // between "not measurable today" and "rotted", and it is the one the count
+  // could not draw.
+  //
+  // The vacuity the count was guarding is closed by construction instead: the
+  // three corpus assertions run only where there is a corpus, and where there
+  // is not, `unmeasurable` says so out loud rather than letting them green.
+  // Note the population is 1, not 0, on the real release PR — `README.md`
+  // survives a version pass — so a guard written at `=== 0` would have left the
+  // gate red on the very tree it was written for. It is written at "empty" and
+  // measured at 0, 1, 3 and 865.
+  t('the `.changeset/*.md` specimen still has a home in this tree', suffixCorpus.includes('.changeset/config.json'));
+  if (changesetPop.length === 0) {
+    unmeasurable(
+      'the `.changeset/*.md` live-specimen corpus assertions',
+      'this tree tracks no `.changeset/*.md` at all — that is what a changesets version pass produces, and the ' +
+        'population comes back as changesets land. The specimen still has its home (see the case above); the three ' +
+        'assertions that need a population are the only thing skipped, and every literal case in this block ran. ' +
+        "Check it yourself: git ls-files '.changeset/'",
+    );
+  } else {
+    t('the live specimen reaches every changeset it names', changesetPop.every((f) => hintCovers('.changeset/*.md', f)));
+    t('and claims nothing else in the whole tree', suffixCorpus.filter((f) => hintCovers('.changeset/*.md', f)).length === changesetPop.length);
+    t('so it is nobody\'s dead literal any more', hintReachesTree('.changeset/*.md', suffixCorpus));
+  }
+  // The branch above is a decision this tree can only exercise one way — it
+  // holds a population today and will hold one on almost every run — so the
+  // sizes the release cycle really produces are pinned on fixtures, at the four
+  // states named in the docblock. A boundary written at the wrong one is the
+  // defect that shipped: `>= 100` is green at 865 and red at every size a
+  // version pass leaves behind.
+  const csTree = (...names) => ['AGENTS.md', '.changeset/config.json', ...names];
+  t('at 865 the corpus assertions run, which is this tree and every ordinary day',
+    changesetSpecimenPop(csTree(...Array.from({ length: 865 }, (_, i) => `.changeset/c${i}.md`))).length === 865);
+  t('at 3 they still run — the state `main` is in for days after a release lands, and where `>= 100` was red',
+    changesetSpecimenPop(csTree('.changeset/a.md', '.changeset/b.md', '.changeset/c.md')).length === 3);
+  t('at 1 they still run, and 1 is what the Version Packages PR really carries — README.md survives a version pass',
+    changesetSpecimenPop(csTree('.changeset/README.md')).length === 1);
+  t('only an EMPTY population is undecidable, and that is the only state that skips',
+    changesetSpecimenPop(csTree()).length === 0);
+  // The home discriminator, both directions: it is what separates "resting" from
+  // "rotted", so it must not answer the same way for a tree that has retired
+  // changesets altogether.
+  t('a tree mid-cycle still has the specimen home, so an empty population reads as resting',
+    csTree().includes('.changeset/config.json'));
+  t('...while a tree that retired changesets has no home, and the case above reds instead of skipping',
+    !['AGENTS.md', 'package.json'].includes('.changeset/config.json'));
+  // The tally the skip is reported through. Pinned here rather than at the
+  // verdict because a green run of this file never reaches the non-empty branch
+  // of it, so nothing else in this program can show that a skip is visible.
+  t('a run that skipped nothing prints the verdict it always printed', notMeasuredSuffix([]) === '');
+  t('...and a run that skipped something names it, so no skip reaches a reader as a bare pass count',
+    notMeasuredSuffix([['a subject', 'a reason']]).includes('NOT MEASURED') &&
+      notMeasuredSuffix([['a subject', 'a reason']]).includes('a subject'));
+  t('...naming every one of them, never just a count',
+    notMeasuredSuffix([['first', 'x'], ['second', 'y']]).includes('first') &&
+      notMeasuredSuffix([['first', 'x'], ['second', 'y']]).includes('second'));
+  t('and a skipped subject is never a case, so the pass count cannot absorb one',
+    !cases.some(([name]) => name.includes('NOT MEASURED')));
   t('the extension the glob names is honoured', !hintCovers('.changeset/*.md', '.changeset/config.json'));
   t('a single `*` matches exactly one segment here too', !hintCovers('.changeset/*.md', '.changeset/pre/x.md'));
   t('a directory surface above it still derives the gate', hintCovers('.changeset/*.md', '.changeset'));
@@ -17054,7 +17178,25 @@ function selfTest() {
   t('...and its reason names the prefix that went missing', unreachableReason(patternPrefixGone).includes('packages/gone-away'));
   // The live half: the specimen is gone from the residue entirely, which is
   // what the card was filed for. A fixture cannot show that.
-  t('the live specimen is not a dead literal on this tree at all', hintReachesTree('.changeset/*.md', trackedFiles()));
+  //
+  // It reads the same live population as the `globCarriesLiteralSuffix` block
+  // above, so it takes the same exit when a version pass has consumed it
+  // (#15255) — the second site, and the reason `unmeasurable` is a primitive
+  // rather than one `if` written once. Left unguarded, this one case would have
+  // kept the release-blocking red after the block above stopped producing it,
+  // which is the shape a repair applied at only the site that was measured red
+  // always has.
+  const residueCorpus = trackedFiles();
+  if (residueCorpus.some((f) => /^\.changeset\/[^/]+\.md$/.test(f))) {
+    t('the live specimen is not a dead literal on this tree at all', hintReachesTree('.changeset/*.md', residueCorpus));
+  } else {
+    unmeasurable(
+      "the residue block's live `.changeset/*.md` specimen",
+      'a hint reaches the tree by matching a FILE, and a tree whose version pass has consumed the population has ' +
+        'no file for this one to match. The judgment this case guards — that a pattern-judged hint is not read as a ' +
+        'dead literal — is pinned on fixtures a few lines above and ran.',
+    );
+  }
 
   // ── A slash is not proof of a path (#10097, option C) ─────────────────────
   //
@@ -19356,11 +19498,19 @@ function selfTest() {
   for (const [, cond] of cases) {
     if (!cond) failed++;
   }
+  // The NOT-MEASURED tally rides on BOTH verdicts (#15255). A reader who sees
+  // only the pass count cannot tell a run that measured everything from one
+  // that skipped a subject, and that indistinguishability is the whole failure
+  // mode a silent skip introduces — so the count is repeated here, next to the
+  // number it would otherwise be hiding inside. It never moves the exit code:
+  // "this tree cannot decide it" is not a defect in this tool, and a gate that
+  // reds for it is the release blocker this replaced.
+  const skipped = notMeasuredSuffix(notMeasured);
   if (failed) {
-    console.error(`✗ dispatch-gates self-test: ${failed} of ${cases.length} case(s) failed.`);
+    console.error(`✗ dispatch-gates self-test: ${failed} of ${cases.length} case(s) failed.${skipped}`);
     process.exit(1);
   }
-  console.log(`✓ dispatch-gates self-test: ${cases.length} cases pass.`);
+  console.log(`✓ dispatch-gates self-test: ${cases.length} cases pass.${skipped}`);
 
   return SELF_TEST_VERDICT;
 }

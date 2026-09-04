@@ -1,5 +1,140 @@
 # @objectstack/metadata-fs
 
+## 17.3.0
+
+### Patch Changes
+
+- e7191ce: fix(build): give each `exports` condition its own `types` target in the 28 dual-build packages (#13112)
+  
+  **Published-surface change, zero runtime change.** No emitted byte moves; what
+  moves is which declaration file a resolver READS. Maintainer ruling 2026-08-29
+  (decision batch #3, verbatim 「同意」) chose declaring the files over deleting
+  them.
+  
+  ## What was wrong
+  
+  These 28 packages are `"type": "module"` and dual-built, and each spelled one
+  `types` condition as a **sibling** of `import`/`require`:
+  
+  ```json
+  "exports": { ".": {
+    "types": "./dist/index.d.ts", "import": "./dist/index.js", "require": "./dist/index.cjs"
+  } }
+  ```
+  
+  A sibling `types` answers for **both** conditions, so a CommonJS consumer was
+  handed `dist/index.d.ts` — an ES-module declaration, because the package is
+  `"type": "module"` — for an entry point it reaches with `require`. Measured with
+  `tsc --traceResolution` on a `"type": "commonjs"` fixture at `moduleResolution:
+  node16`:
+  
+  ```
+  error TS1479: The current file is a CommonJS module whose imports will produce
+  'require' calls; however, the referenced file is an ECMAScript module and cannot
+  be imported with 'require'.
+  ```
+  
+  The JavaScript at `dist/index.cjs` loads perfectly (`check:dual-build-cjs-loads`
+  has asserted that for months). It is the **types** that told the consumer the
+  supported `require` entry point could not be required. The `dist/index.d.cts`
+  twin tsup emits beside it — 36 files, 5,517,701 B on this build — was named by
+  no condition at all and shipped in every tarball unreachable.
+  
+  ## What changed
+  
+  Each condition now names its own declaration, the shape TypeScript documents:
+  
+  ```json
+  "exports": { ".": {
+    "import":  { "types": "./dist/index.d.ts",  "default": "./dist/index.js" },
+    "require": { "types": "./dist/index.d.cts", "default": "./dist/index.cjs" }
+  } }
+  ```
+  
+  33 entry points across 27 packages, subpaths included. The root `types` field is
+  untouched, so `node10` resolvers are unaffected; the `import` condition resolves
+  exactly what it resolved before, measured as an unchanged control in the same
+  run.
+  
+  ## `@objectstack/core` is deliberately NOT changed
+  
+  Splitting a declaration in two makes TypeScript compare it nominally, and
+  `ObjectKernel` carries a `private plugins` member that reaches every plugin
+  through `PluginContext.getKernel()`. With core split, whole-repo `pnpm build`
+  fails in `@objectstack/verify` with 5 × TS2345 ("Types have separate
+  declarations of a private property 'plugins'"); with core held back and the
+  other 27 split, 71/71 tasks pass. So core keeps the sibling-`types` shape and
+  its two `.d.cts` files (220,854 B) stay unreachable, declared as such in
+  `check:dual-build-cjs-loads`. Splitting it needs a decision about core's public
+  types, not about an exports map.
+  
+  ## For consumers
+  
+  - **ESM consumers: nothing changes.** Same declaration file, byte for byte.
+  - **CJS consumers under `node16`/`nodenext`: TS1479 goes away** and the
+    declarations they get are the ones built for CommonJS.
+  - **`node10` / `moduleResolution: node` consumers: nothing changes** — they never
+    read `exports`.
+  - Nothing is removed: every path that resolved before still resolves.
+  
+  Packages that are CJS-first (`require` → `./dist/index.js`, no `"type": "module"`)
+  were already correct and are untouched — their `dist/index.d.ts` really is the
+  CommonJS declaration. Their ESM mirror (an unreachable `.d.mts` under the
+  `import` condition) is a separate, larger population and is filed separately per
+  the ruling, not fixed here.
+  
+  `check:dual-build-cjs-loads` grew a fourth invariant (TYPED) that reds on the old
+  shape, so the drift cannot return silently.
+- a07a831: fix(metadata-fs): declare `startWatcher()`'s chokidar `atomic` option explicitly (#12696)
+  
+  `FileSystemRepository.startWatcher()` constructed its chokidar watcher with
+  `usePolling: true` but never passed `atomic`, leaving it to inherit chokidar's
+  default. That default is unconditionally `true` in the installed version
+  (chokidar 5.0.0): the defaults literal assigns `atomic: true` *before* the
+  caller's options are spread in, so chokidar's own default-correction
+  (`if (opts.atomic === undefined) opts.atomic = !opts.usePolling`) can never
+  fire — it only runs when `atomic` is literally `undefined` after the merge,
+  which it never is. The comment beside that correction ("Editor atomic write
+  normalization enabled by default with fs.watch") reads as "off under
+  polling"; the actual resolved behaviour was on regardless.
+  
+  This change passes `atomic: true` explicitly at the call site, with a comment
+  explaining why. **Patch, not a behaviour change**: verified at runtime
+  (constructing a watcher the way `startWatcher()` does and reading back
+  `watcher.options.atomic`) that the resolved value is identical before and
+  after — `true` either way, today. The only thing that changes is that the
+  value is now DECLARED rather than inherited from an upstream branch that
+  cannot execute, so a future chokidar release that fixes the ordering (making
+  the correction real) cannot silently flip this repository's watcher to
+  `atomic: false` under polling and change behaviour with no diff to review.
+  
+  Not addressed here (see #12696): whether `atomic: true` (the 100ms
+  unlink-coalescing deferral and the `DOT_RE` editor-temp-file matcher it turns
+  on) is actually the right value. No evidence surfaced that either has ever
+  affected a run; flipping it to `false` is a deliberate behaviour change to a
+  live delivery path that needs its own reverse verification, and is out of
+  scope for this card.
+- 3e8f5b0: The file watcher no longer publishes a `delete` for an item that is still on disk.
+  
+  A watcher `unlink` is a claim of absence, not absence: chokidar reaches its removal path from failed stats as well as from real removals, so under filesystem pressure it can retire a file that is still there. `FileSystemRepository` published those claims straight through as `delete` events — appended to the change log and broadcast to every subscriber, which drops the item from the metadata registry and the `list()` cache — and the reconciliation sweep then republished the untouched file as a `create`. A failed stat therefore produced a durable delete/create pair for an item nobody removed, with a window in between where live metadata had disappeared.
+  
+  The removal face now confirms the absence against the disk under the same per-key lock the reconciliation sweep already used for this, and an `unlink` for a path that still exists falls through to the content comparison — so a spurious unlink that arrived alongside a real external edit surfaces as the `update` it always was. Genuine external removals are unaffected and are still published on the first delivery.
+- Updated dependencies [54e2d36]
+- Updated dependencies [b745157]
+- Updated dependencies [d23ebb9]
+- Updated dependencies [fa5d137]
+- Updated dependencies [e7191ce]
+- Updated dependencies [0fd4899]
+- Updated dependencies [00d8f65]
+- Updated dependencies [200d255]
+- Updated dependencies [2852acc]
+- Updated dependencies [15d55fb]
+- Updated dependencies [15eb2c9]
+- Updated dependencies [1272f0a]
+- Updated dependencies [d41d166]
+- Updated dependencies [5d16379]
+  - @objectstack/metadata-core@17.3.0
+
 ## 17.2.0
 
 ### Patch Changes

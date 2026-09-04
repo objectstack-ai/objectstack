@@ -1,5 +1,725 @@
 # @objectstack/service-settings
 
+## 17.3.0
+
+### Minor Changes
+
+- 8e31083: feat(settings,auth): expose the audience posture in the `auth` settings namespace (#11768)
+  
+  The audience posture shipped by #11739 (`invite_only | email_domain | open`,
+  default `invite_only`) was switchable only from stack config at boot; a
+  self-host admin had no console channel. The `auth` settings namespace now
+  carries an `audience` group — three new authorable keys, which is what a host
+  sees and why this is `minor`:
+  
+  - `audience_posture` — a select over the closed vocabulary (the option table
+    is enforced on `setMany` and on the `OS_AUTH_AUDIENCE_POSTURE` env-override
+    door);
+  - `audience_allowed_email_domains` — newline- or comma-separated bare domains
+    (exact, case-insensitive matching; subdomains need their own entries);
+  - `audience_self_registration_permission_set` — the `sys_permission_set` name
+    each self-registrant receives.
+  
+  `bindAuthSettings` maps the three keys — one atomic declaration — to one
+  `AuthManager.applyConfigPatch({ audience })`, which replaces the whole
+  audience object and validates the MERGED result. Every #11739 invariant holds
+  through the new channel: a self-registration posture with verification
+  explicitly off, an empty domain list under `email_domain`, and a missing or
+  `admin_full_access` permission set are all refused loudly (the standing
+  config keeps ruling — fail closed), and off-vocabulary postures are refused,
+  never coerced, per the `membership_policy` precedent (#5152). Only EXPLICIT
+  settings values apply: the manifest defaults never mask a deployment's
+  boot-config declaration. Switching back to `invite_only` always applies —
+  leftover text in the posture-hidden sibling fields cannot make closing the
+  wall refusable.
+- a58eac3: **Security:** `LocalCryptoProvider` selects its crypto posture from the deployment signal only. A test-runner variable inherited by a spawned server can no longer disarm the production key refusal (#11352).
+  
+  `detectMode` read `env.VITEST` as a vote for `'test'` posture:
+  
+  ```ts
+  if (env.VITEST || env.NODE_ENV === 'test') return 'test';
+  ```
+  
+  `'test'` is not a softer flavour of `'production'`. It is the branch that takes an ephemeral key, never touches disk, and **never refuses to boot** — and that refusal is the reason the class exists: minting a key at boot makes every previously-written `sys_secret` value (encrypted settings, `secret` fields, datasource credentials) undecryptable after the next restart or on another node, invisibly at encrypt time. So one runner variable decided whether a security gate ran at all.
+  
+  Runner variables are **inherited**. Vitest sets `TEST`, `VITEST`, `VITEST_MODE`, `VITEST_WORKER_ID` and `VITEST_POOL_ID` on its worker, and every process that worker spawns with `{ ...process.env }` receives them. Measured on this repo: a real `os serve` spawned that way booted with production auth and **test** crypto. `packages/cli/test/serve-node-env-production-default.e2e.test.ts` — a pin whose entire subject is *"unset `NODE_ENV` means production"* — ran that way for its whole life, and nothing said a word, because a gate that does not run prints nothing. It surfaced only incidentally, while closing the sibling `TEST` leak into better-auth's origin check one layer down.
+  
+  **What changes for you.** A process that boots with `NODE_ENV=production`, no `OS_SECRET_KEY`/`OS_DEV_CRYPTO_KEY`, no persisted key file, no `OS_CRYPTO_AUTOKEY` — and a runner variable in its environment — now **refuses to start** instead of running on an ephemeral key. That is the documented fail-loud guarantee arriving where it was previously skipped, not a new restriction: supply the key the refusal names.
+  
+  ```
+  OS_SECRET_KEY=$(openssl rand -hex 32)
+  ```
+  
+  **What does not change.** In-process unit tests still get `test` posture — ephemeral key, disk never touched. The `VITEST` read is deleted rather than narrowed because vitest sets both variables on the same worker (`prepareVitest()`: `process.env.VITEST = "true"; process.env.NODE_ENV ??= "test";`, repeated as `NODE_ENV: process.env.NODE_ENV || "test"` in each worker's env). In-process the two spellings are indistinguishable; they differ only for an **inheriting child**, which is precisely the defect. `NODE_ENV` remains the one signal, and a deployment that declares itself a test deployment still gets test posture.
+  
+  The whole class is now gated: `pnpm check:runner-env-posture` refuses `TEST`, `VITEST`/`VITEST_*` and `JEST_WORKER_ID` anywhere in product source, so the next author is told at authoring time rather than by an operator whose secrets stopped decrypting. `NODE_ENV` is deliberately not banned — it describes the deployment, and a deployment may declare itself a test deployment; a runner may not declare it on the deployment's behalf.
+
+### Patch Changes
+
+- 99ccbb9: Tell the operator in Settings → AI that `@objectstack/service-ai` has no
+  open-edition version to install, instead of three bare "Mount it" lines
+  
+  Configure any real LLM provider in **Settings → AI** and press *Test
+  connection*, and the built-in fallback handler answered — on all three
+  real-provider branches — "Mount `@objectstack/service-ai` to exercise live
+  calls." This platform's own capability roster says that cannot be done:
+  `PLATFORM_CAPABILITY_PROVIDERS.ai` in `@objectstack/spec/kernel` declares
+  `edition: 'cloud'`, which `CapabilityEdition` defines as "realized only by a
+  cloud runtime tier; there is **no installable version in the open edition**" —
+  the un-followable "add it to your dependencies" that framework#3366 exists to
+  make legible. The package is in no directory of this repo (0 path hits for
+  `/service-ai/` on `main`; `/service-settings/` returns 64 and
+  `/embedder-openai/` 8 under the identical command, so the zero is real).
+  
+  The instruction is **kept** — an operator may well have a cloud tier — and
+  gains the boundary it was missing, so one who does not can see the path is
+  closed to them.
+  
+  Worse than a 404, the install succeeds. Measured 2026-08-23 against the public
+  npm registry (unauthenticated, `@objectstack/spec` + `@objectstack/cli` as
+  positive controls, `@objectstack/service-ai-studio` — the sibling
+  `edition: 'cloud'` entry — as a negative control returning 404):
+  `@objectstack/service-ai` returns **200** with 57 versions, and the highest is
+  **10.3.0** (2026-06-23) — entirely below the 11.3.0 cut the roster note names,
+  i.e. the pre-cloud tail left behind on the registry. A determined operator
+  following the old sentence installs a seven-major-old AI runtime that
+  exact-pins `@objectstack/spec@10.3.0` against this repo's 17.2.0, resolving a
+  second spec beside this one. The new message says so, so nobody discovers it
+  from a dependency error.
+  
+  The boundary sentence is **read from the roster**, not hand-written a fourth
+  time: `note` is documented as "surfaced verbatim inside the preflight / boot
+  error so the message carries its own context", and `packages/cli`'s capability
+  preflight already interpolates it the same way. The three provider prefixes
+  stay distinct — only the shared trailing sentence converges.
+  
+  No behaviour change: `ok` and `severity` are untouched on every branch, and the
+  embedder hint at the fourth site is deliberately left alone (its package
+  **is** built here, so that instruction is followable as written) and pinned by
+  a contrast test.
+- 6a180e4: fix(core,rest,services)!: a permission-store read failure now fails LOUD instead of resolving as an authenticated caller holding zero capabilities (#13279)
+  
+  **BREAKING** runtime behaviour change on the shared authorization resolver,
+  shipped as `minor` under the repo's launch-window convention.
+  
+  `resolveAuthzContext`'s per-read helper `tryFind` answered a THROWN read exactly
+  the way it answered an EMPTY one: `[]`. So an outage of the permission store
+  resolved as a well-formed context for an authenticated principal holding no
+  capabilities, and the package-management door answered
+  `403 FORBIDDEN` — "Reading packages requires the `studio.access` or
+  `setup.access` capability." That answer was measured byte-identical
+  (`JSON.stringify` equal, against a control that separates two answers which do
+  differ) to what a caller who genuinely holds nothing receives. An administrator
+  was told they lack a capability, during an outage of the store that holds the
+  capability.
+  
+  Maintainer ruling 2026-08-30, verbatim 「第一批其余同意」: `tryFind` 区分「无行」
+  与「读失败」,读失败 fail-loud —— 权限库不可达时不再解析为「已认证零能力」,而是
+  响亮拒绝(与真实能力拒绝的 403 可区分)。
+  
+  Second maintainer ruling the same day (第 5 场总监席决裁批 #9, verbatim 「同意」),
+  after implementing the first one showed that "the read failed" is two facts:
+  采**选项 A** —— 把 `isMissingTableError` 从 `@objectstack/metadata` 迁至
+  `@objectstack/types`(core 已依赖),metadata 保留 re-export 兼容;`tryFind` 仅对
+  **未被判定为「表未 provision」**的读失败抛 `AuthzStoreUnavailableError`。
+  
+  **What changed.** A permission-store read that is issued and throws now raises
+  `AuthzStoreUnavailableError`, which carries the EXISTING ADR-0112 wire code
+  `SERVICE_UNAVAILABLE` and status `503`. No code is added to the closed wire
+  vocabulary and no response envelope gains or loses a key — only which declared
+  code an outage selects. Doors that map thrown errors through
+  `resolveThrownHttpError` answer 503 with no per-door change.
+  
+  **What did NOT change**, and is pinned:
+  
+  - A reachable, genuinely EMPTY store (reads return no rows) still resolves to
+    zero capabilities.
+  - A genuine capability denial still answers `403 FORBIDDEN` with its message.
+  - An ABSENT engine (`ql` unwired, so no read is ever issued) still resolves to
+    an empty-but-valid envelope.
+  - Anonymous requests never reach the store, so an outage cannot make them loud.
+  - A REAL engine whose `sys_*` tables were never provisioned resolves to zero
+    capabilities, quietly — pinned to be byte-identical to the empty-store
+    envelope, in every dialect spelling and in the production wrapper shape where
+    the driver's phrase is on `cause` rather than the outer message.
+  
+  **The boundary between the two kinds of read failure.** An earlier revision of
+  this changeset claimed "embedders without a data plane are unaffected". That
+  claim was too broad; it is retracted here, and the gap it named is now closed
+  rather than merely disclosed. A read also throws when the table was never
+  PROVISIONED — a real engine, wired and reachable, whose `sys_*` tables were
+  never created — and that is a supported deployment shape, not an outage. There
+  "zero capabilities" is the TRUE answer rather than a fabrication: nothing is
+  provisioned, so nothing was withheld. Only an UNREACHABLE store — the ruling's
+  own word 不可达 — leaves the capability set unknown, and only an unknown answer
+  may not be reported as a denial.
+  
+  Treating the two alike was measured, not theorised: it turned four CI suites
+  red, all from `no such table` on `sys_user` / `sys_member` /
+  `sys_user_position` / `sys_user_permission_set`. Ordinary CRUD in
+  `@objectstack/client` answered `503`; batch validation errors that owe `400`
+  answered `503`, because authorization refused before validation ran; runtime
+  notifications answered `401` where authenticated callers must be served `200`;
+  and two `.integration.test.ts` noise guards reported that the driver and engine
+  diagnostics for `sys_position` stopped being emitted — the eager throw aborted
+  the resolution before that later read was ever issued, so a change made to stop
+  a failed read being silent had made two other channels silent.
+  
+  `tryFind` therefore raises `AuthzStoreUnavailableError` only for a read failure
+  that is NOT positively identified as an unprovisioned table.
+  
+  **`isMissingTableError` moved to `@objectstack/types`.** The classifier that
+  draws that boundary already existed and was already right — driver-code based
+  rather than prose-sniffing, documented so that "cannot say" never means "be
+  loud". It lived in `@objectstack/metadata`, which DEPENDS ON `@objectstack/core`,
+  so the resolver could not import it. Rather than keep a second copy of a
+  security-relevant predicate, the ruling relocated the one classifier to
+  `@objectstack/types` — the package core already depends on, and the repo's own
+  stated Home rule for a cross-package error predicate ("every consumer of the
+  question already depends on it, so adopting the predicate never adds an edge",
+  `packages/types/src/unique-violation.ts`). `@objectstack/metadata/errors` still
+  exports `isMissingTableError`, re-exported from the new home, so no consumer of
+  that published subpath changes.
+  
+  Its sibling `isSchemaAlreadyExistsError` moved with it — the two are not two
+  modules but two signatures over one matcher, and separating them would have
+  meant re-rolling the matcher, which is the duplication the module exists to
+  prevent. Both are now exported from `@objectstack/types`; the metadata subpath
+  deliberately still publishes only `isMissingTableError`, which is the only one
+  anything imports through it.
+  
+  ⚠️ **Signed-off risk, recorded because it is load-bearing.** Gating loudness on
+  a driver-error predicate was approved with its false-positive direction stated:
+  mis-reading a genuine outage as "table not provisioned" silently restores the
+  quiet 403 this change removes, with no thrown error and no other failing test.
+  That direction is accepted, not overlooked — the predicate keys on driver codes,
+  SQLSTATEs and errnos first, excludes the known superstring traps up front, and
+  returns `false` for anything it does not positively recognise, so an
+  unrecognised outage stays loud by default. The risk is written beside the
+  predicate in `resolve-authz-context.ts` and both directions are pinned by name
+  in `authz-store-unavailable.test.ts`. ⛔ Do not widen `isMissingTableError` to
+  make a first boot quieter: every widening moves outages into the quiet branch.
+  
+  **All-transport, not just REST.** Every transport authorizing through
+  `resolveAuthzContext` inherits this. Six of the eight production transports
+  wrapped the call in a fail-closed `catch` that would have re-silenced the
+  outage — measured, not assumed: with the resolver loud but the nets untouched,
+  the package door answered `401`, i.e. the outage merely changed disguises. Those
+  `catch` blocks now re-raise via `isAuthzStoreUnavailableError` and keep their
+  previous behaviour for every other fault. The transport set is rebuilt from
+  source and audited for set equality on every test run, so a transport added
+  later cannot inherit the old silence unnoticed.
+  
+  Callers that treat any throw from `resolveAuthzContext` as "anonymous" should
+  re-raise `isAuthzStoreUnavailableError(err)` instead: degrading it restores the
+  disguise this removes.
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/core/src/security/resolve-authz-context.ts#ResolvedAuthzContext, packages/core/src/security/authz-store-unavailable.ts#AuthzStoreUnavailableError) The breaking surface is runtime TypeScript in `@objectstack/core`'s security module and nothing else: `resolveAuthzContext` stops always-resolving and raises `AuthzStoreUnavailableError` when a permission-store read is issued and throws. NO metadata surface is touched in either direction. No Zod schema changes, no `packages/spec` declaration is added or removed, no authorable key moves, no stored row shape changes, and no object definition is edited — a customer's metadata app is byte-for-byte unaffected, so `objectstack migrate meta` has nothing to visit and there is no tombstone to mint. The wire vocabulary is likewise untouched: `SERVICE_UNAVAILABLE` is an EXISTING `StandardErrorCode` member that `HttpStatusErrorCodeMap` already maps to 503, so this change only selects a different DECLARED code for an outage rather than adding one. Both named symbols resolve at HEAD as exported declarations whose files are not `*.zod.ts`, are not under `packages/spec/src/contracts/`, are not object definitions and are not `z.input` projections; neither is referenced in code by any metadata surface (the `packages/spec` hits for `resolveAuthzContext` are comment prose describing the envelope, which this gate masks). The channel that reaches an affected consumer is therefore code review and this changeset, never the upgrade guide: a ledger entry could not express "your fail-closed catch should re-raise this error", because there is no metadata for a migration to rewrite. -->
+- e7191ce: fix(build): give each `exports` condition its own `types` target in the 28 dual-build packages (#13112)
+  
+  **Published-surface change, zero runtime change.** No emitted byte moves; what
+  moves is which declaration file a resolver READS. Maintainer ruling 2026-08-29
+  (decision batch #3, verbatim 「同意」) chose declaring the files over deleting
+  them.
+  
+  ## What was wrong
+  
+  These 28 packages are `"type": "module"` and dual-built, and each spelled one
+  `types` condition as a **sibling** of `import`/`require`:
+  
+  ```json
+  "exports": { ".": {
+    "types": "./dist/index.d.ts", "import": "./dist/index.js", "require": "./dist/index.cjs"
+  } }
+  ```
+  
+  A sibling `types` answers for **both** conditions, so a CommonJS consumer was
+  handed `dist/index.d.ts` — an ES-module declaration, because the package is
+  `"type": "module"` — for an entry point it reaches with `require`. Measured with
+  `tsc --traceResolution` on a `"type": "commonjs"` fixture at `moduleResolution:
+  node16`:
+  
+  ```
+  error TS1479: The current file is a CommonJS module whose imports will produce
+  'require' calls; however, the referenced file is an ECMAScript module and cannot
+  be imported with 'require'.
+  ```
+  
+  The JavaScript at `dist/index.cjs` loads perfectly (`check:dual-build-cjs-loads`
+  has asserted that for months). It is the **types** that told the consumer the
+  supported `require` entry point could not be required. The `dist/index.d.cts`
+  twin tsup emits beside it — 36 files, 5,517,701 B on this build — was named by
+  no condition at all and shipped in every tarball unreachable.
+  
+  ## What changed
+  
+  Each condition now names its own declaration, the shape TypeScript documents:
+  
+  ```json
+  "exports": { ".": {
+    "import":  { "types": "./dist/index.d.ts",  "default": "./dist/index.js" },
+    "require": { "types": "./dist/index.d.cts", "default": "./dist/index.cjs" }
+  } }
+  ```
+  
+  33 entry points across 27 packages, subpaths included. The root `types` field is
+  untouched, so `node10` resolvers are unaffected; the `import` condition resolves
+  exactly what it resolved before, measured as an unchanged control in the same
+  run.
+  
+  ## `@objectstack/core` is deliberately NOT changed
+  
+  Splitting a declaration in two makes TypeScript compare it nominally, and
+  `ObjectKernel` carries a `private plugins` member that reaches every plugin
+  through `PluginContext.getKernel()`. With core split, whole-repo `pnpm build`
+  fails in `@objectstack/verify` with 5 × TS2345 ("Types have separate
+  declarations of a private property 'plugins'"); with core held back and the
+  other 27 split, 71/71 tasks pass. So core keeps the sibling-`types` shape and
+  its two `.d.cts` files (220,854 B) stay unreachable, declared as such in
+  `check:dual-build-cjs-loads`. Splitting it needs a decision about core's public
+  types, not about an exports map.
+  
+  ## For consumers
+  
+  - **ESM consumers: nothing changes.** Same declaration file, byte for byte.
+  - **CJS consumers under `node16`/`nodenext`: TS1479 goes away** and the
+    declarations they get are the ones built for CommonJS.
+  - **`node10` / `moduleResolution: node` consumers: nothing changes** — they never
+    read `exports`.
+  - Nothing is removed: every path that resolved before still resolves.
+  
+  Packages that are CJS-first (`require` → `./dist/index.js`, no `"type": "module"`)
+  were already correct and are untouched — their `dist/index.d.ts` really is the
+  CommonJS declaration. Their ESM mirror (an unreachable `.d.mts` under the
+  `import` condition) is a separate, larger population and is filed separately per
+  the ruling, not fixed here.
+  
+  `check:dual-build-cjs-loads` grew a fourth invariant (TYPED) that reds on the old
+  shape, so the drift cannot return silently.
+- e7f56d6: Make the settings engine facade and the metadata database loader bind the row
+  they resolved, not a row the payload names
+  
+  Two ingresses resolved an authoritative row id and then folded it into the
+  write payload with the **losing** spread order — `{ id, ...data }` — so a
+  caller-supplied `data.id` spread over the id the ingress had just resolved and
+  silently retargeted the write:
+  
+  - `wrapEngineAsSettingsEngine`'s by-id `update` branch
+    (`@objectstack/service-settings`), whose id comes from the caller's
+    `where.id`.
+  - `DatabaseLoader._update` (`@objectstack/metadata`), whose id arrives as a
+    separate parameter every caller resolves first (`existing.id`, from the read
+    immediately above).
+  
+  Both now spell it `{ ...data, id }` — the operation's id **after** the spread,
+  so it wins. That is the convention the repo's other two ingresses already
+  document: `rest-server.ts`'s batch update arm ("the operation's id AFTER the
+  spread, so it wins") and `protocol.updateData`'s #6479 fix
+  (`{ ...request.data, id: request.id }`).
+  
+  **No wrong write is known to have been reachable.** Both sites' current callers
+  build fresh field literals and never put an `id` inside `data`, so this is
+  hardening a fragile pattern rather than repairing a measured defect. What makes
+  it worth the three characters is that neither site can be caught downstream:
+  both pass **no `where`** to the engine, so the payload is the only id the engine
+  ever sees, and the engine's conflicting-id refusal (`UPDATE_ID_MISMATCH`, 400)
+  needs two disagreeing declarations before it can fire. The fold is the entire
+  trust boundary at both sites, and it is one refactor — a caller handing back a
+  row copy, and rows carry `id` — from the #6479 shape.
+  
+  Both are pinned with a payload whose `id` names a **different** row than the
+  one the ingress resolved, asserting the resolved row is still the row bound. A
+  pin exercising a payload without an `id` would have passed against both
+  spellings. The doubles answer "which row does this bind?" with the producer's
+  own `assertEngineUpdateDispatch`, so they cannot be kinder about it than a
+  running server.
+- 66bbb4c: Tell the operator where `@objectstack/knowledge-turso` comes from instead of
+  naming a package this repo does not build
+  
+  An operator who selects the `turso` knowledge adapter in **Settings → AI &
+  Embedder** and runs the connection test was told: "Mount
+  `@objectstack/knowledge-turso` to exercise live calls." That package is in no
+  directory of this repo (0 path hits on `main`; `knowledge-memory` and
+  `knowledge-ragflow` return 8 each under the identical command, so the zero is
+  real), and the message said nothing about where it does come from — leaving the
+  instruction un-followable at exactly the moment it is read.
+  
+  The prior question the card turned on — *is it published anywhere?* — is now
+  measured rather than assumed. Against the public npm registry on 2026-08-23,
+  with `@objectstack/spec` and `@objectstack/cli` as positive controls and
+  `@objectstack/security-enterprise` as a known-private negative control:
+  `@objectstack/knowledge-turso` **is published**, `latest` 6.9.0 (2026-05-27),
+  nine versions from 6.4.0. So the option stays — dropping it would have deleted a
+  working adapter.
+  
+  What it is *not* is co-installable with this platform version: 6.9.0 exact-pins
+  `@objectstack/spec@6.9.0` while this repo ships 17.2.0, so mounting it resolves a
+  second spec rather than reusing this one. The runtime message now names the
+  package, says this platform does not ship it, points at the ObjectStack Cloud
+  monorepo where it is built, and tells the operator to check for a release
+  matching their platform version — the framework#3366 discipline that an install
+  hint must carry its own edition/version boundary.
+  
+  The manifest's adapter-list comment loses the undated "mirrors the plugin
+  packages currently published" claim that stopped being true with nothing to
+  catch it, and gains the measurement with its date and method so the next reader
+  can re-run it. No behaviour change: `ok` and `severity` are untouched on every
+  branch of the test action.
+- fc8627e: docs(service-settings): state `getMany`'s all-or-nothing key validation on the declaration that owns it (#11680)
+  
+  Documentation and a pin. **No behaviour change** — the accept set and every
+  resolved value are byte-identical.
+  
+  `SettingsService.getMany` validates **every** requested key against the
+  namespace manifest before it reads a single env override and before it loads a
+  single row, so one undeclared key rejects the whole call with
+  `UnknownKeyError` (`code: 'SETTINGS_UNKNOWN_KEY'`) and the caller receives
+  nothing — not the subset it was entitled to. N per-key `get()` calls behave
+  differently on exactly that input: each declared key still answers, and only
+  the undeclared one throws.
+  
+  The doc comment was otherwise detailed — it explained the grouped row load and
+  the env-override ordering, and claimed row-for-row equivalence with per-key
+  `get` "BY CONSTRUCTION" — but never drew this line. That equivalence claim
+  holds for every key that *resolves* and not for the refusal, so a batched
+  consumer had to rediscover the rule from a test. `resolveLocalizationContext`
+  was the first to inherit it and had to record the consequence locally: a host
+  registering a **partial** `localization` manifest loses all its keys at once
+  and drops to a shorter cascade, where the per-key path would still have
+  resolved the declared ones.
+  
+  `getMany`'s doc comment now states the rule, its blast radius, why validating
+  ahead of the grouped walk makes the refusal independent of key order and scope
+  grouping, and what a caller on a partial manifest should expect.
+  
+  The pre-existing pin asserted only `rejects.toThrow(/nope/)` — green whatever
+  the blast radius is. A sibling pin now asserts the property instead: the error
+  envelope (`code: 'SETTINGS_UNKNOWN_KEY'`), that **zero** rows were loaded
+  (the refusal is up-front, with the undeclared key last in the request), and
+  the contrast that per-key `get()` still answers each declared key.
+- 050d8d8: `loadRows` user-keyed engine loads now include tenant/global rows (`$or` over `user_id`/upper scopes), mirroring the in-memory branch. Fixes the user→tenant→global read cascade dying at the user level and upper-scope locks never firing on user-scope writes, on engine-bound deployments (#11228).
+- 47d9b77: The SMTP port range `1-65535` is now declared once and the refusal is generated from it (#12993). It had been hand-written three times across two packages: the enforcement in `SmtpTransport`, the `(expected 1-65535)` literal in the very next line's message, and `min: 1, max: 65535` on the mail settings form's `smtp_port` field — which `@objectstack/service-settings` really does enforce (`declaredBounds` / `validatePatch`), so it is a second door rather than decoration. The first two were adjacent lines, the cheapest possible drift: changing the check without changing the sentence yields a refusal that misstates its own rule, and nothing fails.
+  
+  `transports/smtp-port-contract.ts` now owns `SMTP_PORT_MIN` / `SMTP_PORT_MAX`, the predicate that applies them and the sentence that states them. The message text is **generated** rather than re-spelled, so the second spelling no longer exists to drift — the stronger of the two repairs the card named, since it deletes the drift instead of checking for it.
+  
+  Nothing is accepted or refused that was not before. The move is pinned as behaviour-preserving against the previous inline expression, kept verbatim as the oracle, over a table that includes both edges, the non-finite values and the non-integers.
+  
+  The settings manifest keeps its own numbers deliberately. `@objectstack/service-settings` does not depend on `@objectstack/plugin-email`, and the plugin depends on the service only as a test-only devDependency; making the manifest import the constant would add a runtime edge from a service to a plugin, invert the layering and pull `nodemailer` into the settings service's install closure. So the two are held equal by a cross-package assertion over that existing devDependency instead — the same mechanism that already holds the provider dropdown equal to `EMAIL_TRANSPORT_PROVIDERS` — and no new dependency edge is created in either direction.
+  
+  This range is **not** the CLI's listen range and must never be merged with it: `os serve` floors at `0` because port 0 asks the OS to choose one to listen on, while an SMTP port is a destination and floors at `1`. Collapsing them onto one constant would silently make `0` a legal SMTP port, so the floor is pinned explicitly.
+- Updated dependencies [809d417]
+- Updated dependencies [387e231]
+- Updated dependencies [f794e4e]
+- Updated dependencies [cae2169]
+- Updated dependencies [b812a54]
+- Updated dependencies [2d4fa75]
+- Updated dependencies [0e4e51b]
+- Updated dependencies [e84bbf6]
+- Updated dependencies [effae80]
+- Updated dependencies [efb3513]
+- Updated dependencies [d62f990]
+- Updated dependencies [c45d8e6]
+- Updated dependencies [2e3e8c7]
+- Updated dependencies [e621291]
+- Updated dependencies [655b106]
+- Updated dependencies [40a93b5]
+- Updated dependencies [101ad2c]
+- Updated dependencies [d5b330d]
+- Updated dependencies [dda969c]
+- Updated dependencies [1f45690]
+- Updated dependencies [277948f]
+- Updated dependencies [8bdd955]
+- Updated dependencies [f3bbbef]
+- Updated dependencies [4f24e9d]
+- Updated dependencies [e27583e]
+- Updated dependencies [4bd6faa]
+- Updated dependencies [86cbe37]
+- Updated dependencies [6a180e4]
+- Updated dependencies [474242f]
+- Updated dependencies [63cd487]
+- Updated dependencies [bd4aa4e]
+- Updated dependencies [803eaab]
+- Updated dependencies [f8e8f03]
+- Updated dependencies [983edf1]
+- Updated dependencies [eae824e]
+- Updated dependencies [f6fa22c]
+- Updated dependencies [8a483b3]
+- Updated dependencies [3bc2e38]
+- Updated dependencies [97bcd99]
+- Updated dependencies [df59de0]
+- Updated dependencies [96e25a8]
+- Updated dependencies [f75a38a]
+- Updated dependencies [7a25e7d]
+- Updated dependencies [1fa05a6]
+- Updated dependencies [c85a265]
+- Updated dependencies [dcb10a5]
+- Updated dependencies [773a999]
+- Updated dependencies [35dffea]
+- Updated dependencies [d8024f0]
+- Updated dependencies [8120808]
+- Updated dependencies [776a098]
+- Updated dependencies [5060877]
+- Updated dependencies [4f6325d]
+- Updated dependencies [52954c0]
+- Updated dependencies [2aa8456]
+- Updated dependencies [93809a3]
+- Updated dependencies [7c0d0c3]
+- Updated dependencies [daae7aa]
+- Updated dependencies [8dc22d6]
+- Updated dependencies [a392dbf]
+- Updated dependencies [279431e]
+- Updated dependencies [948dd6b]
+- Updated dependencies [3b4c56c]
+- Updated dependencies [ae8edd2]
+- Updated dependencies [e25403c]
+- Updated dependencies [a81aa9d]
+- Updated dependencies [64baa68]
+- Updated dependencies [9fa70d7]
+- Updated dependencies [09db64a]
+- Updated dependencies [92916e7]
+- Updated dependencies [a84f3ea]
+- Updated dependencies [f2eaae8]
+- Updated dependencies [56c093c]
+- Updated dependencies [c09451b]
+- Updated dependencies [ba64877]
+- Updated dependencies [7345308]
+- Updated dependencies [79b6a22]
+- Updated dependencies [30d96ab]
+- Updated dependencies [f658793]
+- Updated dependencies [c95ad19]
+- Updated dependencies [e58ea8b]
+- Updated dependencies [4a17645]
+- Updated dependencies [3795c5f]
+- Updated dependencies [8ab926b]
+- Updated dependencies [7317cf2]
+- Updated dependencies [e25e839]
+- Updated dependencies [5997207]
+- Updated dependencies [8b13cc8]
+- Updated dependencies [4a4a35d]
+- Updated dependencies [86e765a]
+- Updated dependencies [1d7e76a]
+- Updated dependencies [53dc739]
+- Updated dependencies [fd289be]
+- Updated dependencies [03bf7b1]
+- Updated dependencies [f90e820]
+- Updated dependencies [18d816a]
+- Updated dependencies [e8bd715]
+- Updated dependencies [b91c351]
+- Updated dependencies [a28a3c0]
+- Updated dependencies [daeaaf9]
+- Updated dependencies [c459da6]
+- Updated dependencies [e914733]
+- Updated dependencies [f887e52]
+- Updated dependencies [881f8d8]
+- Updated dependencies [3bfa1e6]
+- Updated dependencies [0a8ebf3]
+- Updated dependencies [901355c]
+- Updated dependencies [34ce8e7]
+- Updated dependencies [33681ea]
+- Updated dependencies [bfe13c8]
+- Updated dependencies [0fb3044]
+- Updated dependencies [4635f3e]
+- Updated dependencies [fd289be]
+- Updated dependencies [ee3595c]
+- Updated dependencies [09b4f4e]
+- Updated dependencies [b2eab95]
+- Updated dependencies [93940d4]
+- Updated dependencies [3a04b01]
+- Updated dependencies [45b9051]
+- Updated dependencies [3954fb7]
+- Updated dependencies [4805b56]
+- Updated dependencies [b9e9227]
+- Updated dependencies [d395692]
+- Updated dependencies [5894d30]
+- Updated dependencies [a3765f6]
+- Updated dependencies [2d5cee3]
+- Updated dependencies [e22158f]
+- Updated dependencies [7404925]
+- Updated dependencies [0c2334f]
+- Updated dependencies [778c59f]
+- Updated dependencies [d2619fd]
+- Updated dependencies [af56546]
+- Updated dependencies [6acb11a]
+- Updated dependencies [33c5fd3]
+- Updated dependencies [20b0fdb]
+- Updated dependencies [905019b]
+- Updated dependencies [a286411]
+- Updated dependencies [98c0d33]
+- Updated dependencies [368a82e]
+- Updated dependencies [a3d5724]
+- Updated dependencies [93ea19b]
+- Updated dependencies [9ee2dcf]
+- Updated dependencies [8cb96ec]
+- Updated dependencies [8f10a79]
+- Updated dependencies [6269a55]
+- Updated dependencies [a17da05]
+- Updated dependencies [a8c00e2]
+- Updated dependencies [22e5236]
+- Updated dependencies [0fb8760]
+- Updated dependencies [e5ce2ed]
+- Updated dependencies [be21955]
+- Updated dependencies [bc56e18]
+- Updated dependencies [be21955]
+- Updated dependencies [a9ee989]
+- Updated dependencies [4d0d944]
+- Updated dependencies [15d58db]
+- Updated dependencies [d63b014]
+- Updated dependencies [9abe4e4]
+- Updated dependencies [2cc7122]
+- Updated dependencies [50d6c92]
+- Updated dependencies [9e0ba21]
+- Updated dependencies [311433f]
+- Updated dependencies [3e5ad08]
+- Updated dependencies [9abe4e4]
+- Updated dependencies [b7131f3]
+- Updated dependencies [e5812fa]
+- Updated dependencies [7085f90]
+- Updated dependencies [dee4dd4]
+- Updated dependencies [ce7e497]
+- Updated dependencies [51ecb2f]
+- Updated dependencies [9086761]
+- Updated dependencies [f6344e7]
+- Updated dependencies [42a117b]
+- Updated dependencies [1401ae7]
+- Updated dependencies [4297fe7]
+- Updated dependencies [e398863]
+- Updated dependencies [d16df74]
+- Updated dependencies [d79c602]
+- Updated dependencies [f11fc61]
+- Updated dependencies [e808890]
+- Updated dependencies [8f79379]
+- Updated dependencies [e6ca40e]
+- Updated dependencies [0c77ea4]
+- Updated dependencies [52954c0]
+- Updated dependencies [89eb997]
+- Updated dependencies [7131f12]
+- Updated dependencies [aa5994e]
+- Updated dependencies [be93457]
+- Updated dependencies [a65db76]
+- Updated dependencies [2cf5a96]
+- Updated dependencies [15eb2c9]
+- Updated dependencies [5691b07]
+- Updated dependencies [2a6122b]
+- Updated dependencies [225e769]
+- Updated dependencies [8af88dd]
+- Updated dependencies [fb5fbb8]
+- Updated dependencies [d7b3963]
+- Updated dependencies [33184fd]
+- Updated dependencies [7c41693]
+- Updated dependencies [b72db01]
+- Updated dependencies [dce5cd4]
+- Updated dependencies [9688f58]
+- Updated dependencies [556ebc1]
+- Updated dependencies [177ebdc]
+- Updated dependencies [8d237b4]
+- Updated dependencies [2d2e6f0]
+- Updated dependencies [2d8dd8d]
+- Updated dependencies [22d573e]
+- Updated dependencies [b5a2398]
+- Updated dependencies [348860c]
+- Updated dependencies [5383fa6]
+- Updated dependencies [5b3ff63]
+- Updated dependencies [1a6a19c]
+- Updated dependencies [064d484]
+- Updated dependencies [527e050]
+- Updated dependencies [dd33bf9]
+- Updated dependencies [4cb2a90]
+- Updated dependencies [74a7804]
+- Updated dependencies [53d3689]
+- Updated dependencies [b3a63d3]
+- Updated dependencies [49f0dcf]
+- Updated dependencies [033a34c]
+- Updated dependencies [4d25d22]
+- Updated dependencies [1ffee51]
+- Updated dependencies [5ae4303]
+- Updated dependencies [ece4dad]
+- Updated dependencies [e9b377e]
+- Updated dependencies [146f448]
+- Updated dependencies [735f5c7]
+- Updated dependencies [a7e18de]
+- Updated dependencies [366f895]
+- Updated dependencies [dc75ba8]
+- Updated dependencies [cce0aa9]
+- Updated dependencies [e764507]
+- Updated dependencies [cff17af]
+- Updated dependencies [39404f3]
+- Updated dependencies [ca1965f]
+- Updated dependencies [8619f95]
+- Updated dependencies [b706af9]
+- Updated dependencies [db8c288]
+- Updated dependencies [0e5fe7f]
+- Updated dependencies [add4360]
+- Updated dependencies [e0abc38]
+- Updated dependencies [fc9ba76]
+- Updated dependencies [0f94cc7]
+- Updated dependencies [a11c1a5]
+- Updated dependencies [71f9cd1]
+- Updated dependencies [ee17d86]
+- Updated dependencies [cdbd920]
+- Updated dependencies [18c432e]
+- Updated dependencies [3c418c4]
+- Updated dependencies [fa8715a]
+- Updated dependencies [a933ed7]
+- Updated dependencies [b3ca463]
+- Updated dependencies [a933ed7]
+- Updated dependencies [0d4a6a8]
+- Updated dependencies [518d5e5]
+- Updated dependencies [6643ba1]
+- Updated dependencies [eeba2ef]
+- Updated dependencies [ec4c4d2]
+- Updated dependencies [424f73c]
+- Updated dependencies [cccbe51]
+- Updated dependencies [a8d6b1d]
+- Updated dependencies [e4a7695]
+- Updated dependencies [87075b1]
+- Updated dependencies [fc58a99]
+- Updated dependencies [14cfc00]
+- Updated dependencies [1c6f7b4]
+- Updated dependencies [e854a53]
+- Updated dependencies [dfebfc8]
+- Updated dependencies [598b7ec]
+- Updated dependencies [d028b37]
+- Updated dependencies [f7b25c5]
+- Updated dependencies [122ef38]
+- Updated dependencies [4a37870]
+- Updated dependencies [428f9b2]
+- Updated dependencies [aa7ff56]
+- Updated dependencies [811a3c2]
+- Updated dependencies [1401ae7]
+- Updated dependencies [2fd3f1c]
+- Updated dependencies [c41b42e]
+- Updated dependencies [c4db311]
+- Updated dependencies [750fff5]
+- Updated dependencies [c19035e]
+- Updated dependencies [ececf7a]
+- Updated dependencies [d173125]
+- Updated dependencies [8eeca27]
+- Updated dependencies [8425c17]
+- Updated dependencies [a5ef1d8]
+- Updated dependencies [87ad30c]
+- Updated dependencies [772d5de]
+- Updated dependencies [ce80ec2]
+- Updated dependencies [b372318]
+- Updated dependencies [97a2263]
+- Updated dependencies [29d0676]
+- Updated dependencies [0169d49]
+- Updated dependencies [6bd3231]
+- Updated dependencies [d2b5ba8]
+- Updated dependencies [b799ac5]
+- Updated dependencies [8f74307]
+- Updated dependencies [d23dc08]
+- Updated dependencies [644ad50]
+- Updated dependencies [9735662]
+- Updated dependencies [4d5b4f8]
+- Updated dependencies [0da7cd2]
+- Updated dependencies [28a5c3e]
+- Updated dependencies [4bc18e5]
+- Updated dependencies [9f57f1e]
+  - @objectstack/spec@17.3.0
+  - @objectstack/platform-objects@17.3.0
+  - @objectstack/core@17.3.0
+  - @objectstack/types@17.3.0
+
 ## 17.2.0
 
 ### Patch Changes

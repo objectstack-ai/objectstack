@@ -1,5 +1,1193 @@
 # @objectstack/platform-objects
 
+## 17.3.0
+
+### Minor Changes
+
+- 09b4f4e: feat(platform-objects,cli): record which source revision a generated translation leaf was filled from (#11671)
+  
+  Closes the half of the sticky-translation-drift class that no value comparison
+  could reach, under maintainer ruling #12069 Option A — by extending the existing
+  #8765 Option B source-hash mechanism to the generated bundles rather than
+  building a second one.
+  
+  **The hole.** `os i18n extract --fill=default` fills gaps only: any non-empty
+  value in a translated locale wins forever. So the ordinary sequence — extract,
+  revise the source string, extract again — rewrites `en` and strands the previous
+  source text in every other locale. The bundle is still in sync by key, so
+  `check:i18n` reports OK; the leaf is still present, so `check:i18n-coverage`
+  counts it translated. Measured on #11659 at `bbe0b17`: three locales serving a
+  602-char superseded draft of a 411-char help string under 31 green checks. Once
+  the source has moved, that stale fill is indistinguishable **by value** from a
+  real translation — 2648 of 3010 leaves differ from `en`, so "untranslated AND
+  differing from the source" describes an empty set, not a noisy one.
+  
+  **What is new.** `os i18n extract --source-hashes` writes
+  `<locale>.source-hashes.generated.ts` beside each generated bundle: per leaf,
+  the digest of the source revision that leaf is **still a byte copy of**.
+  `withSourceFallback` takes that table as a fourth argument and now judges the
+  `objects` / `metadataForms` sections as well as the hand-authored ones, so a
+  leaf whose source has moved underneath it serves the current source string
+  instead of a superseded draft — the same degradation an untranslated key already
+  produces, which is the invariance the #8765 ruling turned on.
+  
+  The generated half needs one conjunct the hand-authored half does not: the leaf
+  must still hold the recorded bytes. Its hash table is itself generated, so a
+  translator cannot be asked to refresh a digest by hand the way
+  `<locale>.source-hashes.ts` asks; without that conjunct, re-translating a stale
+  leaf would leave the old record standing and report the fresh translation as
+  stale forever. With it, editing the value clears the flag by itself.
+  
+  **Behaviour on the day it lands: unchanged for every leaf.** Records are
+  written only where a leaf is currently a byte copy of the **current** source, so
+  every record equals the current digest and nothing is stale. Measured across the
+  nine bundle sets: 9030 translated leaves, 1543 byte-equal to `en` (records
+  written), 7487 differing (left with no record — legacy-trusted, per the ruling's
+  property 1, since nothing in the tree says which revision they were made from).
+  No committed bundle changed a byte.
+  
+  **Scope.** `--source-hashes` is off by default and `@objectstack/platform-objects`
+  is the one bundle set that opts in, by documenting the flag in its extract
+  config. The other eight sets keep exactly today's behaviour and can be enabled
+  file-by-file later; a set with no companion is entirely legacy-trusted.
+  
+  The false "this hole cannot occur there" note that kept the generated sections
+  out of the mechanism is corrected in `source-hash.ts`, with the measurement that
+  falsifies it.
+- 3954fb7: Declare sourced `maxLength` bounds on the thirteen unbounded keyed identity
+  columns, so their declared indexes can exist on MySQL
+  
+  `driver-sql` (since #11430) honours a keyed text-family field's declared
+  `maxLength`, emitting `varchar(maxLength)` instead of `TEXT` — but thirteen
+  identity columns declared no bound at all, so on MySQL every one of their
+  declared indexes was refused (`ER_BLOB_KEY_WITHOUT_LENGTH`: a TEXT/BLOB
+  column cannot be a key without a prefix length) and the objects landed
+  registered-but-broken. Measured on live MySQL 8.0.46 (`+08:00`,
+  `STRICT_TRANS_TABLES`): schema-sync failures drop **12/44 → 8/44** platform
+  objects and physically-present declared indexes rise **89/128 → 104/128**,
+  with the Postgres 16 control at 0 failures on both legs. `sys_session`,
+  `sys_api_key`, `sys_device_code` and `sys_oauth_consent` sync completely
+  clean — a MySQL stack can now enforce the session-token uniqueness its
+  sign-in path assumes.
+  
+  Every bound is derived from a named source, none guessed (maintainer ruling
+  on #11374, 2026-08-24 — route A; the full table with sources is in the PR):
+  better-auth 1.7.1's own MySQL schema mapping (`session.token` /
+  `verification.identifier` → 255), its device-authorization plugin's hard
+  runtime cap of 191 on both codes, IdP norms (`account_id` 256 = SAML Core
+  NameID cap, above OIDC Core's 255 `sub` cap), the landed bounds of referenced
+  or producing siblings (`client_id` × 4 → 255 from
+  `sys_oauth_application.client_id`; `provider_id` 255 from
+  `sys_sso_provider.provider_id`; `issuer` 2048 from `sys_sso_provider.issuer`),
+  and the in-repo producer (`sys_api_key.key` 64 = fixed sha-256 hex).
+  
+  This is an enforcement change on published objects — hence the minor grade: a
+  write wider than its column's new bound is now **refused** (measured: a
+  300-char `sys_session.token` insert fails `ER_DATA_TOO_LONG` on a strict
+  server, 0 rows; a 255-char one lands). Every bound admits everything its
+  upstream producer can write, so only values the producing contracts already
+  forbid are affected.
+  
+  Deliberately not bounded, per the ruling's escape clause:
+  `sys_verification.value` (better-auth's oauth-provider stores JSON
+  authorization-code payloads there — no defensible bound exists), and
+  `sys_import_job.created_by` (outside this card's identity surface).
+  `sys_account.issuer`'s 2048 exceeds the 768-char utf8mb4 key ceiling on
+  purpose — tighter would refuse SSO sign-ins that `sys_sso_provider`'s own
+  contract admits — so its `(issuer, account_id)` unique stays for #11627's
+  hash-shadow route, alongside the `maxLength: 1024` token columns. A new pin
+  test enumerates every keyed text-family identity column and names any future
+  unbounded arrival.
+- 4805b56: Declare a sourced `maxLength` on `sys_import_job.created_by`, so its declared
+  index can exist on MySQL — route A's last column
+  
+  `driver-sql` (since #11430) honours a keyed text-family field's declared
+  `maxLength`, emitting `varchar(maxLength)` instead of `TEXT`, and #11699
+  declared bounds on thirteen keyed identity columns. `sys_import_job.created_by`
+  is keyed by `(created_by, created_at)` and declared no bound at all, so on MySQL
+  that index was refused (`ER_BLOB_KEY_WITHOUT_LENGTH`: a TEXT/BLOB column cannot
+  be a key without a prefix length) and the object landed registered-but-broken.
+  It was the only remaining such object outside the >768-character class that
+  #11627 tracks.
+  
+  The bound is **255**, derived by referenced-column transitivity rather than
+  chosen: the column holds a `sys_user.id` stamped by the rest-server import route
+  from `context.userId`, and `driver-sql` creates every table's primary key as
+  `table.string('id').primary()` — knex's `varchar(255)` — so no id this column
+  can receive exceeds 255. It agrees with what the column would get if declared
+  like its siblings (`Field.lookup('sys_user')` emits
+  `DEFAULT_STRING_VARCHAR_CHARS` = 255) and with the landed declarations for the
+  same value class (`sys_metadata_audit.actor`, `sys_metadata_commit.actor`,
+  `sys_view_definition.owner`, all 255). A minted platform id is 26 characters, so
+  the bound clears the floor with 229 characters of headroom.
+  
+  This is behaviour-narrowing on a published object: on a strict MySQL server a
+  `created_by` longer than 255 is now **refused** (`ER_DATA_TOO_LONG`, 0 rows)
+  rather than stored, where previously the column was unbounded `TEXT`. No value
+  the producing contract can emit is affected, because the id it copies is itself
+  capped at 255 by its own column.
+  
+  The route-A pin moves from `identity/identity-keyed-text-bounds.test.ts` to
+  `platform-keyed-text-bounds.test.ts` and now enumerates **every** platform
+  object the package exports, not just `identity/`. That directory scoping is
+  exactly how this column escaped the first pass — the pin could not see it — and
+  a new control asserts the enumeration reaches columns in `audit/`, `metadata/`
+  and `system/` so the narrowing cannot silently return.
+- af56546: feat(platform-objects): packaged disable works without the automation service, and the activation ledger has one implementation (#12359, #12350)
+  
+  Two halves of ADR-0126's "ledger convergence", bundled by maintainer ruling
+  (2026-08-26, verbatim and untranslated: 「同意」).
+  
+  ## The registration follows the declaration (#12359)
+  
+  `sys_metadata_activation` is declared in `@objectstack/platform-objects`, but
+  the only thing that REGISTERED it was the automation service's manifest —
+  because flows were the ledger's first and, until packaged actions landed, only
+  consumer. Packaged actions are a second consumer with a different owner: their
+  consult and write path live on the ObjectQL engine, present in every
+  composition that can execute an action.
+  
+  So a deployment with actions and no automation service had no ledger table, and
+  the activation door answered **503 SERVICE_UNAVAILABLE** on every flip —
+  correctly (ADR-0126 §6 wall 3: a flip that cannot be made durable must not be
+  reported as one) and permanently. Measured on a real boot; it is now this
+  change's positive test, measured on the same boot:
+  
+  ```
+  POST /api/v1/actions/_activation/showcase_task/showcase_mark_done {"enabled":false}
+    before -> 503 SERVICE_UNAVAILABLE   after -> 200, and dispatch refuses 409 ACTION_DISABLED
+  ```
+  
+  `PlatformObjectsPlugin` registers it now, so every composition carrying
+  platform-objects has the ledger and each future ADR-0126 §8 consumer (`tool`,
+  `skill`, `position`) inherits it. **MOVE, not add** — the automation service no
+  longer names the object. That was not a style choice: a second code package
+  claiming one object throws `Object "…" is already owned by package "…"`
+  (ADR-0029 D3/D7), measured, so adding a registrant would have been a boot
+  failure rather than a duplicate.
+  
+  **Upgrade is a no-op for existing data, and that is measured rather than
+  asserted.** A manifest is also a ROUTING decision — `resolveDatasourceBinding`
+  step 4 routes an object by its owning package's `defaultDatasource` — so the
+  registrar carries the table's datasource with it:
+  
+  ```
+  owner com.objectstack.service-automation (defaultDatasource:'cloud') -> 'cloud'
+  owner com.objectstack.platform-objects   (none)                     -> undefined (global default driver)
+  ```
+  
+  The ledger table already exists in live databases, so on any deployment
+  carrying a `cloud` datasource that difference would leave the rows in one
+  database and read another — every disabled artifact silently re-arming. The
+  ledger therefore rides its own manifest from the same plugin, carrying the
+  automation manifest's `scope` / `namespace` / `defaultDatasource` triple
+  verbatim. The three siblings (`sys_migration`, `sys_migration_journal`,
+  `sys_secret`) deliberately do not get it and keep riding the project database.
+  
+  ## One implementation of the §4 row contract (#12350)
+  
+  ADR-0126 §4 declares one activation ledger; it had two independent
+  implementations of that one row contract — `ObjectStoreFlowActivationStore`
+  (service-automation) and `ObjectStoreActionActivationStore` (objectql). They
+  agreed because the second was written from the first, and nothing structurally
+  held them together; §8 pre-charts `tool`, `skill` and `position`, and a third
+  and fourth copy is where the org-row skip and the `0`-is-false read get lost
+  quietly, in the direction (an artifact re-arming) nothing else measures.
+  
+  Neither consumer could import the other, so the contract now lives once in
+  `@objectstack/core` — the package both already depend on — as
+  `ObjectStoreMetadataActivationStore(engine, metadataType)`, exported alongside
+  `InMemoryMetadataActivationStore`, `MetadataActivationRow`,
+  `MetadataActivationStore`, `MetadataActivationStoreEngine` and
+  `METADATA_ACTIVATION_TABLE`. Each consumer keeps its own name, its own
+  one-argument constructor and its own docs, and fixes the discriminator.
+  
+  **No behaviour change and no API break.** `ObjectStoreFlowActivationStore` /
+  `InMemoryFlowActivationStore` / `FlowActivationStoreEngine` and
+  `ObjectStoreActionActivationStore` / `InMemoryActionActivationStore` /
+  `ActionActivationRow` / `ActionActivationStore` / `ActionActivationStoreEngine`
+  / `ACTION_ACTIVATION_TABLE` are exported from the same modules with the same
+  shapes. Row semantics are byte-equivalent: deployment-level rows scoped only by
+  the `metadata_type` discriminator, a driver `0` read as false, read-then-write
+  rather than a blind upsert, and no `delete` in the engine slice because
+  re-enabling rewrites the row.
+  
+  Both existing pin suites stay green **unchanged**, which is what makes them the
+  proof the consolidation lost nothing — verified by ablation: mutating the one
+  shared implementation turns both of them red on their own assertions, so both
+  really reach it.
+- f6344e7: Make the last two non-unique keyed text indexes expressible on MySQL — remove one,
+  narrow one
+  
+  `driver-sql` emits a keyed text-family column as `varchar(maxLength)` only when the
+  declared bound is one MySQL can key (768 characters on utf8mb4, the 3072-byte key-part
+  ceiling); otherwise the column stays `TEXT`, MySQL refuses it as an index key
+  (`ER_BLOB_KEY_WITHOUT_LENGTH`), and the object's whole `syncSchema` fails — it lands
+  registered with its declared index absent. #11374 declared sourced bounds for thirteen
+  such columns and #11627 carried the over-long UNIQUE ones on a SHA-256 hash-shadow
+  column, taking live MySQL 8.0.46 from 12/44 → 8/44 → 2/44 failing objects.
+  
+  The two that remained are **non-unique**, and a hash shadow structurally cannot serve
+  them: a UNIQUE constraint is an equality-only predicate that survives hashing exactly,
+  but a non-unique index exists for an access path, and an index over a digest
+  accelerates no `WHERE col = ?` the planner can reach without rewriting the read side.
+  They are ruled separately (maintainer, 2026-08-25) because they are different problems:
+  
+  - **`sys_verification.value` — the declared index is removed.** The column is
+    genuinely unboundable (better-auth's oauth-provider writes OIDC authorization-code
+    payloads there as a JSON blob), and the index was measured dead: better-auth 1.7.1
+    keys every verification lookup on `identifier`, `id` or `expiresAt`
+    (`internal-adapter.mjs`), upstream declares the field unindexed and unbounded, and no
+    in-repo query filters `sys_verification` by `value`. An index that silently does not
+    exist on one dialect is the worst of both worlds; removing it makes the metadata match
+    reality.
+  - **`sys_oauth_client_resource.resource_id` — the declared bound narrows 1024 → 768.**
+    This one is a live access path (the FK side of `sys_oauth_resource.identifier`, read
+    as a predicate by upstream's client-registration collision path), so it keeps its
+    index and becomes keyable instead. 768 is the widest utf8mb4 value a MySQL key part
+    holds, and the smallest narrowing that works.
+  
+  This is an enforcement change on published objects — hence the minor grade. On MySQL and
+  SQL Server a `resource_id` longer than 768 characters is now refused rather than stored,
+  and on PostgreSQL and SQLite the `sys_verification` `[value]` index is dropped on the
+  next schema sync (on MySQL it never existed). Neither narrows what the producing
+  contract can emit: the value is an RFC 8707 resource-indicator URI, and upstream
+  better-auth 1.7.1 stores that same identifier as `varchar(255)` on MySQL
+  (`get-migration.mjs`) and this referring column as `varchar(36)`, so a resource whose
+  identifier exceeded 768 characters could never have been registered upstream at all.
+  
+  The pin that enumerated the package for unbounded keyed text columns now also rejects a
+  non-unique index over any text column MySQL cannot key, so a third member of the class
+  fails at test time rather than on a live server. Its `UNBOUNDABLE` allowlist — which
+  existed to excuse `sys_verification.value` — is empty as a result, and a synthetic
+  control keeps the excusing branch exercised rather than letting it rot.
+- d79c602: fix(platform-objects): source `sys_oauth_resource.identifier`'s bound from its producer — 1024 → 255, and the referring column with it (#12313)
+  
+  **BREAKING** accept-set narrowing on two published objects, shipped as `minor`
+  under the repo's launch-window convention for breaking changes.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Narrows two field bounds on objects whose `protection.lock` is `full`; no metadata key is removed or renamed, so no authored metadata can name the discarded band and there is nothing for an upgrader to rewrite. The physical column change is applied by schema sync itself, and the discarded (255, 1024] band is unreachable — measured, the sole writer stores this identifier in varchar(255). -->
+  
+  `sys_oauth_resource.identifier` declared `maxLength: 1024`. That number cited no
+  producer — it arrived with the object wholesale (#3080) as generous slack for
+  "a URI". Every other bound in the #11374 family names where it came from; this
+  one had no comment at all.
+  
+  Measured, the producing contract cannot fill it. better-auth 1.7.1 is the sole
+  writer (`managedBy: 'better-auth'`, `protection.lock: 'full'`) and emits this
+  column as **`varchar(255)`** on MySQL: `oauthResource.identifier` is declared
+  `{ type: 'string', required: true, unique: true }`, and `getType` in
+  `better-auth/dist/db/get-migration.mjs` takes the `field.unique → 'varchar(255)'`
+  arm of its mysql string branch. Verified by running that generator against live
+  MySQL 8.0.46 and reading `information_schema.COLUMNS` as its own query:
+  `varchar(255)`, 1020 octets under utf8mb4.
+  
+  **The dead end this closes.** #11701 had already narrowed the REFERRING column
+  `sys_oauth_client_resource.resource_id` to 768 so its declared index could exist
+  on MySQL at all. The two halves of one foreign key then disagreed about what a
+  legitimate resource identifier is. On PostgreSQL or SQLite — neither of which
+  has MySQL's key-width ceiling — an operator could register a resource whose
+  `identifier` was 900 characters, because the referent's contract admitted it,
+  and then no client could ever be granted that resource, because the referrer
+  refused it. Registration succeeded, authorization failed forever, silently.
+  Both columns now declare **255**, so referent and referrer admit exactly the
+  same domain.
+  
+  **What the narrowing rejects.** Values in **(255, 768]** move from "the referrer
+  accepts" to "both refuse"; values in (768, 1024] were already refused by the
+  referrer and are now refused by the referent too. Nothing upstream can produce
+  either band — the sole writer stores the identifier in `varchar(255)`.
+  
+  **Hash-shadow outcome, measured rather than predicted.** 255 × 4 = 1020 bytes
+  sits under `SqlDriver.MAX_KEYABLE_VARCHAR_CHARS` (768 characters / 3072 bytes),
+  so `sys_oauth_resource` **LEAVES** the #11627/#12198 hash-shadow route it was on
+  at 1024. Both readings are from `information_schema` on live MySQL 8.0.46:
+  
+  | | before (1024) | after (255) |
+  |---|---|---|
+  | `identifier` physical | `text` (65535 octets) | `varchar(255)` (1020 octets) |
+  | shadow column | `uniq_sys_oauth_resource_identifier__hash varbinary(32)` present | **absent** |
+  | UNIQUE index keys on | the shadow column | `identifier` directly, `SUB_PART NULL` |
+  
+  The declared uniqueness is unchanged and still enforced over the full value —
+  the index is a direct full-value UNIQUE, not a prefix index. Deployments that
+  already synced this table on MySQL will see the shadow column dropped and the
+  UNIQUE index rebuilt directly on the narrowed column at the next schema sync.
+  
+  **A correction to the #11701 citation.** That comment stated upstream emits the
+  referring column as `varchar(36)` via `getType`'s `field.references` arm. It
+  does not: `resourceId` participates in table-level indexes, so `getType`
+  receives a `tableIndexStringLength` argument, which takes precedence over every
+  `field.*` arm, and `getDatabaseIndexStringLength` seeds its reduce at MySQL's
+  191-character default — measured, upstream emits **`varchar(191)`**. That 191 is
+  an artifact of upstream's index budget on upstream's own physical schema;
+  ObjectStack emits its own schema, so the referring column takes the REFERENT's
+  255, the same derivation `client_id` already uses.
+- 4d25d22: **BREAKING (platform object removed):** the `sys_scim_provider` platform object is retired (#11757, ruled on #11693 — leg 1a of the #11632 SCIM epic).
+  
+  FROM → TO, per surface:
+  
+  - `SysScimProvider` (export of `@objectstack/platform-objects` / `.../identity`) → removed, no replacement export. Fix: delete the import. Stable SCIM state lives on the seven `sys_scim_*` stable-model objects (#3653), and connection credentials on `sys_scim_connection_credential`.
+  - `sys_scim_provider` in `PLATFORM_PROVIDED_OBJECT_NAMES` (`@objectstack/spec/system`) → removed. `isPlatformProvidedObjectName('sys_scim_provider')` is now `false`, so a stack referencing the name is flagged as a probable typo instead of resolving.
+  - plugin-auth: the object is no longer provisioned, and `AUTH_MODEL_TO_PROTOCOL` carries no `scimProvider` entry — the installed stable `@better-auth/scim@1.7.1` derives no such model, so the entry bridged nothing.
+  - plugin-security: the `BETTER_AUTH_MANAGED_OBJECTS` write-deny entry for it is gone with the object (the list is pinned bidirectionally against `managedBy: 'better-auth'` declarations).
+  
+  The rc.1-era row was written only by the retired `/scim/generate-token` endpoint; after the stable-1.7.1 migration (PR #12726) nothing could write to it. Per the maintainer's ruling (2026-08-24, 「不需要考虑历史数据」; reaffirmed 2026-08-25 — SCIM has no real customers), **no data migration ships**: existing `sys_scim_provider` tables in deployed databases are left untouched — no backfill, no reaper, no migrate command. SCIM-enabled deployments re-register connections on the stable surface; the IdP token reissue is a migration-day operator action regardless of this change.
+  
+  The ADR-0066 D3 capability-gate pin moves from the retired object to its surviving sibling `sys_sso_provider`, so the gate posture stays test-pinned.
+  
+  Breaking ships as `minor` per the launch-window convention (`scripts/check-changeset-no-major.mjs`) and the #12726 precedent on the same ruling.
+  
+  <!-- adr-0087: registered scim-provider-object-retired -->
+- 366f895: feat(auth): migrate `@better-auth/scim` from `1.7.0-rc.1` to stable `1.7.1` — the whole-model SCIM migration (#3653, epic #11632)
+  
+  The stable line is the rc.2-lineage rewrite: the rc.1 `scimProvider` model,
+  `/scim/generate-token` endpoint and `storeSCIMToken` option no longer exist,
+  replaced by seven new models and a three-way connection contract. This lands
+  the migration atomically:
+  
+  - **Seven new platform objects** back the stable models —
+    `sys_scim_connection_binding`, `sys_scim_group`, `sys_scim_group_member`,
+    `sys_scim_identity_tombstone`, `sys_scim_projection_grant`,
+    `sys_scim_subject`, `sys_scim_user` — bridged via `AUTH_MODEL_TO_PROTOCOL`,
+    registered in the platform-object-names registry, listed in
+    `BETTER_AUTH_MANAGED_OBJECTS`, and column-pinned by the parity gate (whose
+    `KNOWN_UNMAPPED_MODELS` shrinks to the empty set: the rc.1-era group
+    provisioning gap — IdP `/Groups` pushes hitting tables that did not exist —
+    is closed).
+  - **SCIM connections stay runtime data.** The stable constructor is satisfied
+    with an application-owned `authentication.verifyBearerToken` that resolves
+    the connection from a row at request time — not static boot config, and not
+    the upstream `managedConnections` catalog (deliberately not adopted).
+  - **ObjectStack owns SCIM credentials outright** (stable upstream stores no
+    credential at all): `sys_scim_connection_credential` plus
+    `scim-connection-service.ts` mint/digest/verify. At rest only an
+    HMAC-SHA-256 keyed by the deployment auth secret (base64url,
+    domain-separated) is stored — at parity or better than the rc.1 unsalted
+    SHA-256 — pinned by `credential-at-rest-posture.test.ts` including live
+    401 paths for forged, revoked and expired bearers.
+  - **The ObjectQL better-auth adapter gains native transactions**
+    (`engine.transaction`, fail-closed on drivers without `beginTransaction`),
+    which stable scim requires by assertion for atomic provisioning writes.
+  - **Scaffold suppression retired**: the `@better-auth/scim>better-call`
+    `allowedVersions` entry (CLI renderer + blank template) is gone — stable
+    1.7.1 peers `better-call@1.4.0` exactly — and its presence ratchets flipped
+    to absence pins. The `better-auth>better-sqlite3` and four
+    `@better-auth/utils` entries stay; their retirement conditions are separate
+    and unmet.
+  - The pin resolves **1.7.1 exactly** (not `^1.7.1`): 1.7.2 peers
+    `better-auth`/`@better-auth/core` at `^1.7.2`, which only the workspace
+    overrides' silencing would "satisfy" while the family is 1.7.1. Floating is
+    its own follow-up.
+  
+  **Semver: minor, argued.** The rc.1 SCIM surface this replaces (generate-token
+  endpoint, rc.1 bearer tokens, `sys_scim_provider` rows) changes incompatibly —
+  but that surface is default-off (`OS_SCIM_ENABLED`), was shipped with a
+  documented "do not let the IdP push groups" boundary, and the maintainer ruled
+  (2026-08-25) that SCIM has no real customers and old data need not carry: the
+  one binding constraint is that an existing system upgrades smoothly, which it
+  does — every table the installed library can write exists at this version, and
+  SCIM-disabled deployments see no behavior change. A major would move the whole
+  fixed version group for a feature surface with zero consumers. Deployments
+  that had SCIM enabled must mint new connection credentials (digests are not
+  portable from rc.1 on any path — IdP token reissue is a migration-day
+  operator action regardless of semver level). `sys_scim_provider` itself is
+  NOT removed here; its retirement is tracked separately (#11757).
+- 428f9b2: feat(platform-objects): declare `sys_metadata_activation`, the packaged-metadata activation ledger (#12155)
+  
+  Additive platform surface implementing **ADR-0126 §4 (D2)**: the disable+clone
+  family gets **one** data-plane platform object, declared beside its siblings so
+  it needs **zero `packages/spec` schema or contract surface** — it is an ordinary
+  platform object, not a metadata type. (The one spec file touched is the
+  mechanical name census described below, not protocol surface.)
+  
+  The whole schema, per §4: `metadata_type` · `name` · `package_id` · `active`.
+  There is **no tenant column**: a row records that THIS ENVIRONMENT switched a
+  packaged artifact off, which is deployment-level state owned by no
+  organization. (An earlier revision of this line declared a nullable
+  `organization_id` marked "reserved"; it was removed before release — see the
+  sibling changeset for that removal.)
+  An earlier ADR draft carried designation columns (`replaced_by`, `cloned_from`);
+  amendment ruling 2 removed them — there is **no recorded linkage** between a
+  clone and its base, matching the landed #11513 posture ("an ordinary org-owned
+  set with no upgrade linkage"). The pin test asserts the column set by EQUALITY
+  and names both removed columns separately, so re-growing the linkage is loud.
+  
+  Row identity is `(metadata_type, name)`, spelled as a declared index with
+  **`unique: 'global'`** (ADR-0120 D1) — installation-wide over exactly those two
+  columns, which is the whole of the identity now that the table carries no
+  tenant column. Stated explicitly rather than as bare `unique: true`: the bare
+  spelling materializes the same index but leaves the scope unstated, which lint
+  `unique/unscoped-declared-index` warns on in 17.x and protocol 18 rejects.
+  
+  The name is also registered in `@objectstack/spec`'s platform-object name census
+  (`PLATFORM_OBJECTS_BY_PACKAGE`, the `platform-objects` group). That census is a
+  curated set of REAL names, not a `sys_`-prefix pattern, precisely so a
+  cross-reference check can tell `sys_user` (real) from a fictional
+  platform-prefixed name; its module contract is explicit that "adding an object
+  to a platform package means adding its name here", and the owning package's
+  conformance pin fails otherwise. This is a one-name roster registration, **not**
+  protocol or schema surface — the ledger remains an ordinary platform object with
+  no zod/contract surface of its own, exactly as ADR-0126 §4 requires. Its
+  user-visible effect is that `isPlatformProvidedObjectName('sys_metadata_activation')`
+  now answers `true`, so lint stops reading a reference to the ledger as a typo.
+  
+  **No behavior change.** This leg ships the declaration only — the enable/disable
+  actions that write the ledger and the per-runtime consult points that read it
+  are separate legs, and nothing in the tree reads the object yet. Absence of a
+  row means the packaged default (**active**), so an empty ledger changes nothing
+  anywhere; there is no seeding mechanism, so a stock boot leaves the table empty.
+  The object deliberately declares **no `lifecycle` block** — unlike its telemetry
+  siblings `sys_flow_dispatch` / `sys_automation_run`, a row here is durable
+  configuration, and reaping one would silently re-arm an artifact an
+  administrator disabled.
+- 1401ae7: feat(platform-objects): `sys_user.locale` — the user's own notification language as a first-class column (#13881)
+  
+  Maintainer ruling 2026-09-01, quoted verbatim and untranslated:
+  
+  > **A**:`sys_user` 加 `locale` 一等列(用户语言是主流平台的一等用户属性;B 的 preference 袋会把一等概念藏进键值对并孕育第二种拼法,排除)
+  
+  `sys_user` gains `locale` — a BCP-47 tag (`zh-CN`, `ja-JP`), optional, in the
+  Profile group. The 2026-08-13 ruling had deferred it "until measured pull";
+  hotcrm measured the pull (4 published languages × 16 notify nodes × 0
+  localizable, two independent lanes agreeing), so the deferral lifted on its own
+  terms. The preference-bag alternative (`sys_user_preference`) was rejected by
+  the ruling and nothing reads it as a fallback.
+  
+  The column is owned by objectql exactly like `ai_access`: better-auth is
+  oblivious to it, and it is deliberately NOT declared as a better-auth
+  `additionalFields` entry — better-auth SELECTs explicit columns, so declaring
+  it there would make `getSession` query a column an environment that has not
+  yet run schema-sync does not have. Boot schema-sync (additive) provisions it.
+  plugin-auth registers it in `MANAGED_EXTENSION_FIELDS.sys_user`, whose ADR-0105
+  D7 collision guard proves better-auth's own user schema owns no `locale` at
+  the pinned version.
+  
+  Who may write it is unchanged: the column is `readonly` on the object (ADR-0092
+  D4, so the standard edit form does not advertise a write the runtime refuses)
+  and is NOT added to `MANAGED_EXTENSION_EDITABLE_FIELDS` or to the ADR-0092 D2
+  self-service whitelist (`{name, image}`). Widening that whitelist so a user can
+  set their own language is a security-boundary decision recorded on #13881, not
+  made here; until then the column is written only by system-context callers (no
+  admin surface writes it today).
+  
+  Who reads it: the messaging channels, per recipient, after fan-out — see the
+  `@objectstack/service-messaging` changeset in the same release.
+- 2fd3f1c: feat(platform-objects,plugin-auth): a user may set their own `sys_user.locale` (#14787)
+  
+  Maintainer ruling 2026-09-03, option B, quoted verbatim and untranslated as
+  adopted:
+  
+  > 「同意」
+  
+  The identity table's user-writable set grows from two fields to three. This is a
+  security-boundary act, taken by the maintainer and recorded as one — it is the
+  first widening of the ADR-0092 D2 self-service whitelist since that ADR shipped
+  `{name, image}` as its first and only entry. `sys_user.locale` landed
+  `readonly` and off the whitelist three weeks earlier (#13881 / #14775), which
+  recorded a decision nobody had made yet; the ruling made it.
+  
+  Three edits move together, and each one is inert without the other two:
+  
+  - `SYS_USER_PROFILE_EDIT_FIELDS` becomes `{name, image, locale}`, so the
+    identity write guard admits the column instead of stripping it (and, on a
+    locale-only PATCH, throwing). `SYS_USER_IMPORT_UPDATE_FIELDS` inherits the
+    widening by construction — it is a spread of the profile set, not a second
+    list.
+  - `MANAGED_EXTENSION_EDITABLE_FIELDS` gains a `sys_user` entry holding
+    `locale` and nothing else.
+  - `sys_user.locale` drops `readonly`. Without this the engine's readonly strip
+    removes a caller-supplied value before the guard or the validator ever sees
+    it, so the whitelist entry alone would have been a silent no-op.
+  
+  **A malformed value is refused, not stored.** The column now declares a
+  `locale_bcp47_shape` `format` validation rule carrying the same BCP-47 pattern
+  the delivery-time reader uses, so objectql's rule validator rejects a malformed
+  tag on insert, by-id update and bulk update with the standard
+  `VALIDATION_FAILED` / `invalid_format` envelope (HTTP 400). The check is of
+  SHAPE, not of membership: an unknown-but-well-formed tag is accepted and falls
+  to the delivery ladder's floor rather than dead-lettering a notification, which
+  is the property #13881's per-recipient chain was built to hold. An absent, null
+  or empty column stays legal — clearing it is how a user returns to the
+  deployment default, which remains the fallback.
+  
+  **What did NOT widen.** The ADR-0092 D6 session-snapshot mirror keeps
+  `{name, image}`: better-auth has no `locale` on its user model and it is
+  deliberately not an `additionalFields` entry, so there is no cached copy to keep
+  coherent, and merging one in would manufacture a `user.locale` key present only
+  on sessions that happen to be cached and only after a profile edit. The mirror
+  set is now named separately from the update whitelist rather than derived from
+  it.
+  
+  **Who may perform the write is unchanged, and is a separate question.** ADR-0092
+  D5 leaves that with the permission layer: `member_default` still denies
+  `allowEdit` on `sys_user`, so a rank-and-file member reaches this column through
+  no shipped surface yet — the widening opens the COLUMN, not a self-service
+  route. Granting one (the `sys_api_key` shape: an explicit `member_default` entry
+  plus a `_self` row-scope for writes) is a further security-boundary decision
+  that this ruling did not take.
+  
+  The `identity-write-guard` and `managed-extension-fields` pins that recorded the
+  old posture are FLIPPED, not deleted, each naming the ruling that reversed it —
+  a pin that recorded a real decision is evidence, and evidence of a superseded
+  decision is what tells the next reader the reversal was deliberate.
+  
+  `@objectstack/service-messaging` is a docs-and-export change only: its
+  `LOCALE_TAG_SHAPE` is unchanged in behaviour and now exported so a parity pin
+  can hold it byte-identical to the write-side pattern. Read-side normalization
+  stays — it is strictly the stricter of the two (`"null"` is shape-legal and only
+  the read side refuses it) and it guards values that arrive below the data API,
+  where no write rule runs.
+
+### Patch Changes
+
+- efb3513: fix(platform-objects,core): `sys_metadata_activation` ships tenant-less — drop the reserved organization column (#15024)
+  
+  The ADR-0126 activation ledger records that **this environment** switched a
+  packaged artifact off. That is deployment-level state, owned by no
+  organization — so the table ships with no tenant column at all.
+  
+  It briefly declared one: an `organization_id` marked "RESERVED", nullable, and
+  written by nobody, held for a per-organization dimension ADR-0126 §5
+  pre-charted. A reserved nullable tenant column is exactly the shape the
+  total-organization-ownership record proposed in PR #14976 rules out, and this
+  one had no reader either. **This is a plain removal, not a migration:** the
+  table landed after the 17.2.0 tag, so no released version ever carried the
+  column and no deployment has data in it. Should a per-organization dimension
+  ever be wanted, it returns as a separate org-owned object — never as a column
+  on this ledger.
+  
+  What changed:
+  
+  - **`sys_metadata_activation` declares `systemFields: { tenant: false }`** and
+    no longer declares the column. Both halves are needed: the tenant anchor is
+    INJECTED at registration, so deleting the field alone would have left the
+    column exactly where it was. ⚠️ Deliberately NOT `tenancy: { enabled: false }`
+    — that key is the ADR-0066 D2 platform-global *posture*, which the sibling
+    `sys_sso_provider` uses for the opposite shape (a table that KEEPS its tenant
+    column and needs the wall over it stood down). Here there is no column to
+    wall. Both spellings reach `plugin-security`'s `tenancyDisabled`, which is
+    required rather than incidental: a Layer 0 wall composing an equality on a
+    column the table does not have denies every row.
+  - **The declared unique index states `unique: 'global'`** over
+    `(metadata_type, name)` instead of `'organization'`. ⚠️ The materialized DDL
+    is unchanged: `normalizeDeclaredIndex` prepends the NULL-safe tenant key part
+    only when the table HAS a tenant column, so `'organization'` already degraded
+    to exactly these two columns. What changes is that the declaration now states
+    the boundary it actually gets, rather than claiming a per-organization one
+    that does not exist. Still explicit rather than bare `unique: true`, which
+    lint `unique/unscoped-declared-index` warns on and protocol 18 rejects.
+  - **`ObjectStoreMetadataActivationStore` drops its NULL filter and its
+    org-row skip.** `list()` is now every activation row of its type, scoped by
+    the `metadata_type` discriminator alone, and `setActive` takes the single row
+    its keyed read returns instead of picking the NULL-organization one out of
+    the result. Both guarded a column that no longer exists; the declared unique
+    index over the two columns the lookup keys on is what makes that read
+    single-valued. `ObjectStoreFlowActivationStore` and
+    `ObjectStoreActionActivationStore` inherit the change.
+  
+  Unchanged, and pinned: the operator gate on activation writes under walled
+  postures (ADR-0126 D3), the `execute()`-time flow consult and the dispatch-time
+  action consult, "absence of a row means ACTIVE", re-enabling UPDATES the row
+  rather than deleting it, and a driver `0` reading as false. The pins that
+  asserted the reserved column and the org-row skip are rewritten to pin the
+  column's ABSENCE rather than deleted — including at the injection authority
+  (`resolveInjectedSystemColumns`, which decides whether the column exists) and
+  in a real booted stack, where the row's key set is a reading of the physical
+  table.
+- 3bc2e38: fix(driver-sql): the builtin-column delivery table speaks the spec's field-type vocabulary, not knex's builder names (#12131)
+  
+  `BUILTIN_COLUMN_DELIVERY.id.type` recorded `'string'` — the **knex builder name** from
+  `table.string('id').primary()` — and `undeliveredStorageAttributes` compares that value
+  with `===` against a declaration's `type`, which is a spec `FieldType`. The two are
+  different vocabularies, and `'string'` is not a member of the one being compared: it is
+  absent from `FieldType`'s 49 options, `Field.string` is absent from the builder's keys,
+  and `FieldSchema` refuses `type: 'string'` outright. So **no declaration could ever
+  match it**, and the #12015 diagnostic reported every correct declaration on the
+  platform's own key as a disagreement.
+  
+  Measured on a stock boot of `@objectstack/platform-objects`: **45 warnings, one per
+  system object**, each saying `type: 'text' (the column is 'string')` about a
+  declaration that was right all along. `varchar` canonicalizes to the field type `text`
+  (`canonicalizeSqlType('varchar(255)') === 'text'`, `suggestFieldTypeForSqlType('varchar(255)') === 'text'`,
+  `isCompatible('varchar(255)', 'text') === true` — all pinned in `type-compat.test.ts`),
+  so `id: Field.text(...)` asks for exactly what the platform's column delivers. The
+  delivery table now records `text`, and the 45 lines go silent because they were false,
+  not because they were suppressed.
+  
+  `sys_migration.id`'s `maxLength: 128` was the one **honest** disagreement in that corpus
+  — the column is varchar(255) — and it is removed rather than widened to 255. It bound
+  nothing in any seam: the DDL discards a declared width on a builtin column name, and
+  `validateRecord` skips `id` by name on both the insert and the update path (it is also
+  `readonly`). Declaring a width that nothing enforces is the shape enforce-or-remove
+  exists to prevent, and the 44 sibling system objects declare none.
+  
+  The classification pin now holds **every** entry in the delivery table to
+  `FieldType.options`, so a builder name written there fails by name instead of surfacing
+  as a corpus of false warnings. The fixtures in both #12015 pin files were written
+  against the delivery table rather than against the source — `sys_presence.id` was spelled
+  `type: 'string'` in the "silent" cases, which is why they passed while the same
+  declaration as actually written warned. They now use the shapes as declared, and the
+  firing cases declare a type that genuinely disagrees.
+  
+  **Grade: `patch` for both, and deliberately.** No door moves and no DDL changes: the
+  platform still owns `id` / `created_at` / `updated_at`, the emitted column is
+  byte-identical, every object that booted before still boots, and `BUILTIN_COLUMN_DELIVERY`
+  is internal to the package (it is not re-exported from the package entry). The
+  `platform-objects` half removes one metadata key that was measured inert in every seam
+  that could read it. What changes is what the driver **says**.
+- a392dbf: fix(ai): author the CANONICAL agent id everywhere the platform teaches one — Studio's pin, the MCP prompt example, and the lint's value roster (#14461)
+  
+  `skills/objectstack-ai` tells authors that `data_chat` and `metadata_assistant`
+  "are **not** vocabulary — always write `ask` / `build`". The platform then
+  taught the opposite from every live example it ships. Nothing was broken at
+  runtime; what was wrong is what an author copies.
+  
+  **Studio's pin.** `studio.app.ts` was the repo's ONLY `app.defaultAgent` usage,
+  and it spelled the alias:
+  
+  ```
+  - defaultAgent: 'metadata_assistant',
+  + defaultAgent: 'build',
+  ```
+  
+  The triage card left this undecidable — if the cloud plugin registered the
+  agent under the legacy id, re-pinning would be a behaviour change in a
+  consumer this repo cannot see. Measured instead of assumed, at `cloud`
+  `main@3856fbf7`: `service-ai-studio/src/agents/metadata-assistant-agent.ts:12,40`
+  ships the record as `name: BUILD_AGENT_NAME` = `'build'`, and `plugin.ts:58`
+  registers `metadata_assistant` as a **one-way, resolution-only** legacy alias.
+  The canonical id *is* `build`; the old pin reached it by detour.
+  
+  Nor is the re-pin cosmetic. Alias resolution depends on an in-memory
+  `registerAgentAlias` call having run at plugin init, and cloud carries two
+  defensive docblocks about that registration silently no-op'ing for real under
+  bundle load ordering (`service-ai-studio/src/plugin.ts:44-57`,
+  `service-ai/src/agent-runtime.ts:30-41` — "a missed alias must never hide a
+  real platform agent like `build`"). The canonical id never touches the alias
+  table, so this drops a load-order dependency from the platform's own flagship
+  authoring surface. On the UI side nothing moves: `objectui`'s
+  `AGENT_ALIAS_GROUPS` is bidirectional and canonical-first, and
+  `SURFACE_DEFAULT['studio-build']` was already `'build'`.
+  
+  **The MCP prompt example.** `mcp-server-runtime.ts`'s `agent_prompt` argument
+  described itself as `'Name of the agent to load (e.g. "data_chat",
+  "metadata_assistant")'` — two retired aliases, neither canonical id present.
+  That string is served to every MCP client asking what to pass, so the one
+  surface that suggests a spelling to an LLM suggested the two the catalogue
+  forbids. Now `(e.g. "ask", "build")`.
+  
+  **The lint's value roster.** `validate-ai-agent-authoring`'s `defaultAgent`
+  **value** limb reused the four-name `PLATFORM_AGENT_NAMES` set, so it
+  deliberately passed `metadata_assistant` — the gate that exists to make
+  authoring mistakes loud waved through the exact spelling the catalogue bans,
+  which is the silent-tolerance shape ADR-0078 exists to close, committed by the
+  gate itself. The two limbs now read different tables, because they ask
+  different questions:
+  
+  - **declaration limb** — unchanged, still all four names. Declaring
+    `metadata_assistant` shadows the `build` record through the alias exactly as
+    declaring `build` does.
+  - **value limb** — canonical `ask` / `build` only. A legacy alias gets its own
+    rule id `default-agent-legacy-alias` (exported) and its own wording, because
+    an alias **resolves** (the app gets the agent it meant — a spelling defect)
+    while an unknown name does **not** (the pin is inert). Describing the alias
+    as "no effect" would send an author hunting a bug that is not there.
+  
+  Both of the #6041 ruling's operative decisions are kept intact: still
+  `warning` tier, still no Zod enum narrowing. `defaultAgent: 'metadata_assistant'`
+  keeps parsing, building, and resolving — the only change is that authoring it
+  now says so.
+  
+  Not breaking: nothing an author can write was removed, and both aliases stay
+  resolvable for old bookmarks and persisted `agent_id`s, which is the only job
+  ADR-0063 §2 ever gave them.
+- 5894d30: Surface the email-invite entry on the organization record page's default
+  Members tab, and stop it rendering as a twin of "Add Member"
+  
+  The in-shell Team surface (`sys_organization` record page, ADR-0081) opens on
+  tab-0 **Members**, whose related-list toolbar carried exactly one action —
+  `add_member`, which attaches an **already-registered** user by id. The
+  email-invite entry, `invite_user`, was declared only on `sys_invitation` and
+  `sys_user`, so it appeared only on tab-1 Invitations. An admin looking to
+  "invite a teammate by email" landed on Members, found no invite affordance and
+  concluded the product had none. The delivery half worked the whole time
+  (`sendInvitationEmail`, template `auth.invitation`) — only the door was in
+  another room.
+  
+  `sys_member` now declares its own `invite_user` on `list_toolbar`, ahead of
+  `add_member`: same endpoint (`/api/v1/auth/organization/invite-member`), same
+  email + role inputs, and the same `requiresFeature: 'organization'` capability
+  gate as the other two mirrors. Declaration order is render order in the
+  related-list toolbar bridge, so the invite button sits left of the attach one.
+  
+  **The `email` param names `objectOverride: 'sys_invitation'`, and must.**
+  `sys_member` has no `email` field, so a verbatim copy of the `sys_invitation`
+  declaration would leave the param unresolvable — the renderer answers that with
+  a `type: 'text'` fallback labelled by the raw field name, which still submits
+  and still looks fine (the ADR-0078 valid-but-inert class). `role` needs no
+  override: `sys_member` declares it, from the same
+  `BUILTIN_MEMBERSHIP_ROLE_OPTIONS` constant `sys_invitation` reads. A test now
+  holds this over **all three** mirrors, so the next copy of any action cannot
+  reintroduce the shape.
+  
+  `add_member` keeps its behaviour and its label and is differentiated only in
+  chrome — `variant: 'secondary'` and `icon: 'link-2'` (the "attach an existing
+  record" icon `sys_account`'s `link_social` already uses) — so the two buttons
+  no longer render as identical primary `user-plus` twins. Both halves are
+  honoured by the renderer: it draws `primary` filled and every other variant
+  outlined.
+  
+  The `@objectstack/spec` half is one line of registry bookkeeping:
+  `PUBLIC_AUTH_FEATURES.organization.gatedInputs` books the new gated action, as
+  it already books the other twelve. No schema, export or authorable key changes.
+- 064d484: Move both authored `record:alert` gates off `properties.visible` onto the
+  component-node `visibleWhen`, `has()`-guarded and served as a CEL envelope
+  (#9167) — the `sys_user` detail page's "Email not verified" banner, and the
+  showcase Task Detail page's "Awaiting review" banner.
+  
+  `record:alert` is the one record component that declares a props-level
+  `visible` predicate, but `PageComponentSchema.properties` is an opaque record:
+  the bag is served verbatim, so a bare string in `visible` never reaches
+  `ExpressionInputSchema` and is evaluated by the console's **legacy JS**
+  evaluator, which has no `has()`. The node-level `visibleWhen` declared at
+  `page.zod.ts:189` *is* an `ExpressionInputSchema`, so a page that goes through
+  the spec's transform serves `{ dialect: 'cel', source }` and runs on CEL — the
+  same engine, and the same `has()` semantics, every other predicate face was
+  migrated to.
+  
+  Three properties of that move were measured in a real console at the pinned
+  objectui SHA rather than reasoned about, and all three are load-bearing:
+  
+  - The `visible` key is **deleted**, not left beside the new gate. A node
+    `visibleWhen` and `properties.visible` compose as **AND**, so keeping both
+    would leave the legacy predicate load-bearing and make the migration
+    cosmetic.
+  - The `has()` guards are **mandatory**. On the CEL face an absent key is a
+    *fault*, and that face is fail-soft: measured, an unguarded gate with its key
+    stripped from the read left the banner VISIBLE, where the guarded gate hid
+    it.
+  - On `sys_user` the predicate is authored through `P` so it reaches the wire as
+    a CEL **envelope**. `SysUserDetailPage` is a raw `Page` object literal, so —
+    unlike a page built with `definePage()` — nothing normalizes it, and the
+    renderer keeps bare strings on the legacy path by design. Measured: the bare
+    form left "Email not verified" showing on *every* profile, including other
+    people's; the envelope restores every polarity.
+  
+  Behaviour for real users is unchanged in every polarity measured — a `todo`
+  task hides the banner and an `in_review` task shows it; a verified user hides
+  "Email not verified", an unverified user viewing their own profile shows it,
+  and another user's profile shows nothing. What changes is that a genuine fault
+  is now **loud** (CEL names the missing key) instead of silently answering
+  `false`, and that both predicates sit on the declared slot the platform teaches
+  everywhere else.
+- 033a34c: **Fix:** `sys_user`'s **`set_user_role`** action ("Set Platform Role") is retired — removed from the object's declared actions, not re-implemented (#9968).
+  
+  The action's only effect was `POST /api/v1/auth/admin/set-role`, which better-auth's `admin` plugin lowers to `internalAdapter.updateUser(userId, { role })` — a gated, UI-driven writer for the legacy `sys_user.role` scalar that ADR-0068 D2 stopped synthesizing. Platform-admin membership is granted through `sys_user_permission_set` / `admin_full_access`; a working "Set Platform Role" button was a supported, one-user-at-a-time channel for resurrecting the dual identity representation the 2026-08-18 ruling permanently vetoed (Option 3).
+  
+  **What an operator will now observe.** The "Set Platform Role" button is gone from the Users list row menu and the user detail header. It was already dead for every platform admin before this change — better-auth's vendor `adminMiddleware` gates on the same retired scalar, so the button 403'd with `YOU_ARE_NOT_ALLOWED_TO_CHANGE_USERS_ROLE` for platform admins and plain members alike. Removing it removes a byte-identical-refusal dead affordance, not a working capability.
+  
+  **Unchanged.** The vendor's `POST /api/v1/auth/admin/set-role` route itself stays mounted and vendor-gated exactly as before — this change touches only the `sys_user` console action pointing at it. Every other `sys_user` admin action (`ban_user`, `unban_user`, `unlock_user`, `create_user`, `set_user_password`, `impersonate_user`) is unaffected.
+  
+  `@objectstack/spec`'s `PUBLIC_AUTH_FEATURES.admin.gatedInputs` registry drops the corresponding `sys_user.actions.set_user_role` entry in the same change (`packages/spec/src/kernel/public-auth-features.ts`) — internal completeness-guard bookkeeping only, no public export shape change.
+- e0abc38: fix(platform-objects): add the Setup nav entry for the packaged-automation page (#12457, ADR-0126 §7.4)
+  
+  The packaged-automation page (on/off per packaged flow/action, clone for
+  flows) shipped complete in the console (objectui app-shell, registered under
+  the component ref `automation:packaged`), but no framework
+  `NavigationContribution` ever named that ref — so on every stock boot the
+  page was reachable only by a hand-typed URL
+  (`/apps/setup/component/automation/packaged`), and Setup's sidebar carried no
+  entry. Epic #12150's L5/L6-UI cards closed with the objectui half pinned and
+  the framework half missing; `content/docs/build-without-code.mdx` promises
+  the page publicly.
+  
+  `SETUP_NAV_CONTRIBUTIONS` now contributes `nav_packaged_automation`
+  (`type: 'component'`, `componentRef: 'automation:packaged'`) in `group_apps`
+  beside Packages — package administration is Operate (ADR-0084), and ADR-0126
+  §7.4 rules "Studio keeps the editing; Setup gets the operational state". The
+  entry deliberately carries no `requiresService: 'automation'` (the action
+  switches ride the `sys_metadata_activation` ledger this package registers and
+  work on compositions with no automation service, #12419) and no
+  `requiredPermissions` (matches `nav_packages`: the app's `setup.access` gates
+  entry, the activation write doors enforce `manage_metadata` / the §5 operator
+  gate server-side). Labels land in all four locales with recorded source
+  hashes; `setup-packaged-automation-nav.test.ts` pins the framework half of
+  the cross-repo contract the objectui nav test pins from its side.
+- 598b7ec: fix(i18n): re-translate the five leaves that served a superseded source revision (#12065)
+  
+  `os i18n extract` merges gaps only, so a revised source string leaves the previous
+  revision standing in every translated locale — in sync by key, green under
+  `check:i18n` and counted as translated by `check:i18n-coverage`. The five leaves
+  `check:i18n-stale-fill` froze in its baseline are re-translated here from the
+  **current** `en` source, and the baseline is ratcheted to empty in the same change.
+  
+  User-visible admin/Setup help text changes in `es-ES`, `ja-JP` and `zh-CN`:
+  
+  - `dataset.fields.measures.helpText` (metadata forms) — all three locales promised a
+    `"certified"` governance flag that was removed from the declaration in 16.0.
+  - `sys_webhook.fields.method.help` — all three locales served the pre-revision method
+    enumeration after the source became a prose description.
+  - `sys_webhook.pluralLabel` — `ja-JP` was an untranslated Latin fill and is now
+    Japanese; `zh-CN` keeps `Webhook`, which is the term this bundle's own Chinese prose
+    uses and which carries no plural inflection.
+  - `sys_http_delivery.fields.attempts.help` — `es-ES` / `ja-JP` held an English fill and
+    `zh-CN` a translation of the same superseded source; all three now carry the
+    PARKED / terminal-row clause the source documents.
+  - `sys_notification_subscription.fields.principal.help` — the selector list was missing
+    the `owner_of:object:id` and bare-email forms in all three locales.
+  
+  No schema, export or runtime behaviour changes: translated-locale leaf values only,
+  plus the shrink-only ratchet baseline.
+- 811a3c2: fix(platform-objects): `sys_secret` field help stops asserting the settings-only reading (#12550)
+  
+  `sys_secret` has **three** privileged producers (#4270) — the object's own
+  `managedBy` note has said so for a while — but its most load-bearing field
+  descriptions still described a settings-only table. Those strings are not
+  internal comments: they are the field help an operator reads in the
+  `sys_secret` grid, and they compile into the shipped translation bundles.
+  
+  Measured on `origin/main@f93df4db`, by producer symbol rather than by line:
+  
+  | producer | `namespace` | `key` | the reference lives at |
+  |---|---|---|---|
+  | `SettingsService` (`settings-service.ts`, `secretStore.insert`) | settings namespace | specifier key | `sys_setting.value_enc` |
+  | engine `encryptSecretFields` (`objectql/src/engine.ts`) | **object name** | **field name** | a `secret:<id>` ref on the business row itself |
+  | datasource credential binder (`datasource-secret-binder.ts`) | **caller-supplied**, default `datasource` | datasource name | the artefact's `sys_secret:<id>` credentialsRef |
+  
+  So `'Settings namespace this secret belongs to.'` / `'Specifier key within the
+  namespace.'` / `'Opaque handle referenced by sys_setting.value_enc.'` were each
+  true of one producer out of three, and the pair they describe was presented as
+  if it identified an owner. That is exactly the `(namespace, key)` attribution
+  reading #8103's re-measurement rejected — the reason
+  `sys-secret-orphan-report.ts` reports a row it cannot attribute as
+  `'unattributable'` rather than `'orphaned'`. Field help asserting the rejected
+  reading is the safety-relevant direction of this drift.
+  
+  Corrected here: the object description, and the `namespace` / `key` / `id`
+  field descriptions, now name the producer-scoped reality and point at
+  `managedBy`. The `en` bundle was regenerated with the repo's own
+  `pnpm i18n:extract`; the three translated locales carried translations of the
+  superseded English, so their four affected leaves were re-translated by hand —
+  the action `<locale>.objects.generated.ts`'s own header prescribes when a
+  source string changes — and the bundles plus their `--source-hashes`
+  companions then come from one extract run.
+  
+  Text only. No field is added, removed, renamed or re-typed; no validation,
+  persistence or access rule moves; every `sys_secret` payload that parsed before
+  parses identically. ⛔ A producer/owner column stays out of scope — that is a
+  persist-path change and belongs to whoever takes that decision.
+- 9f57f1e: fix(platform-objects): the zh-CN `dashboard` metadata-form subtree says what its source says
+  
+  Five leaves of `metadataForms.dashboard` in `zh-CN.metadata-forms.generated.ts`
+  described the Studio dashboard property panel in terms the source form
+  (`packages/spec/src/ui/dashboard.form.ts`) does not use, each one naming a
+  concept the source omits while dropping one it names:
+  
+  | leaf | was | now |
+  | --- | --- | --- |
+  | `sections.layout.description` | 「栅格与响应式」 | 「栅格尺寸与刷新间隔」 |
+  | `sections.basics.description` | 「名称与图标」 | 「仪表板标识与描述」 |
+  | `sections.widgets.description` | 「图表、指标、列表等」 | 「放置在栅格上的卡片与图表」 |
+  | `sections.filters.description` | 「全局筛选与日期范围」 | 「应用到所有组件的默认筛选与全局筛选」 |
+  | `fields.header.helpText` | 「标题、操作按钮与筛选」 | 「仪表板页眉配置（title、subtitle、actions）」 |
+  
+  Two of them sent a zh-CN author looking for a control that does not exist.
+  `layout` promised a responsive-breakpoint input in a section holding `columns`,
+  `gap`, `refreshInterval` and `header`, and left the refresh cadence unnamed.
+  `basics` promised an icon input; that section holds `name`, `label` and
+  `description`, and the dashboard schema declares no icon key at all — the only
+  `icon` under `dashboard.zod.ts` is per header action. The other three swapped
+  which concepts the section covers: widgets is cards and charts on the grid, not
+  metrics and lists; filters is default plus global filters across widgets, not
+  the date range (that is the separate `dateRange` field); and the header carries
+  a subtitle, not filters. The replacements reuse terms this bundle already
+  establishes — `grid` → 「栅格」, `widgets` → 「组件」, `identity` → 「标识」, and
+  the literal key list rendered as `（title、subtitle、actions）` the way
+  `page.fields.layout.helpText` renders `（header、main、sidebar、footer）`.
+  
+  The source strings have not moved since the form was created: all five have been
+  byte-identical across that file's only two commits. zh-CN's values were carried
+  in from the pre-consolidation `metadata-translations/zh-CN.ts` overlay and never
+  reconciled against the extracted English, while es-ES and ja-JP were translated
+  from it and are correct at all five. So this is a translation correction, not a
+  re-sync after a source edit — nothing else in the bundle, the source form, or
+  the recorded source-hash companion changes.
+- Updated dependencies [809d417]
+- Updated dependencies [387e231]
+- Updated dependencies [f794e4e]
+- Updated dependencies [cae2169]
+- Updated dependencies [b812a54]
+- Updated dependencies [2d4fa75]
+- Updated dependencies [0e4e51b]
+- Updated dependencies [e84bbf6]
+- Updated dependencies [effae80]
+- Updated dependencies [d62f990]
+- Updated dependencies [c45d8e6]
+- Updated dependencies [2e3e8c7]
+- Updated dependencies [e621291]
+- Updated dependencies [40a93b5]
+- Updated dependencies [d5b330d]
+- Updated dependencies [dda969c]
+- Updated dependencies [1f45690]
+- Updated dependencies [277948f]
+- Updated dependencies [8bdd955]
+- Updated dependencies [54e2d36]
+- Updated dependencies [b745157]
+- Updated dependencies [f3bbbef]
+- Updated dependencies [4f24e9d]
+- Updated dependencies [474242f]
+- Updated dependencies [63cd487]
+- Updated dependencies [bd4aa4e]
+- Updated dependencies [803eaab]
+- Updated dependencies [f8e8f03]
+- Updated dependencies [eae824e]
+- Updated dependencies [f6fa22c]
+- Updated dependencies [8a483b3]
+- Updated dependencies [97bcd99]
+- Updated dependencies [df59de0]
+- Updated dependencies [96e25a8]
+- Updated dependencies [f75a38a]
+- Updated dependencies [7a25e7d]
+- Updated dependencies [1fa05a6]
+- Updated dependencies [c85a265]
+- Updated dependencies [dcb10a5]
+- Updated dependencies [773a999]
+- Updated dependencies [35dffea]
+- Updated dependencies [776a098]
+- Updated dependencies [5060877]
+- Updated dependencies [4f6325d]
+- Updated dependencies [52954c0]
+- Updated dependencies [2aa8456]
+- Updated dependencies [d23ebb9]
+- Updated dependencies [93809a3]
+- Updated dependencies [7c0d0c3]
+- Updated dependencies [daae7aa]
+- Updated dependencies [8dc22d6]
+- Updated dependencies [fa5d137]
+- Updated dependencies [279431e]
+- Updated dependencies [948dd6b]
+- Updated dependencies [3b4c56c]
+- Updated dependencies [ae8edd2]
+- Updated dependencies [e25403c]
+- Updated dependencies [64baa68]
+- Updated dependencies [9fa70d7]
+- Updated dependencies [09db64a]
+- Updated dependencies [92916e7]
+- Updated dependencies [a84f3ea]
+- Updated dependencies [f2eaae8]
+- Updated dependencies [c09451b]
+- Updated dependencies [ba64877]
+- Updated dependencies [e7191ce]
+- Updated dependencies [7345308]
+- Updated dependencies [79b6a22]
+- Updated dependencies [30d96ab]
+- Updated dependencies [f658793]
+- Updated dependencies [0fd4899]
+- Updated dependencies [c95ad19]
+- Updated dependencies [e58ea8b]
+- Updated dependencies [4a17645]
+- Updated dependencies [3795c5f]
+- Updated dependencies [8ab926b]
+- Updated dependencies [7317cf2]
+- Updated dependencies [e25e839]
+- Updated dependencies [5997207]
+- Updated dependencies [8b13cc8]
+- Updated dependencies [00d8f65]
+- Updated dependencies [4a4a35d]
+- Updated dependencies [86e765a]
+- Updated dependencies [1d7e76a]
+- Updated dependencies [53dc739]
+- Updated dependencies [fd289be]
+- Updated dependencies [03bf7b1]
+- Updated dependencies [f90e820]
+- Updated dependencies [18d816a]
+- Updated dependencies [e8bd715]
+- Updated dependencies [b91c351]
+- Updated dependencies [a28a3c0]
+- Updated dependencies [200d255]
+- Updated dependencies [2852acc]
+- Updated dependencies [daeaaf9]
+- Updated dependencies [c459da6]
+- Updated dependencies [e914733]
+- Updated dependencies [f887e52]
+- Updated dependencies [881f8d8]
+- Updated dependencies [3bfa1e6]
+- Updated dependencies [901355c]
+- Updated dependencies [34ce8e7]
+- Updated dependencies [33681ea]
+- Updated dependencies [4635f3e]
+- Updated dependencies [ee3595c]
+- Updated dependencies [b2eab95]
+- Updated dependencies [93940d4]
+- Updated dependencies [3a04b01]
+- Updated dependencies [45b9051]
+- Updated dependencies [b9e9227]
+- Updated dependencies [d395692]
+- Updated dependencies [5894d30]
+- Updated dependencies [a3765f6]
+- Updated dependencies [e22158f]
+- Updated dependencies [7404925]
+- Updated dependencies [0c2334f]
+- Updated dependencies [778c59f]
+- Updated dependencies [d2619fd]
+- Updated dependencies [6acb11a]
+- Updated dependencies [33c5fd3]
+- Updated dependencies [20b0fdb]
+- Updated dependencies [905019b]
+- Updated dependencies [a286411]
+- Updated dependencies [98c0d33]
+- Updated dependencies [368a82e]
+- Updated dependencies [a3d5724]
+- Updated dependencies [93ea19b]
+- Updated dependencies [9ee2dcf]
+- Updated dependencies [8cb96ec]
+- Updated dependencies [8f10a79]
+- Updated dependencies [6269a55]
+- Updated dependencies [0fb8760]
+- Updated dependencies [e5ce2ed]
+- Updated dependencies [be21955]
+- Updated dependencies [bc56e18]
+- Updated dependencies [be21955]
+- Updated dependencies [a9ee989]
+- Updated dependencies [4d0d944]
+- Updated dependencies [15d58db]
+- Updated dependencies [d63b014]
+- Updated dependencies [9abe4e4]
+- Updated dependencies [2cc7122]
+- Updated dependencies [50d6c92]
+- Updated dependencies [15d55fb]
+- Updated dependencies [9e0ba21]
+- Updated dependencies [311433f]
+- Updated dependencies [3e5ad08]
+- Updated dependencies [9abe4e4]
+- Updated dependencies [b7131f3]
+- Updated dependencies [e5812fa]
+- Updated dependencies [7085f90]
+- Updated dependencies [dee4dd4]
+- Updated dependencies [ce7e497]
+- Updated dependencies [51ecb2f]
+- Updated dependencies [9086761]
+- Updated dependencies [42a117b]
+- Updated dependencies [1401ae7]
+- Updated dependencies [4297fe7]
+- Updated dependencies [e398863]
+- Updated dependencies [d16df74]
+- Updated dependencies [f11fc61]
+- Updated dependencies [e808890]
+- Updated dependencies [8f79379]
+- Updated dependencies [e6ca40e]
+- Updated dependencies [0c77ea4]
+- Updated dependencies [52954c0]
+- Updated dependencies [89eb997]
+- Updated dependencies [aa5994e]
+- Updated dependencies [be93457]
+- Updated dependencies [a65db76]
+- Updated dependencies [15eb2c9]
+- Updated dependencies [5691b07]
+- Updated dependencies [2a6122b]
+- Updated dependencies [225e769]
+- Updated dependencies [8af88dd]
+- Updated dependencies [fb5fbb8]
+- Updated dependencies [d7b3963]
+- Updated dependencies [b72db01]
+- Updated dependencies [dce5cd4]
+- Updated dependencies [177ebdc]
+- Updated dependencies [8d237b4]
+- Updated dependencies [2d2e6f0]
+- Updated dependencies [2d8dd8d]
+- Updated dependencies [22d573e]
+- Updated dependencies [b5a2398]
+- Updated dependencies [348860c]
+- Updated dependencies [5383fa6]
+- Updated dependencies [5b3ff63]
+- Updated dependencies [1a6a19c]
+- Updated dependencies [527e050]
+- Updated dependencies [dd33bf9]
+- Updated dependencies [4cb2a90]
+- Updated dependencies [74a7804]
+- Updated dependencies [53d3689]
+- Updated dependencies [b3a63d3]
+- Updated dependencies [033a34c]
+- Updated dependencies [4d25d22]
+- Updated dependencies [1ffee51]
+- Updated dependencies [5ae4303]
+- Updated dependencies [ece4dad]
+- Updated dependencies [e9b377e]
+- Updated dependencies [146f448]
+- Updated dependencies [735f5c7]
+- Updated dependencies [a7e18de]
+- Updated dependencies [366f895]
+- Updated dependencies [dc75ba8]
+- Updated dependencies [cce0aa9]
+- Updated dependencies [e764507]
+- Updated dependencies [cff17af]
+- Updated dependencies [39404f3]
+- Updated dependencies [ca1965f]
+- Updated dependencies [8619f95]
+- Updated dependencies [b706af9]
+- Updated dependencies [fc9ba76]
+- Updated dependencies [1272f0a]
+- Updated dependencies [0f94cc7]
+- Updated dependencies [a11c1a5]
+- Updated dependencies [71f9cd1]
+- Updated dependencies [ee17d86]
+- Updated dependencies [cdbd920]
+- Updated dependencies [18c432e]
+- Updated dependencies [3c418c4]
+- Updated dependencies [fa8715a]
+- Updated dependencies [a933ed7]
+- Updated dependencies [b3ca463]
+- Updated dependencies [a933ed7]
+- Updated dependencies [0d4a6a8]
+- Updated dependencies [518d5e5]
+- Updated dependencies [6643ba1]
+- Updated dependencies [eeba2ef]
+- Updated dependencies [ec4c4d2]
+- Updated dependencies [424f73c]
+- Updated dependencies [cccbe51]
+- Updated dependencies [a8d6b1d]
+- Updated dependencies [e4a7695]
+- Updated dependencies [87075b1]
+- Updated dependencies [fc58a99]
+- Updated dependencies [14cfc00]
+- Updated dependencies [1c6f7b4]
+- Updated dependencies [e854a53]
+- Updated dependencies [dfebfc8]
+- Updated dependencies [d028b37]
+- Updated dependencies [122ef38]
+- Updated dependencies [4a37870]
+- Updated dependencies [428f9b2]
+- Updated dependencies [aa7ff56]
+- Updated dependencies [c41b42e]
+- Updated dependencies [d41d166]
+- Updated dependencies [c4db311]
+- Updated dependencies [750fff5]
+- Updated dependencies [c19035e]
+- Updated dependencies [ececf7a]
+- Updated dependencies [d173125]
+- Updated dependencies [8eeca27]
+- Updated dependencies [8425c17]
+- Updated dependencies [a5ef1d8]
+- Updated dependencies [772d5de]
+- Updated dependencies [ce80ec2]
+- Updated dependencies [b372318]
+- Updated dependencies [97a2263]
+- Updated dependencies [29d0676]
+- Updated dependencies [0169d49]
+- Updated dependencies [6bd3231]
+- Updated dependencies [d2b5ba8]
+- Updated dependencies [b799ac5]
+- Updated dependencies [8f74307]
+- Updated dependencies [d23dc08]
+- Updated dependencies [644ad50]
+- Updated dependencies [5d16379]
+- Updated dependencies [0da7cd2]
+- Updated dependencies [28a5c3e]
+- Updated dependencies [4bc18e5]
+  - @objectstack/spec@17.3.0
+  - @objectstack/metadata-core@17.3.0
+
 ## 17.2.0
 
 ### Minor Changes

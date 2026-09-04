@@ -429,6 +429,63 @@ const FIXTURE_LOCKFILE = [
   '',
 ].join('\n');
 
+// -- The self-test's own battery roster and floor (#13489) ------------------
+//
+// `--self-test` reaching its verdict used to be this self-test's ONLY success
+// condition, so "every case held" and "the cases never ran" printed the same
+// line. Closed the PR #13487 way: what is pinned is the registered NAMES, not a
+// number.
+//
+// This self-test is TABLE-DRIVEN -- one literal `cases` table, one loop over it,
+// and a sink that writes only when a case FAILS. Routing THAT sink through
+// `registerCase()` would register a case only when it fails: a fully green run
+// would register 0 and every battery would read DID NOT RUN, the floor inverted
+// rather than installed. So the roster is the table's own rows. Each row LABEL
+// is a declared battery, verbatim, with a floor of 1, and `registerCase(name)`
+// is the first statement of the driving loop body -- so the case is attributed
+// to the row actually being run, whatever that row asserts afterwards. There is
+// no `battery()` opener: for a table-driven self-test the ROW is the battery.
+//
+// The three `// --- ... ---` comments inside the table are grouping rules, not
+// section heads, and a comment is NOT promoted to one -- the rows are the
+// batteries either way.
+//
+// A pinned TOTAL is not the repair, and neither is a roster DERIVED from the
+// table: `cases.length` moves with the table, so a deleted row would delete its
+// own floor. The roster below is a LITERAL the table is checked against, which
+// is what lets a deleted or renamed row name ITSELF in the refusal.
+//
+// The counts are a FLOOR, not an equality -- a row that grows into several
+// registrations must not red. 1 is the honest floor for a table row: the loop
+// reaches it exactly once per run.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'lockfile parses into a consumer index': 1,
+  'unparseable lockfile -> census skipped, never a crash': 1,
+  'lockfile that is not a mapping -> census skipped': 1,
+  'transitive consumer present (snapshot pulls undici) -> NOT reported': 1,
+  'workspace importer counts as a consumer (semver) -> NOT reported': 1,
+  'zero consumers (nothing pulls form-data) -> REPORTED': 1,
+  'census reports only the idle one out of a mixed set': 1,
+  'bound equal to the target floor (the #5032 undici shape) -> REPORTED': 1,
+  'bound below the target floor (uncovered gap) -> REPORTED': 1,
+  'bound above the target version line (the durable shape) -> NOT reported': 1,
+  'selector with no upper bound -> NOT reported': 1,
+  'inclusive upper bound covers the target -> NOT reported': 1,
+  'declared range that reaches the target -> no violation': 1,
+  'declared range that cannot reach the target -> violation': 1,
+  'no implicit prereleases: ^1.7.0 does not reach 1.7.0-rc.2': 1,
+  'declaration outside the selector scope -> override does not apply': 1,
+  'declaration inside the selector scope -> override applies': 1,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too. This pin is also half of
+// the duplicate-label refusal: two rows sharing a label collapse to ONE key in
+// the literal above, so the roster falls below this number; the table
+// cross-check in the floor block is the other half, and names WHICH label
+// collided.
+const SELF_TEST_BATTERY_FLOOR = 17;
+
 // Returned by `selfTest()` only after its verdict is printed. The dispatch
 // refuses anything else: a `return` that leaves the function above that line
 // prints nothing and still exits 0 — a self-test that never finished, reported
@@ -542,9 +599,16 @@ function selfTest() {
     },
   ];
 
-  let passed = true;
+  // The ledger this self-test's floor is evaluated against (#13489).
+  const batterySeen = new Map();
+  const registerCase = (name) => {
+    batterySeen.set(name, (batterySeen.get(name) ?? 0) + 1);
+  };
+
+  let failures = 0;
   console.log('check-override-consistency self-test (both directions):');
   for (const testCase of cases) {
+    registerCase(testCase.name);
     let actual;
     try {
       actual = testCase.actual();
@@ -552,15 +616,71 @@ function selfTest() {
       actual = `threw: ${error.message}`;
     }
     const ok = actual === testCase.expect;
-    if (!ok) passed = false;
+    if (!ok) failures++;
     console.log(
       `${ok ? '  ✓' : '  ✗'} ${testCase.name}` +
         (ok ? '' : `\n      expected ${JSON.stringify(testCase.expect)}, got ${JSON.stringify(actual)}`),
     );
   }
 
-  if (!passed) {
-    console.error('\n✗ self-test failed — this check does not do what it claims.');
+  // -- The floor: every declared row RAN, and ran its case (#13489) --------
+  //
+  // Evaluated after every row has had its chance and BEFORE the verdict, so the
+  // success line below can only be printed by a run in which the set of rows
+  // that registered EQUALS the set declared. A set difference names WHICH row
+  // stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    console.error(`✗ self-test floor: ${message}`);
+    failures++;
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  const rowLabels = cases.map((c) => c.name);
+  const duplicated = [...new Set(rowLabels.filter((name, i) => rowLabels.indexOf(name) !== i))];
+  if (duplicated.length > 0) {
+    floorBreached = true;
+    floorFailure(
+      `the cases table uses ${duplicated.map((n) => JSON.stringify(n)).join(', ')} as a row label more than once — ` +
+        'two rows sharing a label are ONE battery, so the second can stop running while the first keeps the floor met.',
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — a case attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed that case holds.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (a deleted row, a renamed label, a loop that no longer ' +
+        'reaches it) and restore it.',
+    );
+  }
+
+  if (failures) {
+    console.error(`\n✗ check-override-consistency self-test: ${failures} failure(s) (cases and floor).`);
     process.exit(1);
   }
   console.log(

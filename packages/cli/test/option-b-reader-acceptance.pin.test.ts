@@ -80,27 +80,38 @@
  *
  * ## Boundaries — what this pin does NOT reach, stated rather than implied
  *
- * Three reads in the enumeration are expressions inline inside oclif command
- * bodies, with no exported reader and no service on the far side, so no probe
- * short of running the command reaches them. They are named here so the next
- * reader does not mistake this file for full coverage of the enumeration:
+ * ### Closed by #15006 (card 3/4)
  *
- *   - `serve.ts` `config.objects` gating ObjectQL engine auto-registration, and
- *     the sibling gate for storage-driver auto-registration. The artifact half
- *     of both IS covered — `createStandaloneStack` surfaces `objects` precisely
- *     so that path can drive them, and that row is in the table — but the
- *     from-source half is reachable only through a real `os serve`.
- *   - `dev.ts` `readArtifactObjects()`, a module-private function that opens the
- *     artifact with its own `JSON.parse(readFileSync(...))` to diff the object
- *     inventory across recompiles. Non-fatal; it goes permanently empty.
- *   - `compile.ts`'s union authoring-rule run, which under option B would judge
- *     an empty stack.
+ * Four reads were named here as unreachable: `serve.ts`'s two `config.objects`
+ * auto-registration gates on the FROM-SOURCE leg, `dev.ts`
+ * `readArtifactObjects()`, and `compile.ts`'s union authoring-rule run. They
+ * were unreachable not because of the artifact but because each was an
+ * EXPRESSION inside an oclif command body — no exported reader, nothing a probe
+ * could call. Card 3/4 introduced the seam
+ * (`packages/cli/src/utils/stack-collections.ts`), so the probe now carries a
+ * row per site and each one CALLS the decision the command makes. The
+ * prohibition that stood beside them still stands and is repeated where those
+ * rows live: ⛔ a row that asserts `config.objects` on an option-B config is a
+ * second copy of the read it watches, stays red after that read is fixed, and
+ * then gets deleted.
  *
- * ⛔ Do not "cover" these by asserting `config.objects` in this file. A row
- * shaped like the read it is watching is a second copy of the code the reader
- * program is about to change: it stays red after the reader beside it is fixed,
- * and a gate that cannot go green gets deleted. Cards 3/4 and 4/4 own those
- * sites; a probe for them belongs beside whatever seam those cards introduce.
+ * ⚠️ The two `serve.ts` gates were only HALF covered before, and the half that
+ * was covered is the ARTIFACT leg — `createStandaloneStack` surfaces `objects`
+ * precisely so that path can drive them, and that row is in the ledger. That
+ * row stays: `standalone-stack.ts` omits the key entirely when the array is
+ * absent, and no CLI-side seam can resolve what the runtime never surfaced. It
+ * is card 2/4's (#15005) to delete, not this file's.
+ *
+ * ### Still open
+ *
+ * `plugins` and `devPlugins` are package-owned collections by the same
+ * derivation every row here uses, and `serve.ts` / `schema-migration-plugins.ts`
+ * read them off the top level only. The zoo declares none, so no row measures
+ * them, and the fix is NOT mechanical: a JSON artifact's `packages[i].plugins`
+ * would be inert data where the call site expects a live plugin instance, and
+ * whether a live-object collection belongs in the package-owned key set at all is
+ * a `packages/spec` question upstream of every reader here. Filed as #15219
+ * rather than folded in.
  */
 
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -143,7 +154,6 @@ const OPTION_B_LOSSES: readonly string[] = [
   'B2 · AppPlugin ql.setDatasourceMapping (object routing) (from source) · datasourceMapping',
   'B2 · AppPlugin seed datasets merged (from source) · data',
   'B2 · AppPlugin translation loading into the i18n service (from source) · translations',
-  'B2 · plugin-security appSecurityPluginOptions over the from-source config (default permission set) · permissions',
   'B2 · runtime collectBundleActions over the from-source config · actions + objects[].actions',
   'B2 · runtime collectBundleFunctionEntries over the from-source config · functions',
   'B2 · runtime collectBundleHooks over the from-source config · hooks',
@@ -269,5 +279,21 @@ describe('#15004 — option-B acceptance pin: every subsystem must see its colle
     // are the B2 rows. The header's "Boundaries" section states what that does
     // and does not cover.
     expect(ids.some((id) => id.startsWith('B5 · resolve-project-database'))).toBe(true);
+  });
+
+  it('#15006 — the four cli reads that had no callable seam are each represented', () => {
+    // These four were named in this file's header as OUT of reach. They are in
+    // reach now, and this test is what stops them from quietly leaving again:
+    // the pin asserts set EQUALITY against the ledger, so a row that stopped
+    // being measured while it was GREEN would take nothing red with it.
+    const ids = optionB.rows.map((r) => r.id);
+    for (const site of [
+      'B2 · cli serve ObjectQL engine auto-registration gate (from source) · objects',
+      'B2 · cli serve storage-driver auto-registration gate (from source) · objects',
+      'B1 · cli dev artifact object inventory (readArtifactObjects recompile diff) · objects',
+      'B3 · cli build union author-time rule input (os build) · every package-owned collection',
+    ]) {
+      expect(ids, `#15006 site no longer measured: ${site}`).toContain(site);
+    }
   });
 });
