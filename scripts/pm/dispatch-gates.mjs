@@ -2210,11 +2210,22 @@ export function declaredWholeTreePopulation(scriptSource) {
  * for a new spelling is to EXTEND this list with a self-test case beside it,
  * never to route around the check.
  *
- * Measured over the six candidate gates #14189 and #14325 nominated: limbs A/B
- * select five, and `check-self-test-workflow-commands.mjs` — whose walk is
- * seeded at `scripts/`, a bounded subtree — is selected by none of them, which
- * is the reading of its source, not a coincidence. That gate's remedy is the
- * ordinary subtree declaration, not this channel.
+ * Measured over the six candidate gates #14189 and #14325 nominated: the limbs
+ * select five — three by A (`check-nul-bytes`, `check-refd-timer-probe`,
+ * `check-closing-keyword-parity`), one by B (`check-watch-hint-literal`), one
+ * by C (`check-comment-mask-corpus`) — and `check-self-test-workflow-commands.mjs`
+ * is selected by none of them, which is the reading of its source, not a
+ * coincidence. Its population is a bounded subtree (`scripts/`), never the
+ * tree, so its remedy is the ordinary subtree declaration and not this channel.
+ *
+ * ⚠️ Re-derived rather than recalled (#15510), and the count is the durable
+ * half of that sentence: the ATTRIBUTION was stale. `check-comment-mask-corpus`
+ * moved from limb B to limb C when limb B was tightened to refuse a path BUILD
+ * (the note on limb B below records that tightening), and "limbs A/B select
+ * five" was left behind. The REASON the sixth is unselected is stale-prone for
+ * its own reason: it was the SHAPE of that gate's walk, and a gate can stop
+ * holding a walk without the census outcome moving at all. What is written
+ * above is the population, which is what the remedy turns on.
  */
 export const REPO_ROOT_WALK_SPELLINGS = [
   {
@@ -14167,6 +14178,86 @@ function selfTest() {
     );
   }
 
+  // ── The MANIFEST population of check:merge-driver (#15501) ────────────────
+  //
+  // That family's `git-merge-regen --self-test` refuses a generator with no
+  // recorded merge disposition, and the population that refusal sweeps is the
+  // MANIFESTS — the root one plus every workspace member's, read for their
+  // `gen:` / `check:` rows. What the family declared HERE was the artifact
+  // paths `scripts/regen-artifacts.mjs` carries, imported one level down: the
+  // generators ALREADY routed. So the one class of card the refusal exists to
+  // catch — a card that ADDS a generator, touching a manifest and a new
+  // `scripts/*.mjs` — was the one class this derivation could not name, and the
+  // gate fired a cycle late, in CI, on every card of that shape. Measured
+  // before the repair, on a `package.json` change set: zero lines naming it.
+  //
+  // Pinned against the LIVE tree through the same discovery pass `derive` runs,
+  // for the reason the scripts/** case above states: a hand-built fixture could
+  // pass here while the real family stayed unnameable, which is the exact
+  // failure these cases exist to stop recurring.
+  const mdFamilies = discoverFamilies().byCheck;
+  const MERGE_DRIVER = 'check:merge-driver';
+  const mdEntry = mdFamilies.get(MERGE_DRIVER);
+  t(`${MERGE_DRIVER} is discovered at all — the pins below mean nothing without this`, Boolean(mdEntry));
+  // The declared halves, stripped for the ablation below. Spelled as a
+  // PREDICATE over the live hint set rather than as a copy of the declaration,
+  // so a hint respelled in `git-merge-regen.mjs` cannot leave a stale twin here
+  // that keeps the ablation passing.
+  const isManifestHint = (h) => h === 'package.json/**' || h.endsWith('/package.json');
+  const mdStripped = mdEntry ? { ...mdEntry, hints: (mdEntry.hints ?? []).filter((h) => !isManifestHint(h)) } : null;
+  // The POSITIVE direction, one probe per declared half. The table is pinned to
+  // its own length first (#13799's floor recipe): a loop over an emptied table
+  // runs zero cases and prints nothing, which reads exactly like a pass.
+  const MD_MANIFEST_PROBES = [
+    ['the ROOT manifest, where the measured CI red added its `gen:` row', 'package.json'],
+    ['a workspace MEMBER manifest', 'packages/plugins/plugin-auth/package.json'],
+  ];
+  t('the manifest probe table still has both declared halves in it', MD_MANIFEST_PROBES.length === 2);
+  for (const [why, probe] of MD_MANIFEST_PROBES) {
+    const verdict = mdEntry ? classifyEntry(mdEntry, [probe]).verdict : null;
+    // The reading rides in the case NAME, never in a third argument: `t` takes
+    // two, so a detail passed beyond them is dropped on the floor — and a
+    // failing case whose reading went with it is a case nobody can act on.
+    t(
+      `a change set touching ${why} derives ${MERGE_DRIVER} — ${probe} => ${verdict}`,
+      verdict === 'matched',
+    );
+    // …and it is the manifest declaration doing it. Without this half the case
+    // above could pass through any hint that happens to cover the probe —
+    // `packages/spec/package.json`, for one, was already reachable through the
+    // `packages/spec` literal, so a probe chosen there would have proved
+    // nothing at all. Both not-matched verdicts are accepted, spelled as an
+    // explicit pair so a NEW verdict value added later cannot slip through as
+    // a pass — the same reasoning as the scripts/** ablation above.
+    const residual = mdStripped ? classifyEntry(mdStripped, [probe]).verdict : null;
+    t(
+      `…and it is the manifest declaration doing it: strip it and ${probe} goes back to NOT MATCHED`
+        + ` (hints ${mdEntry?.hints?.length} -> ${mdStripped?.hints?.length}, residual ${residual})`,
+      // The length comparison is what stops this passing VACUOUSLY: with no
+      // manifest hint to remove, `mdStripped` is the entry itself and a
+      // not-matched verdict compared against itself reads as a pass.
+      Boolean(mdStripped) &&
+        mdStripped.hints.length < (mdEntry.hints ?? []).length &&
+        ['silent', 'undetermined'].includes(residual),
+    );
+  }
+  // The NEGATIVE direction, and it is what keeps the declaration from being a
+  // whole-tree widening in disguise: an unrelated script is not newly derived.
+  // Stated as "the declaration moved NOTHING for it" rather than as a bare
+  // not-matched verdict — the manifest hints are the only thing that changed,
+  // so the two verdicts agreeing is the claim, and it stays true whatever the
+  // rest of the family's population does later.
+  const mdUnrelated = 'scripts/the-one-nobody-has-written-yet.mjs';
+  const mdUnrelatedVerdict = mdEntry ? classifyEntry(mdEntry, [mdUnrelated]).verdict : null;
+  t(
+    `an unrelated brand-new scripts/*.mjs is NOT derived to ${MERGE_DRIVER} (${mdUnrelatedVerdict})`,
+    ['silent', 'undetermined'].includes(mdUnrelatedVerdict),
+  );
+  t(
+    'and the manifest declaration is what moved nothing for it — the same verdict with and without',
+    mdUnrelatedVerdict === (mdStripped ? classifyEntry(mdStripped, [mdUnrelated]).verdict : null),
+  );
+
   // ── The bare root this gate must NOT spell (#10875) ───────────────────────
   //
   // `check:published-files` asks whether a published package ships a scripts/
@@ -15877,13 +15968,67 @@ function selfTest() {
     "nor does one whose --self-test body stages a fixture tree (the self-test is not the gate's work)",
     repoRootWalkSpelling("function selfTest() {\n  execFileSync('git', ['ls-files', '-z'], { cwd: tmp });\n}\n") === null,
   );
-  // The live specimen for the NEGATIVE direction: a walk seeded at a bounded
-  // subtree. check-self-test-workflow-commands.mjs is exactly this shape, and
-  // it is why #14325's census of six is a census of five here.
+  // The NEGATIVE direction: a walk seeded at a bounded subtree, which is why
+  // #14325's census of six is a census of five here.
+  //
+  // The fixture string below is data, not a read of any file, so it cannot go
+  // stale — but it also cannot show that the shape still EXISTS in this tree,
+  // and a specimen named in prose can rot while every case here stays green.
+  // That is exactly what happened to the name this comment used to carry
+  // (#15510): `check-self-test-workflow-commands.mjs` was cited as the live
+  // specimen and then had its walk removed, leaving a sentence pointing at a
+  // file with no walk in it. So the specimens below are MEASURED, and there
+  // are two of them at two different walk roots, so one file's repair cannot
+  // empty the claim again:
+  //
+  //   scripts/check-self-test-wired.mjs   `walkScripts(scriptsDir)`, seeded at
+  //                                       `join(ROOT, 'scripts')`
+  //   scripts/check-spec-parsed-alias.mjs `walkZodFiles(SPEC_SRC)`, seeded at
+  //                                       `join(ROOT, 'packages/spec/src')`
+  //
+  // Both read `null` from this predicate on this tree — the reading is pinned
+  // LIVE two cases down, against their real source rather than against a
+  // string typed here.
   t(
     'a walk seeded at a bounded subtree is not a repo-root walk',
     repoRootWalkSpelling("const scriptsDir = join(ROOT, 'scripts');\nconst files = walkScripts(scriptsDir);") === null,
   );
+
+  // LIVE, on this tree: the two specimens the comment above names, read off
+  // their real source rather than typed here (#15510). This is the half a
+  // fixture cannot carry — that the shape the negative direction is written
+  // for still exists in this repo — and it is the half that went stale last
+  // time. Their walk ROOTS are named in the case text, so a reader who opens
+  // one is told what to look for; a file that has gone is NOT MEASURED rather
+  // than a quiet pass, per the convention at the top of this battery.
+  const SUBTREE_WALK_SPECIMENS = [
+    ['scripts/check-self-test-wired.mjs', "walkScripts(scriptsDir), seeded at join(ROOT, 'scripts')"],
+    ['scripts/check-spec-parsed-alias.mjs', "walkZodFiles(SPEC_SRC), seeded at join(ROOT, 'packages/spec/src')"],
+  ];
+  // The floor (#13799): a loop over an emptied table runs zero cases and reads
+  // exactly like a pass, and this table's whole purpose is to not be down to
+  // one name again.
+  t('the bounded-subtree specimen table still names two files at two walk roots', SUBTREE_WALK_SPECIMENS.length === 2);
+  for (const [file, walk] of SUBTREE_WALK_SPECIMENS) {
+    const abs = nodePath.join(ROOT, file);
+    if (!existsSync(abs)) {
+      unmeasurable(
+        `the bounded-subtree walk specimen ${file}`,
+        'the file is not in this tree, so its source cannot be read — name a specimen that is, or say plainly that only the fixture backs this direction.',
+      );
+      continue;
+    }
+    const src = readFileSync(abs, 'utf8');
+    t(
+      `LIVE: ${file} still holds a bounded-subtree walk (${walk})`,
+      /walk[A-Za-z]*\(/.test(src),
+    );
+    t(
+      `LIVE: …and this predicate reads ${file} as NOT a repo-root walk, the negative direction the fixture above stands for`,
+      repoRootWalkSpelling(src) === null,
+    );
+  }
+
 
   // The refusals — the two contradictions the derivation must not resolve on
   // the gate's behalf.
