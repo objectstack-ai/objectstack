@@ -304,6 +304,7 @@ These properties are available on all field types:
 | `defaultValue` | `any` | — | Default value for new records |
 | `maxLength` | `number` | — | Maximum character length |
 | `minLength` | `number` | — | Minimum character length |
+| `valueDomain` | `'iana_time_zone' \| 'iso_4217_currency' \| 'iso_3166_alpha2'` | — | Standard the written value must be a member of (`text` only): an IANA time zone, an ISO 4217 currency code or an ISO 3166-1 alpha-2 country code. The same closed vocabulary a settings specifier's `valueDomain` uses; membership, not a pattern, is what a write is judged against |
 | `min` | `number` | — | Minimum numeric value |
 | `max` | `number` | — | Maximum numeric value |
 

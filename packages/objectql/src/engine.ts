@@ -14072,14 +14072,74 @@ export class ObjectRepository implements IScopedObjectRepository {
     });
   }
 
-  /** Execute a named action registered on this object */
+  /**
+   * Execute a named action registered on this object.
+   *
+   * [#13866, Director ruling 决裁批 #24 2026-09-01] Elevated to the SAME
+   * trusted posture REST `/actions` (`domains/actions.ts`) and MCP
+   * `run_action` (`action-execution.ts`) already give an action body (#13832,
+   * #2849). This is the third `executeAction` caller those two files' own
+   * comments name `ScopedRepo.execute()` — until now it handed the body
+   * neither `api` nor `executionContext`, the context-less facade #3914
+   * argues an action body must never get. A caller reaching another action
+   * via `ctx.api.object(x).execute(y)` (an in-process handler composing a
+   * sibling handler, `action-execution.ts`'s own description of this path)
+   * now dispatches under the same identity its own body runs under.
+   *
+   * `{ ...this.context, isSystem: true }` is the `sudo()`-shaped elevation
+   * `buildActionExecutionContext` and `recomputeSummaries`'s `systemCtx` both
+   * use, not a bare `{ isSystem: true }`: spreading the caller's envelope
+   * FIRST keeps the resulting write attributable and correctly scoped —
+   * `userId` stamps `created_by`/`updated_by`, `tenantId` stamps the org
+   * column and drives driver-level tenant isolation, an open `transaction`
+   * joins rather than escapes — instead of the unattributable, org-less rows
+   * a bare `{ isSystem: true }` would produce.
+   *
+   * The census behind this change (repo + `examples/` + `apps/`, production
+   * and test) found ZERO existing callers of this method anywhere — every
+   * `ObjectRepository.execute()` / `ScopedRepo.execute()` hit in the tree was
+   * prose describing the shape, never an invocation — so this widens what a
+   * FUTURE caller's write is accepted to do, without changing any write
+   * anyone ships today.
+   *
+   * [Disclosure completeness] What widens is larger than the static
+   * `readonly` strip named above. `isSystem: true` on `this.context` is read
+   * by ObjectQL's registered security middleware as a TOTAL, unconditional
+   * bypass — `plugin-security/src/security-plugin.ts:1614-1616`, "System
+   * operations bypass security" / `return next()` ahead of every other gate
+   * in that middleware — so every `find`/`insert`/`update`/`delete` this
+   * `ctx.api` drives also skips RLS read scoping (`:4344`) and field-level
+   * security (`:4495`); the CRUD/export permission checks in the same
+   * middleware (`:1616`, `canExport` at `:4573`); the ADR-0103 engine-owned/
+   * append-only write guard (`system-write-guard.ts:96,120`, called at
+   * `security-plugin.ts:1736`); the package-managed / system-row /
+   * curated-capability-name / audience-anchor write gates
+   * (`security-plugin.ts:1690-1724`); the referential-integrity check
+   * (`:5892` in this file) and the tenant-audit mute (`:3773`) — in addition
+   * to the static `readonly`/runtime-owned strip on BOTH update paths
+   * (`:11290`, `:11473`) and the insert path (`:10025`), not the single site
+   * an earlier draft of this note implied. Exactly what REST `/actions` and
+   * MCP `run_action` already give an action body — see
+   * `content/docs/permissions/system-context.mdx` ("Elevation is total, and
+   * it is not granular") for the full catalog this bypass belongs to.
+   *
+   * Bounded on two sides: metadata-plane schema masking
+   * (`metadata-core/object-schema-fls.ts:228`) is a separate REST/GraphQL
+   * dispatch path this `ctx.api` surface never calls into; and
+   * `plugin-sharing/rule-hooks.ts`'s insert/update materialisation skip was
+   * already retired by the maintainer's 2026-08-31 ruling on #13533 (system
+   * and user writes materialise sharing grants identically today).
+   */
   async execute(actionName: string, params?: any): Promise<any> {
     if (this.engine.executeAction) {
+      const executionContext: ExecutionContext = { ...this.context, isSystem: true };
       return this.engine.executeAction(this.objectName, actionName, {
         ...params,
         userId: this.context.userId,
         tenantId: this.context.tenantId,
         roles: this.context.positions,
+        executionContext,
+        api: new ScopedContext(executionContext, this.engine),
       });
     }
     throw new Error(`Actions not supported by engine`);

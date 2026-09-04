@@ -31,6 +31,7 @@ import { AddressSchema } from './field-value.zod';
 // ruling 2026-08-12, Option A). One shared verdict for both anchors: the
 // field-level `precision` key and `CurrencyConfigSchema.precision`.
 import { currencyPrecisionContradiction } from './currency-fraction-digits';
+import { ValueDomainSchema } from '../shared/value-domain.zod';
 
 /**
  * Field Type Enum
@@ -136,6 +137,35 @@ export const BOUNDED_STRING_FIELD_TYPES: ReadonlySet<string> = new Set([
   'markdown', 'html', 'richtext', 'code',
   // #11875 — the write seam enforces these two's declared bound (see above).
   'signature', 'qrcode',
+] as const satisfies readonly FieldType[]);
+
+/**
+ * Field types on which `valueDomain` is authorable — the set whose stored
+ * value is ONE plain string that names a member of a published standard
+ * (maintainer ruling 2026-09-02, option A on #14168: a field-level
+ * `valueDomain` drawn from the settings specifier's closed vocabulary; see
+ * `shared/value-domain.zod.ts`).
+ *
+ * Measured against BOUNDED_STRING_FIELD_TYPES (the `maxLength` / `minLength`
+ * family, twelve types) and deliberately NARROWER. A domain member is a short
+ * identifier (`UTC`, `CHF`, `CH`) and the whole stored value is that
+ * identifier, so only the type that stores a single plain string qualifies.
+ * The other eleven store something else: `textarea` / `markdown` / `html` /
+ * `richtext` / `code` store a multi-line body; `email` / `url` / `phone`
+ * already carry their own shape family and a currency code is never an
+ * email; `password` stores a masked credential (ADR-0100); `signature` /
+ * `qrcode` store a data URI. Declaring a domain on any of those would parse
+ * and describe nothing that is stored — the declared-but-inert shape
+ * ADR-0078 keeps out — so `FieldSchema` refuses it there (the superRefine
+ * below, the #11566 template).
+ *
+ * `select` is NOT here, on purpose: a select's membership boundary is its
+ * `options` table, exhaustive on the write path. The settings specifier lets
+ * a domain DEMOTE `options` to a suggestion list; importing that semantics
+ * onto fields is a second ruling, not a widening of this set.
+ */
+export const VALUE_DOMAIN_FIELD_TYPES: ReadonlySet<string> = new Set([
+  'text',
 ] as const satisfies readonly FieldType[]);
 
 /**
@@ -980,6 +1010,16 @@ export const FieldSchema = lazySchema(() => {
   // metadata author mass-produces — and is refused loudly at authoring instead
   // of parsing cleanly and asserting nothing.
   minLength: z.number().int().min(1).optional().describe('Min character length (positive integer; `minLength: 0` is refused — express "no minimum" by omitting the key). Only authorable on types that store a bounded string: text, textarea, email, url, phone, password, markdown, html, richtext, code, signature, qrcode. Checked on the WRITTEN value only (the `min`/`max` transition-gate class): a stored value shorter than a bound declared later is never re-read and survives unrelated edits — only a write carrying a too-short value is refused.'),
+  // #14168 (maintainer ruling 2026-09-02, option A): a field-level value
+  // domain drawn from the SAME closed vocabulary and judged by the SAME
+  // membership predicate as `Specifier.valueDomain` (shared/value-domain.zod.ts
+  // — `isValueDomainMember`), so a time zone accepted in Settings is the time
+  // zone accepted in a field. The vocabulary does not widen here. Which TYPES
+  // may author the key is the superRefine below (VALUE_DOMAIN_FIELD_TYPES —
+  // `text` only; the docblock on that set records the measurement against the
+  // `maxLength` family). The write-path refusal (`value_domain`, ADR-0114
+  // catalog member) is the engine's half of the same ruling.
+  valueDomain: ValueDomainSchema.optional().describe('Standard value domain the WRITTEN value must be a member of: `iana_time_zone` (an IANA/tzdb zone identifier such as `UTC`, `Asia/Kolkata`, `Europe/Kyiv` — membership is the `Intl.DateTimeFormat` probe, never the `Intl.supportedValuesOf` enumeration, which omits `UTC`), `iso_4217_currency` (an ISO 4217 alphabetic currency code, uppercase, e.g. `CHF`) or `iso_3166_alpha2` (an ISO 3166-1 alpha-2 country code, uppercase, e.g. `CH`). The same closed vocabulary and the same membership predicate as a settings specifier\'s `valueDomain`. Only authorable on `text` — the one type whose stored value is a single plain string naming the member. Checked on the WRITTEN value only (the `min`/`max`/`maxLength` transition-gate class): a stored value outside a domain declared later is never re-read and survives unrelated edits — only a write carrying a non-member is refused, with the field error code `value_domain`. Reach for it precisely where a pattern cannot help: `^[A-Z]{2}$` admits `ZZ`, and `Mars/Olympus` is a shape-valid zone that does not exist.'),
 
   // objectui#6140 (maintainer ruling 2026-08-25, Option A — verbatim:
   // 「就全部接受，然后继续下一批」): `rows` was consumed-but-undeclared.
@@ -1884,6 +1924,31 @@ export const FieldSchema = lazySchema(() => {
         'character length for the bound to constrain, so the declaration would parse and ' +
         'enforce nothing (the write-time validator applies `minLength` to exactly those ' +
         'types). Drop the key, or use a bounded string type.',
+    });
+  }
+
+  // [#14168] (maintainer ruling 2026-09-02, option A — the #11566 template
+  // applies): `valueDomain` is only authorable on the types whose stored value
+  // is one plain string naming a member of the standard
+  // (VALUE_DOMAIN_FIELD_TYPES — its docblock carries the measurement against
+  // the `maxLength` family). On any other type the declaration would parse
+  // and constrain nothing that is stored — the declared-but-inert shape
+  // ADR-0078 keeps out — so it is refused at the authoring seam, where the fix
+  // is one keystroke away. `valueDomain` has no schema default, so `undefined`
+  // here always means "not authored" — a field without the key can never fire
+  // this. The message enumerates the set ITSELF rather than a prose copy of
+  // it (#12017 two-copies failure shape).
+  if (field.valueDomain !== undefined && !VALUE_DOMAIN_FIELD_TYPES.has(field.type)) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['valueDomain'],
+      message:
+        `\`valueDomain\` is only valid on field types that store a single plain string — ` +
+        `${[...VALUE_DOMAIN_FIELD_TYPES].map((t) => `'${t}'`).join(', ')} — ` +
+        `and this field is \`${field.type}\`: its stored value is not one identifier ` +
+        'for a standard-domain membership test to judge, so the declaration would parse and ' +
+        'constrain nothing (the write-time validator applies `valueDomain` to exactly those ' +
+        'types). Drop the key, or use a `text` field.',
     });
   }
 

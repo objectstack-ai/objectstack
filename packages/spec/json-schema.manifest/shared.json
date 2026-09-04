@@ -26,6 +26,7 @@
     "shared/SortItem",
     "shared/StaticMount",
     "shared/SystemIdentifier",
-    "shared/TemplateExpressionInput"
+    "shared/TemplateExpressionInput",
+    "shared/ValueDomain"
   ]
 }

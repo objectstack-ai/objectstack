@@ -1,0 +1,193 @@
+// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+
+/**
+ * `FLOW_NODE_EXPRESSION_PATHS` — the `value` role and the `assignment` entry
+ * (#14149, maintainer ruling 2026-09-02: option A, the rendering half).
+ *
+ * The ledger's two consumers (`service-automation`'s `registerFlow` pass and
+ * `@objectstack/lint`) and its reconciliation ratchet live outside this
+ * package; what THIS file pins is the contract they read: the entry exists
+ * with the ruled role, the `*` wildcard resolves each authored variable's
+ * value, only the envelope form is emitted for the `value` role, and every
+ * entry that existed before resolves byte-identically (the fixtures under
+ * "unchanged" are the ratchet's own cases, restated here so a resolver edit
+ * that moves them fails where the edit is made).
+ */
+
+import { describe, expect, it } from 'vitest';
+
+import {
+  FLOW_NODE_EXPRESSION_PATHS,
+  isExpressionEnvelopeShaped,
+  resolveFlowNodeExpressions,
+  type FlowNodeExpressionPath,
+  type FlowNodeExpressionRole,
+} from './flow-node-expression-paths.js';
+
+/** The ruling's example — the declared stdlib, reachable from metadata. */
+const DIGEST_SOURCE = 'joinNonEmpty(overdue_tasks.map(t, t.subject), "\\n")';
+const DIGEST_ENVELOPE = { dialect: 'cel', source: DIGEST_SOURCE };
+
+/** A two-variable assignment: one `{token}` interpolation, one CEL value envelope. */
+const TWO_VARIABLE_ASSIGNMENT = {
+  assignments: {
+    owner_name: '{manager.name}',
+    digest: DIGEST_ENVELOPE,
+  },
+};
+
+describe('FLOW_NODE_EXPRESSION_PATHS — the assignment value entry (#14149)', () => {
+  const entry = FLOW_NODE_EXPRESSION_PATHS.find((e) => e.nodeType === 'assignment');
+
+  it('declares exactly one slot for `assignment`: `assignments.*`, role `value`', () => {
+    expect(entry, 'the ruled entry: an assignment value may be a CEL envelope').toBeDefined();
+    expect(entry!.path).toBe('assignments.*');
+    expect(entry!.role).toBe('value');
+    expect(entry!.label).toBe('assignment value');
+    expect(FLOW_NODE_EXPRESSION_PATHS.filter((e) => e.nodeType === 'assignment')).toHaveLength(1);
+  });
+
+  it('the role union carries `value` beside `predicate` and `flow-template`', () => {
+    // A type-level pin: the union is what downstream consumers switch on.
+    const roles: FlowNodeExpressionRole[] = ['predicate', 'flow-template', 'value'];
+    expect(new Set(FLOW_NODE_EXPRESSION_PATHS.map((e) => e.role))).toEqual(new Set(roles));
+  });
+
+  it('resolves the envelope value of a two-variable assignment, and only it', () => {
+    const found = resolveFlowNodeExpressions('assignment', TWO_VARIABLE_ASSIGNMENT);
+    expect(found).toHaveLength(1);
+    expect(found[0]!.path).toBe('assignments.digest');
+    expect(found[0]!.entry).toBe(entry);
+    expect(found[0]!.entry.role).toBe('value');
+    // The value is handed over verbatim — the envelope, not its source — so a
+    // consumer can pass it straight to `validateExpression('value', envelope)`.
+    expect(found[0]!.value).toBe(DIGEST_ENVELOPE);
+    expect((found[0]!.value as { source: string }).source).toContain('joinNonEmpty(');
+  });
+
+  it('a `{token}` string in a value slot is interpolation, not an expression — skipped', () => {
+    expect(resolveFlowNodeExpressions('assignment', { assignments: { owner_name: '{manager.name}' } })).toEqual([]);
+    // Bare CEL as a STRING is not CEL here either: a plain string has always
+    // meant flow interpolation in this slot, and the envelope is the only CEL
+    // spelling — so `'a + b'` is the literal text `a + b`, and not resolved.
+    expect(resolveFlowNodeExpressions('assignment', { assignments: { sum: 'a + b' } })).toEqual([]);
+  });
+
+  it('literals that are not envelope-shaped are data, not expressions', () => {
+    expect(resolveFlowNodeExpressions('assignment', {
+      assignments: { n: 1, ok: true, nothing: null, list: [1, 2], obj: { source: 'x' } },
+    })).toEqual([]);
+  });
+
+  it('a MALFORMED envelope is still resolved — so the validator refuses it instead of the store keeping it', () => {
+    const found = resolveFlowNodeExpressions('assignment', { assignments: { digest: { dialect: 'cel' } } });
+    expect(found.map((f) => f.path)).toEqual(['assignments.digest']);
+    expect(found[0]!.value).toEqual({ dialect: 'cel' });
+  });
+
+  it('resolves every authored key of the map, in authoring order, with concrete paths', () => {
+    const found = resolveFlowNodeExpressions('assignment', {
+      assignments: {
+        a: { dialect: 'cel', source: '1' },
+        b: '{x}',
+        c: { dialect: 'cel', source: '2' },
+      },
+    });
+    expect(found.map((f) => f.path)).toEqual(['assignments.a', 'assignments.c']);
+  });
+
+  it('the legacy shapes are not declared: bare config keys and the array form resolve nothing', () => {
+    // Bare `{ <variable>: <value> }` — envelope-shaped or not, these are the
+    // literal values they always were; the ledger declares the canonical map.
+    expect(resolveFlowNodeExpressions('assignment', { digest: DIGEST_ENVELOPE })).toEqual([]);
+    // `assignments: [{ variable, value }]` — `*` over an array is not a map of
+    // authored keys and must not invent index paths.
+    expect(resolveFlowNodeExpressions('assignment', {
+      assignments: [{ variable: 'digest', value: DIGEST_ENVELOPE }],
+    })).toEqual([]);
+    // The ratchet's own pin, kept true: `config.condition` is structural.
+    expect(resolveFlowNodeExpressions('assignment', { condition: 'a == b' })).toEqual([]);
+  });
+
+  it('a wildcard against a non-object resolves nothing rather than throwing', () => {
+    expect(resolveFlowNodeExpressions('assignment', {})).toEqual([]);
+    expect(resolveFlowNodeExpressions('assignment', { assignments: 'nope' })).toEqual([]);
+    expect(resolveFlowNodeExpressions('assignment', { assignments: null })).toEqual([]);
+    expect(resolveFlowNodeExpressions('assignment', { assignments: 42 })).toEqual([]);
+    expect(resolveFlowNodeExpressions('assignment', null)).toEqual([]);
+  });
+});
+
+describe('isExpressionEnvelopeShaped — the recognizer a value slot discriminates on', () => {
+  it('is a plain object with a string `dialect`, and nothing else', () => {
+    expect(isExpressionEnvelopeShaped({ dialect: 'cel', source: '1' })).toBe(true);
+    expect(isExpressionEnvelopeShaped({ dialect: 'cel' })).toBe(true); // malformed, but envelope-SHAPED
+    expect(isExpressionEnvelopeShaped({ dialect: 'nope', source: '1' })).toBe(true); // the validator's call
+    expect(isExpressionEnvelopeShaped({ dialect: 1, source: '1' })).toBe(false);
+    expect(isExpressionEnvelopeShaped({ source: '1' })).toBe(false);
+    expect(isExpressionEnvelopeShaped('{ dialect: cel }')).toBe(false);
+    expect(isExpressionEnvelopeShaped(['dialect'])).toBe(false);
+    expect(isExpressionEnvelopeShaped(null)).toBe(false);
+    expect(isExpressionEnvelopeShaped(undefined)).toBe(false);
+  });
+});
+
+describe('every pre-#14149 entry resolves byte-identically (the ratchet\'s fixtures, restated)', () => {
+  const byKey = (e: FlowNodeExpressionPath) => `${e.nodeType}.${e.path} (${e.role})`;
+
+  it('the four entries that existed before are still declared exactly as they were', () => {
+    expect(FLOW_NODE_EXPRESSION_PATHS.map(byKey)).toEqual([
+      'screen.fields[].visibleWhen (predicate)',
+      'decision.conditions[].expression (predicate)',
+      'loop.collection (flow-template)',
+      'map.collection (flow-template)',
+      'assignment.assignments.* (value)',
+    ]);
+  });
+
+  it('screen: each element of a field repeater, with its index', () => {
+    const found = resolveFlowNodeExpressions('screen', {
+      fields: [
+        { name: 'createOpportunity', type: 'boolean' },
+        { name: 'opportunityName', visibleWhen: 'createOpportunity == true' },
+        { name: 'opportunityAmount', visibleWhen: 'createOpportunity == true' },
+      ],
+    });
+    expect(found.map((f) => [f.path, f.value])).toEqual([
+      ['fields[1].visibleWhen', 'createOpportunity == true'],
+      ['fields[2].visibleWhen', 'createOpportunity == true'],
+    ]);
+    expect(found.every((f) => f.entry.role === 'predicate')).toBe(true);
+  });
+
+  it('loop / map: the top-level flow-template slot, still a string', () => {
+    const loop = resolveFlowNodeExpressions('loop', { collection: '{tasks}' });
+    expect(loop.map((f) => [f.path, f.value, f.entry.role])).toEqual([['collection', '{tasks}', 'flow-template']]);
+    const map = resolveFlowNodeExpressions('map', { collection: '{tasks}' });
+    expect(map.map((f) => [f.path, f.value, f.entry.role])).toEqual([['collection', '{tasks}', 'flow-template']]);
+  });
+
+  it('decision: each branch predicate, with its index', () => {
+    const found = resolveFlowNodeExpressions('decision', {
+      conditions: [
+        { label: 'Yes', expression: "lead.status == 'converted'" },
+        { label: 'No', expression: 'true' },
+      ],
+    });
+    expect(found.map((f) => f.path)).toEqual(['conditions[0].expression', 'conditions[1].expression']);
+    expect(found.every((f) => f.entry.role === 'predicate')).toBe(true);
+  });
+
+  it('absent, empty and non-string values in a string-role slot are still skipped', () => {
+    expect(resolveFlowNodeExpressions('screen', {})).toEqual([]);
+    expect(resolveFlowNodeExpressions('screen', { fields: [] })).toEqual([]);
+    expect(resolveFlowNodeExpressions('screen', { fields: [{ visibleWhen: '   ' }] })).toEqual([]);
+    expect(resolveFlowNodeExpressions('screen', { fields: [{ visibleWhen: true }] })).toEqual([]);
+    expect(resolveFlowNodeExpressions('screen', { fields: 'nope' })).toEqual([]);
+    // An ENVELOPE in a predicate-role slot is a non-string — skipped here, a
+    // type violation for the schema pass, exactly as before: the value-role
+    // emission rule is scoped to `value` entries and leaks into no other role.
+    expect(resolveFlowNodeExpressions('loop', { collection: { dialect: 'cel', source: 'x' } })).toEqual([]);
+    expect(resolveFlowNodeExpressions('decision', { condition: 'a == b' })).toEqual([]);
+  });
+});

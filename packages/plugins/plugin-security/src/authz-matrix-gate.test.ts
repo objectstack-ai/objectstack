@@ -30,6 +30,19 @@
 // Every OTHER change vs the pre-extraction snapshot is a same-visibility filter
 // simplification (duplicate-OR dedup; dead org-clause removal on non-tenant
 // objects) and is annotated inline.
+//
+// One LATER delta, authorized by its own ruling rather than by ADR-0095:
+//   (f) [#14959, maintainer ruling 2026-09-03 — ADR-0092 D5 amendment] every
+//       `better_auth` (`sys_user`) WRITE cell moves from `CRUD_DENY` to the
+//       caller's OWN ROW. `member_default` now names `sys_user` with
+//       `allowEdit: true` and its `sys_user_self` carve-out runs at
+//       `operation: 'all'`, so the CRUD gate admits the update and Layer 1
+//       narrows it to `id == <caller>`. What this matrix shows, and the reason
+//       the cell is worth reading rather than just re-baselining: the widening
+//       is EXACTLY one row per principal — `org_admin` gets `oadmin` and not
+//       the org, `no_org_member` gets `u2` even with no active organization
+//       (`sys_user` is non-tenant, so Layer 0 is inert and cannot narrow it
+//       further). Nobody reaches anybody else's identity row on the write path.
 
 import { describe, it, expect, vi } from 'vitest';
 import { derivePosture, POSTURE_RANK } from '@objectstack/core';
@@ -311,14 +324,29 @@ const EXPECTED_MATRIX: Record<string, Record<string, { read: unknown; write: unk
     platform_admin: { read: null, write: 'BYPASS(no-write-filter)' },
     // Simplification: `sys_user` has no organization_id, so the pre-extraction
     // dead org-disjuncts drop; the duplicated `_self` policies remain (self only).
+    //
+    // [D1-era delta (f), #14959] The write cell was `CRUD_DENY`. An org admin
+    // resolves `member_default` additively like everyone else, so the new
+    // `sys_user` edit bit reaches them too — and the row scope reaches them
+    // too: `oadmin` alone. `sys_user_org_members` stays `select`, so the org
+    // ledger this role CAN read is not a set it can write.
     org_admin: {
       read: { $or: [{ id: 'oadmin' }, { id: 'oadmin' }] },
-      write: 'CRUD_DENY:PermissionDeniedError',
+      write: [{ id: 'oadmin' }],
     },
-    // Member: self only (dead org-clause removed); writes denied (better-auth door).
-    member: { read: { id: 'u1' }, write: 'CRUD_DENY:PermissionDeniedError' },
-    // No-org member: self only; writes denied.
-    no_org_member: { read: { id: 'u2' }, write: 'CRUD_DENY:PermissionDeniedError' },
+    // Member: self only (dead org-clause removed).
+    // [delta (f), #14959] The write is now admitted and narrowed to the same
+    // single row the read resolves — the self-service profile edit the ruling
+    // opened. The COLUMN bound is not visible in this matrix at all: it is
+    // ADR-0092 D2's identity write guard, an engine hook downstream of this
+    // middleware (see plugin-auth `sys-user-self-service-route.test.ts`).
+    member: { read: { id: 'u1' }, write: [{ id: 'u1' }] },
+    // No-org member: self only.
+    // [delta (f), #14959] Still exactly one row. `sys_user` carries no
+    // `organization_id`, so Layer 0 is inert here and the absence of an active
+    // organization neither widens the write nor fail-closes it — unlike the
+    // `task` cell above, where delta (e) fail-closes the same principal.
+    no_org_member: { read: { id: 'u2' }, write: [{ id: 'u2' }] },
   },
 };
 

@@ -40,25 +40,24 @@
  *
  * ## The row shape — ⛔ this module writes COLUMNS, never schema
  *
- * `metadata_type` · `name` · `package_id` · `organization_id` · `active`,
- * exactly the five ADR-0126 §4 declares. Four properties are load-bearing and
- * each is pinned on both consumers' sides (`flow-activation-ledger.test.ts`,
+ * `metadata_type` · `name` · `package_id` · `active`, exactly the four
+ * ADR-0126 §4 declares. Three properties are load-bearing and each is pinned on
+ * both consumers' sides (`flow-activation-ledger.test.ts`,
  * `action-activation.test.ts` — unchanged by the consolidation, which is what
  * makes them the proof it lost nothing):
  *
- *   - **`organization_id` is never written.** It is declared nullable and
- *     RESERVED (§5): every row written here is install-level, so the column
- *     stays NULL. The object's `unique: 'organization'` index collapses NULL
- *     through the driver's `COALESCE(organization_id, '__global__')`, so NULL
- *     rows are still unique per `(metadata_type, name)` — which is what lets
- *     {@link ObjectStoreMetadataActivationStore.setActive} treat "the row for
- *     this artifact" as at most one row.
- *   - **Rows carrying an organization are SKIPPED on read, not merged.** A row
- *     with one set was not written by this line, and reading it as
- *     install-level would apply one organization's choice to the whole
- *     installation — the #10243 direction, arrived at from the read side. A
- *     future per-org consumer adds its own scoped read; it does not widen
- *     this one.
+ *   - **The ledger is DEPLOYMENT-level, and carries no tenant column at all.**
+ *     A row says "this environment switched this managed item off" — a fact no
+ *     organization owns. The table briefly declared a nullable tenant column
+ *     marked RESERVED and never written, and this module correspondingly
+ *     filtered reads to the NULL ones and skipped any row carrying an
+ *     organization. Both are gone: a reserved nullable tenant
+ *     column is the shape the total-organization-ownership record proposed in
+ *     PR #14976 rules out, so the column was dropped before it ever shipped
+ *     (17.2.0 predates the table). There is no filter here any more because
+ *     there is no column to filter on — `list()` is simply every activation
+ *     row of this type. Should a per-organization dimension ever be wanted, it
+ *     returns as a separate org-owned object, never as a column here.
  *   - **Absence of a row means ACTIVE.** Nothing here ever writes a row to say
  *     "active by default", and `list()` returning nothing is the normal
  *     stock-boot state, not an error. Re-enabling UPDATES the row to
@@ -90,8 +89,7 @@ const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
  * [ADR-0126 §4] One packaged artifact's install-level activation row.
  *
  * The ledger's own columns are `metadata_type` / `name` / `package_id` /
- * `organization_id` / `active`; `metadata_type` is fixed by the store and
- * `organization_id` is never written on this line (§5), so neither reaches a
+ * `active`; `metadata_type` is fixed by the store, so it never reaches a
  * consumer's projection.
  */
 export interface MetadataActivationRow {
@@ -111,9 +109,9 @@ export interface MetadataActivationRow {
  * always has.
  */
 export interface MetadataActivationStore {
-    /** Every install-level activation row for this type (`organization_id IS NULL`). */
+    /** Every activation row for this type — the ledger is deployment-wide. */
     list(): Promise<MetadataActivationRow[]>;
-    /** Insert or update the install-level row for one packaged artifact. */
+    /** Insert or update the row for one packaged artifact. */
     setActive(row: MetadataActivationRow): Promise<void>;
 }
 
@@ -173,11 +171,12 @@ export class ObjectStoreMetadataActivationStore implements MetadataActivationSto
     ) {}
 
     /**
-     * Every install-level row of this type. Read once at boot to hydrate the
-     * consumer's projection.
+     * Every row of this type. Read once at boot to hydrate the consumer's
+     * projection.
      *
-     * Rows carrying an `organization_id` are SKIPPED, not merged — see the
-     * module header for why that is a wall and not a filter.
+     * The only scoping is the `metadata_type` discriminator: the ledger is
+     * deployment-wide and has no tenant column, so there is no second axis to
+     * filter on (see the module header).
      */
     async list(): Promise<MetadataActivationRow[]> {
         const rows = await this.engine.find(METADATA_ACTIVATION_TABLE, {
@@ -187,8 +186,7 @@ export class ObjectStoreMetadataActivationStore implements MetadataActivationSto
         if (!Array.isArray(rows)) return [];
         const out: MetadataActivationRow[] = [];
         for (const row of rows) {
-            const r = row as { name?: unknown; package_id?: unknown; active?: unknown; organization_id?: unknown };
-            if (r.organization_id != null) continue;
+            const r = row as { name?: unknown; package_id?: unknown; active?: unknown };
             if (typeof r.name !== 'string' || !r.name) continue;
             out.push({
                 name: r.name,
@@ -204,25 +202,27 @@ export class ObjectStoreMetadataActivationStore implements MetadataActivationSto
     }
 
     /**
-     * Insert or update the install-level row for one packaged artifact.
+     * Insert or update the row for one packaged artifact.
      *
      * Read-then-write rather than a blind upsert because the object's
-     * uniqueness is a DECLARED index (`unique: 'organization'`), not a primary
-     * key this store controls: there is no id to collide on, so an
-     * insert-and-catch could not tell "already there" from a real store
-     * failure.
+     * uniqueness is a DECLARED index (`unique: 'global'` over
+     * `(metadata_type, name)`), not a primary key this store controls: there is
+     * no id to collide on, so an insert-and-catch could not tell "already
+     * there" from a real store failure.
      *
-     * ⛔ `organization_id` is not in either payload. Omitting it is what leaves
-     * it NULL, which is the whole of §5's install-level scope on this line.
+     * That index is also why taking the FIRST match is taking the only one: the
+     * read below is keyed on exactly the index's two columns, so it can match
+     * at most one row. It used to pick the first row with a NULL organization
+     * out of the result, back when the table carried a reserved tenant column;
+     * with no such column the set it was choosing from can no longer hold more
+     * than one member.
      */
     async setActive(row: MetadataActivationRow): Promise<void> {
         const existing = await this.engine.find(METADATA_ACTIVATION_TABLE, {
             where: { metadata_type: this.metadataType, name: row.name },
             context: SYSTEM_CTX,
         });
-        const current = Array.isArray(existing)
-            ? existing.find((r: any) => r?.organization_id == null)
-            : undefined;
+        const current = Array.isArray(existing) ? existing[0] : undefined;
 
         if (current && (current as { id?: unknown }).id != null) {
             await this.engine.update(

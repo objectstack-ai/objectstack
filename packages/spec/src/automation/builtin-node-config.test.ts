@@ -17,8 +17,13 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 
 import {
+  ASSIGNMENT_ARRAY_FORM_PRESCRIPTION,
+  ASSIGNMENT_VALUE_ENVELOPE_REFUSAL,
+  AssignmentConfigSchema,
+  AssignmentExpressionValueSchema,
   CreateRecordConfigSchema,
   DeleteRecordConfigSchema,
   GetRecordConfigSchema,
@@ -27,6 +32,11 @@ import {
   ScreenFieldConfigSchema,
   UpdateRecordConfigSchema,
 } from './builtin-node-config.zod.js';
+import {
+  LEDGER_DECLARED_NODE_CONFIG_SCHEMAS,
+  SCHEMALESS_NODE_CONFIG_SCHEMAS,
+  getSchemalessNodeConfigJsonSchemas,
+} from './schemaless-node-config.zod.js';
 
 interface Parseable { safeParse(v: unknown): { success: boolean; error?: { issues: ReadonlyArray<{ code: string; message: string }> } } }
 
@@ -262,5 +272,130 @@ describe('MapConfigSchema — strict as of #4001 批 9', () => {
     const message = unknownKeyMessage(MapConfigSchema, { collection: '{r}', flowName: 'per_row', flow: 'per_row_v2' })!;
     expect(message).toContain('`flow`');
     expect(message).toContain('`flowName`');
+  });
+});
+
+// ─── assignment (#14149) ─────────────────────────────────────────────
+
+describe('assignment value contract — a CEL envelope beside `{token}` interpolation (#14149)', () => {
+  const DIGEST_SOURCE = 'joinNonEmpty(overdue_tasks.map(t, t.subject), "\\n")';
+  const DIGEST_ENVELOPE = { dialect: 'cel', source: DIGEST_SOURCE };
+
+  /** Every `custom` issue at exactly `assignments.<key>` (or beneath it). */
+  function envelopeIssues(config: unknown, key: string) {
+    const result = AssignmentConfigSchema.safeParse(config);
+    if (result.success) return [];
+    return result.error!.issues.filter((i) => i.path[0] === 'assignments' && i.path[1] === key);
+  }
+
+  it('accepts a CEL value envelope as a variable value — the ruling\'s `joinNonEmpty` example, verbatim', () => {
+    const result = AssignmentConfigSchema.safeParse({ assignments: { digest: DIGEST_ENVELOPE } });
+    expect(result.success).toBe(true);
+    // No transform: the stored shape IS the envelope `validateExpression` and
+    // the executor half read, so nothing has to un-normalize it later.
+    expect((result.data as { assignments: Record<string, unknown> }).assignments.digest).toEqual(DIGEST_ENVELOPE);
+    expect(AssignmentExpressionValueSchema.safeParse(DIGEST_ENVELOPE).success).toBe(true);
+  });
+
+  it('accepts the two forms side by side in one node', () => {
+    expect(AssignmentConfigSchema.safeParse({
+      assignments: { owner_name: '{manager.name}', digest: DIGEST_ENVELOPE },
+    }).success).toBe(true);
+  });
+
+  it('PRESERVATION: every value that parsed before still parses — strings, scalars, arrays, plain objects', () => {
+    expect(AssignmentConfigSchema.safeParse({
+      assignments: {
+        decision: 'approved',                 // the showcase's own assignment
+        owner: '{record.owner}',              // sole-token interpolation
+        greeting: 'Hi {record.name}!',        // text with holes
+        cel_looking_text: 'a + b',            // a STRING is never CEL here
+        n: 3, ok: true, nothing: null,
+        list: ['{a}', 2],
+        obj: { nested: '{x}', source: 'not an envelope without a dialect' },
+        empty: '',
+      },
+    }).success).toBe(true);
+    // An envelope-shaped object with a non-string `dialect` is a literal, as it always was.
+    expect(AssignmentConfigSchema.safeParse({ assignments: { weird: { dialect: 1 } } }).success).toBe(true);
+    // An empty node is valid (the descriptor declares no `required`).
+    expect(AssignmentConfigSchema.safeParse({}).success).toBe(true);
+    expect(AssignmentConfigSchema.safeParse({ assignments: {} }).success).toBe(true);
+  });
+
+  it('bare legacy keys (no `assignments` wrapper) still parse, untouched — an envelope there is a literal', () => {
+    expect(AssignmentConfigSchema.safeParse({ decision: 'approved', digest: { dialect: 'cel' } }).success).toBe(true);
+  });
+
+  it.each([
+    ['no `source` (and no `ast`)', { dialect: 'cel' }, ['assignments', 'digest'], 'Expression requires at least one of'],
+    ['an empty `source`', { dialect: 'cel', source: '' }, ['assignments', 'digest', 'source'], ''],
+    ['a non-string `source`', { dialect: 'cel', source: 42 }, ['assignments', 'digest', 'source'], ''],
+    ['an unknown dialect', { dialect: 'javascript', source: '1 + 1' }, ['assignments', 'digest', 'dialect'], ''],
+  ] as ReadonlyArray<[string, unknown, ReadonlyArray<string>, string]>)(
+    'REFUSES a malformed envelope with %s — code `custom`, the value\'s path, the refusal sentence first',
+    (_what, envelope, path, detail) => {
+      const issues = envelopeIssues({ assignments: { digest: envelope } }, 'digest');
+      expect(issues.length).toBeGreaterThan(0);
+      const issue = issues.find((i) => i.path.join('.') === path.join('.'))!;
+      expect(issue, `an issue at ${path.join('.')}`).toBeDefined();
+      expect(issue.code).toBe('custom');
+      expect(issue.message.startsWith(ASSIGNMENT_VALUE_ENVELOPE_REFUSAL)).toBe(true);
+      if (detail) expect(issue.message).toContain(detail);
+    },
+  );
+
+  it('REFUSES a `template` / `cron` envelope: only `cel` is evaluated to a value', () => {
+    for (const dialect of ['template', 'cron']) {
+      const issues = envelopeIssues({ assignments: { body: { dialect, source: 'x' } } }, 'body');
+      expect(issues.map((i) => i.path.join('.'))).toEqual(['assignments.body.dialect']);
+      expect(issues[0]!.code).toBe('custom');
+      expect(issues[0]!.message.startsWith(ASSIGNMENT_VALUE_ENVELOPE_REFUSAL)).toBe(true);
+      expect(issues[0]!.message).toContain('only the `cel` dialect');
+    }
+  });
+
+  it('a malformed envelope is refused wherever it sits in the map — the path names the variable', () => {
+    const result = AssignmentConfigSchema.safeParse({
+      assignments: { fine: DIGEST_ENVELOPE, broken: { dialect: 'cel' }, alsoFine: '{x}' },
+    });
+    expect(result.success).toBe(false);
+    expect(result.error!.issues.map((i) => i.path.join('.'))).toEqual(['assignments.broken']);
+  });
+
+  it('refuses the legacy array form as a type error carrying the map as the prescription', () => {
+    const result = AssignmentConfigSchema.safeParse({ assignments: [{ variable: 'digest', value: DIGEST_ENVELOPE }] });
+    expect(result.success).toBe(false);
+    expect(result.error!.issues.map((i) => [i.code, i.path.join('.')])).toEqual([['invalid_type', 'assignments']]);
+    expect(result.error!.issues[0]!.message).toBe(ASSIGNMENT_ARRAY_FORM_PRESCRIPTION);
+    expect(ASSIGNMENT_ARRAY_FORM_PRESCRIPTION).toContain('`[{ variable, value }]`');
+    // The prescription is scoped to the array: any other wrong type keeps Zod's own message.
+    expect(AssignmentConfigSchema.safeParse({ assignments: 'nope' }).error!.issues[0]!.message)
+      .not.toBe(ASSIGNMENT_ARRAY_FORM_PRESCRIPTION);
+  });
+
+  it('declares the slot to the expression ledger: `xExpression: \'value\'` rides onto the map value', () => {
+    // The channel `FLOW_NODE_EXPRESSION_PATHS`'s `assignment` entry
+    // (`assignments.*`) is derived from: a ratchet walking the map's
+    // `additionalProperties` finds the marker there, the same way it finds
+    // `loop.collection`'s `'template'` marker on a property.
+    const json = z.toJSONSchema(AssignmentConfigSchema, {
+      target: 'draft-2020-12', io: 'input', unrepresentable: 'any',
+    }) as { properties?: Record<string, { additionalProperties?: Record<string, unknown> }> };
+    expect(json.properties?.assignments?.additionalProperties?.xExpression).toBe('value');
+    expect(String(json.properties?.assignments?.additionalProperties?.description)).toContain('joinNonEmpty');
+  });
+
+  it('reaches the reconciliation ratchet through the JSON map it already walks', () => {
+    // `service-automation`'s `config-expression-ledger.test.ts` derives its
+    // expectation from `getSchemalessNodeConfigJsonSchemas()`; `assignment`
+    // is carried there by `LEDGER_DECLARED_NODE_CONFIG_SCHEMAS` — NOT by
+    // `SCHEMALESS_NODE_CONFIG_SCHEMAS`, whose meaning ("publishes no
+    // descriptor") other readers depend on.
+    expect(Object.keys(LEDGER_DECLARED_NODE_CONFIG_SCHEMAS)).toEqual(['assignment']);
+    expect(Object.keys(SCHEMALESS_NODE_CONFIG_SCHEMAS).sort()).toEqual(['decision', 'script', 'subflow']);
+    const projected = getSchemalessNodeConfigJsonSchemas().assignment as
+      { properties?: Record<string, { additionalProperties?: Record<string, unknown> }> };
+    expect(projected.properties?.assignments?.additionalProperties?.xExpression).toBe('value');
   });
 });

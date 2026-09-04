@@ -15,10 +15,9 @@
  *
  * ## What it enforces
  *
- * The activation row these routes write is **install-level**
- * (`organization_id NULL`, §5): one row, one environment, every tenant. So the
- * authority required to write it scales with how many tenants that reach
- * covers:
+ * The activation row these routes write is **deployment-level** (§5): the
+ * ledger carries no tenant column, so one row covers one environment and every
+ * tenant in it. The authority required to write it scales with that reach:
  *
  *   - **`single` posture** — one logical tenant, so install-level and org-level
  *     are the SAME scope. The org admin who already passed the caller's own

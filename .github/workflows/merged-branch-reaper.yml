@@ -28,6 +28,44 @@ name: Merged-Branch Reaper (report-only)
 # `is-ancestor` proves "nothing would be lost". It does NOT prove the converse,
 # and the converse is what a reaper needs.
 #
+# ## MERGED is not MERGED INTO `main` — the base-ref guard (#13503)
+#
+# `merged_at` says a pull request landed. It does not say WHERE. A stacked PR
+# whose base is another dev branch reports `merged_at` exactly like one that
+# landed on `main`, and its content reaches `main` only if that base branch
+# itself later merged — a second hop this deliberately flat criterion cannot
+# see and must not start guessing at.
+#
+# Measured, not supposed (the #13503 census, 2026-09-02, over the 678
+# `copilot/*` branches): of 575 MERGED, 48 (8.3%) merged into something other
+# than `main`. Walking all 48 — 43 have a base that itself later merged to
+# `main`, so the content lands via a 2-hop chain; 4 have a base that no longer
+# exists and could not be re-verified; and 1, `copilot/check-action-run-status`
+# (based on a PR that closed WITHOUT merging), is a MERGED branch whose content
+# has no confirmed path to `main` at all. Against that last one the unguarded
+# criterion says "safe to delete", and it is wrong.
+#
+# So `reapable` now additionally requires that at least one of the branch's
+# merged PRs reports `base.ref === 'main'`. Everything else that merged goes to
+# `mergedElsewhere`: reported in full, never reaped — the 43 safe-by-chain ones
+# included. That asymmetry is the point. A reaper's two error directions do not
+# cost the same: an unreaped branch costs a line of noise in `ls-remote`, a
+# wrongly reaped one costs work that exists nowhere else. The guard buys the
+# removal of the one false positive with a handful of false negatives, at a
+# measured rate of 48 held per 575 merged.
+#
+# ⛔ THE GUARD ONLY NARROWS, and that is asserted rather than asked for on
+# trust. `scripts/check-merged-branch-reaper-outcome.mjs` extracts THIS script
+# from THIS file and drives it under doubles, holding the invariant
+# `reapable ⇒ that branch has a merged PR whose base is main` over every
+# scenario — so no later edit here can widen what is reaped without turning
+# that check red, and its `--self-test` deletes the guard and requires the
+# battery to notice.
+#
+# ⛔ It is NOT `is-ancestor` wearing a new hat. The base ref is read off the PR
+# RECORD, which is the instrument the section above mandates; nothing here asks
+# git whether a commit is reachable from anything.
+#
 # ## Why a scheduled sweep and NOT `on: pull_request` — measured, 2026-08-30
 #
 # The obvious shape is an event-driven reaper on `pull_request: [closed]`. It
@@ -100,12 +138,24 @@ name: Merged-Branch Reaper (report-only)
 # `check:*` family or declare why it has none. This one genuinely has none: its
 # single step is an API sweep run through `actions/github-script`, not a named
 # local verification, so there is no `check:*` script a card's file surface
-# could ever schedule. The `pull_request` filter below is not a verification
-# step either — it exists so that edits to this file exercise the sweep before
-# they merge, and that is not decoration: it is what produced this workflow's
-# first real dry-run list ("111 of 335 ... would be deleted", run 33318728567),
-# which is the one human look the 2026-08-28 ruling requires before deletion is
-# ever enabled. Removing the filter to satisfy the gate would delete that.
+# could ever schedule.
+#
+# ⚠️ Since #13503 there IS a gate over this file — the classifier's contract,
+# `scripts/check-merged-branch-reaper-outcome.mjs` — and it does NOT change the
+# declaration below, deliberately. That gate does not run HERE; it runs in
+# lint.yml beside its two sibling harnesses (the cross-repo closer, the
+# merge-queue triage bot), where a red blocks and where the toolchain it needs
+# is already installed. This marker answers "does THIS workflow's own steps
+# discover a family", and the answer is still no. A card touching this file
+# still gets that gate scheduled, because the gate names this path in its own
+# source, which is how `dispatch-gates` derives a family in the first place.
+#
+# The `pull_request` filter below is not a verification step either — it exists
+# so that edits to this file exercise the sweep before they merge, and that is
+# not decoration: it is what produced this workflow's first real dry-run list
+# ("111 of 335 ... would be deleted", run 33318728567), which is the one human
+# look the 2026-08-28 ruling requires before deletion is ever enabled. Removing
+# the filter to satisfy the gate would delete that.
 #
 # dispatch-gates: no-check-families -- the only step is an API sweep via actions/github-script; no named local check exists to run
 
@@ -161,6 +211,10 @@ jobs:
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const PREFIX = 'claude/';
+            // The one base a merge has to land on for this reaper to call a
+            // branch reapable. See "MERGED is not MERGED INTO `main`" above:
+            // read off the PR record, never from git reachability.
+            const BASE_REF = 'main';
             const graceDays = Number(process.env.GRACE_DAYS || '7');
             if (!Number.isFinite(graceDays) || graceDays < 0) {
               core.setFailed(`grace_days must be a non-negative number, got ${process.env.GRACE_DAYS}`);
@@ -181,7 +235,7 @@ jobs:
             // --- 2. classify by PR state ------------------------------------------
             // ⛔ NO `is-ancestor` ANYWHERE. The only question asked of each branch is
             // "does a PR whose head ref is this branch report a merged_at?".
-            const buckets = { reapable: [], grace: [], open: [], closedUnmerged: [], noPr: [], protectedBranch: [] };
+            const buckets = { reapable: [], grace: [], open: [], mergedElsewhere: [], closedUnmerged: [], noPr: [], protectedBranch: [] };
 
             for (const branch of candidates) {
               if (branch.protected) {
@@ -206,6 +260,13 @@ jobs:
               const merged = mine.filter((pr) => pr.merged_at);
               const open = mine.filter((pr) => pr.state === 'open');
 
+              // The base-ref guard (#13503). `merged_at` is WHETHER it landed;
+              // `base.ref` is WHERE. A PR record with no `base` at all answers
+              // neither, so it is counted as NOT main — the fail-closed
+              // direction, because the cost of being wrong here is a deleted
+              // branch.
+              const intoMain = merged.filter((pr) => pr.base && pr.base.ref === BASE_REF);
+
               if (merged.length > 0) {
                 // Newest merge wins: a branch reused across two PRs is safe to reap
                 // only once the LAST of them has landed and aged out of the grace
@@ -217,10 +278,30 @@ jobs:
                 // reapable, whatever the merge says.
                 if (open.length > 0) {
                   buckets.open.push({ branch: branch.name, pr: open[0].number, note: 'also has a merged PR' });
+                } else if (intoMain.length === 0) {
+                  // Merged, but never onto `main`. Held and REPORTED, never
+                  // reaped. The grace window is deliberately not consulted:
+                  // this exclusion does not age out, it is answered by a human
+                  // reading the list or by the base branch landing later.
+                  buckets.mergedElsewhere.push({
+                    branch: branch.name,
+                    pr: newest.number,
+                    merged_at: newest.merged_at,
+                    base: (newest.base && newest.base.ref) || '(no base on the PR record)',
+                  });
                 } else if (new Date(newest.merged_at).getTime() > graceCutoff) {
                   buckets.grace.push({ branch: branch.name, pr: newest.number, merged_at: newest.merged_at });
                 } else {
-                  buckets.reapable.push({ branch: branch.name, pr: newest.number, merged_at: newest.merged_at });
+                  // `newest` is still the newest of ALL merged PRs, not of the
+                  // main-based ones: the grace window must not shorten because
+                  // of the guard. The guard only ever REMOVES branches from
+                  // this bucket.
+                  buckets.reapable.push({
+                    branch: branch.name,
+                    pr: newest.number,
+                    merged_at: newest.merged_at,
+                    base_pr: intoMain[0].number,
+                  });
                 }
               } else if (open.length > 0) {
                 buckets.open.push({ branch: branch.name, pr: open[0].number });
@@ -249,6 +330,7 @@ jobs:
             lines.push(`| MERGED, past grace | ${n(buckets.reapable)} | ${pct(buckets.reapable)}% | ✅ would delete |`);
             lines.push(`| MERGED, within grace | ${n(buckets.grace)} | ${pct(buckets.grace)}% | held ${graceDays}d |`);
             lines.push(`| OPEN PR | ${n(buckets.open)} | ${pct(buckets.open)}% | ⛔ excluded — in use |`);
+            lines.push(`| MERGED, but not into \`${BASE_REF}\` | ${n(buckets.mergedElsewhere)} | ${pct(buckets.mergedElsewhere)}% | ⛔ excluded — base-ref guard |`);
             lines.push(`| CLOSED, unmerged | ${n(buckets.closedUnmerged)} | ${pct(buckets.closedUnmerged)}% | ⛔ excluded — MERGED-only policy |`);
             lines.push(`| NO PR at all | ${n(buckets.noPr)} | ${pct(buckets.noPr)}% | ⛔ unreachable by construction |`);
             lines.push(`| protected | ${n(buckets.protectedBranch)} | ${pct(buckets.protectedBranch)}% | ⛔ excluded |`);
@@ -264,6 +346,11 @@ jobs:
             lines.push(`**OPEN PR (${n(buckets.open)})** — still in use:`);
             lines.push(n(buckets.open) ? sample(buckets.open, (r) => `- \`${r.branch}\` — PR #${r.pr}${r.note ? ` (${r.note})` : ''}`) : '_none_');
             lines.push('');
+            lines.push(`**MERGED, but not into \`${BASE_REF}\` (${n(buckets.mergedElsewhere)})** — the base-ref guard. \`merged_at\` says it landed, the base says not here; the content reaches \`${BASE_REF}\` only if the base branch itself merged, and that second hop is not a question this criterion can answer. Held for a human look:`);
+            lines.push(n(buckets.mergedElsewhere)
+              ? sample(buckets.mergedElsewhere, (r) => `- \`${r.branch}\` — PR #${r.pr} merged into \`${r.base}\` at ${r.merged_at}`, 40)
+              : '_none_');
+            lines.push('');
             lines.push(`**CLOSED, unmerged (${n(buckets.closedUnmerged)})** — work that never landed; MERGED-only is the default policy:`);
             lines.push(n(buckets.closedUnmerged) ? sample(buckets.closedUnmerged, (r) => `- \`${r.branch}\` — PR #${r.pr}`) : '_none_');
             lines.push('');
@@ -278,9 +365,10 @@ jobs:
             const payload = { generated_at: new Date().toISOString(), grace_days: graceDays, total_branches: allBranches.length, prefix_branches: total, buckets };
             require('fs').writeFileSync(`${process.env.RUNNER_TEMP}/branch-reaper-report.json`, JSON.stringify(payload, null, 2));
 
-            core.notice(`Dry run: ${n(buckets.reapable)} of ${total} ${PREFIX} branches would be deleted. ${n(buckets.noPr)} have no PR and are unreachable by this criterion. Nothing was deleted.`);
+            core.notice(`Dry run: ${n(buckets.reapable)} of ${total} ${PREFIX} branches would be deleted. ${n(buckets.mergedElsewhere)} merged somewhere other than \`${BASE_REF}\` and are held by the base-ref guard. ${n(buckets.noPr)} have no PR and are unreachable by this criterion. Nothing was deleted.`);
             core.setOutput('reapable', String(n(buckets.reapable)));
             core.setOutput('no_pr', String(n(buckets.noPr)));
+            core.setOutput('merged_elsewhere', String(n(buckets.mergedElsewhere)));
 
       - name: Upload the full classification
         # `always()`: a run whose report is missing because an earlier step died
