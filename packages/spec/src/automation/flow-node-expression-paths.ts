@@ -115,11 +115,13 @@ export type FlowNodeExpressionRole =
    * rest of `CEL_STDLIB_FUNCTIONS`) was unreachable from metadata. Validated at
    * `registerFlow` and `objectstack validate` by the executor-side half
    * (`service-automation` / `lint` consumers call
-   * `validateExpression('value', …)` on what this ledger resolves); the same
-   * half evaluates the envelope at run time. Until it lands the built-in
-   * `assignment` executor writes an envelope object into the variable verbatim
-   * (`interpolate()` recurses into it as a literal object) — the contract is
-   * declared here first so the executor has one shape to implement.
+   * `validateExpression('value', …)` on what this ledger resolves, after
+   * `AssignmentValueSchema` has judged the envelope's shape); the same half
+   * evaluates the envelope at run time. That half LANDED in #15137: the
+   * built-in `assignment` executor evaluates a declared envelope and assigns
+   * the result. Comment-only correction — before #15137 this paragraph closed
+   * by saying the executor still wrote the envelope object into the variable
+   * verbatim, which the landing made false.
    */
   | 'value';
 

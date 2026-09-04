@@ -26,6 +26,15 @@ import { FlowSchema, FLOW_STRUCTURAL_NODE_TYPES, validateControlFlow, collectFlo
 // authoring accepted. See `resolveTriggerBinding`.
 import { resolveFlowTriggerKind } from '@objectstack/spec/automation';
 import { resolveFlowNodeExpressions } from '@objectstack/spec/automation';
+// [#15137] The `value`-role half of the ledger. Both halves of "is this envelope
+// well-formed?" are IMPORTED, never re-spelled here: the shape rule is
+// `AssignmentValueSchema` (spec, #14149 — it refuses a non-`cel` dialect and the
+// `{ dialect: 'cel' }` with no `source` that `validateExpression` reads as "not
+// authored"), and the CEL rule is `validateExpression('value', …)` (formula).
+// `registerFlow` and the run-time evaluator call the SAME composition
+// ({@link AutomationEngine.valueEnvelopeRefusals}), so a flow that registers can
+// never be refused at run time and vice versa.
+import { AssignmentValueSchema, ASSIGNMENT_VALUE_ENVELOPE_REFUSAL } from '@objectstack/spec/automation';
 import { applyConversionsToFlow, type ConversionNotice, type ConversionConflictNotice } from '@objectstack/spec';
 // [ADR-0126 §7.3] "Does a code package ship this flow?" for the subflow guard.
 // Routed through the local precedence module rather than importing
@@ -7121,15 +7130,28 @@ export class AutomationEngine implements IAutomationService {
                 // correct `loop.collection`). They are declared in the ledger so the
                 // reconciliation ratchet still covers the marker.
                 for (const found of resolveFlowNodeExpressions(node.type, node.config)) {
+                    const slotWhere =
+                        `${at}node '${node.id}' (${node.type}) ${found.entry.label} at config.${found.path}`;
+                    // [#15137] `value` slots — the ruled `assignment.assignments.*`.
+                    // The resolver emits ONLY envelope-shaped objects for this role
+                    // (a plain string there is `{token}` interpolation, every other
+                    // literal is data), so everything that arrives here is an
+                    // author saying "this is an expression" and must be a valid
+                    // one. Same severity as a predicate — a malformed envelope
+                    // stops the flow registering — because the alternative is what
+                    // this card replaced: the envelope stored verbatim and rendered
+                    // as JSON by `notify`, with nothing said at any layer.
+                    if (found.entry.role === 'value') {
+                        for (const refusal of this.valueEnvelopeRefusals(found.value)) {
+                            failures.push(`  • ${slotWhere}: ${refusal.message}\n      source: \`${refusal.source}\``);
+                        }
+                        continue;
+                    }
                     if (found.entry.role !== 'predicate') continue;
                     // No schema hint: a screen's `visibleWhen` binds the screen's OWN
                     // collected values, not the trigger record's fields, so the
                     // field-existence pass would report every field name as unknown.
-                    check(
-                        `${at}node '${node.id}' (${node.type}) ${found.entry.label} at config.${found.path}`,
-                        found.value,
-                        false,
-                    );
+                    check(slotWhere, found.value, false);
                 }
             }
             for (const edge of graph.edges) {
@@ -7895,6 +7917,127 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
+     * The CEL scope a flow expression is evaluated in — ONE builder, shared by
+     * the predicate path ({@link evaluateCondition}) and the `value` path
+     * ({@link evaluateValueEnvelope}), extracted from the former in #15137.
+     *
+     * Flat variable keys carrying dots (`step.result`) become nested object
+     * paths, and the result is exposed two ways under `extra`: as a `vars`
+     * namespace (so `vars.step.result` keeps working) AND spread to top level
+     * (so bare identifiers like `status` / `previous.status` resolve — the
+     * natural authoring style for record-change start conditions, and what lets
+     * an assignment envelope write `joinNonEmpty(rows.map(r, r.subject), "\n")`
+     * against a `rows` variable).
+     *
+     * Shared deliberately: a predicate and a value expression that disagreed
+     * about what `rows` means would be two dialects wearing one name.
+     */
+    private celScope(variables: Map<string, unknown>): { extra: Record<string, unknown>; record: Record<string, unknown> } {
+        const vars: Record<string, unknown> = {};
+        for (const [key, value] of variables) {
+            // Convert "step.result" keys into nested object paths.
+            const segs = key.split('.');
+            let cursor = vars;
+            for (let i = 0; i < segs.length - 1; i++) {
+                if (typeof cursor[segs[i]] !== 'object' || cursor[segs[i]] === null) {
+                    cursor[segs[i]] = {};
+                }
+                cursor = cursor[segs[i]] as Record<string, unknown>;
+            }
+            cursor[segs[segs.length - 1]] = value;
+        }
+        return { extra: { ...vars, vars }, record: vars };
+    }
+
+    /**
+     * Why an envelope-shaped `value`-role slot is malformed — the SINGLE notion
+     * of "malformed" this package has (#15137), composed of the two published
+     * primitives and nothing of its own:
+     *
+     *  1. **Shape** — `AssignmentValueSchema` (spec, #14149). It is a no-op on
+     *     anything not `isExpressionEnvelopeShaped`, and on an envelope it
+     *     requires `ExpressionSchema` narrowed to `dialect: 'cel'`: a `template`
+     *     or `cron` envelope is refused, and so is `{ dialect: 'cel' }` with no
+     *     `source` — the one shape `validateExpression` lets through, because an
+     *     empty source reads as "not authored" (`ok: true`) there.
+     *  2. **CEL** — `validateExpression('value', …)` (formula), the same parse
+     *     the `predicate` role gets, minus the boolean expectation.
+     *
+     * Both messages lead with the published `ASSIGNMENT_VALUE_ENVELOPE_REFUSAL`
+     * sentence, so an author meets the rule before the detail however the
+     * envelope is wrong. Neither string is re-spelled here.
+     *
+     * `registerFlow` turns the result into a throw and `objectstack validate`
+     * into a located finding (`@objectstack/lint` composes the same two calls) —
+     * the severity split the `predicate` role already uses. The RUN-TIME
+     * evaluator calls this too, which is the property that matters: the reject
+     * set of registration and the reject set of evaluation are one set, derived
+     * once. Two independently-derived notions of "malformed" is how a flow comes
+     * to register cleanly and then fault, or to be refused for a shape the
+     * executor would have run.
+     */
+    private valueEnvelopeRefusals(value: unknown): { message: string; source: string }[] {
+        const source = (value as { source?: unknown })?.source;
+        const sourceText = typeof source === 'string' ? source : '';
+        const shape = AssignmentValueSchema.safeParse(value);
+        if (!shape.success) {
+            // Already prefixed with the refusal sentence by the spec's own
+            // `superRefine` — re-prefixing would say it twice.
+            return shape.error.issues.map((issue) => ({ message: issue.message, source: sourceText }));
+        }
+        const parsed = validateExpression('value', value as { dialect?: string; source?: string });
+        return parsed.errors.map((e) => ({
+            message: `${ASSIGNMENT_VALUE_ENVELOPE_REFUSAL} ${e.message}`,
+            source: e.source,
+        }));
+    }
+
+    /**
+     * Evaluate a `value`-role CEL envelope to the value a variable takes
+     * (#15137 — the executor half of the 2026-09-02 ruling on #14149).
+     *
+     * Before this, the built-in `assignment` executor handed an envelope to
+     * `interpolate()`, which recursed into it as a plain object and wrote it
+     * into the variable VERBATIM — `notify` then rendered `{"dialect":"cel",
+     * "source":"…"}` as JSON into a message body. The whole declared CEL stdlib
+     * (`joinNonEmpty`, …) was unreachable from metadata because CEL was only
+     * ever asked for a boolean.
+     *
+     * Refusals are thrown, never swallowed to a value: ADR-0032 §1c's rule for
+     * predicates holds at least as hard here, since a value that failed to
+     * compute has no truthy/falsy default to hide behind — a silent `undefined`
+     * in a variable surfaces three nodes later as an empty notification. The
+     * message carries the source, per §1d.
+     *
+     * Only slots the ledger declares reach this: `assignment`'s canonical
+     * `assignments` map. The two legacy shapes the executor still normalizes
+     * (the `assignments: [{ variable, value }]` array and the bare
+     * `{ <variable>: <value> }` config) are deliberately NOT declared, so an
+     * envelope-shaped object there stays the literal object it always was.
+     */
+    evaluateValueEnvelope(envelope: { dialect?: string; source?: string; ast?: unknown }, variables: Map<string, unknown>, where: string): unknown {
+        const refusals = this.valueEnvelopeRefusals(envelope);
+        if (refusals.length > 0) {
+            throw new Error(
+                `${where}: ${refusals.map((r) => r.message).join(' ')} — source: \`${refusals[0].source}\``,
+            );
+        }
+        const source = envelope.source ?? '';
+        const result = ExpressionEngine.evaluate({ dialect: 'cel', source }, this.celScope(variables));
+        if (!result.ok) {
+            // Reached by the shapes the two validators above cannot judge — an
+            // `ast`-only envelope (`ExpressionSchema` accepts `source`-or-`ast`;
+            // the CEL engine evaluates `source` only) and a source that parses
+            // but faults on the live values. Loud, with the source attached.
+            throw new Error(
+                `${where}: value expression failed to evaluate as CEL: ${result.error?.message ?? 'unknown error'} — ` +
+                `source: \`${source}\`.`,
+            );
+        }
+        return result.value;
+    }
+
+    /**
      * Evaluate a flow condition to a boolean.
      *
      * ## Which dialect a condition is in
@@ -7958,26 +8101,9 @@ export class AutomationEngine implements IAutomationService {
         // the equivalent `vars.step.result` CEL identifier path.
         if (!useTemplateDialect) {
             try {
-                const vars: Record<string, unknown> = {};
-                for (const [key, value] of variables) {
-                    // Convert "step.result" keys into nested object paths.
-                    const segs = key.split('.');
-                    let cursor = vars;
-                    for (let i = 0; i < segs.length - 1; i++) {
-                        if (typeof cursor[segs[i]] !== 'object' || cursor[segs[i]] === null) {
-                            cursor[segs[i]] = {};
-                        }
-                        cursor = cursor[segs[i]] as Record<string, unknown>;
-                    }
-                    cursor[segs[segs.length - 1]] = value;
-                }
-                // Expose variables two ways under `extra`: as a `vars` namespace
-                // (so `vars.step.result` keeps working) AND spread to top level (so
-                // bare identifiers like `status` / `previous.status` resolve — the
-                // natural authoring style for record-change start conditions).
                 const result = ExpressionEngine.evaluate(
                     { dialect: 'cel', source: exprStr },
-                    { extra: { ...vars, vars }, record: vars },
+                    this.celScope(variables),
                 );
                 // ADR-0032 §Decision 1c — NO silent fallback. A non-`ok` result is a
                 // real fault (malformed predicate, or — pre build-validation — a
