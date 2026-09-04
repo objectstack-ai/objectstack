@@ -39,6 +39,8 @@
 
 import { describe, it, expect, vi } from 'vitest';
 
+import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+
 import { HttpDispatcher } from './http-dispatcher.js';
 import {
     callData,
@@ -155,6 +157,14 @@ function makeRig(opts: {
             return canRead(options?.context) ? [{ ...row }] : [];
         }),
         update: vi.fn(async (object: string, data: any, options?: any) => {
+            // [#4434 / check:engine-double-contract] The double must not be
+            // LOOSER than `ObjectQL.update` about which call shapes address one
+            // row — a fake that accepts a shape the real engine rejects is how a
+            // dead route once shipped with a green suite. This is also load-bearing
+            // for THIS card: the pins below assert "exactly one update of the
+            // CURRENT record", and that claim is only as good as the double's
+            // agreement with the producer about what "by id" means.
+            assertEngineUpdateDispatch(data, options);
             const context = options?.context;
             updates.push({ object, data: { ...data }, context });
             hooks.push({ data: { ...data }, userId: context?.userId, isSystem: context?.isSystem });
