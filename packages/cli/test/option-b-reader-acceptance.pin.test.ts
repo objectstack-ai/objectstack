@@ -143,7 +143,6 @@ const OPTION_B_LOSSES: readonly string[] = [
   'B2 · AppPlugin ql.setDatasourceMapping (object routing) (from source) · datasourceMapping',
   'B2 · AppPlugin seed datasets merged (from source) · data',
   'B2 · AppPlugin translation loading into the i18n service (from source) · translations',
-  'B2 · plugin-security appSecurityPluginOptions over the from-source config (default permission set) · permissions',
   'B2 · runtime collectBundleActions over the from-source config · actions + objects[].actions',
   'B2 · runtime collectBundleFunctionEntries over the from-source config · functions',
   'B2 · runtime collectBundleHooks over the from-source config · hooks',
