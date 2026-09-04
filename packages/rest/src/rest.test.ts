@@ -1876,8 +1876,8 @@ describe('createRestApiPlugin', () => {
 // ---------------------------------------------------------------------------
 
 describe('PUT /meta/:type/:name handler — header → request plumbing (PR-10d.4)', () => {
-  function getPutRoute(rest: any, path: string) {
-    return rest.getRoutes().find((r: any) => r.method === 'PUT' && r.path === path);
+  function getPutRoute(rest: RestServer, path: string) {
+    return rest.getRoutes().find((r) => r.method === 'PUT' && r.path === path);
   }
 
   it('forwards If-Match header as parentVersion to protocol.saveMetaItem', async () => {
@@ -1892,14 +1892,14 @@ describe('PUT /meta/:type/:name handler — header → request plumbing (PR-10d.
     const route = getPutRoute(rest, '/api/v1/meta/:type/:name');
     expect(route).toBeDefined();
 
-    const req = {
+    const req = httpRequestForRoute(route!, {
       params: { type: 'view', name: 'cases' },
       headers: { 'if-match': 'sha256:abc', 'x-actor': 'user_42' },
       body: { name: 'cases', type: 'grid', label: 'X', columns: ['id'] },
-    };
-    const res = { json: vi.fn(), status: vi.fn().mockReturnThis() };
+    });
+    const res = httpResponseTestDouble();
 
-    await route.handler(req, res);
+    await route!.handler(req, res);
 
     // [#7941] `actor` is the authenticated identity, NOT the `x-actor` header
     // this request also sends. The header is retained in the fixture on
@@ -1927,13 +1927,13 @@ describe('PUT /meta/:type/:name handler — header → request plumbing (PR-10d.
   rest.registerRoutes();
     const route = getPutRoute(rest, '/api/v1/meta/:type/:name');
 
-    await route.handler(
-      {
+    await route!.handler(
+      httpRequestForRoute(route!, {
         params: { type: 'view', name: 'cases' },
         headers: { 'If-Match': '"sha256:xyz"' },
         body: {},
-      },
-      { json: vi.fn(), status: vi.fn().mockReturnThis() },
+      }),
+      httpResponseTestDouble(),
     );
 
     expect(protocol.saveMetaItem).toHaveBeenCalledWith(
@@ -1951,13 +1951,13 @@ describe('PUT /meta/:type/:name handler — header → request plumbing (PR-10d.
   rest.registerRoutes();
     const route = getPutRoute(rest, '/api/v1/meta/:type/:name');
 
-    await route.handler(
-      {
+    await route!.handler(
+      httpRequestForRoute(route!, {
         params: { type: 'view', name: 'cases' },
         headers: {},
         body: {},
-      },
-      { json: vi.fn(), status: vi.fn().mockReturnThis() },
+      }),
+      httpResponseTestDouble(),
     );
 
     const arg = (protocol.saveMetaItem as any).mock.calls[0][0];
@@ -1985,9 +1985,13 @@ describe('PUT /meta/:type/:name handler — header → request plumbing (PR-10d.
   rest.registerRoutes();
     const route = getPutRoute(rest, '/api/v1/meta/:type/:name');
 
-    const res = { json: vi.fn(), status: vi.fn().mockReturnThis() };
-    await route.handler(
-      { params: { type: 'view', name: 'cases' }, headers: { 'if-match': 'sha256:stale' }, body: {} },
+    const res = httpResponseTestDouble();
+    await route!.handler(
+      httpRequestForRoute(route!, {
+        params: { type: 'view', name: 'cases' },
+        headers: { 'if-match': 'sha256:stale' },
+        body: {},
+      }),
       res,
     );
     expect(res.status).toHaveBeenCalledWith(409);
@@ -3891,15 +3895,15 @@ describe('filterAppForUser — ADR-0057 D10 requiresService gate', () => {
         { id: 'nav_organizations', type: 'object', requiresService: 'org-scoping' },
       ] },
     });
-    const rest: any = new RestServer(createMockServer() as any, protocol, ANON_API as any);
-    rest.resolveExecCtx = async () => ({ userId: 'u1', systemPermissions: [] });
-    rest.serviceExistsProvider = (n: string) => n !== 'org-scoping';
+    const rest = new RestServer(createMockServer() as any, protocol, ANON_API as any);
+    (rest as any).resolveExecCtx = async () => ({ userId: 'u1', systemPermissions: [] });
+    (rest as any).serviceExistsProvider = (n: string) => n !== 'org-scoping';
     rest.registerRoutes();
     const route = rest.getRoutes().find(
-      (r: any) => r.method === 'GET' && r.path === '/api/v1/meta/:type/:name',
+      (r) => r.method === 'GET' && r.path === '/api/v1/meta/:type/:name',
     );
     const res = { json: vi.fn(), status: vi.fn().mockReturnThis(), header: vi.fn(), send: vi.fn() };
-    await route.handler({ params: { type: 'app', name: 'setup' }, query: {}, headers: {} }, res);
+    await route!.handler(httpRequestForRoute(route!, { params: { type: 'app', name: 'setup' } }), res);
 
     const body = res.json.mock.calls.at(-1)![0];
     expect(body).toMatchObject({ type: 'app', name: 'setup', lock: 'none' });
@@ -3955,7 +3959,7 @@ describe('filterDashboardForUser — ADR-0057 D10 widget requiresService gate', 
     protocol.getMetaItem = vi.fn().mockResolvedValue({
       type: 'dashboard', name: 'system_overview', item: dash(),
     });
-    const rest: any = new RestServer(
+    const rest = new RestServer(
       createMockServer() as any,
       protocol,
       // [#5881] `enableCache: false` is no longer what makes this reachable —
@@ -3966,14 +3970,17 @@ describe('filterDashboardForUser — ADR-0057 D10 widget requiresService gate', 
       // green proof the gate worked at all while the default path skipped it.
       { api: { requireAuth: false }, metadata: { enableCache: false } } as any,
     );
-    rest.resolveExecCtx = async () => ({ userId: 'u1', systemPermissions: [] });
-    rest.serviceExistsProvider = (n: string) => n !== 'org-scoping';
+    (rest as any).resolveExecCtx = async () => ({ userId: 'u1', systemPermissions: [] });
+    (rest as any).serviceExistsProvider = (n: string) => n !== 'org-scoping';
     rest.registerRoutes();
     const route = rest.getRoutes().find(
-      (r: any) => r.method === 'GET' && r.path === '/api/v1/meta/:type/:name',
+      (r) => r.method === 'GET' && r.path === '/api/v1/meta/:type/:name',
     );
     const res = { json: vi.fn(), status: vi.fn().mockReturnThis(), header: vi.fn(), send: vi.fn() };
-    await route.handler({ params: { type: 'dashboard', name: 'system_overview' }, query: {}, headers: {} }, res);
+    await route!.handler(
+      httpRequestForRoute(route!, { params: { type: 'dashboard', name: 'system_overview' } }),
+      res,
+    );
 
     const body = res.json.mock.calls.at(-1)![0];
     expect(body).toMatchObject({ type: 'dashboard', name: 'system_overview' });
@@ -4030,18 +4037,18 @@ describe('filterDashboardForUser — ADR-0057 D10 widget requiresService gate', 
   };
   /** Default config — no `metadata` block at all, so `enableCache` is its default. */
   const defaultServer = (protocol: any) => {
-    const rest: any = new RestServer(createMockServer() as any, protocol, ANON_API as any);
-    rest.resolveExecCtx = async () => ({ userId: 'u1', systemPermissions: [] });
-    rest.serviceExistsProvider = (n: string) => n !== 'org-scoping';
+    const rest = new RestServer(createMockServer() as any, protocol, ANON_API as any);
+    (rest as any).resolveExecCtx = async () => ({ userId: 'u1', systemPermissions: [] });
+    (rest as any).serviceExistsProvider = (n: string) => n !== 'org-scoping';
     rest.registerRoutes();
     return rest;
   };
-  const readMeta = async (rest: any, type: string, name: string) => {
+  const readMeta = async (rest: RestServer, type: string, name: string) => {
     const route = rest.getRoutes().find(
-      (r: any) => r.method === 'GET' && r.path === '/api/v1/meta/:type/:name',
+      (r) => r.method === 'GET' && r.path === '/api/v1/meta/:type/:name',
     );
     const res = { json: vi.fn(), status: vi.fn().mockReturnThis(), header: vi.fn(), send: vi.fn() };
-    await route.handler({ params: { type, name }, query: {}, headers: {} }, res);
+    await route!.handler(httpRequestForRoute(route!, { params: { type, name } }), res);
     return res;
   };
 
