@@ -157,7 +157,9 @@
     "check:stall-guard-headroom": "node scripts/measure-stall-guard-headroom.mjs --self-test",
     "check:swallow-census-controls": "node scripts/measure-durability-swallow-family.mjs --self-test=gated",
     "gen:system-context-census": "node scripts/check-system-context-census.mjs --fix",
-    "check:system-context-census": "node scripts/check-system-context-census.mjs --self-test && node scripts/check-system-context-census.mjs"
+    "check:system-context-census": "node scripts/check-system-context-census.mjs --self-test && node scripts/check-system-context-census.mjs",
+    "gen:platform-object-tenancy-census": "node scripts/platform-object-tenancy-census.mjs --write",
+    "check:platform-object-tenancy-census": "node scripts/check-platform-object-tenancy-census.mjs --self-test && node scripts/check-platform-object-tenancy-census.mjs"
   },
   "keywords": [
     "objectstack",

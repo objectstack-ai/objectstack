@@ -1,0 +1,687 @@
+{
+  "$comment": [
+    "The platform-object tenancy census — DERIVED. Rebuild with `node scripts/platform-object-tenancy-census.mjs --write`;",
+    "`node scripts/check-platform-object-tenancy-census.mjs` holds it to the tree (#14957).",
+    "",
+    "⛔ Do not hand-edit a number here. This file exists because the same census WAS hand-written prose, in",
+    "packages/objectql/src/tenancy/platform-object-tenancy.ts, and failed twice: once with a wrong REASON behind a",
+    "right total (all excluded objects were `managedBy: better-auth`; one of them was described as an addition to",
+    "the set it was already in), and once with a stale TOTAL (PR #15155 declared `systemFields: { tenant: false }`",
+    "on sys_metadata_activation, moving it out of reach, and the ungated prose stayed at the old digits with CI green).",
+    "",
+    "THE PREDICATE IS THE POINT, the number is a by-product. `reach` is the answer of the engine's own",
+    "`resolveTenantFieldName` on the REGISTERED schema — the authored schema plus the columns",
+    "`resolveInjectedSystemColumns` injects. Both are loaded from source and executed by the generator.",
+    "⛔ `managedBy` is not the predicate; it is one declaration among several that make the predicate answer null.",
+    "",
+    "`reasons` are the declarations on the object's OWN schema, spelled as the schema spells them. They are NOT",
+    "mutually exclusive — an object carrying two is why flattening them into one \"the reason\" produced failure 1 —",
+    "and `reasonTotals` therefore counts objects per reason and does not sum to `totals.outOfReach`.",
+    "",
+    "AN UNKNOWN REASON IS AN ERROR. An out-of-reach object with no declared reason is `unexplained`: `--write`",
+    "refuses to commit it and the gate reds. A new exclusion mechanism gets adjudicated, never absorbed into a total."
+  ],
+  "predicate": "resolveTenantFieldName(registered schema) !== null, where the registered schema is the authored schema plus the columns resolveInjectedSystemColumns says the registration injects (the applySystemFields pass). Both functions are loaded from source and executed; neither is re-spelled here.",
+  "population": "every object registered by a tracked packages/**/*.object.ts module whose name carries a platform prefix (sys_ / cloud_ / ai_). The cloud repository's own cloud_ objects are not in this tree and so not in this census.",
+  "totals": {
+    "registered": 84,
+    "inReach": 58,
+    "outOfReach": 26
+  },
+  "reasonTotals": {
+    "managedBy: 'better-auth'": 25,
+    "systemFields.tenant: false": 1,
+    "tenancy.enabled: false": 2
+  },
+  "unexplained": [],
+  "objects": [
+    {
+      "name": "sys_account",
+      "file": "packages/platform-objects/src/identity/sys-account.object.ts",
+      "reach": "out",
+      "tenantField": null,
+      "reasons": [
+        "managedBy: 'better-auth'"
+      ]
+    },
+    {
+      "name": "sys_activity",
+      "file": "packages/plugins/plugin-audit/src/objects/sys-activity.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_api_key",
+      "file": "packages/platform-objects/src/identity/sys-api-key.object.ts",
+      "reach": "out",
+      "tenantField": null,
+      "reasons": [
+        "managedBy: 'better-auth'",
+        "tenancy.enabled: false"
+      ]
+    },
+    {
+      "name": "sys_approval_action",
+      "file": "packages/plugins/plugin-approvals/src/sys-approval-action.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_approval_approver",
+      "file": "packages/plugins/plugin-approvals/src/sys-approval-approver.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_approval_delegation",
+      "file": "packages/plugins/plugin-approvals/src/sys-approval-delegation.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_approval_request",
+      "file": "packages/plugins/plugin-approvals/src/sys-approval-request.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_approval_token",
+      "file": "packages/plugins/plugin-approvals/src/sys-approval-token.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_attachment",
+      "file": "packages/platform-objects/src/audit/sys-attachment.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_audience_binding_suggestion",
+      "file": "packages/plugins/plugin-security/src/objects/sys-audience-binding-suggestion.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_audit_log",
+      "file": "packages/plugins/plugin-audit/src/objects/sys-audit-log.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_automation_run",
+      "file": "packages/services/service-automation/src/sys-automation-run.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_business_unit",
+      "file": "packages/platform-objects/src/identity/sys-business-unit.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_business_unit_member",
+      "file": "packages/platform-objects/src/identity/sys-business-unit-member.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_capability",
+      "file": "packages/plugins/plugin-security/src/objects/sys-capability.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_comment",
+      "file": "packages/plugins/plugin-audit/src/objects/sys-comment.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_device_code",
+      "file": "packages/platform-objects/src/identity/sys-device-code.object.ts",
+      "reach": "out",
+      "tenantField": null,
+      "reasons": [
+        "managedBy: 'better-auth'"
+      ]
+    },
+    {
+      "name": "sys_email",
+      "file": "packages/platform-objects/src/audit/sys-email.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_email_template",
+      "file": "packages/platform-objects/src/audit/sys-email-template.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_file",
+      "file": "packages/services/service-storage/src/objects/system-file.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_flow_dispatch",
+      "file": "packages/services/service-automation/src/sys-flow-dispatch.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_http_delivery",
+      "file": "packages/services/service-messaging/src/objects/http-delivery.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_import_job",
+      "file": "packages/platform-objects/src/audit/sys-import-job.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_inbox_message",
+      "file": "packages/services/service-messaging/src/objects/inbox-message.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_invitation",
+      "file": "packages/platform-objects/src/identity/sys-invitation.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": [
+        "managedBy: 'better-auth'"
+      ]
+    },
+    {
+      "name": "sys_job",
+      "file": "packages/platform-objects/src/audit/sys-job.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_job_queue",
+      "file": "packages/platform-objects/src/audit/sys-job-queue.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_job_run",
+      "file": "packages/platform-objects/src/audit/sys-job-run.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_jwks",
+      "file": "packages/platform-objects/src/identity/sys-jwks.object.ts",
+      "reach": "out",
+      "tenantField": null,
+      "reasons": [
+        "managedBy: 'better-auth'"
+      ]
+    },
+    {
+      "name": "sys_member",
+      "file": "packages/platform-objects/src/identity/sys-member.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": [
+        "managedBy: 'better-auth'"
+      ]
+    },
+    {
+      "name": "sys_metadata",
+      "file": "packages/metadata-core/src/objects/sys-metadata.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_metadata_activation",
+      "file": "packages/platform-objects/src/system/sys-metadata-activation.object.ts",
+      "reach": "out",
+      "tenantField": null,
+      "reasons": [
+        "systemFields.tenant: false"
+      ]
+    },
+    {
+      "name": "sys_metadata_audit",
+      "file": "packages/metadata-core/src/objects/sys-metadata-audit.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_metadata_commit",
+      "file": "packages/metadata-core/src/objects/sys-metadata-commit.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_metadata_history",
+      "file": "packages/metadata-core/src/objects/sys-metadata-history.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_migration",
+      "file": "packages/platform-objects/src/system/sys-migration.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_migration_journal",
+      "file": "packages/platform-objects/src/system/sys-migration-journal.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_notification",
+      "file": "packages/platform-objects/src/audit/sys-notification.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_notification_delivery",
+      "file": "packages/services/service-messaging/src/objects/notification-delivery.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_notification_preference",
+      "file": "packages/services/service-messaging/src/objects/notification-preference.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_notification_receipt",
+      "file": "packages/services/service-messaging/src/objects/notification-receipt.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_notification_subscription",
+      "file": "packages/services/service-messaging/src/objects/notification-subscription.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_notification_template",
+      "file": "packages/services/service-messaging/src/objects/notification-template.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_oauth_access_token",
+      "file": "packages/platform-objects/src/identity/sys-oauth-access-token.object.ts",
+      "reach": "out",
+      "tenantField": null,
+      "reasons": [
+        "managedBy: 'better-auth'"
+      ]
+    },
+    {
+      "name": "sys_oauth_application",
+      "file": "packages/platform-objects/src/identity/sys-oauth-application.object.ts",
+      "reach": "out",
+      "tenantField": null,
+      "reasons": [
+        "managedBy: 'better-auth'"
+      ]
+    },
+    {
+      "name": "sys_oauth_client_assertion",
+      "file": "packages/platform-objects/src/identity/sys-oauth-client-assertion.object.ts",
+      "reach": "out",
+      "tenantField": null,
+      "reasons": [
+        "managedBy: 'better-auth'"
+      ]
+    },
+    {
+      "name": "sys_oauth_client_resource",
+      "file": "packages/platform-objects/src/identity/sys-oauth-client-resource.object.ts",
+      "reach": "out",
+      "tenantField": null,
+      "reasons": [
+        "managedBy: 'better-auth'"
+      ]
+    },
+    {
+      "name": "sys_oauth_consent",
+      "file": "packages/platform-objects/src/identity/sys-oauth-consent.object.ts",
+      "reach": "out",
+      "tenantField": null,
+      "reasons": [
+        "managedBy: 'better-auth'"
+      ]
+    },
+    {
+      "name": "sys_oauth_refresh_token",
+      "file": "packages/platform-objects/src/identity/sys-oauth-refresh-token.object.ts",
+      "reach": "out",
+      "tenantField": null,
+      "reasons": [
+        "managedBy: 'better-auth'"
+      ]
+    },
+    {
+      "name": "sys_oauth_resource",
+      "file": "packages/platform-objects/src/identity/sys-oauth-resource.object.ts",
+      "reach": "out",
+      "tenantField": null,
+      "reasons": [
+        "managedBy: 'better-auth'"
+      ]
+    },
+    {
+      "name": "sys_organization",
+      "file": "packages/platform-objects/src/identity/sys-organization.object.ts",
+      "reach": "out",
+      "tenantField": null,
+      "reasons": [
+        "managedBy: 'better-auth'"
+      ]
+    },
+    {
+      "name": "sys_permission_set",
+      "file": "packages/plugins/plugin-security/src/objects/sys-permission-set.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_position",
+      "file": "packages/plugins/plugin-security/src/objects/sys-position.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_position_permission_set",
+      "file": "packages/plugins/plugin-security/src/objects/sys-position-permission-set.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_presence",
+      "file": "packages/services/service-realtime/src/objects/sys-presence.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_record_share",
+      "file": "packages/plugins/plugin-sharing/src/objects/sys-record-share.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_report_schedule",
+      "file": "packages/platform-objects/src/audit/sys-report-schedule.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_saved_report",
+      "file": "packages/platform-objects/src/audit/sys-saved-report.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_scim_connection_binding",
+      "file": "packages/platform-objects/src/identity/sys-scim-connection-binding.object.ts",
+      "reach": "out",
+      "tenantField": null,
+      "reasons": [
+        "managedBy: 'better-auth'"
+      ]
+    },
+    {
+      "name": "sys_scim_connection_credential",
+      "file": "packages/platform-objects/src/identity/sys-scim-connection-credential.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_scim_group",
+      "file": "packages/platform-objects/src/identity/sys-scim-group.object.ts",
+      "reach": "out",
+      "tenantField": null,
+      "reasons": [
+        "managedBy: 'better-auth'"
+      ]
+    },
+    {
+      "name": "sys_scim_group_member",
+      "file": "packages/platform-objects/src/identity/sys-scim-group-member.object.ts",
+      "reach": "out",
+      "tenantField": null,
+      "reasons": [
+        "managedBy: 'better-auth'"
+      ]
+    },
+    {
+      "name": "sys_scim_identity_tombstone",
+      "file": "packages/platform-objects/src/identity/sys-scim-identity-tombstone.object.ts",
+      "reach": "out",
+      "tenantField": null,
+      "reasons": [
+        "managedBy: 'better-auth'"
+      ]
+    },
+    {
+      "name": "sys_scim_projection_grant",
+      "file": "packages/platform-objects/src/identity/sys-scim-projection-grant.object.ts",
+      "reach": "out",
+      "tenantField": null,
+      "reasons": [
+        "managedBy: 'better-auth'"
+      ]
+    },
+    {
+      "name": "sys_scim_subject",
+      "file": "packages/platform-objects/src/identity/sys-scim-subject.object.ts",
+      "reach": "out",
+      "tenantField": null,
+      "reasons": [
+        "managedBy: 'better-auth'"
+      ]
+    },
+    {
+      "name": "sys_scim_user",
+      "file": "packages/platform-objects/src/identity/sys-scim-user.object.ts",
+      "reach": "out",
+      "tenantField": null,
+      "reasons": [
+        "managedBy: 'better-auth'"
+      ]
+    },
+    {
+      "name": "sys_secret",
+      "file": "packages/platform-objects/src/system/sys-secret.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_session",
+      "file": "packages/platform-objects/src/identity/sys-session.object.ts",
+      "reach": "out",
+      "tenantField": null,
+      "reasons": [
+        "managedBy: 'better-auth'"
+      ]
+    },
+    {
+      "name": "sys_setting",
+      "file": "packages/platform-objects/src/system/sys-setting.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_setting_audit",
+      "file": "packages/platform-objects/src/system/sys-setting-audit.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_share_link",
+      "file": "packages/plugins/plugin-sharing/src/objects/sys-share-link.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_sharing_rule",
+      "file": "packages/plugins/plugin-sharing/src/objects/sys-sharing-rule.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_sso_provider",
+      "file": "packages/platform-objects/src/identity/sys-sso-provider.object.ts",
+      "reach": "out",
+      "tenantField": null,
+      "reasons": [
+        "managedBy: 'better-auth'",
+        "tenancy.enabled: false"
+      ]
+    },
+    {
+      "name": "sys_team",
+      "file": "packages/platform-objects/src/identity/sys-team.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": [
+        "managedBy: 'better-auth'"
+      ]
+    },
+    {
+      "name": "sys_team_member",
+      "file": "packages/platform-objects/src/identity/sys-team-member.object.ts",
+      "reach": "out",
+      "tenantField": null,
+      "reasons": [
+        "managedBy: 'better-auth'"
+      ]
+    },
+    {
+      "name": "sys_two_factor",
+      "file": "packages/platform-objects/src/identity/sys-two-factor.object.ts",
+      "reach": "out",
+      "tenantField": null,
+      "reasons": [
+        "managedBy: 'better-auth'"
+      ]
+    },
+    {
+      "name": "sys_upload_session",
+      "file": "packages/services/service-storage/src/objects/system-upload-session.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_user",
+      "file": "packages/platform-objects/src/identity/sys-user.object.ts",
+      "reach": "out",
+      "tenantField": null,
+      "reasons": [
+        "managedBy: 'better-auth'"
+      ]
+    },
+    {
+      "name": "sys_user_permission_set",
+      "file": "packages/plugins/plugin-security/src/objects/sys-user-permission-set.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_user_position",
+      "file": "packages/plugins/plugin-security/src/objects/sys-user-position.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_user_preference",
+      "file": "packages/platform-objects/src/identity/sys-user-preference.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_verification",
+      "file": "packages/platform-objects/src/identity/sys-verification.object.ts",
+      "reach": "out",
+      "tenantField": null,
+      "reasons": [
+        "managedBy: 'better-auth'"
+      ]
+    },
+    {
+      "name": "sys_view_definition",
+      "file": "packages/metadata-core/src/objects/sys-view-definition.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_webhook",
+      "file": "packages/plugins/plugin-webhooks/src/sys-webhook.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    }
+  ]
+}
