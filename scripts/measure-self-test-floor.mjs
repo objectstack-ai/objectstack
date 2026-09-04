@@ -391,6 +391,64 @@ const UNRUNNABLE_GATE = [
 ].join('\n');
 
 /**
+ * The HELPER handshake spelling, reduced: the third of the three landed
+ * handshake shapes, and the one the probe had never read in either direction.
+ * Its only carrier under `scripts/` is `check-platform-checklist.mjs`, whose
+ * `ENTRY_BY_HAND` row is a deliberate `null` (its dispatch calls four self-test
+ * functions and combines their statuses), so every probe run recorded NOT
+ * MEASURED for it and the sweep said nothing at all about this shape -- not
+ * held, not defeated (#15371). The other two spellings each have dozens of live
+ * carriers AND, for the sentinel, the `SOUND_GATE` control above.
+ *
+ * The shape mirrored here is the real one: a module-level `...ReachedVerdict`
+ * flag set as the self-test's last act, and a `requireReachedVerdict(name,
+ * reached)` helper the DISPATCH calls afterwards, which refuses out loud and
+ * exits 1. The refusal wording is printed after a leading blank line, as the
+ * real helper prints it, so the control also exercises `firstNonBlankLine`
+ * reading past that blank -- `mutatedSpoke` on a run whose first line is empty.
+ *
+ * ⛔ The verdict is still not taught this (or any) wording: the fixture's own
+ * message is asserted below only so that the HELD it earns is the HELPER's
+ * refusal and not some other printer's. Recognising WHICH handshake a file
+ * carries remains #14968's column, not this verdict's job.
+ */
+const HELPER_HANDSHAKE_GATE = [
+  '#!/usr/bin/env node',
+  'let selfTestReachedVerdict = false;',
+  'function requireReachedVerdict(name, reached) {',
+  '  if (reached) return;',
+  "  console.error(String.fromCharCode(10) + 'fixture self-test: ' + name + '() returned without reaching its verdict,');",
+  "  console.error('so its assertions did not all run and no failure of theirs could be reported.');",
+  '  process.exit(1);',
+  '}',
+  'function selfTest() {',
+  '  const failures = [];',
+  "  if (1 !== 1) failures.push('x');",
+  "  if (failures.length) { console.error(failures.join(String.fromCharCode(10))); process.exit(1); }",
+  "  console.log('fixture self-test: 1 case passes');",
+  '  selfTestReachedVerdict = true;',
+  '}',
+  "if (process.argv.includes('--self-test')) {",
+  '  selfTest();',
+  "  requireReachedVerdict('selfTest', selfTestReachedVerdict);",
+  '}',
+  '',
+].join('\n');
+
+/**
+ * The one dispatch line that IS the helper handshake. Deleting it leaves a file
+ * identical in every other byte -- same helper defined, same flag, same
+ * self-test -- whose early return therefore exits 0 in silence. The pair is the
+ * both-directions control: with the line, the probe must read HELD; without it,
+ * DEFEATED. Anything else means the verdict is keying on something other than
+ * the handshake actually being asked for.
+ */
+const HELPER_HANDSHAKE_CALL = "  requireReachedVerdict('selfTest', selfTestReachedVerdict);\n";
+
+/** The same fixture with the handshake call, and only that, removed. */
+const HELPER_HANDSHAKE_GATE_HOLED = HELPER_HANDSHAKE_GATE.replace(HELPER_HANDSHAKE_CALL, '');
+
+/**
  * The ternary exit, reduced: a roster floor whose ONLY failure production is
  * `process.exit(<cond> ? 0 : 1)`. It carries none of the NAMED spellings -- no
  * `failures.push`, no literal `process.exit(1)`, no `throw`, no `exitCode = 1`,
@@ -472,14 +530,20 @@ export function runControls() {
     const sound = join(dir, 'sound-gate.mjs');
     const accident = join(dir, 'accident-gate.mjs');
     const unrunnable = join(dir, 'unrunnable-gate.mjs');
+    const helper = join(dir, 'helper-handshake-gate.mjs');
+    const helperHoled = join(dir, 'helper-handshake-gate-holed.mjs');
     writeFileSync(holed, HOLED_GATE);
     writeFileSync(sound, SOUND_GATE);
     writeFileSync(accident, ACCIDENT_GATE);
     writeFileSync(unrunnable, UNRUNNABLE_GATE);
+    writeFileSync(helper, HELPER_HANDSHAKE_GATE);
+    writeFileSync(helperHoled, HELPER_HANDSHAKE_GATE_HOLED);
     const h = probeEarlyReturn(holed, 'selfTest');
     const s = probeEarlyReturn(sound, 'selfTest');
     const a = probeEarlyReturn(accident, 'runSelfTest');
     const u = probeEarlyReturn(unrunnable, 'selfTest');
+    const hh = probeEarlyReturn(helper, 'selfTest');
+    const hhHoled = probeEarlyReturn(helperHoled, 'selfTest');
     say(h.verdict === 'DEFEATED',
       `POSITIVE CONTROL FAILED: the probe read a known-holed gate as ${h.verdict} (${h.why ?? ''})`);
     say(h.mutatedBytes === 0,
@@ -505,6 +569,26 @@ export function runControls() {
     // being red, would satisfy the verdict above while testing nothing.
     say(u.baselineExit !== 0 && u.baselineBytes > 0 && u.baselineHead !== '',
       `POSITIVE CONTROL FAILED: the unrunnable fixture no longer produces the measured shape (baseline exit ${u.baselineExit}, ${u.baselineBytes} byte(s)); the NOT MEASURED verdict above would then be passing for the wrong reason`);
+    // The HELPER handshake spelling, both directions, differing by ONE line: the
+    // dispatch asking `requireReachedVerdict`. Until this fixture the probe had
+    // read that shape in NEITHER direction -- its single carrier in the tree is
+    // an ENTRY_BY_HAND `null`, so a green sweep was evidence for the sentinel and
+    // flag spellings only (#15371).
+    say(HELPER_HANDSHAKE_GATE_HOLED !== HELPER_HANDSHAKE_GATE,
+      'CONTROL FIXTURE INVALID: the helper-handshake dispatch line was not found in the fixture, so the two directions below are the SAME file and one of the verdicts is passing for the wrong reason');
+    say(hh.verdict === 'HELD',
+      `NEGATIVE CONTROL FAILED: the probe read a helper-handshake gate (\`requireReachedVerdict\`) as ${hh.verdict} (${hh.why ?? ''})`);
+    say(hh.mutatedSpoke === true && hh.mutatedBytes > 0,
+      'NEGATIVE CONTROL FAILED: the helper-handshake gate printed nothing when defeated; HELD is supposed to mean it REFUSED out loud');
+    // ... and the refusal has to be the HELPER's, read past the blank line it
+    // prints first. A HELD earned by some other printer would test nothing about
+    // this spelling.
+    say((hh.mutatedHead ?? '').includes('returned without reaching its verdict'),
+      `CONTROL FIXTURE INVALID: the helper-handshake gate's refusal is no longer the helper's (first non-blank line: ${JSON.stringify((hh.mutatedHead ?? '').slice(0, 80))})`);
+    say(hhHoled.verdict === 'DEFEATED',
+      `POSITIVE CONTROL FAILED: the SAME fixture with only the \`requireReachedVerdict\` call deleted was read as ${hhHoled.verdict} (${hhHoled.why ?? ''}); the handshake call is the whole difference`);
+    say(hhHoled.mutatedBytes === 0,
+      'POSITIVE CONTROL FAILED: the helper-handshake gate with its handshake deleted printed something; without the call there is nothing left to notice the early return, so the run says NOTHING and exits 0');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
