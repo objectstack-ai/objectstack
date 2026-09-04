@@ -75,6 +75,8 @@ import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { childEnv } from './helpers/serve-process.js';
+
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 /** `packages/cli` — this package's own root, never another package's. */
 const PACKAGE_ROOT = resolve(HERE, '..');
@@ -200,9 +202,13 @@ function pnpmPack(destination: string): { filename: string; files: string[] } {
   const execpath = process.env.npm_execpath;
   const viaExecpath = typeof execpath === 'string' && /pnpm/.test(basename(execpath));
   const [command, prefix]: [string, string[]] = viaExecpath ? [process.execPath, [execpath as string]] : ['pnpm', []];
+  // `childEnv()` — every child spawned from this directory declares its
+  // environment (check:cli-test-child-env): the vitest worker's `TEST`/`VITEST*`
+  // family and `NODE_PATH` are stripped, everything pnpm needs (PATH, HOME) stays.
   const res = spawnSync(command, [...prefix, 'pack', '--pack-destination', destination, '--json'], {
     cwd: PACKAGE_ROOT,
     encoding: 'utf8',
+    env: childEnv(),
   });
   if (res.error) throw new Error(`pnpm pack could not start (${command}): ${res.error.message}`);
   if (res.status !== 0) {
@@ -264,7 +270,7 @@ beforeAll(() => {
   // Unpack into a consumer's node_modules. The tarball root is `package/`.
   const extractDir = join(scratch, 'extract');
   mkdirSync(extractDir);
-  const tar = spawnSync('tar', ['-xzf', packed.filename, '-C', extractDir], { encoding: 'utf8' });
+  const tar = spawnSync('tar', ['-xzf', packed.filename, '-C', extractDir], { encoding: 'utf8', env: childEnv() });
   if (tar.status !== 0) throw new Error(`tar -xzf failed (${tar.status}): ${tar.stderr}`);
   const consumer = join(scratch, 'consumer');
   const scope = join(consumer, 'node_modules', ...PACKAGE_NAME.split('/').slice(0, -1));
@@ -279,10 +285,12 @@ beforeAll(() => {
 
   const probePath = join(consumer, 'probe.mjs');
   writeFileSync(probePath, PROBE_SOURCE);
+  // `childEnv()` already strips `NODE_PATH`, so nothing of this workspace's
+  // resolution base reaches the probe: what resolves, resolves from `consumer`.
   const run = spawnSync(process.execPath, [probePath, HOOK_BODY_SPECIFIER, MANIFEST_SPECIFIER, DEEP_PATH_SPECIFIER], {
     cwd: consumer,
     encoding: 'utf8',
-    env: { ...process.env, NODE_PATH: '' },
+    env: childEnv(),
   });
   if (run.status !== 0) throw new Error(`probe exited ${run.status}\n--- stderr ---\n${run.stderr}\n--- stdout ---\n${run.stdout}`);
   probe = JSON.parse(run.stdout) as ProbeResult;
