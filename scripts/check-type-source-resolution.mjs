@@ -804,12 +804,18 @@ const KNOWN_DIST_RESOLVED_TYPE_IMPORTS = {
   // there is no pre-existing program a dep could be laundered through.
   //
   // Provenance measured four ways on one checkout, by varying only what the
-  // `typecheck` script NAMES (`--list`, totals as printed):
+  // `typecheck` script NAMES (`--list`, totals as printed). RE-MEASURED on the
+  // merge of `origin/main` @ 460134af8, which had landed BOTH sibling
+  // onboardings of this family since this card's first reading
+  // (`service-knowledge` #15049 and `service-automation` #15048, above): that
+  // merge moved every ABSOLUTE here (+2 programs, +12 pairs, +2 packages
+  // before this entry exists) and moved none of the DELTAS, which are what
+  // this block claims.
   //
-  //   no `typecheck` script                absent   119 programs / 290 pairs
-  //   names `tsconfig.json` only            absent   119 programs / 290 pairs
-  //   names `tsconfig.test.json` only       PRESENT  120 programs / 297 pairs
-  //   names all three (this card)           PRESENT  121 programs / 297 pairs
+  //   no `typecheck` script (origin/main)  absent   121 programs / 302 pairs
+  //   names `tsconfig.json` only           absent   121 programs / 302 pairs
+  //   names `tsconfig.test.json` only      PRESENT  122 programs / 309 pairs
+  //   names all three (this card)          PRESENT  123 programs / 309 pairs
   //
   // Row 2 is the load-bearing one, exactly as it was for `service-cluster`:
   // the BUILD program carries no dist-resolved workspace type import at all,
@@ -819,8 +825,8 @@ const KNOWN_DIST_RESOLVED_TYPE_IMPORTS = {
   // test program; `tsconfig.scripts.json` reads a directory BUILD's `include`
   // never reached at all.)
   //
-  // Numbers: +1 package (58 -> 59 of 78), +2 programs (119 -> 121, one per
-  // onboarded config), +7 pairs (290 -> 297) -- this entry and nothing else.
+  // Numbers: +1 package (60 -> 61 of 78), +2 programs (121 -> 123, one per
+  // onboarded config), +7 pairs (302 -> 309) -- this entry and nothing else.
   //
   // Why the entry and not `paths`, which is what this gate's failure text
   // asks for: MEASURED on this checkout (temporary `paths` added to
