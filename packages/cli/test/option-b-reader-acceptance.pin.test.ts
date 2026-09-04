@@ -122,6 +122,13 @@ import { measureShape, type ProbeRow, type ShapeMeasurement } from './fixtures/o
  *
  * ⛔ SHRINK-ONLY, audited in BOTH directions (see the header). Each line names
  * a boundary, a subsystem and the collection it reads.
+ *
+ * `@objectstack/verify`'s four rows are absent for a reason worth stating
+ * rather than inferring: the by-shape sweep (#15210) found those sites, not
+ * this pin, so card 5/4 (#15229) ADDED them here and DELETED them again inside
+ * one PR — ledgered red first, then fixed. Both halves are in that card's
+ * history; the probe still measures all four, which is what keeps a regression
+ * in them red.
  */
 const OPTION_B_LOSSES: readonly string[] = [
   'B1 · AppPlugin declared-datasource auto-connect (compiled artifact) · datasources',
@@ -147,10 +154,6 @@ const OPTION_B_LOSSES: readonly string[] = [
   'B2 · runtime collectBundleActions over the from-source config · actions + objects[].actions',
   'B2 · runtime collectBundleFunctionEntries over the from-source config · functions',
   'B2 · runtime collectBundleHooks over the from-source config · hooks',
-  'B2 · verify declaredPositionNames (one RLS persona per declared position) · positions',
-  'B2 · verify deriveCrudCases (CRUD round-trip case derivation) · objects',
-  'B2 · verify deriveCrudCases federated write gate (ADR-0015 double opt-in) · datasources',
-  'B2 · verify rlsProbePermissionSet (RLS probe grants + owner narrowing) · objects',
   'B5 · resolve-project-database readConfigDeclaredDefault (project database tier) · datasourceMapping + datasources',
 ];
 
