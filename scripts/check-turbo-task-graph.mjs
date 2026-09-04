@@ -1026,6 +1026,7 @@ function runSelfTest() {
     for (const f of failures) console.error(`  - ${f}`);
     process.exit(1);
   }
+
   // ── The assertion floor, at the verdict site ───────────────────────
   // `selfTest()` registers but does not decide, so the floor over ITS
   // registrations is evaluated here, after every battery has had its chance and
