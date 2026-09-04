@@ -94,15 +94,46 @@ export type FlowNodeExpressionRole =
    * every existing flow. Recorded here so the reconciliation ratchet still sees
    * the marker and a future validator has one place to hook into.
    */
-  | 'flow-template';
+  | 'flow-template'
+  /**
+   * A CEL **value** expression — evaluated by the expression engine to the
+   * value the variable takes (`validateExpression`'s `'value'` role: parses as
+   * CEL, any result type). Not a predicate (no boolean expected) and not a
+   * template (no `{token}` holes): the slot's *shape* decides which dialect it
+   * is in. A `value` slot is a config position whose authored value is EITHER
+   * the `{token}` flow interpolation every node string already gets (a plain
+   * string — the `flow-template` dialect above, still unvalidated here) OR an
+   * `{ dialect: 'cel', source }` expression envelope (`ExpressionSchema` in
+   * `shared/expression.zod.ts`) evaluated to a value. Only the envelope form is
+   * an expression to check, so {@link resolveFlowNodeExpressions} emits
+   * envelope-shaped objects — never strings — for this role (#14149).
+   *
+   * Declared for the `assignment` node's `assignments` map (maintainer ruling
+   * 2026-09-02, #14149): that is the one slot whose whole job is to compute a
+   * value into a variable, and until then CEL was reachable only where the
+   * answer had to be a boolean — so the declared stdlib (`joinNonEmpty` and the
+   * rest of `CEL_STDLIB_FUNCTIONS`) was unreachable from metadata. Validated at
+   * `registerFlow` and `objectstack validate` by the executor-side half
+   * (`service-automation` / `lint` consumers call
+   * `validateExpression('value', …)` on what this ledger resolves); the same
+   * half evaluates the envelope at run time. Until it lands the built-in
+   * `assignment` executor writes an envelope object into the variable verbatim
+   * (`interpolate()` recurses into it as a literal object) — the contract is
+   * declared here first so the executor has one shape to implement.
+   */
+  | 'value';
 
 /** One expression-bearing config slot on a builtin flow node type. */
 export interface FlowNodeExpressionPath {
   /** Registry node type the path belongs to (`node.type`). */
   readonly nodeType: string;
   /**
-   * Dot path into `node.config`, using `[]` for "every element of this array".
-   * `'fields[].visibleWhen'` reads `config.fields[i].visibleWhen` for each `i`.
+   * Dot path into `node.config`, using `[]` for "every element of this array"
+   * and a `*` segment for "every key of this object" (#14149).
+   * `'fields[].visibleWhen'` reads `config.fields[i].visibleWhen` for each `i`;
+   * `'assignments.*'` reads `config.assignments[k]` for each authored key `k`
+   * — the spelling for a map whose keys are the author's own names (variable
+   * names, field names) and so cannot be enumerated by the ledger.
    */
   readonly path: string;
   /** Which dialect this slot takes — decides what counts as malformed. */
@@ -132,6 +163,19 @@ export interface FlowNodeExpressionPath {
  * like `loop.collection`. The #4439 sweep of the schemaless class found exactly
  * one genuinely declared expression slot — `decision.conditions[].expression` —
  * and `script.template` is a template **id**, not a template body.
+ *
+ * A `value` entry (#14149) is listed for a third reason, not either of those:
+ * the slot's authored value may be an expression *envelope* — `{ dialect:
+ * 'cel', source }`, a shape no `{token}` interpolation ever produced — and only
+ * that form is resolved. The `assignment` node's `assignments` map is the one
+ * such slot; its `{token}` strings stay the generic text-with-holes case above.
+ * It is declared through the spec Zod channel (`AssignmentConfigSchema`'s map
+ * value, `.meta({ xExpression: 'value' })`, exposed to the ratchet through
+ * `LEDGER_DECLARED_NODE_CONFIG_SCHEMAS` in `schemaless-node-config.zod.ts`)
+ * because the node's descriptor declares the map as `additionalProperties:
+ * true` with no marker; the ratchet walks an object-valued
+ * `additionalProperties` as the `*` segment and maps the `value` marker to
+ * this role.
  */
 export const FLOW_NODE_EXPRESSION_PATHS: readonly FlowNodeExpressionPath[] = [
   {
@@ -161,6 +205,30 @@ export const FLOW_NODE_EXPRESSION_PATHS: readonly FlowNodeExpressionPath[] = [
     role: 'flow-template',
     label: 'map collection',
   },
+  {
+    // The `assignment` node's canonical config is the `assignments` map its
+    // descriptor and the Studio keyValue editor declare — `{ <variable>:
+    // <value> }`, keys authored by the flow author — so the slot is spelled
+    // with the `*` wildcard: every value of that map is a `value` slot
+    // (#14149). Declared through the spec Zod channel
+    // (`AssignmentConfigSchema` in `builtin-node-config.zod.ts`, whose map
+    // value carries `.meta({ xExpression: 'value' })`, reaching the
+    // reconciliation ratchet through `LEDGER_DECLARED_NODE_CONFIG_SCHEMAS`):
+    // the descriptor's own `assignments` is `additionalProperties: true` and
+    // carries no marker, and objectui's inspector reads `xExpression` on
+    // string properties only, so the marker does not reach the Studio form.
+    //
+    // Deliberately NOT declared: the two legacy shapes the executor still reads
+    // (`logic-nodes.ts` — the bare `{ <variable>: <value> }` config with no
+    // wrapper, and the `assignments: [{ variable, value }]` array). Neither is
+    // declared by the descriptor or offered for new authoring, and their
+    // values keep today's meaning (a `{token}` template or a literal — an
+    // envelope-shaped object there is a literal object, as it always was).
+    nodeType: 'assignment',
+    path: 'assignments.*',
+    role: 'value',
+    label: 'assignment value',
+  },
 ];
 
 /** One resolved expression value found in a node's config. */
@@ -174,17 +242,52 @@ export interface ResolvedFlowNodeExpression {
 }
 
 /**
+ * Is `value` shaped like an expression envelope — a plain object carrying a
+ * string `dialect`?
+ *
+ * The recognizer a `value` slot discriminates on (#14149): a plain string in
+ * such a slot is `{token}` flow interpolation, a plain object is a literal, and
+ * an object that names a `dialect` is an expression envelope
+ * (`ExpressionSchema`) — the one form the expression engine evaluates. It is
+ * deliberately looser than "a VALID envelope": `{ dialect: 'cel' }` with no
+ * `source` is envelope-shaped, so a malformed envelope reaches the validator
+ * and is refused there instead of being silently stored as a literal object.
+ * Same test the engine's `edge.condition` dispatch and the lint's page-envelope
+ * audit apply (`'dialect' in expression`), stated once so the ledger, the
+ * `assignment` config contract and the executor half all draw the line in the
+ * same place.
+ */
+export function isExpressionEnvelopeShaped(value: unknown): value is { dialect: string } {
+  return (
+    typeof value === 'object'
+    && value !== null
+    && !Array.isArray(value)
+    && typeof (value as { dialect?: unknown }).dialect === 'string'
+  );
+}
+
+/**
  * Resolve every expression slot the ledger declares for `nodeType` against a
- * concrete `config`, filling in array indices.
+ * concrete `config`, filling in array indices and wildcard keys.
  *
  * Pure path resolution — no validation, no I/O. Both the engine and the lint
  * pass call this and then apply their own severity policy (the engine throws on
  * a malformed predicate at `registerFlow`; the lint pass reports it as a located
  * `objectstack validate` finding), so neither has to know the path shapes.
  *
- * Absent, `null` and non-string values are skipped: "not authored" is not a
- * malformed expression, and a non-string in an expression slot is a *type*
- * violation for the schema pass to report, not something to hand to a parser.
+ * What counts as "an authored expression" depends on the role:
+ *
+ *  - `predicate` / `flow-template`: the slot IS the expression, so a non-empty
+ *    string is emitted. Absent, `null` and non-string values are skipped: "not
+ *    authored" is not a malformed expression, and a non-string in an expression
+ *    slot is a *type* violation for the schema pass to report, not something to
+ *    hand to a parser.
+ *  - `value`: the slot holds a VALUE that may be spelled as an expression, so
+ *    only envelope-shaped objects ({@link isExpressionEnvelopeShaped}) are
+ *    emitted. A string there is `{token}` interpolation — the `flow-template`
+ *    dialect, not an expression to parse — and every other literal is data.
+ *    Existing entries resolve byte-identically: no ledger path before #14149
+ *    carries a `*` segment or the `value` role.
  */
 export function resolveFlowNodeExpressions(
   nodeType: string,
@@ -195,7 +298,11 @@ export function resolveFlowNodeExpressions(
   for (const entry of FLOW_NODE_EXPRESSION_PATHS) {
     if (entry.nodeType !== nodeType) continue;
     walk(config as Record<string, unknown>, entry.path.split('.'), '', (path, value) => {
-      if (typeof value === 'string' && value.trim()) out.push({ entry, path, value });
+      if (entry.role === 'value') {
+        if (isExpressionEnvelopeShaped(value)) out.push({ entry, path, value });
+      } else if (typeof value === 'string' && value.trim()) {
+        out.push({ entry, path, value });
+      }
     });
   }
   return out;
@@ -203,8 +310,8 @@ export function resolveFlowNodeExpressions(
 
 /**
  * Descend `segments` through `node`, expanding a `key[]` segment over every
- * element of that array, and hand each terminal value to `emit` with its
- * concrete path.
+ * element of that array and a `*` segment over every own key of that object,
+ * and hand each terminal value to `emit` with its concrete path.
  */
 function walk(
   node: unknown,
@@ -215,6 +322,19 @@ function walk(
   if (node == null || typeof node !== 'object') return;
   const [head, ...rest] = segments;
   if (head === undefined) return;
+
+  if (head === '*') {
+    // Every own key of a plain object (#14149). An array here is not "a map
+    // with authored keys" — its shape is `[]`'s, and a wildcard authored
+    // against the wrong container must not invent index paths.
+    if (Array.isArray(node)) return;
+    for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+      const here = prefix ? `${prefix}.${key}` : key;
+      if (rest.length === 0) emit(here, value);
+      else walk(value, rest, here, emit);
+    }
+    return;
+  }
 
   const isArraySegment = head.endsWith('[]');
   const key = isArraySegment ? head.slice(0, -2) : head;
