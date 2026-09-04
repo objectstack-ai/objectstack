@@ -164,9 +164,14 @@ function makeEngine() {
             registerItem: () => undefined,
             registerObject: () => undefined,
         },
-        async find(table: string, opts?: { where?: Record<string, unknown> }) {
+        async find(table: string, opts?: { where?: Record<string, unknown>, limit?: number }) {
             if (table === 'sys_metadata') metaReads.push({ ...(opts?.where ?? {}) });
-            return tableOf(table).filter((r) => matches(r, opts?.where));
+            const rows = tableOf(table).filter((r) => matches(r, opts?.where));
+            // The caller's bound, applied AFTER the filter and by PRESENCE
+            // (`check:objectql-double-limit`): a double that silently ignores
+            // `limit` answers more rows than the real engine would, and a pin
+            // written against a paged read would pass on rows it never sees.
+            return typeof opts?.limit === 'number' ? rows.slice(0, opts.limit) : rows;
         },
         async findOne(table: string, opts?: { where?: Record<string, unknown> }) {
             assertEngineFindOnePredicate(table, opts);
