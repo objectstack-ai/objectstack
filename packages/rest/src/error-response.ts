@@ -755,6 +755,34 @@ function fiveXxArmDisplacesDeclared4xx(
 }
 
 /**
+ * [#14389 / #14723] Is this thrown value the ENGINE's unique-violation
+ * envelope — `@objectstack/objectql`'s `DuplicateRecordError`?
+ *
+ * Gated on the envelope, name AND code, not on the code alone: a hook that
+ * deliberately throws the registered `DUPLICATE_RECORD` from a sandbox body is
+ * a different producer speaking a member of the vocabulary and keeps its own
+ * sentence and its own code (`rest-duplicate-record-arm.test.ts` §5). The
+ * class is recognised by its declared contract rather than by `instanceof`
+ * so the import runner's row report, which never sees the class, applies the
+ * identical rule. `metadata-protocol`'s `toRowApiError` carries the same
+ * predicate for the batch rows — one rule, stated at each boundary that
+ * crosses to a client, so a whole-request failure and a row agree on which
+ * throws are the engine's envelope.
+ *
+ * The arm in {@link structuredCodeAnswer} spells the same two-part gate
+ * INLINE rather than calling this: `error-response-sandbox-arm-message.test.ts`
+ * §6 keys every arm of that classification by its `error?.code === '…'`
+ * literal (the drift guard that proves each producer-sentence relay asks the
+ * shared sandbox rule), and an arm hidden behind a call would drop out of
+ * that scan. Two spellings of one predicate in one file, each pinned: the
+ * import-row pin drives this function, the arm test drives the arm.
+ */
+export function isEngineDuplicateRecordEnvelope(error: unknown): boolean {
+    const e = error as { code?: unknown; name?: unknown } | null | undefined;
+    return e?.code === 'DUPLICATE_RECORD' && e?.name === 'DuplicateRecordError';
+}
+
+/**
  * [#14541] The bespoke structured arms, in ONE place, so BOTH REST error doors
  * can ask them FIRST.
  *
@@ -829,28 +857,30 @@ function fiveXxArmDisplacesDeclared4xx(
  * not. ⛔ So "the code is new there" is the wrong way round; the withheld value
  * is the change.
  *
- * ## ⚠️ A vocabulary fork this lifts onto routes where the other side lives
+ * ## One wire spelling on the route — the rows too (#14723)
  *
- * Disclosed under the #14541 contract review (condition 2) rather than implied
- * away by the "one condition, one wire code" framing above, which is true of
- * the DOORS and not of the rows beside them.
+ * The #14541 contract review (condition 2) disclosed a fork this file's "one
+ * condition, one wire code" framing did not cover: the DOORS answered a
+ * `DuplicateRecordError` as `UNIQUE_VIOLATION` (#14389's ruling, the arm
+ * below), while a batch or import ROW did not go through this classification
+ * at all — `metadata-protocol`'s `toRowApiError` put the thrown REGISTERED
+ * code on the row verbatim and `import-runner`'s row report did the same — so
+ * after #14541 a whole-request failure on `POST /data/:object/batch` or
+ * `POST /data/:object/import` said `UNIQUE_VIOLATION` while a row on the SAME
+ * route said `DUPLICATE_RECORD`.
  *
- * The `DUPLICATE_RECORD` arm answers the wire spelling `UNIQUE_VIOLATION`
- * (#14389's ruling). A batch or import ROW does not go through this
- * classification at all: `metadata-protocol`'s `toRowApiError` puts a thrown
- * REGISTERED code on the row verbatim, and `import-runner`'s row report does
- * the same, so a `DuplicateRecordError` row reports `DUPLICATE_RECORD` —
- * deliberately, per #14095. ⇒ after this change a WHOLE-REQUEST failure on
- * `POST /data/:object/batch` or `POST /data/:object/import` answers
- * `UNIQUE_VIOLATION` while a ROW failure on the SAME route answers
- * `DUPLICATE_RECORD`. Neither half is new and neither is a regression; what is
- * new is that the two now sit side by side in one route's responses.
- *
- * ⛔ Not decided here, and deliberately not decided by this file: the ledger's
- * "if it merely re-spells a standard member, that registration is a recorded
- * waiver" and ADR-0112's one-name-per-concept both bear on it, and moving
- * either spelling is a published-contract change rather than a door's call.
- * **#14723 carries the decision.**
+ * Maintainer ruling (2026-09-03, #14723): a unique-constraint refusal has ONE
+ * wire spelling on every route, `UNIQUE_VIOLATION` — the standard-catalog
+ * member the published protocol docs give for the 409 constraint-violation
+ * body. The row derivations now apply the same mapping this arm applies, keyed
+ * the same way ({@link isEngineDuplicateRecordEnvelope}: registered code AND
+ * class name, never message text): `toRowApiError` for the rows of
+ * `POST /data/:object/batch`, and `toFailedResult` for the import runner's
+ * row reports. The single-record door's code did not move (#14389's refusal
+ * stands), no ledger waiver was added — the duplication is removed, not
+ * declared — and the ENGINE's thrown identity is unchanged:
+ * `DuplicateRecordError.code` is still `DUPLICATE_RECORD` in-process; only
+ * what crosses the HTTP boundary spells `UNIQUE_VIOLATION`.
  */
 function structuredCodeAnswer(
     error: any,
@@ -940,8 +970,8 @@ function structuredCodeAnswer(
     // engine's own sentence (`message`): it names the object and the column
     // and carries no value. The envelope's own `developerMessage` is
     // deliberately NOT relayed — it addresses the in-process caller of
-    // `engine.insert` ("attached as `cause`", "branch on `code ===
-    // 'DUPLICATE_RECORD'`"), and neither holds on this wire.
+    // `engine.insert` ("attached as `cause`", and the in-process spelling
+    // beside the wire one), and `cause` never reaches this wire.
     //
     // **The body echoes nothing the driver said.** `cause` never reaches the
     // wire and the sentence is fixed text. This matters most for
