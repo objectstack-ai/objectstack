@@ -337,16 +337,26 @@ function checkCondition(value: any, condition: any): boolean {
         // same reason — a rule spelled over "the value is null" alone would
         // reach arms whose no-value answer is ruled elsewhere.
         //
-        // ⛔ A no-value COMPARAND is excluded from this guard, deliberately, so
-        // those cells keep TODAY's answer rather than being decided here.
-        // `$gt: null` is the one null-comparand position the contract still
-        // ACCEPTS (measured at `parseFilterAST`): the 2026-08-31 ruling refused
-        // the three siblings — `$in` / `$nin` null members and `$between`'s
-        // null endpoints (#13357) — and #5332's landing had already recorded
-        // this position in writing as one "no ruling covers". Deciding it in an
-        // operator arm would pick a camp the platform declined to pick, and its
-        // sibling was settled by REFUSING the shape rather than by answering
-        // it.
+        // ⛔ A no-value COMPARAND is excluded from this guard, deliberately.
+        // When #13553 landed, `$gt: null` was the one null-comparand position
+        // the contract still ACCEPTED (measured at `parseFilterAST`): the
+        // 2026-08-31 ruling had refused the three siblings — `$in` / `$nin`
+        // null members and `$between`'s null endpoints (#13357) — and #5332's
+        // landing had recorded this one in writing as "no ruling covers", so
+        // deciding it here would have picked a camp the platform declined to
+        // pick. That reason is gone: ruled 2026-09-01 (option A, #14080), the
+        // shape is REFUSED at the contract's validation entrance
+        // (`assertListComparandShapes`, inside `parseFilterAST` and at the
+        // engine seam), the same door and envelope as its siblings. These
+        // cells are now constructively unreachable through the compile face,
+        // and the exclusion stays for the ruling's own reason — ⛔「不单独修
+        // matcher(死代码)」— with no ordering-vs-null semantics defined
+        // anywhere. Negative pin:
+        // `memory-null-ordering-comparand-unreachable.test.ts`. A direct
+        // caller that skips the compile face meets only this package's own
+        // `assertFilterConditionShape`, which deliberately does not carry the
+        // rule (⛔ 不做跨后端对齐工程) — the honest boundary, not a cell for an
+        // arm to decide.
         if (value === null && ORDERING_OPERATORS.has(op)
             && target !== null && target !== undefined) {
             return false;

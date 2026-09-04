@@ -255,15 +255,24 @@ function invalidComparandError(context: string | undefined, message: string): Er
 const NOT_APPLIED =
   'The filter was NOT applied, and an unapplied filter would have returned the UNFILTERED result set.';
 
-/** `undefined` gets its own sentence — it is the one refused value that arrives by ACCIDENT. */
+/**
+ * `undefined` gets its own sentence — it is the one refused value that arrives
+ * by ACCIDENT. Its prescription names the null predicate by COMPLETE spellings
+ * (`{"$eq": null}` / `{"$ne": null}`, the pair the 2026-09-01 ruling names),
+ * never as "write null": this sentence is emitted at every comparand position,
+ * and at `$gt` / `$gte` / `$lt` / `$lte` — or an `$in` / `$nin` / `$between`
+ * member — "write null" produced exactly the null shapes refused one door over
+ * (2026-08-31, 2026-09-01). Position-safe means following it never lands in a
+ * refusal, whatever position it was emitted at (#14426).
+ */
 function undefinedComparandRefusal(context: string | undefined, path: string): Error {
   return invalidComparandError(
     context,
     `Filter comparand at ${path} is undefined. { key: undefined } cannot be told apart from an ` +
       `omitted key, yet the two mean OPPOSITE things (a predicate vs no constraint) — one ` +
-      `backend even encoded it as MATCH EVERYTHING. Write null for the null predicate, or omit ` +
-      `the key. A comparison value must be ${ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE}. ` +
-      NOT_APPLIED,
+      `backend even encoded it as MATCH EVERYTHING. Write the null predicate — {"$eq": null} / ` +
+      `{"$ne": null} — or omit the key. A comparison value must be ` +
+      `${ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE}. ${NOT_APPLIED}`,
   );
 }
 

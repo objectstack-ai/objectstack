@@ -165,6 +165,14 @@ import { measureShape, type ProbeRow, type ShapeMeasurement } from './fixtures/o
  * measures must now be `present` in BOTH shapes, so a reader that regresses —
  * or a new reader that arrives unresolved — is red on arrival with nothing left
  * to absorb it. Adding a line is never how that red is fixed.
+ *
+ * `@objectstack/verify`'s four rows (#15229) are absent from this list for
+ * exactly that reason, and the reason is worth stating rather than inferring:
+ * the by-shape sweep (#15210) found those sites, not this pin, so that card
+ * LEDGERED them red first and then DELETED the entries again inside one PR, by
+ * fixing the readers rather than the ledger. Both halves are in its history;
+ * the probe still measures all four, which is what keeps a regression in them
+ * red.
  */
 const OPTION_B_LOSSES: readonly string[] = [];
 
@@ -222,10 +230,19 @@ describe('#15004 — option-B acceptance pin: every subsystem must see its colle
     // control for every LOST row below: it proves the option-B fixture really
     // carries every definition under `packages[]`, so a zero is a reader losing
     // a collection and never a fixture that shipped an empty package.
-    expect(additive.registryObjectsFromArtifact).toEqual(['probe_account', 'probe_order']);
+    // `probe_federated_order` is the ADR-0015 federated object #15229 added to
+    // the zoo: `deriveCrudCases`'s datasource-by-name map decides exactly one
+    // thing — whether that object's probe insert clears the double write gate —
+    // so watching the map required carrying one. It registers like any other
+    // object, which is why it is in this control's list.
+    expect(additive.registryObjectsFromArtifact).toEqual(
+      ['probe_account', 'probe_federated_order', 'probe_order'],
+    );
     expect(optionB.registryObjectsFromArtifact).toEqual(additive.registryObjectsFromArtifact);
     expect(optionB.registryObjectsFromSource).toEqual(additive.registryObjectsFromSource);
-    expect(optionB.registryObjectsFromSource).toEqual(['probe_account', 'probe_order']);
+    expect(optionB.registryObjectsFromSource).toEqual(
+      ['probe_account', 'probe_federated_order', 'probe_order'],
+    );
   });
 
   // ── The baseline: green today, and it must stay green ────────────────────
@@ -248,11 +265,18 @@ describe('#15004 — option-B acceptance pin: every subsystem must see its colle
     // comment, and the fourth direction this file's header claims ("the probe
     // itself quietly measuring less ⇒ RED") had silently stopped existing.
     //
-    // 30 is MEASURED, not remembered: with this line temporarily written
+    // 35 is MEASURED, not remembered: with this line temporarily written
     // `expect(additive.rows.length).toBe(-1)`, the run reports
-    // `expected 30 to be -1`. Verified live at the boundary in the same
-    // session — a floor of 31 goes RED on the same fixture, so the assertion
+    // `expected 35 to be -1`. Verified live at the boundary in the same
+    // session — a floor of 36 goes RED on the same fixture, so the assertion
     // is not satisfied by construction.
+    //
+    // ⚠️ RAISED by #15229, which added four `@objectstack/verify` rows, and the
+    // raise repaired an off-by-one while it was here: the floor read 30 against
+    // a probe that measured 31, so one row could stop being measured with
+    // nothing going red. It is now the measured count EXACTLY — no slack — and
+    // that is what makes the next card's raise a step it cannot skip without
+    // this line failing.
     //
     // `>=` rather than `toBe` on purpose, and it is the same shrink-only
     // direction the ledger uses: a row ADDED to the probe is welcome and stays
@@ -260,11 +284,11 @@ describe('#15004 — option-B acceptance pin: every subsystem must see its colle
     // probe grows; ⛔ never lower it to make a red run green.
     expect(
       additive.rows.length,
-      `The probe measured ${additive.rows.length} rows, fewer than the 30 it measured when ` +
+      `The probe measured ${additive.rows.length} rows, fewer than the 35 it measured when ` +
         `this floor was set. A row that stops being measured stops being able to fail, which ` +
         `is the one direction this pin cannot detect anywhere else — fix the probe rather ` +
         `than the floor.`,
-    ).toBeGreaterThanOrEqual(30);
+    ).toBeGreaterThanOrEqual(35);
   });
 
   // ── The pin ──────────────────────────────────────────────────────────────

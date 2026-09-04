@@ -453,7 +453,7 @@ os compile --json                    # JSON output for CI pipelines
   → Normalizing stack definition...
   → Lowering inline handlers...
   → Validating protocol compliance...
-  → Running author-time rules (41)...
+  → Running author-time rules (42)...
   → Checking capability providers (#3366)...
   → Collecting package docs (ADR-0046)...
   → Writing artifact...
@@ -680,9 +680,9 @@ occupancy on its own.
 
 | Category | Examples | Applied by |
 |----------|----------|------------|
-| `safe` | relax `NOT NULL` → nullable, widen a `varchar`, create a declared index, replace a legacy installation-wide unique with its per-organization composite | `os migrate apply` (and dev auto-reconcile) |
+| `safe` | relax `NOT NULL` → nullable, widen a `varchar`, create a declared index (a `UNIQUE` one only when its duplicate pre-flight comes back clean), replace a legacy installation-wide unique with its per-organization composite | `os migrate apply` (and dev auto-reconcile) |
 | `needs_confirm` | non-narrowing type change, rebuild a non-unique index whose columns changed | `os migrate apply` — except `manual_widen_varchar_to_text`, which nothing applies |
-| `destructive` | drop an orphaned column or index, tighten `NOT NULL`, narrow a type, rebuild an index as `UNIQUE` | `os migrate apply --allow-destructive` |
+| `destructive` | drop an orphaned column or index, tighten `NOT NULL`, narrow a type, rebuild an index as `UNIQUE`, create a `UNIQUE` index existing rows already violate | `os migrate apply --allow-destructive` |
 
 #### Index drift
 
@@ -690,7 +690,7 @@ occupancy on its own.
 
 | Op | What it means |
 |----|---------------|
-| `create_index` | Metadata declares an index the database does not have |
+| `create_index` | Metadata declares an index the database does not have. A `UNIQUE` one runs the same duplicate pre-flight probe `recreate_index` does: rows that already violate it **block** the op with a report naming the conflicting key groups and their row counts, instead of failing a boot on the database's own error, and the declared constraint stays unenforced until they are resolved |
 | `replace_unique_index` | A field's `unique` used to be enforced installation-wide, but metadata now scopes it per organization — the legacy single-column index is swapped for the NULL-safe `(COALESCE(organization_id, '__global__'), field)` composite. A pure relaxation: it creates before it drops, and cannot fail |
 | `recreate_index` | An index exists under the declared name but with different columns/uniqueness. The additive sync skips it by name, so it must be dropped and rebuilt. This is also how a per-organization unique becomes NULL-safe: a **tightening**, so it runs a duplicate pre-flight probe first — rows the old NULL-distinct index wrongly admitted **block** the op with a report instead of failing a boot, and the old index stays in place until they are resolved |
 | `drop_index` | An index carrying ObjectStack's generated naming (`uniq_…` / `idx_…`) that metadata no longer declares |
@@ -1190,7 +1190,7 @@ only.
 | Command | Alias | Description |
 |---------|-------|-------------|
 | `os generate <type> <name>` | `os g` | Generate metadata files |
-| `os create <type> [name]` | | Create a new package from template |
+| `os create <type> [name]` | | Scaffold a standalone plugin or example project |
 
 #### `os generate` (alias: `os g`)
 
@@ -1263,12 +1263,31 @@ third-party extension primitive, authored as `src/skills/<name>.skill.ts` with
 
 #### `os create`
 
-Creates new packages from built-in templates (for monorepo-level scaffolding):
+Scaffolds a **standalone** project — a plugin, or an example application — into
+the current directory:
 
 ```bash
-os create plugin analytics    # Create packages/plugins/plugin-analytics
-os create example my-app      # Create examples/my-app
+os create plugin analytics    # Create ./plugin-analytics
+os create example my-app      # Create ./my-app
+
+cd plugin-analytics
+pnpm install
+pnpm build
 ```
+
+The emitted `package.json` declares its `@objectstack/*` dependencies as
+published semver ranges pinned to the version of the CLI that generated it, and
+the emitted `tsconfig.json` is self-contained, so the project installs and
+builds anywhere — a workspace around it is neither needed nor assumed.
+
+**Options:**
+- `-d, --dir <directory>` — Write the project here instead of `./<name>`
+- `--in-repo` — Scaffold **inside an ObjectStack monorepo checkout** instead
+  (`packages/plugins/<name>` for a plugin, `examples/<name>` for an example),
+  with `workspace:*` dependencies and a `tsconfig.json` that extends the
+  repository root config. For ObjectStack platform work only: the project it
+  writes installs nowhere else, and the command refuses the flag when the
+  current directory is not a pnpm workspace root.
 
 ### Quality
 

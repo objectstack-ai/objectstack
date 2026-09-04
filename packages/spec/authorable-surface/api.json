@@ -1632,7 +1632,7 @@
     "api/SessionUser:emailVerified",
     "api/SessionUser:id",
     "api/SessionUser:image",
-    "api/SessionUser:language",
+    "api/SessionUser:language [RETIRED]",
     "api/SessionUser:name",
     "api/SessionUser:roles",
     "api/SessionUser:tenantId",

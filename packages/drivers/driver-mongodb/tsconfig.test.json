@@ -1,0 +1,91 @@
+// The TEST-layer type-check program (#14917), adopting the mechanism #5286 set
+// for `packages/spec` and #5449 generalised — the route `packages/objectql`
+// (#13676), `packages/runtime` (#14504) and `packages/core` (#14613) already
+// run. `tsconfig.json` beside this file stays exactly as it is: it is the BUILD
+// config, and its `**/*.test.ts` exclusion has a reason. This sibling puts the
+// excluded layer back in front of tsc, and `package.json`'s `typecheck` script
+// NAMES it (via `check:test-typecheck --project`), because a config no script
+// invokes is exactly the phantom this whole mechanism is about.
+//
+// BEFORE THIS FILE, NO tsc PROGRAM COMPILED A SINGLE TEST FILE HERE, and that
+// is measured rather than read off the config. At 6ed4b811af with the
+// dependency closure built first, `tsc --noEmit --listFiles -p tsconfig.json`
+// puts **0** of this package's 30 `src/**/*.test.ts` files in the program —
+// while all **10** of its non-test `src/**` files ARE there, so the zero is the
+// `exclude` line and not a probe that sees nothing. Under this file the count is
+// **30 of 30**, with the same 10 non-test files beside them.
+// `pnpm --filter @objectstack/driver-mongodb typecheck` exiting 0 was a true
+// sentence carrying no information about any test file in this package.
+//
+// ⚠️ WHAT THE CARD SAID, AND WHAT WAS ACTUALLY WRONG. The filing's headline —
+// that a compile-time `Equals` / `IsAny` pin here is "checked by nothing" — is
+// FALSE, and the correction on the card is right: a second program does compile
+// these files. `scripts/check-type-check-coverage.mjs`'s `remeasureProject`
+// extends this package's tsconfig, drops only the test glob, and compares the
+// result against its `TEST_DEBT` ledger. That is how CI caught PR #14914's
+// three TS18047 errors, which this package's own `typecheck` could not see. So
+// the pins were not phantoms. What was true is narrower and is what this file
+// closes: the only program reading this layer was a DEBT RATCHET — an
+// instrument that reports a NUMBER and fails when the number MOVES, not a gate
+// that reports a pass.
+//
+// What differs from the build config, and what deliberately does NOT:
+//   - module semantics ONLY, plus `lib`. The tests are written and executed as
+//     ESM by vitest (esbuild/vite), while this package has no `"type":
+//     "module"`, so the build config's NodeNext compiles them as CJS. Measured
+//     cost of that mismatch here: ALL 10 of the raw diagnostics — TS1309 x7
+//     ("cannot use `await` at the top level" in a CJS program, one per suite
+//     that awaits `startMongod()` at module scope) and TS2550 x3 (all three the
+//     same `Array.prototype.at` message in `mongodb-findone-options.test.ts`,
+//     against a `lib` older than es2022). Those 10 are about the CHECK, never
+//     about the code. Matching vitest is fidelity, not laxity. No `DOM` in
+//     `lib`: nothing in this layer touches a browser global.
+//   - ⛔ STRICTNESS IS UNTOUCHED. `strict`, `noUnusedLocals`,
+//     `noUnusedParameters`, `noImplicitReturns`, `noFallthroughCasesInSwitch`
+//     are inherited from the root config, and `types: ["node"]` restates
+//     `tsconfig.json`'s — load-bearing for the same reason its comment gives,
+//     since the `.test.ts` files call the `setTimeout` / `console` users in
+//     `src/test-mongod.ts` and use those globals themselves. Nothing here may
+//     loosen a type rule; if a test does not compile, that is the finding.
+//     ⛔ Not one `any` and not one `@ts-expect-error` was added to any test file
+//     to open this gate — that shape is what turns a real gate into a phantom.
+//   - ⚠️ `noUnusedLocals` / `noUnusedParameters` are worth naming explicitly:
+//     they are `true` at the root and `false` in `driver-turso`'s own overrides
+//     but NOT in this package's, so this layer meets STRICTER settings than the
+//     sibling driver whose clean state might otherwise be read as a prediction.
+//     Measured: neither fires here, in either direction. Zero of the 10.
+//   - `rootDir` is INHERITED as `./src` and deliberately not widened. Like
+//     `packages/runtime` and unlike `objectql` / `spec`, this layer produces no
+//     TS6059: measured, every file this program admits is already under `src`
+//     (all 30 test files sit beside the sources they exercise). Widening it "to
+//     be safe" would admit files the build config does not and change what the
+//     gate judges, so it stays as the build config has it.
+//
+// ⭐ MEASURED at 6ed4b811af, dependency closure built first (an error count
+// taken against an unbuilt closure is not a reading — unresolved-import
+// cascades inflate it): this program reports **0 errors across 30 files**, from
+// a raw 10 under the inherited NodeNext semantics. Every one of the 10 was
+// config-tier and none survives; the residue is EMPTY. So unlike `objectql`,
+// `runtime`, `spec` and `core`, this package needs **no**
+// `test-typecheck-debt.json` at all, and carries none — which is the strongest
+// form of this gate: all 30 files are unledgered, so any error any one of them
+// ever gains is red on arrival, starting today.
+//
+// That empty residue is also why the `TEST_DEBT` entry in
+// `scripts/check-type-check-coverage.mjs` GRADUATES in the same change rather
+// than being paid down. Its recorded 10 and its recorded composition
+// ("TS1309 x7, TS2550 x3") match this file's raw reading exactly, which is the
+// cleanest possible confirmation that the ledger was measuring the CHECK's
+// misconfiguration and never a defect in the tests.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"],
+    "types": ["node"]
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}

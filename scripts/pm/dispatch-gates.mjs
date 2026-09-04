@@ -1110,6 +1110,73 @@ export function jobPathPopulations(workflowText, workflowFile) {
 }
 
 /**
+ * ## The DIRECTORY PREFIX both matchers below carry, and why it is shared (#15342)
+ *
+ * This repo has a package-local gate lane, and `lint.yml` really runs one of
+ * its gates by path — `node packages/lint/scripts/check-reference-carrier-
+ * shape.mjs --self-test`, with the bare production invocation on the next line.
+ * Both patterns used to open on the literal `scripts/` immediately after
+ * `node `, so neither matched that step AT ALL. The gate was in no family, and
+ * `--residue` could not report it either: it is absent from the universe the
+ * matched / silent / undetermined buckets partition, which is the #11397 state
+ * one lane over. Measured on the base tree for a card editing that gate's OWN
+ * file: `--commands` named it zero times, every one of the 27 `--residue`
+ * mentions was the dev's own CHANGED PATH echoed back as an input, and the step
+ * surfaced only in the always-runs STEP tail, as one of the 33 unconditional CI
+ * steps this derivation names no family for.
+ *
+ * ## What the prefix admits, and what it deliberately refuses
+ *
+ *   - A prefix segment must START with an alphanumeric or `_`, so `..` is not
+ *     one. A climbing spelling cannot be resolved against this ROOT without
+ *     knowing what it is relative to, and `entry.files` would then carry a key
+ *     with no file behind it — the phantom `resolveCheckToFiles`' docblock
+ *     prices at "strictly worse than the bug being fixed". Zero occur in the
+ *     workflow corpus today; refusing to match is the safe direction, and the
+ *     sibling anchor in `scripts/check-self-test-wired.mjs` refuses it in the
+ *     same spelling for the same reason.
+ *   - A `scripts/` segment is still REQUIRED, so no new file species is
+ *     admitted. `node packages/cli/bin/run.js` is the only other non-root path
+ *     any workflow invokes with `node`, and it stays out.
+ *   - The prefix cannot RE-ATTRIBUTE an existing match. For a path that already
+ *     began at `scripts/` the group matches empty and the remainder of each
+ *     pattern is byte-identical, so every key this tool minted before it is
+ *     minted after it. Asserted below rather than left as this sentence.
+ *
+ * ## Priced in both directions, over 7472 tracked files (base `65846bc46`)
+ *
+ *   check families discovered        252 -> 254       (+2, ZERO lost)
+ *   gate files                       201 -> 202       (+1, ZERO lost)
+ *   watch-hint (gate, file) pairs  240947 -> 254181   (+13234, ZERO lost)
+ *   existing families re-attributed  0 — every pre-existing family's pair count
+ *                                    is byte-identical before and after
+ *   always-runs steps naming NO family  33 -> 32 (18 -> 17 distinct commands)
+ *
+ * The +13234 is exactly 2 x 6617: the gate declares four subtree hints
+ * (`packages/**`, `examples/**`, `scripts/**`, `apps/**`) and CI runs it twice,
+ * so it arrives as two families under two keys — the split #14880 made, working
+ * as designed. Becoming a GATE FILE is the one direction of this change that
+ * could SUBTRACT (`discoverFamilies` excludes gate files from import-following),
+ * so it is measured rather than argued: no existing family's pair count moved,
+ * in either direction, so the net subtraction is zero.
+ *
+ * ## Why `SELF_TEST_INVOCATION` is widened too, on ZERO specimens
+ *
+ * Today's one package-local specimen carries a `check-` basename, so the direct
+ * matcher takes it and the self-test matcher skips it by design — that half
+ * gains no recall at all. It is widened anyway because the two matchers'
+ * coordination contract is that they mint BYTE-IDENTICAL keys for one script,
+ * and two adjacent patterns with two different path grammars cannot hold it: a
+ * package-local gate NOT named `check-*` would then be discovered by neither,
+ * which is this card's silence wearing a different filename. Same standard as
+ * the extension right-boundary in `resolveCheckToFiles` — zero recall today,
+ * zero cost today (both numbers above are the direct matcher's alone), class
+ * closed before the first specimen arrives. ⛔ Keep the two prefixes spelled
+ * identically; the self-test asserts that both accept the same package-local
+ * path, so a drift reds rather than going quiet.
+ */
+
+/**
  * A `run:` step that invokes a repo script with `--self-test`. The flag is the
  * SCRIPT'S OWN declaration that this invocation verifies the script rather than
  * doing its work, which is what makes the step a gate.
@@ -1130,7 +1197,7 @@ export function jobPathPopulations(workflowText, workflowFile) {
  * its own, which is correct: the inner script is the gate.
  */
 const SELF_TEST_INVOCATION =
-  /node[ \t]+(scripts\/[\w./-]+\.mjs)(?:[ \t]+-{1,2}[A-Za-z0-9][\w-]*)*[ \t]+--self-test\b/g;
+  /node[ \t]+((?:[A-Za-z0-9_][\w.-]*\/)*scripts\/[\w./-]+\.mjs)(?:[ \t]+-{1,2}[A-Za-z0-9][\w-]*)*[ \t]+--self-test\b/g;
 
 /**
  * A `run:` step that invokes a `check-`named repo script directly, WITH the
@@ -1150,7 +1217,7 @@ const SELF_TEST_INVOCATION =
  * outcomes. Joining is how that hazard is removed rather than merely refused.
  */
 const DIRECT_CHECK_INVOCATION =
-  /node[ \t]+(scripts\/[\w./-]*check-[\w.-]+\.mjs)([^\n;|&<>()]*)/g;
+  /node[ \t]+((?:[A-Za-z0-9_][\w.-]*\/)*scripts\/[\w./-]*check-[\w.-]+\.mjs)([^\n;|&<>()]*)/g;
 
 /**
  * Splice a shell line-continuation back into ONE line, so a matcher reading a
@@ -2143,11 +2210,22 @@ export function declaredWholeTreePopulation(scriptSource) {
  * for a new spelling is to EXTEND this list with a self-test case beside it,
  * never to route around the check.
  *
- * Measured over the six candidate gates #14189 and #14325 nominated: limbs A/B
- * select five, and `check-self-test-workflow-commands.mjs` — whose walk is
- * seeded at `scripts/`, a bounded subtree — is selected by none of them, which
- * is the reading of its source, not a coincidence. That gate's remedy is the
- * ordinary subtree declaration, not this channel.
+ * Measured over the six candidate gates #14189 and #14325 nominated: the limbs
+ * select five — three by A (`check-nul-bytes`, `check-refd-timer-probe`,
+ * `check-closing-keyword-parity`), one by B (`check-watch-hint-literal`), one
+ * by C (`check-comment-mask-corpus`) — and `check-self-test-workflow-commands.mjs`
+ * is selected by none of them, which is the reading of its source, not a
+ * coincidence. Its population is a bounded subtree (`scripts/`), never the
+ * tree, so its remedy is the ordinary subtree declaration and not this channel.
+ *
+ * ⚠️ Re-derived rather than recalled (#15510), and the count is the durable
+ * half of that sentence: the ATTRIBUTION was stale. `check-comment-mask-corpus`
+ * moved from limb B to limb C when limb B was tightened to refuse a path BUILD
+ * (the note on limb B below records that tightening), and "limbs A/B select
+ * five" was left behind. The REASON the sixth is unselected is stale-prone for
+ * its own reason: it was the SHAPE of that gate's walk, and a gate can stop
+ * holding a walk without the census outcome moving at all. What is written
+ * above is the population, which is what the remedy turns on.
  */
 export const REPO_ROOT_WALK_SPELLINGS = [
   {
@@ -2274,13 +2352,6 @@ export function wholeTreePopulationRefusal(entry) {
  * reds too: a stale exclusion is an exclusion nobody is measuring any more.
  */
 export const ROOT_WALK_RESIDUE_LEDGER = [
-  [
-    'check:org-identifier',
-    'its enumeration is `git ls-files -- examples apps packages` (the ROOTS constant) — three SUBTREES, not the '
-      + 'tree. The liveness predicate selects it on limb A and is documented as too weak to tell that apart, so a '
-      + 'whole-tree marker here would be precisely the mis-declaration that predicate cannot catch. Its remedy is '
-      + 'the ordinary ROOT_DIR_WATCH_HINTS declaration naming those three roots, after which it is MATCHED here.',
-  ],
   [
     'scripts/check-console-intercept-disarm.mjs',
     'its `scan(REPO_ROOT)` walks `workspacePackageDirs(root)` — every workspace PACKAGE ROOT\'s package.json and '
@@ -11519,6 +11590,67 @@ function selfTest() {
   t('extracts direct node scripts/check-*.mjs', invs.some((i) => i.check === 'scripts/check-nul-bytes.mjs' && i.direct));
   t('ignores non-check runs', !invs.some((i) => String(i.check).includes('build')));
 
+  // ── The package-local gate lane: a path is keyed WHOLE (#15342) ───────────
+  //
+  // `lint.yml` invokes `packages/lint/scripts/check-reference-carrier-shape.mjs`
+  // by path, twice. Before the directory prefix documented beside the patterns,
+  // `node ` had to be followed IMMEDIATELY by `scripts/`, so neither matcher saw
+  // that step at all: no family, no hints, and nothing for `--residue` to place.
+  //
+  // Cases 1-3 and 6 FAIL against the base spelling — measured by applying this
+  // battery to `/node[ \t]+(scripts\/…)/` in a scratch ablation — which is what
+  // makes them an instrument rather than a restatement of the operators. Cases
+  // 4, 5, 7 and 8 hold on BOTH spellings: they are the controls that prove the
+  // widening did not buy its new answers by dropping the old ones.
+  {
+    const PKG = 'packages/lint/scripts/check-reference-carrier-shape.mjs';
+    const pkgInvs = extractCheckInvocations(
+      ['jobs:', '  lint:', '    steps:', '      - name: package-local gate', '        run: |',
+        `          node ${PKG} --self-test`, `          node ${PKG}`].join('\n'),
+      'lint.yml',
+    );
+    t(
+      'a gate CI invokes by a PACKAGE-LOCAL path is discovered at all — unfound, it is in no family, so no '
+        + 'card can be told to run it and --residue has no bucket to place it in either (#15342)',
+      pkgInvs.some((i) => i.check === `${PKG} --self-test` && i.direct),
+    );
+    t(
+      '…and its bare production invocation arrives as the SECOND family under its own key, the #14880 split',
+      pkgInvs.some((i) => i.check === PKG && i.direct),
+    );
+    t(
+      '…both keyed by the REAL path, which is what `entry.files` carries and `existsSync` then opens',
+      pkgInvs.length === 2 && pkgInvs.every((i) => i.script === PKG),
+    );
+    t(
+      'control — no PHANTOM root key is minted beside them: a `scripts/…` TAIL keyed as a path in its own '
+        + 'right names a file this ROOT does not hold, and every audit downstream then passes for the wrong reason',
+      !pkgInvs.some((i) => String(i.script ?? i.check).startsWith('scripts/')),
+    );
+    t(
+      'control — a CLIMBING spelling is refused rather than resolved: `..` is not a prefix segment, because '
+        + 'a path this ROOT cannot resolve is exactly how a phantom identity key gets minted',
+      extractCheckInvocations('    - run: node ../scripts/check-x.mjs\n', 'x.yml').length === 0,
+    );
+    t(
+      'the SELF-TEST matcher carries the same prefix grammar — a package-local gate not named `check-*` '
+        + 'would otherwise be discovered by neither matcher, which is this silence one filename over',
+      extractCheckInvocations('    - run: node packages/lint/scripts/carrier-census.mjs --self-test\n', 'x.yml')
+        .some((i) => i.check === 'packages/lint/scripts/carrier-census.mjs --self-test' && i.direct),
+    );
+    t(
+      'control — the prefix widens the DIRECTORY a gate may sit under and never the SPECIES of file: a path '
+        + 'with no `scripts/` segment is still admitted by neither matcher (`packages/cli/bin/run.js` is live)',
+      extractCheckInvocations('    - run: node packages/cli/bin/run.js check\n', 'x.yml').length === 0,
+    );
+    t(
+      'control — a root-spelled invocation is keyed BYTE-IDENTICALLY to before, so the prefix re-attributes '
+        + 'nothing: it matches empty there and the remainder of each pattern is unchanged',
+      extractCheckInvocations('    - run: node scripts/check-nul-bytes.mjs\n', 'x.yml')
+        .every((i) => i.check === 'scripts/check-nul-bytes.mjs' && i.script === 'scripts/check-nul-bytes.mjs'),
+    );
+  }
+
   // Block-scalar bodies (#8410). A step written `run: |` keeps its commands on
   // the following lines; reading only the `run:` line collected "|" and missed
   // every gate invoked this way. Both scalar styles and both invocation shapes
@@ -11989,6 +12121,20 @@ function selfTest() {
     }
     const direct = liveInvs.filter((i) => i.direct);
     const valueBearing = direct.filter((i) => (i.argvVariables ?? []).length > 0);
+    // The live half of the package-local lane (#15342). The fixtures above prove
+    // the pattern; these two read the tree CI actually runs, so the day the lane
+    // moves this reds here instead of going quiet — and the second one holds the
+    // phantom class over EVERY direct invocation, not only over the specimen.
+    t(
+      '⭐ the live corpus really carries the package-local lane the directory prefix exists for, so the '
+        + 'fixtures above judge a live class. If this reds, the lane moved — re-point it, never widen further',
+      direct.some((i) => i.script === 'packages/lint/scripts/check-reference-carrier-shape.mjs'),
+    );
+    t(
+      `every one of the ${direct.length} direct invocation(s) in the live tree resolves to a file that EXISTS `
+        + 'on disk — a key with no file behind it reads as a confident gate identity in both directions (#15342)',
+      direct.length > 0 && direct.every((i) => existsSync(nodePath.join(ROOT, i.script))),
+    );
     t(
       `the live tree really carries ${valueBearing.length} value-bearing invocation(s) across ${new Set(valueBearing.map((i) => i.script)).size} script(s), so the cases above judge a live class`,
       valueBearing.length > 0,
@@ -14032,6 +14178,86 @@ function selfTest() {
     );
   }
 
+  // ── The MANIFEST population of check:merge-driver (#15501) ────────────────
+  //
+  // That family's `git-merge-regen --self-test` refuses a generator with no
+  // recorded merge disposition, and the population that refusal sweeps is the
+  // MANIFESTS — the root one plus every workspace member's, read for their
+  // `gen:` / `check:` rows. What the family declared HERE was the artifact
+  // paths `scripts/regen-artifacts.mjs` carries, imported one level down: the
+  // generators ALREADY routed. So the one class of card the refusal exists to
+  // catch — a card that ADDS a generator, touching a manifest and a new
+  // `scripts/*.mjs` — was the one class this derivation could not name, and the
+  // gate fired a cycle late, in CI, on every card of that shape. Measured
+  // before the repair, on a `package.json` change set: zero lines naming it.
+  //
+  // Pinned against the LIVE tree through the same discovery pass `derive` runs,
+  // for the reason the scripts/** case above states: a hand-built fixture could
+  // pass here while the real family stayed unnameable, which is the exact
+  // failure these cases exist to stop recurring.
+  const mdFamilies = discoverFamilies().byCheck;
+  const MERGE_DRIVER = 'check:merge-driver';
+  const mdEntry = mdFamilies.get(MERGE_DRIVER);
+  t(`${MERGE_DRIVER} is discovered at all — the pins below mean nothing without this`, Boolean(mdEntry));
+  // The declared halves, stripped for the ablation below. Spelled as a
+  // PREDICATE over the live hint set rather than as a copy of the declaration,
+  // so a hint respelled in `git-merge-regen.mjs` cannot leave a stale twin here
+  // that keeps the ablation passing.
+  const isManifestHint = (h) => h === 'package.json/**' || h.endsWith('/package.json');
+  const mdStripped = mdEntry ? { ...mdEntry, hints: (mdEntry.hints ?? []).filter((h) => !isManifestHint(h)) } : null;
+  // The POSITIVE direction, one probe per declared half. The table is pinned to
+  // its own length first (#13799's floor recipe): a loop over an emptied table
+  // runs zero cases and prints nothing, which reads exactly like a pass.
+  const MD_MANIFEST_PROBES = [
+    ['the ROOT manifest, where the measured CI red added its `gen:` row', 'package.json'],
+    ['a workspace MEMBER manifest', 'packages/plugins/plugin-auth/package.json'],
+  ];
+  t('the manifest probe table still has both declared halves in it', MD_MANIFEST_PROBES.length === 2);
+  for (const [why, probe] of MD_MANIFEST_PROBES) {
+    const verdict = mdEntry ? classifyEntry(mdEntry, [probe]).verdict : null;
+    // The reading rides in the case NAME, never in a third argument: `t` takes
+    // two, so a detail passed beyond them is dropped on the floor — and a
+    // failing case whose reading went with it is a case nobody can act on.
+    t(
+      `a change set touching ${why} derives ${MERGE_DRIVER} — ${probe} => ${verdict}`,
+      verdict === 'matched',
+    );
+    // …and it is the manifest declaration doing it. Without this half the case
+    // above could pass through any hint that happens to cover the probe —
+    // `packages/spec/package.json`, for one, was already reachable through the
+    // `packages/spec` literal, so a probe chosen there would have proved
+    // nothing at all. Both not-matched verdicts are accepted, spelled as an
+    // explicit pair so a NEW verdict value added later cannot slip through as
+    // a pass — the same reasoning as the scripts/** ablation above.
+    const residual = mdStripped ? classifyEntry(mdStripped, [probe]).verdict : null;
+    t(
+      `…and it is the manifest declaration doing it: strip it and ${probe} goes back to NOT MATCHED`
+        + ` (hints ${mdEntry?.hints?.length} -> ${mdStripped?.hints?.length}, residual ${residual})`,
+      // The length comparison is what stops this passing VACUOUSLY: with no
+      // manifest hint to remove, `mdStripped` is the entry itself and a
+      // not-matched verdict compared against itself reads as a pass.
+      Boolean(mdStripped) &&
+        mdStripped.hints.length < (mdEntry.hints ?? []).length &&
+        ['silent', 'undetermined'].includes(residual),
+    );
+  }
+  // The NEGATIVE direction, and it is what keeps the declaration from being a
+  // whole-tree widening in disguise: an unrelated script is not newly derived.
+  // Stated as "the declaration moved NOTHING for it" rather than as a bare
+  // not-matched verdict — the manifest hints are the only thing that changed,
+  // so the two verdicts agreeing is the claim, and it stays true whatever the
+  // rest of the family's population does later.
+  const mdUnrelated = 'scripts/the-one-nobody-has-written-yet.mjs';
+  const mdUnrelatedVerdict = mdEntry ? classifyEntry(mdEntry, [mdUnrelated]).verdict : null;
+  t(
+    `an unrelated brand-new scripts/*.mjs is NOT derived to ${MERGE_DRIVER} (${mdUnrelatedVerdict})`,
+    ['silent', 'undetermined'].includes(mdUnrelatedVerdict),
+  );
+  t(
+    'and the manifest declaration is what moved nothing for it — the same verdict with and without',
+    mdUnrelatedVerdict === (mdStripped ? classifyEntry(mdStripped, [mdUnrelated]).verdict : null),
+  );
+
   // ── The bare root this gate must NOT spell (#10875) ───────────────────────
   //
   // `check:published-files` asks whether a published package ships a scripts/
@@ -15742,13 +15968,67 @@ function selfTest() {
     "nor does one whose --self-test body stages a fixture tree (the self-test is not the gate's work)",
     repoRootWalkSpelling("function selfTest() {\n  execFileSync('git', ['ls-files', '-z'], { cwd: tmp });\n}\n") === null,
   );
-  // The live specimen for the NEGATIVE direction: a walk seeded at a bounded
-  // subtree. check-self-test-workflow-commands.mjs is exactly this shape, and
-  // it is why #14325's census of six is a census of five here.
+  // The NEGATIVE direction: a walk seeded at a bounded subtree, which is why
+  // #14325's census of six is a census of five here.
+  //
+  // The fixture string below is data, not a read of any file, so it cannot go
+  // stale — but it also cannot show that the shape still EXISTS in this tree,
+  // and a specimen named in prose can rot while every case here stays green.
+  // That is exactly what happened to the name this comment used to carry
+  // (#15510): `check-self-test-workflow-commands.mjs` was cited as the live
+  // specimen and then had its walk removed, leaving a sentence pointing at a
+  // file with no walk in it. So the specimens below are MEASURED, and there
+  // are two of them at two different walk roots, so one file's repair cannot
+  // empty the claim again:
+  //
+  //   scripts/check-self-test-wired.mjs   `walkScripts(scriptsDir)`, seeded at
+  //                                       `join(ROOT, 'scripts')`
+  //   scripts/check-spec-parsed-alias.mjs `walkZodFiles(SPEC_SRC)`, seeded at
+  //                                       `join(ROOT, 'packages/spec/src')`
+  //
+  // Both read `null` from this predicate on this tree — the reading is pinned
+  // LIVE two cases down, against their real source rather than against a
+  // string typed here.
   t(
     'a walk seeded at a bounded subtree is not a repo-root walk',
     repoRootWalkSpelling("const scriptsDir = join(ROOT, 'scripts');\nconst files = walkScripts(scriptsDir);") === null,
   );
+
+  // LIVE, on this tree: the two specimens the comment above names, read off
+  // their real source rather than typed here (#15510). This is the half a
+  // fixture cannot carry — that the shape the negative direction is written
+  // for still exists in this repo — and it is the half that went stale last
+  // time. Their walk ROOTS are named in the case text, so a reader who opens
+  // one is told what to look for; a file that has gone is NOT MEASURED rather
+  // than a quiet pass, per the convention at the top of this battery.
+  const SUBTREE_WALK_SPECIMENS = [
+    ['scripts/check-self-test-wired.mjs', "walkScripts(scriptsDir), seeded at join(ROOT, 'scripts')"],
+    ['scripts/check-spec-parsed-alias.mjs', "walkZodFiles(SPEC_SRC), seeded at join(ROOT, 'packages/spec/src')"],
+  ];
+  // The floor (#13799): a loop over an emptied table runs zero cases and reads
+  // exactly like a pass, and this table's whole purpose is to not be down to
+  // one name again.
+  t('the bounded-subtree specimen table still names two files at two walk roots', SUBTREE_WALK_SPECIMENS.length === 2);
+  for (const [file, walk] of SUBTREE_WALK_SPECIMENS) {
+    const abs = nodePath.join(ROOT, file);
+    if (!existsSync(abs)) {
+      unmeasurable(
+        `the bounded-subtree walk specimen ${file}`,
+        'the file is not in this tree, so its source cannot be read — name a specimen that is, or say plainly that only the fixture backs this direction.',
+      );
+      continue;
+    }
+    const src = readFileSync(abs, 'utf8');
+    t(
+      `LIVE: ${file} still holds a bounded-subtree walk (${walk})`,
+      /walk[A-Za-z]*\(/.test(src),
+    );
+    t(
+      `LIVE: …and this predicate reads ${file} as NOT a repo-root walk, the negative direction the fixture above stands for`,
+      repoRootWalkSpelling(src) === null,
+    );
+  }
+
 
   // The refusals — the two contradictions the derivation must not resolve on
   // the gate's behalf.
@@ -18749,7 +19029,20 @@ function selfTest() {
   const tail = alwaysRunSteps([{ file: 'fixture.yml', text: tailWf }]);
   const tailNames = tail.rows.map((r) => r.step);
   t('a step whose family the derivation names is NOT in the tail', !tailNames.includes('A discoverable family'));
-  t('a package-local gate invoked by path IS in the tail', tailNames.includes('A package-local gate invoked by path'));
+  // #15342 retired this member from the tail by giving the derivation the anchor
+  // to discover it, so what is pinned is the RETIREMENT WITH ITS CAUSE: the step
+  // has left the tail AND the derivation names a family for it. Either half
+  // alone goes green for the wrong reason — a tail that stopped walking, or a
+  // family list that claims the step while CI's step sits unaccounted for. The
+  // tail's own class ("a step the derivation names NOTHING for is listed") is
+  // unweakened: the interpreter member below still holds it, on this fixture and
+  // on the live tree.
+  t(
+    'a package-local gate invoked by path is NOT in the tail any more (#15342) — the derivation names it',
+    !tailNames.includes('A package-local gate invoked by path')
+      && extractCheckInvocations(tailWf, 'fixture.yml')
+        .some((i) => i.script === 'packages/lint/scripts/check-fixture-shape.mjs'),
+  );
   t('a gate run by another interpreter IS in the tail', tailNames.includes('A gate run by another interpreter'));
   t('a conditional STEP is excluded and counted', !tailNames.includes('Conditional, so no claim is made about it') && tail.counts.conditionalSteps === 1);
   t('a conditional JOB is excluded and counted', !tailNames.includes('Never claimed as always-run') && tail.counts.conditionalJobs === 1);
@@ -18806,9 +19099,21 @@ function selfTest() {
   );
   const liveCommands = liveTail.rows.flatMap((r) => r.commands);
   t('the live tail is not empty — an empty one would mean the walk broke, not that CI runs nothing', liveTail.rows.length > 0);
+  // #13333's first live instance was a package-local gate invoked by path. It is
+  // no longer here, and that is #15342 landing rather than this pin rotting —
+  // both halves are asserted for the reason the fixture case above states.
+  const liveDirectScripts = new Set(
+    readdirSync(nodePath.join(ROOT, '.github/workflows'))
+      .filter((f) => /\.ya?ml$/.test(f))
+      .flatMap((f) => extractCheckInvocations(readFileSync(nodePath.join(ROOT, '.github/workflows', f), 'utf8'), f))
+      .filter((i) => i.direct)
+      .map((i) => i.script),
+  );
   t(
-    'the live tail names the INSTANCE the card was filed about: a package-local gate invoked by path',
-    liveCommands.some((c) => /^node\s+packages\/\S+\/check-[\w.-]+\.mjs/.test(c)),
+    'the INSTANCE the card was filed about has LEFT the live tail (#15342), and the derivation now names a '
+      + 'family for it — the tail shrank because the step became accounted for, not because the walk broke',
+    !liveCommands.some((c) => /^node\s+packages\/\S+\/check-[\w.-]+\.mjs/.test(c))
+      && liveDirectScripts.has('packages/lint/scripts/check-reference-carrier-shape.mjs'),
   );
   // The class assertion. The instance above is invisible because its path is
   // not under `scripts/`; this one is invisible because its INTERPRETER is not

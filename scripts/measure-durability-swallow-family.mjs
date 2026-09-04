@@ -53,8 +53,9 @@
 //   > swallow-shaped file means NOT MEASURED for that site, never
 //   > "level approved."
 //
-// The gate matches callee NAMES from an 18-entry `DURABILITY_CRITICAL_CALLEES`
-// vocabulary. A seeder that reaches storage through `ql.insert(...)` is not in
+// The gate matches callee NAMES from a 20-entry `DURABILITY_CRITICAL_CALLEES`
+// vocabulary -- 18 until PR #15458 added the seeder wrappers `tryInsert` and
+// `tryUpdate`. A seeder that reaches storage through `ql.insert(...)` is not in
 // that vocabulary and never was, so the gate walks the file, finds no seam it
 // understands, and scores it clean. #12923 measured the cost: the RBAC catalog
 // seeders swallowed refused writes in `catch { return null; }`, and a boot
@@ -191,13 +192,26 @@
 // Picking a regex that happens to return 15 would have been the other option.
 // It would also have been a false green about false greens.
 //
-// ## The handover (the ruling's LAST step, not this one)
+// ## The handover (the ruling's LAST step) -- LANDED in PR #15458
 //
-// The programme ends by adding the seeder-helper names (`tryInsert`/`tryUpdate`)
+// The programme ended by adding the seeder-helper names (`tryInsert`/`tryUpdate`)
 // to the gate's `DURABILITY_CRITICAL_CALLEES` **with zero reds**, which is what
 // keeps `scripts/durability-degradation.baseline.json` at its designed empty
-// steady state. That step is gated on `outstanding == 0` for those wrappers in
-// this census. Until then:
+// steady state. PR #15458 performed that step and measured it: the gate's
+// verdict line was unchanged, the baseline stayed empty, and THIS census's
+// reading was byte-identical across it -- the vocabulary below is copied by
+// VALUE, so the gate's map growing moved nothing here. #12981 then closed with
+// PR #15472.
+//
+// Those two names are therefore labelled `gate-vocabulary` below (#15459): after
+// that PR they ARE declared in the gate, and the census's OVERLAP reading has to
+// say what the tree says. `tryDelete` is not in the gate and stays
+// `seed-wrapper`. The copy stays a copy, and is now cross-checked against the
+// gate's own declaration on every `--self-test` -- see `readGateVocabulary`.
+//
+// The prohibitions this step was held behind did NOT expire with it. Two of them
+// were re-affirmed by the ruling that closed the programme (#12981 comment
+// 5543738972, Q1 = A), and they are standing:
 //
 //   - ⛔ do NOT add an entry to `durability-degradation.baseline.json` (option B,
 //     refused by the ruling: filling the empty ledger teaches every seat that
@@ -229,6 +243,10 @@ import { parseSourceFile } from './ts-parse.mjs';
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const SCAN_ROOT = join(ROOT, 'packages');
 
+/** The sibling GATE, READ (never imported) so the copy below can be cross-checked. */
+const GATE_SCRIPT = 'scripts/check-durability-degradation-log-level.mjs';
+const GATE_VOCABULARY_IDENT = 'DURABILITY_CRITICAL_CALLEES';
+
 /**
  * Callees whose failure means "the bytes did not land".
  *
@@ -240,14 +258,23 @@ const SCAN_ROOT = join(ROOT, 'packages');
  *   - `objectql`         -- the ObjectQL-level write surface the seeders use.
  *   - `seed-wrapper`     -- the `catch { return null; }` helpers this family IS
  *                           (`permission-set-projection.ts` and its per-file
- *                           copies). These are the names the ruling's last step
- *                           hands to the gate.
+ *                           copies) that the gate does NOT declare. `tryInsert`
+ *                           and `tryUpdate` sat here until the ruling's last step
+ *                           handed them over (PR #15458); they are
+ *                           `gate-vocabulary` now, because that is what the tree
+ *                           says. `tryDelete` was not part of that handover and
+ *                           is still this census's alone.
  *   - `gate-vocabulary`  -- already declared in
  *                           `check-durability-degradation-log-level.mjs`.
  *                           Carried here so the census can report the OVERLAP:
  *                           how many members the gate can already see. Copied by
  *                           value on purpose -- importing the gate's map would
  *                           couple a non-gate instrument to a merge-blocking one.
+ *                           A by-value copy's failure mode is SILENCE, so this
+ *                           subset is cross-checked against the gate's own
+ *                           declaration on every `--self-test` and reddens on
+ *                           drift -- see `readGateVocabulary`. It announces;
+ *                           it never absorbs.
  */
 const WRITE_SHAPED_CALLEES = new Map([
   ['insert', 'objectql'],
@@ -261,9 +288,9 @@ const WRITE_SHAPED_CALLEES = new Map([
   ['updateMany', 'driver-contract'],
   ['deleteMany', 'driver-contract'],
   ['dropTable', 'driver-contract'],
-  ['tryInsert', 'seed-wrapper'],
-  ['tryUpdate', 'seed-wrapper'],
   ['tryDelete', 'seed-wrapper'],
+  ['tryInsert', 'gate-vocabulary'],
+  ['tryUpdate', 'gate-vocabulary'],
   ['syncSchema', 'gate-vocabulary'],
   ['syncSchemasBatch', 'gate-vocabulary'],
   ['syncRegisteredSchemas', 'gate-vocabulary'],
@@ -670,10 +697,13 @@ const DETERMINED = new Map([
         + 'several rounds and was listed under "the repair worklist" on every run, so batch 7 had to '
         + 'open the file to discover it was already settled. Nothing claims to have persisted and the '
         + 'request does not look normal from the outside — AGENTS.md\'s third legal ending. Its '
-        + 'delivery is pinned in `http-dispatcher.keys.test.ts`. ⛔ The declaration this site is '
-        + 'waiting for belongs to the programme\'s LAST step, the one that widens '
-        + '`DURABILITY_CRITICAL_CALLEES`; this row does not bring that step forward and must not be '
-        + 're-keyed by it.',
+        + 'delivery is pinned in `http-dispatcher.keys.test.ts`. ⛔ This site is waiting for '
+        + 'nothing: the #12981 ruling (comment 5543738972, Q1 = A) settled that no gate declaration is '
+        + 'owed here, ever. The widening that landed (PR #15458) added `tryInsert`/`tryUpdate`, and '
+        + 'neither matches a seam in this function; the only name that would is bare `insert`, which '
+        + 'this census refuses by design. An entry keyed here would be STALE on arrival, so THIS ROW '
+        + 'is the record -- which is what the ruling relies on. PR #15472 rewrote the in-file note to '
+        + 'say so and kept the anchor sentence byte-identical.',
     },
   ],
   [
@@ -856,10 +886,10 @@ function staleLines(stale) {
  * asserts membership at a declared TIER lives in `all`, and `all` is what a
  * human or an agent touching this instrument runs.
  *
- * ⛔ This subset is also not, and must not be used to bring forward, the
- * ruling's reserved handover step (`tryInsert`/`tryUpdate` into the real gate's
- * `DURABILITY_CRITICAL_CALLEES`, still gated on `outstanding == 0`) -- see "The
- * handover" above.
+ * ⛔ This subset was also not, and must never be used as, a route to the
+ * ruling's handover step (`tryInsert`/`tryUpdate` into the real gate's
+ * `DURABILITY_CRITICAL_CALLEES`). That step landed on its own terms in PR
+ * #15458 -- see "The handover" above.
  *
  * ## The FIFTH family (#13886) is in BOTH modes, and that is the point
  *
@@ -878,6 +908,17 @@ function staleLines(stale) {
  * (`FAILURE_PROPAGATION_SITES`), demanding a one-line deletion that lands with
  * the repair. That is categorically unlike `POSITIVE_CONTROLS`, where the
  * cheapest way to green is to WEAKEN the control.
+ *
+ * ## The COPIED gate vocabulary (#15459) is in both modes, for the same reason
+ *
+ * `WRITE_SHAPED_CALLEES` carries the gate's vocabulary BY VALUE, and the
+ * `--self-test` compares that copy against the gate's own declaration
+ * (`readGateVocabulary`). It passes the same test: a successful repair cannot
+ * destroy it, because it compares two DECLARATIONS and never touches membership.
+ * It is in `gated` because drift is exactly the failure a farm has to catch --
+ * PR #15458 grew the gate's map from 18 names to 20 and this file went stale in
+ * four places the same afternoon (#15459, #15473), under a green farm the whole
+ * time, which is the cost of an uncross-checked copy stated as a measurement.
  */
 const SELF_TEST_MODES = new Set(['all', 'gated']);
 
@@ -1689,6 +1730,76 @@ function checkResolutionControl(control) {
   return { matched, wrong };
 }
 
+/**
+ * The gate's `DURABILITY_CRITICAL_CALLEES` names, read out of its SOURCE.
+ *
+ * `WRITE_SHAPED_CALLEES` copies that vocabulary by value on purpose (its header
+ * says why), and a by-value copy's failure mode is SILENCE: the gate grows a
+ * name, the copy does not, and this census keeps printing an OVERLAP reading
+ * that is simply wrong with nothing anywhere to say so. That is the lie-carrier
+ * shape the `DETERMINED` register closes one layer down, and it is not
+ * hypothetical here -- see the section above.
+ *
+ * So the copy is CROSS-CHECKED, not replaced. The gate is still never imported:
+ * a non-gate instrument that imports a merge-blocking one inherits its blocking,
+ * and the map is not exported in any case. It is PARSED, the way every other
+ * fact in this file is read -- through `parseSourceFile`, which refuses an
+ * unparseable source instead of scoring it empty.
+ *
+ * ⛔ Announce, never absorb. The census does not adopt the gate's names on the
+ * fly; drift reddens the self-test and a person decides which side moved.
+ *
+ * @returns the declared names in source order, or `null` when the declaration
+ *          cannot be read in the shape this cross-check understands -- which the
+ *          caller reports as a FAILURE, never as "no names".
+ */
+function readGateVocabulary() {
+  const file = join(ROOT, GATE_SCRIPT);
+  const sf = parseSourceFile(file, readFileSync(file, 'utf8'), scriptKindFor(file));
+  let names = null;
+  walkAll(sf, (node) => {
+    if (names !== null || !ts.isVariableDeclaration(node)) return;
+    if (!ts.isIdentifier(node.name) || node.name.text !== GATE_VOCABULARY_IDENT) return;
+    const init = node.initializer;
+    if (!init || !ts.isNewExpression(init) || init.arguments?.length !== 1) return;
+    const [entries] = init.arguments;
+    if (!ts.isArrayLiteralExpression(entries)) return;
+    const collected = [];
+    for (const entry of entries.elements) {
+      // A shape this reader does not understand must not degrade to a shorter
+      // list: that would green the comparison against a vocabulary nobody read.
+      if (!ts.isArrayLiteralExpression(entry) || entry.elements.length === 0) return;
+      const [key] = entry.elements;
+      if (!ts.isStringLiteralLike(key)) return;
+      collected.push(key.text);
+    }
+    names = collected;
+  });
+  return names;
+}
+
+/** The census's copy of that vocabulary: the `gate-vocabulary` origin subset. */
+function copiedGateVocabulary() {
+  return [...WRITE_SHAPED_CALLEES]
+    .filter(([, origin]) => origin === 'gate-vocabulary')
+    .map(([name]) => name);
+}
+
+/**
+ * @returns `{ missing, extra }` -- names the gate declares that the copy lacks,
+ *          and names labelled `gate-vocabulary` here that the gate does not
+ *          declare. Both directions matter: the first is a member the census
+ *          under-reports as overlap, the second is overlap it invents.
+ */
+function compareGateVocabulary(copied, declared) {
+  const copiedSet = new Set(copied);
+  const declaredSet = new Set(declared);
+  return {
+    missing: declared.filter((name) => !copiedSet.has(name)),
+    extra: copied.filter((name) => !declaredSet.has(name)),
+  };
+}
+
 function selfTest(mode = 'all') {
   const gated = mode === 'gated';
   const problems = [];
@@ -1801,6 +1912,44 @@ function selfTest(mode = 'all') {
     }
   }
 
+  // ── The COPIED gate vocabulary (#15459), asserted in BOTH modes ───────────
+  //
+  // See SELF_TEST_MODES for why this leg is gated. Two legs: the copy must equal
+  // the gate's own declaration, and the comparison must be able to say it does
+  // not.
+  const declaredGateNames = readGateVocabulary();
+  const copiedGateNames = copiedGateVocabulary();
+  if (declaredGateNames === null) {
+    problems.push(`the gate's \`${GATE_VOCABULARY_IDENT}\` could not be read out of ${GATE_SCRIPT} in the `
+      + 'shape this cross-check understands. Reported as a FAILURE and never as "no names": an '
+      + 'unreadable declaration compared silently would green this leg forever, which is the exact '
+      + 'defect the cross-check exists to close. Re-point `readGateVocabulary` at its new shape.');
+  } else {
+    const drift = compareGateVocabulary(copiedGateNames, declaredGateNames);
+    if (drift.missing.length > 0 || drift.extra.length > 0) {
+      problems.push('the `gate-vocabulary` copy in `WRITE_SHAPED_CALLEES` has DRIFTED from the gate\'s own '
+        + `\`${GATE_VOCABULARY_IDENT}\` (${copiedGateNames.length} copied, ${declaredGateNames.length} declared)`
+        + (drift.missing.length > 0
+          ? `\n    declared by the gate, missing from the copy: ${drift.missing.join(', ')}` : '')
+        + (drift.extra.length > 0
+          ? `\n    labelled \`gate-vocabulary\` here, NOT declared by the gate: ${drift.extra.join(', ')}` : '')
+        + '\n    The copy is deliberate and is NOT adopted automatically (see `WRITE_SHAPED_CALLEES`):'
+        + ' decide which side moved. A name the gate gained belongs in the copy; a name this census'
+        + ' wants that the gate does not declare belongs under a different `origin`.');
+    }
+    // NEGATIVE leg — the comparison must actually fire. A cross-check that
+    // cannot report drift is the by-value copy's own failure mode wearing a
+    // green tick, so perturb the copy in BOTH directions and require both back.
+    const probeAbsent = copiedGateNames[0];
+    const probeInvented = 'aNameNoGateWillEverDeclare';
+    const probe = compareGateVocabulary([...copiedGateNames.slice(1), probeInvented], declaredGateNames);
+    if (!probe.missing.includes(probeAbsent) || !probe.extra.includes(probeInvented)) {
+      problems.push('the gate-vocabulary cross-check did not fire: a copy with one declared name dropped '
+        + `and one undeclared name added was compared as ${probe.missing.length} missing / `
+        + `${probe.extra.length} extra. Without this leg the comparison can pass VACUOUSLY.`);
+    }
+  }
+
   // The durability filter must actually filter: the raw shape is ~3.5x this.
   if (members.length === 0) {
     problems.push('census found ZERO members — on this tree that is a broken matcher, not a clean repo.');
@@ -1818,6 +1967,7 @@ function selfTest(mode = 'all') {
       + `${REGRESSION_CONTROLS.length} regression control(s) stay clear, `
       + `${RESOLUTION_CONTROLS.length} resolution control(s) resolve as declared, `
       + `${DETERMINED.size} DETERMINED register row(s) cross-check clean, `
+      + `${copiedGateNames.length} copied gate-vocabulary name(s) match the gate's own declaration, `
       + `${members.length} member site(s) total\n`
       + `   ${POSITIVE_CONTROLS.length} positive control(s) are NOT asserted here, permanently: they pin `
       + 'members of the #12981 worklist, which\n   that programme exists to remove — a control the repair '
@@ -1832,6 +1982,7 @@ function selfTest(mode = 'all') {
     + `${REGRESSION_CONTROLS.length} regression control(s) stay clear, `
     + `${RESOLUTION_CONTROLS.length} resolution control(s) resolve as declared, `
     + `${DETERMINED.size} DETERMINED register row(s) cross-check clean, `
+    + `${copiedGateNames.length} copied gate-vocabulary name(s) match the gate's own declaration, `
     + `${members.length} member site(s) total\n`,
   );
   return 0;

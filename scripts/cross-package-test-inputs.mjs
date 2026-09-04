@@ -186,8 +186,23 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     },
   },
   '@objectstack/core': {
-    // src/security/operation-private-keys.pin.test.ts walks `git ls-files` over
-    // the whole repo and reads every matching source file.
+    // src/security/operation-private-keys.pin.test.ts asks `git ls-files` for
+    // every authored source file under `packages/` -- tracked plus untracked --
+    // and reads the ones a fixed-string prefilter says mention its two symbols.
+    //
+    // ⛔ `.ts` and NOT `.tsx`, and this half of that boundary is load-bearing in
+    // the same way the `@objectstack/types` entry below is. That pin's scanner
+    // used to match `.ts` and `.tsx` while this glob covered only `.ts`, so it
+    // judged a population neither scoping layer re-runs it for -- the #7802
+    // shape, one extension wide. It was repaired by narrowing the SCANNER to
+    // this glob, never by widening this glob to the scanner: these globs are
+    // inherited as watch hints by `check:cross-package-test-inputs`, and the
+    // dispatch-gates self-test pins that no hint of that family reaches
+    // the `realtime-hooks.test.tsx` file in `packages/client-react`. Measured on
+    // b548e438d, by adding a `.tsx` glob here and re-deriving that family's
+    // hints: the case flipped from true to false with the added glob itself as
+    // the covering hint. ⇒ Extensions and glob widen together or not at all,
+    // and that pin's header carries the measurement of what the boundary costs.
     globs: ['packages/**/*.ts'],
   },
   '@objectstack/types': {
@@ -264,6 +279,18 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     // any package here, and a subtree glob would put cli's e2e suite on every
     // documentation PR.
     //
+    // The three pages added for #14824 are read by
+    // test/create-plugin-docs-parity.test.ts, which holds the `plugin` template's
+    // emitted file set equal to the tree each page PRINTS. They are the only
+    // statement of that template's shape -- it emits no `objectstack.config.ts`,
+    // so `ManifestSchema` does not govern it and the manifest sweep cannot see
+    // it. The coupling runs both ways and so must the re-run: a template that
+    // grows a file must redden the pages that no longer list it, and a page
+    // rewrite must redden if it drops or invents one. Undeclared, a
+    // documentation-only PR would leave cli outside the affected set and the
+    // merge queue would be the first signal -- the shape the three e2e pages
+    // above were declared for.
+    //
     // `connector-mcp-plugin.ts` is read by test/serve-capability-identity.test.ts,
     // which pins that the connector still registers the name the #7652 repro uses
     // rather than importing the class. It surfaced with the three above and has the
@@ -323,6 +350,9 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'content/docs/deployment/cli.mdx',
       'content/docs/deployment/index.mdx',
       'content/docs/permissions/authentication.mdx',
+      'content/docs/plugins/index.mdx',
+      'content/docs/protocol/kernel/index.mdx',
+      'content/docs/protocol/kernel/plugin-spec.mdx',
       'scripts/check-nul-bytes.mjs',
       // This gate's OWN script, the third entry of the mention shape on this
       // package: test/scaffold-workspace-consistency.test.ts quotes it while
@@ -890,11 +920,16 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     // included -- and `scripts/pm/dispatch-gates.mjs`'s self-test pins that no
     // hint of that gate reaches a test file outside `packages/**`, which is the
     // whole reason it is listed there as a change-KIND instead of a path
-    // derivation. Measured: all 41 tracked test files outside `packages/` are
-    // under `examples/`, so that glob does not shrink the residue class, it
-    // EMPTIES it, and the case cannot be re-pointed at another member. Widening
-    // needs that residue measurement redone first; the pins' own headers carry
-    // what it costs meanwhile.
+    // derivation. Measured on c4d1354e3: all 41 tracked test files outside
+    // `packages/` are under `examples/`, so that glob empties the NARROW class
+    // the specimen case stands for -- test files outside `packages/**`, 41 to 0
+    // -- and exactly one case reds: that specimen. It does NOT empty the residue
+    // class the CLASS-LEVEL case guards, which counts every tracked test file no
+    // hint of this gate reaches: that one goes 13 to 3 and stays GREEN, the
+    // survivors being the three `.tsx` tests inside `packages/`. So the specimen
+    // COULD be re-pointed at one of those three -- that is option B on #15097,
+    // ruled OUT for now; ruling A accepts `packages/` as the radius, and the
+    // pins' own headers carry what that costs meanwhile.
     //
     // `cross-package-test-inputs.mjs` is NAMED in that pin's header (it is where
     // the widening instruction points) and never read, the same shape as the
@@ -931,11 +966,16 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     // included -- and `scripts/pm/dispatch-gates.mjs`'s self-test pins that no
     // hint of that gate reaches a test file outside `packages/**`, which is the
     // whole reason it is listed there as a change-KIND instead of a path
-    // derivation. Measured: all 41 tracked test files outside `packages/` are
-    // under `examples/`, so that glob does not shrink the residue class, it
-    // EMPTIES it, and the case cannot be re-pointed at another member. Widening
-    // needs that residue measurement redone first; the pins' own headers carry
-    // what it costs meanwhile.
+    // derivation. Measured on c4d1354e3: all 41 tracked test files outside
+    // `packages/` are under `examples/`, so that glob empties the NARROW class
+    // the specimen case stands for -- test files outside `packages/**`, 41 to 0
+    // -- and exactly one case reds: that specimen. It does NOT empty the residue
+    // class the CLASS-LEVEL case guards, which counts every tracked test file no
+    // hint of this gate reaches: that one goes 13 to 3 and stays GREEN, the
+    // survivors being the three `.tsx` tests inside `packages/`. So the specimen
+    // COULD be re-pointed at one of those three -- that is option B on #15097,
+    // ruled OUT for now; ruling A accepts `packages/` as the radius, and the
+    // pins' own headers carry what that costs meanwhile.
     //
     // `cross-package-test-inputs.mjs` is NAMED in that pin's header (it is where
     // the widening instruction points) and never read, the same shape as the

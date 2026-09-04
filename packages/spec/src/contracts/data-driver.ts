@@ -213,6 +213,42 @@ export interface IDataDriver {
    */
   count(object: string, query?: DriverQuery, options?: DriverOptions): Promise<number>;
 
+  /**
+   * Native aggregation pushdown: execute `query.groupBy` / `query.aggregations`
+   * inside the store and return the ALREADY-GROUPED rows.
+   *
+   * What the engine passes (objectql `engine.ts`, `ObjectQL.aggregate`): the
+   * object name; the full query AST it built for the read (`where`, `groupBy`,
+   * `aggregations`, `orderBy`, `limit`, ...) — the same {@link DriverQuery}
+   * `find()` receives, so a value that satisfies `find` satisfies this; and the
+   * per-call {@link DriverOptions}. Presence IS the capability test: the engine
+   * dispatches on `typeof driver.aggregate === 'function'` — the rule
+   * `data/driver.zod.ts` states for `DriverCapabilities`, and why there is
+   * deliberately no `queryAggregations` bit — and otherwise falls back to
+   * `find()` plus in-memory grouping. Two things the engine keeps for itself
+   * even when it dispatches here: `having` is applied AFTER this call, over the
+   * returned rows (#4286); and `aggregations[].filter` (#10576) or a non-UTC
+   * `timezone` with date bucketing (ADR-0053) force the in-memory path, so a
+   * driver never sees either on this road today.
+   *
+   * What a driver returns: one row per group, keyed by the `groupBy` field
+   * names and by each aggregation's `alias`, with the per-function value
+   * semantics `data/aggregation-conformance.ts` pins for every face that
+   * lowers this vocabulary. The engine's `having` filter reads exactly those
+   * keys, so a mis-keyed row does not error — it silently fails to match.
+   *
+   * Declared for the reason `introspectSchema` gives below: the engine reached
+   * this verb by duck-typing with no signature to mis-match against, so
+   * `aggregate(query, object)` with the arguments swapped, or a non-row
+   * result, compiled clean and surfaced only downstream of `having`. Optional,
+   * matching the presence test — a driver without native aggregation
+   * (driver-rest today) omits the member and stays conformant, served by the
+   * fallback. A wider parameter union (driver-memory also accepts a raw
+   * pipeline) or a looser return type stays assignable; what is refused is a
+   * wrong argument order or a non-array result.
+   */
+  aggregate?(object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown>[]>;
+
   // ===========================================================================
   // Bulk Operations
   // ===========================================================================

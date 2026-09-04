@@ -131,6 +131,34 @@ describe('refusals — the measured divergence rows die at the door', () => {
     expect(err?.message).toMatch(/omit/);
   });
 
+  it('the undefined prescription is position-safe: it names the null predicate by its ruled spellings, at every position it is emitted at (#14426)', () => {
+    // "Write null for the null predicate" was position-agnostic advice: followed
+    // at `$gt: undefined` it produced `$gt: null`, refused one door over since
+    // the 2026-09-01 ruling; at an `$in` member it produced `$in: [null]`,
+    // refused since 2026-08-31. The sentence names COMPLETE spellings instead —
+    // the pair the ruling names — so following it never lands in a refusal.
+    const positions: Array<[Record<string, unknown>, string]> = [
+      [{ owner: undefined }, 'where.owner'],
+      [{ owner: { $eq: undefined } }, 'where.owner.$eq'],
+      [{ owner: { $gt: undefined } }, 'where.owner.$gt'],
+      [{ owner: { $lte: undefined } }, 'where.owner.$lte'],
+      [{ owner: { $in: [undefined] } }, 'where.owner.$in[0]'],
+    ];
+    for (const [where, path] of positions) {
+      const err = refusalOf(() => normalizeFilterComparandTypes(where));
+      expect(err?.code, path).toBe('INVALID_FILTER');
+      expect(err?.status, path).toBe(400);
+      expect(err?.message, path).toContain(path);
+      expect(err?.message, path).toContain('{"$eq": null}');
+      expect(err?.message, path).toContain('{"$ne": null}');
+      expect(err?.message, path).toMatch(/omit the key/);
+      // The defect's own spelling: an instruction to write a bare null INTO the
+      // position the sentence was emitted at.
+      expect(err?.message, path).not.toMatch(/Write null\b/);
+      expect(err?.message.length, path).toBeLessThan(500); // the client bound (#5423)
+    }
+  });
+
   it('refuses a PLAIN OBJECT where a scalar operator comparand belongs — the SQL family already did', () => {
     const err = refusalOf(() => normalizeFilterComparandTypes({ qty: { $eq: { a: 1 } } }));
     expect(err?.code).toBe('INVALID_FILTER');

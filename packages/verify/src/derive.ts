@@ -19,6 +19,8 @@
 // is reported `blocked` with a precise reason — the gate stays honest.
 
 
+import { declaredCollection } from './artifact-collections.js';
+
 const COMPUTED = new Set(['formula', 'summary', 'autonumber', 'rollup', 'vector']);
 const RELATIONAL = new Set(['lookup', 'master_detail', 'master-detail', 'masterdetail', 'tree']);
 const STRUCTURED = new Set(['composite', 'repeater', 'record', 'location', 'address']);
@@ -173,11 +175,17 @@ interface Draft {
  *  - a required non-relational field that can't be synthesized (unchanged from v0).
  */
 export function deriveCrudCases(config: any): CrudCase[] {
-  const objects: any[] = config?.objects ?? [];
+  // ADR-0130 D4 (#15229): the flattened top level answers first and
+  // `packages[]` supplies only what it lacks, so a multi-package app under
+  // option B derives its cases instead of deriving NONE and passing. Both reads
+  // go through the same resolver — `objects` alone would leave the federated
+  // write gate below judging against an empty datasource map, which reports an
+  // app's write-opted-in external objects as read-only and silently skips them.
+  const objects: any[] = declaredCollection(config, 'objects');
   const byName = new Map<string, any>();
   for (const o of objects) if (o?.name) byName.set(o.name, o);
   const dsByName = new Map<string, any>();
-  for (const ds of (config?.datasources ?? [])) if (ds?.name) dsByName.set(ds.name, ds);
+  for (const ds of declaredCollection(config, 'datasources')) if (ds?.name) dsByName.set(ds.name, ds);
 
   const drafts = new Map<string, Draft>();
 

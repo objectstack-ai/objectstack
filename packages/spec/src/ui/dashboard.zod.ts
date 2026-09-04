@@ -899,8 +899,8 @@ export const DashboardSchema = lazySchema(() => strictObject({
   /** Grid column count — defaults to 12 for a standard 12-column grid */
   columns: z.number().int().min(1).max(24).optional().describe('Number of grid columns (default 12)'),
 
-  /** Grid gap in Tailwind spacing units (e.g. 4 = 1rem) */
-  gap: z.number().int().min(0).optional().describe('Grid gap in Tailwind spacing units'),
+  /** Space between widgets, in steps of 0.25rem (4 = 1rem) */
+  gap: z.number().int().min(0).optional().describe('Space between widgets, in steps of 0.25rem (4 = 1rem)'),
 
   /** Auto-refresh */
   refreshInterval: z.number().optional().describe('Auto-refresh interval in seconds'),

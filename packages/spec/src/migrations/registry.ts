@@ -6416,6 +6416,56 @@ const step18: MigrationStep = {
         + 'objectui#6206.',
     },
     {
+      id: 'element-record-picker-filter-rule-array',
+      surface:
+        "`element:record_picker` component props — `filter` (the FORM: the MongoDB-style "
+        + '`FilterConditionSchema` record vs the `ViewFilterRule` array)',
+      replacement:
+        '`z.array(ViewFilterRuleSchema)` — the rule array `[{ field, operator, value }, ...]` '
+        + "the map's array-declared `filter` doors already carry (`record:related_list`, its nested "
+        + 'Add-affordance picker, `element:number`; the four `object-*` blocks declare `filter` as '
+        + '`z.unknown()`, #15449). A record-form filter '
+        + "`{ status: 'active' }` becomes `[{ field: 'status', operator: 'equals', value: 'active' }]`; "
+        + "an operator object `{ amount: { $gt: 100 } }` becomes "
+        + "`[{ field: 'amount', operator: 'greater_than', value: 100 }]`; several keys become "
+        + 'several rules (they AND). Legacy operator shorthands (`eq`, `gt`, `notIn`, …) are '
+        + 'accepted and normalized on parse. The binding-level `dataSource.filter` on the same node '
+        + 'is a different key (`ElementDataSourceSchema`) and is not moved by this entry',
+      reason:
+        'One filter orthography platform-wide (objectui#6206, maintainer batch adjudication '
+        + "2026-08-25, verbatim 「同意」, Option B). `ComponentPropsMap['element:record_picker'].filter` "
+        + 'was the LAST `filter` input in the map still declared as the MongoDB-style record '
+        + '(`FilterConditionSchema`) after `element:number` converged (#12039 Key 2): the three '
+        + 'array-declared doors (`record:related_list`, its nested Add-affordance picker, '
+        + '`element:number`) carried the `ViewFilterRule` array and the four `object-*` doors '
+        + 'declare `z.unknown()` (#15449), so the filter a list view stores and renders was refused '
+        + 'by the picker beside them, and a lone holdout is the state where the next author copies '
+        + 'the wrong form. Sequenced measurement-first, as that convergence had to be (the 2026-08-25 '
+        + 'Option-A ordering ruling, #14406): at the objectui pin `00d3f09c` the renderer hands '
+        + '`filter` to `query.$filter` and calls `adapter.find()` '
+        + '(`components/src/renderers/basic/record-picker.tsx`); `ObjectStackAdapter.convertQueryParams` '
+        + 'lowers an ARRAY `$filter` through `translateFilterArray` into filter AST tuples '
+        + '(`data-objectstack/src/index.ts`), the same door every list view\'s stored rule array '
+        + 'already takes, and the engine lowers the tuples before the driver '
+        + '(`engine-filter-array-lowering.test.ts`); nothing on that path parses `properties` '
+        + 'against the installed spec. The pin and objectui `main` (`f7cf7e8`) are byte-identical on '
+        + 'every read-path file. The ruled migration check ran with the change: the sweep of '
+        + 'first-party corpora (examples/, skills/, content/docs/, docs/, packages/**, .changeset/) '
+        + 'found ONE `element:record_picker` author writing a record-form `filter` — a spec test '
+        + 'fixture, rewritten to the array form in the same change — and zero outside the spec '
+        + 'package; this entry carries the prescription for authors outside the repo.',
+      acceptanceCriteria:
+        "`ComponentPropsMap['element:record_picker'].safeParse({ object, filter: [{ field: "
+        + "'status', operator: 'equals', value: 'active' }] })` succeeds and the parsed `filter` is "
+        + "the same rule array; a record-form `filter: { status: 'active' }` is refused at the "
+        + '`filter` path (`invalid_type`, expected array). At runtime the picker offers exactly the '
+        + 'rows the array selects — the same filter a list view renders. Downstream (objectui, after '
+        + "a released spec version reaches the pin): the registry's `inputs.filter` entry for "
+        + "`element:record_picker` (`type: 'object'`, `record-picker.tsx`) flips to the array arm and "
+        + 'the `record-picker-inputs-spec-parity.test.ts` pins that assert the record form follow — '
+        + 'objectui#7663, filed from #14406 with a Blocked-by line.',
+    },
+    {
       id: 'engine-dotted-filter-refused',
       surface:
         'a `where` / filter whose KEY is a dotted path with a relation, virtual-`formula` or '
@@ -7937,6 +7987,37 @@ const step18: MigrationStep = {
         + '`organizationId` still stamps `sys_email.organization_id` without acquiring any overlay '
         + 'semantics.',
     },
+    {
+      id: 'session-user-language-retired',
+      surface: 'api.session.user.language',
+      replacement:
+        '`GET /auth/me/localization` → `locale` (the user\'s own `sys_user.locale` when set → '
+        + 'the request\'s `Accept-Language` → the deployment default)',
+      reason:
+        '`SessionUserSchema.language` was declared with a permanent default of `\'en\'` and '
+        + 'described as "Preferred language", and had no producer and no consumer anywhere: no '
+        + 'session endpoint wrote it, no client read it (objectui measured zero readers at its '
+        + 'pinned sha), so a reader trusting the published contract received a constant that was '
+        + 'not the user\'s language. Meanwhile the user\'s real preference landed as the '
+        + 'first-class column `sys_user.locale` (#13881), which the session type could not see — '
+        + 'three spellings of one concept on the published surface, none of them right. The '
+        + 'maintainer ruled option D (2026-09-03, #14788): retire the dead key under ADR-0049 '
+        + 'enforce-or-remove and make `GET /auth/me/localization` the ONE read face, with its '
+        + '`locale` projecting the user column first. This is a RESPONSE surface — the server '
+        + 'mints a `SessionUser` and nobody authors or persists one — so there is no source for '
+        + 'the chain to rewrite; the schema tombstones the key via retiredKey() and consumers '
+        + 'move their read to the endpoint. No replacement field joins the session contract '
+        + 'until a session endpoint really produces one (no dual-spelling window, 不渐进). '
+        + 'ADR-0049, ADR-0087, #14788.',
+      acceptanceCriteria:
+        'No client reads `user.language` off a `SessionResponse` / `UserProfileResponse`; a '
+        + 'client that seeded its UI language from it now reads `locale` off '
+        + '`GET /auth/me/localization`, where a user who set `sys_user.locale` sees that value, '
+        + 'a user who did not sees the request\'s `Accept-Language` preference, and a request '
+        + 'expressing none sees the deployment default. Constructing a `SessionUser` with '
+        + '`language` fails to parse with its own prescription instead of being silently '
+        + 'stripped, and assigning it is a `tsc` error at the authoring site.',
+    },
     // Registered as D3 SEMANTIC and deliberately NOT as a D2 conversion, on the
     // D2 scope guard (lossless only — the `owd-legacy-read-aliases` / `'full'`
     // precedent): an authored theme has no lossless target. `app.branding` holds
@@ -8953,6 +9034,34 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // advertises. Its three ledger child rows collapse into the one `overrides`
     // row. Closes #14365's question about `overrides.*.operations` — no record left.
     'api/RouteGenerationConfig:overrides',
+    // #14788 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-03, option
+    // D). `SessionUserSchema.language` (`api/auth.zod.ts`) was declared with a
+    // permanent default of `'en'` and described as "Preferred language", and had
+    // no producer and no consumer anywhere: no session endpoint wrote it, no
+    // client read it (objectui measured at its pinned sha: zero readers of
+    // `SessionUser.language`; its only in-repo mentions were the schema's own
+    // unit test). A reader trusting the published contract received a constant
+    // that was not the user's language — the "declared ≠ honoured" shape, made
+    // worse by the fact that the user's real preference had just landed as a
+    // first-class column (`sys_user.locale`, #13881) the session type could not
+    // see. The ruling retires the dead key and makes `GET /auth/me/localization`
+    // the one read face for the signed-in user's language (`locale`: the user's
+    // own `sys_user.locale` when set → the request's `Accept-Language` → the
+    // deployment default); no replacement field joins the session contract until
+    // a session endpoint really produces one.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // removal ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
+    // The schema is a non-strict `z.object`, so the route is a `retiredKey()`
+    // tombstone (a bare delete would strip the key silently, ADR-0104). A RESPONSE
+    // surface — the server mints a `SessionUser` and nobody authors or persists
+    // one — so, like `api/AuthFeaturesConfig:passkeys`, there is no source for
+    // `os migrate meta` to rewrite and no D2 conversion; the prescription reaches
+    // consumers through this tombstone plus the D3 semantic entry
+    // `session-user-language-retired`.
+    'api/SessionUser:language',
     // #10414 — ADR-0049 enforce-or-remove (triage routed REMOVE; the #10298 shape
     // one level up). `filters` was a declared, authorable per-metric raw-SQL
     // filter (`filters: [{ sql: string }]`) with ZERO consumers, measured with a
