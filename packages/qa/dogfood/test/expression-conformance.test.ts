@@ -38,13 +38,45 @@ const DIALECTS = new Set(['cel', 'cron', 'template', 'js', 'settings-visibility'
  * #7327 hit it: narrowing the settings `visible` slots off `ExpressionInputSchema`
  * dropped them out of discovery and turned their ledger entry stale. A new
  * narrowed alias belongs in this list on the same commit that introduces it.
+ *
+ * The two DIALECT-typed inputs were missing for as long as they have existed
+ * (#15027). `CronExpressionInputSchema` and `TemplateExpressionInputSchema` are
+ * siblings of `ExpressionInputSchema` — same envelope, a different default
+ * dialect on the bare-string arm — so every slot typed with one of them was a
+ * declared expression surface that this scan could NEVER match: the pattern
+ * requires a listed name to start immediately after the colon, and neither was
+ * listed. The ledger therefore reported a complete classification over a
+ * population with zero `cron` and zero `template` rows in it, while the spec
+ * declared 12 such positions. Structurally blind, not merely un-updated — which
+ * is why the roster and the rows classifying them landed on one commit.
  */
-const EXPRESSION_INPUT_SCHEMAS = ['ExpressionInputSchema', 'SettingsVisibilityInputSchema'];
+const EXPRESSION_INPUT_SCHEMAS = [
+  'ExpressionInputSchema',
+  'SettingsVisibilityInputSchema',
+  'CronExpressionInputSchema',
+  'TemplateExpressionInputSchema',
+];
 const DECLARES_EXPRESSION = new RegExp(
   String.raw`^\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*:\s*(?:${EXPRESSION_INPUT_SCHEMAS.join('|')})\b`,
 );
 
-/** Re-discover every expression surface in the spec — the SAME scan the ledger encodes. */
+/**
+ * Re-discover every expression surface in the spec — the SAME scan the ledger encodes.
+ *
+ * ⚠️ A ratchet key is `file:field`, NOT `file:line`, so N declarations of one
+ * key name in one file are ONE key and one ledger row classifies all of them.
+ * Measured at `61821e54cf5` while widening the roster above: 44 declaring
+ * positions reduce to 34 keys (+2 hard-added RLS = 36 surfaces), and 10 keys
+ * carry two positions each. Two of those collapses are the cron ones this
+ * commit classifies (`api/export.zod.ts:cronExpression` at `:576`/`:706`,
+ * `system/disaster-recovery.zod.ts:schedule` at `:57`/`:238`) — genuinely the
+ * same surface twice, so one row is right for them. The other 8 predate this
+ * commit and at least three of them collapse surfaces that are NOT the same
+ * (#15500): `data/field.zod.ts:requiredWhen` covers both the server-enforced
+ * `FieldSchema` gate and the `InlineGridColumnSchema` cell whose own describe
+ * says nothing on the write path reads it. Do not read a green ratchet as
+ * "every declaration is classified" — it means every KEY is.
+ */
 function discoverSurfaces(): Set<string> {
   const found = new Set<string>();
   const walk = (dir: string) => {

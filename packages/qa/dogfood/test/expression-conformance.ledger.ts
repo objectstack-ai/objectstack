@@ -21,6 +21,19 @@ import type { ConformanceRow } from '@objectstack/verify';
 // "declared-but-unwired predicate" — breaks the build. Discovery is by SCHEMA
 // NAME (`EXPRESSION_INPUT_SCHEMAS` in that file), so a slot narrowed onto its
 // own schema must register that schema there or it drops out of the scan.
+//
+// That promise covers all three dialects only as of #15027. The roster listed
+// `ExpressionInputSchema` and `SettingsVisibilityInputSchema` and nothing else,
+// so the 12 positions typed `CronExpressionInputSchema` /
+// `TemplateExpressionInputSchema` could never match — this ledger reported a
+// complete classification while carrying zero `cron` and zero `template` rows.
+// The claim above was FALSE for two whole dialects, and read as true, which is
+// the failure a ratchet is supposed to make impossible. Two limits survive and
+// are worth knowing before trusting a green run: discovery still cannot see a
+// slot typed with a schema nobody registered (the hazard is structural, not
+// spent), and a ratchet key is `file:field`, so several declarations of one key
+// name in one file share a single row — see the `discoverSurfaces` docblock and
+// #15500.
 
 export type ExprMode = 'compile' | 'interpret';
 /**
@@ -241,7 +254,10 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
       // the L1 "Simple Sync" DataSyncConfig) left with the whole file in
       // #4738 — the L1 layer was narrative-only, so no engine ever evaluated
       // that predicate. Connector-attached sync (`ConnectorSchema.syncConfig`)
-      // declares no expression surface; nothing to re-point at.
+      // declares no CEL surface to re-point this cover at. It does declare a
+      // cron one — `syncConfig.schedule` — which was invisible to discovery
+      // when that was written and is classified by `cron-declared-unwired`
+      // since #15027; nothing evaluates it either.
       // `kernel/metadata-loader.zod.ts:filter` (on MetadataLoadOptions and
       // MetadataExportOptions) was removed with the rest of that file's
       // zero-consumer duplicate envelope family in #4411. The surviving
@@ -249,6 +265,70 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
       // declared a `filter` — so no loader predicate was ever evaluated
       // through this surface, and there is nothing to re-point at.
     ],
+  },
+
+  // ── CRON dialect (#15027) ─────────────────────────────────────────────────
+  // Discovery was blind to `CronExpressionInputSchema` until the roster in the
+  // companion test grew, so every row below is a FIRST classification, not an
+  // update. Each `enforcement` names what was actually found by walking out
+  // from the declaration; where the walk found no evaluator, the row says so
+  // and takes a non-`enforced` state rather than borrowing a neighbour's.
+  {
+    id: 'cron-job-schedule',
+    summary: 'declarative background-job cron schedule (CronSchedule.expression)',
+    dialect: 'cron', mode: 'interpret', state: 'enforced', failPolicy: 'throw',
+    enforcement:
+      'runtime/job-schedule.ts `toBoundaryJobSchedule` — the #4567 authoring→boundary seam: it lowers the parsed `{dialect:"cron",source}` envelope to the bare cron string the adapter takes, and THROWS naming the job on a non-cron dialect, an AST-only envelope, or a missing/blank source. Called from runtime/app-plugin.ts `start`; the boundary value reaches service-job/cron-job-adapter.ts `CronJobAdapter.schedule` → **croner** `Cron` (db-job-adapter.ts routes the cron variant there and persists the shape onto sys_job). The throw is CONTAINED at the call site, deliberately and visibly: AppPlugin catches per job, logs `Background job FAILED TO SCHEDULE — it will never run` at ERROR with the `jobScheduleFailuresTotal` counter, then reports the failed count — boot continues and the job does not run. Cron SYNTAX is not judged on this path at all: `toBoundaryJobSchedule` only checks dialect/source shape, and a syntactically invalid pattern throws later inside croner, into the same catch',
+    covers: ['system/job.zod.ts:expression'],
+    proof: 'packages/runtime/src/job-schedule.test.ts',
+    note: 'The ONE cron slot in the spec with a measured evaluator. `@objectstack/formula` cronEngine is NOT on this path — see `cron-declared-unwired` for what that means for the rest.',
+  },
+  {
+    id: 'cron-knowledge-refresh',
+    summary: 'knowledge-source periodic reindex cron (KnowledgeRefreshPolicy.cron) — surfaced, deliberately not scheduled',
+    dialect: 'cron', mode: 'interpret', state: 'experimental', failPolicy: 'compile-error',
+    enforcement:
+      'PARSE ONLY — `CronExpressionInputSchema` refuses a blank/non-string, non-envelope value and normalizes to `{dialect:"cron",source}`; nothing evaluates the result. service-knowledge/knowledge-service.ts reads `refresh.onRecordChange` and NEVER `refresh.cron` (measured: the only `refresh` reads in that package are the two `onRecordChange` sites)',
+    covers: ['ai/knowledge-source.zod.ts:cron'],
+    note: 'EXPERIMENTAL by DESIGN, and separated from `cron-declared-unwired` for that reason: the key documents its own hand-off — service-knowledge surfaces the value so an automation flow / external scheduler can call `reindexSource`, and the field docblock says so (#14825). Nothing in this repo schedules it, which is the intended state rather than an undelivered one. It still has no evaluator, so it is not `enforced`.',
+  },
+  {
+    id: 'cron-declared-unwired',
+    summary: 'cron slots on subsystems that were declared but never built — export schedules, flow schedule state, connector sync, cache warmup, DR backup/test',
+    dialect: 'cron', mode: 'interpret', state: 'experimental', failPolicy: 'compile-error',
+    enforcement:
+      'PARSE ONLY — `CronExpressionInputSchema` refuses a blank/non-string, non-envelope value and normalizes to the envelope; NO EVALUATOR FOUND for any of these five keys. Reader hunt, per key, walking out from each declaration (2026-09-04, `61821e54cf5`): `api/export.zod.ts:cronExpression` — the whole `ExportJobApiContracts` family has zero consumers and rest-server serves no `/api/v1/data/export` route, so `POST /api/v1/data/export/schedules` is a declared contract nothing implements; `IExportService` has no provider binding, which its own source already records. `automation/execution.zod.ts:cronExpression` — `ScheduleStateSchema` has no consumer outside packages/spec; the schedule TRIGGER that does work reads a flow start node `config.schedule` through trigger-schedule/schedule-trigger.ts `normalizeSchedule`, a different shape this key never reaches. `integration/connector.zod.ts:schedule` — `syncConfig` has no reader outside packages/spec. `system/cache.zod.ts:schedule` (CacheWarmup) and `system/disaster-recovery.zod.ts:schedule` (BackupConfig + the DR `testing` block) — neither schema has any consumer outside packages/spec',
+    covers: [
+      'api/export.zod.ts:cronExpression',
+      'automation/execution.zod.ts:cronExpression',
+      'integration/connector.zod.ts:schedule',
+      'system/cache.zod.ts:schedule',
+      'system/disaster-recovery.zod.ts:schedule',
+    ],
+    note: 'EXPERIMENTAL — five declared cron slots with no runtime evaluator (ADR-0049 enforce-or-remove candidates; each wants its own look, and the card that surfaced them says so rather than proposing a sweep). ⚠️ TWO of these keys each cover TWO declaring positions, because a ratchet key is `file:field`: `api/export.zod.ts:cronExpression` is `:576` (ScheduledExport) and `:706` (ScheduleExportRequest), and `system/disaster-recovery.zod.ts:schedule` is `:57` (BackupConfig) and `:238` (the DR `testing` block). Both pairs are genuinely the same surface twice, so one row is honest here — but see #15500, where the same collapse hides surfaces that are NOT the same. ⚠️ The `failPolicy` on this row is `compile-error` because the PARSE is the only thing that ever refuses one of these values; it is not a claim that cron SYNTAX is checked. It is not: `@objectstack/formula` cronEngine validates 5/6-field patterns and `@` aliases, and has ZERO consumers outside packages/formula — nothing routes these slots through it. And per #15028 the envelope arm of `CronExpressionInputSchema` accepts any declared dialect, so even the parse does not pin these to `cron`.',
+  },
+
+  // ── TEMPLATE dialect (#15027) ─────────────────────────────────────────────
+  {
+    id: 'template-prompt',
+    summary: 'AI prompt-template system/user prompts (PromptTemplate.system, .user) — `{{var}}` interpolation',
+    dialect: 'template', mode: 'interpret', state: 'experimental', failPolicy: 'compile-error',
+    enforcement:
+      'PARSE ONLY — `TemplateExpressionInputSchema` refuses a blank/non-string, non-envelope value and normalizes to `{dialect:"template",source}`; NO EVALUATOR FOUND. `PromptTemplateSchema` has no consumer outside packages/spec (measured 2026-09-04), so nothing interpolates the `{{var}}` holes and nothing checks that the declared `variables` match them',
+    covers: [
+      'ai/model-registry.zod.ts:system',
+      'ai/model-registry.zod.ts:user',
+    ],
+    note: 'EXPERIMENTAL — declared prompt templates with no runtime evaluator (ADR-0049). Ownership was checked before classifying rather than assumed: #14797 is CLOSED as completed, and its delivered diff (`d355c361157`, PR #14819) touched exactly one file, `skills/objectstack-ai/SKILL.md` — it corrected a prose clause that called these keys CEL, and never owned a ledger row. No open card owns them.',
+  },
+  {
+    id: 'template-title-format',
+    summary: 'object record-title template (Object.titleFormat, deprecated → nameField per ADR-0079)',
+    dialect: 'template', mode: 'interpret', state: 'experimental', failPolicy: 'compile-error',
+    enforcement:
+      'PARSE ONLY in this repo — `TemplateExpressionInputSchema` refuses a blank/non-string, non-envelope value. The KEY has a build-time reader that is NOT an evaluator: lint/validate-record-title.ts `validateRecordTitle` (wired into authoring-rules.ts, run by `os build` / `os lint` / the MCP authoring surface) reports every declaration as `title-format-retired`, an advisory WARNING steering the author to `nameField` — it reads that the key is present and never looks at the template text. The server-side title resolver deliberately does NOT read it: spec/src/data/display-name.ts `objectTitleCompleteness` / `resolveRecordDisplayName` resolve `nameField` then the `displayNameField` alias then a derivation, and ADR-0079 states the reason (render-only; the server can neither return nor query it)',
+    covers: ['data/object.zod.ts:titleFormat'],
+    note: 'EXPERIMENTAL, and the state is a deliberate split between two questions. `packages/spec/liveness/object.json` classifies the KEY `live` with the note "objectui ({{record.field}} interpolation)" — that ledger asks whether anything READS the key, and the answer is yes. THIS ledger asks what EVALUATES the expression and under which fail policy, and the only interpolation site named is in the sibling repo objectui, which is not in this checkout: ⛔ NOT measured here, so it is not written into `enforcement` as if it had been. Marking the row `enforced` on a second-hand reading is exactly the invented cell this ledger exists to prevent; marking it `removed` would contradict a governed ledger that measured more than I could. Re-state as `enforced` when someone measures the objectui site — or as `removed` when ADR-0079 retires the key.',
   },
   {
     id: 'cel-advanced-policy',
