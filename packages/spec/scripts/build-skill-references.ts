@@ -28,6 +28,7 @@ import path from 'path';
 import { exportListDescription } from './lib/export-list';
 import { findModuleDocBlock } from './lib/file-description';
 import { createSink, type Owns } from './lib/generated-output';
+import { checkCoreEntryShape } from './lib/skill-map-guards';
 
 // ── Paths ────────────────────────────────────────────────────────────────────
 
@@ -100,12 +101,18 @@ const SKILL_MAP: Record<string, string[]> = {
     'ai/tool.zod.ts',
     'ai/skill.zod.ts',
     'ai/model-registry.zod.ts',
-    'ai/conversation.zod.ts',
-    'ai/mcp.zod.ts',
-    'ai/embedding.zod.ts',
     'ai/knowledge-source.zod.ts',
-    'ai/knowledge-document.zod.ts',
-    'ai/usage.zod.ts',
+    // The schema behind the `solution_design` built-in skill the body's
+    // built-in-skills table names. Taught, never advertised until now.
+    'ai/solution-blueprint.zod.ts',
+    // `conversation`, `mcp`, `embedding`, `knowledge-document` and `usage`
+    // left this list: the body teaches none of them, and three had zero
+    // consumers outside packages/spec. An index entry is a POINTER, and
+    // pointing at a schema the body cannot help with is the defect — the
+    // schemas keep existing and stay importable. `embedding` is still
+    // published here as a transitive dep, because `knowledge-source.zod.ts`
+    // composes `EmbeddingModelSchema`: that pointer is reachable from the
+    // authorable face, which is exactly the test the other four fail.
   ],
   'objectstack-api': [
     'api/endpoint.zod.ts',
@@ -359,7 +366,10 @@ function ownsReferenceEntry(refsDir: string): Owns {
 
 function main() {
   console.log('🔗 Building skill schema reference indexes...\n');
-  const problems: string[] = [];
+  // Map-level guards run before any file is read: they ask questions of the
+  // authored config that the artifact-vs-generator comparison structurally
+  // cannot (see lib/skill-map-guards.ts).
+  const problems: string[] = [...checkCoreEntryShape(SKILL_MAP)];
   let totalSkills = 0;
 
   for (const [skillName, coreFiles] of Object.entries(SKILL_MAP)) {
