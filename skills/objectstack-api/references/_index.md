@@ -35,6 +35,7 @@ from `node_modules` — there is no local copy in the skill bundle.
 - `node_modules/@objectstack/spec/src/shared/http.zod.ts` — Shared HTTP Schemas
 - `node_modules/@objectstack/spec/src/shared/identifiers.zod.ts` — Exports: SystemIdentifierSchema, SnakeCaseIdentifierSchema, MetadataItemNameSchema
 - `node_modules/@objectstack/spec/src/shared/suggestions.zod.ts` — "Did you mean?" Suggestion Utilities
+- `node_modules/@objectstack/spec/src/shared/value-domain.zod.ts` — Standard value domains: one closed vocabulary and one membership predicate for settings and fields.
 
 ## How to read these
 

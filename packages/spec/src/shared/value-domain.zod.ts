@@ -1,9 +1,10 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * Standard value domains — ONE closed vocabulary and ONE membership predicate,
- * shared by settings specifiers (`Specifier.valueDomain`) and object fields
- * (`Field.valueDomain`).
+ * Standard value domains: one closed vocabulary and one membership predicate for settings and fields.
+ *
+ * `Specifier.valueDomain` (settings) and `Field.valueDomain` (objects) both
+ * reference the schema below and both are judged by the predicate below.
  *
  * Maintainer ruling 2026-09-02 (A on the field-level card, verbatim 「同意」):
  * `FieldSchema` gains a `valueDomain` slot whose vocabulary is exactly the
