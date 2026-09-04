@@ -789,7 +789,7 @@ export const GENERATED_SURFACE_EXCEPTIONS = Object.freeze([
   Object.freeze({
     id: 'spec-react-blocks',
     ruling: '#11705',
-    candidate: /^skills\/[^/]+\/(references\/react-blocks\.md|contracts\/react-blocks\.contract\.json)$/,
+    candidate: /^skills\/[^/]+\/references\/react-blocks\.md$/,
     surfaceId: 'skills-catalog',
     generator: 'pnpm --filter @objectstack/spec gen:react-blocks',
     verify: Object.freeze({ pkg: '@objectstack/spec', script: 'scripts/build-react-blocks-contract.ts', gate: 'check:react-blocks' }),
@@ -2369,7 +2369,7 @@ const REPLAYS = [
  */
 const REGISTER_SAMPLES = {
   'spec-skill-refs': 'skills/objectstack-ui/references/_index.md',
-  'spec-react-blocks': 'skills/objectstack-ui/contracts/react-blocks.contract.json',
+  'spec-react-blocks': 'skills/objectstack-ui/references/react-blocks.md',
 };
 
 // Returned by `selfTest()` only after its verdict is printed. The dispatch
@@ -3425,9 +3425,14 @@ async function selfTest() {
   assert('every-sample-is-matched-by-the-row-it-illustrates',
     Object.entries(REGISTER_SAMPLES).every(([id, p]) => generatedExceptionFor(p)?.id === id), JSON.stringify(REGISTER_SAMPLES));
   assert('a-generated-index-routes-to-the-skill-refs-generator', generatedExceptionFor(genIndex) === skillRefs);
-  assert('both-react-blocks-outputs-route-to-their-own-generator',
-    generatedExceptionFor('skills/objectstack-ui/references/react-blocks.md') === reactBlocks &&
-      generatedExceptionFor('skills/objectstack-ui/contracts/react-blocks.contract.json') === reactBlocks);
+  assert('the-react-blocks-output-routes-to-its-own-generator',
+    generatedExceptionFor('skills/objectstack-ui/references/react-blocks.md') === reactBlocks);
+  // The retirement, asserted rather than remembered (#14296 item 3 = A): the
+  // generator emits ONE rendering, so the JSON path it used to write is not a
+  // register member any more. A candidate that still matched it would hand a
+  // deleted path a recompute nothing can satisfy.
+  assert('the-retired-json-rendering-is-no-longer-a-register-member',
+    generatedExceptionFor('skills/objectstack-ui/contracts/react-blocks.contract.json') === null);
   // ⭐ The ruled limit, stated as a membership question: hand-authored skill
   // content is not on the register at all, so it never reaches a generator.
   assert('a-hand-authored-skills-file-is-not-registered-and-is-never-consulted-against-a-generator',

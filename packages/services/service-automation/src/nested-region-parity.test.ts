@@ -90,9 +90,9 @@ describe('#4347 — a loop-body predicate is canonicalized like a top-level one'
   it.each([
     ['a bare string', CONDITION],
     ['an explicit CEL envelope', ENVELOPE],
-  ])('stores %s as the canonical envelope on BOTH edges', (_label, condition) => {
+  ])('stores %s as the canonical envelope on BOTH edges', async (_label, condition) => {
     engine.registerFlow('repro', reproFlow(condition));
-    const flow = engine.flows.get('repro')!;
+    const flow = (await engine.getFlow('repro'))!;
 
     const topEdge = flow.edges.find(e => e.id === 'e2')!.condition;
     const bodyEdge = (flow.nodes.find(n => n.id === 'loop')!.config as any).body.edges[0].condition;
@@ -148,13 +148,13 @@ describe('#4347 — the conversion table reaches a node inside a region', () => 
       edges: [{ id: 'e1', source: 'start', target: 'loop', type: 'default' }],
     });
 
-    expect((engine.flows.get('callout')!.nodes[1]!.config as any).body.nodes[0].type).toBe('http');
+    expect(((await engine.getFlow('callout'))!.nodes[1]!.config as any).body.nodes[0].type).toBe('http');
     const result = await engine.execute('callout', { params: {}, event: 'schedule' } as never);
     expect(result.success).toBe(true);
     expect(called).toEqual(['nested']);
   });
 
-  it('canonicalizes a nested CRUD alias — an unconverted `filters` leaves no filter at all', () => {
+  it('canonicalizes a nested CRUD alias — an unconverted `filters` leaves no filter at all', async () => {
     const engine = new AutomationEngine(silentLogger());
     registerLoopNode(engine, ctx());
     engine.registerNodeExecutor({ type: 'delete_record', async execute() { return { success: true }; } } as NodeExecutor);
@@ -177,7 +177,7 @@ describe('#4347 — the conversion table reaches a node inside a region', () => 
       edges: [{ id: 'e1', source: 'start', target: 'loop', type: 'default' }],
     });
 
-    expect((engine.flows.get('purge')!.nodes[1]!.config as any).body.nodes[0].config)
+    expect(((await engine.getFlow('purge'))!.nodes[1]!.config as any).body.nodes[0].config)
       .toEqual({ objectName: 'lead', filter: { status: 'stale' } });
   });
 });
