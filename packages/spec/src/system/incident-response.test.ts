@@ -68,7 +68,6 @@ describe('IncidentResponsePhaseSchema', () => {
       phase: 'containment',
       description: 'Isolate affected systems',
       assignedTo: 'security_team',
-      targetHours: 4,
     };
 
     expect(() => IncidentResponsePhaseSchema.parse(phase)).not.toThrow();
@@ -82,7 +81,6 @@ describe('IncidentResponsePhaseSchema', () => {
         phase,
         description: `${phase} phase`,
         assignedTo: 'team',
-        targetHours: 2,
       })).not.toThrow();
     });
   });
@@ -92,7 +90,6 @@ describe('IncidentResponsePhaseSchema', () => {
       phase: 'recovery',
       description: 'Restore services',
       assignedTo: 'ops_team',
-      targetHours: 8,
       completedAt: 1704067200000,
       notes: 'All systems restored successfully',
     });
@@ -101,13 +98,16 @@ describe('IncidentResponsePhaseSchema', () => {
     expect(phase.notes).toBe('All systems restored successfully');
   });
 
-  it('should reject negative target hours', () => {
+  it('REFUSES an authored `targetHours` — a retiredKey() tombstone since #14477 (ADR-0049)', () => {
+    // The full refusal envelope (path, code, prescription) is pinned in
+    // `deadline-keys-retirement.test.ts`; this keeps the family suite honest
+    // about the shape it parses: any value, not only a negative one, is refused.
     expect(() => IncidentResponsePhaseSchema.parse({
       phase: 'identification',
       description: 'Identify',
       assignedTo: 'team',
-      targetHours: -1,
-    })).toThrow();
+      targetHours: 2,
+    })).toThrow(/`IncidentResponsePhase\.targetHours` was removed/s);
   });
 });
 
@@ -117,9 +117,7 @@ describe('IncidentNotificationRuleSchema', () => {
       severity: 'critical',
       channels: ['email', 'pagerduty'],
       recipients: ['ciso', 'security_team'],
-      withinMinutes: 15,
       notifyRegulators: true,
-      regulatorDeadlineHours: 72,
     };
 
     expect(() => IncidentNotificationRuleSchema.parse(rule)).not.toThrow();
@@ -130,7 +128,6 @@ describe('IncidentNotificationRuleSchema', () => {
       severity: 'low',
       channels: ['email'],
       recipients: ['security_team'],
-      withinMinutes: 60,
     });
 
     expect(rule.notifyRegulators).toBe(false);
@@ -143,7 +140,6 @@ describe('IncidentNotificationRuleSchema', () => {
       severity: 'high',
       channels,
       recipients: ['all'],
-      withinMinutes: 30,
     })).not.toThrow();
   });
 
@@ -152,7 +148,6 @@ describe('IncidentNotificationRuleSchema', () => {
       severity: 'high',
       channels: ['carrier_pigeon'],
       recipients: ['team'],
-      withinMinutes: 30,
     })).toThrow();
   });
 });
@@ -165,12 +160,11 @@ describe('IncidentNotificationMatrixSchema', () => {
           severity: 'critical',
           channels: ['pagerduty', 'sms'],
           recipients: ['ciso', 'security_team'],
-          withinMinutes: 15,
         },
       ],
     });
 
-    expect(matrix.escalationTimeoutMinutes).toBe(30);
+    expect(matrix).not.toHaveProperty('escalationTimeoutMinutes');
     expect(matrix.escalationChain).toEqual([]);
     expect(matrix.rules).toHaveLength(1);
   });
@@ -182,29 +176,24 @@ describe('IncidentNotificationMatrixSchema', () => {
           severity: 'critical',
           channels: ['pagerduty', 'sms', 'email'],
           recipients: ['ciso', 'executive_team'],
-          withinMinutes: 15,
           notifyRegulators: true,
-          regulatorDeadlineHours: 72,
         },
         {
           severity: 'high',
           channels: ['slack', 'email'],
           recipients: ['security_team'],
-          withinMinutes: 30,
         },
         {
           severity: 'low',
           channels: ['email'],
           recipients: ['security_team'],
-          withinMinutes: 120,
         },
       ],
-      escalationTimeoutMinutes: 60,
       escalationChain: ['security_lead', 'ciso', 'ceo'],
     });
 
     expect(matrix.rules).toHaveLength(3);
-    expect(matrix.escalationTimeoutMinutes).toBe(60);
+    expect(matrix).not.toHaveProperty('escalationTimeoutMinutes');
     expect(matrix.escalationChain).toHaveLength(3);
   });
 });
@@ -228,13 +217,11 @@ describe('IncidentSchema', () => {
           phase: 'identification',
           description: 'Identify scope of unauthorized access',
           assignedTo: 'security_team',
-          targetHours: 2,
         },
         {
           phase: 'containment',
           description: 'Block suspicious IP range',
           assignedTo: 'network_team',
-          targetHours: 1,
         },
       ],
       rootCause: 'Compromised API key',
@@ -281,7 +268,6 @@ describe('IncidentSchema', () => {
           phase: 'identification',
           description: 'Identify malware type',
           assignedTo: 'security_team',
-          targetHours: 1,
           completedAt: 1704070800000,
           notes: 'Identified as known ransomware variant',
         },
@@ -289,28 +275,24 @@ describe('IncidentSchema', () => {
           phase: 'containment',
           description: 'Isolate affected workstation',
           assignedTo: 'it_support',
-          targetHours: 0.5,
           completedAt: 1704072600000,
         },
         {
           phase: 'eradication',
           description: 'Remove malware and reimage',
           assignedTo: 'it_support',
-          targetHours: 4,
           completedAt: 1704086400000,
         },
         {
           phase: 'recovery',
           description: 'Restore from backup',
           assignedTo: 'it_support',
-          targetHours: 8,
           completedAt: 1704115200000,
         },
         {
           phase: 'lessons_learned',
           description: 'Post-incident review',
           assignedTo: 'security_team',
-          targetHours: 24,
           completedAt: 1704153600000,
         },
       ],
@@ -360,7 +342,6 @@ describe('IncidentResponsePolicySchema', () => {
             severity: 'critical',
             channels: ['pagerduty'],
             recipients: ['security_team'],
-            withinMinutes: 15,
           },
         ],
       },
@@ -368,10 +349,10 @@ describe('IncidentResponsePolicySchema', () => {
     });
 
     expect(policy.enabled).toBe(true);
-    expect(policy.triageDeadlineHours).toBe(1);
+    expect(policy).not.toHaveProperty('triageDeadlineHours');
     expect(policy.requirePostIncidentReview).toBe(true);
     expect(policy.regulatoryNotificationThreshold).toBe('high');
-    expect(policy.retentionDays).toBe(2555);
+    expect(policy).not.toHaveProperty('retentionDays');
   });
 
   it('should accept full policy configuration', () => {
@@ -383,30 +364,24 @@ describe('IncidentResponsePolicySchema', () => {
             severity: 'critical',
             channels: ['pagerduty', 'sms', 'email'],
             recipients: ['ciso', 'executive_team'],
-            withinMinutes: 15,
             notifyRegulators: true,
-            regulatorDeadlineHours: 72,
           },
           {
             severity: 'high',
             channels: ['slack', 'email'],
             recipients: ['security_team'],
-            withinMinutes: 30,
           },
         ],
-        escalationTimeoutMinutes: 45,
         escalationChain: ['security_lead', 'ciso'],
       },
       defaultResponseTeam: 'incident_response_team',
-      triageDeadlineHours: 2,
       requirePostIncidentReview: true,
       regulatoryNotificationThreshold: 'critical',
-      retentionDays: 3650,
     });
 
-    expect(policy.triageDeadlineHours).toBe(2);
+    expect(policy).not.toHaveProperty('triageDeadlineHours');
     expect(policy.regulatoryNotificationThreshold).toBe('critical');
-    expect(policy.retentionDays).toBe(3650);
+    expect(policy).not.toHaveProperty('retentionDays');
   });
 
   it('should reject missing required fields', () => {

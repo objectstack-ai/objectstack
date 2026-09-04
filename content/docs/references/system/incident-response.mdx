@@ -49,7 +49,7 @@ Security incident record per ISO 27001:2022 A.5.24–A.5.28
 | **resolvedAt** | `number` | optional | Resolution timestamp |
 | **affectedSystems** | `string[]` | ✅ | Affected systems |
 | **affectedDataClassifications** | `Enum<'pii' \| 'phi' \| 'pci' \| 'financial' \| 'confidential' \| 'internal' \| 'public'>[]` | optional | Affected data classifications |
-| **responsePhases** | `{ phase: Enum<'identification' \| 'containment' \| 'eradication' \| 'recovery' \| 'lessons_learned'>; description: string; assignedTo: string; targetHours: number; … }[]` | optional | Incident response phases |
+| **responsePhases** | `{ phase: Enum<'identification' \| 'containment' \| 'eradication' \| 'recovery' \| 'lessons_learned'>; description: string; assignedTo: string; completedAt?: number; … }[]` | optional | Incident response phases |
 | **rootCause** | `string` | optional | Root cause analysis |
 | **correctiveActions** | `string[]` | optional | Corrective actions taken or planned |
 | **lessonsLearned** | `string` | optional | Lessons learned from the incident |
@@ -79,7 +79,7 @@ Incident response phase with timing and assignment
 | **phase** | `Enum<'identification' \| 'containment' \| 'eradication' \| 'recovery' \| 'lessons_learned'>` | ✅ | Response phase name |
 | **description** | `string` | ✅ | Phase description and objectives |
 | **assignedTo** | `string` | ✅ | Responsible team or role |
-| **targetHours** | `number` | ✅ | Target completion time in hours |
+| **targetHours** | `never` | optional | [REMOVED] `IncidentResponsePhase.targetHours` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read it: no engine tracked a response phase against a clock, so the target was never checked, never escalated and never reported. Delete the key. There is no replacement, because no incident-response engine exists to keep a phase deadline. |
 | **completedAt** | `number` | optional | Actual completion timestamp |
 | **notes** | `string` | optional | Phase notes and findings |
 
@@ -113,8 +113,8 @@ Incident notification matrix with escalation policies
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **rules** | `{ severity: Enum<'critical' \| 'high' \| 'medium' \| 'low'>; channels: Enum<'email' \| 'sms' \| 'slack' \| 'pagerduty' \| 'webhook'>[]; recipients: string[]; withinMinutes: number; … }[]` | ✅ | Notification rules by severity level |
-| **escalationTimeoutMinutes** | `number` | optional (default: `30`) | Auto-escalation timeout in minutes |
+| **rules** | `{ severity: Enum<'critical' \| 'high' \| 'medium' \| 'low'>; channels: Enum<'email' \| 'sms' \| 'slack' \| 'pagerduty' \| 'webhook'>[]; recipients: string[]; notifyRegulators: boolean }[]` | ✅ | Notification rules by severity level |
+| **escalationTimeoutMinutes** | `never` | optional | [REMOVED] `IncidentNotificationMatrix.escalationTimeoutMinutes` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read it: no engine walked `escalationChain` on a timer, so the timeout never fired, and its default of 30 minutes was materialized into every parsed matrix without ever being consulted. Delete the key. There is no replacement, because no escalation engine exists. |
 | **escalationChain** | `string[]` | optional (default: `[]`) | Ordered escalation chain of roles |
 
 ### Nested Shape: `IncidentNotificationMatrix.rules[number]`
@@ -126,9 +126,9 @@ Incident notification rule per severity level
 | **severity** | `Enum<'critical' \| 'high' \| 'medium' \| 'low'>` | ✅ | Minimum severity to trigger notification |
 | **channels** | `Enum<'email' \| 'sms' \| 'slack' \| 'pagerduty' \| 'webhook'>[]` | ✅ | Notification channels |
 | **recipients** | `string[]` | ✅ | Roles or teams to notify |
-| **withinMinutes** | `number` | ✅ | Notification deadline in minutes from detection |
+| **withinMinutes** | `never` | optional | [REMOVED] `IncidentNotificationRule.withinMinutes` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read it: no dispatcher sent an incident notification, so no deadline for one was ever measured. Delete the key. There is no replacement, because no incident-notification engine exists to keep the deadline. |
 | **notifyRegulators** | `boolean` | optional (default: `false`) | Whether to notify regulatory authorities |
-| **regulatorDeadlineHours** | `number` | optional | Regulatory notification deadline in hours |
+| **regulatorDeadlineHours** | `never` | optional | [REMOVED] `IncidentNotificationRule.regulatorDeadlineHours` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read it: no engine notified a regulator, so a regulatory deadline declared here (a GDPR 72-hour window, for example) was never tracked, and a compliance author who wrote it held a promise the platform did not keep. Delete the key. There is no replacement, because no regulatory-notification engine exists. |
 
 
 ---
@@ -144,9 +144,9 @@ Incident notification rule per severity level
 | **severity** | `Enum<'critical' \| 'high' \| 'medium' \| 'low'>` | ✅ | Minimum severity to trigger notification |
 | **channels** | `Enum<'email' \| 'sms' \| 'slack' \| 'pagerduty' \| 'webhook'>[]` | ✅ | Notification channels |
 | **recipients** | `string[]` | ✅ | Roles or teams to notify |
-| **withinMinutes** | `number` | ✅ | Notification deadline in minutes from detection |
+| **withinMinutes** | `never` | optional | [REMOVED] `IncidentNotificationRule.withinMinutes` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read it: no dispatcher sent an incident notification, so no deadline for one was ever measured. Delete the key. There is no replacement, because no incident-notification engine exists to keep the deadline. |
 | **notifyRegulators** | `boolean` | optional (default: `false`) | Whether to notify regulatory authorities |
-| **regulatorDeadlineHours** | `number` | optional | Regulatory notification deadline in hours |
+| **regulatorDeadlineHours** | `never` | optional | [REMOVED] `IncidentNotificationRule.regulatorDeadlineHours` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read it: no engine notified a regulator, so a regulatory deadline declared here (a GDPR 72-hour window, for example) was never tracked, and a compliance author who wrote it held a promise the platform did not keep. Delete the key. There is no replacement, because no regulatory-notification engine exists. |
 
 
 ---
@@ -162,7 +162,7 @@ Incident response phase with timing and assignment
 | **phase** | `Enum<'identification' \| 'containment' \| 'eradication' \| 'recovery' \| 'lessons_learned'>` | ✅ | Response phase name |
 | **description** | `string` | ✅ | Phase description and objectives |
 | **assignedTo** | `string` | ✅ | Responsible team or role |
-| **targetHours** | `number` | ✅ | Target completion time in hours |
+| **targetHours** | `never` | optional | [REMOVED] `IncidentResponsePhase.targetHours` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read it: no engine tracked a response phase against a clock, so the target was never checked, never escalated and never reported. Delete the key. There is no replacement, because no incident-response engine exists to keep a phase deadline. |
 | **completedAt** | `number` | optional | Actual completion timestamp |
 | **notes** | `string` | optional | Phase notes and findings |
 
@@ -178,19 +178,19 @@ Organization-level incident response policy per ISO 27001:2022
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | optional (default: `true`) | Enable incident response management |
-| **notificationMatrix** | `{ rules: object[]; escalationTimeoutMinutes: number; escalationChain: string[] }` | ✅ | Notification and escalation matrix |
+| **notificationMatrix** | `{ rules: object[]; escalationChain: string[] }` | ✅ | Notification and escalation matrix |
 | **defaultResponseTeam** | `string` | ✅ | Default incident response team or role |
-| **triageDeadlineHours** | `number` | optional (default: `1`) | Maximum hours to begin triage after detection |
+| **triageDeadlineHours** | `never` | optional | [REMOVED] `IncidentResponsePolicy.triageDeadlineHours` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read it: no engine timed the interval between detection and triage, so the deadline was never kept, and its default of 1 hour was materialized into every parsed policy without ever being consulted. Delete the key. There is no replacement, because no incident-response engine exists to keep a triage window. |
 | **requirePostIncidentReview** | `boolean` | optional (default: `true`) | Require post-incident review for all incidents |
 | **regulatoryNotificationThreshold** | `Enum<'critical' \| 'high' \| 'medium' \| 'low'>` | optional (default: `"high"`) | Minimum severity requiring regulatory notification |
-| **retentionDays** | `number` | optional (default: `2555`) | Incident record retention period in days (default ~7 years) |
+| **retentionDays** | `never` | optional | [REMOVED] `IncidentResponsePolicy.retentionDays` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read it: no sweeper deleted incident records on a schedule, so the retention period was never applied, and its default of 2555 days was materialized into every parsed policy without ever being consulted. Delete the key. Retention on this platform is the object-level `lifecycle` block (ADR-0057), enforced by the LifecycleService over the records of an object — declare it on the object that stores incident records, not on this policy document. |
 
 ### Nested Shape: `IncidentResponsePolicy.notificationMatrix`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **rules** | `{ severity: Enum<'critical' \| 'high' \| 'medium' \| 'low'>; channels: Enum<'email' \| 'sms' \| 'slack' \| 'pagerduty' \| 'webhook'>[]; recipients: string[]; withinMinutes: number; … }[]` | ✅ | Notification rules by severity level |
-| **escalationTimeoutMinutes** | `number` | optional (default: `30`) | Auto-escalation timeout in minutes |
+| **rules** | `{ severity: Enum<'critical' \| 'high' \| 'medium' \| 'low'>; channels: Enum<'email' \| 'sms' \| 'slack' \| 'pagerduty' \| 'webhook'>[]; recipients: string[]; notifyRegulators: boolean }[]` | ✅ | Notification rules by severity level |
+| **escalationTimeoutMinutes** | `never` | optional | [REMOVED] `IncidentNotificationMatrix.escalationTimeoutMinutes` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read it: no engine walked `escalationChain` on a timer, so the timeout never fired, and its default of 30 minutes was materialized into every parsed matrix without ever being consulted. Delete the key. There is no replacement, because no escalation engine exists. |
 | **escalationChain** | `string[]` | optional (default: `[]`) | Ordered escalation chain of roles |
 
 
