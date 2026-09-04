@@ -381,17 +381,23 @@ All system configuration lives in Git:
 
 ### Plugin Development
 ```bash
-# Scaffold new plugin (created under packages/plugins/plugin-<name>/)
+# Scaffold new plugin (created as ./plugin-<name>/ in the current directory)
 os create plugin slack-integration
 
 # Generated structure:
-packages/plugins/plugin-slack-integration/
-  package.json     # name, version, dependencies (@objectstack/spec, zod)
-  tsconfig.json
+plugin-slack-integration/
+  package.json          # name, version, dependencies (@objectstack/spec, zod)
+  tsconfig.json         # self-contained, extends nothing outside the project
+  pnpm-workspace.yaml   # the pnpm build approvals a fresh install needs
   src/
-    index.ts       # default-export Plugin object (name, version, initialize, destroy)
+    index.ts            # default-export Plugin object (name, version, initialize, destroy)
   README.md
 ```
+
+The emitted dependencies are published semver ranges pinned to the CLI that
+generated them, so `pnpm install && pnpm build` works in the new directory
+without a workspace around it. `os create plugin --in-repo` is the opt-in for
+platform work inside an ObjectStack checkout; it emits `workspace:*` instead.
 
 <Callout type="warn">
   The scaffold still emits an `initialize` method. The kernel's plugin contract

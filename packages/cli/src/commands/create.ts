@@ -1,50 +1,231 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+/**
+ * `os create <type> [name]` — scaffold a plugin or an example application.
+ *
+ * ## What this command emits, and why it has two shapes
+ *
+ * ObjectStack is a developer tool, so a documented developer-facing command has
+ * to work for the developer who follows the docs. This command is documented on
+ * four public doc pages (`deployment/cli`, `plugins/index`, the two
+ * `protocol/kernel` pages) and, until #14824, every one of those readers got a
+ * project that CANNOT INSTALL:
+ *
+ *   - the emitted `package.json` declared `@objectstack/spec` and
+ *     `@objectstack/cli` as `workspace:*`, a pnpm protocol that resolves only
+ *     inside a workspace that already contains those packages;
+ *   - the emitted `tsconfig.json` declared `extends: '../../tsconfig.json'`,
+ *     a file that exists in no directory the scaffold lands in (measured: for
+ *     the `plugin` template it did not resolve even INSIDE this monorepo —
+ *     `packages/plugins/<pkg>/../../tsconfig.json` is `packages/tsconfig.json`,
+ *     which does not exist; every real plugin here spells `../../../`);
+ *   - and the default output location was this repo's own `packages/plugins/`
+ *     or `examples/`, so the command only did anything sensible when it was run
+ *     from a checkout of ObjectStack itself.
+ *
+ * The fix is not to narrow the promise but to deliver it, so the DEFAULT is now
+ * a standalone project:
+ *
+ *   `standalone`  (default)  every `@objectstack/*` dependency is a PUBLISHED
+ *                            semver range pinned to the running CLI's own
+ *                            version, the `tsconfig.json` is self-contained,
+ *                            a `pnpm-workspace.yaml` carries the build
+ *                            approvals a fresh `pnpm install` needs, and the
+ *                            project lands in the developer's own directory.
+ *   `in-repo`     (--in-repo) the platform-work shape: `workspace:*` deps, a
+ *                            `tsconfig.json` that extends this repo's root
+ *                            config, landing under `packages/plugins/` or
+ *                            `examples/`. Explicit and documented, never the
+ *                            default — its output installs nowhere else.
+ *
+ * ## The version the standalone shape pins
+ *
+ * Every `@objectstack/*` package in this monorepo is released together on one
+ * version, so the range that is guaranteed to exist and to be mutually
+ * compatible is the CLI's own. `getCliVersion()` (owned by `init.ts`, which
+ * has pinned scaffolded deps this way since long before this command did) reads
+ * it from the CLI package's own manifest; the range is imported rather than
+ * re-derived so the two scaffolders cannot drift on the one value that decides
+ * whether a scaffold resolves at all.
+ *
+ * ## Why the standalone shape reuses `init`'s renderers
+ *
+ * `renderPnpmWorkspaceYaml()` and `SCAFFOLD_PNPM_RANGE` are `init.ts`'s, and
+ * they are CALLED here rather than restated. A restatement is the two-producer
+ * defect `test/scaffold-workspace-consistency.test.ts` exists to catch, and it
+ * has already been paid for once in this repo: the build-approval block landed
+ * in one scaffold path and not the other, and one of them shipped the pre-fix
+ * shape for months.
+ *
+ * ## The pin
+ *
+ * `scripts/create-scaffold-smoke.sh` scaffolds every template in `templates`
+ * into a temporary directory OUTSIDE this repository, installs it from packed
+ * tarballs (the honest stand-in for a registry install of an unreleased
+ * version), and runs the project's own `build` and `typecheck`. It is wired
+ * into `.github/workflows/os-create-smoke.yml`, path-filtered onto this file
+ * and the templates, so it runs on exactly the changes that can break it.
+ */
+
 import { Args, Command, Flags } from '@oclif/core';
 import chalk from 'chalk';
 import fs from 'fs';
 import path from 'path';
-import { execSync } from 'child_process';
 import { PROTOCOL_MAJOR } from '@objectstack/spec/kernel';
-import { sanitizeNamespace } from './init.js';
+import {
+  getCliVersion,
+  renderPnpmWorkspaceYaml,
+  sanitizeNamespace,
+  SCAFFOLD_PNPM_RANGE,
+} from './init.js';
 
-export const templates = {
-  plugin: {
+/**
+ * Where the scaffold is going to live, which is the only thing the emitted
+ * dependency ranges and `tsconfig.json` differ on.
+ */
+export type ScaffoldPlacement = 'standalone' | 'in-repo';
+
+/** ⛔ Never `in-repo` — that placement emits a project that installs nowhere. */
+export const DEFAULT_PLACEMENT: ScaffoldPlacement = 'standalone';
+
+/**
+ * The dependency spec every `@objectstack/*` entry in an emitted manifest gets.
+ *
+ * `standalone` is caret-pinned to the CLI's own version — a published range
+ * that npm, pnpm, yarn and bun all resolve. `workspace:*` is emitted ONLY for
+ * the in-repo placement, where a workspace really does supply those names.
+ */
+export function objectstackDependencySpec(placement: ScaffoldPlacement): string {
+  return placement === 'in-repo' ? 'workspace:*' : `^${getCliVersion()}`;
+}
+
+/**
+ * The `extends` an in-repo scaffold needs to reach this repo's root
+ * `tsconfig.json`, DERIVED from where the template lands rather than written
+ * down. Writing it down is how the `plugin` template came to declare
+ * `'../../tsconfig.json'` from a directory two levels below `packages/`, which
+ * resolves to a file that does not exist.
+ */
+export function rootTsconfigExtends(inRepoDir: string, projectDirName: string): string {
+  const depth = path.posix.join(inRepoDir, projectDirName).split('/').filter(Boolean).length;
+  return `${'../'.repeat(depth)}tsconfig.json`;
+}
+
+/**
+ * The compiler options a standalone scaffold carries in full, because it
+ * extends nothing. Deliberately the same set `objectstack init` writes: two
+ * scaffolders that disagree about `moduleResolution` is a support question
+ * nobody can answer, and `bundler` is what resolves the `exports` subpaths
+ * (`@objectstack/spec/contracts`, `/kernel`) the templates import.
+ */
+const STANDALONE_COMPILER_OPTIONS = {
+  target: 'ES2022',
+  module: 'ESNext',
+  moduleResolution: 'bundler',
+  strict: true,
+  esModuleInterop: true,
+  skipLibCheck: true,
+} as const;
+
+/** A rendered file: JSON objects are stringified on write, strings land as-is. */
+type FileRenderer = (name: string) => unknown;
+
+export interface CreateTemplate {
+  description: string;
+  /** Directory, relative to the monorepo root, the `--in-repo` placement uses. */
+  inRepoDir: string;
+  /** The project directory's own name, in either placement. */
+  dirName: (name: string) => string;
+  /** Every file this template emits for a given placement, keyed by its path. */
+  filesFor: (placement: ScaffoldPlacement) => Record<string, FileRenderer>;
+  /**
+   * The DEFAULT (standalone) file map — what `os create <type> <name>` writes
+   * when nobody passes a flag. Kept as a plain property so a caller that only
+   * cares about the default shape (the manifest-schema sweep in
+   * `test/scaffold-manifest-schema.test.ts`) reads it without knowing about
+   * placements at all.
+   */
+  files: Record<string, FileRenderer>;
+}
+
+function defineTemplate(t: Omit<CreateTemplate, 'files'>): CreateTemplate {
+  return {
+    ...t,
+    get files() {
+      return t.filesFor(DEFAULT_PLACEMENT);
+    },
+  };
+}
+
+function toCamelCase(str: string): string {
+  return str.replace(/-([a-z])/g, (g) => g[1].toUpperCase());
+}
+
+const PLUGIN_IN_REPO_DIR = 'packages/plugins';
+const EXAMPLE_IN_REPO_DIR = 'examples';
+
+export const templates: Record<string, CreateTemplate> = {
+  plugin: defineTemplate({
     description: 'Create a new ObjectStack plugin',
-    files: {
-      'package.json': (name: string) => ({
-        name: `@objectstack/plugin-${name}`,
-        version: '0.1.0',
-        description: `ObjectStack Plugin: ${name}`,
-        main: 'dist/index.js',
-        types: 'dist/index.d.ts',
-        scripts: {
-          build: 'tsc',
-          dev: 'tsc --watch',
-          test: 'vitest',
-        },
-        keywords: ['objectstack', 'plugin', name],
-        author: '',
-        license: 'MIT',
-        dependencies: {
-          '@objectstack/spec': 'workspace:*',
-          zod: '^4.3.6',
-        },
-        devDependencies: {
-          '@types/node': '^22.0.0',
-          typescript: '^5.8.0',
-          vitest: '^4.0.0',
-        },
-      }),
-      'tsconfig.json': () => ({
-        extends: '../../tsconfig.json',
-        compilerOptions: {
-          outDir: 'dist',
-          rootDir: 'src',
-        },
-        include: ['src/**/*'],
-      }),
-      'src/index.ts': (name: string) => `import type { Plugin } from '@objectstack/spec/contracts';
+    inRepoDir: PLUGIN_IN_REPO_DIR,
+    dirName: (name: string) => `plugin-${name}`,
+    filesFor: (placement: ScaffoldPlacement) => {
+      const standalone = placement === 'standalone';
+      const files: Record<string, FileRenderer> = {
+        'package.json': (name: string) => ({
+          name: `@objectstack/plugin-${name}`,
+          version: '0.1.0',
+          description: `ObjectStack Plugin: ${name}`,
+          // `tsc` emits ES modules under the compiler options below, so the
+          // manifest has to declare the project as ESM or Node refuses the
+          // emitted `dist/index.js`. The in-repo placement inherits its module
+          // semantics from the root config it extends, so it does not.
+          ...(standalone ? { type: 'module' } : {}),
+          main: 'dist/index.js',
+          types: 'dist/index.d.ts',
+          // Not a build-script allowlist (that is pnpm-workspace.yaml) — the
+          // minimum pnpm that reads that file at all.
+          ...(standalone ? { engines: { pnpm: SCAFFOLD_PNPM_RANGE } } : {}),
+          scripts: {
+            build: 'tsc',
+            dev: 'tsc --watch',
+            test: 'vitest',
+            typecheck: 'tsc --noEmit',
+          },
+          keywords: ['objectstack', 'plugin', name],
+          author: '',
+          license: 'MIT',
+          dependencies: {
+            '@objectstack/spec': objectstackDependencySpec(placement),
+            zod: '^4.3.6',
+          },
+          devDependencies: {
+            '@types/node': '^22.0.0',
+            typescript: '^5.8.0',
+            vitest: '^4.0.0',
+          },
+        }),
+        'tsconfig.json': (name: string) =>
+          standalone
+            ? {
+                compilerOptions: {
+                  ...STANDALONE_COMPILER_OPTIONS,
+                  outDir: 'dist',
+                  rootDir: 'src',
+                  declaration: true,
+                },
+                include: ['src/**/*'],
+                exclude: ['dist', 'node_modules'],
+              }
+            : {
+                extends: rootTsconfigExtends(PLUGIN_IN_REPO_DIR, `plugin-${name}`),
+                compilerOptions: {
+                  outDir: 'dist',
+                  rootDir: 'src',
+                },
+                include: ['src/**/*'],
+              },
+        'src/index.ts': (name: string) => `import type { Plugin } from '@objectstack/spec/contracts';
 
 /**
  * ${name} Plugin for ObjectStack
@@ -66,7 +247,7 @@ export const ${toCamelCase(name)}Plugin: Plugin = {
 
 export default ${toCamelCase(name)}Plugin;
 `,
-      'README.md': (name: string) => `# @objectstack/plugin-${name}
+        'README.md': (name: string) => `# @objectstack/plugin-${name}
 
 ObjectStack Plugin: ${name}
 
@@ -93,37 +274,55 @@ export default {
 
 MIT
 `,
+      };
+
+      // pnpm does not run dependency build scripts unless they are approved in
+      // this file, and pnpm 11 made the omission a HARD ERROR — without it a
+      // fresh `pnpm install` on the scaffold exits 1. ⛔ Never emitted for the
+      // in-repo placement: a `pnpm-workspace.yaml` inside a workspace declares
+      // the directory its OWN workspace root, which severs `workspace:*`.
+      if (standalone) {
+        files['pnpm-workspace.yaml'] = () => renderPnpmWorkspaceYaml();
+      }
+      return files;
     },
-  },
-  
-  example: {
+  }),
+
+  example: defineTemplate({
     description: 'Create a new ObjectStack example application',
-    files: {
-      'package.json': (name: string) => ({
-        name: `@example/${name}`,
-        version: '0.1.0',
-        private: true,
-        description: `ObjectStack Example: ${name}`,
-        scripts: {
-          build: 'objectstack compile',
-          dev: 'objectstack dev',
-          test: 'vitest',
-        },
-        dependencies: {
-          '@objectstack/spec': 'workspace:*',
-          '@objectstack/cli': 'workspace:*',
-          zod: '^4.3.6',
-        },
-        devDependencies: {
-          '@types/node': '^22.0.0',
-          tsx: '^4.21.0',
-          typescript: '^5.8.0',
-          vitest: '^4.0.0',
-        },
-      }),
-      'objectstack.config.ts': (name: string) => {
-        const namespace = sanitizeNamespace(name);
-        return `import { defineStack } from '@objectstack/spec';
+    inRepoDir: EXAMPLE_IN_REPO_DIR,
+    dirName: (name: string) => name,
+    filesFor: (placement: ScaffoldPlacement) => {
+      const standalone = placement === 'standalone';
+      const files: Record<string, FileRenderer> = {
+        'package.json': (name: string) => ({
+          name: `@example/${name}`,
+          version: '0.1.0',
+          private: true,
+          ...(standalone ? { type: 'module' } : {}),
+          description: `ObjectStack Example: ${name}`,
+          ...(standalone ? { engines: { pnpm: SCAFFOLD_PNPM_RANGE } } : {}),
+          scripts: {
+            build: 'objectstack compile',
+            dev: 'objectstack dev',
+            test: 'vitest',
+            typecheck: 'tsc --noEmit',
+          },
+          dependencies: {
+            '@objectstack/spec': objectstackDependencySpec(placement),
+            '@objectstack/cli': objectstackDependencySpec(placement),
+            zod: '^4.3.6',
+          },
+          devDependencies: {
+            '@types/node': '^22.0.0',
+            tsx: '^4.21.0',
+            typescript: '^5.8.0',
+            vitest: '^4.0.0',
+          },
+        }),
+        'objectstack.config.ts': (name: string) => {
+          const namespace = sanitizeNamespace(name);
+          return `import { defineStack } from '@objectstack/spec';
 
 // Barrel imports — add more as you create new type folders
 // import * as objects from './src/objects';
@@ -157,14 +356,17 @@ export default defineStack({
   ],
 });
 `;
-      },
-      'README.md': (name: string) => `# ${name} Example
+        },
+        'README.md': (name: string) => `# ${name} Example
 
 ObjectStack example application: ${name}
 
 ## Quick Start
 
 \`\`\`bash
+# Install dependencies
+pnpm install
+
 # Build the configuration
 pnpm build
 
@@ -179,27 +381,45 @@ pnpm dev
 
 ## Learn More
 
-- [ObjectStack Documentation](../../content/docs)
-- [Examples](../)
-`,
-      'tsconfig.json': () => ({
-        extends: '../../tsconfig.json',
-        compilerOptions: {
-          outDir: 'dist',
-          rootDir: '.',
-        },
-        include: ['*.ts', 'src/**/*'],
-      }),
+${
+  standalone
+    ? '- [ObjectStack Documentation](https://objectstack.ai/docs)\n'
+      + '- [CLI Reference](https://objectstack.ai/docs/deployment/cli)\n'
+    : '- [ObjectStack Documentation](../../content/docs)\n- [Examples](../)\n'
+}`,
+        'tsconfig.json': (name: string) =>
+          standalone
+            ? {
+                compilerOptions: {
+                  ...STANDALONE_COMPILER_OPTIONS,
+                  outDir: 'dist',
+                  rootDir: '.',
+                  declaration: true,
+                },
+                include: ['*.ts', 'src/**/*'],
+                exclude: ['dist', 'node_modules'],
+              }
+            : {
+                extends: rootTsconfigExtends(EXAMPLE_IN_REPO_DIR, name),
+                compilerOptions: {
+                  outDir: 'dist',
+                  rootDir: '.',
+                },
+                include: ['*.ts', 'src/**/*'],
+              },
+      };
+
+      if (standalone) {
+        files['pnpm-workspace.yaml'] = () => renderPnpmWorkspaceYaml();
+      }
+      return files;
     },
-  },
+  }),
 };
 
-function toCamelCase(str: string): string {
-  return str.replace(/-([a-z])/g, (g) => g[1].toUpperCase());
-}
-
 export default class Create extends Command {
-  static override description = 'Create a new package, plugin, or example from template';
+  static override description =
+    'Create a new standalone plugin or example project from a built-in template';
 
   static override args = {
     type: Args.string({ description: 'Type of project to create (plugin, example)', required: true }),
@@ -207,7 +427,16 @@ export default class Create extends Command {
   };
 
   static override flags = {
-    dir: Flags.string({ char: 'd', description: 'Target directory' }),
+    dir: Flags.string({
+      char: 'd',
+      description: 'Target directory (default: ./<project-name> in the current directory)',
+    }),
+    'in-repo': Flags.boolean({
+      default: false,
+      description:
+        'Scaffold INSIDE an ObjectStack monorepo checkout (packages/plugins/ or examples/) with '
+        + 'workspace:* dependencies. For platform work only — the emitted project installs nowhere else.',
+    }),
   };
 
   async run(): Promise<void> {
@@ -230,15 +459,31 @@ export default class Create extends Command {
     
     const template = templates[args.type as keyof typeof templates];
     const cwd = process.cwd();
-    
+    const placement: ScaffoldPlacement = flags['in-repo'] ? 'in-repo' : DEFAULT_PLACEMENT;
+    const projectDirName = template.dirName(args.name);
+
+    // Refuse `--in-repo` outside a workspace rather than emit the one thing
+    // this command is no longer allowed to emit: a project that cannot install.
+    if (placement === 'in-repo' && !fs.existsSync(path.join(cwd, 'pnpm-workspace.yaml'))) {
+      console.error(chalk.red('\n❌ --in-repo needs to run from a pnpm workspace root'));
+      console.log(
+        chalk.dim(
+          `  No pnpm-workspace.yaml in ${cwd}. --in-repo emits workspace:* dependencies, which\n`
+          + '  resolve only inside a workspace that already provides @objectstack/*.\n'
+          + '  Drop the flag to scaffold a standalone project that installs from the registry.',
+        ),
+      );
+      process.exit(1);
+    }
+
     // Determine target directory
     let targetDir: string;
     if (flags.dir) {
       targetDir = path.resolve(cwd, flags.dir);
+    } else if (placement === 'in-repo') {
+      targetDir = path.join(cwd, template.inRepoDir, projectDirName);
     } else {
-      const baseDir = args.type === 'plugin' ? 'packages/plugins' : 'examples';
-      const projectName = args.type === 'plugin' ? `plugin-${args.name}` : args.name;
-      targetDir = path.join(cwd, baseDir, projectName);
+      targetDir = path.join(cwd, projectDirName);
     }
     
     // Check if directory already exists
@@ -249,6 +494,9 @@ export default class Create extends Command {
     
     console.log(`📁 Creating ${args.type}: ${chalk.blue(args.name)}`);
     console.log(`📂 Location: ${chalk.dim(targetDir)}`);
+    if (placement === 'in-repo') {
+      console.log(chalk.yellow('⚠️  --in-repo: workspace:* dependencies — this project installs only in this monorepo'));
+    }
     console.log('');
     
     try {
@@ -256,7 +504,7 @@ export default class Create extends Command {
       fs.mkdirSync(targetDir, { recursive: true });
       
       // Create files from template
-      for (const [filePath, contentFn] of Object.entries(template.files)) {
+      for (const [filePath, contentFn] of Object.entries(template.filesFor(placement))) {
         const fullPath = path.join(targetDir, filePath);
         const dir = path.dirname(fullPath);
         
@@ -267,7 +515,7 @@ export default class Create extends Command {
         const content = contentFn(args.name);
         const fileContent = typeof content === 'string' 
           ? content 
-          : JSON.stringify(content, null, 2);
+          : JSON.stringify(content, null, 2) + '\n';
         
         fs.writeFileSync(fullPath, fileContent);
         console.log(chalk.green(`✓ Created ${filePath}`));
