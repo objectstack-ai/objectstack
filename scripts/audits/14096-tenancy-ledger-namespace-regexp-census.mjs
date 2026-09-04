@@ -11,10 +11,26 @@
  * SEED paths — `seed-loader.ts`'s `fallbackOrgId` and
  * `seed-tenancy-backfill.ts`'s own `PLATFORM_NAMESPACE` — still cut by)?
  *
- * MEASUREMENT ONLY. Exit 0 always; this is a census, not a gate. Requires the
- * `@objectstack/objectql` dependency closure built (`pnpm --filter
- * '@objectstack/objectql^...' build && pnpm --filter @objectstack/objectql
- * build`) — this script does not build.
+ * MEASUREMENT ONLY on a healthy read: exit 0, this is a census, not a gate.
+ * Requires the `@objectstack/objectql` dependency closure built (`pnpm
+ * --filter '@objectstack/objectql^...' build && pnpm --filter
+ * @objectstack/objectql build`) — this script does not build.
+ *
+ * ⚠️ NOT measurement-only on a BROKEN ledger read. `disagreement_count` is
+ * downstream of `PLATFORM_OBJECT_TENANCY`, the one input this script does not
+ * independently re-derive (§2's header control is an AST census of the
+ * OBJECT FILES — it never reads this ledger, so it validates the population
+ * and tenant-field logic and proves nothing about the ledger import). An
+ * emptied, stale, or mis-imported ledger therefore reports a clean
+ * `disagreement_count: 0` indistinguishable from a genuine zero, WHILE
+ * `reproduced_matches_header` still prints `true` — reproduced against a PR
+ * #15122 reviewer experiment: `PLATFORM_OBJECT_TENANCY = {}`, rebuilt, run;
+ * exit 0, header control "passes", 0 disagreements. Because the ruling this
+ * script serves branches on the number (a zero closes #14096 as "keep the
+ * regexp", non-zero re-opens it p1 — see the audit doc's `## Branch
+ * verdict`), a false zero would close a p1 tenancy question as decided with
+ * no visible sign anything had gone wrong. `LEDGER_ENTRY_COUNT_FLOOR` below
+ * turns that failure mode into a thrown error (non-zero exit) instead.
  *
  * ## The predicate (stated, not left implicit — dispatch Zone 2.1)
  *
@@ -203,6 +219,35 @@ async function main() {
   const { classifyPlatformObjectTenancy, PLATFORM_OBJECT_TENANCY, isPlatformNamespaceObject } =
     await import(resolve(REPO_ROOT, 'packages/objectql/dist/index.js'));
 
+  // Hard floor on the ledger read (see the module doc comment above for why
+  // this is not optional): an empty, stale, or mis-imported
+  // `PLATFORM_OBJECT_TENANCY` must fail LOUDLY, not report a clean
+  // `disagreement_count: 0` that is indistinguishable from a genuine zero.
+  // As of 2026-09-04 the ledger holds 9 entries (8 tenant-scoped +
+  // `sys_permission_set` global) -- §5 of the audit doc. The floor is set
+  // well below that so a handful of future legitimate edits (a new verdict
+  // added, or even one or two retired) does not trip it, while zero -- and
+  // anything close enough to zero to be a broken read rather than a real
+  // ledger -- does. If the ledger legitimately shrinks below this floor,
+  // raise it deliberately in its own PR; do not lower it to silence a real
+  // failure.
+  const LEDGER_ENTRY_COUNT_FLOOR = 5;
+  const ledgerEntryCount = Object.keys(PLATFORM_OBJECT_TENANCY).length;
+  if (ledgerEntryCount < LEDGER_ENTRY_COUNT_FLOOR) {
+    throw new Error(
+      `PLATFORM_OBJECT_TENANCY imported with only ${ledgerEntryCount} ` +
+      `${ledgerEntryCount === 1 ? 'entry' : 'entries'} (floor: ${LEDGER_ENTRY_COUNT_FLOOR}). ` +
+      'This looks like an empty, stale, or mis-imported ledger, not a real low-entry ' +
+      'state -- refusing to compute a disagreement count against it, because a false ' +
+      'zero here would silently close a p1 tenancy question as "decided, nothing to ' +
+      'do" (see the module doc comment and the audit doc\'s `## Branch verdict`). ' +
+      'Rebuild the dependency closure (`pnpm --filter \'@objectstack/objectql^...\' ' +
+      'build && pnpm --filter @objectstack/objectql build`) and re-run. If the ledger ' +
+      `has legitimately shrunk below ${LEDGER_ENTRY_COUNT_FLOOR} entries, raise ` +
+      'LEDGER_ENTRY_COUNT_FLOOR deliberately -- do not lower it to make a real failure go away.',
+    );
+  }
+
   const allMatchRegexp = names.every((n) => isPlatformNamespaceObject(n));
 
   const disagreements = names
@@ -226,7 +271,7 @@ async function main() {
       names.length === 84 && withoutTenantField.length === 25 && withTenantField.length === 59,
     all_discovered_names_match_regexp: allMatchRegexp,
     seed_sites_still_cut_by_regexp: seedSites,
-    ledger_entry_count: Object.keys(PLATFORM_OBJECT_TENANCY).length,
+    ledger_entry_count: ledgerEntryCount,
     disagreement_count: disagreements.length,
     disagreements: disagreements.map((d) => d.name),
     trap_check: trapObjects,

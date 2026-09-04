@@ -106,8 +106,18 @@ comment in the script rather than quietly folded away.
 }
 ```
 
-**Control: PASSES.** The instrument reproduces the header exactly; its other outputs can be
-trusted.
+**Control: PASSES.** The instrument reproduces the header exactly — but say precisely what
+that proves. This control is an AST census of the **object files**; it never reads
+`PLATFORM_OBJECT_TENANCY` at all. So it validates the **population** (which objects exist)
+and the **tenant-field precedence logic** (`resolveTenantFieldName`'s real branch order,
+including the `sys_sso_provider` trap in §2 above) — real value, and it is what caught the
+precedence bug. It validates **nothing about the ledger import** in §5 below: an emptied,
+stale, or mis-imported `PLATFORM_OBJECT_TENANCY` reproduces this exact header
+(`reproduced_matches_header: true`) while `disagreement_count` silently reads 0, because
+`disagreement_count` is computed from a different input this control never touches. §5's
+disagreement count is checked by a separate hard floor
+(`LEDGER_ENTRY_COUNT_FLOOR` in the script — reproduced and demonstrated in PR review), not
+by this control passing.
 
 ---
 
@@ -224,6 +234,35 @@ counter-precedent on the same lane, not a null result.
 **Nothing on disk was touched.** No seed path was edited, no annotation was added (ruling
 item 2's annotations are conditioned on a **zero** result), no row was rewritten or
 backfilled. This document and its companion script are the entire diff.
+
+---
+
+## 7. What this census does not claim
+
+The disagreement is real and the count is 8 — three independent routes agree on it (a hand
+count against §5's table, the ledger's own pinned test
+(`tenancy-by-object-classification.test.ts:162-171`), and the script). This section states
+this census's boundaries; it does not soften that result. Specifically, this census
+measured a **ledger-vs-regexp classification disagreement** — a static comparison of two
+verdicts in code — and it did **not** measure:
+
+- **How many rows the two seed paths have actually written for these 8 objects, on any
+  deployment.** The disagreement is a code-level fact (what each write path *would do* on
+  the next seed load or backfill run); it says nothing about how many org-less rows already
+  exist for `sys_upload_session` or `sys_automation_run` on a given install, or whether a
+  seed/backfill run has touched them recently enough for the gap to matter in practice. That
+  is a separate, deployment-specific measurement this census did not take.
+- **When each ledger verdict was decided relative to the seed paths' code**, i.e. whether
+  a given object is a case of "the ledger later tightened (a writer was repaired and the
+  ledger updated to match) and the seed paths did not follow," or "the seed paths were
+  already out of step when the ledger entry was written." Those two histories imply
+  different remedies — the first is a follow-up patch to two already-known cut sites, the
+  second may indicate the seed paths were never reviewed against the ledger's per-object
+  policy at all — and neither was measured here: §5's table cites *when each writer was
+  repaired*, not *when the seed paths were last checked against that repair*.
+
+Both are legitimate next questions if this card reaches option B or C; this census's scope
+(ruling item 1, a static classification count) does not extend to either.
 
 ---
 
