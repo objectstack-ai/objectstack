@@ -19,6 +19,7 @@ import {
   printHeader,
   printSuccess,
   printWarning,
+  formatConversionNotice,
   printError,
   printInfo,
   printStep,
@@ -576,9 +577,7 @@ export default class Lint extends Command {
       if (conversionNotices.length > 0 && !flags.json) {
         console.log('');
         for (const n of conversionNotices) {
-          printWarning(
-            `${n.path}: '${n.from}' → '${n.to}' (converted at load; conversion '${n.conversionId}', retires in protocol ${n.retiresIn})`,
-          );
+          printWarning(formatConversionNotice(n));
         }
       }
       const issues = lintConfig(normalized, { sduiManifest: resolveSduiManifest() });

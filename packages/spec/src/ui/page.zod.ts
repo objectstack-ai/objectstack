@@ -49,8 +49,66 @@ export const PageRegionSchema = lazySchema(() => strictObject({
   components: z.array(z.lazy(() => PageComponentSchema)).describe('Components in this region')
 }));
 
+// Page-component TYPES retired by name → the prescription an author who still
+// writes one receives (#14159; director ruling 2026-09-01, batch #26, maintainer
+// verbatim 「同意」: option B — `user:profile` is explicitly NOT author-placeable,
+// and no renderer is built). Declared with `//` on purpose — the
+// `CHATTER_POSITION_RETIRED` placement note in component.zod.ts applies:
+// build-docs takes a file's first JSDoc per exported symbol, and this needs no
+// doc page.
+//
+// This is an enum-VALUE narrowing (the def survives, one member fewer), so there
+// is no `retiredKey()` tombstone to hang the prescription on — the enum's own
+// error map below carries it, keyed on `issue.input` so only a value that USED
+// to be legal gets the "not author-placeable" message (the `record:chatter`
+// `position` precedent, #8762). What the enum's error map cannot do on its own
+// is reach the author: `PageComponentSchema.type` is
+// `z.union([PageComponentType, z.string()])`, and the open string arm admits
+// every string the enum refuses — the gap the `element:filter` / `element:form`
+// retirements recorded as "a node-level refusal is not expressible here". It is
+// expressible one level up, and this map is what makes it so: the union carries
+// a check against it (see `PageComponentSchema.type`), so the name is refused
+// with this prescription at the element's own path (`code: 'custom'`), and
+// `ComponentPropsMap['user:profile']` (component.zod.ts) refuses the props bag
+// with the same string for every reader that dispatches on the row. One
+// prescription, three doors, no drift.
+//
+// Adding a member here is an accept-set narrowing (Clause ②) — a contract
+// decision, never a convenience: an entry needs the ruling that retired the
+// type, the measured zero-renderer finding, and the row + enum edits beside it.
+//
+// The prescription names no issue id on purpose — `check:doc-authoring` refuses
+// citation-shaped tokens in text printed AT the customer (maintainer ruling
+// 2026-08-12); the anchors for an internal reader are HERE: the ruling is
+// objectstack#14159 (option B of the objectstack#12183 ask), the zero-renderer
+// measurement is objectui#7135.
+export const RETIRED_PAGE_COMPONENT_TYPES: ReadonlyMap<string, string> = new Map([
+  ['user:profile', '`user:profile` is not a page-placeable element — it is shell chrome (the '
+    + "signed-in user's avatar menu, which the app shell renders itself on every page), no "
+    + 'renderer for it exists anywhere by ruling, and there is nothing to put in its place: '
+    + 'delete the component node and let the shell render the profile. Until this refusal an '
+    + 'authored `user:profile` node validated clean and drew the red unknown-type panel in '
+    + 'front of an end user — the ADR-0078 shape its four sibling shell singletons closed with '
+    + 'renderers; this one gets no renderer '
+    + '(zero measured pull — a future consumer files a feature card, and the refusal flips '
+    + 'additively). Removed from `PageComponentType` in @objectstack/spec 17 (ADR-0049 '
+    + 'enforce-or-remove); the name stays refused here so the failure lands in front of the '
+    + 'author, not the user.'],
+]);
+
 /**
  * Standard Page Component Types
+ *
+ * `user:profile` REMOVED (#14159, ADR-0049 enforce-or-remove — option B of the
+ * objectstack#12183 ask, ruled 2026-09-01): a user profile is shell chrome (the
+ * avatar menu), no mainstream product makes it a page-placeable component, and
+ * no renderer for it ever existed anywhere (objectui#7135 measured the zero
+ * with a positive control in the same query shape). Unlike the `element:filter`
+ * / `element:form` removals below, dropping the value is NOT de-advertisement
+ * only: the name is refused through {@link RETIRED_PAGE_COMPONENT_TYPES} — by
+ * this enum's error map, by the check on `PageComponentSchema.type` that the
+ * open string arm would otherwise defeat, and by the kept `ComponentPropsMap`
+ * row.
  */
 export const PageComponentType = z.enum([
   // Structure
@@ -64,8 +122,9 @@ export const PageComponentType = z.enum([
   'record:details', 'record:highlights', 'record:related_list', 'record:activity', 'record:chatter', 'record:discussion', 'record:path', 'record:alert', 'record:quick_actions', 'record:reference_rail', 'record:history',
   // Navigation
   'app:launcher', 'nav:menu', 'nav:breadcrumb',
-  // Utility
-  'global:search', 'global:notifications', 'user:profile',
+  // Utility — `user:profile` REMOVED (#14159): shell chrome, refused by name
+  // through `RETIRED_PAGE_COMPONENT_TYPES` above, not merely de-advertised.
+  'global:search', 'global:notifications',
   // AI
   'ai:chat_window', 'ai:suggestion',
   // Content Elements (Airtable Interface parity)
@@ -80,7 +139,14 @@ export const PageComponentType = z.enum([
   // — retired at element grain, same mechanism; the tombstones' prescription
   // names the live replacement, the object-bound `object-form` block (#7751).
   'element:button', 'element:record_picker', 'element:text_input'
-]);
+], {
+  // Only a value that USED to be legal gets a retirement prescription; every
+  // other string keeps zod's own enum message (the `record:chatter` `position`
+  // precedent, #8762). Reaches an author only where the enum is parsed alone —
+  // `PageComponentSchema.type` carries the door the open string arm needs.
+  error: (issue) =>
+    typeof issue.input === 'string' ? RETIRED_PAGE_COMPONENT_TYPES.get(issue.input) : undefined,
+});
 
 /**
  * Element Data Source Schema
@@ -156,11 +222,29 @@ export const PageComponentSchema = lazySchema(() => strictObject({
    * `component-type-vocabulary.ts`. The parse stays open so stored documents
    * keep loading; the refusal lands at the authoring doors, where the author
    * is still present to fix the string.
+   *
+   * ONE exception to the open arm, by NAME (#14159): a type the vocabulary
+   * RETIRED — `RETIRED_PAGE_COMPONENT_TYPES` — is refused at the parse itself,
+   * here, with its prescription at this node's path. The enum's own error map
+   * cannot deliver it through this door (the string arm admits whatever the
+   * enum refuses), which is the gap the `element:filter` / `element:form`
+   * retirements recorded as "a node-level refusal is not expressible here".
    */
   type: z.union([
     PageComponentType,
     z.string()
-  ]).describe('Component Type — a standard vocabulary member, or a custom/registered component type in its own namespace (e.g. `object-grid`, `mcp:connect-agent`). The spec\'s own type namespaces are a closed vocabulary at author time: inside them, a type the vocabulary does not declare is refused by `os validate` / `os build` / `os lint` (rule `component-type-unknown`).'),
+  ]).superRefine((type, ctx) => {
+    // #14159 — a type RETIRED BY NAME is refused at the node with the located
+    // prescription. Nothing else about the arm changes: every string the map
+    // does not name keeps parsing, stored documents keep loading, and the
+    // `component-type-unknown` rule keeps its namespace claim. `code: 'custom'`
+    // with the type in `params`, so a consumer can tell a retirement apart
+    // from a shape error without parsing the message.
+    const guidance = RETIRED_PAGE_COMPONENT_TYPES.get(type);
+    if (guidance) {
+      ctx.addIssue({ code: 'custom', message: guidance, params: { retiredComponentType: type } });
+    }
+  }).describe('Component Type — a standard vocabulary member, or a custom/registered component type in its own namespace (e.g. `object-grid`, `mcp:connect-agent`). The spec\'s own type namespaces are a closed vocabulary at author time: inside them, a type the vocabulary does not declare is refused by `os validate` / `os build` / `os lint` (rule `component-type-unknown`); a type the vocabulary RETIRED by name (`user:profile` — shell chrome, not author-placeable) is refused at the parse itself, with the retirement prescription.'),
   id: z.string().optional().describe('Unique instance ID'),
   
   /** Configuration */

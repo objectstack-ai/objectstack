@@ -30,6 +30,7 @@ import { ensureMetadataOverlayIndexes } from './migrations/overlay-index.js';
 import { driverCanRunSql, resolveDriverExec } from './migrations/driver-exec.js';
 import { SysMetadataRepository, type SysMetadataEngine } from './sys-metadata-repository.js';
 import {
+    bumpWriteEpoch,
     metaOverlayCacheTtlMs,
     readMetaOverlayCache,
     readWriteEpoch,
@@ -5217,6 +5218,19 @@ export class ObjectStackProtocolImplementation implements
      * first, listeners second — the #5109 invalidate-before-notify rule: a
      * listener that re-reads must not observe the event and the pre-event
      * registry at the same time.
+     *
+     * [#13609] The convergence above heals THIS replica's registry, but on its
+     * own leaves this replica's `meta-overlay-cache` row set stamped at the
+     * PRE-mutation write epoch — nothing above performs a local engine write,
+     * so nothing retires it. A read of `getMetaItems` landing before that
+     * cache's TTL lapses then re-hydrates the very row this method just healed
+     * the registry of (measured: `protocol.datasource-delete-prolongation.test.ts`).
+     * `bumpWriteEpoch` closes that gap the same way
+     * `authz-invalidation-bridge.ts` already closes it for the authorization
+     * cache on the identical substrate (#11968) — called here, AFTER
+     * convergence and BEFORE {@link notifyMutationListenersLocal}, so a
+     * listener that re-reads through `getMetaItems` sees a cold cache too, not
+     * only a healed registry.
      */
     private async applyRemoteMetadataMutation(evt: MetadataMutationEvent): Promise<void> {
         const type = canonicalMetaType(evt.type);
@@ -5243,6 +5257,10 @@ export class ObjectStackProtocolImplementation implements
         } else {
             await this.restoreArtifactRegistryView(type, evt.name, orgId);
         }
+        // [#13609] Retire this replica's overlay-row cache at the moment of
+        // convergence — never a direct `@objectstack/objectql` import, see
+        // `bumpWriteEpoch`'s header in `meta-overlay-cache.ts`.
+        bumpWriteEpoch(this.engine, 'remote');
         this.notifyMutationListenersLocal({ ...evt, type });
     }
 
@@ -19485,6 +19503,22 @@ export class ObjectStackProtocolImplementation implements
                     // heal above still runs unconditionally — it is a
                     // self-heal, not a mutation.
                     if (current) {
+                        // [ADR-0094] Awaited projection BEFORE the
+                        // fire-and-forget emit below — same order
+                        // `saveMetaItem`'s comment establishes, and the same
+                        // `state: 'deleted'` shape {@link deleteMetaItem}'s
+                        // repository branch already sends: the row is gone,
+                        // and the projector re-reads the layered state to
+                        // decide whether the derived record retires or falls
+                        // back to the artifact baseline. No `body` — a
+                        // soft-remove has none to hand over, exactly as the
+                        // sibling delete call passes none.
+                        await this.runMutationProjector({
+                            type: PLURAL_TO_SINGULAR[it.type] ?? it.type,
+                            name: it.name,
+                            state: 'deleted',
+                            organizationId: itemOrgId,
+                        });
                         this.emitMetadataMutation({
                             type: PLURAL_TO_SINGULAR[it.type] ?? it.type,
                             name: it.name,
@@ -19577,6 +19611,19 @@ export class ObjectStackProtocolImplementation implements
                         // said "the row's OWN scope" while passing the REQUEST's
                         // org; the resolution above is what makes the comment true.
                         organizationId: itemOrgId,
+                    });
+                    // [ADR-0094] Awaited projection BEFORE the
+                    // fire-and-forget emit below — the order `saveMetaItem`'s
+                    // comment establishes. This limb restores an existing
+                    // artifact's pre-commit body, so the derived read-model
+                    // gets exactly that body, the same one the write-through
+                    // just registered under the same singular key and scope.
+                    await this.runMutationProjector({
+                        type: PLURAL_TO_SINGULAR[it.type] ?? it.type,
+                        name: it.name,
+                        state: 'active',
+                        organizationId: itemOrgId,
+                        body: restored.item.body,
                     });
                     // [#14179] The restore limb's half of the same repair: a
                     // revert is a live write, so it funnels through the ONE
@@ -19955,6 +20002,22 @@ export class ObjectStackProtocolImplementation implements
                 ...(request.actor ? { actor: request.actor } : {}),
                 source: 'protocol.rollbackMetaItem',
                 note: `restored from version ${request.toVersion}`,
+            });
+            // [ADR-0094] Awaited projection BEFORE the fire-and-forget
+            // listener below — the order `saveMetaItem`'s comment
+            // establishes. A rollback restores the row and the in-memory
+            // registry to the target version; a derived read-model (e.g.
+            // `permission` -> `sys_permission_set`) must be just as current
+            // when this call returns, not only after the next unrelated
+            // write or boot reconciliation (ADR-0094 D3) eventually heals it.
+            // `body` is the restored version's own — the same value the
+            // write-through above registered.
+            await this.runMutationProjector({
+                type: singularType,
+                name: request.name,
+                state: 'active',
+                organizationId: orgId,
+                body: result.item.body,
             });
             // [#14179] A rollback is a live write like any other (#4521, the
             // line the write-through above is made under) — so it announces
@@ -20666,6 +20729,20 @@ export class ObjectStackProtocolImplementation implements
                 );
             }
 
+            // [ADR-0094] Awaited projection — the SAME call {@link
+            // deleteMetaItem}'s repository branch already makes above
+            // (`state: 'deleted'`), now made from the legacy exit too: a
+            // delete may retire the derived record or reset it to the
+            // artifact baseline, and the projector re-reads the layered
+            // state to decide either way. Awaited BEFORE the emit below, the
+            // order `saveMetaItem`'s comment establishes.
+            const legacyDeleteProjection = await this.runMutationProjector({
+                type: singularTypeForRepo,
+                name: request.name,
+                state: 'deleted',
+                organizationId: request.organizationId ?? null,
+            });
+
             // [#14179] A real deletion announces itself on the ONE choke
             // point, {@link emitMetadataMutation} — the repository path's
             // row-deleted exit does, and this one performs the same removal
@@ -20690,6 +20767,7 @@ export class ObjectStackProtocolImplementation implements
                 // and emits no watch event (see the block comment opening this
                 // path), so there is no cursor to report. That asymmetry is
                 // pre-existing and deliberate — the split does not touch it.
+                ...(legacyDeleteProjection ? { projectionApplied: legacyDeleteProjection } : {}),
                 message: artifactBacked
                     ? `Customization overlay deleted — ${request.type}/${request.name} reset to artifact default.`
                     : `Deleted ${singularTypeForRepo} '${request.name}' — it no longer exists.`,

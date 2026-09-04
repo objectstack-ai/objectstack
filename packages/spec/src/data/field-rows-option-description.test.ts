@@ -21,8 +21,10 @@
  *   `recordToOption` produces the same key for fetched options — while
  *   `SelectOptionSchema` refused it. The object-definition authoring form has
  *   offered a `description` input all along; the declaration makes the offer
- *   honest. Per the same inherited ruling, `dependsOn` is deliberately NOT
- *   declared (the canonical `depends_on` already exists at the field level).
+ *   honest. Per the same inherited ruling the option shape declares
+ *   `description` and no cascade key of its own; the cascade key lives on
+ *   `FieldSchema` as the camelCase `dependsOn`, which objectui mirrors
+ *   (maintainer ruling 2026-09-02 on objectui#6153).
  *
  * The ruling's capability expansion STOPS at these keys: the four inert
  * rich-text editor keys (`toolbar`/`preview`/`minHeight`/`maxHeight`) stay
@@ -200,10 +202,12 @@ describe('SelectOptionSchema accepts `description` (objectui#6153, inherited rul
     // this shape by #5016's option C, and #13671 re-measured that reading for
     // the FIELD-option surface and kept it (section 3). It stays an
     // unrecognized_keys refusal until someone rules otherwise — what #13671
-    // changed is the OFFER, not this door. `dependsOn`: the inherited #6153
-    // ruling resolves it objectui-side (the widget reads the canonical
-    // field-level `depends_on`); declaring a camelCase twin here is
-    // explicitly not licensed.
+    // changed is the OFFER, not this door. `dependsOn`: this option shape
+    // carries no cascade key of its own, per the inherited #6140 / #6153
+    // ruling. The cascade key is `FieldSchema`'s camelCase `dependsOn`,
+    // which refuses the snake_case `depends_on` with a rename hint, and
+    // objectui mirrors that spelling (maintainer ruling 2026-09-02 on
+    // objectui#6153).
     for (const [key, value] of [['icon', 'circle-dot'], ['dependsOn', 'country']] as const) {
       const result = SelectOptionSchema.safeParse({ label: 'Open', value: 'open', [key]: value });
       expect(result.success, `\`${key}\` unexpectedly parsed — an unruled accepted-set expansion`).toBe(false);

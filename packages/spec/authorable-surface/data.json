@@ -413,6 +413,7 @@
     "data/FieldMaskingKeep:keepHead",
     "data/FieldMaskingKeep:keepTail",
     "data/FieldReference:$field",
+    "data/FieldReference:addDays",
     "data/FilePersistenceConfig:autoSaveInterval",
     "data/FilePersistenceConfig:path",
     "data/FilePersistenceConfig:type",

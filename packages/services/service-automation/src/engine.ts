@@ -20,6 +20,11 @@ import {
 } from './screen-input-contract.js';
 import type { Logger } from '@objectstack/spec/contracts';
 import { FlowSchema, FLOW_STRUCTURAL_NODE_TYPES, validateControlFlow, collectFlowGraphs, findRegionEntry, defineActionDescriptor } from '@objectstack/spec/automation';
+// [#14328] The ONE answer to "which trigger kind does this flow ask for?" —
+// shared with `defineStack`'s trigger-capability refusal and `@objectstack/lint`'s
+// `validate-flow-trigger-readiness`, so the runtime cannot drift from what
+// authoring accepted. See `resolveTriggerBinding`.
+import { resolveFlowTriggerKind } from '@objectstack/spec/automation';
 import { resolveFlowNodeExpressions } from '@objectstack/spec/automation';
 import { applyConversionsToFlow, type ConversionNotice, type ConversionConflictNotice } from '@objectstack/spec';
 // [ADR-0126 §7.3] "Does a code package ship this flow?" for the subflow guard.
@@ -1030,6 +1035,31 @@ const ENGINE_BUILT_SIGNAL = Symbol('objectstack.automation.resume.engineBuilt');
 /** Tag a signal the engine constructed for its own continuation. */
 function engineBuilt(signal: ResumeSignal): ResumeSignal {
     return Object.assign(signal, { [ENGINE_BUILT_SIGNAL]: true });
+}
+
+/**
+ * Whether an incoming resume signal ALREADY carries a completed subflow
+ * child's output — the engine-built up-bubble, i.e. the signal
+ * `bubbleToParent` builds with `buildSubflowResumeSignal` when a delegated
+ * child finishes and continues its parent.
+ *
+ * The discriminator for the up-bubble's log branch, and deliberately NOT "is
+ * the child run still there". On the up-bubble the child has COMPLETED, so its
+ * suspension is already consumed and the `loadSuspendedRun` miss on the
+ * parent's `subflow:` correlation says nothing about whether the parent
+ * continues with the child's output — it only says the child is not SUSPENDED.
+ * Branching on a second run lookup would move that same confusion one call
+ * over; this asks the fact the message is actually about.
+ *
+ * The engine-built marker is load-bearing, not decoration: `output` is a
+ * caller-writable field, and on this node the caller's signal is delegated
+ * DOWN to the child, so shape alone would let a caller's own bag silence the
+ * genuine degraded warning. Only the engine can mint the symbol.
+ */
+function carriesSubflowChildOutput(signal: ResumeSignal): boolean {
+    if ((signal as Record<symbol, unknown>)[ENGINE_BUILT_SIGNAL] !== true) return false;
+    const output = signal.output;
+    return typeof output === 'object' && output !== null && 'output' in output;
 }
 
 /**
@@ -2448,6 +2478,17 @@ export class AutomationEngine implements IAutomationService {
      * established by the showcase flows — is that the start node carries the
      * trigger details in its `config`: `{ objectName, triggerType, condition }`
      * for record-change, or a `schedule` descriptor for time-based flows.
+     *
+     * [#14328] WHICH KIND a flow asks for is not decided here: it is
+     * {@link resolveFlowTriggerKind}'s answer, the one `@objectstack/spec`
+     * export that `defineStack`'s trigger-capability refusal and
+     * `@objectstack/lint`'s `validate-flow-trigger-readiness` already read.
+     * This method keeps only the per-kind BINDING construction — which start-node
+     * fields each trigger needs. Before #14328 the chain was hand-kept here in
+     * parallel with the spec one, and nothing pinned them together: a branch
+     * added on one side left `defineStack` accepting a stack the runtime leaves
+     * inert, or refusing one it would arm. Now `getTriggerBindingAudit` and the
+     * boot banner name the kind authoring named, by construction.
      */
     private resolveTriggerBinding(
         flowName: string,
@@ -2456,20 +2497,7 @@ export class AutomationEngine implements IAutomationService {
         if (!flow) return undefined;
         const startNode = flow.nodes.find(n => n.type === 'start');
         const config = (startNode?.config ?? {}) as Record<string, unknown>;
-        const triggerType = typeof config.triggerType === 'string' ? config.triggerType : undefined;
-
-        if (triggerType && triggerType.startsWith('record-')) {
-            return {
-                triggerType: 'record_change',
-                binding: {
-                    flowName,
-                    object: typeof config.objectName === 'string' ? config.objectName : undefined,
-                    event: triggerType,
-                    condition: (config.condition as FlowTriggerBinding['condition']) ?? undefined,
-                    config,
-                },
-            };
-        }
+        const condition = (config.condition as FlowTriggerBinding['condition']) ?? undefined;
 
         // Array-form triggerType (e.g. ['record-after-create', 'record-after-delete']).
         // Multi-event unions are deliberately unsupported (#3457). But a non-string
@@ -2483,6 +2511,18 @@ export class AutomationEngine implements IAutomationService {
         // raw array is preserved in `config` so the trigger can tailor its message;
         // `event` is a joined string so the trigger's single-token mapper reports it
         // verbatim and maps it to no hook.
+        //
+        // [#14328] This stays an explicit pre-check BEFORE `resolveFlowTriggerKind`,
+        // and that is the ONE deliberate divergence between the two — documented in
+        // that resolver's own header. It resolves array form to NO kind on purpose:
+        // reading it as "asks for a record-change trigger" would have `defineStack`
+        // demand a capability for a flow that can never use it and would widen the
+        // lint rule's auto-triggered set. The route below is a DIAGNOSTIC route, not
+        // a trigger the flow could fire on; folding it into the shared resolver would
+        // delete a standing decision and turn a loud refusal into silence. Pre-check
+        // ordering also preserves this method's own precedence exactly: array form
+        // outranks `timeRelative`/`schedule`, which the resolver — blind to it —
+        // would otherwise answer for a start node carrying both.
         if (
             Array.isArray(config.triggerType) &&
             config.triggerType.some((t) => typeof t === 'string' && (t as string).startsWith('record-'))
@@ -2493,56 +2533,86 @@ export class AutomationEngine implements IAutomationService {
                     flowName,
                     object: typeof config.objectName === 'string' ? config.objectName : undefined,
                     event: config.triggerType.filter((t) => typeof t === 'string').join(','),
-                    condition: (config.condition as FlowTriggerBinding['condition']) ?? undefined,
+                    condition,
                     config,
                 },
             };
         }
 
-        // Declarative time-relative sweep (#1874): a start node carrying a
-        // `timeRelative` descriptor is swept on a schedule and launched once per
-        // record whose date field falls in the window. Checked BEFORE `schedule`
-        // because such a flow ALSO carries a `schedule` cadence (the sweep
-        // interval) — without this precedence it would bind to the plain schedule
-        // trigger and fire once with no record instead of once per record.
-        if (config.timeRelative != null && typeof config.timeRelative === 'object') {
-            const tr = config.timeRelative as Record<string, unknown>;
-            return {
-                triggerType: 'time_relative',
-                binding: {
-                    flowName,
-                    object:
-                        typeof tr.object === 'string'
-                            ? tr.object
-                            : typeof config.objectName === 'string'
-                              ? config.objectName
-                              : undefined,
-                    schedule: config.schedule,
-                    condition: (config.condition as FlowTriggerBinding['condition']) ?? undefined,
-                    config,
-                },
-            };
-        }
+        const kind = resolveFlowTriggerKind(flow);
+        if (!kind) return undefined;
 
-        if (config.schedule != null || flow.type === 'schedule') {
-            return {
-                triggerType: 'schedule',
-                binding: { flowName, schedule: config.schedule, condition: (config.condition as FlowTriggerBinding['condition']) ?? undefined, config },
-            };
-        }
+        switch (kind) {
+            case 'record_change':
+                return {
+                    triggerType: kind,
+                    binding: {
+                        flowName,
+                        object: typeof config.objectName === 'string' ? config.objectName : undefined,
+                        // A `record-*` kind means `config.triggerType` IS that string
+                        // token — the resolver read it to answer; the narrowing is
+                        // re-stated because the answer does not carry it back.
+                        event: typeof config.triggerType === 'string' ? config.triggerType : undefined,
+                        condition,
+                        config,
+                    },
+                };
 
-        // Inbound HTTP (ADR-0041 Tier 1): an `api` flow waits for an external
-        // POST. The concrete trigger (`@objectstack/trigger-api`) mounts the
-        // endpoint and enqueues; the binding's `config` carries the hook
-        // details (`hookId`, `secret`) from the start node.
-        if (flow.type === 'api' || triggerType === 'api') {
-            return {
-                triggerType: 'api',
-                binding: { flowName, condition: (config.condition as FlowTriggerBinding['condition']) ?? undefined, config },
-            };
-        }
+            // Declarative time-relative sweep (#1874): a start node carrying a
+            // `timeRelative` descriptor is swept on a schedule and launched once per
+            // record whose date field falls in the window. The resolver ranks it
+            // BEFORE `schedule` for the same reason this method did — such a flow
+            // ALSO carries a `schedule` cadence (the sweep interval), and without
+            // that precedence it would bind to the plain schedule trigger and fire
+            // once with no record instead of once per record.
+            case 'time_relative': {
+                const tr = (config.timeRelative ?? {}) as Record<string, unknown>;
+                return {
+                    triggerType: kind,
+                    binding: {
+                        flowName,
+                        object:
+                            typeof tr.object === 'string'
+                                ? tr.object
+                                : typeof config.objectName === 'string'
+                                  ? config.objectName
+                                  : undefined,
+                        schedule: config.schedule,
+                        condition,
+                        config,
+                    },
+                };
+            }
 
-        return undefined;
+            case 'schedule':
+                return {
+                    triggerType: kind,
+                    binding: { flowName, schedule: config.schedule, condition, config },
+                };
+
+            // Inbound HTTP (ADR-0041 Tier 1): an `api` flow waits for an external
+            // POST. The concrete trigger (`@objectstack/trigger-api`) mounts the
+            // endpoint and enqueues; the binding's `config` carries the hook
+            // details (`hookId`, `secret`) from the start node.
+            case 'api':
+                return {
+                    triggerType: kind,
+                    binding: { flowName, condition, config },
+                };
+
+            default: {
+                // [#14328] Exhaustive over `FlowTriggerKind`, and that is the point:
+                // a kind added to the spec resolver makes `kind` no longer `never`
+                // here, so THIS package's type-check fails until the binding shape
+                // for it is written — the drift is caught at the commit that opens
+                // it instead of showing up as a flow that arms nowhere. At run time
+                // (a spec build ahead of this one) fall back to today's behaviour —
+                // no binding — rather than throwing inside the boot audit.
+                const unhandledKind: never = kind;
+                void unhandledKind;
+                return undefined;
+            }
+        }
     }
 
     /**
@@ -5110,7 +5180,36 @@ export class AutomationEngine implements IAutomationService {
                     // #4354 — down-delegation is the other way a child's work
                     // lands under a parent step written at suspend time.
                     this.creditChildRun(run.steps, run.nodeId, childRes.summary);
+                } else if (carriesSubflowChildOutput(signal)) {
+                    // The engine-built UP-BUBBLE — the HEALTHY path, and the
+                    // one this `else` used to describe as a degradation. The
+                    // child COMPLETED and `bubbleToParent` resumed this run
+                    // with the child's mapped output, so the miss above is the
+                    // SUSPENSION lookup missing (a completed run has no
+                    // suspension), not the child having disappeared, and the
+                    // parent continues *with* the child's output — which is
+                    // what the old sentence denied outright.
+                    //
+                    // `debug`, for the same reason as the lost-advance-claim
+                    // record further down: an ordinary outcome logged at `warn`
+                    // on every healthy subflow completion is the cry-wolf
+                    // shape — the operator who reads "child run is gone" on
+                    // each one stops reading the line, and the one time it
+                    // means what it says is the time it is ignored. Nothing
+                    // else moves: this branch continues the parent exactly as
+                    // before, and the degraded branch below keeps its text and
+                    // its level.
+                    this.logger.debug(
+                        `[automation] run '${runId}' continues from subflow node '${run.nodeId}' with the output of ` +
+                            `completed child run '${childRunId}' — carried on the engine-built up-bubble signal ` +
+                            `(the child's suspension is consumed, which is why it is not loadable here).`,
+                    );
                 } else {
+                    // The genuinely degraded case, and the only one the
+                    // sentence below was ever true of: nothing suspended under
+                    // the child id AND no carried output, so this run really
+                    // does continue without the child's output. #4632 verdict:
+                    // FUNCTIONAL — stays `warn`.
                     this.logger.warn(
                         `[automation] run '${runId}' is paused at subflow node '${run.nodeId}' but child run '${childRunId}' ` +
                             `is gone — continuing without child output`,

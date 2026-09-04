@@ -60,6 +60,15 @@ const result = EqualityOperatorSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **$field** | `string` | ✅ | Field Reference/Column Name |
+| **addDays** | `integer \| { $field: string }` | optional | Whole-day offset added to the referenced column before comparing: an integer literal of any sign (negative subtracts; whole days only), or a `{ $field }` reference to a numeric column. A NULL offset column contributes zero days; a NULL referenced column makes the comparison false rather than NULL, so it stays false under $not. Compiles on SQL push-down between two temporal columns of the same class (date/date, datetime/datetime) and evaluates identically in memory. |
+
+### Nested Shape: `FieldReference.addDays`
+
+A `{ $field }` reference to the numeric column holding the day offset
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **$field** | `string` | ✅ | Numeric column whose value is the number of days to add |
 
 
 ---
@@ -135,8 +144,8 @@ Type: `[FilterArray](#filterarray)[]`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **$null** | `boolean` | optional |  |
-| **$exists** | `boolean` | optional |  |
+| **$null** | `boolean` | optional | Is-null check. `true` matches rows where the field is null, `false` matches rows where it is not null. Lowered to `IS NULL` (true) / `IS NOT NULL` (false) on the SQL family and to `{ field: null }` (true) / `{ $ne: null }` (false) on MongoDB. |
+| **$exists** | `boolean` | optional | Has-a-value check — the exact inverse of `$null`. `true` matches rows where the field holds a value (`!= null`), `false` matches rows where it holds none. Portable across every backend the platform ships: lowered to `IS NOT NULL` (true) / `IS NULL` (false) on the SQL family and to `{ $ne: null }` (true) / `{ $eq: null }` (false) on MongoDB. |
 
 
 ---

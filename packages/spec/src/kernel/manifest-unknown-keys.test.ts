@@ -39,6 +39,7 @@ import { describe, it, expect } from 'vitest';
 
 import { ManifestSchema, PluginEnginesSchema } from './manifest.zod';
 import { ArtifactPackageSchema, ObjectStackDefinitionSchema } from '../stack.zod';
+import { formatZodError } from '../shared/error-map.zod';
 
 /** A legal manifest, the shape every scaffold and example stamps. */
 const legal = () => ({
@@ -159,6 +160,61 @@ describe('#14192 — the refusal reaches every door the measurement listed', () 
     const nested = union!.errors.flat().find((i) => i.code === 'unrecognized_keys');
     expect(nested, 'the named refusal is carried inside the union issue').toBeDefined();
     expect(nested!.keys).toEqual(['namesapce']);
+  });
+
+  it('through `devPlugins[]` — the nested shape is NOT keyless: the author reads the key, the surface and the rename', () => {
+    // #14722 proposed reshaping the union above, on the premise that
+    // `formatZodError` flattens the nested refusal away and leaves the author a
+    // bare `Invalid input` at this one door. Measured on `origin/main`
+    // `3386493f`: it does not. `formatZodIssue` descends `invalid_union` and
+    // ranks the branches through `selectUnionBranches`
+    // (`shared/union-branch-policy.ts`, #8318) — which drops the string arm as
+    // kind-mismatch-only and renders the manifest branch verbatim. So the raw
+    // shape pinned directly above is real, and it is NOT what the author sees.
+    //
+    // This is the standing guard on that difference. The pin above may only
+    // ever be called a defect again by a measurement that gets past THIS
+    // assertion first — the reshape it invited costs either the accept set
+    // (`z.discriminatedUnion` routes on a literal FIELD value, which a bare
+    // string entry cannot carry) or the published JSON Schema for the key (a
+    // hand-rolled `typeof` router on a `z.custom` base emits `items: {}` in
+    // place of the whole `anyOf`), and buys a message the author already has.
+    const result = ObjectStackDefinitionSchema.safeParse({ manifest: legal(), devPlugins: [typo()] });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    const rendered = formatZodError(result.error);
+    expect(rendered).toContain('devPlugins.0');
+    expect(rendered, 'the offending key is named').toContain('namesapce');
+    expect(rendered, 'the surface is named').toContain('this package manifest');
+    expect(rendered, 'the rename is offered').toContain('Did you mean `namesapce` \u2192 `namespace`?');
+  });
+
+  it('through `devPlugins[]` — that selection is structural, not an accident of this one fixture', () => {
+    // The string arm's ONLY complaint about an object is `invalid_type` at the
+    // branch root, so `isKindMismatchOnly` drops it for every object input —
+    // the guarantee does not depend on the manifest branch happening to carry
+    // exactly one issue. Two shapes that give it more than one:
+    const alsoMissingRequired = () => {
+      const { namespace: _ns, version: _v, ...rest } = legal();
+      return { ...rest, namesapce: 'probe' };
+    };
+    const alsoWrongType = () => {
+      const { namespace: _ns, ...rest } = legal();
+      return { ...rest, namesapce: 'probe', version: 42 };
+    };
+    for (const entry of [alsoMissingRequired(), alsoWrongType()]) {
+      const result = ObjectStackDefinitionSchema.safeParse({ manifest: legal(), devPlugins: [entry] });
+      expect(result.success).toBe(false);
+      if (result.success) continue;
+      const rendered = formatZodError(result.error);
+      expect(rendered).toContain('namesapce');
+      expect(rendered).toContain('Did you mean `namesapce` \u2192 `namespace`?');
+    }
+  });
+
+  it('through `devPlugins[]` — the accept side is unmoved: a string entry and a legal manifest both parse', () => {
+    expect(ObjectStackDefinitionSchema.safeParse({ manifest: legal(), devPlugins: ['some-dev-plugin'] }).success).toBe(true);
+    expect(ObjectStackDefinitionSchema.safeParse({ manifest: legal(), devPlugins: [legal()] }).success).toBe(true);
   });
 });
 

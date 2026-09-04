@@ -45,8 +45,10 @@
  *     labelled CONVERGED or ACCEPTED DIVERGENCE — a declared 5xx keeps the
  *     passthrough's prose-withholding arm (#5437 / #5582 / #5907), a 5xx ARM
  *     never displaces a declared 4xx, a sandboxed producer keeps the unwrap
- *     door's sentence on the bulk door (#11588 / #7543; the mirror on the
- *     single door is filed as #14704), and the one status this card DOES move
+ *     door's sentence on BOTH doors (#11588 / #7543; the single door's mirror
+ *     defect was closed by #14704, which FLIPPED that case's verdict here from
+ *     ACCEPTED DIVERGENCE to CONVERGED rather than deleting it), and the one
+ *     status this card DOES move
  *     — a sandboxed 5xx carrying `OBJECT_NOT_FOUND` / `INVALID_FIELD` — is
  *     pinned rather than described;
  *  §5 the drift guard, over BOTH halves of `classifyDataError`: every
@@ -474,7 +476,25 @@ describe('#14541 · structured arms are consulted by BOTH doors', () => {
             expect(bulk.body).toHaveProperty('datasource', 'warehouse');
         });
 
-        it('ACCEPTED DIVERGENCE (#14704): a sandboxed producer — bulk door unwraps, single door does not', () => {
+        /**
+         * FLIPPED by #14704, deliberately and in that card's PR, from
+         * `ACCEPTED DIVERGENCE` to `CONVERGED (sentence)`. ⛔ The case is not
+         * DELETED: it is the only thing that would notice the divergence coming
+         * back, and what changes is its verdict, not its existence.
+         *
+         * The divergence it recorded was the SENTENCE: the bulk door read
+         * `sandboxBusinessMessage` (#11588) while the single door reached the
+         * arm and shipped `error.message` — the QuickJS debug wrapper. #14704
+         * gave the code-gated arms the same two-read rule (`armSentence`), so
+         * both doors now answer the business sentence for one hook refusal.
+         *
+         * ⚠️ What remains different is the KEY SET, and it is not this card's:
+         * #14541's `isSandboxOrigin` guard declines the shared consult on the
+         * bulk door outright, so the arm's structured fields never ride there.
+         * That is stated below rather than left implied — a case labelled
+         * CONVERGED whose bodies are unequal has to say where and why.
+         */
+        it('CONVERGED (sentence, #14704): a sandboxed producer — both doors ship the business sentence', () => {
             const err: any = new Error("hook 'guard' threw: Error: Opportunity is closed.");
             err.innerMessage = 'Opportunity is closed.';
             err.code = 'DELETE_RESTRICTED';
@@ -489,12 +509,15 @@ describe('#14541 · structured arms are consulted by BOTH doors', () => {
             // the business sentence; ⛔ never the QuickJS debug wrapper.
             expect(bulk.body.error).toBe('Opportunity is closed.');
             expect(String(bulk.body.error)).not.toContain('threw:');
-            // The single door reaches the arm, which ships `error.message` —
-            // the wrapper. That is the mirror defect, filed as #14704 and
-            // deliberately NOT closed here: closing it means deciding what an
-            // arm answers for a sandboxed CRASH. Pinned so it cannot drift
-            // unnoticed in either direction.
-            expect(single.body.error).toBe("hook 'guard' threw: Error: Opportunity is closed.");
+            // [#14704] The single door now reads the same rule through the
+            // arm. This assertion IS the flip — it read
+            // `"hook 'guard' threw: Error: Opportunity is closed."` before.
+            expect(single.body.error).toBe('Opportunity is closed.');
+            expect(String(single.body.error)).not.toContain('threw:');
+            // The residue, named: #14541's sandbox guard keeps the arm's
+            // structured fields off the bulk door. Owned there, not here.
+            expect(single.body).toHaveProperty('dependentObject', 'contact');
+            expect(bulk.body).not.toHaveProperty('dependentObject');
         });
 
         it('ACCEPTED DIVERGENCE (guard 1): a producer-declared 5xx keeps the passthrough on the bulk door', () => {

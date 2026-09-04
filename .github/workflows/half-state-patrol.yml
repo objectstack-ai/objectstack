@@ -87,10 +87,23 @@ name: Half-State Patrol
 #
 # To adopt, in the sibling repo:
 #
-#   1. copy `scripts/pm/check-half-states.mjs` and this file, unchanged;
+#   1. copy THREE files, unchanged: `scripts/pm/check-half-states.mjs`,
+#      `scripts/invoked-as.mjs` (the sweeper imports it — see below), and this
+#      file;
 #   2. open one `tracking`-labeled anchor issue there and set the repository
 #      VARIABLE `HALF_STATE_ANCHOR_ISSUE` to its number
 #      (Settings → Secrets and variables → Actions → Variables).
+#
+# ⚠️ Step 1 said TWO files until 2026-09-03, and the sweeper has imported
+# `../invoked-as.mjs` since well before that — so the documented install was a
+# patrol that could not start. Measured on a clean two-file copy of this repo's
+# own files: `ERR_MODULE_NOT_FOUND … /scripts/invoked-as.mjs`, exit 1, before a
+# single predicate runs; the same copy with the helper added passes the
+# sweeper's 2,062-case `--self-test`. It fails LOUDLY rather than silently (the
+# job's last step turns the run red and the anchor is rewritten with "THE SWEEP
+# DID NOT RUN"), which is the one mercy in it — but a repo adopting this file by
+# following the list above installed a dead patrol. ⛔ Do not shorten this list
+# again from memory: the import is what decides it, not this comment.
 #
 # That is the whole install. The swept repo needs no configuration at all: it is
 # `github.repository`, so the copy reads the board it lives in — a hardcoded
@@ -129,6 +142,13 @@ on:
   pull_request:
     paths:
       - 'scripts/pm/check-half-states.mjs'
+      # The sweeper imports this helper, so a change to it can break the patrol
+      # without touching either file beside it — and the PR-time proof this
+      # trigger exists to give would not run. Same reasoning as the adopt list
+      # above, one layer down: an undeclared dependency is undeclared in every
+      # place that has to name it. (The adopted objectui copy carries this row
+      # already; upstream is catching up to its own port.)
+      - 'scripts/invoked-as.mjs'
       - '.github/workflows/half-state-patrol.yml'
 
 # Least privilege: this job reads the repo and writes exactly one issue BODY.
@@ -190,9 +210,14 @@ jobs:
         with:
           node-version: '22'
 
-      # No `pnpm install`: the sweeper imports nothing but `node:process` and
-      # global `fetch`. Installing the workspace here would buy nothing and would
-      # give a scheduled patrol a lockfile it could fail on.
+      # No `pnpm install`: the sweeper imports only `node:` builtins
+      # (`process`, `child_process`, `fs`, `url`), global `fetch`, and the one
+      # repo-local helper `../invoked-as.mjs` — no npm dependency, so installing
+      # the workspace here would buy nothing and would give a scheduled patrol a
+      # lockfile it could fail on. ⚠️ That repo-local import is why the adopt
+      # list above copies THREE files; this sentence read "imports nothing but
+      # `node:process` and global `fetch`" until 2026-09-03, which is the claim
+      # an adopter would have checked the copy list against.
       - name: Run the live sweep
         id: sweep
         env:

@@ -54,12 +54,28 @@ describe.skipIf(!URL)('Field.datetime on MySQL (#3942)', () => {
   let driver: SqlDriver;
   let serverTimeZone = '';
 
+  // ── Why this beforeAll carries an explicit 60_000 budget (#14628) ──
+  // The live cell is one indirection away: this hook builds no driver of its
+  // own, it calls `rawDriver()` above — which hard-codes `MYSQL_CELL.config()`,
+  // unconditionally LIVE, not a parametrised `cell.config()` that would be
+  // SQLite for the sqlite cell. So the probe pays a real live connect, a
+  // `select @@global.time_zone` round trip and a disconnect against the cell's
+  // MySQL server. That one level of indirection is the whole reason the #14213
+  // walk — which read each hook's OWN `new SqlDriver(...)` argument — did not
+  // reach this site while it did reach the three beforeEach hooks below.
+  // ⚠️ A hook inherits `hookTimeout`, NOT `testTimeout`. Measured in this
+  // package's config (which sets neither, so both are vitest's own defaults):
+  // an unbudgeted hook dies at 10000ms ("Hook timed out in 10000ms"), not at
+  // the 5000ms an unbudgeted it() gets.
+  // A beforeAll is the LIGHTEST shape in this class — the cost is paid once
+  // per suite, not once per test — and ⛔ this is NOT a claim that the hook is
+  // known to time out: it was found by an AST walk, never by a measured red.
   beforeAll(async () => {
     const probe = rawDriver();
     const rows = await rowsOf(probe, `select @@global.time_zone as tz`);
     serverTimeZone = String((rows[0] as any).tz);
     await probe.disconnect();
-  });
+  }, 60_000);
 
   // ── Why this beforeEach carries an explicit 60_000 budget (#14213) ──
   // The driver argument here is `MYSQL_CELL.config()` — unconditionally LIVE,

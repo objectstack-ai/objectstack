@@ -493,7 +493,7 @@ The structured form is equivalent and carries the experimental knobs below — `
 
 <Callout type="warn">
 Only `query` and `fields` are implemented. The engine expands `search` into a driver-agnostic
-`$and`-of-`$or`-of-`$contains` filter (ADR-0061) — `fuzzy`, `operator`, `boost`, `minScore`,
+`$and`-of-`$or`-of-`$icontains` filter (ADR-0061) — `fuzzy`, `operator`, `boost`, `minScore`,
 `language`, and `highlight` are accepted by `QuerySchema` but read nowhere in
 `expandSearchToFilter()` / `normalizeSearch()`, so they have no effect; since #4286 their
 `.describe()` markers say so. Multiple search terms are always AND-ed regardless of
@@ -530,7 +530,7 @@ The answer is a **mirror field**: copy the related record's title into a stored
 field on this object and declare *that* field searchable. A task list searched by
 project name gets a `project_name` text column on `task`, maintained on write and
 listed in `task.searchableFields`. It has to be a **stored** field — a `formula`
-field is virtual, so no driver has a column for `$contains` to scan. Cross-object
+field is virtual, so no driver has a column for `$icontains` to scan. Cross-object
 search paths are rejected by design, not pending. Full recipe (the hooks that keep
 the mirror fresh, and the lint wording) in [Schema Design → Searching by a related
 record's title](/docs/data-modeling/schema-design#searching-by-a-related-records-title--mirror-the-value).

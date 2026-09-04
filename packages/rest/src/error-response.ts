@@ -275,6 +275,58 @@ export function sandboxBusinessMessage(error: any): string | undefined {
 }
 
 /**
+ * [#14704] The sentence a declared-code structured arm relays to the caller:
+ * {@link sandboxBusinessMessage} first, `error.message` second.
+ *
+ * ## The defect this retires
+ *
+ * `classifyDataError` surfaces the bespoke arms ABOVE its sandbox unwrap door,
+ * deliberately, "so the structured fields survive the generic catch-alls" —
+ * and every arm built its sentence from `error?.message`. For a sandboxed
+ * producer `error.message` IS the `<kind> '<name>' threw: <msg>` debug wrapper,
+ * and the unwrap door that would have read `.innerMessage` sits below the arms
+ * and was never reached. So one hook refusal came back as two sentences
+ * depending on the route: the bulk door answered `Opportunity is closed.` and
+ * the single-record `/data` door answered
+ * `hook 'guard' threw: Error: Opportunity is closed.`
+ *
+ * #11588 repaired exactly this class one door over — it named
+ * {@link sandboxBusinessMessage} and taught {@link resolveErrorResponse}'s
+ * declared-status passthrough to read it. The arms were not in that card's
+ * scope, so the wrapper kept reaching a client with the direction reversed
+ * rather than closed. This is that same rule, asked once here instead of
+ * re-opined per arm — the third local opinion is what produced the divergence.
+ *
+ * ## Why the bulk door does not change
+ *
+ * {@link resolveErrorResponse} declines the shared consult outright for a
+ * sandbox-origin error (#14541's `isSandboxOrigin` guard), so this read is
+ * unreachable from that door and every bulk / metadata / UI route answers
+ * byte-for-byte what it answered before. The repair lands on
+ * {@link mapDataError} alone, which is where the defect was.
+ *
+ * ## ⛔ What this deliberately does NOT decide
+ *
+ * A sandboxed **CRASH** (#7543). {@link sandboxBusinessMessage} declines one by
+ * contract, so the fallback hands the arm `error.message` — the wrapper — and
+ * the arm answers with its own declared status, where the unwrap door's
+ * terminal for the same crash is the sanitised 500. That divergence is
+ * UNCHANGED by this rule, on purpose: choosing between those two answers is
+ * fault classification rather than message sourcing (triage on #14704, verbatim:
+ * "leave today's behaviour exactly as it is, implement the business-message
+ * read only, and name the site and the divergence"). It is pinned in
+ * `error-response-sandbox-arm-message.test.ts` §4 so that deciding it is a
+ * visible edit rather than a drift, and it carries its own decision card.
+ *
+ * ⛔ Deliberately a READ of the field the sandbox populated, never a
+ * pattern-strip of the wrapper off `.message` — {@link sandboxBusinessMessage}
+ * carries that argument, and this function must not grow a second one.
+ */
+function armSentence(error: any): unknown {
+    return sandboxBusinessMessage(error) ?? error?.message;
+}
+
+/**
  * [#5462] Does a driver's missing-relation message name the very object this
  * request asked for?
  *
@@ -810,7 +862,7 @@ function structuredCodeAnswer(
         return {
             status: 409,
             body: {
-                error: error?.message ?? 'Cannot delete: dependent records exist',
+                error: armSentence(error) ?? 'Cannot delete: dependent records exist',
                 code: 'DELETE_RESTRICTED',
                 // [#7307] `error` is the END USER's half — localized, labels
                 // only — because Console renders it verbatim in a toast.
@@ -839,7 +891,7 @@ function structuredCodeAnswer(
         return {
             status: 409,
             body: {
-                error: error?.message ?? 'Record was modified by another user',
+                error: armSentence(error) ?? 'Record was modified by another user',
                 code: 'CONCURRENT_UPDATE',
                 ...(error?.currentVersion ? { currentVersion: error.currentVersion } : {}),
                 ...(error?.currentRecord ? { currentRecord: error.currentRecord } : {}),
@@ -937,7 +989,7 @@ function structuredCodeAnswer(
         return {
             status: 503,
             body: {
-                error: error?.message ?? 'The datasource for this object is not available',
+                error: armSentence(error) ?? 'The datasource for this object is not available',
                 code: 'ERR_DATASOURCE_UNAVAILABLE',
                 ...(error?.datasource ? { datasource: error.datasource } : {}),
                 ...(error?.kind ? { reason: error.kind } : {}),
@@ -953,7 +1005,7 @@ function structuredCodeAnswer(
         return {
             status: 400,
             body: {
-                error: error?.message ?? 'Validation failed',
+                error: armSentence(error) ?? 'Validation failed',
                 code: 'VALIDATION_FAILED',
                 fields: Array.isArray(error?.fields) ? error.fields : [],
                 ...(object ? { object } : {}),
@@ -971,7 +1023,7 @@ function structuredCodeAnswer(
         return {
             status: 403,
             body: {
-                error: error?.message ?? 'This capability is disabled for the target object',
+                error: armSentence(error) ?? 'This capability is disabled for the target object',
                 code: error.code,
                 ...(error?.object || object ? { object: error?.object ?? object } : {}),
             },
@@ -985,7 +1037,7 @@ function structuredCodeAnswer(
         return {
             status: 403,
             body: {
-                error: error?.message ?? 'Attachment access denied',
+                error: armSentence(error) ?? 'Attachment access denied',
                 code: error.code,
                 ...(error?.object || object ? { object: error?.object ?? object } : {}),
             },
@@ -1003,7 +1055,7 @@ function structuredCodeAnswer(
         return {
             status: 403,
             body: {
-                error: error?.message ?? 'Record access denied',
+                error: armSentence(error) ?? 'Record access denied',
                 code: 'RECORD_NOT_ACCESSIBLE',
                 ...(error?.object || object ? { object: error?.object ?? object } : {}),
             },
@@ -1094,7 +1146,7 @@ function classifyDataError(error: any, object?: string): { status: number; body:
         return {
             status: 403,
             body: {
-                error: error?.message ?? 'Permission denied',
+                error: armSentence(error) ?? 'Permission denied',
                 code: 'PERMISSION_DENIED',
                 ...(object ? { object } : {}),
             },

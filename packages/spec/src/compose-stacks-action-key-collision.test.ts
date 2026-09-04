@@ -308,10 +308,8 @@ describe('composeStacks - what stays accepted', () => {
     const out = composeStacks([orders, core], { manifest: 'preserve' });
     expect(out.packages).toHaveLength(2);
     expect(keysOf(out).top).toEqual(['crm_order:ship_order']);
-    // #14847: the bound action appears twice on `crm_order` today — the measured
-    // shape, not the contract — so the pin asks only that it is carried, and
-    // that the other package's embedded action is carried exactly once.
-    expect(keysOf(out).embedded.crm_order).toContain('ship_order/BOUND');
-    expect(keysOf(out).embedded.crm_account).toEqual(['archive_account/EMB']);
+    // Each package's action is carried exactly once — the bound one no longer
+    // doubled by the composed merge (#14847), the embedded one as before.
+    expect(keysOf(out).embedded).toEqual({ crm_order: ['ship_order/BOUND'], crm_account: ['archive_account/EMB'] });
   });
 });

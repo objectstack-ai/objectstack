@@ -391,6 +391,42 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // One file, not `packages/create-objectstack/**`: the test reads that
       // template and nothing else across the boundary.
       'packages/create-objectstack/src/templates/blank/pnpm-workspace.yaml',
+      // The two files that hold the COLUMN authority the CLI's migration
+      // generators mirror, READ by
+      // src/commands/generate-multiple-json-column.pin.test.ts (#14829). That
+      // pin asserts a `multiple: true` field gets a JSON column from both
+      // `os generate migration` formats because `SqlDriver.createColumn`
+      // short-circuits on the flag ABOVE its per-type switch, and
+      // `fieldHasColumn` mirrors that decision for the drift differ. Source-read
+      // rather than imported: `createColumn` is `protected` and needs a knex
+      // table builder, so driving it would mean a live driver and a built
+      // `dist`, while the SHAPE of its decision — flag first, type second — is
+      // exactly what has to stay true and is legible in the source.
+      //
+      // The declaration is the whole point of the pin, not paperwork around it:
+      // if the driver moves that rule and cli's suite does not re-run, the two
+      // sides drift again in silence, which is the #14829 defect returning by
+      // the cache. Two files rather than `packages/drivers/driver-sql/src/**`:
+      // the pin reads these two and nothing else across the boundary, and that
+      // package's `src` is edited often enough that the subtree glob would put
+      // cli's whole suite on every driver commit.
+      'packages/drivers/driver-sql/src/sql-driver.ts',
+      'packages/drivers/driver-sql/src/schema-drift.ts',
+      // `field.zod.ts` is the third entry no test READS -- named in the header
+      // of src/commands/generate-field-type-vocabulary.pin.test.ts, which cites
+      // it as the file `git log -S` was run over to establish that the ghost
+      // field types that pin removes never existed on the spec side either.
+      // It appears here only now because #14828 gave that pin its first
+      // cross-package READ (the two driver files above), which is what brings a
+      // file into the scan at all; the flat literal collector then took the
+      // quoted path out of the prose exactly as it always has. Settled the same
+      // way as `translation.zod.ts` above -- declaring one file beats teaching
+      // the scanner to tell prose from code, and it costs nothing in practice
+      // for the same reason: `@objectstack/spec` is a real dependency of this
+      // package. It is also the honest declaration rather than a shrug, because
+      // that file DEFINES the `FieldType` enum the pin asserts totality over --
+      // a member added there is exactly the change that must re-run this suite.
+      'packages/spec/src/data/field.zod.ts',
     ],
   },
   '@objectstack/client': {
@@ -492,6 +528,17 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'examples/app-showcase/src/ui/pages/capability-map.page.ts',
       'examples/app-showcase/src/ui/pages/command-center-jsx.page.ts',
       'examples/app-showcase/src/ui/pages/start-here.page.ts',
+      //   src/validate-page-visualization-bindings.test.ts (#14073) imports the
+      //     seven shipped `showcase_task` interface pages, that object, and its
+      //     view aggregate LIVE, and asserts each whitelisted visualization
+      //     still derives a binding. The coupling runs in BOTH directions: a
+      //     new whitelist entry on a page, a renamed or retyped field on the
+      //     object (the date / select / image / location fields the derivation
+      //     finds), or a `calendar:` / `map:` block moving on the view all
+      //     change the rule's verdict, so each must re-run this package's suite.
+      'examples/app-showcase/src/ui/pages/task-visualizations.pages.ts',
+      'examples/app-showcase/src/data/objects/task.object.ts',
+      'examples/app-showcase/src/ui/views/task.view.ts',
       'sdui.manifest.json',
     ],
     heldBy: {
@@ -827,6 +874,38 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'packages/spec/src/**': ['packages/qa/downstream-contract/test/source-resolution.pin.test.ts'],
     },
   },
+  '@objectstack/objectql': {
+    // src/action-owner-key-single-source.test.ts carries the #14878 TREE-scoped
+    // absence pin: `git grep` over `packages/` and `examples/` for the private
+    // `ObjectQLPlugin` member #14667 deleted, so that the PR which writes a new
+    // stale mention of it reddens at the moment it is written rather than
+    // surfacing as a follow-up card weeks later. The two `.ts` globs ARE that
+    // scan surface -- the pin spells the same two roots and the same extension
+    // in `SCANNED_ROOTS` / `SCANNED_EXTENSION`, and its own header says the two
+    // widen together or not at all.
+    //
+    // ⛔ `packages/` ONLY, and the `examples/` half is REFUSED rather than
+    // forgotten. An examples-wide `.ts` glob here would be inherited as a watch
+    // hint by every importer of this table -- `check-cross-package-test-inputs`
+    // included -- and `scripts/pm/dispatch-gates.mjs`'s self-test pins that no
+    // hint of that gate reaches a test file outside `packages/**`, which is the
+    // whole reason it is listed there as a change-KIND instead of a path
+    // derivation. Measured: all 41 tracked test files outside `packages/` are
+    // under `examples/`, so that glob does not shrink the residue class, it
+    // EMPTIES it, and the case cannot be re-pointed at another member. Widening
+    // needs that residue measurement redone first; the pins' own headers carry
+    // what it costs meanwhile.
+    //
+    // `cross-package-test-inputs.mjs` is NAMED in that pin's header (it is where
+    // the widening instruction points) and never read, the same shape as the
+    // `check-nul-bytes.mjs` mentions elsewhere in this table: the literal
+    // collector takes quoted paths out of comments, and declaring the file is
+    // cheaper than rewording prose to dodge the scanner.
+    globs: [
+      'packages/**/*.ts',
+      'scripts/cross-package-test-inputs.mjs',
+    ],
+  },
   '@objectstack/runtime': {
     // src/error-envelope.conformance.test.ts imports `stripComments` from
     // `js-comment-mask.mjs` to decide which text in the ten dispatcher modules
@@ -836,9 +915,38 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     // it has to re-run this package's suite. The `.d.mts` sibling is declared
     // alongside it because it is what gives `stripComments` its type, so this
     // package's typecheck verdict is a function of it too.
+    //
+    // src/action-owner-key-single-source.test.ts also carries the #14878 TREE-scoped
+    // absence pin: `git grep` over `packages/` and `examples/` for the private
+    // `ObjectQLPlugin` member #14667 deleted, so that the PR which writes a new
+    // stale mention of it reddens at the moment it is written rather than
+    // surfacing as a follow-up card weeks later. The two `.ts` globs ARE that
+    // scan surface -- the pin spells the same two roots and the same extension
+    // in `SCANNED_ROOTS` / `SCANNED_EXTENSION`, and its own header says the two
+    // widen together or not at all.
+    //
+    // ⛔ `packages/` ONLY, and the `examples/` half is REFUSED rather than
+    // forgotten. An examples-wide `.ts` glob here would be inherited as a watch
+    // hint by every importer of this table -- `check-cross-package-test-inputs`
+    // included -- and `scripts/pm/dispatch-gates.mjs`'s self-test pins that no
+    // hint of that gate reaches a test file outside `packages/**`, which is the
+    // whole reason it is listed there as a change-KIND instead of a path
+    // derivation. Measured: all 41 tracked test files outside `packages/` are
+    // under `examples/`, so that glob does not shrink the residue class, it
+    // EMPTIES it, and the case cannot be re-pointed at another member. Widening
+    // needs that residue measurement redone first; the pins' own headers carry
+    // what it costs meanwhile.
+    //
+    // `cross-package-test-inputs.mjs` is NAMED in that pin's header (it is where
+    // the widening instruction points) and never read, the same shape as the
+    // `check-nul-bytes.mjs` mentions elsewhere in this table: the literal
+    // collector takes quoted paths out of comments, and declaring the file is
+    // cheaper than rewording prose to dodge the scanner.
     globs: [
       'scripts/js-comment-mask.mjs',
       'scripts/js-comment-mask.d.mts',
+      'packages/**/*.ts',
+      'scripts/cross-package-test-inputs.mjs',
     ],
   },
   '@objectstack/driver-sql': {
