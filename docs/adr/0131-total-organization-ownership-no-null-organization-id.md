@@ -525,6 +525,35 @@ Template rows an admin has customized (`customized: true`) are the one populatio
 rule on (§6 Q1): keep them readable as the Default Organization's overrides (half of the D6 door), or
 accept the loss under the startup posture with a release note.
 
+**The migration is a manual, operator-run ceremony — never an automatic boot step.** Maintainer,
+2026-09-04, verbatim: 「我建议 18.0 的主要考虑是客户数据变化比较大，而且需要手工执行升级脚本。」 The v18
+change rewrites customer data at a scale no boot may perform silently — column drops and mirror-row
+deletions are irreversible, attribution rewrites ownership, the constraint locks the shape — so it ships
+as an `os migrate`-family command the operator runs, in this order and with these guarantees:
+
+1. **Preflight, read-only** (`--plan`): per table, the fate, the row counts each fate will touch, the rows
+   whose owner cannot be derived (listed by id), and the tables that will and will not receive the NOT
+   NULL constraint. The plan is written to a file the operator keeps; nothing is changed. ⛔ A plan that
+   cannot enumerate a table refuses instead of reporting it as empty.
+2. **Backup is the operator's act and the precondition** the apply step asks about explicitly; the
+   platform does not take backups for the operator and does not assume one exists.
+3. **Apply** (`--apply`) executes the plan in fate order — attribution before mirror deletion (D10 fate
+   2's gate is the verified rewrite), column drops last — **idempotent and resumable**: a second run
+   after an interruption continues from the recorded checkpoint, never re-derives owners already written.
+4. **Post-check** re-runs the plan and prints zero-remaining per table; the constraint lands only on
+   tables that read zero, exactly as D10 states. Tables still reporting NULL rows are named with the
+   remedy and stay unconstrained until the operator resolves them and re-runs.
+5. **A v18 runtime refuses to boot against a database the ceremony has not completed** — the same
+   fail-fast shape as [ADR-0093](./0093-tenancy-mode-and-membership-lifecycle.md) D5 — naming the
+   command to run; it never auto-migrates, never runs degraded on a half-migrated schema, and offers no
+   escape hatch that silently skips the check (an operator who wants to run 17.x semantics runs 17.x).
+
+The ceremony reuses the [ADR-0120](./0120-unique-scope-vocabulary-and-null-safe-tenant-uniqueness.md)
+D4 migration ceremony where it exists (index and column changes) rather than inventing a second one.
+On cloud each customer environment is its own database: the ceremony runs per environment, and the
+control plane's own database is one more environment — cloud's release runbook carries the sequence
+(C10). Documentation for self-hosters (C11) leads with this ceremony, not with the feature list.
+
 ### D11 — Postures differ only in enforcement
 
 Ownership rules, refusals and constraints are identical under `single`, `group` and `isolated`; only
@@ -640,8 +669,10 @@ Maintainer, 2026-09-04: 「我发 17.3，然后后续这么大的改动应该放
   D4's name references, D6's template mode and the retirement of the per-organization overlay axis, D7's
   column drops, D8's single predicate, D9's refusals, D10's four-fate migration, D13's retirements. Within
   the line the order of §8 holds (C1–C6 before C7 before C8), and the migration keeps its per-table gate
-  (D10). The driver arms are removed in the same major, after C7. ⛔ No 17.x card narrows or removes an
-  arm, adds a name column beside an id column, or ships a half of this record.
+  (D10). The driver arms are removed in the same major, after C7. **The v18 upgrade is a manual
+  operator ceremony with a boot refusal behind it (D10) — the release notes and the self-hoster docs lead
+  with it.** ⛔ No 17.x card narrows or removes an arm, adds a name column beside an id column, or ships
+  a half of this record.
 
 Doing it in one major rather than additively across 17.x avoids carrying dual id/name columns and a
 registry-first-then-rows resolution through a public release — compatibility shims for a shape nobody
@@ -687,6 +718,9 @@ has used yet.
 - **One new authoring key** (D3): `PositionSchema.permissionSets` — the binding had no declared vocabulary;
   every existing `sys_position_permission_set` row is migrated into the position definitions it binds
   (environment metadata under `single`; under a wall the residue is reported per organization, D10).
+- **The v18 upgrade is a manual operator ceremony** (D10): plan → backup → apply → post-check, per-table
+  gate, resumable; a v18 runtime refuses to boot until it has run. Every self-hoster and every cloud
+  environment pays one operator session; the price of not paying it silently at boot.
 - **Four catalog objects retire** (D3/D13): `sys_position`, `sys_permission_set`,
   `sys_position_permission_set`, `sys_capability`. Every reader of those tables — authorization
   resolution, hierarchy security, delegated admin, sharing recipients, the Setup pages — moves to the
@@ -818,7 +852,7 @@ One epic tracks the family. C0 and #15030 land before 17.3; every other card is 
 | C5 | `sys_metadata` family tenant-less (environment definitions, UI-editable by metadata authors); per-organization overlay axis retired (org-scoped writes of the five tier-A types refused); `sys_view_definition` and its two runtime index migrations retired as inert (ADR-0087 entry; ADR-0017 amended); ADR-0005 amended | D6, D7, D13 | C1 |
 | C12 | Template install mode: manifest `installModes`, one-time import into the environment ledger with provenance, refusal on `group` / `isolated`, CLI + marketplace surfaces | D6 | C5 |
 | C6 | Deployment-level state has no column: settings global rung leaves `sys_setting`; plumbing objects drop the column; #12699 declaration made total | D7 | ADR merge (+ §6 Q3) |
-| C7 | Inventory + migration: four fates, id→name rewrite verified before mirror deletion, per-table boot report | D10 | C2, C3, C4, C5, C6 |
+| C7 | Inventory + the manual migration ceremony (`os migrate` family: plan / apply / post-check, idempotent + resumable, per-table constraint gate) and the v18 boot refusal against an un-migrated database | D10 | C2, C3, C4, C5, C6 |
 | C8 | One predicate; NOT NULL per cleared table; every-posture refusal; both arms and the ledger retired — protocol 18 | D1, D8, D9, D13, D14 | C7 |
 | C9 | objectui: Setup catalog pages read the registry (editor under `single`, read-only under a wall); assignment pages stay data pages; pickers list the registry; Studio lists and edits environment metadata | D3, D7 | C2 |
 | C10 | cloud: control plane and objectos-ee adopt the record (per-deployment no-column, backfill, tests) | D7, D8, D10 | C6, then C8 |
