@@ -10,12 +10,31 @@
  * 2026-08-13 ruling had made the deployment default the whole answer and
  * rejected `Accept-Language` outright. #14762 then added the rung ABOVE both,
  * per the #14788 option-D ruling of 2026-09-03: the recipient's own
- * `sys_user.locale` (#13881) when the account holds one. Invitations keep the
- * deployment rung — an invitee has no row until acceptance (#14641) — and
- * this file pins that abstention too. The ruling text of record lives on
- * `AuthManager.setDefaultEmailLocale` / `authEmailLocaleFromRequest` /
- * `emailLocaleArg`; the request rung's own cases and the stored rung's are the
- * last two describe blocks in this file.
+ * `sys_user.locale` (#13881) when the account holds one.
+ *
+ * #14641 reached the INVITATION send last, and it is the one send with two
+ * branches rather than one. The card's terminal state read "choose the
+ * template by the invitee's stored language", which cannot hold for every
+ * invitee — an invitee generally has no `sys_user` row until acceptance, so
+ * there is no stored language to read. What IS implementable, and what this
+ * file pins, is the two-branch shape:
+ *
+ *   1. the address ALREADY carries a `sys_user` row — an existing platform
+ *      user invited into a second organization, or a re-invitation → their own
+ *      `locale`;
+ *   2. a genuinely new invitee with NO row → the deployment default, because
+ *      their language is still truly unknown at invitation time.
+ *
+ * ⛔ The INVITER direction stays rejected on both branches: #13881's ruling
+ * item 3 fixes the chain as RECIPIENT locale → deployment default, and
+ * stamping the inviter's `Accept-Language` onto the invitee's mail would move
+ * the defect one seat over. That abstention is pinned here too, now against a
+ * manager that HAS the top rung wired — the stronger form of the #14319 pin.
+ *
+ * The ruling text of record lives on `AuthManager.setDefaultEmailLocale` /
+ * `authEmailLocaleFromRequest` / `emailLocaleArg`; the request rung's own
+ * cases, the stored rung's, and the invitation's two branches are the last
+ * three describe blocks in this file.
  *
  * Before this, no `sendTemplate` call in `auth-manager.ts` passed a `locale`,
  * so `EmailService`'s ladder always resolved `en-US` and the localized rows
@@ -603,10 +622,10 @@ describe('#14762 — sys_user.locale is the top rung of the auth-mail ladder', (
     expect(sent[0].locale).toBe('zh-CN');
   });
 
-  it('the INVITATION send is untouched — its rung is #14641\'s', async () => {
-    // Scope fence, asserted rather than described: an invitee has no sys_user
-    // row until acceptance, so this send still names the deployment rung even
-    // when a row for that address would have carried a locale.
+  it('the INVITATION send reads the SAME rung, on the address — #14641', async () => {
+    // Was a scope fence ("untouched — its rung is #14641's") until #14641
+    // landed. The rung is the same one; only the predicate differs, because
+    // this callback is handed an address rather than a user row.
     const dataEngine = { async findOne() { return { locale: 'ja-JP' }; } };
     const { capturedConfig, sent } = await boot('es-ES', { dataEngine } as never);
     const org = capturedConfig.plugins.find((p: any) => p.id === 'organization');
@@ -617,6 +636,215 @@ describe('#14762 — sys_user.locale is the top rung of the auth-mail ladder', (
       inviter: { user: { email: 'dana@example.com', name: 'Dana' } },
     });
     expect(sent[0].template).toBe('auth.invitation');
-    expect(sent[0].locale).toBe('es-ES');
+    expect(sent[0].locale).toBe('ja-JP');
+    expect(sent[0].locale).not.toBe('es-ES');
+  });
+});
+
+// ── #14641 — the invitation send's two branches ────────────────────────────
+
+/**
+ * A `sys_user` table keyed by ADDRESS, so the only thing separating the two
+ * branches is whether the invitee's address carries a row. One engine object
+ * is shared between drives wherever a test needs the branches to be provably
+ * the same lookup — otherwise "no row" and "no read" would be indistinguishable
+ * from the outside, since both land on the deployment default.
+ */
+function emailKeyedEngine(rows: Record<string, unknown>) {
+  const reads: any[] = [];
+  return {
+    reads,
+    engine: {
+      async findOne(object: string, query: any) {
+        reads.push({ object, query });
+        if (object !== 'sys_user') return null;
+        const email = (query?.where ?? {}).email as string;
+        return Object.prototype.hasOwnProperty.call(rows, email)
+          ? { locale: rows[email] }
+          : null;
+      },
+    },
+  };
+}
+
+async function driveInvitation(opts: {
+  engine: unknown;
+  deployment?: string;
+  invitee?: string;
+  /** The INVITER's browser language — better-auth hands this callback its request. */
+  header?: string;
+}) {
+  const { capturedConfig, sent } = await boot(opts.deployment, {
+    dataEngine: opts.engine,
+  } as never);
+  const org = capturedConfig.plugins.find((p: any) => p.id === 'organization');
+  await org._opts.sendInvitationEmail(
+    {
+      email: opts.invitee ?? 'invitee@example.com',
+      invitation: { id: 'inv1', organizationId: 'o1', role: 'member' },
+      organization: { name: 'Northwind' },
+      inviter: { user: { email: 'dana@example.com', name: 'Dana' } },
+    },
+    opts.header === undefined
+      ? undefined
+      : new Request('http://x/invite', { headers: { 'accept-language': opts.header } }),
+  );
+  return sent;
+}
+
+describe("#14641 — an invitation reads the INVITEE's own sys_user.locale", () => {
+  const prevMcpEnv = process.env.OS_MCP_SERVER_ENABLED;
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.OS_MCP_SERVER_ENABLED = 'false';
+  });
+  afterEach(() => {
+    if (prevMcpEnv === undefined) delete process.env.OS_MCP_SERVER_ENABLED;
+    else process.env.OS_MCP_SERVER_ENABLED = prevMcpEnv;
+  });
+
+  it('BRANCH 1 — an address that already has a row is written in THAT locale', async () => {
+    const { engine } = emailKeyedEngine({ 'invitee@example.com': 'zh-CN' });
+    const sent = await driveInvitation({ engine, deployment: 'en-US' });
+    expect(sent[0].template).toBe('auth.invitation');
+    expect(sent[0].locale).toBe('zh-CN');
+    // The direction that makes the pin real: the deployment's own tag is NOT
+    // what went out.
+    expect(sent[0].locale).not.toBe('en-US');
+  });
+
+  it('and the reverse — an en-US invitee on a zh-CN deployment gets English', async () => {
+    // Swapping the two tags is what rules out a pin that would pass because
+    // one of them always wins.
+    const { engine } = emailKeyedEngine({ 'invitee@example.com': 'en-US' });
+    const sent = await driveInvitation({ engine, deployment: 'zh-CN' });
+    expect(sent[0].locale).toBe('en-US');
+    expect(sent[0].locale).not.toBe('zh-CN');
+  });
+
+  it('BRANCH 2 — a genuinely new invitee, no row, still takes the deployment default', async () => {
+    // ⚠️ Positive control for the zero, and the reason ONE engine drives both
+    // sends: the same table, the same predicate and the same deployment answer
+    // zh-CN for an address that carries a row and en-US for one that does not.
+    // That is what separates "the read ran and found nothing" from "the read
+    // never ran" / "this engine answers nothing" — both of which would also
+    // land on the deployment default and look identical from the payload.
+    const { engine, reads } = emailKeyedEngine({ 'known@example.com': 'zh-CN' });
+
+    const known = await driveInvitation({ engine, deployment: 'en-US', invitee: 'known@example.com' });
+    expect(known[0].locale).toBe('zh-CN');
+
+    const newcomer = await driveInvitation({ engine, deployment: 'en-US', invitee: 'newcomer@example.com' });
+    expect(newcomer[0].locale).toBe('en-US');
+    expect(newcomer[0].locale).not.toBe('zh-CN');
+
+    // ...and the newcomer's read really was attempted, on their address.
+    const userReads = reads.filter((r) => r.object === 'sys_user');
+    expect(userReads.map((r) => r.query.where)).toEqual([
+      { email: 'known@example.com' },
+      { email: 'newcomer@example.com' },
+    ]);
+  });
+
+  it("reads the column off the INVITEE's address — never the inviter's", async () => {
+    // Establishes WHICH rung produced the value, and on WHOSE identity. The
+    // inviter has a row too, carrying a different language; it must not be
+    // reached at all.
+    const { engine, reads } = emailKeyedEngine({
+      'invitee@example.com': 'zh-CN',
+      'dana@example.com': 'ja-JP',
+    });
+    const sent = await driveInvitation({ engine, deployment: 'en-US' });
+    expect(sent[0].locale).toBe('zh-CN');
+    expect(sent[0].locale).not.toBe('ja-JP');
+
+    const userReads = reads.filter((r) => r.object === 'sys_user');
+    expect(userReads).toHaveLength(1);
+    expect(userReads[0].query.where).toEqual({ email: 'invitee@example.com' });
+    expect(userReads[0].query.fields).toEqual(['locale']);
+    expect(userReads[0].query.context?.isSystem).toBe(true);
+  });
+
+  it("⛔ the INVITER's Accept-Language still loses — with the top rung now wired", async () => {
+    // The #14319 abstention, re-pinned in its stronger form: this send reads a
+    // recipient rung now, so "no request argument" is no longer trivially true
+    // of the whole callback. An English-speaking admin must still not force
+    // English onto a Chinese workspace's new hire.
+    const { engine } = emailKeyedEngine({});
+    const sent = await driveInvitation({ engine, deployment: 'zh-CN', header: 'en-US' });
+    expect(sent[0].locale).toBe('zh-CN');
+    expect(sent[0].locale).not.toBe('en-US');
+  });
+
+  it("...and does not win over the invitee's stored column either", async () => {
+    const { engine } = emailKeyedEngine({ 'invitee@example.com': 'ja-JP' });
+    const sent = await driveInvitation({ engine, deployment: 'zh-CN', header: 'en-US' });
+    expect(sent[0].locale).toBe('ja-JP');
+    expect(sent[0].locale).not.toBe('en-US');
+  });
+
+  it('refuses the stringified-nothing literals a lossy producer leaves at rest', async () => {
+    for (const junk of ['undefined', 'null', '', '   ', 42, {}]) {
+      const { engine } = emailKeyedEngine({ 'invitee@example.com': junk });
+      const sent = await driveInvitation({ engine, deployment: 'en-US' });
+      expect(sent[0].locale, `stored ${JSON.stringify(junk)} named a locale`).toBe('en-US');
+    }
+  });
+
+  it('a failing recipient read never blocks the invitation', async () => {
+    const engine = { async findOne() { throw new Error('sys_user unavailable'); } };
+    const sent = await driveInvitation({ engine, deployment: 'en-US' });
+    expect(sent).toHaveLength(1);
+    expect(sent[0].template).toBe('auth.invitation');
+    expect(sent[0].locale).toBe('en-US');
+  });
+
+  it('with no data engine at all, the deployment rung answers exactly as before', async () => {
+    const { capturedConfig, sent } = await boot('en-US');
+    const org = capturedConfig.plugins.find((p: any) => p.id === 'organization');
+    await org._opts.sendInvitationEmail({
+      email: 'invitee@example.com',
+      invitation: { id: 'inv1', organizationId: 'o1', role: 'member' },
+      organization: { name: 'Northwind' },
+      inviter: { user: { email: 'dana@example.com', name: 'Dana' } },
+    });
+    expect(sent[0].locale).toBe('en-US');
+  });
+
+  it('with neither a row nor a deployment default, NO locale is named at all', async () => {
+    // The ladder's contract is written against an ABSENT key.
+    const { engine } = emailKeyedEngine({});
+    const sent = await driveInvitation({ engine });
+    expect(sent[0].locale).toBeUndefined();
+    expect(Object.prototype.hasOwnProperty.call(sent[0], 'locale')).toBe(false);
+  });
+
+  it('does not disturb the rest of the invitation payload', async () => {
+    const { engine } = emailKeyedEngine({ 'invitee@example.com': 'zh-CN' });
+    const sent = await driveInvitation({ engine, deployment: 'en-US' });
+    expect(sent[0].to).toBe('invitee@example.com');
+    expect(sent[0].relatedObject).toBe('sys_invitation');
+    expect(sent[0].relatedId).toBe('inv1');
+    expect(sent[0].organizationId).toBe('o1');
+    expect(sent[0].data.organization.name).toBe('Northwind');
+    expect(sent[0].data.role).toBe('member');
+  });
+
+  it('a placeholder address is still refused BEFORE any recipient read', async () => {
+    // #2766 V1.5 ordering, re-pinned now that a read sits on this path: the
+    // refusal must not be preceded by a lookup for an address that is not a
+    // real recipient.
+    const { engine, reads } = emailKeyedEngine({});
+    const { capturedConfig } = await boot('en-US', { dataEngine: engine } as never);
+    const org = capturedConfig.plugins.find((p: any) => p.id === 'organization');
+    await expect(
+      org._opts.sendInvitationEmail({
+        email: 'u-abcdefghijklmnopqrst@placeholder.invalid',
+        invitation: { id: 'inv1', organizationId: 'o1', role: 'member' },
+        organization: { name: 'Northwind' },
+        inviter: { user: { email: 'dana@example.com', name: 'Dana' } },
+      }),
+    ).rejects.toThrow(/placeholder address/);
+    expect(reads.filter((r) => r.object === 'sys_user')).toHaveLength(0);
   });
 });

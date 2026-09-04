@@ -146,6 +146,21 @@ export async function completeTask(ctx: ActionContext): Promise<void> {
 }
 ```
 
+<Callout type="warn">
+**`ctx.engine.find(object, filter)` takes a filter, not a query.** The second
+argument is the `where` half only — `{ status: 'completed' }`, operators
+(`{ amount: { $gt: 100 } }`), `$and` / `$or` / `$not` — and the runtime wraps
+it in `where` itself. Passing an ObjectQL envelope
+(`{ where: { status: 'completed' } }`) raises no error: it becomes
+`{ where: { where: … } }`, matches no row, and returns `[]`. An empty filter
+(`{}`) is passed through unwrapped, so the one unfiltered read works under
+either reading and a handler can look partially alive. The parameter is typed
+`FilterCondition` (`ActionEngineFacade` in `@objectstack/spec/ui`), which
+refuses a primitive or a mistyped `$and` / `$or` / `$not` but still admits
+`where` as a key — the sentence above is the contract, and a hand-written test
+double must honour it too.
+</Callout>
+
 ```typescript title="objectstack.config.ts"
 export const onEnable = async (ctx: { ql: { registerAction: (...args: unknown[]) => void } }) => {
   ctx.ql.registerAction('todo_task', 'completeTask', completeTask);

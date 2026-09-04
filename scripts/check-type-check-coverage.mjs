@@ -3794,6 +3794,12 @@ function observed() {
   };
 }
 
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'check-type-check-coverage self-test reached its verdict';
+
 /**
  * The ledger semantics are the one part of this gate that can be wrong while
  * every package is right -- an evaluate() that under-reports waves the next
@@ -5657,10 +5663,19 @@ function selfTest() {
       `${planCases.length + rewriteCases.length + roundTripCases.length} auto-lowering case(s) + ` +
       `${REFUSING.length * 2 + 1 + exitCodeCases.length + textCases.length} exit-code case(s) hold.`,
   );
+
+  return SELF_TEST_VERDICT;
 }
 
 if (process.argv.includes('--self-test')) {
-  selfTest();
+  if (selfTest() !== SELF_TEST_VERDICT) {
+    console.error(
+      '\n✗ check:type-check-coverage self-test: selfTest() returned without reaching its verdict,\n'
+        + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+        + 'that never finished as a self-test that passed.\n',
+    );
+    process.exit(1);
+  }
   process.exit(0);
 }
 
