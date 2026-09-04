@@ -189,6 +189,13 @@ describe('the door is a walker over the shared predicate, not a second judge', (
     'Mars/Olympus', 'Europe/Munich', 'Not A Zone',
     'XYZ', 'VED', 'XAU', 'usd', 'chf',
     'ZZ', 'UK', 'XX', 'us', 'AAA', '', ' CH', 'CH ',
+    // Plausible WIDENINGS — the complement the population pins cannot cover.
+    // A population walk catches any narrowing exhaustively; the set of values
+    // a second judge might wrongly ADMIT is infinite, so the corpus seeds the
+    // ones a real editor would reach for: a user-assigned code in live use
+    // (XK), a supranational alias (EU), and codes withdrawn from the standards
+    // (AN, CS, SU, YU, BTC, CNH, XTS).
+    'XK', 'EU', 'AN', 'CS', 'SU', 'YU', 'BTC', 'CNH', 'XTS',
   ];
 
   /** Door and predicate, one value: `true` when both admit, `false` when both refuse. */

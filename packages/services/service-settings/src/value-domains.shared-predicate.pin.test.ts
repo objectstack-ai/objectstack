@@ -41,29 +41,57 @@
  * that `value-domains.ts` imported and consulted for `iso_3166_alpha2` while
  * the shared predicate still served the other two. Both now red.
  *
- * The check that closes that second route at its ROOT is the import-surface pin
- * below: `value-domains.ts` may import from `@objectstack/spec/shared` and
- * nothing else. A table can exist anywhere in the tree without harm as long as
- * the door cannot reach it, and a relative import is how it would.
+ * ## Two routes, and the two checks that are NOT interchangeable
+ *
+ * A table the DOOR REACHES is closed at its root by the import-surface pin:
+ * `value-domains.ts` may import from `@objectstack/spec/shared` and nothing
+ * else, so a table anywhere in the tree is inert while nothing here can name
+ * it, and a relative specifier is how it would be named.
+ *
+ * A judge STANDING IN FRONT OF THE DOOR is closed by the package-wide density
+ * scan, and that distinction is a measured falsification, not a design
+ * flourish. An earlier draft ran the density scan on the door alone and
+ * argued the import pin covered everything else. It does not: the same
+ * alternation put in the door's CALLER — `settings-service.ts`, replacing the
+ * `firstRejectedDomainMember(…)` call at the save-path refusal — is never
+ * reached by the door, answers `iso_3166_alpha2` itself, and falls through
+ * for the other two. Door blob unchanged, no quoted codes, no new caller of
+ * the predicate: every instrument here was green and the whole package was
+ * green, while a second judge decided the `value_domain` FieldError on every
+ * alpha-2 save. Deleting two codes from it turned two behavioural cases red,
+ * so it was live code, not decoration.
  *
  * Every scan below is DELIMITER-AGNOSTIC. It was not, and that is the round-2
  * finding: a verbatim double-quoted copy of the array mutation passed the
  * whole file green, because the import pin and both shape regexes hard-coded
  * the single quote. This package has no `quotes` lint rule active, so both
- * spellings are legal here and only these pins can tell them apart. The
- * space after `from` is optional for the same reason.
+ * spellings are legal here and only these pins can tell them apart. The space
+ * after `from` is optional for the same reason, and the density scan's
+ * separator class admits a newline — a one-code-per-line template literal is
+ * the same table.
  *
- * The alternation shape (`/^(?:AD|AE|…|ZW)$/`) needs neither quotes nor an
- * import, so it is caught by DENSITY instead of by spelling, on the door.
+ * ## NOT covered — stated so the claim stays the size of the evidence
  *
- * NOT covered, stated so the claim stays the size of the evidence: a 3-letter
- * table (a currency list) is not shape-detected in any spelling — the density
- * and shape scans are two-letter — and a membership table reached through a
- * BARE package specifier rather than a relative one would pass the import pin.
- * A currency table is instead reached BEHAVIOURALLY, by the population
- * agreement pin in `value-domains.test.ts`, which walks every code this
- * runtime enumerates through the door and the shared predicate and requires
- * the two to answer alike.
+ * Each of these was constructed and measured, and each is left open
+ * deliberately rather than unnoticed:
+ *
+ * - **3-letter tables.** A currency list is not shape-detected in any
+ *   spelling; every scan here is two-letter. Currency is reached
+ *   BEHAVIOURALLY instead, by the population agreement pins in
+ *   `value-domains.test.ts`.
+ * - **Separators of three characters or more** (`'AD',  'AE',` with padding,
+ *   or a comment between entries) fall outside the density class.
+ * - **No separator at all** — one 498-character string sliced with
+ *   `.match(/../g)` — has no run to find.
+ * - **Widening by a single literal** (`|| v === 'XK'`) is invisible to every
+ *   scan here, and the population pins cover NARROWING exhaustively while the
+ *   complement is infinite. The trap corpus seeds the plausible members of
+ *   that complement rather than pretending to close it.
+ * - **A table reached through a BARE package specifier** rather than a
+ *   relative one would pass the import pin.
+ * - Two further routes are closed by the toolchain rather than by a pin here,
+ *   and are recorded because a toolchain is not a guarantee: the suite's
+ *   module resolution, and the `tsup` es2020 target.
  *
  * Test sources are exempt from the scan: they are evidence, not enforcement.
  */
@@ -136,20 +164,6 @@ describe('value-domains.ts answers from the shared predicate', () => {
     expect(specifiers).toEqual(['@objectstack/spec/shared']);
   });
 
-  it('carries no dense run of two-letter tokens in ANY delimiter — the alternation shape', () => {
-    // A membership table needs no quotes and no import at all: the 249 codes
-    // as a regex alternation (`/^(?:AD|AE|…|ZW)$/`) inside this very file is a
-    // table by every meaning of the word, and passes a quote-shaped scan and
-    // the import pin alike. What is invariant across every spelling is the
-    // DENSITY: seven or more bare two-uppercase-letter tokens separated by
-    // one or two non-alphanumerics. Applied to the door alone, which is where
-    // this shape has to live to matter — the import pin above is what keeps
-    // one in a sibling module out of reach.
-    const code = stripComments(readFileSync(DOOR, 'utf8'));
-    const DENSE = /(?:\b[A-Z]{2}\b[^A-Za-z0-9\n]{1,2}){7}/;
-    expect(DENSE.test(code), 'the door carries a dense run of two-letter tokens').toBe(false);
-  });
-
   it('declares no membership machinery of its own', () => {
     const src = readFileSync(DOOR, 'utf8');
     // The three copies that were here, by the shape each took. Comments in
@@ -182,6 +196,42 @@ describe('no membership table anywhere in this package', () => {
     }
   });
 
+  it('carries no dense run of two-letter tokens, in ANY delimiter or none — the alternation shape', () => {
+    // A membership table needs no quotes and no import at all: the 249 codes
+    // as a regex alternation (`/^(?:AD|AE|…|ZW)$/`) is a table by every
+    // meaning of the word, and passes a quote-shaped scan and the import pin
+    // alike. What is invariant across those spellings is DENSITY: seven or
+    // more bare two-uppercase-letter tokens separated by one or two
+    // non-alphanumerics — a newline among them, which is how a
+    // one-code-per-line template literal spells the same thing.
+    //
+    // PACKAGE-WIDE, and the reason is a measured falsification rather than
+    // caution. An earlier draft ran this on the door alone, arguing that the
+    // import pin kept a table in a sibling module out of reach. It does — but
+    // only a table the door REACHES. The alternation put in the door's CALLER
+    // (`settings-service.ts`, replacing the `firstRejectedDomainMember(…)`
+    // call at the save-path refusal) is never reached by the door at all: it
+    // stands IN FRONT of it, answers `iso_3166_alpha2` itself, and falls
+    // through for the other two. Door blob unchanged, no quoted codes, no new
+    // caller of the predicate — every other instrument here green, and the
+    // whole package green, while a second judge decided the `value_domain`
+    // FieldError on every alpha-2 save.
+    //
+    // The false-positive exposure is a census, not a hope: this pattern hits
+    // 1 of 1,885 runtime `.ts` files repo-wide (49 `src` roots, comments
+    // masked) — the shared module `value-domain.zod.ts` in the spec package,
+    // i.e. the table itself, which is the one place the definition belongs.
+    // (Named without a repo-relative path on purpose: this test does not READ
+    // that file, and `check:cross-package-test-inputs` reads a spelled path as
+    // a declared input. Its scan is source text, comments included.) Quoted
+    // arrays, string enums (`MO = 'MO'`), unions and `{ AD: 1, … }` maps do
+    // not trip it: quotes and digits push the separator past two characters.
+    const DENSE = /(?:\b[A-Z]{2}\b[^A-Za-z0-9]{1,2}){7}/;
+    for (const [name, src] of runtimeSources()) {
+      expect(DENSE.test(stripComments(src)), `${name} carries a dense run of two-letter tokens`).toBe(false);
+    }
+  });
+
   it('probes no Intl enumeration on any enforcement path', () => {
     for (const [name, src] of runtimeSources()) {
       expect(stripComments(src), `${name} probes an Intl enumeration`).not.toContain('supportedValuesOf');
@@ -191,7 +241,10 @@ describe('no membership table anywhere in this package', () => {
   it('states the membership question exactly once, as the shared call', () => {
     // Positive half of the ratchet: the absence checks above are satisfiable
     // by deleting the enforcement altogether, so pin that the call is present
-    // and that exactly one file makes it.
+    // and that exactly one file makes it. Note the honest limit, the same one
+    // this file's header states: what reddens for a DIVERGENT second
+    // definition may pass for an identical duplicate, which is why the shape
+    // scans exist beside the behavioural pins rather than instead of them.
     const callers = runtimeSources().filter(([, src]) => stripComments(src).includes('isValueDomainMember('));
     expect(callers.map(([name]) => name)).toEqual(['value-domains.ts']);
   });
