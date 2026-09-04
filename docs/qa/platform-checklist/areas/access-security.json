@@ -2099,7 +2099,7 @@
       "title": "Activation-ledger write authority (ADR-0126 §5): the manage_metadata tier refuses first on every posture, and the shared operator gate — INERT on stock `single` — demands the platform_admin POSITION in walled postures, at both the flow and action doors",
       "since": "v17",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2128,7 +2128,7 @@
         "as the plain member again: repeat the flow toggle with a deliberately INVALID body (e.g. {\"enabled\": \"false\"}) — the refusal must still be the 403, not a 400 body-validation answer (the gate runs before body validation, automation.ts; activation-gate.ts)",
         "GET /api/v1/data/sys_metadata_activation (reads are open — sys-metadata-activation.object.ts) and confirm no row for either artifact was written by the refusals",
         "author the scratch manage_metadata permission set, grant it to a fresh member, and prove server-side that the member's positions do NOT include platform_admin (session row / GET /auth/get-session — never the grant gesture)",
-        "as that member: POST /api/v1/automation/showcase_urgent_task_alert/toggle {\"enabled\": false} — expect 200; read the ledger row back (metadata_type 'flow', active false, organization_id NULL); then re-enable ({\"enabled\": true}) to restore the fixture",
+        "as that member: POST /api/v1/automation/showcase_urgent_task_alert/toggle {\"enabled\": false} — expect 200; read the ledger row back (metadata_type 'flow', active false, and NO organization_id key on the row — the ledger carries no tenant column at all, #15024 / ADR-0131 D7); then re-enable ({\"enabled\": true}) to restore the fixture",
         "as the same member: POST /api/v1/actions/_activation/showcase_task/showcase_mark_done {\"enabled\": false} — expect 200 + the metadata_type 'action' row; re-enable to restore",
         "walled-posture legs: BLOCKED on stock fixtures (see knownGaps) — the group/isolated matrix (org admin with manage_metadata refused naming the posture and the per-artifact remedy; platform_admin POSITION admitted; no row on refusal) is pinned at unit level by automated.ref"
       ],
@@ -2152,9 +2152,9 @@
           "evidence": "the ledger reads + the invalid-body trace"
         },
         {
-          "clause": "the §5 gate is INERT on `single`, not satisfied: a caller holding manage_metadata but NOT the platform_admin POSITION succeeds at BOTH doors, and each write lands one install-level ledger row (organization_id NULL) — install-level and org-level are the same scope on one logical tenant (activation-gate.ts,141-147)",
+          "clause": "the §5 gate is INERT on `single`, not satisfied: a caller holding manage_metadata but NOT the platform_admin POSITION succeeds at BOTH doors, and each write lands one deployment-level ledger row — install-level and org-level are the same scope on one logical tenant (activation-gate.ts,141-147), and the ledger carries no tenant column to say otherwise",
           "oracle": "api",
-          "verify": "the scratch-set member's positions are proven server-side to exclude platform_admin (BUILTIN_IDENTITY_PLATFORM_ADMIN = 'platform_admin', packages/spec/src/identity/eval-user.zod.ts), then both toggles answer 200 and GET /api/v1/data/sys_metadata_activation shows the metadata_type 'flow' and 'action' rows with active false, organization_id NULL; re-enable restores active true",
+          "verify": "the scratch-set member's positions are proven server-side to exclude platform_admin (BUILTIN_IDENTITY_PLATFORM_ADMIN = 'platform_admin', packages/spec/src/identity/eval-user.zod.ts), then both toggles answer 200 and GET /api/v1/data/sys_metadata_activation shows the metadata_type 'flow' and 'action' rows with active false and no organization_id key at all; re-enable restores active true. ⛔ Do not score the tenant half from a VALUE read — a check of the shape `row.organization_id ?? null` is `null` for a column that does not exist, so it passes while measuring nothing; read the key set (platform-core.activation-ledger-row-contract owns that probe)",
           "evidence": "the position proof + both 200 traces + the ledger rows"
         },
         {
@@ -2195,8 +2195,8 @@
         "packages/runtime/src/domains/automation.ts#FLOW_ENABLEMENT_DENY_MESSAGE (FLOW_ENABLEMENT_DENY_MESSAGE), (isFlowActivationWrite), (gate ordering ahead of service probe and body checks)",
         "packages/runtime/src/domains/actions.ts (both tiers at the action door)",
         "packages/spec/src/security/tenancy-posture.ts#TenancyPostureSchema (TenancyPostureSchema — the variants source; postureEnforcesWall; the ADR-0105 D12 entitlement note)",
-        "docs/adr/0126-packaged-metadata-customization-model.md §5 (D3: install-level rows, operator-gated in multi-org postures)",
-        "#12438 (the sweep), #12159 (ADR-0126 flow legs), #10243 (the measured incident the gate makes durable), #12157 / #12160 (the two door cards)"
+        "docs/adr/0126-packaged-metadata-customization-model.md §5 (D3: install-level rows, operator-gated in multi-org postures) — ⚠️ the operator gate this item owns STANDS; only §5's separate 'the org column is reserved' bullet was withdrawn (ADR-0131 D7), which is why the ledger read-backs here name no organization_id",
+        "#12438 (the sweep), #12159 (ADR-0126 flow legs), #10243 (the measured incident the gate makes durable), #12157 / #12160 (the two door cards), #15154 (the ledger read-back detail re-grounded after #15024 dropped the tenant column — the gate itself and its pins are unchanged)"
       ],
       "history": [
         {
@@ -2204,6 +2204,12 @@
           "date": "2026-08-26",
           "change": "new — ADR-0126 §5 write authority had no checklist coverage. Authored with the stock-posture truth stated up front (the §5 gate is INERT on `single`; the D1 refusal is the manage_metadata tier) so a runner never scores the wrong gate, and with the group/isolated legs blocked(fixture) on the enterprise-posture gap (#9334 precedent) instead of faked. Variants pinned to TenancyPostureSchema (verified extractable by the validator's enumSource extractor)",
           "ref": "#12438"
+        },
+        {
+          "revision": 2,
+          "date": "2026-09-04",
+          "change": "read-back detail only: #15024 dropped sys_metadata_activation's reserved organization_id column, so the two ledger read-backs (step 7 and the inert-gate clause) asked the runner to see a column that is gone. They now read the row's KEY SET instead — a value check of the shape `row.organization_id ?? null` is `null` for a column that does not exist, so carrying the old spelling forward would have left a leg that passes while measuring nothing. ⚠️ The gate itself is UNCHANGED: ADR-0126 §5's operator-gate half stands and its unit pins pass unmodified; only §5's separate 'the org column is reserved' bullet was withdrawn (ADR-0131 D7). The source citation now says so, so the next reader does not infer the gate moved too",
+          "ref": "#15154"
         }
       ]
     },
