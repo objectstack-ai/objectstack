@@ -40,6 +40,56 @@ import { BusinessUnitGraphService } from './business-unit-graph.js';
  */
 const SYSTEM_CTX: ExecutionContext = { isSystem: true, positions: [], permissions: [] };
 
+/**
+ * [#15072] The `FieldSchema.name` machine-name grammar, as `packages/spec`
+ * spells it inline (`data/field.zod.ts`; `shared/identifiers.zod.ts` records
+ * that object and field names are bound there and by no exported schema). A
+ * `field` recipient's `recipient_id` is a field NAME and is held to it at the
+ * authoring seams that never run the spec parse — see
+ * {@link SharingRuleService.defineRule}.
+ */
+const FIELD_NAME_GRAMMAR = /^[a-z_][a-z0-9_]*$/;
+
+/**
+ * [#15072] The user ids a record's user-typed column names.
+ *
+ * Exactly the stored shapes a user-valued field has: one id (a scalar) or,
+ * with `multiple: true`, an array of ids — the drivers hydrate a multi-value
+ * column back to an array before a row reaches an `engine.find` caller, so a
+ * string here is one id, never JSON to be parsed (a driver handing back an
+ * unhydrated column would be the driver's defect, and a parse here would
+ * fossilise it into a second contract — AGENTS.md PD #12). Everything else —
+ * `null`, an empty string, an empty array, an object — names NOBODY: fail-
+ * closed, executor-contract point 3 (never a match-all principal, never a
+ * fallback to the owner). Duplicates collapse: a column naming one user twice
+ * grants once.
+ */
+function usersNamedBy(raw: unknown): string[] {
+  const out = new Set<string>();
+  const add = (v: unknown): void => {
+    if (typeof v !== 'string' && typeof v !== 'number') return;
+    const id = String(v).trim();
+    if (id) out.add(id);
+  };
+  if (Array.isArray(raw)) for (const v of raw) add(v);
+  else add(raw);
+  return [...out];
+}
+
+/**
+ * [#15072] Does this declared field hold USERS? The two spellings the spec
+ * has for a user-valued column: the `user` type (its target is fixed to
+ * `sys_user` by the type — `Field.user()` takes no target), and a `lookup` /
+ * `master_detail` whose `reference` is `sys_user` (the same pair
+ * `defaultValue: 'current_user'` is accepted on, `data/field.zod.ts`).
+ */
+function fieldHoldsUsers(def: unknown): boolean {
+  if (!def || typeof def !== 'object') return false;
+  const d = def as { type?: unknown; reference?: unknown };
+  if (d.type === 'user') return true;
+  return (d.type === 'lookup' || d.type === 'master_detail') && d.reference === 'sys_user';
+}
+
 function uid(prefix: string): string {
   const g: any = globalThis as any;
   if (g.crypto?.randomUUID) return `${prefix}_${g.crypto.randomUUID()}`;
@@ -113,6 +163,25 @@ type RuleEvaluationPass = {
   positionActive?: Map<string, boolean>;
 };
 
+/** [#15072] One grant a rule DESIRES on a whole-rule pass: a (record, user) pair. */
+interface DesiredGrant {
+  record_id: string;
+  recipient_id: string;
+}
+
+/**
+ * [#15072] Everything a whole-rule pass wants to exist, keyed
+ * `${record_id}::${recipient_id}`, plus the two counts the evaluation result
+ * reports. Built per recipient kind by {@link SharingRuleService.desiredGrantsForRule}
+ * so that `reconcile` diffs pairs without knowing whether the recipient was
+ * resolved once per rule or once per record.
+ */
+interface DesiredGrantSet {
+  desired: Map<string, DesiredGrant>;
+  matchedRecords: number;
+  expandedUsers: number;
+}
+
 /**
  * Default {@link ISharingRuleService} implementation.
  *
@@ -142,6 +211,13 @@ export class SharingRuleService implements ISharingRuleService {
    * deployment's log.
    */
   private readonly emptyUnitExpansionSeen = new Set<string>();
+  /**
+   * [#15072] `field` rules already warned about this process, keyed by cause
+   * — the same once-per-rule dedup {@link inertRuleSeen} and
+   * {@link emptyUnitExpansionSeen} carry, for the same reason: the per-record
+   * path runs on every write of the shared object.
+   */
+  private readonly fieldRuleWarned = new Set<string>();
 
   constructor(opts: SharingRuleServiceOptions) {
     this.engine = opts.engine;
@@ -407,6 +483,21 @@ export class SharingRuleService implements ISharingRuleService {
     if (!input.object) throw new Error('VALIDATION_FAILED: object is required');
     if (!input.recipientType) throw new Error('VALIDATION_FAILED: recipientType is required');
     if (!input.recipientId) throw new Error('VALIDATION_FAILED: recipientId is required');
+    // [#15072] A `field` recipient's `recipientId` is a FIELD NAME, not a
+    // principal id, and is held to the grammar `sharedWith.value` meets at
+    // parse (`ShareRecipientType` `field`, `sharing.zod.ts`): the
+    // `FieldSchema.name` machine-name shape. Refused HERE as well because this
+    // entry — the REST `POST /sharing/rules` body and programmatic authoring —
+    // never runs the spec schema, so without it a dotted path
+    // (`owner.manager_id`: a graph walk spelled as a value, the shape the
+    // ruling's ⛔ on a `manager` member refuses) would reach the executor and
+    // share with nobody in silence.
+    if (input.recipientType === 'field' && !FIELD_NAME_GRAMMAR.test(String(input.recipientId))) {
+      throw new Error(
+        "VALIDATION_FAILED: recipientId must name a user-typed field on the object when recipientType is 'field' " +
+          `(got ${JSON.stringify(input.recipientId)}) — a snake_case field name, not a principal id and not a dotted path`,
+      );
+    }
     // [#3896] `criteria` is as required as the fields above — and for a
     // sharper reason. Omitting `recipientId` yields a rule that shares with
     // nobody; omitting `criteria` used to yield one that shares EVERYTHING
@@ -672,9 +763,14 @@ export class SharingRuleService implements ISharingRuleService {
       const revoked = await this.purgeRuleGrants(rule.id);
       return { ruleId: rule.id, matchedRecords: 0, expandedUsers: 0, grantsCreated: 0, grantsUpdated: 0, grantsRevoked: revoked };
     }
-    const matches = await this.findMatchingRecords(rule);
-    const users = await this.expandRecipient(rule);
-    return this.reconcile(rule, matches, users);
+    // [#15072] One whole-rule pass whatever the recipient kind: the desired
+    // set is derived per kind ({@link desiredGrantsForRule}) and the diff is
+    // shared. This is the primitive behind the background re-grant
+    // (`rule-hooks.ts` `revokeThenQueueRegrant` → `evaluateAllRulesForObject`),
+    // the `kernel:bootstrapped` backfill and the REST evaluate endpoint — so a
+    // `field` rule is either right here or wrong after every unbounded bulk
+    // write and every restart.
+    return this.reconcile(rule, await this.desiredGrantsForRule(rule));
   }
 
   /**
@@ -767,9 +863,11 @@ export class SharingRuleService implements ISharingRuleService {
     const pass: RuleEvaluationPass = {};
     for (const rule of rules) {
       // An inactive rule desires nothing; skip the criteria query entirely.
-      const match = rule.active ? await this.recordMatches(rule, recordId) : false;
-      const users = match ? await this.expandRecipient(rule, pass) : [];
-      results.push(await this.reconcileForRecord(rule, recordId, match, users));
+      // [#15072] The match read answers with the ROW, not a boolean: for a
+      // `field` rule the recipients are on it, read by the per-record switch.
+      const matched = rule.active ? await this.matchRecord(rule, recordId) : null;
+      const users = matched ? await this.expandRecipientForRecord(rule, matched, pass) : [];
+      results.push(await this.reconcileForRecord(rule, recordId, matched !== null, users));
     }
     return results;
   }
@@ -911,6 +1009,17 @@ export class SharingRuleService implements ISharingRuleService {
    */
   async revokeRuleGrantsForRetiredRecipients(rule: SharingRuleRow): Promise<number> {
     if (!rule?.id) return 0;
+    // [#15072] A `field` rule has NO rule-wide recipient set to diff against:
+    // its recipients live on each matched record and are re-derived by that
+    // record's own write ({@link evaluateAllForRecord}) and by the whole-rule
+    // pass ({@link evaluateRule} → {@link desiredGrantsForRule}). Expanding it
+    // "rule-wide" would answer nobody, and this method would then delete every
+    // grant the rule still deserves — a mass revocation, on the recipient
+    // axis, of grants that are all still correct. Its one production caller
+    // (`bu-tree-recompute.ts`) filters on `BU_TREE_RECIPIENT_TYPES` and never
+    // hands a `field` rule in; this guard is what makes that a contract rather
+    // than a coincidence, and `field-recipient.test.ts` pins both halves.
+    if (rule.recipient_type === 'field') return 0;
     const existing = await this.engine.find('sys_record_share', {
       where: { source: 'rule', source_id: rule.id },
       fields: ['id', 'recipient_id'],
@@ -1038,30 +1147,51 @@ export class SharingRuleService implements ISharingRuleService {
   }
 
   private async findMatchingRecords(rule: SharingRuleRow): Promise<string[]> {
+    const rows = await this.findMatchingRows(rule, ['id']);
+    return rows.map((r: any) => String(r.id)).filter(Boolean);
+  }
+
+  /**
+   * [#15072] The rule's matched ROWS with `fields` projected — `['id']` for
+   * every rule-wide recipient, `['id', <the user column>]` for a `field`
+   * rule, whose recipients are read off these very rows
+   * ({@link desiredGrantsForRule}).
+   */
+  private async findMatchingRows(rule: SharingRuleRow, fields: string[]): Promise<Record<string, unknown>[]> {
     if (this.isInertMatchAll(rule)) return [];
     const filter = (rule.criteria ?? {}) as any;
     try {
       const rows = await this.engine.find(rule.object_name, {
         filter,
-        fields: ['id'],
+        fields,
         limit: 5000,
         // [#10119] The rule's own organization, when it has one.
         context: this.criteriaContext(rule),
       });
-      return Array.isArray(rows) ? rows.map((r: any) => String(r.id)).filter(Boolean) : [];
+      return Array.isArray(rows) ? rows : [];
     } catch (err: any) {
       this.logger?.warn?.('[sharing-rule] criteria query failed', { rule: rule.name, error: err?.message });
       return [];
     }
   }
 
-  private async recordMatches(rule: SharingRuleRow, recordId: string): Promise<boolean> {
-    if (this.isInertMatchAll(rule)) return false;
+  /**
+   * The per-record half of the criteria read: the matched ROW, or `null`.
+   *
+   * [#15072] Was `recordMatches(): boolean`. It answers with the row because
+   * a `field` rule's recipients are ON it — the match read projects that
+   * column beside `id`, so one query answers "does this record match" and
+   * "whom does it name" together and the two can never be read from two
+   * versions of the row. Every other kind still projects `id` alone.
+   */
+  private async matchRecord(rule: SharingRuleRow, recordId: string): Promise<Record<string, unknown> | null> {
+    if (this.isInertMatchAll(rule)) return null;
     const filter = { ...((rule.criteria ?? {}) as any), id: recordId };
+    const fields = rule.recipient_type === 'field' ? ['id', rule.recipient_id] : ['id'];
     try {
       const rows = await this.engine.find(rule.object_name, {
         filter,
-        fields: ['id'],
+        fields,
         limit: 1,
         // [#10119] Same scope as the whole-rule sweep — see
         // {@link criteriaContext}. A per-record hook pass that stayed
@@ -1069,13 +1199,162 @@ export class SharingRuleService implements ISharingRuleService {
         // rows the sweep no longer creates.
         context: this.criteriaContext(rule),
       });
-      return Array.isArray(rows) && rows.length > 0;
-    } catch {
-      return false;
+      return Array.isArray(rows) && rows[0] ? (rows[0] as Record<string, unknown>) : null;
+    } catch (err: any) {
+      // [#15072] For a `field` rule the read carries the recipient column, so
+      // a failure here is most likely the rule naming a column the object
+      // does not have (`INVALID_FIELD`) — an authoring defect that must be
+      // loud (ADR-0078), once per rule. The verdict stays fail-closed: no
+      // match, no grant, and the record's stale grants are revoked.
+      if (rule.recipient_type === 'field') this.warnFieldRuleOnce(rule, 'read-failed', err?.message);
+      return null;
     }
   }
 
+  /**
+   * [#15072] The recipients of ONE matched record — the per-record switch.
+   *
+   * `field` is the only member expanded here (maintainer ruling 2026-09-02 on
+   * #14103, B: "`expandRecipient` becomes per-record for that member only"):
+   * the user or users the row's named column holds. Every other member is the
+   * rule-wide expansion, memoised across the pass exactly as before
+   * ({@link expandRecipient}).
+   */
+  private async expandRecipientForRecord(
+    rule: SharingRuleRow,
+    row: Record<string, unknown>,
+    pass: RuleEvaluationPass,
+  ): Promise<string[]> {
+    if (rule.recipient_type !== 'field') return this.expandRecipient(rule, pass);
+    return this.recipientsNamedOnRecord(rule, row);
+  }
+
+  /**
+   * [#15072] Whom `row`'s recipient column names, fail-closed
+   * ({@link usersNamedBy}) — once the column has been judged usable
+   * ({@link fieldRecipientColumnIsUsable}).
+   */
+  private recipientsNamedOnRecord(rule: SharingRuleRow, row: Record<string, unknown>): string[] {
+    if (!this.fieldRecipientColumnIsUsable(rule)) return [];
+    return usersNamedBy(row[rule.recipient_id]);
+  }
+
+  /**
+   * [#15072] Does the object DECLARE the column a `field` rule names as one
+   * that holds users? Judged from the registry on every call — a metadata
+   * reload may add the column, and a verdict cached at boot would outlive it
+   * (AGENTS.md "Startup registry reads") — and warned about once per rule.
+   *
+   * Three answers:
+   *  - the engine cannot say (no `getSchema`, or an object it does not
+   *    resolve) → the column is READ. Absence of a schema is absence of
+   *    evidence, and the declared semantics are the column's value.
+   *  - declared, and user-typed ({@link fieldHoldsUsers}) → read.
+   *  - declared but absent, or of another type → NOBODY, and one warn naming
+   *    the rule and the column. A rule that grants nobody in silence is the
+   *    authoring trap ADR-0078 names, and a `text` column read as user ids
+   *    would grant to whatever strings the records happen to hold.
+   */
+  private fieldRecipientColumnIsUsable(rule: SharingRuleRow): boolean {
+    if (typeof this.engine.getSchema !== 'function') return true;
+    const schema = this.engine.getSchema(rule.object_name);
+    const fields = schema?.fields;
+    if (!fields || typeof fields !== 'object') return true;
+    const def = (fields as Record<string, unknown>)[rule.recipient_id];
+    if (fieldHoldsUsers(def)) return true;
+    this.warnFieldRuleOnce(rule, def ? 'not-user-typed' : 'no-such-field');
+    return false;
+  }
+
+  /**
+   * [#15072] An active `field` rule whose recipient column cannot be read as
+   * users says so — once per rule per cause ({@link fieldRuleWarned}). An
+   * EMPTY column is deliberately not a cause: an unassigned record sharing
+   * with nobody is the declared semantics, not a misconfiguration.
+   */
+  private warnFieldRuleOnce(
+    rule: SharingRuleRow,
+    cause: 'no-such-field' | 'not-user-typed' | 'read-failed',
+    detail?: string,
+  ): void {
+    const key = `${String(rule.id ?? rule.name)}::${cause}`;
+    if (this.fieldRuleWarned.has(key)) return;
+    this.fieldRuleWarned.add(key);
+    this.logger?.warn?.(
+      '[sharing-rule] active field-recipient rule grants NOBODY — its recipient column cannot be read as ' +
+        'users (logged once per rule per process). The rule must name a field of the shared object that ' +
+        'exists and holds users (a user field, or a lookup to sys_user); fix the field name or set active: false',
+      {
+        rule: rule.name ?? rule.id,
+        object: rule.object_name,
+        recipientType: rule.recipient_type,
+        field: rule.recipient_id,
+        cause,
+        ...(detail ? { error: detail } : {}),
+      },
+    );
+  }
+
+  /**
+   * [#15072] Every grant a whole-rule pass wants to exist, derived per
+   * recipient kind — the one place the rule-wide and the per-record members
+   * meet, so {@link reconcile} never has to know which it is diffing.
+   *
+   * Rule-wide members: the matched ids × ONE recipient expansion — the
+   * cartesian product `evaluateRule` always materialised, and a `position`
+   * recipient still expands exactly once per rule here (the ruling's explicit
+   * pin). `field`: the matched ROWS, each contributing a (record, user) pair
+   * for every user its own column names — no product, because there is no
+   * rule-wide recipient list to multiply by. `expandedUsers` for that kind is
+   * the number of DISTINCT users across the matched records.
+   */
+  private async desiredGrantsForRule(rule: SharingRuleRow): Promise<DesiredGrantSet> {
+    const desired = new Map<string, DesiredGrant>();
+    if (rule.recipient_type === 'field') {
+      const rows = (await this.findMatchingRows(rule, ['id', rule.recipient_id]))
+        .filter((r) => r.id != null && String(r.id) !== '');
+      const users = new Set<string>();
+      for (const row of rows) {
+        const recordId = String(row.id);
+        for (const userId of this.recipientsNamedOnRecord(rule, row)) {
+          desired.set(`${recordId}::${userId}`, { record_id: recordId, recipient_id: userId });
+          users.add(userId);
+        }
+      }
+      return { desired, matchedRecords: rows.length, expandedUsers: users.size };
+    }
+    const matchedIds = await this.findMatchingRecords(rule);
+    const users = await this.expandRecipient(rule);
+    for (const recordId of matchedIds) {
+      for (const userId of users) desired.set(`${recordId}::${userId}`, { record_id: recordId, recipient_id: userId });
+    }
+    return { desired, matchedRecords: matchedIds.length, expandedUsers: users.length };
+  }
+
+  /**
+   * The RULE-WIDE recipient expansion — "the one switch that decides"
+   * (`bu-tree-recompute.ts`), answered once per rule per pass.
+   *
+   * [#15072] `field` is deliberately NOT a case here, and asking for it is an
+   * error rather than an empty answer. A `field` recipient (maintainer ruling
+   * 2026-09-02 on #14103, B) is the user or users a column on EACH MATCHED
+   * RECORD names, so it has no rule-wide expansion at all — and answering `[]`
+   * (what the `queue` fallthrough below would have done) is precisely how a
+   * rule-wide caller turns "per record" into "nobody": `reconcile` would then
+   * revoke every grant, and `revokeRuleGrantsForRetiredRecipients` would
+   * retire every recipient. The three callers each decide explicitly: a
+   * caller with a record in hand goes through {@link expandRecipientForRecord};
+   * the whole-rule pass derives per-record pairs in {@link desiredGrantsForRule};
+   * the recipient-axis revoke declines `field` at its door. Reaching this
+   * throw is a programming error, and it is loud so that it stays one.
+   */
   private async expandRecipient(rule: SharingRuleRow, pass: RuleEvaluationPass = {}): Promise<string[]> {
+    if (rule.recipient_type === 'field') {
+      throw new Error(
+        `[sharing-rule] rule '${rule.name ?? rule.id}' has a field recipient, which expands per RECORD — ` +
+          'there is no rule-wide expansion to answer (#15072)',
+      );
+    }
     const team = new TeamGraphService({
       engine: this.engine,
       organizationId: rule.organization_id ?? null,
@@ -1166,7 +1445,9 @@ export class SharingRuleService implements ISharingRuleService {
    * reasons for an empty set that this issue did not measure. ⛔ Do not widen
    * this into "warn whenever any recipient expands to zero" without measuring
    * those — `queue` expands to `[]` by construction today, so a blanket warn
-   * would fire on every pass of every queue rule.
+   * would fire on every pass of every queue rule, and a `field` rule's empty
+   * column is a legitimate state (an unassigned record shares with nobody,
+   * #15072), not a misconfiguration.
    *
    * Named completely: the rule, the object, the recipient kind, the unit, the
    * organization, and the two causes worth checking first. Once per rule per
@@ -1299,21 +1580,24 @@ export class SharingRuleService implements ISharingRuleService {
     }
   }
 
-  private async reconcile(
-    rule: SharingRuleRow,
-    matchedIds: string[],
-    users: string[],
-  ): Promise<SharingRuleEvaluationResult> {
+  /**
+   * Diff a whole-rule pass's desired pairs against the rule's materialised
+   * grants: upsert what is wanted, revoke the remainder.
+   *
+   * [#15072] Takes the pairs ({@link DesiredGrantSet}) rather than
+   * `(matchedIds, users)`: the product of those two is what a rule-wide
+   * recipient wants, and it is built in {@link desiredGrantsForRule} — where
+   * a `field` rule builds its per-record pairs instead. The diff below is
+   * unchanged.
+   */
+  private async reconcile(rule: SharingRuleRow, want: DesiredGrantSet): Promise<SharingRuleEvaluationResult> {
     const existing = await this.engine.find('sys_record_share', {
       where: { source: 'rule', source_id: rule.id },
       fields: ['id', 'record_id', 'recipient_id', 'access_level'],
       limit: 100000,
       context: SYSTEM_CTX,
     });
-    const desired = new Map<string, { record_id: string; recipient_id: string }>();
-    for (const rid of matchedIds) {
-      for (const uId of users) desired.set(`${rid}::${uId}`, { record_id: rid, recipient_id: uId });
-    }
+    const desired = want.desired;
     const existingMap = new Map<string, any>();
     for (const row of (existing ?? [])) existingMap.set(`${row.record_id}::${row.recipient_id}`, row);
 
@@ -1367,8 +1651,8 @@ export class SharingRuleService implements ISharingRuleService {
 
     return {
       ruleId: rule.id,
-      matchedRecords: matchedIds.length,
-      expandedUsers: users.length,
+      matchedRecords: want.matchedRecords,
+      expandedUsers: want.expandedUsers,
       grantsCreated: created,
       grantsUpdated: updated,
       grantsRevoked: revoked,
