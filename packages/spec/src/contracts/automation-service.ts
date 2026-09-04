@@ -53,12 +53,11 @@ export interface AutomationContext {
      * nothing both arrive as `RECORD_NOT_FOUND`, deliberately, and the key does
      * not pretend to separate them.
      *
-     * Declared, NOT YET POPULATED on the flow face: the handler face carries it
-     * today, but `dispatchFlowAction` still hands `automation.execute` a context
-     * without it, so until the runtime half lands a flow run never sees this key
-     * and a guard on it is inert (never `true`), never wrong. Additive — no
-     * existing key changes value. Callers other than the action dispatcher do
-     * NOT set this.
+     * Populated on the flow face since #15168: `dispatchFlowAction` takes the
+     * producer's load outcome and spreads the signal into the context it hands
+     * `automation.execute`, on both doors, so a flow run receives this key
+     * exactly when a handler would. Additive — no existing key changes value.
+     * Callers other than the action dispatcher do NOT set this.
      */
     recordLoadDenied?: true;
     /**

@@ -456,7 +456,11 @@ describe("#9585 — the failed run's artefacts ride BOTH doors' 400 details", ()
         let thrown: unknown;
         try {
             await dispatchFlowAction(deps, {} as any, flowAction, {
-                objectName: 'crm_lead', record: {}, params: {}, ec: {}, envId: 'platform',
+                // [#15168] The wiring takes the subject LOAD outcome, not a bare
+                // record — a record-less dispatch is `recordLoadDenied: false`,
+                // which is the same run this assertion always made.
+                objectName: 'crm_lead', subject: { record: {}, recordLoadDenied: false },
+                params: {}, ec: {}, envId: 'platform',
             });
         } catch (e) {
             thrown = e;

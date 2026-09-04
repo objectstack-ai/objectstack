@@ -44,6 +44,14 @@
  *     dispatcher sets but the sandbox never marshals would read as `undefined`
  *     inside every body, re-manufacturing the always-false guard. Pinned by
  *     running a real QuickJS body.
+ *  5. **[#15168] The FLOW face carries it too, on both doors.** #14244 declared
+ *     `AutomationContext.recordLoadDenied` and nothing populated it: a
+ *     `type: 'flow'` action reached `automation.execute` with the stamped
+ *     `record.id` and no verdict, so a `runAs: 'system'` flow guarding on the
+ *     declared key was inert — never `true`, never wrong, and indistinguishable
+ *     from a flow whose caller could read the row. The last describe blocks
+ *     read the context the automation service is actually handed, through BOTH
+ *     doors, and pin that the two agree.
  *
  * ## The RLS double is faithful on the one point that matters
  *
@@ -82,7 +90,23 @@ const ACTION = {
     target: 'close_case',
     ai: { exposed: true, description: 'Close a case.' },
 };
-const OBJECT_DEF = { name: 'crm_case', actions: [ACTION] };
+/**
+ * [#15168] The same subject row, reached through a `type: 'flow'` action — the
+ * FLOW face of the signal. Declared on the same object as the script action so
+ * both faces run against the ONE row-scoped engine double below: a rig that
+ * gave the flow tests their own, more permissive read path could report a
+ * populated key that production never populates.
+ */
+const FLOW_NAME = 'crm_case_escalate_wizard';
+const FLOW_ACTION = {
+    name: 'escalate_case',
+    label: 'Escalate',
+    objectName: 'crm_case',
+    type: 'flow',
+    target: FLOW_NAME,
+    ai: { exposed: true, description: 'Escalate a case.' },
+};
+const OBJECT_DEF = { name: 'crm_case', actions: [ACTION, FLOW_ACTION] };
 
 /** The acting principal, as `resolveExecutionContext` builds one. */
 function ec(userId: string) {
@@ -309,5 +333,179 @@ describe('#14143 — the signal crosses into a sandboxed action body', () => {
 
         expect(out.denied).toBe(false);
         expect(out.id).toBe(RECORD_ID);
+    });
+});
+
+/**
+ * [#15168] An automation service double that RECORDS the context it is handed.
+ * `getFlow` resolves the one held flow so the #9378 not-found row (404) never
+ * fires; `execute` succeeds, because what is under test is the context that
+ * reaches the engine, not the engine's verdict.
+ */
+function makeAutomation() {
+    const execute = vi.fn(async (_flow: string, _context?: any) => ({ success: true, output: {} }));
+    const getFlow = vi.fn(async (name: string) => (name === FLOW_NAME ? { name } : null));
+    return { execute, getFlow };
+}
+
+/** The context `automation.execute` was handed on its first (only) call. */
+function flowContextOf(automation: { execute: any }) {
+    return automation.execute.mock.calls[0]?.[1];
+}
+
+/** REST — `POST /actions/crm_case/escalate_case/case_1` with a flow action. */
+async function dispatchRestFlow(userId: string, ql: any, path = `/crm_case/escalate_case/${RECORD_ID}`) {
+    const automation = makeAutomation();
+    const metadata: any = {
+        load: vi.fn(async () => null),
+        loadDiagnosed: vi.fn(async () => ({ data: null, degraded: false, errors: [] })),
+        listObjects: vi.fn(async () => [OBJECT_DEF]),
+        getObject: vi.fn(async (n: string) => (n === OBJECT_DEF.name ? OBJECT_DEF : undefined)),
+    };
+    const resolve = (n: string) =>
+        n === 'objectql' || n === 'data' ? ql
+        : n === 'metadata' ? metadata
+        : n === 'automation' ? automation
+        : null;
+    const kernel: any = { getService: resolve, getServiceAsync: async (n: string) => resolve(n), context: { getService: resolve } };
+    const context: any = { request: {}, environmentId: 'platform', executionContext: ec(userId) };
+    const res: any = await (new HttpDispatcher(kernel) as any).handleActions(path, 'POST', {}, context);
+    return { response: res.response, automation, flowCtx: flowContextOf(automation) };
+}
+
+/** MCP — `run_action` on the same flow action, through the REAL `callData`. */
+async function dispatchMcpFlow(userId: string, ql: any, input: Record<string, unknown> = { recordId: RECORD_ID }) {
+    const automation = makeAutomation();
+    const deps: any = {
+        resolveService: async (_ctx: any, name: string) => (name === 'automation' ? automation : undefined),
+        getObjectQL: async () => ql,
+    };
+    const requestContext: any = { request: {}, environmentId: 'platform' };
+    const caller = ec(userId);
+    await invokeBusinessAction(deps, requestContext, FLOW_ACTION.name, input as any, {
+        driver: undefined,
+        envId: 'platform',
+        ec: caller,
+        getMeta: () => ({ listObjects: async () => [OBJECT_DEF] }),
+        callData: (action, params, dataDriver, scopeId, execCtx) =>
+            callData(deps, requestContext, action, params, dataDriver, scopeId, execCtx),
+    });
+    return { automation, flowCtx: flowContextOf(automation) };
+}
+
+describe('[#15168] the FLOW face receives the signal — REST /actions', () => {
+    it('a caller who CANNOT read the row starts the flow with ctx.recordLoadDenied === true', async () => {
+        const ql = makeQl();
+        const { automation, flowCtx } = await dispatchRestFlow(STRANGER, ql);
+
+        expect(automation.execute).toHaveBeenCalledTimes(1);
+        expect(automation.execute.mock.calls[0][0]).toBe(FLOW_NAME);
+        expect(flowCtx).toBeDefined();
+        // The contract's own predicate, verbatim (`AutomationContext`): a flow
+        // reads `recordLoadDenied === true`, never a truthiness of `false`.
+        expect(flowCtx.recordLoadDenied).toBe(true);
+
+        // ⛔ Sibling of `record`, never a key ON it — a flow node reading
+        // `{{record.recordLoadDenied}}` must find nothing, or the signal would
+        // arrive as a phantom field of the subject row.
+        expect('recordLoadDenied' in flowCtx.record).toBe(false);
+
+        // The stamp survives here exactly as it does on the handler face — it
+        // is why `record.id` cannot be the authorization predicate.
+        expect(flowCtx.record.id).toBe(RECORD_ID);
+        expect(flowCtx.record.status).toBeUndefined();
+        expect(flowCtx.record.owner_id).toBeUndefined();
+        // The rest of the envelope is untouched by this card.
+        expect(flowCtx.object).toBe(OBJECT_DEF.name);
+        expect(flowCtx.userId).toBe(STRANGER);
+    });
+
+    it('the row OWNER starts the flow with the key ABSENT — not `false`', async () => {
+        const ql = makeQl();
+        const { flowCtx } = await dispatchRestFlow(OWNER, ql);
+
+        expect(flowCtx.record).toMatchObject({ id: RECORD_ID, status: 'open', owner_id: OWNER });
+        // The assertion that catches the most likely wrong implementation —
+        // spreading `{ recordLoadDenied: false }`. Its firing positive control
+        // is the case above: same rig, same expectation shape, reports `true`.
+        expect('recordLoadDenied' in flowCtx).toBe(false);
+        expect(flowCtx.recordLoadDenied).toBeUndefined();
+    });
+
+    it('a record-less flow invocation attempts no load and carries no flag', async () => {
+        const ql = makeQl();
+        const { flowCtx } = await dispatchRestFlow(STRANGER, ql, '/crm_case/escalate_case');
+
+        expect(flowCtx.record).toEqual({});
+        expect('recordLoadDenied' in flowCtx).toBe(false);
+        expect(ql.find.mock.calls.filter((c: any[]) => c[0] === OBJECT_DEF.name)).toHaveLength(0);
+    });
+});
+
+describe('[#15168] the FLOW face receives the signal — MCP run_action', () => {
+    it('a caller who CANNOT read the row starts the flow with ctx.recordLoadDenied === true', async () => {
+        const ql = makeQl();
+        const { automation, flowCtx } = await dispatchMcpFlow(STRANGER, ql);
+
+        expect(automation.execute).toHaveBeenCalledTimes(1);
+        expect(flowCtx.recordLoadDenied).toBe(true);
+        expect('recordLoadDenied' in flowCtx.record).toBe(false);
+        expect(flowCtx.record.id).toBe(RECORD_ID);   // stamp preserved
+        expect(flowCtx.record.status).toBeUndefined();
+    });
+
+    it('the row OWNER starts the flow with the key ABSENT — not `false`', async () => {
+        const ql = makeQl();
+        const { flowCtx } = await dispatchMcpFlow(OWNER, ql);
+
+        expect(flowCtx.record).toMatchObject({ id: RECORD_ID, status: 'open' });
+        expect('recordLoadDenied' in flowCtx).toBe(false);
+        expect(flowCtx.recordLoadDenied).toBeUndefined();
+    });
+
+    it('a record-less flow invocation attempts no load and carries no flag', async () => {
+        const ql = makeQl();
+        const { flowCtx } = await dispatchMcpFlow(STRANGER, ql, {});
+
+        expect(flowCtx.record).toEqual({});
+        expect('recordLoadDenied' in flowCtx).toBe(false);
+    });
+});
+
+/**
+ * [#15168] The convergence itself. A per-door assertion is satisfied by two
+ * copies of a rule, and two copies drifting apart is the defect #14143 was
+ * filed for and the reason this card had to move both doors in one stroke — so
+ * the SAME caller against the SAME row is driven through both doors and the
+ * signal is compared as a set.
+ */
+describe('[#15168] the two flow doors agree — the same caller, the same row, the same signal', () => {
+    it('both doors deny for the stranger and both stay silent for the owner', async () => {
+        const deniedRest = (await dispatchRestFlow(STRANGER, makeQl())).flowCtx;
+        const deniedMcp = (await dispatchMcpFlow(STRANGER, makeQl())).flowCtx;
+        const okRest = (await dispatchRestFlow(OWNER, makeQl())).flowCtx;
+        const okMcp = (await dispatchMcpFlow(OWNER, makeQl())).flowCtx;
+
+        // Read as a SET: a collapse to one answer on both doors reddens here
+        // whatever that one answer is.
+        expect([
+            deniedRest.recordLoadDenied,
+            deniedMcp.recordLoadDenied,
+            okRest.recordLoadDenied,
+            okMcp.recordLoadDenied,
+        ]).toEqual([true, true, undefined, undefined]);
+
+        expect([
+            'recordLoadDenied' in deniedRest,
+            'recordLoadDenied' in deniedMcp,
+            'recordLoadDenied' in okRest,
+            'recordLoadDenied' in okMcp,
+        ]).toEqual([true, true, false, false]);
+
+        // And the stamp is present on all four, which is what makes the flag —
+        // not `record.id` — the only usable predicate on either door.
+        expect([
+            deniedRest.record.id, deniedMcp.record.id, okRest.record.id, okMcp.record.id,
+        ]).toEqual([RECORD_ID, RECORD_ID, RECORD_ID, RECORD_ID]);
     });
 });
