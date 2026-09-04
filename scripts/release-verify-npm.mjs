@@ -110,6 +110,9 @@
  * dispatch-gates: no-path-population -- the self-test drives synthetic package maps and a stub registry; the live workspace read and the network read both belong to the release run, which no pull request schedules
  */
 
+import { appendFileSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { isEntrypoint } from './invoked-as.mjs';
 import { listWorkspacePackages } from './release-github-releases.mjs';
 
@@ -140,11 +143,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '6. Targets are derived, and an empty derivation is refused': 7,
   '7. The failure text names what is absent, and only that': 6,
   '8. The registry probe: present, absent, and unreadable': 6,
+  '9. The job summary is written SYNCHRONOUSLY, before process.exit': 4,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 8;
+const SELF_TEST_BATTERY_FLOOR = 9;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -618,14 +622,18 @@ export async function main({ argv = process.argv.slice(2), env = process.env } =
   return 0;
 }
 
-/** Best-effort append to the job summary; never the reason a release fails. */
+/**
+ * Best-effort append to the job summary; never the reason a release fails.
+ *
+ * ⚠️ SYNCHRONOUS on purpose. A `import('node:fs').then(...)` here is a floating
+ * promise, and the caller's `process.exit(await main())` discards pending
+ * microtasks — so the lazy form wrote the summary on NEITHER path while
+ * reading, in every review, exactly like one that did.
+ */
 function appendStepSummary(env, lines) {
   if (!env.GITHUB_STEP_SUMMARY) return;
   try {
-    // Imported lazily so `--self-test` and `--dry-run` need no fs at all.
-    import('node:fs').then(({ appendFileSync }) => {
-      appendFileSync(env.GITHUB_STEP_SUMMARY, `${lines.join('\n')}\n`);
-    }).catch(() => {});
+    appendFileSync(env.GITHUB_STEP_SUMMARY, `${lines.join('\n')}\n`);
   } catch {
     /* a summary that cannot be written is not a publish failure */
   }
@@ -855,9 +863,9 @@ export async function selfTest() {
       checked: 69,
     };
     const text = formatFailure(result);
-    t('it names the absent package', text.includes('@objectstack/runtime@17.3.0'), text.split('\n')[0].slice(0, 80));
+    t('it names the absent package', text.includes('@objectstack/runtime@17.3.0'), text.split('\n')[0].slice(9, 80));
     t('it does NOT name a package that was fine', !text.includes('@objectstack/cli'), 'no cli in the text');
-    t('it says how many of how many', text.includes('1 of 69'), text.split('\n')[0].slice(0, 80));
+    t('it says how many of how many', text.includes('1 of 69'), text.split('\n')[0].slice(9, 80));
     t('it points at the repair channel the maintainer actually has', text.includes('force: true'), 'force mentioned');
     t('the annotation is a single line', text.split('\n')[0].startsWith('::error::') && !text.split('\n')[1].startsWith('::'), 'one-line annotation');
     t(
@@ -894,6 +902,38 @@ export async function selfTest() {
       threw = err instanceof RegistryUnreadable;
     }
     t('a 5xx THROWS rather than answering "absent"', threw, 'RegistryUnreadable');
+  }
+
+  // ── 9. The job summary ────────────────────────────────────────────────────
+  battery('9. The job summary is written SYNCHRONOUSLY, before process.exit');
+  {
+    // This battery exists for a bug that was live in this file: the append was
+    // `import('node:fs').then(...)`, a floating promise, and the caller's
+    // `process.exit(await main())` discards pending microtasks. It wrote the
+    // summary on NEITHER path while reading exactly like one that did — and a
+    // deferred write cannot be told from a working one by inspection.
+    const dir = mkdtempSync(join(tmpdir(), 'release-verify-npm-'));
+    try {
+      const file = join(dir, 'summary.md');
+      appendStepSummary({ GITHUB_STEP_SUMMARY: file }, ['### line one', 'line two']);
+      // Read IMMEDIATELY, with no await in between: a deferred write fails here.
+      const written = readFileSync(file, 'utf8');
+      t('the summary is on disk the instant the call returns', written.includes('### line one'), JSON.stringify(written));
+      t('every line is written, not just the first', written.includes('line two'), JSON.stringify(written));
+
+      appendStepSummary({ GITHUB_STEP_SUMMARY: file }, ['appended']);
+      t('a second call APPENDS rather than replacing', readFileSync(file, 'utf8').includes('### line one'), 'both blocks present');
+
+      let threw = false;
+      try {
+        appendStepSummary({ GITHUB_STEP_SUMMARY: join(dir, 'no', 'such', 'dir', 's.md') }, ['x']);
+      } catch {
+        threw = true;
+      }
+      t('an unwritable summary path is swallowed — it is not a publish failure', !threw, 'no throw');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   }
 
   // The floor runs BEFORE the verdict below, so a success line can only be
