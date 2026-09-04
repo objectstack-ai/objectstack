@@ -1203,10 +1203,15 @@ export const ENTRY_BY_HAND = Object.freeze({
   // sentence and then a FIXTURE STRING stand ahead of the real definition. That
   // was the INSTRUMENT's limit recorded as this file's property. Anchored on the
   // definition the copy parses and runs (measured: exit 1, `selfTest() returned
-  // without reaching its verdict`). The probe still reads NOT MEASURED here and
-  // now says why itself -- `baseline run failed (exit 1)`, because it writes its
-  // copy under `scripts/`, where this gate's own single-site sweep finds the
-  // near-duplicate and refuses (#15515). A separate card, not worked around here.
+  // without reaching its verdict`). It then read NOT MEASURED `baseline run
+  // failed (exit 1)` for as long as the copy was written under `scripts/`, where
+  // this gate's own single-site sweep found the near-duplicate and refused: the
+  // copy now lands outside that tree and this gate's baseline is clean (#15515).
+  // What is left is the BUDGET: at the default 120 s the self-test does not
+  // finish and the row reads `killed by SIGTERM` (#15573, not folded in here).
+  // Measured at 900 s on a shared box: baseline exit 0 after ~7 minutes, mutated
+  // exit 1 in 200 bytes, verdict HELD -- so the row is a budget away, not a
+  // property of the file.
   'scripts/pm/dispatch-gates.mjs': 'selfTest',
 });
 
