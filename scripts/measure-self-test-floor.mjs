@@ -101,11 +101,11 @@
  * roster had been removed. The control caught it; nothing else would have.
  */
 
-import { readFileSync, writeFileSync, rmSync, readdirSync, existsSync, mkdtempSync } from 'node:fs';
+import { readFileSync, writeFileSync, rmSync, readdirSync, existsSync, mkdirSync, mkdtempSync, symlinkSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join, dirname, basename, sep } from 'node:path';
 import { tmpdir } from 'node:os';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { isEntrypoint } from './invoked-as.mjs';
 import { blank, maskComments, scanSource } from './js-comment-mask.mjs';
@@ -308,12 +308,141 @@ export function injectEarlyReturn(src, name) {
 }
 
 /**
+ * Where the mutated copy is written, and what its placement has to answer.
+ *
+ * The copy used to be written BESIDE the original, which answered "do relative
+ * imports and repo-root resolution still resolve?" by construction -- and broke
+ * a different question nobody had asked it: a near-duplicate of a gate, sitting
+ * under `scripts/`, is a FINDING for any gate whose own work is to walk that
+ * tree. That gate's BASELINE then exits non-zero, the precondition ends the
+ * probe, and the row reads NOT MEASURED `baseline run failed (exit 1)` -- a
+ * limit of the INSTRUMENT recorded as a property of the FILE, which is the
+ * mistake this whole file exists to stop making. Measured on
+ * `check-pnpm-filter-targets.mjs`: `--self-test` exits 0 alone and exits 1 with
+ * a copy of itself beside it, over its own "the checked-in tree is clean" sweep
+ * (#15515). Naming the copy so the walking gates skip it is the same mistake
+ * from the other side -- it weakens the gates to suit the instrument.
+ *
+ * So the copy goes OUTSIDE every walked tree, into a fresh temp directory, and
+ * the three things the old placement answered implicitly are answered here
+ * explicitly. Every rewrite below is applied ONLY where `scanSource` says the
+ * text is real CODE: several gates in this tree feed themselves fixture STRINGS
+ * containing import statements and the word `import.meta.url`, and rewriting one
+ * of those would change what the gate scans rather than where the copy resolves.
+ *
+ *   1. RELATIVE SPECIFIERS -- `from './x.mjs'`, `import('../y.mjs')` and the
+ *      bare `import './z.mjs'` -- become absolute `file://` URLs of the
+ *      ORIGINAL's neighbours, so the copy imports the very modules the original
+ *      imports (measured over the census: 320 `from` and 5 dynamic).
+ *   2. `import.meta.url` becomes a literal naming the ORIGINAL (and
+ *      `import.meta.dirname` / `.filename` likewise), so `new URL('..',
+ *      import.meta.url)` ROOT resolution, `createRequire`, and the `importerUrl`
+ *      that `requireDependency` turns into its `fromDir` all answer as they did.
+ *      The ONE exception is the argument of `isEntrypoint(...)`, which asks "was
+ *      THIS file run?" -- 145 of the census's dispatches sit behind that call,
+ *      and answering it about the original would leave every one of those copies
+ *      parsing, running NOTHING, printing nothing and exiting 0: a whole-census
+ *      false DEFEATED, the loudest wrong answer available here.
+ *   3. BARE specifiers resolve by walking up from the file, so the temp
+ *      directory is given a `node_modules` symlink to the nearest one above the
+ *      ORIGINAL. Without it `import 'typescript'` (4 members) and the dynamic
+ *      `import('yaml')` inside `requireDependency` (51 call sites) die in module
+ *      resolution -- non-zero AND speaking, which this file scores HELD. That is
+ *      the FLATTERING direction, so it is closed rather than accepted.
+ *
+ * `cwd` stays `ROOT`, so nothing resolved from `process.cwd()` moves at all.
+ *
+ * A member this cannot serve keeps the OLD placement, per row and never
+ * silently -- the row publishes `placement: 'beside'` and the reason.
+ */
+const RELATIVE_SPECIFIER = /^\.\.?\//;
+
+/** `from '<spec>'` -- the static import and re-export form. */
+const SPEC_FROM = /(?<![.\w$])from(\s*)(['"])([^'"\n]*)\2/g;
+/** `import('<spec>')` -- the dynamic form. */
+const SPEC_DYNAMIC = /(?<![.\w$])import(\s*\(\s*)(['"])([^'"\n]*)\2/g;
+/** `import '<spec>'` -- the side-effect-only form. */
+const SPEC_BARE = /(?<![.\w$])import(\s+)(['"])([^'"\n]*)\2/g;
+/**
+ * A specifier written as a TEMPLATE literal. Not rewritable to a literal URL --
+ * it is an expression -- so a member carrying one keeps the old placement rather
+ * than being relocated with a specifier that would resolve against the temp dir.
+ */
+const SPEC_TEMPLATE = /(?<![.\w$])(?:from|import)\s*\(?\s*`\.\.?\//g;
+
+/** A match is CODE only where it is neither comment nor string/template content. */
+const isCode = (flags, at) => flags.comment[at] === 0 && flags.literal[at] === 0;
+
+/** The nearest existing `node_modules` at or above `fromDir`, or `null`. */
+export function nearestNodeModules(fromDir) {
+  for (let dir = fromDir; ; ) {
+    const candidate = join(dir, 'node_modules');
+    if (existsSync(candidate)) return candidate;
+    const up = dirname(dir);
+    if (up === dir) return null;
+    dir = up;
+  }
+}
+
+/**
+ * Rewrite `source` so that, run from anywhere, it resolves what `absFile` would.
+ *
+ * @returns `{ source, blocked }` -- `blocked` non-empty means DO NOT relocate
+ * this file, and each entry is the reason, published on the row.
+ */
+export function relocateSource(source, absFile) {
+  const flags = scanSource(source);
+  const selfUrl = pathToFileURL(absFile).href;
+  const edits = [];
+  const blocked = [];
+
+  for (const m of source.matchAll(/import\.meta\.(\w+)/g)) {
+    if (!isCode(flags, m.index)) continue;
+    const span = { at: m.index, end: m.index + m[0].length };
+    if (m[1] === 'url') {
+      // The entry guard must keep asking about the RUNNING file -- see rule 2.
+      if (/isEntrypoint\(\s*$/.test(source.slice(Math.max(0, span.at - 40), span.at))) continue;
+      edits.push({ ...span, text: JSON.stringify(selfUrl) });
+    } else if (m[1] === 'dirname') {
+      edits.push({ ...span, text: JSON.stringify(dirname(absFile)) });
+    } else if (m[1] === 'filename') {
+      edits.push({ ...span, text: JSON.stringify(absFile) });
+    } else {
+      blocked.push(`import.meta.${m[1]} resolves from the running file's own url, which is not a literal to rewrite`);
+    }
+  }
+
+  for (const re of [SPEC_FROM, SPEC_DYNAMIC, SPEC_BARE]) {
+    for (const m of source.matchAll(re)) {
+      if (!isCode(flags, m.index)) continue;
+      if (!RELATIVE_SPECIFIER.test(m[3])) continue;
+      const end = m.index + m[0].length;
+      edits.push({ at: end - (m[3].length + 2), end, text: JSON.stringify(new URL(m[3], selfUrl).href) });
+    }
+  }
+  for (const m of source.matchAll(SPEC_TEMPLATE)) {
+    if (!isCode(flags, m.index)) continue;
+    blocked.push('a relative import specifier written as a template literal is an expression, not a literal to rewrite');
+  }
+
+  if (blocked.length > 0) return { source, blocked };
+  let out = source;
+  for (const e of edits.sort((a, b) => b.at - a.at)) out = out.slice(0, e.at) + e.text + out.slice(e.end);
+  return { source: out, blocked };
+}
+
+/**
  * Run one gate's `--self-test` with an early `return` at the top of `entry`.
  *
- * The copy is written BESIDE the original so relative imports and repo-root
- * resolution still answer the same, and the marker is re-read FROM DISK before
- * the run: an editor step that matched nothing exits 0 just as happily as one
- * that landed, and an unmutated file would report "held" for no reason at all.
+ * The copy is written OUTSIDE every walked tree and rewritten to resolve what
+ * the original resolves -- see the placement docblock above -- and the marker is
+ * re-read FROM DISK before the run: an editor step that matched nothing exits 0
+ * just as happily as one that landed, and an unmutated file would report "held"
+ * for no reason at all.
+ *
+ * `placement: 'beside'` forces the OLD placement, next to the original. It is
+ * the control's way of reproducing the defect above on a fixture; nothing in the
+ * census passes it.
  *
  * THE BASELINE IS A PRECONDITION, NOT A DATA POINT. It is read BEFORE any
  * reading of the mutated run, and a non-zero one ends the probe as NOT MEASURED
@@ -324,23 +453,47 @@ export function injectEarlyReturn(src, name) {
  * row still publishes what the baseline said, because `baselineHead` is usually
  * the whole diagnosis (`Cannot find package ...` reads as "run pnpm install").
  */
-export function probeEarlyReturn(absFile, entry, { timeout = 120000 } = {}) {
+export function probeEarlyReturn(absFile, entry, { timeout = 120000, placement = 'relocated' } = {}) {
   const src = readFileSync(absFile, 'utf8');
   const mutated = injectEarlyReturn(src, entry);
   if (mutated === null) return { verdict: 'NOT MEASURED', why: `no injectable definition of ${entry}` };
   if (src.includes(PROBE_MARKER)) return { verdict: 'NOT MEASURED', why: 'marker already present in source' };
 
-  const probePath = join(dirname(absFile), `.self-test-floor-probe-${basename(absFile)}`);
+  const relocation = placement === 'beside' ? { source: mutated, blocked: [] } : relocateSource(mutated, absFile);
+  const probeName = `.self-test-floor-probe-${basename(absFile)}`;
+  let probeDir = null;
+  let probePath = join(dirname(absFile), probeName);
+  let text = mutated;
+  let besideWhy = relocation.blocked.length > 0 ? relocation.blocked.join('; ') : null;
+  if (placement !== 'beside' && relocation.blocked.length === 0) {
+    try {
+      probeDir = mkdtempSync(join(tmpdir(), 'self-test-floor-probe-'));
+      const modules = nearestNodeModules(dirname(absFile));
+      if (modules) symlinkSync(modules, join(probeDir, 'node_modules'));
+      probePath = join(probeDir, probeName);
+      text = relocation.source;
+    } catch (err) {
+      // Relocation is the better placement, not a required one: a temp dir that
+      // cannot be made or linked falls back to the original placement, saying so.
+      if (probeDir) rmSync(probeDir, { recursive: true, force: true });
+      probeDir = null;
+      probePath = join(dirname(absFile), probeName);
+      text = mutated;
+      besideWhy = `relocation failed (${err?.code ?? err?.message ?? 'unknown'})`;
+    }
+  }
+  const beside = probeDir === null && placement !== 'beside' ? { placement: 'beside', placementWhy: besideWhy } : {};
+
   const isTs = /\.(mts|ts)$/.test(absFile);
   const cmd = isTs ? join(ROOT, 'node_modules/.bin/tsx') : process.execPath;
   try {
-    writeFileSync(probePath, mutated);
+    writeFileSync(probePath, text);
     const onDisk = (readFileSync(probePath, 'utf8').match(new RegExp(PROBE_MARKER, 'g')) ?? []).length;
-    if (onDisk !== 1) return { verdict: 'NOT MEASURED', why: `mutation not on disk (marker x${onDisk})` };
+    if (onDisk !== 1) return { verdict: 'NOT MEASURED', why: `mutation not on disk (marker x${onDisk})`, ...beside };
 
     const base = spawnSync(cmd, [absFile, '--self-test'], { cwd: ROOT, timeout, encoding: 'utf8' });
     const baseOut = (base.stdout ?? '') + (base.stderr ?? '');
-    if (base.signal) return { verdict: 'NOT MEASURED', why: `killed by ${base.signal}` };
+    if (base.signal) return { verdict: 'NOT MEASURED', why: `killed by ${base.signal}`, ...beside };
     // PRECONDITION. A file the tree cannot run offered the mutation nothing to
     // defeat, so no verdict below is available -- however loudly the mutated run
     // would have exited and spoken. Read before the mutated run is spawned.
@@ -355,16 +508,17 @@ export function probeEarlyReturn(absFile, entry, { timeout = 120000 } = {}) {
         baselineExit: base.status,
         baselineBytes: baseOut.length,
         baselineHead: firstNonBlankLine(baseOut),
+        ...beside,
       };
     }
 
     const mut = spawnSync(cmd, [probePath, '--self-test'], { cwd: ROOT, timeout, encoding: 'utf8' });
     const mutOut = (mut.stdout ?? '') + (mut.stderr ?? '');
-    if (mut.signal) return { verdict: 'NOT MEASURED', why: `killed by ${mut.signal}` };
+    if (mut.signal) return { verdict: 'NOT MEASURED', why: `killed by ${mut.signal}`, ...beside };
     // A mutation that changed nothing observable did not reach the executed
     // path, whatever its exit code says.
     if (baseOut === mutOut && base.status === mut.status) {
-      return { verdict: 'NOT MEASURED', why: 'mutation had no observable effect' };
+      return { verdict: 'NOT MEASURED', why: 'mutation had no observable effect', ...beside };
     }
     // Did the mutated run SAY anything? Read as "printed a non-blank line", the
     // same reading `mutatedHead` already publishes and quotes -- a run whose whole
@@ -380,9 +534,11 @@ export function probeEarlyReturn(absFile, entry, { timeout = 120000 } = {}) {
       mutatedBytes: mutOut.length,
       mutatedHead,
       mutatedSpoke,
+      ...beside,
     };
   } finally {
     rmSync(probePath, { force: true });
+    if (probeDir) rmSync(probeDir, { recursive: true, force: true });
   }
 }
 
@@ -664,6 +820,99 @@ const DECOY_ANCHOR_GATE = [
 const DECOY_ANCHOR_TEXT = 'function selfTest() {';
 
 /**
+ * The WALKING gate, reduced: a gate whose own self-test sweeps the directory it
+ * lives in and refuses anything it did not expect to find there. That is not a
+ * defect -- `check-pnpm-filter-targets` does exactly this over `scripts/` and is
+ * right to -- but under the OLD placement the probe's own copy was the stray, so
+ * the gate's BASELINE exited non-zero and the row read NOT MEASURED for a reason
+ * belonging entirely to the instrument (#15515).
+ *
+ * The fixture is deliberately the WHOLE relocation contract in one spawn. Its
+ * module-level line prints three readings, all of which the mutated copy must
+ * still answer the way the original does:
+ *
+ *   dir=   `basename(dirname(fileURLToPath(import.meta.url)))` -- the
+ *          `import.meta.url` rewrite. Unrewritten, the copy names its temp dir.
+ *   help=  a value imported RELATIVELY from `./helper.mjs` -- the specifier
+ *          rewrite. Unrewritten, the copy dies in module resolution.
+ *   dep=   a value imported by BARE specifier from a `node_modules` beside the
+ *          original -- the `node_modules` link. Unlinked, likewise.
+ *
+ * ...and it dispatches behind `isEntrypoint(import.meta.url)`, the one
+ * `import.meta.url` the relocation must NOT rewrite: answered about the
+ * original, the copy would run nothing, print nothing and exit 0 -- DEFEATED
+ * rather than the HELD its handshake earns. So the verdict reads that exception
+ * and the printed line reads the three rewrites, in the same run.
+ */
+const WALKING_GATE_DIR = 'walked';
+const WALKING_GATE_DEP = 'os-probe-fixture-dep';
+
+const WALKING_GATE_HELPER = [
+  '// `isEntrypoint` is RE-EXPORTED from the tree\'s one entry predicate rather',
+  '// than respelled here -- a twelfth spelling is the defect check-entry-guard',
+  '// exists to stop. By absolute URL, which the relocation leaves alone.',
+  `export { isEntrypoint } from ${JSON.stringify(new URL('./invoked-as.mjs', import.meta.url).href)};`,
+  "export const HELP = 'helped';",
+  '',
+].join('\n');
+
+const WALKING_GATE = [
+  '#!/usr/bin/env node',
+  "import { readdirSync } from 'node:fs';",
+  "import { basename, dirname } from 'node:path';",
+  "import { fileURLToPath } from 'node:url';",
+  `import { DEP } from '${WALKING_GATE_DEP}';`,
+  "import { HELP, isEntrypoint } from './helper.mjs';",
+  'const HERE = dirname(fileURLToPath(import.meta.url));',
+  "const EXPECTED = ['gate.mjs', 'helper.mjs', 'node_modules'];",
+  'let selfTestReachedVerdict = false;',
+  "console.log('fixture: dir=' + basename(HERE) + ' help=' + HELP + ' dep=' + DEP);",
+  'function selfTest() {',
+  '  const failures = [];',
+  '  const strays = readdirSync(HERE).filter((n) => !EXPECTED.includes(n));',
+  "  if (strays.length) failures.push('the walked tree is not clean: ' + strays.join(','));",
+  "  if (failures.length) { console.error(failures.join(String.fromCharCode(10))); process.exit(1); }",
+  "  console.log('fixture self-test: 1 case passes');",
+  '  selfTestReachedVerdict = true;',
+  '}',
+  'if (isEntrypoint(import.meta.url)) {',
+  "  if (process.argv.includes('--self-test')) {",
+  '    selfTest();',
+  '    if (!selfTestReachedVerdict) {',
+  "      console.error('fixture self-test: selfTest() returned without reaching its verdict');",
+  '      process.exit(1);',
+  '    }',
+  '  }',
+  '}',
+  '',
+].join('\n');
+
+/** What the walking fixture prints before it dispatches, when ALL THREE rewrites landed. */
+const WALKING_GATE_LINE = `fixture: dir=${WALKING_GATE_DIR} help=helped dep=linked`;
+
+/**
+ * The rewrite specimen, READ rather than run: every shape `relocateSource`
+ * touches and every shape it must leave alone, in one text. The last two lines
+ * are the ones that make this a control rather than a demonstration -- a fixture
+ * STRING carrying an import statement, and prose naming `import.meta.url`. Both
+ * are what several gates in this tree feed their own scanners, and rewriting
+ * either would change what the gate SCANS instead of where the copy resolves.
+ */
+const RELOCATION_SPECIMEN = [
+  "import { a } from './sib.mjs';",
+  "import { b } from '../up.mjs';",
+  "import './side-effect.mjs';",
+  "import { c } from 'node:path';",
+  'const HERE = fileURLToPath(import.meta.url);',
+  "const ROOT_URL = new URL('..', import.meta.url);",
+  'if (isEntrypoint(import.meta.url)) {}',
+  "const load = () => import('./dyn.mjs');",
+  "const FIXTURE = `import { z } from './fixture-only.mjs';`;",
+  "const PROSE = 'import.meta.url';",
+  '',
+].join('\n');
+
+/**
  * The anchor an UNMASKED, UNANCHORED first match takes -- the pre-#14963 rule,
  * kept here as the thing the controls below measure against rather than as a
  * second implementation of anything: `injectEarlyReturn` never uses it.
@@ -768,6 +1017,42 @@ export function runControls() {
   say(PRODUCES_FAILURE_TERNARY_EXIT.test(ACCIDENT_GATE.split('\n').find((l) => l.includes('process.exit(')) ?? ''),
     'CONTROL FAILED: the accident fixture no longer dispatches with the ternary exit this criterion was extended to read; the two have drifted apart');
 
+  // The RELOCATION rewrite, read as a pure function: every shape it touches and
+  // every shape it must leave alone. What is at stake in the last two is not a
+  // classification but WHAT THE COPY SCANS -- rewriting a fixture string would
+  // change the gate's own input (#15515).
+  const specimenFile = join(ROOT, 'scripts', 'not-on-disk-relocation-specimen.mjs');
+  const specimenUrl = pathToFileURL(specimenFile).href;
+  const relocated = relocateSource(RELOCATION_SPECIMEN, specimenFile);
+  const sibling = (rel) => JSON.stringify(new URL(rel, specimenUrl).href);
+  say(relocated.blocked.length === 0,
+    `RELOCATION CONTROL FAILED: the specimen carries only rewritable shapes but was refused (${relocated.blocked.join('; ')})`);
+  say(relocated.source.includes(`import { a } from ${sibling('./sib.mjs')};`),
+    'RELOCATION CONTROL FAILED: a `./` static specifier was not rewritten to the ORIGINAL neighbour it names');
+  say(relocated.source.includes(`import { b } from ${sibling('../up.mjs')};`),
+    'RELOCATION CONTROL FAILED: a `../` static specifier was not rewritten to the ORIGINAL neighbour it names');
+  say(relocated.source.includes(`import ${sibling('./side-effect.mjs')};`),
+    'RELOCATION CONTROL FAILED: the side-effect-only `import <spec>` form was not rewritten');
+  say(relocated.source.includes(`import(${sibling('./dyn.mjs')})`),
+    'RELOCATION CONTROL FAILED: a DYNAMIC relative specifier was not rewritten; `requireDependency` loads its optional deps through exactly that form');
+  say(relocated.source.includes("import { c } from 'node:path';"),
+    'CONTROL FIXTURE INVALID: a `node:` builtin specifier was rewritten; only RELATIVE specifiers name a neighbour to follow');
+  say(relocated.source.includes(`fileURLToPath(${JSON.stringify(specimenUrl)})`)
+    && relocated.source.includes(`new URL('..', ${JSON.stringify(specimenUrl)})`),
+    "RELOCATION CONTROL FAILED: `import.meta.url` in a PATH-deriving position was not rewritten to the original's url; ROOT would then resolve to the temp directory");
+  // ⛔ ... and the one that must NOT be rewritten. 145 of the census's dispatches
+  // sit behind this call; answered about the original, every one of those copies
+  // runs nothing, prints nothing and exits 0 -- a whole-census false DEFEATED.
+  say(relocated.source.includes('if (isEntrypoint(import.meta.url)) {}'),
+    'RELOCATION CONTROL FAILED: the `isEntrypoint(import.meta.url)` argument was rewritten; the copy would then ask whether the ORIGINAL was run, dispatch nothing, and be scored DEFEATED');
+  say(relocated.source.includes("const FIXTURE = `import { z } from './fixture-only.mjs';`;")
+    && relocated.source.includes("const PROSE = 'import.meta.url';"),
+    'RELOCATION CONTROL FAILED: an import statement inside a fixture STRING, or the word `import.meta.url` inside prose, was rewritten -- that changes what the gate SCANS, not where the copy resolves');
+  say(relocateSource("const t = import.meta.resolve('x');", specimenFile).blocked.length === 1,
+    'RELOCATION CONTROL FAILED: a shape that resolves from the running file\'s OWN url was not refused; a member it cannot serve must keep the old placement and SAY so, never be relocated with resolution it cannot honour');
+  say(relocateSource('const m = await import(`./x-${n}.mjs`);', specimenFile).blocked.length === 1,
+    'RELOCATION CONTROL FAILED: a relative specifier written as a TEMPLATE literal was not refused; it is an expression, so no literal rewrite can follow it to the original');
+
   // Instrument 2, both directions, against real processes on disk.
   const dir = mkdtempSync(join(tmpdir(), 'self-test-floor-control-'));
   try {
@@ -845,6 +1130,36 @@ export function runControls() {
       `POSITIVE CONTROL FAILED: the SAME fixture with only the \`requireReachedVerdict\` call deleted was read as ${hhHoled.verdict} (${hhHoled.why ?? ''}); the handshake call is the whole difference`);
     say(hhHoled.mutatedBytes === 0,
       'POSITIVE CONTROL FAILED: the helper-handshake gate with its handshake deleted printed something; without the call there is nothing left to notice the early return, so the run says NOTHING and exits 0');
+
+    // The WALKING gate, in both PLACEMENTS. This is the pair that pins the
+    // repair: the same fixture, the same mutation, differing only in where the
+    // copy was written. Its own directory is separate from the fixtures above,
+    // because what it asserts is that NOTHING it did not expect is in there.
+    const walkedDir = join(dir, WALKING_GATE_DIR);
+    const depDir = join(walkedDir, 'node_modules', WALKING_GATE_DEP);
+    mkdirSync(depDir, { recursive: true });
+    writeFileSync(join(depDir, 'package.json'), '{"name":"' + WALKING_GATE_DEP + '","type":"module","main":"index.mjs"}\n');
+    writeFileSync(join(depDir, 'index.mjs'), "export const DEP = 'linked';\n");
+    writeFileSync(join(walkedDir, 'helper.mjs'), WALKING_GATE_HELPER);
+    const walkingGate = join(walkedDir, 'gate.mjs');
+    writeFileSync(walkingGate, WALKING_GATE);
+    const wk = probeEarlyReturn(walkingGate, 'selfTest');
+    const wkBeside = probeEarlyReturn(walkingGate, 'selfTest', { placement: 'beside' });
+    say(wk.verdict === 'HELD',
+      `RELOCATION CONTROL FAILED: a gate whose self-test walks its own directory read ${wk.verdict} (${wk.why ?? ''}); with the copy written outside that tree its baseline is clean, so a verdict is available at all`);
+    // One line, three rewrites: see the fixture's docblock. A copy that resolved
+    // any of them against the temp directory cannot print it.
+    say(wk.mutatedHead === WALKING_GATE_LINE,
+      `RELOCATION CONTROL FAILED: the relocated copy did not resolve what the original resolves -- it printed ${JSON.stringify(wk.mutatedHead ?? '')}, not ${JSON.stringify(WALKING_GATE_LINE)}`);
+    // ... and the direction. The SAME fixture, the copy beside the original: the
+    // gate finds the stray, refuses, and its own baseline ends the probe.
+    say(wkBeside.verdict === 'NOT MEASURED' && /^baseline run failed \(exit /.test(wkBeside.why ?? ''),
+      `DIRECTION CONTROL FAILED: with the copy written BESIDE the original the walking gate read ${wkBeside.verdict} (${wkBeside.why ?? ''}); that placement is what made this class of row NOT MEASURED, so the verdict above would be passing for no reason`);
+    // ... and it is the PLACEMENT that reds it, not the fixture. Same file, same
+    // mutation, same spawn: the relocated leg's baseline exits 0 (its HELD above
+    // is only reachable through a green baseline) and this one exits 1.
+    say(wk.baselineExit === 0 && wkBeside.baselineExit === 1,
+      `CONTROL FIXTURE INVALID: the two placements did not separate the fixture's own baseline (relocated exit ${wk.baselineExit}, beside exit ${wkBeside.baselineExit}); with both alike, the verdicts above say nothing about WHERE the copy was written`);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
