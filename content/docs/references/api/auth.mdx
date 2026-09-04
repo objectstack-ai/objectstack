@@ -159,7 +159,7 @@ const result = AuthProvider.parse(data);
 | **username** | `string` | optional | Username (optional) |
 | **roles** | `string[]` | optional (default: `[]`) | Assigned role IDs |
 | **tenantId** | `string` | optional | Current tenant ID |
-| **language** | `string` | optional (default: `"en"`) | Preferred language |
+| **language** | `never` | optional | [REMOVED] `SessionUser.language` was removed in @objectstack/spec 17.4.0 (ADR-0049 enforce-or-remove) — it was declared with a permanent default of `'en'` and never produced by any session endpoint nor read by any client, so a reader keying on it saw a constant, not the user's language. Delete the key. Read the signed-in user's language from `GET /auth/me/localization` (`locale`: the user's own `sys_user.locale` when set → the request's `Accept-Language` → the deployment default). |
 | **timezone** | `string` | optional | Preferred timezone |
 | **createdAt** | `string` | optional |  |
 | **updatedAt** | `string` | optional |  |
@@ -203,7 +203,7 @@ const result = AuthProvider.parse(data);
 | **username** | `string` | optional | Username (optional) |
 | **roles** | `string[]` | optional (default: `[]`) | Assigned role IDs |
 | **tenantId** | `string` | optional | Current tenant ID |
-| **language** | `string` | optional (default: `"en"`) | Preferred language |
+| **language** | `never` | optional | [REMOVED] `SessionUser.language` was removed in @objectstack/spec 17.4.0 (ADR-0049 enforce-or-remove) — it was declared with a permanent default of `'en'` and never produced by any session endpoint nor read by any client, so a reader keying on it saw a constant, not the user's language. Delete the key. Read the signed-in user's language from `GET /auth/me/localization` (`locale`: the user's own `sys_user.locale` when set → the request's `Accept-Language` → the deployment default). |
 | **timezone** | `string` | optional | Preferred timezone |
 | **createdAt** | `string` | optional |  |
 | **updatedAt** | `string` | optional |  |

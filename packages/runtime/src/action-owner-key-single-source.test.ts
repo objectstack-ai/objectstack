@@ -228,10 +228,15 @@ describe('standalone-action owner key — half C: no bare literal (#14678)', () 
  * included — and `dispatch-gates.mjs`'s self-test pins that no hint of that gate
  * reaches a test file outside `packages/**`, because the whole reason it is
  * listed as a change-KIND rather than a path derivation is that the hint route
- * cannot reach the population it judges. Measured on this tree: all 41 tracked
- * test files outside `packages/` are under `examples/`, so that one glob does
- * not shrink the residue class, it EMPTIES it, and the case cannot be
- * re-pointed at another member because there is none.
+ * cannot reach the population it judges. Measured on c4d1354e3: all 41 tracked
+ * test files outside `packages/` are under `examples/`, so that one glob empties
+ * the NARROW class the specimen case stands for — test files outside
+ * `packages/**`, 41 → 0 — and exactly one case reds: that specimen. It does NOT
+ * empty the residue class the CLASS-LEVEL case guards, which counts every
+ * tracked test file no hint of that gate reaches: that one goes 13 → 3 and stays
+ * GREEN, the survivors being the three `.tsx` tests inside `packages/`. So the
+ * specimen COULD be re-pointed at one of those three — that is option B on
+ * #15097, ruled OUT for now: ruling A accepts `packages/` as this pin's radius.
  *
  * ⇒ Widening this pin to `examples/` is not a two-line change and ⛔ must not be
  * done by editing that self-test case. It needs the residue measurement behind
@@ -242,8 +247,14 @@ describe('standalone-action owner key — half C: no bare literal (#14678)', () 
  *
  * ⚠️ Any widening — `examples/`, `docs/`, `content/`, `skills/`, `apps/` — is
  * TWO edits, never one: `SCANNED_ROOTS` here AND this package's globs in
- * `scripts/cross-package-test-inputs.mjs` (a NEW top-level root needs a matching
- * ci.yml `crosspkg:` entry too, which `check-ci-filter-parity.mjs` gates).
+ * `scripts/cross-package-test-inputs.mjs`. A THIRD edit — a matching ci.yml
+ * `crosspkg:` entry, which `check-ci-filter-parity.mjs` gates — is owed only by
+ * a root that NEITHER `core:` nor `crosspkg:` already covers, because that
+ * gate's `SCHEDULING_FILTERS` is those two judged as an OR. It does not bind for
+ * `examples/`: ci.yml's `core:` filter already carries that root, and measured
+ * on c4d1354e3 with the examples glob planted, `check-ci-filter-parity.mjs`
+ * exits 0 — "OK: all 144 declared cross-package glob(s) (100 unique) are covered
+ * by `core` or `crosspkg`". Read the two filters before assuming the third edit.
  * Widening the scanner alone reads as coverage while turbo never re-runs this
  * suite for the files it now claims to judge.
  */
