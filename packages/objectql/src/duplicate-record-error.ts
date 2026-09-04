@@ -32,7 +32,18 @@ import { isUniqueViolationError, uniqueViolationColumn } from '@objectstack/type
  *
  *  - **`code: 'DUPLICATE_RECORD'`** — already a member of `StandardErrorCode`
  *    (the 409 conflict group), so nothing in `packages/spec` had to grow a
- *    member for this. It is what an application branches on, on every driver.
+ *    member for this. It is the engine's THROWN identity — what an in-process
+ *    caller of `engine.insert` / `engine.update` (a hook, a flow node, a
+ *    script holding the engine) branches on, on every driver. ⛔ It is not
+ *    the WIRE spelling: every REST route — the single-record door, the
+ *    whole-request bulk / import doors, and since #14723 the per-row reports
+ *    of `POST /data/:object/batch` and the import runner alike — reports a
+ *    unique-constraint refusal as `UNIQUE_VIOLATION`, the standard-catalog
+ *    member the published protocol docs give for the 409 constraint-violation
+ *    body (maintainer ruling 2026-09-03: one wire spelling on every route).
+ *    A client of the HTTP API branches on `UNIQUE_VIOLATION`; only code that
+ *    catches this class in-process sees `DUPLICATE_RECORD`. One condition,
+ *    one spelling per boundary, and `developerMessage` below says both.
  *  - **`status: 409`** — the conflict status the engine's sibling refusals
  *    already declare (`DELETE_RESTRICTED`, `CONCURRENT_UPDATE`), so REST's
  *    declared-status passthrough answers 409 instead of the sanitised 500 an
@@ -93,9 +104,11 @@ export class DuplicateRecordError extends Error {
     this.cause = cause;
     this.developerMessage =
       `The driver refused this write as a unique-constraint violation. Its own error is attached ` +
-      `as \`cause\` — branch on \`code === '${DUPLICATE_RECORD_CODE}'\` (ADR-0112) rather than on a ` +
-      `dialect's code or message, so the handling survives a change of store. To make the write ` +
-      `idempotent, catch this code and treat the row as already present.`;
+      `as \`cause\`. Branch on the platform code (ADR-0112), never on a dialect's code or message, ` +
+      `so the handling survives a change of store: over the HTTP API this refusal is reported as ` +
+      `\`code === 'UNIQUE_VIOLATION'\` on every route, whole-request and per-row alike; inside the ` +
+      `engine the thrown class carries \`code === '${DUPLICATE_RECORD_CODE}'\`. To make the write ` +
+      `idempotent, catch it and treat the row as already present.`;
   }
 }
 
