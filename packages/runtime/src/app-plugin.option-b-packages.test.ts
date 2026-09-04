@@ -171,7 +171,7 @@ describe('#15005 — AppPlugin schedules and hands out `packages[]` collections'
     const fireReady = async () => { for (const cb of readyHooks) await cb(); };
 
     it('schedules a job declared in a package body, and its handler context carries the RESOLVED bundle', async () => {
-        const sweep = vi.fn(async () => undefined);
+        const sweep = vi.fn(async (_jobCtx: any) => undefined as unknown);
         const plugin = new AppPlugin(optionBBundle({
             packages: [
                 { manifest: { ...ordersBody(), functions: { obSweep: sweep } } },
