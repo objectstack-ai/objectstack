@@ -13,11 +13,25 @@
  *  2. **Built-in fallback** — the bundled texts here (en + zh), used when
  *     no template row resolves (fresh env, missing table, exotic locale).
  *
- * The recipient locale is the DEPLOYMENT default (`localization.locale`
- * setting). `sys_user.locale` exists since #13881 (ruling 2026-09-01) and
- * the messaging channels read it per recipient; the auth OTP/invite texts
- * here do not read it yet — adopting it is its own card, and until then the
- * deployment default is the correct behaviour here, not an accident.
+ * The recipient locale reaching this module is resolved by the caller
+ * (`AuthManager.renderPhoneSmsBody`), and #14762 gave the OTP send a rung
+ * above the deployment default: the recipient's own `sys_user.locale`
+ * (#13881, ruling 2026-09-01 — the same column the messaging channels read
+ * per recipient), then the DEPLOYMENT default (`localization.locale`
+ * setting). There is no request rung on this surface: better-auth hands the
+ * send-OTP callbacks `{ phoneNumber, code }` and nothing else, so the ruled
+ * chain (#14788 option D, 2026-09-03) collapses to stored → deployment here.
+ *
+ * #14641 gave the SMS **invite** path the same two rungs, matched on
+ * `phone_number`. A number that resolves no row — or a row naming no language
+ * — keeps the deployment default. ⚠️ That is what the one in-repo caller gets
+ * today: the identity import endpoint creates the account before sending, so a
+ * ROW is always there, but it never writes `locale` and the column has no
+ * default, so that flow still resolves to the deployment rung. The rung is
+ * wired for an out-of-repo caller, or a future import that populates it.
+ *
+ * Whatever arrives, {@link phoneSmsLocaleChain}'s terminal `en` remains the
+ * floor: this module never returns nothing, and an OTP never fails to render.
  *
  * Red line unchanged: the OTP code appears only in the rendered body handed
  * to the SMS service — never in logs or error messages.

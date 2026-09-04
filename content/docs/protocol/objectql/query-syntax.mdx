@@ -457,6 +457,61 @@ const query: QueryAST = {
 //      AND (amount > 100000 OR is_strategic = true)
 ```
 
+### Comparing Two Fields
+
+A comparand can be a **field reference** instead of a literal — `{ $field: 'other_column' }`
+— as the *whole* comparand of one of the six scalar comparison operators
+(`$eq` / `$ne` / `$gt` / `$gte` / `$lt` / `$lte`). Both execution paths answer it: the
+in-memory evaluator (`matchesFilter`, `@objectstack/formula`) resolves the reference
+against the record, and SQL push-down (`driver-sql`, `driver-sqlite-wasm`) compiles it to
+a same-table column-to-column comparison written total across NULLs, so the two return
+the same rows. A reference is **not** allowed as an `$in` / `$nin` member or a `$between`
+endpoint — the schema refuses those positions by name.
+
+{/* os:check */}
+```typescript
+import type { FilterCondition } from '@objectstack/spec/data';
+
+// completed_at <= due_date
+const onTime: FilterCondition = {
+  completed_at: { $lte: { $field: 'due_date' } },
+};
+
+// completed_at <= due_date + grace_days   (grace_days is a numeric column)
+const onTimeWithGrace: FilterCondition = {
+  completed_at: { $lte: { $field: 'due_date', addDays: { $field: 'grace_days' } } },
+};
+
+// completed_at > due_date + 5   (a literal binds where the column would)
+const lateByMoreThanFive: FilterCondition = {
+  completed_at: { $gt: { $field: 'due_date', addDays: 5 } },
+};
+
+// completed_at >= due_date - 3   (a negative integer subtracts; there is no subDays)
+const withinThreeDaysBefore: FilterCondition = {
+  completed_at: { $gte: { $field: 'due_date', addDays: -3 } },
+};
+```
+
+`addDays` adds a **whole-day offset** to the referenced column before the comparison:
+an integer literal of any sign, or a nested `{ $field }` reference to a numeric column
+holding the number of days. Whole days are the only unit. The NULL semantics are
+stated rather than inherited from SQL three-valued logic:
+
+| Case | Reads as |
+|:-----|:---------|
+| The offset column is NULL | zero days — `due_date + NULL` is `due_date` |
+| The referenced column is NULL | the comparison is **false**, for every operator (`$ne` included) — no deadline is never "on time", so `$not` re-admits the row |
+| The target column is NULL | its ordinary reading — fails the orderings and `$eq`, satisfies `$ne` when the offset deadline exists |
+
+On SQL push-down the offset compiles only between two temporal columns of the same
+class (`date` with `date`, `datetime` with `datetime`) against a numeric offset column,
+on every dialect the `$field` compiler covers (SQLite, PostgreSQL, MySQL); the
+memory evaluator matches, and a fractional offset *value* is truncated toward zero on
+both. The same-table rule applies to the offset column too: `addDays: { $field:
+'duty.grace_days' }` (a relation path) is resolved by the memory evaluator and refused
+by SQL push-down with `INVALID_FILTER`, exactly as a dotted `$field` is.
+
 ### Date, Datetime, and Time Filters
 
 Before a comparison is built, the driver puts the comparand into the **same canonical
@@ -969,9 +1024,9 @@ disclose every other tenant's values for that column.
 ### Full-Text Search
 
 The `search` parameter does **not** reach a full-text index. The engine expands it into
-an `$or` of `$contains` predicates across the object's server-resolved searchable fields
+an `$or` of `$icontains` predicates across the object's server-resolved searchable fields
 (ADR-0061) and deletes `search` from the AST before the driver sees it — every driver
-already runs `$or`/`$contains`, so no driver support is needed (which is also why the
+already runs `$or`/`$icontains`, so no driver support is needed (which is also why the
 old `supports.fullTextSearch` capability bit had no reader and was retired in 17.0.0,
 #4634).
 
@@ -1006,13 +1061,15 @@ because the engine-side intersection alone used to drop the unknown name and fal
 scanning the full searchable set. Internal callers reaching `engine.find()` directly keep
 the tolerant intersection. Multiple whitespace-separated terms are AND-ed and
 fields are OR-ed. Case sensitivity comes from the operator the expansion emits, not
-from the expansion: it emits a plain `$contains`, which is **case-sensitive** by the
-rule in [Case Sensitivity](#case-sensitivity) above. Note what that means for search —
-a user typing `acme` does not find `ACME Corp`. Only `select` / `status` option
-*labels* are matched case-insensitively by the expansion itself.
+from the expansion: it emits `$icontains`, which ignores **ASCII case** by the
+rule in [Case Sensitivity](#case-sensitivity) above. So a user typing `acme` does
+find `ACME Corp` — search is case-insensitive by ruling
+([#7641](https://github.com/objectstack-ai/objectstack/issues/7641)). `select` /
+`status` option *labels* are matched case-insensitively too, by a separate
+label→value mapping in the expansion rather than by the operator.
 
 <Callout type="info">
-  **Measured today: every driver matches that rule.** The `$contains` alignment
+  **Measured today: both operators mean one thing on every driver.** The `$contains` alignment
   landed in three steps —
   [#6518](https://github.com/objectstack-ai/objectstack/issues/6518) made `SqlDriver`
   case-exact per dialect (`GLOB` on the SQLite dialects, `LIKE` unchanged on
@@ -1024,8 +1081,12 @@ a user typing `acme` does not find `ACME Corp`. Only `select` / `status` option
   the divergence this callout warned about is closed, and
   `FILTER_TEXT_CASES` holds all five drivers to it. Whether the expansion should emit
   `$icontains` instead of `$contains` — i.e. whether search is case-insensitive by
-  definition — remains a separate open question, and one that can now actually be
-  answered, since both operators mean one thing everywhere.
+  definition — is **settled, not open**:
+  [#7641](https://github.com/objectstack-ai/objectstack/issues/7641) ruled that it should,
+  and `expandSearchToFilter` has compiled `$search` to `$icontains` ever since.
+  `$contains` stays case-**sensitive** by contract
+  ([#4706](https://github.com/objectstack-ai/objectstack/issues/4706) Q2 = A) — the two
+  are different operators, not two spellings of one.
 </Callout>
 `fuzzy`, `boost`, `operator`, `minScore`, `language`, and `highlight` carry
 `[EXPERIMENTAL — not enforced]` markers (#4286): the schema accepts them, the
@@ -1050,8 +1111,8 @@ The declarative answer is a **mirror field**: copy the related record's title
 into a stored field on this object and declare *that* field searchable — a task
 list searched by project name carries a `project_name` text column on `task`,
 maintained on write and listed in `task.searchableFields`, so the expansion stays
-a single-table `$or` of `$contains`. The mirror must be **stored**: a `formula`
-field is virtual, no driver materializes a column for it, and a `$contains`
+a single-table `$or` of `$icontains`. The mirror must be **stored**: a `formula`
+field is virtual, no driver materializes a column for it, and an `$icontains`
 against one has nothing to scan. Cross-object search paths are rejected by
 design, not pending — see [Schema Design → Searching by a related record's
 title](/docs/data-modeling/schema-design#searching-by-a-related-records-title--mirror-the-value)

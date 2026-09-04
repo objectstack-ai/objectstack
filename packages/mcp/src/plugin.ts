@@ -111,15 +111,21 @@ export interface MCPServerPluginOptions {
  * 1. **init** — Creates {@link MCPServerRuntime} and registers as `'mcp'` service.
  * 2. **start** — Bridges ToolRegistry, MetadataService, DataEngine, and Agents
  *    to the MCP server. Starts the long-lived transport (stdio) only when
- *    `autoStart` is enabled or `OS_MCP_SERVER_ENABLED` is explicitly `true` —
+ *    `autoStart` is enabled or `OS_MCP_STDIO_ENABLED` is truthy —
  *    the HTTP surface needs no start: the runtime dispatcher serves it
  *    per-request at `/api/v1/mcp` (default-on; `OS_MCP_SERVER_ENABLED=false`
  *    opts out — see `isMcpServerEnabled` in `@objectstack/types`).
  * 3. **destroy** — Stops the MCP transport.
  *
  * Environment Variables:
- * - `OS_MCP_SERVER_ENABLED` — HTTP surface default-on; `false` disables it,
- *   explicit `true` additionally auto-starts the stdio transport
+ * - `OS_MCP_SERVER_ENABLED` — gates the default-on HTTP surface only; `false`
+ *   disables it (see `isMcpServerEnabled` in `@objectstack/types`)
+ * - `OS_MCP_STDIO_ENABLED` — the long-lived stdio transport's own switch,
+ *   default OFF (see `resolveMcpStdioAutoStart` in `@objectstack/types`).
+ *   Starting the stdio transport via `OS_MCP_SERVER_ENABLED=true` is
+ *   DEPRECATED — that var now only gates the default-on HTTP surface. Use
+ *   `OS_MCP_STDIO_ENABLED=true` (or the plugin `autoStart` option) for the
+ *   long-lived stdio transport.
  * - `OS_MCP_SERVER_NAME` — Override server name
  * - `OS_MCP_SERVER_TRANSPORT` — Override transport ('stdio' | 'http')
  *   (legacy `MCP_SERVER_*` names still honoured with a deprecation warning)

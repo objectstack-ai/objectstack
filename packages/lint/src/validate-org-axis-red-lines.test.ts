@@ -434,12 +434,14 @@ describe('validateOrgAxisRedLines — undeclared keys are the schema’s job, no
 /**
  * ── Rule ②'s recipient word list ────────────────────────────────────────────
  *
- * The two BU-tree recipients ② intercepts, and the three it deliberately lets
- * past. Split out here because the drift guard below asserts the two halves
- * partition `ShareRecipientType` exactly — the check whose absence is #4991.
+ * The two BU-tree recipients ② intercepts, and the four it deliberately lets
+ * past (`field` — #14103 — is read off the matched record itself: no tree, so
+ * nothing for ② to scope). Split out here because the drift guard below
+ * asserts the two halves partition `ShareRecipientType` exactly — the check
+ * whose absence is #4991.
  */
 const BU_TREE_RECIPIENTS = ['business_unit', 'unit_and_subordinates'] as const;
-const FLAT_RECIPIENTS = ['user', 'team', 'position'] as const;
+const FLAT_RECIPIENTS = ['user', 'team', 'position', 'field'] as const;
 
 describe('validateOrgAxisRedLines — ② business-unit trees stay org-internal', () => {
   const platformGlobalStack = (

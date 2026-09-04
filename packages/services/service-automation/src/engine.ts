@@ -1038,6 +1038,31 @@ function engineBuilt(signal: ResumeSignal): ResumeSignal {
 }
 
 /**
+ * Whether an incoming resume signal ALREADY carries a completed subflow
+ * child's output — the engine-built up-bubble, i.e. the signal
+ * `bubbleToParent` builds with `buildSubflowResumeSignal` when a delegated
+ * child finishes and continues its parent.
+ *
+ * The discriminator for the up-bubble's log branch, and deliberately NOT "is
+ * the child run still there". On the up-bubble the child has COMPLETED, so its
+ * suspension is already consumed and the `loadSuspendedRun` miss on the
+ * parent's `subflow:` correlation says nothing about whether the parent
+ * continues with the child's output — it only says the child is not SUSPENDED.
+ * Branching on a second run lookup would move that same confusion one call
+ * over; this asks the fact the message is actually about.
+ *
+ * The engine-built marker is load-bearing, not decoration: `output` is a
+ * caller-writable field, and on this node the caller's signal is delegated
+ * DOWN to the child, so shape alone would let a caller's own bag silence the
+ * genuine degraded warning. Only the engine can mint the symbol.
+ */
+function carriesSubflowChildOutput(signal: ResumeSignal): boolean {
+    if ((signal as Record<symbol, unknown>)[ENGINE_BUILT_SIGNAL] !== true) return false;
+    const output = signal.output;
+    return typeof output === 'object' && output !== null && 'output' in output;
+}
+
+/**
  * Variable names the flow engine owns: `$runId`, `$flowName`, `$flowLabel`,
  * `$record`, `$error`, `$parentRunId`, `$parentMapNode`, `$parentOutputVariable`,
  * and the node-scoped `<nodeId>.$mapState` / `$mapItemDone` / `$mapItemOutput`.
@@ -1465,11 +1490,11 @@ export interface FlowDispatchStore {
 }
 
 /**
- * [ADR-0126 §4] One packaged flow's install-level activation row, as the engine
- * sees it. The ledger's own columns are `metadata_type` / `name` /
- * `package_id` / `organization_id` / `active`; `metadata_type` is fixed to
- * `'flow'` by the store and `organization_id` is never written on this line
- * (§5), so those two never reach the engine.
+ * [ADR-0126 §4] One packaged flow's deployment-level activation row, as the
+ * engine sees it. The ledger's own columns are `metadata_type` / `name` /
+ * `package_id` / `active`; `metadata_type` is fixed to `'flow'` by the store,
+ * so it never reaches the engine. There is no tenant column on the table —
+ * a row records that THIS ENVIRONMENT switched a packaged flow off.
  */
 export interface FlowActivationRow {
     /** The packaged flow's machine name. */
@@ -1496,9 +1521,9 @@ export interface FlowActivationRow {
  * always has.
  */
 export interface FlowActivationStore {
-    /** Every install-level flow activation row (`organization_id IS NULL`). */
+    /** Every flow activation row — the ledger is deployment-wide. */
     list(): Promise<FlowActivationRow[]>;
-    /** Insert or update the install-level row for one packaged flow. */
+    /** Insert or update the row for one packaged flow. */
     setActive(row: FlowActivationRow): Promise<void>;
 }
 
@@ -5155,7 +5180,36 @@ export class AutomationEngine implements IAutomationService {
                     // #4354 — down-delegation is the other way a child's work
                     // lands under a parent step written at suspend time.
                     this.creditChildRun(run.steps, run.nodeId, childRes.summary);
+                } else if (carriesSubflowChildOutput(signal)) {
+                    // The engine-built UP-BUBBLE — the HEALTHY path, and the
+                    // one this `else` used to describe as a degradation. The
+                    // child COMPLETED and `bubbleToParent` resumed this run
+                    // with the child's mapped output, so the miss above is the
+                    // SUSPENSION lookup missing (a completed run has no
+                    // suspension), not the child having disappeared, and the
+                    // parent continues *with* the child's output — which is
+                    // what the old sentence denied outright.
+                    //
+                    // `debug`, for the same reason as the lost-advance-claim
+                    // record further down: an ordinary outcome logged at `warn`
+                    // on every healthy subflow completion is the cry-wolf
+                    // shape — the operator who reads "child run is gone" on
+                    // each one stops reading the line, and the one time it
+                    // means what it says is the time it is ignored. Nothing
+                    // else moves: this branch continues the parent exactly as
+                    // before, and the degraded branch below keeps its text and
+                    // its level.
+                    this.logger.debug(
+                        `[automation] run '${runId}' continues from subflow node '${run.nodeId}' with the output of ` +
+                            `completed child run '${childRunId}' — carried on the engine-built up-bubble signal ` +
+                            `(the child's suspension is consumed, which is why it is not loadable here).`,
+                    );
                 } else {
+                    // The genuinely degraded case, and the only one the
+                    // sentence below was ever true of: nothing suspended under
+                    // the child id AND no carried output, so this run really
+                    // does continue without the child's output. #4632 verdict:
+                    // FUNCTIONAL — stays `warn`.
                     this.logger.warn(
                         `[automation] run '${runId}' is paused at subflow node '${run.nodeId}' but child run '${childRunId}' ` +
                             `is gone — continuing without child output`,

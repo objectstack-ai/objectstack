@@ -12,8 +12,8 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import type { RealtimeEventHandler, RealtimeEventPayload } from '@objectstack/spec/contracts';
-import { KnowledgeServicePlugin } from '../knowledge-service-plugin';
-import type { KnowledgeService } from '../knowledge-service';
+import { KnowledgeServicePlugin } from '../knowledge-service-plugin.js';
+import type { KnowledgeService } from '../knowledge-service.js';
 
 function makeCtx() {
   let readyHook: (() => Promise<void>) | undefined;

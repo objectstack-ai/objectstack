@@ -444,8 +444,13 @@ The OTP and invitation bodies are localised and tenant-customisable: a
 `sys_notification_template` row for `(auth.phone_otp | auth.phone_invite,
 channel 'sms', locale)` wins — built-in English and Chinese rows are seeded
 once (never overwriting your edits) and can be changed under Setup →
-Notification Templates. The locale follows the deployment default
-(`localization.locale` setting) with a `zh-CN → zh → en` fallback chain;
+Notification Templates. Both bodies resolve the same way: the recipient's own
+`sys_user.locale` when their account has one, and the deployment default
+(`localization.locale` setting) otherwise — the account is matched on its
+`phone_number`, so a number no account carries takes the deployment default
+too. For the **invitation** SMS the account normally does exist, because the
+identity import endpoint creates it and only then sends the message. Whichever
+locale that names is then resolved with a `zh-CN → zh → en` fallback chain;
 holes are `{{code}}`, `{{appName}}`, `{{minutes}}` (OTP) and `{{appName}}`,
 `{{loginUrl}}` (invitation — `{{baseUrl}}`, the bare origin, is still
 interpolated for tenant templates written against the older text). Template

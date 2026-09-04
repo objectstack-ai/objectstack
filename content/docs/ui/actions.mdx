@@ -146,6 +146,21 @@ export async function completeTask(ctx: ActionContext): Promise<void> {
 }
 ```
 
+<Callout type="warn">
+**`ctx.engine.find(object, filter)` takes a filter, not a query.** The second
+argument is the `where` half only — `{ status: 'completed' }`, operators
+(`{ amount: { $gt: 100 } }`), `$and` / `$or` / `$not` — and the runtime wraps
+it in `where` itself. Passing an ObjectQL envelope
+(`{ where: { status: 'completed' } }`) raises no error: it becomes
+`{ where: { where: … } }`, matches no row, and returns `[]`. An empty filter
+(`{}`) is passed through unwrapped, so the one unfiltered read works under
+either reading and a handler can look partially alive. The parameter is typed
+`FilterCondition` (`ActionEngineFacade` in `@objectstack/spec/ui`), which
+refuses a primitive or a mistyped `$and` / `$or` / `$not` but still admits
+`where` as a key — the sentence above is the contract, and a hand-written test
+double must honour it too.
+</Callout>
+
 ```typescript title="objectstack.config.ts"
 export const onEnable = async (ctx: { ql: { registerAction: (...args: unknown[]) => void } }) => {
   ctx.ql.registerAction('todo_task', 'completeTask', completeTask);
@@ -358,6 +373,17 @@ handlers alike.
 Set `ctx.recordLoadDenied` aside only when your action is *meant* to run without
 a readable subject row (an "import this id from elsewhere" action, say). The
 default for a row-scoped action on a `private` object is to refuse.
+
+**Flow actions.** A `type: 'flow'` action hands its target flow the same
+`record` — `record.id` stamped the same way — and the flow run's context
+(`AutomationContext`, the `@objectstack/spec` contract) declares the same key
+in the same spelling, `recordLoadDenied?: true`, so a `runAs: 'system'` flow
+has something to guard on before it acts on a row its invoker could not read.
+On the flow face the key is **declared but not yet populated**: the flow
+dispatcher does not pass the signal into the run's context yet, so until that
+lands a flow run never sees it and a guard on it is inert (never `true`), never
+wrong. A `runAs: 'user'` flow needs no guard — it re-derives the caller's
+scope on its own reads, and the stub resolves to nothing.
 
 ## Call it over REST
 

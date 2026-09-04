@@ -79,6 +79,37 @@ A few notable entries:
   live in `plugin-audit`, but they are not contributed as Setup nav
   entries.)
 
+### When a contribution names an anchor that is not there
+
+Aiming at a `group` id the target app does not declare is **not** refused and
+the entry is **not** dropped: the items are appended at the app's **top level**
+and the merge continues. That is deliberate — the merge is a read-time fold
+precisely so registration order does not matter (a contributor may register
+before the app it aims at), and a contribution into an *optional* anchor has to
+keep working when the plugin owning that anchor is not loaded.
+
+It is, however, **loud**. The relocation emits a
+`nav_contribution_group_missing` diagnostic at `warn` — naming the contributing
+package, the target app, the missing group id and the relocated items — so it
+survives `OS_REGISTRY_LOG=warn` and appears in boot output. The same finding is
+carried on the app itself, readable as
+`registry.getAppNavDiagnostics(appName)`, and it is raised once per distinct
+mis-aim rather than once per read of the app.
+
+`os build` **and `os validate`** answer the same question at compile time
+whenever the contributing package and the target app are composed into one
+artifact. Both print the finding and both carry it in `--json` under the
+existing `warnings` key, beside the authoring-rule advisories and the
+capability hints — the payload is deliberately closed, so a new class of
+finding fills a declared key rather than adding one. They **report** there;
+neither fails the build.
+
+⚠️ The anchor id is the whole contract between a shell and its contributors,
+and a contributor cannot see the shell's ids at authoring time. A typo
+therefore produces a menu that renders, passes a smoke test, and has silently
+moved the entry one level up — which is why the diagnostic exists rather than a
+refusal.
+
 ## Why a shell + contributions
 
 The Setup App is a shell of empty group anchors rather than a fixed

@@ -568,9 +568,11 @@ export const CEILINGS = new Map([
   // 4 lines are re-flow slack, never a cut. Headroom 0 again, same convention.
   // Raised 466 → 469 by the axis-weighting ruling (maintainer 2026-09-01, PM
   // chat, verbatim and untranslated): 「四维分析中，长期合理应该权重最高，至少50%」.
-  // This file is one of the four `check:skill-frame-sync` COPIES, so a rule that
-  // changes which recommendation the frame yields has to reach it — the #5130
-  // drift is exactly a frame-semantics change that skipped a mirror. +3 lines,
+  // This file is not a `check:skill-frame-sync` COPIES entry, but it names the
+  // decision frame's mechanism (the dev reads it from the PM's pasted copy at
+  // dispatch time), and a rule that changes which recommendation the frame
+  // yields still has to reach that description — the #5130 drift is exactly a
+  // frame-semantics change that skipped a mirror. +3 lines,
   // folded into the existing binding sentence rather than added as a new
   // paragraph. ⚠️ Re-wrap funding was AVAILABLE here and was REFUSED: three
   // paragraphs nearby carry wrap artifacts (two orphan lines of 6 and 8 bytes)

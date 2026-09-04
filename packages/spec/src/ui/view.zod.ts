@@ -874,7 +874,7 @@ export const RowColorConfigSchema = lazySchema(() => strictObject({
   surface: 'this row color configuration',
   history: VIEW_HISTORY,
 }, {
-  field: z.string().describe('Field to derive color from (typically a select/status field)'),
+  field: z.string().describe('Field whose value is looked up in the `colors` map below to pick a row colour (typically a select/status field). The map is what does the colouring — with no `colors`, no row is ever coloured, whatever this field holds. Author-time diagnostic `view/row-color-without-colors` reports that combination.'),
   colors: z.record(z.string(), z.string()).optional().describe('Map of field value to color (hex/token)'),
 }).describe('Row color configuration based on field values'));
 
