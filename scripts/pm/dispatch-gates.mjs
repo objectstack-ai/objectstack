@@ -11805,17 +11805,17 @@ export function bannerLines({ identity, paths = [], drift = null }) {
  * "1288 cases pass" to zero bytes of output and exit 0 — a self-test that never
  * finished, reported as one that passed.
  *
- * The mechanical probe in `scripts/measure-self-test-floor.mjs` reaches the real
- * definition below only once its anchor is taken over a comment-and-literal
- * MASK. Read raw — measured on `ca46f8f12` — the first `function selfTest() {`
- * in this source is that phrase quoted inside a DOCBLOCK, and the next is a
- * FIXTURE STRING; the injected marker carries a comment TERMINATOR, so it ends
- * that comment early and the copy only ever produces a SyntaxError. #14963
- * (PR #15580) moves the anchor onto the definition, after which the copy parses
- * and runs. Either way that was a limit of the INSTRUMENT recorded as a
- * property of this file: the entry stays hand-read in `ENTRY_BY_HAND`, and the
- * NOT MEASURED its row keeps is the probe's own artefact (#15515), not a claim
- * about this file.
+ * The mechanical probe in `scripts/measure-self-test-floor.mjs` READS this file
+ * since #14963: its anchor is taken over a comment-and-literal MASK and must
+ * begin a line, so it lands on the real definition below rather than on either
+ * decoy ahead of it — that phrase quoted in a docblock, then a FIXTURE STRING.
+ * Injected there the copy PARSES and RUNS (re-measured on the merge base of
+ * this change: exit 1, `selfTest() returned without reaching its verdict`),
+ * where the unmasked anchor could only ever produce a SyntaxError. The entry is
+ * still hand-read in `ENTRY_BY_HAND` — four self-test-shaped names stand in raw
+ * source — and the NOT MEASURED its row keeps is the probe's own artefact
+ * (#15515: it writes the copy under `scripts/`, where a single-site sweep
+ * refuses the near-duplicate), not a property of this file.
  */
 /**
  * The lines ONE self-test case prints — a pure renderer, so both directions can
