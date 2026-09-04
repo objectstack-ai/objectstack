@@ -307,15 +307,14 @@ localStorage / auth gotchas.
     governed surface, ⛔ never merge it, ⛔ never add it to the merge queue, ⛔ never call `enable_pr_auto_merge`,
     ⛔ never flip it out of draft to make any of those possible. Judge it on the PR's **file list**, not on its
     description, and a **mixed diff is not a proportion question** — one path hit is enough; if the rest needs to
-    land, split the governed files into their own PR. **Those four lift only for an authorized APPROVED review**
-    (approver set 2026-08-27; unpinned 2026-09-04): by an account in `GOVERNED_APPROVERS`
-    (`scripts/pm/check-governed-queue-guard.mjs`), **on ANY commit** — then the queue lands it. The maintainer ruled
-    the sha pin off, verbatim: 「只需要有人工批准记录就行，不需要卡最新的提交。」 — so a later push no longer
-    expires the approval, and the accepted cost, stated rather than discovered, is that this gate does not re-review
-    that push. Hand-authored governed content needs that approval; a PR whose only governed paths are register rows
-    the queue leg regenerates byte-exact clears with zero approvals (2026-09-01) — an uncertified recompute, drift or
-    a hand-authored sibling keeps it governed. Unapproved, the maintainer's bypass direct merge (人工直合) is the
-    only landing. ⛔ **No agent seat submits an approving review on a governed-surface PR,
+    land, split the governed files into their own PR. **Those four lift only for an authorized APPROVED review** — by
+    an account in `GOVERNED_APPROVERS` (`scripts/pm/check-governed-queue-guard.mjs`), on ANY commit; the queue then
+    lands it. Approver set 2026-08-27; pin retired 2026-09-04:
+    「只需要有人工批准记录就行，不需要卡最新的提交。」 A later push no longer expires it, and
+    this gate does not re-review it. Hand-authored governed content needs that approval; a PR whose only governed paths
+    are register rows the queue leg regenerates byte-exact clears with zero approvals (2026-09-01) — an uncertified
+    recompute, drift or a hand-authored sibling keeps it governed. Unapproved, the bypass direct
+    merge (人工直合) is the only landing. ⛔ **No agent seat submits an approving review on a governed-surface PR,
     under any account** — an authorized account is agent-operated too. Nothing else substitutes: under #13 an accepted
     ADR *is* the decision, so merging one is the act of adopting a governance position — the one class of change about
     which "CI is green" carries no information at all (a thorough, fully-green ADR draft has been closed by the

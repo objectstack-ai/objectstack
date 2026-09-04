@@ -725,9 +725,10 @@ dev**:先试 SendMessage 复活,不可用才走接手协议(四条增量见 runb
 ① 复核结论照常写在 issue
 上(不能合 ≠ 不复核;技能面 PR 的复核席须跑在契约复审档位,档位单源见条款②闸门);② PR
 留给维护者,**看得见地悬着**,终局两条:**人工直合即审核记录**(兜底);或**授权人工批准
-⇒ 队列放行**（2026-09-04 裁定,逐字「只需要有人工批准记录就行，不需要卡最新的提交。」,
-取代 2026-08-27 的钉 head 半边,批准人集合不变)(判定单源 = 队列守卫常量 `GOVERNED_APPROVERS`
-(`scripts/pm/check-governed-queue-guard.mjs`):授权账户 APPROVED 即算,⛔ 不卡 `commit_id`,后推不过期)。无批准 ⛔ 不翻 ready、不入队、不挂
+⇒ 队列放行**（2026-09-04 裁定,逐字「只需要有人工批准记录就行，不需要卡最新的提交。」
+——取代 2026-08-27 的钉 head 半边,批准人集合不变)(判定单源 = 队列守卫常量 `GOVERNED_APPROVERS`
+(`scripts/pm/check-governed-queue-guard.mjs`):授权账户 APPROVED 即算,⛔ 不卡 `commit_id`,
+批准后再推提交也不过期)。无批准 ⛔ 不翻 ready、不入队、不挂
 auto-merge;③ 在 draft PR 上**向两个授权批准账户 `os-zhuang` 与 `hotlong` 都 request review**
 （2026-08-27 裁定）—— 主动推,永不等被发现;通道出处（2026-08-19 裁定）,
 当日实测推送到达(「推送到了」);
