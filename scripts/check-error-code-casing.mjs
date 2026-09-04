@@ -306,7 +306,64 @@ export function findViolations(src, file, stats = null) {
 // handshake is a flag rather than a returned sentinel.
 let selfTestReachedVerdict = false;
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failed` used to be this self-test's ONLY success condition, so "every case
+// held" and "the cases never ran" printed the same line. Closed the way
+// PR #13487 validated on check-doc-authoring: what is pinned is the registered
+// NAMES, not a number. The floor requires the OPENED set to equal the DECLARED
+// set with each battery at or above its own count.
+//
+// This file declares ONE battery, opened at the top of the self-test body. Its
+// blocks are headed by unmarked prose comments, so it carries fewer than the two
+// named section banners the sectioning criterion needs, and ⛔ a comment is NOT
+// promoted to a section head — that is a judgement per comment this transplant
+// does not make. The hoisted single battery is the shape PR #14896, PR #15003
+// and PR #15217 landed for exactly this case.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The count is a FLOOR, not an equality — adding cases is ordinary work and must
+// not red. A battery BELOW its floor means cases stopped running; the remedy is
+// to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'check-error-code-casing self-test': 51,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 1;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const batterySeen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+  };
+  battery('check-error-code-casing self-test');
+  // The thunk PR #15198 measured: it registers the case and then runs the
+  // existing site VERBATIM, so no assertion condition is inverted or rewritten
+  // and the sink keeps its own semantics. Registration happens whether or not
+  // the site fires, which is what makes the count a floor on cases RUN rather
+  // than a count of failures.
+  const check = (fn) => {
+    registerCase();
+    fn();
+  };
   const cases = [
     // [source, expectedHitCount, label]
     [`return c.json({ error: { code: 'not_found', message: 'x' } }, 404);`, 1, 'emission'],
@@ -385,10 +442,12 @@ function selfTest() {
   let failed = 0;
   for (const [src, want, label] of cases) {
     const got = findViolations(src, 'self-test.ts').length;
-    if (got !== want) {
-      console.error(`  ✗ self-test "${label}": expected ${want} hit(s), got ${got}`);
-      failed++;
-    }
+check(() => {
+      if (got !== want) {
+        console.error(`  ✗ self-test "${label}": expected ${want} hit(s), got ${got}`);
+        failed++;
+      }
+});
   }
   // [#10658] The shrink-only registry, in both directions. The second one is
   // the load-bearing half: when the owning card's rename lands, a stale line
@@ -419,22 +478,73 @@ function selfTest() {
   for (const [input, want, label] of partitionCases) {
     const got = partitionKnown(input, fixtureRegistry);
     const shape = { known: got.known.length, fresh: got.fresh.length, stale: got.stale.length };
-    if (shape.known !== want.known || shape.fresh !== want.fresh || shape.stale !== want.stale) {
-      console.error(`  ✗ self-test "${label}": expected ${JSON.stringify(want)}, got ${JSON.stringify(shape)}`);
-      failed++;
-    }
+check(() => {
+      if (shape.known !== want.known || shape.fresh !== want.fresh || shape.stale !== want.stale) {
+        console.error(`  ✗ self-test "${label}": expected ${JSON.stringify(want)}, got ${JSON.stringify(shape)}`);
+        failed++;
+      }
+});
   }
 
   // [#10716] The live registry, at zero. It is closed to new entries by the rule
   // above, so "closed" is checked rather than merely written down: a wire-visible
   // code that genuinely needs deferring is a call for the ADR-0112 owner to make
   // in the open, not a line someone adds back here on the way past.
-  if (KNOWN_LOWERCASE_CODES.size !== 0) {
-    console.error(
-      `  ✗ self-test "the live registry stays empty": KNOWN_LOWERCASE_CODES holds ${KNOWN_LOWERCASE_CODES.size} entry/entries — ` +
-        `this list is closed (#10658/#10716); a new deferral is an ADR-0112 decision, not a line here.`,
+check(() => {
+    if (KNOWN_LOWERCASE_CODES.size !== 0) {
+      console.error(
+        `  ✗ self-test "the live registry stays empty": KNOWN_LOWERCASE_CODES holds ${KNOWN_LOWERCASE_CODES.size} entry/entries — ` +
+          `this list is closed (#10658/#10716); a new deferral is an ADR-0112 decision, not a line here.`,
+      );
+      failed++;
+    }
+});
+
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  // This file's sink is the `failed` counter, so the floor speaks its idiom: a
+  // breach prints like any other case failure and reds through the existing
+  // verdict below.
+  const floorFailure = (message) => { console.error(message); failed++; };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned `
+        + `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
     );
-    failed++;
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in `
+        + 'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. `
+          + 'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of `
+          + `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the '
+        + 'number. Find what stopped registering (an early return, a deleted block, a guard that now '
+        + 'skips) and restore it.',
+    );
   }
 
   if (failed) {
