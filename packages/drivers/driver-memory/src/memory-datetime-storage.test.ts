@@ -66,8 +66,14 @@ describe('InMemoryDriver Field.datetime storage (#4047)', () => {
       expect(typeof (row as any).created_at, `${(row as any).id} stored form`).toBe('string');
       expect((row as any).created_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
     }
-    const midnight = raw.find((r: any) => r.id === 'd_midnight');
-    expect(midnight.created_at).toBe('2026-07-28T00:00:00.000Z');
+    // `find()` now publishes the contract's `Record<string, unknown>[]`
+    // (#14435), so `Array.prototype.find` hands back the `undefined` arm it
+    // has always been able to produce. Narrowed rather than cast: the row
+    // being present is a real precondition of the assertion below, and while
+    // `raw` was `any[]` a missing row raised a TypeError instead of failing here.
+    const midnight = raw.find((r) => r.id === 'd_midnight');
+    expect(midnight, 'd_midnight seeded and returned by find()').toBeDefined();
+    expect(midnight!.created_at).toBe('2026-07-28T00:00:00.000Z');
   });
 
   it('a date window reaches rows written in BOTH forms', async () => {
@@ -173,7 +179,12 @@ describe('InMemoryDriver Field.datetime storage (#4047)', () => {
     }
     const all = await driver.find('task', {});
     for (const row of all) expect(typeof (row as any).created_on).toBe('string');
-    expect((all.find((r: any) => r.id === 'on_obj')).created_on).toBe('2026-07-28');
+    // Same narrowing as above (#14435): the `undefined` arm of
+    // `Array.prototype.find` is now visible, and the row's presence is an
+    // assertion in its own right rather than a TypeError waiting to happen.
+    const onObj = all.find((r) => r.id === 'on_obj');
+    expect(onObj, 'on_obj seeded and returned by find()').toBeDefined();
+    expect(onObj!.created_on).toBe('2026-07-28');
 
     const found = await driver.find('task', {
       where: { created_on: { $gte: '2026-04-29', $lte: '2026-07-28' } },
