@@ -39,6 +39,22 @@ export { YAMLSerializer } from './serializers/yaml-serializer.js';
 export * as Migration from './migration/index.js';
 export { TypeScriptSerializer } from './serializers/typescript-serializer.js';
 
+// View container binding
+//
+// [#14399] `deriveViewContainerObject` is this package's ONE spelling of "which
+// object does an aggregated `defineView` container bind to" — the container's
+// own top-level `object` first, then `list.data.object`, `form.data.object`,
+// and the row's own `name` last (its own docblock carries the ruling). It is
+// published here because the ObjectQL boot-loop registrar
+// (`packages/objectql/src/engine.ts`, `resolveMetadataItemName`) is a SOURCE
+// registrar for the same containers and has to mint the same registry key: it
+// used to consult the row's `name` FIRST, so a container whose `name` differs
+// from its `object` registered under two different keys depending on which
+// registrar loaded it. `packages/objectql` already declares this package as a
+// dependency and nothing here depends on it, so the import is the repair — a
+// fifth hand-copy of the chain is the defect, not the fix.
+export { deriveViewContainerObject } from './view-container-expansion.js';
+
 // Re-export types from spec
 export type {
   MetadataFormat,

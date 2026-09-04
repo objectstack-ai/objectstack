@@ -625,13 +625,67 @@ function exitCodeFor(flagCount, advisory) {
 // handshake is a flag rather than a returned sentinel.
 let selfTestReachedVerdict = false;
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'Unit: extraction tidy-up': 6,
+  'Unit: the variant relation is exactly plural + lexicon': 5,
+  'Unit: exit semantics': 3,
+  'Ledger parsing reached the real files': 2,
+  'Walk wiring': 3,
+  'The teeth: measured drift class flags, by name': 10,
+  'Precision pins: what must NOT flag': 11,
+  'Red/green: dead root (#4916)': 2,
+  'Red/green: empty root (#4932)': 2,
+  'Red/green: extractor evaporation (the occurrence floor)': 2,
+  'Red/green: the authority itself (#4932 applied to the ledgers)': 4,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 11;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const seen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    seen.set(b, (seen.get(b) ?? 0) + 1);
+  };
   const failures = [];
   const expect = (label, got, want) => {
+    registerCase();
     if (got !== want) failures.push(`  ✗ self-test "${label}": expected ${JSON.stringify(want)}, got ${JSON.stringify(got)}`);
   };
 
   // ── Unit: extraction tidy-up ──────────────────────────────────────────────
+  battery('Unit: extraction tidy-up');
   expect('query string is cut', tidyLiteral('/api/v1/data/task?limit=5'), '/api/v1/data/task');
   expect('sentence punctuation is trimmed', tidyLiteral('/api/v1/search).'), '/api/v1/search');
   expect('a closer that balances an opener survives', tidyLiteral('/api/v1/data/{object}'), '/api/v1/data/{object}');
@@ -640,6 +694,7 @@ function selfTest() {
   expect('bare base with slash collapses to the base', tidyLiteral('/api/v1/'), '/api/v1');
 
   // ── Unit: the variant relation is exactly plural + lexicon ────────────────
+  battery('Unit: the variant relation is exactly plural + lexicon');
   expect('plural pair flags', isVariantPair('object', 'objects'), true);
   expect('es-plural pair flags', isVariantPair('view', 'viewes'), true);
   expect('lexicon pair flags (the measured third spelling)', isVariantPair('meta', 'metadata'), true);
@@ -647,6 +702,7 @@ function selfTest() {
   expect('unrelated words are NOT variants', isVariantPair('keys', 'leads'), false);
 
   // ── Unit: exit semantics ──────────────────────────────────────────────────
+  battery('Unit: exit semantics');
   expect('enforce mode reds on findings', exitCodeFor(1, false), 1);
   expect('advisory mode does not red on findings', exitCodeFor(1, true), 0);
   expect('clean is green in both modes', exitCodeFor(0, false) + exitCodeFor(0, true), 0);
@@ -751,11 +807,13 @@ function selfTest() {
     const r = runScan(cfg);
 
     // ── Ledger parsing reached the real files ────────────────────────────
+    battery('Ledger parsing reached the real files');
     expect('ledger rows parsed (13 rest + 6 runtime; servedBy and note prose are not rows)',
       r.ledgerCounts.routes, 19);
     expect('wildcard families parsed', r.ledgerCounts.families, 2);
 
     // ── Walk wiring ──────────────────────────────────────────────────────
+    battery('Walk wiring');
     expect('corpus files walked (releases/ and node_modules/ excluded)', r.fileCount, 3);
     expect('no verdict came from the releases tree',
       r.flags.some((f) => f.file.includes('releases')), false);
@@ -763,6 +821,7 @@ function selfTest() {
       r.flags.some((f) => f.file.includes('node_modules')), false);
 
     // ── The teeth: measured drift class flags, by name ───────────────────
+    battery('The teeth: measured drift class flags, by name');
     expect('flag count', r.flags.length, 6);
     const flagged = r.flags.map((f) => f.literal).sort();
     expect('the plural flags', flagged.includes('/api/v1/meta/objects/lead/state/status'), true);
@@ -783,6 +842,7 @@ function selfTest() {
       stateFlags.some((f) => f.misses.some((m) => m.prose === 'objects' && m.row === 'object')), true);
 
     // ── Precision pins: what must NOT flag ───────────────────────────────
+    battery('Precision pins: what must NOT flag');
     expect('exact literals pass', r.stats.exact >= 10, true);
     expect('a wrong VALUE at a parameter position is not this gate’s business (meta/viewes)',
       r.flags.some((f) => f.literal.includes('viewes')), false);
@@ -803,6 +863,7 @@ function selfTest() {
         && !r.flags.some((f) => f.literal === '/api/v1/reports/:id/<verb>'), true);
 
     // ── Red/green: dead root (#4916) ─────────────────────────────────────
+    battery('Red/green: dead root (#4916)');
     renameSync(join(dir, 'skills'), join(dir, 'skills-renamed'));
     let deadErr = null;
     try { runScan(cfg); } catch (err) { deadErr = err; }
@@ -811,6 +872,7 @@ function selfTest() {
     expect('the failure names the dead root only', deadErr?.roots?.join(','), 'skills');
 
     // ── Red/green: empty root (#4932) ────────────────────────────────────
+    battery('Red/green: empty root (#4932)');
     const skillPath = join(dir, 'skills', 'demo', 'SKILL.md');
     rmSync(skillPath);
     let emptyErr = null;
@@ -820,6 +882,7 @@ function selfTest() {
     expect('the failure names the empty root only', emptyErr?.roots?.join(','), 'skills');
 
     // ── Red/green: extractor evaporation (the occurrence floor) ──────────
+    battery('Red/green: extractor evaporation (the occurrence floor)');
     writeFileSync(skillPath, 'No wire paths taught here any more.');
     let floorErr = null;
     try { runScan(cfg); } catch (err) { floorErr = err; }
@@ -828,6 +891,7 @@ function selfTest() {
     expect('the floor failure names the root', floorErr?.root, 'skills');
 
     // ── Red/green: the authority itself (#4932 applied to the ledgers) ───
+    battery('Red/green: the authority itself (#4932 applied to the ledgers)');
     const restPath = join(dir, 'packages', 'rest', 'src', 'rest-route-ledger.ts');
     renameSync(restPath, `${restPath}.moved`);
     let ledgerGone = null;
@@ -851,6 +915,51 @@ function selfTest() {
     rmSync(dir, { recursive: true, force: true });
   }
 
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    failures.push(message);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of seen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = seen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
+  }
   if (failures.length) {
     console.error(`\n✗ check-doc-route-spelling self-test failed:\n${failures.join('\n')}\n`);
     process.exit(1);

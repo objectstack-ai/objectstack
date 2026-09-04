@@ -365,7 +365,37 @@ const STACK_DEFINITION_COLLECTIONS_SHAPE = {
   dashboards: z.array(DashboardSchema).optional().describe('Dashboards'),
   reports: z.array(ReportSchema).optional().describe('Analytics Reports'),
   datasets: z.array(DatasetSchema).optional().describe('Analytics semantic-layer datasets (ADR-0021)'),
-  actions: z.array(ActionSchema).optional().describe('Global and Object Actions'),
+  /**
+   * Registered actions — global (no `objectName`) and object-bound (`objectName`
+   * set; `defineStack` merges those into the named object's `actions`).
+   *
+   * Uniqueness is per SCOPE, not per stack. The runtime registers and dispatches
+   * every action under one exact-string key — the owning object's name (or
+   * `'global'` for an object-less action), a colon, then the action name — with
+   * no wildcard semantics, so `defineStack` refuses two declarations that
+   * resolve to the same key: both written here, both on one object's `actions`,
+   * or one in each position, byte-identical twins included (that case is a
+   * delete, not a rename). An embedded action is keyed by the object it is
+   * written ON — the declaration-resolution key `collectActionDeclarations` /
+   * `resolveRouteActionDeclaration` use — not by its own `objectName` (the
+   * registration key `collectBundleActions` / `standaloneActionOwnerKey` read).
+   * One
+   * global and one object-bound action MAY share a `name`: they occupy two
+   * keys, and a by-name reader on the object's route resolves the object's own
+   * `actions` (embedded, or merged in from here) before a standalone global
+   * declaration.
+   */
+  actions: z.array(ActionSchema).optional().describe(
+    'Global and Object Actions. Unique per scope, not per stack: the runtime keys every action by '
+    + "its owning object's name (or 'global' when object-less), a colon, then the action name, and "
+    + 'defineStack refuses two declarations that resolve to one key — both here, both on one '
+    + "object's actions, or one in each position, identical twins included (an embedded action is keyed "
+    + 'by the object it is written on, not by its own objectName). '
+    + "One global and one object-bound action may share "
+    + "a name; on that object's route the object's own actions take precedence for by-name readers. "
+    + 'composeStacks runs the same key rule across its input stacks (counting distinct stacks, not sites) '
+    + 'and names both source stacks on a collision.',
+  ),
   // `themes` was REMOVED in 17.1 (#10485, ADR-0049 enforce-or-remove — ruled
   // 退役授权面, 2026-08-21). The pipeline was live from authoring gate through
   // artifact ingest and stopped there: no framework package ever read the
@@ -1500,12 +1530,145 @@ function collectInlinePageActions(page: unknown): InlineActionSite[] {
 }
 
 /**
+ * Scope segment of the runtime's action key for an object-less action.
+ *
+ * Must stay in lockstep with `GLOBAL_ACTION_OBJECT_KEY` in
+ * `@objectstack/objectql` (`action-governance.ts`) — the literal `executeAction`
+ * registers and looks up an object-less action under. Spelled here rather than
+ * imported because the spec sits below every runtime package.
+ */
+const GLOBAL_ACTION_SCOPE = 'global';
+
+/**
+ * Join origins for a refusal line: `a`, `a and b`, `a, b and c`.
+ */
+function joinDeclarationOrigins(origins: readonly string[]): string {
+  if (origins.length <= 1) return origins.join('');
+  return `${origins.slice(0, -1).join(', ')} and ${origins[origins.length - 1]}`;
+}
+
+/**
+ * Same-scope duplicate action keys — one refusal line per colliding key.
+ *
+ * The runtime registers and dispatches every action under one exact-string
+ * key, `<scope>:<name>`, where the scope is the owning object's name or
+ * {@link GLOBAL_ACTION_SCOPE} for an object-less action (`packages/objectql`'s
+ * `executeAction`; the runtime's `collectActionDeclarations` and
+ * `standaloneActionObjectName` build the same key), with no wildcard
+ * semantics. Two declarations that resolve to one key collapse to one handler
+ * registration: whichever registers second wins (`registerAction` is a plain
+ * `Map.set`), and the other stays a live, declared, permission-gated button
+ * whose handler is unreachable — nothing at author, build or boot time says
+ * so, and the loser fails only when a user clicks it (the ADR-0078 shape
+ * arriving at collection level). Measured on main before this check: two
+ * standalone globals sharing a name, two standalone actions bound to the same
+ * object, a bound standalone beside an embedded twin on the same object
+ * (`mergeActionsIntoObjects` APPENDS, so both survived into `object.actions`)
+ * and two embedded twins all built clean.
+ *
+ * Scope resolution follows the runtime's DECLARATION-RESOLUTION key: a
+ * standalone action is scoped by its `objectName` (post-parse — the legacy
+ * `object` alias is already canonicalized) or global; an embedded action is
+ * scoped by the object it is written on, whatever its own `objectName` says —
+ * that is how `collectActionDeclarations` and `resolveRouteActionDeclaration`
+ * key it. (The REGISTRATION key — `collectBundleActions` /
+ * `standaloneActionOwnerKey` — reads the action's own `objectName` instead; the
+ * walk
+ * deliberately follows the resolution side, where the by-name collision the
+ * card describes happens.)
+ *
+ * Every site counts, byte-identical twins included: the merge appends, so a
+ * pair that is one declaration to the eye is two entries under one key in the
+ * shipped artifact — `collectActionDeclarations` pushes every embedded entry,
+ * MCP `listActions` lists both, and bare-name `resolveActionByName` refuses
+ * the ambiguity. The identical case is therefore a delete, not a rename, and
+ * the message says so. A consequence worth knowing: a stack BUILT by
+ * `defineStack` carries each bound action in both positions, so feeding a
+ * built stack back in is refused too — author the source shape, not the
+ * artifact.
+ *
+ * Deliberately NOT refused: the cross-scope pair — one global and one
+ * object-bound declaration sharing a `name`. They occupy two distinct keys, and
+ * the precedence the runtime already implements for by-name readers
+ * (`resolveRouteActionDeclaration` reads the object's own `actions` before a
+ * standalone declaration) is documented on the `actions` collection, not
+ * changed here.
+ */
+/**
+ * An `operation: 'update'` action writes ONE record — the current one — on the
+ * object it belongs to (#14092). Which object that is, `ActionSchema` cannot
+ * tell: the same schema parses an action embedded on an object (the object is
+ * implicit) and a standalone one in `stack.actions`, where only `objectName`
+ * can say. So the standalone form is judged here, the one place standalone-
+ * ness is knowable: a GLOBAL action (no `objectName`) has no current record
+ * and nothing to write to, and is refused with the two spellings that do. An
+ * embedded action is never visited — the object it is written on binds it.
+ */
+function collectGlobalUpdateActionErrors(config: ObjectStackDefinition): string[] {
+  const errors: string[] = [];
+  for (const [i, action] of (config.actions ?? []).entries()) {
+    if (action.operation !== 'update' || action.objectName) continue;
+    errors.push(
+      `Action '${action.name}' (stack.actions[${i}]) is \`operation: 'update'\` — a single-record field write — `
+      + 'but declares no `objectName`, so there is no object to write to: a global action has no current record. '
+      + "Set `objectName: 'the_object'` (defineStack merges it into that object's actions) or declare it inside "
+      + "the object's own `actions`.",
+    );
+  }
+  return errors;
+}
+
+function collectDuplicateActionKeyErrors(config: ObjectStackDefinition): string[] {
+  const originsByKey = new Map<string, string[]>();
+  const note = (scope: string, name: string, origin: string): void => {
+    const key = `${scope}:${name}`;
+    const list = originsByKey.get(key) ?? [];
+    list.push(origin);
+    originsByKey.set(key, list);
+  };
+
+  for (const [i, action] of (config.actions ?? []).entries()) {
+    if (action.objectName) {
+      note(action.objectName, action.name, `stack.actions[${i}] (objectName '${action.objectName}')`);
+    } else {
+      note(GLOBAL_ACTION_SCOPE, action.name, `stack.actions[${i}] (no objectName, so scope '${GLOBAL_ACTION_SCOPE}')`);
+    }
+  }
+  for (const obj of config.objects ?? []) {
+    for (const [j, action] of (obj.actions ?? []).entries()) {
+      note(obj.name, action.name, `objects['${obj.name}'].actions[${j}] (embedded on the object)`);
+    }
+  }
+
+  const errors: string[] = [];
+  for (const [key, origins] of originsByKey) {
+    if (origins.length < 2) continue;
+    errors.push(
+      `Action key '${key}' is declared ${origins.length === 2 ? 'twice' : `${origins.length} times`}: ` +
+        `${joinDeclarationOrigins(origins)}. The runtime registers and dispatches every action under ` +
+        `this one exact-string key, so only one of these handlers is reachable and the other ` +
+        `declaration is a dead button. Rename one of them within this scope, bind one to a ` +
+        `different object, or remove the duplicate.`,
+    );
+  }
+  return errors;
+}
+
+/**
  * Perform strict cross-reference validation on a parsed stack definition.
  * Returns an array of error messages (empty if valid).
  */
 function validateCrossReferences(config: ObjectStackDefinition): string[] {
   const errors: string[] = [];
   const objectNames = collectObjectNames(config);
+
+  // Runs BEFORE the object-count early return on purpose: an object-less
+  // stack that declares two globals under one name collides on exactly the
+  // same runtime key, and this check needs no object to resolve against.
+  errors.push(...collectDuplicateActionKeyErrors(config));
+  // Same placement, same reason: a global `operation: 'update'` action is
+  // wrong whether or not the stack declares any objects.
+  errors.push(...collectGlobalUpdateActionErrors(config));
 
   if (objectNames.size === 0) return errors;
 
@@ -1930,6 +2093,17 @@ function sortActionsByOrder<T extends { order?: number }>(actions: T[]): T[] {
  * top-level `actions` array is preserved for global access (e.g., platform
  * overview, search).
  *
+ * Idempotent over its own output (#14847): a bound action the object already
+ * carries BY IDENTITY is not appended again. That is the shape `composeStacks`
+ * feeds it — inputs built by `defineStack`, each object already carrying the
+ * copy its own build appended while the standalone still sits in `actions` —
+ * and before this the second merge doubled every bound action in the composed
+ * object (three copies for two declarations under `objectConflict: 'override'`
+ * / `'merge'`). Identity, deliberately not equality: an author writing one
+ * action in both positions produces two distinct objects, which #14686's
+ * same-key refusal (run before this merge) rejects and which this merge must
+ * not quietly fold.
+ *
  * After merging, every action group (each object's `actions` and the top-level
  * `actions`) is stable-sorted by `order` via {@link sortActionsByOrder}. Because
  * that sort is a no-op unless an author sets `order`, this is fully backward
@@ -1968,12 +2142,23 @@ function mergeActionsIntoObjects(config: ObjectStackDefinition): ObjectStackDefi
   // references, consistent with mergeObjects() and Zod output).
   let objectsChanged = false;
   const newObjects = config.objects.map((obj) => {
-    const objActions = actionsByObject.get(obj.name);
     const base = obj.actions ?? [];
-    const merged = objActions ? [...base, ...objActions] : base;
+    // Idempotent (#14847): append only the bound actions `base` does not carry
+    // ALREADY — judged by identity, never by equality. The one way an entry of
+    // `config.actions` can be the very same object as an entry of `obj.actions`
+    // is a previous run of this merge having put it there: `defineStack` ends
+    // here, so a BUILT stack carries each bound action in both positions, and
+    // `composeStacks` — which concatenates its inputs' `actions` and hands the
+    // surviving objects through as-is — ran this merge a second time over that
+    // echo and doubled every bound action. A hand-written twin (one action
+    // authored in both positions) is two objects after the strict parse, and
+    // #14686's same-key refusal has already run ahead of this merge to refuse
+    // it; an equality skip here would have swallowed it instead.
+    const fresh = (actionsByObject.get(obj.name) ?? []).filter((action) => !base.includes(action));
+    const merged = fresh.length > 0 ? [...base, ...fresh] : base;
     const sorted = sortActionsByOrder(merged);
-    // Untouched: no top-level actions merged in AND the sort was a no-op.
-    if (!objActions && sorted === base) return obj;
+    // Untouched: nothing new merged in AND the sort was a no-op.
+    if (sorted === base) return obj;
     objectsChanged = true;
     return { ...obj, actions: sorted };
   });
@@ -2549,23 +2734,37 @@ function warnUncomposedStackKey(key: string, rule: ComposeDisposition): void {
 
 /**
  * Merge objects from multiple stacks according to the chosen conflict strategy.
+ *
+ * Besides the merged list it reports, per composed object name, WHICH input
+ * stack's `actions` array the composed object carries (`actionsOwner`, a stack
+ * index) — the provenance {@link collectComposedActionKeyCollisions} needs to
+ * tell a cross-stack collision from one stack's own declarations. It is
+ * recorded here, beside the spread that decides it, rather than re-derived
+ * from the strategy elsewhere (a second statement of one rule is the drift
+ * ADR-0116 exists about): a first sighting and `'override'` hand the whole
+ * object to stack `i`; under `'merge'` the shallow spread hands `actions` to
+ * the LATER object only when that object carries the key itself — an absent
+ * key leaves the earlier stack's array in place — which is exactly what an
+ * own-property check reads.
  * @internal
  */
 function mergeObjects(
   stacks: ObjectStackDefinition[],
   strategy: ConflictStrategy,
-): ObjectStackDefinition['objects'] {
+): { objects: ObjectStackDefinition['objects']; actionsOwner: Map<string, number> } {
   type Obj = NonNullable<ObjectStackDefinition['objects']>[number];
   const map = new Map<string, Obj>();
   const result: Obj[] = [];
+  const actionsOwner = new Map<string, number>();
 
-  for (const stack of stacks) {
+  for (const [i, stack] of stacks.entries()) {
     if (!stack.objects) continue;
     for (const obj of stack.objects) {
       const existing = map.get(obj.name);
       if (!existing) {
         map.set(obj.name, obj);
         result.push(obj);
+        actionsOwner.set(obj.name, i);
         continue;
       }
 
@@ -2580,6 +2779,7 @@ function mergeObjects(
           const idx = result.indexOf(existing);
           result[idx] = obj;
           map.set(obj.name, obj);
+          actionsOwner.set(obj.name, i);
           break;
         }
         case 'merge': {
@@ -2587,13 +2787,133 @@ function mergeObjects(
           const idx = result.indexOf(existing);
           result[idx] = merged;
           map.set(obj.name, merged);
+          if (Object.prototype.hasOwnProperty.call(obj, 'actions')) actionsOwner.set(obj.name, i);
           break;
         }
       }
     }
   }
 
-  return result.length > 0 ? result : undefined;
+  return { objects: result.length > 0 ? result : undefined, actionsOwner };
+}
+
+/**
+ * Cross-stack duplicate action keys over the COMPOSED action set (#14662).
+ *
+ * `defineStack` refuses two declarations that resolve to one scope-qualified
+ * runtime key within ONE stack ({@link collectDuplicateActionKeyErrors}), and
+ * the runtime keys a composed artifact exactly the same way — so two input
+ * stacks, each legal on its own, each declaring `global:shared_refresh`,
+ * composed into one collapsed handler key: the same dead button, arriving one
+ * composition step later. This is that walk over the composed set, with every
+ * declaration attributed to the stack it came from.
+ *
+ * Judged on what composition CARRIES, not on what each input declared:
+ *
+ * - A standalone action reaches the output from every stack (`actions` is a
+ *   `'concat'` collection), attributed to the stack that wrote it.
+ * - An embedded action reaches the output through exactly ONE stack's object —
+ *   the one `mergeObjects` handed the object's `actions` to (`actionsOwner`).
+ *   Under `objectConflict: 'override'` / `'merge'` the other stacks' embedded
+ *   declarations on that object are not in the artifact at all, so they cannot
+ *   collide with anything; that loss is the object strategy's own semantics,
+ *   not an action collision.
+ * - Only a key declared by TWO OR MORE DISTINCT stacks is reported. A key an
+ *   input repeats within itself is `defineStack`'s door (which `strict: false`
+ *   opts out of by choice) — and every input BUILT by `defineStack` repeats
+ *   each bound standalone action legitimately, as the copy
+ *   `mergeActionsIntoObjects` appended to its object on the way out. Counting
+ *   sites instead of stacks would refuse every composition of built stacks that
+ *   binds an action to an object.
+ *
+ * Deliberately NOT refused, as in `defineStack`: the cross-scope pair (a global
+ * and an object-bound action sharing a name — two keys) and one name bound to
+ * two different objects.
+ *
+ * Runs BEFORE `mergeActionsIntoObjects` so the composed output's own echo is
+ * not counted either. Returns one line per colliding key, in first-seen order.
+ * @internal
+ */
+function collectComposedActionKeyCollisions(
+  stacks: ObjectStackDefinition[],
+  composedObjects: ObjectStackDefinition['objects'],
+  actionsOwner: ReadonlyMap<string, number>,
+): string[] {
+  type Action = NonNullable<ObjectStackDefinition['actions']>[number];
+  // key → stack index → where that stack declares it
+  const sitesByKey = new Map<string, Map<number, string[]>>();
+  const note = (scope: string, name: string, stackIndex: number, site: string): void => {
+    const key = `${scope}:${name}`;
+    const byStack = sitesByKey.get(key) ?? new Map<number, string[]>();
+    const sites = byStack.get(stackIndex) ?? [];
+    sites.push(site);
+    byStack.set(stackIndex, sites);
+    sitesByKey.set(key, byStack);
+  };
+
+  for (const [i, stack] of stacks.entries()) {
+    // A non-array `actions` never reaches the output: the concat pass drops it
+    // (and warns), so it declares nothing here either.
+    const declared = (stack as Record<string, unknown>).actions;
+    if (!Array.isArray(declared)) continue;
+    for (const [j, action] of (declared as Action[]).entries()) {
+      // Truthiness, not nullish: an empty-string `objectName` (type-legal;
+      // refused by ActionSchema's regex only under strict parse) keys as
+      // global here exactly as `collectDuplicateActionKeyErrors`,
+      // `mergeActionsIntoObjects` and objectql's `standaloneActionOwnerKey`
+      // resolve it.
+      note(action.objectName || GLOBAL_ACTION_SCOPE, action.name, i, `stack.actions[${j}]`);
+    }
+  }
+  for (const obj of composedObjects ?? []) {
+    const owner = actionsOwner.get(obj.name);
+    if (owner === undefined) {
+      // Every composed object is recorded by `mergeObjects` the moment it is
+      // first seen; a miss is an edit to that function that forgot the map,
+      // and skipping would hide exactly the collisions this walk exists for.
+      throw new Error(`composeStacks internal error: no source stack recorded for composed object '${obj.name}'.`);
+    }
+    for (const [j, action] of (obj.actions ?? []).entries()) {
+      note(obj.name, action.name, owner, `objects['${obj.name}'].actions[${j}]`);
+    }
+  }
+
+  const errors: string[] = [];
+  for (const [key, byStack] of sitesByKey) {
+    if (byStack.size < 2) continue;
+    // Stack order, not note order — standalone declarations are walked before
+    // embedded ones, so a later stack's standalone would otherwise be named
+    // ahead of an earlier stack's embedded action.
+    const parties = [...byStack.entries()]
+      .sort(([a], [b]) => a - b)
+      .map(([index, sites]) => `${stackLabel(stacks[index], index)} at ${sites.join(' + ')}`);
+    errors.push(`Action key '${key}' is declared by ${byStack.size} stacks: ${joinDeclarationOrigins(parties)}.`);
+  }
+  return errors;
+}
+
+/**
+ * The refusal `composeStacks` throws for {@link collectComposedActionKeyCollisions}
+ * findings — `defineStack`'s envelope shape (a count, one `✗` line per key)
+ * under the `composeStacks conflict:` prefix every other composition refusal
+ * carries. Names no strategy option: there is none for actions by ruling.
+ * @internal
+ */
+function formatComposedActionKeyCollisions(lines: readonly string[]): string {
+  const header =
+    `composeStacks conflict: cross-stack action key collision ` +
+    `(${lines.length} issue${lines.length === 1 ? '' : 's'}):`;
+  const body = lines.map((line) => `  ✗ ${line}`).join('\n');
+  const why =
+    `The runtime registers and dispatches every action under one exact-string key — the owning ` +
+    `object's name (or '${GLOBAL_ACTION_SCOPE}' for an object-less action), a colon, then the action ` +
+    `name — so only one of these handlers would be reachable in the composed artifact and the ` +
+    `other declaration is a dead button: the collision defineStack refuses within one stack, ` +
+    `arriving one composition step later. Each stack is legal on its own; the collision is between them.`;
+  const fix =
+    `Fix: rename one of the colliding actions within its scope, bind one of them to a different ` +
+    `object, or remove the duplicate from one of the stacks. composeStacks does not pick a winner for actions.`;
+  return `${header}\n\n${body}\n\n${why}\n${fix}`;
 }
 
 /**
@@ -2724,6 +3044,17 @@ function assemblePackageBody(stack: ObjectStackDefinition): AssembledPackageBody
  * neither overridden nor merged: identical declarations pass through, and two
  * stacks declaring *different* values throw an error naming both stacks
  * (#5005; `i18n` joined them in #5051).
+ * **Actions** concatenate like every other collection, and the composed set is
+ * then checked the way `defineStack` checks one stack (#14662): two input
+ * stacks whose declarations resolve to one scope-qualified runtime key
+ * (`objectName:name`, or `global:name` for an object-less action) throw, and
+ * the error names both stacks by manifest id and where each declaration sits.
+ * There is no strategy option for actions — rename one, bind it to a different
+ * object, or drop it from one stack. One global and one object-bound action
+ * may still share a name (two keys); a key an input repeats within itself is
+ * `defineStack`'s door rather than this one; and an embedded action that
+ * `objectConflict: 'override'` / `'merge'` did not carry into the composed
+ * object cannot collide.
  *
  * @param stacks  - Stack definitions to compose (order matters for conflict resolution)
  * @param options - Composition options (conflict strategy, manifest selection, etc.)
@@ -2736,7 +3067,8 @@ function assemblePackageBody(stack: ObjectStackDefinition): AssembledPackageBody
  * const crm = defineStack({ ... });
  * const todo = defineStack({ ... });
  *
- * // Simple composition — throws on duplicate objects
+ * // Simple composition — throws on duplicate objects, and on two stacks
+ * // declaring one scope-qualified action key
  * const combined = composeStacks([crm, todo]);
  *
  * // Override strategy — later stacks win
@@ -2770,8 +3102,9 @@ export function composeStacks(
   //    and no consumer reading `composed.manifest` loses a key.
   composed.manifest = selectManifest(stacks, opts.manifest === 'preserve' ? 'last' : opts.manifest);
 
-  // 2. Objects — use conflict strategy
-  const objects = mergeObjects(stacks, opts.objectConflict);
+  // 2. Objects — use conflict strategy (and remember, per composed object,
+  //    which stack's `actions` array it carries — step 6 reads that).
+  const { objects, actionsOwner } = mergeObjects(stacks, opts.objectConflict);
   if (objects) {
     composed.objects = objects;
   }
@@ -2855,5 +3188,21 @@ export function composeStacks(
     if (single.declared) composed[key] = single.value;
   }
 
+  // 6. Cross-stack action key collisions (#14662) — the check `defineStack`
+  //    runs within one stack, over what composition actually carries. AFTER
+  //    every collection is composed, and BEFORE `mergeActionsIntoObjects`
+  //    copies each bound standalone action into its object: that copy is the
+  //    echo an input built by `defineStack` already carries, and counting it
+  //    would make every bound action collide with itself.
+  const actionCollisions = collectComposedActionKeyCollisions(stacks, objects, actionsOwner);
+  if (actionCollisions.length > 0) {
+    throw new Error(formatComposedActionKeyCollisions(actionCollisions));
+  }
+
+  // 7. Bind every standalone action to its object — ONCE. Each input built by
+  //    `defineStack` already carries its own bound actions on its objects (the
+  //    echo step 6 steps around), and the surviving objects reach here as-is,
+  //    so the merge appends only what an object does not already carry by
+  //    identity (#14847): the other inputs' actions bound to it.
   return mergeActionsIntoObjects(composed as ObjectStackDefinition);
 }

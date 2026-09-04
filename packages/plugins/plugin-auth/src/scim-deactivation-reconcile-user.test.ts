@@ -14,7 +14,7 @@
  * identity provider deactivating a user revoked sessions and wrote nothing:
  * `sys_user.banned` stayed false, and a user holding a local password signed
  * straight back in. `auth-manager.ts` now passes the callback and routes it
- * to the platform's own ban write (`admin-ban-endpoints.ts`).
+ * to the platform's own ban write (`user-ban-write.ts`).
  *
  * ## Why every case drives the vendor and none simulates the write
  *
@@ -43,10 +43,16 @@
  *  (c) the last administrator: refused THROUGH SCIM as a 403 SCIM error, the
  *      account stays active — plus the positive control (a second
  *      administrator makes the same request succeed) that proves the guard
- *      was the thing refusing.
+ *      was the thing refusing. Both SCIM lifecycle verbs are driven:
+ *      `PATCH active: false` and `DELETE /Users/{id}`, which on 1.7.2
+ *      reach the guard through the SAME `beforeUpdate` ban write.
  *  (d) negative controls: a PATCH that does not change `active` touches no
  *      ban column and revokes nothing; an administrator's ban survives an
- *      IdP attribute sync and an explicit `active: true`.
+ *      IdP attribute sync and an explicit `active: true`; a deactivation
+ *      makes an administrator's EXPIRING ban permanent — paired with the
+ *      positive control that the SAME expiry, with no deactivation, DOES
+ *      re-admit, so what holds the refusal is the `ban_expires` clearing
+ *      and not an expiry that never elapsed.
  *  (e) a host that declines the admin plugin beside SCIM is still refused at
  *      construction (#13816 — unchanged by this card).
  *  (f) `DELETE /Users/{id}` leaves the tombstoned account disabled (the
@@ -61,27 +67,8 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ADMIN_FULL_ACCESS } from '@objectstack/spec/identity';
-import {
-  SysUser,
-  SysSession,
-  SysAccount,
-  SysVerification,
-  SysOrganization,
-  SysMember,
-  SysInvitation,
-  SysTeam,
-  SysTeamMember,
-  SysScimConnectionBinding,
-  SysScimConnectionCredential,
-  SysScimGroup,
-  SysScimGroupMember,
-  SysScimIdentityTombstone,
-  SysScimProjectionGrant,
-  SysScimSubject,
-  SysScimUser,
-  SysJwks,
-} from '@objectstack/platform-objects';
 import { AuthManager } from './auth-manager.js';
+import { authIdentityObjects } from './manifest.js';
 import { createTenancyService } from './tenancy-service.js';
 import { mintScimConnectionCredential } from './scim-connection-service.js';
 import { registerLastAdminGuard, type LastAdminGuardEngine } from './last-admin-guard.js';
@@ -102,27 +89,17 @@ const SCIM_ERROR_SCHEMA = 'urn:ietf:params:scim:api:messages:2.0:Error';
 /** Every read below is a safety-proof read, never RLS-scoped to a caller. */
 const SYSTEM = { context: { isSystem: true } } as const;
 
-/** The identity surface the org + admin (forced by SCIM) + scim plugins touch. */
-const AUTH_OBJECTS = [
-  SysUser,
-  SysSession,
-  SysAccount,
-  SysVerification,
-  SysOrganization,
-  SysMember,
-  SysInvitation,
-  SysTeam,
-  SysTeamMember,
-  SysScimConnectionBinding,
-  SysScimConnectionCredential,
-  SysScimGroup,
-  SysScimGroupMember,
-  SysScimIdentityTombstone,
-  SysScimProjectionGrant,
-  SysScimSubject,
-  SysScimUser,
-  SysJwks,
-];
+/**
+ * The objects a deployment that mounts plugin-auth registers, imported from the
+ * plugin's own manifest rather than re-spelled here, so this harness cannot
+ * drift from what `auth-plugin.ts` registers at runtime (#14615). The
+ * hand-written list this replaced omitted the OAuth objects, and the
+ * oauth-provider's `session.delete.before` hook reads two of them
+ * (`sys_oauth_access_token`, `sys_oauth_refresh_token`) on every session
+ * revocation — which made every revocation this suite drives log a Better Auth
+ * ERROR about a missing table.
+ */
+const AUTH_OBJECTS = authIdentityObjects;
 
 /**
  * The two tables the break-glass guard enumerates platform administrators
@@ -475,16 +452,17 @@ describe('[#14360] deactivating the last administrator is refused through SCIM, 
     expect(row?.ban_reason ?? null).toBeNull();
     await expectSignInAccepted(h, owner.email);
 
-    // RESIDUAL — pinned as observed, filed as #14522, ⛔ not this card's to
-    // fix: the vendor's own `scimUser.active = false` write, made BEFORE the
-    // callback inside what it believes is a transaction, survives the
-    // refusal, because the adapter's #3653 SCIM transaction scoping never
-    // opens an engine transaction on 1.7.2 (measured: 0 `engine.transaction`
-    // and 0 `driver.beginTransaction` calls across POST + PATCH /Users). So
-    // the SCIM resource reports `active: false` while the account is still
-    // enabled. When #14522 lands, this line flips to `true` DELIBERATELY —
-    // that is the whole reason it is asserted rather than left unread.
-    expect(await scimActive(h, owner.scimId)).toBe(false);
+    // [#14522] The vendor's own `scimUser.active = false` write, made BEFORE
+    // the callback inside its transaction, is rolled back WITH the refusal:
+    // the adapter's #3653 SCIM transaction scoping opens a real engine
+    // transaction now that the scope is opened at `handleRequest` (it was
+    // stamped with `enterWith` inside `verifyBearerToken` and never reached
+    // the writes — measured as 0 `engine.transaction` calls across POST +
+    // PATCH /Users). So the SCIM resource keeps reporting `active: true` for
+    // the account that stayed enabled. This line read `false` on purpose
+    // while that residual was open and was flipped DELIBERATELY with the fix;
+    // the positive control below is the genuine `false`.
+    expect(await scimActive(h, owner.scimId)).toBe(true);
   }, 60_000);
 
   it('(c) positive control: with a second administrator left behind, the same request succeeds', async () => {
@@ -504,6 +482,44 @@ describe('[#14360] deactivating the last administrator is refused through SCIM, 
     const last = await setActive(h, deputy.scimId, false);
     expect(last.status).toBe(403);
     expect(isBanned(await userRow(h, deputy.email))).toBe(false);
+  }, 60_000);
+
+  it('(c) DELETE /Users/{id} of the last administrator is refused the same way — a 1.7.2 deprovision is a ban, not a row delete', async () => {
+    const h = await boot();
+    const owner = await provision(h, 'owner');
+    await attachPassword(h, owner);
+    await makePlatformAdmin(h, owner.userId);
+    await expectSignInAccepted(h, owner.email);
+
+    // The other lifecycle verb an IdP deprovisions with, and the one the
+    // guard's own header used to file under "deleting the `sys_user` row".
+    // On 1.7.2 it is not a row delete: the vendor tombstones the SCIM source
+    // and leaves the better-auth user in place (face (f)), the aggregate
+    // turns inactive, and the deprovision arrives as the SAME ban write as
+    // `active: false` — so it is `guardBan` on `beforeUpdate` that refuses
+    // here, and `guardDelete` on `beforeDelete` never runs at all. The
+    // mechanism covered this from the day #14360 landed; nothing drove it.
+    const res = await h.send(scimRequest(h, 'DELETE', `/Users/${owner.scimId}`));
+    const body = (await res.json()) as { schemas?: string[]; status?: string; detail?: string };
+    expect(res.status, `expected the guard's 403, got ${res.status} ${JSON.stringify(body)}`).toBe(
+      403,
+    );
+    expect(body.schemas ?? []).toContain(SCIM_ERROR_SCHEMA);
+    expect(String(body.status)).toBe('403');
+    expect(body.detail).toMatch(/last administrator/i);
+    expect(body.detail).toMatch(/ADR-0024 D5\.2/);
+
+    // Nothing landed: the row is still there, still unbanned, and the last
+    // administrator still signs in — the lockout the guard exists to stop.
+    const row = await userRow(h, owner.email);
+    expect(row, 'the refusal must leave the sys_user row in place').toBeTruthy();
+    expect(isBanned(row)).toBe(false);
+    expect(row?.ban_reason ?? null).toBeNull();
+    await expectSignInAccepted(h, owner.email);
+
+    // …and the vendor's own tombstone rolled back with the refusal (#14522),
+    // so the IdP still sees an active resource, not a half-deprovisioned one.
+    expect(await scimActive(h, owner.scimId)).toBe(true);
   }, 60_000);
 });
 
@@ -568,6 +584,21 @@ describe('[#14360] a SCIM update that does not change `active` touches no ban co
     expect(row?.ban_reason).toBe('Policy violation');
   }, 60_000);
 
+  /**
+   * The administrator's timed ban in the face below and in its positive
+   * control. Wide enough that the pre-PATCH sign-in — which has to land while
+   * the ban is still in force — is not racing the clock: on a loaded CI shard
+   * wall-clock time is not the test's progress (this file's own module import
+   * alone measured 12.7 s on an uncontended box), and the 1.5 s this replaces
+   * was a flake margin rather than a defect. Nothing either face proves
+   * depends on the number: the proof is that the ban OUTLIVES the expiry
+   * because `ban_expires` was nulled, and the control's is that the same
+   * expiry, left alone, re-admits.
+   */
+  const TIMED_BAN_MS = 5_000;
+  /** `expiry + 500 ms` — puts both faces past the expiry with margin to spare. */
+  const TIMED_BAN_WAIT_MS = TIMED_BAN_MS + 500;
+
   it("(d) a deactivation makes an administrator's EXPIRING ban permanent — the expiry cannot re-admit a deactivated principal", async () => {
     const h = await boot();
     const hana = await provision(h, 'hana');
@@ -577,7 +608,7 @@ describe('[#14360] a SCIM update that does not change `active` touches no ban co
     // moment `banExpires` is in the past, and nothing re-invokes the SCIM
     // callback until the IdP mutates the user again — so an expiry left in
     // place would ADMIT a principal the IdP still holds deactivated.
-    const expiresAt = new Date(Date.now() + 1_500);
+    const expiresAt = new Date(Date.now() + TIMED_BAN_MS);
     await h.engine.update(
       'sys_user',
       { id: hana.userId, banned: true, ban_reason: 'Policy violation', ban_expires: expiresAt },
@@ -598,12 +629,42 @@ describe('[#14360] a SCIM update that does not change `active` touches no ban co
     // Let the administrator's expiry pass, then prove the refusal still holds
     // (status AND code): without the clearing above the vendor would have
     // auto-unbanned here and answered 2xx.
-    await new Promise((resolve) => setTimeout(resolve, 2_000));
+    await new Promise((resolve) => setTimeout(resolve, TIMED_BAN_WAIT_MS));
     expect(Date.now()).toBeGreaterThan(expiresAt.getTime());
     await expectSignInBanned(h, hana.email);
     row = await userRow(h, hana.email);
     expect(isBanned(row)).toBe(true);
     expect(row?.ban_reason).toBe('Policy violation');
+  }, 60_000);
+
+  it('(d) positive control: with NO SCIM deactivation the same expiry DOES re-admit — so it is the `ban_expires` clearing that holds the refusal above', async () => {
+    const h = await boot();
+    const hana = await provision(h, 'hana');
+    await attachPassword(h, hana);
+
+    // Identical setup to the face above — same timed administrator ban, same
+    // wait — with exactly one thing taken away: the SCIM deactivation. Without
+    // this line a green face above is equally well explained by "the expiry
+    // never elapsed", which is the ambiguity a WIDER window would otherwise
+    // deepen: the refusal would be pinned by a clock rather than by the write
+    // under test.
+    const expiresAt = new Date(Date.now() + TIMED_BAN_MS);
+    await h.engine.update(
+      'sys_user',
+      { id: hana.userId, banned: true, ban_reason: 'Policy violation', ban_expires: expiresAt },
+      SYSTEM,
+    );
+    await expectSignInBanned(h, hana.email);
+
+    await new Promise((resolve) => setTimeout(resolve, TIMED_BAN_WAIT_MS));
+    expect(Date.now()).toBeGreaterThan(expiresAt.getTime());
+
+    // The vendor's `session.create` hook auto-lifts a ban whose `banExpires`
+    // is in the past and lets the sign-in through — clearing the row as it
+    // goes. That auto-lift is live here, which is exactly what the face above
+    // disables by nulling the expiry.
+    await expectSignInAccepted(h, hana.email);
+    expect(isBanned(await userRow(h, hana.email))).toBe(false);
   }, 60_000);
 });
 

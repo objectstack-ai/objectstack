@@ -492,8 +492,98 @@
 //
 // Before adding a `test` block for speed, re-measure: if `tests` is still the
 // dominant term, the block is not the lever.
-import { defineConfig } from 'vitest/config';
+//
+// ## THE TWO TIERS (#13504, #14554) — `unit` and `integration`, DERIVED population
+//
+// Maintainer ruling (2026-09-01): split this suite into two NAMED tiers — a
+// unit-fast tier that is the local default and does not monopolise the shared
+// verify lock, and a real-kernel integration tier that is CI-mandatory and run
+// locally on demand. Nothing is skipped, weakened, deleted or doubled: every
+// test file in this package still runs under `pnpm test`, because `vitest run`
+// with no `--project` runs every project. The tiers only change what a NARROWED
+// local run selects.
+//
+//   pnpm --filter @objectstack/cli exec vitest run --project unit          # fast, local default
+//   pnpm --filter @objectstack/cli exec vitest run --project integration   # the real thing, on demand
+//   pnpm --filter @objectstack/cli test                                    # both — what CI runs
+//
+// ⛔ THE PREDICATE IS WHAT A FILE DOES, NOT WHAT IT IS CALLED. The ACCEPT on
+// #13504 fixed that the `*.e2e.test.ts` name disagrees with behaviour, so a
+// tier keyed on the name routes coverage to the wrong place. The predicate is
+// stated ONCE, in `vitest-tiers.ts` — SPAWN (the real CLI, or this package's
+// source in a cold tsx child) or KERNEL (a real kernel or driver booted in
+// process), evaluated in code position with comments masked. Type-only
+// imports, spelling lists, fixture objects that merely SAY
+// `client: 'better-sqlite3'` and prose do not count; that module's header
+// carries the regexes and the false positives they were tuned against, and is
+// the place to read or change them.
+//
+// ⛔ AND THERE IS NO LIST HERE TO KEEP IN STEP (#14554). `INTEGRATION_FILES`
+// below is DERIVED from that predicate at config load. A hand-maintained list
+// is a copy of a fact already on disk, and the copy goes stale whenever
+// ANOTHER PR lands a qualifying test file: the pin then fires inside the merge
+// queue, against a `main` that is by construction newer than any queued PR's
+// own run, and — because GitHub stacks queue entries — ejects every PR behind
+// it too. Measured 2026-09-02: five ejections in a rolling 24 hours, ONE
+// independent hit, four bystanders touching no `packages/cli` path at all. A
+// derived population is classified rather than reported, so that shape is
+// gone. What `test/vitest-tiers-partition.test.ts` (unit tier) still holds —
+// coverage of the union, that the derivation reaches vitest, and the predicate
+// itself against fixture sources — and why a derivation needs a pin at all, is
+// set out in its own header.
+//
+// Population on this branch: 230 files = 158 unit + 72 integration. Deriving
+// reproduced the last hand-maintained list EXACTLY: `vitest list --filesOnly
+// --project <name>` returns byte-identical lists before and after #14554 (158
+// and 72, zero added, zero removed), so nothing moved tier when the list went
+// away. Before it did, the list moved twice between the first cut
+// (00ff228fe0: 228 = 158 + 70) and 3b5f8168b5, and the pin caught both in the
+// merge queue: one NEW spawner file and one EXISTING file that started
+// constructing `new ObjectQL(`
+// — the second is the shape a name-based tier can never see. Reconciled
+// against the #13872 census (f532630d02, 220 files, 35 spawners / 29
+// kernel-booters / 1 both):
+// on that same tree this predicate finds 46 spawners and 22 kernel-booters.
+// The spawner side GROWS by 11 files the basename census could not see — six
+// that spawn only through `runServe()` and five through the helper's exported
+// `CLI` path constant — and SHRINKS by three that name an entry basename in an
+// assertion without importing `child_process` at all. The kernel side shrinks
+// because the census counted text matches: two `CONTRACT_ONLY_SPELLINGS`
+// lists, a banner fixture, a connection-display formatter, a scaffold
+// dependency assertion and two `import type { … } from '@objectstack/driver-*'`
+// are not boots. With the behavioural predicate the name-vs-behaviour
+// disagreement is 5 files (4 spawn without the `.e2e` name, 1 carries the name
+// and spawns plain node), down from the census's 18.
+//
+// WHAT THE SPLIT COSTS AND BUYS, priced from the #13872 attribution above: the
+// 70 integration files hold the 73.4% of test-body time that belongs to the
+// spawners plus the 3.4% of the kernel-booters; the unit tier is the remaining
+// ~23% of test-body time plus the per-file import floor, which is the part the
+// split cannot move. The unit tier's measured wall on this box is recorded in
+// the PR that landed this section; re-measure it when the population moves,
+// and print the commit here.
+//
+// ⚠️ INLINE PROJECTS INHERIT NOTHING BY DEFAULT — `extends: true` is what
+// carries this file's `resolve.alias` table and `test.server.deps.external`
+// into each project (vitest 4.1.10: an inline project without it gets a fresh
+// Vite config, so the source aliases the gate above guards would be declared
+// here and enforced nowhere). `disableConsoleIntercept: true` is repeated
+// inside every project because `check:console-intercept-disarm` measured the
+// root-level setting inert under projects. `exclude` for the unit tier spreads
+// `configDefaults.exclude` first: an `exclude` that names only the integration
+// files would drop the `node_modules` exclusion and start collecting
+// dependencies' own test files.
+import { configDefaults, defineConfig } from 'vitest/config';
 import path from 'path';
+import { integrationTestFiles } from './vitest-tiers.js';
+
+// The integration tier, DERIVED from what the files DO — never written down.
+// `vitest-tiers.ts` holds the predicate, the walk and the argument for both;
+// `test/vitest-tiers-partition.test.ts` pins what a derivation cannot pin
+// about itself. Package-root-relative, POSIX-separated, sorted; each entry is
+// an exact path, which is what lets the same array serve as the integration
+// project's `include` and the unit project's `exclude`.
+export const INTEGRATION_FILES = integrationTestFiles(__dirname);
 
 export default defineConfig({
   resolve: {
@@ -555,5 +645,27 @@ export default defineConfig({
         external: [/packages[\/]types[\/]dist/],
       },
     },
+    // The two tiers (#13504) — see the header section of the same name. Both
+    // `extends: true` so each project inherits the `resolve.alias` table and
+    // the `server.deps.external` entry above; each repeats the console-intercept
+    // disarm because the root-level one is inert under projects.
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: 'unit',
+          disableConsoleIntercept: true,
+          exclude: [...configDefaults.exclude, ...INTEGRATION_FILES],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: 'integration',
+          disableConsoleIntercept: true,
+          include: INTEGRATION_FILES,
+        },
+      },
+    ],
   },
 });

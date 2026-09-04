@@ -4,6 +4,11 @@ import { Args, Command, Flags } from '@oclif/core';
 import chalk from 'chalk';
 import fs from 'fs';
 import path from 'path';
+
+// Type-only (erased at runtime): the three field-type vocabularies below are
+// `satisfies Record<FieldType, …>`, which is what makes a field type added to
+// the spec a named compile error here instead of a silent fallback (#14657).
+import type { FieldType } from '@objectstack/spec/data';
 import { printHeader, printSuccess, printError, printInfo, printStep, createTimer, CLI_ALIAS } from '../utils/format.js';
 import { metadataFileName } from '../utils/metadata-file-name.js';
 
@@ -452,6 +457,36 @@ function toSnakeCase(str: string): string {
 
 // ─── Field Type Mapping ─────────────────────────────────────────────
 
+/**
+ * The TypeScript type each authored field type generates (#13871).
+ *
+ * Every key here MUST be a member of the `FieldType` enum in
+ * `@objectstack/spec/data` — that enum is the only statement of which field
+ * types exist, and a key outside it describes nothing. This table used to carry
+ * six that never existed anywhere (`integer`, `slug`, `uuid`, `ip_address`,
+ * `geo_point`, `encrypted`): invented here, mirrored into the migration
+ * codegen below, and readable as an acceptance surface the platform cannot
+ * honour. `generate-field-type-vocabulary.pin.test.ts` now fails on any such
+ * key, in this table and in the two vocabularies below it.
+ *
+ * TOTAL since #14657, and total BY CONSTRUCTION: the `satisfies
+ * Record<FieldType, string>` below makes a missing member a named `tsc` error
+ * (`Property 'x' is missing …`), so the next field type the spec adds cannot
+ * arrive here in silence. Before it, 21 real members had no entry and every one
+ * of them silently generated `unknown` — a plausible-looking wrong type with
+ * nothing to tell the author. The `|| 'unknown'` below stays, and now means
+ * only what it always should have: this generator's answer for a `type` string
+ * that is not a `FieldType` at all, which the UNVALIDATED authoring door (a
+ * plain-object config export, `defineStack(x, { strict: false })`) can still
+ * deliver.
+ *
+ * Values are MEASURED, not invented — each one is the shape the platform
+ * actually implements, read from the spec's ADR-0104 D1 value classes
+ * (`@objectstack/spec/data` `field-value.zod.ts`) and cross-checked against the
+ * `driver-sql` DDL emitter that creates the real columns. The two structured
+ * types point AT the spec's own exported types rather than transcribing them,
+ * so the generated interface cannot drift from the value contract.
+ */
 const FIELD_TYPE_MAP: Record<string, string> = {
   text: 'string',
   textarea: 'string',
@@ -459,7 +494,6 @@ const FIELD_TYPE_MAP: Record<string, string> = {
   html: 'string',
   markdown: 'string',
   number: 'number',
-  integer: 'number',
   currency: 'number',
   percent: 'number',
   boolean: 'boolean',
@@ -479,22 +513,58 @@ const FIELD_TYPE_MAP: Record<string, string> = {
   file: 'string',
   image: 'string',
   password: 'string',
-  slug: 'string',
-  uuid: 'string',
-  ip_address: 'string',
   color: 'string',
   rating: 'number',
-  geo_point: '{ lat: number; lng: number }',
   vector: 'number[]',
-  encrypted: 'string',
-};
+  // #14657 — the members that used to fall to `|| 'unknown'`. Grouped by the
+  // spec's ADR-0104 D1 value class, which is what decides each answer.
+  // STRING_VALUE_TYPES. `secret` is a string because the ROW holds an opaque
+  // ref, not the credential: the engine encrypts via the ICryptoProvider,
+  // stores the ciphertext handle in `sys_secret`, and masks on read (ADR-0100).
+  secret: 'string',
+  code: 'string',
+  signature: 'string',
+  qrcode: 'string',
+  // BOOLEAN_VALUE_TYPES.
+  toggle: 'boolean',
+  // SINGLE_OPTION_TYPES / MULTI_OPTION_TYPES — an option code, or an array of
+  // them. `tags` is the free-form member of the multi class.
+  radio: 'string',
+  checkboxes: 'string[]',
+  tags: 'string[]',
+  // NUMERIC_VALUE_TYPES — `valueSchemaFor` gives all three `z.number()`.
+  slider: 'number',
+  progress: 'number',
+  summary: 'number',
+  // REFERENCE_VALUE_TYPES — the STORED form of a reference is the related
+  // record's id string; the expanded record is the read shape and is never
+  // stored. `user` stores identically to `lookup` (field.zod says so).
+  user: 'string',
+  tree: 'string',
+  // FILE_REFERENCE_TYPES — the stored form is an opaque `sys_file` id string
+  // (`FileReferenceIdValueSchema`), which is why `file`/`image` above are
+  // already `string`; these three are the same class and take the same answer.
+  avatar: 'string',
+  video: 'string',
+  audio: 'string',
+  // STRUCTURED_JSON_TYPES — embedded structured values stored as JSON on the
+  // parent row. ONE decision for the whole family, not four independent ones.
+  // `location` and `address` name the spec's own exported value types (the
+  // generated file already imports `* as Data`), so the emitted interface is
+  // derived from the value contract instead of transcribing `{lat, lng}` here.
+  composite: 'Record<string, unknown>',
+  repeater: 'Record<string, unknown>[]',
+  record: 'Record<string, Record<string, unknown>>',
+  location: 'Data.LocationValue',
+  address: 'Data.AddressValue',
+} satisfies Record<FieldType, string>;
 
 function fieldTypeToTs(fieldType: string, multiple?: boolean): string {
   const base = FIELD_TYPE_MAP[fieldType] || 'unknown';
   return multiple ? `${base}[]` : base;
 }
 
-function generateTypesFromConfig(config: Record<string, unknown>): string {
+export function generateTypesFromConfig(config: Record<string, unknown>): string {
   const lines: string[] = [
     '// Auto-generated by ObjectStack CLI — do not edit manually',
     `// Generated at ${new Date().toISOString()}`,
@@ -860,14 +930,86 @@ async function runClientGeneration(configPath: string | undefined, flags: { outp
 
 // ─── Migration Generator ────────────────────────────────────────────
 
-const FIELD_TYPE_SQL_MAP: Record<string, string> = {
+/**
+ * The SQL column type each authored field type generates (#13871).
+ *
+ * Same invariant as `FIELD_TYPE_MAP`, and since #14657 the same totality: every
+ * key is a `FieldType` member AND every `FieldType` member has a key, enforced
+ * by the `satisfies` below. The `|| 'TEXT'` default now covers only a `type`
+ * string that is not a field type at all (the unvalidated authoring door).
+ *
+ * ⚠️ The `null` entry is not a gap — it is the answer. `formula` is VIRTUAL:
+ * `SqlDriver.createColumn` spells it `case 'formula': return; // Virtual — no
+ * column`, and the driver's own read-only mirror `varcharColumnChars` answers
+ * the same shape (`case 'formula': return null;`). `null` is that answer
+ * carried in the table rather than restated at a call site, so the two
+ * migration generators cannot disagree about which fields materialise at all.
+ * The totality rule is unchanged: `formula` still has an ENTRY, so a field type
+ * added to the spec still cannot arrive here in silence.
+ *
+ * ## #14828 — the five pre-#14657 entries that disagreed with the platform
+ *
+ * #13871 removed entries naming types the platform does not have; #14657 added
+ * entries for real members that had none, and deliberately left every
+ * PRE-EXISTING entry byte-for-byte alone. This is the third direction: entries
+ * that existed, keyed on a real member, and described something the platform
+ * does not do. Each is now the platform's own answer, read from
+ * `packages/drivers/driver-sql/src/sql-driver.ts` — ⛔ the DRIVER is the
+ * authority for which column exists, never the spec's `isMultiValueField`
+ * VALUE predicate (see {@link fieldTypeToSql}):
+ *
+ *   `autonumber`  SERIAL      → VARCHAR(255). The runtime issues a RENDERED
+ *                 string (prefix + counter + suffix); `createColumn`'s
+ *                 `case 'auto_number': case 'autonumber':` arm is
+ *                 `table.string(name)` = knex's `varchar(255)`
+ *                 (`DEFAULT_STRING_VARCHAR_CHARS`). A SERIAL is an integer
+ *                 column with a sequence attached: Postgres answers
+ *                 `22P02 invalid input syntax for type integer` for `INV-0001`,
+ *                 and `FIELD_TYPE_MAP` in this same file already said `string`
+ *                 — the file contradicted ITSELF.
+ *   `multiselect` TEXT        → JSONB. `MULTI_OPTION_TYPES` seeds the driver's
+ *                 `JSON_COLUMN_TYPES`, so the runtime writes a JSON array here.
+ *                 A TEXT column is the SILENT shape: `schema-drift.ts` gates
+ *                 its multi-value finding on `acceptsStringifiedJson` =
+ *                 `/char|text/i` precisely because "the textual family is the
+ *                 one that says yes and corrupts" — the array lands as the
+ *                 literal `'["a","b"]'` and reads back as one opaque string.
+ *   `vector`      VECTOR      → JSONB. `vector` is in `STRUCTURED_JSON_TYPES`,
+ *                 hence in `JSON_COLUMN_TYPES`, hence a JSON column. `VECTOR`
+ *                 is also not a portable type at all: it needs the pgvector
+ *                 extension and does not exist on MySQL or SQLite, so the
+ *                 generated `CREATE TABLE` fails outright off Postgres.
+ *   `formula`     TEXT        → null (no column). See above.
+ *   `lookup` /    VARCHAR(36) → VARCHAR(255), with the migration switch's
+ *   `master_detail`             `table.uuid` corrected in the same breath. The
+ *                 `uuid` half is the only HARD failure of the five: a platform
+ *                 id is 26 characters (`createColumn`'s lookup arm says so and
+ *                 spells one out — `01JQ8XKZ9M4N7P2R5T6V8W0Y3B`), and Postgres
+ *                 refuses one in a `uuid` column with `22P02`. The width half
+ *                 is the same rule for the whole REFERENCE_VALUE_TYPES class:
+ *                 `user` and `tree` moved with them, because a reference column
+ *                 holds the TARGET's `id` — which the driver itself emits as
+ *                 `table.string('id').primary()`, i.e. `varchar(255)` — and
+ *                 that is the derivation their own comment below already
+ *                 states. Leaving two members of one class at 36 while the
+ *                 other two moved would have manufactured a fresh within-file
+ *                 contradiction of exactly the kind this card exists to close.
+ *
+ * ⛔ NOT in scope here, and filed rather than mirrored: the FILE_REFERENCE_TYPES
+ * family (`file` / `image` / `avatar` / `video` / `audio`) is in the driver's
+ * `JSON_COLUMN_TYPES` today while this table gives it `VARCHAR(2048)`. That is
+ * a real disagreement, but it is #14657's ADR-0104 D3 answer against a driver
+ * that is still pre-D3 — a decision about which side moves, not a wrong value
+ * to correct. `generate-field-type-vocabulary.pin.test.ts` names the exclusion
+ * so it cannot be mistaken for coverage.
+ */
+const FIELD_TYPE_SQL_MAP: Record<string, string | null> = {
   text: 'VARCHAR(255)',
   textarea: 'TEXT',
   richtext: 'TEXT',
   html: 'TEXT',
   markdown: 'TEXT',
   number: 'DECIMAL(18,2)',
-  integer: 'INTEGER',
   currency: 'DECIMAL(18,2)',
   percent: 'DECIMAL(5,2)',
   boolean: 'BOOLEAN',
@@ -878,30 +1020,130 @@ const FIELD_TYPE_SQL_MAP: Record<string, string> = {
   phone: 'VARCHAR(50)',
   url: 'VARCHAR(2048)',
   select: 'VARCHAR(255)',
-  multiselect: 'TEXT',
-  lookup: 'VARCHAR(36)',
-  master_detail: 'VARCHAR(36)',
-  formula: 'TEXT',
-  autonumber: 'SERIAL',
+  // #14828 — MULTI_OPTION_TYPES seeds `driver-sql`'s `JSON_COLUMN_TYPES`, so
+  // the runtime stores this in a JSON column; `json: 'JSONB'` below is the
+  // spelling, read from this table's own entry by `fieldTypeToSql`.
+  multiselect: 'JSONB',
+  // #14828 — REFERENCE_VALUE_TYPES, one width for the whole class: the stored
+  // value is the TARGET's `id`, which `driver-sql` emits as
+  // `table.string('id').primary()` = `varchar(255)`. See `user` / `tree` below.
+  lookup: 'VARCHAR(255)',
+  master_detail: 'VARCHAR(255)',
+  // #14828 — VIRTUAL. `createColumn` answers `case 'formula': return;` and its
+  // own mirror `varcharColumnChars` answers `case 'formula': return null;`.
+  // Both migration generators skip the field entirely; see `fieldTypeToSql`.
+  formula: null,
+  // #14828 — the runtime issues a RENDERED string (prefix + counter + suffix)
+  // and `createColumn` gives it `table.string(name)`. `FIELD_TYPE_MAP` above
+  // has always said `string`; `SERIAL` made this file contradict itself.
+  autonumber: 'VARCHAR(255)',
   json: 'JSONB',
   file: 'VARCHAR(2048)',
   image: 'VARCHAR(2048)',
   password: 'VARCHAR(255)',
-  slug: 'VARCHAR(255)',
-  uuid: 'UUID',
-  ip_address: 'VARCHAR(45)',
   color: 'VARCHAR(7)',
   rating: 'INTEGER',
-  geo_point: 'POINT',
-  vector: 'VECTOR',
-  encrypted: 'TEXT',
-};
+  // #14828 — `vector` is in STRUCTURED_JSON_TYPES, hence in the driver's
+  // `JSON_COLUMN_TYPES`. `VECTOR` was also not portable: it needs pgvector and
+  // does not exist on MySQL or SQLite.
+  vector: 'JSONB',
+  // #14657 — the members that used to fall to `|| 'TEXT'`. Same ADR-0104 D1
+  // classes as `FIELD_TYPE_MAP`, resolved to this table's own SQL vocabulary.
+  // STRING_VALUE_TYPES. `secret` holds the opaque `sys_secret` ref, not the
+  // credential, so it is an ordinary short string column (ADR-0100).
+  secret: 'VARCHAR(255)',
+  // `code` / `signature` / `qrcode` are the text family in `driver-sql`'s own
+  // DDL switch (#11794, #11875): their values are unbounded unless the field
+  // declares a `maxLength`, which the write seam — not the column — enforces.
+  code: 'TEXT',
+  signature: 'TEXT',
+  qrcode: 'TEXT',
+  // BOOLEAN_VALUE_TYPES.
+  toggle: 'BOOLEAN',
+  // SINGLE_OPTION_TYPES: one option code, exactly like `select`.
+  radio: 'VARCHAR(255)',
+  // MULTI_OPTION_TYPES: arrays, so a JSON column — matching `json` above and
+  // `driver-sql`'s `JSON_COLUMN_TYPES`, which is seeded from this same class.
+  checkboxes: 'JSONB',
+  tags: 'JSONB',
+  // NUMERIC_VALUE_TYPES. `progress` takes `percent`'s narrower shape because it
+  // is the same 0-100 quantity; `slider` and `summary` are open-range.
+  slider: 'DECIMAL(18,2)',
+  progress: 'DECIMAL(5,2)',
+  summary: 'DECIMAL(18,2)',
+  // REFERENCE_VALUE_TYPES: the stored value is the related record's id, so the
+  // width belongs to the TARGET's id column, never to this field. #14828 read
+  // that derivation off the driver and applied it: the target's `id` column is
+  // `table.string('id').primary()`, knex's `varchar(255)`. These two moved with
+  // `lookup` / `master_detail` above so one class keeps one answer.
+  user: 'VARCHAR(255)',
+  tree: 'VARCHAR(255)',
+  // FILE_REFERENCE_TYPES: the ADR-0104 D3 stored form is an opaque `sys_file`
+  // id string, which is why `file` / `image` above are already a varchar; these
+  // three are the same class and take the same answer.
+  avatar: 'VARCHAR(2048)',
+  video: 'VARCHAR(2048)',
+  audio: 'VARCHAR(2048)',
+  // STRUCTURED_JSON_TYPES — the embedded-structured family answered ONCE.
+  // `location` is JSON, NOT `POINT`: the spec's own value contract is
+  // `{lat, lng, altitude?, accuracy?}` and `driver-sql` gives every member of
+  // this class a JSON column. (`POINT` was the invented `geo_point` ghost this
+  // table used to carry, and it is not portable to SQLite.)
+  composite: 'JSONB',
+  repeater: 'JSONB',
+  record: 'JSONB',
+  location: 'JSONB',
+  address: 'JSONB',
+} satisfies Record<FieldType, string | null>;
 
-function fieldTypeToSql(fieldType: string): string {
-  return FIELD_TYPE_SQL_MAP[fieldType] || 'TEXT';
+/**
+ * The column one field takes.
+ *
+ * `multiple` is answered FIRST, before the type is looked up at all, because
+ * that is what the platform does. `SqlDriver.createColumn` short-circuits on
+ * `field.multiple` ABOVE its own `switch (type)`; `isJsonField` is
+ * `JSON_COLUMN_TYPES.has(type) || !!field.multiple`; and `fieldHasColumn`
+ * opens with `if (field?.multiple) return true` under the comment "Mirrors
+ * `SqlDriver.createColumn` exactly ... including `multiple` (a JSON column)".
+ * Three statements of one rule: a flagged field is a JSON column whatever its
+ * element type would have been, so the element type gets no vote here either
+ * (#14829). Before this, one authored `Field.lookup({ multiple: true })`
+ * produced `account?: string[]` from `os generate types` and a scalar
+ * `VARCHAR(36)` column from this generator, in the same run.
+ *
+ * WARNING: this is deliberately NOT the spec's `isMultiValueField`. That is the
+ * ADR-0104 D1 VALUE contract ("is the persisted value an array"), gated on
+ * `MULTI_CAPABLE_TYPES`; asking it here would answer VARCHAR for a `text`
+ * field the driver gives a JSON column - the same drift one notch narrower.
+ * The column question belongs to the driver, and the driver's answer is the
+ * flag alone. `generate-multiple-json-column.pin.test.ts` pins both halves.
+ *
+ * The JSON spelling is READ from this table's own `json` entry rather than
+ * restated, so the two cannot drift about what a JSON column is spelled here.
+ *
+ * `null` means NO COLUMN — the answer for a virtual field type (#14828). It is
+ * the table's own entry, not a second decision here, and it composes in the
+ * driver's order: `multiple` still wins first, so a flagged field of any type
+ * is a JSON column and never reaches the lookup at all.
+ *
+ * ⚠️ The default is selected by OWN-PROPERTY PRESENCE, not by the value being
+ * falsy or nullish, because `null` is now a meaningful ANSWER and every other
+ * spelling swallows it: `||` and `??` both fall through on `null` and hand a
+ * virtual field a TEXT column again — the exact defect this card closes, one
+ * operator to the left. (Measured: the first cut of this fix used `??` and
+ * still emitted `"f" TEXT`.) `hasOwnProperty` rather than `in` for the second
+ * half of the same care — `in` answers true for `toString` and every other
+ * inherited key, and the unvalidated authoring door can deliver one as a
+ * `type` string.
+ */
+function fieldTypeToSql(fieldType: string, multiple?: boolean): string | null {
+  if (multiple) return FIELD_TYPE_SQL_MAP.json;
+  return Object.prototype.hasOwnProperty.call(FIELD_TYPE_SQL_MAP, fieldType)
+    ? FIELD_TYPE_SQL_MAP[fieldType]
+    : 'TEXT';
 }
 
-function generateMigrationSql(config: Record<string, unknown>): string {
+export function generateMigrationSql(config: Record<string, unknown>): string {
   const lines: string[] = [
     '-- Auto-generated by ObjectStack CLI — do not edit manually',
     `-- Generated at ${new Date().toISOString()}`,
@@ -933,7 +1175,11 @@ function generateMigrationSql(config: Record<string, unknown>): string {
 
     const fieldLines: string[] = [];
     for (const [fieldName, fieldDef] of Object.entries(fields)) {
-      const sqlType = fieldTypeToSql(String(fieldDef.type || 'text'));
+      const sqlType = fieldTypeToSql(String(fieldDef.type || 'text'), !!fieldDef.multiple);
+      // #14828 — a VIRTUAL field materialises no column. `SqlDriver.createColumn`
+      // returns without emitting one and `schema-drift.ts`'s `fieldHasColumn`
+      // answers false for it, so a column here is one the runtime never writes.
+      if (sqlType === null) continue;
       const notNull = fieldDef.required ? ' NOT NULL' : '';
       fieldLines.push(`  "${fieldName}" ${sqlType}${notNull}`);
     }
@@ -948,7 +1194,7 @@ function generateMigrationSql(config: Record<string, unknown>): string {
   return lines.join('\n') + '\n';
 }
 
-function generateMigrationTs(config: Record<string, unknown>): string {
+export function generateMigrationTs(config: Record<string, unknown>): string {
   const lines: string[] = [
     '// Auto-generated by ObjectStack CLI — do not edit manually',
     `// Generated at ${new Date().toISOString()}`,
@@ -987,24 +1233,52 @@ function generateMigrationTs(config: Record<string, unknown>): string {
     for (const [fieldName, fieldDef] of Object.entries(fields)) {
       const fType = String(fieldDef.type || 'text');
       const required = fieldDef.required ? '.notNullable()' : '.nullable()';
-      let colMethod: string;
 
+      // #14829 - `multiple` before the type, exactly as `SqlDriver.createColumn`
+      // does it: the driver short-circuits on the flag above its own per-type
+      // switch, so a flagged field is a JSON column whatever its element type
+      // would have been. Emitted here rather than as a switch arm because the
+      // switch cases on the TYPE and the type has no vote in this decision;
+      // the spelling is this generator's own JSON arm, stated once more.
+      // See `fieldTypeToSql` for why the authority is the driver's flag rule
+      // and not the spec's `isMultiValueField` value predicate.
+      if (fieldDef.multiple) {
+        lines.push(`    table.jsonb('${fieldName}')${required};`);
+        continue;
+      }
+
+      // #14828 — `string | null`, where `null` is the VIRTUAL answer. Carried
+      // through the switch rather than short-circuited above it so every field
+      // type keeps exactly one arm in one vocabulary, which is what
+      // `generate-field-type-vocabulary.pin.test.ts` measures.
+      let colMethod: string | null;
       switch (fType) {
         case 'text': case 'email': case 'phone': case 'url': case 'select':
-        case 'slug': case 'password': case 'color': case 'ip_address':
+        case 'password': case 'color':
+        // #14657 — `secret` holds the opaque `sys_secret` ref, not the
+        // credential (ADR-0100); `radio` is a single option code like `select`.
+        case 'secret': case 'radio':
           colMethod = `table.string('${fieldName}')`;
           break;
         case 'textarea': case 'richtext': case 'html': case 'markdown':
-        case 'formula': case 'encrypted':
+        // #14657 — `driver-sql`'s own DDL switch puts these three in the text
+        // family (#11794, #11875): the declared `maxLength`, when there is one,
+        // is enforced at the write seam rather than by the column.
+        case 'code': case 'signature': case 'qrcode':
           colMethod = `table.text('${fieldName}')`;
           break;
         case 'number': case 'currency': case 'percent':
+        // #14657 — NUMERIC_VALUE_TYPES: `valueSchemaFor` gives all of these
+        // `z.number()`, and `driver-sql` gives them a float column.
+        case 'slider': case 'progress': case 'summary':
           colMethod = `table.decimal('${fieldName}')`;
           break;
-        case 'integer': case 'rating':
+        case 'rating':
           colMethod = `table.integer('${fieldName}')`;
           break;
         case 'boolean':
+        // #14657 — BOOLEAN_VALUE_TYPES; `driver-sql` shares one arm for the pair.
+        case 'toggle':
           colMethod = `table.boolean('${fieldName}')`;
           break;
         case 'date':
@@ -1017,19 +1291,61 @@ function generateMigrationTs(config: Record<string, unknown>): string {
           colMethod = `table.time('${fieldName}')`;
           break;
         case 'json': case 'multiselect':
+        // #14657 — the rest of MULTI_OPTION_TYPES, the whole
+        // STRUCTURED_JSON_TYPES family answered ONCE, and `vector`. Every one
+        // of these is a member of `driver-sql`'s `JSON_COLUMN_TYPES`, which is
+        // seeded from these very spec classes, so a JSON column here is what
+        // the runtime already creates. `location` is JSON, not `POINT` — the
+        // spec's value contract is `{lat, lng, altitude?, accuracy?}`, and
+        // `POINT` is not portable to SQLite.
+        case 'checkboxes': case 'tags':
+        case 'composite': case 'repeater': case 'record':
+        case 'location': case 'address': case 'vector':
           colMethod = `table.jsonb('${fieldName}')`;
           break;
-        case 'uuid': case 'lookup': case 'master_detail':
-          colMethod = `table.uuid('${fieldName}')`;
+        // #14828 — VIRTUAL: `SqlDriver.createColumn` answers this type with
+        // `case 'formula': return; // Virtual — no column`, and
+        // `schema-drift.ts`'s `fieldHasColumn` answers false for it. The
+        // generated migration used to create a `table.text` column the runtime
+        // never writes to. Emitted as `null` and skipped below — the field
+        // keeps its arm here so the vocabulary stays total over `FieldType`.
+        case 'formula':
+          colMethod = null;
           break;
         // `user` references sys_user, whose id is a text identifier (not a uuid),
         // so store it as a string column — consistent with the runtime sql-driver.
-        case 'user':
+        // #14657 — `tree` is the same REFERENCE_VALUE_TYPES class pointing at the
+        // object's own id, and the FILE_REFERENCE_TYPES class stores an opaque
+        // `sys_file` id string (ADR-0104 D3). `autonumber` is a RENDERED string
+        // (prefix + counter + suffix), which is both what `FIELD_TYPE_MAP` says
+        // and what `driver-sql` emits — a SERIAL could not hold `INV-0001`.
+        //
+        // #14828 — `lookup` / `master_detail` JOIN this arm, out of a
+        // `table.uuid` arm of their own. They are the other two members of
+        // REFERENCE_VALUE_TYPES and the driver gives the whole class one
+        // answer: `createColumn`'s `case 'lookup': case 'user':` is
+        // `table.string(name)`, and `master_detail` reaches the same call
+        // through its catch-all. `table.uuid` was the one HARD failure among
+        // this card's five rows — a platform id is 26 characters
+        // (`01JQ8XKZ9M4N7P2R5T6V8W0Y3B`, spelled out in that same driver arm),
+        // and Postgres refuses one in a `uuid` column with `22P02 invalid
+        // input syntax for type uuid` on the very first insert.
+        case 'lookup': case 'master_detail':
+        case 'user': case 'tree':
+        case 'image': case 'file': case 'avatar': case 'video': case 'audio':
+        case 'autonumber':
           colMethod = `table.string('${fieldName}')`;
           break;
         default:
+          // Reachable only through the UNVALIDATED authoring door — a `type`
+          // that is not a `FieldType` at all. Every real member is cased above,
+          // and `generate-field-type-vocabulary.pin.test.ts` fails if one stops
+          // being.
           colMethod = `table.text('${fieldName}')`;
       }
+
+      // #14828 — the virtual answer: emit nothing at all for this field.
+      if (colMethod === null) continue;
 
       lines.push(`    ${colMethod}${required};`);
     }

@@ -291,9 +291,28 @@ export interface AutomationResult {
      * Lifecycle status. `'paused'` means the run suspended at a node (e.g.
      * an Approval node awaiting a human decision, ADR-0019) and can be
      * continued later with {@link IAutomationService.resume}. Absent or
-     * `'completed'`/`'failed'` ⇒ the run reached a terminal state.
+     * `'completed'`/`'failed'`/`'stranded'` ⇒ the run reached a terminal
+     * state.
+     *
+     * `'stranded'` names the terminally-failed-but-repairable run (#13909;
+     * the #13937 shape-4 ruling, maintainer 2026-09-01): a resume CONSUMED the
+     * suspension, a downstream node threw, and the run is recorded as failed —
+     * terminal exactly like `'failed'`, except that the pause a durable
+     * decision (an approval, a screen submission) was waiting on is gone with
+     * it, so the run can be re-armed only by an explicit operator verb — never
+     * by {@link IAutomationService.resume} (which answers `'RUN_NOT_FOUND'`:
+     * there is no suspension left) and never automatically. Distinct from
+     * `'failed'` on purpose: that one says the run ran and was rejected; this
+     * one says a recorded continuation stopped mid-flight and an operator has
+     * something to repair. This member is the ruling's contract half; the
+     * engine begins stamping it when #13937's services half (the re-arm verb
+     * and the catch-arm stamp in `resumeInternal`) lands. plugin-approvals'
+     * `StrandedRunState` (`'missing' | 'failed'`) is a report-only label over
+     * a request's run and is deliberately NOT promoted to this status (same
+     * ruling): it classifies WHY a request's run is unrecoverable, this names
+     * the run's own lifecycle verdict.
      */
-    status?: 'completed' | 'paused' | 'failed';
+    status?: 'completed' | 'paused' | 'failed' | 'stranded';
     /** Run id — set when `status` is `'paused'`, so callers can resume it. */
     runId?: string;
     /**

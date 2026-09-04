@@ -187,11 +187,20 @@ describe('#14242 B — two stages, two declarations, neither tolerant of the oth
     expect(ArtifactPackageSchema.safeParse(assembledBody).success).toBe(false);
   });
 
-  it('the body schema is not `strict` — `ManifestSchema` has never had that door', () => {
-    // Stated as a pin because it is a deliberate choice, not an oversight: this
-    // change adds a SHAPE gate on the collections, not a new unknown-key
-    // refusal on a manifest surface that is open by design.
-    expect(AssembledPackageBodySchema.safeParse({ ...coreManifest, somethingUndeclared: 1 }).success).toBe(true);
+  it('the body schema inherits the manifest door: an undeclared key on an assembled body is refused', () => {
+    // This pin used to assert the opposite — "not strict, `ManifestSchema` has
+    // never had that door" — and was true while the manifest was open.
+    // `ManifestSchema` is closed now (`strictObject`), and `.extend()` carries
+    // the closed posture and the error map onto the assembled body, so the
+    // refusal is inherited rather than declared twice: a key that is neither a
+    // manifest field nor a stack collection is refused at the load gate,
+    // naming the key.
+    const verdict = AssembledPackageBodySchema.safeParse({ ...coreManifest, somethingUndeclared: 1 });
+    expect(verdict.success).toBe(false);
+    if (verdict.success) return;
+    const issue = verdict.error.issues.find((i) => i.code === 'unrecognized_keys');
+    expect(issue).toBeDefined();
+    expect((issue as unknown as { keys: string[] }).keys).toEqual(['somethingUndeclared']);
   });
 });
 

@@ -911,10 +911,67 @@ async function main() {
 // as one that passed (#13798).
 const SELF_TEST_VERDICT = 'check-shard-attestation self-test reached its verdict';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  '(i) all N positives ⇒ green': 1,
+  '(ii) N-1 positives, one never scheduled ⇒ red': 7,
+  '(iii) N-1 positives + one explicit failure ⇒ red': 4,
+  '(iv) filter-skipped family ⇒ green with expected-N adjusted to 0': 1,
+  'the #4928 guard itself must not regress': 8,
+  '#3668 lifecycle: cancelled passes without counting': 2,
+  'dogfood-gate: a matrix leg and a single leg under one context': 5,
+  'foreign / stale credentials': 3,
+  '#11998: attempt scoping, in both directions': 26,
+  'missing input is a failure, never a pass (#4690)': 2,
+  'the classifier: adjacency, not co-occurrence (#6589)': 14,
+  '…and the PROGRAM word must be unquoted (#10889)': 12,
+  'readAttestations over a real directory': 4,
+  'the static drift guard, over fixture workflows': 17,
+  '#6589: a shard job is not a gate because a step says `--verify`': 23,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 15;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 async function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const seen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    seen.set(b, (seen.get(b) ?? 0) + 1);
+  };
   const failures = [];
   let checked = 0;
   const assert = (condition, description) => {
+    registerCase();
     checked += 1;
     if (!condition) failures.push(description);
   };
@@ -932,6 +989,7 @@ async function selfTest() {
     });
 
   // ── (i) all N positives ⇒ green ───────────────────────────────────────────
+  battery('(i) all N positives ⇒ green');
   assert(testGate('success', [attest('test', 1, 3), attest('test', 2, 3), attest('test', 3, 3)]).ok, 'all 3 declared shards attested ⇒ green');
 
   // ── (ii) N-1 positives, one never scheduled ⇒ red ─────────────────────────
@@ -940,6 +998,7 @@ async function selfTest() {
   // executed zero tests while the queue was still consuming this run's
   // verdicts. Whitelisting the word (option A) would have published `Test
   // Core: success` over that. Counting cannot: the credential is absent.
+  battery('(ii) N-1 positives, one never scheduled ⇒ red');
   const abandonedNotMoot = testGate('abandoned', [attest('test', 1, 3), attest('test', 2, 3)]);
   assert(!abandonedNotMoot.ok, 'abandoned-not-moot: 2 of 3 attested + aggregate `abandoned` ⇒ red');
   assert(
@@ -953,6 +1012,7 @@ async function selfTest() {
   }
 
   // ── (iii) N-1 positives + one explicit failure ⇒ red ──────────────────────
+  battery('(iii) N-1 positives + one explicit failure ⇒ red');
   assert(!testGate('failure', [attest('test', 1, 3), attest('test', 2, 3)]).ok, 'a genuinely failing shard ⇒ red');
   // COUNTER-EXAMPLE PIN 2 — "a real failure swallowed by a sibling's lifecycle
   // value" (#6082 comment 5208599210, run 31114735713: shard `Test Core (3/3)`
@@ -971,8 +1031,10 @@ async function selfTest() {
   assert(!testGate('failure', [attest('test', 1, 3), attest('test', 2, 3), attest('test', 3, 3)]).ok, 'a full roster never overrides a declared `failure`');
 
   // ── (iv) filter-skipped family ⇒ green with expected-N adjusted to 0 ──────
+  battery('(iv) filter-skipped family ⇒ green with expected-N adjusted to 0');
   assert(testGate('skipped', []).ok, '#4928: skipped legs + filter success ⇒ green, expected-N adjusts to 0');
   // ── the #4928 guard itself must not regress ───────────────────────────────
+  battery('the #4928 guard itself must not regress');
   for (const bad of ['failure', 'skipped', '']) {
     const guarded = testGate('skipped', [], bad);
     assert(!guarded.ok, `#4928 guard: skipped legs while filter result is '${bad || '(empty)'}' ⇒ red`);
@@ -982,10 +1044,12 @@ async function selfTest() {
   assert(!testGate('skipped', [attest('test', 1, 3)]).ok, 'a credential from a leg that was reported skipped is a contradiction ⇒ red');
 
   // ── #3668 lifecycle: cancelled passes without counting ────────────────────
+  battery('#3668 lifecycle: cancelled passes without counting');
   assert(testGate('cancelled', []).ok, '#3668: a cancelled matrix passes with zero credentials (superseded SHA)');
   assert(testGate('cancelled', [attest('test', 1, 3)]).ok, '#3668: a leg that attested before the cancellation is allowed, not required');
 
   // ── dogfood-gate: a matrix leg and a single leg under one context ─────────
+  battery('dogfood-gate: a matrix leg and a single leg under one context');
   const dogfood = (dogfoodResult, verifyResult, ids) =>
     judge({
       gate: 'Dogfood Regression Gate',
@@ -1005,6 +1069,7 @@ async function selfTest() {
   assert(!dogfood('success', 'skipped', fullDogfood).ok, 'dogfood: a credential from the leg reported skipped contradicts the skip ⇒ red');
 
   // ── foreign / stale credentials ───────────────────────────────────────────
+  battery('foreign / stale credentials');
   assert(!testGate('success', [attest('test', 1, 3), attest('test', 2, 3), attest('test', 3, 3), attest('test', 4, 4)]).ok, 'a credential no declared leg accounts for ⇒ red');
   assert(
     !testGate('success', [attest('test', 1, 3), attest('test', 2, 3), attest('test', 3, 3, '1234')]).ok,
@@ -1024,6 +1089,7 @@ async function selfTest() {
   // succeeded, judged docs-only, the legs stayed `skipped` — and the gates
   // refused attempt 1's own credentials one by one. The two error clusters
   // below are quoted from that run's job logs verbatim.
+  battery('#11998: attempt scoping, in both directions');
   const rerun = (legs, ids, runAttempt = '2', filterResult = 'success') =>
     judge({ gate: 'Test Core', legs, filterResult, present: new Map(ids), runId: '99', runAttempt });
   const testLeg = (result) => [{ job: 'test', total: 6, result }];
@@ -1123,6 +1189,7 @@ async function selfTest() {
   );
 
   // ── missing input is a failure, never a pass (#4690) ──────────────────────
+  battery('missing input is a failure, never a pass (#4690)');
   assert(!judge({ gate: 'Test Core', legs: [], filterResult: 'success', present: new Map(), runId: '99' }).ok, 'a gate with no legs verifies nothing ⇒ red');
   assert(!testGate('', []).ok, 'an aggregate result that did not interpolate ⇒ red');
 
@@ -1131,6 +1198,7 @@ async function selfTest() {
   // is the point. The old test asked whether the basename and the flag both
   // occurred; these ask whether the flag is an ARGUMENT of a command that runs
   // the script.
+  battery('the classifier: adjacency, not co-occurrence (#6589)');
   const REAL_GATE_COMMAND = "node scripts/check-shard-attestation.mjs --verify \\\n  --gate 'Test Core' \\\n  --dir \"$OS_ATTEST_DIR\"";
   assert(invokesScript('node scripts/check-shard-attestation.mjs --verify --gate x', '--verify'), 'the flag as an argument on the same line ⇒ an invocation');
   assert(invokesScript(REAL_GATE_COMMAND, '--verify'), "ci.yml's real gate command, continuations and all ⇒ an invocation");
@@ -1168,6 +1236,7 @@ async function selfTest() {
   // #6589's cases above stay exactly as they were: a recognizer tightened until
   // nothing satisfies it is a worse defect than the prose it excluded, because
   // what a permanently red pin gets is loosened.
+  battery('…and the PROGRAM word must be unquoted (#10889)');
   assert(
     !invokesScript('echo "node scripts/check-shard-attestation.mjs --verify is how you would check"', '--verify'),
     '#10889: an `echo` QUOTING the invocation is prose — the quoted blob is ONE argument, not a program being run',
@@ -1235,6 +1304,7 @@ async function selfTest() {
   );
 
   // ── readAttestations over a real directory ───────────────────────────────
+  battery('readAttestations over a real directory');
   const dir = mkdtempSync(join(tmpdir(), 'shard-attest-'));
   try {
     assert(readAttestations(join(dir, 'never-created')).present.size === 0, 'a missing download directory is zero credentials, not a crash');
@@ -1252,6 +1322,7 @@ async function selfTest() {
     assert(readAttestations(join(dir, 'a')).problems.length === 1, 'an unreadable credential is a problem, not a silent skip');
 
     // ── the static drift guard, over fixture workflows ──────────────────────
+    battery('the static drift guard, over fixture workflows');
     const good = readFileSync(join(scriptRepoRoot(), '.github', 'workflows', 'ci.yml'), 'utf8');
     const withWorkflow = async (source) => {
       const root = mkdtempSync(join(tmpdir(), 'shard-attest-wf-'));
@@ -1310,6 +1381,7 @@ async function selfTest() {
     // reported neither the classifier nor the flag — it reported that job
     // `test` lacked two properties only an aggregate gate owes, and following
     // that reading means editing the shard job's `if:`, i.e. breaking #3622.
+    battery('#6589: a shard job is not a gate because a step says `--verify`');
     assert(
       REQUIRED_GATE_JOBS.every((id) => baseline.gateIds.includes(id)) && baseline.gateIds.length === REQUIRED_GATE_JOBS.length,
       `the real gate invocations, and only those, are classified as gates (${REQUIRED_GATE_JOBS.join(', ')})`,
@@ -1374,6 +1446,51 @@ async function selfTest() {
     rmSync(dir, { recursive: true, force: true });
   }
 
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    failures.push(message);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of seen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = seen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
+  }
   if (failures.length > 0) {
     console.error(`✗ check-shard-attestation --self-test -- ${failures.length} failure(s)\n`);
     for (const failure of failures) console.error(`  • ${failure}`);

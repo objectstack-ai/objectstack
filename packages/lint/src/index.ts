@@ -297,6 +297,7 @@ export {
   SECURITY_GRANT_EXPIRED_AT_AUTHORING,
   SECURITY_DELEGATION_MISSING_REASON,
   SECURITY_CBP_NO_RELATION,
+  SECURITY_CBP_AMBIGUOUS_RELATION,
 } from './validate-security-posture.js';
 export type { SecurityFinding, SecuritySeverity } from './validate-security-posture.js';
 
@@ -467,6 +468,27 @@ export {
 } from './validate-page-field-bindings.js';
 export type { PageFieldFinding, PageFieldSeverity } from './validate-page-field-bindings.js';
 
+// [#14073] The PAGE door's visualization whitelist, one layer out from the key
+// resolution above. `appearance.allowedVisualizations` names a RENDERER, not a
+// field, and `InterfacePageConfigSchema` has no per-visualization binding key
+// for the author to fill in — so the renderer derives the binding from the
+// source object's fields, or the page borrows one through `sourceView`. This
+// rule mirrors that derivation at authoring time (the table it mirrors is
+// exported so a consumer can read the predicates rather than retype them) and
+// reports the whitelisted type that binds to nothing: `error` when it leads
+// (the runtime reaches its renderer's refusal screen), `warning` otherwise
+// (the type is dropped from the switcher silently).
+export {
+  validatePageVisualizationBindings,
+  PAGE_VISUALIZATION_WITHOUT_BINDING,
+  OBJECTUI_DERIVATION_PREDICATES,
+} from './validate-page-visualization-bindings.js';
+export type {
+  PageVisualizationFinding,
+  PageVisualizationSeverity,
+  VisualizationPredicate,
+} from './validate-page-visualization-bindings.js';
+
 // [#13855] The shared field-group reference half both layout surfaces resolve
 // against — exported so an out-of-repo consumer (cloud graph-lint, the AI
 // authoring path) can ask the same question of the same index rather than
@@ -623,6 +645,7 @@ export {
   validateAiAgentAuthoring,
   AGENT_AUTHORING_WITHDRAWN,
   DEFAULT_AGENT_OUTSIDE_ROSTER,
+  DEFAULT_AGENT_LEGACY_ALIAS,
 } from './validate-ai-agent-authoring.js';
 export type {
   AiAgentAuthoringFinding,
@@ -734,6 +757,8 @@ export {
   FLOW_MULTIPLE_DEFAULT_EDGES,
   FLOW_INERT_NODE_CONDITION,
   FLOW_MULTI_WRITE_UNFILTERED,
+  FLOW_LOOP_BODY_UNCONTAINED,
+  FLOW_TRY_CATCH_WITHOUT_CATCH,
 } from './lint-flow-patterns.js';
 
 export { lintLivenessProperties } from './lint-liveness-properties.js';
@@ -748,6 +773,10 @@ export {
   LIVENESS_DEAD_PROPERTY,
   LIVENESS_EXPERIMENTAL_PROPERTY,
   LIVENESS_PLANNED_PROPERTY,
+  // #14057 — the fifth ledger verdict's own rule id. `live-elsewhere` is dead
+  // HERE by measurement but genuinely enforced in a sibling repo, so it must
+  // never share the `dead` id: the two ask the author for opposite actions.
+  LIVENESS_LIVE_ELSEWHERE_PROPERTY,
 } from './lint-liveness-properties.js';
 
 export { lintAutonumberFormats } from './lint-autonumber-formats.js';

@@ -377,11 +377,13 @@ object: account
 accessLevel: read           # read | edit
 condition: 'record.account_type == "Enterprise"'
 sharedWith:
-  type: position            # user | team | position | unit_and_subordinates | business_unit
+  type: position            # user | team | position | unit_and_subordinates | business_unit | field
   value: sales_rep
 ```
 
 `unit_and_subordinates` expands a **business-unit subtree**: the unit named by `value` plus every descendant unit's members (ADR-0057 D5 / ADR-0090 D3 — the former position-tree walk was re-homed onto the `sys_business_unit` tree).
+
+`field` is the **record-relative** recipient (#14103, maintainer ruling 2026-09-02): `value` names a user-typed field on the object, and each matched record is shared with the user or users that column holds on it (`multiple: true` shares with every user it names; an empty column shares with nobody). It expands once per matched record, not once per rule. There is no `manager` recipient — "the owner's manager" is a user field the application stores on the record, named by a `field` recipient. The per-record executor is #15072.
 
 ### Owner-Based Sharing — removed in v17
 
@@ -417,7 +419,7 @@ sharedWith:
   value: west_region_managers
 ```
 
-> **Enforcement status.** Every authorable rule and recipient type is enforced. Criteria rules with `user` / `team` / `position` / `unit_and_subordinates` / `business_unit` recipients compile and enforce (the CEL condition lowers to a runtime filter that materializes `sys_record_share` grants, ADR-0058 D3). Owner-type rules and the `group` / `guest` recipients are **not** `[experimental — not enforced]` and are no longer skipped at seed time — v17 removed them from the schema, so they do not parse at all (see above). What is still skipped-and-logged is a `condition` the compiler cannot lower (functions, cross-object traversal): it is never seeded as a permissive match-all (ADR-0049).
+> **Enforcement status.** Criteria rules with `user` / `team` / `position` / `unit_and_subordinates` / `business_unit` recipients compile and enforce (the CEL condition lowers to a runtime filter that materializes `sys_record_share` grants, ADR-0058 D3). The `field` recipient is the contract half of a two-part landing (#14103): it parses, and until its per-record executor (#15072) lands the declared-rule bootstrap skips such a rule with a logged warning — never silently, never as a wider grant. Owner-type rules and the `group` / `guest` recipients are **not** `[experimental — not enforced]` and are no longer skipped at seed time — v17 removed them from the schema, so they do not parse at all (see above). What is still skipped-and-logged is a `condition` the compiler cannot lower (functions, cross-object traversal): it is never seeded as a permissive match-all (ADR-0049).
 
 > `accessLevel` is one of `read` or `edit`. Sharing widens **which rows** a principal reaches, never **which verbs** they may use — an `edit` share opens *update*, not *delete*: delete comes from ownership, the ADR-0057 DEPTH scopes, or the `modifyAllRecords` bypass, enforced by the sharing layer's own `canDelete` gate (distinct from the `canEdit` update gate) on top of the object-level CRUD gate (ADR-0111 D3). A third level `full` ("Full Access — transfer/share/delete") was authorable through protocol 16 but never granted any of those verbs: both enforcement sites matched `edit`/`full` alike, so it was equivalent to `edit` while telling admins otherwise, and it was removed (#3865, ADR-0078). Stacks still authoring it are rewritten to `edit` at load by the `sharing-rule-access-level-full-to-edit` conversion.
 
@@ -465,6 +467,31 @@ qualifying. That is the intent — the alternative was a declared policy the
 platform did not hold — but if you depend on links surviving a
 reclassification, widen the predicate rather than relying on the old
 behaviour.
+</Callout>
+
+**When `publicSharing.enabled` is off** (#14033). The block's own switch is
+the same standing-policy shape as `eligibility` above, one level up: it too
+is held at every redemption, not only at mint. Turning it off stops every
+existing link on the object immediately, with no revocation step to
+remember; turning it back on restores them, with no link needing to be
+re-minted. Turning the block off silences everything inside it —
+`eligibility` is not evaluated, `redactFields` is not computed — so the
+bypass some callers have at mint (a late schema scan, or a system context)
+buys only the mint: it still succeeds while the block is off, but what it
+mints does not resolve until the block is enabled. What an anonymous holder
+sees is the same "invalid or expired" answer `eligibility` already gives;
+the readable reason is written to the server log, never to the response.
+
+<Callout type="warn">
+**Upgrade note.** Before this, `publicSharing.enabled` gated only the mint —
+once a link was issued it kept resolving after the object's switch was
+turned off. Deployments upgrading across that change can feel it: links
+that used to keep serving after `enabled` was flipped off now stop
+immediately, and resume as soon as it is flipped back on. That is the
+intent — the alternative was a declared switch the platform did not hold —
+but there is no way to keep an already-minted link serving through the
+object being switched off; the object must stay opted in for its links to
+serve.
 </Callout>
 
 ---

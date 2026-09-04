@@ -70,6 +70,7 @@ import {
   isUnbackedConflictTargetError,
   uniqueViolationColumn,
   resolveTenancyPosture,
+  declareTargetedTable,
 } from '@objectstack/types';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import { nextUtcCalendarDay } from '@objectstack/core';
@@ -828,12 +829,39 @@ function unresolvableFilterColumnError(object: string, column: string | null): E
  * invisible to serialisation, which is the same reasoning
  * {@link WITHHELD_FILTER_DIAGNOSTIC} applies one refusal over.
  *
+ * # The targeted table is declared on the envelope, and never in the message
+ *
+ * [#13438] `isMissingTableError(error, readObject)` compares the dialect phrase
+ * against the name the CALLER read — its API object name — and for a federated
+ * object (ADR-0015) that is not the name in the statement: {@link
+ * SqlDriver.getBuilder} targets `external.remoteName`. A genuinely absent
+ * remote therefore raised a phrase naming `legacy_orders` against a caller
+ * naming `crm_order`, and the #13324 comparison read a real missing table as
+ * "about something else" — loud, for the one case the licence exists for.
+ * Nothing at a call site can fold that away: the mapping lives on this
+ * instance.
+ *
+ * Maintainer ruling 2026-09-01 (option 2 on the card): the driver DECLARES the
+ * table its statement targeted, and the predicate prefers the declared name
+ * over the caller's. `targetedTable` is that name, resolved by
+ * {@link SqlDriver.backendStatementFault} exactly as `getBuilder` resolves it,
+ * so it is the table the statement was compiled against and not a
+ * re-derivation. It travels under `@objectstack/types`' `DRIVER_TARGETED_TABLE`
+ * symbol, non-enumerable — the same carrier discipline as `cause` above, for
+ * the same reason: the physical table is precisely what the composed message
+ * withholds, and a member that serialised would put it back on the wire. ⛔ It
+ * is never written into the message; the disclosure clause below stands.
+ *
  * @param object - the API object name the caller asked for. Its own vocabulary,
  *                 never the physical table: see the message note below.
  * @param cause  - the dialect error, kept whole for the log and for
  *                 cause-following predicates.
+ * @param targetedTable - the physical table the failed statement was compiled
+ *                 against: a federated object's `external.remoteName`,
+ *                 otherwise the object's own name. Declared on the envelope for
+ *                 `isMissingTableError`; never echoed.
  */
-function backendStatementFaultError(object: string, cause: unknown): Error {
+function backendStatementFaultError(object: string, cause: unknown, targetedTable: string): Error {
   // ⛔ No dialect text reaches the caller — not the statement, not the quoted
   // references, not the `$n` placeholders, not the backend's own prose. The
   // ruling's disclosure clause, and it is why this message is COMPOSED rather
@@ -862,6 +890,8 @@ function backendStatementFaultError(object: string, cause: unknown): Error {
     writable: true,
     configurable: true,
   });
+  // [#13438] Code-readable, serialisation-invisible — see the section above.
+  declareTargetedTable(err, targetedTable);
   return err;
 }
 
@@ -2003,6 +2033,46 @@ function fieldReferenceOf(value: unknown): string | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const ref = (value as Record<string, unknown>).$field;
   return typeof ref === 'string' ? ref : null;
+}
+
+/**
+ * [#14104] The `addDays` operand a `{ $field }` reference carries — a
+ * whole-day offset added to the referenced column before the comparison
+ * (`FieldReferenceSchema.addDays`, `data/filter.zod.ts`):
+ *
+ *   - `null` — the reference carries no offset (the #5222 arm, unchanged);
+ *   - `literal` — an integer, any sign (a negative value subtracts);
+ *   - `column` — a nested `{ $field }` naming the numeric column that holds
+ *     the days;
+ *   - `invalid` — anything else. The schema door already refuses these; this
+ *     driver refuses them again rather than binding the object as a literal,
+ *     for the reason #5041 installed the first refusal: `find()` takes a
+ *     `where` no face re-validates, and a permission filter assembled in code
+ *     never passes the schema at all.
+ *
+ * Mirrors `@objectstack/formula`'s `resolveDayOffset` on WHAT an offset is;
+ * the two differ only in what they do with one.
+ */
+type CrossFieldOffset =
+  | { kind: 'literal'; days: number }
+  | { kind: 'column'; ref: string }
+  | { kind: 'invalid'; reason: string };
+
+function fieldReferenceOffsetOf(value: unknown): CrossFieldOffset | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const raw = (value as Record<string, unknown>).addDays;
+  if (raw === undefined) return null;
+  if (typeof raw === 'number') {
+    return Number.isInteger(raw)
+      ? { kind: 'literal', days: raw }
+      : { kind: 'invalid', reason: `addDays ${String(raw)} is not an integer (whole days only)` };
+  }
+  const nested = fieldReferenceOf(raw);
+  if (nested !== null) return { kind: 'column', ref: nested };
+  return {
+    kind: 'invalid',
+    reason: `addDays ${JSON.stringify(raw)} is neither an integer nor a { "$field": "numeric_column" } reference`,
+  };
 }
 
 /**
@@ -5868,7 +5938,11 @@ export class SqlDriver implements IDataDriver {
     // Run the DDL on the caller's own transaction instead; SQLite permits DDL
     // inside a transaction. We deliberately do NOT route DDL through `parentTrx`
     // on MySQL, where DDL implicitly commits the caller's transaction; there the
-    // roomy pool (max=10) lets a fresh connection create the table safely.
+    // pool has room (max=5) for a fresh connection to create the table safely.
+    // The 5 is `buildSqlPool`'s — service-datasource's
+    // `default-datasource-driver-factory.ts` gives every datasource it composes
+    // `{min:0,max:5}` unless one declares its own `pool` — not knex's roomier
+    // `poolDefaults()` of `{min:2,max:10}`, which the factory never reaches.
     const runner: Knex | Knex.Transaction = parentTrx && this.isSqlite ? parentTrx : this.knex;
     // If we are about to run DDL on a fresh pooled connection while a SQLite
     // transaction holds the only one, fail fast with a clear message instead of
@@ -8027,7 +8101,13 @@ export class SqlDriver implements IDataDriver {
         'and on the dialects that inline them the bound literals too (#7929, #8931): ' +
         `${typeof detail === 'string' ? detail : String(error)}`,
     );
-    return backendStatementFaultError(object, error);
+    // [#13438] The table the statement was compiled against, resolved the way
+    // {@link SqlDriver.getBuilder} resolves it — a federated object's
+    // `external.remoteName`, otherwise the object's own name — because every
+    // read exit that reaches here built its statement through `getBuilder`.
+    // Declared on the envelope for `isMissingTableError`; never in the message.
+    const targetedTable = this.physicalTableByObject[object] ?? object;
+    return backendStatementFaultError(object, error, targetedTable);
   }
 
   async count(object: string, query?: DriverQuery, options?: DriverOptions): Promise<number> {
@@ -8165,9 +8245,13 @@ export class SqlDriver implements IDataDriver {
    * turns that into an immediate, actionable error at the call site.
    *
    * No-op in production (zero overhead on the hot path) and on every non-SQLite
-   * dialect, whose roomy pools (max ≥ 10) cannot exhibit the single-connection
-   * dead-lock. Callers that legitimately need the connection during a
-   * transaction must bind the operation to that transaction instead of
+   * dialect, whose pool holds more than one connection and so cannot exhibit the
+   * single-connection dead-lock. That headroom is `max: 5`, from `buildSqlPool`
+   * in service-datasource's `default-datasource-driver-factory.ts`, which gives
+   * every datasource it composes `{min:0,max:5}` unless one declares its own
+   * `pool` — not knex's roomier `poolDefaults()` of `{min:2,max:10}`, which the
+   * factory never reaches. Callers that legitimately need the connection during
+   * a transaction must bind the operation to that transaction instead of
    * `this.knex`.
    */
   protected assertBareKnexSafe(op: string): void {
@@ -13628,6 +13712,30 @@ export class SqlDriver implements IDataDriver {
    * legacy-datetime/time storage repair (#3912/#3994), the same normalisation
    * every VALUE comparison applies — `??` identifier binding otherwise, so
    * quoting stays Knex's on every dialect.
+   *
+   * # `addDays` — the whole-day offset on the referenced column (#14104, ruled 2026-09-02)
+   *
+   * `{ completed_at: { $lte: { $field: 'due_date', addDays: { $field: 'grace_days' } } } }`
+   * compiles to `completed_at <= (due_date + grace_days days)`, and a literal
+   * (`addDays: 5`, `addDays: -3`) binds as a parameter where the column would
+   * be. The offset rides the same arm and the same four rulings: the offset
+   * column is a same-table, declared, non-tenant column of the NUMERIC class,
+   * and the two compared columns are temporal columns of the SAME class
+   * (`date`/`date` or `datetime`/`datetime` — day arithmetic has no meaning
+   * on a number, a text or a `time`). {@link crossFieldOffsetExpr} spells the
+   * addition per dialect; the offset value is `COALESCE(offset, 0)` and
+   * truncated toward zero on every dialect, the memory evaluator's reading.
+   *
+   * The NULL semantics are the ruling's, written INTO the predicate the way
+   * the #5222 arms write theirs: a NULL offset column contributes zero days
+   * (`COALESCE`), and a NULL referenced column makes the comparison FALSE —
+   * not NULL — for every operator, `$ne` included (`<ref> IS NOT NULL AND …`),
+   * so `$not` re-admits exactly those rows, as it does in memory. The target
+   * column keeps its ordinary reading (NULL fails the orderings and `$eq`,
+   * satisfies `$ne` when the offset deadline exists). So with an offset the
+   * `$eq`/`$ne` pair is NOT the both-NULL-matching pair the bare arm emits:
+   * `completed_at = due_date + grace` is false when there is no due date. The
+   * cross-path conformance corpus pins every cell on both paths.
    */
   protected applyCrossFieldComparison(
     builder: Knex.QueryBuilder,
@@ -13705,6 +13813,92 @@ export class SqlDriver implements IDataDriver {
     const rhs = this.filterColumnExpr(table, refLocal, refColumn)
       ?? { sql: '??', bindings: [refColumn] };
     const raw = method === 'orWhere' ? 'orWhereRaw' : 'whereRaw';
+
+    // [#14104] The whole-day offset, when the reference carries one.
+    const offset = fieldReferenceOffsetOf(refNode);
+    if (offset !== null) {
+      if (offset.kind === 'invalid') {
+        throw uncompilableFieldReferenceError(targetColumn, op, ref,
+          `${offset.reason}; addDays is an integer literal of any sign or a { "$field" } reference ` +
+          `to a numeric column.`, refNode);
+      }
+      if (refClass !== 'date' && refClass !== 'datetime') {
+        throw uncompilableFieldReferenceError(targetColumn, op, ref,
+          `addDays adds whole days to a date or datetime column, and "${ref}" is stored as ` +
+          `${refClass} — an offset has no meaning on it.`, refNode);
+      }
+      let offsetOperand: { sql: string; bindings: any[] };
+      if (offset.kind === 'literal') {
+        offsetOperand = { sql: '?', bindings: [offset.days] };
+      } else {
+        const offsetRef = offset.ref;
+        if (offsetRef.includes('.')) {
+          throw uncompilableFieldReferenceError(targetColumn, op, ref,
+            `the addDays offset "${offsetRef}" is a dotted path, and SQL push-down compiles ` +
+            `same-table column references only (no relation traversal, no alias-qualified columns).`,
+            refNode);
+        }
+        if (tenantField !== null && offsetRef === tenantField) {
+          throw uncompilableFieldReferenceError(targetColumn, op, ref,
+            `"${tenantField}" is the tenant-isolation column of "${table}", which must not appear ` +
+            `in a cross-field comparison — not as the addDays offset either.`, refNode);
+        }
+        const offsetDeclaredName = hasOwn(offsetRef) ? offsetRef : this.mapSortField(offsetRef);
+        if (!hasOwn(offsetDeclaredName)) {
+          throw uncompilableFieldReferenceError(targetColumn, op, ref,
+            `the addDays offset "${offsetRef}" is not a declared field of "${table}" — only ` +
+            `declared fields can be referenced.`, refNode);
+        }
+        const offsetClass = crossFieldComparisonClass(declared[offsetDeclaredName] ?? {});
+        if (offsetClass !== 'numeric') {
+          throw uncompilableFieldReferenceError(targetColumn, op, ref,
+            `the addDays offset "${offsetRef}" (type ` +
+            `"${String(declared[offsetDeclaredName]?.type ?? 'string')}"` +
+            `${declared[offsetDeclaredName]?.multiple ? ', multiple' : ''}) is not a numeric ` +
+            `column, and a day offset must be a number of days.`, refNode);
+        }
+        const offsetLocal = this.mapSortField(offsetRef);
+        offsetOperand = { sql: '??', bindings: [this.remoteColumn(table, offsetRef, offsetLocal)] };
+      }
+      const shifted = this.crossFieldOffsetExpr(rhs, offsetOperand, refClass);
+      const A = lhs.sql;
+      const B = rhs.sql;
+      const Bx = shifted.sql;
+      switch (op) {
+        case '$eq':
+          // Both sides must have a value AND agree; a NULL referenced column
+          // is FALSE (no deadline), never the both-NULL match of the bare arm.
+          (builder as any)[raw](
+            `(${A} is not null and ${B} is not null and ${A} = ${Bx})`,
+            [...lhs.bindings, ...rhs.bindings, ...lhs.bindings, ...shifted.bindings],
+          );
+          return;
+        case '$ne':
+          // The referenced column must have a value (else FALSE); then the
+          // target either has none — `!looseEq(null, deadline)` is true in
+          // memory — or differs from the shifted deadline.
+          (builder as any)[raw](
+            `(${B} is not null and (${A} is null or ${A} <> ${Bx}))`,
+            [...rhs.bindings, ...lhs.bindings, ...lhs.bindings, ...shifted.bindings],
+          );
+          return;
+        case '$gt':
+        case '$gte':
+        case '$lt':
+        case '$lte': {
+          const sqlOp = op === '$gt' ? '>' : op === '$gte' ? '>=' : op === '$lt' ? '<' : '<=';
+          (builder as any)[raw](
+            `(${A} is not null and ${B} is not null and ${A} ${sqlOp} ${Bx})`,
+            [...lhs.bindings, ...rhs.bindings, ...lhs.bindings, ...shifted.bindings],
+          );
+          return;
+        }
+        default:
+          // Unreachable: the call site gates on CROSS_FIELD_COMPARISON_OPERATORS.
+          throw crossFieldComparisonError(targetColumn, op, ref, refNode);
+      }
+    }
+
     const A = lhs.sql;
     const B = rhs.sql;
     const ab = [...lhs.bindings, ...rhs.bindings];
@@ -13745,6 +13939,59 @@ export class SqlDriver implements IDataDriver {
         // Unreachable: the call site gates on CROSS_FIELD_COMPARISON_OPERATORS.
         throw crossFieldComparisonError(targetColumn, op, ref, refNode);
     }
+  }
+
+  /**
+   * [#14104] `base` shifted by `offset` whole days, spelled per dialect, in the
+   * storage form the column is compared in — so the shifted value compares
+   * against the target column exactly as a stored value of that column would.
+   *
+   * `offset` is a `??` column or a `?` literal; both sides read through
+   * `coalesce(<offset>, 0)` (a NULL offset column contributes zero days) and
+   * are truncated toward zero to whole days — `cast(… as integer)` on SQLite,
+   * `trunc` on Postgres, `truncate` on MySQL — the reading
+   * `@objectstack/formula`'s `resolveDayOffset` applies (`Math.trunc`).
+   *
+   * **SQLite adds on the driver's canonical TEXT form, deliberately.** A
+   * `Field.date` is `YYYY-MM-DD` text and `date(col, 'N days')` returns the
+   * same shape; a `Field.datetime` is the canonical `YYYY-MM-DDTHH:MM:SS.sssZ`
+   * text (#3912) — or, for a column not yet backfilled, the
+   * {@link sqliteCanonicalDatetimeSql} repair `base` already carries, which is
+   * likewise text — and `strftime('%Y-%m-%dT%H:%M:%fZ', col, 'N days')` is the
+   * SAME format string `nowColumnDefault` and the backfill write, so the shifted
+   * value is byte-identical to a stored one and the comparison stays a plain
+   * text compare. No julian-day arithmetic anywhere: `strftime` parses the
+   * text and `'N days'` is its own modifier, so an epoch INTEGER (the pre-#3912
+   * legacy form) never reaches the arithmetic unrepaired. `'-3 days'` is a legal
+   * modifier, so a negative offset subtracts without a second spelling.
+   *
+   * Postgres: `date + integer` is a `date`, `timestamptz + make_interval(days
+   * => n)` a `timestamptz`. MySQL: `date_add(col, interval n day)` keeps the
+   * column's own type (`DATE` stays `DATE`, `DATETIME(3)` stays `DATETIME(3)`).
+   */
+  protected crossFieldOffsetExpr(
+    base: { sql: string; bindings: any[] },
+    offset: { sql: string; bindings: any[] },
+    cls: 'date' | 'datetime',
+  ): { sql: string; bindings: any[] } {
+    const bindings = [...base.bindings, ...offset.bindings];
+    if (this.isSqlite) {
+      const modifier = `(cast(coalesce(${offset.sql}, 0) as integer) || ' days')`;
+      return cls === 'date'
+        ? { sql: `date(${base.sql}, ${modifier})`, bindings }
+        : { sql: `strftime('%Y-%m-%dT%H:%M:%fZ', ${base.sql}, ${modifier})`, bindings };
+    }
+    if (this.isMysql) {
+      return {
+        sql: `date_add(${base.sql}, interval cast(truncate(coalesce(${offset.sql}, 0), 0) as signed) day)`,
+        bindings,
+      };
+    }
+    // Postgres (and any dialect with SQL-standard interval arithmetic).
+    const days = `cast(trunc(coalesce(${offset.sql}, 0)) as integer)`;
+    return cls === 'date'
+      ? { sql: `(${base.sql} + ${days})`, bindings }
+      : { sql: `(${base.sql} + make_interval(days => ${days}))`, bindings };
   }
 
   /**

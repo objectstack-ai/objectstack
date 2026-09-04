@@ -525,7 +525,24 @@ export const ActionParamSchema = lazySchema(() => strictObject(
 }).transform((p, ctx) => lowerRequiresFeature(p, ctx)));
 
 /**
- * Action type enum values.
+ * Action type enum values — the DISPATCH ROUTE of an action.
+ *
+ * The declarative single-record field write (#14092, maintainer ruling
+ * 2026-09-01) is deliberately NOT a member. It is spelled as a parallel key —
+ * `operation: 'update'` + `patch` — mirroring the list view's `bulkActionDefs`
+ * vocabulary word for word, and it rides the `script` route: the platform
+ * action route (`POST /api/v1/actions/<object>/<action>`) is where the write
+ * is performed, and `type: 'script'` is that route's name on an action. So
+ * `type` answers WHERE the action dispatches and `operation` answers WHAT the
+ * platform does there; an `operation: 'update'` action keeps `type` at its
+ * default and every other `type` beside it is refused (see
+ * {@link refuseDeclarativeUpdateContradictions}).
+ *
+ * Why not a member: objectui's `ActionRunner` types its dispatch table
+ * `Record<RunnableActionType, …>` on purpose, so a member added here stops the
+ * console compiling until an executor exists — a coupling the ruling's
+ * contract-first split (spec now, executor halves downstream) must not carry —
+ * and a member would be a second spelling of the bulk def's `operation`.
  */
 export const ActionType = z.enum(['script', 'url', 'modal', 'flow', 'api', 'form']);
 export type ActionType = z.input<typeof ActionType>;
@@ -554,6 +571,8 @@ const TARGET_REQUIRED_TYPES: ReadonlySet<string> = new Set(
  * - `type: 'modal'`  — `target` is **required** (the modal/page name to open).
  * - `type: 'api'`    — `target` is **required** (the API endpoint to call).
  * - `type: 'form'`   — `target` is **required** (the FormView name to open, routed to `/_console/forms/:name`).
+ * - `operation: 'update'` (on the default `script` route) — `target` is **refused**: the platform writes
+ *   `patch` to the current record; there is nothing for a target to name (#14092).
  * 
  * The `execute` alias was **removed in protocol 17** (#3855). `target` is the
  * only handler slot, so no consumer has a second slot to disagree about. An
@@ -766,10 +785,10 @@ export const ActionAiSchema = strictObject({
 
   /**
    * Override confirmation for AI calls. When unset, the bridge defaults to
-   * `true` for actions that look destructive (`confirmText` set, `mode:'delete'`,
-   * or `variant:'danger'`). Set explicitly to `false` to assert a destructive-
-   * looking action is safe to run without human approval, or `true` to force a
-   * human-in-the-loop gate on an otherwise-safe action.
+   * `true` for actions that look destructive: `mode:'delete'` or
+   * `variant:'danger'` (#7828 Option A). `confirmText` is dialog copy, not a
+   * destructive signal. Set explicitly to `false` to assert such an action is
+   * safe without human approval, or `true` to gate an otherwise-safe one.
    */
   requiresConfirmation: z.boolean().optional().describe('Override HITL confirmation for AI invocations.'),
 });
@@ -834,6 +853,10 @@ const actionObject = () => strictObject({
     style: 'variant', color: 'variant', appearance: 'variant',
     placement: 'locations', location: 'locations', position: 'locations',
     verb: 'method', httpMethod: 'method',
+    // #14092 — the bulk def's own shorthand for `operation`, and the words an
+    // author borrows for "the field values to write" (`values`, `set`, or the
+    // verb itself) all rename onto the two declarative-update keys.
+    op: 'operation', values: 'patch', set: 'patch', update: 'patch',
     // #5013 — `body` is DECLARED on this schema (the `script` action's L1/L2
     // hook body), so an alias filed under it could never run; `payload` is the
     // live spelling that still needs pointing at `bodyExtra`.
@@ -944,8 +967,21 @@ const actionObject = () => strictObject({
     'action:group'   // Button Group
   ]).optional().describe('Visual component override'),
   
-  /** What type of interaction? */
-  type: ActionType.default('script').describe('Action functionality type'),
+  /**
+   * What type of interaction — the dispatch ROUTE. The declarative
+   * single-record field write is not a type: it is `operation: 'update'` on
+   * the default `script` route (see {@link ActionType}), so the one input
+   * that has a declarative answer gets the prescription instead of zod's
+   * bare enum list.
+   */
+  type: z.enum(ActionType.options, {
+    error: (issue) => (issue.input === 'update'
+      ? "`type: 'update'` is not an action type — the declarative single-record field write is spelled "
+        + "`operation: 'update'` with a `patch: { … }` of static field values (the list view's "
+        + "`bulkActionDefs` vocabulary, mirrored). Leave `type` at its default `'script'`: that is the "
+        + 'platform action route the write is performed on.'
+      : undefined),
+  }).default('script').describe("Action functionality type — the dispatch route. The declarative single-record field write is not a type: it is `operation: 'update'` + `patch` on the default `script` route."),
   
   /** 
    * Payload / Target — the canonical binding for the action handler.
@@ -1026,6 +1062,60 @@ const actionObject = () => strictObject({
    * parse cannot reach.
    */
   body: HookBodySchema.optional().describe('Action body — expression (L1) or sandboxed JS (L2). Only used when type is `script`.'),
+
+  /**
+   * The declarative single-record field write — the row-level counterpart of
+   * a list view's `bulkActionDefs` `{ operation: 'update', patch }` (#14092,
+   * maintainer ruling 2026-09-01), spelled with the same words on purpose:
+   * `operation`, `patch`, `params`, `visible`, `confirmText` mean here exactly
+   * what they mean on the def. No second spelling was invented.
+   *
+   * ONE member, `'update'`, by ruling. The def's other two operations are not
+   * admitted on a row: `'delete'` is the object's own delete affordance and
+   * was not ruled for the row form, and `'custom'` means "dispatch the action
+   * this def NAMES" — on a row the action is already the action, so there is
+   * nothing to name. The enum's error map says so rather than listing one
+   * member.
+   *
+   * Beside `operation: 'update'` the action keeps `type` at its default
+   * `'script'` — the platform action route, where the write is performed —
+   * and carries NO executor binding of its own: `target`, `body`, `method`,
+   * `bodyExtra`, `bodyShape`, `recordIdParam`/`recordIdField`, `onSuccess`,
+   * `opensInNewTab`/`newTabUrl` and any other explicit `type` are each refused
+   * with their own message ({@link refuseDeclarativeUpdateContradictions}).
+   * A `list_toolbar` location is refused too: there is no current record
+   * there — the selection bar is the bulk def's home.
+   *
+   * EXECUTOR CONTRACT (the halves that perform the write are downstream cards
+   * — both keys are `planned` in the liveness ledger until they land):
+   * a single-record data-plane update of the CURRENT record, executed AS THE
+   * CALLER and never system-elevated — the direction ruled for hook
+   * `runAs: 'user'`, consumed here, not reopened — so the caller's object,
+   * row and field permissions, the object's hooks and its validations fire
+   * exactly as for a user edit; a caller who cannot read or write the row is
+   * refused; the static `patch` is merged UNDER the values `params` collects;
+   * `undoable` captures the prior values of exactly the fields written.
+   */
+  operation: z.enum(['update'], {
+    error: (issue) => (issue.input === 'delete' || issue.input === 'custom'
+      ? `\`operation: '${issue.input}'\` is a bulk-def operation with no row-level form: `
+        + (issue.input === 'delete'
+          ? 'a row delete is the object\'s own delete affordance, not a declarative action (and was not ruled for the row form). '
+          : "on a bulk def `'custom'` dispatches the action the def NAMES; on a row the action IS the action, so there is nothing to name. ")
+        + "The one row-level operation is `'update'` (a static `patch` written to the current record)."
+      : undefined),
+  }).optional().describe("The declarative single-record field write, mirroring a list view's `bulkActionDefs`: `'update'` applies `patch` (merged under the collected `params`) to the current record on the data plane AS THE CALLER — never system-elevated — so the caller's permissions, the object's hooks and its validations fire as for a user edit. `type` stays at its default `'script'` (the platform action route the write is performed on); `target`/`body`/`method`/`bodyExtra` are refused beside it. `'delete'` and `'custom'` have no row-level form."),
+
+  /**
+   * Static field values for `operation: 'update'` — see that key. Merged
+   * UNDER the user-supplied `params`, so a fixed value can be declared without
+   * exposing it in the dialog; a param of the same name wins. Passed through
+   * verbatim: no transform, no field-existence check here (that is a
+   * reference diagnostic for `@objectstack/lint`, the `UserFilterFieldSchema`
+   * precedent) — the executor validates the values against the object like
+   * any user edit.
+   */
+  patch: z.record(z.string(), z.unknown()).optional().describe("For `operation: 'update'` — static field values written to the current record, merged UNDER the user-supplied `params` so a fixed value can be declared without exposing it in the dialog. Written on the data plane as the caller: object permissions, hooks and validations fire as for a user edit. Refused on an action without `operation: 'update'` (it would be silently dropped)."),
 
   /**
    * [REMOVED in protocol 17 — #3855] The deprecated alias of `target`.
@@ -1141,8 +1231,11 @@ const actionObject = () => strictObject({
   refreshAfter: z.boolean().default(false).describe('Refresh view after execution'),
   // Single-record update actions only. When true, the runtime captures the
   // record's prior field values and offers an "Undo" affordance on the success
-  // toast (backed by the client UndoManager) to restore them.
-  undoable: z.boolean().optional().describe('Offer an Undo affordance after this single-record update action succeeds.'),
+  // toast (backed by the client UndoManager) to restore them. `operation:
+  // 'update'` is the DECLARED form of such an action (#14092): its `patch`
+  // names exactly the fields written, so the capture is exact rather than
+  // inferred from a handler's side effects — the anchor this flag lacked.
+  undoable: z.boolean().optional().describe("Offer an Undo affordance after this single-record update action succeeds. `operation: 'update'` is the declared form of that action — its `patch` names exactly the fields whose prior values are captured."),
 
   /**
    * Result Dialog — describe how to render the API response on success.
@@ -1304,8 +1397,27 @@ const actionObject = () => strictObject({
   ]).optional().describe('Body wrapping: flat (default) or { wrap: key } to nest user-collected params under a key.'),
   /**
    * HTTP method to use when `type: 'api'`. Defaults to `POST`. Use `PATCH` to
-   * call data-API update endpoints (e.g. `/api/v1/sys_api_key/{id}` with
-   * `bodyExtra: { revoked: true }`).
+   * call data-API update endpoints. The shipped data door is
+   * `PATCH {apiBase}/data/:object/:id` — `getApiBasePath()` + `crud.dataPrefix`,
+   * i.e. `/api/v1` + `/data` on a default host — so the endpoint for one
+   * record is e.g. `/api/v1/data/sys_api_key/${ctx.recordId}` with
+   * `bodyExtra: { revoked: true }`. Two things the path depends on: the
+   * `/data` segment (omit it and the action renders, is clickable, and 404s
+   * at the click), and the `${ctx.X}` / `${param.X}` interpolation
+   * {@link target} documents — a bare `{recordId}` placeholder is
+   * {@link newTabUrl}'s convention alone and is not substituted here.
+   *
+   * The full path is host-dependent: under `enableProjectScoping` with
+   * `projectResolution: 'required'` only
+   * `/api/v1/environments/:environmentId/data/:object/:id` is registered, so
+   * an unscoped path 404s on such a host — write `target` against the base
+   * the host actually mounts.
+   *
+   * To write a field on the CURRENT record, prefer the declarative
+   * {@link operation} `'update'` with {@link patch}: the platform performs
+   * the write, so there is no endpoint, method or id placeholder to spell at
+   * all. The `type: 'api'` + `PATCH` form above remains the way to call an
+   * explicit endpoint.
    */
   method: z.enum(['POST', 'PATCH', 'PUT', 'DELETE']).optional().describe('HTTP method for type:"api" actions. Defaults to POST.'),
   /**
@@ -1462,6 +1574,140 @@ const actionObject = () => strictObject({
   ...MetadataProtectionFields,
 });
 
+/**
+ * The keys an `operation: 'update'` action must not carry, each with the
+ * sentence that names the executor the key belongs to. A table rather than a
+ * chain of `.refine()`s so every combination gets ONE issue at ITS key's path
+ * — the same shape `BulkActionDefSchema`'s refinements use for the def side.
+ */
+const DECLARATIVE_UPDATE_REFUSED_KEYS: ReadonlyArray<readonly [key: string, why: string]> = [
+  ['target',
+    "`target` names a handler, URL, page, flow or endpoint — an `operation: 'update'` action dispatches on "
+    + 'none of them: the platform action route writes `patch` to the current record. Drop `target`; to call '
+    + "an endpoint of your own instead, use `type: 'api'` without `operation`."],
+  ['body',
+    "`body` is the inline handler of a `type: 'script'` action — an `operation: 'update'` action has no "
+    + 'handler: the write IS the `patch`, performed by the platform as the caller. Drop `body`; to write '
+    + 'through a handler of your own (system-elevated `ctx.api`), drop `operation` and `patch` instead.'],
+  ['method',
+    "`method` is the HTTP verb of a `type: 'api'` request — an `operation: 'update'` action makes no request "
+    + 'of its own: the platform performs the write on the data plane. Drop `method`.'],
+  ['bodyExtra',
+    "`bodyExtra` is the static request body of a `type: 'api'` action — on an `operation: 'update'` action "
+    + 'the static field values go in `patch`. Move them there and drop `bodyExtra`.'],
+  ['bodyShape',
+    "`bodyShape` shapes a `type: 'api'` request body — an `operation: 'update'` action sends no request body "
+    + 'of its own. Drop `bodyShape`.'],
+  ['recordIdParam',
+    "`recordIdParam` injects the row id into a request body — an `operation: 'update'` action binds the "
+    + 'current record from the invocation context and has no body to inject into. Drop `recordIdParam`.'],
+  ['recordIdField',
+    "`recordIdField` seeds `recordIdParam` — an `operation: 'update'` action binds the current record from "
+    + 'the invocation context and injects nothing. Drop `recordIdField`.'],
+  ['onSuccess',
+    "`onSuccess` is not defined for an `operation: 'update'` action yet — its `${result.*}` scope is a "
+    + "handler's return value, and a declarative update has no handler. Drop it; post-success navigation "
+    + 'for the declarative write is a spec proposal, not a silent key.'],
+  ['opensInNewTab',
+    "`opensInNewTab` pre-opens a tab for a handler-returned `{ redirectUrl }` — an `operation: 'update'` "
+    + 'action has no handler and returns no redirect. Drop it.'],
+  ['newTabUrl',
+    "`newTabUrl` is the zero-roundtrip target of the pre-opened-tab flow — an `operation: 'update'` action "
+    + 'has no such flow. Drop it.'],
+];
+
+/**
+ * The mixing rule between the declarative single-record field write and the
+ * rest of the action vocabulary (#14092), designed with the PR that landed it
+ * and pinned in `action-row-update.test.ts`:
+ *
+ *  1. `operation: 'update'` keeps `type` at its default `'script'` — the
+ *     platform action route — and any OTHER explicit `type` is refused. An
+ *     explicit `type: 'script'` is indistinguishable from the materialized
+ *     default at object level (a `.default()` has already run by the time a
+ *     refinement sees the object — the #13897 asymmetry) and means the same
+ *     thing, so it is accepted.
+ *  2. Every key that names or shapes a dispatch the update does not make is
+ *     refused at its own path ({@link DECLARATIVE_UPDATE_REFUSED_KEYS}).
+ *  3. `patch` without `operation: 'update'` is refused (it would be silently
+ *     dropped — ADR-0078); `operation: 'update'` with neither `patch` nor
+ *     `params` is refused (nothing to write).
+ *  4. `list_toolbar` is refused: no current record there.
+ *
+ * Deliberately NOT judged here: `objectName`. The same schema parses an
+ * action embedded on an object (object implicit) and a standalone one in
+ * `stack.actions` (only `objectName` can say), so the standalone form is
+ * judged where standalone-ness is knowable — `defineStack`'s cross-reference
+ * walk (`stack.zod.ts`, `collectGlobalUpdateActionErrors`).
+ */
+function refuseDeclarativeUpdateContradictions(
+  data: {
+    type?: string;
+    operation?: string;
+    patch?: unknown;
+    params?: unknown;
+    locations?: unknown;
+  } & Record<string, unknown>,
+  ctx: z.core.$RefinementCtx,
+): void {
+  if (data.operation !== 'update') {
+    if (data.patch !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['patch'],
+        message:
+          "`patch` only applies to `operation: 'update'` — without it the action never writes fields, so "
+          + "these values would be silently dropped. Add `operation: 'update'`, or for the static request "
+          + "body of a `type: 'api'` action use `bodyExtra`.",
+      });
+    }
+    return;
+  }
+
+  if (data.type !== undefined && data.type !== 'script') {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['type'],
+      message:
+        "`operation: 'update'` is performed by the platform action route — the route a `type: 'script'` "
+        + "action posts to — so `type` stays at its default `'script'`; leave it off. A `type: '"
+        + `${data.type}'\` action dispatches on \`target\` (\`api\` makes the browser call the endpoint itself) `
+        + 'and never performs the write.',
+    });
+  }
+
+  for (const [key, why] of DECLARATIVE_UPDATE_REFUSED_KEYS) {
+    if (data[key] !== undefined) {
+      ctx.addIssue({ code: 'custom', path: [key], message: why });
+    }
+  }
+
+  const collectsParams = Array.isArray(data.params) && data.params.length > 0;
+  if (data.patch === undefined && !collectsParams) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['patch'],
+      message:
+        "An `operation: 'update'` action has nothing to write: declare a static `patch` (`{ status: 'done' }`), "
+        + 'or `params` so the dialog collects the values, or both — the patch is merged UNDER the collected params.',
+    });
+  }
+
+  if (Array.isArray(data.locations)) {
+    data.locations.forEach((location, index) => {
+      if (location !== 'list_toolbar') return;
+      ctx.addIssue({
+        code: 'custom',
+        path: ['locations', index],
+        message:
+          "`list_toolbar` has no current record — an `operation: 'update'` action writes ONE record, the one it "
+          + 'runs on. Use a record location (`list_item`, `record_header`, `record_more`, `record_section`) or, '
+          + "for the selection bar, a `bulkActionDefs` entry on the list view (`{ operation: 'update', patch }`).",
+      });
+    });
+  }
+}
+
 export const ActionSchema = lazySchema(() => actionObject().refine((data) => {
   // Require `target` for types that reference an external resource
   if (TARGET_REQUIRED_TYPES.has(data.type) && !data.target) {
@@ -1478,7 +1724,11 @@ export const ActionSchema = lazySchema(() => actionObject().refine((data) => {
   // the action fails at runtime with `Action '<name>' on object '*' not found`
   // (the #2169 Mark Done bug) — a soft failure invisible to build & shape
   // tests. Reject it at author/compile time instead.
-  if (data.type === 'script' && !data.body && !data.target) {
+  //
+  // `operation: 'update'` (#14092) rides this same route with NEITHER: the
+  // platform performs the write from the declaration, so there is no handler
+  // to bind — and the block below refuses a `body`/`target` beside it.
+  if (data.type === 'script' && data.operation !== 'update' && !data.body && !data.target) {
     return false;
   }
   return true;
@@ -1664,7 +1914,8 @@ export const ActionSchema = lazySchema(() => actionObject().refine((data) => {
     + '(behavior is unchanged — the lone key was never read). For a STATIC url action, new-tab '
     + 'behavior is `openIn: "new-tab"`, not this pair.',
   path: ['newTabUrl'],
-}).transform((data, ctx) => lowerRequiresFeature(data, ctx)));
+}).superRefine(refuseDeclarativeUpdateContradictions)
+  .transform((data, ctx) => lowerRequiresFeature(data, ctx)));
 
 export type Action = z.input<typeof ActionSchema>;
 /** Post-parse shape of {@link Action} — defaults applied, transforms run (ADR-0122). */

@@ -91,6 +91,25 @@ describe('validateSearchableFields — object declaration', () => {
     expect(findings[0].message).toContain('Did you mean "billing_email"?');
   });
 
+  // #14577 — this rule used to carry a private Levenshtein-only `suggest`,
+  // which gave NO hint here: `amount` → `sum_amount` is 4 edits, over the
+  // `max(2, floor(len/3))` budget of 2 — the issue's own headline example. Now
+  // delegating to the shared `suggestName` (#14268), the containment pre-pass
+  // catches it.
+  it('offers a did-you-mean via containment where edit distance alone would not', () => {
+    const findings = validateSearchableFields({
+      objects: [
+        {
+          name: 'crm_opportunity',
+          fields: { sum_amount: { type: 'number' } },
+          searchableFields: ['amount'],
+        },
+      ],
+    });
+
+    expect(findings[0].message).toContain('Did you mean "sum_amount"?');
+  });
+
   it('reports every stale entry, not just the first', () => {
     const findings = validateSearchableFields({
       objects: [

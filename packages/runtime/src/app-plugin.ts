@@ -87,7 +87,7 @@ export type AppPluginSecurityMetadataRegistrar = 'app-plugin' | 'artifact-door';
  */
 export class AppPlugin implements Plugin {
     name: string;
-    type = 'app';
+    type = 'app' as const;
     version?: string;
     /**
      * Ordering — declared, not positional (ADR-0116, the #4131 close of
@@ -1033,7 +1033,26 @@ export class AppPlugin implements Plugin {
                                         ql,
                                         logger: ctx.logger,
                                     };
-                                    await handler(jobContext);
+                                    // #14256: RETURN the handler's resolved
+                                    // value. `JobHandler` is
+                                    // `(context) => Promise<void | JobRunOutcome>`
+                                    // and all three shipped adapters map a
+                                    // resolved `{ outcome: 'degraded', reason }`
+                                    // onto a `sys_job_run.status` distinct from
+                                    // `success` (#6617/#5548). A block-bodied
+                                    // arrow that only awaited made this wrapper
+                                    // a `Promise<void>`, so the third outcome
+                                    // was unreachable from `defineJob`: a job
+                                    // that ran to completion while its work did
+                                    // not happen was recorded as `success` with
+                                    // `reason` dropped, and the three-outcome
+                                    // table in `content/docs/automation/jobs.mdx`
+                                    // was false on the declarative door.
+                                    // A handler that resolves `undefined` — every
+                                    // handler written before #6617 — still returns
+                                    // `undefined` here, which is the `success`
+                                    // branch exactly as before.
+                                    return await handler(jobContext);
                                 },
                                 // #3494: thread the authored retryPolicy/timeout to the adapter
                                 (job.retryPolicy || job.timeout)

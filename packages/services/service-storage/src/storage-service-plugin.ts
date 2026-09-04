@@ -165,7 +165,7 @@ export class StorageServicePlugin implements Plugin {
     'com.objectstack.service.settings',
   ];
   version = '1.0.0';
-  type = 'standard';
+  type = 'standard' as const;
 
   private readonly options: StorageServicePluginOptions;
   private storage: SwappableStorageService | null = null;

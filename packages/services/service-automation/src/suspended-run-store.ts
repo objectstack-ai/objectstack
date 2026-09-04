@@ -9,7 +9,13 @@ import type { Logger } from '@objectstack/spec/contracts';
 // recorder-local re-derivation here was rejected by name (Option B): it would
 // be a third answer to a question the codebase already answered two ways.
 import { createRecordOrganizationResolver, type RecordOrganizationResolver } from '@objectstack/metadata-core';
-import type { RunRecord, SuspendedRun, SuspendedRunStore } from './engine.js';
+import type {
+  RunRecord,
+  SuspendedRun,
+  SuspendedRunStore,
+  SuspensionClaimOutcome,
+  SuspensionParkedAt,
+} from './engine.js';
 
 /**
  * Durable persistence for suspended flow runs (ADR-0019).
@@ -127,6 +133,25 @@ export class InMemorySuspendedRunStore implements SuspendedRunStore {
     this.runs.delete(runId);
   }
 
+  /**
+   * [#14333] Conditional consume. The test and the removal sit between the
+   * same two `await` points — there is none between them — so on a single
+   * JavaScript thread they ARE one atomic operation against `this.runs`, which
+   * is what lets two engines sharing one instance of this store produce
+   * exactly one winner. Spelling it as `load()` then `delete()` would put a
+   * microtask boundary in the middle and reopen the window.
+   */
+  async claimSuspension(runId: string, parkedAt: SuspensionParkedAt): Promise<SuspensionClaimOutcome> {
+    const run = this.runs.get(runId);
+    if (!run) return 'lost';
+    if (run.nodeId !== parkedAt.nodeId) return 'lost';
+    // Compared only when the caller has one, per the contract: a row persisted
+    // without a correlation has nothing to compare and the node test stands.
+    if (parkedAt.correlation !== undefined && run.correlation !== parkedAt.correlation) return 'lost';
+    this.runs.delete(runId);
+    return 'claimed';
+  }
+
   async list(): Promise<SuspendedRun[]> {
     return [...this.runs.values()].map(jsonClone);
   }
@@ -209,6 +234,11 @@ export interface ObjectStoreSuspendedRunStoreOptions {
 export class ObjectStoreSuspendedRunStore implements SuspendedRunStore {
   private readonly maxTerminalRunsPerFlow: number;
   /**
+   * [#14333] Whether this store has already said it cannot express the
+   * conditional advance — see {@link claimSuspension}'s docblock.
+   */
+  private claimUnsupportedWarned = false;
+  /**
    * [#10101] Memoized shared platform-row organization resolver over the same
    * engine the rows are written through — answers "which column carries the
    * TRIGGERING object's own organization, and what does the trigger record
@@ -278,6 +308,93 @@ export class ObjectStoreSuspendedRunStore implements SuspendedRunStore {
       return;
     }
     await this.engine.delete(TABLE, { where: { id: runId }, context: SYSTEM_CTX });
+  }
+
+  /**
+   * [#14333] Conditional consume against `sys_automation_run`, as ONE
+   * statement: `DELETE ... WHERE id = ? AND node_id = ?` (plus `correlation`
+   * when the caller has one), whose affected-row count names the winner.
+   *
+   * ⛔ No schema change, and none is needed: `node_id` and `correlation` are
+   * columns {@link serialize} has always written, so the condition is
+   * expressible against the row exactly as it stands. (A version column on
+   * `sys_automation_run` was the other candidate remedy and is deliberately
+   * NOT taken — a platform-object schema change is the maintainer's floor.)
+   *
+   * The spelling is `multi: true` with a full `where`: `ObjectQL.delete`
+   * dispatches a `where` carrying keys BESIDES `id` to `driver.deleteMany`
+   * with the composed AST — the engine's own compare-and-set route, documented
+   * as such in `engine-delete-dispatch.ts` — and `IDataDriver.deleteMany` is
+   * contracted to resolve an affected COUNT. A pure-`id` `where` would take
+   * the by-id route instead and silently discard the condition, which is the
+   * one shape that must never happen here. ⛔ Dropping `multi: true` does not
+   * degrade to the by-id route either: with unhonoured keys in the `where` and
+   * no `multi`, the dispatch verdict is `reject` and `ObjectQL.delete` THROWS
+   * `ENGINE_DELETE_REJECT_MESSAGE`. That is pinned in
+   * `suspended-run-store.test.ts` through the producer's own predicate rather
+   * than by asserting the token, so a double can never be looser than the
+   * engine here.
+   *
+   * THREE ways a composition can leave this store unable to offer the
+   * guarantee, and only the first two are an `'unsupported'` ANSWER:
+   *
+   *  1. an engine with no `delete()` at all — the same composition
+   *     {@link delete} already degrades on;
+   *  2. a multi-row result that is not a count, where "did I win?" has no
+   *     answer to read;
+   *  3. ⚠️ a DRIVER with no `deleteMany` — which this method never sees as an
+   *     answer at all. `ObjectQL.delete` resolves the predicate route and then
+   *     finds no `deleteMany` to call, so it throws
+   *     `ENGINE_DELETE_REJECT_MESSAGE` rather than returning anything; the
+   *     engine's `claimAdvance` maps that throw to `STORE_UNAVAILABLE`, so such
+   *     a composition REFUSES every resume instead of degrading to an
+   *     unguarded one. All five shipped drivers implement `deleteMany` (memory,
+   *     sql, mongodb, turso; sqlite-wasm inherits it from `SqlDriver`), so this
+   *     is third-party exposure only — recorded here because a host wiring its
+   *     own driver is the one reader who can hit it, and the symptom (every
+   *     resume 503) does not name its cause.
+   *
+   * The two answers it CAN give are said once per store instance, not once per
+   * call: a composition that cannot express the condition cannot express it for
+   * the rest of the process, so a line per resume would be pure repetition of a
+   * permanent fact — the same call {@link AutomationEngine.claim}'s
+   * missing-ledger branch makes, and what the engine's own degradation line
+   * already promises. ⛔ Deliberately NOT extended to {@link delete}'s warn one
+   * screen up: that line predates this card, fires once per CONSUMPTION rather
+   * than once per resume attempt, and is not this change's to re-shape.
+   */
+  async claimSuspension(runId: string, parkedAt: SuspensionParkedAt): Promise<SuspensionClaimOutcome> {
+    if (typeof this.engine.delete !== 'function') {
+      this.warnClaimUnsupported(
+        `engine has no delete(); the conditional advance for suspended run '${runId}' cannot be expressed`,
+      );
+      return 'unsupported';
+    }
+    const where: Record<string, unknown> = { id: runId, node_id: parkedAt.nodeId };
+    if (parkedAt.correlation !== undefined) where.correlation = parkedAt.correlation;
+    const affected = await this.engine.delete(TABLE, { where, multi: true, context: SYSTEM_CTX });
+    if (typeof affected !== 'number') {
+      this.warnClaimUnsupported(
+        `the data engine's multi-row delete resolved ${typeof affected}, not an affected-row count, so the ` +
+          `conditional advance for suspended run '${runId}' cannot be decided`,
+      );
+      return 'unsupported';
+    }
+    return affected > 0 ? 'claimed' : 'lost';
+  }
+
+  /**
+   * [#14333] Say ONCE, per store instance, that this composition cannot
+   * express the conditional advance. See {@link claimSuspension}'s docblock
+   * for why once and not per call.
+   */
+  private warnClaimUnsupported(cause: string): void {
+    if (this.claimUnsupportedWarned) return;
+    this.claimUnsupportedWarned = true;
+    this.logger?.warn?.(
+      `[automation] ObjectStoreSuspendedRunStore: ${cause} — no cross-replica advance guarantee is offered ` +
+        `by this store for the life of this process.`,
+    );
   }
 
   async list(): Promise<SuspendedRun[]> {

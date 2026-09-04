@@ -152,6 +152,120 @@ describe('validateTranslationReferences — orphan keys', () => {
   });
 });
 
+describe('validateTranslationReferences — nested conditional validation branches (#14700)', () => {
+  // Mirrors the card's own fixture: `demo_account` with one `conditional`
+  // rule whose `then` / `otherwise` are each a full, named rule.
+  const conditionalStack = (validations: unknown[], objectNode: Record<string, unknown>) => ({
+    objects: [
+      {
+        name: 'demo_account',
+        label: 'Account',
+        fields: {
+          status: { type: 'select', label: 'Status' },
+          churn_reason: { type: 'text', label: 'Churn reason' },
+        },
+        validations,
+      },
+    ],
+    translations: [{ 'zh-CN': { objects: { demo_account: objectNode } } }],
+  });
+
+  const churnConsistencyRule = {
+    type: 'conditional',
+    name: 'churn_reason_consistency',
+    message: 'Churn reason must match the account state.',
+    when: "record.status == 'churned'",
+    then: {
+      type: 'script',
+      name: 'churn_reason_present',
+      message: 'A churned account needs a churn reason.',
+      condition: 'record.churn_reason == null',
+    },
+    otherwise: {
+      type: 'script',
+      name: 'churn_reason_absent',
+      message: 'A non-churned account must not carry a churn reason.',
+      condition: 'record.churn_reason != null',
+    },
+  };
+
+  it('accepts bundle entries for both branch names and the wrapper name at once', () => {
+    // Before the fix, this reported `translation-target-unknown` on BOTH
+    // branch keys — the card's own measurement — because the flat walk over
+    // `obj.validations` never descended into `then` / `otherwise`, even
+    // though `checkConditional` / `authoredRuleMessage` address the branch by
+    // exactly this name at runtime.
+    const findings = validateTranslationReferences(
+      conditionalStack([churnConsistencyRule], {
+        _validations: {
+          // The wrapper's own message is never rendered by `checkConditional`
+          // (#14518 keeps a bundle entry for it anyway, deliberately, so the
+          // bundle mirrors the declared rule set 1:1).
+          churn_reason_consistency: { message: 'Wrapper message (never rendered)' },
+          churn_reason_present: { message: '流失账户需要填写流失原因。' },
+          churn_reason_absent: { message: '未流失账户不应填写流失原因。' },
+        },
+      }),
+    );
+    expect(findings).toEqual([]);
+  });
+
+  it('still flags a bundle entry naming no rule at any depth — real orphans stay caught', () => {
+    const findings = validateTranslationReferences(
+      conditionalStack([churnConsistencyRule], {
+        _validations: {
+          churn_reason_present: { message: '流失账户需要填写流失原因。' },
+          churn_reason_absent: { message: '未流失账户不应填写流失原因。' },
+          churn_reason_ghost: { message: 'Nothing declares this.' },
+        },
+      }),
+    );
+    expect(findings.map((f) => f.path)).toEqual([
+      'translations[0]["zh-CN"].objects.demo_account._validations.churn_reason_ghost',
+    ]);
+    expect(findings[0].rule).toBe(TRANSLATION_TARGET_UNKNOWN);
+  });
+
+  it('descends through a branch that is itself a nested conditional', () => {
+    const outerGate = {
+      type: 'conditional',
+      name: 'outer_gate',
+      message: 'outer',
+      when: "record.status == 'churned'",
+      then: {
+        type: 'conditional',
+        name: 'inner_gate',
+        message: 'inner',
+        when: 'record.churn_reason != null',
+        then: {
+          type: 'script',
+          name: 'innermost_rule',
+          message: 'deepest branch of all',
+          condition: 'true',
+        },
+      },
+    };
+    const findings = validateTranslationReferences(
+      conditionalStack([outerGate], { _validations: { innermost_rule: { message: '最深层的分支。' } } }),
+    );
+    expect(findings).toEqual([]);
+  });
+
+  it('skips an unnamed branch, same as an unnamed top-level rule already was (#14253)', () => {
+    const gateWithUnnamedBranch = {
+      type: 'conditional',
+      name: 'gate',
+      message: 'gate',
+      when: "record.status == 'churned'",
+      then: { type: 'script', message: 'has no name', condition: 'true' },
+    };
+    const findings = validateTranslationReferences(
+      conditionalStack([gateWithUnnamedBranch], { _validations: { gate: { message: '门。' } } }),
+    );
+    expect(findings).toEqual([]);
+  });
+});
+
 describe('validateTranslationReferences — option keys', () => {
   it('flags an option key that is a near-miss of the stored value', () => {
     // The HotCRM instance: `direct-mail` for the value `direct_mail`.
@@ -298,6 +412,22 @@ describe('validateTranslationReferences — cross-package objects (§4 ladder)',
     expect(findings).toHaveLength(1);
     expect(findings[0].path).toBe('translations[0]["zh-CN"].objects.task');
     expect(findings[0].message).toContain('Did you mean "todo_task"?');
+  });
+
+  // #14577 — the namespace-segment pre-pass stays rule-local (it is knowledge
+  // about how this stack prefixes object names, not the shared helper's
+  // business), but a miss now falls through to `suggestName` (#14268) instead
+  // of a private Levenshtein copy. "amountsummary" is not a `_`-segment match
+  // for "amount" (no underscore boundary), so the segment pre-pass misses;
+  // `suggestName`'s containment scan still catches it — 7 edits apart, far
+  // outside the `max(2, floor(len/3))` budget the private copy was bound by.
+  it('falls through to suggestName (containment) when the namespace-segment pre-pass misses', () => {
+    const findings = validateTranslationReferences({
+      objects: [{ name: 'amountsummary', fields: { total: { type: 'number' } } }],
+      translations: bundleFor('amount'),
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain('Did you mean "amountsummary"?');
   });
 });
 

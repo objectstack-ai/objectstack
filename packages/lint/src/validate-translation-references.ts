@@ -102,6 +102,7 @@
 import { expandViewContainer } from '@objectstack/spec';
 import { hasPlatformObjectPrefix, isPlatformProvidedObjectName } from '@objectstack/spec/system';
 import { walkFlowNodes } from './flow-walk.js';
+import { suggestName } from './object-graph.js';
 import { walkPageComponents } from './page-walk.js';
 import { SYSTEM_FIELDS } from './system-fields.js';
 import { viewObjectName } from './view-walk.js';
@@ -156,32 +157,33 @@ function strName(v: unknown): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined;
 }
 
-function distance(a: string, b: string): number {
-  const m = a.length;
-  const n = b.length;
-  if (m === 0) return n;
-  if (n === 0) return m;
-  let prev = Array.from({ length: n + 1 }, (_, j) => j);
-  for (let i = 1; i <= m; i++) {
-    const curr = [i, ...new Array<number>(n).fill(0)];
-    for (let j = 1; j <= n; j++) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      curr[j] = Math.min(curr[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost);
-    }
-    prev = curr;
-  }
-  return prev[n];
+/**
+ * Add a validation rule's own `name` to the universe, then recurse into a
+ * `conditional` rule's `then` / `otherwise` branch — each branch is itself a
+ * full rule (with its own `name`, and possibly its own nested branches), and
+ * mirrors the recursion `evaluateRule` performs at runtime (#14700). See the
+ * call site in {@link buildUniverse} for why the wrapper's own name is kept
+ * too, even though `then` / `otherwise` are what a caller actually reads.
+ */
+function collectValidationRuleNames(rule: AnyRec, validations: Set<string>): void {
+  const ruleName = strName(rule.name);
+  if (ruleName) validations.add(ruleName);
+  if (isRec(rule.then)) collectValidationRuleNames(rule.then, validations);
+  if (isRec(rule.otherwise)) collectValidationRuleNames(rule.otherwise, validations);
 }
 
 /**
- * "Did you mean?" over the known names — Levenshtein-bounded, plus a namespace
- * pass the distance metric cannot see.
+ * "Did you mean?" over the known names — a namespace pass the shared helper
+ * cannot see, falling back to `suggestName`'s containment/edit-distance
+ * budget.
  *
  * A stack prefixes its object names (`todo_task`, `crm_lead`), and the orphan
  * key is routinely the bare noun the author had in mind (`task`). That is 5
  * edits from `todo_task` — far outside the typo bound, and exactly the case
  * where the suggestion is most useful — so a candidate that differs only by a
- * snake_case namespace segment is offered before falling back to edit distance.
+ * snake_case namespace segment is offered before falling back to the shared
+ * helper. Rule-local knowledge (the namespace-segment shape), not the shared
+ * helper's business.
  */
 function suggest(target: string, known: Iterable<string>): string {
   const names = [...known];
@@ -189,18 +191,7 @@ function suggest(target: string, known: Iterable<string>): string {
     (candidate) => candidate.endsWith(`_${target}`) || candidate.startsWith(`${target}_`),
   );
   if (segmentMatch) return ` Did you mean "${segmentMatch}"?`;
-
-  let best: string | undefined;
-  let bestScore = Infinity;
-  for (const candidate of names) {
-    const d = distance(target, candidate);
-    if (d < bestScore) {
-      bestScore = d;
-      best = candidate;
-    }
-  }
-  const limit = Math.max(2, Math.floor(target.length / 3));
-  return best && bestScore <= limit ? ` Did you mean "${best}"?` : '';
+  return suggestName(target, names);
 }
 
 /** At most `max` names, sorted, for the "known values are …" tail of a hint. */
@@ -233,9 +224,12 @@ interface ObjectFacts {
   sections: Set<string>;
   /**
    * `_validations` names — the custom validation rules this object declares
-   * (`objects[].validations[].name`). `objects.<obj>._validations.<rule>.message`
-   * (#14253) is keyed by that name, so a ghost here is a rule message that
-   * renders in the source locale inside an otherwise translated refusal.
+   * (`objects[].validations[].name`, including a nested `conditional` rule's
+   * `then` / `otherwise` branch — the branch is itself a full rule and is the
+   * address `checkConditional` / `authoredRuleMessage` actually key on;
+   * #14700). `objects.<obj>._validations.<rule>.message` (#14253) is keyed by
+   * that name, so a ghost here is a rule message that renders in the source
+   * locale inside an otherwise translated refusal.
    */
   validations: Set<string>;
   /**
@@ -629,9 +623,19 @@ function buildUniverse(stack: AnyRec): Universe {
     // #14253: `_validations.<rule>` is keyed by the rule's own `name`. A rule
     // without a name has no key and is not registered — the resolver cannot
     // address it either, so nothing is lost by skipping it here.
+    // #14700: a `conditional` rule's `then` / `otherwise` branch is itself a
+    // full rule, and its `name` — not the wrapper's — is the address
+    // `checkConditional` delegates to and `authoredRuleMessage` keys on (see
+    // `packages/objectql/src/validation/rule-validator.ts`). A flat walk over
+    // `obj.validations` never sees a branch name, so a legitimate bundle
+    // entry for one was reported as an orphan. Descend into `then` /
+    // `otherwise`, mirroring `evaluateRule`'s recursion (a branch may itself
+    // be a nested `conditional`, so depth is unbounded); the wrapper's own
+    // name stays in the universe too — its message is structurally
+    // unreachable at runtime, but #14518 keeps a bundle entry for it
+    // deliberately so the bundle mirrors the declared rule set 1:1.
     for (const rule of asArray(obj.validations)) {
-      const ruleName = strName(rule.name);
-      if (ruleName) facts.validations.add(ruleName);
+      collectValidationRuleNames(rule, facts.validations);
     }
   }
 

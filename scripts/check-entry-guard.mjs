@@ -75,6 +75,119 @@ import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from './invoked-as.mjs';
 import { blank, scanSource } from './js-comment-mask.mjs';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// This self-test used to decide success by "no failure was recorded" and
+// nothing else, so "every case held" and "the cases never ran" printed the same
+// line. Closed the way PR #13487 validated on check-doc-authoring: what is
+// pinned is the registered NAMES, not a number. Every section opens with
+// `battery('<name>')`, every assertion is attributed to the battery most
+// recently opened, and the floor requires the OPENED set to equal the DECLARED
+// set with each battery at or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3 keeps
+// a total "right" the moment a sibling grows. A set difference says WHICH
+// battery stopped; a count says only that something did.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+//
+// The machinery lives HERE, at module scope, rather than inside the self-test:
+// this self-test's assertion sink is not a block-bodied helper in its body (it
+// is a concise arrow, or a module-scope function), so there is no in-body
+// helper to thread a per-run ledger through. Module scope is safe because the
+// self-test runs once per process, and it is what lets the existing sink route
+// through `registerCase()` with no case rewritten and no assertion changed.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'the eleven spellings this gate exists to reject': 13,
+  'the canonical form is accepted': 2,
+  'the predicate\'s own home may read argv': 2,
+  'prose and payloads are not guards': 4,
+  'the other idioms': 3,
+  'the call shape': 3,
+  'the line number is the one a reader can open': 1,
+  'the second kind: an EXPORTING file whose top level runs on import': 17,
+  'the slicer, driven directly': 4,
+  'the dispatch-gates scan surface (#10784)': 5,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 10;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
+// ⚠️ None of these helpers is named with a self-test spelling, deliberately and
+// on the record: `check:pm-dispatch-gates` anchors on a top-level declaration
+// whose NAME spells self-test, and every such name owes a row in that gate's
+// COMPOUND_ANCHOR_LEDGER. These are the battery ROSTER's machinery -- they hold
+// no fixtures to mask and read no path literal -- so the accurate name is the
+// one that says `battery`, not the one that would owe a ledger row for a role
+// this code does not have.
+
+/** Cases registered per battery: `battery()` opens one, `registerCase()` files into it. */
+const batteryCases = new Map();
+let openBattery = null;
+
+/** Open a battery. Every assertion after this line is attributed to it. */
+function battery(name) {
+  openBattery = name;
+}
+
+/** Called by the self-test's own assertion sink, once per assertion. */
+function registerCase() {
+  const name = openBattery ?? UNATTRIBUTED_BATTERY;
+  batteryCases.set(name, (batteryCases.get(name) ?? 0) + 1);
+}
+
+/**
+ * The floor: every declared battery RAN, and ran its cases (#13489).
+ *
+ * Evaluated after every battery has had its chance and BEFORE the verdict, so
+ * the success line can only be printed by a run in which the set of batteries
+ * that registered assertions EQUALS the set declared.
+ */
+function batteryFloorFailures() {
+  const declared = Object.keys(SELF_TEST_BATTERIES);
+  const problems = [];
+  if (declared.length < SELF_TEST_BATTERY_FLOOR) {
+    problems.push(
+      `SELF_TEST_BATTERIES declares ${declared.length} batteries, below the pinned `
+        + `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batteryCases) {
+    if (declared.includes(name)) continue;
+    problems.push(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in `
+        + 'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declared) {
+    const count = batteryCases.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    problems.push(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. `
+          + 'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of `
+          + `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (problems.length) {
+    problems.push(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the '
+        + 'number. Find what stopped registering (an early return, a deleted block, a guard that now '
+        + 'skips) and restore it.',
+    );
+  }
+  return problems;
+}
+
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const REPO_ROOT = resolve(HERE, '..');
 const SCRIPTS = HERE;
@@ -457,10 +570,7 @@ export function importUnsafeStatements(source) {
  * a line in here. An entry whose file has since been fixed fails as STALE and
  * names itself, which is what stops this from rotting into an allowlist.
  */
-const KNOWN_IMPORT_UNSAFE = new Set([
-  'scripts/check-changeset-no-major.mjs',
-  'scripts/check-empty-changeset.mjs',
-]);
+const KNOWN_IMPORT_UNSAFE = new Set([]);
 
 /**
  * The SCAN SURFACE, written in the syntax `scripts/pm/dispatch-gates.mjs` can
@@ -634,10 +744,14 @@ let selfTestReachedVerdict = false;
 
 export function selfTest() {
   const cases = [];
-  const t = (name, ok, detail) => cases.push({ name, ok: Boolean(ok), detail });
+  const t = (name, ok, detail) => {
+    registerCase();
+    return cases.push({ name, ok: Boolean(ok), detail });
+  };
   const n = (src, opts) => scanFile('f.mjs', src, opts).length;
 
   // ── the eleven spellings this gate exists to reject ───────────────────────
+  battery('the eleven spellings this gate exists to reject');
   const SPELLINGS = [
     "const invokedDirectly = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));",
     "const invokedDirectly = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);",
@@ -668,10 +782,12 @@ export function selfTest() {
   );
 
   // ── the canonical form is accepted ────────────────────────────────────────
+  battery('the canonical form is accepted');
   t('the canonical guard is accepted', n(`if (${CANONICAL}) { main(); }`) === 0);
   t('a file with no guard at all is accepted', n("console.log('hello');\n") === 0);
 
   // ── the predicate's own home may read argv ────────────────────────────────
+  battery('the predicate\'s own home may read argv');
   t(
     'invoked-as.mjs itself may read process.argv[1]',
     n('return invokedAs(process.argv[1], fileURLToPath(u));', { isPredicateHome: true }) === 0,
@@ -682,6 +798,7 @@ export function selfTest() {
   );
 
   // ── prose and payloads are not guards ─────────────────────────────────────
+  battery('prose and payloads are not guards');
   t('a process.argv[1] in a LINE COMMENT is not a guard', n('// process.argv[1] is left as typed\n') === 0);
   t('a process.argv[1] in a BLOCK COMMENT is not a guard', n('/**\n * process.argv[1] as typed\n */\n') === 0);
   t(
@@ -694,11 +811,13 @@ export function selfTest() {
   );
 
   // ── the other idioms ──────────────────────────────────────────────────────
+  battery('the other idioms');
   t('require.main is rejected', n('if (require.main === module) {}') > 0);
   t('import.meta.main is rejected', n('if (import.meta.main) {}') > 0);
   t('process.mainModule is rejected', n('if (process.mainModule === module) {}') > 0);
 
   // ── the call shape ────────────────────────────────────────────────────────
+  battery('the call shape');
   t('isEntrypoint on someone else’s url is rejected', n('if (isEntrypoint(other.url)) {}') > 0);
   t('isEntrypoint(import.meta.url) is accepted', n('if (isEntrypoint(import.meta.url)) {}') === 0);
   t(
@@ -707,6 +826,7 @@ export function selfTest() {
   );
 
   // ── the line number is the one a reader can open ──────────────────────────
+  battery('the line number is the one a reader can open');
   const multi = "line one\nline two\nconst g = process.argv[1] === x;\n";
   t('a finding reports the line the guard is ON', scanFile('f.mjs', multi)[0]?.line === 3, JSON.stringify(scanFile('f.mjs', multi)));
 
@@ -715,6 +835,7 @@ export function selfTest() {
   // Asserted POSITIVELY in both directions. This gate prints files SCANNED, not
   // files recognised, so "the count moved" is not evidence available to a reader
   // — recognition has to be pinned here or it is not pinned anywhere.
+  battery('the second kind: an EXPORTING file whose top level runs on import');
   const u = (src) => importUnsafeStatements(src).length;
   const first = (src) => importUnsafeStatements(src)[0];
 
@@ -759,6 +880,7 @@ export function selfTest() {
   );
 
   // ── the slicer, driven directly ──────────────────────────────────────────
+  battery('the slicer, driven directly');
   t('an import declaration is ONE top-level statement', topLevelStatements(codeOnly("import { a, b } from 'x';\n")).length === 1);
   t('a destructuring declaration is ONE top-level statement', topLevelStatements(codeOnly('const { a } = f();\n')).length === 1);
   t('else continues the statement before it', topLevelStatements(codeOnly('if (a) { x(); } else { y(); }\n')).length === 1);
@@ -772,6 +894,7 @@ export function selfTest() {
   // missing from the brief — which is the round that was actually paid. Both
   // directions are derived from the walked root rather than re-spelled, so
   // moving or renaming it cannot leave the declaration describing the old one.
+  battery('the dispatch-gates scan surface (#10784)');
   const walkedRoot = relative(REPO_ROOT, SCRIPTS);
   const declaredRoots = ROOT_DIR_WATCH_HINTS.map((h) => h.replace(/\/\*+$/, ''));
   t(
@@ -802,6 +925,10 @@ export function selfTest() {
   // Provenance, never a lookup key: the glob form appearing where the walk root
   // is read would send readdirSync at a directory that does not exist.
   t('the declared form is NOT the walk root itself', !ROOT_DIR_WATCH_HINTS.includes(walkedRoot));
+
+  // The floor runs BEFORE the verdict below, so a success line can only be
+  // printed by a run in which every declared battery registered its cases.
+  for (const message of batteryFloorFailures()) cases.push({ name: message, ok: false });
 
   const failed = cases.filter((c) => !c.ok);
   for (const c of failed) console.error(`  ✗ ${c.name}${c.detail ? ` — ${c.detail}` : ''}`);

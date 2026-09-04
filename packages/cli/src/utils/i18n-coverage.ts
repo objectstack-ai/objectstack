@@ -55,6 +55,7 @@ export interface CoverageIssue {
     | 'navigation'
     | 'dashboard'
     | 'widget'
+    | 'dataset'
     | 'page'
     | 'flow'
     | 'metadataForm';
@@ -205,6 +206,15 @@ const COVERAGE_SOURCE: Record<ExpectedEntry['source'], CoverageIssue['source']> 
   navigation: 'navigation',
   dashboard: 'dashboard',
   widget: 'widget',
+  // Analytics dataset copy (`datasets.<d>.label`, `.description`, and each
+  // dimension's / measure's `label`) — the author's own semantic layer, drawn
+  // under every metric tile and on every chart axis, so it keeps its own
+  // bucket and reports as `i18n/missing-dataset` rather than folding away with
+  // `--include-platform`. A dataset is bound BY REFERENCE from N widgets
+  // across M dashboards (ADR-0021 D1), which is also why it is not folded into
+  // the `dashboard` bucket: the string is defined once, not once per
+  // presentation.
+  dataset: 'dataset',
   page: 'page',
   // Screen-flow copy (`flows.<f>.label`, `flows.<f>.screens.<n>.title`, and
   // the per-field `label` / `placeholder`) — the author's own wizard text, so
@@ -231,10 +241,70 @@ const SOURCE_NOUN: Record<CoverageIssue['source'], string> = {
   navigation: 'Navigation item',
   dashboard: 'Dashboard',
   widget: 'Widget',
+  dataset: 'Dataset',
   page: 'Page',
   flow: 'Flow',
   metadataForm: 'Metadata form',
 };
+
+/**
+ * The same taxonomy, spelled as the plural surface noun a *reader* of
+ * `os i18n check --help` needs — `SOURCE_NOUN` above is the singular subject of
+ * a per-issue message ("Object \"account\" fields.name.label"), which is a
+ * different sentence and cannot serve both.
+ *
+ * ⚠️ This is the SET, not a sample. `os i18n check --help` used to name five of
+ * these kinds in a parenthetical, and a five-item sample of a fifteen-member
+ * taxonomy does not read as an illustration — it reads as a scope statement, so
+ * a reader who wanted app navigation or dashboard widgets checked concluded the
+ * command did not cover them and went looking for a second tool that does not
+ * exist. The capability was shipped and hidden by its own description.
+ *
+ * The `Record<CoverageIssue['source'], string>` type is what keeps that from
+ * happening again: it is exhaustive by construction, so a new member of the
+ * union is a **compile error** here until it is named, and naming it publishes
+ * it in `--help` in the same edit. ⛔ Never widen this to a partial map or an
+ * index signature — that restores exactly the drift this file measured.
+ *
+ * Kinds that fold together do so here too, because they fold in the *report*:
+ * a filter-preset tab is reported as `view`, an action parameter as `action`,
+ * and the three registry-driven metadata-form kinds as `metadataForm`.
+ */
+const SOURCE_SURFACE: Record<CoverageIssue['source'], string> = {
+  object: 'objects',
+  field: 'fields',
+  option: 'options',
+  section: 'sections',
+  view: 'views',
+  action: 'actions',
+  globalAction: 'global actions',
+  app: 'apps',
+  navigation: 'navigation items',
+  dashboard: 'dashboards',
+  widget: 'widgets',
+  dataset: 'datasets',
+  page: 'pages',
+  flow: 'flow screens',
+  metadataForm: 'metadata forms',
+};
+
+/**
+ * Every source kind a {@link CoverageIssue} can carry, in declaration order.
+ * Derived from {@link SOURCE_SURFACE}, never retyped.
+ */
+export const COVERAGE_SOURCE_KINDS = Object.keys(SOURCE_SURFACE) as ReadonlyArray<
+  CoverageIssue['source']
+>;
+
+/**
+ * The translatable surfaces this detector reports on, as one comma-separated
+ * phrase — the text `os i18n check --help` shows.
+ *
+ * Derived from the taxonomy rather than retyped beside it: the command's
+ * description and the kinds its report can emit are then one fact with one
+ * source, and cannot drift apart the way they did.
+ */
+export const COVERAGE_SURFACE_PHRASE = COVERAGE_SOURCE_KINDS.map((kind) => SOURCE_SURFACE[kind]).join(', ');
 
 /** Subject line for the "missing translation" message. */
 function describeEntry(entry: ExpectedEntry, source: CoverageIssue['source']): string {

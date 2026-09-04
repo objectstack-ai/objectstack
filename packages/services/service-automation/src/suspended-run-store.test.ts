@@ -5,6 +5,15 @@ import { AutomationEngine } from './engine.js';
 import { ObjectStoreSuspendedRunStore, type SuspendedRunStoreEngine } from './suspended-run-store.js';
 import type { RunRecord, SuspendedRun } from './engine.js';
 import { defineActionDescriptor } from '@objectstack/spec/automation';
+import { RESUME_AUTHORITY_SERVICE } from '@objectstack/spec/contracts';
+// [#14333] The PRODUCER's own delete-dispatch decision, imported rather than
+// re-approximated. `createFakeEngine` below routes its `delete` through it, so
+// the double physically cannot accept a call `ObjectQL.delete` refuses — the
+// property `scripts/check-engine-double-contract.mjs` exists to hold, and the
+// thing that makes the compare-and-set spelling in
+// `ObjectStoreSuspendedRunStore.claimSuspension` testable at all: drop
+// `multi: true` from it and this fake THROWS, exactly as a running server does.
+import { assertEngineDeleteDispatch } from '@objectstack/metadata-core';
 
 /**
  * The `resumeAuthority: 'any'` declaration every pausing fixture below needs
@@ -64,13 +73,21 @@ function createFakeEngine(
             return rows.get(String(id));
         },
         async delete(_object, options) {
-            if (options?.multi) {
+            // [#14333] Dispatch through the producer's predicate, never a
+            // hand-written approximation of it: `by-id` when a truthy scalar
+            // `where.id` is the WHOLE predicate, `multi` when `options.multi`
+            // carries the rest of the `where` to the many-row route, and a
+            // THROW otherwise — the shape `ObjectQL.delete` refuses. Before
+            // this, a `where` of `{ id, node_id }` with no `multi` silently
+            // took the by-id branch here and returned `true`, so a store that
+            // had lost its condition read as an untestable `'unsupported'`.
+            const dispatch = assertEngineDeleteDispatch(options as any);
+            if (dispatch.kind === 'multi') {
                 const doomed = [...rows.values()].filter(r => matches(r, options?.where));
                 for (const r of doomed) rows.delete(String(r.id));
                 return doomed.length;
             }
-            const id = options?.where?.id;
-            rows.delete(String(id));
+            rows.delete(String(dispatch.id));
             return true;
         },
     };
@@ -783,5 +800,247 @@ describe('ObjectStoreSuspendedRunStore — organization attribution (cloud#1395)
 
         expect(engine.rows.get('run_abc').organization_id).toBe('org_1');
         expect(engine.rows.get('run_abc2').organization_id).toBe('org_1');
+    });
+});
+
+/**
+ * [#14333] The PRODUCTION conditional advance — `ObjectStoreSuspendedRunStore`,
+ * against the counting `multi` fake engine above.
+ *
+ * ## Why this suite exists
+ *
+ * The engine-side pin (`concurrent-replica-resume-race.test.ts`) drives two
+ * `AutomationEngine`s over one `InMemorySuspendedRunStore`, which proves the
+ * engine asks the store and honours the answer. It says NOTHING about the store
+ * every production deployment actually runs. Measured, on the branch before
+ * this suite existed: deleting `multi: true` from `claimSuspension`'s one
+ * `delete` call left every test green — while against a running server that
+ * spelling is the dispatch `reject` verdict, which throws, which `claimAdvance`
+ * turns into `STORE_UNAVAILABLE` on EVERY resume. A one-token regression that
+ * refuses every production resume must not be able to pass.
+ *
+ * So the spelling is asserted through the producer's own predicate
+ * (`assertEngineDeleteDispatch`, wired into `createFakeEngine` above and read
+ * directly below), not by matching a literal token: a test that greps for
+ * `multi: true` pins the characters, this pins the DECISION `ObjectQL.delete`
+ * will make about the same options bag.
+ */
+describe('#14333 ObjectStoreSuspendedRunStore.claimSuspension — the production conditional advance', () => {
+    /** A paused row for `run_abc`, parked at `approve_step` / `areq_1`. */
+    const parkRun = async (store: ObjectStoreSuspendedRunStore, over: Partial<SuspendedRun> = {}) => {
+        await store.save({ ...baseRun(), ...over });
+    };
+
+    it('spells the compare-and-set the way ObjectQL dispatches to deleteMany, not the by-id route', async () => {
+        const engine = createFakeEngine();
+        const seen: any[] = [];
+        const spy = { ...engine, async delete(object: string, options: any) {
+            seen.push(options);
+            return engine.delete!(object, options);
+        } } as SuspendedRunStoreEngine & { rows: Map<string, any> };
+        const store = new ObjectStoreSuspendedRunStore(spy, createTestLogger());
+        await parkRun(store);
+
+        expect(await store.claimSuspension('run_abc', { nodeId: 'approve_step', correlation: 'areq_1' }))
+            .toBe('claimed');
+
+        expect(seen).toHaveLength(1);
+        // The condition really is carried: id AND the parking, not id alone.
+        expect(seen[0].where).toEqual({ id: 'run_abc', node_id: 'approve_step', correlation: 'areq_1' });
+        // THE decision, taken by the producer's predicate over the very options
+        // bag the store built. `by-id` would bind only the primary key and
+        // silently discard the condition; `reject` is what a missing `multi`
+        // produces, and it THROWS in a running server.
+        expect(assertEngineDeleteDispatch(seen[0])).toEqual({ kind: 'multi' });
+        // …and it actually removed the row.
+        expect(engine.rows.has('run_abc')).toBe(false);
+    });
+
+    it('omits `correlation` from the condition when the caller has none, and still takes the multi route', async () => {
+        const engine = createFakeEngine();
+        const seen: any[] = [];
+        const spy = { ...engine, async delete(object: string, options: any) {
+            seen.push(options);
+            return engine.delete!(object, options);
+        } } as SuspendedRunStoreEngine & { rows: Map<string, any> };
+        const store = new ObjectStoreSuspendedRunStore(spy, createTestLogger());
+        await parkRun(store, { correlation: undefined });
+
+        expect(await store.claimSuspension('run_abc', { nodeId: 'approve_step' })).toBe('claimed');
+        expect(seen[0].where).toEqual({ id: 'run_abc', node_id: 'approve_step' });
+        expect(assertEngineDeleteDispatch(seen[0])).toEqual({ kind: 'multi' });
+    });
+
+    it('maps the affected-row COUNT to the outcome: 1 is claimed, 0 is lost', async () => {
+        const engine = createFakeEngine();
+        const store = new ObjectStoreSuspendedRunStore(engine, createTestLogger());
+        await parkRun(store);
+
+        // One row matches the whole condition.
+        expect(await store.claimSuspension('run_abc', { nodeId: 'approve_step', correlation: 'areq_1' }))
+            .toBe('claimed');
+        // The row is gone, so the second claim matches nothing.
+        expect(await store.claimSuspension('run_abc', { nodeId: 'approve_step', correlation: 'areq_1' }))
+            .toBe('lost');
+    });
+
+    it('a row that MOVED to another node is lost, not claimed — the row still exists', async () => {
+        const engine = createFakeEngine();
+        const store = new ObjectStoreSuspendedRunStore(engine, createTestLogger());
+        await parkRun(store, { nodeId: 'second_step', correlation: 'areq_2' });
+
+        // A replica still holding the earlier parking claims against it.
+        expect(await store.claimSuspension('run_abc', { nodeId: 'approve_step', correlation: 'areq_1' }))
+            .toBe('lost');
+        // ⛔ And the winner's parking is intact: an existence-only consume would
+        // have deleted the row that another replica is standing on.
+        expect(engine.rows.has('run_abc')).toBe(true);
+        expect(engine.rows.get('run_abc').node_id).toBe('second_step');
+    });
+
+    it('a row re-parked at the SAME node with a new correlation is lost (the map re-entry shape)', async () => {
+        const engine = createFakeEngine();
+        const store = new ObjectStoreSuspendedRunStore(engine, createTestLogger());
+        await parkRun(store, { nodeId: 'items', correlation: 'map:child_2' });
+
+        expect(await store.claimSuspension('run_abc', { nodeId: 'items', correlation: 'map:child_1' }))
+            .toBe('lost');
+        expect(engine.rows.has('run_abc')).toBe(true);
+        expect(engine.rows.get('run_abc').correlation).toBe('map:child_2');
+    });
+
+    it('an engine with no delete() answers unsupported, and says so ONCE per store', async () => {
+        const engine = createFakeEngine();
+        const noDelete = { find: engine.find, insert: engine.insert, update: engine.update } as SuspendedRunStoreEngine;
+        const lines: string[] = [];
+        const store = new ObjectStoreSuspendedRunStore(noDelete, { warn: (m: string) => lines.push(m) } as any);
+
+        for (let i = 0; i < 3; i++) {
+            expect(await store.claimSuspension('run_abc', { nodeId: 'approve_step' })).toBe('unsupported');
+        }
+        // Once per STORE, not once per call: the composition cannot express the
+        // condition for the life of the process, so repeating it every resume
+        // is repetition of a permanent fact.
+        expect(lines).toHaveLength(1);
+        expect(lines[0]).toContain('no cross-replica advance guarantee');
+        expect(lines[0]).toContain('engine has no delete()');
+    });
+
+    it('a multi-row result that is not a COUNT answers unsupported, and says so ONCE per store', async () => {
+        const engine = createFakeEngine();
+        // A driver whose many-row delete resolves something other than a number:
+        // "did I win?" has no answer to read, so the store must not guess.
+        const nonCounting = { ...engine, async delete() { return true; } } as SuspendedRunStoreEngine;
+        const lines: string[] = [];
+        const store = new ObjectStoreSuspendedRunStore(nonCounting, { warn: (m: string) => lines.push(m) } as any);
+
+        for (let i = 0; i < 3; i++) {
+            expect(await store.claimSuspension('run_abc', { nodeId: 'approve_step' })).toBe('unsupported');
+        }
+        expect(lines).toHaveLength(1);
+        expect(lines[0]).toContain('not an affected-row count');
+        expect(lines[0]).toContain('no cross-replica advance guarantee');
+    });
+
+    // ── End to end: two engines over ONE ObjectStoreSuspendedRunStore ────────
+    //
+    // The engine-side pin runs over the in-memory store. This is the same race
+    // driven through the store production actually uses, so the predicate
+    // spelling, the count mapping and the engine's fold are exercised together.
+
+    const RACE_FLOW = {
+        name: 'expense_approval',
+        label: 'Expense approval',
+        type: 'autolaunched',
+        nodes: [
+            { id: 'start', type: 'start', label: 'Start' },
+            { id: 'lv1', type: 'approval_level', label: 'Department head' },
+            { id: 'notify', type: 'notify_action', label: 'Notify finance' },
+            { id: 'lv2', type: 'approval_level', label: 'General manager' },
+            { id: 'end', type: 'end', label: 'End' },
+        ],
+        edges: [
+            { id: 'e1', source: 'start', target: 'lv1' },
+            { id: 'e2', source: 'lv1', target: 'notify' },
+            { id: 'e3', source: 'notify', target: 'lv2' },
+            { id: 'e4', source: 'lv2', target: 'end' },
+        ],
+    } as any;
+
+    function raceReplica(store: ObjectStoreSuspendedRunStore, opened: string[], fired: string[]) {
+        const engine = new AutomationEngine(createTestLogger(), store);
+        engine.registerNodeExecutor({
+            type: 'approval_level',
+            descriptor: defineActionDescriptor({
+                type: 'approval_level', version: '1.0.0', name: 'Approval level',
+                supportsPause: true, resumeAuthority: 'service',
+            }),
+            async execute(node) {
+                opened.push(node.id);
+                return { success: true, suspend: true, correlation: `req_${node.id}` };
+            },
+        });
+        engine.registerNodeExecutor({
+            type: 'notify_action',
+            descriptor: defineActionDescriptor({ type: 'notify_action', version: '1.0.0', name: 'Notify' }),
+            async execute(node) { fired.push(node.id); return { success: true }; },
+        });
+        engine.registerFlow('expense_approval', RACE_FLOW);
+        return engine;
+    }
+
+    it('two engines over ONE durable store advance a raced run exactly once', async () => {
+        const dataEngine = createFakeEngine();
+        const store = new ObjectStoreSuspendedRunStore(dataEngine, createTestLogger());
+        const opened: string[] = [];
+        const fired: string[] = [];
+        const a = raceReplica(store, opened, fired);
+        const b = raceReplica(store, opened, fired);
+
+        const runId = (await a.execute('expense_approval')).runId!;
+        expect(opened).toEqual(['lv1']);
+
+        const both = await Promise.all([
+            a.resume(runId, { [RESUME_AUTHORITY_SERVICE]: true } as any),
+            b.resume(runId, { [RESUME_AUTHORITY_SERVICE]: true } as any),
+        ]);
+
+        // The observable effect, through the production store: one advance.
+        expect(fired).toEqual(['notify']);
+        expect(opened).toEqual(['lv1', 'lv2']);
+        expect(both.filter((r) => r.success)).toHaveLength(1);
+        const loser = both.find((r) => !r.success)!;
+        expect(loser.code).toBe('RESUME_IN_PROGRESS');
+        expect(loser.status).toBeUndefined();
+        // The winner's new parking survived the loser's claim.
+        expect(dataEngine.rows.get(runId).node_id).toBe('lv2');
+    });
+
+    it('a claim that THROWS refuses the resume as STORE_UNAVAILABLE and says only what it knows', async () => {
+        const dataEngine = createFakeEngine();
+        const store = new ObjectStoreSuspendedRunStore(dataEngine, createTestLogger());
+        const opened: string[] = [];
+        const fired: string[] = [];
+        const engine = raceReplica(store, opened, fired);
+        const runId = (await engine.execute('expense_approval')).runId!;
+
+        (store as any).claimSuspension = async () => { throw new Error('sqlite: database is locked'); };
+        const refused = await engine.resume(runId, { [RESUME_AUTHORITY_SERVICE]: true } as any);
+
+        expect(refused.success).toBe(false);
+        // Unknown, never "gone for good" (#4420) — the same call is expected to
+        // work once the store recovers.
+        expect(refused.code).toBe('STORE_UNAVAILABLE');
+        expect(refused.status).toBeUndefined();
+        // ⛔ It must NOT assert the suspension was not consumed: a throw can
+        // arrive after a committed delete. It states what it knows and hands
+        // the ambiguity to a retry.
+        expect(refused.error).toContain('this resume did NOT continue the run');
+        expect(refused.error).toContain('UNKNOWN');
+        expect(refused.error).not.toContain('the suspension was NOT consumed');
+        // Nothing ran, and the run is still parked for that retry.
+        expect(fired).toEqual([]);
+        expect(opened).toEqual(['lv1']);
+        expect(dataEngine.rows.get(runId).node_id).toBe('lv1');
     });
 });

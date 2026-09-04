@@ -379,10 +379,61 @@ async function main() {
 // as one that passed (#13798).
 const SELF_TEST_VERDICT = 'check-aggregator-roster self-test reached its verdict';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  '(1) BASELINE: the checked-in tree is green, and says what it read': 8,
+  '(2) POSITIVE CONTROL A, per aggregator': 9,
+  '(3) POSITIVE CONTROL B, per aggregator': 9,
+  '(4) A declared member that is not a job in the workflow': 2,
+  '(5) REFUSALS -- the most important assertions in this file': 9,
+  '(6) The declaration cannot drift from how the gate actually counts': 2,
+  '(7) Malformed declarations fail loudly rather than silently shrinking': 2,
+  '(8) `filter` may not be laundered into the roster to silence a red': 2,
+  '(9) WIRING: the gate and its self-test really run in CI': 2,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 9;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 async function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const seen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    seen.set(b, (seen.get(b) ?? 0) + 1);
+  };
   const failures = [];
   let checked = 0;
   const assert = (condition, description) => {
+    registerCase();
     checked += 1;
     if (!condition) failures.push(description);
   };
@@ -423,6 +474,7 @@ async function selfTest() {
   };
 
   // ── (1) BASELINE: the checked-in tree is green, and says what it read ─────
+  battery('(1) BASELINE: the checked-in tree is green, and says what it read');
   const baseline = judge({ workflows: await readWorkflows(root) });
   assert(baseline.problems.length === 0, `the checked-in workflows pass -- got ${JSON.stringify(baseline.problems)}`);
   assert(
@@ -440,6 +492,7 @@ async function selfTest() {
   // ── (2) POSITIVE CONTROL A, per aggregator ───────────────────────────────
   // A declared member dropped from `needs:` -- the card's exact failure.
   // Predicted direction: RED, naming the aggregator and the orphaned lane.
+  battery('(2) POSITIVE CONTROL A, per aggregator');
   const dropped = [
     { label: 'typecheck loses a lane from needs:', file: 'lint.yml', member: 'typecheck-consumers', from: '      - typecheck-consumers\n', to: '' },
     { label: 'test-gate loses its matrix from needs:', file: 'ci.yml', member: 'test', from: '    needs: [test, filter]\n', to: '    needs: [filter]\n' },
@@ -467,6 +520,7 @@ async function selfTest() {
   // A `needs:` entry naming a job that does not exist. Two findings at once,
   // both true and both wanted: the roster does not account for it, and the
   // workflow has no such job.
+  battery('(3) POSITIVE CONTROL B, per aggregator');
   const phantom = [
     { label: 'typecheck needs a job that was deleted', file: 'lint.yml', from: '      - typecheck-consumers\n', to: '      - typecheck-consumers\n      - typecheck-ghost\n', ghost: 'typecheck-ghost' },
     { label: 'test-gate needs a job that was deleted', file: 'ci.yml', from: '    needs: [test, filter]\n', to: '    needs: [test, filter, test-ghost]\n', ghost: 'test-ghost' },
@@ -491,6 +545,7 @@ async function selfTest() {
   }
 
   // ── (4) A declared member that is not a job in the workflow ──────────────
+  battery('(4) A declared member that is not a job in the workflow');
   const ghostMember = fixture('typecheck declares a member that does not exist', 'lint.yml', (s) =>
     s.replace(`${MEMBERS_KEY}: typecheck-source-gates`, `${MEMBERS_KEY}: typecheck-phantom typecheck-source-gates`),
   );
@@ -505,6 +560,7 @@ async function selfTest() {
   // problems" over an aggregator it never read (#4690).
 
   // 5a. The declaration is unfindable: the whole env block is gone.
+  battery('(5) REFUSALS -- the most important assertions in this file');
   const noDeclaration = fixture('typecheck loses its roster declaration', 'lint.yml', (s) =>
     s.replace(new RegExp(`\\n    env:\\n      ${MEMBERS_KEY}: [^\\n]*\\n`), '\n'),
   );
@@ -551,6 +607,7 @@ async function selfTest() {
   );
 
   // ── (6) The declaration cannot drift from how the gate actually counts ────
+  battery('(6) The declaration cannot drift from how the gate actually counts');
   const legDrift = fixture('dogfood-gate stops counting a declared member', 'ci.yml', (s) =>
     s.replace("            --leg \"dogfood-verify/1:$OS_VERIFY_RESULT\"\n", ''),
   );
@@ -560,6 +617,7 @@ async function selfTest() {
   );
 
   // ── (7) Malformed declarations fail loudly rather than silently shrinking ─
+  battery('(7) Malformed declarations fail loudly rather than silently shrinking');
   const commaSeparated = fixture('typecheck separates its roster with commas', 'lint.yml', (s) =>
     s.replace(
       `${MEMBERS_KEY}: typecheck-source-gates typecheck-workspace`,
@@ -572,6 +630,7 @@ async function selfTest() {
   );
 
   // ── (8) `filter` may not be laundered into the roster to silence a red ────
+  battery('(8) `filter` may not be laundered into the roster to silence a red');
   const launderedFilter = fixture('test-gate calls filter a member', 'ci.yml', (s) =>
     s.replace(`${MEMBERS_KEY}: test\n      ${NON_MEMBERS_KEY}: filter`, `${MEMBERS_KEY}: test filter`),
   );
@@ -583,6 +642,7 @@ async function selfTest() {
   // ── (9) WIRING: the gate and its self-test really run in CI ───────────────
   // A gate that exists and is not scheduled is the #10682 shape this card is a
   // sibling of. Asserted against the workflow text, not remembered.
+  battery('(9) WIRING: the gate and its self-test really run in CI');
   {
     const lint = sources['lint.yml'];
     const self = 'scripts/check-aggregator-roster.mjs';
@@ -590,6 +650,51 @@ async function selfTest() {
     assert(lint.includes(`node ${self} --self-test`), 'wiring: lint.yml runs the --self-test half too');
   }
 
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    failures.push(message);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of seen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = seen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
+  }
   if (failures.length > 0) {
     console.error(`✗ check-aggregator-roster --self-test — ${failures.length} failure(s)\n`);
     for (const failure of failures) console.error(`  • ${failure}`);

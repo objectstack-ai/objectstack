@@ -185,6 +185,11 @@ import {
   AssembledViewArtifactSchema,
   isViewContainerShaped,
 } from '@objectstack/spec';
+// [#14399] The ONE spelling of "which object does an aggregated `defineView`
+// container bind to", imported rather than re-spelled. See
+// `resolveMetadataItemName` below for why this registrar had a fourth copy and
+// why it lost it.
+import { deriveViewContainerObject } from '@objectstack/metadata';
 import { bindHooksToEngine } from './hook-binder.js';
 import { validateRecord, normalizeMultiValueFields, coerceBooleanFields, ValidationError, buildFieldError, resolveFieldLabel, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
 import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
@@ -194,6 +199,11 @@ import { evaluateValidationRules, needsPriorRecord, stripReadonlyWhenFields, str
 // SAME value. Armed and sealed in `update()`; the module owns the argument for
 // why neither end may move.
 import { recordHookPayloadWrites } from './hook-write-provenance.js';
+import {
+  divergingHookPayloadKeys,
+  MultiUpdateHookKeyDivergenceError,
+} from './multi-update-hook-key-divergence.js';
+import { UnscopedHookApi, type HookRunAs, type HookRunAsRef, type RunAsDerivableApi } from './hook-run-as.js';
 import type { HookWriteRecording } from './hook-write-provenance.js';
 import { resolveMasterDetailRelation } from './master-detail.js';
 // [#6457] The master-detail header a `parent`-scoped predicate reads is made
@@ -2014,28 +2024,67 @@ const METADATA_ARRAY_KEYS = [
  *
  * Most metadata items expose a top-level `name` (or `id`). The `View`
  * container defined by `@objectstack/spec/ui` is special: it aggregates
- * `list / form / listViews / formViews` for a single object and is
- * keyed implicitly by its target object name (see `data.object`).
+ * `list / form / listViews / formViews` for a single object and is keyed by
+ * the OBJECT it binds to, not by its own row identity — which is what
+ * `/api/v1/meta/views/:object`, `getViewsByObject()` and
+ * `GET /meta/view?object=` all address it by.
  *
- * Per spec, `ViewSchema` does NOT have a top-level `name` field
- * (view.zod.ts), so we resolve it from the inner data source. This
- * matches the server-side metadata API contract (`/api/v1/meta/views/:object`).
+ * ⚠️ [#14399] The sentence that used to stand here — "per spec, `ViewSchema`
+ * does NOT have a top-level `name` field" — is measurably false and was the
+ * premise for consulting `item.name` first. `ViewSchema` declares an optional
+ * `name` (`view.zod.ts`), described there as "supplied by the metadata door;
+ * for an object-scoped container it is the object name". "Is the object name"
+ * is a CONVENTION the door does not enforce, so the two never actually had to
+ * agree — and where they disagreed, this registrar and the other two picked
+ * different keys for the same document.
  */
 function resolveMetadataItemName(key: string, item: any): string | undefined {
   if (!item) return undefined;
+  // [#14399] The aggregated `views` CONTAINER branch, taken FIRST and answered
+  // by the shared derivation. Everything below is unchanged.
+  //
+  // This registrar used to consult `item.name` before anything else, for every
+  // key including this one — so a container written as
+  // `{ name: 'lead_views', object: 'crm_lead', list: {…} }` registered under
+  // `lead_views` here while the artifact/HMR SOURCE registrar
+  // (`MetadataPlugin._parseAndRegisterArtifact`) and the runtime door
+  // (`expandRuntimeViewContainer`) both registered it under `crm_lead`. Same
+  // document, two source registrars, two registry keys and two sets of expanded
+  // item names, with `getViewsByObject()` / `GET /meta/view?object=` answering
+  // for the object only when the right registrar happened to load it.
+  //
+  // The 2026-08-07 meta-rule settles the direction rather than taste: one
+  // operation with two inconsistent implementations, the side bound by a
+  // DECLARATION wins. `ViewSchema.object`'s own `.describe()` names its readers
+  // (`getViewsByObject()` / `GET /meta/view?object=`); this loop's old order
+  // argued from item identity, which declares nothing about the binding. So the
+  // container branch adopts `deriveViewContainerObject` — by import, because a
+  // fourth hand-copy of a chain that already exists three times is the defect
+  // this repair exists to close, not the repair.
+  //
+  // The gate is `isAggregatedViewContainer`, which is what makes this the
+  // CONTAINER branch and nothing wider: it is false for every artifact carrying
+  // a `viewKind`, so the assembled `viewItems:` channel below (standalone
+  // ViewItems and flattened list/form overlays — every member of
+  // `AssembledViewArtifactSchema` requires `viewKind`) still resolves by its own
+  // `name` first, which is its identity and not a binding.
+  //
+  // `item.id` is untouched and stays reachable for every other key. It cannot
+  // fire for a spec-valid container: `ViewSchema` is a `strictObject` that
+  // declares `name` and `object` and no `id`, so an `id` on a container is
+  // refused at the authoring and metadata doors before this seam sees it.
+  if (key === 'views' && isAggregatedViewContainer(item)) {
+    return deriveViewContainerObject(item);
+  }
   if (item.name) return item.name;
   if (item.id) return item.id;
   if (key === 'views') {
-    // Independent ViewItems ("Object has-many View") carry a top-level `name`
-    // (handled above) and bind to their object via `object`. The aggregated
-    // container has no top-level name/object, so fall back to its inner data
-    // source — matching the loader's expansion key.
-    return (
-      item?.object ||
-      item?.list?.data?.object ||
-      item?.form?.data?.object ||
-      undefined
-    );
+    // A `views` entry that is NOT an aggregated container and carries neither
+    // `name` nor `id` — e.g. a flattened overlay whose optional `name` was
+    // omitted. Same derivation, and identical to the chain that used to be
+    // written out here: with `item.name` already known falsy, the helper's
+    // trailing `name` term contributes nothing.
+    return deriveViewContainerObject(item);
   }
   return undefined;
 }
@@ -2884,10 +2933,27 @@ export class ObjectQL implements IObjectQLEngine {
    * A rewrite CONDITIONED on the row (`ctx.previous`, `ctx.input.id`) is
    * outside the contract: it does not scope itself to the row it was decided
    * on, it widens to every matched row. Per-row `previous` is supplied so a
-   * guard can REFUSE the write (throw), not so a rewrite can be aimed. That is
-   * a contract statement, not an enforcement — no static rule can decide
-   * whether a rewrite is row-invariant — and the ADR names it as such rather
-   * than hiding it.
+   * guard can REFUSE the write (throw), not so a rewrite can be aimed.
+   *
+   * ## D3, ENFORCED — divergent key sets refuse the batch [#14099]
+   *
+   * That last paragraph used to end "a contract statement, not an enforcement
+   * — no static rule can decide whether a rewrite is row-invariant". The second
+   * half is still true and the conclusion no longer follows: nothing STATIC can
+   * decide it, but the dispatch can MEASURE it. #14088's recorder is armed once
+   * more per row here, so each dispatch reports the set of payload keys THAT
+   * row's hook chain assigned; if two rows disagree, the batch is refused whole
+   * before any write ({@link MultiUpdateHookKeyDivergenceError}).
+   *
+   * Maintainer ruling of 2026-09-02, on the corruption `duly` measured against
+   * published 17.2.0 — a `completed_at` transition stamp moved an
+   * already-completed row's timestamp, silently, on a two-row batch. The
+   * criterion is the key SET and never the values, which is what lets the
+   * clock-reading audit stamp through: every row writes `updated_at`, so an
+   * honest batch is never refused non-deterministically. The full argument,
+   * both rejected value-comparison variants, and the blind spot the ruling
+   * carries openly (same key, per-row VALUES) live on
+   * `multi-update-hook-key-divergence.ts`.
    *
    * ## D4 — `input.id` is not a reroute lever here
    *
@@ -2904,6 +2970,30 @@ export class ObjectQL implements IObjectQLEngine {
   ): Promise<void> {
     const schema = this._registry.getObject(object);
     const carriesPayload = event === 'beforeUpdate';
+    // ── [#14099] D3's ENFORCEMENT half: one observation window per row ──────
+    //
+    // The #14088 recorder, armed a SECOND time for this loop and NESTED over
+    // the batch-scoped recording `update()` already armed at its entry. The
+    // nesting is what makes both readings true at once: a write through this
+    // view lands on the outer recording's view, which lands on the real
+    // payload — so the outer record (the one the read-only strips read for
+    // provenance) still sees every hook write, while `closeWindow()` gives
+    // this loop what only it needs: the keys assigned by ONE row's chain.
+    //
+    // ⭐ ONE recording for the whole loop, not one per row, and that is a
+    // contract point rather than a saving: every per-row context must carry
+    // THE SAME payload object (D3, pinned by reference identity in
+    // `bulk-write-per-row-hooks.test.ts`). A fresh view per row would still be
+    // write-through onto one payload — no copy, nothing to reconcile — but it
+    // would hand each row a DIFFERENT object, which is a difference an author
+    // can observe and which this contract says is not there.
+    const batchPayloadAtEntry = (batchCtx.input as { data?: unknown }).data;
+    const hookWrites =
+      carriesPayload && batchPayloadAtEntry !== null && typeof batchPayloadAtEntry === 'object'
+        ? recordHookPayloadWrites(batchPayloadAtEntry as Record<string, unknown>)
+        : undefined;
+    if (hookWrites) (batchCtx.input as { data?: unknown }).data = hookWrites.payload;
+    const perRowHookWrittenKeys: ReadonlySet<string>[] = [];
     for (let index = 0; index < rows.length; index++) {
       const row = rows[index];
       const rowId = (row as { id?: unknown }).id;
@@ -2932,6 +3022,9 @@ export class ObjectQL implements IObjectQLEngine {
       // D3, the accumulate half — see the class doc above.
       if (carriesPayload) {
         (batchCtx.input as { data?: unknown }).data = (rowCtx.input as { data?: unknown }).data;
+        // [#14099] and the enforcement half: close THIS row's window, so the
+        // next row opens a fresh one.
+        if (hookWrites) perRowHookWrittenKeys.push(hookWrites.closeWindow());
       }
       // D4.
       const observed = (rowCtx.input as { id?: unknown }).id;
@@ -2939,6 +3032,43 @@ export class ObjectQL implements IObjectQLEngine {
         throw new HookTargetRebindError({
           object, event, path: 'per-row', expectedId: rowId, observedId: observed,
         });
+      }
+    }
+
+    // [#14099] Close this loop's recording and put the underlying payload back
+    // in `batchCtx.input.data`, so no recording VIEW travels on to the outer
+    // seal, the strips or a driver.
+    //
+    // `hookWrittenKeys` is `undefined` exactly when a hook REPLACED the payload
+    // object somewhere in this batch (`hook-write-provenance.ts`'s KNOWN
+    // LIMIT). Then the whole batch ABSTAINS: the windows collected before the
+    // replacement describe writes the replacement discarded, so refusing on
+    // them would be a verdict about a payload that is no longer the one being
+    // written. Abstaining keeps the pre-#14099 behaviour for that shape, which
+    // is the same fail-safe direction #14088 chose for the same limit.
+    const sealedLoopWrites = hookWrites?.seal((batchCtx.input as { data?: unknown }).data);
+    if (sealedLoopWrites) {
+      (batchCtx.input as { data?: unknown }).data = sealedLoopWrites.data;
+    }
+
+    // [#14099] The refusal, ruled 2026-09-02 (recommendation C). Placed after
+    // the loop and not inside it, for two reasons that are both about the
+    // envelope rather than about cost: the diverging set is `union` minus
+    // `intersection` over EVERY row, so the message names every offending key
+    // instead of the first pair to disagree, and it is order-independent — the
+    // same batch answers the same way whatever order the driver returned the
+    // matched rows in.
+    //
+    // ⭐ Still BEFORE any write, which is the load-bearing half. This method is
+    // called from `update()`'s predicate branch ahead of the outer hook-write
+    // seal, both readonly strips, `evaluateValidationRules` and every
+    // `driver.updateMany` — and it runs outside `update()`'s own `try`, so the
+    // envelope reaches the caller undecorated. Not "after the first row", not
+    // "inside a transaction that then rolls back": nothing was written.
+    if (sealedLoopWrites?.hookWrittenKeys !== undefined) {
+      const diverging = divergingHookPayloadKeys(perRowHookWrittenKeys);
+      if (diverging.length > 0) {
+        throw new MultiUpdateHookKeyDivergenceError(object, diverging, rows.length);
       }
     }
   }
@@ -10229,6 +10359,38 @@ export class ObjectQL implements IObjectQLEngine {
     return this.insert(object, rows, { ...(options ?? {}), __partialRowErrors: true } as any);
   }
 
+  /**
+   * Update one record by id, or every record a predicate selects.
+   *
+   * # The error contract on a unique violation (#14390)
+   *
+   * A driver's unique-constraint refusal leaves this door as the ADR-0112
+   * envelope `DuplicateRecordError` — `code: 'DUPLICATE_RECORD'`, `status: 409`,
+   * the driver's own error whole on `cause`, and `field` when the dialect
+   * determinably named the conflicting COLUMN — identically on every driver
+   * and on both driver exits (the by-id `driver.update` and the predicate
+   * `driver.updateMany`). It is the insert door's contract (#14095), one verb
+   * over: before this, the same user action answered `409 DUPLICATE_RECORD` on
+   * create and `500 INTERNAL_ERROR` on edit, because the raw driver error
+   * carried neither `code` nor `status` and the REST boundary sanitised it.
+   *
+   * A predicate write names no row. `field` is what `uniqueViolationColumn`
+   * reads off the driver's error; WHICH of the N matched rows conflicted is a
+   * question that error does not answer, and this door invents no answer to it
+   * (triage ruling, 2026-09-02: a fabricated row attribution is worse than an
+   * absent one).
+   *
+   * ⛔ Every other driver failure is rethrown UNCHANGED — a NOT NULL violation,
+   * a deadlock, a missing table, an unreachable store. The verdict is
+   * `isUniqueViolationError` (`@objectstack/types`), the one predicate the repo
+   * has for the question; this door adds no dialect knowledge of its own. The
+   * operator log line (`Update operation failed`) keeps carrying the driver's
+   * own diagnosis, read through the envelope's `cause`.
+   *
+   * The envelope sits on the two driver exits, not on the outer `catch`: that
+   * `catch` also sees the `afterUpdate` dispatch and the roll-up recompute, and
+   * a violation raised by a nested driver call in there is not this object's.
+   */
   async update(object: string, data: any, options?: EngineUpdateOptions & WriteObservabilityOptions): Promise<any> {
      object = this.resolveObjectName(object);
      this.logger.debug('Update operation starting', { object });
@@ -11156,7 +11318,22 @@ export class ObjectQL implements IObjectQLEngine {
                  updateSchema, hookContext.input.data as Record<string, unknown>,
                  opCtx.data as Record<string, unknown>, opCtx.context, updateMsgCtx,
                );
-               result = await driver.update(object, hookContext.input.id as string, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
+               // [#14390] The by-id driver exit — where a driver's refusal
+               // leaves this door, and where a recognised unique violation
+               // stops being the driver's error. `envelopeUniqueViolation`
+               // returns everything else untouched (a NOT NULL, a deadlock, a
+               // missing table, an unreachable store), so only the conflict
+               // changes shape; the contract is stated on `update()` above.
+               // Wrapped HERE rather than at the outer `catch` below, and
+               // deliberately: that `try` also encloses the `afterUpdate`
+               // dispatch and the roll-up recompute, so an envelope applied
+               // there would attribute a violation raised by a nested driver
+               // call inside a hook to THIS object.
+               try {
+                   result = await driver.update(object, hookContext.input.id as string, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
+               } catch (driverError) {
+                   throw envelopeUniqueViolation(driverError, object);
+               }
            } else {
                // [#6262] A bulk SET clause must not carry `id`. Reaching this
                // branch AT ALL means `resolveEngineUpdateDispatch` returned
@@ -11353,7 +11530,18 @@ export class ObjectQL implements IObjectQLEngine {
                  opCtx.data as Record<string, unknown>, opCtx.context, updateMsgCtx,
                );
                // `updateMany` presence is part of the ladder verdict resolved above.
-               result = await driver.updateMany!(object, ast, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
+               // [#14390] The predicate driver exit, enveloped on the same
+               // terms as the by-id exit above. A multi-row write names no
+               // row: `field` is whatever `uniqueViolationColumn` reads off
+               // the driver's error, and NOTHING is invented about which of
+               // the N matched rows conflicted — a fabricated row attribution
+               // is worse than an absent one (triage ruling, 2026-09-02),
+               // exactly as the composite-index case already behaves on insert.
+               try {
+                   result = await driver.updateMany!(object, ast, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
+               } catch (driverError) {
+                   throw envelopeUniqueViolation(driverError, object);
+               }
                isPredicateWrite = true;
            }
 
@@ -11469,7 +11657,15 @@ export class ObjectQL implements IObjectQLEngine {
           // `set` clause exactly as an INSERT does in its `values` list. Same
           // redaction, same one argument — the message, the level and the
           // `object` are unchanged.
-          this.logger.error('Update operation failed', redactBoundStatement(e) as Error, { object });
+          //
+          // [#14390] …and, as on the insert door (#14095), the line still
+          // carries what the DATABASE said now that the caller receives an
+          // envelope: the platform logger serializes `message` and `stack`
+          // only, so logging the envelope would silently drop the failing
+          // column and the driver's own frames. The log takes the `cause`;
+          // `e` is what is rethrown one line down, unchanged.
+          const logged = e instanceof DuplicateRecordError ? e.cause : e;
+          this.logger.error('Update operation failed', redactBoundStatement(logged) as Error, { object });
           throw e;
        }
      });
@@ -13876,14 +14072,47 @@ export class ObjectRepository implements IScopedObjectRepository {
     });
   }
 
-  /** Execute a named action registered on this object */
+  /**
+   * Execute a named action registered on this object.
+   *
+   * [#13866, Director ruling 决裁批 #24 2026-09-01] Elevated to the SAME
+   * trusted posture REST `/actions` (`domains/actions.ts`) and MCP
+   * `run_action` (`action-execution.ts`) already give an action body (#13832,
+   * #2849). This is the third `executeAction` caller those two files' own
+   * comments name `ScopedRepo.execute()` — until now it handed the body
+   * neither `api` nor `executionContext`, the context-less facade #3914
+   * argues an action body must never get. A caller reaching another action
+   * via `ctx.api.object(x).execute(y)` (an in-process handler composing a
+   * sibling handler, `action-execution.ts`'s own description of this path)
+   * now dispatches under the same identity its own body runs under.
+   *
+   * `{ ...this.context, isSystem: true }` is the `sudo()`-shaped elevation
+   * `buildActionExecutionContext` and `recomputeSummaries`'s `systemCtx` both
+   * use, not a bare `{ isSystem: true }`: spreading the caller's envelope
+   * FIRST keeps the resulting write attributable and correctly scoped —
+   * `userId` stamps `created_by`/`updated_by`, `tenantId` stamps the org
+   * column and drives driver-level tenant isolation, an open `transaction`
+   * joins rather than escapes — instead of the unattributable, org-less rows
+   * a bare `{ isSystem: true }` would produce.
+   *
+   * The census behind this change (repo + `examples/` + `apps/`, production
+   * and test) found ZERO existing callers of this method anywhere — every
+   * `ObjectRepository.execute()` / `ScopedRepo.execute()` hit in the tree was
+   * prose describing the shape, never an invocation — so this widens what a
+   * FUTURE caller's write is accepted to do (the static `readonly` strip now
+   * skips this path exactly as it already skips REST `/actions` and MCP
+   * `run_action`) without changing any write anyone ships today.
+   */
   async execute(actionName: string, params?: any): Promise<any> {
     if (this.engine.executeAction) {
+      const executionContext: ExecutionContext = { ...this.context, isSystem: true };
       return this.engine.executeAction(this.objectName, actionName, {
         ...params,
         userId: this.context.userId,
         tenantId: this.context.tenantId,
         roles: this.context.positions,
+        executionContext,
+        api: new ScopedContext(executionContext, this.engine),
       });
     }
     throw new Error(`Actions not supported by engine`);
@@ -13903,7 +14132,7 @@ export class ObjectRepository implements IScopedObjectRepository {
  * begin/commit/rollback trio and the identity getters stay off it, so this
  * class is deliberately wider than what it implements.
  */
-export class ScopedContext implements IScopedContext {
+export class ScopedContext implements IScopedContext, RunAsDerivableApi {
   constructor(
     private executionContext: ExecutionContext,
     private engine: IDataEngine
@@ -13918,6 +14147,35 @@ export class ScopedContext implements IScopedContext {
   sudo(): ScopedContext {
     return new ScopedContext(
       { ...this.executionContext, isSystem: true },
+      this.engine
+    );
+  }
+
+  /**
+   * [#14010] The api a hook that declared `runAs` is handed — derived from the
+   * engine-built one (`buildHookApi(opCtx.context)`) at dispatch, by
+   * `wrapDeclarativeHook`, for the duration of the handler call. `'inherit'`
+   * never reaches here (the wrapper hands the original through by reference).
+   *
+   *  - `'system'` → {@link sudo}: `{ ...triggering context, isSystem: true }`.
+   *    The same envelope the in-process `ctx.api.sudo()` idiom produced, so a
+   *    hook that used to elevate by hand elevates identically by declaration
+   *    — and now on the sandboxed surface too. `userId` / `tenantId` /
+   *    `transaction` ride along: elevation is authorization, not anonymity
+   *    (#5494), and the hook's writes stay inside the triggering transaction.
+   *  - `'user'` → `{ ...triggering context, isSystem: false }` when the
+   *    trigger resolved a user — the pin de-elevates a hook fired by a
+   *    `runAs:'system'` flow node or an `isSystem` service write that still
+   *    named its operator. With NO `userId` there is nothing to scope to, so
+   *    the api is an {@link UnscopedHookApi}: every data door refuses
+   *    (`HOOK_UNSCOPED_DATA_ACCESS`, the #3760 posture — never a silent
+   *    fall-open, never a silent re-badge as system).
+   */
+  withRunAs(runAs: Exclude<HookRunAs, 'inherit'>, ref: HookRunAsRef): IScopedContext {
+    if (runAs === 'system') return this.sudo();
+    if (!this.executionContext.userId) return new UnscopedHookApi(ref);
+    return new ScopedContext(
+      { ...this.executionContext, isSystem: false },
       this.engine
     );
   }

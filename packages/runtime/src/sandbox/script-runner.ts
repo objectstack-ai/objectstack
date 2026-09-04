@@ -418,6 +418,34 @@ export interface ScriptResult {
    */
   mutatedInput?: Record<string, unknown>;
   /**
+   * [#14758] Hook path only: the keys of {@link mutatedInput} the BODY actually
+   * assigned, defined or deleted — as opposed to every key the dump can see.
+   *
+   * `mutatedInput` alone cannot answer that question: it is the whole
+   * post-run `ctx.input`, so a body that touched nothing produces a dump
+   * identical to one that rewrote every field. The host write-back re-asserts
+   * whatever it is given onto the engine's flat-input proxy, and every one of
+   * those assignments is recorded by the #14088 hook-write provenance
+   * recorder — which is what #14099's per-row divergence refusal reads. Handing
+   * it the whole dump made that refusal blind on the shipped hook-body path,
+   * and blind in a way that depended on the driver's row order.
+   *
+   * ⚠️ `[]` and `undefined` are DIFFERENT answers, and a consumer that fuses
+   * them reintroduces the defect from the other side:
+   *
+   *  - `[]` — the recorder was armed and the body wrote nothing. Carry back
+   *    nothing.
+   *  - `undefined` — this runner cannot say (no recorder installed, the runner
+   *    predates this field, the read failed). Carry back the whole dump, which
+   *    is the pre-#14758 behaviour: narrowing on a key set that cannot speak
+   *    would silently drop a write the body really made.
+   *
+   * Keys reachable only THROUGH a value on `ctx.input` — `ctx.input.meta.x = 1`
+   * — never touch a trap and so are not listed here; `applyMutationsToInput`
+   * covers them from the dump instead (see its docblock).
+   */
+  mutatedInputKeys?: string[];
+  /**
    * Keys the script wrote on `ctx.record`, in first-write order (#4345).
    *
    * `ctx.record` is a read-only snapshot (see {@link ScriptContext.record}), so
@@ -482,11 +510,9 @@ export interface ScriptRunner {
  * and be unit-tested ahead of the engine landing.
  */
 export class UnimplementedScriptRunner implements ScriptRunner {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   evalExpression(_body: ExpressionBody, _ctx: ScriptContext, _opts: ScriptRunOptions): Promise<ScriptResult> {
     return Promise.reject(new Error('ScriptRunner not configured: install a quickjs engine first.'));
   }
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   runScript(_body: ScriptBody, _ctx: ScriptContext, _opts: ScriptRunOptions): Promise<ScriptResult> {
     return Promise.reject(new Error('ScriptRunner not configured: install a quickjs engine first.'));
   }

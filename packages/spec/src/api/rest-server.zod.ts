@@ -197,42 +197,19 @@ export const CrudOperation = z.enum([
 
 export type CrudOperation = z.input<typeof CrudOperation>;
 
-/**
- * CRUD Endpoint Pattern Schema
- * Defines the URL pattern for CRUD operations
- * 
- * @example
- * {
- *   "create": { "method": "POST", "path": "/data/{object}" },
- *   "read": { "method": "GET", "path": "/data/{object}/:id" },
- *   "update": { "method": "PATCH", "path": "/data/{object}/:id" },
- *   "delete": { "method": "DELETE", "path": "/data/{object}/:id" },
- *   "list": { "method": "GET", "path": "/data/{object}" }
- * }
- */
-export const CrudEndpointPatternSchema = lazySchema(() => z.object({
-  /**
-   * HTTP method
-   */
-  method: HttpMethod.describe('HTTP method'),
-  
-  /**
-   * URL path pattern (relative to API base)
-   */
-  path: z.string().describe('URL path pattern'),
-  
-  /**
-   * Operation summary for documentation
-   */
-  summary: z.string().optional().describe('Operation summary'),
-  
-  /**
-   * Operation description
-   */
-  description: z.string().optional().describe('Operation description'),
-}));
-
-export type CrudEndpointPattern = z.input<typeof CrudEndpointPatternSchema>;
+// `CrudEndpointPatternSchema` — REMOVED (#14691)
+//
+// The per-operation `{ method, path, summary, description }` pattern shape was
+// the value type of `crud.patterns`, retired below under ADR-0049
+// enforce-or-remove (the #14369 liveness census: every CRUD route is mounted
+// from fixed method/path pairs in `packages/rest`'s `registerCrudEndpoints`,
+// so a custom pattern was validated and never read). With its carrier key
+// tombstoned the def had no consumer left, and an exported schema nothing
+// reads is read as a capability by whoever finds it (#3950), so it leaves with
+// the key — declared in RETIRED_DEFS_BY_MAJOR[18] (`api/CrudEndpointPattern`).
+// `CrudOperation` above stays: `GeneratedEndpointSchema.operation` still reads
+// it. An endpoint on a custom path or method is a declarative `api` endpoint
+// (`endpoint.zod.ts`, `type: 'object_operation'`).
 
 /**
  * CRUD Endpoints Configuration Schema
@@ -251,10 +228,23 @@ export const CrudEndpointsConfigSchema = lazySchema(() => z.object({
   }).optional().describe('Enable/disable operations'),
   
   /**
-   * Custom endpoint patterns (override defaults)
+   * [REMOVED in #14691] Per-operation custom URL patterns. Tombstoned rather
+   * than deleted: this schema is not `.strict()`, so a plain deletion would
+   * silently strip the key and an author would keep a config that "customizes"
+   * routes the server mounts from fixed pairs (ADR-0104, #3733). The mounted
+   * CRUD paths are the contract the client SDK, the discovery document and the
+   * served /openapi.json all describe; a configurable per-operation method or
+   * path would make every one of them lie (Route & surface ownership §4).
    */
-  patterns: z.record(CrudOperation, CrudEndpointPatternSchema.optional()).optional()
-    .describe('Custom URL patterns for operations'),
+  patterns: retiredKey(
+    '`crud.patterns` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — '
+    + 'nothing ever read it: every CRUD route is mounted from the fixed method/path pairs in the REST '
+    + "server's `registerCrudEndpoints`, so a custom pattern was validated and ignored. Delete the key. "
+    + 'The mounted CRUD paths are the contract the client SDK, the discovery document and the served '
+    + '/openapi.json all describe, and `crud.dataPrefix` is the one live knob that moves them; an '
+    + "endpoint on a custom path or method is a declarative `api` endpoint (`type: 'object_operation'`, "
+    + '`ApiEndpoint` in `@objectstack/spec/api`), which is matched, executed and documented.',
+  ),
   
   /**
    * Path prefix for data operations
@@ -262,10 +252,17 @@ export const CrudEndpointsConfigSchema = lazySchema(() => z.object({
   dataPrefix: z.string().default('/data').describe('URL prefix for data endpoints'),
   
   /**
-   * Object name parameter style
+   * [REMOVED in #14691] The object-name parameter style. Every CRUD route takes
+   * the object name as a PATH segment; `'query'` was validated against the enum
+   * and mounted exactly what `'path'` mounts. Tombstoned, not deleted — the
+   * schema is not `.strict()` (see `patterns` above).
    */
-  objectParamStyle: z.enum(['path', 'query']).default('path')
-    .describe('How object name is passed (path param or query param)'),
+  objectParamStyle: retiredKey(
+    '`crud.objectParamStyle` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — '
+    + 'nothing ever read it: every CRUD route takes the object name as a path segment, so '
+    + "`'query'` was validated and mounted exactly what `'path'` mounts. Delete the key; the object "
+    + 'name is always a path segment.',
+  ),
 }));
 
 export type CrudEndpointsConfig = z.input<typeof CrudEndpointsConfigSchema>;
@@ -303,9 +300,20 @@ export const MetadataEndpointsConfigSchema = lazySchema(() => z.object({
   enableCache: z.boolean().default(true).describe('Enable HTTP cache headers (ETag, Last-Modified)'),
   
   /**
-   * Cache TTL in seconds
+   * [REMOVED in #14691] The metadata cache TTL. `enableCache` selects the
+   * protocol's `getMetaItemCached` read path, which takes no TTL, and no
+   * `Cache-Control` / `ETag` / `Last-Modified` header was ever built from this
+   * value — `cacheTtl: 60` changed no header and no cache lifetime (and, having
+   * no lower bound, accepted `-1`). Tombstoned, not deleted — the schema is not
+   * `.strict()`.
    */
-  cacheTtl: z.number().int().default(3600).describe('Cache TTL in seconds'),
+  cacheTtl: retiredKey(
+    '`metadata.cacheTtl` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — '
+    + "nothing ever read it: `metadata.enableCache` selects the protocol's `getMetaItemCached` read "
+    + 'path, which takes no TTL, and no Cache-Control / ETag header was ever built from this value. '
+    + 'Delete the key; `metadata.enableCache` is the live switch, and a declarative `api` '
+    + "endpoint's `cacheTtl` is the key that does reach the wire.",
+  ),
 
   /**
    * [ADR-0106 D8] Per-caller field-level masking of the OBJECT SCHEMAS this
@@ -337,7 +345,17 @@ export const MetadataEndpointsConfigSchema = lazySchema(() => z.object({
     types: z.boolean().default(true).describe('GET /meta - List all metadata types'),
     items: z.boolean().default(true).describe('GET /meta/:type - List items of type'),
     item: z.boolean().default(true).describe('GET /meta/:type/:name - Get specific item'),
-    schema: z.boolean().default(true).describe('GET /meta/:type/:name/schema - Get JSON schema'),
+    /**
+     * [REMOVED in #14691] Gated a route that does not exist: the REST server
+     * mounts no `GET /meta/:type/:name/schema`, so `false` removed nothing and
+     * `true` added nothing. Its three siblings each gate a real mount.
+     */
+    schema: retiredKey(
+      '`metadata.endpoints.schema` was removed in @objectstack/spec 17 (ADR-0049 '
+      + 'enforce-or-remove) — it gated a route that does not exist: the REST server mounts no '
+      + '`GET /meta/:type/:name/schema`, so `false` removed nothing and `true` added nothing. Delete '
+      + 'the key; `endpoints.types` / `items` / `item` are the switches that gate real mounts.',
+    ),
   }).optional().describe('Enable/disable specific endpoints'),
 }));
 
@@ -382,14 +400,39 @@ export const BatchEndpointsConfigSchema = lazySchema(() => z.object({
     createMany: z.boolean().default(true).describe('Enable POST /data/:object/createMany'),
     updateMany: z.boolean().default(true).describe('Enable POST /data/:object/updateMany'),
     deleteMany: z.boolean().default(true).describe('Enable POST /data/:object/deleteMany'),
-    upsertMany: z.boolean().default(true).describe('Enable POST /data/:object/upsertMany'),
+    /**
+     * [REMOVED in #14691] Gated a route that was never built: there is no
+     * `POST /data/:object/upsertMany` and no protocol member behind it (the
+     * protocol carries `createManyData` / `updateManyData` / `deleteManyData`
+     * and no upsert counterpart). Upsert is an operation TYPE of the generic
+     * batch endpoint (`BatchOperationType` `'upsert'`, `batch.zod.ts`).
+     */
+    upsertMany: retiredKey(
+      '`batch.operations.upsertMany` was removed in @objectstack/spec 17 (ADR-0049 '
+      + 'enforce-or-remove) — it gated a route that was never built: there is no '
+      + '`POST /data/:object/upsertMany` and no protocol member behind it, so `false` disabled '
+      + 'nothing. Delete the key. Upsert is an operation type of the generic `POST /data/:object/batch` '
+      + "endpoint (`BatchOperationType` `'upsert'`, keyed by `externalId`), gated by "
+      + '`batch.enableBatchEndpoint`.',
+    ),
   }).optional().describe('Enable/disable specific batch operations'),
-  
+
   /**
-   * Transaction mode default
+   * [REMOVED in #14691] A server-side default for batch atomicity. No batch
+   * handler ever consulted it: atomicity is decided per request by
+   * `options.atomic` in the batch body (`BatchOptionsSchema`, ADR-0119 D4 —
+   * opt-in, default `false`, aligned to what every caller already gets). A
+   * deployment default that flipped it silently would change the failure
+   * semantics of callers who send nothing, the move ADR-0119 D4 refused.
+   * Tombstoned, not deleted — the schema is not `.strict()`.
    */
-  defaultAtomic: z.boolean().default(true)
-    .describe('Default atomic/transaction mode for batch operations'),
+  defaultAtomic: retiredKey(
+    '`batch.defaultAtomic` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — '
+    + 'no batch handler ever consulted it: atomicity is decided per request by `options.atomic` in the '
+    + 'batch body (`BatchOptions`, ADR-0119 D4, opt-in), and a server-side default that flipped it '
+    + 'silently would change the failure semantics of callers who send nothing. Delete the key; a '
+    + 'caller that needs all-or-nothing sends `options: { atomic: true }`.',
+  ),
 }));
 
 export type BatchEndpointsConfig = z.input<typeof BatchEndpointsConfigSchema>;
@@ -402,36 +445,52 @@ export type BatchEndpointsConfigParsed = z.infer<typeof BatchEndpointsConfigSche
 
 /**
  * Route Generation Configuration Schema
- * Controls automatic route generation for objects
+ *
+ * [#14691] Every key of this sub-object is a `retiredKey()` tombstone: the
+ * #14369 liveness census found the whole block parsed, defaulted and
+ * normalized into the REST server's config and never read back —
+ * `excludeObjects: ['sys_log']` excluded nothing, `nameTransform: 'plural'`
+ * mounted every route under the raw object name, and the per-object
+ * `overrides` record turned nothing on or off. Retired under ADR-0049
+ * enforce-or-remove rather than wired, because each key duplicated a contract
+ * that already lives where it belongs: per-object API exposure is declared ON
+ * the object (`enable.apiEnabled` / `enable.apiMethods`, enforced by the REST
+ * data surface — 404 / 405), the object `name` is the canonical id on every
+ * surface including the REST path segment (Prime Directive #6, so there is no
+ * URL transform to configure), and the data base path is deployment-wide
+ * (`crud.dataPrefix`). The sub-object stays declared so that an authored key
+ * is refused with its prescription instead of being silently stripped (the
+ * schemas are not `.strict()`); it ages out with its tombstones.
  */
 export const RouteGenerationConfigSchema = lazySchema(() => z.object({
-  /**
-   * Objects to include (if empty, include all)
-   */
-  includeObjects: z.array(z.string()).optional()
-    .describe('Specific objects to generate routes for (empty = all)'),
-  
-  /**
-   * Objects to exclude
-   */
-  excludeObjects: z.array(z.string()).optional()
-    .describe('Objects to exclude from route generation'),
-  
-  /**
-   * Object name transformations
-   */
-  nameTransform: z.enum(['none', 'plural', 'kebab-case', 'camelCase']).default('none')
-    .describe('Transform object names in URLs'),
-  
-  /**
-   * Custom route overrides per object
-   */
-  overrides: z.record(z.string(), z.object({
-    enabled: z.boolean().optional().describe('Enable/disable routes for this object'),
-    basePath: z.string().optional().describe('Custom base path'),
-    operations: z.record(CrudOperation, z.boolean()).optional()
-      .describe('Enable/disable specific operations'),
-  })).optional().describe('Per-object route customization'),
+  includeObjects: retiredKey(
+    '`routes.includeObjects` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — '
+    + 'nothing ever read it: route registration iterates every registered object, so an include list '
+    + 'still mounted all of them. Delete the key. Per-object API exposure is declared on the object '
+    + 'and enforced by the REST data surface: `enable.apiEnabled: false` hides the object (404) and '
+    + '`enable.apiMethods` whitelists its operations (405 for the rest).',
+  ),
+  excludeObjects: retiredKey(
+    '`routes.excludeObjects` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — '
+    + 'nothing ever read it: route registration iterates every registered object, so an excluded '
+    + 'object was still mounted. Delete the key. Per-object API exposure is declared on the object '
+    + 'and enforced by the REST data surface: `enable.apiEnabled: false` hides the object (404) and '
+    + '`enable.apiMethods` whitelists its operations (405 for the rest).',
+  ),
+  nameTransform: retiredKey(
+    '`routes.nameTransform` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — '
+    + 'nothing ever read it: the enum was validated and every value mounted exactly what '
+    + "`'none'` mounts. Delete the key; the object `name` is the canonical id on every surface, the "
+    + 'REST path segment included, so there is no URL transform to configure.',
+  ),
+  overrides: retiredKey(
+    '`routes.overrides` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — '
+    + 'nothing ever read the per-object record: `enabled`, `basePath` and `operations` were validated '
+    + 'and turned nothing on or off. Delete the key. Per-object exposure lives on the object '
+    + '(`enable.apiEnabled` hides it, `enable.apiMethods` whitelists its operations — both enforced by '
+    + 'the REST data surface); the data base path is deployment-wide (`crud.dataPrefix`); and an '
+    + 'endpoint on a custom path is a declarative `api` endpoint.',
+  ),
 }));
 
 export type RouteGenerationConfig = z.input<typeof RouteGenerationConfigSchema>;
@@ -487,11 +546,12 @@ export type RouteGenerationConfigParsed = z.infer<typeof RouteGenerationConfigSc
  *   },
  *   "batch": {
  *     "maxBatchSize": 200
- *   },
- *   "routes": {
- *     "excludeObjects": ["system_log"]
  *   }
  * }
+ *
+ * To keep an object off the REST data surface, declare it on the object
+ * (`enable.apiEnabled: false`, or an `enable.apiMethods` whitelist) — the
+ * `routes` sub-object's selectors were retired in #14691 because nothing read them.
  */
 export const RestServerConfigSchema = lazySchema(() => z.object({
   /**

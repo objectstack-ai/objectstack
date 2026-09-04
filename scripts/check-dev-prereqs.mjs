@@ -243,6 +243,50 @@ import {
   workspaceMemberDirs,
 } from './workspace-enumerator.mjs';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  '1. Built workspace → green, and the count reflects what was inspected.': 3,
+  '2. Unbuilt package → red, named, with the plain build fix.': 10,
+  '3. Dependencies absent → the one-line fix has to install first.': 1,
+  '4. Exclusions: a package is only judged on an entry point under dist/.': 2,
+  '5. Nested and literal member patterns both expand.': 2,
+  '6. A member pattern this gate cannot expand must fail loudly, never': 1,
+  '7. No pnpm-workspace.yaml at all → same loud failure.': 1,
+  '8. Stamped by its own build → fresh, and the pass line says what it now': 6,
+  '9. THE POINT OF THE WHOLE CHANGE: a source edit after the build is stale,': 6,
+  '10. mtime is NOT the criterion — the whole reason PR #5863 refused to do': 1,
+  '11. Absence of the freshness input is red, not a shrug (#4690): a dist': 4,
+  '12. A stamp that is not a sha256 (truncated, hand-written, half-flushed)': 1,
+  '13. Declared = enforced, in BOTH directions. An amplifier whose build': 2,
+  '14. Every other way the freshness half can lose its subject is red too.': 4,
+  '15. The hash reads the inputs it claims to. A global build input (from': 3,
+  '16. Existence outranks freshness: a workspace that is not built reports': 4,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 16;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
@@ -590,8 +634,23 @@ function stamp(root, cwd, amplifiers = AMPLIFIERS) {
 let selfTestReachedVerdict = false;
 
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const batterySeen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+  };
+
   const failures = [];
   const expect = (label, actual, wanted) => {
+    registerCase();
     if (actual !== wanted) failures.push(`${label}: expected ${JSON.stringify(wanted)}, got ${JSON.stringify(actual)}`);
   };
 
@@ -643,6 +702,7 @@ function selfTest() {
 
   try {
     // 1. Built workspace → green, and the count reflects what was inspected.
+    battery('1. Built workspace → green, and the count reflects what was inspected.');
     const built = fixture('built', { installed: true });
     write(built, 'packages/a/package.json', JSON.stringify({ name: '@f/a', exports: { '.': { types: './dist/index.d.mts', default: './dist/index.mjs' } } }));
     write(built, 'packages/a/dist/index.mjs', 'export {};');
@@ -654,6 +714,7 @@ function selfTest() {
     expect('built/fix', v.fix, 'pnpm build');
 
     // 2. Unbuilt package → red, named, with the plain build fix.
+    battery('2. Unbuilt package → red, named, with the plain build fix.');
     const unbuilt = fixture('unbuilt', { installed: true });
     write(unbuilt, 'packages/a/package.json', JSON.stringify({ name: '@f/a', exports: { '.': './dist/index.mjs' } }));
     write(unbuilt, 'packages/b/package.json', JSON.stringify({ name: '@f/b', main: 'dist/index.js' }));
@@ -676,6 +737,7 @@ function selfTest() {
     expect('built/one-line', green.text.trim().split('\n').length, 1);
 
     // 3. Dependencies absent → the one-line fix has to install first.
+    battery('3. Dependencies absent → the one-line fix has to install first.');
     const fresh = fixture('fresh');
     write(fresh, 'packages/a/package.json', JSON.stringify({ name: '@f/a', main: 'dist/index.js' }));
     expect('fresh/fix', inspect(fresh, []).fix, 'pnpm install && pnpm build');
@@ -686,6 +748,7 @@ function selfTest() {
     //    build-console.sh; declares no entry but package.json), @objectstack/docs
     //    (no entry point, filtered out of `pnpm build`), and the examples
     //    (entry is a .ts source file). See header.
+    battery('4. Exclusions: a package is only judged on an entry point under dist/.');
     const excluded = fixture('excluded', { installed: true });
     write(excluded, 'packages/console/package.json', JSON.stringify({ name: '@f/console', exports: { './package.json': './package.json' }, files: ['dist'] }));
     write(excluded, 'packages/docs/package.json', JSON.stringify({ name: '@f/docs', scripts: { build: 'next build' } }));
@@ -695,6 +758,7 @@ function selfTest() {
     expect('excluded/missing', v.missing.length, 0);
 
     // 5. Nested and literal member patterns both expand.
+    battery('5. Nested and literal member patterns both expand.');
     const nested = fixture('nested', { members: ['packages/plugins/*', 'packages/spec'], installed: true });
     write(nested, 'packages/plugins/driver-sql/package.json', JSON.stringify({ name: '@f/driver-sql', main: 'dist/index.js' }));
     write(nested, 'packages/spec/package.json', JSON.stringify({ name: '@f/spec', main: 'dist/index.js' }));
@@ -704,10 +768,12 @@ function selfTest() {
 
     // 6. A member pattern this gate cannot expand must fail loudly, never
     //    silently cover fewer packages.
+    battery('6. A member pattern this gate cannot expand must fail loudly, never');
     const opaque = fixture('opaque', { members: ['packages/**'], installed: true });
     expect('opaque/throws', threwCoverage(() => inspect(opaque, [])), 'CoverageError');
 
     // 7. No pnpm-workspace.yaml at all → same loud failure.
+    battery('7. No pnpm-workspace.yaml at all → same loud failure.');
     const rootless = path.join(tmp, 'rootless');
     mkdirSync(rootless, { recursive: true });
     expect('rootless/throws', threwCoverage(() => inspect(rootless, [])), 'CoverageError');
@@ -716,6 +782,7 @@ function selfTest() {
 
     // 8. Stamped by its own build → fresh, and the pass line says what it now
     //    vouches for AND what it still does not.
+    battery('8. Stamped by its own build → fresh, and the pass line says what it now');
     const stampedRoot = amplifierFixture('stamped');
     expect('stamp/exit-code', capture(() => stamp(stampedRoot, path.join(stampedRoot, 'packages/spec'), ['packages/spec'])).code, 0);
     v = inspect(stampedRoot, ['packages/spec']);
@@ -728,6 +795,7 @@ function selfTest() {
 
     // 9. THE POINT OF THE WHOLE CHANGE: a source edit after the build is stale,
     //    red, and named — with one fix, and #5726 named as the reason.
+    battery('9. THE POINT OF THE WHOLE CHANGE: a source edit after the build is stale,');
     write(stampedRoot, 'packages/spec/src/index.ts', 'export const token = 2;\n');
     v = inspect(stampedRoot, ['packages/spec']);
     expect('stale/state', v.freshness[0]?.state, 'stale');
@@ -742,6 +810,7 @@ function selfTest() {
     //     this half. A source file touched into the future with byte-identical
     //     content stays fresh; an mtime comparison would red here, and reds like
     //     that are how gates get switched off.
+    battery('10. mtime is NOT the criterion — the whole reason PR #5863 refused to do');
     const untouched = amplifierFixture('untouched');
     capture(() => stamp(untouched, path.join(untouched, 'packages/spec'), ['packages/spec']));
     const touched = path.join(untouched, 'packages/spec/src/index.ts');
@@ -752,6 +821,7 @@ function selfTest() {
 
     // 11. Absence of the freshness input is red, not a shrug (#4690): a dist
     //     built before this stamp existed is exactly #5726's tree.
+    battery('11. Absence of the freshness input is red, not a shrug (#4690): a dist');
     const unstamped = amplifierFixture('unstamped');
     v = inspect(unstamped, ['packages/spec']);
     expect('unstamped/state', v.freshness[0]?.state, 'unstamped');
@@ -762,6 +832,7 @@ function selfTest() {
 
     // 12. A stamp that is not a sha256 (truncated, hand-written, half-flushed)
     //     is unverifiable, and unverifiable is red — never "close enough".
+    battery('12. A stamp that is not a sha256 (truncated, hand-written, half-flushed)');
     const garbled = amplifierFixture('garbled');
     capture(() => stamp(garbled, path.join(garbled, 'packages/spec'), ['packages/spec']));
     write(garbled, 'packages/spec/dist/' + STAMP_BASENAME, 'not-a-hash\n');
@@ -771,11 +842,13 @@ function selfTest() {
     //     script stopped stamping must fail loudly (otherwise this gate passes
     //     on any dist forever), and --stamp from an unlisted package must refuse
     //     (otherwise a stamp is written that nobody reads).
+    battery('13. Declared = enforced, in BOTH directions. An amplifier whose build');
     const unstamping = amplifierFixture('unstamping', { build: 'tsup' });
     expect('drift/build-script-lost-stamp', threwCoverage(() => inspect(unstamping, ['packages/spec'])), 'CoverageError');
     expect('drift/stamp-refuses-unlisted', capture(() => stamp(stampedRoot, path.join(stampedRoot, 'packages/spec'), [])).code, 1);
 
     // 14. Every other way the freshness half can lose its subject is red too.
+    battery('14. Every other way the freshness half can lose its subject is red too.');
     const noMember = amplifierFixture('no-member');
     expect('coverage/not-a-member', threwCoverage(() => inspect(noMember, ['packages/nonexistent'])), 'CoverageError');
     const noSrc = amplifierFixture('no-src');
@@ -792,6 +865,7 @@ function selfTest() {
     //     turbo.json) and the package manifest both move it; the stamp file
     //     itself, living inside dist, does not — otherwise stamping would
     //     invalidate the stamp it just wrote.
+    battery('15. The hash reads the inputs it claims to. A global build input (from');
     const inputs = amplifierFixture('inputs');
     const specDir = path.join(inputs, 'packages/spec');
     const base = buildInputHash(inputs, specDir);
@@ -806,6 +880,7 @@ function selfTest() {
 
     // 16. Existence outranks freshness: a workspace that is not built reports
     //     ONE precondition, and it is the build — not two.
+    battery('16. Existence outranks freshness: a workspace that is not built reports');
     const halfBuilt = amplifierFixture('half-built');
     capture(() => stamp(halfBuilt, path.join(halfBuilt, 'packages/spec'), ['packages/spec']));
     write(halfBuilt, 'packages/other/package.json', JSON.stringify({ name: '@f/other', main: 'dist/index.js' }));
@@ -823,6 +898,52 @@ function selfTest() {
   // its own (#11510 — being a gate is exactly what it must not be); every gate
   // that consolidated onto it folds in its checks.
   failures.push(...workspaceEnumeratorSelfTest({ root: ROOT }));
+
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    failures.push(message);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
+  }
 
   if (failures.length > 0) {
     console.error(`\n✗ check:dev-prereqs --self-test — ${failures.length} failure(s)\n`);

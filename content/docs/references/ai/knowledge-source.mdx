@@ -65,7 +65,7 @@ const result = FileKnowledgeSourceSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **onRecordChange** | `boolean` | optional (default: `true`) |  |
-| **cron** | `string` | optional |  |
+| **cron** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Cron-dialect expression for a periodic full reindex. A bare string is shorthand for `{ dialect: 'cron', source }`; the parse enforces a non-empty string or an expression envelope and normalizes to the envelope — cron syntax (5- or 6-field, or an `@` alias) is the `cron` dialect engine's verdict when the expression is evaluated, not checked here. `service-knowledge` does not schedule it: the value is surfaced so an automation flow / external scheduler can trigger `reindexSource`. |
 
 
 ---
@@ -84,7 +84,7 @@ const result = FileKnowledgeSourceSchema.parse(data);
 | **source** | `{ kind: 'object'; object: string; contentFields: string[]; metadataFields?: string[]; … } \| { kind: 'file'; prefix: string; mimeTypes?: string[] } \| { kind: 'http'; urls: string[]; userAgent?: string }` | ✅ |  |
 | **embedding** | `{ provider: Enum<'openai' \| 'cohere' \| 'azure_openai' \| 'huggingface' \| 'local' \| 'custom'>; model: string; dimensions: integer; endpoint?: string; … }` | optional |  |
 | **vectorStore** | `{ provider: Enum<'pgvector' \| 'chroma' \| 'qdrant' \| 'pinecone' \| 'weaviate' \| 'milvus' \| 'redis' \| …>; collection: string; endpoint?: string; secretRef?: string; … }` | optional |  |
-| **refresh** | `{ onRecordChange?: boolean; cron?: string }` | optional (default: `{}`) |  |
+| **refresh** | `{ onRecordChange?: boolean; cron?: string \| object }` | optional | Refresh / sync configuration; omitted parses to `{}` (the runtime default — the published input-shape JSON Schema cannot state it beside `cron`'s transform). |
 | **aiExposed** | `boolean` | optional (default: `true`) |  |
 
 ### Nested Shape: `KnowledgeSource.source[kind='object']`
@@ -124,6 +124,13 @@ const result = FileKnowledgeSourceSchema.parse(data);
 | **endpoint** | `string` | optional | Connection string or endpoint URL |
 | **secretRef** | `string` | optional | Reference to stored credential secret |
 | **dimensions** | `integer` | optional |  |
+
+### Nested Shape: `KnowledgeSource.refresh`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **onRecordChange** | `boolean` | optional (default: `true`) |  |
+| **cron** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Cron-dialect expression for a periodic full reindex. A bare string is shorthand for `{ dialect: 'cron', source }`; the parse enforces a non-empty string or an expression envelope and normalizes to the envelope — cron syntax (5- or 6-field, or an `@` alias) is the `cron` dialect engine's verdict when the expression is evaluated, not checked here. `service-knowledge` does not schedule it: the value is surfaced so an automation flow / external scheduler can trigger `reindexSource`. |
 
 
 ---

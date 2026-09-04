@@ -551,6 +551,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Timeout",
         helpText: "Abort the hook after N milliseconds"
       },
+      runAs: {
+        label: "実行主体",
+        helpText: "ctx.api のデータ操作の主体：inherit は起点となった書き込みのコンテキストを継承（既定）、system は昇格、user は起点ユーザーに固定"
+      },
       condition: {
         label: "条件",
         helpText: "任意の数式 — false 評価時はフックをスキップ"

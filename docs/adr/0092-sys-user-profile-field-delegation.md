@@ -1,7 +1,7 @@
 # ADR-0092: Identity-table write guard — engine-enforced `managedBy: 'better-auth'`, with sys_user profile fields as the first whitelist
 
 - **Status:** Accepted
-- **Date:** 2026-07-10 (proposed) · 2026-07-11 (revised: D2 generalized from a sys_user-only hook to a registry-driven guard over every better-auth-managed object, per review) · 2026-07-11 (accepted)
+- **Date:** 2026-07-10 (proposed) · 2026-07-11 (revised: D2 generalized from a sys_user-only hook to a registry-driven guard over every better-auth-managed object, per review) · 2026-07-11 (accepted) · **2026-09-03 (amended: D5 — self-service edits of the whitelisted columns route through the generic data path; see the D5 Amendment)**
 - **Implementation:** #2816 (generic identity write guard — D2/D3/D6) → #2817 (sys_user edit affordance + form field gating — D4, gated on #2816)
 - **Deciders:** ObjectStack Protocol Architects
 - **Relates to:** [ADR-0010](./0010-metadata-protection-model.md) (identity tables managed by better-auth), [ADR-0049](./0049-no-unenforced-security-properties.md) (no unenforced security properties), [ADR-0068](./0068-unified-user-context-and-built-in-identity-roles.md) (platform-admin gate), [ADR-0069](./0069-enterprise-authentication-hardening.md) (system-managed auth stamps), #2766 / PR #2771 (admin user management + identity import), #2784 (originating RFC)
@@ -38,6 +38,9 @@ Decision — one mechanism serves both:
   `allowEdit: false`; the standard edit path is therefore **platform-admin only**.
   Self-service profile editing stays on better-auth `/update-user`
   (the existing `update_my_profile` action).
+  ⚠️ **Amended 2026-09-03** — a member may now edit their OWN row on the generic
+  data path, bounded by `member_default`'s explicit `sys_user` entry and the
+  `sys_user_self` RLS carve-out. Read the D5 Amendment below before this bullet.
 - **D6** — an `afterUpdate` companion hook invalidates the affected user's cached
   session snapshots (secondary storage), keeping better-auth session reads coherent
   without delegating the write itself to `internalAdapter.updateUser`.
@@ -245,6 +248,10 @@ table changes its affordances in this ADR.
 
 ### D5 — Who can edit whom: unchanged permission topology
 
+*(As amended 2026-09-03 — see the Amendment below for what changed and why. The
+original text is kept verbatim, because the Amendment is only readable against
+it and because two of the three bullets still hold.)*
+
 - `member_default` / `viewer_readonly` / `organization_admin`: `allowEdit: false` on
   identity tables stays. Nothing about this ADR widens *who* may write.
 - Platform admins (`admin_full_access`) become the only principals whose standard-form
@@ -258,6 +265,68 @@ table changes its affordances in this ADR.
 If org-admin-scoped profile editing is wanted later ("org admin fixes a member's
 name"), that is a permission-set + RLS decision (`sys_user_org_members` is currently
 `select`-only) layered on top of the same guard — a follow-up, not this ADR.
+
+> **Amendment (2026-09-03, #14959 — maintainer ruling, decision batch #22,
+> verbatim 「同意」).** A rank-and-file member **may** edit their own `sys_user`
+> row on the generic data path. The third bullet above no longer holds: an RLS
+> self-row EDIT carve-out for CRUD is exactly what this amendment builds, and
+> better-auth's door is no longer strictly better — it cannot carry every
+> whitelisted column.
+>
+> **What forced it.** The 2026-07-11 text rests on a premise that a later ruling
+> retired: that better-auth `/update-user` can carry everything Tier 1 holds. It
+> could, while Tier 1 was `{name, image}`. The 2026-09-03 ruling on #14787
+> admitted `locale`, and `locale` is deliberately **not** a better-auth
+> `additionalFields` entry — declaring it there would make `getSession` SELECT a
+> column an environment that has not run schema-sync does not have (#13881
+> measured this; it is the same hazard the `ai_access` note in `auth-manager.ts`
+> records). So `/update-user` cannot post the column, and with `member_default`
+> denying `allowEdit` the generic path could not either. The column shipped
+> reachable by platform admins alone — a *user-stated* preference (#14788 ruled
+> the stored value outranks `Accept-Language` precisely because it is the user's
+> own statement) that the user could not state. That is ADR-0049's
+> declared-but-not-enforceable shape one step removed, and it is why leaving it
+> admin-only was rejected rather than deferred.
+>
+> **What the amendment decides.** Self-service edits of the D1 Tier-1 columns
+> route through the **generic data path**, bounded on the two axes that already
+> exist and in the shape `sys_api_key` has shipped since #8053:
+>
+> - **which rows** — `member_default` gains an explicit `sys_user` entry
+>   (`allowRead` / `allowEdit` true, create / delete **false**), and its
+>   `sys_user_self` policy (`id == current_user.id`) widens from `select` to
+>   `all` so it reaches the by-id write pre-image check. `sys_user_org_members`
+>   stays `select`-only: RLS policies OR-combine, so widening the org-peer
+>   *visibility* scope would compose `id == me OR id IN <every user in my org>`
+>   and hand every member their colleagues' profile rows. The org-admin
+>   follow-up named at the end of the original D5 text is therefore still open,
+>   and still a separate decision.
+> - **which columns** — unchanged. D2's guard keeps bounding a user-context
+>   update to the registered whitelist, so widening *who* does not widen *what*.
+>   The shape rules on the columns refuse a malformed value identically on every
+>   path, which is the property that made this the small decision rather than
+>   the large one.
+>
+> `name` and `image` therefore become editable on the generic path too, not only
+> through `/update-user`. That is the real cost of the amendment and it is
+> accepted deliberately: **D6** already mirrors better-auth's
+> `refreshUserSessions` for exactly those columns, so the session-cache
+> coherence the original bullet bought by routing through `/update-user` is
+> bought here by the companion hook instead. (`locale` is correctly *excluded*
+> from that mirror — better-auth carries no such field on its user model, so
+> there is no stale cached copy to repair and merging one would manufacture an
+> incoherence rather than fix one.) Both doors stay open; neither is retired.
+>
+> **Rejected in the same ruling**, recorded so they are not re-proposed:
+> a dedicated endpoint (`POST /api/v1/me/locale`, or extending
+> `update_my_profile`) writing under system context — the "second stamping
+> route" that #14787's own ruling rejected one level up, and the position where
+> a shape check is most easily skipped; and `locale` as a better-auth
+> `additionalFields` entry, refused on #13881's measurement above.
+>
+> **Not amended by this:** D1's tier *table* still lists two Tier-1 members. The
+> whitelist constant is the enforced one and holds three; reconciling the table
+> is tracked separately (#14951).
 
 ### D6 — Session-cache invalidation companion hook
 

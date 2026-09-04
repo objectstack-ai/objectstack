@@ -1591,6 +1591,81 @@ describe('state_machine initialStates enforcement on INSERT (#3165)', () => {
     ).not.toThrow();
   });
 
+  /**
+   * #14311 — an authored `message` costs the caller the WORDING, not the rest
+   * of the envelope.
+   *
+   * `constraint` and `value` are declared on `FieldValidationError` and are the
+   * half a client ACTS on: which states a record may be created in, and which
+   * one it tried. They were emitted only when the rule left its message empty —
+   * and `ValidationRuleSchema` REQUIRES `message` on every rule, so in practice
+   * the machine-readable half was reachable only by declaring `message: ''`.
+   * A create form that wants to offer exactly the legal initial states had to
+   * parse the author's prose, or hardcode a copy of the state machine.
+   *
+   * Both halves are asserted on the SAME rejection, because the defect was
+   * never "no error" — it was an error carrying less than it declares.
+   */
+  it('carries constraint + value alongside an AUTHORED message (insert)', () => {
+    const [err] = (() => {
+      try {
+        evaluateValidationRules(approvalSchema, { approval_status: 'approved' }, 'insert');
+        throw new Error('expected a ValidationError');
+      } catch (e) {
+        return (e as ValidationError).fields;
+      }
+    })();
+    // Envelope (ADR-0112): the refusal is a VALIDATION_FAILED naming the field.
+    expect(err.field).toBe('approval_status');
+    expect(err.code).toBe('invalid_initial_state');
+    // The author still owns the sentence.
+    expect(err.message).toBe('A request must start as draft.');
+    // …and the facts ride along, exactly as they do without an authored message.
+    expect(err.constraint).toEqual({ allowed: 'draft' });
+    expect(err.value).toBe('approved');
+  });
+
+  it('carries constraint alongside an AUTHORED message (update transition)', () => {
+    const [err] = (() => {
+      try {
+        evaluateValidationRules(
+          approvalSchema,
+          { approval_status: 'approved' },
+          'update',
+          { previous: { approval_status: 'draft' } },
+        );
+        throw new Error('expected a ValidationError');
+      } catch (e) {
+        return (e as ValidationError).fields;
+      }
+    })();
+    expect(err.field).toBe('approval_status');
+    expect(err.code).toBe('invalid_transition');
+    expect(err.message).toBe('A request must start as draft.');
+    expect(err.constraint).toEqual({ from: 'draft', to: 'approved' });
+  });
+
+  /**
+   * The control for the pair above: the built-in path already carried both, and
+   * must keep doing so. If this ever diverges from the authored path again, the
+   * two assertions disagree instead of one silently shrinking.
+   */
+  it('the built-in path (empty message) carries the same constraint + value', () => {
+    const catalogSchema = {
+      validations: [{ ...approvalSchema.validations[0], message: '' }],
+    };
+    const [err] = (() => {
+      try {
+        evaluateValidationRules(catalogSchema, { approval_status: 'approved' }, 'insert');
+        throw new Error('expected a ValidationError');
+      } catch (e) {
+        return (e as ValidationError).fields;
+      }
+    })();
+    expect(err.constraint).toEqual({ allowed: 'draft' });
+    expect(err.value).toBe('approved');
+  });
+
   it('does not affect UPDATE transitions (initialStates is insert-only)', () => {
     // draft → pending is a declared transition; initialStates must not interfere.
     expect(() =>
@@ -1774,6 +1849,56 @@ describe('script / cross_field predicates', () => {
     expect(() =>
       evaluateValidationRules(schema, { a: 1 }, 'update', { previous: { a: 0 } }),
     ).toThrow(/rule 'broken' could not be evaluated/);
+  });
+
+  // ── #14891 — the case that DEFINES a `script`/`cross_field` rule as an
+  // INVARIANT rather than a transition gate. `checkPredicate` (above) is handed
+  // `ctx.merged` on EVERY write, with no exemption for a violation that was
+  // already stored, so a row that already violates is refused on *any* edit
+  // until a repairing write lands: frozen, not bricked.
+  //
+  // That is the exact opposite of `Field.requiredWhen`, whose ADR-0113
+  // exemption is pinned at the top of this file — "legacy rows rest: a
+  // pre-existing violation does not block an unrelated write". Until these two
+  // cases landed, the boundary had asymmetric coverage: the gate's exemption
+  // was pinned, the invariant's *absence* of one was not — so a future edit
+  // that quietly gave `script` rules the same exemption would have gone
+  // unnoticed by this suite.
+  const discountSchema = {
+    validations: [
+      {
+        type: 'script' as const,
+        name: 'discount_cap',
+        condition: { dialect: 'cel', source: 'record.discount > 60' },
+        message: 'Discount may not exceed 60%.',
+      },
+    ],
+  };
+
+  it('a stored violation FREEZES the row — an unrelated-field write is refused too (#14891)', () => {
+    // pre: discount 90 → ALREADY violates. The write touches only `note`, so it
+    // CREATES nothing; it is refused all the same, because the merged record
+    // still violates. (Asserting the envelope, not just `toThrow` — a bare
+    // throw here would also be satisfied by an unrelated fault.)
+    let caught: unknown;
+    try {
+      evaluateValidationRules(discountSchema, { note: 'x' }, 'update', { previous: { discount: 90 } });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(ValidationError);
+    expect((caught as ValidationError).code).toBe('VALIDATION_FAILED');
+    expect((caught as ValidationError).fields).toEqual([
+      { field: '_record', code: 'rule_violation', message: 'Discount may not exceed 60%.' },
+    ]);
+  });
+
+  it('…and the REPAIRING write passes — frozen, not bricked (#14891)', () => {
+    // Same violating prior row; this write brings the merged record back under
+    // the cap, so the invariant is satisfied and the row is editable again.
+    expect(() =>
+      evaluateValidationRules(discountSchema, { discount: 50 }, 'update', { previous: { discount: 90 } }),
+    ).not.toThrow();
   });
 });
 

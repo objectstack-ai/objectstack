@@ -157,6 +157,42 @@ export const SCANNED_EXTENSIONS = new Set(['.yml', '.yaml', '.mjs', '.js', '.cjs
 const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', 'coverage']);
 
 /**
+ * POPULATION DECLARATION -- what `scripts/pm/dispatch-gates.mjs` is told this
+ * gate reads, in the subtree spelling that tool compares in. Provenance ONLY:
+ * nothing in this file reads this array.
+ *
+ * That tool builds every dispatch's gate list by scanning a gate's own source
+ * for the path literals it operates on, and "looks like a path" there means
+ * "carries a separator". Two of the three `ROOTS` carry one and are recovered
+ * for free; the third is the bare single-segment word `scripts`, which the
+ * extractor cannot see AT ALL. So the only other literals this file offered it
+ * were two `owner/repo` action slugs and the sandbox filenames the fixtures
+ * build -- an artifact roster, not a population. The measured result was a gate
+ * that walks all of `scripts/` and appeared on no card that edited any of it,
+ * while its two `.github` roots were named correctly the whole time.
+ *
+ * ⛔ NOT the bare subtree. One hint per admitted extension, following
+ * `check-ratchet-remedy-authority.mjs` at this same root: `scripts/**` would
+ * name this gate for the JSON, Markdown and text files under the root that
+ * `walk` skips on `SCANNED_EXTENSIONS`. The declared set is SET-EQUAL to what
+ * that walk admits under this root -- nothing walked left uncovered, nothing
+ * covered left unwalked -- which is what `--self-test` pins, in both directions
+ * and against the live tree.
+ *
+ * An extension `SCANNED_EXTENSIONS` admits but the tree does not yet HOLD under
+ * this root is deliberately absent: a hint reaching nothing tracked is a dead
+ * lead, which the consumer reports as a population and is not one. The pin
+ * below reddens the day such a file lands.
+ *
+ * Spelled as a LITERAL array, never computed from `SCANNED_EXTENSIONS`: the
+ * extractor reads SOURCE TEXT, so a built spelling keeps this value identical
+ * at runtime, keeps every assertion about it green, and contributes ZERO hints.
+ * `check-watch-hint-literal.mjs` holds that rule fleet-wide; the self-test
+ * below holds the own-source half.
+ */
+const ROOT_DIR_WATCH_HINTS = ['scripts/**/*.mjs', 'scripts/**/*.ts', 'scripts/**/*.sh'];
+
+/**
  * How far apart the method slot and the `/labels` path may sit and still be
  * read as one call. A backslash-continued `curl` puts them 1-3 lines apart; a
  * multi-line `fetch` options object, 1-4. Six is that with headroom.
@@ -726,85 +762,103 @@ function baseFiles() {
   };
 }
 
+// RED_CASES/GREEN_CASES below reuse three REAL tracked paths as their sandbox
+// keys (`scripts/check-nul-bytes.mjs`, `scripts/build-console.sh`,
+// `.github/workflows/ci.yml`) rather than invented names (`scripts/w.mjs`,
+// `scripts/writer.sh`, `.github/workflows/w.yml`, pre-#14695). The fixture's
+// own content is written into an isolated temp directory (`writeTree`) either
+// way, so which real path stands in for "a script" or "a workflow" makes no
+// difference to what any RED/GREEN case here asserts — but the KEY is a
+// string literal in THIS module's own source, and `RED_CASES`/`GREEN_CASES`
+// are top-level exports, not bodies inside a `selfTest()`-shaped function, so
+// `maskSelfTests` never hides them from `extractWatchHints`: every key here
+// already entered this gate's own declared-population hint set. An invented
+// name that exists in no tracked tree is therefore a DEAD lead — exactly the
+// shape `check:declared-population-live` exists to refuse — and it read as
+// live only because that gate's liveness bar is per-FAMILY (at least one hint
+// live) rather than per-hint; a real path clears the same bar honestly at
+// full precision instead of by accident (#14695). The two paths chosen for
+// the `.mjs`/`.sh` cases are deliberately UNRELATED scripts, picked only to be
+// tracked and short — not files this gate has any real interest in reading.
 /** Every spelling that MUST be refused. */
 export const RED_CASES = {
   'curl -X PUT, one line': {
-    'scripts/writer.sh': 'curl -X PUT -H "auth" "https://api.github.com/repos/o/r/issues/1/labels" -d "{}"\n'
+    'scripts/build-console.sh': 'curl -X PUT -H "auth" "https://api.github.com/repos/o/r/issues/1/labels" -d "{}"\n'
   },
   'curl -X PUT, backslash-continued onto the path line': {
-    'scripts/writer.sh': 'curl -X PUT \\\n  -H "auth" \\\n  "https://api.github.com/repos/o/r/issues/1/labels"\n'
+    'scripts/build-console.sh': 'curl -X PUT \\\n  -H "auth" \\\n  "https://api.github.com/repos/o/r/issues/1/labels"\n'
   },
   'gh api -X PUT': {
-    '.github/workflows/w.yml': 'jobs:\n  j:\n    steps:\n      - run: gh api -X PUT "repos/$R/issues/$N/labels" -f labels[]=a\n'
+    '.github/workflows/ci.yml': 'jobs:\n  j:\n    steps:\n      - run: gh api -X PUT "repos/$R/issues/$N/labels" -f labels[]=a\n'
   },
   'gh api --method PUT': {
-    '.github/workflows/w.yml': 'jobs:\n  j:\n    steps:\n      - run: gh api --method PUT repos/o/r/issues/1/labels\n'
+    '.github/workflows/ci.yml': 'jobs:\n  j:\n    steps:\n      - run: gh api --method PUT repos/o/r/issues/1/labels\n'
   },
   'github-script issues.setLabels': {
-    '.github/workflows/w.yml':
+    '.github/workflows/ci.yml':
       'jobs:\n  j:\n    steps:\n      - uses: actions/github-script@v9\n        with:\n          script: |\n' +
       '            await github.rest.issues.setLabels({ owner, repo, issue_number: 1, labels });\n'
   },
   'octokit.request route string': {
-    'scripts/w.mjs': "await octokit.request('PUT /repos/{owner}/{repo}/issues/{issue_number}/labels', { labels });\n"
+    'scripts/check-nul-bytes.mjs': "await octokit.request('PUT /repos/{owner}/{repo}/issues/{issue_number}/labels', { labels });\n"
   },
   'fetch with a multi-line options object': {
-    'scripts/w.mjs': 'await fetch(`${api}/repos/${repo}/issues/${n}/labels`, {\n  headers,\n  method: "PUT",\n  body\n});\n'
+    'scripts/check-nul-bytes.mjs': 'await fetch(`${api}/repos/${repo}/issues/${n}/labels`, {\n  headers,\n  method: "PUT",\n  body\n});\n'
   },
   'a bare .put( onto the endpoint': {
-    'scripts/w.mjs': "await client.put(`/issues/${n}/labels`, { labels });\n"
+    'scripts/check-nul-bytes.mjs': "await client.put(`/issues/${n}/labels`, { labels });\n"
   },
   'uses: actions/labeler at the version #10703 read': {
-    '.github/workflows/w.yml': 'jobs:\n  j:\n    steps:\n      - uses: actions/labeler@v7.0.0\n'
+    '.github/workflows/ci.yml': 'jobs:\n  j:\n    steps:\n      - uses: actions/labeler@v7.0.0\n'
   },
   'uses: actions/labeler at ANY other version': {
-    '.github/workflows/w.yml': 'jobs:\n  j:\n    steps:\n      - uses: actions/labeler@a1b2c3d4\n'
+    '.github/workflows/ci.yml': 'jobs:\n  j:\n    steps:\n      - uses: actions/labeler@a1b2c3d4\n'
   },
   'uses: codelytv/pr-size-labeler': {
-    '.github/workflows/w.yml': 'jobs:\n  j:\n    steps:\n      - uses: codelytv/pr-size-labeler@v1.10.4\n'
+    '.github/workflows/ci.yml': 'jobs:\n  j:\n    steps:\n      - uses: codelytv/pr-size-labeler@v1.10.4\n'
   },
   'the method slot WINDOW_LINES-1 lines from the path': {
-    'scripts/w.mjs': `const url = '/issues/1/labels';\n${'// filler\n'.repeat(WINDOW_LINES - 2)}await go({ method: 'PUT', url });\n`
+    'scripts/check-nul-bytes.mjs': `const url = '/issues/1/labels';\n${'// filler\n'.repeat(WINDOW_LINES - 2)}await go({ method: 'PUT', url });\n`
   }
 };
 
 /** Forms that MUST stay clean. Every one is correct as written. */
 export const GREEN_CASES = {
   'the additive POST': {
-    'scripts/w.mjs': "await gh('POST', `/issues/${n}/labels`, { labels: ['size/l'] });\n"
+    'scripts/check-nul-bytes.mjs': "await gh('POST', `/issues/${n}/labels`, { labels: ['size/l'] });\n"
   },
   'the targeted DELETE': {
-    'scripts/w.mjs': "await gh('DELETE', `/issues/${n}/labels/${encodeURIComponent(name)}`);\n"
+    'scripts/check-nul-bytes.mjs': "await gh('DELETE', `/issues/${n}/labels/${encodeURIComponent(name)}`);\n"
   },
   'the ban documented in a YAML comment': {
-    '.github/workflows/w.yml': '# never `curl -X PUT .../issues/1/labels`, and never issues.setLabels\njobs:\n  j:\n    steps:\n      - run: true\n'
+    '.github/workflows/ci.yml': '# never `curl -X PUT .../issues/1/labels`, and never issues.setLabels\njobs:\n  j:\n    steps:\n      - run: true\n'
   },
   'the ban documented in a JS block comment': {
-    'scripts/w.mjs': '/**\n * `PUT /issues/{n}/labels` and `issues.setLabels` are both banned.\n * Not `curl -X PUT .../issues/1/labels` either.\n */\nexport const ok = 1;\n'
+    'scripts/check-nul-bytes.mjs': '/**\n * `PUT /issues/{n}/labels` and `issues.setLabels` are both banned.\n * Not `curl -X PUT .../issues/1/labels` either.\n */\nexport const ok = 1;\n'
   },
   'the ban documented in a JS line comment': {
-    'scripts/w.mjs': "// await octokit.request('PUT /repos/o/r/issues/1/labels') -- BANNED\nexport const ok = 1;\n"
+    'scripts/check-nul-bytes.mjs': "// await octokit.request('PUT /repos/o/r/issues/1/labels') -- BANNED\nexport const ok = 1;\n"
   },
   'a comparison REFUSING the verb': {
-    'scripts/w.mjs': "if (step.method === 'PUT') throw new Error(`refused for /issues/${n}/labels`);\n"
+    'scripts/check-nul-bytes.mjs': "if (step.method === 'PUT') throw new Error(`refused for /issues/${n}/labels`);\n"
   },
   'the verb named in a test name next to a labels path': {
-    'scripts/w.mjs': "const plan = { path: '/issues/10698/labels' };\ncheck('the retired whole-set PUT destroys the label', plan);\n"
+    'scripts/check-nul-bytes.mjs': "const plan = { path: '/issues/10698/labels' };\ncheck('the retired whole-set PUT destroys the label', plan);\n"
   },
   'an unrelated action pin': {
-    '.github/workflows/w.yml': 'jobs:\n  j:\n    steps:\n      - uses: actions/checkout@v7\n      - uses: actions/stale@v11.0.0\n'
+    '.github/workflows/ci.yml': 'jobs:\n  j:\n    steps:\n      - uses: actions/checkout@v7\n      - uses: actions/stale@v11.0.0\n'
   },
   'a PUT to a different endpoint entirely': {
-    'scripts/w.mjs': "await gh('PUT', `/repos/${repo}/actions/variables/${name}`);\n"
+    'scripts/check-nul-bytes.mjs': "await gh('PUT', `/repos/${repo}/actions/variables/${name}`);\n"
   },
   'a label READ, no write': {
-    '.github/workflows/w.yml': 'jobs:\n  j:\n    steps:\n      - run: gh api "repos/$R/issues/$N/labels" --jq ".[].name"\n'
+    '.github/workflows/ci.yml': 'jobs:\n  j:\n    steps:\n      - run: gh api "repos/$R/issues/$N/labels" --jq ".[].name"\n'
   },
   'steps.labels output references': {
-    '.github/workflows/w.yml': "jobs:\n  j:\n    steps:\n      - if: steps.labels.outputs.skip != 'true'\n        run: true\n"
+    '.github/workflows/ci.yml': "jobs:\n  j:\n    steps:\n      - if: steps.labels.outputs.skip != 'true'\n        run: true\n"
   },
   'the method slot WINDOW_LINES lines from the path (a STATED miss)': {
-    'scripts/w.mjs': `const url = '/issues/1/labels';\n${'// filler\n'.repeat(WINDOW_LINES - 1)}await go({ method: 'PUT', url });\n`
+    'scripts/check-nul-bytes.mjs': `const url = '/issues/1/labels';\n${'// filler\n'.repeat(WINDOW_LINES - 1)}await go({ method: 'PUT', url });\n`
   }
 };
 
@@ -863,9 +917,9 @@ export function selfTest() {
 
   // Refusal 3 -- an allowlist entry with no stated reason. Assertion 3.
   withTree(RED_CASES['gh api -X PUT'], (dir) => {
-    const noReason = [{ path: '.github/workflows/w.yml', rule: 'endpoint', reason: 'too short' }];
+    const noReason = [{ path: '.github/workflows/ci.yml', rule: 'endpoint', reason: 'too short' }];
     expect('REFUSE allowlist entry without a reason', run(dir, { allowlist: noReason }, silent), EXIT_REFUSED);
-    const noRule = [{ path: '.github/workflows/w.yml', rule: 'whatever', reason: 'a'.repeat(MIN_REASON_LENGTH) }];
+    const noRule = [{ path: '.github/workflows/ci.yml', rule: 'whatever', reason: 'a'.repeat(MIN_REASON_LENGTH) }];
     expect('REFUSE allowlist entry with no valid rule', run(dir, { allowlist: noRule }, silent), EXIT_REFUSED);
   });
 
@@ -880,7 +934,7 @@ export function selfTest() {
   withTree(RED_CASES['gh api -X PUT'], (dir) => {
     const reasoned = [
       {
-        path: '.github/workflows/w.yml',
+        path: '.github/workflows/ci.yml',
         rule: /** @type {'endpoint'} */ ('endpoint'),
         reason: 'fixture: a deliberate exception recorded with a real sentence explaining itself.'
       }
@@ -896,6 +950,76 @@ export function selfTest() {
   for (const [action, why] of WHOLE_SET_ACTIONS) {
     if (typeof why === 'string' && why.length >= 60) continue;
     failures.push(`WHOLE_SET_ACTIONS['${action}'] has no source-read reason`);
+  }
+
+  // ── POPULATION DECLARATION: what the dispatch derivation is told this gate reads ──
+  //
+  // Nothing in this file can ENFORCE the declaration: `ROOT_DIR_WATCH_HINTS` is
+  // read by another tool entirely (`extractWatchHints` in
+  // `scripts/pm/dispatch-gates.mjs`), so a stale or wrong one runs green here
+  // forever and pays itself out as a dev dispatched on a `scripts/` card with
+  // this gate absent from the brief. Held against the LIVE WALK rather than a
+  // fixture tree: the fixtures below build sandboxes, and a pin over one of
+  // those would stay green while the real declaration drifted.
+  {
+    const walked = [];
+    walk(REPO_ROOT, 'scripts', walked);
+    const extOf = (path) => path.slice(path.lastIndexOf('.'));
+    // Written INDEPENDENTLY of the consumer's `hintCovers`, deliberately: a pin
+    // that reuses the consumer's own matcher cannot catch it changing underneath.
+    const declares = (path) =>
+      path.startsWith('scripts/') && ROOT_DIR_WATCH_HINTS.includes(`scripts/**/*${extOf(path)}`);
+
+    expect('POPULATION the declaration pin walked files at all (#4690)', walked.length > 0, true);
+    expect(
+      'POPULATION every file this gate walks under scripts/ is declared',
+      walked.every(declares),
+      true,
+    );
+    expect(
+      'POPULATION every declared hint reaches a file this gate walks (no dead lead)',
+      ROOT_DIR_WATCH_HINTS.every((hint) => walked.some((path) => declares(path) && `scripts/**/*${extOf(path)}` === hint)),
+      true,
+    );
+    expect(
+      'POPULATION every declared hint names an extension SCANNED_EXTENSIONS admits',
+      ROOT_DIR_WATCH_HINTS.every((hint) => SCANNED_EXTENSIONS.has(extOf(hint))),
+      true,
+    );
+    expect(
+      'POPULATION the bare subtree and the repo root are NOT declared',
+      ROOT_DIR_WATCH_HINTS.some((hint) => hint === 'scripts' || hint.endsWith('/**') || hint === '.' || hint === '**'),
+      false,
+    );
+    expect(
+      'POPULATION every declared literal carries a separator (a bare word reaches nothing)',
+      ROOT_DIR_WATCH_HINTS.every((hint) => hint.includes('/')),
+      true,
+    );
+    expect(
+      'POPULATION the scripts root is the one ROOTS entry the extractor cannot see, and it is the one declared',
+      ROOTS.filter((root) => !root.includes('/')).join(),
+      'scripts',
+    );
+    // The literal SPELLING is the whole mechanism: a value built from
+    // SCANNED_EXTENSIONS would keep every assertion above green and contribute
+    // ZERO hints. `check-watch-hint-literal` owns that rule fleet-wide.
+    let ownSource = null;
+    try {
+      ownSource = readFileSync(join(REPO_ROOT, 'scripts/check-whole-set-label-write.mjs'), 'utf8');
+    } catch {
+      ownSource = null;
+    }
+    const declSites = ownSource === null
+      ? []
+      : [...ownSource.matchAll(/\bconst\s+ROOT_DIR_WATCH_HINTS\s*=\s*([^;]*);/g)];
+    expect(
+      'POPULATION declared exactly once, as an array of quoted literals the text scan can read',
+      declSites.length === 1
+        && ROOT_DIR_WATCH_HINTS.every((hint) => declSites[0][1].includes(`'${hint}'`))
+        && !/[A-Za-z_$][\w$]*\s*\./.test(declSites[0][1]),
+      true,
+    );
   }
 
   // The checked-in allowlist itself passes the reason rule.

@@ -19,9 +19,8 @@ model: opus
 
 仓库根的 AGENTS.md 有约束力;第一次编辑前先读它。本文件只承载原则、查表数据、与钩子无
 法
-机械强制的条款;事故经验一律写成自含的教训 —— 不引用 issue 编号,维护者裁决保留日
-期 +
-原话。
+机械强制的条款;事故经验一律写成自含的教训 —— 不引用 issue 编号,维护者裁决保留日期
+(原话仅在引文本身即操作性判据处保留)。
 
 ## 六条基本规则
 
@@ -229,6 +228,7 @@ dispatch prompt 只携带每单增量(裁决引文、裁决 / PM-机制假设分
   `origin/main` 是共享指针,别的 agent 一次 fetch 就推进它:`git reset --soft origin/main` 把你分支点
   之后**他人已合并的文件**整批 stage 成你的(实测一次四个 agent 的合并文件,commit 前才逮
   住)。「我从哪开始」的 reset/diff/log/rebase 一律锚基本规则 1 记录的 `"$BASE"`。
+- **`log -S/--follow/blame` 判日期或先后前**,先 `git rev-parse --is-shallow-repository`,true 就加深申报。
 - **要做反向验证(「回退修复,看诊断变化」)?先 commit 修复。** 已 commit,恢复只是
   `git checkout <your-branch> -- <path>`;对着未提交的编辑, `git checkout origin/main -- <path>` 不留任何恢
   复点 —— 工作树曾是唯一副本,而丢弃它是一次正常、无声、exit-0 的操作(恢复机制与字
@@ -300,7 +300,6 @@ dispatch prompt 只携带每单增量(裁决引文、裁决 / PM-机制假设分
 - 实现满足 issue 的验收判据。
 - 测试:新增/更新覆盖;跑受影响包的 `pnpm test` / `pnpm typecheck`,为报告留真实输出 (范围
   按「本地验证范围」圈定)。
-- 用户可见的改动加 changeset。
 - 用 `git push -u origin claude/issue-<n>-<slug>` 推上去(网络失败退避重试)。
 - **Draft** PR 指向 `main`,正文首行 `Fixes #<n>` —— **合并不应关卡时用 `Part of #<n>`**(你只实现
   了可执行的那一半;说明留下的是哪一半)。⛔ 永不 `Fixes` 一张还在决策箱的卡 —— 合并
@@ -316,28 +315,27 @@ dispatch prompt 只携带每单增量(裁决引文、裁决 / PM-机制假设分
   sanitizer 纪律」)。
 - **触 `skills/**`(对外发布的技能包)的 diff:PR 正文报两个读数,并默认拒绝「小功能大扩
   写」。** 两个读数缺一不可 —— 被改文件的**整文件** before/after,与**整包** before/after
-  (发布目录下全部 SKILL.md 之和);行数为准,姊妹门禁定义 token 计数后同报 token。维护者
-  2026-08-21 裁决,原文不译:「对外发布的 skills 是整个平台的最大价值,尤其要整体考虑和评
-  估。」「……不能为了一个小功能扩写很多。」派发词给的净增预算装不下 ⇒ 停下按 `blocked` 报
+  (发布目录下全部 SKILL.md 之和);行数为准,姊妹门禁定义 token 计数后同报 token
+  （2026-08-21 裁定）。派发词给的净增预算装不下 ⇒ 停下按 `blocked` 报
   缺口,⛔ 不自行扩写、不自行抬预算 —— 预算是 PM 的,抬它是维护者裁决。
 - **付行数棘轮的唯一合法货币是删内容。** 维护者 2026-08-17 裁「⛔ re-wrap(折行合并)
   不得用作筹行 —— 棘轮治理的是内容体量,行数只是机读代理,新增以删减付账;密度优化仅随净减
   内容的 PR 顺带」、2026-08-29 裁「筹行(为内容购买行数)⛔ vs 独立密度修复(无内容购买)允
   许」。分界只问折行有没有为新增内容买行 —— 门禁分不出两种 net-0;⛔ 不买内容的密度
   修复是修复,不要当筹行拒掉。删不出等量内容 ⇒ 报 `blocked`,⛔ 不抬 ceiling(人工地板)。
-- **`skip-changeset` 标签按仓库分流——先认清目标仓库有没有这个机制。** 判据:**不从任何包
-  发布东西**;闭合清单:仅含 `docs/adr/**` · `.claude/**` · `scripts/pm/**` · tests/workflow · 注释 的
-  diff。**本仓库**:标签是真实机制,打标签是你的步骤、不是 CI 的,**PR 一开出就打**,⛔ 永不
-  等 Check Changeset 转红再补。写入首选**加法端点**(REST `POST .../issues/<n>/labels`——不碰已有标
-  签),⚠️ 可达性是**会话**属性、不是端点或席位的(门先于端点应答、读写同拒,门开会话
-  实测 200;读数住 platform-readings)⇒ 先探后用;被拒 ⇒ 走回退:MCP 读现值→并集→整组
-  写→**必做对比式读回**(diff 现集对 union(读集, 目标),union 有而回读缺 = 被剥的并发标签,重
-  挂并写进报告;读回只**检测**剥除防不了,门语义标签被剥恰成绿灯),并申报换道。加法写
-  同样必要不充分:size-labeler 整组 PUT 曾 ~1 秒内抹掉正确加法写——收尾一律读回、清单引
-  进报告;标签消失读作被抹,**重新加上**,不是你的错。关此步骤的是读回不是写入;读回
-  验「写落了」验不出「有门在读」——幻影门标签读回照样成功。**objectui:同名标签对象
-  在(历史误挂铸出),零 workflow/脚本读它、豁免不了任何东西,pin 测试钉着**——那边用空
-  frontmatter 的 changeset 声明,门禁判定行是权威;⛔ 永不在那边施加该标签。
+- **`skip-changeset` 标签按仓库分流——先认清目标仓库有没有这个机制。** 判据是规则:**不从
+  任何包发布东西**;清单仅为示例(`docs/adr/**` · `.claude/**` · `scripts/pm/**` · 仓根工具配置 ·
+  `examples/**` 等私有 workspace · tests/workflow · 注释)。**本仓库**:标签是真实机制,打标签是你
+  的步骤、不是 CI 的,**PR 一开出就打**,⛔ 永不等 Check Changeset 转红再补。写入首选**加法端
+  点**(REST `POST .../issues/<n>/labels`——不碰已有标签),⚠️ 可达性是**会话**属性(读写同拒;读
+  数住 platform-readings)⇒ 先探后用;被拒 ⇒ 走回退:MCP 读现值→并集→整组写→**必做对比式
+  读回**(diff 现集对 union(读集, 目标),union 有而回读缺 = 被剥的并发标签,重挂并写进报告;读
+  回只**检测**剥除防不了,门语义标签被剥恰成绿灯),并申报换道。加法写同样必要不充
+  分:size-labeler 整组 PUT 曾 ~1 秒内抹掉正确加法写——收尾一律读回、清单引进报告;标签消
+  失读作被抹,**重新加上**,不是你的错。关此步骤的是读回不是写入;读回验「写落了」验不
+  出「有门在读」——幻影门标签读回照样成功。**objectui:同名标签对象在(历史误挂铸出),
+  零 workflow/脚本读它、豁免不了任何东西,pin 测试钉着**——那边用空 frontmatter 的 changeset
+  声明,门禁判定行是权威;⛔ 永不在那边施加该标签。
 - **报告在 draft PR 时点交付 —— CI 收敛等待归 PM,不归你**(维护者 2026-08-10 拍板)。分支一推
   上、draft PR 一开出,立刻交报告;门禁状态如实记录 —— `in_progress` 是诚实值。⛔ draft PR 开
   出后永不 sleep、定时等待或空转轮询 CI(实测:空转轮询烧掉的恰是一个红门禁需要的预
@@ -397,29 +395,10 @@ issue 对塑造公开契约的某个决定欠规格 —— spec/Zod schema、API
 ——
 或两种读法通向两种架构时:不猜,不写投机代码。返回 `status: "needs_decision"`,把每个问
 题连同选项、成本与你的推荐写进 `open_questions`。
-**Analyze every option on four fixed axes — this framing is the core of the escalation,
-not decoration:**
-
-- **Real business need**(实际业务需求)— 该方案服务的是**真实存在的业务场景**,还是投
-  机性能力面?证据必须**实测** —— 谁在写这个键、谁在读这个能力、示例应用与真实部署
-  怎么
-  用;「读起来像有用」不作数。这条轴会改变结论,不是陪衬。
-- **Long-term soundness for THIS project**(项目长远合理性)— 哪个方案符合北极星方向与
-  可持续架构(no workarounds、contract-first)—— 补丁式选项的长期代价要明说。
-- **Making AI-written code — especially AI-authored metadata apps — hard to get wrong**
-  (防 AI 写代码犯错,尤其是 AI 编写的元数据 app)— 优先选在编写时点就结构性防错的方案
-  (严格 schema、publish 时响亮拒绝的校验、declared = enforced),而非消费端宽容 —— 宽
-  容的消费端恰是 AI 生成错误藏身并扩散的地方。
-- **Startup scope discipline**(创业阶段不扩散需求)— **创业阶段聚焦原则**(维护者
-  2026-08-04:这是创业项目,核心能力优先):能力扩张默认从紧,无拉动的声明面按
-  implementation-first 处置,已发布零消费的能力不因沉没成本获得豁免。
-
-Your recommendation must be justified on all four axes;长远合理性权重恒 ≥50%(2026-09-01
-裁「四维分析中，长期合理应该权重最高，至少50%」):推荐以它领起,另三轴合起来投不翻
-它,按本义读(缩小而非扩大特例/契约增生),⛔ 不为投机扩张背书;四轴冲突时推荐按拉动排
-序:实测拉动→长远,零拉动→不扩散,防错破平,安全与难逆恒人工(权重与序都只排推荐,⛔
-不授权、不移人工地板);权衡如实呈现交维护者拍板。`main` 在你脚下碎了、依赖未合并、CI
-基础设施故障⇒`blocked`(附证据),重试到足以排除你的改动。
+升级分析的四轴决策框架由派发词携带 —— 派发的 PM 从自己那份副本填入(已发布模板里
+是 `rules/dev-template.md` 的 `{decision_frame}` 槽位):每个方案逐轴分析,推荐也按那
+些轴给出理由;派发词没带,停下向 PM 索取,⛔ 不自拟一套轴。`main` 在你脚下碎了、依赖
+未合并、CI 基础设施故障⇒`blocked`(附证据),重试到足以排除你的改动。
 
 ## 终报消息 —— 恰好这段 JSON,不带任何环绕散文
 
@@ -461,9 +440,11 @@ GitHub 正文 sanitizer 是同一纪律的另一半 —— 形状、触发条件
 「GitHub mutates body BYTES」条款(一条规则一个家;此处不再复制窄版)。署名页脚两形:
 
 ```text
+---                                                                 ← 规则线,前留一空行;平台只认整块
 _Generated by [Claude Code](https://claude.ai/code)_                ← bare:评论用;PR 正文编辑后的落形
 _Generated by [Claude Code](https://claude.ai/code/session_<id>)_   ← session-URL:创建 PR 正文用
 ```
 
-**session 形按 create-only 对待**(PATCH 编辑把它降回裸形;评论通路裸形原样存活)⇒ 耐久归属
-写进正文散文或评论,⛔ 不循环重贴页脚;完整实测(2026-08-26)住 AGENTS.md 同条。
+**session 形按 create-only 对待**(PATCH 编辑把它降回裸形;评论通路 MCP 与 REST 同判:整块原样
+存活,缺规则线则不认、再落整块留两个)⇒ 耐久归属写进正文散文或评论,⛔ 不循环重贴
+页脚;完整实测(2026-08-26、2026-09-03)住 AGENTS.md 同条。

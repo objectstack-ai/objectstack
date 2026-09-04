@@ -8,12 +8,22 @@ import { retiredKey } from '../shared/retired-key';
 import { strictObject } from '../shared/strict-object';
 
 /**
+ * QueryAST — Abstract Syntax Tree for data queries.
+ *
+ * The query AST every data read is expressed in: `where` predicates, `fields`
+ * projection, `orderBy` sort nodes, `expand` traversal, pagination and
+ * aggregation.
+ */
+
+/**
  * Sort Node
  * Represents "Order By" — one `{ field, order }` pair. Unknown keys are
  * REJECTED (#4721); spell the direction `order`, never `direction`.
  */
-// ⚠️ Keep the block above short: `build-docs.ts` takes the FIRST JSDoc block in
-// the file as this page's description, so the rationale below is line comments.
+// ⚠️ Keep the file header above short: `build-docs.ts` publishes the FIRST
+// HEADER-ZONE doc block that documents no symbol — the zone ends at the first
+// declaration, so a later block cannot take over (`scripts/lib/file-description.ts`
+// selects it) — as this page's description, so the rationale below is line comments.
 //
 // ─── Why this one schema is strict while the rest of the file is not (#4721) ──
 //

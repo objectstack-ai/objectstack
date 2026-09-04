@@ -34,7 +34,7 @@ interface AutomationTriggerRegistry {
  */
 export class TimeRelativeTriggerPlugin implements Plugin {
     name = 'com.objectstack.trigger.time-relative';
-    type = 'standard';
+    type = 'standard' as const;
     version = '1.0.0';
     dependencies = ['com.objectstack.service.job', 'com.objectstack.engine.objectql'];
 

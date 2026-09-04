@@ -123,6 +123,51 @@ function canonicalIsoInstant(value: unknown): string | undefined {
 }
 
 /**
+ * Canonicalise the ONE driver materialisation {@link
+ * SysMetadataRepository.rowToEvent} was measured to produce — a valid JS
+ * `Date` — into the ISO-8601 string `MetadataEvent.ts` is declared as. Every
+ * other shape is returned UNTOUCHED.
+ *
+ * [#14037] `rowToEvent` reaches `ts` through `(row.recorded_at as string) ??
+ * …`, and `row` is `any`, so tsc sees a `string` assignment that never
+ * happened. `recorded_at` is a declared `Field.datetime` on
+ * `sys_metadata_history`, which the dialect asymmetry above does NOT protect:
+ * the `datetimeFields` fold sits inside `formatOutput`'s `if (this.isSqlite)`
+ * arm, so Postgres and MySQL hand the column out as a JS `Date`.
+ * `MetadataEventSchema.ts` is `z.string()`
+ * (`packages/metadata-core/src/types.ts`), and the value's one in-repo reader
+ * — `MetadataManager.applyRepoEvent`, which forwards it to
+ * `MetadataWatchEvent.timestamp` — is declared `z.string().datetime()`.
+ *
+ * ⚠️ Deliberately NOT {@link canonicalIsoInstant} above, and the difference is
+ * exactly one input shape. That spelling reaches `value.toISOString()` for ANY
+ * `Date`, which raises `RangeError: Invalid time value` on an Invalid `Date`
+ * — measured reachable on BOTH live dialects (a MySQL zero datetime; any
+ * Postgres year in 275760..294276) and the open subject of #14078, which
+ * #13973 is blocked on. Whether the shared spelling should throw there
+ * (option A) or fall back to a rendering (option B) is a maintainer call over
+ * four packages, so this repair imports NEITHER answer into a new call site:
+ * an Invalid `Date` is returned unchanged, exactly as this cast passes it
+ * through today. When #14078 rules, this helper collapses into the shared
+ * spelling.
+ *
+ * ⛔ NOT a tolerant fallback (#13973's standing prohibition): it teaches no
+ * consumer to accept an off-spec shape; it converts one measured producer
+ * materialisation at the producer. The `Number.isNaN(value.getTime())` guard
+ * is the spelling already in use at `packages/rest/src/export-format.ts` and
+ * `packages/rest/src/import-prepare.ts`, not a new one.
+ *
+ * A sibling copy serves the four sites in
+ * `packages/metadata/src/loaders/database-loader.ts`. ⛔ Neither is exported:
+ * widening `@objectstack/metadata-core`'s public surface for it is a separate
+ * decision, and #14078 consolidates this family anyway.
+ */
+function isoFromValidDate(value: unknown): unknown {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString();
+  return value;
+}
+
+/**
  * Overlay-row lifecycle state.
  *
  *  - `'active'`  → the published, live overlay. `getMetaItem` (the
@@ -1034,7 +1079,6 @@ export class SysMetadataRepository implements MetadataRepository {
         row,
       );
       // Strip body for the header projection.
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { body, ...header } = item;
       yield header;
     }
@@ -1155,7 +1199,7 @@ export class SysMetadataRepository implements MetadataRepository {
       // the answer is "the platform", not a user literally named 'unknown'.
       actor: (row.recorded_by as string | null | undefined) ?? null,
       message: (row.change_note as string | undefined) ?? undefined,
-      ts: (row.recorded_at as string) ?? new Date(0).toISOString(),
+      ts: (isoFromValidDate(row.recorded_at) as string) ?? new Date(0).toISOString(),
       source: (row.source as string | undefined) ?? 'sys-metadata-repo',
     };
   }

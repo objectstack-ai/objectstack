@@ -38,13 +38,12 @@
  *
  * Both halves are shared now. The addressing vocabulary lives here, and so
  * does the ownership test that decides whether a registry item covers a route
- * ({@link standaloneActionOwnerKey}, in lockstep with the runtime's
- * `standaloneActionObjectName` and `ObjectQLPlugin.actionObjectKey`). The
- * registry rung itself arrives as the caller-injected `lookupRegistryAction`,
- * because objectql cannot import the router — the one caller that holds `ql`
- * hands the rung over. The invariant this file may claim, and no more: the
- * inventory reports a handler as undeclared only when EVERY source the router
- * resolves through answered nothing for it.
+ * ({@link standaloneActionOwnerKey}). The registry rung itself arrives as the
+ * caller-injected `lookupRegistryAction`, because objectql cannot import the
+ * router — the one caller that holds `ql` hands the rung over. The invariant
+ * this file may claim, and no more: the inventory reports a handler as
+ * undeclared only when EVERY source the router resolves through answered
+ * nothing for it.
  */
 
 /**
@@ -52,11 +51,12 @@
  *
  * Canonical since #3913, and it is `'global'` because that is what the two
  * writers have always written: `AppPlugin` (`action.object || 'global'`) and
- * `ObjectQLPlugin.actionObjectKey`. `engine.executeAction` is an exact-string
- * `Map` lookup with no wildcard semantics, so the READERS have to probe the
- * same literal — before this, the REST route and the MCP bridge both rotated
- * to `'*'`, which nothing ever registers, and every global action came back as
- * `Action '<name>' on object '*' not found`.
+ * the ObjectQL plugin (now via {@link standaloneActionOwnerKey}, which is
+ * why that writer no longer spells the literal itself). `engine.executeAction`
+ * is an exact-string `Map` lookup with no wildcard semantics, so the READERS
+ * have to probe the same literal — before this, the REST route and the MCP
+ * bridge both rotated to `'*'`, which nothing ever registers, and every global
+ * action came back as `Action '<name>' on object '*' not found`.
  */
 export const GLOBAL_ACTION_OBJECT_KEY = 'global';
 
@@ -73,13 +73,20 @@ export function isObjectLessActionKey(objectName: string | undefined | null): bo
  *
  * Standalone `action` metadata declares `objectName` (spec `ActionSchema`);
  * bundle collectors attach `object`; an object-less action owns the canonical
- * `'global'` key. Three writers had this same three-line ladder — the
- * runtime's `standaloneActionObjectName`, `ObjectQLPlugin.actionObjectKey`,
- * and an inline copy inside {@link collectEngineActionDeclarations}. It is
- * spelled once here because the router's rung-2 ownership test and this
- * inventory now have to agree on it exactly; the other two stay in lockstep
- * by their own docblocks (the runtime cannot import backwards, and the
- * plugin's copy is a private method).
+ * `'global'` key. Three other writers spelled this same three-line ladder —
+ * the runtime's `standaloneActionObjectName`, a private owner-key method on the
+ * ObjectQL plugin, and an inline copy inside
+ * {@link collectEngineActionDeclarations}. All of them resolve HERE now: the
+ * plugin calls this function directly (same package) and
+ * `@objectstack/runtime` re-exports it, keeping `standaloneActionObjectName`
+ * as a delegating alias for its own callers.
+ *
+ * ⛔ Do not re-inline it. What this replaced was a set of docblocks promising
+ * lockstep, which is documentation standing in for a check — and the plugin's
+ * copy had already drifted in the way only a copy can: it terminated on a bare
+ * `'global'` literal rather than {@link GLOBAL_ACTION_OBJECT_KEY}, equal in
+ * value and invisible to every test, so the day the constant moved they would
+ * have parted in silence.
  */
 export function standaloneActionOwnerKey(action: any): string {
     if (typeof action?.objectName === 'string' && action.objectName.length > 0) return action.objectName;

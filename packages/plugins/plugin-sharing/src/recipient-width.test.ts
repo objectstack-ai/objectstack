@@ -34,7 +34,7 @@
  * grandchild.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/objectql';
 import { SharingService } from './sharing-service.js';
 import { SharingRuleService } from './sharing-rule-service.js';
@@ -260,6 +260,326 @@ describe('#7807 recipient width — business_unit vs unit_and_subordinates', () 
       await engine.update('sys_business_unit', { id: 'bu_div', active: false });
       await rules.evaluateRule(WIDE_RULE, SYS);
       expect(granteesOf('note_wide')).toEqual([]);
+    });
+  });
+});
+
+/**
+ * [#14547] The same two widths, now against a SEEDED business unit — driven
+ * end to end so the observables the report named are the observables asserted.
+ *
+ * `business-unit-graph.test.ts` pins the two screens at the graph service.
+ * This block drives the whole rule path — `evaluateRule` → `expandRecipient`
+ * → `reconcile` → `sys_record_share` — because that is the layer the defect
+ * was reported at and the layer at which it was silent: the rule was accepted
+ * (201), it stayed `active: true`, it materialised zero grants, and nothing
+ * was logged. Asserting the graph's return value alone leaves every one of
+ * those facts unpinned.
+ *
+ * The fixture is the reported reproduction's shape, not an invented one, and
+ * its three rows carry three DIFFERENT tenancy facts — which is the whole
+ * reason the defect existed:
+ *
+ *   - `sys_business_unit` comes from app SEED data and carries
+ *     `organization_id = NULL` — a seed cannot know the id the runtime mints
+ *     at boot;
+ *   - `sys_business_unit_member` is POSTed through the REST data API and IS
+ *     organization-stamped (the engine threads the caller's tenant and
+ *     `SqlDriver.injectTenantOnInsert` fills the injected column);
+ *   - `sys_sharing_rule` is created by an organization admin and is
+ *     org-stamped too (an explicit `organization_id: null` in the payload is
+ *     overridden).
+ *
+ * ⚠️ The security half lives in its own `describe` below and is NOT a
+ * corollary of the functional half: a change that expands the right members
+ * while also expanding another organization's members passes every functional
+ * assertion here.
+ */
+describe('#14547 — an org-stamped rule against a SEEDED business unit', () => {
+  let engine: ReturnType<typeof makeEngine>;
+  let rules: SharingRuleService;
+  let warn: ReturnType<typeof vi.fn>;
+
+  const ORG_A = 'org_a';
+  const ORG_B = 'org_b';
+  const RULE = 'kpi_sheet_to_market_unit';
+
+  /** Who currently holds a rule-materialised grant on `recordId`. */
+  const granteesOf = (recordId: string): string[] =>
+    (engine._tables.sys_record_share ?? [])
+      .filter((r) => r.record_id === recordId && r.source === 'rule')
+      .map((r) => String(r.recipient_id))
+      .sort();
+
+  /** The empty-expansion warn calls this run emitted. */
+  const emptyWarns = (): any[][] =>
+    warn.mock.calls.filter((c) => String(c[0]).includes('expands to NO recipients'));
+
+  /** Create the rule the reproduction created, org-stamped like a real one. */
+  const seedRule = (
+    recipientType: 'business_unit' | 'unit_and_subordinates',
+    organizationId: string | null = ORG_A,
+  ) => {
+    engine.seed('sys_sharing_rule', [{
+      id: 'srule_kpi', organization_id: organizationId, name: RULE,
+      label: 'KPI sheet → Market', object_name: 'kpi_entry_sheet',
+      criteria_json: JSON.stringify({ subject: 'bu_market' }),
+      recipient_type: recipientType, recipient_id: 'bu_market',
+      access_level: 'edit', active: true, managed_by: 'package',
+    }]);
+  };
+
+  /**
+   * Units written before any organization existed — the `organization_id`
+   * column spelled explicitly, because a NULL column and an absent key are
+   * different things to a tenant screen. This is the shape #14547 is about.
+   */
+  const seedOrglessUnits = () =>
+    engine.seed('sys_business_unit', [
+      { id: 'bu_market', name: 'Market', parent_business_unit_id: null, organization_id: null, active: true },
+      { id: 'bu_market_west', name: 'Market West', parent_business_unit_id: 'bu_market', organization_id: null, active: true },
+    ]);
+
+  /**
+   * The same tree, created through the API by `org_a` and therefore stamped.
+   * ⚠️ Required by every MEMBER-screen assertion below: with the unit screen
+   * strict, an org-less unit is invisible to an org-stamped rule, so a member
+   * assertion anchored on one would be answered by the UNIT screen before the
+   * member read ever ran — it would pass with `memberScope` deleted.
+   */
+  const seedOrgStampedUnits = () =>
+    engine.seed('sys_business_unit', [
+      { id: 'bu_market', name: 'Market', parent_business_unit_id: null, organization_id: ORG_A, active: true },
+      { id: 'bu_market_west', name: 'Market West', parent_business_unit_id: 'bu_market', organization_id: ORG_A, active: true },
+    ]);
+
+  beforeEach(() => {
+    engine = makeEngine();
+    warn = vi.fn();
+    const sharing = new SharingService({ engine: engine as any });
+    rules = new SharingRuleService({ engine: engine as any, sharing, logger: { warn } as any });
+    engine.seed('kpi_entry_sheet', [{ id: 'kpi_1', subject: 'bu_market', owner_id: 'author' }]);
+  });
+
+  /**
+   * ⚠️ #14547's symptom stands in 17.x and these two cases REPRODUCE it — they
+   * do not assert a fix. (#14547 itself is CLOSED as completed, closed by
+   * #14949 whose unit half this reverts; reopening it is the maintainer's
+   * call. These tests assert the behaviour, which is 17.2.0's.) #14949 closed it by widening the unit screen with the
+   * platform's NULL arm; that was reverted before the 17.3 tag (the v18 org-ownership decision (PR #14976), D8)
+   * because it re-implemented `SqlDriver.applyTenantScope`'s own predicate a
+   * second time in a second place, and had not shipped. The structural fix is
+   * the v18 org-ownership decision (PR #14976), C1 on the v18 line: the Default Organization exists before
+   * application seed datasets load and the seed loader stamps
+   * `sys_business_unit` seeds.
+   *
+   * What DID survive #14949 is the observability half — the rule no longer
+   * grants nobody in silence.
+   */
+  describe('the reported defect — 201, active, zero shares, now LOUD (#14547)', () => {
+    it('WIDE — `unit_and_subordinates` still materialises NOTHING, and says so', async () => {
+      seedOrglessUnits();
+      engine.seed('sys_business_unit_member', [
+        { id: 'bum_1', business_unit_id: 'bu_market', user_id: 'u_1', organization_id: ORG_A },
+        { id: 'bum_2', business_unit_id: 'bu_market_west', user_id: 'u_2', organization_id: ORG_A },
+      ]);
+      seedRule('unit_and_subordinates');
+      const result = await rules.evaluateRule(RULE, SYS);
+      // The membership rows are stamped and would pass the member screen; the
+      // units are seeded, so the strict UNIT screen answers first.
+      expect(granteesOf('kpi_1')).toEqual([]);
+      expect(result.expandedUsers).toBe(0);
+      // The one thing 17.3 improves on 17.2.0 for this defect: it is no
+      // longer silent.
+      expect(emptyWarns()).toHaveLength(1);
+    });
+
+    it('NARROW — `business_unit` materialises nothing either', async () => {
+      seedOrglessUnits();
+      engine.seed('sys_business_unit_member', [
+        { id: 'bum_1', business_unit_id: 'bu_market', user_id: 'u_1', organization_id: ORG_A },
+        { id: 'bum_2', business_unit_id: 'bu_market_west', user_id: 'u_2', organization_id: ORG_A },
+      ]);
+      seedRule('business_unit');
+      await rules.evaluateRule(RULE, SYS);
+      expect(granteesOf('kpi_1')).toEqual([]);
+      expect(emptyWarns()).toHaveLength(1);
+    });
+
+    it('the SAME rule against an org-stamped tree grants normally — the control', async () => {
+      // Separates "#14547 stands" from "business-unit rules are broken". Only
+      // the units' organization moves; every other input is identical to the
+      // WIDE case above, and the grant materialises.
+      seedOrgStampedUnits();
+      engine.seed('sys_business_unit_member', [
+        { id: 'bum_1', business_unit_id: 'bu_market', user_id: 'u_1', organization_id: ORG_A },
+        { id: 'bum_2', business_unit_id: 'bu_market_west', user_id: 'u_2', organization_id: ORG_A },
+      ]);
+      seedRule('unit_and_subordinates');
+      const result = await rules.evaluateRule(RULE, SYS);
+      expect(granteesOf('kpi_1')).toEqual(['u_1', 'u_2']);
+      expect(result.expandedUsers).toBe(2);
+      expect(emptyWarns()).toHaveLength(0);
+    });
+
+    it('the two widths stay two widths on that tree (#7807)', async () => {
+      seedOrgStampedUnits();
+      engine.seed('sys_business_unit_member', [
+        { id: 'bum_1', business_unit_id: 'bu_market', user_id: 'u_1', organization_id: ORG_A },
+        { id: 'bum_2', business_unit_id: 'bu_market_west', user_id: 'u_2', organization_id: ORG_A },
+      ]);
+      seedRule('business_unit');
+      await rules.evaluateRule(RULE, SYS);
+      expect(granteesOf('kpi_1')).toEqual(['u_1']);
+    });
+  });
+
+  /**
+   * [#14949, KEPT] The MEMBER screen — NOT part of the the v18 org-ownership decision (PR #14976), D8 revert.
+   *
+   * ⚠️ Anchored on an ORG-STAMPED unit on purpose. With the unit screen strict
+   * again, an org-less unit is invisible to an org-stamped rule, so every
+   * assertion here would pass with `memberScope` deleted — the unit screen
+   * would answer before the member read ran. A visible unit is what makes
+   * these assertions pins on the MEMBER screen.
+   */
+  describe('⚠️ the cross-tenant leak `memberScope` closes', () => {
+    /**
+     * ONE unit the rule's own organization owns, two tenants' membership rows
+     * hanging off it. `sys_business_unit_member` is not organization-stamped
+     * on every write path, so mixed tenancy on a visible unit is a real
+     * deployment shape.
+     */
+    const twoTenantMembers = () => [
+      { id: 'bum_a', business_unit_id: 'bu_market', user_id: 'u_a', organization_id: ORG_A },
+      { id: 'bum_b', business_unit_id: 'bu_market', user_id: 'u_b', organization_id: ORG_B },
+      { id: 'bum_aw', business_unit_id: 'bu_market_west', user_id: 'u_a_west', organization_id: ORG_A },
+      { id: 'bum_bw', business_unit_id: 'bu_market_west', user_id: 'u_b_west', organization_id: ORG_B },
+    ];
+
+    it('WIDE — no `sys_record_share` row is ever materialised for another org’s member', async () => {
+      seedOrgStampedUnits();
+      engine.seed('sys_business_unit_member', twoTenantMembers());
+      seedRule('unit_and_subordinates', ORG_A);
+      await rules.evaluateRule(RULE, SYS);
+      expect(granteesOf('kpi_1')).toEqual(['u_a', 'u_a_west']);
+      expect(granteesOf('kpi_1')).not.toContain('u_b');
+      expect(granteesOf('kpi_1')).not.toContain('u_b_west');
+    });
+
+    it('NARROW — the single-unit width does not cross either', async () => {
+      seedOrgStampedUnits();
+      engine.seed('sys_business_unit_member', twoTenantMembers());
+      seedRule('business_unit', ORG_A);
+      await rules.evaluateRule(RULE, SYS);
+      expect(granteesOf('kpi_1')).toEqual(['u_a']);
+    });
+
+    it('an org-LESS membership row is not admitted to an org-stamped rule', async () => {
+      // Unknown tenancy, not platform-global: `sys_business_unit_member` is
+      // NOT organization-stamped by seed replay or by an elevated system
+      // write, so a NULL here fails CLOSED. The anchor unit is visible to the
+      // rule, so the exclusion below is the MEMBER screen's own doing.
+      seedOrgStampedUnits();
+      engine.seed('sys_business_unit_member', [
+        { id: 'bum_ok', business_unit_id: 'bu_market', user_id: 'u_ok', organization_id: ORG_A },
+        { id: 'bum_seeded', business_unit_id: 'bu_market', user_id: 'u_seeded', organization_id: null },
+      ]);
+      seedRule('unit_and_subordinates', ORG_A);
+      await rules.evaluateRule(RULE, SYS);
+      expect(granteesOf('kpi_1')).toEqual(['u_ok']);
+    });
+  });
+
+  describe('an active rule that grants nobody is LOUD', () => {
+    it('warns naming the rule, the object, the recipient kind, the unit and the org', async () => {
+      // The unit is visible and the membership row is org-less, so the empty
+      // expansion here is the MEMBER screen's — the residual case the warn
+      // exists for, and one the v18 org-ownership decision (PR #14976), C1 does not remove. It used to be
+      // completely silent.
+      seedOrgStampedUnits();
+      engine.seed('sys_business_unit_member', [
+        { id: 'bum_seeded', business_unit_id: 'bu_market', user_id: 'u_seeded', organization_id: null },
+      ]);
+      seedRule('unit_and_subordinates');
+      await rules.evaluateRule(RULE, SYS);
+
+      expect(granteesOf('kpi_1')).toEqual([]);
+      const calls = emptyWarns();
+      expect(calls).toHaveLength(1);
+      expect(String(calls[0][0])).toContain('organization_id');
+      expect(calls[0][1]).toMatchObject({
+        rule: RULE,
+        object: 'kpi_entry_sheet',
+        recipientType: 'unit_and_subordinates',
+        businessUnit: 'bu_market',
+        organization: ORG_A,
+      });
+    });
+
+    it('warns for the NARROW width too', async () => {
+      seedOrgStampedUnits();
+      seedRule('business_unit');
+      await rules.evaluateRule(RULE, SYS);
+      expect(emptyWarns()).toHaveLength(1);
+      expect(emptyWarns()[0][1]).toMatchObject({ recipientType: 'business_unit' });
+    });
+
+    it('warns ONCE per rule per process, not once per evaluation', async () => {
+      // The reconcilers call `expandRecipient` on every matched write. Without
+      // the dedup one misconfigured rule dominates the deployment's log — the
+      // same reasoning the inert-criteria warn already carries.
+      seedOrgStampedUnits();
+      seedRule('unit_and_subordinates');
+      await rules.evaluateRule(RULE, SYS);
+      await rules.evaluateRule(RULE, SYS);
+      await rules.evaluateRule(RULE, SYS);
+      expect(emptyWarns()).toHaveLength(1);
+    });
+
+    it('says nothing when the rule grants somebody', async () => {
+      seedOrgStampedUnits();
+      engine.seed('sys_business_unit_member', [
+        { id: 'bum_1', business_unit_id: 'bu_market', user_id: 'u_1', organization_id: ORG_A },
+      ]);
+      seedRule('unit_and_subordinates');
+      await rules.evaluateRule(RULE, SYS);
+      expect(emptyWarns()).toHaveLength(0);
+    });
+
+    it('an INACTIVE rule is not warned about — it is meant to grant nobody', async () => {
+      // `evaluateRule` short-circuits an inactive rule before `expandRecipient`
+      // runs at all; the guard inside the warn covers the reconciler paths that
+      // reach the expansion directly. Both roads lead here, so this asserts the
+      // observable rather than which of the two answered.
+      seedOrgStampedUnits();
+      engine.seed('sys_sharing_rule', [{
+        id: 'srule_off', organization_id: ORG_A, name: 'off_rule',
+        label: 'Off', object_name: 'kpi_entry_sheet',
+        criteria_json: JSON.stringify({ subject: 'bu_market' }),
+        recipient_type: 'unit_and_subordinates', recipient_id: 'bu_market',
+        access_level: 'edit', active: false, managed_by: 'package',
+      }]);
+      await rules.evaluateRule('off_rule', SYS);
+      expect(emptyWarns()).toHaveLength(0);
+    });
+  });
+
+  describe('the org-LESS rule — the dominant shape today — is unmoved', () => {
+    it('still expands every member of the seeded tree, stamped or not', async () => {
+      // A platform-global rule threads no organization, so BOTH screens are
+      // no-ops for it — unmoved by #14949 and unmoved by the the v18 org-ownership decision (PR #14976), D8
+      // revert of its unit half. Pinned in both directions so neither change
+      // can silently retire the declared cross-tenant behaviour of a
+      // null-org rule.
+      seedOrglessUnits();
+      engine.seed('sys_business_unit_member', [
+        { id: 'bum_1', business_unit_id: 'bu_market', user_id: 'u_1', organization_id: ORG_A },
+        { id: 'bum_2', business_unit_id: 'bu_market_west', user_id: 'u_2', organization_id: null },
+      ]);
+      seedRule('unit_and_subordinates', null);
+      await rules.evaluateRule(RULE, SYS);
+      expect(granteesOf('kpi_1')).toEqual(['u_1', 'u_2']);
     });
   });
 });

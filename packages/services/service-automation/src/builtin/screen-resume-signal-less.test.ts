@@ -30,6 +30,28 @@ import { installBuiltinNodes } from './index.js';
 function silentLogger() {
     return { info() {}, warn() {}, error() {}, debug() {}, child() { return silentLogger(); } } as any;
 }
+
+/**
+ * A logger that RECORDS what it was told, level included — the engine's own
+ * sink for the tests that pin a log branch. `silentLogger` discards, so a
+ * branch can only be pinned on absence against something that keeps the calls
+ * (#14392).
+ */
+function recordingLogger(sink: Array<{ level: string; message: string }>) {
+    const rec = (level: string) => (message: unknown) => { sink.push({ level, message: String(message) }); };
+    const self: any = {
+        info: rec('info'), warn: rec('warn'), error: rec('error'), debug: rec('debug'),
+        child() { return self; },
+    };
+    return self;
+}
+
+/**
+ * The degraded up-bubble sentence, verbatim (#14392). Asserted by CONTENT and
+ * not by "some warn fired": the card is that this exact sentence described the
+ * healthy path.
+ */
+const DEGRADED_SENTENCE = 'is gone — continuing without child output';
 function ctx() {
     return { logger: silentLogger(), getService() { return undefined; } } as any;
 }
@@ -165,9 +187,12 @@ describe('signal-less resume of a pause that declares no contract proceeds (#136
 describe("engine-built continuation stays exempt — the flag is the ONLY exemption (#13648 negative control)", () => {
     let engine: AutomationEngine;
     let captured: unknown[];
+    /** #14392 — the engine's log records, so the up-bubble branch is pinnable. */
+    let records: Array<{ level: string; message: string }>;
 
     beforeEach(() => {
-        engine = new AutomationEngine(silentLogger());
+        records = [];
+        engine = new AutomationEngine(recordingLogger(records));
         installBuiltinNodes(engine, ctx());
         captured = [];
         // Copies the screen-collected `kind` into the child's declared output.
@@ -241,6 +266,54 @@ describe("engine-built continuation stays exempt — the flag is the ONLY exempt
         expect(childRes.status).toBeUndefined();
         expect(captured).toEqual([{ result: 'escalate' }]);
         expect(engine.listSuspendedRuns()).toHaveLength(0);
+
+        // [#14392] Pinned on the BRANCH, not on the sentence. This IS the
+        // engine-built up-bubble: `captured` one line up is the child's output
+        // arriving in the parent, so the parent continued *with* it. The
+        // degraded line claims the opposite and must be absent — it used to
+        // fire here on every healthy subflow completion, because the parent's
+        // `subflow:` correlation is looked up with `loadSuspendedRun` and a
+        // COMPLETED child has no suspension to find.
+        expect(records.filter((r) => r.message.includes(DEGRADED_SENTENCE))).toEqual([]);
+        // Not silent by accident either: the healthy continuation says what it
+        // is, once, at `debug` — never `warn`.
+        const bubbled = records.filter((r) => r.message.includes('engine-built up-bubble signal'));
+        expect(bubbled).toHaveLength(1);
+        expect(bubbled[0].level).toBe('debug');
+        expect(bubbled[0].message).toContain(child.runId);
+    });
+
+    it('[#14392 positive control] the degraded line still fires when the child run is gone AND nothing carries its output', async () => {
+        const started = await engine.execute('parent', {} as any);
+        const parentRunId = started.runId!;
+        const child = engine.listSuspendedRuns().find((r) => r.flowName === 'child')!;
+
+        // Make the child GENUINELY gone without bubbling anything up:
+        // `cancelRun` consumes the child's continuation only, leaving this
+        // parent parked on a `subflow:` correlation that now dangles.
+        expect(await engine.cancelRun(child.runId, 'abandoned')).toBe(true);
+        records.length = 0;
+
+        // A CALLER's signal this time — not the engine's — so nothing carries
+        // the child's output. `kind` satisfies the child's screen, which the
+        // parent surfaces as its own.
+        const res = await engine.resume(parentRunId, { variables: { kind: 'escalate' } });
+
+        const degraded = records.filter((r) => r.message.includes(DEGRADED_SENTENCE));
+        expect(degraded).toHaveLength(1);
+        // The level does NOT move (#13398-class): this branch keeps `warn`.
+        expect(degraded[0].level).toBe('warn');
+        expect(degraded[0].message).toContain(child.runId);
+        expect(degraded[0].message).toContain(parentRunId);
+        // ...and no debug up-bubble line, since there was no up-bubble.
+        expect(records.filter((r) => r.message.includes('engine-built up-bubble signal'))).toEqual([]);
+
+        // Behaviour unchanged: the branch still CONTINUES the parent, which is
+        // the whole point of the `else` — downstream ran, with no subflow
+        // output to map into `subResult`.
+        expect(res.success).toBe(true);
+        expect(captured).toEqual([undefined]);
+        expect(await engine.hasSuspendedRun(parentRunId)).toBe(false);
     });
 
     it("a signal-less resume of the CHILD is still refused — the flag exempts the engine's signal, not the run", async () => {

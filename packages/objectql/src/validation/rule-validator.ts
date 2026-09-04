@@ -535,11 +535,16 @@ function readonlyWhenBindings(
  *
  * So `supplied` is the CALLER's payload as snapshotted at ENGINE ENTRY, before
  * any middleware or hook ran, and a key is judged only when it is still the
- * caller's — the identical two-part test `stripReadonlyFields` applies:
+ * caller's — a two-part test, spelled out in {@link isCallerSuppliedValue}:
  *
  *  1. the key is an OWN property of `supplied` (a key a hook ADDED is not), and
  *  2. the payload still holds the caller's VALUE by `Object.is` (a key a hook
  *     OVERWROTE now carries a platform value, not a forgery).
+ *
+ * `stripReadonlyFields` began with those same two parts and NO LONGER HAS THEM:
+ * #14088 gave it a hook-write RECORD, asked ahead of part 2. This seam keeps
+ * value equality — a deliberate, lock-motivated divergence (#14259), argued
+ * where the test itself lives ({@link isCallerSuppliedValue}).
  *
  * ⚠️ **This does not weaken the lock at the API boundary, and the reason is
  * that a caller cannot reach the exempt side of either test.** To be treated as
@@ -568,8 +573,52 @@ interface ReadonlyWhenStripOptions {
 /**
  * Is this key still the CALLER's to be judged? (#9107 — see
  * {@link ReadonlyWhenStripOptions}.) Shared by the single-id and bulk strips so
- * the two can never disagree about what "caller-supplied" means, and written to
- * be textually parallel with the same test inside {@link stripReadonlyFields}.
+ * those two can never disagree about what "caller-supplied" means.
+ *
+ * ## ⚠️ It is NOT the same test as {@link stripReadonlyFields}' any more (#14259)
+ *
+ * It once was, and this docblock said so. #14088 moved that one off value
+ * equality onto a RECORD of the keys the before-phase hook chain actually
+ * assigned (`options.hookWrittenKeys`), and #14472 did the same to the
+ * insert-side {@link stripRuntimeOwnedFields}. This predicate deliberately
+ * stayed behind. The divergence is not drift, and it is not a port nobody got
+ * to — it is decided by what each face GUARDS:
+ *
+ *  - **The static face** ({@link stripReadonlyFields} and its insert-side twin)
+ *    guards an author-declared `readonly` or a runtime-owned COLUMN. Hook
+ *    authorship is precisely the exemption it means to grant, so "the chain
+ *    assigned this key" is the right evidence for it, and value equality was
+ *    only ever a proxy for it — a proxy that collapses *the hook deliberately
+ *    wrote the value the caller also sent* into *the hook never touched it*.
+ *  - **The lock face** (this predicate, behind {@link stripReadonlyWhenFields}
+ *    and {@link stripReadonlyWhenFieldsMulti}) guards a `readonlyWhen` STATE
+ *    lock, whose entire guarantee is that NO caller write survives a TRUE
+ *    predicate (#4889's frozen paid-invoice lines). A record of assignments is
+ *    blind to the value by design — that blindness is what makes it correct on
+ *    the static face — so here it would let an innocuous before-phase line
+ *    spelled `data.x = data.x`, or a normalisation that is the identity for
+ *    canonical input, hand the CALLER's own value hook ownership and silently
+ *    unlock the lock. Measured, not feared: threading the record into this
+ *    predicate turned the #9107 pin `LOCK 3b` red.
+ *
+ * So on a `readonlyWhen` lock a hook assignment that writes back the value
+ * already on the key **is not a hook write**: the caller's value is stripped,
+ * with the existing warning and the same `onFieldsDropped` /
+ * `strictReadonlyWrites` reporting. The residual is accepted and recorded
+ * rather than hidden — a hook that genuinely DERIVES a locked field loses its
+ * write when the caller echoed the identical value. No instance of that exists
+ * in the tree; the shape that would buy a repair is hook ownership declared as
+ * an act on the hook context, which both faces would then read.
+ *
+ * Each face carries a measurement pin, written to be read side by side:
+ *  - static face — `MEASURED: a lone self-assigning hook leaves the CALLER
+ *    value on the key` in `engine-readonly-strip-caller-values.test.ts`
+ *    (update side) and `engine-hook-provenance-sibling-seams.test.ts` (insert);
+ *  - lock face — `LOCK 3b` in `engine-readonly-when-derived-writes.test.ts`,
+ *    which pins the OPPOSITE verdict on the same hook spelling.
+ *
+ * Both record what IS. Reversing this ruling inverts them; it never deletes
+ * them.
  */
 function isCallerSuppliedValue(
   data: Record<string, unknown>,
@@ -2180,6 +2229,18 @@ function checkStateMachine(
         code,
         message: authoredRuleMessage(rule, ctx?.messages),
         label: resolveFieldLabel(rule.field, def, ctx?.messages),
+        // An authored message replaces the built-in WORDING — not the
+        // machine-readable facts beside it. `constraint` and `value` are
+        // declared on `FieldValidationError` (mirroring `FieldErrorSchema`) and
+        // are what a client ACTS on rather than displays: the legal
+        // `initialStates` a create form must offer, or the `from → to` pair a
+        // detail page greys out. Emitting them only on the built-in path meant
+        // that declaring a message — which the spec REQUIRES on every rule —
+        // silently cost the caller the rest of the envelope, so the richer
+        // envelope was reachable only by leaving the sentence empty. Nothing
+        // about the refusal changes; it gains the location it already declares.
+        ...(Object.keys(constraint).length > 0 ? { constraint } : {}),
+        ...(value !== undefined ? { value } : {}),
       };
     }
     return buildFieldError({ field: rule.field, code, def, constraint, value }, ctx?.messages);
@@ -2356,7 +2417,6 @@ function matchesNamedFormat(format: FormatRule['format'], str: string): boolean 
       return PHONE_RE.test(str);
     case 'url':
       try {
-        // eslint-disable-next-line no-new
         new URL(str);
         return true;
       } catch {

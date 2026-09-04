@@ -337,10 +337,17 @@ export const TriggerFlowResponseSchema = lazySchema(() => BaseResponseSchema.ext
       + 'their transport mappings are documented on the contract '
       + '(`AutomationResult.code`, contracts/automation-service.ts).',
     ),
-    status: z.enum(['completed', 'paused', 'failed']).optional().describe(
+    // `stranded` is the contract half of the #13937 shape-4 ruling (#14384);
+    // the condition is #13909's. Mirrors `AutomationResult.status` member for
+    // member — the pin is `contracts/automation-result-status.pin.test.ts`.
+    status: z.enum(['completed', 'paused', 'failed', 'stranded']).optional().describe(
       'Lifecycle status. `paused` means the run suspended at a node and can be '
-      + 'continued with the resume route. Absent or `completed`/`failed` means '
-      + 'the run reached a terminal state.',
+      + 'continued with the resume route. Absent or `completed`/`failed`/`stranded` '
+      + 'means the run reached a terminal state. `stranded` is the '
+      + 'terminally-failed-but-repairable run: a resume consumed the suspension '
+      + 'and a downstream node threw, so the run is recorded as failed and can be '
+      + 're-armed only by an explicit operator verb - never by the resume route, '
+      + 'which answers RUN_NOT_FOUND for it.',
     ),
     runId: z.string().optional()
       .describe('Run id - set when `status` is `paused`, so callers can resume it'),

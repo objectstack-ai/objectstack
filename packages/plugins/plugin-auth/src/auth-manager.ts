@@ -11,7 +11,11 @@ import type {
   AuthPluginConfig,
   OidcProvidersConfig,
 } from '@objectstack/spec/system';
-import { SystemObjectName, audiencePermitsSelfRegistration } from '@objectstack/spec/system';
+import {
+  SystemObjectName,
+  audiencePermitsSelfRegistration,
+  preferredLocaleFromHeader,
+} from '@objectstack/spec/system';
 import {
   assertAudienceConfig,
   classifyCreationMethod,
@@ -113,6 +117,17 @@ import {
   interpolatePhoneSms,
   loadPhoneSmsTemplateBody,
 } from './phone-sms-texts.js';
+// #14762 — the stored rung of the ruled locale ladder reuses the messaging
+// seam's normalizer rather than growing a second one. `normalizeRecipientLocale`
+// is the platform's ONE reader of a value at rest in `sys_user.locale`, and its
+// refusal of the stringified-nothing literals (`"undefined"`, `"null"`) is part
+// of its contract — hotcrm measured that literal dead-lettering every delivery
+// for every user without a preference row. A private copy here would be a
+// second place for that refusal to rot.
+import {
+  RECIPIENT_LOCALE_FIELD,
+  normalizeRecipientLocale,
+} from '@objectstack/service-messaging';
 import {
   AUTH_USER_CONFIG,
   AUTH_SESSION_CONFIG,
@@ -232,7 +247,6 @@ function installWebContainerRequestStatePolyfill(): void {
   if (!g[sym].context) g[sym].context = {};
   if (!g[sym].context.requestStateAsyncStorage) {
     g[sym].context.requestStateAsyncStorage = new WebContainerRequestStateAsyncLocalStorage();
-    // eslint-disable-next-line no-console
     console.warn(
       '[AuthManager] WebContainer detected: installed synchronous request-state polyfill ' +
         '(node:async_hooks AsyncLocalStorage does not propagate context across await in WebContainer).',
@@ -924,6 +938,22 @@ export function ipMatchesRange(ip: string, range: string): boolean {
 const SMS_QUOTA_EXCEEDED_CODE = 'TOO_MANY_REQUESTS';
 
 /**
+ * [#14522] The better-auth endpoint path prefix every SCIM 2.0 protocol
+ * endpoint lives under (`/scim/v2/Users`, `/scim/v2/Groups/:groupId`, …) —
+ * the same predicate `@better-auth/scim` uses for its own after-hook matcher
+ * (`context.path?.startsWith("/scim/v2")`). A request under it runs inside
+ * `scimRequestScope`; see `handleRequest`.
+ */
+const SCIM_PROTOCOL_PATH_PREFIX = '/scim/v2';
+
+function isScimProtocolPath(endpointPath: string | undefined): boolean {
+  return (
+    endpointPath === SCIM_PROTOCOL_PATH_PREFIX ||
+    endpointPath?.startsWith(`${SCIM_PROTOCOL_PATH_PREFIX}/`) === true
+  );
+}
+
+/**
  * #6039 — is this `SendSmsResult.error` the quota wall's refusal?
  *
  * Matched as a PREFIX of the service's `CODE: message` envelope, never as a
@@ -986,6 +1016,85 @@ export function normalizeAuthEmailLocale(raw: string | undefined): string | unde
     (l) => l.slice(0, l.indexOf('-')).toLowerCase() === lower,
   );
   return byLanguage ?? value;
+}
+
+/**
+ * #14319 — the auth email locale the REQUEST asked for, or `undefined`.
+ *
+ * Maintainer ruling 2026-09-02 (in session). Quoted verbatim and untranslated,
+ * as rulings are:
+ *
+ * > 注册 / 登录 / 重置密码等由请求触发的 auth 邮件，语言优先取请求的
+ * > `Accept-Language`（命中 `AUTH_EMAIL_TEMPLATE_LOCALES` 才生效），其次才是
+ * > 部署默认（`localization.locale` → `i18n.defaultLocale`）。
+ *
+ * The motivating case is the one no deployment default can answer: at cloud
+ * self-service signup there is no workspace yet, so nothing on the server
+ * represents this person's language — only the request does.
+ *
+ * The header is parsed by the platform's ONE parser,
+ * {@link preferredLocaleFromHeader}, which REST already uses for metadata
+ * translation and the runtime dispatcher for `ExecutionContext.requestLocale`.
+ * A second parser here would let the mail a user receives disagree with the
+ * screen that triggered it — the very class of defect this card is about.
+ *
+ * A hit is REQUIRED, not merely preferred: only a locale this platform ships an
+ * auth row for takes effect, so `fr-FR` falls through to the deployment default
+ * instead of naming a row that does not exist. That is deliberately narrower
+ * than {@link normalizeAuthEmailLocale}, which passes an unshipped regional tag
+ * through because a tenant may overlay `en-GB` rows and the deployment default
+ * may legitimately ask for them. The asymmetry is the ruling's own: a
+ * per-request header is a weaker claim than a deployment's declaration.
+ *
+ * ⚠️ The source is read defensively because better-auth is NOT consistent about
+ * what it hands these callbacks — measured against the installed 1.7.x, not
+ * assumed: `sendResetPassword`, `sendVerificationEmail` and
+ * `sendInvitationEmail` are called with `ctx.request` (a Web `Request`), while
+ * `sendMagicLink` is called with the endpoint `ctx` itself, and the
+ * change-email notice fires from the global `after` hook, which also holds a
+ * `ctx`. One reader covering all three shapes beats three call sites each
+ * guessing at one.
+ */
+export function authEmailLocaleFromRequest(source: unknown): string | undefined {
+  const header = acceptLanguageHeader(source);
+  if (!header) return undefined;
+  const preferred = preferredLocaleFromHeader(header);
+  if (!preferred) return undefined;
+  const normalized = normalizeAuthEmailLocale(preferred);
+  const shipped: readonly string[] = AUTH_EMAIL_TEMPLATE_LOCALES;
+  return normalized && shipped.includes(normalized) ? normalized : undefined;
+}
+
+/**
+ * The `accept-language` value off a Web `Request`, a better-auth endpoint
+ * context, or anything carrying either. Never throws: a vendor changing the
+ * shape it hands a callback must degrade to the deployment default, never fail
+ * the send.
+ */
+function acceptLanguageHeader(source: unknown): string | undefined {
+  if (!source || typeof source !== 'object') return undefined;
+  const nested = (source as { request?: unknown }).request;
+  const bags = [
+    (source as { headers?: unknown }).headers,
+    nested && typeof nested === 'object' ? (nested as { headers?: unknown }).headers : undefined,
+  ];
+  for (const bag of bags) {
+    if (!bag || typeof bag !== 'object') continue;
+    try {
+      const getter = (bag as { get?: unknown }).get;
+      if (typeof getter === 'function') {
+        const value = (bag as Headers).get('accept-language');
+        if (typeof value === 'string' && value) return value;
+        continue;
+      }
+      const record = bag as Record<string, unknown>;
+      const value = record['accept-language'] ?? record['Accept-Language'];
+      if (typeof value === 'string' && value) return value;
+    } catch {
+      // A header bag that throws on read is not a reason to fail the send.
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -1333,7 +1442,8 @@ export class AuthManager {
             ? { autoSignIn: this.config.emailAndPassword.autoSignIn } : {}),
           ...(this.config.emailAndPassword?.revokeSessionsOnPasswordReset != null
             ? { revokeSessionsOnPasswordReset: this.config.emailAndPassword.revokeSessionsOnPasswordReset } : {}),
-        sendResetPassword: async ({ user, url, token }: { user: { id: string; email: string; name?: string }; url: string; token: string }) => {
+        // #14319 — better-auth calls this as `sendResetPassword(data, ctx.request)`.
+        sendResetPassword: async ({ user, url, token }: { user: { id: string; email: string; name?: string }; url: string; token: string }, request?: unknown) => {
           // #2766 V1.5 — placeholder addresses (phone-only users) are never
           // real recipients. Refuse loudly instead of "sending" into the void;
           // the reset path for these users is phone sign-in / an admin
@@ -1362,10 +1472,17 @@ export class AuthManager {
           // background-task handling (see sendVerificationEmail) and the
           // forget-password route always returns {status:true}, so this never
           // leaks whether an address exists nor turns the request into a 500.
+          // #14762 — the ladder's stored rung. It matters most HERE: an
+          // admin-initiated reset (`admin-import-users.ts` calls
+          // `requestPasswordReset`) reaches this callback with the ADMIN's
+          // request, so without this rung the user's mail carries the admin's
+          // browser language. Best-effort; `undefined` leaves the #14319
+          // ladder exactly as it was.
+          const storedLocale = await this.storedRecipientLocale({ id: user.id });
           const result = await email.sendTemplate({
             template: 'auth.password_reset',
             to: { address: user.email, ...(user.name ? { name: user.name } : {}) },
-            ...this.emailLocaleArg(),
+            ...this.emailLocaleArg(request, storedLocale),
             data: {
               user: { name: user.name || user.email, email: user.email, id: user.id },
               resetUrl: url,
@@ -1396,7 +1513,8 @@ export class AuthManager {
             ? { autoSignInAfterVerification: this.config.emailVerification.autoSignInAfterVerification } : {}),
           ...(this.config.emailVerification?.expiresIn != null
             ? { expiresIn: this.config.emailVerification.expiresIn } : {}),
-          sendVerificationEmail: async ({ user, url, token }: { user: { id: string; email: string; name?: string }; url: string; token: string }) => {
+          // #14319 — better-auth calls this as `sendVerificationEmail(data, ctx.request)`.
+          sendVerificationEmail: async ({ user, url, token }: { user: { id: string; email: string; name?: string }; url: string; token: string }, request?: unknown) => {
             const email = this.getEmailService();
             if (!email) {
               // Verification is enabled (this callback only exists when it is)
@@ -1419,10 +1537,14 @@ export class AuthManager {
             // template/loader errors, and returns status:'failed' on transport
             // errors — surface both so resend is honest and signup stays
             // resilient via better-auth's background-task error handling.
+            // #14762 — the stored rung, same ladder as the reset above. An
+            // admin re-triggering verification for a user is the same
+            // requester-is-not-the-recipient shape.
+            const storedLocale = await this.storedRecipientLocale({ id: user.id });
             const result = await email.sendTemplate({
               template: 'auth.verify_email',
               to: { address: user.email, ...(user.name ? { name: user.name } : {}) },
-              ...this.emailLocaleArg(),
+              ...this.emailLocaleArg(request, storedLocale),
               data: {
                 user: { name: user.name || user.email, email: user.email, id: user.id },
                 verificationUrl: url,
@@ -1965,8 +2087,17 @@ export class AuthManager {
           // carve-out: an app that seeds people makes the bootstrap probe
           // answer "populated" before the seed ever runs. Cheap synchronous
           // check first, so the ticket path costs no I/O.
+          // [#14373] The email alone no longer admits — see
+          // `stageOperatorProvisioning`'s doc. `ctx.body` is the vendor's own
+          // zod-validated body, which keeps any key outside the declared
+          // schema (`signUpEmailBodySchema.and(z.record(...))`), so the
+          // in-process seed call's ticket field survives here untouched.
           const signUpEmail = typeof ctx?.body?.email === 'string' ? ctx.body.email : undefined;
-          if (this.isOperatorProvisioning(signUpEmail) || (await this.isBootstrapCreation())) {
+          const provisioningTicket = ctx?.body?.[AuthManager.OPERATOR_PROVISIONING_TICKET_FIELD];
+          if (
+            this.isOperatorProvisioning(signUpEmail, provisioningTicket) ||
+            (await this.isBootstrapCreation())
+          ) {
             ctx.context.__osDisableSignUpOrig = ep.disableSignUp;
             ep.disableSignUp = false;
           }
@@ -2102,7 +2233,9 @@ export class AuthManager {
             }
             const newEmail = typeof ctx?.body?.newEmail === 'string' ? ctx.body.newEmail : '';
             if (succeeded && from?.email && newEmail) {
-              await this.sendChangeEmailNotice(from, newEmail);
+              // #14319 — the notice goes to the account owner, who IS the
+              // caller here, so the request rung applies.
+              await this.sendChangeEmailNotice(from, newEmail, ctx);
             }
             return;
           }
@@ -2915,11 +3048,47 @@ export class AuthManager {
             );
             return;
           }
+          // #14641 — the invitee's OWN stored language, when the address
+          // already carries a `sys_user` row. Two branches, and the split is
+          // the whole point:
+          //
+          //  1. the address HAS a row — an existing platform user invited into
+          //     a second organization, or a re-invitation (better-auth's
+          //     `create-invitation` refuses only an address that is already a
+          //     member of THIS org, measured in the installed 1.7.x
+          //     `routes/crud-invites.mjs`, so an existing account being invited
+          //     elsewhere reaches this callback normally). Their column is a
+          //     language they chose for themselves — the same authority the
+          //     reset / verification sends read since #14762.
+          //  2. NO row — a genuinely new invitee. Their language is still truly
+          //     unknown at invitation time, so the deployment default stands,
+          //     exactly as before.
+          //
+          // Matched EXACTLY on the address, which is safe here rather than
+          // merely tolerable: better-auth lowercases the invitee address on the
+          // invite route (`crud-invites.mjs` — both the create and the resend
+          // branch) and lowercases the stored `user.email` on sign-up
+          // (`api/routes/sign-up.mjs`), so both sides of this predicate are
+          // already in the same case. A spelling that resolves no row lands on
+          // the deployment default, which is the documented floor rather than a
+          // failure.
+          const storedLocale = await this.storedRecipientLocale({ email: recipientEmail });
           try {
             await emailService.sendTemplate({
               template: 'auth.invitation',
               to: recipientEmail,
-              ...this.emailLocaleArg(),
+              // #14319 — DELIBERATELY no request argument, and the only one of
+              // the five sends without one. better-auth DOES hand this callback
+              // a `ctx.request`, but it is the INVITER's: stamping their
+              // browser language onto the invitee's mail would recreate this
+              // very card one seat over. The 2026-09-02 ruling enumerates
+              // signup, sign-in and password reset — sends where the requester
+              // IS the recipient — and the superseded 2026-08-13 ruling named
+              // invitations as its own counterexample. #13881's ruling item 3
+              // fixes the chain as RECIPIENT locale → deployment default, so
+              // the inviter direction stays rejected: what #14641 added above
+              // is the invitee's own column, never the inviter's header.
+              ...this.emailLocaleArg(undefined, storedLocale),
               data: {
                 inviter: {
                   name: inviter?.user?.name ?? inviter?.user?.email ?? 'A teammate',
@@ -3064,7 +3233,9 @@ export class AuthManager {
       const { magicLink } = await import('better-auth/plugins/magic-link');
       // magic-link reuses the `verification` table — no extra schema mapping needed.
       return magicLink({
-        sendMagicLink: async ({ email: recipientEmail, url, token }) => {
+        // #14319 — this one is called with the endpoint CTX, not a Request
+        // (measured; magic-link/index.mjs `sendMagicLink({...}, ctx)`).
+        sendMagicLink: async ({ email: recipientEmail, url, token }, ctx?: unknown) => {
           // #2766 V1.5 — placeholder addresses are never real recipients.
           if (isPlaceholderEmail(recipientEmail)) {
             throw new Error(
@@ -3086,7 +3257,7 @@ export class AuthManager {
             await emailService.sendTemplate({
               template: 'auth.magic_link',
               to: recipientEmail,
-              ...this.emailLocaleArg(),
+              ...this.emailLocaleArg(ctx),
               data: {
                 magicLinkUrl: url,
                 token,
@@ -3266,17 +3437,22 @@ export class AuthManager {
     if (enabled.scim) {
       await this.addOptionalPlugin(plugins, 'scim', async () => {
         const { scim } = await import('@better-auth/scim');
-        const { verifyScimBearerToken, scimRequestScope } = await import('./scim-connection-service.js');
+        const { verifyScimBearerToken } = await import('./scim-connection-service.js');
         const secret = this.resolveAuthSecret();
         return scim({
           connections: [],
           authentication: {
             verifyBearerToken: async (input) => {
-              // Mark the remainder of this request's async chain as a SCIM
-              // protocol request, so the adapter runs its provisioning writes
-              // inside a REAL engine transaction (see scimRequestScope's
-              // rationale in scim-connection-service.ts).
-              scimRequestScope.enterWith({ scim: true });
+              // ⛔ No `scimRequestScope.enterWith(...)` here. The SCIM request
+              // scope that makes the adapter open a REAL engine transaction is
+              // opened by `handleRequest` with `run(...)` around the whole
+              // request (see `SCIM_PROTOCOL_PATH_PREFIX`). It used to be
+              // stamped from this callback and never reached the writes: an
+              // `enterWith` marks only the async resource it runs in and that
+              // resource's descendants, and the vendor resumes the endpoint
+              // handler from a continuation captured BEFORE this verifier ran
+              // (measured on 1.7.2 — zero engine transactions across a SCIM
+              // POST + PATCH; pinned by `scim-transaction-scope.test.ts`).
               const engine = this.config.dataEngine;
               if (!engine) return null; // no store to verify against — fail closed
               return verifyScimBearerToken(engine as never, secret, input.token);
@@ -3690,8 +3866,12 @@ export class AuthManager {
    * [#14157] Addresses the deployment's OWN boot command is provisioning right
    * now — see {@link stageOperatorProvisioning} for why this exists and why it
    * is not the bootstrap probe.
+   *
+   * [#14373] Keyed by email, but admission also requires the per-stage
+   * `ticket` below — see {@link stageOperatorProvisioning} for why the
+   * address alone stopped being enough.
    */
-  private pendingOperatorProvisioning = new Map<string, { stagedAtMs: number }>();
+  private pendingOperatorProvisioning = new Map<string, { stagedAtMs: number; ticket: string }>();
 
   /**
    * Deliberately short. The window this covers is a single in-process
@@ -3699,6 +3879,19 @@ export class AuthManager {
    * only the floor under a caller killed between the two.
    */
   private static readonly OPERATOR_PROVISIONING_STAGE_TTL_MS = 60 * 1000;
+
+  /**
+   * [#14373] Body field the ticket's random value rides on for the single
+   * in-process `signUpEmail` call it admits. `signUpEmailBodySchema` in
+   * better-auth is `z.object({...}).and(z.record(z.string(), z.any()))`, so
+   * an unrecognized key survives validation on `ctx.body` untouched — this
+   * rides that catch-all rather than a declared `additionalFields` column,
+   * so it never becomes a `sys_user` field. The name is deliberately
+   * internal-looking; nothing public ever sends this key, so its presence in
+   * a request is itself the credential this seam demands (see
+   * {@link isOperatorProvisioning}).
+   */
+  static readonly OPERATOR_PROVISIONING_TICKET_FIELD = '__osOperatorProvisioningTicket';
 
   /**
    * Page size of the bootstrap population probe ({@link isBootstrapCreation}).
@@ -3768,17 +3961,23 @@ export class AuthManager {
    * OAuth flows redirect to the error URL carrying the same code).
    *
    * [#11767] The vendor's second argument — the endpoint context — is
-   * deliberately UNREAD. Both probes below take their own ctx-independent data
-   * path, because sourcing this gate's I/O from the request context is exactly
-   * what made the bootstrap bypass inert (see {@link isBootstrapCreation}).
-   * The parameter is kept so the signature still reads as the vendor's.
+   * deliberately UNREAD for the population probes below: both take their own
+   * ctx-independent data path, because sourcing THEIR I/O from the request
+   * context is exactly what made the bootstrap bypass inert (see {@link
+   * isBootstrapCreation}). [#14373] carves one narrow exception: the operator
+   * ticket's random value (see `stageOperatorProvisioning`), which travels
+   * only as a `ctx.body` field and has no other channel to reach this gate —
+   * `data.user` here is `internalAdapter.createUser`'s own input, not the raw
+   * request body, so it never carries an undeclared key. That is a plain read
+   * of an already-parsed value, not a re-derived I/O probe, so it does not
+   * reopen what #11767 closed.
    */
   private async validateAudienceAdmission(
     data: {
       user?: Record<string, unknown>;
       source?: { action?: string; method?: string; oauth?: { providerId?: string } };
     },
-    _ctx?: unknown,
+    ctx?: unknown,
   ): Promise<{ error: string; errorDescription?: string } | undefined> {
     try {
       // link-account / provider sign-in concern an EXISTING user's identity,
@@ -3792,7 +3991,15 @@ export class AuthManager {
       // because the seed reaches better-auth through the same `signUpEmail`
       // API a person's sign-up does. See `stageOperatorProvisioning` for why
       // this is a declared ticket and not a wider bootstrap probe.
-      const creationClass: AudienceCreationClass = this.isOperatorProvisioning(email)
+      // [#14373] …and why email alone no longer decides it: the ticket's
+      // random value must also match, read off the SAME endpoint context the
+      // `disableSignUp` before-hook already reads `ctx.body.email` from
+      // (`getCurrentAuthEndpointContext()` — one context per request, shared
+      // across the before/after hooks and this validateUserInfo callback).
+      const provisioningTicket = (ctx as { body?: Record<string, unknown> } | undefined)?.body?.[
+        AuthManager.OPERATOR_PROVISIONING_TICKET_FIELD
+      ];
+      const creationClass: AudienceCreationClass = this.isOperatorProvisioning(email, provisioningTicket)
         ? 'operator'
         : classifyCreationMethod(data?.source, {
             enterpriseOAuthProviderIds: this.enterpriseOAuthProviderIds(),
@@ -4110,15 +4317,58 @@ export class AuthManager {
    * `NODE_ENV==='development'`, the ticket names ONE address, the caller
    * clears it in a `finally`, and anything that outlives that is pruned by
    * {@link OPERATOR_PROVISIONING_STAGE_TTL_MS}.
+   *
+   * ## [#14373] Why the address alone stopped being the whole ticket
+   *
+   * The address is **not a secret**: `admin@objectos.ai` is the documented
+   * default and the boot banner prints it (with the password) once the seed
+   * completes. "The address is the operator's own" is true but does not
+   * narrow the attacker set the way it would for an unguessable value — a
+   * stranger's OWN concurrent `POST /sign-up/email` for that same address,
+   * arriving while this ticket is staged, would satisfy an email-only peek at
+   * BOTH admission seams and get admitted as `operator` class: past the
+   * `disableSignUp` bypass, and (since the stamp only cares about the
+   * creation class) potentially email-verified at creation too — a stranger
+   * would not merely read as the operator, their row would BECOME the
+   * account at that address, since a unique-email constraint lets only one of
+   * the two concurrent `signUpEmail` calls actually land. Milliseconds and
+   * `NODE_ENV==='development'` are true today, but both are properties of the
+   * *caller*, not of what the ticket asserts.
+   *
+   * So the ticket now also carries a random, unguessable `ticket` string,
+   * returned here and threaded by the caller into the SAME `signUpEmail`
+   * call's body under {@link OPERATOR_PROVISIONING_TICKET_FIELD} — see
+   * `AuthPlugin.maybeSeedDevAdmin`. {@link isOperatorProvisioning} requires an
+   * exact match on both email AND this ticket, so admission now asks "did
+   * THIS process's own boot command make THIS exact call" rather than "does
+   * the address match" — a stranger's request, however precisely it times
+   * the window, carries no value that was ever transmitted anywhere for them
+   * to replay. Not a stronger *guess* — a different question.
    */
-  stageOperatorProvisioning(email: string): void {
+  stageOperatorProvisioning(email: string): string {
     this.prunePendingOperatorProvisioning();
-    this.pendingOperatorProvisioning.set(email.trim().toLowerCase(), { stagedAtMs: Date.now() });
+    const ticket = this.generateOperatorProvisioningTicket();
+    this.pendingOperatorProvisioning.set(email.trim().toLowerCase(), { stagedAtMs: Date.now(), ticket });
+    return ticket;
   }
 
   /** [#14157] Drop the ticket staged by {@link stageOperatorProvisioning}. */
   clearOperatorProvisioning(email: string): void {
     this.pendingOperatorProvisioning.delete(email.trim().toLowerCase());
+  }
+
+  /**
+   * [#14373] 128 bits from WebCrypto, hex-encoded — same `getRandomValues`
+   * baseline `resolvePasswordHasher`'s WebContainer salt uses, so this stays
+   * portable to hosts without `node:crypto`. Never persisted, never logged,
+   * never sent anywhere but the one in-process `signUpEmail` body call that
+   * consumes it.
+   */
+  private generateOperatorProvisioningTicket(): string {
+    const bytes = (globalThis as any).crypto.getRandomValues(new Uint8Array(16));
+    let hex = '';
+    for (let i = 0; i < bytes.length; i++) hex += bytes[i].toString(16).padStart(2, '0');
+    return hex;
   }
 
   /**
@@ -4128,11 +4378,19 @@ export class AuthManager {
    * creation, so a one-shot read here would admit at the first seam and refuse
    * at the second. The ticket's lifetime is bounded by its owner's `finally`
    * and by the TTL instead.
+   *
+   * [#14373] `ticket` is REQUIRED to match the value {@link
+   * stageOperatorProvisioning} returned — see that method's doc for why the
+   * address alone is no longer sufficient. A missing, wrong-typed, or
+   * mismatched ticket reads as "not provisioning", the same as no ticket at
+   * all; there is no email-only fallback path.
    */
-  isOperatorProvisioning(email: unknown): boolean {
+  isOperatorProvisioning(email: unknown, ticket?: unknown): boolean {
     if (typeof email !== 'string' || email.trim() === '') return false;
     this.prunePendingOperatorProvisioning();
-    return this.pendingOperatorProvisioning.has(email.trim().toLowerCase());
+    const entry = this.pendingOperatorProvisioning.get(email.trim().toLowerCase());
+    if (!entry) return false;
+    return typeof ticket === 'string' && ticket === entry.ticket;
   }
 
   private prunePendingOperatorProvisioning(): void {
@@ -4324,20 +4582,29 @@ export class AuthManager {
    * ⛔ No undo/rollback link is passed, and the template declares no hole for
    * one: a one-click revert is a separate flow and a separate decision.
    *
-   * The deployment-default locale IS named now (#8195), via
-   * {@link setDefaultEmailLocale} — so the three non-`en-US` rows this template
-   * has shipped since #8019 are finally selectable through the platform's own
-   * send path, instead of waiting on a caller or a tenant overlay. With nothing
-   * pushed, the argument is omitted entirely and `EmailService`'s ladder
-   * resolves its documented `en-US` default exactly as before.
+   * The locale is named through the #14319 ladder: the caller's own
+   * `Accept-Language` first ({@link authEmailLocaleFromRequest}), then the
+   * deployment default (#8195, {@link setDefaultEmailLocale}). The request rung
+   * is legitimate here precisely because the recipient IS the caller — this
+   * notice goes to the account's CURRENT address, i.e. to the person who just
+   * asked to change it. With neither rung answering, the argument is omitted
+   * entirely and `EmailService`'s ladder resolves its documented `en-US`
+   * default exactly as before.
    *
-   * Still NOT a per-recipient preference: `sys_user` carries no locale column
-   * and the 2026-08-13 ruling defers one until there is measured pull. This is
-   * the deployment's language, not the reader's.
+   * #14762 layered the per-recipient stored preference on TOP of both rungs:
+   * `sys_user.locale` (#13881, ruling 2026-09-01) when the account holds one,
+   * then this request's `Accept-Language`, then the deployment default. The
+   * request rung did not lose its argument — it is still what answers for an
+   * account with no stored column — it lost the tie, per the #14788 option-D
+   * ruling of 2026-09-03. (#14641 then gave the invitation sends the SAME top
+   * rung, on the address / phone number rather than a user id — an invitee who
+   * ALREADY holds a row gets their own language, and only a genuinely new
+   * invitee still takes the deployment default.)
    */
   private async sendChangeEmailNotice(
     from: { email: string; name?: string; id?: string },
     newEmail: string,
+    requestSource?: unknown,
   ): Promise<void> {
     try {
       const email = this.getEmailService();
@@ -4348,10 +4615,14 @@ export class AuthManager {
       // address that would actually land.
       const target = newEmail.trim().toLowerCase();
       if (!target) return;
+      // #14762 — the stored rung on top of the #14319 ladder. The recipient is
+      // the account holder, so their own column outranks the header the
+      // request happened to carry.
+      const storedLocale = from.id ? await this.storedRecipientLocale({ id: from.id }) : undefined;
       await email.sendTemplate({
         template: 'auth.email_change_notice',
         to: { address: from.email, ...(from.name ? { name: from.name } : {}) },
-        ...this.emailLocaleArg(),
+        ...this.emailLocaleArg(requestSource, storedLocale),
         data: {
           user: { name: from.name || from.email, email: from.email, ...(from.id ? { id: from.id } : {}) },
           newEmail: target,
@@ -4460,15 +4731,37 @@ export class AuthManager {
     const otpCfg = this.config.phoneOtp ?? {};
     const minutes = Math.max(1, Math.round((otpCfg.expiresIn ?? 300) / 60));
     // #2815 — localised, tenant-customisable body: a sys_notification_template
-    // row for (auth.phone_otp, sms, deployment locale) wins; the built-in
+    // row for (auth.phone_otp, sms, resolved locale) wins; the built-in
     // bilingual text is the fallback. Purpose-neutral wording on purpose —
     // one provider template covers sign-in and reset, and the SMS reveals
     // nothing about what the code unlocks.
-    const body = await this.renderPhoneSmsBody(PHONE_SMS_TOPICS.otp, {
-      code,
-      appName: this.getAppName(),
-      minutes,
-    });
+    //
+    // #14762 — the recipient of an OTP IS the user, so the locale is theirs to
+    // name: `sys_user.locale` first, the deployment default underneath.
+    //
+    // ⚠️ The row is looked up here rather than taken from the callback: the
+    // card's suggested shape assumed `sendPhoneOtp` already held one, and it
+    // does not — better-auth's phone-number plugin calls both `sendOTP` and
+    // `sendPasswordResetOTP` with `{ phoneNumber, code }` and no user
+    // (measured in the installed 1.7.x `routes.mjs`; `request-password-reset`
+    // resolves the user for its own gate and does not pass it on). One
+    // projected read on the unique `phone_number` index is the cost, paid only
+    // once the send is going to happen, and swallowed on any failure.
+    //
+    // ⚠️ Matched EXACTLY, as better-auth matches it for its own user lookup on
+    // the same route — a caller that posts a differently formatted spelling of
+    // a stored number resolves no row and lands on the deployment default,
+    // which is the documented floor rather than a failure.
+    const storedLocale = await this.storedRecipientLocale({ phone_number: phone });
+    const body = await this.renderPhoneSmsBody(
+      PHONE_SMS_TOPICS.otp,
+      {
+        code,
+        appName: this.getAppName(),
+        minutes,
+      },
+      storedLocale,
+    );
     const result = await sms.send({
       to: phone,
       body,
@@ -4510,11 +4803,32 @@ export class AuthManager {
     // `loginUrl` points at the actual Console sign-in page; `baseUrl` (bare
     // origin) is kept for backward-compatibility with tenant-overridden
     // templates that still interpolate `{{baseUrl}}`.
-    const body = await this.renderPhoneSmsBody(PHONE_SMS_TOPICS.invite, {
-      appName: this.getAppName(),
-      baseUrl: this.getCanonicalOrigin(),
-      loginUrl: this.getConsolePageUrl('/login'),
-    });
+    //
+    // #14641 — the invitee's OWN stored language, on the same two branches the
+    // invitation EMAIL takes. A number that resolves no row, or a row naming no
+    // language, keeps the deployment default. Matched exactly on
+    // `phone_number`, the same predicate {@link deliverPhoneOtp} matches on.
+    //
+    // ⚠️ What this yields TODAY, so the next reader does not over-read it: the
+    // one in-repo caller (the identity import endpoint's `invite` policy)
+    // CREATES the account before sending, so a ROW is always there — but
+    // `admin-import-users.ts` never writes `locale` and the column declares no
+    // default, so the value is empty at send time and this path still resolves
+    // to the deployment default, exactly as it did before #14641. The rung is
+    // wired, not yet exercised in-repo: it answers for an out-of-repo caller,
+    // or for a future import that populates the column. ⛔ Do not read this
+    // site as a behaviour change users see today — that one is on the
+    // invitation EMAIL, whose invitee may already hold a locale-bearing row.
+    const storedLocale = await this.storedRecipientLocale({ phone_number: phone });
+    const body = await this.renderPhoneSmsBody(
+      PHONE_SMS_TOPICS.invite,
+      {
+        appName: this.getAppName(),
+        baseUrl: this.getCanonicalOrigin(),
+        loginUrl: this.getConsolePageUrl('/login'),
+      },
+      storedLocale,
+    );
     const result = await sms.send({ to: phone, body, templateParams: { content: body } });
     if (result.status === 'failed') {
       // #6039 — same quota wall, same outward shape as the OTP path above.
@@ -4539,8 +4853,14 @@ export class AuthManager {
    * `kernel:ready` and on every settings change (same pattern as
    * {@link setAppName}). Unset ⇒ the built-in English text.
    *
-   * Per-user locale is not resolved yet — `sys_user` carries no locale
-   * column; when it grows one, resolution should prefer it (#2815).
+   * #14762 — this is now the SECOND rung, not the whole answer. The OTP send
+   * reads the recipient's own `sys_user.locale` first (#13881, ruling
+   * 2026-09-01, the same column the messaging channels resolve per recipient)
+   * and falls here when the account holds none. #14641 gave the SMS INVITE
+   * path the same rung, matched on `phone_number` — though the one in-repo
+   * caller (identity import) creates a row that never carries a `locale`, so
+   * that flow still lands HERE in practice. This rung answers when the
+   * number resolves no row, or the row names no language.
    */
   setDefaultSmsLocale(locale: string | undefined): void {
     this.smsLocale = locale?.trim() || undefined;
@@ -4551,32 +4871,98 @@ export class AuthManager {
    * #8195 — the deployment-default locale named on every auth **email**, so the
    * localized `sys_email_template` rows can be selected at all.
    *
-   * Maintainer ruling 2026-08-13: the recipient locale is the **deployment
-   * default**, resolved at the plugin layer; `Accept-Language` is rejected
-   * (auth mail is frequently sent outside the triggering request —
-   * invitations, admin-initiated resets — and a per-device header is the wrong
-   * authority for it). AuthPlugin pushes the value on `kernel:ready`, exactly
-   * as it pushes {@link setDefaultSmsLocale}.
+   * This is the SECOND rung of a two-rung ladder, not the whole of it. The
+   * request's own `Accept-Language` outranks it — see
+   * {@link authEmailLocaleFromRequest}, which carries the operative ruling.
+   * What lands here is the deployment's declaration, used when the request
+   * asked for nothing this platform ships a row for, or when there is no
+   * request at all (invitations, scheduled and admin-initiated mail).
    *
-   * #14319 — that "deployment default" is the workspace's declared language,
-   * `localization.locale` (ADR-0053), whenever the operator has explicitly set
-   * one; `II18nService.getDefaultLocale()` (the app artifact's build-time
-   * `i18n.defaultLocale`) stands underneath it. Email read only the build-time
-   * half before, so a workspace that switched to Chinese in Setup received
-   * Chinese auth SMS and English auth mail. The precedence lives in
-   * `AuthPlugin`; this setter stays a plain sink.
+   * The deployment's declaration has two producers of its own (#14591): the
+   * workspace's `localization.locale` (ADR-0053) whenever the operator has
+   * explicitly set one, and `II18nService.getDefaultLocale()` — the app
+   * artifact's build-time `i18n.defaultLocale` — standing underneath it. Email
+   * read only the build-time half before, so a workspace that switched to
+   * Chinese in Setup received Chinese auth SMS and English auth mail. That
+   * precedence is resolved in `AuthPlugin`; this setter stays a plain sink for
+   * whichever of the two won, and the request rung is applied above it at send
+   * time.
    *
-   * Unset ⇒ nothing is named and `EmailService`'s ladder resolves its
-   * documented `en-US` default, i.e. today's behaviour.
+   * AuthPlugin pushes the value on `kernel:ready`, exactly as it pushes
+   * {@link setDefaultSmsLocale}. Unset ⇒ nothing is named and `EmailService`'s
+   * ladder resolves its documented `en-US` default.
    *
-   * Per-user locale is deliberately NOT resolved: the same ruling defers a
-   * `sys_user.locale` column until there is measured pull for it. When one
-   * arrives it layers on top of this as an override, so nothing here is wasted.
+   * ⚠️ Ruling history, because this rung used to be the ONLY one. The
+   * 2026-08-13 ruling made the deployment default the whole answer and
+   * REJECTED `Accept-Language` outright, reasoning that auth mail is
+   * frequently sent outside the triggering request — invitations,
+   * admin-initiated resets — so a per-device header was the wrong authority
+   * for it. **That ruling was superseded on 2026-09-02** (#14319): cloud
+   * self-service signup has no workspace yet, so no deployment default can
+   * represent that user at all, and English mail to a Chinese signup was the
+   * measured result. The 2026-08-13 reasoning did not simply lose — it is why
+   * the request rung applies only where the requester IS the recipient, and
+   * why the invitation send below still reads this rung.
+   *
+   * Per-user locale EXISTS since #13881 (maintainer ruling 2026-09-01):
+   * `sys_user.locale`, resolved per recipient by service-messaging for
+   * notification mail (`recipient-locale.ts`). #14762 layered it on top of
+   * this ladder for the sends that hold a recipient row — reset, verification
+   * and the change-email notice — so the order is stored → request → this
+   * rung, per the #14788 option-D ruling of 2026-09-03. Nothing here changed:
+   * this is still what answers when neither rung above names a locale, which
+   * is every send to an account that never set one. #14641 then reached the
+   * invitation send too — but only through the STORED rung, matched on the
+   * invitee's address: an invitation to an address with no `sys_user` row (the
+   * common case) still reads exactly this rung, and the inviter's
+   * `Accept-Language` remains rejected on that send.
    */
   setDefaultEmailLocale(locale: string | undefined): void {
     this.emailLocale = normalizeAuthEmailLocale(locale);
   }
   private emailLocale?: string;
+
+  /**
+   * #14762 — the ladder's TOP rung: the recipient's own `sys_user.locale`,
+   * read best-effort off the identity row.
+   *
+   * Returns `undefined` for every shape that cannot name a language — no data
+   * engine, no matching row, an unset column, or a value
+   * {@link normalizeRecipientLocale} refuses. ⛔ It must never throw and must
+   * never be the reason a send fails: a language is a courtesy, delivery is
+   * not, and every caller below layers the remaining rungs underneath. That is
+   * the same posture `service-messaging`'s email channel takes on the
+   * notification path (`email-channel.ts` retries address-only and warns), and
+   * the ruling's item 3 — no path may dead-letter because of the locale read.
+   *
+   * The read is one row on an indexed predicate, projected to the single
+   * column, under a system context — the recipient's own language must resolve
+   * regardless of who triggered the send, which is exactly the
+   * admin-initiated case #14762 was about, and the INVITER-triggered case
+   * #14641 added. Three predicates, one per caller shape: `sys_user.id` (the
+   * sends that hold a user row), the unique `phone_number` (the SMS sends,
+   * which are handed a number and nothing else), and the unique `email` (the
+   * invitation send, which is handed an address for an account that may not
+   * exist yet). All three are `unique: true` in the better-auth `user` table
+   * this object is backed by (`@better-auth/core` `db/get-tables.mjs`).
+   */
+  private async storedRecipientLocale(where: Record<string, unknown>): Promise<string | undefined> {
+    const engine = this.getDataEngine();
+    if (!engine || typeof engine.findOne !== 'function') return undefined;
+    try {
+      const row = await engine.findOne('sys_user', {
+        where,
+        fields: [RECIPIENT_LOCALE_FIELD],
+        context: { isSystem: true, positions: [], permissions: [] },
+      } as never);
+      return normalizeRecipientLocale((row as Record<string, unknown> | null | undefined)?.[RECIPIENT_LOCALE_FIELD]);
+    } catch {
+      // A `sys_user` shape without the column, a datasource outage, an engine
+      // that rejects the projection — all mean "no stored language", never
+      // "no mail".
+      return undefined;
+    }
+  }
 
   /**
    * The `locale` fragment spread into every auth `sendTemplate` call.
@@ -4585,9 +4971,34 @@ export class AuthManager {
    * and an absent key travel the same path today, but only the absent key is
    * what the ladder's "no locale means the DOCUMENTED default" contract is
    * written against.
+   *
+   * #14762 — three rungs now, in the order ruled for #14788 on 2026-09-03
+   * (option D): the recipient's own **stored** `sys_user.locale` → the
+   * **request**'s `Accept-Language` (#14319) → the **deployment** default
+   * (#8195). The recorded reasoning is that a value the user chose is stronger
+   * evidence of intent than the `Accept-Language` the browser just sent — and
+   * the case that forces the order is the send where the requester is NOT the
+   * recipient (an admin-initiated password reset), where the request rung
+   * carries the *admin's* browser language onto the *user's* mail.
+   *
+   * `storedLocale` arrives already through {@link normalizeRecipientLocale}
+   * (see {@link storedRecipientLocale}); {@link normalizeAuthEmailLocale} then
+   * maps it onto the row spelling, exactly as the deployment rung is mapped.
+   * Deliberately NOT the narrower `authEmailLocaleFromRequest` treatment, which
+   * requires a hit in `AUTH_EMAIL_TEMPLATE_LOCALES`: that narrowing exists
+   * because "a per-request header is a weaker claim than a deployment's
+   * declaration", and a column the user set for themselves is not the weak
+   * claim — a tenant overlaying `en-GB` rows must be able to ask for them.
+   *
+   * A caller with no recipient row in hand passes nothing and gets exactly the
+   * two-rung #14319 behaviour.
    */
-  private emailLocaleArg(): { locale?: string } {
-    return this.emailLocale ? { locale: this.emailLocale } : {};
+  private emailLocaleArg(requestSource?: unknown, storedLocale?: string): { locale?: string } {
+    const locale =
+      normalizeAuthEmailLocale(storedLocale) ??
+      authEmailLocaleFromRequest(requestSource) ??
+      this.emailLocale;
+    return locale ? { locale } : {};
   }
 
   /**
@@ -4595,11 +5006,31 @@ export class AuthManager {
    * `sys_notification_template` row for `(topic, 'sms', locale chain)` when
    * one exists, else the built-in bilingual text. Template lookups are
    * best-effort — an outage must never block an OTP send.
+   *
+   * #14762 — `storedLocale` is the recipient's own `sys_user.locale` when the
+   * caller could resolve one ({@link storedRecipientLocale}); the deployment
+   * default stands underneath it. There is NO request rung on this surface:
+   * the ruled ladder's middle rung is the request's `Accept-Language`, and an
+   * SMS body is chosen at delivery time from a phone number — the send-OTP
+   * route hands the callback `{ phoneNumber, code }` and nothing else
+   * (measured against the installed better-auth 1.7.x, not assumed). So the
+   * ruled chain collapses here to stored → deployment, with the built-in `en`
+   * row as {@link phoneSmsLocaleChain}'s terminal floor exactly as before.
+   *
+   * A caller that passes nothing — or one whose recipient resolves no row —
+   * gets exactly the pre-#14762 deployment-default behaviour. #14641 made the
+   * SMS invite path a passer rather than an abstainer; it is no longer the
+   * standing example of a caller that names nothing.
    */
-  private async renderPhoneSmsBody(topic: string, data: Record<string, unknown>): Promise<string> {
+  private async renderPhoneSmsBody(
+    topic: string,
+    data: Record<string, unknown>,
+    storedLocale?: string,
+  ): Promise<string> {
+    const locale = storedLocale ?? this.smsLocale;
     const template =
-      (await loadPhoneSmsTemplateBody(this.getDataEngine(), topic, this.smsLocale)) ??
-      builtinPhoneSmsBody(topic, this.smsLocale);
+      (await loadPhoneSmsTemplateBody(this.getDataEngine(), topic, locale)) ??
+      builtinPhoneSmsBody(topic, locale);
     return interpolatePhoneSms(template, data);
   }
 
@@ -4740,10 +5171,32 @@ export class AuthManager {
     // is left with an identity that still occupies the org roster and can no
     // longer sign in. Nothing tells the operator, and there is no way back.
     const endpointPath = this.betterAuthEndpointPath(request);
+
+    // [#3653 / #14522] A SCIM protocol request (`/scim/v2/*`) runs inside
+    // `scimRequestScope`, which is what makes the adapter's `transaction`
+    // config open a REAL engine transaction around the vendor's provisioning
+    // multi-writes (`objectql-adapter.ts`, the scoping note there). Opened
+    // HERE, with `run(...)` around the whole request, for the same reason the
+    // actor-attribution scope above is: `run` has a callback boundary that
+    // every `als.run` the vendor performs underneath nests inside. The stamp
+    // used to be an `enterWith` inside the SCIM plugin's `verifyBearerToken`
+    // callback, and it never reached the writes — the vendor resumes the
+    // endpoint handler from a continuation captured before the verifier ran
+    // (measured on 1.7.2: zero `engine.transaction` calls across
+    // `POST /Users` + `PATCH /Users/{id}`). Keyed on the endpoint path prefix
+    // so it is exactly as narrow as before — SCIM protocol requests only; the
+    // non-SCIM flows keep their sequential posture, which the scoping note
+    // records as load-bearing. Pinned by `scim-transaction-scope.test.ts`.
+    const runRequest = isScimProtocolPath(endpointPath)
+      ? async (): Promise<Response> => {
+          const { scimRequestScope } = await import('./scim-connection-service.js');
+          return scimRequestScope.run({ scim: true }, runHandler);
+        }
+      : runHandler;
     const vendorResponse =
       endpointPath !== undefined && SESSION_ERASURE_PATHS.has(endpointPath)
-        ? await this.runSubjectErasureAtomically(runHandler)
-        : await runHandler();
+        ? await this.runSubjectErasureAtomically(runRequest)
+        : await runRequest();
 
     // [#10349] The better-auth-native `/admin/` routes refuse an anonymous
     // caller through the vendor's `adminMiddleware`
@@ -4881,7 +5334,7 @@ export class AuthManager {
    * generated docs and the #13816 refusal all asserted the ban.
    *
    * This method restores declared = enforced by routing the state to the
-   * platform's OWN ban write (`admin-ban-endpoints.ts`):
+   * platform's OWN ban write (`user-ban-write.ts`):
    *
    *  - `active: false` on a row that is not banned ⇒ `applyUserBan` with
    *    `SCIM_DEACTIVATION_BAN_REASON` and no expiry. The vendor's
@@ -4910,8 +5363,14 @@ export class AuthManager {
    * A consequence worth stating: on 1.7.2 a SCIM `DELETE /Users/{id}` no
    * longer deletes the better-auth user (the vendor tombstones the source);
    * it leaves the user with no active source, so this callback disables the
-   * account. Re-provisioning through the tombstone re-links the same user,
-   * the state turns active, and the SCIM ban is lifted by the second bullet.
+   * account — by the SAME branch as `active: false`, including over an
+   * administrator's timed ban, whose `banExpires` a DELETE therefore clears
+   * too: a deprovision cannot be outlived by an expiry the administrator set.
+   * For the same reason a DELETE is judged by the `beforeUpdate` guard below
+   * and never by any `beforeDelete` — deleting the last administrator through
+   * SCIM is refused exactly as deactivating them is. Re-provisioning through
+   * the tombstone re-links the same user, the state turns active, and the
+   * SCIM ban is lifted by the second bullet.
    *
    * The break-glass last-administrator guard (ADR-0024 D5.2, #5892) is an
    * ENGINE `beforeUpdate` hook on `sys_user`, so it judges this write exactly
@@ -4925,15 +5384,15 @@ export class AuthManager {
    * so it never half-lands: the account stays enabled and nothing is
    * skipped silently.
    *
-   * ⚠️ What does NOT roll back today: the vendor runs this callback inside
+   * What ALSO rolls back: the vendor runs this callback inside
    * `runWithTransaction`, which on this adapter is a real engine transaction
-   * only while `scimRequestScope` is set — and that scope, stamped inside
-   * `verifyBearerToken`, is not observed at write time on 1.7.2 (measured:
-   * zero `engine.transaction` calls across a SCIM POST + PATCH; #14522). So
+   * while `scimRequestScope` is set — and `handleRequest` opens that scope
+   * around every SCIM protocol request (#14522; it was once stamped inside
+   * `verifyBearerToken` with `enterWith` and never reached the writes). So
    * the vendor's own `scimUser.active = false` write, made before this
-   * callback, survives a refusal and the SCIM resource reads inactive while
-   * the account is enabled. #14522 owns that seam; the #14360 suite pins the
-   * residual so its fix flips the pin deliberately.
+   * callback, is rolled back with the refusal, and the SCIM resource keeps
+   * reading `active: true` for the account that stayed enabled — pinned by
+   * the #14360 suite's face (c).
    *
    * Deliberately NOT applied here: the last-LOCAL-credential guard the admin
    * mount re-runs (`isLastLocalCredentialHolder`). That guard protects the
@@ -4946,8 +5405,8 @@ export class AuthManager {
    *
    * Every read and write goes through `context.database` — the adapter the
    * vendor bound to its transaction — never through an `internalAdapter`
-   * resolved outside it, so the moment #14522 makes that transaction real,
-   * the ban commits or rolls back with the SCIM mutation it belongs to.
+   * resolved outside it, so the ban commits or rolls back with the SCIM
+   * mutation it belongs to.
    */
   private async reconcileScimUserLifecycle(
     state: SCIMIdentityState,

@@ -166,6 +166,7 @@ describe('#13491 the inventory — a verdict per object, never a namespace', () 
       'sys_automation_run',
       'sys_file',
       'sys_notification_delivery',
+      'sys_record_share',
       'sys_upload_session',
     ]);
   });

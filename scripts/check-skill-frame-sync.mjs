@@ -1,13 +1,22 @@
 #!/usr/bin/env node
 // check-skill-frame-sync — isomorphism gate for the escalation decision frame,
-// which exists as FOUR hand-written copies across three files (#5798).
+// which exists as TWO hand-written copies across two files (#5798, narrowed to
+// two by the 2026-09-03 batch-3 ruling, item 4 option B — see COPIES below).
 //
 // The frame ("analyze every option on N fixed axes") is binding text for both
 // the PM agent and the dev agent, and it is written twice over: once for this
 // repo's internal agent protocol (`.claude/**`, never published) and once for
 // third-party projects (`skills/objectstack-pm-dispatch/SKILL.md`, which ships
-// verbatim via `npx skills add objectstack-ai/objectstack/skills` and embeds its
-// own dev-agent template). Nothing compared them.
+// verbatim via `npx skills add objectstack-ai/objectstack/skills`). Nothing
+// compared them.
+//
+// Both surviving copies are PM-side. The two dev-side copies this gate used to
+// watch — the internal agent definition's block and the published skill's
+// embedded dev template — are gone: a dispatching PM now pastes its own copy
+// into the dev prompt's `{decision_frame}` slot, so the dev reads the frame the
+// PM is holding rather than a third and fourth transcription of it. That is a
+// REDUCTION IN COPIES, not a reduction in coverage — the anti-dormancy scan
+// below is what keeps a dev-side copy from quietly coming back.
 //
 // The drift is not hypothetical. #5130 (2026-08-04) widened the internal frame
 // from two axes to three; the published mirror was untouched and stayed at two
@@ -24,7 +33,7 @@
 // frontmatter and generated indexes, never the body.
 //
 // WHAT IS COMPARED — structure, deliberately NOT wording:
-//   • axis COUNT (per copy, and equal across all four),
+//   • axis COUNT (per copy, and equal across every copy),
 //   • axis NAME SEQUENCE, mapped through the explicit AXIS_MAP below (internal
 //     Chinese ⇄ published English), order significant,
 //   • the BINDING SENTENCE is in place in every copy,
@@ -96,14 +105,23 @@ function soft(template) {
 }
 
 /**
- * The four copies. `start` is the sentence that declares the frame, `binding` is
+ * The two copies. `start` is the sentence that declares the frame, `binding` is
  * the sentence that makes it binding; the axis entries are whatever lies between
  * them. Both anchors must match exactly once per file — an ambiguous anchor is
  * reported rather than silently resolved to the first hit.
  *
+ * Why two and not four (2026-09-03 batch-3 ruling, item 4 option B): the frame
+ * had a PM copy and a dev copy on each side of the publish boundary, and the two
+ * dev copies were transcriptions of the PM copy beside them. They are now filled
+ * in at dispatch time from the PM copy instead — the published dev template's
+ * `{decision_frame}` line, and the dispatch prompt the internal PM writes — so
+ * the text a dev reads is the text its dispatcher is holding, and cannot be a
+ * copy that stopped being updated. Adding a copy back is a COPIES edit, which
+ * the anti-dormancy scan below forces rather than merely invites.
+ *
  * EXPORTED for scripts/check-skill-frame-freshness.mjs (#5866), which asks the
  * OTHER invariant about the same documents — "is this working tree's copy of the
- * frame still current with origin/main?" as opposed to this gate's "are the four
+ * frame still current with origin/main?" as opposed to this gate's "are the
  * copies in one tree isomorphic?". Two invariants, two scripts (the #5866 triage
  * ruled explicitly against merging them), but exactly ONE definition of what
  * "the frame's structure" is — forking these anchors into a second script would
@@ -119,28 +137,12 @@ export const COPIES = [
     binding: soft('推荐意见必须基于这%N%轴给出理由'),
   },
   {
-    id: 'internal-dev',
-    file: '.claude/agents/os-dev.md',
-    lang: 'en',
-    what: 'internal dev-agent definition, "When to stop instead of code"',
-    start: soft('**Analyze every option on %N% fixed axes — this framing is the core of the escalation'),
-    binding: soft('recommendation must be justified on %Q% axes'),
-  },
-  {
     id: 'published-pm',
     file: 'skills/objectstack-pm-dispatch/SKILL.md',
     lang: 'en',
     what: 'published PM skill, the decision frame section',
     start: soft('**and analyze every option on the %N% fixed axes below.**'),
     binding: soft('recommendation must be justified on %Q% axes'),
-  },
-  {
-    id: 'published-dev',
-    file: 'skills/objectstack-pm-dispatch/SKILL.md',
-    lang: 'en',
-    what: 'published PM skill, the EMBEDDED dev-agent template',
-    start: soft('Analyze every option on %N% fixed axes:'),
-    binding: soft('Justify your recommendation on %Q% axes'),
   },
 ];
 
@@ -195,8 +197,8 @@ function toCount(word) {
 }
 
 /**
- * An axis entry starts either at a list bullet (three of the four copies) or at
- * an `**Axis ① — …**` paragraph (the published PM copy). Both shapes are accepted
+ * An axis entry starts either at a list bullet (the internal PM copy) or at an
+ * `**Axis ① — …**` paragraph (the published PM copy). Both shapes are accepted
  * everywhere, so reformatting one copy into the other's shape does not blind the
  * gate. A blank line closes an entry; wrapped continuation lines belong to it.
  */
@@ -340,7 +342,57 @@ const SCAN_ROOTS = ['.claude', 'skills'];
  * than re-spelled, so re-scoping a root cannot leave this describing the old one.
  */
 const ROOT_DIR_WATCH_HINTS = ['skills/**'];
-const SCAN_SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'references']);
+/**
+ * Directories the anti-dormancy walk refuses to descend into: trees that are
+ * INSTALLED or GENERATED, where nothing hand-written lives.
+ *
+ * ## Why `references` is NOT one of them (#15056)
+ *
+ * It was, until this edit, carried over from the idiom the repo's prose gates
+ * share — and that idiom states its reason outright, in
+ * `check-corpus-claim-drift.mjs`:
+ *
+ *   > Generated `references/` is skipped: the spec source is the fix site
+ *   > there, so a finding in a generated file names the wrong file.
+ *
+ * That sentence is about `content/docs/references/`, which IS generated from
+ * spec. This gate never walks `content/docs`. Under SCAN_ROOTS the same
+ * directory NAME holds hand-written operative prose: the PM protocol files
+ * under `.claude/skills/pm-dispatch/references/` — `decision-analysis.md`
+ * among them, whose subject matter IS escalation analysis and so is the single
+ * likeliest place for a third copy to be pasted — and the published reference
+ * companions that ship verbatim to third parties via `npx skills add`, the
+ * exact distribution path this gate's header gives as the reason the published
+ * copy is watched at all. So the reason did not hold here, and the skip hid 32
+ * of 72 markdown files (44%) from the half of this gate whose entire job is to
+ * notice a copy of the frame appearing somewhere new. A scan that cannot see
+ * 44% of its population is the #4690 anti-pattern one directory level down: it
+ * runs, it passes, and it reports nothing about the files it never opened.
+ *
+ * Two sibling gates over this same corpus already carry the corrected verdict.
+ * `check-skill-identifier-liveness.mjs` keeps `references` OUT of its skip set
+ * and pins the difference in its self-test ("under `skills/**` those files are
+ * hand-authored published content, unlike content/docs/references which is
+ * generated"). `check-doc-authoring.mjs` gave its published-catalog rule a
+ * SECOND walk rather than reuse the skipping one, because reusing it "would
+ * have produced a gate that runs, passes, and cannot see a ninth of the
+ * population it exists to guard".
+ *
+ * Hence no narrowed carve-out for the generated pages under `skills/**` either
+ * (`references/_index.md`, `references/react-blocks.md`). That is the same
+ * refusal `check-doc-authoring.mjs` records beside them — "an exemption over a
+ * surface that no longer needs one is where the next regeneration would smuggle
+ * one back in. A red here is fixed AT THE SPEC SOURCE, never by hand-editing
+ * the artifact" — and it holds a fortiori here: a fingerprint hit in a
+ * generated page would mean the GENERATOR is emitting a copy of the frame,
+ * which is a real finding whose fix site is the generator, not a false one.
+ *
+ * The self-test pins this from the WALK's own output rather than as a file
+ * count: a count has to be re-typed whenever a page is added, and the failure
+ * it must catch — "the scan reaches no reference page at all" — is not a
+ * statement a count can make.
+ */
+const SCAN_SKIP_DIRS = new Set(['node_modules', '.git', 'dist']);
 const SCAN_EXTENSIONS = ['.md', '.mdx'];
 
 function matchAllOf(text, source) {
@@ -499,8 +551,11 @@ export function runAllChecks(copies, axisMap = AXIS_MAP, scanFiles = null) {
     if (r) results.push(r);
   }
 
-  // Two copies share the published file; sections must not overlap, or an anchor
-  // is reading the wrong instance and the comparison is vacuous.
+  // Copies MAY share a file (two did until the 2026-09-03 reduction); whenever
+  // they do, their sections must not overlap, or an anchor is reading the wrong
+  // instance and the comparison is vacuous. Kept as a live guard rather than
+  // deleted with the same-file pair: re-declaring one is a COPIES edit away, and
+  // this is the check that makes such a pair prove it compares two things.
   for (const a of results) {
     for (const b of results) {
       if (a === b || a.copy.file !== b.copy.file) continue;
@@ -521,7 +576,7 @@ export function runAllChecks(copies, axisMap = AXIS_MAP, scanFiles = null) {
   const counts = new Set(results.map((r) => r.declared));
   if (counts.size > 1) {
     problems.push(
-      `the four copies do not agree on the NUMBER of axes — this is the #5130 drift:\n` +
+      `the ${results.length} copies do not agree on the NUMBER of axes — this is the #5130 drift:\n` +
       results.map((r) => `      ${r.declared} axes  ${r.copy.id}  (${r.copy.file})`).join('\n') +
       `\n    Every copy of the frame must be updated in the same PR, including the ` +
       `published mirror in skills/ that ships to third parties.`,
@@ -648,7 +703,7 @@ function mutate(copies, id, from, to) {
         `self-test fixture drifted: mutation target not found in ${c.id} (${c.file}): ${from}`,
       );
     }
-    // Both published copies share one file; keep the sibling's text in step.
+    // If two copies ever share one file, keep the sibling's text in step.
     return { ...c, text };
   }).map((c, _i, all) => {
     const mutated = all.find((x) => x.id === id);
@@ -674,7 +729,7 @@ function selfTest() {
 
   const cases = [
     {
-      label: 'baseline: the four real copies are isomorphic',
+      label: 'baseline: the two real copies are isomorphic',
       copies: () => base,
       expect: 'green',
     },
@@ -682,27 +737,27 @@ function selfTest() {
       // The #5130 shape, incoherent half: bullets changed, prose count not.
       label: 'one copy loses an axis, its declared count unchanged → red (count vs entries)',
       copies: () => mutate(
-        base, 'internal-dev',
-        '- **Long-term soundness for THIS project**',
-        '  **Long-term soundness for THIS project**',
+        base, 'internal-pm',
+        '- **项目长远合理性**',
+        '  **项目长远合理性**',
       ),
       expect: 'red',
-      wants: [/internal-dev/, /declares 4 axes but 3 axis entries/],
+      wants: [/internal-pm/, /declares 4 axes but 3 axis entries/],
     },
     {
       // The #5130 shape, coherent: one side becomes a consistent three-axis frame.
       label: 'one copy coherently rewritten to three axes → red (cross-copy count)',
       copies: () => {
         let c = mutate(
-          base, 'internal-dev',
-          '- **Long-term soundness for THIS project**',
-          '  **Long-term soundness for THIS project**',
+          base, 'internal-pm',
+          '- **项目长远合理性**',
+          '  **项目长远合理性**',
         );
-        c = mutate(c, 'internal-dev', 'on four fixed axes', 'on three fixed axes');
-        return mutate(c, 'internal-dev', 'on all four axes', 'on all three axes');
+        c = mutate(c, 'internal-pm', '沿四条固定评估轴', '沿三条固定评估轴');
+        return mutate(c, 'internal-pm', '基于这四条轴给出理由', '基于这三条轴给出理由');
       },
       expect: 'red',
-      wants: [/do not agree on the NUMBER of axes/, /#5130/, /3 axes {2}internal-dev/],
+      wants: [/do not agree on the NUMBER of axes/, /#5130/, /3 axes {2}internal-pm/],
     },
     {
       // Regression pin for the draft defect described in soft(): the two-axis form
@@ -711,20 +766,20 @@ function selfTest() {
       label: 'two-axis copy phrased "both axes" → red on the COUNT, not on extraction',
       copies: () => {
         let c = mutate(
-          base, 'published-dev',
-          '- Making AI-authored code — especially AI-authored metadata — structurally hard',
-          '  Making AI-authored code — especially AI-authored metadata — structurally hard',
+          base, 'published-pm',
+          '\n**Axis ③ — making AI-authored code',
+          '\n  **Axis ③ — making AI-authored code',
         );
         c = mutate(
-          c, 'published-dev',
-          '- Startup scope discipline — do not grow the declared surface',
-          '  Startup scope discipline — do not grow the declared surface',
+          c, 'published-pm',
+          '\n**Axis ④ — startup scope discipline.**',
+          '\n  **Axis ④ — startup scope discipline.**',
         );
-        c = mutate(c, 'published-dev', 'Analyze every option on four fixed axes:', 'Analyze every option on two fixed axes:');
-        return mutate(c, 'published-dev', 'Justify your recommendation on all four axes', 'Justify your recommendation on both axes');
+        c = mutate(c, 'published-pm', 'every option on the four fixed axes below.', 'every option on the two fixed axes below.');
+        return mutate(c, 'published-pm', 'must be justified on **all four** axes.', 'must be justified on **both** axes.');
       },
       expect: 'red',
-      wants: [/do not agree on the NUMBER of axes/, /2 axes {2}published-dev/],
+      wants: [/do not agree on the NUMBER of axes/, /2 axes {2}published-pm/],
       unwanted: [/BINDING sentence is not in place/, /could not extract/],
     },
     {
@@ -768,12 +823,12 @@ function selfTest() {
     {
       label: 'the declaring sentence is removed → red (extraction failure, not a skip)',
       copies: () => mutate(
-        base, 'internal-dev',
-        '**Analyze every option on four fixed axes',
-        '**Weigh the options sensibly',
+        base, 'internal-pm',
+        '**每个方案必须沿四条固定评估轴',
+        '**每个方案应当妥善权衡',
       ),
       expect: 'red',
-      wants: [/internal-dev/, /could not extract the decision frame/],
+      wants: [/internal-pm/, /could not extract the decision frame/],
     },
     {
       label: 'a frame count mention drifts from the frame → red',
@@ -798,7 +853,7 @@ function selfTest() {
       wants: [/do not agree on the axis NAME SEQUENCE/],
     },
     {
-      label: 'an undeclared fifth copy appears → red (anti-dormancy)',
+      label: 'an undeclared extra copy appears → red (anti-dormancy)',
       copies: () => base,
       extraScan: [{
         file: 'skills/objectstack-somethingelse/SKILL.md',
@@ -806,6 +861,31 @@ function selfTest() {
       }],
       expect: 'red',
       wants: [/looks like ANOTHER copy of the decision frame/],
+    },
+    {
+      // The regression pin for the 2026-09-03 reduction: the dev-side copies were
+      // deleted, and the thing that keeps them deleted is this scan. The fixture
+      // uses the REAL path whose declaration this change dropped
+      // (`.claude/agents/os-dev.md`) rather than a synthetic one, so a future PR
+      // that re-adds the block there is refused instead of being asked politely.
+      //
+      // ⚠️ MEASURED LIMIT, stated rather than implied: the scan's population is
+      // per FILE (`declaredFiles.has(f.file)`). A second, undeclared copy pasted
+      // back into a file that IS declared — the published SKILL.md, which keeps
+      // the published-pm copy — is NOT refused by this scan, and was not refused
+      // before this change either. That gap is why the published copy is named by
+      // heading at the paste site rather than re-transcribed: the paste
+      // instruction is what keeps a second published copy from being written, and
+      // review is what enforces it. Closing the gap mechanically needs a
+      // per-occurrence criterion this gate does not have today.
+      label: 'the dev-side copy returns to the now-undeclared agent definition → red (anti-dormancy)',
+      copies: () => base,
+      extraScan: [{
+        file: '.claude/agents/os-dev.md',
+        text: 'Analyze every option on four fixed axes:\n- Real business need — ...\n',
+      }],
+      expect: 'red',
+      wants: [/looks like ANOTHER copy of the decision frame/, /os-dev\.md/],
     },
     {
       // The anti-false-positive direction. #5451 route B generalized the published
@@ -905,11 +985,48 @@ function selfTest() {
   for (const f of declFailures) console.error(`  ✗ dispatch-gates declaration: ${f}`);
   failed += declFailures.length;
 
+  // ── The scan population (#15056) ──────────────────────────────────────────
+  //
+  // What SCAN_SKIP_DIRS leaves out IS the anti-dormancy half's reach, and a
+  // skip is invisible in the pass line: "40 markdown files scanned" reads
+  // exactly like 72 to anyone not counting. `references` sat in that set for
+  // reasons belonging to a corpus this gate does not walk, and hid 44% of the
+  // population — see the SCAN_SKIP_DIRS docblock.
+  //
+  // Pinned from the WALK, on the real tree, by the same call `main()` makes —
+  // never as a hand-typed file count. A count has to be re-typed whenever a
+  // page is added, and it cannot state the thing that actually went wrong:
+  // "the scan reaches no reference page at all".
+  const INSTALLED_OR_GENERATED = new Set(['node_modules', '.git', 'dist']);
+  const popFailures = [];
+  let popCases = 0;
+  const pop = (label, ok) => { popCases += 1; if (!ok) popFailures.push(label); };
+  const walked = SCAN_ROOTS.flatMap((root) => walkMarkdown(root, []));
+  const inReferences = walked.filter((f) => /(^|[\\/])references[\\/]/.test(f.file));
+  pop('the walk reaches the `references/` subtrees under SCAN_ROOTS — hand-written '
+    + 'operative prose, not an installed or generated tree. Restoring the skip empties '
+    + 'this and every gate stays green, which is the defect this case exists for',
+    inReferences.length > 0);
+  pop('the walk reaches more than those subtrees, so the case above is judging a real '
+    + 'population rather than passing on a coincidence',
+    walked.length > inReferences.length);
+  pop('every SCAN_SKIP_DIRS entry is DECLARED installed-or-generated here — the '
+    + 'criterion the three surviving entries meet and `references` never did, so a '
+    + 'fourth entry has to be stated rather than appended',
+    [...SCAN_SKIP_DIRS].every((d) => INSTALLED_OR_GENERATED.has(d)));
+  for (const f of popFailures) console.error(`  ✗ scan population: ${f}`);
+  failed += popFailures.length;
+
   if (failed > 0) {
     console.error(`\n✗ check-skill-frame-sync self-test failed (${failed} case(s)).`);
     process.exit(1);
   }
-  console.log(`✓ check-skill-frame-sync self-test: ${cases.length} cases pass, plus 5 dispatch-gates declaration cases.`);
+  console.log(
+    `✓ check-skill-frame-sync self-test: ${cases.length} cases pass, plus 5 `
+    + `dispatch-gates declaration cases and ${popCases} scan-population cases `
+    + `(${walked.length} markdown files walked under the scan roots, `
+    + `${inReferences.length} of them inside a references/ directory).`,
+  );
   selfTestReachedVerdict = true;
 }
 

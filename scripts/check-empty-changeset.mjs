@@ -143,6 +143,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { isEntrypoint } from './invoked-as.mjs';
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..');
 
@@ -410,10 +412,73 @@ function list() {
 // as one that passed (#13798).
 const SELF_TEST_VERDICT = 'check-empty-changeset self-test reached its verdict';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'RED 1: a PR that ADDS an empty-frontmatter changeset': 3,
+  'GREEN 1: the stock. Empty changesets on base, untouched by the PR': 2,
+  'GREEN 2: a PR that adds a NON-empty changeset': 1,
+  'GREEN 3: a skills/**-only PR carrying NO changeset (route 2)': 2,
+  'RED 2: a stock NON-empty changeset EMPTIED in place': 2,
+  'GREEN 4: a stock EMPTY changeset whose prose is edited': 2,
+  'RED 3: a new changeset with no frontmatter fence at all': 1,
+  'GREEN 5: .changeset/README.md is not a changeset': 1,
+  'RED 4: a stock non-empty changeset RENAMED AND EMPTIED in one commit': 5,
+  'GREEN 6: a PURE rename of a stock EMPTY changeset stays exempt': 3,
+  'GREEN 7: a pure rename of a stock DECLARING changeset is simply ok': 3,
+  'RED 5: an `R` row whose BASE side is README.md is not "inherited"': 3,
+  '#6129: main drift must not move the verdict, in EITHER direction': 6,
+  '#6129, the other half: a base branch that DELETES': 2,
+  '#4690, one step later: no merge base at all is a failure': 1,
+  'The consumer: this gate\'s own CI step (#6129)': 23,
+  'The second consumer: where THIS SELF-TEST runs (#6509)': 12,
+  'Parser unit rows': 8,
+  'THE FIX (#7004): comments and quoted bump values': 12,
+  'The family reads one block one way (#7004)': 25,
+  'Missing input is a failure, never a pass (#4690)': 1,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 21;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const seen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    seen.set(b, (seen.get(b) ?? 0) + 1);
+  };
   const failures = [];
   let checked = 0;
   const assert = (cond, msg) => {
+    registerCase();
     checked++;
     if (!cond) failures.push(msg);
   };
@@ -512,6 +577,7 @@ function selfTest() {
     // ── RED 1: a PR that ADDS an empty-frontmatter changeset ─────────────────
     // The #5799 shape verbatim: a skills/** change declaring nothing, via a new
     // empty changeset. This is the case the gate exists for.
+    battery('RED 1: a PR that ADDS an empty-frontmatter changeset');
     {
       const { dir, base } = makeRepo(
         { '.changeset/README.md': '# Changesets\n', 'skills/demo/SKILL.md': 'v1\n' },
@@ -529,6 +595,7 @@ function selfTest() {
     // ── GREEN 1: the stock. Empty changesets on base, untouched by the PR ────
     // The ruling's exemption, and the reason this gate reads a diff rather than
     // the directory: 182 such files sit on main and none of them may go red.
+    battery('GREEN 1: the stock. Empty changesets on base, untouched by the PR');
     {
       const { dir, base } = makeRepo(
         {
@@ -545,6 +612,7 @@ function selfTest() {
     }
 
     // ── GREEN 2: a PR that adds a NON-empty changeset ────────────────────────
+    battery('GREEN 2: a PR that adds a NON-empty changeset');
     {
       const { dir, base } = makeRepo(
         { 'packages/spec/src/index.ts': 'export const v = 1;\n' },
@@ -557,6 +625,7 @@ function selfTest() {
     // ── GREEN 3: a skills/**-only PR carrying NO changeset (route 2) ─────────
     // The #5947 destination. Such a PR takes the `skip-changeset` label; this
     // gate must have nothing to say about it, label or no label.
+    battery('GREEN 3: a skills/**-only PR carrying NO changeset (route 2)');
     {
       const { dir, base } = makeRepo(
         { 'skills/objectstack-pm-dispatch/SKILL.md': 'two axes\n', '.changeset/stock-empty.md': EMPTY },
@@ -570,6 +639,7 @@ function selfTest() {
     // ── RED 2: a stock NON-empty changeset EMPTIED in place ──────────────────
     // The bypass `--diff-filter=A` alone cannot see. A new empty declaration is
     // a new empty declaration however it was spelled.
+    battery('RED 2: a stock NON-empty changeset EMPTIED in place');
     {
       const { dir, base } = makeRepo(
         { '.changeset/was-declaring.md': DECLARING },
@@ -583,6 +653,7 @@ function selfTest() {
     // ── GREEN 4: a stock EMPTY changeset whose prose is edited ───────────────
     // Still empty at base, so this PR created no new empty declaration. This is
     // the row that keeps the exemption honest under `--diff-filter=AMR`.
+    battery('GREEN 4: a stock EMPTY changeset whose prose is edited');
     {
       const { dir, base } = makeRepo(
         { '.changeset/stock-empty.md': EMPTY },
@@ -594,6 +665,7 @@ function selfTest() {
     }
 
     // ── RED 3: a new changeset with no frontmatter fence at all ──────────────
+    battery('RED 3: a new changeset with no frontmatter fence at all');
     {
       const { dir, base } = makeRepo({}, { '.changeset/no-fence.md': 'just a body, no fence\n' });
       const r = scan({ cwd: dir, base });
@@ -601,6 +673,7 @@ function selfTest() {
     }
 
     // ── GREEN 5: .changeset/README.md is not a changeset ─────────────────────
+    battery('GREEN 5: .changeset/README.md is not a changeset');
     {
       const { dir, base } = makeRepo({}, { '.changeset/README.md': '# Changesets\n\nhow to write one\n' });
       const r = scan({ cwd: dir, base });
@@ -631,6 +704,7 @@ function selfTest() {
     // ── RED 4: a stock non-empty changeset RENAMED AND EMPTIED in one commit ──
     // Exactly RED 2 with a `git mv` bolted on -- the same brand-new empty
     // declaration, spelled so that `AM` could not see it at all.
+    battery('RED 4: a stock non-empty changeset RENAMED AND EMPTIED in one commit');
     {
       const { dir, base } = makeRepo(
         { '.changeset/was-declaring.md': RENAMEABLE_DECLARING },
@@ -651,6 +725,7 @@ function selfTest() {
     // tidying a filename into a red. Note this case can ONLY be green through the
     // `R` path -- were the rename to degrade to add-plus-delete, the new path
     // would arrive as `A` + empty, which is RED 1.
+    battery('GREEN 6: a PURE rename of a stock EMPTY changeset stays exempt');
     {
       const { dir, base } = makeRepo(
         { '.changeset/stock-empty.md': RENAMEABLE_EMPTY },
@@ -666,6 +741,7 @@ function selfTest() {
     }
 
     // ── GREEN 7: a pure rename of a stock DECLARING changeset is simply ok ────
+    battery('GREEN 7: a pure rename of a stock DECLARING changeset is simply ok');
     {
       const { dir, base } = makeRepo(
         { '.changeset/stock-declaring.md': RENAMEABLE_DECLARING },
@@ -691,6 +767,7 @@ function selfTest() {
     // exemption out for free on a head file that is a brand-new empty changeset.
     // This is the case the `isChangesetFile(basePath)` guard in the scan exists
     // for; delete the guard and this row goes green as `exempt`.
+    battery('RED 5: an `R` row whose BASE side is README.md is not "inherited"');
     {
       const README = `# Changesets\n\n${RENAMEABLE}`;
       const { dir, base } = makeRepo(
@@ -716,6 +793,7 @@ function selfTest() {
     // deliberately identical except for which side of the fork the offending
     // changeset is on, because a drift assertion on its own is satisfied by a
     // gate that has simply stopped looking.
+    battery('#6129: main drift must not move the verdict, in EITHER direction');
     {
       const OFFENDER = '.changeset/an-empty-one.md';
 
@@ -783,6 +861,7 @@ function selfTest() {
     // changeset from main, and a two-dot diff then reads each one still sitting on
     // an un-rebased branch as newly added AND empty. This is the fixture that goes
     // red if the merge base is taken back out of scan() itself.
+    battery('#6129, the other half: a base branch that DELETES');
     {
       const dir = mkdtempSync(join(tmpdir(), 'check-empty-changeset-deleted-'));
       repos.push(dir);
@@ -827,6 +906,7 @@ function selfTest() {
     // ── #4690, one step later: no merge base at all is a failure ─────────────
     // Falling back to the raw base here would restore exactly the bug above, so
     // the scan throws and the CLI turns that into exit 1.
+    battery('#4690, one step later: no merge base at all is a failure');
     {
       const { dir } = makeRepo({}, { 'a.txt': 'x\n' });
       const other = mkdtempSync(join(tmpdir(), 'check-empty-changeset-unrelated-'));
@@ -855,6 +935,7 @@ function selfTest() {
     // for it has to read that file. Without this block the workflow could be
     // reverted to the frozen `base.sha` tomorrow with every assertion above still
     // green, which is precisely the "returns in a different shape" #6129 rules out.
+    battery('The consumer: this gate\'s own CI step (#6129)');
     {
       const workflow = join(REPO_ROOT, '.github/workflows/pr-automation.yml');
       const present = existsSync(workflow);
@@ -1130,6 +1211,7 @@ function selfTest() {
     // family asserting this family's wiring, which is a coupling with its own
     // cost. Stated so the next reader inherits the fact and not a false sense of
     // closure.
+    battery('The second consumer: where THIS SELF-TEST runs (#6509)');
     {
       const lintPath = join(REPO_ROOT, '.github/workflows/lint.yml');
       const lintPresent = existsSync(lintPath);
@@ -1226,6 +1308,7 @@ function selfTest() {
     }
 
     // ── Parser unit rows ─────────────────────────────────────────────────────
+    battery('Parser unit rows');
     assert(isEmptyDeclaration('---\n---\n\nbody\n'), 'parser: the canonical empty shape is empty');
     assert(isEmptyDeclaration('\n---\n\n---\n\nbody\n'), 'parser: blank lines around/inside the fence stay empty');
     assert(!isEmptyDeclaration(DECLARING), 'parser: a declaring changeset is not empty');
@@ -1259,6 +1342,7 @@ function selfTest() {
     // Predicted direction on reverse verification: restoring the old anchor
     // (`([A-Za-z]+)\s*$`) turns exactly these red — `isEmptyDeclaration` goes
     // true and the gate rejects a valid file.
+    battery('THE FIX (#7004): comments and quoted bump values');
     const declares = (label, text, expected) => {
       const { packages } = declaredBumpsIn(text);
       assert(
@@ -1318,6 +1402,7 @@ function selfTest() {
     // reached all four carriers at once, and the fourth
     // (`objectui-changeset-digest.mjs`) was not even named in the report,
     // because nothing mechanical connected it to the other three.
+    battery('The family reads one block one way (#7004)');
     {
       const FAMILY = [
         'scripts/check-changeset-no-major.mjs',
@@ -1423,6 +1508,7 @@ function selfTest() {
     }
 
     // ── Missing input is a failure, never a pass (#4690) ─────────────────────
+    battery('Missing input is a failure, never a pass (#4690)');
     {
       const { dir } = makeRepo({}, { 'a.txt': 'x\n' });
       assert(resolveCommit('definitely-not-a-ref', dir) === null, 'unresolvable base must resolve to null (-> exit 1)');
@@ -1431,6 +1517,51 @@ function selfTest() {
     for (const dir of repos) rmSync(dir, { recursive: true, force: true });
   }
 
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    failures.push(message);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of seen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = seen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
+  }
   if (failures.length) {
     console.error(`✗ check-empty-changeset --self-test -- ${failures.length} failure(s)\n`);
     for (const f of failures) console.error(`   - ${f}`);
@@ -1445,7 +1576,26 @@ function selfTest() {
 
 const argv = process.argv.slice(2);
 
-if (argv.includes('--self-test')) {
+/**
+ * The guard is INVERTED so the dispatch chain below keeps its indentation:
+ * the imported case is the empty first branch, and every mode that was here
+ * before is untouched in the `else if` chain.
+ *
+ * Measured before this landed: importing this module for its exports ran the
+ * whole gate inside the importer and wrote this gate's verdict to the
+ * importer's stdout before the exports came back — foreign output in a tool
+ * that never asked for it.
+ *
+ * Nothing imports this file today (every reference in `.github/**`,
+ * `package.json` and `scripts/**` spawns it as `node scripts/...`), so the
+ * guard silences no census: the only top-level statement it moves behind
+ * `isEntrypoint` is CLI dispatch.
+ */
+const invokedDirectly = isEntrypoint(import.meta.url);
+
+if (!invokedDirectly) {
+  // imported as a module — expose the exports and do nothing else
+} else if (argv.includes('--self-test')) {
   if (selfTest() !== SELF_TEST_VERDICT) {
       console.error(
           '\n✗ check-empty-changeset self-test: selfTest() returned without reaching its verdict,\n'

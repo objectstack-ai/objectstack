@@ -28,6 +28,7 @@ import {
   FIELD_CHOICE_WITHOUT_OPTIONS,
   VIEW_LAYOUT_WITHOUT_BINDING,
   VIEW_TREE_WITHOUT_PARENT_FIELD,
+  VIEW_ROW_COLOR_WITHOUT_COLORS,
   WEBHOOK_WITHOUT_TRIGGERS,
 } from './functional-completeness';
 
@@ -277,6 +278,78 @@ describe('checkViewCompleteness — the tree parent pointer (the silent-flat hal
   });
 });
 
+describe('checkViewCompleteness — rowColor without a colour map (the parse-clean no-op)', () => {
+  // `RowColorConfigSchema` requires `field` and leaves `colors` optional, so
+  // `rowColor: { field }` parses, publishes, and colours nothing: objectui's
+  // `useRowColor.ts` returns `undefined` unless BOTH are present. Every key is
+  // one we know, which is why nothing else in the stack can see it.
+
+  it('flags `rowColor: { field }` with no `colors` as a WARNING', () => {
+    const f = only(checkViewCompleteness({ type: 'grid', rowColor: { field: 'status' } }) as never);
+    expect(f.rule).toBe(VIEW_ROW_COLOR_WITHOUT_COLORS);
+    expect(f.severity).toBe('warning');
+    expect(f.path).toBe('rowColor.colors');
+    // The first sentence, verbatim: it names the view, the bound field and the
+    // consequence — a prescription with no diagnosis is the shape ADR-0078 §6
+    // rejects.
+    expect(f.message).toContain(
+      'A `grid` view whose `rowColor` binds `status` and declares no `colors` map never colours a row',
+    );
+    // …and the runtime line that makes it true.
+    expect(f.message).toContain('if (!config?.field || !config.colors) return undefined');
+    // The prescription is machine-pastable and carries the authored field back.
+    expect(f.fix).toContain("field: 'status'");
+    expect(f.fix).toContain('colors');
+  });
+
+  it('is silent once a `colors` map is declared — the negative fixture', () => {
+    expect(checkViewCompleteness({
+      type: 'grid',
+      rowColor: { field: 'status', colors: { open: '#0f0' } },
+    })).toEqual([]);
+  });
+
+  it('flags `colors: {}` the same — an empty map passes the guard and then matches nothing', () => {
+    // The renderer's own test is `!config.colors`, which an empty object
+    // PASSES; the lookup one line down matches no value and the row keeps its
+    // default background anyway. Mirroring the guard expression alone would
+    // have blessed this shape; the rule mirrors the outcome.
+    const f = only(checkViewCompleteness({ type: 'grid', rowColor: { field: 'status', colors: {} } }) as never);
+    expect(f.rule).toBe(VIEW_ROW_COLOR_WITHOUT_COLORS);
+    expect(f.path).toBe('rowColor.colors');
+  });
+
+  it('does NOT flag the view types whose renderer never reads `rowColor` — the pinned NON-rule', () => {
+    // objectui's ListView adapter forwards `rowColor` in its `grid` branch
+    // only. On a kanban board the block is inert too, but declaring a `colors`
+    // map would not fix it — so warning here would be a false prescription,
+    // which is what this module refuses to ship. Recorded, not enforced.
+    for (const type of ['kanban', 'gallery', 'chart', 'timeline']) {
+      const findings = checkViewCompleteness({ type, rowColor: { field: 'status' } });
+      expect(findings.map((f) => f.rule)).not.toContain(VIEW_ROW_COLOR_WITHOUT_COLORS);
+    }
+  });
+
+  it('stays silent without a `field` to bind — that half is the schema\'s to refuse', () => {
+    // `field` is REQUIRED by `RowColorConfigSchema`, so a block without one is
+    // a parse error, not a completeness finding. Asserting it here would
+    // double-report the same defect in two different vocabularies.
+    expect(checkViewCompleteness({ type: 'grid', rowColor: {} })).toEqual([]);
+    expect(checkViewCompleteness({ type: 'grid', rowColor: { field: '' } })).toEqual([]);
+  });
+
+  it('leaves a non-record `colors` alone — only what was verified is asserted', () => {
+    // The schema refuses these at parse; this module is not a second parser.
+    expect(checkViewCompleteness({ type: 'grid', rowColor: { field: 'status', colors: 'red' } })).toEqual([]);
+    expect(checkViewCompleteness({ type: 'grid', rowColor: { field: 'status', colors: [] } })).toEqual([]);
+  });
+
+  it('never throws on junk', () => {
+    expect(checkViewCompleteness({ type: 'grid', rowColor: 'red' })).toEqual([]);
+    expect(checkViewCompleteness({ type: 'grid', rowColor: null })).toEqual([]);
+  });
+});
+
 describe('checkWebhookCompleteness — the rule the runtime comment argued against', () => {
   it('flags a webhook with no `triggers` as an ERROR', () => {
     const f = only(checkWebhookCompleteness({ name: 'notify_slack', url: 'https://x' }) as never);
@@ -329,6 +402,7 @@ describe('registry hygiene', () => {
       'field/relationship-without-reference',
       'field/summary-without-operations',
       'view/layout-without-binding',
+      'view/row-color-without-colors',
       'view/tree-without-parent-field',
       'webhook/without-triggers',
     ]);
@@ -343,9 +417,10 @@ describe('registry hygiene', () => {
       ...checkFieldCompleteness({ type: 'checkboxes' }),
       ...checkViewCompleteness({ type: 'kanban' }),
       ...checkViewCompleteness({ type: 'tree', tree: {} }, { name: 'unit', fields: {} }),
+      ...checkViewCompleteness({ type: 'grid', rowColor: { field: 'status' } }),
       ...checkWebhookCompleteness({ url: 'https://x' }),
     ];
-    expect(all).toHaveLength(8);
+    expect(all).toHaveLength(9);
     for (const f of all) {
       expect(f.fix.length).toBeGreaterThan(8);
       expect(f.message.length).toBeGreaterThan(60);

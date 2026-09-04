@@ -134,7 +134,32 @@ export type CodeStampShape =
      * because a filter drawn around the inconvenient cases is an exemption
      * wearing a predicate's clothes.
      */
-    | 'objlithelper';
+    | 'objlithelper'
+    /**
+     * [#13790] An INLINE literal EXPRESSION at an object-literal `code:` — a
+     * ternary, or a `||`/`??` chain, written at the stamp itself with every
+     * branch already a literal:
+     *
+     * ```ts
+     * code: isProvisioning ? 'PROJECT_PROVISIONING' : 'PROJECT_NOT_FOUND'
+     * ```
+     *
+     * The fifth object-literal position and, until #13790, the third one no
+     * shape reached at all: `objlit` needs the quote immediately after the
+     * colon and here the condition comes first, `objlitconst` needs a
+     * SCREAMING_SNAKE identifier there, `objlittemplate` needs backticks, and
+     * `objlithelper`'s candidate captures the CONDITION's identifier, which is
+     * not a parameter, so it declines. No site AND no unresolved, again.
+     *
+     * ⭐ Unlike every other indirect shape it needs NO resolver: the gate
+     * reduces the value text with `literalCodeValues` directly, and the
+     * ALL-OR-NOTHING rule that drops an expression with one runtime limb is
+     * also what keeps its precision high — 214 of the 216 candidate positions
+     * on the tree it landed against are type annotations or runtime
+     * expressions, and every one of them reduces to nothing without a single
+     * position-specific test.
+     */
+    | 'objlitexpr';
 
 /**
  * Where the stamped code can end up. `dispatcher` is the door this card is
@@ -284,6 +309,23 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
     // (no source site — the producer is tenant code; see SANDBOX_AUTHORED_LIMB)
 
     // ── foreign vocabularies: spelled `code`, not an ADR-0112 error.code ────
+    {
+        code: 'TEXT',
+        file: 'packages/cli/src/commands/generate.ts',
+        shape: 'objlit',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'Not a vocabulary of codes at all — it is the SQL column type for the `code` FIELD TYPE ' +
+            "(a code editor), one entry of `FIELD_TYPE_SQL_MAP`, whose keys are `FieldType` members and " +
+            'whose values are DDL types. The scan reaches it because the key is spelled `code` and the ' +
+            'value happens to be upper-case; its siblings (`signature: \'TEXT\'`, `qrcode: \'TEXT\'`) ' +
+            'are the same string and are invisible only because their keys are not `code`. Nothing here ' +
+            'is thrown, returned, or stamped on an envelope: the value is interpolated into generated ' +
+            "`CREATE TABLE` text by `os generate migration --format sql`. The twin entry in " +
+            '`FIELD_TYPE_MAP` reads `code: \'string\'` and is below the grammar for the same reason ' +
+            'this one is above it — case, not meaning.',
+    },
     {
         code: 'MODULE_NOT_FOUND',
         file: 'packages/types/src/node.ts',
@@ -545,6 +587,44 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             'that a live wire code is outside the vocabulary; it does not prescribe the remedy.',
     },
 
+    // ── pending registration [#14474]: an install-time refusal that GAINED an
+    // ── envelope, so the scan can see it for the first time ────────────────
+    // Not a widened scan and not a new producer: `NamespaceConflictError` has
+    // thrown from `SchemaRegistry.installPackage` since ADR-0048 Phase 1, but
+    // it carried no `code` at all, so there was no stamp for any pattern to
+    // match. #14474 gave it the ADR-0112 envelope its three install-time
+    // siblings already carried, which is what put a site here to classify.
+    // The door narrowing its `why` names is #9106's — the file header above
+    // carries it. The anchor lives here rather than in the string, because a
+    // runtime string reaches operators who cannot resolve a tracker id.
+    {
+        code: 'NAMESPACE_CONFLICT',
+        file: 'packages/objectql/src/registry.ts',
+        shape: 'classfield',
+        door: 'dispatcher',
+        verdict: 'pending-registration',
+        why:
+            'ADR-0048 Phase 1 — the install-time namespace gate\'s refusal, raised by ' +
+            '`SchemaRegistry.installPackage` when a package\'s `manifest.namespace` is already owned by an ' +
+            'installed package that is not a co-owner of it (ADR-0130 D1). ⭐ Its reachability is what ' +
+            'separates it from the three ADR-0130 install-time rows below, whose `door: none` turns on ' +
+            'needing an artifact install SCOPE that no HTTP caller builds: this gate needs no scope, so the ' +
+            'ordinary one-package install reaches it. MEASURED on a booted stack (`@objectstack/verify` ' +
+            '`bootStack`, dev admin, two `POST /api/v1/packages` installs declaring one namespace), not ' +
+            'inferred from the call graph. Before the envelope the door answered `500` with ' +
+            '`code: INTERNAL_ERROR` — `packages/runtime/src/domains/packages.ts` catches and calls ' +
+            '`errorFromThrown(e, 500)`, and `resolveThrownHttpError` found neither `.status` nor `.code` to ' +
+            'read, so the caller\'s fallback stood. With the envelope the SAME request answers `422` and ' +
+            'the body carries `declaredCode: NAMESPACE_CONFLICT` beside `code: VALIDATION_ERROR` (the ' +
+            'member 422 derives through `standardErrorCodeForHttpStatus`, which does not name 422 and ' +
+            'buckets it as a client error). That demote is the door narrowing described in this file\'s ' +
+            'header, and it is exactly what ' +
+            'a `pending-registration` row records: the body PARSES, and what the producer loses instead is ' +
+            'its semantic code, silently absent from `error.code` until a ledger row lands. ⛔ Registering ' +
+            'it is the `packages/spec` lane\'s call and is NOT made here — this row is that batch\'s input, ' +
+            'and registering the code is what ratchets the row out again.',
+    },
+
     // ── boot refusals: no HTTP boundary exists yet ─────────────────────────
     // [#9460] The four `MigrationJournalRefusal` codes below arrive through the
     // same code-carrying-helper shape as `owd_widening_forbidden` — a class
@@ -656,7 +736,7 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
     // registered code, so they are not demoted at a door, they never reach one.
     {
         code: 'INVALID_ARTIFACT_PACKAGES',
-        file: 'packages/objectql/src/artifact-packages.ts',
+        file: 'packages/core/src/artifact-packages.ts',
         shape: 'codehelper',
         door: 'none',
         verdict: 'boot-refusal',
@@ -676,7 +756,7 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
     },
     {
         code: 'INVALID_ARTIFACT_PACKAGE_ENTRY',
-        file: 'packages/objectql/src/artifact-packages.ts',
+        file: 'packages/core/src/artifact-packages.ts',
         shape: 'codehelper',
         door: 'none',
         verdict: 'boot-refusal',
@@ -697,7 +777,7 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
     },
     {
         code: 'DUPLICATE_ARTIFACT_PACKAGE',
-        file: 'packages/objectql/src/artifact-packages.ts',
+        file: 'packages/core/src/artifact-packages.ts',
         shape: 'codehelper',
         door: 'none',
         verdict: 'boot-refusal',
@@ -1179,6 +1259,62 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             'value is a member of the closed ADR-0114 D2 catalog by construction; \'min_value\' is one of them. ' +
             'It reaches `ApiError.details.fields[].code`, never `error.code`, so no ledger row can be owed ' +
             'for it (ADR-0112 D6).',
+    },
+
+    // ── [#13790] the SAME D6 genre, arriving through the inline-expression ──
+    // ── shape rather than through a helper parameter ────────────────────────
+    //
+    // These two rows are the whole verdict cost of the `objlitexpr` widening on
+    // this tree, and they are owed for the reason the block above is owed:
+    // reconciliation runs in BOTH directions, so a newly derived site with no
+    // row is a red. What is NOT here is the point of the card — no
+    // `pending-registration` row, because the widening surfaced no unregistered
+    // WIRE code at all. The other live inline-expression position,
+    // `packages/rest/src/error-response.ts`, stamps `PROJECT_PROVISIONING` /
+    // `PROJECT_PROVISIONING_FAILED` / `PROJECT_NOT_FOUND` — all three already in
+    // `ERROR_CODE_LEDGER`, so the scan derives no site for them, and the value
+    // of the shape there is that it will derive one the day a fourth branch is
+    // added to that ternary. That file is the REST door itself.
+    //
+    // ⚠️ Reported HERE rather than delegated to `check:error-code-casing`, and
+    // that was measured rather than assumed. Every pattern that gate has needs
+    // a QUOTED literal beside the token `code`; at an inline ternary there is
+    // none — `findViolations()` returns ZERO findings for this file, while the
+    // literally-spelled `code: 'invalid_type'` a few lines up it DOES see and
+    // correctly skips as D6. A `casing-gate` delegation here would therefore be
+    // the seam this file's header describes, not a hand-off.
+    // flow definition + clone doors — domains/automation.ts
+    {
+        code: 'required',
+        file: 'packages/runtime/src/domains/automation.ts',
+        shape: 'objlitexpr',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'The automation door builds `validationFailure(message, [{ field, code, message }])` and stamps ' +
+            'the field code as an INLINE ternary at the property itself — `code: body.name === undefined ? ' +
+            '\'required\' : \'invalid_type\'`. Both branches are ADR-0114 D2 `FieldErrorCode` members, and ' +
+            '`validationFailure` puts the record in `ApiError.details.fields[]` while `error.code` carries ' +
+            'the envelope\'s own VALIDATION_ERROR. The same D6 field-addressed catalog the record-validator ' +
+            'and query-param rows above carry, one stamp shape over (ADR-0112 D6).',
+    },
+    {
+        code: 'invalid_type',
+        file: 'packages/runtime/src/domains/automation.ts',
+        shape: 'objlitexpr',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'The automation door builds `validationFailure(message, [{ field, code, message }])` and stamps ' +
+            'the field code as an INLINE ternary at the property itself — `code: body.name === undefined ? ' +
+            '\'required\' : \'invalid_type\'`. Both branches are ADR-0114 D2 `FieldErrorCode` members, and ' +
+            '`validationFailure` puts the record in `ApiError.details.fields[]` while `error.code` carries ' +
+            'the envelope\'s own VALIDATION_ERROR. The same D6 field-addressed catalog the record-validator ' +
+            'and query-param rows above carry, one stamp shape over (ADR-0112 D6). ⚠️ The gate derives this ' +
+            'row from the `name` ternary alone: two more instances of the identical stamp (the clone door\'s ' +
+            '`name` and `label` checks) sit behind a nested-template desync in the shared textual scanners ' +
+            'and are invisible to `enclosingOpeners`. Same values, same verdict; recorded so the count is ' +
+            'read as a lower bound.',
     },
 ];
 

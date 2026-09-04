@@ -45,6 +45,7 @@ import {
     isObjectLessActionKey,
     reconcileActionRegistrations as reconcileActionRegistrationsPure,
     resolveActionHandlerKeys,
+    standaloneActionOwnerKey,
 } from '@objectstack/objectql';
 
 // [ADR-0110] The addressing vocabulary and the D5 reconciliation moved to
@@ -58,6 +59,7 @@ export {
     actionHandlerObjectKeys,
     isObjectLessActionKey,
     resolveActionHandlerKeys,
+    standaloneActionOwnerKey,
 };
 
 /** A `sys_`-prefixed object is a system table — off-limits to external MCP agents. */
@@ -636,7 +638,16 @@ export function seedFlowActionParams(_deps: ActionExecutionDeps,
 
     if (rowId != null) {
         const keys = new Set<string>(['recordId']);
-        if (objectName && objectName !== 'global') {
+        // [#14864] ONE predicate for "object-less", the same one
+        // `dispatchFlowAction` asks three lines from here before it decides
+        // whether to hand the automation service an `object` at all. This used
+        // to be a second, narrower comparison (`objectName !==
+        // GLOBAL_ACTION_OBJECT_KEY`), and the two parted on exactly one input:
+        // a route resolved at the legacy `'*'` was object-less to the envelope
+        // and object-BOUND here, so the bag grew a nonsense `'*Id'` alias. The
+        // empty-string leg was never the divergence — the `objectName &&`
+        // truthiness test this replaces already covered it.
+        if (!isObjectLessActionKey(objectName)) {
             keys.add(`${objectName.replace(/_([a-z])/g, (_m: string, c: string) => c.toUpperCase())}Id`);
         }
         if (typeof action?.recordIdParam === 'string' && action.recordIdParam) {
@@ -1011,7 +1022,7 @@ export function enforceActionParams(deps: ActionExecutionDeps,
     if (!laxActionParams()) {
         return `Invalid action params: ${summary}`;
     }
-    const key = `${where.objectName ?? 'global'}/${where.actionName ?? action?.name ?? 'action'}`;
+    const key = `${where.objectName ?? GLOBAL_ACTION_OBJECT_KEY}/${where.actionName ?? action?.name ?? 'action'}`;
     warnActionParamsOnce(
         key,
         `[action-params] ${key}: ${summary} — accepted because ` +
@@ -1485,7 +1496,7 @@ export async function resolveActionByName(deps: ActionExecutionDeps,
  *     engine executes since #2608 (`resyncAuthoredActions`) but that never
  *     appear inside any object definition. Their owning object follows the
  *     same convention as the engine registration key (`objectName` field,
- *     legacy `object` field, else the `'global'` wildcard).
+ *     legacy `object` field, else the object-less `GLOBAL_ACTION_OBJECT_KEY`).
  *
  * On a key clash (`objectName:name`) the object-embedded declaration wins,
  * mirroring the execution layer's artifact-wins rule — `resyncAuthoredActions`
@@ -1532,16 +1543,18 @@ export async function collectActionDeclarations(deps: ActionExecutionDeps,
 
 
 /**
- * Owning object of a standalone `action` item — must stay in lockstep with
- * the ObjectQL plugin's `actionObjectKey` (the engine registration key), so
+ * Owning object of a standalone `action` item: spec `objectName`, then the
+ * bundle collector's `object`, else the object-less `GLOBAL_ACTION_OBJECT_KEY`.
+ *
+ * A DELEGATING ALIAS, not a second spelling. The ladder itself is
+ * {@link standaloneActionOwnerKey}, re-exported above — one implementation, so
  * the declaration the MCP surface resolves is the one whose handler
- * `executeAction` will find: spec `objectName`, bundle-collector `object`,
- * else the `'global'` wildcard.
+ * `executeAction` will find. This name survives because `ownsRoute` and any
+ * out-of-repo importer already call it, and `_deps` stays (unused, as its
+ * underscore already said) so the exported signature does not move under them.
  */
 export function standaloneActionObjectName(_deps: ActionExecutionDeps, action: any): string {
-    if (typeof action?.objectName === 'string' && action.objectName.length > 0) return action.objectName;
-    if (typeof action?.object === 'string' && action.object.length > 0) return action.object;
-    return GLOBAL_ACTION_OBJECT_KEY;
+    return standaloneActionOwnerKey(action);
 }
 
 

@@ -5,6 +5,8 @@ import chalk from 'chalk';
 import fs from 'fs';
 import path from 'path';
 import { execSync } from 'child_process';
+import { PROTOCOL_MAJOR } from '@objectstack/spec/kernel';
+import { sanitizeNamespace } from './init.js';
 
 export const templates = {
   plugin: {
@@ -119,7 +121,9 @@ MIT
           vitest: '^4.0.0',
         },
       }),
-      'objectstack.config.ts': (name: string) => `import { defineStack } from '@objectstack/spec';
+      'objectstack.config.ts': (name: string) => {
+        const namespace = sanitizeNamespace(name);
+        return `import { defineStack } from '@objectstack/spec';
 
 // Barrel imports — add more as you create new type folders
 // import * as objects from './src/objects';
@@ -128,9 +132,20 @@ MIT
 
 export default defineStack({
   manifest: {
-    name: '${name}',
+    id: 'com.example.${namespace}',
+    namespace: '${namespace}',
     version: '0.1.0',
+    type: 'app',
+    name: '${name}',
     description: '${name} example application',
+    // Protocol compatibility range: the metadata-protocol major this app is
+    // authored against. The runtime checks it before it loads anything, so a
+    // runtime outside the range refuses this app at the boundary with the
+    // exact migration command instead of crashing later. Scaffolding stamped
+    // it to match the ObjectStack version you installed — change it when you
+    // deliberately move to a new protocol major, not to silence a mismatch.
+    // Guide: https://objectstack.ai/docs/upgrading
+    engines: { protocol: '^${PROTOCOL_MAJOR}' },
   },
   
   objects: [
@@ -141,7 +156,8 @@ export default defineStack({
     // Object.values(apps),     // Uncomment after creating src/apps/index.ts
   ],
 });
-`,
+`;
+      },
       'README.md': (name: string) => `# ${name} Example
 
 ObjectStack example application: ${name}

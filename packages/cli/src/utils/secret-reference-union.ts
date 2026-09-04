@@ -256,9 +256,36 @@ export function buildSecretReferenceUnion(
 // `getDriverForObject()` are public members of it.
 // ---------------------------------------------------------------------------
 
-/** The driver read this module uses. Matches `IDataDriver.find`. */
+/**
+ * The driver read this module uses, declared at the shape `IDataDriver.find`
+ * really has: `Promise<Record<string, unknown>[]>`
+ * (`packages/spec/src/contracts/data-driver.ts`).
+ *
+ * The sentence above this port always said it MATCHED `IDataDriver.find`; the
+ * return type said `Promise<unknown>`, and the two disagreed. The sentence was
+ * the correct one, and #14843 is the cost of the disagreement: a consumer that
+ * cannot see an array in the type invents a normalizer for envelope shapes no
+ * producer here emits, and that normalizer then reads as a live defence.
+ *
+ * Every concrete driver reachable through `ObjectQL.getDriverForObject()`
+ * resolves `find` to an array, verified rather than inferred — `SqlDriver`
+ * (and `SqliteWasmDriver`, which extends it without overriding `find`),
+ * `TursoDriver` in both its local and remote faces, `MongoDBDriver` and
+ * `InMemoryDriver`. Those five are every `IDataDriver` implementation in this
+ * tree, and `registerDriver`/`getDriver` hand the registered instance back
+ * unwrapped, so nothing interposes another shape.
+ *
+ * ⛔ Do not loosen it back to `unknown`. `unknown` here buys no safety: it
+ * relocates the decision to every call site, where each one answers it
+ * differently and none of the answers is reachable.
+ *
+ * ⚠️ NOT a claim about every `find` in the platform. The console's
+ * `ObjectStackAdapter.find()` resolves to a normalized `QueryResult` envelope
+ * and never to an array — a different port, and the reason this one is stated
+ * from the concrete drivers rather than from the word "find".
+ */
 export interface SecretReferenceDriverLike {
-  find(object: string, query: Record<string, unknown>, options?: unknown): Promise<unknown>;
+  find(object: string, query: Record<string, unknown>, options?: unknown): Promise<Record<string, unknown>[]>;
 }
 
 /** The engine slice this module uses. */

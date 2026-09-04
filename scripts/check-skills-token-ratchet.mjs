@@ -313,7 +313,11 @@ export const CEILINGS = new Map([
   // a transition gate written as a `validations[]` invariant bricks rows that
   // were legal when stored, and an invariant written as `requiredWhen` never
   // enforces itself at all. +110 tokens, 1 absorbed by headroom, ceiling +109.
-  ['skills/objectstack-data/SKILL.md', 13892],
+  // 13892 -> 10009: RE-LOCK at the landed count after the `rules/security.md`
+  // split (#14296 item 1 = A, condition (b)). The raise recorded above is spent
+  // and its headroom leaves with it; the moved text is priced in its own row
+  // below, so the package total is unchanged by the re-lock itself.
+  ['skills/objectstack-data/SKILL.md', 10009],
   ['skills/objectstack-formula/SKILL.md', 6002], //     -53 (was 6055)
   ['skills/objectstack-i18n/SKILL.md', 6338], //        -11 (was 6349)
   // 12705 -> 12984 (2026-08-31 app-repo-principles raise, see the block above).
@@ -327,7 +331,7 @@ export const CEILINGS = new Map([
   ['skills/objectstack-platform/SKILL.md', 12984],
   // 14239 -> 14391: the pull-directed split-resolution order joined the decision
   // frame (maintainer ruling 2026-08-27, verbatim and untranslated: 「tong y 4」 —
-  // accepting the four-rule set), and this file carries TWO enforced frame copies
+  // accepting the four-rule set), and this file carries one enforced frame copy
   // (check:skill-frame-sync COPIES), so the rule ships to third-party installers
   // with the frame it amends — the #5130 drift is exactly a frame-semantics change
   // that skipped this mirror. +152 tokens across both copies, compressed to the
@@ -337,8 +341,8 @@ export const CEILINGS = new Map([
   // 2026-09-01, verbatim and untranslated (kept on ONE line, #11106: a governed
   // quotation that soft-breaks stops being findable by the things that grep it):
   // 「四维分析中，长期合理应该权重最高，至少50%」
-  // Same shape and same reason as the +152 row above it: this file carries TWO
-  // enforced frame copies (check:skill-frame-sync COPIES), and a rule that
+  // Same shape and same reason as the +152 row above it: this file carries one
+  // enforced frame copy (check:skill-frame-sync COPIES), and a rule that
   // changes WHICH RECOMMENDATION the frame yields is exactly the #5130 drift
   // class if it ships to third-party installers with only the old tie-break —
   // the customer's agent would weigh the axes co-equally while this repo weighs
@@ -350,7 +354,12 @@ export const CEILINGS = new Map([
   // zero of each), so the verbatim ruling lives in the internal copies and in
   // the raising PR's body. No genuine deletion was available: the rule makes no
   // existing sentence redundant, and a re-wrap moves no tokens and pays nothing.
-  ['skills/objectstack-pm-dispatch/SKILL.md', 14549],
+  // 14549 -> 9708: re-locked at the landed count after the #14296 item-4 split —
+  // the developer-agent operating template moved to `rules/dev-template.md`
+  // (its own row below); the one gate-pinned copy of the decision frame stays
+  // in this file (check:skill-frame-sync reads its copies by path). Lowered,
+  // not raised: shrink-only, no ruling needed for this direction.
+  ['skills/objectstack-pm-dispatch/SKILL.md', 9708],
   ['skills/objectstack-query/SKILL.md', 5552], //       -17 (was 5569)
   // 25125 -> 25143: the CRM UI Blueprint — the catalog's module-completeness
   // list, and the only place an agent is told what a finished module contains —
@@ -382,7 +391,12 @@ export const CEILINGS = new Map([
   // default in the very PR that demotes it. Both now reference a declared group,
   // which is shorter — -13 tokens, real, and the fix the ruling asks for rather
   // than a payment invented to fund it. +315 gross, -13, ceiling +302.
-  ['skills/objectstack-ui/SKILL.md', 25445],
+  // 25445 -> 3815: the #14296 item 1 split (ruled A). The entry file's body
+  // moved into the five `rules/*.md` rows below; this row is RE-LOCKED to the
+  // entry's landed count in the same PR, so the split banks its own shrink
+  // instead of leaving 21,630 tokens of headroom behind for the next author.
+  // Lowering is always legitimate (see the shrink-only section in the header).
+  ['skills/objectstack-ui/SKILL.md', 3815],
   ['skills/objectstack-upgrade/SKILL.md', 8333], //      -2 (was 8335)
 
   // ── the #12392 extension: the rest of the AUTHORED bundle ────────────────
@@ -408,6 +422,10 @@ export const CEILINGS = new Map([
   ['skills/objectstack-data/rules/lifecycle.md', 1590],
   ['skills/objectstack-data/rules/naming.md', 773],
   ['skills/objectstack-data/rules/relationships.md', 3778],
+  // NEW FILE (#14296 item 1 = A, condition (b)): the entry's Security & Access
+  // Control block moved here whole. Pinned at its landed count — no headroom,
+  // because a split that arrives with budget is a raise wearing a new path.
+  ['skills/objectstack-data/rules/security.md', 2480],
   // 3024 -> 3109 (2026-08-31 app-repo-principles raise, see the block above).
   // Severity Levels listed the three values and left the CHOICE unstated: a
   // block rests on a judgement a person made, so a machine-inferred signal — a
@@ -417,10 +435,7 @@ export const CEILINGS = new Map([
   ['skills/objectstack-data/rules/validation.md', 3109],
 
   // objectstack-platform
-  ['skills/objectstack-platform/evals/README.md', 514],
   ['skills/objectstack-platform/references/plugin-hooks.md', 2628],
-  ['skills/objectstack-platform/rules/bootstrap-patterns.md', 1093],
-  ['skills/objectstack-platform/rules/plugin-hooks-events.md', 985],
   ['skills/objectstack-platform/rules/plugin-lifecycle.md', 2408],
   ['skills/objectstack-platform/rules/service-registry.md', 2331],
 
@@ -432,15 +447,33 @@ export const CEILINGS = new Map([
   // objectstack-automation
   ['skills/objectstack-automation/evals/approvals/test-revise-loop.md', 1329],
 
+  // objectstack-pm-dispatch — the #14296 item-1/item-4 split (2026-09-02, maintainer
+  // ruling 「其他同意」 adopting 1A/4A): the developer-agent operating template
+  // moved out of SKILL.md verbatim, minus the decision-frame block the frame
+  // gate pins to the entry. Pinned AT its landed count, zero headroom.
+  ['skills/objectstack-pm-dispatch/rules/dev-template.md', 1838],
+
   // objectstack-ui — the two authored eval files; its `references/react-blocks.md`
   // and `contracts/react-blocks.contract.json` are generator-owned and carry no
   // row here on purpose (see the boundary section).
   ['skills/objectstack-ui/evals/README.md', 289],
   ['skills/objectstack-ui/evals/analytics-inline-vs-dataset.json', 1102],
 
+  // objectstack-ui `rules/` — the five files the #14296 item 1 split created.
+  // Each row is an INITIAL measurement AT its landed count, so every one starts
+  // with exactly zero headroom, on the same terms as the #12392 rows above: the
+  // next token added to any of them is paid for by deleting one from the same
+  // file. The split moves text only — it deleted the 234 tokens of restatement
+  // the reassembly exposed (plus three cross-references the move killed) and
+  // added nothing but five titles and five pointers,
+  // so the package nets -58 (33,957 -> 33,899).
+  ['skills/objectstack-ui/rules/actions.md', 2108],
+  ['skills/objectstack-ui/rules/dashboards.md', 6090],
+  ['skills/objectstack-ui/rules/list-views.md', 3011],
+  ['skills/objectstack-ui/rules/navigation.md', 2273],
+  ['skills/objectstack-ui/rules/pages.md', 5501],
+
   // the remaining skills' eval notes
-  ['skills/objectstack-ai/evals/README.md', 315],
-  ['skills/objectstack-i18n/evals/README.md', 411],
 ]);
 
 /**
@@ -671,6 +704,12 @@ function fixtureTree() {
   return { root, cleanup: () => rmSync(root, { recursive: true, force: true }) };
 }
 
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'check-skills-token-ratchet self-test reached its verdict';
+
 function selfTest() {
   const rel = 'skills/objectstack-ui/SKILL.md';
   const over = verdict(rel, 26000, 25154).msg;
@@ -889,9 +928,19 @@ function selfTest() {
     process.exit(1);
   }
   console.log(`✓ check-skills-token-ratchet self-test: ${cases.length} cases pass.`);
+
+  return SELF_TEST_VERDICT;
 }
 
 if (isEntrypoint(import.meta.url)) {
-  if (process.argv.includes('--self-test')) selfTest();
-  else run();
+  if (process.argv.includes('--self-test')) {
+    if (selfTest() !== SELF_TEST_VERDICT) {
+      console.error(
+        '\n✗ check-skills-token-ratchet self-test: selfTest() returned without reaching its verdict,\n'
+          + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+          + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
+  } else run();
 }

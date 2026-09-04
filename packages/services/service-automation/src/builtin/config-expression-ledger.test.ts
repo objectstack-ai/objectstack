@@ -46,6 +46,8 @@ interface SchemaNode {
   type?: string;
   properties?: Record<string, SchemaNode>;
   items?: SchemaNode;
+  /** `true` = an open map with untyped values; an object = the schema every value takes. */
+  additionalProperties?: boolean | SchemaNode;
   xExpression?: string;
 }
 
@@ -57,15 +59,26 @@ interface SchemaNode {
  * enforces the ADR-0032 §3 double-brace text template, a different dialect that
  * rejects a single `{x}`. Conflating the two would fail every valid
  * `loop.collection`.
+ *
+ * `'value'` (#14149) maps to the ledger's `value` role: a slot whose authored
+ * value may be a `{ dialect: 'cel', source }` envelope evaluated by the
+ * expression engine to a value — the `assignment` node's `assignments.*`. It
+ * IS `validateExpression`'s `'value'` role (CEL, any result type); what makes
+ * it a distinct ledger role is the slot's shape rule: only an envelope-shaped
+ * object is an expression there, a plain string stays `{var}` interpolation.
  */
 const ROLE_BY_MARKER: Record<string, FlowNodeExpressionRole> = {
   expression: 'predicate',
   template: 'flow-template',
+  value: 'value',
 };
 
 /**
  * Collect every `xExpression`-marked property in a configSchema, as the same
- * `key[].nested` path syntax the ledger uses.
+ * `key[].nested` path syntax the ledger uses — and, since #14149, the same
+ * `key.*` syntax: an object-valued `additionalProperties` is the schema every
+ * value of an open map takes, so a marker there declares "every authored key
+ * of this map", the sibling of `items` for arrays.
  */
 function collectExpressionProps(
   schema: SchemaNode | undefined,
@@ -87,6 +100,18 @@ function collectExpressionProps(
       if (isObjectArray) out.push(...collectExpressionProps(prop.items, here));
       else out.push(...collectExpressionProps(prop, here));
     }
+  }
+
+  // An open map whose VALUES carry a schema contributes `key.*` — the ledger's
+  // spelling for "every authored key of this map" (`assignments.*`). A bare
+  // `additionalProperties: true` (untyped values — the `assignment`
+  // DESCRIPTOR's own shape) declares nothing, so the descriptor channel and
+  // the spec channel cannot double-declare the same slot.
+  const values = schema.additionalProperties;
+  if (values && typeof values === 'object') {
+    const here = prefix ? `${prefix}.*` : '*';
+    if (typeof values.xExpression === 'string') out.push({ path: here, marker: values.xExpression });
+    out.push(...collectExpressionProps(values, here));
   }
   return out;
 }
@@ -201,6 +226,23 @@ describe('configSchema ↔ expression-ledger reconciliation (#4027)', () => {
     // `decision` publishes no descriptor configSchema, by design.
     expect(declaredFromSchemalessConfigs().map(key)).toContain(key(decision!));
     expect(declaredFromDescriptors().map(key)).not.toContain(key(decision!));
+  });
+
+  it('assignment.assignments.* is covered — the #14149 value slot, declared where the descriptor cannot carry it', () => {
+    const assignment = FLOW_NODE_EXPRESSION_PATHS.find(
+      (e) => e.nodeType === 'assignment' && e.path === 'assignments.*',
+    );
+    expect(assignment, 'the ruled slot: an assignment value may be a CEL envelope').toBeDefined();
+    expect(assignment!.role).toBe('value');
+    // The descriptor declares `assignments` as `additionalProperties: true`
+    // (the openness IS its contract, pinned by the form↔Zod ledger), so the
+    // marker rides the spec Zod's map value and reaches this ratchet through
+    // the JSON map — never through the descriptor channel.
+    expect(declaredFromSchemalessConfigs().map(key)).toContain(key(assignment!));
+    expect(declaredFromDescriptors().map(key)).not.toContain(key(assignment!));
+    // And the marker is mapped, not merely tolerated: an unknown marker still
+    // fails `roleOf`, and a ledger entry with no declaration still reads stale.
+    expect(ROLE_BY_MARKER.value).toBe('value');
   });
 
   it('screen.fields[].visibleWhen is covered — the #3528 regression', () => {

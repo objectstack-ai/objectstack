@@ -223,6 +223,36 @@ import { findViolations } from './check-error-code-casing.mjs';
 import { join, relative, dirname, resolve } from 'node:path';
 import { isEntrypoint } from './invoked-as.mjs';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  '[#14626] THE NESTED TEMPLATE, across all FOUR shared textual primitives.': 242,
+  '[#13790] The INLINE literal EXPRESSION at an object-literal `code:`.': 40,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 2;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 const ROOT = resolve(new URL('..', import.meta.url).pathname);
 const SCAN_ROOT = 'packages';
 const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', '.turbo', 'coverage', 'build']);
@@ -351,7 +381,72 @@ export const SHAPES = [
   // reports nothing, so a new recognizer that hides under an existing name
   // cannot be counted, pinned or ratcheted separately from the one it borrows.
   { name: 'objlithelper', re: /(?:\bcode\s*:\s*|[{,]\s*(?=code\s*[,;}\n]))([A-Za-z_$][\w$]*)\s*[,;}\n]/g, resolve: 'objlithelper', lowercase: 'here' },
+  // [#13790] `code: <an INLINE expression of literals>` in an object literal —
+  // a ternary, or a `||`/`??` chain, written AT THE STAMP with every branch
+  // already a literal. The FIFTH object-literal position, and the one each of
+  // the other four declines for its own reason: `objlit` wants the quote
+  // IMMEDIATELY after the colon and the condition comes first; `objlitconst`
+  // wants a SCREAMING_SNAKE identifier there; `objlittemplate` wants backticks;
+  // and `objlithelper`'s candidate regex captures the CONDITION's identifier
+  // (`isProvisioning`), which is not a parameter, so it declines. Reached by no
+  // shape at all is no site AND no unresolved — the one way this gate's
+  // "REPORTED as unresolved, never dropped" bound cannot notice itself failing,
+  // in a third position after #9223's and #13233's.
+  //
+  // ⭐ Unlike every other indirect shape here, this one needs NO resolver.
+  // `literalCodeValues` already reduces the expression, so the shape is exactly
+  // "reduce the value text between `code:` and the property's terminating
+  // top-level comma". `resolveIdent` is deliberately left at its default
+  // (answer nothing): an identifier limb then makes the whole expression
+  // unreducible under the ALL-OR-NOTHING rule, which is what keeps this shape
+  // out of the lower-case-LOCAL position #13478 censused rather than quietly
+  // annexing it — and it is also what makes the widening cheap (see
+  // INLINE_LITERAL_EXPRESSION_CENSUS: 218 of the 222 candidates on this tree
+  // cost nothing because a type annotation reduces to nothing by the same rule).
+  //
+  // ⛔ The anchor is the STRICT `code:` of its three literal siblings, not
+  // `objlithelper`'s `code\s*:\s*`. Measured, not preferred: the loose spelling
+  // matches the COLON OF A TERNARY — `typeof issue.code === 'string' ? issue.code
+  // : 'unknown'` in `thrown-cause-diagnostics.ts` reads as a `code :` stamp of
+  // `'unknown'` — which is a false position this shape would have no structural
+  // way to reject. `objlithelper` can afford the loose anchor because its
+  // parameter guard rejects it; this shape's guard is the reduction, and the
+  // reduction succeeds on that text.
+  //
+  // The regex is a CANDIDATE generator, not the shape. Three guards in
+  // `deriveSites` decide, and each one's cost on the real tree is a row in
+  // INLINE_LITERAL_EXPRESSION_CENSUS.
+  //
+  // ⛔ Named separately rather than folded into `objlit` for the reason
+  // `objlithelper` records: SHAPES is a PUBLISHED list whose price is that an
+  // unrecognised spelling reports nothing, so a recognizer hiding under an
+  // existing name cannot be counted, pinned or ratcheted apart from it.
+  //
+  // ⛔ The negative lookahead is NOT an optimisation, and removing it reds the
+  // kebab pin. #12925 declares the kebab DIAGNOSTIC vocabulary outside BOTH
+  // gates and pins that declaration by counting RECOGNIZER MATCHES rather than
+  // findings — precisely because a shape can match a value and still report
+  // nothing. A bare `code:` anchor MATCHES `code: 'unknown-component'` even
+  // though every guard below then declines it, which would read as this gate
+  // adopting that vocabulary. A bare quoted literal is `objlit`'s anyway (or,
+  // for a kebab one, nobody's by declaration), so refusing it in the regex
+  // costs this shape nothing and keeps the published population honest.
+  { name: 'objlitexpr', re: /\bcode:(?!\s*'[^']*'\s*[,;}\n])\s*/g, resolve: 'objlitexpr', lowercase: 'here' },
 ];
+
+/**
+ * [#13790] The object-literal shapes `objlitexpr` is the REMAINDER of, anchored
+ * so a candidate token can be asked "are you already theirs?".
+ *
+ * Built from their own published regexes rather than re-derived as a private
+ * copy of "a quoted literal, a SCREAMING_SNAKE identifier or a template": a
+ * paraphrase drifts from what it paraphrases, and a drift in THIS direction
+ * makes two shapes report one position — the double-count that a published,
+ * ratcheted shape list has no way to notice.
+ */
+const OBJECT_LITERAL_SIBLING_ANCHORS = ['objlit', 'objlitconst', 'objlittemplate'].map(
+  (name) => new RegExp(`^(?:${SHAPES.find((sh) => sh.name === name).re.source})`),
+);
 
 /**
  * ## [#12925] Kebab-case DIAGNOSTIC codes are a SEPARATE VOCABULARY — declared
@@ -616,6 +711,14 @@ export const OBJECT_LITERAL_CODE_HELPER_BLINDNESS = Object.freeze({
    * [#13233] What closing the POSITION actually moved, re-derived on this tree
    * through the real `deriveSites` rather than through a separate instrument.
    */
+  /**
+   * [#14626] RE-CHECKED against the primitive change rather than assumed: with
+   * the template-literal mode in, `objlithelper` derives the SAME 29 sites and
+   * the SAME 5 `unresolved` entries over the same helper positions as it did
+   * before (diffed key-by-key, both directions empty). These figures record
+   * what #13233's POSITION closure moved on its own tree and are a historical
+   * delta rather than a census of today's; nothing here moved.
+   */
   measured: Object.freeze({
     helpers: 13,
     callSitesNewlyReached: 117,
@@ -650,7 +753,7 @@ export const OBJECT_LITERAL_CODE_HELPER_BLINDNESS = Object.freeze({
    *     ON and 0 with it OFF; a same-name-shadowing negative control yielded 0.
    *
    * ⚠️ The headline zero is NOT "the position is empty". The position is
-   * populated — 24 value-position candidates feed a `code:` through a local or
+   * populated — 26 value-position candidates feed a `code:` through a local or
    * a destructured binding. Every one of them holds a RUNTIME value, which is
    * the #9460 bound this gate declares rather than a hole. What is empty is the
    * REDUCIBLE subclass: not one local in this tree holds the ternary-or-chain
@@ -663,19 +766,29 @@ export const OBJECT_LITERAL_CODE_HELPER_BLINDNESS = Object.freeze({
    * assume the next tree is also empty.
    */
   localTwinCensus: Object.freeze({
-    /** Every position where `objlithelper` declines a non-parameter identifier. */
-    candidatePositions: 125,
+    /**
+     * Every position where `objlithelper` declines a non-parameter identifier.
+     *
+     * [#14626] RE-DERIVED, and the two deltas are separated because they are
+     * different facts. Against the pinned 125 this tree reads 136, of which
+     * 125 → 134 is TREE DRIFT (measured by running the PRE-fix primitives over
+     * today's sources) and 134 → 136 is the nested-template fix newly placing
+     * two positions `enclosingOpeners` used to skip. The reducible subclass is
+     * still EMPTY at both ends, so no verdict row moves — but the numbers below
+     * describe today's tree rather than #13478's.
+     */
+    candidatePositions: 136,
     /**
      * Of those, the ones another object-literal shape ALREADY matches at the
      * same `code` token — SCREAMING_SNAKE module constants, which `objlitconst`
      * resolves or reports today. Not newly reached, and counting them as such
      * is the easiest way to inflate this census.
      */
-    alreadyCoveredByObjlitconst: 36,
+    alreadyCoveredByObjlitconst: 41,
     /** Genuinely newly reached: no other shape matches that token. */
-    newlyReached: 89,
-    newlyReachedDistinctFileIdent: 69,
-    newlyReachedDistinctFiles: 45,
+    newlyReached: 95,
+    newlyReachedDistinctFileIdent: 73,
+    newlyReachedDistinctFiles: 47,
     /** ⭐ Of the newly reached, how many reduce to a literal set. */
     reduce: 0,
     /** ⇒ nothing to emit ⇒ no rows owed in the declaration file. */
@@ -696,9 +809,9 @@ export const OBJECT_LITERAL_CODE_HELPER_BLINDNESS = Object.freeze({
      * more than the assignment position's did.
      */
     reduceToEmptyByClass: Object.freeze({
-      typeKeywordPosition: 49, // `code: string` / `number` / `undefined`
+      typeKeywordPosition: 53, // `code: string` / `number` / `undefined`
       namedTypePosition: 16, // `code: FieldErrorCode` / `ErrorCode` / `FlowRefusalCode` / …
-      runtimeValueLocal: 15, // `const code = e?.body?.code ?? …` — the #9460 bound
+      runtimeValueLocal: 17, // `const code = e?.body?.code ?? …` — the #9460 bound
       bindingWithoutDeclarator: 9, // destructured `const { code } = resolveThrownHttpError(…)`
     }),
     /**
@@ -721,6 +834,326 @@ export const OBJECT_LITERAL_CODE_HELPER_BLINDNESS = Object.freeze({
     helpersNowVisibleToEnclosingDeclaration: 13,
     helpersStillInvisible: 1,
   }),
+});
+
+/**
+ * ## [#13790] The INLINE literal EXPRESSION at an object-literal `code:`
+ *
+ * The third stamp position this gate reached with NO shape at all — after
+ * #9223's `code: CONST` and #13233's `{ code }` helper — and the third time the
+ * failure wore the same clothes: no site AND no unresolved, which is the one
+ * way the "REPORTED, never dropped" bound above cannot notice itself failing.
+ *
+ * ```ts
+ * body: {
+ *     code: isProvisioning
+ *         ? 'PROJECT_PROVISIONING'
+ *         : isFailed
+ *             ? 'PROJECT_PROVISIONING_FAILED'
+ *             : 'PROJECT_NOT_FOUND',
+ * }
+ * ```
+ *
+ * ⭐ The cheap part, and the reason this widening is not `objlithelper`-shaped
+ * work: the position needs NO resolver. Every branch is already a literal, so
+ * `literalCodeValues` reduces the value text directly.
+ *
+ * ## ⚠️ THE MEASUREMENT THE CARD DEMANDED FIRST — precision, not reach
+ *
+ * `objlithelper` pays 65 type-annotation positions for every value stamp it
+ * finds, and the card refused to authorise a fifth object-literal shape until
+ * the same cost was measured HERE. It was measured before the shape was
+ * written, over the same population the gate scans (`packages/**` non-test
+ * source, 2186 files), with the gate's own primitives, and the numbers below
+ * are that sweep. The finding: the ALL-OR-NOTHING reduction IS the guard. A
+ * type annotation (`code: string | undefined`, `code: FieldErrorCode`,
+ * `code?: 'a' | 'b'`) reduces to nothing for the same reason a runtime
+ * expression does, so it costs a `continue` and no verdict row — 218 of the 222
+ * candidates that reach the reduction, and every one of the ~155 of those that
+ * are type annotations.
+ *
+ * ## The three guards, and why each is not the reduction
+ *
+ *   ⓪ THE REGEX itself refuses a bare quoted literal (see the SHAPES entry): of
+ *     the 906 `code:` tokens in the population it reaches 349.
+ *   ① STRUCTURAL (`enclosingOpeners`) — the innermost enclosing bracket must be
+ *     `{`. 70 of the 349 fail it: 41 are `(`, a function PARAMETER LIST where
+ *     `code: number | null` is an annotation, 18 are bytes GENUINELY inside a
+ *     string literal (the correct answer) and 11 are positions in a file whose
+ *     scan is not health-certified — [#14626] two numbers where there used to
+ *     be one, and the whole point of that card.
+ *   ② OWNERSHIP — 48 of the survivors are already `objlit`'s (4, the
+ *     `code: 'X' as const` spelling the lookahead cannot refuse),
+ *     `objlitconst`'s (41) or `objlittemplate`'s (3) at that same `code` token,
+ *     and 9 more are a bare identifier, which is `objlithelper`'s candidate and
+ *     — when it is not a parameter — the lower-case-LOCAL remainder #13478
+ *     censused and deliberately left open. Tested against those shapes' own
+ *     published regexes, so this partition cannot drift from what it partitions.
+ *   ③ CONDITIONAL TYPE — `code: T extends X ? 'A' : 'B'`. The one type form the
+ *     reduction would accept, because its branches really are literals and only
+ *     the POSITION is a type. Zero on this tree; the guard is against the class.
+ *
+ * ## ⚠️ Two readings that are NOT what this census says
+ *
+ * ⚠️ The 9 values behind the 4 live positions are NOT 9 new verdict rows. The
+ * three in the REST door file are already in `ERROR_CODE_LEDGER`, so the scan
+ * derives no site for them — the shape's value there is prospective, and the
+ * door file is precisely where prospective matters: those three are stamped
+ * straight into an HTTP error envelope's `body.code`. Two rows are owed, both
+ * for the D6 field-addressed validation catalog in `domains/automation.ts`, and
+ * [#14626]'s two newly reached positions in that same file owe NO further rows:
+ * they are the identical catalog ternary with the identical values, so they
+ * derive the site keys the `:1125` instance already derives.
+ *
+ * ## [#14626] What moved this census, separated from what merely drifted
+ *
+ * ⚠️ Two different deltas land in the same numbers, and reading them as one is
+ * how a census stops being a measurement. Re-derived on this tree at BOTH ends:
+ *
+ *   · TREE DRIFT (nothing to do with the fix): the population grew from 2186
+ *     files / 902 `code:` tokens / 346 anchor hits to 2187 / 906 / 349, and the
+ *     reduction bucket with it (216 → 219 candidates, 214 → 217 declined) —
+ *     measured by running the PRE-fix primitives over today's tree.
+ *   · THE FIX: 349 → 349 anchor hits (the regex did not move), 33 → 29
+ *     positions guard ① cannot place, 219 → 222 reaching the reduction, and
+ *     2 → 4 live positions. The two recovered are `domains/automation.ts`
+ *     `:1384` and `:1399` — exactly the two the card predicted.
+ *
+ * ⚠️ `livePositions` is STILL a lower bound, for a DIFFERENT reason, and the
+ * new reason is measured rather than inherited. The nested-template class this
+ * census used to declare is CLOSED (`skipStringLiteral` tracks `${ … }`
+ * nesting). What remains is a REGEX LITERAL whose character class contains a
+ * quote or a backtick — `/\brelation\s+["'`][^"'`]+["'`]\s+does not exist/i` in
+ * `packages/rest/src/error-response.ts` is the live one — which opens a literal
+ * the source does not have. 11 positions at this shape's anchor sit behind that
+ * class today, and they are counted as their own row rather than folded into
+ * the 18 that really are inside a string. See `SCANNER_LITERAL_BLIND_SPOTS`.
+ */
+/**
+ * ## [#14626] What the shared textual scanners still cannot read
+ *
+ * The card that closed the NESTED-TEMPLATE class measured a second one on the
+ * way past, and this block is it — declared with numbers rather than left to be
+ * rediscovered, which is the discipline the census above was praised for.
+ *
+ * ## The class
+ *
+ * A REGEX LITERAL whose character class carries a quote or a backtick. The live
+ * one on this tree is in `packages/rest/src/error-response.ts`:
+ *
+ * ```ts
+ * const RELATION_DOES_NOT_EXIST = /\brelation\s+["'`][^"'`]+["'`]\s+does not exist/i;
+ * ```
+ *
+ * A textual walk with no lexer sees the `"` and opens a string the source does
+ * not have. Everything after it in that file is read inside out — the same
+ * symptom the nested template had, from a different cause.
+ *
+ * ## ⛔ Why it is NOT fixed here
+ *
+ * Because the fix is not mechanical. Telling `/re/` from division needs the
+ * PRECEDING token's grammatical class (`a / b / c` and `x = /b/` differ only in
+ * what came before the slash), which is lexer state this scan deliberately does
+ * not carry — the file's own "Why textual, not AST" note is the reason. A
+ * heuristic here would trade a blind spot that is now COUNTED for one that is
+ * not, which is the wrong direction. Filed as its own card.
+ *
+ * ## What makes the count trustworthy
+ *
+ * `enclosingOpeners` certifies a walk as healthy only when no literal ran to
+ * EOF, no bracket underflowed and the stack ended empty. Comments are masked
+ * and every bracket inside a real literal is skipped, so a correct walk of
+ * well-formed source ENDS EMPTY; not ending empty is proof it did not.
+ * ⚠️ Necessary, not sufficient: a desync that re-balances by luck is invisible,
+ * which is why these are floors.
+ */
+export const SCANNER_LITERAL_BLIND_SPOTS = Object.freeze({
+  /** The class this card CLOSED. */
+  fixedClass: 'nested template literal — `a ${xs.map((k) => `<k>`).join()} b`',
+  /** The class it measured and deliberately left open. */
+  residualClass: 'regex literal whose character class carries a quote or a backtick',
+  residualExample: "packages/rest/src/error-response.ts — RELATION_DOES_NOT_EXIST",
+  /** `packages/**` non-test source files swept, both readings on the same sweep. */
+  filesScanned: 2187,
+  /** Files whose whole-file walk ends health-certified, PRE-fix and POST-fix. */
+  scansHealthyBefore: 2108,
+  scansHealthyAfter: 2119,
+  filesRecovered: 11,
+  filesStillDesynchronised: 68,
+  /** Over the whole `code:` token population, not just one shape's anchor. */
+  codePositions: 906,
+  unplacedBefore: 86,
+  /** ⭐ Positions the template-literal mode newly PLACED. */
+  newlyPlaced: 19,
+  /** Of the rest: the answer that is CORRECT, now certified as such. */
+  genuinelyInsideAString: 21,
+  /** Of the rest: the answer that is a BLIND SPOT, now named as such. */
+  behindScannerDesync: 46,
+  /** The same split, restricted to `objlitexpr`'s anchor — see the census below. */
+  atThisShapesAnchor: Object.freeze({
+    genuinelyInsideAString: 18,
+    behindScannerDesync: 11,
+  }),
+  /**
+   * ⭐⭐ THE ROW THAT DECIDES IT, on the standard #13478 and #13790 were closed
+   * on: unregistered WIRE codes the 19 newly placed positions surfaced. None —
+   * verified by diffing `deriveSites` key-by-key across the change, both
+   * directions empty. So this card moved a MEASUREMENT, not a verdict.
+   */
+  unregisteredWireCodesSurfaced: 0,
+});
+
+export const INLINE_LITERAL_EXPRESSION_CENSUS = Object.freeze({
+  /** `packages/**` non-test source files swept. [#14626] re-derived. */
+  filesScanned: 2187,
+  /**
+   * Every `code:` token in the population, the denominator the split below is
+   * read against. The shape's own anchor reaches fewer, by the negative
+   * lookahead the SHAPES entry explains: a bare quoted literal is `objlit`'s
+   * (or, kebab-spelled, nobody's by declaration) and must not even MATCH here.
+   */
+  objectLiteralCodeTokens: 906,
+  /** What the shipped regex reaches, before any guard. */
+  anchorHits: 349,
+  /** ① rejected: the enclosing bracket is not a `{`. */
+  notObjectLiteral: 70,
+  /**
+   * [#14626] THREE classes where there used to be two, because the third used
+   * to be indistinguishable from the second. `insideAString` is now asserted
+   * only for a walk that ends health-certified (no unterminated literal, no
+   * bracket underflow, an empty stack at EOF); everything else the walk skipped
+   * is `behindScannerDesync` — "cannot place this, and cannot certify why".
+   * ⛔ Do not merge these two back into one number to make the sum tidier: one
+   * of them is a correct answer and the other is a blind spot, and the whole
+   * card is that they used to be printed as the same figure.
+   */
+  notObjectLiteralByClass: Object.freeze({
+    parameterList: 41, // `(code: number | null, signal) => void`
+    insideAString: 18, // certified: the byte really is inside a string literal
+    behindScannerDesync: 11, // the file's scan is not health-certified — see SCANNER_LITERAL_BLIND_SPOTS
+  }),
+  /**
+   * ② rejected: an existing object-literal shape owns that same token. Small
+   * for `objlit` only because the lookahead already refused the plain
+   * `code: 'X'` spelling; what is left here is `code: 'X' as const`, which
+   * `objlit`'s regex matches and this one must not double-count.
+   */
+  ownedBySibling: Object.freeze({ objlit: 4, objlitconst: 41, objlittemplate: 3 }),
+  /** ② rejected: a bare identifier — `objlithelper`'s candidate, #13478's remainder. */
+  bareIdentifier: 9,
+  /** ③ rejected: a conditional TYPE, whose branches are literals. */
+  conditionalType: 0,
+  /** What actually reaches `literalCodeValues`. */
+  candidatesReachingReduction: 222,
+  /** Of those, declined by ALL-OR-NOTHING — no site, no unresolved. */
+  declinedByReduction: 218,
+  /**
+   * The declined bucket, split by a REPORTING heuristic (a single `|`, a
+   * top-level `;`, or a bare type expression reads as an annotation). The SUM
+   * is exact and pinned; the split is colour, and it is what answers the card's
+   * question directly: the type-annotation noise `objlithelper` pays per value
+   * stamp is reached here too, and all of it costs a `continue`.
+   */
+  declinedTypeAnnotation: 155,
+  declinedRuntimeValue: 63,
+  /** ⭐ Positions that reduce — the shape's whole output on this tree. */
+  livePositions: 4,
+  /** Values behind them, summed over `liveSites`. */
+  distinctValues: 9,
+  /**
+   * ⭐ Type-annotation positions that SURVIVE every guard and become a site.
+   * Not a heuristic: both live positions are printed in `liveSites` below and
+   * both are value positions.
+   */
+  typeAnnotationsSurviving: 0,
+  /** Verdict rows the widening owes in the declaration file. */
+  newVerdictRows: 2,
+  /**
+   * ⭐⭐ THE ROW THAT DECIDES IT, on the same evidence standard #13478 and
+   * #13233 were closed on: unregistered WIRE codes the widening surfaces.
+   */
+  unregisteredWireCodesHiding: 0,
+  /** The positions, so the pinned counts above can be read against real text. */
+  liveSites: Object.freeze([
+    Object.freeze({
+      file: 'packages/rest/src/error-response.ts',
+      what: "code: isProvisioning ? 'PROJECT_PROVISIONING' : isFailed ? 'PROJECT_PROVISIONING_FAILED' : 'PROJECT_NOT_FOUND'",
+      values: 3,
+      rowsOwed: 0, // all three are registered
+      note: 'the REST door file — stamped straight into an HTTP error envelope body.code',
+    }),
+    Object.freeze({
+      file: 'packages/runtime/src/domains/automation.ts',
+      what: "code: body.name === undefined ? 'required' : 'invalid_type'",
+      values: 2,
+      rowsOwed: 2,
+      note: 'ADR-0112 D6 field-addressed validation catalog; reaches details.fields[].code, never error.code',
+    }),
+    // [#14626] The two the card predicted, recovered by the template-literal
+    // mode. Same file, same genre, same two values — so they derive the site
+    // keys `:1125` already derives and owe NO further verdict rows. That is the
+    // measurement, not a convenience: `rowsOwed: 0` here is what says the
+    // recovered positions surfaced nothing unregistered.
+    Object.freeze({
+      file: 'packages/runtime/src/domains/automation.ts',
+      what: "code: targetName === undefined ? 'required' : 'invalid_type'",
+      values: 2,
+      rowsOwed: 0,
+      note: '[#14626] clone door `name` check, behind the nested template at :1285 until the scanners were fixed',
+    }),
+    Object.freeze({
+      file: 'packages/runtime/src/domains/automation.ts',
+      what: "code: targetLabel === undefined ? 'required' : 'invalid_type'",
+      values: 2,
+      rowsOwed: 0,
+      note: '[#14626] clone door `label` check, same class as the row above',
+    }),
+  ]),
+  /**
+   * [#14626] Positions of the same genre this scan still cannot place. The
+   * NESTED-TEMPLATE class this field was opened for is CLOSED — the two it
+   * counted are the two `liveSites` rows above. What it counts now is the
+   * REGEX-LITERAL class, measured on the same sweep and left open deliberately:
+   * telling a regex literal from a division needs lexical state this textual
+   * scan does not have, which is a different card from this one.
+   */
+  positionsBehindScannerDesync: 11,
+  /** [#14626] Positions the template-literal mode RECOVERED — the card's own prediction. */
+  positionsRecoveredByTemplateMode: 2,
+  /**
+   * ⚠️ Why the lowercase catalog above is reported HERE and not delegated to
+   * `check:error-code-casing`, measured rather than assumed. That gate needs a
+   * QUOTED literal beside the token `code`; at an inline ternary there is none,
+   * so `findViolations()` returns ZERO for `domains/automation.ts` — while the
+   * literally-spelled `code: 'invalid_type'` a few lines up it DOES see and
+   * correctly skips as D6. A `casing-gate` delegation would be the seam the
+   * header describes ("two gates, each assuming the other"), not a hand-off, so
+   * the shape carries `lowercase: 'here'`. Pinned by `--self-test` against that
+   * gate's real detector rather than against this sentence.
+   */
+  casingGateFindingsAtTheLivePosition: 0,
+  /**
+   * ⚠️ The DECLARED BOUNDARY of guard ②, counted rather than left to be
+   * discovered. `objlit` matches on the quote alone, so a chain whose FIRST
+   * operand is a bare quoted literal — `code: 'A' || 'B'` — is handed to
+   * `objlit`, which reports 'A' and not 'B'. Partial reporting, not silence,
+   * and the deliberate price of a partition in which one stamp can never be
+   * reported under two shape names and owe two verdict rows. Live instances of
+   * the spelling on this tree: none. The four positions the guard does hand to
+   * `objlit` are three `code: 'X' as const` (a whole-value literal wearing
+   * decoration, correctly `objlit`'s) and one union of literal TYPES.
+   */
+  chainWhoseFirstOperandIsABareLiteral: 0,
+  /**
+   * The anchor is the STRICT `code:`, not `objlithelper`'s `code\s*:\s*`, and
+   * this is the measurement that decided it: the loose spelling matches the
+   * COLON OF A TERNARY, so `typeof issue.code === 'string' ? issue.code :
+   * 'unknown'` reads as a `code :` stamp of `'unknown'` — a false position with
+   * no structural tell. `objlithelper` can afford the loose anchor because its
+   * parameter guard rejects that; this shape's guard is the reduction, which
+   * accepts it.
+   */
+  falsePositionsUnderTheLooseAnchor: 1,
 });
 
 const isTestFile = (rel) =>
@@ -870,21 +1303,154 @@ function unwrapExpression(expr) {
 }
 
 /**
+ * [#14626] THE ONE string-skipper the four textual primitives share.
+ *
+ * ## What it replaced, and why one helper rather than four
+ *
+ * `scanTopLevel`, `enclosingOpeners`, `sliceBalanced` and `splitTopLevel` each
+ * carried the SAME six lines: on a quote character, seek forward to the next
+ * occurrence of that same character, honouring `\\`. Four copies of one
+ * algorithm is four places for a fix to be applied three times, which is how a
+ * primitive's behaviour drifts from its sibling's without a single edit looking
+ * wrong. They now all call this.
+ *
+ * ## The defect the seek could not survive
+ *
+ * A NESTED TEMPLATE LITERAL. In
+ *
+ * ```ts
+ * `Unknown key${n > 1 ? 's' : ''} ${keys.map((k) => `\\`${k}\\``).join(', ')}`
+ * ```
+ *
+ * the seek enters at the OUTER backtick and leaves at the first INNER one, so
+ * from there on it reads string bytes as code and code bytes as string. The
+ * bracket stack desynchronises and stays desynchronised for the rest of the
+ * file: measured, every `code:` position after such a template in
+ * `packages/runtime/src/domains/automation.ts` came back unplaced, and every
+ * shape guarded by `enclosingOpeners` silently declined them.
+ *
+ * ## The state machine
+ *
+ *   · `'` / `"` — walk to the matching quote, `\\` escapes the next byte.
+ *   · `` ` `` — TEMPLATE mode: `\\` escapes, a bare `` ` `` closes, and `${`
+ *     pushes an INTERPOLATION frame.
+ *   · `${ … }` — CODE mode: `{` and `}` move a brace depth (so `${ {a:1}.a }`
+ *     closes where it should), and a quote there opens a NEW literal, which
+ *     recurses through this same stack to any depth.
+ *
+ * ## Why it reports `closed`
+ *
+ * The second half of #14626. Running off the end with a frame still open is the
+ * ONLY self-evident signature of a scan that has lost its place, and before
+ * this the primitives had no way to say it: "the byte is genuinely inside a
+ * string" and "the scanner desynchronised 400 lines ago" both came back as
+ * `undefined`, and the caller could not tell which answer it was being given.
+ *
+ * ⚠️ `closed: false` is a SUFFICIENT signal, not a complete one. A desync that
+ * happens to re-synchronise before EOF still returns `closed: true`; what this
+ * flag buys is that the class is now REPORTABLE at all, and that the census
+ * below can publish the two answers as separate numbers instead of one.
+ *
+ * @param {string} src
+ * @param {number} at index of the opening quote / backtick
+ * @returns {{ end: number, closed: boolean }} `end` is the index of the CLOSING
+ *   quote — the same post-condition the four seek loops had, so each caller
+ *   still advances past it with its own `i += 1` — or `src.length` when the
+ *   literal never closes.
+ */
+export function skipStringLiteral(src, at) {
+  const opener = src[at];
+  if (opener !== "'" && opener !== '"' && opener !== '`') return { end: at, closed: true };
+  // A STACK of open frames, not a single mode: `quote` and `template` are
+  // string modes, `interp` is a code mode, and a quote inside an interpolation
+  // opens a new frame rather than closing the template that contains it.
+  const stack = [opener === '`' ? { kind: 'template', quote: '`' } : { kind: 'quote', quote: opener }];
+  let i = at + 1;
+  while (i < src.length && stack.length > 0) {
+    const frame = stack[stack.length - 1];
+    const c = src[i];
+    if (frame.kind === 'interp') {
+      if (c === '{') { frame.depth += 1; i += 1; continue; }
+      if (c === '}') { frame.depth -= 1; if (frame.depth === 0) stack.pop(); i += 1; continue; }
+      if (c === "'" || c === '"' || c === '`') {
+        stack.push(c === '`' ? { kind: 'template', quote: '`' } : { kind: 'quote', quote: c });
+        i += 1;
+        continue;
+      }
+      i += 1;
+      continue;
+    }
+    if (c === '\\') { i += 2; continue; }
+    if (c === frame.quote) { stack.pop(); i += 1; continue; }
+    if (frame.kind === 'template' && c === '$' && src[i + 1] === '{') {
+      stack.push({ kind: 'interp', depth: 1 });
+      i += 2;
+      continue;
+    }
+    i += 1;
+  }
+  if (stack.length > 0) return { end: src.length, closed: false };
+  return { end: i - 1, closed: true };
+}
+
+/**
+ * [#14626] A scanner's account of its OWN state — the second half of this card,
+ * and the half that outlives the nested-template fix.
+ *
+ * `sliceBalanced` answers `null` for "the brackets never balanced";
+ * `scanTopLevel` simply stops; `splitTopLevel` returns however many parts it
+ * found; `enclosingOpeners` answered `undefined` both for "that byte really is
+ * inside a string" and for "I lost my place 400 lines ago". None of them could
+ * say which. Pass a report and ask.
+ *
+ * The three signals, and why each is evidence rather than a guess:
+ *   · `unterminated` — a literal ran to EOF with a frame still open. Nothing
+ *     after its opening byte can be placed.
+ *   · `underflow` — a `)`/`]`/`}` closed a bracket that was never opened, so
+ *     the walk is reading closer bytes it did not read the openers for.
+ *   · `unbalanced` — brackets left open at EOF. Comments are masked and every
+ *     bracket inside a real literal is skipped, so a correct walk of
+ *     well-formed source ENDS EMPTY; not ending empty is proof it did not.
+ *
+ * ⚠️ Healthy is NECESSARY, not sufficient: a desync that happens to re-balance
+ * is invisible to all three. That is why the class this card fixed
+ * (nested templates) is fixed rather than merely reported, and why the class it
+ * does NOT fix is reported rather than assumed away — see
+ * `SCANNER_LITERAL_BLIND_SPOTS`.
+ */
+export function scanReport() {
+  return { desynchronised: false, unterminatedAt: -1, underflow: false, unbalanced: false };
+}
+
+/** Record an unterminated literal on an optional report. */
+function noteDesync(report, at) {
+  if (!report) return;
+  if (!report.desynchronised) {
+    report.desynchronised = true;
+    report.unterminatedAt = at;
+  }
+}
+
+/**
  * Walk `src` calling `visit(char, index)` only at TOP level — inside no bracket,
  * no string and no template. Brackets only: `<` and `>` are comparison operators
  * far more often than generics inside a value expression, and counting them as
  * depth reads `a < b ? 'A' : 'B'` as unbalanced and gives up on a reducible one.
+ *
+ * [#14626] Strings and templates are skipped by `skipStringLiteral`, so a nested
+ * template no longer ends the walk early; pass a `scanReport()` to learn whether
+ * it ran off the end with a literal open.
  */
-function scanTopLevel(src, visit) {
+export function scanTopLevel(src, visit, report = null) {
   let depth = 0;
   for (let i = 0; i < src.length; i += 1) {
     const c = src[i];
     if (c === '(' || c === '[' || c === '{') { depth += 1; continue; }
     if (c === ')' || c === ']' || c === '}') { depth -= 1; continue; }
     if (c === "'" || c === '"' || c === '`') {
-      const quote = c;
-      i += 1;
-      while (i < src.length && src[i] !== quote) i += src[i] === '\\' ? 2 : 1;
+      const skipped = skipStringLiteral(src, i);
+      if (!skipped.closed) noteDesync(report, i);
+      i = skipped.end;
       continue;
     }
     if (depth === 0 && visit(c, i) === false) return;
@@ -938,6 +1504,41 @@ export function splitChain(expr) {
   }
   parts.push(expr.slice(start));
   return parts;
+}
+
+/**
+ * [#13790] The text of the object-literal property whose value starts at `from`
+ * inside `body` — up to that property's own terminating TOP-LEVEL comma, or to
+ * the end of the object when it is the last property. A multi-line ternary
+ * survives intact, which is the whole point: the live instance in
+ * `error-response.ts` spells its three branches over six lines.
+ *
+ * ⚠️ `splitTopLevel` is deliberately NOT reused here even though it splits an
+ * argument list on the same commas: it counts `<` and `>` as depth, so
+ * `code: a < b ? 'A' : 'B'` reads as unterminated and swallows every property
+ * after it. `scanTopLevel` counts brackets and strings only, for the reason its
+ * own comment gives — inside a VALUE expression those characters are
+ * comparison operators far more often than generics.
+ */
+function propertyValueText(body, from) {
+  const rest = body.slice(from);
+  let end = rest.length;
+  scanTopLevel(rest, (c, i) => {
+    if (c !== ',') return;
+    end = i;
+    return false;
+  });
+  return rest.slice(0, end);
+}
+
+/**
+ * [#13790] `s` with the BODY of every string and template literal emptied, so a
+ * keyword search cannot be answered by the same word sitting inside a code
+ * value — `code: x ? 'EXTENDS_BASE' : 'B'` is a value ternary, not a
+ * conditional type.
+ */
+function withoutStringBodies(s) {
+  return s.replace(/'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|`(?:[^`\\]|\\.)*`/g, "''");
 }
 
 /**
@@ -1245,26 +1846,56 @@ function resolveFromWorkspacePackage(name, spec, { scanned, packageDirs } = {}) 
  * One pass per file, so the cost is linear in the source rather than in
  * matches × source, which a per-match backward walk would be.
  */
-export function enclosingOpeners(src, indices) {
+export const AT_TOP_LEVEL = Object.freeze({ kind: 'top-level' });
+export const INSIDE_STRING = Object.freeze({ kind: 'inside-string' });
+export const SCANNER_DESYNC = Object.freeze({ kind: 'desync' });
+
+export function enclosingOpeners(src, indices, report = null) {
   const want = new Set(indices);
   const out = new Map();
   const stack = [];
+  const health = report ?? scanReport();
   for (let i = 0; i < src.length; i += 1) {
-    if (want.has(i)) out.set(i, stack.length ? stack[stack.length - 1] : null);
+    if (want.has(i)) out.set(i, stack.length ? stack[stack.length - 1] : AT_TOP_LEVEL);
     const c = src[i];
-    if (c === '(' || c === '[' || c === '{') stack.push({ ch: c, at: i });
-    else if (c === ')' || c === ']' || c === '}') stack.pop();
-    else if (c === "'" || c === '"' || c === '`') {
-      const quote = c;
-      i += 1;
-      while (i < src.length && src[i] !== quote) i += src[i] === '\\' ? 2 : 1;
+    if (c === '(' || c === '[' || c === '{') stack.push({ kind: 'bracket', ch: c, at: i });
+    else if (c === ')' || c === ']' || c === '}') {
+      if (stack.length === 0) health.underflow = true;
+      else stack.pop();
+    } else if (c === "'" || c === '"' || c === '`') {
+      const skipped = skipStringLiteral(src, i);
+      if (!skipped.closed) noteDesync(health, i);
+      i = skipped.end;
     }
+  }
+  if (stack.length > 0) health.unbalanced = true;
+  // [#14626] Every requested index now gets an ANSWER, and the two that used to
+  // arrive as one `undefined` are separated by EVIDENCE rather than by
+  // assumption. An index the walk never visited was jumped over by a literal
+  // skip; whether that skip was a real literal is exactly what the health
+  // signals above decide.
+  //
+  // ⛔ `inside-string` is asserted ONLY for a walk that ends healthy. In a walk
+  // that does not, a skipped span may be a span the scan invented, so the
+  // honest answer for every unvisited index there is `desync` — "cannot place
+  // this, and cannot certify why". Tagging those `inside-string` would be the
+  // same over-claim in a new spelling, one layer up.
+  const certified = !health.desynchronised && !health.underflow && !health.unbalanced;
+  for (const idx of want) {
+    if (out.has(idx)) continue;
+    out.set(idx, certified ? INSIDE_STRING : SCANNER_DESYNC);
   }
   return out;
 }
 
-/** The substring inside the parentheses opening at `open`, brackets balanced. */
-export function sliceBalanced(src, open) {
+/**
+ * The substring inside the parentheses opening at `open`, brackets balanced.
+ *
+ * [#14626] `null` used to mean two things at once — "the brackets never
+ * balanced" and "a nested template ate the rest of the file". Pass a
+ * `scanReport()` as `report` to tell them apart.
+ */
+export function sliceBalanced(src, open, report = null) {
   let depth = 0;
   for (let i = open; i < src.length; i += 1) {
     const c = src[i];
@@ -1273,16 +1904,29 @@ export function sliceBalanced(src, open) {
       depth -= 1;
       if (depth === 0) return src.slice(open + 1, i);
     } else if (c === "'" || c === '"' || c === '`') {
-      const quote = c;
-      i += 1;
-      while (i < src.length && src[i] !== quote) i += src[i] === '\\' ? 2 : 1;
+      const skipped = skipStringLiteral(src, i);
+      if (!skipped.closed) noteDesync(report, i);
+      i = skipped.end;
     }
   }
   return null;
 }
 
-/** Split on TOP-LEVEL commas — a nested call, generic or template keeps its own. */
-export function splitTopLevel(args) {
+/**
+ * Split on TOP-LEVEL commas — a nested call, generic or template keeps its own.
+ *
+ * ⚠️ [#14626] That sentence was the sharpest evidence in the card that filed
+ * this: it asserted template-awareness ("or template") over a seek-to-matching-
+ * backtick that a NESTED template desynchronises, so a reader checking whether
+ * templates were handled found a "yes". The claim is now true — `skipStringLiteral`
+ * tracks `${ … }` nesting — and it is pinned by `--self-test` rather than
+ * asserted here, because a comment is exactly what failed last time.
+ *
+ * Pass a `scanReport()` as `report` to learn whether the walk ran off the end
+ * with a literal still open, which is the one case where the split it returns
+ * is not the split the source has.
+ */
+export function splitTopLevel(args, report = null) {
   const out = [];
   let depth = 0;
   let start = 0;
@@ -1291,9 +1935,9 @@ export function splitTopLevel(args) {
     if (c === '(' || c === '[' || c === '{' || c === '<') depth += 1;
     else if (c === ')' || c === ']' || c === '}' || c === '>') depth -= 1;
     else if (c === "'" || c === '"' || c === '`') {
-      const quote = c;
-      i += 1;
-      while (i < args.length && args[i] !== quote) i += args[i] === '\\' ? 2 : 1;
+      const skipped = skipStringLiteral(args, i);
+      if (!skipped.closed) noteDesync(report, i);
+      i = skipped.end;
     } else if (c === ',' && depth === 0) {
       out.push(args.slice(start, i));
       start = i + 1;
@@ -1637,8 +2281,9 @@ export function deriveSites({ registered, files, readFile, packageDirs = new Map
       // [#13233] The object-literal helper position needs to know WHICH bracket
       // is open at each candidate, which is a per-file fact — computed once for
       // the whole match set rather than per match.
+      // [#13790] `objlitexpr` needs the same per-file fact for the same reason.
       const openers =
-        shape.resolve === 'objlithelper'
+        shape.resolve === 'objlithelper' || shape.resolve === 'objlitexpr'
           ? enclosingOpeners(
               stripped,
               matches.map((m) => m.index + m[0].indexOf('code')),
@@ -1739,10 +2384,13 @@ export function deriveSites({ registered, files, readFile, packageDirs = new Map
           // Two structural guards, in the order that makes the cheap one first.
           const codeAt = m.index + m[0].indexOf('code');
           const opener = openers.get(codeAt);
-          // Not inside a `{`: an argument list, an array, or (absent from the
-          // map) a string. The regex has to admit `,` to reach a non-first
-          // property, so this is what makes the shape mean what it is named.
-          if (!opener || opener.ch !== '{') continue;
+          // Not inside a `{`: an argument list, an array, or a position the
+          // scan could not place — [#14626] `inside-string` (correct: a brace
+          // inside a string opens nothing) or `desync` (a defect, and now
+          // SAYS so instead of arriving as the same `undefined`). The regex has
+          // to admit `,` to reach a non-first property, so this is what makes
+          // the shape mean what it is named.
+          if (!opener || opener.kind !== 'bracket' || opener.ch !== '{') continue;
           // `${code}` inside a template — a brace that opens an interpolation,
           // not a literal. Belt and braces: the pass above already skips
           // template bodies, so this fires only if a backtick was itself
@@ -1775,6 +2423,79 @@ export function deriveSites({ registered, files, readFile, packageDirs = new Map
             continue;
           }
           for (const hc of objHelperCodes) emit(hc, shape.name);
+          continue;
+        } else if (shape.resolve === 'objlitexpr') {
+          // [#13790] The INLINE literal expression at an object-literal `code:`
+          // — a ternary or a `||`/`??` chain written at the stamp itself. No
+          // resolver is involved: `literalCodeValues` reduces the value text
+          // directly. Four guards, cheapest first; what each one costs and
+          // rejects on the real tree is a row in
+          // INLINE_LITERAL_EXPRESSION_CENSUS.
+          const codeAt = m.index + m[0].indexOf('code');
+          const opener = openers.get(codeAt);
+          // ① STRUCTURAL — the same guard `objlithelper` carries, for the same
+          // reason. Split into its two questions rather than written as one
+          // condition, so that ablating the bracket TEST leaves the null check
+          // standing and `--self-test` answers with its named finding instead
+          // of a TypeError. (Measured: joined, the ablation crashed.)
+          // [#14626] No bracket to read, and the map now says WHICH of the two:
+          // `inside-string` is the correct answer for a `code:` written inside a
+          // string literal, `desync` is the scanner admitting it lost its place.
+          // Both decline — the census publishes them as separate numbers.
+          if (!opener || opener.kind !== 'bracket') continue;
+          // A `(` is a function PARAMETER LIST, where `code: number | null` is
+          // an annotation and not a stamp at all — 41 such positions on this
+          // tree; a `[` is an array.
+          if (opener.ch !== '{') continue;
+          // `${code}` — a brace that opens a template interpolation rather than
+          // an object literal. Belt and braces, exactly as above.
+          if (opener.at > 0 && stripped[opener.at - 1] === '$') continue;
+          const objectBody = sliceBalanced(stripped, opener.at);
+          if (objectBody === null) continue;
+          const valueStart = m.index + m[0].length - (opener.at + 1);
+          if (valueStart < 0 || valueStart > objectBody.length) continue;
+          const raw = propertyValueText(objectBody, valueStart).trim();
+          if (!raw) continue;
+          // ② OWNERSHIP. This shape is the REMAINDER of the object-literal
+          // position, never a second reporter for a position that already has
+          // one: if a sibling object-literal shape matches at this very `code`
+          // token, the value is theirs and reporting it here would derive the
+          // same site twice under two names.
+          if (OBJECT_LITERAL_SIBLING_ANCHORS.some((anchor) => anchor.test(stripped.slice(codeAt)))) continue;
+          // A BARE IDENTIFIER is `objlithelper`'s candidate — and, when it is
+          // not a parameter, the lower-case-LOCAL remainder #13478 censused and
+          // left declared. Annexing it here would close that card's position by
+          // accident and without its census.
+          //
+          // ⚠️ Honest about what this line does TODAY: nothing an ablation can
+          // see. With `resolveIdent` left at its default an identifier answers
+          // nothing, so the reduction below declines it anyway — removing this
+          // line changes no site, no unresolved and no finding (measured). It is
+          // kept because it states the partition where a reader looks for it,
+          // and because it is the line that would have to be deliberately
+          // deleted the day someone hands this shape a resolver — which is
+          // exactly the moment #13478's position would be annexed in silence.
+          if (/^[A-Za-z_$][\w$]*$/.test(raw)) continue;
+          // ③ CONDITIONAL TYPE — `code: T extends X ? 'A' : 'B'`. The one
+          // type-annotation form the reduction below would happily reduce,
+          // because its branches really ARE literals; what is a type here is
+          // the POSITION. `extends` is not legal in a value expression, so the
+          // keyword outside a string literal settles it. Zero on this tree — a
+          // guard against the CLASS, not against today's count, and the reason
+          // the type-annotation noise that costs `objlithelper` 65 positions
+          // per value stamp costs this shape none.
+          if (/\bextends\b/.test(withoutStringBodies(raw))) continue;
+          // ④ REDUCTION, and no resolver — see the shape's comment. An
+          // identifier limb answers nothing, so ALL-OR-NOTHING declines the
+          // whole expression: no site AND no unresolved. That is the #9460
+          // runtime-value bound rather than a silencing (`code: typeof x.code
+          // === 'string' ? x.code : 'unknown'` has a limb no scan can read),
+          // and it is the same rule that declines every ordinary type
+          // annotation — `code: string | undefined`, `code: FieldErrorCode` —
+          // without a single position-specific test.
+          const inlineValues = literalCodeValues(raw);
+          if (!inlineValues || !inlineValues.length) continue;
+          for (const value of inlineValues) emit(value, shape.name);
           continue;
         } else if (shape.resolve === 'template' && !/^[A-Za-z][A-Za-z0-9_]*$/.test(code)) {
           // Interpolated: no literal exists to check against the registry. It
@@ -2138,9 +2859,24 @@ export function checkDoorTyping({ doorSource, files }) {
 let selfTestReachedVerdict = false;
 
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const batterySeen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+  };
+  battery('[#14626] THE NESTED TEMPLATE, across all FOUR shared textual primitives.');
+
   const fail = [];
   let cases = 0;
-  const ok = (cond, what) => { cases += 1; if (!cond) fail.push(what); };
+  const ok = (cond, what) => { registerCase(); cases += 1; if (!cond) fail.push(what); };
 
   // Each published SHAPE matches what it claims to.
   const samples = {
@@ -2162,6 +2898,8 @@ function selfTest() {
       `function diag(code: string, msg: string) {\n` +
       `  return { severity: 'error', code, message: msg };\n}\n` +
       `report(diag('OBJ_HELPER_ONE', 'x'));`,
+    // [#13790] the inline literal expression, written at the stamp.
+    objlitexpr: `send(res, { code: down ? 'INLINE_ONE' : 'INLINE_TWO', status: 503 });`,
   };
   // [#13233] Every PUBLISHED shape carries a sample, checked rather than
   // assumed. The per-shape loop below iterates `samples`, not `SHAPES`, so a
@@ -2423,6 +3161,213 @@ function selfTest() {
       splitTopLevel(`a, f(b, c), \`t${'${x}'}\`, d`).length === 4,
       'splitTopLevel counted a nested or templated comma as a separator',
     );
+    // ------------------------------------------------------------------
+    // [#14626] THE NESTED TEMPLATE, across all FOUR shared textual primitives.
+    //
+    // ⚠️ Every case is PAIRED with a POSITIVE CONTROL run through
+    // `legacySeekQuote` — the pre-fix skip, verbatim, kept here in test scope.
+    // "The fixture passes" and "the fixture could never have failed" are the
+    // same green, and the control is the half that separates them: it asserts
+    // the SAME fixture through the OLD algorithm gives the WRONG answer. A
+    // fixture that both algorithms answer correctly is measuring nothing.
+    // ------------------------------------------------------------------
+    {
+      // The card's shape. The outer template's interpolation contains an INNER
+      // template, so a seek-to-matching-backtick leaves the outer literal at
+      // the first inner backtick and reads the rest of the input inside out.
+      const NESTED =
+        "const msg = `Unknown key${n > 1 ? 's' : ''} " +
+        "${keys.map((k) => `\\`${k}\\``).join(', ')} — the clone body is { name, label }`;\n";
+
+      /** The pre-fix skip, verbatim: seek the next occurrence of the same quote. */
+      const legacySeekQuote = (src, at) => {
+        const quote = src[at];
+        let i = at + 1;
+        while (i < src.length && src[i] !== quote) i += src[i] === '\\' ? 2 : 1;
+        return i;
+      };
+      // The four primitives as they were, differing from the shipped ones in
+      // exactly the skip. Anything else here would make the control a straw man.
+      const legacyScanTopLevel = (src) => {
+        const hits = [];
+        let depth = 0;
+        for (let i = 0; i < src.length; i += 1) {
+          const c = src[i];
+          if (c === '(' || c === '[' || c === '{') { depth += 1; continue; }
+          if (c === ')' || c === ']' || c === '}') { depth -= 1; continue; }
+          if (c === "'" || c === '"' || c === '`') { i = legacySeekQuote(src, i); continue; }
+          if (depth === 0 && c === ';') hits.push(i);
+        }
+        return hits;
+      };
+      const legacyEnclosingOpeners = (src, indices) => {
+        const want = new Set(indices);
+        const out = new Map();
+        const stack = [];
+        for (let i = 0; i < src.length; i += 1) {
+          if (want.has(i)) out.set(i, stack.length ? stack[stack.length - 1] : null);
+          const c = src[i];
+          if (c === '(' || c === '[' || c === '{') stack.push({ ch: c, at: i });
+          else if (c === ')' || c === ']' || c === '}') stack.pop();
+          else if (c === "'" || c === '"' || c === '`') i = legacySeekQuote(src, i);
+        }
+        return out;
+      };
+      const legacySliceBalanced = (src, open) => {
+        let depth = 0;
+        for (let i = open; i < src.length; i += 1) {
+          const c = src[i];
+          if (c === '(' || c === '[' || c === '{') depth += 1;
+          else if (c === ')' || c === ']' || c === '}') { depth -= 1; if (depth === 0) return src.slice(open + 1, i); }
+          else if (c === "'" || c === '"' || c === '`') i = legacySeekQuote(src, i);
+        }
+        return null;
+      };
+      const legacySplitTopLevel = (args) => {
+        const out = [];
+        let depth = 0;
+        let start = 0;
+        for (let i = 0; i < args.length; i += 1) {
+          const c = args[i];
+          if (c === '(' || c === '[' || c === '{' || c === '<') depth += 1;
+          else if (c === ')' || c === ']' || c === '}' || c === '>') depth -= 1;
+          else if (c === "'" || c === '"' || c === '`') i = legacySeekQuote(args, i);
+          else if (c === ',' && depth === 0) { out.push(args.slice(start, i)); start = i + 1; }
+        }
+        out.push(args.slice(start));
+        return out;
+      };
+
+      // ① scanTopLevel — the walk must come back OUT of the template and see
+      //   both top-level `;`. The legacy walk sees NEITHER: it re-enters an
+      //   unterminated literal and runs to the end of the input.
+      {
+        const src = NESTED + 'const done = 1;\n';
+        const semis = [];
+        scanTopLevel(src, (c, i) => { if (c === ';') semis.push(i); });
+        ok(
+          semis.length === 2,
+          `scanTopLevel saw ${semis.length} top-level \`;\` past a nested template, not 2 — the walk did not ` +
+            'come back out of the template, so every top-level token after one is invisible to `splitTernary`, ' +
+            '`splitChain` and `propertyValueText`',
+        );
+        ok(
+          legacyScanTopLevel(src).length === 0,
+          '⭐ POSITIVE CONTROL: the pre-fix seek-to-matching-quote walk now answers the nested-template ' +
+            'fixture CORRECTLY, so this fixture no longer exercises the defect #14626 fixed. Rewrite the ' +
+            'fixture; do not delete the control.',
+        );
+      }
+
+      // ② enclosingOpeners — the position after the template must be PLACED,
+      //   and the two answers that used to arrive as one `undefined` must be
+      //   distinguishable. This is the primitive the card was filed against.
+      {
+        const src = NESTED + "const body = { code: down ? 'NT_ONE' : 'NT_TWO' };\n";
+        const at = src.indexOf('code:', NESTED.length);
+        const tag = enclosingOpeners(src, [at]).get(at);
+        ok(
+          tag.kind === 'bracket' && tag.ch === '{',
+          `enclosingOpeners answered ${JSON.stringify(tag)} for a \`code:\` after a nested template instead ` +
+            'of the object-literal `{` that encloses it. That is the defect itself: every shape guarded by ' +
+            'this primitive (`objlithelper`, `objlitexpr`) silently declines the position',
+        );
+        ok(
+          legacyEnclosingOpeners(src, [at]).get(at) === undefined,
+          '⭐ POSITIVE CONTROL: the pre-fix scan now places this position too, so the fixture is no longer ' +
+            'the shape that desynchronised it.',
+        );
+        // The two `undefined`s, told apart — and told apart by EVIDENCE.
+        const inAString = "const s = 'a { code: X } b';\nconst t = 1;\n";
+        const inAt = inAString.indexOf('code:');
+        ok(
+          enclosingOpeners(inAString, [inAt]).get(inAt).kind === 'inside-string',
+          'a `code:` written INSIDE a string literal is no longer reported as `inside-string`. That answer ' +
+            'is CORRECT — a brace inside a string opens nothing — and collapsing it back into the ' +
+            'desynchronised answer is what made this class invisible for as long as `objlithelper` existed',
+        );
+        const unterminated = "const s = `open\nconst body = { code: 'X' };\n";
+        const unAt = unterminated.indexOf('code:');
+        ok(
+          enclosingOpeners(unterminated, [unAt]).get(unAt).kind === 'desync',
+          'a position the scan could not place because a literal ran to EOF is no longer reported as ' +
+            '`desync`. The whole point of #14626 is that "genuinely in a string" and "the scanner lost its ' +
+            'place" stop arriving as the same answer',
+        );
+      }
+
+      // ③ sliceBalanced — the argument slice must survive a nested template in
+      //   an argument, or `enclosingDeclaration` and `helperCodesFor` read a
+      //   truncated parameter/argument list.
+      const nestedArgs = "`a${xs.map((k) => `\\`${k}\\``).join(', ')}b`, 'TAIL'";
+      {
+        const call = `f(${nestedArgs})`;
+        ok(
+          sliceBalanced(call, 1) === nestedArgs,
+          `sliceBalanced returned ${JSON.stringify(sliceBalanced(call, 1))} for an argument list containing ` +
+            'a nested template — a truncated slice is what `parseParamNames` and `helperCodesFor` then read',
+        );
+        ok(
+          legacySliceBalanced(call, 1) !== nestedArgs,
+          '⭐ POSITIVE CONTROL: the pre-fix slice now returns the whole argument list, so this fixture no ' +
+            'longer carries the defect.',
+        );
+      }
+
+      // ④ splitTopLevel — the primitive whose DOCBLOCK claimed the property it
+      //   lacked ("a nested call, generic or template keeps its own"). The
+      //   comma after the template is a separator; the ones inside it are not.
+      {
+        ok(
+          splitTopLevel(nestedArgs).length === 2,
+          `splitTopLevel cut a nested-template argument list into ${splitTopLevel(nestedArgs).length} parts, ` +
+            'not 2. Its docblock asserts template-awareness; this is the assertion that makes the sentence ' +
+            'true rather than aspirational',
+        );
+        ok(
+          legacySplitTopLevel(nestedArgs).length !== 2,
+          '⭐ POSITIVE CONTROL: the pre-fix splitter now answers 2 as well, so the fixture no longer ' +
+            'separates the two algorithms.',
+        );
+      }
+
+      // ⑤ The skipper itself, at the two places a template-unaware walk breaks:
+      //   an interpolation carrying its own braces, and one carrying its own
+      //   quotes. Both are CODE, not string bytes.
+      ok(
+        skipStringLiteral('x = `${ {a: 1}.a }` + 1', 4).end === 18,
+        'skipStringLiteral mis-placed the close of a template whose interpolation carries an object literal ' +
+          '— the `}` of `{a: 1}` is not the end of the interpolation',
+      );
+      ok(
+        skipStringLiteral("x = `${ f('`') }` + 1", 4).closed === true,
+        'skipStringLiteral lost a template whose interpolation carries a STRING containing a backtick — ' +
+          'inside `${ … }` the bytes are code, and a quote there opens a new literal',
+      );
+
+      // ⑥ The scan REPORT — the same distinction for the three primitives whose
+      //   return value has no room for a per-position tag.
+      {
+        const healthy = scanReport();
+        sliceBalanced(`f(${nestedArgs})`, 1, healthy);
+        ok(!healthy.desynchronised, 'sliceBalanced reported a desync on a well-formed argument list');
+        const lost = scanReport();
+        sliceBalanced('f(`never closed', 1, lost);
+        ok(
+          lost.desynchronised && lost.unterminatedAt === 2,
+          'sliceBalanced no longer reports the unterminated literal that made its `null` ambiguous — ' +
+            '"the brackets never balanced" and "I lost my place" are the two answers this report exists to ' +
+            'separate',
+        );
+        const split = scanReport();
+        splitTopLevel('`never closed', split);
+        ok(split.desynchronised, 'splitTopLevel no longer reports running off the end with a literal open');
+        const walked = scanReport();
+        scanTopLevel('`never closed', () => {}, walked);
+        ok(walked.desynchronised, 'scanTopLevel no longer reports running off the end with a literal open');
+      }
+    }
+
     ok(parseParamNames('readonly a: Map<string, number> = x, b?: string').join(',') === 'a,b', 'parseParamNames mis-read a parameter list');
 
     // [#13227] The MODIFIER RUN, pinned at every length TypeScript admits and
@@ -3512,6 +4457,388 @@ function selfTest() {
     }
   }
 
+  // ------------------------------------------------------------------
+  // [#13790] The INLINE literal EXPRESSION at an object-literal `code:`.
+  //
+  // ⚠️ Nothing here asserts a bare "it matched". Every positive is paired with
+  // the SAME-TEXT negative the guard is supposed to separate it from, and every
+  // negative with a positive control, because "the shape is silent" and "the
+  // shape is dead" are the same output.
+  // ------------------------------------------------------------------
+  battery('[#13790] The INLINE literal EXPRESSION at an object-literal `code:`.');
+  {
+    const C = INLINE_LITERAL_EXPRESSION_CENSUS;
+    const REL = 'packages/x/src/a.ts';
+    const derive = (source) =>
+      deriveSites({ registered: new Set(['ALREADY_REGISTERED']), files: [{ rel: REL, source }], readFile: () => '' });
+    const exprSites = (source) =>
+      derive(source).sites.filter((s) => s.shape === 'objlitexpr').map((s) => s.code).sort();
+    const REGRESSION =
+      'the INLINE literal-expression position is UNREACHED again. #13790 closed it (shape `objlitexpr`, ' +
+      'guarded by enclosingOpeners + the sibling-shape partition + the ALL-OR-NOTHING reduction) at a ' +
+      `measured cost of ${C.newVerdictRows} verdict rows in ${DECLARATION}. If that closure is being ` +
+      'reverted the rows go with it, or the table asserts sites no shape derives. ⛔ Do not adjust this ' +
+      'pin to match a regression.';
+
+    // ① THE LIVE SHAPE — the REST door's three-branch ternary, spelled over
+    //    several lines exactly as `error-response.ts` writes it. All three
+    //    branches must arrive: a reduction that returned only the first would
+    //    pass a "did it derive something" test.
+    {
+      const doorTernary =
+        `return {\n  status: isProvisioning ? 503 : 404,\n  body: {\n    error: raw,\n` +
+        `    code: isProvisioning\n      ? 'INLINE_PROVISIONING'\n      : isFailed\n` +
+        `        ? 'INLINE_FAILED'\n        : 'INLINE_NOT_FOUND',\n  },\n};\n`;
+      ok(
+        JSON.stringify(exprSites(doorTernary)) ===
+          JSON.stringify(['INLINE_FAILED', 'INLINE_NOT_FOUND', 'INLINE_PROVISIONING']),
+        `a multi-line NESTED ternary at an object-literal \`code:\` derived ` +
+          `${JSON.stringify(exprSites(doorTernary))} rather than all three branches — ${REGRESSION}`,
+      );
+    }
+
+    // ② The `||` / `??` chain, the card's other named spelling — both halves of
+    //    ALL-OR-NOTHING, since a chain is where "half an expression's values"
+    //    is easiest to ship by accident (#9568).
+    for (const op of ['||', '??']) {
+      const runtimeLimb = `send(res, { code: pick ${op} 'INLINE_CHAIN_A', status: 500 });`;
+      ok(
+        exprSites(runtimeLimb).length === 0,
+        `a \`${op}\` chain with a RUNTIME limb derived ${JSON.stringify(exprSites(runtimeLimb))} — ` +
+          'ALL-OR-NOTHING is gone, and half an expression is a finding wrong in both directions at once',
+      );
+      // ⚠️ The first operand is PARENTHESISED, and that is not decoration. A
+      // chain whose first operand is a BARE quoted literal at the colon is
+      // matched by `objlit`, so the ownership guard hands the whole token over
+      // — see `chainWhoseFirstOperandIsABareLiteral` in the census, and the
+      // pin for that boundary below.
+      const literalChain = `send(res, { code: ('INLINE_CHAIN_B') ${op} 'INLINE_CHAIN_A', status: 500 });`;
+      ok(
+        JSON.stringify(exprSites(literalChain)) === JSON.stringify(['INLINE_CHAIN_A', 'INLINE_CHAIN_B']),
+        `a \`${op}\` chain of LITERALS derived ${JSON.stringify(exprSites(literalChain))} rather than both ` +
+          `operands — ${REGRESSION}`,
+      );
+    }
+
+    // ②b THE DECLARED BOUNDARY of the ownership guard, pinned rather than
+    //     discovered later. When a chain's FIRST operand is a bare quoted
+    //     literal, `objlit` matches at that same `code` token and the guard
+    //     hands the position over, so only the FIRST operand is reported. That
+    //     is partial reporting, not the silence this card closed — and it is
+    //     the deliberate price of a partition that can never double-report one
+    //     stamp under two shape names. Zero live instances (census).
+    {
+      const literalFirst = `send(res, { code: 'INLINE_FIRST' || 'INLINE_SECOND', status: 500 });`;
+      const derived = derive(literalFirst).sites;
+      ok(
+        derived.some((x) => x.shape === 'objlit' && x.code === 'INLINE_FIRST'),
+        'a chain whose first operand is a bare literal is no longer reported by `objlit` either — the ' +
+          'boundary below is now a SILENT position rather than a partially reported one, which is the ' +
+          'failure this card exists to close',
+      );
+      ok(
+        !derived.some((x) => x.shape === 'objlitexpr'),
+        'the ownership guard no longer hands a chain led by a bare literal to `objlit` — one stamp is now ' +
+          'reported under two shape names and owes two verdict rows. If closing the remainder is the intent, ' +
+          'measure it and give it its own card; do not adjust this pin',
+      );
+      ok(
+        C.chainWhoseFirstOperandIsABareLiteral === 0,
+        'the census no longer records ZERO live instances of the boundary above. A live one makes the ' +
+          'partial report a real under-count and the remainder worth closing — a new measurement, not a ' +
+          'number to edit',
+      );
+    }
+
+    // ③ THE OWNERSHIP PARTITION. Each sibling spelling derives under ITS OWN
+    //    name and NOT additionally under this one: a position reported twice
+    //    owes two verdict rows for one stamp, and the reconciliation cannot
+    //    tell that from two real stamps.
+    {
+      const owned = {
+        objlit: `throw Object.assign(new Error('x'), { code: 'OWNED_LIT' });`,
+        objlitconst:
+          `const OWNED_CONST = 'OWNED_CONST_VALUE';\nthrow Object.assign(new Error('x'), { code: OWNED_CONST });`,
+        objlittemplate: 'send(res, { code: `OWNED_${action}_FAILED`, status: 500 });',
+      };
+      for (const [name, source] of Object.entries(owned)) {
+        const sites = derive(source).sites;
+        ok(
+          sites.some((s) => s.shape === name),
+          `the '${name}' control derives no '${name}' site — the partition assertion beside it measures nothing`,
+        );
+        ok(
+          !sites.some((s) => s.shape === 'objlitexpr'),
+          `a '${name}' stamp was ALSO derived as 'objlitexpr' — the object-literal position now has two ` +
+            'reporters, so one stamp owes two verdict rows',
+        );
+      }
+    }
+
+    // ④ THE STRUCTURAL GUARD. A `code:` in a function PARAMETER LIST is a type
+    //    annotation, not a stamp — 41 such positions on the real tree.
+    {
+      // ⚠️ The fixture carries a DEFAULT whose value reduces. Measured: the
+      // obvious `(code: number | null, signal)` does not discriminate — the
+      // reduction declines `number | null` anyway, so that pin sat GREEN through
+      // an ablation of the very guard it claims to test. A parameter DEFAULT is
+      // a value expression, so only the bracket says it is not a stamp.
+      const paramList =
+        `export function fail(code: string = down ? 'INLINE_PARAM_A' : 'INLINE_PARAM_B') { throw new Error(code); }\n`;
+      ok(
+        exprSites(paramList).length === 0,
+        `a \`code:\` in a function PARAMETER LIST derived ${JSON.stringify(exprSites(paramList))} — the ` +
+          'enclosing-bracket guard is gone, and a parameter default is now read as an object-literal stamp',
+      );
+      const objectLiteral = `send(res, { code: down ? 'INLINE_GUARD_A' : 'INLINE_GUARD_B' });`;
+      ok(
+        exprSites(objectLiteral).length === 2,
+        'the enclosing-bracket guard rejects a genuine object literal too — the assertion above is passing ' +
+          'because nothing is recognised at all',
+      );
+    }
+
+    // ⑤ TYPE ANNOTATIONS — the precision cost the card refused to authorise the
+    //    widening without measuring. The ordinary forms are declined by the
+    //    REDUCTION with no position-specific test; the CONDITIONAL TYPE is the
+    //    one form whose branches really are literals, and it has its own guard.
+    {
+      const annotations = [
+        [`interface E { code: string | undefined; message: string }\n`, 'a union of type keywords'],
+        [`interface E { code: FieldErrorCode; message: string }\n`, 'a named type'],
+        [`interface E { code: 'INLINE_A' | 'INLINE_B'; message: string }\n`, 'a union of literal TYPES'],
+        [`type Pick<T> = { code: T extends string ? 'INLINE_A' : 'INLINE_B' };\n`, 'a CONDITIONAL type'],
+      ];
+      for (const [source, what] of annotations) {
+        ok(
+          exprSites(source).length === 0,
+          `${what} at a \`code:\` derived ${JSON.stringify(exprSites(source))} — a type annotation is not a ` +
+            `stamp, and this is the ~${C.declinedTypeAnnotation}-position noise class the census measured as ` +
+            'costing nothing',
+        );
+      }
+      // The conditional-type guard's positive control: the SAME ternary as a
+      // VALUE derives, so the assertion above is the `extends` keyword doing
+      // the work rather than the whole shape being dead.
+      const asValue = `send(res, { code: t ? 'INLINE_A' : 'INLINE_B' });`;
+      ok(
+        exprSites(asValue).length === 2,
+        'the conditional-TYPE guard also rejects the same ternary written as a VALUE — it is matching the ' +
+          'ternary rather than the `extends`',
+      );
+      // …and it is the keyword OUTSIDE a string that decides, not the letters.
+      const extendsInsideALiteral = `send(res, { code: t ? 'INLINE_EXTENDS_BASE' : 'INLINE_B' });`;
+      ok(
+        exprSites(extendsInsideALiteral).length === 2,
+        'a code VALUE containing the letters `extends` was read as a conditional type — the guard is not ' +
+          'looking outside string literals',
+      );
+    }
+
+    // ⑥ THE RUNTIME LIMB, in the exact text that made the STRICT anchor
+    //    necessary. `objlithelper`'s loose `code\s*:\s*` matches the COLON OF
+    //    THE TERNARY here and reads `'inline_unknown'` as a stamp; the strict
+    //    anchor does not, and the reduction declines the outer expression
+    //    anyway because `issue.code` is a value no scan can read.
+    {
+      const runtimeLimb =
+        `const flat = { code: typeof issue.code === 'string' ? issue.code : 'inline_unknown', path: p };\n`;
+      ok(
+        exprSites(runtimeLimb).length === 0,
+        `a ternary with a RUNTIME limb derived ${JSON.stringify(exprSites(runtimeLimb))} — ALL-OR-NOTHING is ` +
+          'gone, and the value reported is one the program may never stamp',
+      );
+      const loose = [...runtimeLimb.matchAll(new RegExp(String.raw`\bcode\s*:\s*`, 'g'))].length;
+      const shape = SHAPES.find((sh) => sh.name === 'objlitexpr');
+      ok(
+        shape !== undefined,
+        'SHAPES no longer publishes `objlitexpr` at all — the INLINE literal-expression position is back to ' +
+          'no site AND no unresolved, the failure #13790 closed',
+      );
+      const strict = shape
+        ? [...runtimeLimb.matchAll(new RegExp(shape.re.source, 'g'))].length
+        : Number.POSITIVE_INFINITY;
+      ok(
+        loose > strict,
+        'the loose `code\\s*:\\s*` anchor no longer over-matches this text, so ' +
+          `falsePositionsUnderTheLooseAnchor (${C.falsePositionsUnderTheLooseAnchor}) describes a hazard that ` +
+          'has gone — re-measure before trusting the anchor choice it justifies',
+      );
+    }
+
+    // ⑦ LOWERCASE IS REPORTED HERE, and the reason is MEASURED against the
+    //    other gate's real detector rather than asserted in prose. At an inline
+    //    ternary there is no quoted literal beside the token `code`, so every
+    //    pattern that gate has is structurally blind — which makes a
+    //    `casing-gate` delegation the seam this file's header describes, not a
+    //    hand-off. The paired control is the same catalog value spelled as a
+    //    plain literal, which that gate DOES read.
+    {
+      const catalogTernary =
+        `throw validationFailure('x', [\n  { field: 'name', code: body.name === undefined ? 'inline_required' ` +
+        `: 'inline_invalid', message: 'expected a non-empty string' },\n]);\n`;
+      ok(
+        findViolations(catalogTernary, REL).length === C.casingGateFindingsAtTheLivePosition,
+        'check:error-code-casing now reports the inline-ternary catalog position. If it really reads this ' +
+          "text, `objlitexpr`'s `lowercase: 'here'` is a DUPLICATE report rather than the only one — " +
+          're-measure and move the delegation; do not adjust this pin',
+      );
+      ok(
+        JSON.stringify(exprSites(catalogTernary)) === JSON.stringify(['inline_invalid', 'inline_required']),
+        `the lower-case catalog ternary derived ${JSON.stringify(exprSites(catalogTernary))} — with the other ` +
+          'gate measured blind at this position (assertion above), dropping it here means NOBODY reports a ' +
+          'lower-case code stamped through an inline ternary',
+      );
+      const sameValueAsALiteral = `throw new Error('x'); const body = { code: 'inline_required', message: 'm' };\n`;
+      ok(
+        findViolations(sameValueAsALiteral, REL).length > 0,
+        'the same catalog value spelled as a PLAIN literal is not read by check:error-code-casing either — ' +
+          'that gate is measuring nothing here, so the zero beside it is not a reading',
+      );
+    }
+
+    // ⑧ The census's own arithmetic. Every figure the bounds line prints is a
+    //    claim about a partition, and a partition that does not sum is a
+    //    miscount presented as a measurement.
+    {
+      const sibling = C.ownedBySibling.objlit + C.ownedBySibling.objlitconst + C.ownedBySibling.objlittemplate;
+      ok(
+        C.anchorHits ===
+          C.notObjectLiteral + sibling + C.bareIdentifier + C.conditionalType + C.candidatesReachingReduction,
+        'INLINE_LITERAL_EXPRESSION_CENSUS: the guard cascade does not sum to anchorHits. Every position the ' +
+          'anchor reaches is rejected by exactly one guard or reaches the reduction; an off sum means a class ' +
+          'was counted twice or not at all',
+      );
+      ok(
+        Object.values(C.notObjectLiteralByClass).reduce((a, n) => a + n, 0) === C.notObjectLiteral,
+        'INLINE_LITERAL_EXPRESSION_CENSUS: notObjectLiteralByClass does not sum to notObjectLiteral',
+      );
+      ok(
+        C.notObjectLiteralByClass.behindScannerDesync === SCANNER_LITERAL_BLIND_SPOTS.atThisShapesAnchor.behindScannerDesync &&
+          C.notObjectLiteralByClass.insideAString === SCANNER_LITERAL_BLIND_SPOTS.atThisShapesAnchor.genuinelyInsideAString,
+        '[#14626] INLINE_LITERAL_EXPRESSION_CENSUS and SCANNER_LITERAL_BLIND_SPOTS disagree about the split ' +
+          'of guard ①. They are two readings of ONE sweep, and the whole card is that the two answers stop ' +
+          'being printed as one number — two blocks quietly drifting apart would re-open it in a new place',
+      );
+      ok(
+        C.candidatesReachingReduction === C.declinedByReduction + C.livePositions,
+        'INLINE_LITERAL_EXPRESSION_CENSUS: the reduction outcome does not sum to what reaches it',
+      );
+      ok(
+        C.declinedTypeAnnotation + C.declinedRuntimeValue === C.declinedByReduction,
+        'INLINE_LITERAL_EXPRESSION_CENSUS: the declined split does not sum to declinedByReduction. The SPLIT ' +
+          'is a reporting heuristic and the SUM is exact — a drifting sum means the exact half moved',
+      );
+      ok(
+        C.anchorHits <= C.objectLiteralCodeTokens,
+        'INLINE_LITERAL_EXPRESSION_CENSUS: the shape reaches more positions than there are `code:` tokens',
+      );
+      ok(
+        C.liveSites.reduce((n, l) => n + l.values, 0) === C.distinctValues &&
+          C.liveSites.reduce((n, l) => n + l.rowsOwed, 0) === C.newVerdictRows &&
+          C.liveSites.length === C.livePositions,
+        'INLINE_LITERAL_EXPRESSION_CENSUS: liveSites does not add up to the headline counts, so the rows a ' +
+          'reader can check disagree with the numbers the bounds line prints',
+      );
+      ok(
+        C.typeAnnotationsSurviving === 0 && C.unregisteredWireCodesHiding === 0,
+        'INLINE_LITERAL_EXPRESSION_CENSUS no longer records the readings the card turned on. If a type ' +
+          'annotation now survives the guards, or an unregistered WIRE code has appeared, that is a new ' +
+          'measurement and a new decision — not a number to edit in place',
+      );
+    }
+
+    // ⑨ [#14626] THE RESIDUAL BLIND SPOT, kept live rather than left as prose.
+    //
+    //    `SCANNER_LITERAL_BLIND_SPOTS` claims two things a number cannot assert
+    //    on its own, and each is pinned in the direction it can fail:
+    //      · the arithmetic is a PARTITION of the pre-fix unplaced positions —
+    //        an off sum means a class was counted twice or dropped;
+    //      · the class is still OPEN. If the regex-literal fixture below starts
+    //        being placed, the card that block defers to has landed and every
+    //        figure in it is stale — re-measure, do not edit the numbers.
+    {
+      const S = SCANNER_LITERAL_BLIND_SPOTS;
+      ok(
+        S.newlyPlaced + S.genuinelyInsideAString + S.behindScannerDesync === S.unplacedBefore,
+        'SCANNER_LITERAL_BLIND_SPOTS: the three outcomes do not partition the positions the PRE-fix scan ' +
+          'left unplaced. Every one of them was recovered, certified as genuinely inside a string, or is ' +
+          'still behind a desync; a position in none of those columns is the ambiguity this card removed, ' +
+          'back again',
+      );
+      ok(
+        S.scansHealthyAfter - S.scansHealthyBefore === S.filesRecovered &&
+          S.filesScanned - S.scansHealthyAfter === S.filesStillDesynchronised,
+        'SCANNER_LITERAL_BLIND_SPOTS: the file-level health figures do not agree with each other',
+      );
+      // ⭐ POSITIVE CONTROL FOR THE DECLARATION: the regex class really does
+      //    still desynchronise the walk, and the SAME source without it really
+      //    does place the position. A block declaring an open blind spot that
+      //    is in fact closed is worse than no block at all.
+      const regexBlind = "const re = /[`'\"]/;\nconst body = { code: 'RX_ONE' };\n";
+      const rxAt = regexBlind.indexOf('code:');
+      ok(
+        enclosingOpeners(regexBlind, [rxAt]).get(rxAt).kind === 'desync',
+        'SCANNER_LITERAL_BLIND_SPOTS declares the regex-literal class OPEN, but the scan now places a ' +
+          'position after one. If that class was closed, this block is stale: re-run the sweep and rewrite ' +
+          'it — including whether `positionsBehindScannerDesync` is still 11',
+      );
+      const noRegex = "const re = 1;\nconst body = { code: 'RX_ONE' };\n";
+      const nrAt = noRegex.indexOf('code:');
+      ok(
+        enclosingOpeners(noRegex, [nrAt]).get(nrAt).kind === 'bracket',
+        '⭐ the same source WITHOUT the regex literal is not placed either — so the assertion above is ' +
+          'measuring a broken fixture rather than the declared blind spot',
+      );
+    }
+  }
+
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    fail.push(message);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
+  }
+
   if (fail.length) {
     console.error('check-dispatcher-error-vocabulary --self-test FAILED:');
     for (const f of fail) console.error(`  - ${f}`);
@@ -3610,6 +4937,37 @@ function main() {
     `wire code(s) hiding. So the widening is PREVENTIVE, not a live defect. ⚠️ The position is populated ` +
     `(${OBJECT_LITERAL_CODE_HELPER_BLINDNESS.localTwinCensus.reduceToEmptyByClass.runtimeValueLocal + OBJECT_LITERAL_CODE_HELPER_BLINDNESS.localTwinCensus.reduceToEmptyByClass.bindingWithoutDeclarator} ` +
     `value-position candidates); what is empty is the REDUCIBLE subclass. See localTwinCensus.`;
+  const inline = INLINE_LITERAL_EXPRESSION_CENSUS;
+  const inlineBound =
+    `\n  [#13790] an INLINE literal EXPRESSION at an object-literal \`code:\` (a ternary or a \`||\`/\`??\` ` +
+    `chain written at the stamp, every branch already a literal) IS now in this gate's population — the ` +
+    `\`objlitexpr\` shape. It needs no resolver: \`literalCodeValues\` reduces the value text directly, and ` +
+    `the ALL-OR-NOTHING rule is also the precision guard. Measured on this tree BEFORE it was written: of ` +
+    `${inline.objectLiteralCodeTokens} \`code:\` tokens the shape's anchor reaches ${inline.anchorHits} (a bare ` +
+    `quoted literal is refused by the regex itself, so #12925's kebab declaration is untouched); of those, ` +
+    `${inline.notObjectLiteral} are not object literals (${inline.notObjectLiteralByClass.parameterList} ` +
+    `parameter lists), ${inline.ownedBySibling.objlit + inline.ownedBySibling.objlitconst + inline.ownedBySibling.objlittemplate} ` +
+    `are already a sibling shape's and ${inline.bareIdentifier} are a bare identifier, ` +
+    `${inline.candidatesReachingReduction} reach the reduction and ${inline.declinedByReduction} decline ` +
+    `(~${inline.declinedTypeAnnotation} of them type annotations) ⇒ ${inline.livePositions} live position(s), ` +
+    `${inline.distinctValues} value(s), ${inline.newVerdictRows} verdict row(s) and ` +
+    `${inline.unregisteredWireCodesHiding} unregistered WIRE code(s) hiding. So the widening is PREVENTIVE. ` +
+    `⚠️ ${inline.typeAnnotationsSurviving} type-annotation position survives the guards — the cost ` +
+    `\`objlithelper\` pays per value stamp is reached here and costs nothing. ` +
+    `\n  [#14626] the shared textual scanners now carry a TEMPLATE-LITERAL mode (\`skipStringLiteral\` ` +
+    `tracks \`\${ … }\` nesting instead of seeking a matching backtick) in all four primitives, and ` +
+    `\`enclosingOpeners\` answers each position with WHICH of its two former \`undefined\`s applies. ` +
+    `Over the ${SCANNER_LITERAL_BLIND_SPOTS.codePositions} \`code:\` tokens in the population that ` +
+    `recovered ${SCANNER_LITERAL_BLIND_SPOTS.newlyPlaced} positions (${inline.positionsRecoveredByTemplateMode} ` +
+    `of them at this shape's anchor, both in domains/automation.ts) and surfaced ` +
+    `${SCANNER_LITERAL_BLIND_SPOTS.unregisteredWireCodesSurfaced} unregistered wire code(s). ` +
+    `⚠️ The count is STILL a lower bound, now for a measured and different reason: ` +
+    `${inline.positionsBehindScannerDesync} position(s) at this anchor ` +
+    `(${SCANNER_LITERAL_BLIND_SPOTS.behindScannerDesync} across the whole population, in ` +
+    `${SCANNER_LITERAL_BLIND_SPOTS.filesStillDesynchronised} of ${SCANNER_LITERAL_BLIND_SPOTS.filesScanned} ` +
+    `files) sit behind a REGEX LITERAL carrying a quote — see SCANNER_LITERAL_BLIND_SPOTS, which says why ` +
+    `that class is counted rather than guessed at. ` +
+    `See INLINE_LITERAL_EXPRESSION_CENSUS in this file, pinned by --self-test.`;
 
   if (argv.includes('--report')) {
     console.log('Derived sites (code / shape / file):');
@@ -3622,13 +4980,13 @@ function main() {
       const doors = [...new Set(pending.filter((d) => d.code === p).map((d) => d.door))].join(',');
       console.log(`  ${p.padEnd(40)} door=${doors}`);
     }
-    console.log(`\n${bounds}`);
+    console.log(`\n${bounds}${inlineBound}`);
   }
 
   if (findings.length) {
     console.error(`\ncheck-dispatcher-error-vocabulary: ${findings.length} finding(s)\n`);
     for (const f of findings) console.error(`  [${f.kind}] ${f.text}\n`);
-    console.error(bounds);
+    console.error(bounds + inlineBound);
     process.exit(1);
   }
 
@@ -3636,7 +4994,7 @@ function main() {
     `check-dispatcher-error-vocabulary: OK — ${sites.length} unregistered code-stamping site(s), all classified; ` +
       `${new Set(pending.map((d) => d.code)).size} awaiting a ledger entry (#8846).`,
   );
-  console.log(bounds);
+  console.log(bounds + inlineBound);
 }
 
 // Exports bindings, so an import for those exports alone must run nothing (#10667).

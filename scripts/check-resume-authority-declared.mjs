@@ -340,9 +340,57 @@ function report({ list = false, scanRoots = DEFAULT_SCAN_ROOTS } = {}) {
 // as one that passed (#13798).
 const SELF_TEST_VERDICT = 'check-resume-authority-declared self-test reached its verdict';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'The finding itself, and its two silences.': 4,
+  'Scope: a non-pausing descriptor is not asked the question.': 2,
+  'Structure, not text: the property must be the descriptor\'s OWN, not a': 2,
+  'Two descriptors in one file are judged separately (crud-nodes.ts ships': 1,
+  'A dynamically assembled argument is recorded, never judged.': 2,
+  'A same-named local factory is not the spec\'s. Deliberately still counted:': 2,
+  'Wiring: discovery must reach the real tree, and specifically the four': 5,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 7;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const seen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    seen.set(b, (seen.get(b) ?? 0) + 1);
+  };
   const failures = [];
-  const expect = (label, cond) => { if (!cond) failures.push(label); };
+  const expect = (label, cond) => { registerCase(); if (!cond) failures.push(label); };
 
   const descriptor = (body) => `import { defineActionDescriptor } from '@objectstack/spec/automation';
 engine.registerNodeExecutor({
@@ -355,6 +403,7 @@ ${body}
 `;
 
   // ── The finding itself, and its two silences.
+  battery('The finding itself, and its two silences.');
   let d = scanSource('a.ts', descriptor("    type: 'x', version: '1.0.0', name: 'X', supportsPause: true,"));
   expect('finds a pausing descriptor that omits resumeAuthority',
     d.length === 1 && d[0].supportsPause === true && d[0].declaresResumeAuthority === false);
@@ -367,6 +416,7 @@ ${body}
   expect("an explicit 'service' satisfies the gate", d.length === 1 && d[0].declaresResumeAuthority === true);
 
   // ── Scope: a non-pausing descriptor is not asked the question.
+  battery('Scope: a non-pausing descriptor is not asked the question.');
   d = scanSource('a.ts', descriptor("    type: 'x', version: '1.0.0', name: 'X',"));
   expect('a descriptor with no supportsPause is out of scope', d.length === 1 && d[0].supportsPause === null);
 
@@ -376,6 +426,7 @@ ${body}
   // ── Structure, not text: the property must be the descriptor's OWN, not a
   //    key of the same name nested inside its configSchema JSON Schema. This is
   //    the case a regex cannot decide, and `screen` really does nest a schema.
+  battery('Structure, not text: the property must be the descriptor\'s OWN, not a');
   const nested = descriptor(`    type: 'x', version: '1.0.0', name: 'X',
     configSchema: {
       type: 'object',
@@ -400,6 +451,7 @@ ${body}
 
   // ── Two descriptors in one file are judged separately (crud-nodes.ts ships
   //    four), and a violation next to a compliant one is still found.
+  battery('Two descriptors in one file are judged separately (crud-nodes.ts ships');
   const two = `import { defineActionDescriptor } from '@objectstack/spec/automation';
 const a = defineActionDescriptor({ type: 'a', version: '1.0.0', name: 'A', supportsPause: true, resumeAuthority: 'service' });
 const b = defineActionDescriptor({ type: 'b', version: '1.0.0', name: 'B', supportsPause: true });
@@ -409,6 +461,7 @@ const b = defineActionDescriptor({ type: 'b', version: '1.0.0', name: 'B', suppo
     d.length === 2 && d[0].declaresResumeAuthority === true && d[1].declaresResumeAuthority === false);
 
   // ── A dynamically assembled argument is recorded, never judged.
+  battery('A dynamically assembled argument is recorded, never judged.');
   d = scanSource('dyn.ts', "const d = defineActionDescriptor(base);\n");
   expect('a non-literal argument is opaque, not a violation', d.length === 1 && d[0].opaque === true);
 
@@ -420,6 +473,7 @@ const b = defineActionDescriptor({ type: 'b', version: '1.0.0', name: 'B', suppo
   // ── A same-named local factory is not the spec's. Deliberately still counted:
   //    the criterion is the literal's shape, and a hand-rolled factory producing
   //    a descriptor has the same obligation. Asserted so the choice is visible.
+  battery('A same-named local factory is not the spec\'s. Deliberately still counted:');
   d = scanSource('local.ts',
     "function defineActionDescriptor(x: any) { return x; }\nconst d = defineActionDescriptor({ type: 'x', supportsPause: true });\n");
   expect('a same-named local factory is judged too (documented choice)',
@@ -432,6 +486,7 @@ const b = defineActionDescriptor({ type: 'b', version: '1.0.0', name: 'B', suppo
   //    tree is clean. That is the gated run's job, and duplicating it would make
   //    a genuine violation surface as a self-test failure — the least legible
   //    message available.
+  battery('Wiring: discovery must reach the real tree, and specifically the four');
   const { found } = audit();
   expect('discovers descriptors in the real tree', found.length > 0);
   const pausingTypes = new Set();
@@ -442,6 +497,51 @@ const b = defineActionDescriptor({ type: 'b', version: '1.0.0', name: 'B', suppo
     expect(`discovery reaches the '${t}' pausing built-in`, pausingTypes.has(t));
   }
 
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    failures.push(message);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of seen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = seen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
+  }
   if (failures.length) {
     for (const f of failures) console.error(`  x self-test: ${f}`);
     console.error(`\ncheck-resume-authority-declared --self-test: ${failures.length} failure(s).\n`);

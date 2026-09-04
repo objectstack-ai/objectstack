@@ -2,7 +2,7 @@
 
 import chalk from 'chalk';
 import type { ZodError } from 'zod';
-import { formatZodIssue } from '@objectstack/spec';
+import { formatZodIssue, type ConversionNotice } from '@objectstack/spec';
 import type { TenancyPosture } from '@objectstack/spec/security';
 import { writeStdoutDirect } from './json-stdout.js';
 
@@ -1394,4 +1394,44 @@ export function printBulletList(
     noun: options.noun,
     remedy: options.remedy,
   });
+}
+
+// ─── ADR-0087 D2 conversion notices ─────────────────────────────────
+
+/**
+ * The human face of one ADR-0087 D2 conversion notice — ONE implementation of
+ * that sentence, deliberately, for the same reason as
+ * {@link printTruncationNotice} above.
+ *
+ * The sentence is close to a contract. A conversion rewrites an old-shape key
+ * at load and asks the author for nothing, so this notice is the ONLY warning
+ * they get before the conversion retires and their metadata stops loading —
+ * and an author who runs two of the three authoring commands over one tree is
+ * meant to be told the same thing in the same words. It was written out three
+ * times, verbatim, in `compile.ts`, `validate.ts` and `lint.ts` (#13743), held
+ * equal by convention alone: the parity guard in
+ * `test/validate-build-gate-parity.test.ts` asserted that each command PASSES
+ * an `onConversionNotice` sink, never that they SAY the same thing once they
+ * have one — so a reword in one command drifted from the other two with every
+ * gate green.
+ *
+ * ⛔ A formatter, not a printer, and that is what makes one implementation
+ * possible at all. The three call sites are genuinely not interchangeable in
+ * what they DO with the string — `os build` and `os lint` hand it to
+ * {@link printWarning} behind `!flags.json`, while `os validate` pushes it
+ * into the `warnings` list that `--strict` then judges — but they were
+ * byte-identical in what they SAY (measured: one distinct template literal
+ * across the three). The whole difference lives in the disposition of the
+ * returned string, so it costs this function no parameter.
+ *
+ * ⛔ NOT the `defineStack` face, which is a fourth rendering of these same
+ * fields and deliberately a different sentence: `warnConversionNotice` in
+ * `packages/spec/src/stack.zod.ts` adds a `defineStack:` prefix and a trailing
+ * "update the source" instruction, because that seam warns once per process
+ * while an author is composing, not inside a command's report. It also cannot
+ * import this: `@objectstack/cli` depends on `@objectstack/spec`, not the
+ * reverse. Hoisting all four onto one source is a separate question.
+ */
+export function formatConversionNotice(notice: ConversionNotice): string {
+  return `${notice.path}: '${notice.from}' → '${notice.to}' (converted at load; conversion '${notice.conversionId}', retires in protocol ${notice.retiresIn})`;
 }

@@ -120,6 +120,52 @@ import { join, resolve } from 'node:path';
 import { maskComments } from './js-comment-mask.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'The base path is DERIVED, and its absence is not an empty population.': 2,
+  'LOAD-BEARING NEGATIVE: a mount with an exact row is clean.': 1,
+  'LOAD-BEARING POSITIVE: a mount added with no row REDDENS, naming the route.': 2,
+  'THE RIGHT BOUNDARY, both directions. This is the defect class #10534 fell into.': 4,
+  'The method is part of the identity: same path, different verb, is a different route.': 1,
+  'CONSTRAINT 3: the lanes are excluded, and adding one does not redden.': 2,
+  'Mounts that are not under basePath are not this ledger\'s business.': 2,
+  'A commented-out mount is not a mount.': 2,
+  'A string-literal mount under basePath is still a mount (no `${basePath}` required).': 1,
+  'CONSTRAINT 4: what cannot be read is reported, never skipped.': 3,
+  'The vendor inventory accounts for a shadowing mount, and says so.': 2,
+  'The rationale half: a pasted row does not satisfy this gate.': 5,
+  'A row whose mount is gone fails (the direction the hand-written pin already had).': 1,
+  'PENDING_DISPOSITION, reconciled in BOTH directions.': 5,
+  '#8435 remedy authority. PLACEMENT is pinned here, per-gate, because the': 4,
+  'Parse anchors: a moved anchor is a REFUSAL input, never an empty population.': 2,
+  'The escaped-quote shape the real notes use is measured, not truncated.': 1,
+  'And the real inputs on disk are readable, so the anchors have not moved.': 2,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 18;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 const ROOT = resolve(new URL('..', import.meta.url).pathname);
 
 /** The two inputs. Module-scope literals, so `dispatch-gates` derives this
@@ -558,16 +604,32 @@ const REAL_NOTE =
 let selfTestReachedVerdict = false;
 
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const batterySeen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+  };
+
   const fail = [];
   let cases = 0;
-  const ok = (cond, what) => { cases += 1; if (!cond) fail.push(what); };
+  const ok = (cond, what) => { registerCase(); cases += 1; if (!cond) fail.push(what); };
   const kinds = (r) => r.findings.map((f) => f.kind).sort();
 
   // -- The base path is DERIVED, and its absence is not an empty population.
+  battery('The base path is DERIVED, and its absence is not an empty population.');
   ok(deriveBasePath(FIXTURE_PREAMBLE) === FIXTURE_BASE, 'basePath was not derived from the plugin');
   ok(deriveBasePath('const basePath = 42;') === null, 'a plugin with no derivable basePath did not refuse');
 
   // -- LOAD-BEARING NEGATIVE: a mount with an exact row is clean.
+  battery('LOAD-BEARING NEGATIVE: a mount with an exact row is clean.');
   ok(
     runFixture(
       'rawApp.post(`${basePath}/admin/unlock-user`, h);',
@@ -577,6 +639,7 @@ function selfTest() {
   );
 
   // -- LOAD-BEARING POSITIVE: a mount added with no row REDDENS, naming the route.
+  battery('LOAD-BEARING POSITIVE: a mount added with no row REDDENS, naming the route.');
   {
     const r = runFixture('rawApp.post(`${basePath}/admin/zzz-new`, h);', []);
     ok(kinds(r).includes('unaccounted-mount'), 'an unledgered mount did not redden the gate');
@@ -587,6 +650,7 @@ function selfTest() {
   }
 
   // -- THE RIGHT BOUNDARY, both directions. This is the defect class #10534 fell into.
+  battery('THE RIGHT BOUNDARY, both directions. This is the defect class #10534 fell into.');
   {
     // The shorter route is mounted; only the LONGER sibling is ledgered.
     const r = runFixture(
@@ -621,6 +685,7 @@ function selfTest() {
   }
 
   // -- The method is part of the identity: same path, different verb, is a different route.
+  battery('The method is part of the identity: same path, different verb, is a different route.');
   ok(
     runFixture(
       'rawApp.get(`${basePath}/config`, h);',
@@ -630,6 +695,7 @@ function selfTest() {
   );
 
   // -- CONSTRAINT 3: the lanes are excluded, and adding one does not redden.
+  battery('CONSTRAINT 3: the lanes are excluded, and adding one does not redden.');
   {
     const r = runFixture(
       'rawApp.all(`${basePath}/*`, h);\n' +
@@ -642,6 +708,7 @@ function selfTest() {
   }
 
   // -- Mounts that are not under basePath are not this ledger's business.
+  battery('Mounts that are not under basePath are not this ledger\'s business.');
   ok(
     runFixture("rawApp.get('/.well-known/openid-configuration', h);", []).findings.length === 0,
     'a .well-known mount outside basePath was treated as an auth-ledger mount',
@@ -652,6 +719,7 @@ function selfTest() {
   );
 
   // -- A commented-out mount is not a mount.
+  battery('A commented-out mount is not a mount.');
   ok(
     runFixture('// rawApp.post(`${basePath}/admin/ghost`, h);', []).findings.length === 0,
     'a commented-out mount was counted -- comment masking is not reaching the scan',
@@ -662,12 +730,14 @@ function selfTest() {
   );
 
   // -- A string-literal mount under basePath is still a mount (no `${basePath}` required).
+  battery('A string-literal mount under basePath is still a mount (no `${basePath}` required).');
   ok(
     runFixture("rawApp.post('/api/v1/auth/admin/literal', h);", []).findings.some((f) => f.text.includes('/admin/literal')),
     'a mount written with a literal path instead of the template bypassed the census',
   );
 
   // -- CONSTRAINT 4: what cannot be read is reported, never skipped.
+  battery('CONSTRAINT 4: what cannot be read is reported, never skipped.');
   ok(
     kinds(runFixture("rawApp.on('POST', `${basePath}/x`, h);", [])).includes('unreadable-mount'),
     'rawApp.on(...) was silently skipped instead of reported',
@@ -682,6 +752,7 @@ function selfTest() {
   );
 
   // -- The vendor inventory accounts for a shadowing mount, and says so.
+  battery('The vendor inventory accounts for a shadowing mount, and says so.');
   {
     const r = runFixture(
       'rawApp.post(`${basePath}/admin/ban-user`, h);',
@@ -693,6 +764,7 @@ function selfTest() {
   }
 
   // -- The rationale half: a pasted row does not satisfy this gate.
+  battery('The rationale half: a pasted row does not satisfy this gate.');
   ok(
     kinds(runFixture(
       'rawApp.post(`${basePath}/admin/pasted`, h);',
@@ -731,6 +803,7 @@ function selfTest() {
   );
 
   // -- A row whose mount is gone fails (the direction the hand-written pin already had).
+  battery('A row whose mount is gone fails (the direction the hand-written pin already had).');
   ok(
     kinds(runFixture(
       '',
@@ -740,6 +813,7 @@ function selfTest() {
   );
 
   // -- PENDING_DISPOSITION, reconciled in BOTH directions.
+  battery('PENDING_DISPOSITION, reconciled in BOTH directions.');
   {
     const mount = 'rawApp.post(`${basePath}/set-initial-password`, h);';
     const p = [{ route: 'POST /api/v1/auth/set-initial-password', issue: '#10975', why: 'x' }];
@@ -776,6 +850,7 @@ function selfTest() {
   //    farm-wide sweep deliberately checks only PRESENCE (its header states the
   //    split: "Presence here, placement there"). Both paths that expand
   //    PENDING_DISPOSITION must name their owner IN THE MESSAGE THE AUTHOR READS.
+  battery('#8435 remedy authority. PLACEMENT is pinned here, per-gate, because the');
   ok(
     RATCHET_AUTHORITY === '⛔ MAINTAINER-ONLY',
     'the authority token is not the spelling scripts/check-ratchet-remedy-authority.mjs sweeps for',
@@ -807,18 +882,67 @@ function selfTest() {
   );
 
   // -- Parse anchors: a moved anchor is a REFUSAL input, never an empty population.
+  battery('Parse anchors: a moved anchor is a REFUSAL input, never an empty population.');
   ok(parseLedgerRows('export const SOMETHING_ELSE = [];') === null, 'a missing AUTH_ROUTE_LEDGER anchor parsed as zero rows');
   ok(parseVendorSurface('export const SOMETHING_ELSE = [];') === null, 'a missing surface anchor parsed as zero rows');
 
   // -- The escaped-quote shape the real notes use is measured, not truncated.
+  battery('The escaped-quote shape the real notes use is measured, not truncated.');
   ok(
     unescape("objectui app-shell\\'s wizard").length === 'objectui app-shell\'s wizard'.length,
     'an escaped quote in a note was mis-measured',
   );
 
   // -- And the real inputs on disk are readable, so the anchors have not moved.
+  battery('And the real inputs on disk are readable, so the anchors have not moved.');
   for (const rel of [MOUNT_SOURCE, LEDGER_SOURCE]) {
     ok(existsSync(join(ROOT, rel)), `${rel} does not exist -- this gate's anchor moved`);
+  }
+
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    fail.push(message);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
   }
 
   if (fail.length) {

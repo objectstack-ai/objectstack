@@ -23,6 +23,7 @@ import {
   printSuccess,
   printError,
   printStep,
+  formatConversionNotice,
   printAuthoringRuleErrors,
   printDocIssueErrors,
   JSON_FULL_LIST_REMEDY,
@@ -406,7 +407,7 @@ export default class Validate extends Command {
       // was auto-converted at load. No action is required to keep loading, but
       // the notice steers the author to the canonical key before it retires.
       for (const n of conversionNotices) {
-        warnings.push(`${n.path}: '${n.from}' → '${n.to}' (converted at load; conversion '${n.conversionId}', retires in protocol ${n.retiresIn})`);
+        warnings.push(formatConversionNotice(n));
       }
 
       // Every advisory the registry raised. All of them feed `--strict` now:

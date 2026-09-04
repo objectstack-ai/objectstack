@@ -66,6 +66,54 @@ function canonicalIsoInstant(value: unknown): string | undefined {
 }
 
 /**
+ * Canonicalise the ONE driver materialisation these adapter boundaries were
+ * measured to produce — a valid JS `Date` — into the ISO-8601 string the
+ * declared type promises. Every other shape is returned UNTOUCHED.
+ *
+ * [#14037] `rowToRecord` and the two history adapters below each assert a
+ * `string` over a driver row (`row.created_at as string | undefined`, and so
+ * on). On Postgres and MySQL that assertion is false: `SqlDriver#formatOutput`
+ * repairs the BUILTIN audit columns (`repairNaiveUtcAuditTimestamp`) and folds
+ * declared `Field.datetime` columns (`normalizeSqliteDatetimeOutput`) only
+ * inside its `if (this.isSqlite)` arm, and `withPostgresCalendarDayAsText`
+ * leaves `timestamptz` / `timestamp` deliberately untouched. Both column
+ * classes therefore arrive as a JS `Date` on the live dialects — pinned in
+ * `packages/drivers/driver-sql/src/sql-driver-13567-audit-stamp-materialisation.test.ts`.
+ * `MetadataRecord.createdAt` / `.updatedAt` and
+ * `MetadataHistoryRecord.recordedAt` are declared `z.string().datetime()`
+ * (`packages/spec/src/system/metadata-persistence.zod.ts`) — a refinement a
+ * `Date` fails outright. The cast is an assertion about a driver row, never a
+ * measurement of one, which is why tsc reports nothing.
+ *
+ * ⚠️ Deliberately NOT {@link canonicalIsoInstant} above, and the difference is
+ * exactly one input shape. That spelling reaches `value.toISOString()` for ANY
+ * `Date`, which raises `RangeError: Invalid time value` on an Invalid `Date`
+ * — measured reachable on BOTH live dialects (a MySQL zero datetime; any
+ * Postgres year in 275760..294276) and the open subject of #14078, which
+ * #13973 is blocked on. Whether the shared spelling should throw there
+ * (option A) or fall back to a rendering (option B) is a maintainer call over
+ * four packages, so this repair imports NEITHER answer into five new call
+ * sites: an Invalid `Date` is returned unchanged, exactly as these casts pass
+ * it through today. When #14078 rules, this helper collapses into the shared
+ * spelling.
+ *
+ * ⛔ NOT a tolerant fallback (#13973's standing prohibition): it teaches no
+ * consumer to accept an off-spec shape; it converts one measured producer
+ * materialisation at the producer. The `Number.isNaN(value.getTime())` guard
+ * is the spelling already in use at `packages/rest/src/export-format.ts` and
+ * `packages/rest/src/import-prepare.ts`, not a new one.
+ *
+ * A sibling copy serves the single site in
+ * `packages/metadata-protocol/src/sys-metadata-repository.ts`. ⛔ Neither is
+ * exported: widening `@objectstack/metadata-core`'s public surface for it is a
+ * separate decision, and #14078 consolidates this family anyway.
+ */
+function isoFromValidDate(value: unknown): unknown {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString();
+  return value;
+}
+
+/**
  * Cache configuration for `DatabaseLoader`.
  *
  * The cache sits in front of `load()`, `loadMany()`, `exists()`, `stat()`,
@@ -743,9 +791,9 @@ export class DatabaseLoader implements MetadataLoader {
       source: row.source as MetadataRecord['source'],
       tags: row.tags ? (typeof row.tags === 'string' ? JSON.parse(row.tags as string) : row.tags as string[]) : undefined,
       createdBy: row.created_by as string | undefined,
-      createdAt: row.created_at as string | undefined,
+      createdAt: isoFromValidDate(row.created_at) as string | undefined,
       updatedBy: row.updated_by as string | undefined,
-      updatedAt: row.updated_at as string | undefined,
+      updatedAt: isoFromValidDate(row.updated_at) as string | undefined,
     };
   }
 
@@ -1077,7 +1125,7 @@ export class DatabaseLoader implements MetadataLoader {
       changeNote: row.change_note as string | undefined,
       organizationId: row.organization_id as string | undefined,
       recordedBy: row.recorded_by as string | undefined,
-      recordedAt: row.recorded_at as string,
+      recordedAt: isoFromValidDate(row.recorded_at) as string,
     };
   }
 
@@ -1158,7 +1206,7 @@ export class DatabaseLoader implements MetadataLoader {
         changeNote: row.change_note as string | undefined,
         organizationId: row.organization_id as string | undefined,
         recordedBy: row.recorded_by as string | undefined,
-        recordedAt: row.recorded_at as string,
+        recordedAt: isoFromValidDate(row.recorded_at) as string,
       };
     });
 

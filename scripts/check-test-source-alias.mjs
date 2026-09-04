@@ -2419,12 +2419,64 @@ function buildFixtureTree() {
 // as one that passed (#13798).
 const SELF_TEST_VERDICT = 'check-test-source-alias self-test reached its verdict';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'baseline — every registry-uncovered fixture is reported': 6,
+  'the remediation hint is MEASURED, not a template (#8256)': 9,
+  'the canary (#8020)': 14,
+  'the cross-boundary walk (#8351)': 7,
+  'the latent half (#9674)': 8,
+  'the clocked-window rule (#10126)': 10,
+  'the import clause is bounded to ONE statement (#12555)': 11,
+  'the declared population must stay READABLE by the dispatch deriver': 11,
+  'the declaration must still BE the workspace (#11510)': 22,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 9;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const seen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    seen.set(b, (seen.get(b) ?? 0) + 1);
+  };
   const root = buildFixtureTree();
   const problems = [];
   const expect = (condition, message) => {
+    registerCase();
     if (!condition) problems.push(message);
   };
+  battery('baseline — every registry-uncovered fixture is reported');
   const has = (failures, needle) => failures.some((f) => f.includes(needle));
 
   try {
@@ -2444,6 +2496,7 @@ function selfTest() {
     // only ever writes subpaths, and the message then repeats unchanged. Each
     // assertion below pins one fact the hint must carry from the measurement
     // rather than from a shape guess.
+    battery('the remediation hint is MEASURED, not a template (#8256)');
     const subpathOnly = bare.failures.find((f) => f.startsWith('packages/subpath-only')) ?? '';
     expect(
       subpathOnly.includes('@fx/core/logger') &&
@@ -2500,6 +2553,7 @@ function selfTest() {
     // Escaped-slash regex `find` AND template-literal `replacement`, together,
     // exactly as the two real configs write them. Both spellings have already
     // broken a reader of these configs; neither may break this one again.
+    battery('the canary (#8020)');
     expect(
       !has(bare.failures, 'packages/canary'),
       'the canary config (escaped-slash regex find + template-literal replacement) was reported as unaliased',
@@ -2589,6 +2643,7 @@ function selfTest() {
     // resolution domain. Each of these pins one half of that; the registry
     // fixture keeps the ledger-only entries quiet so the rule-5 half is read
     // against a clean list.
+    battery('the cross-boundary walk (#8351)');
     const cross = check(root, {
       '@fx/violator': ['@fx/core', '@fx/other'],
       '@fx/no-cross-unaliased': ['@fx/relay'],
@@ -2630,6 +2685,7 @@ function selfTest() {
 
     // ── the latent half (#9674) ───────────────────────────────────────────
     // Judged without a reader: the population is the dependency's export map.
+    battery('the latent half (#9674)');
     expect(
       cross.failures.some((f) => f.includes('packages/latent-prefix-trap') && f.includes('@fx/publisher/leaf')),
       'a published subpath the bare prefix entry would mangle went unreported because no test reaches it',
@@ -2679,6 +2735,7 @@ function selfTest() {
     // one of these fixtures ALSO carries an unregistered ledger entry, so a bare
     // package-name search matches for a reason that has nothing to do with this
     // rule. Each silent assertion is therefore scoped to the rule's own sentence.
+    battery('the clocked-window rule (#10126)');
     const clockedIn = (needle) =>
       cross.failures.filter((f) => f.includes(needle) && f.includes('a CLOCKED window'));
 
@@ -2766,6 +2823,7 @@ function selfTest() {
     // the whole defect was that the verdict depended on import ORDER rather than
     // on what the file loads, and a detector that silently stops matching
     // reports a spotless repo.
+    battery('the import clause is bounded to ONE statement (#12555)');
     const specsOf = (code) => [...new Set(extractRuntimeImports(code))].sort();
     const rowA = specsOf("import 'pkg/kernel';\nconst x = 1;\n");
     const rowB = specsOf("import 'pkg/kernel';\nimport { X } from 'other';\n");
@@ -2855,6 +2913,7 @@ function selfTest() {
     // here. That is what the bare spelling cost, measured in that constant's
     // docblock (#9955). Asserted here rather than left to review because the
     // regression is a tidy-up nobody would flag.
+    battery('the declared population must stay READABLE by the dispatch deriver');
     for (const glob of WORKSPACE_PARENT_GLOBS) {
       expect(
         glob.replace(/^(?:\.\.?(?:\/|$))+/, '').includes('/'),
@@ -2878,6 +2937,7 @@ function selfTest() {
     // #11190 measurement that made consolidation safe in the first place. So
     // the declaration stays and the live parse becomes its CHECK, in both
     // directions, the shape check-published-files.mjs already uses.
+    battery('the declaration must still BE the workspace (#11510)');
     const declaredParents = WORKSPACE_PARENT_GLOBS.map((g) => g.replace(/\/\*+$/, ''));
     const liveParents = readWorkspaceGlobs(REPO_ROOT)
       .filter((g) => !isExclusionGlob(g))
@@ -2903,6 +2963,51 @@ function selfTest() {
     rmSync(root, { recursive: true, force: true });
   }
 
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    problems.push(message);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of seen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = seen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
+  }
   if (problems.length > 0) {
     console.error('check-test-source-alias --self-test FAILED:');
     for (const problem of problems) console.error(`  - ${problem}`);

@@ -50,15 +50,16 @@ import type {
   MetadataStats,
   MetadataWatchEvent,
 } from '@objectstack/spec/system';
-import { MetadataManager } from './metadata-manager';
-import { MemoryLoader } from './loaders/memory-loader';
-// `.js` deliberately, unlike the three extensionless imports above it: under
-// `moduleResolution: nodenext` an extensionless relative import does not
+import { MetadataManager } from './metadata-manager.js';
+import { MemoryLoader } from './loaders/memory-loader.js';
+// `.js` on this relative import, as on every relative import in this file:
+// under `moduleResolution: nodenext` an extensionless relative import does not
 // resolve, and every symbol it names silently becomes `any` (AGENTS.md, the
-// TS7006 cascade). Spelling this one correctly is what makes `implements
+// TS7006 cascade). Spelling it correctly is what makes `implements
 // MetadataLoader` on the fixture below an actual check rather than decoration.
-// The three above are this package's pre-existing type-check debt (#4311) and
-// are left for whoever pays that ledger down.
+// That is no longer a convention this file keeps on its own: the package
+// declares a `typecheck` script, so `turbo run typecheck` compiles this file
+// and an extensionless relative import here is a red gate, not a silent `any`.
 import type { MetadataLoader } from './loaders/loader-interface.js';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 
@@ -205,7 +206,7 @@ describe('#3112 — register()/unregister() notify subscribe() watchers', () => 
   describe('register()', () => {
     it('announces a first registration as "added"', async () => {
       const seen: any[] = [];
-      manager.subscribe('object', (evt) => seen.push(evt));
+      manager.subscribe('object', (evt) => { seen.push(evt); });
 
       await manager.register('object', 'account', { name: 'account', label: 'Account' });
 
@@ -222,7 +223,7 @@ describe('#3112 — register()/unregister() notify subscribe() watchers', () => 
       await manager.register('object', 'account', { name: 'account', label: 'V1' });
 
       const seen: any[] = [];
-      manager.subscribe('object', (evt) => seen.push(evt));
+      manager.subscribe('object', (evt) => { seen.push(evt); });
 
       await manager.register('object', 'account', { name: 'account', label: 'V2' });
 
@@ -290,7 +291,7 @@ describe('#3112 — register()/unregister() notify subscribe() watchers', () => 
 
     it('is silent when the caller opts out with { notify: false }', async () => {
       const seen: any[] = [];
-      manager.subscribe('object', (evt) => seen.push(evt));
+      manager.subscribe('object', (evt) => { seen.push(evt); });
 
       await manager.register('object', 'account', { name: 'account' }, { notify: false });
 
@@ -302,8 +303,8 @@ describe('#3112 — register()/unregister() notify subscribe() watchers', () => 
     it('only notifies watchers of the written type', async () => {
       const objects: any[] = [];
       const views: any[] = [];
-      manager.subscribe('object', (evt) => objects.push(evt));
-      manager.subscribe('view', (evt) => views.push(evt));
+      manager.subscribe('object', (evt) => { objects.push(evt); });
+      manager.subscribe('view', (evt) => { views.push(evt); });
 
       await manager.register('object', 'account', { name: 'account' });
 
@@ -320,7 +321,7 @@ describe('#3112 — register()/unregister() notify subscribe() watchers', () => 
       readOnly.setTypeRegistry(DEFAULT_METADATA_TYPE_REGISTRY);
 
       const seen: any[] = [];
-      readOnly.subscribe('object', (evt) => seen.push(evt));
+      readOnly.subscribe('object', (evt) => { seen.push(evt); });
 
       await readOnly.register('object', 'account', { name: 'account' });
 
@@ -340,7 +341,7 @@ describe('#3112 — register()/unregister() notify subscribe() watchers', () => 
 
     it('stops notifying after unsubscribe', async () => {
       const seen: any[] = [];
-      const off = manager.subscribe('object', (evt) => seen.push(evt));
+      const off = manager.subscribe('object', (evt) => { seen.push(evt); });
 
       await manager.register('object', 'a', { name: 'a' });
       off();
@@ -356,7 +357,7 @@ describe('#3112 — register()/unregister() notify subscribe() watchers', () => 
       await manager.register('object', 'account', { name: 'account' });
 
       const seen: any[] = [];
-      manager.subscribe('object', (evt) => seen.push(evt));
+      manager.subscribe('object', (evt) => { seen.push(evt); });
 
       await manager.unregister('object', 'account');
 
@@ -372,7 +373,7 @@ describe('#3112 — register()/unregister() notify subscribe() watchers', () => 
       await manager.register('object', 'account', { name: 'account' }, { notify: false });
 
       const seen: any[] = [];
-      manager.subscribe('object', (evt) => seen.push(evt));
+      manager.subscribe('object', (evt) => { seen.push(evt); });
 
       await manager.unregister('object', 'account', { notify: false });
 
@@ -384,7 +385,7 @@ describe('#3112 — register()/unregister() notify subscribe() watchers', () => 
   describe('bulk forms', () => {
     it('bulkRegister announces one event per item by default', async () => {
       const seen: any[] = [];
-      manager.subscribe('object', (evt) => seen.push(evt));
+      manager.subscribe('object', (evt) => { seen.push(evt); });
 
       await manager.bulkRegister([
         { type: 'object', name: 'a', data: { name: 'a' } },
@@ -396,7 +397,7 @@ describe('#3112 — register()/unregister() notify subscribe() watchers', () => 
 
     it('bulkRegister forwards { notify: false } to every item', async () => {
       const seen: any[] = [];
-      manager.subscribe('object', (evt) => seen.push(evt));
+      manager.subscribe('object', (evt) => { seen.push(evt); });
 
       await manager.bulkRegister(
         [
@@ -420,7 +421,7 @@ describe('#3112 — register()/unregister() notify subscribe() watchers', () => 
       );
 
       const seen: any[] = [];
-      manager.subscribe('object', (evt) => seen.push(evt));
+      manager.subscribe('object', (evt) => { seen.push(evt); });
 
       await manager.bulkUnregister([
         { type: 'object', name: 'a' },
@@ -442,7 +443,7 @@ describe('#3112 — register()/unregister() notify subscribe() watchers', () => 
       await manager.register('object', 'other', { name: 'other', packageId: 'com.other' }, { notify: false });
 
       const seen: any[] = [];
-      manager.subscribe('object', (evt) => seen.push(evt));
+      manager.subscribe('object', (evt) => { seen.push(evt); });
 
       await manager.unregisterPackage('com.acme.crm');
 
@@ -456,7 +457,7 @@ describe('#3112 — register()/unregister() notify subscribe() watchers', () => 
   describe('registerInMemory()', () => {
     it('stays silent by design (GitOps-owned artefacts, documented on the method)', async () => {
       const seen: any[] = [];
-      manager.subscribe('datasource', (evt) => seen.push(evt));
+      manager.subscribe('datasource', (evt) => { seen.push(evt); });
 
       manager.registerInMemory('datasource', 'crm_db', { name: 'crm_db', origin: 'code' });
 

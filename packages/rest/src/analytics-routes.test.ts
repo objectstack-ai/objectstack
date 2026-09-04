@@ -65,6 +65,22 @@ describe('POST /analytics/dataset/query', () => {
     expect(queryDataset.mock.calls[0][1]).toEqual(selection);
   });
 
+  // #14492 — `fields[].builtinAggregate` is relayed verbatim: the handler ends
+  // in `res.json(result)` with no reshaping, so the discriminator the service
+  // set is exactly what the renderer reads.
+  it('relays fields[].builtinAggregate unchanged (#14492)', async () => {
+    const fields = [
+      { name: 'status', type: 'string', label: 'Status' },
+      { name: 'count', type: 'number', builtinAggregate: 'count' },
+    ];
+    const queryDataset = vi.fn().mockResolvedValue({ rows: [{ status: 'active', count: 3 }], fields });
+    const { route } = buildServer(async () => ({ queryDataset }));
+    const res = mockRes();
+    await route!.handler({ method: 'POST', params: {}, headers: {}, body: { dataset: inlineDataset, selection } } as any, res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.fields).toEqual(fields);
+  });
+
   it('returns 501 when no analytics service is configured', async () => {
     const { route } = buildServer(undefined);
     const res = mockRes();

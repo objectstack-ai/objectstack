@@ -1917,10 +1917,11 @@ export default class Serve extends Command {
     // compiled artifact is reachable (explicit OS_ARTIFACT_PATH —
     // including http(s):// URLs — or the canonical
     // `<cwd>/dist/objectstack.json`), boot from that artifact alone.
-    // This is the same capability previously hard-coded in
-    // `apps/objectos/objectstack.config.ts`, lifted into the framework
-    // so any project can `objectstack start` against just a
-    // `dist/objectstack.json`.
+    // This is the same capability previously hard-coded in the tenant
+    // runtime's own `objectstack.config.ts` — that app is `apps/objectos` in
+    // the separate `objectstack-ai/cloud` repo, NOT a path in this one — and
+    // lifted into the framework so any project can `objectstack start`
+    // against just a `dist/objectstack.json`.
     const configMissing = !configExists;
     let useArtifactFallback = false;
     let useEmptyBoot = false;
@@ -2786,14 +2787,121 @@ export default class Serve extends Command {
       // need this wrap when they ALSO carry top-level metadata — otherwise
       // top-level `flows`, `objects`, etc. never reach the ObjectQL registry
       // and downstream services like AutomationServicePlugin start with 0 flows.
+      // `examples/app-showcase` is the in-repo worked example of exactly that
+      // shape: its `plugins[]` holds instantiated connector plugins while the
+      // stack still declares top-level `objects` / `apps` / `flows` / `apis`
+      // (`serve-host-config-security-registrar.pin.test.ts` records an `os dev`
+      // boot of it).
       //
       // To avoid double-registration when the host already wraps itself with
-      // an AppPlugin (e.g. apps/objectos's dev-workspace stack), we skip if
-      // any plugin in `plugins[]` is already an AppPlugin instance.
+      // an AppPlugin, we skip if any plugin in `plugins[]` is already an
+      // AppPlugin instance. That branch keys on the SHAPE — a `plugins[]` that
+      // already holds an AppPlugin instance — and never on a named app, so it
+      // is checked structurally below.
       const hasAppPluginAlready = plugins.some(isAppPluginLike);
       const configHasMetadata = !!(
         config.objects || config.manifest || config.apps || config.flows || config.apis
       );
+
+      // ── Decide the dev-only artifact door BEFORE the wrap (#14397) ────
+      // On a HOST config `os dev` composes TWO writers over ONE stack: the
+      // `new AppPlugin(config)` wrap below, over the config MODULE, and the
+      // dev-only HMR `MetadataPlugin` further down, over the compiled twin
+      // (`dist/objectstack.json`) the `os dev` supervisor produced from that
+      // same module. Measured on a real `os dev` boot of a host config: the
+      // door loads the artifact first and the wrap's ADR-0057 block registers
+      // last, so the WRAP's copy wins the cold boot — and the door's copy
+      // replaces it on the first artifact reload, so the winner CHANGES
+      // mid-run without a restart. ⚠️ The two copies differ by PROVENANCE and
+      // by FRESHNESS, not by parsing: on a config boot `defineStack()` is
+      // strict by default and runs the same `ObjectStackDefinitionSchema`
+      // parse the door runs, so the wrap's copy already carries the schema
+      // defaults and input transforms. What it lacks is the ADR-0010 stamp,
+      // and it never refreshes while the door's copy reloads on every
+      // recompile. Maintainer ruling (2026-08-29, #12892): the
+      // door owns the registration route; two permanent writers with matched
+      // shapes was refused as an end state. So the composition that runs the
+      // door declares it, here, exactly as `createStandaloneStack` does for
+      // the artifact boot.
+      //
+      // The door instance is CONSTRUCTED here rather than at its `kernel.use`
+      // site so that ONE value decides both facts — the wrap's registrar and
+      // the door's existence — instead of two expressions free to drift.
+      // Declaring the option with no door composed would be strictly worse
+      // than the divergence it removes: measured on `os serve` over the same
+      // host config, a metadata service is present and this wrap is its ONLY
+      // writer, so the four security collections would then have no registrar
+      // at all — the silent hole #12892 measured on the artifact boot.
+      //
+      // `hasMetadataPlugin` is read here instead of at the `kernel.use` site
+      // and the answer is identical: `plugins` is not mutated between the two
+      // points except by the AppPlugin append below, and an AppPlugin is not a
+      // MetadataPlugin.
+      let devArtifactDoor: any;
+      if (isDev && flags.server && !plugins.some((p: any) => p?.constructor?.name === 'MetadataPlugin')) {
+        try {
+          const { resolveDefaultArtifactPath } = await import('@objectstack/runtime');
+          // `os dev` is the only caller that reaches here, and it is a
+          // supervisor: read its channel, or the artifact this HMR watcher
+          // polls would silently drift to `<cwd>/dist/objectstack.json`
+          // whenever `os dev --artifact <elsewhere>` was used.
+          const hmrArtifactPath = resolveDefaultArtifactPath(readInternalArtifactPath());
+          // ⛔ RESOLVING IS NOT EXISTING, and the difference decides who
+          // registers the four security collections. Under `os dev` the
+          // supervisor writes its channel unconditionally, so
+          // `readInternalArtifactPath()` always answers and
+          // `resolveDefaultArtifactPath` hands an explicitly named path back
+          // VERBATIM, with no existence check (packages/runtime/src/
+          // default-host.ts — only the conventional `<cwd>/dist/…` fallback is
+          // stat'ed). Compose a door over a path that is not there and it
+          // starts EMPTY and SILENT by design: `MetadataPlugin`'s local-file
+          // load is `{ optional: true }` and answers ENOENT with an `info`
+          // line, registering nothing (packages/metadata/src/plugin.ts). The
+          // wrap below would then have deferred to a door that never writes,
+          // and `positions` / `permissions` / `capabilities` / `sharingRules`
+          // would end the boot with ZERO registrars — green, quiet, and worse
+          // than the divergence this whole block exists to remove. So the
+          // door is composed only when its bytes are on disk NOW; a named but
+          // missing artifact leaves the wrap as the single registrar, exactly
+          // as before this decision existed.
+          //
+          // The trade this makes, stated rather than discovered later: on that
+          // boot the dev HMR SSE endpoint is not mounted either, because the
+          // plugin that mounts it is the one not composed. That is the right
+          // way round. The alternative — compose the door anyway and only
+          // withhold the registrar — keeps a dev convenience by re-creating the
+          // TWO-WRITER divergence this block exists to remove: the watcher
+          // picks the artifact up if it later appears, and then registers a
+          // second copy behind a wrap that already registered its own. The
+          // endpoint is missing only where `os dev` was pointed at an artifact
+          // that is not there (`--artifact` skips auto-compile), and the
+          // warning above says so by name.
+          if (hmrArtifactPath && !/^https?:\/\//i.test(hmrArtifactPath)) {
+            if (!fs.existsSync(hmrArtifactPath)) {
+              console.warn(chalk.yellow(
+                `  ⚠ Dev metadata-HMR endpoint not enabled: no compiled artifact at ${hmrArtifactPath}`
+                + '\n    Stack-declared security metadata stays with the app wrap, its registrar on every'
+                + '\n    boot without a door.',
+              ));
+            } else {
+              const { MetadataPlugin } = await import('@objectstack/metadata');
+              // Mirror the standalone stack's dev config exactly
+              // (packages/runtime/src/standalone-stack.ts): declarative
+              // metadata is loaded from the compiled artifact — no source-file
+              // scanner (redundant + EMFILE-prone) — and `artifactWatch` polls
+              // the single artifact file so an `os dev` recompile broadcasts a
+              // reload over the SSE stream.
+              devArtifactDoor = new MetadataPlugin({
+                watch: false,
+                artifactWatch: true,
+                artifactSource: { mode: 'local-file', path: hmrArtifactPath },
+              });
+            }
+          }
+        } catch (e: any) {
+          console.warn(chalk.yellow(`  ⚠ Dev metadata-HMR endpoint not enabled: ${e?.message}`));
+        }
+      }
       // ORDERING (#4085 → #4131/ADR-0116): the wrap is APPENDED to `plugins`
       // rather than registered here — but the append is no longer what makes
       // the boot correct. AppPlugin now DECLARES its ordering contract
@@ -2808,7 +2916,15 @@ export default class Serve extends Command {
       if (!hasAppPluginAlready && configHasMetadata) {
         try {
             const { AppPlugin } = await import('@objectstack/runtime');
-            plugins = [...plugins, new AppPlugin(config)];
+            // The registrar is DECLARED by this composition, never inferred by
+            // AppPlugin — see the `devArtifactDoor` block above. Default
+            // (`'app-plugin'`) whenever no door composes, which is every
+            // non-dev boot of a host config.
+            plugins = [...plugins, new AppPlugin(
+              config,
+              undefined,
+              devArtifactDoor ? { securityMetadataRegistrar: 'artifact-door' } : {},
+            )];
         } catch (e: any) {
             // Non-fatal — the platform still boots, just without this app's
             // metadata. But it must SAY so: this catch was silent, and the two
@@ -2854,9 +2970,9 @@ export default class Serve extends Command {
             || p.constructor?.name === 'I18nServicePlugin'
       );
       // Check the top-level config AND any nested AppPlugin bundles in the
-      // `plugins` array — host/aggregator configs (e.g. apps/objectos) don't
-      // define translations themselves but compose multiple `new AppPlugin(...)`
-      // entries, each carrying its own translations.
+      // `plugins` array — a host/aggregator config may define no translations
+      // of its own and instead compose several `new AppPlugin(...)` entries,
+      // each carrying its own. Keyed on that shape, not on a named app.
       const pluginBundleHasTranslations = (bundle: any): boolean => {
         if (!bundle || typeof bundle !== 'object') return false;
         if (Array.isArray(bundle.translations) && bundle.translations.length > 0) return true;
@@ -3011,36 +3127,27 @@ export default class Serve extends Command {
       // Registered AFTER the HonoServer plugin so the `http-server` service
       // (and its `getRawApp()`) is available when MetadataPlugin.start() mounts
       // the route.
-      if (isDev && flags.server) {
-        const hasMetadataPlugin = plugins.some(
-          (p: any) => p?.constructor?.name === 'MetadataPlugin'
-        );
-        if (!hasMetadataPlugin) {
-          try {
-            const { resolveDefaultArtifactPath } = await import('@objectstack/runtime');
-            // `os dev` is the only caller that reaches here, and it is a
-            // supervisor: read its channel, or the artifact this HMR watcher
-            // polls would silently drift to `<cwd>/dist/objectstack.json`
-            // whenever `os dev --artifact <elsewhere>` was used.
-            const hmrArtifactPath = resolveDefaultArtifactPath(readInternalArtifactPath());
-            if (hmrArtifactPath && !/^https?:\/\//i.test(hmrArtifactPath)) {
-              const { MetadataPlugin } = await import('@objectstack/metadata');
-              // Mirror the standalone stack's dev config exactly
-              // (packages/runtime/src/standalone-stack.ts): declarative
-              // metadata is loaded from the compiled artifact — no source-file
-              // scanner (redundant + EMFILE-prone) — and `artifactWatch` polls
-              // the single artifact file so an `os dev` recompile broadcasts a
-              // reload over the SSE stream.
-              await kernel.use(new MetadataPlugin({
-                watch: false,
-                artifactWatch: true,
-                artifactSource: { mode: 'local-file', path: hmrArtifactPath },
-              }));
-              trackPlugin('Metadata');
-            }
-          } catch (e: any) {
-            console.warn(chalk.yellow(`  ⚠ Dev metadata-HMR endpoint not enabled: ${e?.message}`));
-          }
+      //
+      // The instance was resolved and constructed next to the AppPlugin wrap
+      // (search `devArtifactDoor`) because the wrap's
+      // `securityMetadataRegistrar` has to be decided from the SAME value;
+      // only the `kernel.use` stays here, where the ordering requirement is.
+      // The catch is the pre-existing one and keeps its pre-existing message.
+      // ⛔ It is deliberately NOT the place to warn that the four security
+      // collections went unregistered: `Kernel.use` only validates the plugin
+      // and registers it by name (packages/core/src/kernel.ts) — `init` and
+      // `start` run later, in `bootstrap` — so for a MetadataPlugin that was
+      // constructed successfully a few hundred lines above, on a kernel still
+      // `idle`, this path does not fire. The registrar hand-off is decided by
+      // whether `devArtifactDoor` exists at all, and the case that genuinely
+      // loses a door — a named artifact that is not on disk — warns at the
+      // construction site, where the missing path can be named.
+      if (devArtifactDoor) {
+        try {
+          await kernel.use(devArtifactDoor);
+          trackPlugin('Metadata');
+        } catch (e: any) {
+          console.warn(chalk.yellow(`  ⚠ Dev metadata-HMR endpoint not enabled: ${e?.message}`));
         }
       }
 

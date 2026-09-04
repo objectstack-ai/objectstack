@@ -111,36 +111,72 @@ describe('[#5491] what the baseline still declares, it still enforces', () => {
     }
   });
 
+  // The two managed tables a member may UPDATE, and the reason each is not a
+  // hole in the "door is better-auth" rule. Both are self-service, both are
+  // narrowed on two axes no permission-set boolean can express, and both
+  // narrowings existed on that specific table BEFORE its edit bit flipped:
+  //
+  //   - [#8053] `sys_api_key` — a member revokes their own personal key. The
+  //     table is hand-rolled ObjectStack (better-auth's `apiKey` plugin is not
+  //     loaded); rows are scoped by `sys_api_key_self` and columns by ADR-0092
+  //     D2's whitelist (`revoked` alone).
+  //   - [#14959, maintainer ruling 2026-09-03] `sys_user` — a member edits
+  //     their own profile row (`name` / `image` / `locale`). Rows are scoped by
+  //     `sys_user_self`, columns by ADR-0092 D2's `SYS_USER_PROFILE_EDIT_FIELDS`.
+  //     The ruling AMENDED ADR-0092 D5, which had said self-service stays on
+  //     better-auth `/update-user` and that no RLS self-row edit carve-out
+  //     would be built.
+  const UPDATABLE_MANAGED_OBJECTS = ['sys_api_key', 'sys_user'];
+
   it('better-auth identity tables stay WRITE-DENIED (the door is better-auth, not CRUD)', () => {
     for (const object of BETTER_AUTH_MANAGED_OBJECTS) {
       expect(allows('insert', [MEMBER_DEFAULT], object), `${object} insert`).toBe(false);
-      // [#8053] `sys_api_key` is the ONE update exception: a member revokes
-      // their own personal key. It is not a hole in the "door is better-auth"
-      // rule — that table is hand-rolled ObjectStack (better-auth's `apiKey`
-      // plugin is not loaded), and the write is narrowed to the owner's rows by
-      // the `sys_api_key_self` RLS policy and to `revoked` by ADR-0092 D2's
-      // column whitelist. Neither narrowing is expressible as a permission-set
-      // boolean, which is why this axis has to be asserted per object here.
       expect(allows('update', [MEMBER_DEFAULT], object), `${object} update`).toBe(
-        object === 'sys_api_key',
+        UPDATABLE_MANAGED_OBJECTS.includes(object),
       );
       expect(allows('delete', [MEMBER_DEFAULT], object), `${object} delete`).toBe(false);
     }
   });
 
-  it('[#8053] the update exception is `sys_api_key` alone, and it does not leak onto the other axes', () => {
+  it('[#8053 / #14959] the update exceptions are those two alone, and neither leaks onto the other axes', () => {
     // Stated positively and separately so the loop above cannot be "fixed" by
     // widening the condition: every other managed table must still refuse
-    // update, and `sys_api_key` itself must still refuse insert and delete.
+    // update, and each exception must still refuse insert and delete.
     const alsoUpdatable = BETTER_AUTH_MANAGED_OBJECTS.filter(
-      (o) => o !== 'sys_api_key' && allows('update', [MEMBER_DEFAULT], o),
+      (o) => !UPDATABLE_MANAGED_OBJECTS.includes(o) && allows('update', [MEMBER_DEFAULT], o),
     );
     expect(alsoUpdatable, 'no other managed identity table may become updatable').toEqual([]);
 
-    expect(allows('update', [MEMBER_DEFAULT], 'sys_api_key')).toBe(true);
+    for (const object of UPDATABLE_MANAGED_OBJECTS) {
+      expect(allows('update', [MEMBER_DEFAULT], object), `${object} update`).toBe(true);
+      expect(allows('find', [MEMBER_DEFAULT], object), `${object} read`).toBe(true);
+    }
     expect(allows('insert', [MEMBER_DEFAULT], 'sys_api_key'), 'minting stays POST /keys').toBe(false);
     expect(allows('delete', [MEMBER_DEFAULT], 'sys_api_key'), 'rows retire by revoking').toBe(false);
-    expect(allows('find', [MEMBER_DEFAULT], 'sys_api_key')).toBe(true);
+    // [#14959] Accounts are minted and retired through better-auth's own
+    // endpoints (sign-up, invite, admin remove-member) — the ruling opened the
+    // EDIT axis on `sys_user` and nothing else.
+    expect(allows('insert', [MEMBER_DEFAULT], 'sys_user'), 'sign-up is better-auth\'s').toBe(false);
+    expect(allows('delete', [MEMBER_DEFAULT], 'sys_user'), 'account deletion is better-auth\'s').toBe(false);
+  });
+
+  it('[#14959] the `sys_user` edit bit rides a WRITE-class row scope, and the org-peer scope stays read-only', () => {
+    // The edit bit alone would be table-wide. What bounds it to one row is the
+    // `sys_user_self` carve-out reaching the write class — a `select`-only
+    // policy contributes nothing to the by-id write pre-image check — and the
+    // org-peer policy NOT reaching it. Policies OR-combine, so an `all` on
+    // `sys_user_org_members` would compose `id == me OR id IN <my whole org>`
+    // and hand every member their colleagues' profile rows.
+    const byName = (n: string) => (MEMBER_DEFAULT.rowLevelSecurity ?? []).find((p: any) => p.name === n);
+    const self = byName('sys_user_self') as any;
+    expect(self, 'sys_user_self is still shipped').toBeTruthy();
+    expect(self.object).toBe('sys_user');
+    expect(self.using).toBe('id == current_user.id');
+    expect(['all', 'update'], 'sys_user_self must reach the write class').toContain(self.operation);
+
+    const peers = byName('sys_user_org_members') as any;
+    expect(peers, 'sys_user_org_members is still shipped').toBeTruthy();
+    expect(peers.operation, 'org-peer VISIBILITY must not become a write scope').toBe('select');
   });
 
   it('self-service preferences survive the wildcard removal as an EXPLICIT grant', () => {

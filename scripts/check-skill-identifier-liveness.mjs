@@ -215,6 +215,44 @@ import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 import { isEntrypoint } from './invoked-as.mjs';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'extractor': 26,
+  'LEG 1 end to end, incl. the positive control': 7,
+  'LEG 2: symbols, sections, and the two structural safety rules': 23,
+  'both legs in ONE walk': 1,
+  '#8435: whose remedy is the expanding one': 3,
+  'the ledgers move in opposite directions, and the source says so': 2,
+  'dispatch-gates coupling, both ways': 4,
+  'the shipped table is well-formed': 5,
+  'suggest is advisory and must never be able to fail anything': 2,
+  'refusal before scanning': 2,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 10;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(HERE, '..');
 
@@ -868,6 +906,12 @@ function allSpecSources() {
 
 // ── Self-test ───────────────────────────────────────────────────────────────
 
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'check-skill-identifier-liveness self-test reached its verdict';
+
 /**
  * Why this exists at all, in the words of the wiring gate that requires it: a
  * gate whose defect class is its MATCHING RULE cannot detect its own regression
@@ -882,12 +926,26 @@ function allSpecSources() {
  * clothes.
  */
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const batterySeen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+  };
   const failures = [];
-  const expect = (label, cond) => { if (!cond) failures.push(label); };
+  const expect = (label, cond) => { registerCase(); if (!cond) failures.push(label); };
   const eq = (label, a, b) => expect(`${label} (got ${JSON.stringify(a)}, want ${JSON.stringify(b)})`,
     JSON.stringify(a) === JSON.stringify(b));
 
   // ── extractor ────────────────────────────────────────────────────────────
+  battery('extractor');
   eq('citationOf: bare backticked identifier', citationOf('`foo`'), 'foo');
   eq('citationOf: trailing parenthetical is STRIPPED, not rejected',
     citationOf('`none` (default)'), 'none');
@@ -942,6 +1000,7 @@ function selfTest() {
     deadSegments('etl.schedule', new Set(['etl'])), ['schedule']);
 
   // ── LEG 1 end to end, incl. the positive control ─────────────────────────
+  battery('LEG 1 end to end, incl. the positive control');
   const corpus1 = [{
     file: 'skills/s/SKILL.md',
     text: ['| Key | Meaning |', '|:---|:---|', '| `liveKey` | ok |', '| `phantomKey` | bad |'].join('\n'),
@@ -968,6 +1027,7 @@ function selfTest() {
   expect('the stale message asks for --update', staleExemptionMessage(r1s.stale).includes('--update'));
 
   // ── LEG 2: symbols, sections, and the two structural safety rules ────────
+  battery('LEG 2: symbols, sections, and the two structural safety rules');
   const specText = [
     "export const Colour = z.enum(['red', 'green', 'blue']);",
     "const Legacy = z.enum(['a', // 'notAMember'",
@@ -1068,6 +1128,7 @@ function selfTest() {
   expect('duplicate binding ids are refused', r2dupe.errors.some((e) => e.includes('duplicate binding id')));
 
   // ── both legs in ONE walk ────────────────────────────────────────────────
+  battery('both legs in ONE walk');
   const both = run({
     corpus: [{ file: 'skills/s/SKILL.md', text: `${doc}\n| K | M |\n|:--|:--|\n| \`ghost\` | x |` }],
     index: idxDoc, bindings: [synthBinding], sources: sources2, ledger: noLedger,
@@ -1077,6 +1138,7 @@ function selfTest() {
     && both.errors.some((e) => e.startsWith('[leg2-missing-row]')));
 
   // ── #8435: whose remedy is the expanding one ─────────────────────────────
+  battery('#8435: whose remedy is the expanding one');
   expect('#8435 — the phantom message marks the ledger path ' + RATCHET_AUTHORITY_MARKER,
     phantomMessage({ file: 'f', line: 1, identifier: 'x' }, ['x']).includes(RATCHET_AUTHORITY_MARKER));
   expect('#8435 — the missing-row message marks the ledger path ' + RATCHET_AUTHORITY_MARKER,
@@ -1086,12 +1148,14 @@ function selfTest() {
     < phantomMessage({ file: 'f', line: 1, identifier: 'x' }, ['x']).indexOf(RATCHET_AUTHORITY_MARKER));
 
   // ── the ledgers move in opposite directions, and the source says so ──────
+  battery('the ledgers move in opposite directions, and the source says so');
   expect('--update is documented as PRUNE-ONLY for Leg 1 exemptions',
     /--update\s+NEVER adds one/.test(selfSource()));
   expect('the header states the asymmetry between the two ledgers',
     selfSource().includes('PRUNE-ONLY') && selfSource().includes('REWRITTEN FROM THE TREE'));
 
   // ── dispatch-gates coupling, both ways ───────────────────────────────────
+  battery('dispatch-gates coupling, both ways');
   eq('every separator-less ROOT is declared for dispatch-gates',
     ROOTS.filter((r) => !r.includes('/')).map((r) => `${r}/**`).sort(),
     [...ROOT_DIR_WATCH_HINTS].sort());
@@ -1111,6 +1175,7 @@ function selfTest() {
     hintDecl[0].includes("'skills/**'") && !hintDecl[0].includes('map('));
 
   // ── the shipped table is well-formed ─────────────────────────────────────
+  battery('the shipped table is well-formed');
   eq('shipped binding ids are unique',
     BINDINGS.length, new Set(BINDINGS.map((b) => b.id)).size);
   expect('every shipped binding carries a `why` a reviewer can act on',
@@ -1123,6 +1188,7 @@ function selfTest() {
     BINDINGS.every((b) => b.source.startsWith('packages/')));
 
   // ── --suggest is advisory and must never be able to fail anything ───────
+  battery('suggest is advisory and must never be able to fail anything');
   const sug = suggestions({ corpus: corpus2, sources: sources2, bindings: [] });
   expect('--suggest returns candidates without raising findings', Array.isArray(sug));
   expect('--suggest skips what is already registered',
@@ -1130,10 +1196,55 @@ function selfTest() {
       .every((c) => c.symbol !== 'Colour'));
 
   // ── refusal before scanning ──────────────────────────────────────────────
+  battery('refusal before scanning');
   eq('a configured root that does not resolve is refused, not skipped',
     missingRoots(['skills', 'nope'], REPO_ROOT, (p) => !String(p).endsWith('nope')), ['nope']);
   expect('the refusal explains why a partial population is not a verdict',
     missingRootsMessage(['nope']).includes('nobody configured'));
+
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => { failures.push(message); };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
+  }
 
   if (failures.length) {
     console.error(`\ncheck-skill-identifier-liveness --self-test: ${failures.length} failure(s).\n`);
@@ -1141,6 +1252,8 @@ function selfTest() {
     process.exit(1);
   }
   console.log('check-skill-identifier-liveness --self-test OK');
+
+  return SELF_TEST_VERDICT;
 }
 
 let SELF_SOURCE = null;
@@ -1152,6 +1265,14 @@ function selfSource() {
 }
 
 if (isEntrypoint(import.meta.url)) {
-  if (argv.includes('--self-test')) selfTest();
-  else main();
+  if (argv.includes('--self-test')) {
+    if (selfTest() !== SELF_TEST_VERDICT) {
+      console.error(
+        '\n✗ check-skill-identifier-liveness self-test: selfTest() returned without reaching its verdict,\n'
+          + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+          + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
+  } else main();
 }

@@ -190,9 +190,21 @@ export class FilesystemLoader implements MetadataLoader {
    * The card's own fence: "keying items under names nothing else uses … is
    * worse than today's honest drop". So the drop stays exactly where the key is
    * unsettled, and is pinned as a RECORD in
-   * `filesystem-loader-keyed-items.test.ts`. Repairing the derivation itself —
-   * one shared name-to-path function for `list()`, `findFile()` and this method
-   * — moves `listNames()` output and is #14486, NOT this method's business.
+   * `filesystem-loader-keyed-items.test.ts`.
+   *
+   * [#14486, partial] `list()` and {@link findFile} have since converged on
+   * {@link resolvableNameForPath} — the derivation this method already used —
+   * so a nested or extension-less file is now neither listed nor resolvable.
+   * What did NOT change is the WALK behind this method: `loadManyEntries()`
+   * still READS those files, so `loadMany()` still returns their bodies and
+   * this method still falls back to `body.name` for them. That half of the
+   * #14486 ruling ("nothing unlisted is returned by `loadMany()` either") is
+   * deliberately NOT taken here: it would invert the three landed #14341 pins
+   * in `filesystem-loader-keyed-items.test.ts:113,167,187` and the
+   * `loadMany()` CONTROL at `:196`, and that file was under a concurrent
+   * claim (PR #14627) when this landed. The remaining divergence — listed ⊂
+   * loaded — is pinned as a RECORD in
+   * `filesystem-loader-list-reachability.test.ts` rather than left implicit.
    *
    * One consequence, deliberate: a flat file whose `body.name` DISAGREES with
    * its basename is now keyed by the BASENAME. That is #14205's rule (identity
@@ -327,6 +339,30 @@ export class FilesystemLoader implements MetadataLoader {
     }
   }
 
+  /**
+   * [#14486] The names this loader can be asked for, and ONLY those: a file
+   * directly under `ROOT/TYPE/` carrying an extension one of this instance's
+   * REGISTERED serializers claims. Every name it reports resolves back through
+   * {@link findFile}, so `listNames()` and `get()` give the same answer.
+   *
+   * It used to report `path.basename(file, ext)` for every file the glob found,
+   * nested or not, extension or not — and {@link findFile} resolves neither
+   * shape. `ROOT/TYPE/crm/account.json` was listed as `account`, which resolves
+   * against `ROOT/TYPE/account.json` and finds nothing; an extension-less
+   * `ROOT/TYPE/noext` was listed as `noext`, which resolves under no appended
+   * extension at all. A name in the list that `get()` answers `null` for is the
+   * silent failure an author (human or AI) reads as their own typo, so they
+   * retry the same word: the list and the door now agree instead.
+   *
+   * Ruling (maintainer, via the director seat on #14486, 2026-09-02): narrow
+   * the list — direction A, over B (reverse-unify: report `crm/account` and
+   * teach `findFile()` path-shaped names), which would have made a slash inside
+   * a metadata name every consumer's permanent obligation with no measured
+   * demand for it. The two-segment layout follows ADR-0008 §10, which
+   * `metadata-fs`'s `parseItemPath()` already enforces for its own store; the
+   * EXTENSION set deliberately does NOT follow §10's `.json`-only rule — see
+   * {@link resolvableExtensions} for why.
+   */
   async list(type: string): Promise<string[]> {
     const typeDir = path.join(this.rootDir, type);
 
@@ -337,7 +373,11 @@ export class FilesystemLoader implements MetadataLoader {
         nodir: true,
       });
 
-      return files.map(file => FilesystemLoader.nameFromFilename(file));
+      // `cwd` makes these relative; `resolvableNameForPath()` measures against
+      // the type directory, so hand it the absolute path it expects.
+      return files
+        .map(file => this.resolvableNameForPath(typeDir, path.join(typeDir, file)))
+        .filter((name): name is string => name !== null);
     } catch (error) {
       this.logger?.error('Failed to list', undefined, {
         type,
@@ -443,11 +483,48 @@ export class FilesystemLoader implements MetadataLoader {
   }
 
   /**
-   * The extensions {@link findFile} tries, in the order it tries them. Shared
-   * with {@link resolvableNameForPath} so the set a name can be RESOLVED under
-   * cannot drift from the set {@link loadManyKeyed} is willing to KEY by.
+   * The inverse of {@link detectFormat}: which file extensions carry which
+   * format. Fixed ORDER, because it is also {@link findFile}'s precedence when
+   * two files under one type directory share a stem — registration order must
+   * not be able to change which file `ROOT/TYPE/NAME` opens.
    */
-  private static readonly RESOLVABLE_EXTENSIONS = ['.json', '.yaml', '.yml', '.ts', '.js'];
+  private static readonly EXTENSIONS_BY_FORMAT: ReadonlyArray<
+    readonly [MetadataFormat, readonly string[]]
+  > = [
+    ['json', ['.json']],
+    ['yaml', ['.yaml', '.yml']],
+    ['typescript', ['.ts']],
+    ['javascript', ['.js']],
+  ];
+
+  /**
+   * [#14486] The extensions a name can be resolved under, for THIS instance:
+   * the ones belonging to the serializer set it was constructed with. Shared by
+   * {@link findFile}, {@link resolvableNameForPath} and therefore {@link list},
+   * so the set a name can be RESOLVED under cannot drift from the set that is
+   * LISTED or the set {@link loadManyKeyed} is willing to KEY by.
+   *
+   * Registered, not hard-coded, and deliberately not ADR-0008 §10's `.json`
+   * only. §10 governs the `metadata-fs` store; applying it verbatim here would
+   * drop `.yaml` and `.ts` metadata out of `listNames()` — a breakage this card
+   * never asked for. Under the manager's DEFAULT format set
+   * (`typescript` / `json` / `yaml`, `metadata-manager.ts`) that leaves `.js`
+   * out, which is the card's row-4 membership mismatch closing for free: a `.js`
+   * file was listed and resolvable while `loadMany()` could never return it and
+   * `load()` threw `No serializer found for format: javascript`. Register
+   * `javascript` and it is listed, resolvable and loadable together.
+   */
+  private resolvableExtensions(): string[] {
+    const extensions: string[] = [];
+
+    for (const [format, formatExtensions] of FilesystemLoader.EXTENSIONS_BY_FORMAT) {
+      if (this.serializers.has(format)) {
+        extensions.push(...formatExtensions);
+      }
+    }
+
+    return extensions;
+  }
 
   /**
    * The metadata name this loader reports for a file: the basename with its
@@ -478,7 +555,7 @@ export class FilesystemLoader implements MetadataLoader {
 
     // Case-SENSITIVE on purpose: `findFile()` composes `name + ext` with these
     // exact spellings, so `Foo.JSON` is not resolvable under `Foo`.
-    if (!FilesystemLoader.RESOLVABLE_EXTENSIONS.includes(path.extname(rel))) {
+    if (!this.resolvableExtensions().includes(path.extname(rel))) {
       return null;
     }
 
@@ -490,7 +567,7 @@ export class FilesystemLoader implements MetadataLoader {
    */
   private async findFile(type: string, name: string): Promise<string | null> {
     const typeDir = path.join(this.rootDir, type);
-    const extensions = FilesystemLoader.RESOLVABLE_EXTENSIONS;
+    const extensions = this.resolvableExtensions();
 
     for (const ext of extensions) {
       const filePath = path.join(typeDir, `${name}${ext}`);

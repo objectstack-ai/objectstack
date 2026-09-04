@@ -40,7 +40,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { ObjectKernel } from '@objectstack/core';
 import { ObjectQLPlugin } from './plugin.js';
-import { resolveArtifactPackageOrder } from './artifact-packages.js';
+import { resolveArtifactPackageOrder } from '@objectstack/core';
 import type { ObjectQL } from './engine.js';
 import type { IMetadataService } from '@objectstack/spec/contracts';
 
