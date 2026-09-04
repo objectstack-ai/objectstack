@@ -965,7 +965,7 @@ export const TimelineConfigSchema = lazySchema(() => strictObject({
   endDateField: z.string().optional().describe('Field for timeline item end date'),
   titleField: z.string().describe('Field to display as timeline item title'),
   groupByField: z.string().optional().describe('Field to group timeline rows'),
-  colorField: z.string().optional().describe('Field to determine item color'),
+  colorField: z.string().optional().describe('Field to derive each item color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the timeline default marker color'),
   scale: z.enum(['hour', 'day', 'week', 'month', 'quarter', 'year']).default('week').describe('Default timeline scale'),
 }).describe('Timeline view configuration'));
 
@@ -1300,7 +1300,7 @@ export const CalendarConfigSchema = lazySchema(() => strictObject({
   startDateField: z.string().describe('Field providing the event start date/time'),
   endDateField: z.string().optional().describe('Field providing the event end date/time (defaults to a single-day event)'),
   titleField: z.string().optional().describe('Field displayed as the event title. Omit to fall back to the record display name (ADR-0079 resolver chain)'),
-  colorField: z.string().optional().describe('Field whose value determines the event color'),
+  colorField: z.string().optional().describe('Field to derive each event color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the calendar theme-aware palette color hashed from the value'),
 }));
 
 /**
@@ -1344,7 +1344,7 @@ export const GanttConfigSchema = lazySchema(() => strictObject({
   titleField: z.string().describe('Field displayed as the task title'),
   progressField: z.string().optional().describe('Field providing the task completion percentage'),
   dependenciesField: z.string().optional().describe("Field listing the task's predecessor (dependency) record ids"),
-  colorField: z.string().optional().describe('Field that drives the bar color'),
+  colorField: z.string().optional().describe('Field to derive each bar color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else a semantic color token derived from the value'),
   // Two-level hierarchy: a parent task id (summary bar) and a row type.
   parentField: z.string().optional().describe('Field holding the parent task id (builds the summary → step tree)'),
   typeField: z.string().optional().describe('Field whose value maps to task/summary/milestone'),

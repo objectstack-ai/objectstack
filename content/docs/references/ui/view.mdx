@@ -106,7 +106,7 @@ Appearance and visualization configuration
 | **startDateField** | `string` | ✅ | Field providing the event start date/time |
 | **endDateField** | `string` | optional | Field providing the event end date/time (defaults to a single-day event) |
 | **titleField** | `string` | optional | Field displayed as the event title. Omit to fall back to the record display name (ADR-0079 resolver chain) |
-| **colorField** | `string` | optional | Field whose value determines the event color |
+| **colorField** | `string` | optional | Field to derive each event color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the calendar theme-aware palette color hashed from the value |
 
 
 ---
@@ -559,7 +559,7 @@ Gallery/card view configuration
 | **titleField** | `string` | ✅ | Field displayed as the task title |
 | **progressField** | `string` | optional | Field providing the task completion percentage |
 | **dependenciesField** | `string` | optional | Field listing the task's predecessor (dependency) record ids |
-| **colorField** | `string` | optional | Field that drives the bar color |
+| **colorField** | `string` | optional | Field to derive each bar color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else a semantic color token derived from the value |
 | **parentField** | `string` | optional | Field holding the parent task id (builds the summary → step tree) |
 | **typeField** | `string` | optional | Field whose value maps to task/summary/milestone |
 | **baselineStartField** | `string` | optional | Baseline (planned) start field |
@@ -915,7 +915,7 @@ View filter rule
 | **startDateField** | `string` | ✅ | Field providing the event start date/time |
 | **endDateField** | `string` | optional | Field providing the event end date/time (defaults to a single-day event) |
 | **titleField** | `string` | optional | Field displayed as the event title. Omit to fall back to the record display name (ADR-0079 resolver chain) |
-| **colorField** | `string` | optional | Field whose value determines the event color |
+| **colorField** | `string` | optional | Field to derive each event color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the calendar theme-aware palette color hashed from the value |
 
 ### Nested Shape: `ListView.gantt`
 
@@ -926,7 +926,7 @@ View filter rule
 | **titleField** | `string` | ✅ | Field displayed as the task title |
 | **progressField** | `string` | optional | Field providing the task completion percentage |
 | **dependenciesField** | `string` | optional | Field listing the task's predecessor (dependency) record ids |
-| **colorField** | `string` | optional | Field that drives the bar color |
+| **colorField** | `string` | optional | Field to derive each bar color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else a semantic color token derived from the value |
 | **parentField** | `string` | optional | Field holding the parent task id (builds the summary → step tree) |
 | **typeField** | `string` | optional | Field whose value maps to task/summary/milestone |
 | **baselineStartField** | `string` | optional | Baseline (planned) start field |
@@ -959,7 +959,7 @@ View filter rule
 | **endDateField** | `string` | optional | Field for timeline item end date |
 | **titleField** | `string` | ✅ | Field to display as timeline item title |
 | **groupByField** | `string` | optional | Field to group timeline rows |
-| **colorField** | `string` | optional | Field to determine item color |
+| **colorField** | `string` | optional | Field to derive each item color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the timeline default marker color |
 | **scale** | `Enum<'hour' \| 'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>` | optional (default: `"week"`) | Default timeline scale |
 
 ### Nested Shape: `ListView.chart`
@@ -1301,7 +1301,7 @@ View filter rule
 | **startDateField** | `string` | ✅ | Field providing the event start date/time |
 | **endDateField** | `string` | optional | Field providing the event end date/time (defaults to a single-day event) |
 | **titleField** | `string` | optional | Field displayed as the event title. Omit to fall back to the record display name (ADR-0079 resolver chain) |
-| **colorField** | `string` | optional | Field whose value determines the event color |
+| **colorField** | `string` | optional | Field to derive each event color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the calendar theme-aware palette color hashed from the value |
 
 ### Nested Shape: `ObjectListView.gantt`
 
@@ -1312,7 +1312,7 @@ View filter rule
 | **titleField** | `string` | ✅ | Field displayed as the task title |
 | **progressField** | `string` | optional | Field providing the task completion percentage |
 | **dependenciesField** | `string` | optional | Field listing the task's predecessor (dependency) record ids |
-| **colorField** | `string` | optional | Field that drives the bar color |
+| **colorField** | `string` | optional | Field to derive each bar color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else a semantic color token derived from the value |
 | **parentField** | `string` | optional | Field holding the parent task id (builds the summary → step tree) |
 | **typeField** | `string` | optional | Field whose value maps to task/summary/milestone |
 | **baselineStartField** | `string` | optional | Baseline (planned) start field |
@@ -1345,7 +1345,7 @@ View filter rule
 | **endDateField** | `string` | optional | Field for timeline item end date |
 | **titleField** | `string` | ✅ | Field to display as timeline item title |
 | **groupByField** | `string` | optional | Field to group timeline rows |
-| **colorField** | `string` | optional | Field to determine item color |
+| **colorField** | `string` | optional | Field to derive each item color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the timeline default marker color |
 | **scale** | `Enum<'hour' \| 'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>` | optional (default: `"week"`) | Default timeline scale |
 
 ### Nested Shape: `ObjectListView.chart`
@@ -1597,7 +1597,7 @@ Timeline view configuration
 | **endDateField** | `string` | optional | Field for timeline item end date |
 | **titleField** | `string` | ✅ | Field to display as timeline item title |
 | **groupByField** | `string` | optional | Field to group timeline rows |
-| **colorField** | `string` | optional | Field to determine item color |
+| **colorField** | `string` | optional | Field to derive each item color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the timeline default marker color |
 | **scale** | `Enum<'hour' \| 'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>` | optional (default: `"week"`) | Default timeline scale |
 
 
