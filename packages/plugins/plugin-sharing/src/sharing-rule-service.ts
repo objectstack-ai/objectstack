@@ -171,6 +171,14 @@ export class SharingRuleService implements ISharingRuleService {
    * matches NOTHING); only the repetition is gone.
    */
   private readonly inertRuleSeen = new Set<string>();
+  /**
+   * [#14547] Business-unit rules seen expanding to NOBODY this process — the
+   * same once-per-rule dedup {@link inertRuleSeen} carries, for the same
+   * reason: the reconcilers call {@link expandRecipient} on every matched
+   * write, so an undeduped warn would let one misconfigured rule dominate a
+   * deployment's log.
+   */
+  private readonly emptyUnitExpansionSeen = new Set<string>();
 
   constructor(opts: SharingRuleServiceOptions) {
     this.engine = opts.engine;
@@ -1130,7 +1138,9 @@ export class SharingRuleService implements ISharingRuleService {
         organizationId: rule.organization_id ?? null,
         teamGraph: team,
       });
-      return dept.expandUnitMembers(rule.recipient_id);
+      const members = await dept.expandUnitMembers(rule.recipient_id);
+      this.warnOnEmptyUnitExpansion(rule, members);
+      return members;
     }
     if (rule.recipient_type === 'position') {
       // [#8710] A DEACTIVATED position confers NOTHING — checked before the
@@ -1163,10 +1173,63 @@ export class SharingRuleService implements ISharingRuleService {
         organizationId: rule.organization_id ?? null,
         teamGraph: team,
       });
-      return dept.expandUsers(rule.recipient_id);
+      const members = await dept.expandUsers(rule.recipient_id);
+      this.warnOnEmptyUnitExpansion(rule, members);
+      return members;
     }
     // queue — v1 stores literal; treat as no-op until queue impl lands.
     return [];
+  }
+
+  /**
+   * [#14547] An ACTIVE business-unit rule that expands to NOBODY says so.
+   *
+   * This is the half of #14547 that is independent of any screen. The reported
+   * failure was not merely that the expansion was empty — it was that nothing
+   * anywhere recorded it: the rule was accepted (201), stayed `active: true`,
+   * materialised zero `sys_record_share` rows and logged nothing, so the only
+   * observable was "the right people cannot see the record", arbitrarily far
+   * from the cause and indistinguishable from a criteria mistake, a
+   * permission-set mistake or a UI bug.
+   *
+   * It also covers the case the screens deliberately leave empty: a rule
+   * stamped with an organization whose unit AND membership rows were both
+   * seeded expands to nobody, because an org-less membership row is of unknown
+   * tenancy and is not a member of an org-scoped rule
+   * ({@link BusinessUnitGraphService} → `memberScope`). Failing closed is the
+   * right answer; failing closed in silence is not.
+   *
+   * Both business-unit recipient kinds route here, and only they: a `user`
+   * recipient cannot be empty, and `team` / `position` / `queue` have their own
+   * reasons for an empty set that this issue did not measure. ⛔ Do not widen
+   * this into "warn whenever any recipient expands to zero" without measuring
+   * those — `queue` expands to `[]` by construction today, so a blanket warn
+   * would fire on every pass of every queue rule.
+   *
+   * Named completely: the rule, the object, the recipient kind, the unit, the
+   * organization, and the two causes worth checking first. Once per rule per
+   * process ({@link emptyUnitExpansionSeen}).
+   */
+  private warnOnEmptyUnitExpansion(rule: SharingRuleRow, users: readonly string[]): void {
+    if (users.length > 0) return;
+    if (rule.active === false) return;
+    const key = `${String(rule.id ?? rule.name)}::${String(rule.recipient_id ?? '')}`;
+    if (this.emptyUnitExpansionSeen.has(key)) return;
+    this.emptyUnitExpansionSeen.add(key);
+    this.logger?.warn?.(
+      '[sharing-rule] active business-unit rule expands to NO recipients — it grants nobody and ' +
+        'will materialise no shares (logged once per rule per process). Check that the business ' +
+        'unit exists and is active, and that its `sys_business_unit_member` rows carry the same ' +
+        'organization_id as the rule — membership rows written by seed replay or by an elevated ' +
+        'system write are not organization-stamped, and are not members of an org-scoped rule',
+      {
+        rule: rule.name ?? rule.id,
+        object: rule.object_name,
+        recipientType: rule.recipient_type,
+        businessUnit: rule.recipient_id,
+        organization: rule.organization_id ?? null,
+      },
+    );
   }
 
   /**

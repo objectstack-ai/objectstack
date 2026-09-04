@@ -158,6 +158,13 @@ const CHAIN_CASES = [
 /** How many cases `selfTest` holds -- for a folding gate's printed tally. */
 export const SELF_TEST_CASE_COUNT = NAMED_CASES.length + CHAIN_CASES.length;
 
+// Set by `selfTest()` only after its verdict is printed, and read at the
+// dispatch: a `return` that leaves the function above that line prints nothing
+// and still exits 0 — a self-test that never finished, reported as one that
+// passed (#13798). The self-test's own exit code stays load-bearing, so the
+// handshake is a flag rather than a returned sentinel.
+let selfTestReachedVerdict = false;
+
 /**
  * @returns {string[]}  One string per failed case; empty means pass.
  */
@@ -180,12 +187,21 @@ export function selfTest() {
     }
   }
 
+  selfTestReachedVerdict = true;
   return failures;
 }
 
 if (isEntrypoint(import.meta.url)) {
   if (process.argv.includes('--self-test')) {
     const failures = selfTest();
+    if (!selfTestReachedVerdict) {
+      console.error(
+        '\n✗ typecheck-configs self-test: selfTest() returned without reaching its verdict,\n'
+          + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+          + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
     for (const failure of failures) console.error(`  - ${failure}`);
     if (failures.length > 0) {
       console.error(`typecheck-configs --self-test FAILED: ${failures.length} of ${SELF_TEST_CASE_COUNT} case(s)`);

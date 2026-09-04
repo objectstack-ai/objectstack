@@ -16,11 +16,35 @@ import {
   isExitSignal,
   errorCodeFields,
 } from '../../utils/format.js';
-import { computeI18nCoverage } from '../../utils/i18n-coverage.js';
+import { computeI18nCoverage, COVERAGE_SURFACE_PHRASE } from '../../utils/i18n-coverage.js';
 
 export default class I18nCheck extends Command {
+  // ⛔ The surface list is DERIVED (`COVERAGE_SURFACE_PHRASE`), never a
+  // hand-typed sample. It used to be a parenthetical naming five source kinds
+  // of the fifteen the report carries, and a sample that size does not read as
+  // an illustration — it reads as a scope statement: a reader who wanted app
+  // navigation or dashboard widgets checked was told this command does objects
+  // and fields, so they skipped the gate or went looking for a second tool that
+  // does not exist. Deriving it is what stops the two drifting again — a new
+  // member of `CoverageIssue['source']` fails to compile until it is named, and
+  // is published here in the same edit.
+  //
+  // Why `summary` as well, when no sibling command sets one: oclif renders a
+  // command in two places with very different budgets, and the set fits only
+  // one of them. The COMMANDS list (`os i18n --help`) prints `summary`, falling
+  // back to the description's FIRST LINE when a command sets none — measured at
+  // COLUMNS=80, the derived set in that column wraps to five lines against the
+  // sibling's three, and `renderList`'s `lines.length > 4` would drop the whole
+  // list into its multi-line layout on one more. The command's own `--help` has
+  // room for it. So the short line goes in `summary`, with the parenthetical
+  // dropped outright — never a five-item sample of fifteen — and the derived
+  // set goes in `description`, where a reader asking what this command covers
+  // is actually looking. oclif prints the two one after the other, so the
+  // description elaborates the summary rather than restating it.
+  static override summary = 'Detect missing translation keys across all configured locales';
+
   static override description =
-    'Detect missing translation keys (object/field/option/view/action labels) across all configured locales';
+    `Every translatable surface the coverage report carries is checked: ${COVERAGE_SURFACE_PHRASE}.`;
 
   static override examples = [
     '$ os i18n check',

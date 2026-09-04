@@ -42,10 +42,14 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": true,
-    // `.` rather than the inherited `src`, because the files this program
-    // checks (`examples/**/*`, `objectstack.config.ts`) sit outside `src`.
-    // Safe precisely because nothing is emitted from here -- see the header.
-    "rootDir": "."
+    // `../..` (= `packages/`) rather than the inherited value, because the
+    // files this program checks (`examples/**/*`, `objectstack.config.ts`) sit
+    // outside `src`, and #14762's `paths` rule on the parent config pulls
+    // `packages/services/service-messaging/src/**` into the program too --
+    // `rootDir` is enforced over every program file even under `--noEmit`, so
+    // it has to be the directory containing both. Safe precisely because
+    // nothing is emitted from here -- see the header.
+    "rootDir": "../.."
   },
   "include": ["examples/**/*", "objectstack.config.ts"]
 }

@@ -378,7 +378,8 @@ const STACK_DEFINITION_COLLECTIONS_SHAPE = {
    * delete, not a rename). An embedded action is keyed by the object it is
    * written ON — the declaration-resolution key `collectActionDeclarations` /
    * `resolveRouteActionDeclaration` use — not by its own `objectName` (the
-   * registration key `collectBundleActions` / `actionObjectKey` read). One
+   * registration key `collectBundleActions` / `standaloneActionOwnerKey` read).
+   * One
    * global and one object-bound action MAY share a `name`: they occupy two
    * keys, and a by-name reader on the object's route resolves the object's own
    * `actions` (embedded, or merged in from here) before a standalone global
@@ -1570,8 +1571,9 @@ function joinDeclarationOrigins(origins: readonly string[]): string {
  * `object` alias is already canonicalized) or global; an embedded action is
  * scoped by the object it is written on, whatever its own `objectName` says —
  * that is how `collectActionDeclarations` and `resolveRouteActionDeclaration`
- * key it. (The runtime's REGISTRATION key — `collectBundleActions` /
- * `actionObjectKey` — reads the action's own `objectName` instead; the walk
+ * key it. (The REGISTRATION key — `collectBundleActions` /
+ * `standaloneActionOwnerKey` — reads the action's own `objectName` instead; the
+ * walk
  * deliberately follows the resolution side, where the by-name collision the
  * card describes happens.)
  *
@@ -1592,6 +1594,30 @@ function joinDeclarationOrigins(origins: readonly string[]): string {
  * standalone declaration) is documented on the `actions` collection, not
  * changed here.
  */
+/**
+ * An `operation: 'update'` action writes ONE record — the current one — on the
+ * object it belongs to (#14092). Which object that is, `ActionSchema` cannot
+ * tell: the same schema parses an action embedded on an object (the object is
+ * implicit) and a standalone one in `stack.actions`, where only `objectName`
+ * can say. So the standalone form is judged here, the one place standalone-
+ * ness is knowable: a GLOBAL action (no `objectName`) has no current record
+ * and nothing to write to, and is refused with the two spellings that do. An
+ * embedded action is never visited — the object it is written on binds it.
+ */
+function collectGlobalUpdateActionErrors(config: ObjectStackDefinition): string[] {
+  const errors: string[] = [];
+  for (const [i, action] of (config.actions ?? []).entries()) {
+    if (action.operation !== 'update' || action.objectName) continue;
+    errors.push(
+      `Action '${action.name}' (stack.actions[${i}]) is \`operation: 'update'\` — a single-record field write — `
+      + 'but declares no `objectName`, so there is no object to write to: a global action has no current record. '
+      + "Set `objectName: 'the_object'` (defineStack merges it into that object's actions) or declare it inside "
+      + "the object's own `actions`.",
+    );
+  }
+  return errors;
+}
+
 function collectDuplicateActionKeyErrors(config: ObjectStackDefinition): string[] {
   const originsByKey = new Map<string, string[]>();
   const note = (scope: string, name: string, origin: string): void => {
@@ -1640,6 +1666,9 @@ function validateCrossReferences(config: ObjectStackDefinition): string[] {
   // stack that declares two globals under one name collides on exactly the
   // same runtime key, and this check needs no object to resolve against.
   errors.push(...collectDuplicateActionKeyErrors(config));
+  // Same placement, same reason: a global `operation: 'update'` action is
+  // wrong whether or not the stack declares any objects.
+  errors.push(...collectGlobalUpdateActionErrors(config));
 
   if (objectNames.size === 0) return errors;
 
@@ -2064,6 +2093,17 @@ function sortActionsByOrder<T extends { order?: number }>(actions: T[]): T[] {
  * top-level `actions` array is preserved for global access (e.g., platform
  * overview, search).
  *
+ * Idempotent over its own output (#14847): a bound action the object already
+ * carries BY IDENTITY is not appended again. That is the shape `composeStacks`
+ * feeds it — inputs built by `defineStack`, each object already carrying the
+ * copy its own build appended while the standalone still sits in `actions` —
+ * and before this the second merge doubled every bound action in the composed
+ * object (three copies for two declarations under `objectConflict: 'override'`
+ * / `'merge'`). Identity, deliberately not equality: an author writing one
+ * action in both positions produces two distinct objects, which #14686's
+ * same-key refusal (run before this merge) rejects and which this merge must
+ * not quietly fold.
+ *
  * After merging, every action group (each object's `actions` and the top-level
  * `actions`) is stable-sorted by `order` via {@link sortActionsByOrder}. Because
  * that sort is a no-op unless an author sets `order`, this is fully backward
@@ -2102,12 +2142,23 @@ function mergeActionsIntoObjects(config: ObjectStackDefinition): ObjectStackDefi
   // references, consistent with mergeObjects() and Zod output).
   let objectsChanged = false;
   const newObjects = config.objects.map((obj) => {
-    const objActions = actionsByObject.get(obj.name);
     const base = obj.actions ?? [];
-    const merged = objActions ? [...base, ...objActions] : base;
+    // Idempotent (#14847): append only the bound actions `base` does not carry
+    // ALREADY — judged by identity, never by equality. The one way an entry of
+    // `config.actions` can be the very same object as an entry of `obj.actions`
+    // is a previous run of this merge having put it there: `defineStack` ends
+    // here, so a BUILT stack carries each bound action in both positions, and
+    // `composeStacks` — which concatenates its inputs' `actions` and hands the
+    // surviving objects through as-is — ran this merge a second time over that
+    // echo and doubled every bound action. A hand-written twin (one action
+    // authored in both positions) is two objects after the strict parse, and
+    // #14686's same-key refusal has already run ahead of this merge to refuse
+    // it; an equality skip here would have swallowed it instead.
+    const fresh = (actionsByObject.get(obj.name) ?? []).filter((action) => !base.includes(action));
+    const merged = fresh.length > 0 ? [...base, ...fresh] : base;
     const sorted = sortActionsByOrder(merged);
-    // Untouched: no top-level actions merged in AND the sort was a no-op.
-    if (!objActions && sorted === base) return obj;
+    // Untouched: nothing new merged in AND the sort was a no-op.
+    if (sorted === base) return obj;
     objectsChanged = true;
     return { ...obj, actions: sorted };
   });
@@ -3148,5 +3199,10 @@ export function composeStacks(
     throw new Error(formatComposedActionKeyCollisions(actionCollisions));
   }
 
+  // 7. Bind every standalone action to its object — ONCE. Each input built by
+  //    `defineStack` already carries its own bound actions on its objects (the
+  //    echo step 6 steps around), and the surviving objects reach here as-is,
+  //    so the merge appends only what an object does not already carry by
+  //    identity (#14847): the other inputs' actions bound to it.
   return mergeActionsIntoObjects(composed as ObjectStackDefinition);
 }

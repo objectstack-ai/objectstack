@@ -13,9 +13,20 @@
  *  2. **Built-in fallback** — the bundled texts here (en + zh), used when
  *     no template row resolves (fresh env, missing table, exotic locale).
  *
- * The recipient locale is the DEPLOYMENT default (`localization.locale`
- * setting) — `sys_user` carries no per-user locale yet; when it grows one,
- * resolution should prefer it (tracked in #2815).
+ * The recipient locale reaching this module is resolved by the caller
+ * (`AuthManager.renderPhoneSmsBody`), and #14762 gave the OTP send a rung
+ * above the deployment default: the recipient's own `sys_user.locale`
+ * (#13881, ruling 2026-09-01 — the same column the messaging channels read
+ * per recipient), then the DEPLOYMENT default (`localization.locale`
+ * setting). There is no request rung on this surface: better-auth hands the
+ * send-OTP callbacks `{ phoneNumber, code }` and nothing else, so the ruled
+ * chain (#14788 option D, 2026-09-03) collapses to stored → deployment here.
+ *
+ * The SMS **invite** path still names the deployment default alone — its
+ * recipient's own column is #14641's rung, not this one's.
+ *
+ * Whatever arrives, {@link phoneSmsLocaleChain}'s terminal `en` remains the
+ * floor: this module never returns nothing, and an OTP never fails to render.
  *
  * Red line unchanged: the OTP code appears only in the rendered body handed
  * to the SMS service — never in logs or error messages.

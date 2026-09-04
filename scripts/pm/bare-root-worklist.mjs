@@ -812,23 +812,6 @@ const TRIAGE = new Map([
     why: 'workspace manifests only — 4 of 241 (1.7%), re-measured 2026-08-26; the spelling reaches '
       + '4 of 4, 100% precise and complete. Deferred with its packages half',
   }],
-  ['scripts/check-adr-0087-registration.mjs PACKAGE_ROOTS packages', {
-    verdict: 'SPELLABLE-UNDECLARED',
-    spelling: 'packages manifests',
-    why: 'workspace manifests only — 74 of 5275 (1.4%), re-measured 2026-08-26 rather than '
-      + 'inherited from the identically-shaped row above; the spelling reaches 74 of 74. Deferred '
-      + 'for the reason recorded there',
-  }],
-  ['scripts/check-adr-0087-registration.mjs PACKAGE_ROOTS apps', {
-    verdict: 'SPELLABLE-UNDECLARED',
-    spelling: 'apps manifests',
-    why: 'workspace manifests only — 1 of 40 (2.5%), re-measured 2026-08-26; 1 of 1 covered',
-  }],
-  ['scripts/check-adr-0087-registration.mjs PACKAGE_ROOTS examples', {
-    verdict: 'SPELLABLE-UNDECLARED',
-    spelling: 'examples manifests',
-    why: 'workspace manifests only — 4 of 241 (1.7%), re-measured 2026-08-26; 4 of 4 covered',
-  }],
   ['check:skill-compatibility PACKAGE_ROOTS packages', {
     verdict: 'SPELLABLE-UNDECLARED',
     spelling: 'packages manifests',
@@ -846,6 +829,156 @@ const TRIAGE = new Map([
     verdict: 'SPELLABLE-UNDECLARED',
     spelling: 'examples manifests',
     why: 'workspace manifests only — 4 of 241 (1.7%), re-measured 2026-08-26; 4 of 4 covered',
+  }],
+
+  // ── SECOND-KEY TWINS: one literal, two family keys (#14880) ──────────────
+  //
+  // Nine rows landed FRESH in one edit, and NOT because a gate changed. The
+  // dispatch-gates derivation key became (script, args) in #14880 — one entry
+  // per workflow INVOCATION rather than per script path — so CI's
+  // `--self-test` invocation of a gate it also runs plainly is now its own
+  // family. `sweep()` keys a row on `family constant word`, so the identical
+  // bare-root literal, in the identical file, under the identical constant, is
+  // reached a second time and produces a second row.
+  //
+  // ⛔ These are therefore NOT new populations, and each `why` below states
+  // that instead of a measurement. The docblock above forbids carrying a
+  // sibling's numbers into a new row, and the reason it gives is that two rows
+  // are two populations measured at two times; here the two rows are ONE
+  // population read through two keys, so restating a number would mint a
+  // reading this pass never took — the same defect the ban is written against,
+  // arriving by the one route the ban's wording does not cover. The verdict is
+  // the twin's verdict for the only honest reason there is: a different verdict
+  // on the same literal would have this map assert two decisions about one
+  // population.
+  //
+  // ⚠️ The class GROWS with the workflows, not with this file: any gate CI
+  // starts invoking a second way acquires a twin row here on the next run. The
+  // structural alternative — keying `sweep()`'s dedupe on the gate SOURCE FILE
+  // rather than on the family, since the verdict is about a literal in a file
+  // and never about an invocation — is real and is deliberately NOT taken here:
+  // it re-decides which family a surviving row is attributed to, which would
+  // strand the existing twin as STALE, and redesigning this file's keying is
+  // not what the FRESH remedy names. Recorded for whoever owns that call.
+  ['scripts/check-adr-0087-registration.mjs --self-test PACKAGE_ROOTS packages', {
+    verdict: 'SPELLABLE-UNDECLARED',
+    spelling: 'packages manifests',
+    why: 'second-key twin of the row keyed on this same script without the flag — same file, '
+      + 'same constant, same root, one population. It exists because CI invokes this gate both '
+      + 'plainly and with the self-test flag and the derivation now keys on the invocation. The '
+      + 'verdict and the spelling are that row decision, unchanged; ⛔ no count is restated here, '
+      + 'because this pass measured none and the twin numbers belong to the pass that took them',
+  }],
+  ['scripts/check-adr-0087-registration.mjs --self-test PACKAGE_ROOTS apps', {
+    verdict: 'SPELLABLE-UNDECLARED',
+    spelling: 'apps manifests',
+    why: 'second-key twin, apps half — same file, same constant, same root as the unflagged row. '
+      + 'Verdict and spelling carried as one decision about one population, counts deliberately '
+      + 'not restated',
+  }],
+  ['scripts/check-adr-0087-registration.mjs --self-test PACKAGE_ROOTS examples', {
+    verdict: 'SPELLABLE-UNDECLARED',
+    spelling: 'examples manifests',
+    why: 'second-key twin, examples half — same file, same constant, same root as the unflagged '
+      + 'row. Verdict and spelling carried as one decision about one population, counts '
+      + 'deliberately not restated',
+  }],
+  // ── The same twins, one turn further: an argv the workflow FILLS IN (#15083)
+  //
+  // The three rows these replace were keyed on `scripts/check-adr-0087-
+  // registration.mjs` with no argv, and they went STALE without the gate
+  // changing a byte. `dispatch-gates` now renders a value-bearing invocation
+  // instead of dropping back to a bare path key, and CI invokes this gate only
+  // as `--base "$MERGE_BASE"` (pr-automation.yml) and `--base "$SNAPSHOT_SHA"`
+  // (cut-rc.yml) — never bare — so the unflagged key stopped being derived at
+  // all and two keys arrived in its place. The `--self-test` twins above still
+  // say "the row keyed on this same script without the flag"; that row is
+  // these two, split by the workflow that runs it.
+  //
+  // ⛔ Still not new populations, and still no count restated: one literal, one
+  // constant, one file, read through more keys. The verdict and the spelling
+  // are the retired row's, carried whole, for the reason the block above gives
+  // — a different verdict on the same literal would have this map assert two
+  // decisions about one population.
+  ['scripts/check-adr-0087-registration.mjs --base "$MERGE_BASE" PACKAGE_ROOTS packages', {
+    verdict: 'SPELLABLE-UNDECLARED',
+    spelling: 'packages manifests',
+    why: 'the pr-automation.yml invocation of the row that used to be keyed on this script bare — '
+      + 'same file, same constant, same root, one population. It exists because the derivation '
+      + 'renders the argv CI actually passes, and this gate has no bare invocation to fall back '
+      + 'to. Verdict and spelling are that row decision, unchanged; ⛔ no count is restated here, '
+      + 'because this pass measured none',
+  }],
+  ['scripts/check-adr-0087-registration.mjs --base "$MERGE_BASE" PACKAGE_ROOTS apps', {
+    verdict: 'SPELLABLE-UNDECLARED',
+    spelling: 'apps manifests',
+    why: 'apps half of the pr-automation.yml invocation — same file, same constant, same root as '
+      + 'the retired bare row. Verdict and spelling carried as one decision about one population, '
+      + 'counts deliberately not restated',
+  }],
+  ['scripts/check-adr-0087-registration.mjs --base "$MERGE_BASE" PACKAGE_ROOTS examples', {
+    verdict: 'SPELLABLE-UNDECLARED',
+    spelling: 'examples manifests',
+    why: 'examples half of the pr-automation.yml invocation — same file, same constant, same root '
+      + 'as the retired bare row. Verdict and spelling carried as one decision about one '
+      + 'population, counts deliberately not restated',
+  }],
+  ['scripts/check-adr-0087-registration.mjs --base "$SNAPSHOT_SHA" PACKAGE_ROOTS packages', {
+    verdict: 'SPELLABLE-UNDECLARED',
+    spelling: 'packages manifests',
+    why: 'the cut-rc.yml invocation of the same literal — the release cut pins the base to its '
+      + 'snapshot instead of a merge base, which is a different ARGV and the same population. '
+      + 'Verdict and spelling carried whole, counts deliberately not restated',
+  }],
+  ['scripts/check-adr-0087-registration.mjs --base "$SNAPSHOT_SHA" PACKAGE_ROOTS apps', {
+    verdict: 'SPELLABLE-UNDECLARED',
+    spelling: 'apps manifests',
+    why: 'apps half of the cut-rc.yml invocation — same file, same constant, same root. Verdict '
+      + 'and spelling carried as one decision about one population, counts deliberately not '
+      + 'restated',
+  }],
+  ['scripts/check-adr-0087-registration.mjs --base "$SNAPSHOT_SHA" PACKAGE_ROOTS examples', {
+    verdict: 'SPELLABLE-UNDECLARED',
+    spelling: 'examples manifests',
+    why: 'examples half of the cut-rc.yml invocation — same file, same constant, same root. '
+      + 'Verdict and spelling carried as one decision about one population, counts deliberately '
+      + 'not restated',
+  }],
+  ['scripts/check-declaration-mirrors.mjs --self-test SCRIPTS_DIR scripts', {
+    verdict: 'REFUSE-UNSPELLABLE',
+    why: 'second-key twin of the unflagged row for this script. The refusal is about the walk the '
+      + 'gate own source performs — an extension filter no subtree idiom describes — and a walk '
+      + 'is a property of the file, not of which invocation CI happens to schedule, so the '
+      + 'refusal transfers whole and its measurement stays where it was taken',
+  }],
+  ['scripts/check-position-name-fold-loaders.mjs --self-test SCAN_ROOTS packages', {
+    verdict: 'REFUSE-WIDE',
+    why: 'second-key twin of the unflagged row for this script. The trade it refuses — a true '
+      + 'declaration naming this gate on every card under the root — is the same trade whichever '
+      + 'invocation CI schedules, so the verdict transfers and the numbers stay with the pass '
+      + 'that measured them',
+  }],
+  ['scripts/check-position-name-fold-loaders.mjs --self-test SCAN_ROOTS examples', {
+    verdict: 'REFUSE-WIDE',
+    why: 'second-key twin, examples half — refused with its packages half for the reason the '
+      + 'unflagged row states, and for the same one population',
+  }],
+  ['scripts/check-position-name-fold-loaders.mjs --self-test SCAN_ROOTS apps', {
+    verdict: 'REFUSE-WIDE',
+    why: 'second-key twin, apps half — same trade, same reason, same single population as the '
+      + 'unflagged row',
+  }],
+  ['scripts/check-position-name-fold-loaders.mjs --self-test SCAN_ROOTS scripts', {
+    verdict: 'REFUSE-WIDE',
+    why: 'second-key twin, scripts half — the root where this gate own allowed readers live, '
+      + 'walked wholesale for the reason the unflagged row records, and one population with it',
+  }],
+  ['scripts/check-skills-token-ratchet.mjs --self-test SKILLS_DIR skills', {
+    verdict: 'SPELLABLE-UNDECLARED',
+    spelling: 'published skill files',
+    why: 'second-key twin of the unflagged row for this script. The recorded spelling is that '
+      + 'row spelling and is already pinned LIVE, PRECISE and COMPLETE below on its own terms, so '
+      + 'this row adds a key and no new claim; the deferral reason is the one recorded there',
   }],
 ]);
 

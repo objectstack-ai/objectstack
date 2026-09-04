@@ -13,6 +13,8 @@
 // exactly as it did.
 import { flush, handle, run, settings } from '@oclif/core';
 
+import { keepStderrNonBlocking } from './stderr-nonblocking.mjs';
+
 /**
  * How long stderr may make NO PROGRESS before this shim stops waiting for it.
  *
@@ -74,6 +76,15 @@ const STDERR_DRAIN_POLL_MS = 50;
  * ⛔ Deliberately NOT `process.stderr._handle.setBlocking(true)`: `format.ts`
  * records why — the same binary runs `os serve` / `os dev`, and a blocking
  * write to a pipe with a slow reader stalls the event loop.
+ *
+ * ⚠️ That last sentence is also this function's own PREMISE, not just a reason
+ * to avoid a call: a bound enforced by a `setInterval` is worth nothing if a
+ * write can park the thread. The premise is not free — libuv clears
+ * `O_NONBLOCK` on fd 2's shared description in the pre-exec of any child
+ * spawned with inherited stdio, and this shim runs under `tsx`, which spawns
+ * the esbuild service on a cold transform cache. `keepStderrNonBlocking()`,
+ * installed above `run()`, is what holds the premise true; without it this
+ * bound is unreachable rather than late, which is a HANG and not a long wait.
  */
 function writeStderr(text) {
   return new Promise((resolve) => {
@@ -168,6 +179,21 @@ async function announceUnbuiltWorkspace(error) {
 
 process.env.NODE_ENV = 'development';
 settings.debug = true;
+
+// ⚠️ BEFORE `run()`, and that order is the whole point rather than tidiness.
+// The bound in `writeStderr` is a `setInterval`, so it can only fire while this
+// process's event loop is running — and every byte oclif is about to put on
+// stderr is written by `Config.load()`, long before this file gets control
+// back. If one of those writes parks the main thread inside `write(2)`, no
+// bound in this file has run yet or ever will: the process is frozen in the
+// kernel with the diagnostic still unwritten, and only a reader or a kill ends
+// it. Measured that way on an unbuilt workspace with the reader gone — 27 of 30
+// cold-cache runs, main thread in `write(2)` on fd 2 at `sock_alloc_send_pskb`,
+// still alive at a 90 s ceiling. `stderr-nonblocking.mjs` carries the whole
+// derivation, including who clears the flag (a child spawned with inherited
+// stdio — libuv clears `O_NONBLOCK` on the SHARED open file description) and
+// why the re-assert has to sit on the write path rather than run once here.
+keepStderrNonBlocking();
 
 const running = run(process.argv.slice(2), import.meta.url);
 

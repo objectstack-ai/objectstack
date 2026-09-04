@@ -309,6 +309,134 @@ const ts = await requireDefaultExport('typescript', () => import('typescript'), 
 import { isEntrypoint } from './invoked-as.mjs';
 import { parseSourceFile } from './ts-parse.mjs';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// This self-test used to decide success by "no failure was recorded" and
+// nothing else, so "every case held" and "the cases never ran" printed the same
+// line. Closed the way PR #13487 validated on check-doc-authoring: what is
+// pinned is the registered NAMES, not a number. Every section opens with
+// `battery('<name>')`, every assertion is attributed to the battery most
+// recently opened, and the floor requires the OPENED set to equal the DECLARED
+// set with each battery at or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3 keeps
+// a total "right" the moment a sibling grows. A set difference says WHICH
+// battery stopped; a count says only that something did.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+//
+// The machinery lives HERE, at module scope, rather than inside the self-test:
+// this self-test's assertion sink is not a block-bodied helper in its body (it
+// is a concise arrow, or a module-scope function), so there is no in-body
+// helper to thread a per-run ledger through. Module scope is safe because the
+// self-test runs once per process, and it is what lets the existing sink route
+// through `registerCase()` with no case rewritten and no assertion changed.
+const SELF_TEST_BATTERIES = Object.freeze({
+  '(1) the positive control: a bare spread in a spawner REDS': 1,
+  '(2) the childEnv() form is green': 1,
+  '(3) the negative control the whole precision claim rests on': 3,
+  '(4) reading ONE variable off the environment is never a finding': 4,
+  '(5) the other bulk spellings, so the rule is not spread-shaped': 6,
+  '(6) prose is not code, which is what an AST buys over a text scan': 3,
+  '(7) the spawner roster, every import spelling': 13,
+  '(8) the carve-out, and that it is SITE-scoped rather than file-scoped': 2,
+  '(8b) SITE NAMING (#12531): a callback arrow is named after its CALL': 10,
+  '(8c) THE MODIFIER FAMILY (#12545): a rostered vitest chain names a': 23,
+  '(9) RULE 2 (#11595): a spawn CALL that leaves its env undeclared': 6,
+  'rule 2\'s blind spot is the one place a call-anchored rule could go': 16,
+  '(10) the ratchet, in every direction it must move': 6,
+  '(11) every refusal, each PAIRED with a tree that still answers': 4,
+  '(12) THE anti-vacuity leg: the real entry point, out of process': 3,
+  '(13) the unparseable leg: ts-parse ends the PROCESS': 1,
+  '(16) RULE 3 (#11464): the built entrypoint and a rerouting NODE_ENV': 0,
+  'membership': 5,
+  'the rule over the members': 12,
+  'the one-hop spread resolution': 12,
+  'the declaration registry, site-scoped like DELIBERATE': 2,
+  'the three rules are INDEPENDENT': 3,
+  'OUT OF PROCESS: rule 3 can actually fail a run': 2,
+  '(14) wiring. Unwiring the gate must redden HERE, not go quiet.': 3,
+  '(15) the live tree, as a case rather than as the run\'s only evidence': 11,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 25;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
+// ⚠️ None of these helpers is named with a self-test spelling, deliberately and
+// on the record: `check:pm-dispatch-gates` anchors on a top-level declaration
+// whose NAME spells self-test, and every such name owes a row in that gate's
+// COMPOUND_ANCHOR_LEDGER. These are the battery ROSTER's machinery -- they hold
+// no fixtures to mask and read no path literal -- so the accurate name is the
+// one that says `battery`, not the one that would owe a ledger row for a role
+// this code does not have.
+
+/** Cases registered per battery: `battery()` opens one, `registerCase()` files into it. */
+const batteryCases = new Map();
+let openBattery = null;
+
+/** Open a battery. Every assertion after this line is attributed to it. */
+function battery(name) {
+  openBattery = name;
+}
+
+/** Called by the self-test's own assertion sink, once per assertion. */
+function registerCase() {
+  const name = openBattery ?? UNATTRIBUTED_BATTERY;
+  batteryCases.set(name, (batteryCases.get(name) ?? 0) + 1);
+}
+
+/**
+ * The floor: every declared battery RAN, and ran its cases (#13489).
+ *
+ * Evaluated after every battery has had its chance and BEFORE the verdict, so
+ * the success line can only be printed by a run in which the set of batteries
+ * that registered assertions EQUALS the set declared.
+ */
+function batteryFloorFailures() {
+  const declared = Object.keys(SELF_TEST_BATTERIES);
+  const problems = [];
+  if (declared.length < SELF_TEST_BATTERY_FLOOR) {
+    problems.push(
+      `SELF_TEST_BATTERIES declares ${declared.length} batteries, below the pinned `
+        + `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batteryCases) {
+    if (declared.includes(name)) continue;
+    problems.push(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in `
+        + 'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declared) {
+    const count = batteryCases.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    problems.push(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. `
+          + 'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of `
+          + `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (problems.length) {
+    problems.push(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the '
+        + 'number. Find what stopped registering (an early return, a deleted block, a guard that now '
+        + 'skips) and restore it.',
+    );
+  }
+  return problems;
+}
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '..');
 
@@ -1650,7 +1778,10 @@ let selfTestReachedVerdict = false;
 
 export function selfTest() {
   const cases = [];
-  const t = (name, ok, detail) => cases.push({ name, ok: Boolean(ok), detail });
+  const t = (name, ok, detail) => {
+    registerCase();
+    return cases.push({ name, ok: Boolean(ok), detail });
+  };
 
   const SELF = fileURLToPath(import.meta.url);
   const dir = mkdtempSync(join(tmpdir(), 'cli-test-child-env-'));
@@ -1709,10 +1840,12 @@ export function selfTest() {
 
   try {
     // -- (1) the positive control: a bare spread in a spawner REDS ----------
+    battery('(1) the positive control: a bare spread in a spawner REDS');
     t('a bare process.env spread in a spawner file REDS',
       count('pos-spread', { 'a.e2e.test.ts': spawner('  execFile(\'x\', [], { cwd, env: { ...process.env, NO_COLOR: \'1\' } });') }) === 1);
 
     // -- (2) the childEnv() form is green -----------------------------------
+    battery('(2) the childEnv() form is green');
     t('the childEnv() form stays GREEN',
       count('neg-childenv', { 'a.e2e.test.ts': spawner('  execFile(\'x\', [], { cwd, env: childEnv({ NO_COLOR: \'1\' }) });') }) === 0);
 
@@ -1720,6 +1853,7 @@ export function selfTest() {
     //    A legitimate non-spawner bulk copy -- the ordinary save/restore around
     //    an in-process mutation. This is the shape a package-wide scan would
     //    flag, and flagging it is how a gate gets carved out into uselessness.
+    battery('(3) the negative control the whole precision claim rests on');
     t('a save/restore bulk copy in a NON-spawner file stays GREEN (the negative control)',
       count('neg-nonspawner', {
         ...COMPANION,
@@ -1733,6 +1867,7 @@ export function selfTest() {
       count('restore-only', { 'a.e2e.test.ts': spawner('  process.env = build();') }) === 0);
 
     // -- (4) reading ONE variable off the environment is never a finding ----
+    battery('(4) reading ONE variable off the environment is never a finding');
     t('process.env.HOME is a member read, not a bulk copy',
       count('read-dot', { 'a.e2e.test.ts': spawner('  const h = process.env.HOME;\n  void h;') }) === 0);
     t("process.env['HOME'] is a member read too",
@@ -1745,6 +1880,7 @@ export function selfTest() {
       }) === 0);
 
     // -- (5) the other bulk spellings, so the rule is not spread-shaped -----
+    battery('(5) the other bulk spellings, so the rule is not spread-shaped');
     t('Object.assign({}, process.env) is a bulk copy',
       count('bulk-assign', { 'a.e2e.test.ts': spawner('  const e = Object.assign({}, process.env, { NO_COLOR: \'1\' });\n  void e;') }) === 1);
     t('Object.entries(process.env) is a bulk copy',
@@ -1759,6 +1895,7 @@ export function selfTest() {
       count('bulk-two', { 'a.e2e.test.ts': spawner('  const a = { ...process.env };\n  const b = { ...process.env };\n  void a; void b;') }) === 2);
 
     // -- (6) prose is not code, which is what an AST buys over a text scan --
+    battery('(6) prose is not code, which is what an AST buys over a text scan');
     t('a docblock quoting the banned shape is not a finding',
       count('prose-block', { 'a.e2e.test.ts': spawner('  /** never write { ...process.env } here */\n  void cwd;') }) === 0);
     t('a line comment quoting it is not a finding',
@@ -1767,6 +1904,7 @@ export function selfTest() {
       count('prose-string', { 'a.e2e.test.ts': spawner('  const s = \'{ ...process.env }\';\n  void s;') }) === 0);
 
     // -- (7) the spawner roster, every import spelling ----------------------
+    battery('(7) the spawner roster, every import spelling');
     for (const [mod, roster] of Object.entries(SPAWN_MODULES)) {
       for (const api of roster) {
         const src = `import { ${api} } from 'node:${mod}';\nvoid ${api};\nexport const e = { ...process.env };\n`;
@@ -1785,6 +1923,7 @@ export function selfTest() {
       count('roster-non-spawn-member', { ...COMPANION, 'a.ts': 'import { ChildProcess } from \'node:child_process\';\nvoid ChildProcess;\nexport const e = { ...process.env };\n' }) === 0);
 
     // -- (8) the carve-out, and that it is SITE-scoped rather than file-scoped
+    battery('(8) the carve-out, and that it is SITE-scoped rather than file-scoped');
     const chokePath = 'helpers/serve-process.ts';
     const carved = scan('carve-hit', {
       [chokePath]: 'import { spawn } from \'node:child_process\';\nvoid spawn;\nexport function childEnv() {\n  return { ...process.env };\n}\n',
@@ -1805,6 +1944,7 @@ export function selfTest() {
     //    An arrow passed DIRECTLY as a call argument matches none of the four
     //    shapes the walk recognises, so before this it ran past `it(...)` and
     //    `beforeAll(...)` to the source file and reported `(top-level)`.
+    battery('(8b) SITE NAMING (#12531): a callback arrow is named after its CALL');
 
     /** The site names a one-file spawner tree attributes its bulk copies to. */
     const siteNames = (name, sources) => JSON.stringify(scan(name, sources).findings?.map((row) => row.fn));
@@ -1862,6 +2002,7 @@ export function selfTest() {
     //    what that case's comment was really protecting -- the refusal of
     //    `promise.then` and `rows.map` -- is pinned outright further down,
     //    where it is a measurement rather than a side effect.
+    battery('(8c) THE MODIFIER FAMILY (#12545): a rostered vitest chain names a');
 
     t('an it.skip() block is named, not (top-level)',
       siteNames('site-mod-skip', { 'a.e2e.test.ts': suite(`it.skip('x', () => {\n${BULK}\n});`) })
@@ -1991,6 +2132,7 @@ export function selfTest() {
     //    The reds here are the whole point of the rule, so they are pinned by
     //    REASON as well as by count: "reds for some reason" would still pass if
     //    the classifier collapsed every shape into one.
+    battery('(9) RULE 2 (#11595): a spawn CALL that leaves its env undeclared');
     const undeclared = (name, sources) => audit(tree(name, sources)).envless ?? [];
     const reasons = (name, sources) => undeclared(name, sources).map((row) => row.reason);
 
@@ -2019,6 +2161,7 @@ export function selfTest() {
     // An options object this scan cannot read is a FINDING, never a quiet pass
     // -- rule 2's blind spot is the one place a call-anchored rule could go
     // silent, which is the defect this rule exists to close.
+    battery('rule 2\'s blind spot is the one place a call-anchored rule could go');
     t('an options object passed as an identifier REDS as unreadable, not green',
       JSON.stringify(reasons('envless-opaque-ident', { 'a.e2e.test.ts': spawner('  execFile(\'x\', [], opts);') }))
         === JSON.stringify([ENVLESS.OPAQUE]));
@@ -2091,6 +2234,7 @@ export function selfTest() {
       }).map((row) => row.fn)) === names('it("spawns a probe")'));
 
     // -- (10) the ratchet, in every direction it must move -----------------
+    battery('(10) the ratchet, in every direction it must move');
     const one = [{ file: 'packages/cli/test/a.ts', fn: 'runCli', line: 1, text: 'x' }];
     const two = [...one, { file: 'packages/cli/test/a.ts', fn: 'runOther', line: 2, text: 'x' }];
     const allDeliberate = Object.keys(DELIBERATE).map((key) => {
@@ -2113,6 +2257,7 @@ export function selfTest() {
         && judge([], allDeliberate, {}).missing.length === 0);
 
     // -- (11) every refusal, each PAIRED with a tree that still answers ----
+    battery('(11) every refusal, each PAIRED with a tree that still answers');
     const emptyRoot = tree('refuse-empty', { 'README.md': 'not a source\n' });
     t('a population with no TypeScript source REFUSES, while a readable tree still answers',
       audit(emptyRoot).refusal !== null && audit(tree('refuse-empty-pair', READABLE)).refusal === null,
@@ -2140,6 +2285,7 @@ export function selfTest() {
     // -- (12) THE anti-vacuity leg: the real entry point, out of process ---
     //    "exits non-zero on a violation" is the claim, and a process cannot
     //    observe its own exit status. These two run the real CLI.
+    battery('(12) THE anti-vacuity leg: the real entry point, out of process');
     const redRoot = tree('oop-red', {
       'a.e2e.test.ts': spawner('  execFile(\'x\', [], { cwd, env: { ...process.env, NO_COLOR: \'1\' } });'),
     });
@@ -2166,6 +2312,7 @@ export function selfTest() {
       JSON.stringify({ status: green.status, out: (green.stdout || '').trim() }));
 
     // -- (13) the unparseable leg: ts-parse ends the PROCESS ---------------
+    battery('(13) the unparseable leg: ts-parse ends the PROCESS');
     const wreckRoot = tree('oop-wreck', {
       ...READABLE,
       'wreck.ts': 'import { spawn } from \'node:child_process\';\n<<<<<<< HEAD\nvoid spawn;\n=======\nvoid 0;\n>>>>>>> other\n',
@@ -2182,6 +2329,7 @@ export function selfTest() {
     //    wrong is the more expensive error -- it is what puts a file that only
     //    NAMES bin/run.js into a population it does not belong to, which is the
     //    census error this card was dispatched with.
+    battery('(16) RULE 3 (#11464): the built entrypoint and a rerouting NODE_ENV');
 
     /**
      * A file that binds the BUILT entrypoint and spawns it -- the population's
@@ -2203,6 +2351,7 @@ export function selfTest() {
     const memberCount = (name, sources) => audit(tree(name, sources), DELIBERATE, {}).builtSpawns;
 
     // -- membership --------------------------------------------------------
+    battery('membership');
     t('a spawn through a const bound to bin/run.js is in the population',
       memberCount('member-binding', { 'a.e2e.test.ts': built('childEnv({ NODE_ENV: undefined })') }) === 1);
     t('a spawn naming bin/run.js as a bare literal in argv is in the population too',
@@ -2236,6 +2385,7 @@ export function selfTest() {
       }) === 0);
 
     // -- the rule over the members -----------------------------------------
+    battery('the rule over the members');
     t('NODE_ENV: undefined -- what the population says today -- stays GREEN',
       reroutes('rule-unset', 'childEnv({ NO_COLOR: \'1\', NODE_ENV: undefined })').length === 0);
     t('NODE_ENV: void 0 is the same value with different punctuation',
@@ -2287,6 +2437,7 @@ export function selfTest() {
     //    Every real site in the population is `childEnv({ ..., NODE_ENV:
     //    undefined, ...env })`, so without this hop the rule reads NOTHING it
     //    is meant to read and reports four "gave up" findings instead.
+    battery('the one-hop spread resolution');
     const SPREAD = 'childEnv({ NODE_ENV: undefined, ...env })';
 
     t('a trailing spread resolved to a caller that overrides NOTHING stays GREEN',
@@ -2332,6 +2483,7 @@ export function selfTest() {
         'export const a = boot({ NODE_ENV: \'production\' });').length === 0);
 
     // -- the declaration registry, site-scoped like DELIBERATE -------------
+    battery('the declaration registry, site-scoped like DELIBERATE');
     const rerouteTree = tree('reroute-registry', {
       'a.e2e.test.ts': built(SPREAD,
         'it(\'first\', () => {\n  boot({ NODE_ENV: \'development\' });\n});\n'
@@ -2355,6 +2507,7 @@ export function selfTest() {
         })).missingReroute.length === 0);
 
     // -- the three rules are INDEPENDENT ------------------------------------
+    battery('the three rules are INDEPENDENT');
     const onlyRule3 = audit(tree('independent-3', {
       'a.e2e.test.ts': built('childEnv({ NODE_ENV: \'development\' })'),
     }), DELIBERATE, {});
@@ -2382,6 +2535,7 @@ export function selfTest() {
         && bothTwoThree.rerouted[0].reason === REROUTE.INHERITED);
 
     // -- OUT OF PROCESS: rule 3 can actually fail a run --------------------
+    battery('OUT OF PROCESS: rule 3 can actually fail a run');
     const rerouteRoot = tree('oop-reroute', {
       'a.e2e.test.ts': built('childEnv({ NODE_ENV: \'development\' })'),
     });
@@ -2400,6 +2554,7 @@ export function selfTest() {
       JSON.stringify({ status: rerouteGreen.status, out: (rerouteGreen.stdout || '').trim() }));
 
     // -- (14) wiring. Unwiring the gate must redden HERE, not go quiet. ----
+    battery('(14) wiring. Unwiring the gate must redden HERE, not go quiet.');
     const pkg = JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8'));
     const alias = pkg.scripts?.['check:cli-test-child-env'] ?? '';
     t('a package.json alias invokes this script', /check-cli-test-child-env\.mjs/.test(alias), alias);
@@ -2408,6 +2563,7 @@ export function selfTest() {
     t('a lint job runs the alias', lintYml.includes('pnpm check:cli-test-child-env'));
 
     // -- (15) the live tree, as a case rather than as the run's only evidence
+    battery('(15) the live tree, as a case rather than as the run\'s only evidence');
     const live = audit(REPO_ROOT);
     t('the live tree resolves a real population (not zero, not a refusal)',
       live.refusal === null && live.files > 0 && live.spawners > 0,
@@ -2494,6 +2650,10 @@ export function selfTest() {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+
+  // The floor runs BEFORE the verdict below, so a success line can only be
+  // printed by a run in which every declared battery registered its cases.
+  for (const message of batteryFloorFailures()) cases.push({ name: message, ok: false });
 
   const failed = cases.filter((c) => !c.ok);
   for (const c of failed) console.error(`  ✗ ${c.name}${c.detail ? ` -- ${c.detail}` : ''}`);

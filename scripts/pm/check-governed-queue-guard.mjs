@@ -236,6 +236,51 @@ import {
 } from './check-governed-merges.mjs';
 import { isEntrypoint } from '../invoked-as.mjs';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'the register is READ, never restated (#9840)': 6,
+  'the exit contract as a table': 4,
+  'the merge-queue head ref': 6,
+  'event payloads, including the malformed ones': 5,
+  'the approval predicate': 3,
+  '⭐ The fail-open direction a naive `.some(r => r.state === \'APPROVED\')`': 5,
+  'the 2026-08-27 pinned predicate (the queue leg\'s)': 12,
+  'decomposition, and the multi-PR group trap': 6,
+  'the verdict table, both events': 10,
+  'the pull_request leg is an EARLY WARNING and never reddens': 3,
+  'the replay fixtures: the three incidents this guard descends from': 9,
+  '⭐ the ordering guarantee, measured with a spy that THROWS': 7,
+  'the words a reader acts on (requirement (e))': 26,
+  '⭐ #14063 END TO END: what the dependency install actually buys': 9,
+  'the PR-head reader: throws, never defaults (exit 4 at the caller)': 3,
+  'the WIRING pin: the workflow still spells this context name': 8,
+  '⭐ #14063: the environment the exemption needs, pinned to the YAML': 7,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 17;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, '..', '..');
 
@@ -986,10 +1031,31 @@ const REPLAYS = [
   },
 ];
 
+// Set by `selfTest()` only after its verdict is printed, and read at the
+// dispatch: a `return` that leaves the function above that line prints nothing
+// and still exits 0 — a self-test that never finished, reported as one that
+// passed (#13798). The self-test's own exit code stays load-bearing, so the
+// handshake is a flag rather than a returned sentinel.
+let selfTestReachedVerdict = false;
+
 export async function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const batterySeen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+  };
   let checked = 0;
   const failures = [];
   const assert = (name, cond, detail) => {
+    registerCase();
     checked += 1;
     if (!cond) failures.push(`${name}${detail ? `: ${detail}` : ''}`);
   };
@@ -1011,6 +1077,7 @@ export async function selfTest() {
   // The one assertion that would catch this file growing its own copy of the
   // surface list: every surface the register declares must be answerable
   // through it here, including one added tomorrow.
+  battery('the register is READ, never restated (#9840)');
   for (const surface of GOVERNED_SURFACES) {
     const sample = surface.prefix ? `${surface.prefix}sample.md` : surface.exact;
     const { governed } = decomposeGovernedWork([row(1, [sample])]);
@@ -1019,6 +1086,7 @@ export async function selfTest() {
   assert('this-file-restates-no-surface-list', GOVERNED_SURFACES.length >= 5 && governedPathsIn(['docs/adrs/z.md', 'examples/AGENTS.md']).length === 0);
 
   // ── the exit contract as a table ──────────────────────────────────────────
+  battery('the exit contract as a table');
   assert('exit-clear-is-0', EXIT_CLEAR === 0);
   assert('exit-cannot-run-is-1', EXIT_CANNOT_RUN === 1);
   assert(
@@ -1029,6 +1097,7 @@ export async function selfTest() {
   assert('the-unapproved-refusal-shares-the-siblings-GOVERNED-code-3', EXIT_REFUSED_UNAPPROVED === 3);
 
   // ── the merge-queue head ref ──────────────────────────────────────────────
+  battery('the merge-queue head ref');
   assert('queue-ref-yields-its-pr', pullNumberFromQueueRef('refs/heads/gh-readonly-queue/main/pr-11387-484ae0019cd') === 11387);
   assert('queue-ref-without-the-refs-prefix-too', pullNumberFromQueueRef('gh-readonly-queue/main/pr-42-abcdef1') === 42);
   assert('a-base-branch-with-a-slash-is-still-read', pullNumberFromQueueRef('refs/heads/gh-readonly-queue/release/v5/pr-7-abcdef1') === 7);
@@ -1037,6 +1106,7 @@ export async function selfTest() {
   assert('nonsense-is-null-never-a-number', pullNumberFromQueueRef(undefined) === null && pullNumberFromQueueRef('') === null);
 
   // ── event payloads, including the malformed ones ──────────────────────────
+  battery('event payloads, including the malformed ones');
   const mg = resolveEventContext({
     eventName: 'merge_group',
     payload: { merge_group: { base_sha: 'b'.repeat(40), head_sha: 'h'.repeat(40), head_ref: 'refs/heads/gh-readonly-queue/main/pr-99-abcdef1', base_ref: 'refs/heads/main' } },
@@ -1053,11 +1123,13 @@ export async function selfTest() {
   assert('an-unsupported-event-CANNOT-RUN-and-names-both-events-it-does-read', !unsupported.ok && /merge_group/.test(unsupported.reason) && /pull_request/.test(unsupported.reason), unsupported.reason);
 
   // ── the approval predicate ────────────────────────────────────────────────
+  battery('the approval predicate');
   assert('an-approval-is-an-approval', approvalVerdict(approved('hotlong')).state === 'approved');
   assert('no-reviews-at-all-is-unapproved', approvalVerdict([]).state === 'unapproved');
   assert('a-COMMENTED-review-is-not-an-approval', approvalVerdict([{ state: 'COMMENTED', user: { login: 'a' } }]).state === 'unapproved');
   // ⭐ The fail-open direction a naive `.some(r => r.state === 'APPROVED')`
   // gets wrong, and the only direction this file may not be wrong in.
+  battery('⭐ The fail-open direction a naive `.some(r => r.state === \'APPROVED\')`');
   assert(
     'an-approval-later-superseded-by-CHANGES_REQUESTED-is-NOT-an-approval',
     approvalVerdict([
@@ -1088,6 +1160,7 @@ export async function selfTest() {
   // membership pin iterates it and the membership assertion pins it to the
   // ruling: a silent edit to the set fails here, and nothing else in the repo
   // restates the names as data.
+  battery('the 2026-08-27 pinned predicate (the queue leg\'s)');
   assert('the-authorized-set-is-exactly-the-ruled-two-accounts', GOVERNED_APPROVERS.join() === 'os-zhuang,hotlong');
   for (const login of GOVERNED_APPROVERS) {
     assert(`an-authorized-approval-pinned-to-the-current-head-passes: ${login}`, pinnedApprovalVerdict([approvedAt(login, HEAD)], HEAD).state === 'approved');
@@ -1120,6 +1193,7 @@ export async function selfTest() {
   );
 
   // ── decomposition, and the multi-PR group trap ────────────────────────────
+  battery('decomposition, and the multi-PR group trap');
   const clearRows = [row(1, ['packages/spec/src/index.ts', 'content/docs/x.mdx'])];
   assert('a-clear-diff-decomposes-to-nothing', decomposeGovernedWork(clearRows).governed.length === 0 && decomposeGovernedWork(clearRows).unattributed.length === 0);
   const mixed = decomposeGovernedWork([row(5, ['AGENTS.md', 'packages/spec/src/index.ts'])]);
@@ -1133,6 +1207,7 @@ export async function selfTest() {
   assert('an-UNGOVERNED-commit-naming-no-pr-is-simply-not-our-business', decomposeGovernedWork([{ sha: 'd'.repeat(40), subject: 'x', pr: null, paths: ['README.md'] }]).unattributed.length === 0);
 
   // ── the verdict table, both events ────────────────────────────────────────
+  battery('the verdict table, both events');
   const clearV = run('merge_group', clearRows);
   assert('a-clear-merge-group-is-CLEAR-and-exits-0', clearV.conclusion === 'clear' && clearV.exitCode === EXIT_CLEAR);
   assert('and-it-made-zero-review-lookups', clearV.apiCalls === 0);
@@ -1158,6 +1233,7 @@ export async function selfTest() {
   assert('one-approved-pr-does-NOT-carry-an-unapproved-sibling-through-the-same-group', partial.exitCode === EXIT_REFUSED_UNAPPROVED);
 
   // ── the pull_request leg is an EARLY WARNING and never reddens ────────────
+  battery('the pull_request leg is an EARLY WARNING and never reddens');
   const warnedV = run('pull_request', [row(9527, ['AGENTS.md'])], new Map([[9527, approvalVerdict([])]]));
   assert('a-governed-unapproved-PULL-REQUEST-is-WARNED-not-refused', warnedV.conclusion === 'warned' && warnedV.exitCode === EXIT_CLEAR);
   assert(
@@ -1169,6 +1245,7 @@ export async function selfTest() {
   assert('and-an-unattributed-governed-commit-does-not-redden-a-pr-run-either', run('pull_request', [{ sha: 'c'.repeat(40), subject: 'x', pr: null, paths: ['CLAUDE.md'] }]).exitCode === EXIT_CLEAR);
 
   // ── the replay fixtures: the three incidents this guard descends from ─────
+  battery('the replay fixtures: the three incidents this guard descends from');
   for (const replay of REPLAYS) {
     const rows = [row(replay.pr, replay.files, 'e'.repeat(40), replay.subject)];
     const queued = run('merge_group', rows, new Map([[replay.pr, pinnedApprovalVerdict([], HEAD)]]));
@@ -1184,6 +1261,7 @@ export async function selfTest() {
   // "The path test runs first and a clear diff makes no API call" is a claim
   // about control flow, so it is tested by making the API impossible to touch.
   // A mock returning [] would have passed against a version that called it.
+  battery('⭐ the ordering guarantee, measured with a spy that THROWS');
   let apiTouched = 0;
   const explode = () => {
     apiTouched += 1;
@@ -1297,6 +1375,7 @@ export async function selfTest() {
   );
 
   // ── the words a reader acts on (requirement (e)) ──────────────────────────
+  battery('the words a reader acts on (requirement (e))');
   const refusalText = renderGuardVerdict(refusedV);
   assert('a-refusal-names-the-exact-paths-that-matched', refusalText.includes('AGENTS.md'), refusalText);
   assert('a-refusal-names-the-pull-request', refusalText.includes('#9527'), refusalText);
@@ -1411,6 +1490,7 @@ export async function selfTest() {
   // answer produces — certified, un-run, drifted — and the workflow pins below
   // assert the environment that makes the certified answer reachable at all.
   // Neither half is worth much alone; together they are the claim.
+  battery('⭐ #14063 END TO END: what the dependency install actually buys');
   const regenPaths = ['objectstack-ai', 'objectstack-api', 'objectstack-data', 'objectstack-query'].map(
     (skill) => `skills/${skill}/references/_index.md`,
   );
@@ -1492,6 +1572,7 @@ export async function selfTest() {
   assert('a-recompute-that-THROWS-never-lifts-it-propagates-into-CANNOT-RUN', liftThrew !== null && /EACCES/.test(liftThrew), String(liftThrew));
 
   // ── the PR-head reader: throws, never defaults (exit 4 at the caller) ────
+  battery('the PR-head reader: throws, never defaults (exit 4 at the caller)');
   const fakeRes = (body, ok = true, status = 200) => async () => ({ ok, status, json: async () => body });
   const readerArgs = { apiUrl: 'https://api.example', slug: 'o/r', token: null };
   assert(
@@ -1515,6 +1596,7 @@ export async function selfTest() {
   // #6865's whole defect — and the name declared here becomes a name nothing
   // publishes. Read from disk on purpose: a constant asserting against itself
   // proves nothing.
+  battery('the WIRING pin: the workflow still spells this context name');
   try {
     const wf = readFileSync(join(repoRoot, '.github', 'workflows', CHECK_WORKFLOW), 'utf8');
     assert('the-workflow-exists-and-declares-the-job-id-this-file-names', wf.includes(`\n  ${CHECK_JOB_ID}:\n`), CHECK_JOB_ID);
@@ -1534,6 +1616,7 @@ export async function selfTest() {
     // generator and every #11705 row fails closed, which is precisely the state
     // the 2026-09-01 ruling ended. A green self-test over a workflow that had
     // silently lost its install would be the loudest possible false negative.
+  battery('⭐ #14063: the environment the exemption needs, pinned to the YAML');
     const audit = installStepAudit(wf);
     assert('the-job-installs-the-workspace-dependencies-the-recompute-runs-on', audit.installIndex !== -1 && /--frozen-lockfile/.test(audit.installCommand), audit.installCommand || '(no pnpm install step)');
     assert('the-job-acquires-pnpm-through-the-shared-composite-not-a-second-spelling', audit.acquiresPnpm, JSON.stringify(audit.steps));
@@ -1568,6 +1651,50 @@ export async function selfTest() {
     assert('the-workflow-file-is-readable', false, String(error?.message ?? error).split('\n')[0]);
   }
 
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => { failures.push(message); };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
+  }
+
   for (const f of failures) console.error(`  ✗ ${f}`);
   if (failures.length > 0) {
     console.error(`✗ check-governed-queue-guard self-test: ${failures.length} of ${checked} case(s) failed.`);
@@ -1586,9 +1713,20 @@ export async function selfTest() {
       'dependency install the recompute needs, its register-agnostic filter-free form, and its continue-on-error ' +
       'degradation).',
   );
+
+  selfTestReachedVerdict = true;
   return 0;
 }
 
 if (isEntrypoint(import.meta.url) && process.argv.includes('--self-test')) {
-  process.exit(await selfTest());
+  const selfTestCode = await selfTest();
+  if (!selfTestReachedVerdict) {
+    console.error(
+      '\n✗ check-governed-queue-guard self-test: selfTest() returned without reaching its verdict,\n'
+        + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+        + 'that never finished as a self-test that passed.\n',
+    );
+    process.exit(1);
+  }
+  process.exit(selfTestCode);
 }

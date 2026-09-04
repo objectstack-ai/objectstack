@@ -8,10 +8,14 @@
  * caller's own `Accept-Language` first (only when it names a locale in
  * `AUTH_EMAIL_TEMPLATE_LOCALES`), and the deployment default second. The
  * 2026-08-13 ruling had made the deployment default the whole answer and
- * rejected `Accept-Language` outright. Still no `sys_user.locale` column —
- * that half stayed deferred. The ruling text of record lives on
- * `AuthManager.setDefaultEmailLocale` / `authEmailLocaleFromRequest`; the
- * request rung's own cases are the last describe block in this file.
+ * rejected `Accept-Language` outright. #14762 then added the rung ABOVE both,
+ * per the #14788 option-D ruling of 2026-09-03: the recipient's own
+ * `sys_user.locale` (#13881) when the account holds one. Invitations keep the
+ * deployment rung — an invitee has no row until acceptance (#14641) — and
+ * this file pins that abstention too. The ruling text of record lives on
+ * `AuthManager.setDefaultEmailLocale` / `authEmailLocaleFromRequest` /
+ * `emailLocaleArg`; the request rung's own cases and the stored rung's are the
+ * last two describe blocks in this file.
  *
  * Before this, no `sendTemplate` call in `auth-manager.ts` passed a `locale`,
  * so `EmailService`'s ladder always resolved `en-US` and the localized rows
@@ -453,5 +457,166 @@ describe('#14319 — authEmailLocaleFromRequest', () => {
     const hostile = { headers: { get() { throw new Error('boom'); } } };
     expect(() => authEmailLocaleFromRequest(hostile)).not.toThrow();
     expect(authEmailLocaleFromRequest(hostile)).toBeUndefined();
+  });
+});
+
+// ── #14762 — the stored rung ───────────────────────────────────────────────
+
+/**
+ * #14788 was ruled option D on 2026-09-03 (maintainer verbatim 「同意」):
+ *
+ *   `sys_user.locale` when set → the request's `Accept-Language` → the
+ *   deployment default.
+ *
+ * The recorded reasoning: a value the user chose is stronger evidence of
+ * intent than the `Accept-Language` the browser just sent. The case that
+ * forces the order is the send where the requester is NOT the recipient — an
+ * admin-initiated password reset (`admin-import-users.ts` calls
+ * `requestPasswordReset`), where the request rung would otherwise stamp the
+ * ADMIN's browser language onto the USER's mail.
+ *
+ * ⚠️ Every rung below is given a DIFFERENT locale, so each assertion names
+ * exactly one rung. A pin that set two rungs to the same tag would pass
+ * whichever produced the value.
+ */
+async function driveResetWith(opts: {
+  stored?: unknown;
+  header?: string;
+  deployment?: string;
+  engine?: unknown;
+}) {
+  const reads: any[] = [];
+  const dataEngine =
+    opts.engine ??
+    {
+      async findOne(object: string, query: any) {
+        reads.push({ object, query });
+        return object === 'sys_user' ? { locale: opts.stored } : null;
+      },
+    };
+  const { capturedConfig, sent } = await boot(opts.deployment, { dataEngine } as never);
+  const request =
+    opts.header === undefined
+      ? undefined
+      : new Request('http://x/any', { headers: { 'accept-language': opts.header } });
+  await capturedConfig.emailAndPassword.sendResetPassword(
+    { user: USER, url: 'http://x/reset', token: 't' },
+    request,
+  );
+  return { sent, reads };
+}
+
+describe('#14762 — sys_user.locale is the top rung of the auth-mail ladder', () => {
+  const prevMcpEnv = process.env.OS_MCP_SERVER_ENABLED;
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.OS_MCP_SERVER_ENABLED = 'false';
+  });
+  afterEach(() => {
+    if (prevMcpEnv === undefined) delete process.env.OS_MCP_SERVER_ENABLED;
+    else process.env.OS_MCP_SERVER_ENABLED = prevMcpEnv;
+  });
+
+  it('the stored column outranks BOTH the request header and the deployment default', async () => {
+    // Three rungs, three distinct locales — the pin the card names.
+    const { sent } = await driveResetWith({
+      stored: 'ja-JP',
+      header: 'zh-CN',
+      deployment: 'es-ES',
+    });
+    expect(sent).toHaveLength(1);
+    expect(sent[0].locale).toBe('ja-JP');
+  });
+
+  it('with no stored column the request rung answers — #14319 intact', async () => {
+    const { sent } = await driveResetWith({ stored: null, header: 'zh-CN', deployment: 'es-ES' });
+    expect(sent[0].locale).toBe('zh-CN');
+  });
+
+  it('with neither stored nor request, the deployment rung answers — #8195 intact', async () => {
+    const { sent } = await driveResetWith({ stored: null, deployment: 'es-ES' });
+    expect(sent[0].locale).toBe('es-ES');
+  });
+
+  it('with nothing at all, NO locale is named and the documented en-US floor applies', async () => {
+    const { sent } = await driveResetWith({ stored: null });
+    expect(sent[0].locale).toBeUndefined();
+    // The ladder's contract is written against an ABSENT key, not an explicit
+    // `undefined` — see the #8195 case above.
+    expect(Object.prototype.hasOwnProperty.call(sent[0], 'locale')).toBe(false);
+  });
+
+  it('reads the column off the recipient row by id, projected, under a system context', async () => {
+    // Establishes which rung produced the value above.
+    const { reads } = await driveResetWith({ stored: 'ja-JP', header: 'zh-CN' });
+    const userRead = reads.find((r) => r.object === 'sys_user');
+    expect(userRead, 'no sys_user read happened').toBeTruthy();
+    expect(userRead.query.where).toEqual({ id: 'u1' });
+    expect(userRead.query.fields).toEqual(['locale']);
+    expect(userRead.query.context?.isSystem).toBe(true);
+  });
+
+  it('maps a stored catalog language onto the row spelling', async () => {
+    // `zh` is a legal BCP-47 tag and a legal value of the column; auth rows
+    // are keyed `zh-CN` and matched exactly.
+    const { sent } = await driveResetWith({ stored: 'zh', deployment: 'es-ES' });
+    expect(sent[0].locale).toBe('zh-CN');
+  });
+
+  it('passes a stored tag we ship no row for through, unlike the request rung', async () => {
+    // The asymmetry is deliberate: the request rung REQUIRES a hit in
+    // AUTH_EMAIL_TEMPLATE_LOCALES because "a per-request header is a weaker
+    // claim than a deployment's declaration". A column the user set for
+    // themselves is not that weak claim — a tenant overlaying en-GB rows must
+    // be able to ask for them.
+    const { sent } = await driveResetWith({ stored: 'en-GB', header: 'zh-CN', deployment: 'es-ES' });
+    expect(sent[0].locale).toBe('en-GB');
+    // Same tag through the request rung is refused, unchanged.
+    expect(authEmailLocaleFromRequest({ headers: { 'accept-language': 'en-GB' } })).toBeUndefined();
+  });
+
+  it('refuses the stringified-nothing literals a lossy producer leaves at rest', async () => {
+    // hotcrm's measured dead-letter shape. `normalizeRecipientLocale` — the
+    // messaging seam's normalizer, reused rather than re-written — refuses it.
+    for (const junk of ['undefined', 'null', '', '   ', 42, {}]) {
+      const { sent } = await driveResetWith({ stored: junk, deployment: 'es-ES' });
+      expect(sent[0].locale, `stored ${JSON.stringify(junk)} named a locale`).toBe('es-ES');
+    }
+  });
+
+  it('a failing recipient read never blocks the mail', async () => {
+    const { sent } = await driveResetWith({
+      engine: { async findOne() { throw new Error('sys_user unavailable'); } },
+      header: 'zh-CN',
+      deployment: 'es-ES',
+    });
+    expect(sent).toHaveLength(1);
+    expect(sent[0].locale).toBe('zh-CN');
+  });
+
+  it('an auth manager with no data engine keeps exactly the two-rung behaviour', async () => {
+    const { capturedConfig, sent } = await boot('es-ES');
+    await capturedConfig.emailAndPassword.sendResetPassword(
+      { user: USER, url: 'http://x/reset', token: 't' },
+      new Request('http://x/any', { headers: { 'accept-language': 'zh-CN' } }),
+    );
+    expect(sent[0].locale).toBe('zh-CN');
+  });
+
+  it('the INVITATION send is untouched — its rung is #14641\'s', async () => {
+    // Scope fence, asserted rather than described: an invitee has no sys_user
+    // row until acceptance, so this send still names the deployment rung even
+    // when a row for that address would have carried a locale.
+    const dataEngine = { async findOne() { return { locale: 'ja-JP' }; } };
+    const { capturedConfig, sent } = await boot('es-ES', { dataEngine } as never);
+    const org = capturedConfig.plugins.find((p: any) => p.id === 'organization');
+    await org._opts.sendInvitationEmail({
+      email: 'invitee@example.com',
+      invitation: { id: 'inv1', organizationId: 'o1', role: 'member' },
+      organization: { name: 'Northwind' },
+      inviter: { user: { email: 'dana@example.com', name: 'Dana' } },
+    });
+    expect(sent[0].template).toBe('auth.invitation');
+    expect(sent[0].locale).toBe('es-ES');
   });
 });

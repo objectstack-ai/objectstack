@@ -925,7 +925,14 @@ function main() {
     return;
   }
   // Every invocation, not a lint step -- see the header note on why.
-  selfTest({ quiet: true });
+  if (selfTest({ quiet: true }) !== SELF_TEST_VERDICT) {
+    console.error(
+      '\n✗ check-test-completeness self-test: selfTest() returned without reaching its verdict,\n'
+        + 'so no success line was printed. Running the gate on top of a self-test\n'
+        + 'that never finished would report an unverified gate as a verified one.\n',
+    );
+    process.exit(1);
+  }
 
   const { verdict, paths } = invocationVerdict(argv);
   if (verdict) reportVerdict(verdict);

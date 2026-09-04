@@ -47,32 +47,10 @@
       }
     },
     "patterns": {
-      "children": {
-        "method": {
-          "status": "dead",
-          "verifiedAt": "2026-09-02",
-          "evidenceScope": "in-repo",
-          "note": "0 read sites at 2514d49f3. The `patterns` record is normalized into `this.config.crud.patterns` and never read: every CRUD route is mounted from the hard-coded method/path pairs in rest-server.ts#registerCrudEndpoints, so a custom pattern changes nothing. The four rows here are that one container's members — `patterns` is dead as a whole, and each member is recorded so the verdict is falsifiable per key rather than inherited. Related: #14365 asks a different question about this same key (its z.record input type demands all five operations); that is a declaration defect, not a liveness one, and is not re-derived here."
-        },
-        "path": {
-          "status": "dead",
-          "verifiedAt": "2026-09-02",
-          "evidenceScope": "in-repo",
-          "note": "0 read sites at 2514d49f3. See `patterns.method`: the container is never read, so a custom URL path pattern is accepted, validated and ignored."
-        },
-        "summary": {
-          "status": "dead",
-          "verifiedAt": "2026-09-02",
-          "evidenceScope": "in-repo",
-          "note": "0 read sites at 2514d49f3. See `patterns.method`. Additionally documentation-shaped: nothing in the served OpenAPI document reads a configured per-operation summary — that document is the pre-generated @objectstack/spec contract enriched at request time."
-        },
-        "description": {
-          "status": "dead",
-          "verifiedAt": "2026-09-02",
-          "evidenceScope": "in-repo",
-          "note": "0 read sites at 2514d49f3. See `patterns.summary`."
-        }
-      }
+      "status": "dead",
+      "verifiedAt": "2026-09-03",
+      "evidenceScope": "cross-repo",
+      "note": "REMOVED 2026-09-03 (#14691) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error). No source is stripped by a conversion: a RestServerConfig is plugin TS configuration, never a stack collection member or a sys_metadata row (the `RestServerConfig.openApi31` precedent, #4579), so the D3 entry `rest-server-config-dead-keys-retired` carries the prescription. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent); every CRUD route is mounted from the fixed method/path pairs in rest-server.ts#registerCrudEndpoints, which the client SDK, the discovery document and the served /openapi.json all describe, so a per-operation method/path knob was never enforceable without making those surfaces lie; `crud.dataPrefix` is the live knob that moves them, and an endpoint on a custom path or method is a declarative `api` endpoint (`type: 'object_operation'`). The four child rows this container carried (`method` / `path` / `summary` / `description` — the members of `CrudEndpointPatternSchema`) collapse into this one row: the tombstone is a leaf, the value def left the shape with it (RETIRED_DEFS_BY_MAJOR[18] `api/CrudEndpointPattern`), and rows for keys that left the walked shape would report ORPHAN. Closes #14365's question about the record's input type — there is no record left to reshape. Pre-retirement census note: 0 read sites at 2514d49f3. The `patterns` record is normalized into `this.config.crud.patterns` and never read: every CRUD route is mounted from the hard-coded method/path pairs in rest-server.ts#registerCrudEndpoints, so a custom pattern changes nothing. The four rows here are that one container's members — `patterns` is dead as a whole, and each member is recorded so the verdict is falsifiable per key rather than inherited. Related: #14365 asks a different question about this same key (its z.record input type demands all five operations); that is a declaration defect, not a liveness one, and is not re-derived here. Scope widened 2026-09-03: in-repo census at 2514d49f3 (0 read sites) + objectui @d4c6a86 clean + cloud @9b6abe0f2fd5 clean STRUCTURALLY (#14796: cloud never authors a `RestServerConfig`), so `evidenceScope` is `cross-repo`."
     },
     "dataPrefix": {
       "status": "live",
@@ -84,9 +62,9 @@
     },
     "objectParamStyle": {
       "status": "dead",
-      "verifiedAt": "2026-09-02",
-      "evidenceScope": "in-repo",
-      "note": "0 read sites at 2514d49f3. Repo-wide there are no reads outside packages/spec and rest-server.ts either. Every CRUD route takes the object name as a PATH segment; `'query'` is accepted, validated against the enum since #11984, and mounts exactly what `'path'` mounts. Enforcing it would be a second routing shape for every data route, which is why the call is a follow-up and not a ledger decision."
+      "verifiedAt": "2026-09-03",
+      "evidenceScope": "cross-repo",
+      "note": "REMOVED 2026-09-03 (#14691) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error). No source is stripped by a conversion: a RestServerConfig is plugin TS configuration, never a stack collection member or a sys_metadata row (the `RestServerConfig.openApi31` precedent, #4579), so the D3 entry `rest-server-config-dead-keys-retired` carries the prescription. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent); every CRUD route takes the object name as a PATH segment, so `'query'` was validated (since #11984) and mounted exactly what `'path'` mounts; there is no second routing shape to select. Pre-retirement census note: 0 read sites at 2514d49f3. Repo-wide there are no reads outside packages/spec and rest-server.ts either. Every CRUD route takes the object name as a PATH segment; `'query'` is accepted, validated against the enum since #11984, and mounts exactly what `'path'` mounts. Enforcing it would be a second routing shape for every data route, which is why the call is a follow-up and not a ledger decision. Scope widened 2026-09-03: in-repo census at 2514d49f3 (0 read sites) + objectui @d4c6a86 clean + cloud @9b6abe0f2fd5 clean STRUCTURALLY (#14796: cloud never authors a `RestServerConfig`), so `evidenceScope` is `cross-repo`."
     }
   }
 }
