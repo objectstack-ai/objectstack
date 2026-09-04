@@ -58,6 +58,29 @@
  * `scripts/check-self-test-wired.mjs`, which already owns the answer to "which
  * scripts does CI run that ship a `--self-test`". One definition, two gates.
  *
+ * ## That sentence was a PROMISE for one release, and it was false (#15414)
+ *
+ * What was imported was the EXTRACTION (`collectInvocations`, `carriesSelfTest`,
+ * `codeOf`) — not the population. This gate then built its own from a private
+ * `walkScripts` anchored at the repo-root `scripts/` dir, and the sibling gate
+ * had meanwhile grown a SECOND population source: the package-local gate lane
+ * CI names by path (#15342). Two answers to one question, and they disagreed by
+ * exactly one file:
+ *
+ *   check-self-test-wired             169 of those are run by 30 workflow(s)
+ *   check-self-test-workflow-commands 168 script(s) CI runs ship a `--self-test`
+ *
+ * The missing member was `packages/lint/scripts/check-reference-carrier-shape
+ * .mjs`, which `lint.yml` runs with `--self-test` on every pull request. Its
+ * output was in no sweep — and NOTHING said so, because every `#4690` refusal
+ * below fires on an EMPTY population or an empty candidate set. A population
+ * that is complete-minus-one refuses nothing and prints a confident scope line.
+ *
+ * So the population now arrives through `collectPopulation`, exported by the
+ * gate that owns it. ⛔ This file adds no walk of its own — a second walk is
+ * how the drift got here, and a re-derivation that agrees today is a
+ * re-derivation that can stop agreeing without either side going red.
+ *
  * ## The verdict comes from real output, never from a rule about source
  *
  * The static scan below only SELECTS which self-tests to run. Whether a token
@@ -93,17 +116,33 @@
  * nothing" are the two readings this gate is built to keep apart.
  */
 
-import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
 import { isEntrypoint } from './invoked-as.mjs';
-import { collectInvocations, carriesSelfTest, codeOf } from './check-self-test-wired.mjs';
+import { codeOf, collectPopulation, refusalFor } from './check-self-test-wired.mjs';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
+
+/**
+ * The workflow corpus this gate's population is derived FROM.
+ *
+ * Nothing here reads it — `collectPopulation` does. It is declared anyway, for
+ * two reasons that are both mechanical:
+ *
+ *   - `scripts/pm/dispatch-gates.mjs` derives this gate's family by scanning
+ *     THIS module's source for path-shaped literals. Deleting the literal along
+ *     with the read would drop this gate off every card that edits a workflow —
+ *     while its verdict still moves with those files, since a workflow is what
+ *     decides which self-tests are in the population at all.
+ *   - it is PINNED against `read.workflowDir` in `main()` below, so it is a live
+ *     coupling rather than a decoration: the day the shared reader's corpus root
+ *     moves, this gate refuses out loud instead of quietly declaring a directory
+ *     it no longer depends on.
+ */
 const WORKFLOW_DIR = '.github/workflows';
-const SCRIPT_EXT = /\.(mjs|mts|js|sh)$/;
 
 /** How long one self-test may take before the gate refuses rather than guesses. */
 const TIMEOUT_MS = 120_000;
@@ -161,6 +200,30 @@ const CANDIDATE_V2 = /(?:^|["'`]|\\n)[ \t]*::[A-Za-z][\w-]/m;
  * Could this script's CODE (comments masked — prose never prints) print a
  * workflow command?
  *
+ * ## Package-local members are filtered on exactly these terms — decided, not
+ * ## defaulted (#15414)
+ *
+ * The population now includes gates CI names by a package-local path, and the
+ * question asked here is whether they get a lane of their own. They do NOT, and
+ * the reason is that the predicate's subject is the FILE: "could this code print
+ * a workflow command" is a property of the bytes, and where the file sits says
+ * nothing about it. A lane-specific arm would be a second matching rule with no
+ * measurement behind it, in a gate whose whole design note is that its verdict
+ * comes from real output precisely because matching rules rot in silence.
+ *
+ * What that decision COSTS, measured on this tree at the commit that took it:
+ * `packages/lint/scripts/check-reference-carrier-shape.mjs` — the one
+ * package-local member — is NOT selected. Its code carries neither form: no
+ * `##[`, and no `::` that could reach the start of a printed line. So the
+ * candidate set is 17 before and 17 after, and this change spawns ZERO extra
+ * subprocesses today.
+ *
+ * The price is deferred, not waived, and it is small: that gate's `--self-test`
+ * runs in 0.68s wall (measured, shared box), against ~14s for the 17 already
+ * selected. If it ever gains a token in code it joins the candidate set on the
+ * same terms as any root script, and paying 0.7s to scan the output of a
+ * self-test CI runs on every pull request is the trade this gate exists to make.
+ *
  * @param {string} relPath
  * @param {string} source
  */
@@ -170,15 +233,6 @@ export function isCandidate(relPath, source) {
 }
 
 // ---------------------------------------------------------------------------
-
-function walkScripts(dir, out = []) {
-  for (const entry of readdirSync(dir).sort()) {
-    const abs = join(dir, entry);
-    if (statSync(abs).isDirectory()) walkScripts(abs, out);
-    else if (SCRIPT_EXT.test(entry)) out.push(abs.slice(ROOT.length + 1).split('\\').join('/'));
-  }
-  return out;
-}
 
 /**
  * Run one self-test and hand back everything it said.
@@ -203,52 +257,26 @@ export function runSelfTest(relPath) {
 }
 
 function main() {
-  const scriptsDir = join(ROOT, 'scripts');
-  const workflowDir = join(ROOT, WORKFLOW_DIR);
   const refuse = (message) => {
     console.error(`\ncheck-self-test-workflow-commands: REFUSED — ${message}\n`);
     process.exit(1);
   };
-  if (!existsSync(scriptsDir)) refuse('scripts/ does not exist, so nothing was read (#4690).');
-  if (!existsSync(workflowDir)) refuse(`${WORKFLOW_DIR} does not exist, so nothing was read (#4690).`);
 
-  const files = walkScripts(scriptsDir);
-  if (files.length === 0) refuse('the walk over scripts/ found no files — a broken walk, not a clean tree (#4690).');
-
-  const sources = new Map();
-  const carriers = new Set();
-  for (const relPath of files) {
-    let source;
-    try {
-      source = readFileSync(join(ROOT, relPath), 'utf8');
-    } catch {
-      refuse(`${relPath} could not be read.`);
-    }
-    sources.set(relPath, source);
-    if (carriesSelfTest(relPath, source)) carriers.add(relPath);
+  // ONE definition, two gates (#15414). The walk, the sources, the workflow
+  // corpus, the alias expansion, the package-local admission and every `#4690`
+  // floor belong to `check-self-test-wired.mjs` and are IMPORTED. This gate's
+  // own work begins at the prefilter below, and it adds no walk: the drift this
+  // replaced was a second walk that agreed for a while and then quietly did not.
+  const read = collectPopulation();
+  if (read.refusal) refuse(read.refusal);
+  if (read.workflowDir !== WORKFLOW_DIR) {
+    refuse(
+      `the shared population was read from \`${read.workflowDir}\`, but this gate declares ` +
+        `\`${WORKFLOW_DIR}\` to the dispatch derivation. One of the two moved, and a gate naming a ` +
+        'corpus it no longer depends on is derived onto the wrong cards in silence.',
+    );
   }
-  if (carriers.size === 0) {
-    refuse('no script under scripts/ carries a `--self-test` — this tree has dozens, so the reader is broken (#4690).');
-  }
-
-  const workflowNames = readdirSync(workflowDir).filter((f) => /\.ya?ml$/.test(f)).sort();
-  if (workflowNames.length === 0) refuse(`${WORKFLOW_DIR} holds no workflow files (#4690).`);
-  const workflows = workflowNames.map((name) => ({ name, text: readFileSync(join(workflowDir, name), 'utf8') }));
-
-  let pkgScripts = {};
-  try {
-    pkgScripts = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).scripts ?? {};
-  } catch {
-    refuse('the root package.json could not be read or parsed.');
-  }
-
-  const { named } = collectInvocations(workflows, pkgScripts);
-  if (named.size === 0) refuse('no workflow names any scripts/ file — the workflow reader is broken (#4690).');
-
-  const population = [...carriers].filter((s) => named.has(s)).sort();
-  if (population.length === 0) {
-    refuse('no script CI runs ships a `--self-test` — the population reader is broken, not the tree (#4690).');
-  }
+  const { population, packageLocal, sources } = read;
 
   const candidates = population.filter((s) => isCandidate(s, sources.get(s)));
   if (candidates.length === 0) {
@@ -274,8 +302,11 @@ function main() {
   }
 
   const scope =
-    `  scope: ${population.length} script(s) CI runs ship a \`--self-test\`; ${candidates.length} mention a ` +
-    'workflow-command token in code (comments masked) and were RUN, and their real stdout+stderr was scanned.';
+    `  scope: ${population.length} script(s) CI runs ship a \`--self-test\` (${packageLocal.length} of them ` +
+    'package-local gate(s) CI names by path, present because this population is the one ' +
+    'check-self-test-wired.mjs exports rather than a second walk taken here); ' +
+    `${candidates.length} mention a workflow-command token in code (comments masked) and were RUN, and ` +
+    'their real stdout+stderr was scanned.';
 
   if (findings.length > 0) {
     console.error(`\ncheck-self-test-workflow-commands: ${findings.length} finding(s)\n`);
@@ -341,12 +372,13 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'innocent output': 4,
   'prefilter reads CODE, never prose': 5,
   'end to end on the real defect site': 5,
+  'the population is imported, never re-walked': 8,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the registry's own size is pinned too. Adding a battery raises
 // this number; removing one is the same ⛔ deliberate edit as lowering a count.
-const SELF_TEST_BATTERY_FLOOR = 6;
+const SELF_TEST_BATTERY_FLOOR = 7;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -447,6 +479,82 @@ function selfTest() {
     ok(scanOutput(r.output).length === 0, `${target} --self-test still prints a line the runner would parse — this is the #11886 defect, live`);
   }
 
+  // ── The population is the sibling gate's, and this file takes no walk (#15414) ──
+  //
+  // The defect these close: this gate used to derive its own population from a
+  // private root walk, so the package-local gate `lint.yml` self-tests on every
+  // pull request was in NO population here and its output was never scanned.
+  // Both halves need an instrument, and they need different ones:
+  //
+  //   - that the imported population CONTAINS the package-local member is a
+  //     live reading, taken against the tree CI actually runs;
+  //   - that this file does not quietly grow a second walk again is a claim
+  //     about THIS SOURCE, and only an own-source pin can hold it. A re-derived
+  //     population that agrees today is one that can stop agreeing with nothing
+  //     going red on either side — which is precisely how the 169/168 split got
+  //     here and stayed.
+  battery('the population is imported, never re-walked');
+  {
+    const SPECIMEN = 'packages/lint/scripts/check-reference-carrier-shape.mjs';
+    const live = collectPopulation();
+    ok(
+      live.refusal === null && live.population.length > 0,
+      `the imported population could not be read (${live.refusal ?? 'empty'}), so the cases below prove nothing (#4690)`,
+    );
+    ok(
+      live.population.includes(SPECIMEN) && live.packageLocal.length > 0,
+      `${SPECIMEN} is not in the population this gate scans. CI runs its --self-test on every pull request; `
+        + 'out of the population, its output is in no sweep and nothing says so (#15414)',
+    );
+    ok(
+      typeof isCandidate(SPECIMEN, live.sources.get(SPECIMEN) ?? '') === 'boolean',
+      'the prefilter could not be applied to the package-local member — it is filtered on exactly the same '
+        + 'terms as a root script, and its VALUE is a measurement of that file, deliberately not pinned here',
+    );
+    ok(
+      live.workflowDir === WORKFLOW_DIR,
+      'the shared reader derives the population from a corpus root this gate does not declare, so the '
+        + 'dispatch derivation would name this gate for the wrong cards',
+    );
+
+    // Own-source. The needles are ASSEMBLED: spelled out, they would be found
+    // in this very fixture and the pin would red on itself forever.
+    let ownCode = '';
+    try {
+      ownCode = codeOf('scripts/check-self-test-workflow-commands.mjs', readFileSync(fileURLToPath(import.meta.url), 'utf8'));
+    } catch {
+      ownCode = '';
+    }
+    ok(ownCode.length > 0, 'this gate could not read its own source, so the own-source pins below prove nothing (#4690)');
+    ok(
+      ['readdir', 'stat'].every((fn) => !ownCode.includes(`${fn}Sync(`)),
+      'this gate walks a directory again. The population is imported for a reason: a second walk here is '
+        + 'what drifted from the sibling gate by one file, silently, in both directions (#15414)',
+    );
+    ok(
+      ownCode.includes('collectPopulation()') && ownCode.includes('check-self-test-wired.mjs'),
+      'the population no longer arrives from the gate that owns it — "one definition, two gates" is back '
+        + 'to being a sentence in a header rather than a mechanism',
+    );
+
+    // The refusals this gate delegated still fire, in both the pure and the
+    // disk arm. Neither is reachable on a healthy tree, which is exactly why
+    // they are driven here rather than trusted.
+    ok(
+      (refusalFor({
+        files: ['scripts/g.mjs'],
+        rootCarriers: new Set(['scripts/g.mjs']),
+        workflows: [{ name: 'lint.yml', text: '' }],
+        pkgScriptCount: 1,
+        named: new Map([['scripts/g.mjs', new Set(['lint.yml'])]]),
+        population: [],
+      }) ?? '').includes('population reader is broken')
+        && (collectPopulation({ root: join(ROOT, '.github') }).refusal ?? '').includes('scripts/ does not exist'),
+      'an empty population, or a tree with no scripts/ at all, stopped being a REFUSAL. "Nothing to check" '
+        + 'and "the reader is broken" are the two readings this gate is built to keep apart (#4690)',
+    );
+  }
+
   // ── The floor: every declared battery RAN, and ran its cases ─────────────
   //
   // Evaluated here, after every battery has had its chance and BEFORE the
@@ -500,7 +608,8 @@ function selfTest() {
   console.log(
     'check-self-test-workflow-commands --self-test: both measured parse rules pinned (legacy form ' +
       'anywhere in a line, current form only at line start), the innocent-output and Perl-namespace ' +
-      'cases, the comment mask in both directions, and one end-to-end run of the real defect site' +
+      'cases, the comment mask in both directions, one end-to-end run of the real defect site, and the ' +
+      'imported population held against the live tree with no second walk taken here' +
       ` — ${declaredBatteries.length} declared batteries, ${totalCases} cases registered, every battery` +
       ' at or above its pinned floor.',
   );
