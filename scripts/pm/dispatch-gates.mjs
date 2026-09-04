@@ -273,6 +273,63 @@
  * them is printed in the residue rather than left as an absence — a schedule
  * this tool cannot narrow is a fact the reader is owed, not one to keep quiet.
  *
+ * ## The SCHEDULED-only routing question, measured and DEFERRED (#14899)
+ *
+ * The section above says what CI's trigger CAN answer. This one records what
+ * a card asked it next, and why the answer was to ship a reading rather than a
+ * rule. The card: the derivation names `node scripts/pm/check-half-states.mjs`
+ * — a live board sweep — for any diff carrying a changeset, on the reading
+ * that its only caller is a `schedule`-triggered workflow, so CI never runs it
+ * on a PR while the dispatch protocol tells a dev to run every printed
+ * command. The proposed general repair was a third withholding class beside
+ * the CI-measured and value-bearing ones: "scheduled-only, not a PR gate".
+ *
+ * Measured first, from the workflow text at fa8c1963 (2026-09-04):
+ *
+ *     .github/workflows/*.yml                                            30
+ *       declaring `schedule:`                                            15
+ *       …of those, contributing a discovered check family                 8
+ *     discovered families                                               252
+ *       reaching a scheduled workflow at all                             21
+ *       reached ONLY through scheduled workflows                         10
+ *       SCHEDULED-ONLY — reached by no PR-time trigger                    0
+ *
+ * All ten candidates dissolve on the same fact, and it is a deliberate repo
+ * posture rather than an accident: every patrol here declares a
+ * `pull_request:` trigger with a `paths:` filter naming its own script, so
+ * "changes to the patrol itself get exercised before they merge"
+ * (`half-state-patrol.yml`'s own comment, and the same words in
+ * `required-set-patrol.yml`, `release-coverage-patrol.yml` and
+ * `merged-branch-reaper.yml`). The card's own specimen is one of those ten:
+ * `half-state-patrol.yml` already carried that trigger on the day the card was
+ * filed. Three of the ten are `validate-deps.yml`'s, including
+ * `check:override-consistency` — a gate every dependency card must run. So
+ * "its only source workflow declares a schedule" is not close to "no PR runs
+ * it", and a class keyed on that predicate would have withheld gates a dev
+ * owes.
+ *
+ * The reading does not turn on where the PR-time line is drawn either:
+ * narrowing `PR_TIME_TRIGGER_EVENTS` to `pull_request` alone leaves the same
+ * zero, because every one of the ten is reached through a `pull_request`
+ * trigger specifically.
+ *
+ * ⛔ So the class is NOT shipped: an empty classification is a capability with
+ * nothing in it, the speculative-capability shape `extractTriggerPaths`'
+ * `paths-ignore:` boundary already refuses two sections down — "when one does
+ * and its families matter, model it then". The cost the card measured (3m09s
+ * of a dev's wall clock, plus shared API quota) is separately gone: #15083
+ * classified that invocation VALUE-BEARING off its `$PROVENANCE` argv, so it
+ * left `--commands` without any scheduled-only rule existing.
+ *
+ * What ships is the reading, and that is the load-bearing half. A deferral is
+ * only honest while its population stays empty, and nothing was watching that:
+ * `declaredTriggerEvents` re-takes the measurement from the workflow text on
+ * every `--self-test`, so the day a family really is scheduled-only the pin
+ * reds on the PR that creates it. Two exits from there, and the pin's own case
+ * names both: give the workflow the `pull_request` paths trigger every patrol
+ * here already carries, or ship the class this section defers. ⛔ Neither exit
+ * is "edit the pin's expectation" — the zero is a reading, not a roster.
+ *
  * ## Why a declaration can only NARROW, and what that guarantee costs (#12842)
  *
  * `declaredInheritedPopulation` refuses any path its own module does not
@@ -1562,6 +1619,120 @@ export function declaresPullRequestTrigger(workflowText) {
   }
   return false;
 }
+
+/**
+ * Every event a workflow's `on:` block DECLARES, in declaration order.
+ *
+ * The third of the three narrow `on:` walkers, kept beside the two above so
+ * the trio cannot drift: `extractTriggerPaths` reads one event's `paths:`,
+ * `declaresPullRequestTrigger` answers one event's presence, and this one
+ * answers WHICH events there are. All three walk indentation rather than
+ * parse YAML, for the reason `extractTriggerPaths` states — this script is
+ * dependency-free by design.
+ *
+ * ## Why it exists when NO derivation consumes it (#14899)
+ *
+ * It is the instrument for the scheduled-only measurement in the header, and
+ * the self-test's live block is its only caller. That is deliberate and it is
+ * the whole shape of what shipped: the classification the card proposed has
+ * ZERO members on this tree, so shipping it would be a capability with nothing
+ * in it, and the header records why. What a deferral needs to be safe is a
+ * reading that goes loud the day the population stops being empty — and a
+ * reading needs an instrument. ⛔ Do not delete this as unused: its caller is
+ * the pin, and deleting it deletes the detection that makes the deferral
+ * honest rather than merely convenient.
+ *
+ * ## The three `on:` spellings, all read
+ *
+ *   - the mapping (`on:` then `  pull_request:` on its own line) — every
+ *     workflow in this tree today;
+ *   - the flow sequence (`on: [push, pull_request]`);
+ *   - the bare scalar (`on: push`), and the block sequence under it.
+ *
+ * The YAML 1.1 spelling is read too: an unquoted `on` is the BOOLEAN `true` to
+ * a 1.1 parser, so `'on':`, `"on":` and a literal `true:` are all the same key
+ * — the same three spellings the two walkers above already accept.
+ *
+ * ## The boundaries, each with the direction it fails in
+ *
+ *   - Only keys at the FIRST indentation level inside `on:` are events. A
+ *     `paths:`/`types:`/`branches:` under an event is not one, and neither is
+ *     a `schedule:` under `jobs:` — a walk that scooped either would report
+ *     events a workflow does not declare, and this reader's whole use is to
+ *     decide that a workflow has NO PR-time trigger. A fabricated event fails
+ *     in the safe direction (it can only ever REMOVE a family from the
+ *     scheduled-only class); a missed one fails in the loud direction (a false
+ *     member, caught by the reader of the pin). Both are pinned below.
+ *   - `workflow_call` is reported as declared and is NOT a PR-time event: a
+ *     reusable workflow runs with its caller's event, so the caller is where
+ *     the question is answered. No family in this tree reaches one.
+ */
+export function declaredTriggerEvents(workflowText) {
+  const out = [];
+  const add = (name) => {
+    const clean = unquoteScalar(name);
+    if (clean !== '' && !out.includes(clean)) out.push(clean);
+  };
+  let inOn = false;
+  let eventIndent = -1;
+  for (const line of workflowText.split('\n')) {
+    const trimmed = line.trim();
+    if (trimmed === '' || trimmed.startsWith('#')) continue;
+    const indent = /^[ \t]*/.exec(line)[0].length;
+    if (indent === 0) {
+      // A new top-level key closes whatever we were inside — the same reset
+      // the two walkers above make, and what keeps a `jobs:` decoy out.
+      const on = /^(?:on|'on'|"on"|true):\s*(.*)$/.exec(trimmed);
+      inOn = Boolean(on);
+      eventIndent = -1;
+      if (on && on[1].trim() !== '') {
+        const flow = flowSequenceItems(on[1]);
+        if (flow.length > 0) for (const item of flow) add(item);
+        else add(on[1].trim());
+        // An inline value IS the whole declaration; nothing indented under it.
+        inOn = false;
+      }
+      continue;
+    }
+    if (!inOn) continue;
+    // The first indented line fixes the level events live at. Anything deeper
+    // belongs to an event, not to `on:`.
+    if (eventIndent === -1) eventIndent = indent;
+    if (indent !== eventIndent) continue;
+    const item = /^-\s*(.*)$/.exec(trimmed);
+    if (item) {
+      add(item[1]);
+      continue;
+    }
+    const key = /^([A-Za-z_][A-Za-z0-9_]*):/.exec(trimmed);
+    if (key) add(key[1]);
+  }
+  return out;
+}
+
+/**
+ * The events that put a workflow in front of a PULL REQUEST — the predicate
+ * the scheduled-only measurement subtracts by (#14899).
+ *
+ * `pull_request` and `pull_request_target` run on the PR itself; `merge_group`
+ * runs on the speculative merge the queue builds out of it; `push` runs on the
+ * result of landing it. All four judge a diff a dev wrote, which is the
+ * question — `schedule`, `workflow_dispatch`, `workflow_run` and
+ * `workflow_call` judge a board, a human's button, another run, or a caller.
+ *
+ * ⚠️ The set is deliberately WIDE, and the header records that the measured
+ * answer does not depend on it: narrowing it to `pull_request` alone leaves
+ * the scheduled-only count at zero, because every family this tree reaches
+ * through a scheduled workflow is also reached through a `pull_request` one.
+ * A wide set can only ever UNDER-report the class, which is the direction that
+ * fails quietly — so the pin below asserts the narrow reading too.
+ */
+export const PR_TIME_TRIGGER_EVENTS = Object.freeze([
+  'pull_request',
+  'pull_request_target',
+  'merge_group',
+  'push',
+]);
 
 /**
  * A job's steps, each as `{ name, if: <text|null>, text }`, with the original
@@ -8028,7 +8199,7 @@ export const CHANGE_KIND_GATES = [
     gates: [
       {
         name: 'check:type-check-debt',
-        why: 'the ROOT ledger entry (@objectstack/spec-monorepo) IS this program, so a file here moves its raw tsc count even though your diff touches no package — measured, one added bench file put it 19 over and cost a CI round. It is a shrink-only ratchet: the repair is to make the file typecheck, and raising the entry is maintainer-only, never the co-equal option. Most of this class is one missing setting rather than real breakage — the root config carries lib ES2020 and no types, so process and console are absent unless the file declares them ambiently. Needs the workspace closure BUILT — on an unbuilt worktree it refuses outright, and that throw means NOT MEASURED, never `not applicable to me`. Build first, exactly as lint.yml does: pnpm exec turbo run build --filter=./packages/* --filter=./packages/*/* (quote the filter values for your shell)',
+        why: 'the ROOT ledger entry (@objectstack/spec-monorepo) IS this program, so a file here moves its raw tsc count even though your diff touches no package — measured, one added bench file put it 19 over and cost a CI round. It is a shrink-only ratchet: the repair is to make the file typecheck, and raising the entry is maintainer-only — ⛔ MAINTAINER-ONLY under the #8435 convention — never the co-equal option. Most of this class is one missing setting rather than real breakage — the root config carries lib ES2020 and no types, so process and console are absent unless the file declares them ambiently. Needs the workspace closure BUILT — on an unbuilt worktree it refuses outright, and that throw means NOT MEASURED, never `not applicable to me`. Build first, exactly as lint.yml does: pnpm exec turbo run build --filter=./packages/* --filter=./packages/*/* (quote the filter values for your shell)',
       },
     ],
   },
@@ -14573,6 +14744,150 @@ function selfTest() {
   t('a workflow with no paths filter yields an empty list, not a match-nothing list', extractTriggerPaths('on:\n  pull_request:\n    branches: [main]\njobs: {}\n').length === 0);
   t('the flow-sequence spelling is read too', extractTriggerPaths("on:\n  pull_request:\n    paths: ['a/**', \"b/c\"]\n").join('|') === 'a/**|b/c');
   t('pull_request_target is not mistaken for pull_request', extractTriggerPaths("on:\n  pull_request_target:\n    paths:\n      - 'x/**'\n").length === 0);
+
+  // ── The SCHEDULED-ONLY routing question, measured and answered ZERO (#14899)
+  //
+  // The card: the derivation named `node scripts/pm/check-half-states.mjs` —
+  // a live board sweep — for any diff carrying a changeset, on the reading
+  // that its only caller is a `schedule`-triggered workflow. Two things were
+  // measured against the tree instead of accepted:
+  //
+  //   1. `half-state-patrol.yml` DOES declare a `pull_request:` trigger, with
+  //      a `paths:` filter naming the sweeper and the workflow — it already
+  //      did on the day the card was filed. So the specimen was never a
+  //      workflow no PR runs; it is a patrol that exercises itself on the PRs
+  //      that change it, the posture every patrol in this tree keeps.
+  //   2. Across the whole tree, the number of discovered families whose
+  //      source workflows ALL lack a PR-time trigger is ZERO — and it stays
+  //      zero under the narrowest reading of "PR-time" as well.
+  //
+  // So the classification the card proposed has no members, and shipping it
+  // would be a capability with nothing in it. What ships instead is this pin:
+  // the reading is re-taken from the workflow text on every run, so the
+  // deferral goes loud the day the population stops being empty. ⛔ The cases
+  // below are the whole remedy for that day — they are not a roster to edit
+  // when one reds. See the header section of the same name for the exits.
+  const wfDirLive = nodePath.join(ROOT, '.github/workflows');
+  const eventsWf = [
+    'name: Fixture',
+    '# a comment before the on: block',
+    'on:',
+    '  schedule:',
+    "    - cron: '37 1,7,13,19 * * *'",
+    '  workflow_dispatch: {}',
+    '  # a comment between events',
+    '  pull_request:',
+    '    types: [opened, synchronize]',
+    '    paths:',
+    "      - 'scripts/pm/check-half-states.mjs'",
+    // A decoy at an event's OWN depth-plus-one: a key under `pull_request:` is
+    // not an event, however event-shaped its name.
+    '    push:',
+    '      branches: [main]',
+    'jobs:',
+    '  sweep:',
+    // A decoy under `jobs:`, the shape a walk without the top-level reset eats.
+    '    merge_group:',
+    '      never: read',
+    '',
+  ].join('\n');
+  const fixtureEvents = declaredTriggerEvents(eventsWf);
+  t('the on: mapping\'s events are read in declaration order', fixtureEvents.join('|') === 'schedule|workflow_dispatch|pull_request');
+  t('a key nested UNDER an event is not an event, however event-shaped its name', !fixtureEvents.includes('push'));
+  t('a decoy event under jobs: is not read', !fixtureEvents.includes('merge_group'));
+  t('an event\'s own sub-keys never enter the list', !fixtureEvents.includes('types') && !fixtureEvents.includes('paths') && !fixtureEvents.includes('branches'));
+  t('the flow-sequence spelling is read', declaredTriggerEvents('on: [push, pull_request]\njobs: {}\n').join('|') === 'push|pull_request');
+  t('the bare-scalar spelling is read', declaredTriggerEvents('on: push\njobs: {}\n').join('|') === 'push');
+  t('the block-sequence spelling is read', declaredTriggerEvents('on:\n  - push\n  - schedule\njobs: {}\n').join('|') === 'push|schedule');
+  // The YAML 1.1 coercion the two walkers above already accept: unquoted `on`
+  // is the boolean `true`, so all three spellings name the same key.
+  t('the quoted and YAML-1.1 spellings of the key are all read', ["'on'", '"on"', 'true'].every((k) => declaredTriggerEvents(`${k}:\n  schedule:\n    - cron: '0 1 * * *'\n`).join('|') === 'schedule'));
+  t('a workflow declaring no on: block yields an empty list, not a fabricated event', declaredTriggerEvents('name: X\njobs: {}\n').length === 0);
+
+  // The same reader against REAL `on:` blocks, read from the tree rather than
+  // pasted: a quoted copy of a workflow is a second revision of it waiting to
+  // rot, which is what this whole file refuses.
+  const eventsOfWorkflow = new Map();
+  for (const f of readdirSync(wfDirLive).filter((x) => /\.ya?ml$/.test(x))) {
+    eventsOfWorkflow.set(f, declaredTriggerEvents(readFileSync(nodePath.join(wfDirLive, f), 'utf8')));
+  }
+  t(
+    '⭐ the card\'s own specimen declares a pull_request trigger beside its schedule — half-state-patrol.yml is not a workflow no PR runs',
+    ['schedule', 'workflow_dispatch', 'pull_request'].every((e) => (eventsOfWorkflow.get('half-state-patrol.yml') ?? []).includes(e)),
+  );
+  t(
+    'and a genuinely scheduled-only workflow reads as one, so the predicate is not answering `pull_request` to everything (stale.yml)',
+    (eventsOfWorkflow.get('stale.yml') ?? []).join('|') === 'schedule|workflow_dispatch',
+  );
+
+  // The live half. Fixtures cannot prove the tree has no scheduled-only
+  // family; this reads it.
+  const reachesPRTime = (workflows, prTime = PR_TIME_TRIGGER_EVENTS) =>
+    [...workflows].some((wf) => (eventsOfWorkflow.get(wf) ?? []).some((e) => prTime.includes(e)));
+  const isScheduled = (wf) => (eventsOfWorkflow.get(wf) ?? []).includes('schedule');
+  const triggerFamilies = [...discoverFamilies().byCheck.values()];
+  const scheduledWorkflows = [...eventsOfWorkflow.keys()].filter(isScheduled);
+  const scheduledContributors = scheduledWorkflows.filter((wf) => triggerFamilies.some((e) => e.workflows.has(wf)));
+  const fromScheduled = triggerFamilies.filter((e) => [...e.workflows].some(isScheduled));
+  const scheduledOnly = triggerFamilies.filter((e) => !reachesPRTime(e.workflows) && [...e.workflows].every(isScheduled));
+  // Non-vacuity, both halves — a zero over an empty sweep is a broken
+  // instrument wearing a clean result's clothes, which is #4690's shape.
+  t(
+    `the live tree really declares ${scheduledWorkflows.length} schedule-triggered workflow(s), so the sweep below has a population`,
+    scheduledWorkflows.length > 0,
+  );
+  t(
+    `…and ${scheduledContributors.length} of them really contribute discovered families (${fromScheduled.length} famil(ies)), so the zero below is a reading`,
+    scheduledContributors.length > 0 && fromScheduled.length > 0,
+  );
+  t(
+    `⭐ ZERO of the ${triggerFamilies.length} discovered families is SCHEDULED-ONLY — every one reaches a workflow that declares a PR-time`
+      + ' event, so no board sweep is routed into a per-PR gate list. If this reds, a scheduled-only family has ARRIVED: give its'
+      + ' workflow the pull_request paths trigger every patrol here already carries, or ship the withheld class the header defers',
+    scheduledOnly.length === 0,
+  );
+  t(
+    '…and the reading does not depend on how wide PR-time is drawn: narrowing it to `pull_request` alone leaves the same zero',
+    triggerFamilies.filter((e) => !reachesPRTime(e.workflows, ['pull_request']) && [...e.workflows].every(isScheduled)).length === 0,
+  );
+  // The complement, so the zero above cannot be the union quietly hiding a
+  // member: a family reached by NO PR-time event at all must come from a
+  // workflow that declares no `schedule` either. Today that is `cut-rc.yml`,
+  // the human release lane, which is `workflow_dispatch`-only.
+  const noPRTime = triggerFamilies.filter((e) => !reachesPRTime(e.workflows));
+  t(
+    `the complement agrees: all ${noPRTime.length} famil(ies) reached by no PR-time event at all come from workflows that declare no schedule`,
+    noPRTime.every((e) => [...e.workflows].every((wf) => !isScheduled(wf))),
+  );
+  // The control the card's ruling names: a family from a scheduled workflow
+  // that ALSO declares a PR-time trigger keeps the class it already had. The
+  // card's own specimen is the subject — it is withheld from `--commands` by
+  // the value-bearing class (#15083) and by nothing else, which is why the
+  // 3m09s it measured is gone without any scheduled-only rule existing.
+  const sweepEntry = triggerFamilies.find((e) => e.check.startsWith('scripts/pm/check-half-states.mjs'));
+  t(
+    'the card\'s specimen is still discovered, still reached only through its patrol, and still classified VALUE-BEARING — not withheld for being scheduled',
+    Boolean(sweepEntry)
+      && [...sweepEntry.workflows].join('|') === 'half-state-patrol.yml'
+      && isScheduled('half-state-patrol.yml')
+      && reachesPRTime(sweepEntry.workflows)
+      && Boolean(sweepEntry.notRunnable)
+      && !sweepEntry.ciOnly,
+  );
+  // And the half this card must NOT move: the OFFLINE self-test lint.yml runs
+  // on every PR stays a runnable command. It is the same script's other
+  // spelling, and a rule keyed on the sweeper's name rather than on the
+  // workflow text — the per-script exclusion the ruling refused — would have
+  // taken this one with it.
+  const offlineHalf = triggerFamilies.find((e) => e.check === 'check:pm-half-states');
+  t(
+    'and the offline half CI runs on every PR is untouched — check:pm-half-states reaches lint.yml, carries neither withholding class, and still renders a runnable command',
+    Boolean(offlineHalf)
+      && offlineHalf.workflows.has('lint.yml')
+      && reachesPRTime(offlineHalf.workflows)
+      && !offlineHalf.ciOnly
+      && !offlineHalf.notRunnable,
+  );
 
   // ── The population a job `if:` names one hop away (#12956) ────────────────
   //
