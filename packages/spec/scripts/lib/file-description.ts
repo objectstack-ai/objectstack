@@ -158,6 +158,19 @@
  * expression and fail the docs build — the target dialect has one spelling for
  * a code block and this is it.
  *
+ * ## A block tag renders by whether it has a PAYLOAD (#13796, #14455)
+ *
+ * The sources are JSDoc, so their headers carry block tags, and every one of
+ * them used to reach the page as literal `@…` text — fourteen pages opening on
+ * `@module ui/sharing`, then eighteen more lines of `@example` and `@category`
+ * across fourteen others. What none of it needs is a `^@\w+` line filter,
+ * because the tags do not agree on what they are: a tag whose entire content is
+ * the tag is machinery and is DROPPED, while a tag carrying prose is REWRITTEN
+ * into that prose. The four verdicts and the measurement behind each live on
+ * the constants — `MODULE_MARKER`, `BARE_EXAMPLE` and `CATEGORY_MARKER` drop,
+ * `EXAMPLE_CAPTION` and `renderProse`'s `See also:` rewrite — and a fifth tag
+ * arriving on this surface is answered there, by which of the two it is.
+ *
  * ## Heading levels are the PAGE's, not the source file's (#12249)
  *
  * The second such place, and the same argument. A `.zod.ts` header is written
@@ -485,14 +498,16 @@ const SKILL_EXAMPLE_MARKER = '<!-- os:check -->';
  * it is machinery, not content, and the one thing it says — the module's own
  * path — is what the page's route and title already say twice over.
  *
- * SCOPE: this tag, deliberately, and NOT `^@\w+` at large. The two other block
- * tags that reach a page carry a payload a reader needs — `@example Basic field
- * mapping` is the caption of the fence beneath it, `@category Security` is a
- * classification — so a line-drop would take that prose with them, and "no page
- * loses non-tag prose" is this fix's acceptance criterion. `@see` shows the
- * shape those two want instead: `renderProse` REWRITES it into `See also: …`
- * rather than dropping it. `@module` is the one tag whose entire content is the
- * marker, so it is the one tag a drop is right for.
+ * SCOPE: this tag, deliberately, and NOT `^@\w+` at large. Whether a block tag
+ * may be DROPPED is decided by whether it has a payload, and the tags that
+ * reach a page do not answer alike: `@module` and a bare `@example` are their
+ * own entire content, while `@example CAPTION` is the caption of the fence
+ * beneath it and `@see` is a cross-reference — both rewritten instead
+ * (`EXAMPLE_CAPTION`, and `renderProse`'s `See also: …`). A blanket line filter
+ * cannot express that difference; it would take the caption off the page and
+ * orphan its fence, and "no page loses non-tag prose" is this fix's acceptance
+ * criterion. `@category` is the one payload-carrying tag that still renders as
+ * nothing, and `CATEGORY_MARKER` carries the measurement that says why.
  *
  * Judged with the same UNTRIMMED `^@module\b` test `hasModuleMarker` selects
  * on, so the renderer drops exactly what the selector recognised — never a
@@ -502,9 +517,57 @@ const SKILL_EXAMPLE_MARKER = '<!-- os:check -->';
  */
 const MODULE_MARKER = /^@module\b/;
 
+/**
+ * `@category <value>` — a payload the page does NOT show (#14455).
+ *
+ * The one tag here that carries content and is still dropped, so the reason is
+ * recorded rather than left to be re-derived. Measured over the whole repo when
+ * this landed: the tag is on four of the 190 described modules
+ * (`system/incident-response`, `system/security-context`,
+ * `system/supplier-security`, `system/training`), carries the identical value
+ * `Security` on all four, and NOTHING reads it — no typedoc or api-extractor
+ * (this repo runs neither), no search index, no gate. Four pages under a
+ * `system/` section, classified as the thing that section already says.
+ *
+ * That is not a taxonomy a page is failing to surface. The two coherent
+ * alternatives are to make the classification real across the whole corpus —
+ * an expansion nobody asked for — or to route it into page frontmatter, which
+ * publishes a field with no consumer, i.e. the declared-but-unenforced shape
+ * ADR-0049 exists to refuse. Dropping is the loud, non-expanding option.
+ *
+ * ⚠️ Dropped from the rendered PAGE, never from the source. `@category` is a
+ * legitimate source-level JSDoc tag and `packages/spec/src` goes on writing it;
+ * the day something actually reads it, this constant is what gets revisited —
+ * not the four docblocks.
+ */
+const CATEGORY_MARKER = /^@category\b/;
+
+/**
+ * `@example` with nothing after it — the `@module` case exactly (#14455).
+ *
+ * A tag whose entire content is the tag tells the reader nothing: the fence
+ * below it is visibly an example whether or not a line above announces one.
+ * Two module headers write it bare — `studio/plugin` and
+ * `studio/object-designer`, the same two whose `os:check` marker
+ * `SKILL_EXAMPLE_MARKER` exists for — and both published the literal text
+ * `@example` above their fence.
+ *
+ * `[ \t]*$` and not `\s*$`: `stripDocGutter` has already trimmed the line end,
+ * so anything surviving after the tag is a caption, and a caption is content
+ * `EXAMPLE_CAPTION` rewrites rather than machinery this drops. The two spellings
+ * partition the tag between them, with no line matching both and none matching
+ * neither.
+ */
+const BARE_EXAMPLE = /^@example[ \t]*$/;
+
 /** A machinery line the rendered page must never show, whichever kind it is. */
 function isMarkerLine(line: string): boolean {
-  return line.trim() === SKILL_EXAMPLE_MARKER || MODULE_MARKER.test(line);
+  return (
+    line.trim() === SKILL_EXAMPLE_MARKER ||
+    MODULE_MARKER.test(line) ||
+    CATEGORY_MARKER.test(line) ||
+    BARE_EXAMPLE.test(line)
+  );
 }
 
 /** What a line is, which decides which transforms may touch it. */
@@ -701,6 +764,40 @@ function mapProse(text: string, kinds: ProseRun['kind'][], fn: (plain: string) =
   return tokenizeProse(text).map(run => (kinds.includes(run.kind) ? fn(run.text) : run.text)).join('');
 }
 
+/**
+ * `@example <caption>` -> that caption, in bold, above the block it captions
+ * (#14455).
+ *
+ * A REWRITE and not a drop, which is the whole of what separates this tag from
+ * `MODULE_MARKER`: the payload is prose the reader needs. Twelve module headers
+ * write a caption over a fence — `@example Basic field mapping` on
+ * `shared/mapping`, `@example Overdue sweep (fires for POs up to 14 days past
+ * due)` on `automation/time-relative-trigger` — and a line-drop would delete
+ * that sentence and leave the fence beneath it unlabelled. `@see` beside it in
+ * `renderProse` already has this shape; this is the second tag to take it.
+ *
+ * **Bold, and not a heading.** The difference is structural, not cosmetic.
+ * `withHeadingsAtSectionLevel` has already renumbered the block by the time
+ * this runs, so a heading emitted here would take a level chosen blind of the
+ * page and would not move with the rest — on top of adding twelve entries to
+ * eight pages' tables of contents and putting a caption in reach of
+ * `check-docs-single-h1.mjs`. Strong emphasis cannot touch a page's heading
+ * structure at all, and a bold line over a fence is the caption idiom these
+ * sources were already reaching for.
+ *
+ * **Bold, and not `Example: <caption>`** — the literal parallel of `See also:`.
+ * `@see` needs its label because a bare URL says nothing about why it is on the
+ * page; a fenced block under a caption is already visibly an example, so the
+ * label only restates the fence (`Example: Endpoints`, `Example: Basic task`).
+ *
+ * Anchored at column 0 and matched per line, the same UNTRIMMED test
+ * `MODULE_MARKER` uses — never a mid-sentence mention, never an indented
+ * `@example` in a list item — and only ever shown prose, so an `@example` inside
+ * a fence stays as the author wrote it. Held global-safe by `String#replace`,
+ * which resets `lastIndex` around the call.
+ */
+const EXAMPLE_CAPTION = /^@example[ \t]+(\S.*)$/gm;
+
 /** One run of consecutive prose lines, rendered to MDX. */
 function renderProse(text: string, ctx: FileDescriptionContext): string {
   // ONE resolution rule for every position a path can be referenced from — the
@@ -713,6 +810,13 @@ function renderProse(text: string, ctx: FileDescriptionContext): string {
 
   // A bare `@see <path>` tag renders as noise — turn it into prose.
   let out = text.replace(/^@see[ \t]+/gm, 'See also: ');
+
+  // …and the same for the other tag whose payload is content: the caption of
+  // the block beneath it becomes the caption, rather than reaching the page as
+  // the literal text `@example …` (#14455; see `EXAMPLE_CAPTION`). Run FIRST,
+  // so a caption naming a neighbour still gets the link and code-span
+  // treatment every other line of prose gets.
+  out = out.replace(EXAMPLE_CAPTION, '**$1**');
 
   // `{@link}` first, because this is the step that PRODUCES markdown links.
   out = mapProse(out, ['text'], s => s
