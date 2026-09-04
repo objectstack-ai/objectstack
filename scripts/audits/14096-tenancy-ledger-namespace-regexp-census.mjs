@@ -241,10 +241,11 @@ async function main() {
       'state -- refusing to compute a disagreement count against it, because a false ' +
       'zero here would silently close a p1 tenancy question as "decided, nothing to ' +
       'do" (see the module doc comment and the audit doc\'s `## Branch verdict`). ' +
-      'Rebuild the dependency closure (`pnpm --filter \'@objectstack/objectql^...\' ' +
-      'build && pnpm --filter @objectstack/objectql build`) and re-run. If the ledger ' +
-      `has legitimately shrunk below ${LEDGER_ENTRY_COUNT_FLOOR} entries, raise ` +
-      'LEDGER_ENTRY_COUNT_FLOOR deliberately -- do not lower it to make a real failure go away.',
+      'Rebuild the @objectstack/objectql dependency closure (see the exact commands in ' +
+      "this file's module doc comment, or the audit doc's \"Commands to re-run this " +
+      'census\" section) and re-run. If the ledger has legitimately shrunk below ' +
+      `${LEDGER_ENTRY_COUNT_FLOOR} entries, raise LEDGER_ENTRY_COUNT_FLOOR deliberately -- ` +
+      'do not lower it to make a real failure go away.',
     );
   }
 
