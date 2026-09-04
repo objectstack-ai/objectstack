@@ -182,7 +182,7 @@ const result = EnhancedApiErrorSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **field** | `string` | ✅ | Field path (supports dot notation) |
-| **code** | `Enum<'required' \| 'invalid_type' \| 'invalid_shape' \| 'unknown_field' \| 'invalid_boolean' \| 'invalid_number' \| 'invalid_date' \| 'invalid_time' \| 'invalid_email' \| … +19 more>` | ✅ | Which constraint the value violated (field-level catalog, ADR-0114) |
+| **code** | `Enum<'required' \| 'invalid_type' \| 'invalid_shape' \| 'unknown_field' \| 'invalid_boolean' \| 'invalid_number' \| 'invalid_date' \| 'invalid_time' \| 'invalid_email' \| … +20 more>` | ✅ | Which constraint the value violated (field-level catalog, ADR-0114) |
 | **message** | `string` | ✅ | Human-readable error message, rendered in the caller’s locale |
 | **label** | `string` | optional | Field display label in the caller’s locale |
 | **value** | `any` | optional | The invalid value that was provided |
@@ -211,6 +211,7 @@ const result = EnhancedApiErrorSchema.parse(data);
 * `min_items`
 * `max_items`
 * `invalid_option`
+* `value_domain`
 * `invalid_value`
 * `reference_not_found`
 * `reference_ambiguous`
@@ -247,6 +248,7 @@ const result = EnhancedApiErrorSchema.parse(data);
 * `min_items`
 * `max_items`
 * `invalid_option`
+* `value_domain`
 * `invalid_value`
 * `reference_not_found`
 * `reference_ambiguous`

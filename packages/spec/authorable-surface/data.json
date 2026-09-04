@@ -408,6 +408,7 @@
     "data/Field:type",
     "data/Field:unique",
     "data/Field:useGrouping",
+    "data/Field:valueDomain",
     "data/Field:visibleWhen",
     "data/Field:widget",
     "data/FieldMaskingKeep:keepHead",

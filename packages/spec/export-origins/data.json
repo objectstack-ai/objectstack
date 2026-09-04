@@ -636,6 +636,7 @@
     "UnknownAuthoringKeyFinding": "src/data/authoring-key-lint.ts#UnknownAuthoringKeyFinding (interface)",
     "UnorderedPaginationConformanceCase": "src/data/pagination-conformance.ts#UnorderedPaginationConformanceCase (interface)",
     "VALID_AST_OPERATORS": "src/data/filter.zod.ts#VALID_AST_OPERATORS (const)",
+    "VALUE_DOMAIN_FIELD_TYPES": "src/data/field.zod.ts#VALUE_DOMAIN_FIELD_TYPES (const)",
     "VALUE_ROUNDTRIP_CASES": "src/data/value-roundtrip-conformance.ts#VALUE_ROUNDTRIP_CASES (const)",
     "VALUE_ROUNDTRIP_COLLISION_PAIRS": "src/data/value-roundtrip-conformance.ts#VALUE_ROUNDTRIP_COLLISION_PAIRS (const)",
     "VALUE_ROUNDTRIP_FIELDS": "src/data/value-roundtrip-conformance.ts#VALUE_ROUNDTRIP_FIELDS (const)",
