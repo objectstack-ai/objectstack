@@ -774,7 +774,12 @@ export class TursoDriver extends SqlDriver {
     return super.create(object, data, options);
   }
 
-  override async update(object: string, id: string | number, data: Record<string, any>, options?: DriverOptions): Promise<any> {
+  // [#14438] The override declares the contract's type, as both of its branches
+  // already do: `super.update` (driver-sql) and `RemoteTransport.update()`
+  // (#14428) both answer `Record<string, unknown> | null`, and `formatRemoteRow`
+  // is a generic pass-through. The explicit `Promise<any>` here was the one
+  // place this package's own `.d.ts` re-erased the door.
+  override async update(object: string, id: string | number, data: Record<string, any>, options?: DriverOptions): Promise<Record<string, unknown> | null> {
     if (this.isRemote) return this.formatRemoteRow(object, await this.remoteTransport!.update(object, id, this.toRemoteWriteForms(object, data)));
     return super.update(object, id, data, options);
   }
