@@ -1,5 +1,1751 @@
 # @objectstack/driver-sql
 
+## 17.3.0
+
+### Minor Changes
+
+- 0010797: Cross-schema foreign keys are now qualified instead of shipping an unusable bare name (#11377).
+  
+  `IntrospectedForeignKey` (driver-sql) gains an optional `referencedSchema`, present when — and
+  only when — the referenced parent table lives outside the introspecting session's resolution
+  scope (Postgres: the parent's schema is not on `current_schemas(false)`; MySQL: the parent's
+  database differs from `DATABASE()`; SQLite never sets it — no schemas, and a foreign key cannot
+  cross an ATTACHed database). `referencedTable` stays a bare name always — the qualification is a
+  separate key, never a conditional spelling.
+  
+  `convertIntrospectedSchemaToObjects` (objectql) reads the new key: a foreign key whose target
+  carries `referencedSchema` is loudly skipped and flagged through the new `options.logger`
+  (default `console`) instead of being wired to the bare name — which either resolved to nothing
+  or to a same-named table in the current schema, silently. The column is kept as a plain field so
+  its data stays visible. Foreign keys with in-scope targets keep producing identical lookup
+  fields.
+- 09f9361: Report a multi-value field left on a stale `varchar`/`text` column, instead of
+  letting it silently corrupt every array written to it
+  
+  A field that gains `multiple: true` materialises as a `json` column on a fresh
+  database, but `initObjects` is additive-only: on a database created while the
+  field was single-value, nothing is missing, so nothing is added and the old
+  `varchar`/`text` column is kept forever. The write path stringifies the array
+  for a json field on every non-SQLite dialect; the read path relies on the
+  driver's column-type-based decoding, which a stale textual column defeats. The
+  array goes in as the literal `["id1","id2"]` and comes back as a **string** —
+  so a hook copying the value into a child record's single-lookup column writes
+  that whole string as one id. User-filed production report, repaired by hand on a
+  live database.
+  
+  Until now the schema-drift detector said **nothing** about it. Measured on the
+  pre-fix tree against live Postgres 16.13 and MySQL 8.0.46: after the metadata
+  change and a reboot, `detectManagedDrift()` returned `[]` and the boot logged
+  zero `[schema-drift]` lines, while the very next write stored
+  `["user_A","user_B"]` into a `character varying(255)` column and read it back
+  with `typeof === 'string'`. The action vocabulary had no "the base type is
+  wrong" entry at all — only `relax`/`tighten_not_null`, `widen`/`narrow_varchar`,
+  `drop_column`, `drop_column_default` and the index ops.
+  
+  The divergence is now **detected and reported**, naming the table, the column,
+  the declared type, the physical type and the exact statement an operator runs by
+  hand — dialect-correct, and executed against both live servers by the suite
+  rather than merely printed. ObjectStack does **not** change the column: an
+  `ALTER TABLE … TYPE json USING …` over existing rows with an index drop and
+  rebuild is a destructive migration over shipped data, and whether the platform
+  should perform it is a separate, open decision. The new `manual_column_type_change`
+  op deliberately has no reconciler arm; `applyMigrationEntries` reports it as
+  skipped, which is the intended contract while that decision is open.
+  
+  Reported at severity `error` and category **`needs_confirm`**, and the category
+  is load-bearing rather than cosmetic. Every database this finding describes is
+  already serving — that is the premise of the report — and the artifact-pinned
+  boot gate refuses a boot for `category === 'destructive'` and nothing else
+  (`severity` it never reads). Measured both ways: a `destructive` entry returns
+  `ok=false` from that gate, this entry returns `ok=true`. Spelling it
+  `destructive` would have turned every affected deployment into a crash-loop on
+  its next restart — the report of the corruption becoming the outage.
+  
+  SQLite is deliberately excluded, and the exclusion is a measurement rather than a
+  scoping convenience: the same stale column reads back as a real `['x','y']`
+  array there, because SQLite's read path `JSON.parse`s regardless of what the
+  column calls itself. There is no corruption to report, and reporting it anyway
+  would put a permanent `error` finding on every long-lived SQLite development
+  database. A stale `integer`/`timestamp` column is excluded for the mirror-image
+  reason — the server already refuses that write loudly, so there is no silence to
+  break.
+  
+  Also fixed, same defect class: a multi-value field that *also* declared
+  `maxLength` used to produce `narrow_varchar` at severity `error`, category
+  **destructive** on both enforcing dialects — a finding that refuses the
+  artifact-pinned boot and invites `os migrate apply --allow-destructive` to
+  rewrite the column to `varchar(50)`, the exact opposite of the repair it needs.
+  `createColumn` returns at its `multiple` branch before `maxLength` is ever read,
+  so the emitter never asks for that width; the differ no longer does either. The
+  single-value width branch is untouched and pinned as untouched.
+- 34d3011: Report an **unbounded** text-family field left on a pre-existing `varchar`
+  column, instead of leaving the operator with a refused write and no diagnostic
+  
+  After #11875/#12119 a **newly created** `signature` / `qrcode` column is TEXT and
+  holds a data URI correctly. `initObjects` is additive-only, so on a database
+  created by an earlier release nothing is missing, nothing is added, and the old
+  `varchar(255)` column is kept forever — the boundary #12119's own changeset
+  states in as many words. What was not stated is what the drift reporter did
+  about it, and the answer was **nothing**.
+  
+  The varchar differ's entire branch required `declaredMaxLength !== undefined`, so
+  on a pre-existing table it split the text family by whether its author had
+  written a number:
+  
+  ```
+  Field.signature({ maxLength: 4096 })  over varchar(255)  ->  widen_varchar   reported
+  Field.signature()      — no bound     over varchar(255)  ->  (nothing)       silent
+  ```
+  
+  The second row is the common case. Measured on the pre-fix tree, one
+  `diffManagedTable` call per type on dialect `postgres` against a `varchar(255)`
+  column: `text` / `textarea` / `html` / `markdown` / `richtext` / `code` /
+  `signature` / `qrcode` with no `maxLength` each returned **zero** entries, while
+  `{ type: 'signature', maxLength: 4096 }` over the same column returned exactly
+  one `widen_varchar` in the same run — so the differ was working and this shape
+  was simply invisible to it. An upgrading deployment therefore saw no change and
+  no diagnostic, while the server kept refusing the same write; and the refusal is
+  a poor substitute for a report, because the live probe behind objectql's
+  `driver-fault-redaction.ts` measured Postgres's `22001` as identifier-only and
+  naming the **type** rather than the column (`value too long for type character
+  varying(255)`).
+  
+  The divergence is now **detected and reported** under a new report-only
+  `manual_widen_varchar_to_text` op, naming the declared type, the physical width,
+  the consequence, and both operator routes. Same `declared ≠ enforced` shape as
+  the #11374 / #11431 / #11875 family, closed one door further along — at the
+  migration seam rather than the authoring or write seam.
+  
+  **Nothing is migrated for you, and nothing new is refused.** There is no
+  reconciler arm: `os migrate apply` reports the entry as skipped, exactly as it
+  does for `manual_column_type_change`. The entry is `category: 'needs_confirm'`,
+  so the artifact-pinned boot gate — which refuses a boot for `destructive` and
+  nothing else — is unaffected: a deployment that merely refuses over-long values
+  must not become a crash-loop on its next restart. Dev auto-reconcile takes
+  `safe` only, so it never applies this unattended either. SQLite is excluded: it
+  enforces no declared width, so there is no divergence to report.
+  
+  `manual_widen_varchar_to_text` is a **distinct** op rather than a second use of
+  `manual_column_type_change`, for a measured reason: `os migrate
+  multi-value-columns` selects its entire population by
+  `op.type === 'manual_column_type_change'` and recovers the dialect by matching
+  the message against `manualJsonConversionSql`, so sharing the op would hand this
+  finding to a command whose remedy makes the column `json` — and, the message
+  carrying no json statement, have it refused as `remedy_not_recognized` on every
+  run.
+  
+  Graded `minor` rather than `patch` on two counts, matching the sibling drift-op
+  addition that shipped for #11535: `detectManagedDrift` emits a finding on
+  existing deployments where it previously emitted none (visible in `os migrate
+  plan`, in `os migrate apply`'s skipped count and in the boot-time
+  `[schema-drift]` warn), and the exported `DriftOp` union gains a member, which is
+  additive for producers but widens a type any consumer switching exhaustively
+  over it must account for. Nothing is removed, renamed or newly rejected, so it is
+  not a breaking change.
+- d0e3a88: **Fix:** a text-family field that a declared index keys on is emitted as `varchar(maxLength)` instead of an unbounded `TEXT`, so the index MySQL previously refused can actually be created (#11374).
+  
+  `createColumn` mapped the whole text family (`text` / `textarea` / `html` / `markdown`) to an unbounded `TEXT`, ignoring the field's own declared `maxLength`. MySQL refuses a `TEXT`/`BLOB` column in a key without a prefix length, and the two halves of schema-sync fail *separately*: the `CREATE TABLE` succeeds, then `ALTER TABLE … ADD [UNIQUE] INDEX` fails with `ER_BLOB_KEY_WITHOUT_LENGTH`. The table therefore lands on disk **without the constraint it declared**, and the object stays registered-but-broken. Measured on a live MySQL 8.0.46: **36 of the 44 platform objects** failed schema-sync this way, so a stack whose `default` datasource is MySQL could not stand up its own schema — the dev-admin seed never landed and first sign-in returned `401 INVALID_EMAIL_OR_PASSWORD`. Honouring the declared bound takes that to **12**.
+  
+  **The bound is the field's own `maxLength` — nothing is invented.** `schema-drift.ts` already treated `varchar(field.maxLength)` as the expected physical shape of a bounded field (its `widen_varchar` / `narrow_varchar` ops say so in as many words); this is the emitter finally agreeing with the differ. On MySQL that removes a permanent destructive drift finding: `columnInfo()` reports `maxLength: 65535` for a `TEXT` column, so every bounded text field already reported `narrow_varchar` ("metadata caps at 32 chars but the column allows 65535") against a column the driver itself had created.
+  
+  **Scope, both halves load-bearing.** The bound is emitted only for a column some declared index **keys on** — a non-indexed `Field.text({ maxLength: 65000 })` stays `TEXT`, because `varchar(65000)` on utf8mb4 is 260000 bytes and would blow MySQL's 65535-byte row limit, turning a working table into an un-creatable one. And only where the bound is **usable as a key part**: `maxLength` absent, or wider than 768 characters (3072 index bytes ÷ 4 bytes per utf8mb4 character — measured: `varchar(768)` takes a unique index, `varchar(769)` is refused with `ER_TOO_LONG_KEY`), leaves the column `TEXT` and the index refused with a message naming the field and the declaration that fixes it.
+  
+  **⚠️ Graded `minor`, not `patch`: this changes declared behaviour on newly created tables.** A keyed bounded text column now enforces its declared length where the dialect enforces `varchar` (Postgres and MySQL), so a write longer than `maxLength` that previously landed in an unbounded `TEXT` is now refused — under `STRICT_TRANS_TABLES`, with `ER_DATA_TOO_LONG`. That is the declaration becoming enforced rather than a new restriction, and it is exactly what makes the column indexable, but it is a behaviour change and is named here as one. **Existing tables are unaffected**: schema-sync is additive and never rewrites a column that is already present.
+  
+  **A prefix index is deliberately NOT substituted for an unkeyable column.** For an ordinary index that would be a transparent access-path choice, but for a `UNIQUE` one it silently replaces the declared constraint with a stricter one — uniqueness of the *prefix*. Measured on MySQL 8.0.46 with `UNIQUE KEY (token(191))` and two distinct 200+ character tokens sharing their first 191 characters: the second insert was rejected with `ER_DUP_ENTRY` **even though the tokens differ**. On `sys_session.token` that is a valid sign-in refused as a duplicate. The refusal an operator can read is strictly better than a constraint that quietly means something else.
+- 64505a5: fix(driver-sql): stamp `updated_at` at the audit column's own precision on MySQL, so an updated row stops reading as modified BEFORE it was created (#11224)
+  
+  `createAuditTimestampColumn` builds the audit columns on MySQL as `DATETIME(3)`
+  defaulted with `now(3)`, and its docblock says why in as many words
+  ("`CURRENT_TIMESTAMP` has to carry matching precision for a `DATETIME(3)`
+  default", #3942). `updatedAtStamp()` — the value every UPDATE door writes into
+  that same column — was a bare `knex.fn.now()`, which compiles to an unqualified
+  `CURRENT_TIMESTAMP` that MySQL truncates to whole seconds. So the column was
+  created at millisecond precision on purpose and then written at second precision.
+  
+  Measured on live MySQL 8.0.46, against the exact schema the driver produces:
+  
+  ```
+                              created_at                 updated_at              delta
+  before  CURRENT_TIMESTAMP     2026-08-23 10:22:36.799   2026-08-23 10:22:36.000  -799 ms
+  after   CURRENT_TIMESTAMP(3)  2026-08-23 10:22:36.799   2026-08-23 10:22:36.802    +3 ms
+  ```
+  
+  Nothing errors. Three silent consequences, in ascending order of damage:
+  
+  1. **"Last modified" precedes "created".** Any consumer comparing the two — an
+     audit answer, a "modified since creation?" badge, a data-quality check —
+     reads a row that WAS modified as if it were not.
+  2. **A delta / incremental sync SKIPS the row.** A cursor held at millisecond
+     precision (`updated_at > cursor`) misses every row whose stamp was truncated
+     back below it. Measured: all six rows in the new suite's §2 were invisible to
+     their own cursor immediately after being updated. This is the same
+     silent-wrong-answer family as #11067 / #11176 / #11223, reached by a fourth
+     mechanism.
+  3. **Two updates in the same second are indistinguishable**, so an
+     `order by updated_at` over them is unstable exactly where it matters most.
+  
+  The fix is the expression #11176 had already derived and measured for the UPSERT
+  door: `now(3)` on MySQL, unchanged elsewhere. Every UPDATE door reads one helper
+  (`update`, `updateMany`, `rotatedUpdateById`), so all three move together.
+  
+  **Postgres and SQLite emit byte-identical SQL to before, and that is a
+  measurement rather than an assumption.** Postgres' `CURRENT_TIMESTAMP` is
+  `transaction_timestamp()` at microsecond precision against a `timestamptz`
+  column; SQLite's stamp is a JS ISO-8601 string that already carries millis.
+  Neither has anything to truncate. The new suite runs every cell on SQLite AND on
+  live Postgres AND on live MySQL, and its §5 pins which expression each dialect
+  gets — so a future "just add `(3)` everywhere" cannot satisfy the ordering
+  assertions while changing the SQL the other two dialects emit. In the baseline
+  run against the unfixed driver, the SQLite and Postgres cells were green (7/7
+  each) and only the MySQL cell was red (6 of 7).
+  
+  **BREAKING**, narrowly, and the reason this is not a patch: the `protected`
+  `upsertUpdatedAtStamp()` that shipped in 17.2.0 with #11176 is **removed**. It
+  existed only to hold the precision-matched form for the upsert door without
+  changing the SQL every `update()` emits — a split that card made deliberately
+  because it had not measured the UPDATE door. This one measured it, so the pair
+  collapses back into the single `updatedAtStamp()`, which now carries the matched
+  precision for both doors. A subclass of `SqlDriver` that OVERRODE
+  `upsertUpdatedAtStamp()` would otherwise have kept compiling while silently
+  ceasing to be called, which is precisely the failure mode a release note has to
+  name out loud. Such a subclass should override `updatedAtStamp()` instead; the
+  two in-repo subclasses (`SqliteWasmDriver`, `TursoDriver`) override neither and
+  are unaffected. Nothing else was removed or renamed, no authored metadata
+  changes, and no public API moves — under this repo's launch-window convention
+  (breaking changes ship as `minor` while the stack versions in lockstep) `minor`
+  is the honest slot.
+  
+  Stored data is not rewritten. Rows updated before this change keep their
+  truncated `updated_at`; the ordering invariant holds from the next write onward.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A precision fix to the value one builtin audit column is written with, plus the removal of a `protected` driver hook that has no authorable face. No authorable key, export, config field or stored `sys_metadata` shape changes, so there is nothing for `objectstack migrate meta` or the upgrade guide to carry — a subclass that overrode the removed hook moves its override to `updatedAtStamp()`, which is a code edit rather than a metadata migration. -->
+- 4a4a35d: feat(driver-sql): compile the `addDays` offset of a `{ $field }` reference on every dialect
+  
+  `{ completed_at: { $lte: { $field: 'due_date', addDays: { $field: 'grace_days' } } } }`
+  now compiles to `completed_at <= due_date + grace_days days` on SQLite, PostgreSQL and
+  MySQL (`driver-sqlite-wasm` inherits the compiler unchanged); a literal (`addDays: 5`,
+  `addDays: -3`) binds as a parameter where the column would be. The offset rides the
+  cross-field arm and its four rulings — the offset column is a same-table, declared,
+  non-tenant numeric column — and adds two of its own: day arithmetic applies only between
+  two `date` columns or two `datetime` columns, and a fractional offset value is truncated
+  toward zero. Everything else is refused with `INVALID_FILTER` (400), operands withheld from
+  the caller and named in the server log.
+  
+  The NULL semantics are written into the predicate rather than left to three-valued logic:
+  `COALESCE(offset, 0)` for a NULL offset column, and `referenced IS NOT NULL AND …` so a NULL
+  referenced column is false — not NULL — for every operator including `$ne`, and stays false
+  under `$not`. SQLite adds days on the driver's canonical text form (`date(col, 'N days')` /
+  `strftime('%Y-%m-%dT%H:%M:%fZ', col, 'N days')`), so a shifted value is byte-identical to a
+  stored one and the comparison stays a plain text compare.
+  
+  The shared cross-field conformance corpus gains an offset fixture with literal, column,
+  negative, NULL-offset, NULL-base and `$not`-wrapped rows, held to the same ids on the SQL
+  path and the in-memory evaluator; both driver suites run it, and the live PG + MySQL job
+  runs it per dialect.
+- 107bb4b: driver-sql (MySQL): carry an over-long UNIQUE index on a hash-shadow column
+  
+  On utf8mb4 InnoDB a key part holds at most 3072 bytes (768 characters), so a
+  full-value UNIQUE index over a longer column is inexpressible — an OAuth access
+  token that is a multi-KB JWT cannot be made keyable by any declared bound.
+  Measured on live MySQL 8.0.46, 7 of 44 exported platform objects failed
+  `syncSchema` outright and landed registered with their declared uniqueness
+  absent (Postgres 16.13: 0 of 44).
+  
+  Such a UNIQUE index is now carried by a driver-owned `<index>__hash` column — a
+  `STORED GENERATED` `VARBINARY(32)` holding the full, untruncated SHA-256 of the
+  key values — with the unique index on that column. Uniqueness is still enforced
+  over the whole value: distinct values sharing a long prefix are both accepted
+  (the property that ruled out prefix-unique indexes), NULLs stay distinct, and a
+  composite tuple containing NULL conflicts with nothing.
+  
+  The shadow is created only *after* the server refuses the direct index, so the
+  dialect divergence is selected by the error code rather than by a dialect check:
+  Postgres and SQLite are byte-identical to before. Non-unique indexes are
+  deliberately left refused — an index over a digest accelerates no lookup the
+  planner can reach.
+- 0e5bea6: New operator-run command `os migrate multi-value-columns`: migrates a stale `varchar`/`text` column to `json` where the field declares `multiple: true` — the `manual_column_type_change` drift `os migrate apply` reports and deliberately never reconciles for you (#11535, ruled C on #11700). Flags: `--apply` (default off), `--yes`/`-y`, `--force`, `--table <name>` (repeatable), `--database-url`, `--json`. **Dry-run contract: without `--apply` the command executes nothing at all** — it prints the exact statements and the database they would run against, opens no seam and issues no probe, and a run is verified to have left the column type and every row unchanged. `--apply` runs `@objectstack/driver-sql`'s own `manualJsonConversionSql` — newly re-exported from that package's index for this consumer, its only other change — i.e. the statement the drift finding itself prints (Postgres: one `ALTER … USING (CASE …)` with `json_build_array`; MySQL: the two row-shaping `UPDATE`s then `ALTER … MODIFY … json`), refuses to execute anything the finding does not contain verbatim, re-runs detection afterwards and exits non-zero if the finding has not cleared. SQLite is excluded — the stale column round-trips a real array there, so the finding is never raised. Rows corrupted before the column is migrated are out of scope, and the command is never invoked automatically: nothing on the boot path reaches it.
+- c05b40b: Stop reading every PostgreSQL `Field.date` one day early on a process east of UTC
+  
+  On PostgreSQL a `Field.date` came back **one calendar day early** whenever the
+  Node process ran east of UTC — an app container on `TZ=Asia/Shanghai` served
+  `"apply_date": "2026-08-23"` for a row `psql` reads as `2026-08-24`. The stored
+  value was always right; the read corrupted it, so the wrong day was already in
+  the REST payload before anything rendered it. Worse than a display bug: an
+  `afterUpdate` hook copying a date into a child record persisted the shifted
+  value, writing the wrong day back into the database.
+  
+  `node-postgres` materialises OID 1082 (`date`) as a JS `Date` at **local**
+  midnight, and `SqlDriver#toDateOnly` reads a `Date` with **UTC** components.
+  East of UTC, local midnight is the previous day in UTC. Measured on PostgreSQL
+  16, one stored row `2026-08-24`, only the process `TZ` changed:
+  
+  | process `TZ` | `pg` materialised | driver returned |
+  |---|---|---|
+  | `UTC` | `2026-08-24T00:00:00.000Z` | `2026-08-24` |
+  | `America/New_York` | `2026-08-24T04:00:00.000Z` | `2026-08-24` |
+  | `Asia/Shanghai` | `2026-08-23T16:00:00.000Z` | **`2026-08-23`** |
+  
+  Fixed at the parser rather than the reader: the driver now registers a
+  connection-scoped type parser so `date` (OID 1082) and `date[]` (1182) arrive
+  as their `YYYY-MM-DD` wire text and never become a `Date` at all — the same
+  shape SQLite has always had, and the same shape MySQL already had via the
+  existing UTC connection pin. `timestamptz` is untouched: an instant is what a
+  `Date` is for, and `Field.datetime` depends on it. The parser is registered on
+  the connections this driver opens, never through the process-wide
+  `pg.types.setTypeParser`, so a host application's own `pg` clients keep stock
+  behaviour.
+  
+  Reading local components in `toDateOnly` instead was measured and rejected:
+  that helper is shared by the read, write and filter paths, and a caller's
+  `new Date('2026-08-24')` is UTC midnight — local components would report it as
+  `2026-08-23` west of UTC, i.e. the identical one-day error moved onto the write
+  and filter paths. `toDateOnly` now documents the UTC clock as its contract.
+  
+  **If you worked around this, you can undo the workaround.** Running the app
+  process with `TZ=UTC` is no longer a prerequisite for correct dates, and any
+  app-side "+1 day" compensation on a PostgreSQL date read must be removed — with
+  this release the driver returns the stored day, so a compensating shift now
+  overshoots. Rows that were *written* through the old skew (a hook that copied a
+  date it had just read) still hold the wrong day and need a data fix; nothing
+  here rewrites stored data.
+  
+  One behaviour change beyond the corrected day: on PostgreSQL a raw read
+  (`driver.execute(...)`, or knex used directly on this driver's connection) now
+  yields a `string` for a `date` column where it previously yielded a `Date`.
+  Values leaving `find()` / `findOne()` / `aggregate()` / `distinct()` were
+  already normalised to `YYYY-MM-DD` strings and keep that type — only the day
+  they name changes.
+  
+  Pinned by a process-zone matrix (`UTC`, `Asia/Shanghai`, `America/New_York`,
+  `Asia/Kolkata`) that asserts it contains an east-of-UTC cell before it believes
+  itself: the existing live-Postgres CI job runs at `TZ=America/New_York`, which
+  is west of UTC, where the pre-fix read names the right day — which is why this
+  was green in CI for as long as it was broken in production.
+- a11c1a5: `signature` and `qrcode` join the bounded-string family end to end, closing the last measured hole #11794 left open (#11875, maintainer ruling 2026-08-25, option 1). Three seams move together, in the order that keeps declared = enforced at every step:
+  
+  - **Authoring (`@objectstack/spec`)**: `maxLength` / `minLength` become authorable on `signature` and `qrcode` — both types join `BOUNDED_STRING_FIELD_TYPES`, so `Field.signature({ maxLength: 64 })`, refused at the authoring seam since #11566, now parses. The refusal message for the remaining out-of-set types enumerates the set itself instead of a hand-written copy of it, and both authoring forms show the key for the same set.
+  - **Write seam (`@objectstack/objectql`)**: the record-validator's `max_length` / `min_length` branch now reads the spec's `BOUNDED_STRING_FIELD_TYPES` instead of a hand-copied ten-type list, so a declared bound on `signature` / `qrcode` refuses an over-long value with a field-named ADR-0112 `max_length` envelope — boundary measured: exactly `maxLength` characters is accepted, one past it is refused, on insert and update. `secret` and `color` are deliberately NOT covered (opaque `sys_secret` ref per ADR-0100; short by construction — the ruling's explicit carve-outs).
+  - **Storage (`@objectstack/driver-sql`)**: both types move from the catch-all's `varchar(255)` into the TEXT family, under exactly the invariant #11794 established — an unbounded TEXT column is permitted precisely because the write seam now enforces the declared bound. Measured on live MySQL 8.0.46 (`STRICT_TRANS_TABLES`) and Postgres 16: a 1000-character data-URI signature, previously refused by the server (`ER_DATA_TOO_LONG` / `22001`), lands in a column that reads back as `text` from `information_schema.COLUMNS` on both dialects and round-trips byte-identically. The #11374 keyed-and-bounded rule applies to them unchanged: a keyed, bounded column is emitted `varchar(maxLength)` and the server refuses exactly one character past the declared bound.
+  
+  Nothing about existing tables changes — `createColumn` runs on `CREATE TABLE` and `ALTER TABLE ADD COLUMN`, so the column it sizes is always empty; a pre-existing `signature` / `qrcode` column stays `varchar(255)` until an operator migrates it, and the additive sync never rewrites a column's type on its own.
+- dfebfc8: feat(driver-sql,spec): one emission-identity source — `redshift`/`cockroachdb` DDL is refused by name, `pgnative` joins the Postgres family (#11991, landing the #11756 ruling)
+  
+  **BREAKING** accept-set narrowing on `SqlDriver`'s DDL path, shipped as `minor`
+  under the repo's launch-window convention for breaking changes — and a widening
+  in the same edit, so read both directions.
+  
+  Maintainer ruling, 2026-08-25 (#11756, verbatim 「同意」 on 「C，但 pgnative
+  归入 Postgres 家族」). Three knex clients speak the PostgreSQL wire protocol
+  without being the PostgreSQL this driver emits DDL for, and the driver had no
+  opinion about any of them — it simply let knex compile whatever it compiles.
+  Measured on `origin/main` before the change, one `CREATE TABLE` per client:
+  
+  ```
+  pg / pgnative / cockroachdb   "body" text          primary key inline
+  redshift                      "body" varchar(max)  primary key in a separate ALTER TABLE
+  ```
+  
+  So on Redshift the pre-ruling behaviour was not a failure — it was a table of a
+  different shape, built quietly, with the deployment finding out when it wrote
+  data into it.
+  
+  **Refused (narrowing).** A `redshift` or `cockroachdb` datasource that reaches
+  schema DDL — `initObjects` / `syncSchema`, `dropTable`, `rotateShards`,
+  `reconcileManagedSchema` — now gets an immediate
+  `UnsupportedDialectEmissionError`: code `SQL_DIALECT_EMISSION_UNSUPPORTED`
+  (newly registered under `@objectstack/driver-sql` in `ERROR_CODE_LEDGER`),
+  HTTP status `501`, and a message naming the client, every client the driver
+  DOES emit for, and the supported way to keep the database — manage its schema
+  out-of-band and boot with `skipSchemaSync` / `OS_SKIP_SCHEMA_SYNC=1`. It throws
+  before any statement is issued, so nothing is half-built. Connection, the
+  connect bound and the #11389 calendar-day parser are untouched: the boundary is
+  DDL only, drawn where behaviour was actually verified.
+  
+  **Recognised (widening).** `pgnative` is now a member of the Postgres emission
+  family — knex resolves it to the same `postgresql` dialect and the same query
+  compiler as `pg`, differing only in which npm binding carries the bytes. It was
+  previously in neither the emission set nor the wire table, so a `date` column
+  got a bare `CURRENT_TIMESTAMP` default (the server's calendar day, the exact
+  #11550 defect) and no calendar-day parser. It now behaves identically to `pg`
+  and carries the #11389 pin.
+  
+  **One source of truth.** The pair `cockroachdb, redshift` used to be
+  hand-written into the connect-timeout table and again into the wire table. It
+  is now declared once, as `POSTGRES_WIRE_ONLY_CLIENTS`, and both tables extend
+  the emission sets through it — as does the refusal, which reads the same set.
+  Adding a future pg-wire client is one edit, and the three answers cannot drift
+  apart. `mariadb` is explicitly out of the ruling's scope and keeps its third
+  state: neither recognised nor refused.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A DDL-emission scope narrowing plus one added client spelling, both inside `driver-sql`. No spec schema, no authorable metadata key and no runtime interface is removed, renamed or re-shaped: the value that decides the outcome is a datasource's knex `client`, which lives in deployment configuration rather than in any stored `sys_metadata` document, so `objectstack migrate meta` has nothing to rewrite and there is no tombstone to project. The channel that reaches an affected deployment is the refusal itself — raised at the DDL gate, before any statement is issued, naming the supported clients and the `skipSchemaSync` posture — and choosing between "move this datasource to a supported database" and "manage its schema out-of-band" is a deployment decision no migration entry can make on an operator's behalf. `pgnative` is a widening and needs no upgrade action at all. -->
+- 9f4a6d5: feat(driver-sql,driver-turso,driver-sqlite-wasm): SQLite-family JSON columns declare `TEXT`; server dialects keep native JSON (#12738)
+  
+  A `Field.json` column — and any field with `multiple: true` — is now declared as
+  the JSON column type the **target dialect actually has**. Postgres and MySQL are
+  untouched: their native `json`/`jsonb` and `JSON` types are correct and stay.
+  The SQLite family (plain `SqlDriver` on `sqlite3`/`better-sqlite3`, `TursoDriver`
+  in all three transport modes, and `SqliteWasmDriver`) now declares `text`.
+  
+  **Why.** SQLite has no JSON type. It derives a column's *affinity* from
+  substrings of the declared type name, and `json` contains none of the markers
+  (`INT`, `CHAR`/`CLOB`/`TEXT`, `BLOB`, `REAL`/`FLOA`/`DOUB`), so it fell through
+  to **NUMERIC** and converted number-like input on the way in — measured through
+  raw SQL, a bare `'0123'` was stored as the integer `123`. `text` takes TEXT
+  affinity, converts nothing, and is what SQLite's own JSON1 functions operate on.
+  It is also what `RemoteTransport.mapFieldTypeToSQL` had spelled all along, so
+  turso's two transports now agree instead of diverging on one column.
+  
+  ## The migration shape
+  
+  - **New columns only.** The change is to the DDL emitter. Schema sync is
+    additive, so no existing column is altered, dropped or rewritten.
+  - **Existing columns keep their declared type.** A column created before this
+    release stays `json` and keeps NUMERIC affinity — including through an
+    unrelated SQLite drift rebuild, which re-declares an introspected `json`
+    column as `json` rather than converting it.
+  - **Platform write-path behaviour is unchanged.** The `Field.json` codec stays
+    injective and stays in force: what the platform writes and reads back is
+    identical before and after, on legacy and new columns alike. Nothing on the
+    read path consults the physical column type — `isJsonField` answers from
+    metadata — so decoding is the same on both spellings.
+  - **No new schema-drift findings.** The multi-value base-type finding is gated
+    on the dialect where the column type is load-bearing (Postgres and MySQL);
+    SQLite was already excluded, and the emitter now agrees with the differ
+    instead of merely being excused by it.
+  - **The visible difference is raw-SQL-only, and in the safe direction.** A value
+    written to a JSON column by raw SQL (bypassing the driver) is preserved as
+    text on a new column where it would previously have been coerced to a number.
+    Nothing that was preserved before is coerced now.
+- 4045b95: fix(driver-sql): make the SQLite `Field.json` codec injective — one encoding across all three dialects (#12380)
+  
+  **BREAKING** storage-format change for `Field.json` columns on SQLite (and the
+  SQLite-backed `driver-turso` / `driver-sqlite-wasm`, which inherit this codec),
+  shipped as `minor` under the repo's launch-window convention for breaking
+  changes. Postgres and MySQL are **untouched** — this makes SQLite match what
+  they have always done.
+  
+  `formatInput` now `JSON.stringify`s every `Field.json` value on every dialect,
+  and `formatOutput` parses it back. That **deletes a dialect branch rather than
+  adding one**.
+  
+  ## What was wrong
+  
+  Measured 2026-08-26 through the driver boundary on live SQLite, live Postgres
+  16.13 and live MySQL 8.0.46, with each stored cell read back through a separate
+  raw catalog query: **Postgres and MySQL were 17/17 faithful; SQLite was 13/17
+  type-changed.** Three independent mechanisms, only two of them reversible:
+  
+  1. **Read-side.** `formatOutput` `JSON.parse`s every string in a json column, so
+     a stored string whose *content* is valid JSON came back type-changed —
+     `'true'` → boolean, `'null'` → null, `'[]'` → array, `'{"a":1}'` → object.
+  2. **Write-side.** The column is declared type `json`, which contains none of
+     `INT`/`CHAR`/`CLOB`/`TEXT`/`BLOB`/`REAL`/`FLOA`/`DOUB`, so SQLite's affinity
+     rules fall through to **NUMERIC** and a bound number-like string was converted
+     to INTEGER/REAL *before storage*: `'123'`, `'  123  '`, `'0123'`, `'1e5'`,
+     `'1.0'`, `'-0'` were destroyed on disk. ⛔ Not reversible.
+  3. **Native booleans.** `true` was stored as INTEGER 1 and read back as the
+     number `1` — `formatOutput`'s `booleanFields` pass is keyed to declared
+     `Field.boolean` *columns*, not to booleans inside a json payload.
+  
+  The contract decides which dialect is right, not strictness: `json`'s stored
+  contract is `z.unknown()` because *"openness is now an explicit decision, not an
+  accident of nobody checking"* (`packages/spec/src/data/field-value.zod.ts`). An
+  explicitly-open contract admits both `123` and `'123'` as legal values of one
+  field, so no driver may collapse them onto one representation.
+  
+  The live consumer is `sys_setting.value`, which is `Field.json`, and the settings
+  service persists verbatim and reads back with no re-coercion by declared type —
+  so the driver's answer is what the caller gets, on the dialect tenant
+  environments actually run.
+  
+  ## What changes on disk, and what does not
+  
+  The DDL is unchanged — the column is still declared `json`, so NUMERIC affinity
+  is still in force. The encoded form defeats it because a string's encoding
+  carries its quotes (`'123'` → `"123"`, which is not a numeric literal). Pinned
+  live rather than reasoned.
+  
+  For **new** writes the on-disk delta is exactly two classes:
+  
+  - **strings** are now quoted JSON text;
+  - **booleans** are now TEXT `true`/`false` instead of INTEGER `1`/`0`.
+  
+  Objects, arrays, `null` and **numbers** are byte-identical to before (`123` bound
+  as a number and `"123"` bound as text both land as INTEGER `123`).
+  
+  ⚠️ An out-of-band reader of a SQLite file — anything reading the table with its
+  own SQL rather than through this driver — now sees quoted JSON text where it saw
+  a bare value.
+  
+  ## The migration, and the limits of what it can recover
+  
+  `backfillCanonicalJsonEncoding` runs on `syncSchema`/`initObjects` for existing
+  tables, the same posture and shape as the `backfillCanonicalDatetimes` and
+  `backfillCanonicalTimes` storage-format migrations beside it: one `UPDATE` per
+  column, failures logged and swallowed, correctness never contingent on it having
+  run. It converts the **one on-disk class the pre-fix encoding left unambiguous** —
+  a TEXT cell that is not valid JSON, which nothing but a stored plain string could
+  have produced — into its quoted form. Idempotent by construction: the `WHERE` is
+  the exact complement of the `SET`'s output, so a converted row cannot match again
+  and re-running costs one scan and zero writes.
+  
+  ⛔ **It does not guess, because the rest cannot be guessed**, and two classes are
+  therefore left exactly as they are:
+  
+  - **INTEGER/REAL cells.** A number, a boolean, and a number-like string eaten by
+    NUMERIC affinity are the *same bytes* on disk — `123` the number and `'123'`
+    the string are one INTEGER `123`. No migration can know which was written.
+  - **TEXT cells that already parse.** A stored object `{"a":1}` and a stored
+    *string* `'{"a":1}'` were byte-identical before this change. Re-quoting them
+    would turn every legacy object and array into a string — corrupting the common
+    case to guess at the rare one.
+  
+  ⇒ Those rows read after this change exactly as they read before it. **The class
+  stops growing; it is not retroactively repaired.** Maintainer ruling 2026-08-26,
+  with that cost accepted explicitly.
+  
+  The migration changes **no read**: a legacy plain string reads back as that
+  string before it runs (via `formatOutput`'s parse fallback, kept for exactly this
+  reason and now documented as the pre-#12380 read-side repair) and after it runs.
+  It is a canonicalisation that makes the on-disk format uniform and injective
+  going forward, not a repair of something that reads wrong today.
+  
+  ## What upgraders may notice
+  
+  Values that were being **corrupted** now read back correctly. Code that adapted
+  to the corruption is what changes underneath: a boolean `Field.json` value that
+  read back as `1` now reads back as `true`, and a string whose content is valid
+  JSON now reads back as that string instead of the structure it looked like.
+  Filters are unaffected — every scalar comparison operator on a json column is
+  already refused by the driver (`JSON_COLUMN_INCOMPATIBLE_OPERATORS`), so no
+  predicate could have been keyed to the old stored text.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A storage-codec change inside one driver: no authorable metadata key is removed, renamed or re-shaped, no `packages/spec` declaration changes, and the `json` field type's stored contract (`z.unknown()`) is exactly what it was — so there is no tombstone and nothing whatsoever for `objectstack migrate meta` to rewrite. The migration this change needs is over DATA ROWS, not metadata, and it is performed automatically by the driver at schema sync (`backfillCanonicalJsonEncoding`); there is no step an upgrader is prescribed to take, which is why no ledger entry could carry one. -->
+- c49afd0: driver-sql: a string field's declared `maxLength` now shapes the column it gets
+  
+  `createColumn` mapped the string family — `string` / `email` / `url` / `phone` /
+  `password` — with a bare `table.string(name)`, so every column took knex's
+  default width of 255 and the field's own `maxLength` was never read. A field
+  declaring a wider bound got a narrower column, and on a dialect that enforces
+  `varchar` length the write was refused: measured through the driver's own
+  `initObjects` on MySQL 8.0.46 and Postgres 16, a 300-character value written to
+  a `maxLength: 1024` column came back `ER_DATA_TOO_LONG` and `22001 value too
+  long for type character varying(255)` respectively. `schema-drift.ts` has always
+  treated `varchar(field.maxLength)` as the expected physical shape, so every such
+  column also reported permanent drift against a table the driver had just
+  created.
+  
+  **This changes emitted DDL for existing declarations.** A field declaring
+  `maxLength` now gets `varchar(maxLength)` in both directions — wider *and*
+  narrower than 255. Only newly created columns are affected: `createColumn` runs
+  on `CREATE TABLE` and `ALTER TABLE ADD COLUMN`, never on a column that already
+  holds rows, so nothing is truncated and no existing column is rewritten.
+  Narrowing a populated column remains what it was — the `narrow_varchar` drift
+  op, category `destructive`, behind `os migrate apply --allow-destructive`.
+  
+  A declared bound above 16383 characters (MySQL's utf8mb4 `varchar` ceiling)
+  makes the column `TEXT` rather than clamping it, since a clamp would reinstate
+  the same defect. Fields declaring no `maxLength`, or a malformed one, keep
+  `varchar(255)` exactly as before. `lookup` / `user`, `autonumber`, and the
+  catch-all branch are deliberately unchanged — none of them stores the value the
+  declared bound describes.
+  
+  Two matching corrections in `schema-drift.ts`, so the differ and the emitter
+  agree on which declarations count: a `maxLength` that is not a positive integer
+  is no longer read as a bound (`maxLength: 0` planned a destructive `varchar(0)`
+  ALTER), and a MySQL `TEXT` column is no longer diffed as a `varchar` 65535 wide
+  — MySQL reports `character_maximum_length` 65535 for `TEXT` where Postgres
+  reports NULL, so on MySQL alone every bounded unkeyed text column had been
+  reporting a permanent destructive `narrow_varchar` against itself.
+- 1246b4c: fix(driver-sql): the varchar differ now expects what `createColumn` would actually emit, instead of a different rule (#12732)
+  
+  The managed-schema drift differ's varchar-length branch expected
+  `varchar(field.maxLength)` for any bounded field, over a **pre-existing**
+  column dialect `postgres`/`mysql` enforce. `SqlDriver.createColumn` does not
+  build that for every bounded field — and disagreed with the differ in two
+  measured directions:
+  
+  **An already-serving deployment stopped booting.** An UNKEYED, bounded
+  text-family field (`text` / `richtext` / `signature` / `markdown` / …)
+  reported `narrow_varchar` at severity `error`, category `destructive` — the
+  one category `runArtifactBootMigrationGate` refuses a boot for — demanding
+  the column be narrowed to a shape `createColumn` would never build: unkeyed,
+  it leaves the column TEXT (`keyableTextLength` returns `null` unkeyed). The
+  trigger was an ordinary, correct-looking edit: adding `maxLength: 50` to a
+  legacy `varchar(255)` text column. The divergence changed no behaviour at
+  all — the write seam already enforces the declared bound — so the refusal
+  was over nothing.
+  
+  **A `safe`, dev-auto-reconcilable finding planned DDL MySQL refuses
+  outright.** A base string-family field (`email` / `url` / `password` / …)
+  bounded past `SqlDriver.MAX_VARCHAR_CHARS` (16383) reported `widen_varchar`
+  at `warning`/`safe`, planning `ALTER … varchar(100000)` — `ERROR 1074 Column
+  length too big` on MySQL, while Postgres accepted it: the dialect-divergent
+  enforcement this package's conformance matrices exist to close.
+  `declaredVarcharLength` returns `null` above the ceiling for the same reason
+  `createColumn` never emits that DDL.
+  
+  This guard had already been patched at the call site three times for the
+  same defect class (#11431 for `multiple: true`; #11794/#11875 for genuine
+  TEXT columns) — each time by adding one more condition. This is that defect
+  arriving a fourth time, through a column spelled `varchar` because an older
+  release created it. Rather than a fourth patch, the branch now asks
+  `SqlDriver.varcharColumnChars(field, keyed)` — the emitter's own read-only
+  mirror of `createColumn`'s switch, already pinned against `columnInfo()` for
+  every `FieldType` — what width `createColumn` would actually build. `null`
+  means "the emitter would not make this a varchar," and the branch does not
+  fire. Keyedness (`indexedKeyColumns()`, #11374) is threaded from
+  `SqlDriver.detectTableDrift` into `diffManagedTable`, since a KEYED bounded
+  text-family field legitimately takes `varchar(maxLength)` — the fix
+  suppresses the false positive, not the branch itself; a keyed field over the
+  same shape still reports.
+  
+  Graded `minor` rather than `patch`, mirroring the sibling drift-op change for
+  #12121 in the opposite direction: an already-serving deployment that
+  currently fails to boot over Case A will boot after this upgrade, and a
+  `widen_varchar` currently eligible for dev auto-reconcile over Case B will no
+  longer be planned — both are user-visible behaviour changes for an existing
+  deployment (`os migrate plan`, `os migrate apply`'s counts, the boot-time
+  `[schema-drift]` warn), not merely an internal correctness detail. `diffManagedTable`'s exported args object gains two **optional** parameters
+  (`keyedColumns`, `varcharColumnChars`); omitting either keeps the pre-#12732
+  behaviour unconditionally; this is additive to the object type and — unlike
+  #12121's `DriftOp` union member — does not add a case any consumer's
+  exhaustive switch must handle, so it is not itself a reason to grade higher
+  than `minor`. Nothing is removed, renamed, or newly rejected, so this is not
+  a breaking change. The category question (whether Case A's `destructive`
+  should become a report) is deliberately **not** addressed here: the fix
+  makes the false-positive stop firing entirely, so there is nothing left to
+  downgrade, and downgrading it as a separate act would be gate-weakening the
+  triage seat did not authorise.
+
+### Patch Changes
+
+- ef52884: `aggregate()` now answers an unresolvable column with the same refusal class as `find()` and `count()` instead of the generic `DATABASE_ERROR`/500 terminal — the #8790 refusal reaching the third read door (#11541). The dialect-named column is attributed to the clause the caller's own query names it in: a `groupBy` field or an aggregation `field` refuses with `INVALID_FIELD`/400 naming the column and the clause (the same code the protocol ingress gives this condition, #4254); a column named by neither clause is the WHERE, which answers #8790's `INVALID_FILTER`/400 refusal verbatim; a dialect wording that yields no column name keeps the #11455 terminal envelope unchanged, because no attribution is supportable there (#8931). Drivers extending `SqlDriver` (`driver-turso`'s embedded face, `driver-sqlite-wasm`) inherit the same answers.
+- 9e1b2de: Fix a `500 DATABASE_ERROR` on any analytics cube query that buckets a measure by
+  a time-dimension granularity (`"count by month"` and every other
+  `timeDimensions[].granularity` shape).
+  
+  An analytics measure is addressed on the wire as `<cube>.<measure>`, and that
+  dotted name is used verbatim as the driver-level aggregation `alias` — it is the
+  key the caller reads its own number back under. `driver-sql` bound the alias
+  through knex's `??` placeholder, which does not quote an identifier so much as
+  parse one: it splits the value on `.` into `table.column` and re-quotes each
+  segment. The statement therefore reached the database as
+  ``count(*) as `showcase_delivery`.`count` `` — not valid SQL on any dialect — and
+  was refused before it ran.
+  
+  The granularity was the router rather than the fault: `NativeSQLStrategy`
+  declines exactly on a granularity, so an un-bucketed cube query was served by the
+  native face (which already emitted the alias correctly) while a bucketed one fell
+  through to this door. Aliases are now emitted as a single dialect-quoted
+  identifier at every alias position on the aggregate and window-function builders;
+  column *references* still bind through `??` and may still be qualified.
+- 178f90c: Boolean aggregands now answer the ruled #11249 contract on every SQL dialect. On Postgres, `sum`/`avg`/`min`/`max` over a declared `boolean` field are lowered with a cast (`avg(cast("flag" as int))`) instead of reaching the server as `avg("flag")` — which PostgreSQL refuses with SQLSTATE `42883`, so those aggregations previously failed with `DATABASE_ERROR`/500. On every dialect, `min`/`max` results over a declared boolean are now presented as JSON booleans (`false`/`true`) at the driver boundary — previously MySQL (`tinyint(1)` storage) answered `0`/`1`. `sum`/`avg` answer arithmetic (`3` / `0.5` over a 3-true/3-false column); `count`/`count_distinct` are unchanged, and `min`/`max` over an empty window still answer `null`.
+- f6fa22c: `min`/`max` over a **boolean** aggregand now answer the numbers `0`/`1` on every face — maintainer ruling 2026-08-28 (#11152, option A), superseding #11249's `false`/`true`: booleans aggregate as numbers, with no per-aggregate exception, so one flag column's `sum`/`avg`/`min`/`max` all answer in one numeric domain.
+  
+  FROM → TO, per face: `driver-sql` (every dialect, `driver-sqlite-wasm` included via the shared compiler) no longer re-presents `min`/`max` results over a declared boolean as JSON booleans — `false`/`true` → `0`/`1`; row reads (`find()`) still present booleans, and `min`/`max` over an empty window still answer `null`. `driver-memory` (data and analytics faces) and objectql's in-memory fallback compare booleans as the numbers they are worth — `false`/`true` → `0`/`1`; strings, dates and numbers reach the same comparison they always did. `driver-mongodb` wraps `$min`/`$max` in the same boolean-only `$cond` coercion `$sum`/`$avg` use — `false`/`true` → `0`/`1`; null/missing still pass through, so the empty window still answers `null`. A caller reading `min`/`max` over a boolean column as a JSON boolean should read the number (`0` is false-y, `1` truthy, so boolean coercion at the call site keeps working).
+  
+  The cross-driver aggregation conformance fixture (`AGGREGATION_ROWS`, `@objectstack/spec/data`) now carries the boolean column those rulings are pinned by: `flag` (3 true / 3 false), with cases for `sum`=3, `avg`=0.5, `min`=0, `max`=1, `count`=6, `count_distinct`=2 and a grouped `min` over the deliberately asymmetric groups — the reach gap #11065 and #11151 were both found through (a boolean aggregand no conformance cell could see) is closed.
+- 84de7e3: fix(driver-sql): name the storage a declaration on a builtin column name loses, instead of discarding it in silence (#12015)
+  
+  `initObjects` emits `id`, `created_at` and `updated_at` itself and then skips any
+  declared field colliding with one — `if (builtinColumns.has(name)) continue;`, with
+  no warning, no throw and no record anywhere that the author's declaration had been
+  dropped. Measured on live PostgreSQL 16.13: an object declaring
+  `id: { type: 'text' }` boots green and gets `id varchar(255)` — `table.string('id')`,
+  not TEXT. Measured here on SQLite: the same substitution, and a declared
+  `maxLength: 12` on that field binds nothing. The driver is right to own its primary
+  key and audit stamps; the defect was that it disagreed with the author in silence —
+  the declared-≠-enforced shape that bites hardest on AI-authored metadata, where the
+  mismatch surfaces much later as data behaving oddly.
+  
+  Every DDL path that drops such a declaration now says so, naming the field, the
+  object, the attributes that were lost and what the platform's column actually is:
+  
+  - **create** — `while creating table "…"`, said before the CREATE runs, so the
+    author hears it even when the CREATE goes on to fail for an unrelated reason;
+  - **ADD COLUMN diff** — `while syncing existing table "…"`; this path drops the
+    declaration for a different reason (the builtin is already in the table, so the
+    diff never proposes it), and it is the path a stock upgrade takes;
+  - **rotation shard** — `while syncing shard "…"`, covering both the shard-create and
+    shard-column-sync branches.
+  
+  A warning on one path with silence on the others just moves the trap, so each path
+  carries its own call and its own pin: a regression to a silent `continue` on one path
+  fails by name rather than being absorbed by a sibling.
+  
+  **Only the STORAGE half is reported, because only the storage half is lost.** A
+  declaration on a builtin column name still carries `label` (and the locales generated
+  from it), `readonly`, `searchable` and the ADR-0113 write contract in `required` — all
+  honoured on the platform's column exactly as on any other. So the diagnostic fires
+  only when the declaration asks for storage the platform's own column does not deliver
+  (a differing `type`, a `maxLength`, `unique`, `defaultValue`, `storage.notNull`, a
+  `multiple` shape…) and stays silent when it does not: `created_at: { type: 'datetime',
+  defaultValue: 'NOW()' }` describes precisely what lands, and says nothing.
+  `id: { type: 'number' }` — an author expecting a numeric key — still fires.
+  `id: { type: 'text' }` does **not**: varchar(255) canonicalizes to the field type
+  `text`, so that declaration asks for precisely what the column delivers (#12131 —
+  the delivery table recorded the knex builder name `'string'` there at first, and
+  reported all 45 of the platform's own correct `id` declarations as disagreements). The storage/presentation split is one table
+  (`builtin-column-collision.ts`) pinned against `FieldSchema.shape`, so a field key
+  added later is classified deliberately instead of defaulting into silence.
+  
+  **Grade: `patch`, and deliberately.** Nothing about the accept set moves — every
+  object that booted before still boots, the DDL emitted is byte-identical, no public
+  type or metadata key changes, and the only observable difference is a line in the log
+  for storage that was already being discarded. The platform still owns `id` /
+  `created_at` / `updated_at`: this changes what the driver **says**, never what it
+  **does**.
+- 3bc2e38: fix(driver-sql): the builtin-column delivery table speaks the spec's field-type vocabulary, not knex's builder names (#12131)
+  
+  `BUILTIN_COLUMN_DELIVERY.id.type` recorded `'string'` — the **knex builder name** from
+  `table.string('id').primary()` — and `undeliveredStorageAttributes` compares that value
+  with `===` against a declaration's `type`, which is a spec `FieldType`. The two are
+  different vocabularies, and `'string'` is not a member of the one being compared: it is
+  absent from `FieldType`'s 49 options, `Field.string` is absent from the builder's keys,
+  and `FieldSchema` refuses `type: 'string'` outright. So **no declaration could ever
+  match it**, and the #12015 diagnostic reported every correct declaration on the
+  platform's own key as a disagreement.
+  
+  Measured on a stock boot of `@objectstack/platform-objects`: **45 warnings, one per
+  system object**, each saying `type: 'text' (the column is 'string')` about a
+  declaration that was right all along. `varchar` canonicalizes to the field type `text`
+  (`canonicalizeSqlType('varchar(255)') === 'text'`, `suggestFieldTypeForSqlType('varchar(255)') === 'text'`,
+  `isCompatible('varchar(255)', 'text') === true` — all pinned in `type-compat.test.ts`),
+  so `id: Field.text(...)` asks for exactly what the platform's column delivers. The
+  delivery table now records `text`, and the 45 lines go silent because they were false,
+  not because they were suppressed.
+  
+  `sys_migration.id`'s `maxLength: 128` was the one **honest** disagreement in that corpus
+  — the column is varchar(255) — and it is removed rather than widened to 255. It bound
+  nothing in any seam: the DDL discards a declared width on a builtin column name, and
+  `validateRecord` skips `id` by name on both the insert and the update path (it is also
+  `readonly`). Declaring a width that nothing enforces is the shape enforce-or-remove
+  exists to prevent, and the 44 sibling system objects declare none.
+  
+  The classification pin now holds **every** entry in the delivery table to
+  `FieldType.options`, so a builder name written there fails by name instead of surfacing
+  as a corpus of false warnings. The fixtures in both #12015 pin files were written
+  against the delivery table rather than against the source — `sys_presence.id` was spelled
+  `type: 'string'` in the "silent" cases, which is why they passed while the same
+  declaration as actually written warned. They now use the shapes as declared, and the
+  firing cases declare a type that genuinely disagrees.
+  
+  **Grade: `patch` for both, and deliberately.** No door moves and no DDL changes: the
+  platform still owns `id` / `created_at` / `updated_at`, the emitted column is
+  byte-identical, every object that booted before still boots, and `BUILTIN_COLUMN_DELIVERY`
+  is internal to the package (it is not re-exported from the package entry). The
+  `platform-objects` half removes one metadata key that was measured inert in every seam
+  that could read it. What changes is what the driver **says**.
+- f9ffd01: `SqlDriver` now recognises knex's own **canonical** client spellings, so `client: 'postgres'` and `client: 'sqlite'` no longer silently lose every dialect-specific behaviour (#11550). `SqlDriverConfig` is `Knex.Config & {…}`, so every client name knex accepts was already declared valid, while `isPostgres` / `isSqlite` enforced two literals each — and `postgres` is the canonical name of the dialect whose registered aliases are `pg` and `postgresql`, `sqlite` likewise for `sqlite3`. Nothing failed on the unrecognised spellings; the driver just emitted the wrong SQL. The sharpest case: `nowColumnDefault` fell through to a bare `CURRENT_TIMESTAMP` default on a `DATE` column, which resolves the calendar day in the **server's** timezone — the exact defect ("a UTC-12 server records YESTERDAY") that method's Postgres branch exists to remove. The three getters, the connect-timeout table, the pg wire-protocol set and the MySQL UTC session pin now derive from one identity source per dialect family instead of four hand-written lists that had already drifted apart. What an already-recognised spelling (`pg`, `postgresql`, `sqlite3`, `better-sqlite3`, `mysql`, `mysql2`) resolves to is unchanged, and `redshift` / `cockroachdb` keep pg **wire** recognition without gaining SQL-**emission** identity — that remains an open support-scope decision (#11756).
+- c804f0c: The stale multi-value column warning now names `os migrate multi-value-columns`,
+  instead of telling operators ObjectStack will never fix the column
+  
+  The finding that reports a multi-value field left on a stale `varchar`/`text`
+  column opened its remedy with **"ObjectStack will NOT change this column for
+  you. Migrate it by hand"** and then printed raw SQL. That was true when it was
+  written and became false the moment `os migrate multi-value-columns` shipped:
+  there is now an operator-run command that does exactly this, with a dry run as
+  the default, a confirmation prompt, and a post-run re-detection that exits
+  non-zero if the finding has not cleared. Operators were being sent to hand-write
+  DDL on a production table while the safer route sat one command away, unnamed.
+  
+  The message now leads with the command and keeps the hand-run statement after it
+  for anyone without the CLI. Both surfaces an operator meets this on pick the
+  change up, because both print `message` verbatim: the boot warning
+  (`[schema-drift] …` on every restart) and `os migrate plan`.
+  
+  What has **not** changed is what the finding gates. It stays `severity: 'error'`,
+  `category: 'needs_confirm'` — the artifact boot gate refuses a boot on
+  `category === 'destructive'` and on nothing else, and every database this finding
+  describes is already serving, so making the report louder must never be the thing
+  that stops one from starting. No load-time or write-time refusal was added; the
+  platform still never migrates the column on its own, per the ruling that it warns
+  and ships an explicit operator-run migration rather than altering a customer's
+  production table unattended.
+  
+  The dialect-specific statement stays embedded **verbatim**, which is a contract
+  rather than formatting: a `ManagedDriftEntry` carries no dialect, so the CLI
+  command recovers one by testing which dialect's statement the message contains.
+  That coupling is now pinned from the emitting side as well as the consuming one.
+- 9d3c04d: fix(driver-sql): `aggregate()` joins the enveloped read exits — a dialect error it
+  cannot attribute now leaves as `DATABASE_ERROR` / 500 instead of raw (#11455)
+  
+  `SqlDriver.aggregate()` executed its statement **bare**. Every dialect error the
+  backend raised left the driver as the backend's own error object: a `code` from
+  the backend's vocabulary, **no `status`** at all, and a message opening with the
+  compiled statement. `find()` and `count()` have carried the terminal ADR-0112
+  envelope since #8931; this third read door was simply never given it.
+  
+  Measured on live PostgreSQL 16.13. The driver maps a `boolean` field to a real PG
+  `boolean` column and `SQL_AGGREGATE_FUNCTIONS` lowers the arithmetic aggregates to
+  a bare function name with no cast, so an ordinary analytics shape — a rate measure
+  over a flag column — reached the server as `avg("flag")`:
+  
+  ```
+  sum(flag) => THREW code=42883 status=undefined
+               msg=select sum("flag") as "n" from "…" - function sum(boolean) does not exist
+  ```
+  
+  A raw `42883` is on no list `@objectstack/rest` reads, so with `status` undefined
+  a caller-shaped mistake was logged as an **unhandled server fault**, and the
+  statement's shape travelled to the caller with it.
+  
+  `aggregate()` now composes the same `backendStatementFaultError` its two siblings
+  do: `DATABASE_ERROR` / 500, asserting exactly one thing — *the backend would not
+  run this statement* — with the dialect's own diagnostic written to the **server
+  log** rather than the caller's message, and the original error kept as a
+  non-enumerable `cause` so `isMissingTableError` and every other cause-following
+  predicate stay truthful.
+  
+  **No new error code.** ADR-0112 D3/D4 closed the `StandardErrorCode` vocabulary,
+  and D2's 2026-08-18 amendment retired three members on the reasoning that an
+  unreachable-but-declared code teaches a branch that can never fire. The code here
+  is the catalogued member the sibling read exits already answer with.
+  
+  **This is the envelope half only, and it decides no contract.** Whether the
+  platform should *answer a number* for an arithmetic aggregate over a boolean (by
+  casting in the lowering) or *refuse* is #11152's question, and #11249's for
+  `min`/`max`. Nothing here pre-empts it: the envelope is raised from the **exit**,
+  not from recognising `42883` or any wording, so it holds whichever way that card
+  is ruled — and the three dialects' arithmetic answers are deliberately left
+  unpinned (measured 2026-08-24: SQLite and MySQL's `tinyint(1)` both answer,
+  Postgres refuses).
+  
+  Unchanged, and pinned as controls: the precise refusals this door already
+  composed — an undeclared function (`INVALID_QUERY` / 400, #5907), a
+  `count_distinct` with no `field` (`INVALID_QUERY` / 400, #6409), a
+  per-aggregation `filter` (`NOT_IMPLEMENTED` / 501, #10576) — are all raised while
+  the statement is *built*, upstream of the guarded execution, so none can be buried
+  under the generic envelope. The accept set does not move: every condition that now
+  takes the envelope failed before this change and fails after it.
+- d29e42f: chore(driver-sql): pin the varchar-sizing type switch against the spec's `BOUNDED_STRING_FIELD_TYPES`, so the two lists cannot drift apart silently (#12017)
+  
+  `packages/spec` decides which field types may DECLARE a `maxLength`
+  (`BOUNDED_STRING_FIELD_TYPES`, which `FieldSchema` and objectql's
+  record-validator both read since #11989/#11875). `driver-sql`'s
+  `varcharColumnChars` / `createColumn` switch decides which types get a column
+  SIZED from that declaration. The two are related by reasoning and nothing
+  asserted the relationship — so a type admitted into the spec's set without a
+  matching hand edit to the driver's switch falls to the catch-all
+  `table.string(name)` at knex's varchar(255): the author declares
+  `maxLength: 2000`, the platform formally accepts the declaration, and the
+  column refuses at 255. That is #11431's defect re-entering through a different
+  door. #12119 is the proof it is reachable — admitting `signature`/`qrcode`
+  required a hand edit to this switch that nothing would have caught if it had
+  been forgotten.
+  
+  ⛔ No divergence existed: the lists were measured and agree. This adds the
+  missing guard, and changes no runtime code.
+  
+  The pin asserts set EQUALITY over the spec's `FieldType` vocabulary — the types
+  the switch sizes from a declared `maxLength` are exactly the types the spec
+  permits to declare one — and identifies each type's branch by probing the
+  driver's own dispatch, so no copy of either list is added. `'string'` is pinned
+  separately as the switch's untyped default (`field?.type || 'string'`, knex's
+  builder name, not a spec `FieldType`), which is why the equality is scoped to
+  the declared vocabulary.
+  
+  Grade: `patch`, argued rather than defaulted. Not `minor` — no new public API,
+  no widened accept-set, no behaviour change of any kind; the emitted DDL is
+  identical. Not `skip-changeset` either, though this PR ships only a test: the
+  package's published CONTRACT (a bounded-string field gets a column that honours
+  its declared bound) becomes a checked invariant here, and the CHANGELOG line is
+  the record a future reader needs when the guard goes red.
+- 87ad30c: fix(driver-sql): the terminal backend-fault envelope declares the table the statement targeted, so a genuinely absent federated remote reads benign again (#13438)
+  
+  `isMissingTableError(error, readObject)` compares the dialect's missing-table
+  phrase against the name the **caller** read — its API object name (#13324). For a
+  federated object (ADR-0015) that is not the name in the statement:
+  `registerExternalObject` records `external.remoteName` and `getBuilder` targets
+  it. So a caller reading `crm_order` from an absent `legacy_orders` got a phrase
+  naming `legacy_orders`, compared it against `crm_order`, and was told the failure
+  was about some other relation — the **loud** verdict, for the one case the benign
+  licence exists for. Nothing at the call site knows the mapping; it lives on the
+  driver instance.
+  
+  Maintainer ruling 2026-09-01 (option 2 on the card): the driver declares the table
+  it targeted on the envelope. `backendStatementFaultError` — the terminal of the
+  `find` / `count` / `aggregate` read exits — now stamps the physical table the
+  statement was compiled against (a federated object's `external.remoteName`,
+  otherwise the object's own name, resolved exactly as `getBuilder` resolves it)
+  onto the envelope under `@objectstack/types`' `DRIVER_TARGETED_TABLE` symbol.
+  
+  The member is **code-readable and serialisation-invisible** — a non-enumerable
+  symbol key, the same discipline the envelope already applies to `cause`:
+  `JSON.stringify(err)`, `{ ...err }` and `Object.keys(err)` never carry it. ⛔ It is
+  never written into the message: #8931's disclosure clause stands, and the
+  composed message still names only the caller's object. No new export from this
+  package and no new error code; the envelope's `code` / `status` / `message` are
+  byte-identical to before.
+  
+  Pinned live on SQLite, Postgres and MySQL: the declared table is the name the
+  dialect's own phrase carries; an absent remote now reads benign through the real
+  predicate while the same envelope without the declaration still reads loud (the
+  control); a native object declares its own name and matches as before; and a
+  relation the statement did **not** target (a view over a dropped base table)
+  stays loud with the declaration present — the #13324 narrowing does not reopen.
+- fcd0efc: fix(driver-sql): scope the Postgres `introspectForeignKeys` catalog read to the session's own schemas (#11201)
+  
+  The Postgres arm queried `information_schema.table_constraints` with
+  `tc.constraint_type = 'FOREIGN KEY' AND tc.table_name = ?` and **no `table_schema`
+  predicate at all**. Those views span every schema the session has privilege on,
+  independently of `search_path`, so a table name that exists in more than one schema had
+  all of their foreign keys merged into a single answer — including foreign keys from
+  schemas the session can never reach unqualified.
+  
+  That is a wrong answer rather than a missing one, and it is consumed as fact:
+  `introspectSchema` hangs the result on the table it just listed, and from there it reaches
+  federated-object codegen, the persisted `external_catalog` (ADR-0015) and schema-drift
+  comparison. A phantom foreign key makes a drafted federated object reference a table it
+  does not reference.
+  
+  The fix is the pin the rest of the family already carries —
+  `AND tc.table_schema = ANY (current_schemas(false))` — spelled and placed exactly as
+  `introspectUniqueConstraints` spells it, which in turn follows `introspectSchema`'s own
+  table listing. `introspectForeignKeys` was the last unscoped introspection arm; the two
+  `pg_index`-based arms (`introspectIndexes`, `introspectPrimaryKeys`) reach the same scoping
+  from the other side by resolving the name to an OID through `regclass`. No interface shape
+  and no accepted input changes: a same-named table in another schema simply stops
+  contributing foreign keys it never should have contributed.
+  
+  Measured on a live PostgreSQL 16.13. The regression pin
+  (`sql-driver-11201-introspect-fk-schema-scope.test.ts`) builds the collision the repo's own
+  live-PG isolation (#9350, one schema per test file in one database) already makes routine:
+  two same-named tables in two schemas, each with a different foreign key. It first asserts
+  the pre-fix predicate really sees both constraints — so the interesting assertion, an
+  absence, cannot go green on a fixture that never collided — then requires the arm and
+  `introspectSchema` to return only the current schema's. Reverse-verified: with the
+  predicate reverted the pin fails with the neighbour's foreign key present in the answer.
+  
+  The MySQL arm of the same method was checked and is not affected: it already pins
+  `TABLE_SCHEMA = DATABASE()`. SQLite has no schemas.
+- 3f42920: fix(driver-sql): keep the logger's receiver at the nine detach-then-call sites — a class-based host logger no longer turns a durability warning into a `TypeError` (#12792)
+  
+  Nine sites in `sql-driver.ts` picked a log channel by **extracting** the method before
+  calling it — eight on the durability channel and one on `info`:
+  
+  ```ts
+  (this.logger.error ?? this.logger.warn)(msg, meta);   // 8 sites
+  (this.logger.info  ?? this.logger.warn)(msg);         // 1 site
+  ```
+  
+  `a.b` in *call position* passes `a` as the receiver; `(a.b ?? c.d)(…)` evaluates to the
+  bare function first, so the call runs with `this === undefined`. A plain-closure logger
+  does not read `this` and survives it — which is why no suite ever went red, since this
+  class's own default sink and every test double in the package are closures.
+  `@objectstack/core`'s `ObjectLogger` is a real class with prototype methods and no
+  constructor binding — `error`/`fatal` reach for `this.writeErrorLike`,
+  `debug`/`info`/`warn` for `this.write` — so a host that injects one got:
+  
+  ```
+  TypeError: Cannot read properties of undefined (reading 'writeErrorLike')
+      at error (packages/core/src/logger.ts:414:14)
+      at SqlDriver.syncDeclaredIndexes (packages/drivers/driver-sql/src/sql-driver.ts)
+  ```
+  
+  The asymmetry that makes it worth fixing rather than noting: these particular lines
+  report **durability degradation and schema drift** — the channel that exists to be loud
+  when a constraint the metadata claims is enforced is not. A throw there converts the one
+  signal into silence plus an unrelated crash, and where the site sits inside the
+  reconcile's own `try` the throw is swallowed and re-reported as
+  `dev auto-reconcile failed` — a reconcile that really happened, announced as a failure,
+  with the post-reconcile re-detect skipped so the next warning describes a state that is
+  no longer true.
+  
+  The eight `error ?? warn` sites now call `logDurabilityFailure()` — the property-access
+  helper this class already had, three lines from the docblock that explains it. The ninth
+  is `info ?? warn` and reports a reconcile that **succeeded**, so it keeps its level with
+  an in-place property-access spelling rather than being escalated onto the durability
+  channel; escalating a functional report to `error` is the over-application AGENTS.md
+  names as what makes `error` unreadable in the first place.
+  
+  **Why `patch`.** No export, signature, accepted input or rejected input changes, and no
+  message text changes. A host whose logger is a plain closure object sees byte-identical
+  behaviour — that shape worked before and is pinned unchanged. The one behaviour a
+  consumer could observe is a subclass that overrides the `protected`
+  `logDurabilityFailure`: eight more calls now route through its override. That method is
+  already this class's declared verb for the durability channel and the fallback semantics
+  at those sites are unchanged (`error` when the sink has one, else `warn`), so more calls
+  honouring the override is the documented intent rather than a break.
+  
+  Also measured and recorded rather than assumed: **nothing composes an `ObjectLogger`
+  into `SqlDriver` today**. The plugin's `onEnable` builds `new SqlDriver(config)` and
+  never passes the kernel's logger, the constructor reads no `logger` key, and every
+  `driver.logger = …` assignment in the repo is a test or a testkit; the one production
+  seam that *can* install one is `SqliteWasmDriver`'s constructor, inherited straight into
+  this class, and no caller passes it yet. So these were latent, not live — which decides
+  urgency, not whether: a call that runs with `this === undefined` is a defect whatever
+  today's wiring happens to tolerate.
+  
+  The regression pin (`logger-receiver-detach.test.ts`) uses **class-based** logger doubles
+  whose channels dispatch through `this`, drives the real reconcile and the real
+  declared-index sync against real SQLite, and adds a structural AST scan over
+  `sql-driver.ts` for all four detach spellings — including the two a single-line regex
+  cannot see, which is how this file's count was twice taken as a floor.
+- dd4113e: fix(driver-sql): order the MySQL `introspectForeignKeys` read by the key ordinal (#11379)
+  
+  `SqlDriver.introspectForeignKeys`' MySQL arm read `information_schema.KEY_COLUMN_USAGE`
+  with no `ORDER BY`. `ORDINAL_POSITION` is the key ordinal and was selected by neither the
+  projection nor an order clause, so the row order of a composite foreign key's columns was
+  whatever the query plan happened to yield.
+  
+  That order is load-bearing. `IntrospectedForeignKey` is a flat per-column record with no
+  ordinal field, so a composite key is expressed as **ordered sibling rows** — `(x, y)
+  references p (a, b)` is `x -> p.a` then `y -> p.b`, and there is nothing for a consumer to
+  recover the position from if the rows arrive permuted. The Postgres arm pins this with
+  `ORDER BY … k.ord`; the MySQL arm was leaving it to the optimizer.
+  
+  This is a determinism fix rather than the repair of a wrong answer, and the measurement is
+  what distinguishes the two. On MySQL 8.0.46, a foreign key declared out of column sequence
+  — `foreign key (second_col, first_col) references ooo_parent (pa, pb)` — came back in key
+  order through this predicate with no `ORDER BY` at all. But on the same server, in the
+  same session, over the same view, the sibling `introspectPrimaryKeys` predicate
+  (`CONSTRAINT_NAME = 'PRIMARY'`) returned an out-of-sequence primary key in **column**
+  order — `carrier_code` at ordinal 2 ahead of `shipment_id` at ordinal 1. `KEY_COLUMN_USAGE`
+  therefore does not preserve the ordinal for free on this server: which of the two orders
+  you get is decided by the `WHERE` clause, and nothing declared that. The foreign-key
+  predicate was on the lucky side of a choice nobody made.
+  
+  Consumers that read composite foreign keys through `introspectSchema` — federated-object
+  codegen, the persisted `external_catalog` (ADR-0015), and schema-drift comparison — now get
+  the declared key order from MySQL by construction rather than by plan choice.
+- 992161b: fix(driver-sql): `introspectUniqueConstraints` reports single-column uniqueness on all three dialects (#11202)
+  
+  `SqlDriver.introspectUniqueConstraints` returns a flat `string[]` that
+  `introspectSchema` folds into a per-column `isUnique` flag, and the three dialect arms
+  disagreed about what that list meant. SQLite pushed a column only when the unique index
+  had exactly one column; the Postgres and MySQL arms returned **every member of every
+  composite constraint**. So for `UNIQUE (a, b)` the same table read through Postgres
+  claimed `a` alone is unique *and* `b` alone is unique — a claim the constraint does not
+  make — while through SQLite it claimed neither.
+  
+  The divergence was latent rather than active until recently: the Postgres arm's query
+  selected `c.column_name` with no alias `c` in scope, and the bare `catch {}` the method
+  carried until #11161 turned every execution into `[]`. Live Postgres had therefore never
+  once reported a unique constraint through this method. Repairing that query is what put
+  three dialects into conflict on live systems for the first time.
+  
+  Per maintainer ruling 2026-08-23 (option A→B), the flag is now narrowed to
+  **single-column uniqueness only**: a column is reported iff some unique constraint covers
+  that column and nothing else. A composite constraint's members are deliberately absent —
+  a per-column boolean is structurally unable to say "a and b are unique *together*", so
+  setting it on both members asserts something different and false. Representing composite
+  constraints is option B and waits for real demand; until it exists, an absent flag on a
+  composite member means "not single-column unique", never "no constraint".
+  
+  All three arms now normalise their rows to a `UniqueConstraintMember` and decide through
+  one predicate, so a fourth dialect cannot quietly acquire a fourth meaning. The Postgres
+  arm additionally selects `constraint_schema` and keys constraint identity on
+  `(schema, name)`: its answer spans `current_schemas(false)` and Postgres auto-names a
+  unique constraint after the table and column, so two same-named tables in two schemas
+  produce two different constraints under one name — keyed on the name alone they would
+  fuse into an apparent two-member constraint and drop a genuinely single-column unique
+  (the #11201 defect class, one method over).
+  
+  Two smaller corrections ride the same rewrite, both in the SQLite arm's handling of
+  `PRAGMA index_info` rows: an expression-index term (`… ON t (lower(a))`) reports
+  `name: null`, which the arm used to push into a `string[]` as a literal `null` — it is
+  now discarded, while still counting toward the index's width so `(d, lower(e))` cannot
+  read as single-column; and the returned columns are de-duplicated, so a column carrying
+  both a `UNIQUE` clause and a hand-made unique index is named once.
+  
+  No interface shape and no accepted input changes, and `isUnique` is only ever *set* to
+  `true`, so a column that stops being flagged carries `undefined` exactly as an
+  unconstrained column always has. The one in-tree consumer is
+  `introspectedSchemaToObjects` in `@objectstack/objectql`, which turns the flag into a
+  drafted field's `unique: true` — it is the direct beneficiary: composite members no
+  longer draft fields declaring a single-column uniqueness the database never enforced.
+  
+  Verified on embedded SQLite, including the consumer-visible `introspectSchema` fold; the
+  live Postgres and MySQL cells are declared through the shared dialect matrix and run in
+  the `Temporal Conformance (live PG + MySQL)` job. The narrowing predicate is pinned
+  directly against each dialect's real row shape, so the Postgres and MySQL decision is
+  measurable without a provisioned server. Reverse-verified by ablation: with the width
+  filter removed, 9 of the new pins fail — the Postgres and MySQL row-shape cases, the
+  end-to-end SQLite cell, and the `isUnique` fold.
+- ebcc34e: fix(driver-sql): an unkeyable TEXT column whose field ALREADY declares a bound now names the real remedy (#12999)
+  
+  One message served two causes and was true of only one of them.
+  
+  `explainUnkeyableTextColumn` turns MySQL's `ER_BLOB_KEY_WITHOUT_LENGTH` /
+  `ER_TOO_LONG_KEY` index refusal into operator-readable advice. It rendered
+  every such refusal as *"the field declares no `maxLength` … declare
+  `maxLength` on the field(s)"*. That is correct at CREATE time. On the UPGRADE
+  path both halves are false: the additive sync adds columns and indexes and
+  deliberately never rewrites a column's type (#3728), so once a release adds a
+  bound to a previously unbounded keyed field (#12978 did exactly that for five
+  `sys_notification_*` objects), the field declares a perfectly usable
+  `maxLength` while the physical column is still TEXT. The index is refused
+  again on every boot and the message tells the operator to do the thing they
+  already did — in production, once per boot, which reads as the release that
+  shipped the fix being broken.
+  
+  **What changed.** A second branch, selected per column on a criterion that
+  needs both halves: the physical column is TEXT *and* `keyableTextLength` says
+  a fresh create would have emitted `varchar(n)` for the field's declared bound.
+  Both inputs were already in hand on the failure path — the `columnInfo()` read
+  this method already performs, and the driver's `managedObjectFields`
+  registration. That message names the column, the bound it already declares,
+  that re-declaring changes nothing, and the remedy that does apply: convert the
+  column to `varchar(n)` **by hand, with a backup taken first**, restating the
+  FULL column definition on MySQL — `MODIFY` does not repeat a `NOT NULL` and
+  silently drops a `DEFAULT` it does not restate — after which the next boot
+  creates the index. A composite key that mixes a stale column with a genuinely
+  unbounded one names both dispositions rather than sending the operator down
+  one route for both.
+  
+  **What deliberately did not change.**
+  
+  - The CREATE-path message is **byte-identical**, and is what a field that
+    really declares no usable bound still gets. A declared bound *wider* than a
+    utf8mb4 key part can hold (768 characters) is not a stale column either — a
+    fresh create emits TEXT for it too — so it keeps the CREATE message, whose
+    768-character ceiling is the fact that operator needs.
+  - The refusal stays **loud and stays a failure**. The index genuinely was not
+    created and a declared uniqueness is genuinely unenforced; naming a better
+    remedy is not a reason to downgrade or silence that.
+  - The additive sync still does **not** rewrite the column itself. A widening
+    `ALTER … MODIFY` takes an exclusive metadata lock on the table, which makes
+    it a destructive, hard-to-roll-back action and a deliberate manual floor
+    rather than something a boot may decide to do.
+  
+  Diagnostic text only: no schema, DDL, wire or API surface moves.
+- d395692: Withdraw the never-honored `IntrospectedTable.indexes` promise and widen two
+  introspection declarations to the measured emitted types (#11122, maintainer
+  ruling 2026-08-23, option B — 「其他同意你的意见」).
+  
+  The spec's introspection contract (`schema-diff-service.ts`) declared
+  `indexes: IntrospectedIndex[]` as REQUIRED, yet no producer has ever emitted
+  it — a consumer typed against the promise read `undefined` with no compiler
+  complaint. It also declared `defaultValue?: string` while the in-tree SQL
+  driver passes `knex.columnInfo().defaultValue` through raw (measured on live
+  SQLite: `null` for a column with no default, dialect-quoted strings such as
+  `'abc'` otherwise; other producers report native values such as `true`).
+  
+  - `IntrospectedTable.indexes` is now **optional**, and absence is meaningful:
+    an absent key means the producer did not read indexes; an empty array is a
+    positive claim the table HAS none. Producers that did not look must omit
+    the key rather than emit `[]`. Wiring the index read into
+    `introspectSchema()` is explicitly NOT part of this change.
+  - `IntrospectedColumn.defaultValue` is now `unknown` — consumers narrow
+    before use instead of trusting a string promise no producer kept.
+  - The SQL layer's extra `maxLength` fact (driver-sql / objectql
+    `IntrospectedColumn`, driver-sql `PhysicalColumn`) widens from `number` to
+    `number | string` — SQLite reports the string `"255"` where other dialects
+    report a number.
+  
+  With the spec now telling the truth, the deliberate `Omit` workarounds in
+  `@objectstack/driver-sql` and `@objectstack/objectql` (which carved
+  `defaultValue` and `indexes` out of the spec types to keep the divergence
+  visible) are retired: both packages' introspection types now extend the spec
+  contract directly.
+  
+  Consumers that read `table.indexes` must guard for absence (none exist
+  in-tree — the requirement was never honored, so today's readers would have
+  crashed on `undefined` anyway); consumers of `defaultValue` must narrow from
+  `unknown` before string operations.
+- e40a28c: fix(driver-sql): a declared `Field.boolean` answers JSON booleans on MySQL's row-read doors (#11782)
+  
+  `formatOutput`'s boolean read coercion — and its per-column mirror
+  `readPresentationKind`, which `distinct()` and the aggregate group-key /
+  `min`/`max` tracking consume — was gated `isSqlite`-only. On MySQL the storage
+  is `tinyint(1)` and mysql2 hands back a JS number, so a declared boolean
+  answered `1`/`0` through `find()`, `distinct()` and aggregate group keys while
+  SQLite and Postgres answered `true`/`false` — and, after #11635 presented
+  aggregate `min`/`max` on every dialect, `max(flag) === true` and
+  `row.flag === 1` disagreed on the same column over the same MySQL connection.
+  
+  Measured on live MySQL 8.0.46 before the fix: `find().flag` → `1` (`typeof
+  number`), `distinct('flag')` → `[0, 1]`, aggregate group keys → `1`/`0`. The
+  boolean presentation now runs on the two dialects whose stored boolean is a
+  number (SQLite `INTEGER` 0/1, MySQL `tinyint(1)`); Postgres stores a real
+  `boolean` node-pg already parses, so it deliberately stays outside the gate and
+  its answers are byte-identical. A `NULL` boolean stays `null` on every door
+  (absence is not `false`), and declared `number`/`string` columns are untouched.
+- 7e83932: MySQL's row-size refusal now names the declarations that caused it (#11565). MySQL charges every bounded column's DECLARED byte width against a per-row budget, independently of the per-column `varchar` ceiling — measured on 8.0.46 through this driver, 15 fields at `maxLength: 1024` create and 16 are refused — and its own error names no column and no declaration, about a table its author described entirely in metadata. Schema sync now translates `ER_TOO_BIG_ROWSIZE` at both the `CREATE TABLE` and `ALTER TABLE ADD COLUMN` sites into the same failure re-worded: every varchar column the object produces, widest first, with its emitted width and its byte cost at the schema's real bytes-per-character (read from the server, not assumed), plus the fields that reach the budget while declaring nothing — `lookup`, `user`, `auto_number` and the option types all take `varchar(255)`. InnoDB's separate per-page limit answers with the same code and is reported with the number the server quoted rather than 65535. Deliberately a translator and not a pre-flight: it speaks only after the server has refused, so it cannot refuse an object MySQL would have accepted. Nothing is refused that was accepted before, and no other dialect is touched.
+- 431d2fb: Retiring a shadow-carried UNIQUE index no longer leaves its generated column behind forever (#13056).
+  
+  `isHashShadowColumn`'s docblock is why the orphan-COLUMN drift pass skips a #11627 hash shadow, and it stated what happens instead: the column "is then cleaned up by the index's own removal path, not by a blind column drop". There was no such path. `dropIndexIfExists` issues one statement family — `ALTER TABLE .. DROP CONSTRAINT`, `DROP INDEX IF EXISTS`, `ALTER TABLE .. DROP INDEX` — and never touches a column. So when metadata stopped declaring the index, `diffManagedIndexes` reported it as an orphan, `os migrate apply --allow-destructive` dropped it, and the `VARBINARY(32)` STORED generated column survived keyed by nothing, while the orphan-column pass declined to report it forever, exactly as designed. A STORED generated column is recomputed and written on every INSERT and on every UPDATE touching its source columns, so a table accumulating retired declarations paid for them permanently and silently.
+  
+  The `drop_index` op now collects that column after dropping the index. Ownership is established first, never assumed — in the shape of #13015's `foreign` guard, a column the driver has not proved is its own is left in place and named in a warning rather than dropped: a column of that name that is **not generated** may hold user data, and a column some **other index still keys** is not this orphan (that second read is what makes "index first, then column" a checked precondition rather than an ordering comment). An unreadable catalog degrades to leaving the column alone.
+  
+  **Why the cleanup hangs off the op and not off `dropIndexIfExists`,** which has two other callers. The discriminator is not *which caller* but *is this index name coming back*, and only the op knows. `recreate_index` drops in order to re-create under the same name, and its shadow must survive: #13015's `reusable` branch re-keys the survivor in place instead of rebuilding the table around a regenerated STORED column, and a cleanup in the shared helper would destroy exactly that survivor on every rebuild. `replace_unique_index`'s legacy-name drop cannot reach a shadow at all — #13015 already excludes `isHashShadowCarrier` from legacy detection, in `diffManagedIndexes`, saying it does so *because* that op drops the legacy name. Both are pinned in the negative direction, since they are what a later move of the drop into the shared helper would break and nothing else would notice.
+  
+  **Why `patch` and not `minor`.** Nothing new is authorable, no export is added (the collector is `protected`), and no input that was accepted is now rejected or vice versa. What an operator will observe that they did not before is a `DROP COLUMN` in the applied set of a migration they had already opted into: the `drop_index` op was already `category: 'destructive'` and already required `--allow-destructive`, so the opt-in is unchanged — the difference is that it now finishes the job it named instead of leaving half of it on the table. A `drop_index` that finds the index already gone is now reported as *applied* rather than skipped when it collects the leftover column, because the apply did rewrite the table.
+- 80f1dcd: **Fix:** `introspectForeignKeys`' Postgres arm no longer drops a cross-schema foreign key, nor returns a composite one as a cartesian product (#11324).
+  
+  The arm joined three `information_schema` views, and the correlations were wrong in two independent ways. Both were measured on live PostgreSQL 16.13, against the query as it stood after #11201, so neither was caused by nor repaired by that change.
+  
+  **A foreign key whose target lived in another schema vanished.** The join carried `ccu.table_schema = tc.table_schema`, which demands parent and child sit in the same schema. For a FOREIGN KEY constraint, `constraint_column_usage` describes the *referenced* side — that is exactly why the projection aliases it `referenced_table` — so its `table_schema` is the **parent's**, not the constraint's. A cross-schema reference therefore contributed **zero rows**, and the table reported having no foreign keys at all. That is the #7332 failure mode through a different door and it has no `onFailure` to consult, because nothing failed: `[]` does not read downstream as "I could not see it", it reads as *this table has no foreign keys*, and federated-object codegen, the persisted `external_catalog` (ADR-0015) and schema-drift comparison all act on it. Cross-schema references are the normal shape for the federated remotes ADR-0015 points this driver at.
+  
+  **A composite foreign key came back as the cartesian product of its columns.** The `kcu` ↔ `ccu` join carried no ordinal correlation at all, so an N-column key yielded N x N rows pairing every child column with every parent column. Measured, a 2-column key `(x, y) references p (a, b)` returned **four** records — `x -> a`, `x -> b`, `y -> a`, `y -> b` — where the answer is `x -> a`, `y -> b`. Because `IntrospectedForeignKey` is a flat per-column record, the two phantom pairs are indistinguishable from the real ones to every consumer: a wrong-shaped answer that type-checks.
+  
+  **The whole query moves to `pg_constraint` rather than the join predicate being patched.** `constraint_column_usage` exposes no ordinal column at all — measured, its seven columns are the catalog/schema/name triples for the table and the constraint plus `column_name` — so the composite half has nothing to correlate on inside `information_schema`. The conservative half-fix was tried and measured: correlating `ccu` on `tc.constraint_schema`, the spelling `introspectUniqueConstraints` already carries, repairs the cross-schema case and leaves the composite case at four rows. `pg_constraint` carries both facts on one row — `conkey` and `confkey` are parallel `smallint[]`s in key order — so unnesting them *together* pairs child column with parent column by construction, and `unnest(...) WITH ORDINALITY` keeps the key position the old join threw away. That is the shape `introspectPrimaryKeys` already uses for `indkey` (#11101 / #11162), and dropping to the catalog matches what that arm and `introspectIndexes` already do.
+  
+  **No interface change.** `IntrospectedForeignKey` keeps its flat per-column shape and gains no ordinal field. A composite key is expressed as **ordered sibling rows** — contiguous, in declared key order, each pairing its own child column with its own parent column — which `ORDER BY con.conname, con.oid, k.ord` now pins and the type's docblock now states. Measured on a key declared out of column sequence, `foreign key (second_col, first_col)`, the result is key order rather than column order. An ordinal field was considered and rejected: it would let a wrong `ORDER BY` keep shipping wrong rows that merely *describe* their wrongness, where the pairing is a fact the query itself has to get right.
+  
+  Schema scoping is unchanged in meaning: `ns.nspname = ANY (current_schemas(false))` is #11201's `tc.table_schema = ANY (…)` expressed over the catalog, so a same-named table in a schema `search_path` never reaches still contributes nothing. An unknown table name still yields an empty list rather than a throw, so the #7332 `onFailure` contract is untouched.
+- 6c6157a: `os migrate plan` / `apply` examine the object set the composed host DECLARED, and report the boundary when they cannot
+  
+  A composed host stack (#12938) registers its plugins for their DECLARATIONS: `init()` runs, `start()` is suppressed. The pass that hands every registered object to its driver — the one that fills the `managedObjectFields` map `detectManagedDrift()` diffs — lives in `ObjectQLPlugin.start()`, and a host that brings its own `ObjectQLPlugin` (under the framework's own plugin name, so the CLI's capability injector de-dups against it) DISPLACES the standalone one, since duplicate registration overwrites by name. The result was a boot where no `ObjectQLPlugin.start()` ran at all: every host plugin declared its objects, and not one reached a driver.
+  
+  Measured on ObjectStack Cloud's staging control plane: 36 host plugins composed, ~80 `sys_*` tables declared, **8** examined — all eight belonging to the single service that provisions its own tables from a `kernel:ready` hook rather than relying on that pass. Every consumer-visible signal was green, and `Physical schema is in sync with metadata` was one composed plugin away from printing over seventy unexamined tables.
+  
+  Two changes:
+  
+  - **The composed boot now drives that pass itself**, over the deferral it already armed: `engine.syncObjectSchema(name)` per declared object, which reaches `SqlDriver.initObjects` exactly as the suppressed `start()` would have. A plan still writes nothing — the deferral records the create-table work instead of running it.
+  - **`plan` / `apply` report what they could NOT examine.** `--json` payloads gain `composition.coverage` (`registeredObjects`, `examinedObjects`, `unexaminedObjects`, and per-reason counts: federated, unbound, on another datasource, on a driver without schema registration, refused). When `unexaminedObjects > 0`, the human output refuses the unqualified "in sync" line and says the plan is PARTIAL instead. A consumer gate asserting coverage should read `composition.coverage.unexaminedObjects` — `managedTables` alone cannot tell a small deployment apart from a mostly unexamined one.
+  
+  `@objectstack/driver-sql`: `initObjects` no longer calls `ensureDatabaseExists()` while DDL is deferred. It is the one line there that can write — `mkdir -p` for a sqlite parent directory, and on Postgres/MySQL a `SELECT 1` that CREATEs the database on `3D000` / `ER_BAD_DB_ERROR` — and under the deferral there is no DDL for a database to exist for. `flushDeferredSchemaDdl` clears the flag before re-entering, so the confirmed `os migrate apply` still ensures the database ahead of the first `CREATE TABLE`.
+  
+  A project with neither an `objectstack.config.*` nor a compiled artifact is unchanged: it composes nothing, carries no `composition` key, and diffs the same five data-stack tables it always did.
+- 6757eb2: A `redshift` datasource now gets the 10s dialect connect-timeout bound instead of silently degrading to the 15s pool backstop (#11784). `SqlDriver` answers three separate questions about a knex `client` name from three separate tables, and `redshift` was a member of the wire-protocol one (`POSTGRES_WIRE_CLIENTS`, which #11389 put it in so it gets the calendar-day parser pin) while absent from `DIALECT_CONNECT_TIMEOUT`. It reaches the server through the `pg` driver — knex's `Client_Redshift` literally `extends Client_PG` — so it has `connectionTimeoutMillis` and would have obeyed it; it just never received it, and `withConnectBound` skipped the injection. Nothing errored and nothing was logged: the bound was simply 50% looser than the method's own docblock declares ("the effective bound" at 10s, with `pool.createTimeoutMillis` a "strictly looser backstop, reached only by a dialect that has no connect-timeout knob (SQLite) or ignores the one we set"). A `redshift` host is neither of those. The practical consequence is the framework#3769 failure shape — an endpoint that accepts the TCP connection and never completes the handshake makes every query WAIT rather than fail, and the wait was bounded 5s later than declared, with knex's inaccurate "the pool is probably full" wording instead of pg's `timeout expired`. A host that sets its own `connectionTimeoutMillis` or `pool.createTimeoutMillis` is still left alone. `redshift` gains **no** SQL-emission identity from this: the connect-timeout knob is a property of the npm driver doing the connecting, not of which DDL dialect gets compiled, so this is independent of the open support-scope decision (#11756).
+- 1c66fe4: fix(driver-sql): retire the lookup FOREIGN KEY branch gated on the rejected alias `reference_to`, and refuse the key instead of honouring it (#11567)
+  
+  `SqlDriver.createColumn` emitted `table.foreign(name).references('id')` for a
+  relationship field carrying `reference_to`. `reference` is the only relationship
+  spelling `@objectstack/spec` declares — `reference_to` is a **rejected alias**,
+  answered by `FieldSchema` with `unrecognized_keys` and *"Did you mean
+  `reference_to` → `reference`?"* — so that branch could not fire for any
+  spec-conformant lookup, and never had.
+  
+  **This is not a behaviour change for any authored deployment.** Measured across
+  all 44 exported platform objects on live PostgreSQL 16.13 and MySQL 8.0.46
+  before the change: **0** FOREIGN KEY constraints. `reference_to` has zero
+  non-test assignments repo-wide; the branch was reachable only by metadata that
+  went around Zod through raw `registerObject` (which deliberately skips it).
+  
+  What changes is that the driver no longer disagrees with the spec in silence. A
+  field still carrying `reference_to` at DDL time now throws
+  `VALIDATION_ERROR`/400 naming it as a rejected alias of `reference`, in the same
+  words `FieldSchema` uses, rather than quietly changing the physical schema. One
+  key, one answer, on both doors.
+  
+  Fix, if you have such metadata — the same rename the schema has always asked for:
+  
+  | Wrote | Write instead |
+  |---|---|
+  | `{ type: 'lookup', reference_to: 'account' }` | `{ type: 'lookup', reference: 'account' }` |
+  
+  Referential integrity is unchanged and remains the **engine's**, applied via
+  `deleteBehavior` (the `409 DELETE_RESTRICTED`) — which is what
+  `content/docs/protocol/objectql/types.mdx` has documented since 2026-07-30.
+  
+  **Not graded as declared-breaking, deliberately.** ADR-0087's ledger reaches
+  upgraders about *authorable metadata* that must be rewritten. `reference_to` is
+  not authorable: the spec refuses it at the authoring door today and did before
+  this change, so no conformant object definition behaves differently and no
+  migration is owed to any deployment `objectstack migrate meta` can see. The
+  prescription above exists for metadata that bypassed validation, not for a
+  surface this repo ever published as writable.
+- b826390: A `richtext` field now takes an unbounded TEXT column instead of knex's `varchar(255)`, so an ordinary rich-text body over 255 characters can be written (#11794). `createColumn`'s text-family case listed `text` / `textarea` / `html` / `markdown`; `richtext` — the third member of the spec's own "Rich Content" grouping in `field.zod.ts` — was in neither that case nor `JSON_COLUMN_TYPES`, so it fell through to the catch-all's `table.string(name)`. Measured at 1000 characters on live MySQL 8.0.46 and Postgres 16: before this change the write was refused by the server (`ER_DATA_TOO_LONG` under `STRICT_TRANS_TABLES`, `22001 value too long for type character varying(255)`) while the same body in a `markdown` field on the same table was accepted; after it, the column reads back as `text` from `information_schema` on both and the value round-trips byte-identically. `code` moves with it for the same reason.
+  
+  Membership is now decided by a stated, measured test instead of the hand-maintained case list that let one member of a three-member spec group diverge in the first place: a type may take an unbounded TEXT column exactly when the **write seam** enforces its declared `maxLength`, which is the invariant `schema-drift.ts` already rests on ("A TEXT column refuses nothing a `maxLength` allows … the bound is enforced at the write seam"). objectql's record-validator applies its `max_length` branch to `text` / `textarea` / `email` / `url` / `phone` / `password` / `markdown` / `html` / `richtext` / `code` and to nothing else, so both moved types keep a field-named ADR-0112 refusal for an over-declared value and the physical surface is restored to the declared contract rather than widened past it. The set of types that take an unbounded column when unkeyed is pinned as a whole, so the next addition has to be stated on purpose.
+  
+  `signature` and `qrcode` are **not** moved, deliberately and against the first reading of this defect. Their stored value is the author's own and routinely far past 255 characters (a data-URI PNG), so `varchar(255)` refuses ordinary values for them too — but the record-validator has no `max_length` branch for either, so an unbounded column would accept values a declared `maxLength` forbids: over-accepting in place of under-accepting, which is a physical surface wider than the contract. They stay bounded until the write seam can bound them, and the live-dialect suite asserts that refusal out loud rather than leaving it undocumented.
+  
+  The #11374 keyed-and-bounded rule applies to the two new members unchanged: a keyed, bounded `richtext` / `code` column is still emitted as `varchar(maxLength)` so a declared index can key it on MySQL, and a keyed but unbounded one still gets the named `explainUnkeyableTextColumn` refusal rather than a silently weaker constraint. Nothing about existing tables changes — `createColumn` runs on `CREATE TABLE` and `ALTER TABLE ADD COLUMN`, so the column it sizes is always empty.
+- cd13488: A healthy hash-shadow-carried UNIQUE is no longer reported as destructive index
+  drift — and the remedy that used to be proposed for it would have DROPPED the
+  constraint
+  
+  On MySQL a declared UNIQUE whose key is too wide for an InnoDB key part is
+  carried by a driver-owned generated column holding a SHA-256 of the key values
+  (#11627). The index differ compared the declared columns against the columns an
+  index physically KEYS, so a shadow-carried UNIQUE — one VARBINARY(32) generated
+  column as the whole key — could never match. A clean `initObjects` reported the
+  index the same boot had just created as `index_mismatch` / `destructive`, with
+  `recreate_index` as the remedy and `os migrate apply --allow-destructive` in the
+  message.
+  
+  Following that advice removed a live uniqueness guarantee. `recreate_index`
+  drops the UNIQUE by name and re-runs the additive sync; the sync retakes the
+  shadow route, and its `ALTER TABLE … ADD COLUMN` then failed on the generated
+  column that **survived** the index drop. That failure is a duplicate-COLUMN
+  error, matched by neither the "already exists" absorb (which spells index names)
+  nor the unique-violation branch — so the apply ended with the constraint dropped
+  and not re-created.
+  
+  Both halves are fixed, and they share one vocabulary rather than special-casing
+  the differ. The orphan-COLUMN pass already recognised the shadow as driver-owned
+  (`isHashShadowColumn`) while the index it carries was proposed for destructive
+  rebuild; that asymmetry was the shape of the defect.
+  
+  - The shadow's name derivation moved next to that predicate, so the name the
+    sync creates and the name the differ looks for have one definition.
+  - Introspection reads the shadow's stored `GENERATION_EXPRESSION` and records
+    the key it actually hashes, so the differ compares the key the constraint
+    **enforces** instead of the digest column it stores. Drift reports and plan
+    messages now name that key too, rather than `UNIQUE (uniq_…__hash)`.
+  - The sync inspects a surviving shadow column instead of assuming it absent: a
+    column already hashing the declared key is re-keyed in place, one hashing a
+    different key is re-generated, and a non-generated column of that name is
+    refused rather than dropped.
+  
+  Deliberately a real key comparison and not a blanket skip of every shadow. A
+  shadow written before #12998 hashes the RAW columns, so `CONCAT` yields NULL for
+  every NULL-organization row and the rows the `COALESCE(organization_id,
+  '__global__')` bucket exists to constrain are constrained by nothing (#5030's
+  shape) — indistinguishable by name from a healthy shadow. Skipping shadows
+  wholesale would have traded one false destructive finding for a true silent one;
+  that case is now reported as the ADR-0120 D4 tightening it is, runs the
+  duplicate pre-flight before anything is dropped, and is repaired by the apply.
+  A carrier whose expression cannot be read at all reports nothing rather than
+  proposing a drop it cannot reason about.
+- df1c75c: MySQL hash-shadow UNIQUE indexes (#11627) now hash the DECLARED key: the NULL-safe organization key part of an org-scoped unique (ADR-0120 D3) is embedded as `COALESCE(organization_id, '__global__')` inside the generation expression, so NULL-organization rows fold into the global bucket and collide with each other — the same key the direct index would have enforced. Previously the shadow hashed the raw columns, `CONCAT` returned NULL for every NULL-organization row, and a shadow-carried org-scoped unique silently enforced nothing on exactly the rows (single-tenant stacks, admin-global defaults) the NULL-safe key exists to constrain, while the boot log reported the constraint as carried. Plain composite shadows are unchanged: any-NULL tuples still conflict with nothing, matching MySQL's own composite-UNIQUE semantics.
+  
+  Deployment note — turning this constraint on is data-dependent: a MySQL database that accumulated duplicate NULL-organization rows while the shadow enforced nothing will fail the shadow `ALTER` with `ER_DUP_ENTRY` on its next boot. That failure is now diagnosed, not fatal: the boot continues, the log names the conflicting groups (probed over the same COALESCE key) and the operator action (`os migrate plan`, deduplicate, re-run), and the constraint is honestly reported as NOT enforced until the data is deduplicated — the same disposition as the direct NULL-safe route (ADR-0120 D4). Write-path duplicate diagnosis follows the key: a genuine NULL-organization duplicate is named in declared terms instead of being misreported as a hash collision.
+- 07cced5: fix(driver-sql): `bulkUpdate` applies as one transaction, so a mid-batch refusal rolls back the rows already applied (#13854)
+  
+  `SqlDriver.bulkUpdate` is a sequential loop of individual `update()` calls — one
+  per id, because each id carries its own patch and no single statement expresses
+  N different SET lists. That loop had no transaction around it, so every
+  `update()` autocommitted its own row. A batch refused partway through — a unique
+  violation on a later row, a NOT NULL violation, any per-row failure from the
+  database — left every row processed **before** the refusal permanently
+  committed. The caller received an exception while the database held a state
+  nobody declared: neither the pre-image nor the post-image, and a retry of the
+  same array was not safe.
+  
+  The loop now runs inside a transaction, so the batch applies as one unit.
+  `driver-turso` reaches this door through `super.bulkUpdate` and inherits the
+  repair; no subclass change is needed or was made.
+  
+  Same defect class #13340/#13435 closed on `driver-memory`'s batch doors, on the
+  production SQL driver. `bulkDelete` was measured and is untouched — it is a
+  single `whereIn(...).delete()` per rotation shard, already atomic per shard.
+  
+  **Behaviour inside a caller's transaction.** When the caller supplies
+  `options.transaction`, the batch runs in a nested transaction (a `SAVEPOINT`) on
+  that same transaction rather than opening a competing one. A refused batch is
+  undone as a unit, the caller's own surrounding work is untouched, and the
+  caller's transaction stays usable — so a caller that catches the refusal and
+  commits anyway no longer lands a partial batch.
+  
+  No API, signature or accepted-input change: every input accepted before is
+  accepted after, and every refusal that fired before still fires. A missing id is
+  still skipped rather than refused, unchanged.
+- 3956069: fix(driver-sql): correct two comments in `createColumn` that cited a `Field.string` builder that has never existed (#12593)
+  
+  Two comments in the keyed/bounded text-family branch of `createColumn`
+  (`signature` / `qrcode` / `richtext` / `code`) asserted a `Field.string`
+  builder exists and that it "has always taken knex's `varchar(255)`." It does
+  not exist and never has: `Field` has 37 keys and none is `string`,
+  `FieldType.options` (49 entries) does not list it, and
+  `FieldSchema.safeParse({ type: 'string', … })` fails at `[type]` — all three
+  reproduced fresh on this branch, plus `git log -S` confirming no commit ever
+  added such a builder key to `field.zod.ts`.
+  
+  The name is not arbitrary: `'string'` is knex's own column-builder method
+  name (`table.string(name)`), reused internally by this driver as its
+  *untyped* default (`field?.type || 'string'`) — a storage-side spelling that
+  collides with, but is not, an authoring-side one. The corrected comments now
+  state only checkable facts: knex's bare `table.string(name)` (no length) is
+  `varchar(255)`; this branch never calls it bare, it calls
+  `table.string(name, keyable)` with the field's own declared `maxLength`
+  (up to `MAX_KEYABLE_VARCHAR_CHARS`, 768 chars); and the nearest *authorable*
+  spelling that reaches this exact `varchar(n)` shape is `Field.text({
+  maxLength: n })` on a keyed column — exactly what this switch arm already
+  serves.
+  
+  No code changed — `git diff` is comment-only lines inside `sql-driver.ts`.
+  Nothing here alters DDL, column widths, or any runtime behavior; the two
+  pins that already exercise this exact branch behaviorally
+  (`sql-driver-11565-row-byte-budget.test.ts`'s "agrees with createColumn about
+  every FieldType" mirror, and `sql-driver-keyed-text-mysql.test.ts`'s
+  "emits varchar(maxLength) for a keyed bounded field") both stay green,
+  unmodified.
+  
+  **Grade: `patch`, and deliberately no higher.** This is documentation
+  embedded in source, not an exported symbol, a spec key, or any authorable or
+  runtime surface — there is nothing here for a consumer to migrate. `patch`
+  is the correct floor for a fix that changes only what the driver's own
+  source *says*, matching the sibling `builtin-column-delivery-id-type.md`
+  changeset (#12131) that corrected the same false `Field.string` premise in
+  an adjacent file. Not a declared-breaking changeset, so no ADR-0087
+  disposition marker applies.
+- 5dd3bc9: **Fix:** on SQLite the builtin `created_at`/`updated_at` audit columns now take the same canonical ISO-8601 `DEFAULT` a declared `Field.datetime` NOW() column in the same table already gets (#11321).
+  
+  `createAuditTimestampColumn`'s non-MySQL branch was `table.timestamp(name).defaultTo(this.knex.fn.now())`. On SQLite `knex.fn.now()` compiles to an unqualified `CURRENT_TIMESTAMP`, which renders a zone-**naive**, space-separated, second-precision `'YYYY-MM-DD HH:MM:SS'`. A declared `defaultValue: 'NOW()'` field in the **same table** already got `(strftime('%Y-%m-%dT%H:%M:%fZ','now'))` from `nowColumnDefault`, so one table carried two spellings of one conceptual value:
+  
+  ```
+  created_at  "2026-08-23 14:54:17"          <- builtin audit  (naive)
+  when        "2026-08-23T14:54:17.796Z"     <- declared field (canonical)
+  ```
+  
+  That naive spelling is the one `updatedAtStamp()`'s own docblock condemns: `Date.parse` reads a zone-less string as LOCAL time, silently shifting the instant by the host offset on a non-UTC runtime. It is also the pre-canonical storage form `backfillCanonicalDatetimes` exists to converge — reached here by a path writing it *today*, not by legacy data.
+  
+  The SQLite branch is now routed through `nowColumnDefault('datetime')` — the existing single source for "what does NOW() mean in DDL on this dialect" — rather than restating the expression, so the two cannot drift apart again. **Postgres and MySQL are untouched**: `knex.fn.now()` on Postgres is a real zone-aware `TIMESTAMP` that never had the ambiguity, and MySQL keeps the `now(3)` precision match from #11224.
+  
+  `rebuildSqliteTablePatched` — the whole-table rebuild SQLite drift reconciliation uses — re-emitted the audit default itself as `knex.fn.now()`. That method is SQLite-only, so leaving it would have silently **reverted** a canonically-created table the moment any unrelated drift (a relaxed NOT NULL, an orphaned column) triggered a rebuild. Fixed in the same change: a rebuild hands back the column `initObjects` would have built.
+  
+  **Graded `patch`, not `minor`, on a measurement rather than a judgement.** The change alters emitted DDL, so the question that decides the grade is what it does to databases that already exist:
+  
+  - **Existing tables are not altered.** Both call sites are `CREATE TABLE` only; `initObjects`' `alterTable` branch adds declared fields and never the audit columns. A table already on disk keeps `default CURRENT_TIMESTAMP`.
+  - **They do not start reporting drift.** Measured on live in-memory SQLite through the real `detectManagedDrift` entry point against a table carrying the old default: **zero** entries. Two independent guards — `BUILTIN_COLUMNS` skips `created_at`/`updated_at` in both of `diffManagedTable`'s loops, and the only `default_mismatch` producer is the #4560 runtime-token check, for which `isAppResolvedDefaultToken('NOW()')` is pinned `false`. The measurement carries a positive control: in the same call on the same table, drift reports `unmapped_column` **and** `default_mismatch` for a `current_user` column, so the default-reading dimension is demonstrably live and still says nothing about the audit columns.
+  - **Rows already written naive keep reading correctly.** `formatOutput`'s `repairNaiveUtcAuditTimestamp` folds them to canonical on read — the same disposition `nowColumnDefault` already documents for declared fields.
+  
+  So no deployment changes behaviour on upgrade; only newly-created tables get the corrected default.
+  
+  The population this actually repairs is wider than "writes that bypass the driver". `stampInsertTimestamps` fills both columns app-side, but it gates on `tablesWithTimestamps`, which only DDL-running paths populate. On the documented `skipSchemaSync` / `OS_SKIP_SCHEMA_SYNC=1` posture, `registerObjectMetadata` (the DDL-free registration door) deliberately does not touch that set — so the set is empty, the stamp returns early, and **the driver's own `create()` door reaches the column DEFAULT**. Measured, one table, one row per boot posture: `created_at "2026-08-23T14:54:17.791Z"` on a normal boot versus `"2026-08-23 14:54:17"` on a `skipSchemaSync` boot, with the declared NOW() sibling canonical in both — because its canonical shape lives in the column DEFAULT rather than in an app-side stamp. That asymmetry is the argument for fixing this in DDL, and it is now closed.
+- 7adcd07: `introspectUniqueConstraints` no longer reports a PRIMARY KEY column as unique on SQLite, so all three dialects now answer the same question (#11654). The SQLite arm read `PRAGMA index_list` keyed only on `unique === 1`, and SQLite materialises a non-INTEGER primary key as a unique auto-index — so a `varchar` key was reported while the Postgres and MySQL arms, which filter on `CONSTRAINT_TYPE = 'UNIQUE'`, never see a primary key at all. It also disagreed with itself: an `INTEGER PRIMARY KEY` is a rowid alias with no auto-index, so the same logical schema produced a different `isUnique` flag depending only on the declared type of its key. The arm now skips `origin: 'pk'` index rows, which closes both gaps at once (`WITHOUT ROWID` keys included).
+  
+  This continues #11202's convention: `isUnique` means a *declared single-column UNIQUE constraint*. Nothing is lost — primary-key membership is still reported losslessly through `IntrospectedTable.primaryKeys` and `IntrospectedColumn.primaryKey`. The filter is on the index's `origin`, not on whether the column is in the key, so a key column that separately carries its own unique index stays flagged.
+  
+  Consumer-visible effect: `introspectedSchemaToObjects` in `@objectstack/objectql` turns this flag into a drafted field's `unique: true`, so a federated-object draft (ADR-0015) taken from a SQLite table no longer gains a redundant `unique: true` on its key column that the same table drafted through Postgres or MySQL never had. Drivers extending `SqlDriver` (`driver-turso`, `driver-sqlite-wasm`) inherit the change.
+- f5a7f9c: **Fix:** on SQLite, `applyMigrationEntries` no longer reports an op as **applied** just because a table rebuild ran (#11722).
+  
+  `SqlDriver.applyMigrationEntries` splits by dialect, and the two arms disagreed about what `applied` means. The in-place arm (Postgres / MySQL) asks per entry and believes the answer — `applyDriftOpInPlace` returns `false` for an op its dialect cannot perform, and the entry goes to `skipped`. The SQLite arm did not ask at all: it called `rebuildSqliteTablePatched(table, ents)` and then `applied.push(...ents)`, every entry, unconditionally. But that rebuild honours exactly four op types — `relax_not_null`, `tighten_not_null`, `drop_column`, `drop_column_default` — and silently ignores everything else; its own docblock already said so for the varchar ops. An ignored op was still reported applied.
+  
+  **The failure mode is a false green, not an error.** Nothing throws and nothing is skipped, so every consumer announces work that never happened: `reconcileAndWarnDrift` logs `auto-reconciled <op> on <table>`, and the artifact boot gate prints `↪ migrated <op>`. The finding is still physically present, so the next boot detects it again, reports drift again, and "migrates" it again — a loop with no failing signal anywhere in it.
+  
+  **What changes.** `rebuildSqliteTablePatched` now returns the entries it actually acted on, built in the same pass that fills the four column sets it already partitioned into — deliberately not a second list of op types to keep in sync, so the returned set cannot drift from the work done. The caller reports those as `applied` and routes the remainder to `skipped`, logging it in the **same sentence** the in-place arm uses for an op its dialect cannot do (`<op> on <table>.<column> is unsupported on dialect 'sqlite' — skipped`), so one greppable line covers all three dialects. `@objectstack/driver-sqlite-wasm` and `@objectstack/driver-turso` extend `SqlDriver` without overriding either method, so both inherit the correction.
+  
+  **What deliberately does not change.** No op does anything different — this moves only what is *reported*. In particular the rebuild still runs for the whole table even when it honours nothing: it re-materializes every kept column's default (#11321, #4560) and the full declared index set from metadata (#3696), so it is not a no-op, and suppressing it would change what the reconciler DOES rather than what it says it did. `applied`/`skipped` remains a reported partition consumed by log lines and CLI counts; it is not an accept/reject door, and no public surface widens.
+  
+  **Latent when found, and fixed anyway.** The gap was unreachable at the time of the fix, held closed from two independent directions neither of which knew it was holding it: `enforcesVarcharLength` excludes SQLite, so the differ never emits `widen_varchar`/`narrow_varchar` there, and `multiValueColumnTypeIsLoadBearing` excludes SQLite for an unrelated measured reason, so #11535's `manual_column_type_change` is never emitted there either. The next column op that is not SQLite-rebuildable would have opened it silently. `manual_column_type_change`'s own docblock states that `applyMigrationEntries` reports it "skipped, never applied" — measured on Postgres and MySQL; that sentence is now also true on SQLite, and the docblock says so.
+  
+  Pinned by `packages/drivers/driver-sql/src/sql-driver-11722-sqlite-rebuild-applied-honesty.test.ts`, which constructs the reachability rather than waiting for it — it substitutes only the differ's dialect guard, handing entries straight to the public `applyMigrationEntries` seam that `os migrate apply` and the artifact boot gate both call, with a real driver, dialect and database throughout. All five cases fail on the pre-fix tree, including the consumer-level one that catches `auto-reconciled` being logged for an op that never happened.
+- f24c90d: fix(driver-sql): route `updateMany()`'s payload through `formatInput` / `applyWriteColumnMap` (#11223)
+  
+  `updateMany()` was the only write door in `sql-driver.ts` that passed the caller's `data`
+  straight to `builder.update(data)`. Every other one — `create`, `update`, `bulkCreate`,
+  `upsert`, `rotatedUpdateById` — applies `applyWriteColumnMap(object, formatInput(object, data))`
+  first, and the WHERE side of the very same bulk statement was already being translated by
+  `applyFilters`. Measured on SQLite, live PostgreSQL 16.13 and live MySQL 8.0.46:
+  
+  - **`json` and `Field.multiple` values were refused.** Nothing stringified the structured
+    value for the bind, so each dialect refused it in its own voice: `22P02 invalid input
+    syntax for type json` on Postgres, `SQLite3 can only bind numbers, strings, bigints,
+    buffers, and null` on SQLite, and on MySQL the array expanded into the SET list itself
+    (``set `tags` = 'y', 'z'``) — a syntax error rather than a bind error. `update()` wrote
+    the identical values correctly in the same run.
+  - **A federated `external.columnMap` object's bulk update named a column that does not
+    exist.** The WHERE was mapped and the SET was not, in one statement:
+    ``update `legacy_p` set `name` = 'Bulk' where `full_name` = 'Renamed'`` → `no such
+    column: name`. The door was unusable on every remapped external object.
+  - **Temporal values were stored verbatim**, silently. On SQLite a zone-naive
+    `'2026-05-06 07:08:09'` landed as-is — the pre-#3912 storage form
+    `needsLegacyDatetimeRepair` exists to repair on read, written into a column
+    `canonicalDatetimeFields` had already certified as canonical and therefore stopped
+    repairing. Measured end to end: a range filter over that calendar day returned only the
+    `update()`-written row, with the bulk-written row on disk carrying the right day and
+    invisible to the query. On live Postgres the same literal was resolved in the **server's**
+    timezone rather than UTC — `2026-05-06 07:08:09` stored as `2026-05-05T23:08:09.000Z`, a
+    silent 8-hour instant shift on an `Asia/Shanghai` server. `Field.date` and `Field.time`
+    were affected the same way: stored verbatim on SQLite, refused outright on the live
+    dialects.
+  
+  The literal `'NOW()'` token now resolves on this door as it does on every other one; it
+  previously stored the four-character string `"NOW()"` into a datetime column on SQLite and
+  was refused by MySQL.
+  
+  #11176's `updated_at` stamping is unchanged in effect — the stamping decision now reads the
+  formatted payload, matching `update()` and `rotatedUpdateById`, and the stamp is still
+  applied afterwards as the literal post-map column name.
+- Updated dependencies [809d417]
+- Updated dependencies [387e231]
+- Updated dependencies [f794e4e]
+- Updated dependencies [cae2169]
+- Updated dependencies [b812a54]
+- Updated dependencies [2d4fa75]
+- Updated dependencies [0e4e51b]
+- Updated dependencies [e84bbf6]
+- Updated dependencies [effae80]
+- Updated dependencies [efb3513]
+- Updated dependencies [d62f990]
+- Updated dependencies [c45d8e6]
+- Updated dependencies [2e3e8c7]
+- Updated dependencies [e621291]
+- Updated dependencies [655b106]
+- Updated dependencies [40a93b5]
+- Updated dependencies [101ad2c]
+- Updated dependencies [d5b330d]
+- Updated dependencies [dda969c]
+- Updated dependencies [1f45690]
+- Updated dependencies [277948f]
+- Updated dependencies [8bdd955]
+- Updated dependencies [f3bbbef]
+- Updated dependencies [4f24e9d]
+- Updated dependencies [e27583e]
+- Updated dependencies [4bd6faa]
+- Updated dependencies [86cbe37]
+- Updated dependencies [6a180e4]
+- Updated dependencies [474242f]
+- Updated dependencies [63cd487]
+- Updated dependencies [bd4aa4e]
+- Updated dependencies [803eaab]
+- Updated dependencies [f8e8f03]
+- Updated dependencies [983edf1]
+- Updated dependencies [eae824e]
+- Updated dependencies [f6fa22c]
+- Updated dependencies [8a483b3]
+- Updated dependencies [97bcd99]
+- Updated dependencies [df59de0]
+- Updated dependencies [96e25a8]
+- Updated dependencies [f75a38a]
+- Updated dependencies [7a25e7d]
+- Updated dependencies [1fa05a6]
+- Updated dependencies [c85a265]
+- Updated dependencies [dcb10a5]
+- Updated dependencies [773a999]
+- Updated dependencies [35dffea]
+- Updated dependencies [d8024f0]
+- Updated dependencies [8120808]
+- Updated dependencies [776a098]
+- Updated dependencies [5060877]
+- Updated dependencies [4f6325d]
+- Updated dependencies [52954c0]
+- Updated dependencies [2aa8456]
+- Updated dependencies [93809a3]
+- Updated dependencies [7c0d0c3]
+- Updated dependencies [daae7aa]
+- Updated dependencies [8dc22d6]
+- Updated dependencies [279431e]
+- Updated dependencies [948dd6b]
+- Updated dependencies [3b4c56c]
+- Updated dependencies [ae8edd2]
+- Updated dependencies [e25403c]
+- Updated dependencies [a81aa9d]
+- Updated dependencies [64baa68]
+- Updated dependencies [9fa70d7]
+- Updated dependencies [09db64a]
+- Updated dependencies [92916e7]
+- Updated dependencies [a84f3ea]
+- Updated dependencies [f2eaae8]
+- Updated dependencies [56c093c]
+- Updated dependencies [c09451b]
+- Updated dependencies [ba64877]
+- Updated dependencies [e7191ce]
+- Updated dependencies [7345308]
+- Updated dependencies [79b6a22]
+- Updated dependencies [30d96ab]
+- Updated dependencies [f658793]
+- Updated dependencies [c95ad19]
+- Updated dependencies [e58ea8b]
+- Updated dependencies [4a17645]
+- Updated dependencies [3795c5f]
+- Updated dependencies [8ab926b]
+- Updated dependencies [7317cf2]
+- Updated dependencies [e25e839]
+- Updated dependencies [5997207]
+- Updated dependencies [8b13cc8]
+- Updated dependencies [4a4a35d]
+- Updated dependencies [86e765a]
+- Updated dependencies [1d7e76a]
+- Updated dependencies [53dc739]
+- Updated dependencies [fd289be]
+- Updated dependencies [03bf7b1]
+- Updated dependencies [f90e820]
+- Updated dependencies [18d816a]
+- Updated dependencies [e8bd715]
+- Updated dependencies [b91c351]
+- Updated dependencies [a28a3c0]
+- Updated dependencies [daeaaf9]
+- Updated dependencies [c459da6]
+- Updated dependencies [e914733]
+- Updated dependencies [f887e52]
+- Updated dependencies [881f8d8]
+- Updated dependencies [3bfa1e6]
+- Updated dependencies [0a8ebf3]
+- Updated dependencies [901355c]
+- Updated dependencies [34ce8e7]
+- Updated dependencies [33681ea]
+- Updated dependencies [bfe13c8]
+- Updated dependencies [0fb3044]
+- Updated dependencies [4635f3e]
+- Updated dependencies [fd289be]
+- Updated dependencies [ee3595c]
+- Updated dependencies [b2eab95]
+- Updated dependencies [93940d4]
+- Updated dependencies [3a04b01]
+- Updated dependencies [45b9051]
+- Updated dependencies [b9e9227]
+- Updated dependencies [d395692]
+- Updated dependencies [5894d30]
+- Updated dependencies [a3765f6]
+- Updated dependencies [2d5cee3]
+- Updated dependencies [e22158f]
+- Updated dependencies [7404925]
+- Updated dependencies [0c2334f]
+- Updated dependencies [778c59f]
+- Updated dependencies [d2619fd]
+- Updated dependencies [af56546]
+- Updated dependencies [6acb11a]
+- Updated dependencies [33c5fd3]
+- Updated dependencies [20b0fdb]
+- Updated dependencies [905019b]
+- Updated dependencies [a286411]
+- Updated dependencies [98c0d33]
+- Updated dependencies [368a82e]
+- Updated dependencies [a3d5724]
+- Updated dependencies [93ea19b]
+- Updated dependencies [9ee2dcf]
+- Updated dependencies [8cb96ec]
+- Updated dependencies [8f10a79]
+- Updated dependencies [6269a55]
+- Updated dependencies [a17da05]
+- Updated dependencies [a8c00e2]
+- Updated dependencies [22e5236]
+- Updated dependencies [0fb8760]
+- Updated dependencies [37e82eb]
+- Updated dependencies [e5ce2ed]
+- Updated dependencies [be21955]
+- Updated dependencies [bc56e18]
+- Updated dependencies [be21955]
+- Updated dependencies [a9ee989]
+- Updated dependencies [4d0d944]
+- Updated dependencies [15d58db]
+- Updated dependencies [d63b014]
+- Updated dependencies [9abe4e4]
+- Updated dependencies [2cc7122]
+- Updated dependencies [50d6c92]
+- Updated dependencies [9e0ba21]
+- Updated dependencies [311433f]
+- Updated dependencies [3e5ad08]
+- Updated dependencies [9abe4e4]
+- Updated dependencies [b7131f3]
+- Updated dependencies [e5812fa]
+- Updated dependencies [7085f90]
+- Updated dependencies [dee4dd4]
+- Updated dependencies [ce7e497]
+- Updated dependencies [51ecb2f]
+- Updated dependencies [9086761]
+- Updated dependencies [42a117b]
+- Updated dependencies [1401ae7]
+- Updated dependencies [4297fe7]
+- Updated dependencies [e398863]
+- Updated dependencies [d16df74]
+- Updated dependencies [f11fc61]
+- Updated dependencies [e808890]
+- Updated dependencies [8f79379]
+- Updated dependencies [e6ca40e]
+- Updated dependencies [0c77ea4]
+- Updated dependencies [52954c0]
+- Updated dependencies [89eb997]
+- Updated dependencies [7131f12]
+- Updated dependencies [aa5994e]
+- Updated dependencies [be93457]
+- Updated dependencies [a65db76]
+- Updated dependencies [2cf5a96]
+- Updated dependencies [15eb2c9]
+- Updated dependencies [5691b07]
+- Updated dependencies [2a6122b]
+- Updated dependencies [225e769]
+- Updated dependencies [8af88dd]
+- Updated dependencies [fb5fbb8]
+- Updated dependencies [d7b3963]
+- Updated dependencies [33184fd]
+- Updated dependencies [7c41693]
+- Updated dependencies [b72db01]
+- Updated dependencies [dce5cd4]
+- Updated dependencies [9688f58]
+- Updated dependencies [556ebc1]
+- Updated dependencies [177ebdc]
+- Updated dependencies [8d237b4]
+- Updated dependencies [2d2e6f0]
+- Updated dependencies [2d8dd8d]
+- Updated dependencies [22d573e]
+- Updated dependencies [b5a2398]
+- Updated dependencies [348860c]
+- Updated dependencies [5383fa6]
+- Updated dependencies [5b3ff63]
+- Updated dependencies [1a6a19c]
+- Updated dependencies [527e050]
+- Updated dependencies [dd33bf9]
+- Updated dependencies [4cb2a90]
+- Updated dependencies [74a7804]
+- Updated dependencies [53d3689]
+- Updated dependencies [b3a63d3]
+- Updated dependencies [49f0dcf]
+- Updated dependencies [033a34c]
+- Updated dependencies [4d25d22]
+- Updated dependencies [1ffee51]
+- Updated dependencies [5ae4303]
+- Updated dependencies [ece4dad]
+- Updated dependencies [e9b377e]
+- Updated dependencies [146f448]
+- Updated dependencies [735f5c7]
+- Updated dependencies [a7e18de]
+- Updated dependencies [366f895]
+- Updated dependencies [dc75ba8]
+- Updated dependencies [cce0aa9]
+- Updated dependencies [e764507]
+- Updated dependencies [cff17af]
+- Updated dependencies [39404f3]
+- Updated dependencies [ca1965f]
+- Updated dependencies [8619f95]
+- Updated dependencies [b706af9]
+- Updated dependencies [db8c288]
+- Updated dependencies [0e5fe7f]
+- Updated dependencies [add4360]
+- Updated dependencies [fc9ba76]
+- Updated dependencies [0f94cc7]
+- Updated dependencies [a11c1a5]
+- Updated dependencies [71f9cd1]
+- Updated dependencies [ee17d86]
+- Updated dependencies [cdbd920]
+- Updated dependencies [18c432e]
+- Updated dependencies [3c418c4]
+- Updated dependencies [fa8715a]
+- Updated dependencies [a933ed7]
+- Updated dependencies [b3ca463]
+- Updated dependencies [a933ed7]
+- Updated dependencies [0d4a6a8]
+- Updated dependencies [518d5e5]
+- Updated dependencies [6643ba1]
+- Updated dependencies [eeba2ef]
+- Updated dependencies [ec4c4d2]
+- Updated dependencies [424f73c]
+- Updated dependencies [cccbe51]
+- Updated dependencies [a8d6b1d]
+- Updated dependencies [e4a7695]
+- Updated dependencies [87075b1]
+- Updated dependencies [fc58a99]
+- Updated dependencies [14cfc00]
+- Updated dependencies [1c6f7b4]
+- Updated dependencies [e854a53]
+- Updated dependencies [dfebfc8]
+- Updated dependencies [d028b37]
+- Updated dependencies [f7b25c5]
+- Updated dependencies [122ef38]
+- Updated dependencies [4a37870]
+- Updated dependencies [428f9b2]
+- Updated dependencies [aa7ff56]
+- Updated dependencies [c41b42e]
+- Updated dependencies [c4db311]
+- Updated dependencies [750fff5]
+- Updated dependencies [c19035e]
+- Updated dependencies [ececf7a]
+- Updated dependencies [d173125]
+- Updated dependencies [8eeca27]
+- Updated dependencies [8425c17]
+- Updated dependencies [a5ef1d8]
+- Updated dependencies [87ad30c]
+- Updated dependencies [772d5de]
+- Updated dependencies [ce80ec2]
+- Updated dependencies [b372318]
+- Updated dependencies [97a2263]
+- Updated dependencies [29d0676]
+- Updated dependencies [0169d49]
+- Updated dependencies [6bd3231]
+- Updated dependencies [d2b5ba8]
+- Updated dependencies [b799ac5]
+- Updated dependencies [8f74307]
+- Updated dependencies [d23dc08]
+- Updated dependencies [644ad50]
+- Updated dependencies [9735662]
+- Updated dependencies [4d5b4f8]
+- Updated dependencies [0da7cd2]
+- Updated dependencies [28a5c3e]
+- Updated dependencies [4bc18e5]
+  - @objectstack/spec@17.3.0
+  - @objectstack/core@17.3.0
+  - @objectstack/types@17.3.0
+  - @objectstack/observability@17.3.0
+
 ## 17.2.0
 
 ### Minor Changes

@@ -1,5 +1,883 @@
 # @objectstack/service-messaging
 
+## 17.3.0
+
+### Minor Changes
+
+- 99d23b1: fix(service-messaging,service-automation,plugin-webhooks): stamp `organization_id` on `sys_http_delivery` rows so the cross-organization wall on `redeliver()` actually excludes other tenants' rows (#13546)
+  
+  `sys_http_delivery` is tenant-scoped and `redeliver()` — the one
+  request-reachable door on it — deliberately scopes by the caller's
+  organization (#10740). But the enqueue door never stamped the
+  `organization_id` column, and the SQL driver's tenant term is
+  `(organization_id = :tenantId OR organization_id IS NULL)` — a deliberate
+  global-row fail-open — so 100% of delivery rows landed in the NULL arm:
+  visible to, and replayable by, every organization on a walled deployment.
+  
+  The repair mirrors the notification outbox's existing convention
+  (`EnqueueDeliveryInput.organizationId`), end to end:
+  
+  - `EnqueueHttpInput` gains an **optional** `organizationId` member (inherited
+    by `UndeliverableHttpInput`, so parked rows are tenant-stamped too), and
+    `HttpDelivery` surfaces it on read-back. `SqlHttpOutbox.insert` writes
+    `organization_id: input.organizationId ?? null` exactly like
+    `SqlOutbox.enqueue`; `MemoryHttpOutbox` stores the same field and — now
+    that its rows carry a tenant — applies `RedeliverOptions.tenantId` in
+    `redeliver()` with the driver's exact semantics (another organization's row
+    is invisible/`RESOURCE_NOT_FOUND`; an org-less row stays a global row; a
+    tenant-less caller stays unscoped).
+  - The flow `http` node (durable mode) threads its run's acting organization
+    (`AutomationContext.tenantId` — the same source as the `notify` node's
+    #11303 repair) and warns loudly when a multi-org run has none to thread.
+  - The webhook auto-enqueuer stamps each delivery with its subscription's own
+    organization (`sys_webhook.organization_id`); org-less subscriptions
+    enqueue org-less, unchanged.
+  
+  Forward-stamping only: existing NULL rows are untouched (their disposition is
+  a separate decision). Producers with genuinely no organization — a
+  `single`-posture deployment, a stack before its first organization — keep
+  working unchanged; their rows land NULL, which is the honest global-row shape.
+- b6d9432: **Feature:** `MessagingService` gains a plugin-facing inbox write door scoped to the **authenticated caller** — `markReadAsCaller(caller, ids)` and `markAllReadAsCaller(caller)` (#10753).
+  
+  A plugin that pushes an "…awaiting your approval" message through `emit()` had no legitimate way to close it out again once the work was done, so the Console bell's unread badge stayed lit through a full page reload until the user hit "mark all read". The reporting project carries 30+ business hooks in that shape.
+  
+  What it was reaching for instead is the shape this closes. `markRead(userId, ids)` is the REST door's contract method (`INotificationService.markRead?`), and on that path its `userId` is trustworthy because `runtime/src/domains/notifications.ts` binds it to an already-authenticated session and answers 401 when there is none. But the service is also a kernel service, and the kernel hands every plugin ONE shared `PluginContext` whose `getService` carries no caller identity — so for an in-process caller that same parameter is a free string. **Any plugin could mark any user's inbox messages read**, and the receipt lands context-lessly on an `engine-owned` object (ADR-0103), so no engine permission check saw it either. This release is therefore both an API widening and the first tightening of in-process power on that path.
+  
+  The new pair takes **no target user at all**. The recipient is derived from the caller's `ExecutionContext.userId`, so "mark someone else's inbox read" has no spelling on this surface — it is unrepresentable rather than discouraged. That fits the case it was asked for exactly: the approver who clears a request *is* the recipient whose badge is stuck.
+  
+  `userId` is read, and nothing that merely resembles one:
+  
+  - `attributedUserId` is **attribution only** — its own contract states that nothing in the authorization path reads it, and a context carrying only it authorizes as anonymous (ADR-0118 D2). A `userId ?? attributedUserId` fallback would read as working and clear the wrong person's badge.
+  - `actor` is a service-principal label (`svc:<name>`), not a `sys_user` id.
+  - `isSystem: true` with no user is refused rather than elevated: the system has no inbox to be the recipient of.
+  
+  Each refusal throws `InboxCallerError` carrying the ADR-0112 envelope pair a boundary reads — `status: 401` and the registered `code: 'UNAUTHENTICATED'` — and the refusal is evaluated **before** the empty-`ids` and no-data-engine short-circuits, which return `{ success: true, readCount: 0 }`. Reaching one of those with no authenticated caller would report success for a write that was never authorized, which is the silent-success shape this door exists to replace.
+  
+  Honest about what it is: a **discipline** boundary, not a security boundary. An in-process plugin already holds the data engine and can write `sys_notification_receipt` directly; nothing at this layer stops trusted code that means to. What changes is that the correct pattern is the only one the plugin-facing surface expresses, and the incorrect one now fails loudly at the call site.
+  
+  Nothing existing changes behaviour: `markRead` / `markAllRead` / `listInbox` keep their signatures (they are the published `INotificationService` contract the REST door needs), and no schema, column or object declaration moves.
+- 3b5f036: **Feature:** `MessagingService` gains the plugin-facing inbox **read** door scoped to the authenticated caller — `listInboxAsCaller(caller, opts)` (#11452), completing the axis the write door (`markReadAsCaller` / `markAllReadAsCaller`, #10753) established.
+  
+  `listInbox(userId, opts)` is the REST door's contract method (`INotificationService.listInbox?`), and on that path its `userId` is trustworthy because `runtime/src/domains/notifications.ts` binds it to an already-authenticated session and answers 401 when there is none. But the service is also a kernel service, and the kernel hands every plugin one shared `PluginContext` whose `getService` carries no caller identity — so for an in-process caller that same parameter is a free string, and the read lands context-lessly on an `engine-owned` object (ADR-0103), so no engine permission check sees it either. Any plugin could read any user's inbox titles, bodies and read-state — the exact shape the write door closed, on the arguably more sensitive half: inbox bodies carry rendered business content.
+  
+  `listInboxAsCaller` takes **no target user at all**. The recipient is derived from the caller's `ExecutionContext.userId` through the same `resolveInboxRecipient` the write door uses — one refusal vocabulary, not two. `attributedUserId` (attribution only, ADR-0118 D2), `actor` (a service-principal label) and `isSystem` are refused rather than promoted, with `InboxCallerError` carrying the ADR-0112 envelope pair a boundary reads — `status: 401`, registered `code: 'UNAUTHENTICATED'`. The refusal is evaluated **before** `listInbox`'s no-data-engine / no-user short-circuit, which answers a well-formed empty `{ notifications: [], unreadCount: 0 }` inbox — the read-side analog of the silent success the write door replaced. The options window (`read` / `type` / `limit`) is forwarded unchanged.
+  
+  Honest about what it is, same as the write door: a **discipline** boundary, not a security boundary. An in-process plugin already holds the data engine and can read `sys_inbox_message` rows directly; nothing at this layer stops trusted code that means to. What changes is that the correct pattern is the only one the plugin-facing surface expresses, and the incorrect one now fails loudly at the call site.
+  
+  Nothing existing changes behaviour: `listInbox` / `markRead` / `markAllRead` keep their signatures (they are the published `INotificationService` contract the REST door needs), and no schema, column or object declaration moves. `resolveInboxRecipient` gains an optional third parameter naming the target-user door its refusal prescribes; it defaults to the write door's existing text, so existing call sites keep their refusal bytes unchanged.
+- e4902d2: **Fix:** every keyed text column across the five `sys_notification_*` objects declares a sourced `maxLength`, so on MySQL the indexes they key are expressible **as declared** instead of the current mixed state — the UNIQUE constraints (above all `sys_notification_delivery`'s `(notification_id, recipient_id, channel)` dedup key) carried on #11627 hash-shadow columns, and every plain text-keyed index refused with a schema-sync error on each boot (#12978, the #11374 route-A class).
+  
+  The bounds and their producers (each stated in the declaration): `notification_id` / `recipient_id` / `user_id` 255 (the referenced physical id column, `varchar(255)`); `channel` 64 (registered `MessagingChannel.id` machine vocabulary, per the `sys_session.revoke_reason` precedent); `topic` 200 (= `sys_notification.topic`, the event topic these values are matched against); `digest_key` 331 (= recipient 255 + `|` + channel 64 + `|` + window date 10); `principal` 520 (widest declared selector arm `owner_of:OBJECT:ID` = 9 + 255 + 1 + 255); `locale` 16 (= `sys_email_template.locale`, the sibling BCP-47 declaration).
+  
+  **Operator-facing consequences.** Additive schema-sync never rewrites an existing column, so what changes depends on the deployment:
+  
+  - **New databases (all dialects):** the columns are created `varchar(n)` and every declared index is created directly — the dedup UNIQUE key is 255+255+64 = 574 chars = 2296 utf8mb4 bytes, inside InnoDB's 3072-byte key budget. The two wide organization-scoped UNIQUEs (`sys_notification_preference` 774 chars, `sys_notification_subscription` 975 chars) still exceed that budget on MySQL and remain carried by the #11627 SHA-256 hash shadow — enforced, with the NULL-organization caveat tracked as #12998.
+  - **Existing databases, Postgres/SQLite:** the declared indexes already existed (the refusal is MySQL-only) and no drift op is emitted for a bounded text field over a physical TEXT column (`narrow_varchar` deliberately fires only against a wider varchar — #11431; measured, with duals, on #12978). Boot behaviour is unchanged. What changes is the write seam: a value longer than the declared bound is now **refused loudly** instead of stored (`declared = enforced`; these identifier-family ceilings are storage-owned, #12144).
+  - **Existing databases, MySQL:** the columns stay TEXT. Boot-time index sync keeps re-attempting the declared indexes: the UNIQUEs stay carried by the #11627 hash shadow (created on the first boot under a post-#11627 build — unless pre-existing duplicate rows make the shadow ALTER fail loudly, in which case deduplicate first), and each **plain** text-keyed index is still refused, logged at error level by schema-sync on every boot; the object stays registered and served. This is today's behaviour, not a new refusal — what this change adds is that the refusal's remedy becomes real: `os migrate` has **no arm** that rewrites TEXT to `varchar(n)` and never truncates, so the operator route is a hand `ALTER TABLE ... MODIFY` of the named columns to their declared widths, after which the next boot creates every declared index directly. Take a backup first; restate `NOT NULL`/`DEFAULT` on MySQL `MODIFY`; run under `STRICT_TRANS_TABLES` (the default), where an over-long stored value fails the ALTER with `ER_DATA_TOO_LONG` instead of being truncated — pre-flight with `SELECT COUNT(*) FROM sys_notification_delivery WHERE CHAR_LENGTH(channel) > 64` (and likewise per column) to find such rows first. The artifact boot-migration gate is unaffected: this change emits no `destructive` drift entry (the missing-index finding is `create_index`, category `safe`).
+  
+  Graded `minor` for the same reason as the #11374 emitter changeset: on newly created tables the declared bound is now physically enforced where the dialect enforces `varchar`, and at the write seam everywhere, so a write longer than the bound that previously landed in unbounded TEXT is refused — the declaration becoming enforced, named here as a behaviour change.
+- 1401ae7: feat(service-messaging): notification locale is resolved per recipient — `sys_user.locale`, then the deployment default (#13881)
+  
+  Maintainer ruling 2026-09-01, quoted verbatim and untranslated:
+  
+  > **解析点移到 fan-out 后按收件人**:`payload.locale` 不再是 fan-out 前单值,插进 `email-channel.ts` L86-99 自留的 seam
+  > **解析链 = 收件人 `locale` → 部署默认**(`II18nService.getDefaultLocale()`),缺失恒回退,⛔ 任何路径不得死信
+  
+  Before, the delivery path resolved ONE locale per notification: `payload.locale`
+  if the producer set one (interpolated once, before fan-out), else the deployment
+  default. Every recipient of a notify node got the same `sys_email_template` row,
+  whatever language they read — the hotcrm measurement that lifted the 2026-08-13
+  deferral.
+  
+  Now the locale is resolved PER RECIPIENT, at delivery time, through ONE read
+  point (`recipient-locale.ts`, `resolveRecipientLocale`): the recipient's own
+  `sys_user.locale` — email and SMS read it off the same row they already fetch
+  for the address, so it costs no second query there; the inbox channel, which
+  never read the row before, makes one read for it on the template path — else
+  the deployment default, probed
+  lazily so live `localization` changes are honoured. The same chain serves the
+  email channel's two arms (`sendTemplate` and `sys_notification_template`), the
+  inbox channel's template path, and the SMS channel, so one notification cannot
+  arrive in two languages across channels.
+  
+  **Never a dead letter from this seam.** A recipient value that is absent, empty,
+  whitespace, non-string, malformed, or the literal string `"undefined"` /
+  `"null"` (the exact shape hotcrm measured dead-lettering every user without a
+  preference row) falls back to the deployment default; nothing named anywhere
+  arrives at the downstream ladders as an absent key, which is their documented
+  `en-US` floor. A locale read that throws (a `userObject` override without the
+  column) is retried address-only and falls back — the delivery still goes out.
+  
+  **Behaviour change for producers:** a `payload.locale` set by a producer is no
+  longer consulted. It was never a declared key of the notify node (only the
+  generic `payload` passthrough carried it) and no in-repo producer writes it;
+  the ruling retired it as the pre-fan-out single value. A node that relied on
+  it now sends each recipient their own language, else the deployment default —
+  which is the ruled behaviour, not a regression. Nothing to migrate: remove the
+  key, or leave it, it is inert either way.
+  
+  Second behaviour change: on the `sys_notification_template` arm (email topic
+  path, SMS) the deployment default (`II18nService.getDefaultLocale()`) is now
+  the second rung; before, that arm fell straight from `payload.locale` to the
+  static `en` and never consulted it. A deployment whose `localization.locale`
+  is e.g. `zh-CN` with a topic bundle holding `en` and `zh` rows renders `zh`
+  there now for recipients without a column. SMS is newly handed the
+  deployment-default probe.
+  
+  `@objectstack/spec` ships the contract text: the `notify` node's `template`
+  description and its refusal messages now state the per-recipient chain and
+  name `payload.locale` as not consulted (`automation/io-node-config.zod.ts`),
+  mirrored on the runtime descriptor in `@objectstack/service-automation`.
+  
+  Interaction with the `TEMPLATE_*` permanent-failure class is unchanged in
+  kind: `sendTemplate`'s ladder for a NAMED locale still ends at `en-US`, so a
+  recipient locale can dead-letter a delivery only against a bundle that has
+  neither the requested row nor an `en-US` row — off the documented contract.
+  Two asymmetries against the old single value, both on such bundles: (a) the
+  bundle carries the deployment default's row but no `en-US` row — old delivered,
+  new fails for a recipient whose own tag is a third language; (b) there is NO
+  deployment default (i18n absent or `getDefaultLocale` unimplemented) — old
+  called `sendTemplate` with no locale and the ladder's any-row rung delivered,
+  new names the recipient's tag, the any-row rung is skipped, and a tag absent
+  from the bundle is `TEMPLATE_NOT_FOUND` (permanent). The fix in both is the
+  bundle (`en-US` is the ladder's floor), not a third rung.
+- d9cf78e: **BREAKING (interface member signature):** `INotificationOutbox.ack()` now takes back the claimed record instead of a bare row id, and its compare-and-set binds the claim credential the record carries (#11859). `claim()` / `claimDigest()` declare their true return type, `ClaimedDeliveryRecord[]` — the same rows as before, with the (`claimedBy`, `claimedAt`) pair the store stamps guaranteed present — so reads of claim results do not change; the one breaking edit is at ack call sites, which hand the whole record back where they previously handed `record.id` (the caller already holds it: `ack` completes a claim, and the record is what `claim()` returned).
+  
+  Why: `status = 'in_flight'` could prove a claim exists but not whose. In the reachable sequence — node A claims a row, the send outruns `claimTtlMs`, another node's `claim()` reaps and re-claims the row, A finishes late — A's ack still matched and wrote its outcome over B's live attempt. With the credential in the predicate a late ack matches nothing, is refused with the existing `NotificationAckError` (`DELIVERY_NOT_ELIGIBLE`, ADR-0112), and writes nothing; the caller never needs to know its own `nodeId`, because ownership is proven by round-tripping what `claim()` returned. Both implementations (`SqlNotificationOutbox`, `MemoryNotificationOutbox`) enforce it identically.
+  
+  Breaking ships as `minor` per the launch-window convention (`scripts/check-changeset-no-major.mjs`).
+  
+  <!-- adr-0087: not-required (no-migration-prescription) The changed member is a runtime TypeScript interface method (`INotificationOutbox.ack` in `packages/services/service-messaging/src/outbox.ts`): no Zod schema, no `packages/spec` declaration, no authorable key and no stored representation changes shape — `sys_notification_delivery` rows are byte-identical before and after, so `objectstack migrate meta` has nothing to visit and there is no tombstone to mint. Every affected consumer is told by the compiler at the call site (the argument type no longer accepts a string), which is more precise than a ledger entry. The checkable `runtime-interface-only` spelling is deliberately not claimed: `packages/spec/src/api/error-code-ledger.zod.ts` mentions `INotificationOutbox` in a prose comment about the shared `DELIVERY_NOT_ELIGIBLE` code, which its step-4 scan refuses as an unresolvable mention — the honest disposition here is this catch-all, with the same argument #8277 ratified. -->
+- 1a47a53: `INotificationOutbox.ack()` enforces its declared precondition — the row must be claimed — in both implementations, and `attempts` moves only for a real dispatch attempt
+  
+  `ack()` is the dispatcher's completion callback for a row it CLAIMED, and
+  neither implementation checked that. `MemoryNotificationOutbox.ack` looked the
+  row up by id and mutated it; `SqlNotificationOutbox.ack` read only `attempts`
+  by id. So `ack(id, { success: false, suppressed: true })` on an unclaimed
+  `pending` row succeeded, flipped the row to terminal `suppressed`, and
+  incremented `attempts` — which made `ack` read like the cancellation primitive
+  this interface deliberately does not have.
+  
+  That was a trap in two directions. It **raced the dispatcher**: between a
+  caller's `list()` and its `ack()`, `claim()` could take the row — `claim` is
+  atomic by contract and `ack` was never part of that atom — so a suppression
+  could land on a delivery already on the wire, or a dispatcher's real outcome
+  could be overwritten by a caller that thought it was cancelling. And it
+  **corrupted `attempts`**: the counter feeds the retry schedule
+  (`classifyDeliveryAttempt(result, errorClass, row.attempts, …)`), so a row
+  "cancelled" this way arrived at its next real attempt with the backoff already
+  advanced by an attempt that never went out.
+  
+  Both implementations now refuse an ack on a row that is not `in_flight`,
+  throwing `NotificationAckError` with this package's already-registered
+  ADR-0112 code `DELIVERY_NOT_ELIGIBLE` — the same refusal
+  `SqlHttpOutbox.redeliver` raises when its own compare-and-set misses. A refused
+  ack writes **nothing**: status, `attempts` and `error` are left exactly as they
+  were, so the row stays claimable and its backoff position stays honest. An id
+  matching no row remains a silent no-op — an absent row has no state to corrupt
+  and no claim to lose.
+  
+  `SqlNotificationOutbox` does it as an **atomic conditional update** rather than
+  a read-then-write, because a read cannot hold a row still and a read-then-write
+  is the same defect wearing a different hat. The precondition is re-stated in
+  the write (`where: { id, status: 'in_flight' }`), which — per #11009 — must
+  ride the predicate path: on the by-id path the driver binds only the primary
+  key and the extra predicate is silently discarded. `attempts` is incremented
+  inside that condition and nowhere else, so the counter can only move for a row
+  that was genuinely claimed. A conditional write that matches nothing is
+  reported rather than passed off as success.
+  
+  `NotificationDispatcher` absorbs exactly one refusal — `DELIVERY_NOT_ELIGIBLE`
+  — logs it and continues with the rest of the batch, because a send slower than
+  `claimTtlMs` legitimately loses its claim to the visibility-timeout reap, and
+  letting that unwind the partition loop would strand every still-valid row in
+  the batch `in_flight` until its own timeout expired. Any other error still
+  propagates.
+  
+  The sibling HTTP outbox is deliberately untouched: `assertHttpRedeliverable`
+  depends on `IHttpOutbox.ack` incrementing `attempts` unconditionally, so that
+  `attempts === 0` on a terminal row still means "parked, never sent".
+- b706af9: Widen `SendEmailInput` / `SendTemplateInput` with an optional `organizationId`, threaded from producers that already hold an organization, so `plugin-email`'s writer stamps `sys_email.organization_id` at the source (#11741, Decision 2 of #11303).
+  
+  - `@objectstack/spec`: `SendEmailInput.organizationId?` and `SendTemplateInput.organizationId?` — optional, pass-through only; absent stays legal (auth verification / password-reset mail carries none).
+  - `@objectstack/plugin-email`: `EmailService.send()` stamps the value verbatim onto the persisted `sys_email` row; `sendTemplate()` forwards it to `send()`. No in-adapter resolution or fabrication — the writer runs under a constant system context and only passes through what the input carries.
+  - `@objectstack/service-messaging`: the email channel threads `delivery.notification.organizationId` on both of its arms (plain `send` and the `sendTemplate` template path).
+  - `@objectstack/plugin-auth`: `sendInvitationEmail` threads the invitation's own `organizationId`; org-less auth mail (reset / verification / magic link / email-change notice) is unchanged.
+  
+  Forward-stamping only: existing org-less `sys_email` rows are not backfilled.
+- 2fd3f1c: feat(platform-objects,plugin-auth): a user may set their own `sys_user.locale` (#14787)
+  
+  Maintainer ruling 2026-09-03, option B, quoted verbatim and untranslated as
+  adopted:
+  
+  > 「同意」
+  
+  The identity table's user-writable set grows from two fields to three. This is a
+  security-boundary act, taken by the maintainer and recorded as one — it is the
+  first widening of the ADR-0092 D2 self-service whitelist since that ADR shipped
+  `{name, image}` as its first and only entry. `sys_user.locale` landed
+  `readonly` and off the whitelist three weeks earlier (#13881 / #14775), which
+  recorded a decision nobody had made yet; the ruling made it.
+  
+  Three edits move together, and each one is inert without the other two:
+  
+  - `SYS_USER_PROFILE_EDIT_FIELDS` becomes `{name, image, locale}`, so the
+    identity write guard admits the column instead of stripping it (and, on a
+    locale-only PATCH, throwing). `SYS_USER_IMPORT_UPDATE_FIELDS` inherits the
+    widening by construction — it is a spread of the profile set, not a second
+    list.
+  - `MANAGED_EXTENSION_EDITABLE_FIELDS` gains a `sys_user` entry holding
+    `locale` and nothing else.
+  - `sys_user.locale` drops `readonly`. Without this the engine's readonly strip
+    removes a caller-supplied value before the guard or the validator ever sees
+    it, so the whitelist entry alone would have been a silent no-op.
+  
+  **A malformed value is refused, not stored.** The column now declares a
+  `locale_bcp47_shape` `format` validation rule carrying the same BCP-47 pattern
+  the delivery-time reader uses, so objectql's rule validator rejects a malformed
+  tag on insert, by-id update and bulk update with the standard
+  `VALIDATION_FAILED` / `invalid_format` envelope (HTTP 400). The check is of
+  SHAPE, not of membership: an unknown-but-well-formed tag is accepted and falls
+  to the delivery ladder's floor rather than dead-lettering a notification, which
+  is the property #13881's per-recipient chain was built to hold. An absent, null
+  or empty column stays legal — clearing it is how a user returns to the
+  deployment default, which remains the fallback.
+  
+  **What did NOT widen.** The ADR-0092 D6 session-snapshot mirror keeps
+  `{name, image}`: better-auth has no `locale` on its user model and it is
+  deliberately not an `additionalFields` entry, so there is no cached copy to keep
+  coherent, and merging one in would manufacture a `user.locale` key present only
+  on sessions that happen to be cached and only after a profile edit. The mirror
+  set is now named separately from the update whitelist rather than derived from
+  it.
+  
+  **Who may perform the write is unchanged, and is a separate question.** ADR-0092
+  D5 leaves that with the permission layer: `member_default` still denies
+  `allowEdit` on `sys_user`, so a rank-and-file member reaches this column through
+  no shipped surface yet — the widening opens the COLUMN, not a self-service
+  route. Granting one (the `sys_api_key` shape: an explicit `member_default` entry
+  plus a `_self` row-scope for writes) is a further security-boundary decision
+  that this ruling did not take.
+  
+  The `identity-write-guard` and `managed-extension-fields` pins that recorded the
+  old posture are FLIPPED, not deleted, each naming the ruling that reversed it —
+  a pin that recorded a real decision is evidence, and evidence of a superseded
+  decision is what tells the next reader the reversal was deliberate.
+  
+  `@objectstack/service-messaging` is a docs-and-export change only: its
+  `LOCALE_TAG_SHAPE` is unchanged in behaviour and now exported so a parity pin
+  can hold it byte-identical to the write-side pattern. Read-side normalization
+  stays — it is strictly the stricter of the two (`"null"` is shape-legal and only
+  the read side refuses it) and it guards values that arrive below the data API,
+  where no write rule runs.
+
+### Patch Changes
+
+- 52954c0: `IDataEngine` declares the optional `syncObjectSchema?(objectName: string): Promise<void>` member (#12482) — on-demand single-object physical schema sync: create/alter the object's table, or for a federated (external) object register its DDL-free read metadata (ADR-0015 §18). Additive contract catch-up under the 2026-08-25 #11833 ruling's item-4 precedent as executed by #12248: the member #12010's inventory left "not verified" is verified — implemented on `ObjectQL`, consumed cross-package by two service packages, both until now through consumer-local structural recovery (`service-datasource`'s `ConnectionEngineLike.syncObjectSchema?`, called per bound external object after its driver connects; `service-messaging`'s system-table provisioning via an `as unknown as` cast whose own comment recorded the member "lives on the concrete ObjectQL engine, not the contract"). FROM undeclared (consumers cast or re-declare structurally) TO declared-optional on `IDataEngine` (consumers read `engine.syncObjectSchema` directly and keep their runtime probes). `service-messaging` drops the now-redundant cast (behaviour unchanged). Optional, so existing `IDataEngine` implementers and test doubles are unaffected. No runtime change.
+- e7191ce: fix(build): give each `exports` condition its own `types` target in the 28 dual-build packages (#13112)
+  
+  **Published-surface change, zero runtime change.** No emitted byte moves; what
+  moves is which declaration file a resolver READS. Maintainer ruling 2026-08-29
+  (decision batch #3, verbatim 「同意」) chose declaring the files over deleting
+  them.
+  
+  ## What was wrong
+  
+  These 28 packages are `"type": "module"` and dual-built, and each spelled one
+  `types` condition as a **sibling** of `import`/`require`:
+  
+  ```json
+  "exports": { ".": {
+    "types": "./dist/index.d.ts", "import": "./dist/index.js", "require": "./dist/index.cjs"
+  } }
+  ```
+  
+  A sibling `types` answers for **both** conditions, so a CommonJS consumer was
+  handed `dist/index.d.ts` — an ES-module declaration, because the package is
+  `"type": "module"` — for an entry point it reaches with `require`. Measured with
+  `tsc --traceResolution` on a `"type": "commonjs"` fixture at `moduleResolution:
+  node16`:
+  
+  ```
+  error TS1479: The current file is a CommonJS module whose imports will produce
+  'require' calls; however, the referenced file is an ECMAScript module and cannot
+  be imported with 'require'.
+  ```
+  
+  The JavaScript at `dist/index.cjs` loads perfectly (`check:dual-build-cjs-loads`
+  has asserted that for months). It is the **types** that told the consumer the
+  supported `require` entry point could not be required. The `dist/index.d.cts`
+  twin tsup emits beside it — 36 files, 5,517,701 B on this build — was named by
+  no condition at all and shipped in every tarball unreachable.
+  
+  ## What changed
+  
+  Each condition now names its own declaration, the shape TypeScript documents:
+  
+  ```json
+  "exports": { ".": {
+    "import":  { "types": "./dist/index.d.ts",  "default": "./dist/index.js" },
+    "require": { "types": "./dist/index.d.cts", "default": "./dist/index.cjs" }
+  } }
+  ```
+  
+  33 entry points across 27 packages, subpaths included. The root `types` field is
+  untouched, so `node10` resolvers are unaffected; the `import` condition resolves
+  exactly what it resolved before, measured as an unchanged control in the same
+  run.
+  
+  ## `@objectstack/core` is deliberately NOT changed
+  
+  Splitting a declaration in two makes TypeScript compare it nominally, and
+  `ObjectKernel` carries a `private plugins` member that reaches every plugin
+  through `PluginContext.getKernel()`. With core split, whole-repo `pnpm build`
+  fails in `@objectstack/verify` with 5 × TS2345 ("Types have separate
+  declarations of a private property 'plugins'"); with core held back and the
+  other 27 split, 71/71 tasks pass. So core keeps the sibling-`types` shape and
+  its two `.d.cts` files (220,854 B) stay unreachable, declared as such in
+  `check:dual-build-cjs-loads`. Splitting it needs a decision about core's public
+  types, not about an exports map.
+  
+  ## For consumers
+  
+  - **ESM consumers: nothing changes.** Same declaration file, byte for byte.
+  - **CJS consumers under `node16`/`nodenext`: TS1479 goes away** and the
+    declarations they get are the ones built for CommonJS.
+  - **`node10` / `moduleResolution: node` consumers: nothing changes** — they never
+    read `exports`.
+  - Nothing is removed: every path that resolved before still resolves.
+  
+  Packages that are CJS-first (`require` → `./dist/index.js`, no `"type": "module"`)
+  were already correct and are untouched — their `dist/index.d.ts` really is the
+  CommonJS declaration. Their ESM mirror (an unreachable `.d.mts` under the
+  `import` condition) is a separate, larger population and is filed separately per
+  the ruling, not fixed here.
+  
+  `check:dual-build-cjs-loads` grew a fourth invariant (TYPED) that reds on the old
+  shape, so the drift cannot return silently.
+- 30928a6: fix(i18n): read the provenance companion at serving time, not only record it (#12642)
+  
+  Maintainer ruling #12069 Option A (#11671) landed translation provenance as
+  **two** halves: `os i18n extract --source-hashes` RECORDS which source revision
+  a generated leaf is still a byte copy of, and `withSourceFallback` READS those
+  records at serving time and substitutes the current source for a leaf whose
+  source has moved underneath it. The recording half was then rolled out to every
+  bundle set. The reading half was not — measured on `main`: provenance
+  **recorded in 9 of 9** bundle sets and **read at serving time in 1**.
+  
+  The other eight assembled their `TranslationBundle` straight from the raw
+  generated modules and never consulted the companion sitting beside them, so
+  they recorded the drift and went on serving the superseded draft. Nothing said
+  so: `check:i18n` compares key sets and they still matched, `check:i18n-coverage`
+  counts a present leaf as translated, and `check:i18n-stale-fill`'s cross-locale
+  rule needs a SECOND locale holding the same stale bytes before it can testify.
+  The measured case had one locale and no second witness.
+  
+  All eight are wired here, in the shape `@objectstack/platform-objects`'s own
+  `metadata-translations/index.ts` uses — the committed
+  `<locale>.source-hashes.generated.ts` passed as the fourth argument, the third
+  left `undefined` because these sets have no hand-authored sections. Provenance
+  is now recorded in 9 of 9 sets and served in 9 of 9.
+  
+  `@objectstack/plugin-webhooks` was the last of them and is the only one whose
+  manifest changed: `withSourceFallback` lives in `@objectstack/platform-objects`,
+  which that package did not declare. It was **already in that package's install
+  closure** through `@objectstack/service-messaging`, so the edge declares a
+  resolution that already resolved rather than adding a package to the graph —
+  and relying on it undeclared would have been a phantom dependency under this
+  repo's strict package manager.
+  
+  `check:i18n-stale-fill` gains a second verdict, **UNSERVED PROVENANCE**, so this
+  cannot silently come apart again: a bundle set that commits a companion and
+  does not consult it at serving time now fails the build, including a tenth set
+  that lands tomorrow.
+  
+  **Graded `patch`, and the grade is the interesting part.** No API changes, no
+  new exported surface, and no key set moves — substitution was chosen over
+  deletion precisely so key-set claims stay put (ruling #8765 Option B). What
+  changes is which STRING a stale leaf serves. On this tree that is **zero
+  leaves**: a record is only ever written for a leaf that IS a byte copy of the
+  current source, so the companions arrive 0-stale by construction. The change is
+  in what happens the next time a source string moves — the reader sees the
+  English source rather than a superseded draft of it, which is the same
+  degradation an untranslated key already produces and not a new state.
+- de47336: chore(i18n): roll the generated-leaf provenance companion out to the remaining bundle sets (#12559)
+  
+  `os i18n extract --source-hashes` (#11671, maintainer ruling #12069 Option A)
+  records, per generated translation leaf, the digest of the source revision that
+  leaf is **still a byte copy of** — the one signal that tells a stale fill from a
+  real translation once the source has moved and the two stopped being
+  distinguishable by value. It shipped opt-in, and exactly one of the nine i18n
+  bundle sets opted in. A landed detector, a changeset announcing it and a green
+  gate read together as *"generated translation staleness is now caught"*; for
+  eight of nine sets it was not, and the thing making it not caught was a single
+  absent flag in an extract config — invisible from all three of those surfaces.
+  
+  **All eight remaining sets now opt in** — `plugin-approvals`, `plugin-audit`,
+  `plugin-security`, `plugin-sharing`, `plugin-webhooks`, `service-messaging`,
+  `service-realtime`, `service-storage`. Each documents `source-hashes` in its
+  extract config and commits three `<locale>.source-hashes.generated.ts`
+  companions, produced by the same extract run as the bundles they sit beside
+  (`check:i18n` compares them byte-for-byte, so they cannot be written by hand).
+  `check:i18n` now reports 7 bundles per set where it reported 4, and 11 for
+  `platform-objects` where it reported 8.
+  
+  **Records count what is currently RECORDABLE, never what is covered.** A record
+  is written only for a leaf that *is* right now a byte copy of the current
+  source, so a fully translated locale starts with an empty table — which is the
+  instrument armed, not an instrument that measures nothing: the entry appears by
+  itself on the first extract after a leaf becomes a fill. Measured at this
+  commit, per set over its three translated locales: `service-messaging` 289,
+  `plugin-approvals` 61, `plugin-security` 33, `plugin-webhooks` 20,
+  `plugin-audit` 8, `service-storage` 7, `plugin-sharing` 1 (es-ES only; zh-CN and
+  ja-JP are fully translated and start empty), `service-realtime` 0 (all three
+  locales fully translated). **419 records written across the eight sets, 0
+  stale.**
+  
+  **One extractor fix the rollout forced.** `--source-hashes` had one user, and
+  that user commits both generated sections, so the interaction with
+  `--no-metadata-forms` had never been exercised. The provenance table is computed
+  over every generated section the extractor builds; the eight sets here commit no
+  metadata-forms bundle, and their `metadataForms` subtree — absent from their
+  merge baseline — arrives as a fresh `--fill=default` copy of `en`, so every leaf
+  of it was recordable. First measured on `plugin-audit`: **763 records, of which
+  2 were its own objects and 761 were digests of the Studio metadata-form baseline
+  `@objectstack/platform-objects` owns.** Those records are unreadable in the
+  package holding them and would have rewritten all 24 companions on any unrelated
+  `*.form.ts` change in `packages/spec` — the cross-package coupling ADR-0029 D8
+  and every `bundle-ownership.test.ts` keep out of committed bundles. The
+  companion now covers exactly the sections a run commits, decided by the same two
+  predicates that decide the bundle files. `platform-objects` commits both, so its
+  three committed companions are byte-for-byte unchanged.
+  
+  **Grade: `patch`, and behaviour on the day it lands is unchanged for every
+  leaf.** A record is written only where a leaf is currently a byte copy of the
+  **current** source, so every record written equals the current digest and none
+  of them can be stale; the mechanism cannot arrive red. No committed translation
+  bundle changed a byte, no public API moved, and no leaf's rendered text changed.
+  `narrowToCommittedSections` is new but internal to `@objectstack/cli` — the
+  package's entrypoint does not re-export the extractor utils.
+  
+  **What this does not do**, stated so the boundary is not inferred wrongly a
+  second time: these eight sets now *record* provenance. Reading it at serving
+  time is `withSourceFallback`, and that is still wired in
+  `@objectstack/platform-objects` alone — so a stale fill in one of the eight is
+  now recorded and reportable, but not yet substituted at runtime. Tracked
+  separately.
+- e577445: The `notify` node's Studio form and the messaging registration log now state the locale the delivery path actually resolves — one per notification, not one per recipient
+  
+  `NotifyConfigSchema` was corrected in `packages/spec` to say that the `template`
+  path resolves `(name, locale)` with **one** locale for the whole notification.
+  The same retired promise survived outside the spec file, in the places an app
+  author is most likely to read it:
+  
+  - `service-automation/src/builtin/notify-node.ts` — the `template` field's
+    `configSchema` description, i.e. the text rendered in the **Studio form** the
+    author fills in. It said the row is "resolved by (name, recipient locale) at
+    delivery time and rendered per recipient".
+  - `content/docs/automation/email-templates.mdx` — the only site that stated the
+    conclusion outright rather than merely licensing it: "so one node mails each
+    person in their own language".
+  - `service-messaging/src/messaging-service-plugin.ts` — the channel-registration
+    log line, which advertised "resolve sys_email_template per recipient locale".
+  - Two internal comments in `notify-node.ts` and one in its test, describing the
+    payload the outbox snapshots as carrying a per-recipient-locale resolution.
+  
+  None of that is what the delivery path does. `payload.locale` is interpolated
+  **once, before fan-out**, so it is a single value for the whole notification, and
+  its fallback is the deployment default (`II18nService.getDefaultLocale()`). The
+  platform has no per-user locale to read — `sys_user` carries no locale column,
+  and request-scoped locale does not exist at async delivery time — so recipients
+  whose personal languages differ all receive the same template row. A per-user
+  locale is deferred until measured pull (maintainer ruling, 2026-08-13) and layers
+  in as an override at that same seam when it lands; the corrected wording dates
+  the deferral so it reads as a decision with provenance rather than an oversight.
+  
+  The gap was worth correcting because the wording licensed exactly one action —
+  convert `notify` nodes on the belief that non-English recipients get non-English
+  mail — and that action is a **net regression**: `TEMPLATE_*` failures classify
+  `permanent` and dead-letter, and the inbox channel starts requiring an email
+  service with `renderTemplate()` where inline text needed none.
+  
+  Text only: no schema accepts or refuses anything it did not before, no delivery
+  behaviour moves, and no wire value changes. A new pin in `notify-node.test.ts`
+  asserts the form description names `payload.locale` and the deployment default
+  and refuses a bare "recipient locale", so a later edit cannot quietly restore the
+  promise.
+- 598b7ec: fix(i18n): re-translate the five leaves that served a superseded source revision (#12065)
+  
+  `os i18n extract` merges gaps only, so a revised source string leaves the previous
+  revision standing in every translated locale — in sync by key, green under
+  `check:i18n` and counted as translated by `check:i18n-coverage`. The five leaves
+  `check:i18n-stale-fill` froze in its baseline are re-translated here from the
+  **current** `en` source, and the baseline is ratcheted to empty in the same change.
+  
+  User-visible admin/Setup help text changes in `es-ES`, `ja-JP` and `zh-CN`:
+  
+  - `dataset.fields.measures.helpText` (metadata forms) — all three locales promised a
+    `"certified"` governance flag that was removed from the declaration in 16.0.
+  - `sys_webhook.fields.method.help` — all three locales served the pre-revision method
+    enumeration after the source became a prose description.
+  - `sys_webhook.pluralLabel` — `ja-JP` was an untranslated Latin fill and is now
+    Japanese; `zh-CN` keeps `Webhook`, which is the term this bundle's own Chinese prose
+    uses and which carries no plural inflection.
+  - `sys_http_delivery.fields.attempts.help` — `es-ES` / `ja-JP` held an English fill and
+    `zh-CN` a translation of the same superseded source; all three now carry the
+    PARKED / terminal-row clause the source documents.
+  - `sys_notification_subscription.fields.principal.help` — the selector list was missing
+    the `owner_of:object:id` and bare-email forms in all three locales.
+  
+  No schema, export or runtime behaviour changes: translated-locale leaf values only,
+  plus the shrink-only ratchet baseline.
+- ffbb7a1: Stamp `organization_id` on flow-produced notifications and on `markRead`
+  receipts, so the notification family stops writing org-less rows
+  
+  An application project's read-only inventory found `sys_inbox_message`,
+  `sys_notification`, `sys_notification_receipt` and `sys_notification_delivery`
+  carrying `organization_id = NULL` on **100%** of their rows — existing rows and
+  same-day new ones alike, while `sys_approval_request` in the same database
+  carried an organization on every row. Ruled a gap, not a design choice.
+  
+  Everything below the messaging ingress was already threaded: `emit()` stamps the
+  `sys_notification` event, the inbox channel stamps `sys_inbox_message` and its
+  `delivered` receipt, and the outbox carries the value onto
+  `sys_notification_delivery`. Each of them reads `EmitInput.organizationId` —
+  and the `notify` flow node, the dominant producer, never supplied it. Its local
+  structural mirror of `emit()` did not even declare the field, so the value could
+  not have been passed. One missing argument, four tables at 100% null.
+  
+  The node now threads the organization from the run's own acting context
+  (`AutomationContext.tenantId`), the same source the `collab.mention` producer in
+  `@objectstack/plugin-audit` already uses, so the two notification producers agree
+  about whose organization a notification carries.
+  
+  A second producer of the same table is fixed alongside it: the `read` receipt
+  `markRead` inserts — written when a user reads a notification whose delivered
+  receipt never landed — named no organization at all. It now carries the
+  organization of the `sys_notification` row it is about.
+  
+  There is deliberately **no fallback limb** in either producer: not "the current
+  organization", not the install's first organization, not the recipient's first
+  membership. A run with no organization in scope still emits and still writes its
+  rows, and the `notify` node warns audibly naming the topic and the consequence.
+  A wrong `organization_id` is worse than a null — a null is visibly missing,
+  while a wrong value is silently authoritative to every report, export and
+  cleanup script that filters by organization.
+  
+  Forward-stamping only. Existing rows are not backfilled and no migration ships.
+- Updated dependencies [809d417]
+- Updated dependencies [387e231]
+- Updated dependencies [f794e4e]
+- Updated dependencies [cae2169]
+- Updated dependencies [b812a54]
+- Updated dependencies [2d4fa75]
+- Updated dependencies [0e4e51b]
+- Updated dependencies [e84bbf6]
+- Updated dependencies [effae80]
+- Updated dependencies [efb3513]
+- Updated dependencies [d62f990]
+- Updated dependencies [c45d8e6]
+- Updated dependencies [2e3e8c7]
+- Updated dependencies [e621291]
+- Updated dependencies [655b106]
+- Updated dependencies [40a93b5]
+- Updated dependencies [101ad2c]
+- Updated dependencies [d5b330d]
+- Updated dependencies [dda969c]
+- Updated dependencies [1f45690]
+- Updated dependencies [277948f]
+- Updated dependencies [8bdd955]
+- Updated dependencies [f3bbbef]
+- Updated dependencies [4f24e9d]
+- Updated dependencies [e27583e]
+- Updated dependencies [4bd6faa]
+- Updated dependencies [86cbe37]
+- Updated dependencies [6a180e4]
+- Updated dependencies [474242f]
+- Updated dependencies [63cd487]
+- Updated dependencies [bd4aa4e]
+- Updated dependencies [803eaab]
+- Updated dependencies [f8e8f03]
+- Updated dependencies [983edf1]
+- Updated dependencies [eae824e]
+- Updated dependencies [f6fa22c]
+- Updated dependencies [8a483b3]
+- Updated dependencies [3bc2e38]
+- Updated dependencies [97bcd99]
+- Updated dependencies [df59de0]
+- Updated dependencies [96e25a8]
+- Updated dependencies [f75a38a]
+- Updated dependencies [7a25e7d]
+- Updated dependencies [1fa05a6]
+- Updated dependencies [c85a265]
+- Updated dependencies [dcb10a5]
+- Updated dependencies [773a999]
+- Updated dependencies [35dffea]
+- Updated dependencies [d8024f0]
+- Updated dependencies [8120808]
+- Updated dependencies [776a098]
+- Updated dependencies [5060877]
+- Updated dependencies [4f6325d]
+- Updated dependencies [52954c0]
+- Updated dependencies [2aa8456]
+- Updated dependencies [93809a3]
+- Updated dependencies [7c0d0c3]
+- Updated dependencies [daae7aa]
+- Updated dependencies [8dc22d6]
+- Updated dependencies [a392dbf]
+- Updated dependencies [279431e]
+- Updated dependencies [948dd6b]
+- Updated dependencies [3b4c56c]
+- Updated dependencies [ae8edd2]
+- Updated dependencies [e25403c]
+- Updated dependencies [a81aa9d]
+- Updated dependencies [64baa68]
+- Updated dependencies [9fa70d7]
+- Updated dependencies [09db64a]
+- Updated dependencies [92916e7]
+- Updated dependencies [a84f3ea]
+- Updated dependencies [f2eaae8]
+- Updated dependencies [56c093c]
+- Updated dependencies [c09451b]
+- Updated dependencies [ba64877]
+- Updated dependencies [7345308]
+- Updated dependencies [79b6a22]
+- Updated dependencies [30d96ab]
+- Updated dependencies [f658793]
+- Updated dependencies [c95ad19]
+- Updated dependencies [e58ea8b]
+- Updated dependencies [4a17645]
+- Updated dependencies [3795c5f]
+- Updated dependencies [8ab926b]
+- Updated dependencies [7317cf2]
+- Updated dependencies [e25e839]
+- Updated dependencies [5997207]
+- Updated dependencies [8b13cc8]
+- Updated dependencies [4a4a35d]
+- Updated dependencies [86e765a]
+- Updated dependencies [1d7e76a]
+- Updated dependencies [53dc739]
+- Updated dependencies [fd289be]
+- Updated dependencies [03bf7b1]
+- Updated dependencies [f90e820]
+- Updated dependencies [18d816a]
+- Updated dependencies [e8bd715]
+- Updated dependencies [b91c351]
+- Updated dependencies [a28a3c0]
+- Updated dependencies [daeaaf9]
+- Updated dependencies [c459da6]
+- Updated dependencies [e914733]
+- Updated dependencies [f887e52]
+- Updated dependencies [881f8d8]
+- Updated dependencies [3bfa1e6]
+- Updated dependencies [0a8ebf3]
+- Updated dependencies [901355c]
+- Updated dependencies [34ce8e7]
+- Updated dependencies [33681ea]
+- Updated dependencies [bfe13c8]
+- Updated dependencies [0fb3044]
+- Updated dependencies [4635f3e]
+- Updated dependencies [fd289be]
+- Updated dependencies [ee3595c]
+- Updated dependencies [09b4f4e]
+- Updated dependencies [b2eab95]
+- Updated dependencies [93940d4]
+- Updated dependencies [3a04b01]
+- Updated dependencies [45b9051]
+- Updated dependencies [3954fb7]
+- Updated dependencies [4805b56]
+- Updated dependencies [b9e9227]
+- Updated dependencies [d395692]
+- Updated dependencies [5894d30]
+- Updated dependencies [a3765f6]
+- Updated dependencies [2d5cee3]
+- Updated dependencies [e22158f]
+- Updated dependencies [7404925]
+- Updated dependencies [0c2334f]
+- Updated dependencies [778c59f]
+- Updated dependencies [d2619fd]
+- Updated dependencies [af56546]
+- Updated dependencies [6acb11a]
+- Updated dependencies [33c5fd3]
+- Updated dependencies [20b0fdb]
+- Updated dependencies [905019b]
+- Updated dependencies [a286411]
+- Updated dependencies [98c0d33]
+- Updated dependencies [368a82e]
+- Updated dependencies [a3d5724]
+- Updated dependencies [93ea19b]
+- Updated dependencies [9ee2dcf]
+- Updated dependencies [8cb96ec]
+- Updated dependencies [8f10a79]
+- Updated dependencies [6269a55]
+- Updated dependencies [a17da05]
+- Updated dependencies [a8c00e2]
+- Updated dependencies [22e5236]
+- Updated dependencies [0fb8760]
+- Updated dependencies [e5ce2ed]
+- Updated dependencies [be21955]
+- Updated dependencies [bc56e18]
+- Updated dependencies [be21955]
+- Updated dependencies [a9ee989]
+- Updated dependencies [4d0d944]
+- Updated dependencies [15d58db]
+- Updated dependencies [d63b014]
+- Updated dependencies [9abe4e4]
+- Updated dependencies [2cc7122]
+- Updated dependencies [50d6c92]
+- Updated dependencies [9e0ba21]
+- Updated dependencies [311433f]
+- Updated dependencies [3e5ad08]
+- Updated dependencies [9abe4e4]
+- Updated dependencies [b7131f3]
+- Updated dependencies [e5812fa]
+- Updated dependencies [7085f90]
+- Updated dependencies [dee4dd4]
+- Updated dependencies [ce7e497]
+- Updated dependencies [51ecb2f]
+- Updated dependencies [9086761]
+- Updated dependencies [f6344e7]
+- Updated dependencies [42a117b]
+- Updated dependencies [1401ae7]
+- Updated dependencies [4297fe7]
+- Updated dependencies [e398863]
+- Updated dependencies [d16df74]
+- Updated dependencies [d79c602]
+- Updated dependencies [f11fc61]
+- Updated dependencies [e808890]
+- Updated dependencies [8f79379]
+- Updated dependencies [e6ca40e]
+- Updated dependencies [0c77ea4]
+- Updated dependencies [52954c0]
+- Updated dependencies [89eb997]
+- Updated dependencies [7131f12]
+- Updated dependencies [aa5994e]
+- Updated dependencies [be93457]
+- Updated dependencies [a65db76]
+- Updated dependencies [2cf5a96]
+- Updated dependencies [15eb2c9]
+- Updated dependencies [5691b07]
+- Updated dependencies [2a6122b]
+- Updated dependencies [225e769]
+- Updated dependencies [8af88dd]
+- Updated dependencies [fb5fbb8]
+- Updated dependencies [d7b3963]
+- Updated dependencies [33184fd]
+- Updated dependencies [7c41693]
+- Updated dependencies [b72db01]
+- Updated dependencies [dce5cd4]
+- Updated dependencies [9688f58]
+- Updated dependencies [556ebc1]
+- Updated dependencies [177ebdc]
+- Updated dependencies [8d237b4]
+- Updated dependencies [2d2e6f0]
+- Updated dependencies [2d8dd8d]
+- Updated dependencies [22d573e]
+- Updated dependencies [b5a2398]
+- Updated dependencies [348860c]
+- Updated dependencies [5383fa6]
+- Updated dependencies [5b3ff63]
+- Updated dependencies [1a6a19c]
+- Updated dependencies [064d484]
+- Updated dependencies [527e050]
+- Updated dependencies [dd33bf9]
+- Updated dependencies [4cb2a90]
+- Updated dependencies [74a7804]
+- Updated dependencies [53d3689]
+- Updated dependencies [b3a63d3]
+- Updated dependencies [49f0dcf]
+- Updated dependencies [033a34c]
+- Updated dependencies [4d25d22]
+- Updated dependencies [1ffee51]
+- Updated dependencies [5ae4303]
+- Updated dependencies [ece4dad]
+- Updated dependencies [e9b377e]
+- Updated dependencies [146f448]
+- Updated dependencies [735f5c7]
+- Updated dependencies [a7e18de]
+- Updated dependencies [366f895]
+- Updated dependencies [dc75ba8]
+- Updated dependencies [cce0aa9]
+- Updated dependencies [e764507]
+- Updated dependencies [cff17af]
+- Updated dependencies [39404f3]
+- Updated dependencies [ca1965f]
+- Updated dependencies [8619f95]
+- Updated dependencies [b706af9]
+- Updated dependencies [db8c288]
+- Updated dependencies [0e5fe7f]
+- Updated dependencies [add4360]
+- Updated dependencies [e0abc38]
+- Updated dependencies [fc9ba76]
+- Updated dependencies [0f94cc7]
+- Updated dependencies [a11c1a5]
+- Updated dependencies [71f9cd1]
+- Updated dependencies [ee17d86]
+- Updated dependencies [cdbd920]
+- Updated dependencies [18c432e]
+- Updated dependencies [3c418c4]
+- Updated dependencies [fa8715a]
+- Updated dependencies [a933ed7]
+- Updated dependencies [b3ca463]
+- Updated dependencies [a933ed7]
+- Updated dependencies [0d4a6a8]
+- Updated dependencies [518d5e5]
+- Updated dependencies [6643ba1]
+- Updated dependencies [eeba2ef]
+- Updated dependencies [ec4c4d2]
+- Updated dependencies [424f73c]
+- Updated dependencies [cccbe51]
+- Updated dependencies [a8d6b1d]
+- Updated dependencies [e4a7695]
+- Updated dependencies [87075b1]
+- Updated dependencies [fc58a99]
+- Updated dependencies [14cfc00]
+- Updated dependencies [1c6f7b4]
+- Updated dependencies [e854a53]
+- Updated dependencies [dfebfc8]
+- Updated dependencies [598b7ec]
+- Updated dependencies [d028b37]
+- Updated dependencies [f7b25c5]
+- Updated dependencies [122ef38]
+- Updated dependencies [4a37870]
+- Updated dependencies [428f9b2]
+- Updated dependencies [aa7ff56]
+- Updated dependencies [811a3c2]
+- Updated dependencies [1401ae7]
+- Updated dependencies [2fd3f1c]
+- Updated dependencies [c41b42e]
+- Updated dependencies [c4db311]
+- Updated dependencies [750fff5]
+- Updated dependencies [c19035e]
+- Updated dependencies [ececf7a]
+- Updated dependencies [d173125]
+- Updated dependencies [8eeca27]
+- Updated dependencies [8425c17]
+- Updated dependencies [a5ef1d8]
+- Updated dependencies [87ad30c]
+- Updated dependencies [772d5de]
+- Updated dependencies [ce80ec2]
+- Updated dependencies [b372318]
+- Updated dependencies [97a2263]
+- Updated dependencies [29d0676]
+- Updated dependencies [0169d49]
+- Updated dependencies [6bd3231]
+- Updated dependencies [d2b5ba8]
+- Updated dependencies [b799ac5]
+- Updated dependencies [8f74307]
+- Updated dependencies [d23dc08]
+- Updated dependencies [644ad50]
+- Updated dependencies [9735662]
+- Updated dependencies [4d5b4f8]
+- Updated dependencies [0da7cd2]
+- Updated dependencies [28a5c3e]
+- Updated dependencies [4bc18e5]
+- Updated dependencies [9f57f1e]
+  - @objectstack/spec@17.3.0
+  - @objectstack/platform-objects@17.3.0
+  - @objectstack/core@17.3.0
+  - @objectstack/types@17.3.0
+
 ## 17.2.0
 
 ### Minor Changes

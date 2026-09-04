@@ -1,5 +1,946 @@
 # @objectstack/types
 
+## 17.3.0
+
+### Minor Changes
+
+- 6a180e4: fix(core,rest,services)!: a permission-store read failure now fails LOUD instead of resolving as an authenticated caller holding zero capabilities (#13279)
+  
+  **BREAKING** runtime behaviour change on the shared authorization resolver,
+  shipped as `minor` under the repo's launch-window convention.
+  
+  `resolveAuthzContext`'s per-read helper `tryFind` answered a THROWN read exactly
+  the way it answered an EMPTY one: `[]`. So an outage of the permission store
+  resolved as a well-formed context for an authenticated principal holding no
+  capabilities, and the package-management door answered
+  `403 FORBIDDEN` — "Reading packages requires the `studio.access` or
+  `setup.access` capability." That answer was measured byte-identical
+  (`JSON.stringify` equal, against a control that separates two answers which do
+  differ) to what a caller who genuinely holds nothing receives. An administrator
+  was told they lack a capability, during an outage of the store that holds the
+  capability.
+  
+  Maintainer ruling 2026-08-30, verbatim 「第一批其余同意」: `tryFind` 区分「无行」
+  与「读失败」,读失败 fail-loud —— 权限库不可达时不再解析为「已认证零能力」,而是
+  响亮拒绝(与真实能力拒绝的 403 可区分)。
+  
+  Second maintainer ruling the same day (第 5 场总监席决裁批 #9, verbatim 「同意」),
+  after implementing the first one showed that "the read failed" is two facts:
+  采**选项 A** —— 把 `isMissingTableError` 从 `@objectstack/metadata` 迁至
+  `@objectstack/types`(core 已依赖),metadata 保留 re-export 兼容;`tryFind` 仅对
+  **未被判定为「表未 provision」**的读失败抛 `AuthzStoreUnavailableError`。
+  
+  **What changed.** A permission-store read that is issued and throws now raises
+  `AuthzStoreUnavailableError`, which carries the EXISTING ADR-0112 wire code
+  `SERVICE_UNAVAILABLE` and status `503`. No code is added to the closed wire
+  vocabulary and no response envelope gains or loses a key — only which declared
+  code an outage selects. Doors that map thrown errors through
+  `resolveThrownHttpError` answer 503 with no per-door change.
+  
+  **What did NOT change**, and is pinned:
+  
+  - A reachable, genuinely EMPTY store (reads return no rows) still resolves to
+    zero capabilities.
+  - A genuine capability denial still answers `403 FORBIDDEN` with its message.
+  - An ABSENT engine (`ql` unwired, so no read is ever issued) still resolves to
+    an empty-but-valid envelope.
+  - Anonymous requests never reach the store, so an outage cannot make them loud.
+  - A REAL engine whose `sys_*` tables were never provisioned resolves to zero
+    capabilities, quietly — pinned to be byte-identical to the empty-store
+    envelope, in every dialect spelling and in the production wrapper shape where
+    the driver's phrase is on `cause` rather than the outer message.
+  
+  **The boundary between the two kinds of read failure.** An earlier revision of
+  this changeset claimed "embedders without a data plane are unaffected". That
+  claim was too broad; it is retracted here, and the gap it named is now closed
+  rather than merely disclosed. A read also throws when the table was never
+  PROVISIONED — a real engine, wired and reachable, whose `sys_*` tables were
+  never created — and that is a supported deployment shape, not an outage. There
+  "zero capabilities" is the TRUE answer rather than a fabrication: nothing is
+  provisioned, so nothing was withheld. Only an UNREACHABLE store — the ruling's
+  own word 不可达 — leaves the capability set unknown, and only an unknown answer
+  may not be reported as a denial.
+  
+  Treating the two alike was measured, not theorised: it turned four CI suites
+  red, all from `no such table` on `sys_user` / `sys_member` /
+  `sys_user_position` / `sys_user_permission_set`. Ordinary CRUD in
+  `@objectstack/client` answered `503`; batch validation errors that owe `400`
+  answered `503`, because authorization refused before validation ran; runtime
+  notifications answered `401` where authenticated callers must be served `200`;
+  and two `.integration.test.ts` noise guards reported that the driver and engine
+  diagnostics for `sys_position` stopped being emitted — the eager throw aborted
+  the resolution before that later read was ever issued, so a change made to stop
+  a failed read being silent had made two other channels silent.
+  
+  `tryFind` therefore raises `AuthzStoreUnavailableError` only for a read failure
+  that is NOT positively identified as an unprovisioned table.
+  
+  **`isMissingTableError` moved to `@objectstack/types`.** The classifier that
+  draws that boundary already existed and was already right — driver-code based
+  rather than prose-sniffing, documented so that "cannot say" never means "be
+  loud". It lived in `@objectstack/metadata`, which DEPENDS ON `@objectstack/core`,
+  so the resolver could not import it. Rather than keep a second copy of a
+  security-relevant predicate, the ruling relocated the one classifier to
+  `@objectstack/types` — the package core already depends on, and the repo's own
+  stated Home rule for a cross-package error predicate ("every consumer of the
+  question already depends on it, so adopting the predicate never adds an edge",
+  `packages/types/src/unique-violation.ts`). `@objectstack/metadata/errors` still
+  exports `isMissingTableError`, re-exported from the new home, so no consumer of
+  that published subpath changes.
+  
+  Its sibling `isSchemaAlreadyExistsError` moved with it — the two are not two
+  modules but two signatures over one matcher, and separating them would have
+  meant re-rolling the matcher, which is the duplication the module exists to
+  prevent. Both are now exported from `@objectstack/types`; the metadata subpath
+  deliberately still publishes only `isMissingTableError`, which is the only one
+  anything imports through it.
+  
+  ⚠️ **Signed-off risk, recorded because it is load-bearing.** Gating loudness on
+  a driver-error predicate was approved with its false-positive direction stated:
+  mis-reading a genuine outage as "table not provisioned" silently restores the
+  quiet 403 this change removes, with no thrown error and no other failing test.
+  That direction is accepted, not overlooked — the predicate keys on driver codes,
+  SQLSTATEs and errnos first, excludes the known superstring traps up front, and
+  returns `false` for anything it does not positively recognise, so an
+  unrecognised outage stays loud by default. The risk is written beside the
+  predicate in `resolve-authz-context.ts` and both directions are pinned by name
+  in `authz-store-unavailable.test.ts`. ⛔ Do not widen `isMissingTableError` to
+  make a first boot quieter: every widening moves outages into the quiet branch.
+  
+  **All-transport, not just REST.** Every transport authorizing through
+  `resolveAuthzContext` inherits this. Six of the eight production transports
+  wrapped the call in a fail-closed `catch` that would have re-silenced the
+  outage — measured, not assumed: with the resolver loud but the nets untouched,
+  the package door answered `401`, i.e. the outage merely changed disguises. Those
+  `catch` blocks now re-raise via `isAuthzStoreUnavailableError` and keep their
+  previous behaviour for every other fault. The transport set is rebuilt from
+  source and audited for set equality on every test run, so a transport added
+  later cannot inherit the old silence unnoticed.
+  
+  Callers that treat any throw from `resolveAuthzContext` as "anonymous" should
+  re-raise `isAuthzStoreUnavailableError(err)` instead: degrading it restores the
+  disguise this removes.
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/core/src/security/resolve-authz-context.ts#ResolvedAuthzContext, packages/core/src/security/authz-store-unavailable.ts#AuthzStoreUnavailableError) The breaking surface is runtime TypeScript in `@objectstack/core`'s security module and nothing else: `resolveAuthzContext` stops always-resolving and raises `AuthzStoreUnavailableError` when a permission-store read is issued and throws. NO metadata surface is touched in either direction. No Zod schema changes, no `packages/spec` declaration is added or removed, no authorable key moves, no stored row shape changes, and no object definition is edited — a customer's metadata app is byte-for-byte unaffected, so `objectstack migrate meta` has nothing to visit and there is no tombstone to mint. The wire vocabulary is likewise untouched: `SERVICE_UNAVAILABLE` is an EXISTING `StandardErrorCode` member that `HttpStatusErrorCodeMap` already maps to 503, so this change only selects a different DECLARED code for an outage rather than adding one. Both named symbols resolve at HEAD as exported declarations whose files are not `*.zod.ts`, are not under `packages/spec/src/contracts/`, are not object definitions and are not `z.input` projections; neither is referenced in code by any metadata surface (the `packages/spec` hits for `resolveAuthzContext` are comment prose describing the envelope, which this gate masks). The channel that reaches an affected consumer is therefore code review and this changeset, never the upgrade guide: a ledger entry could not express "your fail-closed catch should re-raise this error", because there is no metadata for a migration to rewrite. -->
+- 0fb3044: fix(types): load a declared ESM-only host package through `createHostImporter`, and split its failure kind (#14041)
+  
+  The declared leg's finder is `hostRequire.resolve(pkg)` — a **CommonJS**
+  resolution. A host-app package publishing only an `import` condition
+  (`{"exports": {".": {"import": "./dist/index.js"}}}`, ordinary for pure-ESM
+  publishes outside this workspace) made that resolve throw
+  `ERR_PACKAGE_PATH_NOT_EXPORTED`, and the leg classified **every** resolver
+  throw as `declared-unresolvable`: the load hard-failed, worded as an INSTALL
+  problem — `pnpm install`, un-prune, rebuild — about an install that was fine.
+  Nothing the message prescribed could help.
+  
+  **The finder.** When — and only when — `hostRequire.resolve` throws, the leg
+  now consults exactly one directory: `<hostRoot>/node_modules/<name>` (name
+  verified against the package's own manifest, then realpath'd, so its
+  transitive imports resolve from its real location exactly as on the succeeding
+  path). If that package's `exports` names an existing `import`-condition target
+  for the requested subpath, it is imported. The fallback is **strictly
+  tighter** than the CJS resolution it backs up — no `NODE_PATH`, no walk above
+  `hostRoot`, no bare `require`, and Node's invalid-segment refusal mirrored
+  before exports resolution (a subpath carrying `''`, `.`, `..` or
+  `node_modules` segments is refused exactly as both of Node's resolvers refuse
+  it, so a pattern key can never substitute a traversal span into its target) —
+  so it cannot reopen the #4719 declaration-gate hole and cannot bypass the
+  package encapsulation Node's resolvers enforce: a package reachable only
+  through a hoisted store or a parent directory stays refused, even though CJS
+  resolution can see it there, and a traversal specifier keeps the hard failure
+  it has today. And because the fallback runs only inside a catch that was a
+  hard failure before, no currently-succeeding load changes behaviour.
+  
+  **The split.** When the fallback cannot help either, the failure kind is
+  decided by whether any install action could: a package absent from the host's
+  `node_modules`, or one whose manifest names a runtime target whose file is
+  missing (a dist never built, a partial publish), keeps `declared-unresolvable`
+  and the existing INSTALL wording — it is right for both. A package that is
+  installed and whose manifest names **no** runtime entry for the subpath under
+  either the `require` or the `import` conditions (a `types`-only or
+  `browser`-only publish, an unexported subpath) now fails as the new
+  `HostImportFailureKind` value **`declared-no-loadable-entry`**, with a message
+  about the package's own published shape — the remedy lives in the package,
+  and an operator is no longer sent to re-run `pnpm install` against a correct
+  install. The new error still carries `code: 'MODULE_NOT_FOUND'`, so every
+  existing caller's missing-vs-crashed classification is unchanged, and an
+  evaluation crash still propagates untouched with no kind.
+  
+  Consumers that branch on `HostImportFailureKind` should add an arm for
+  `declared-no-loadable-entry`: a two-way branch written against the old
+  two-member union will fall into its else leg for the new kind, whose wording
+  ("declare it") is wrong for a package that is declared and installed.
+- db8c288: fix(types): let `sendError`'s `extra` carry `declaredCode`, so a nested-envelope route can emit the ADR-0112 open channel (#11719)
+  
+  `ApiErrorSchema` has declared `declaredCode` since #9106 — the open,
+  author-authored channel that carries a metadata app's own `.code` verbatim when
+  the spelling is not a member of the closed `code` vocabulary. ADR-0112's
+  2026-08-17 amendment rules that demote **platform-wide**, and #9232 extended it
+  to the flat `/data` door, which emits the pair today.
+  
+  The shared nested-envelope writer could not. `sendError`'s `extra` was typed
+  `Pick<ApiError, 'category' | 'httpStatus' | 'details' | 'requestId'>`, so
+  passing a demoted spelling was a **compile error** and every route answering the
+  nested envelope dropped it. Nothing invalid shipped — the closed `code` still
+  carried the member derived from the status — which is exactly what made the loss
+  silent and one-directional: the author's spelling gone, and a consumer told by
+  the ADR to read `declaredCode` finding nothing there. Declared-but-unemittable
+  is a `declared = enforced` gap, closed here at the one writer rather than per
+  module.
+  
+  Additive: `declaredCode` joins the `Pick`. No existing call site changes, no
+  wire byte moves for any body already being emitted, and the contract's accept
+  set is untouched — the schema has always permitted the field.
+  
+  ⛔ Presence still MEANS demotion, and the writer does not re-derive that. The
+  caller passes `demotedDeclaredCode(thrown)` (`@objectstack/types`), exactly as
+  the flat door's `thrownCodeFields` does; that helper answers `undefined` when
+  the producer's spelling is already the vocabulary member sitting in `code`, so a
+  registered refusal never carries two spellings of one fact. Vocabulary and
+  position stay two decisions (#9232).
+  
+  Pinned in `response-envelope.test.ts` by driving the real pipeline — a
+  sandbox-shaped throw carrying a tenant-authored `.code` through
+  `resolveThrownHttpError` and `demotedDeclaredCode` — and by parsing the emitted
+  body with the real `ApiErrorSchema`, asserting the field is still on it *after*
+  the parse. `ApiErrorSchema` is a plain `z.object` that strips undeclared keys,
+  so a `.success` assertion alone would have passed against a schema declaring
+  nothing.
+- 0e5fe7f: fix(types): let `sendError`'s `extra` carry `userMessage`, so a nested-envelope route can emit the #9934 user-facing channel (#12404)
+  
+  `ApiErrorSchema` declares `userMessage` — the producer-side opt-in for "this
+  exact text is addressed to the END USER" (#9934; maintainer ruling 2026-08-19 on
+  objectui#5210, option 1), where **presence IS the marking** and a consumer that
+  sees the field renders it verbatim instead of substituting its generic string
+  (#3821 preserved by construction, for everything unmarked).
+  
+  Two of the three doors already emit it: the flat `/data` door through
+  `withDeclaredUserMessage` (`@objectstack/rest`) and the dispatcher door through
+  `thrown.userMessage` (`@objectstack/runtime`). The shared nested-envelope writer
+  could not — `sendError`'s `extra` was typed
+  `Pick<ApiError, 'category' | 'httpStatus' | 'details' | 'requestId' | 'declaredCode'>`,
+  so passing the field was a **compile error** and every route answering the
+  nested envelope dropped it. Nothing invalid shipped, which is what made the loss
+  silent and one-directional: the author's deliberate, localized refusal text
+  gone, and a consumer told to read `userMessage` finding nothing there.
+  Declared-but-unemittable is a `declared = enforced` gap, closed here at the one
+  writer rather than per module.
+  
+  Additive: `userMessage` joins the `Pick`. No existing call site changes, no wire
+  byte moves for any body already being emitted, and the contract's accept set is
+  untouched — the schema has always declared the field.
+  
+  The channel is live on both ends, which is what makes this a repair rather than
+  a new declared-but-dead surface: a hook opts in at throw time (host-side, or a
+  metadata app's sandboxed body whose `e.userMessage` crosses the QuickJS boundary
+  through `SANDBOX_ERROR_PASSTHROUGH`), and `resolveThrownHttpError` already
+  carries it onto `ThrownHttpError` for every caller of the shared resolver.
+  
+  ⛔ Unlike `declaredCode`, this field hands the caller **no invariant to
+  re-derive**. `declaredCode`'s presence means demotion, so its caller passes
+  `demotedDeclaredCode(thrown)`; `userMessage`'s presence means only that the
+  producer opted in, which `declaredUserMessage` has already decided (a non-empty
+  string, or nothing). The caller passes `thrown.userMessage` straight through,
+  exactly as the dispatcher door does. That difference is why `extra` stays an
+  explicit `Pick` rather than being derived from `ApiError`'s optional fields: a
+  derivation would admit every future optional on the day it lands, with nobody
+  asked what obligation the channel hands the caller — and these two fields needed
+  opposite answers to exactly that question.
+  
+  Pinned in `response-envelope.test.ts` by driving the real pipeline — a hook
+  refusal shaped like the one `hook-refusal-user-facing-marking.dogfood.test.ts`
+  drives, through `resolveThrownHttpError` — and by parsing the emitted body with
+  the real `ApiErrorSchema`, asserting the field is still on it *after* the parse,
+  paired with a control showing an undeclared sibling being stripped from the same
+  body. `ApiErrorSchema` is a plain `z.object` that strips undeclared keys, so a
+  `.success` assertion alone would have passed against a schema declaring nothing.
+  A blank marking is pinned ABSENT: the writer never invents a marked message for
+  a producer that wrote none.
+- 87ad30c: fix(types): `isMissingTableError` prefers the table a driver declared it targeted over the caller-supplied `readObject` — new `DRIVER_TARGETED_TABLE` / `declareTargetedTable` / `targetedTableOf` (#13438)
+  
+  `minor` because the public entry gains three exports; the predicate's signature
+  `(error, readObject?)` is **unchanged**, and every existing caller compiles and
+  behaves as before unless the error it holds carries a declaration.
+  
+  **The residual #13324 left behind.** `readObject` lets a caller say which table it
+  read, so a phrase naming a *different* relation no longer earns the benign "not
+  provisioned yet" verdict. But a caller names its **object**, and a driver compiles
+  the statement against the **physical** table — for a federated object (ADR-0015,
+  `external.remoteName`) two different names. A genuinely absent remote therefore
+  raised a phrase naming `legacy_orders` against a caller naming `crm_order`, and the
+  comparison read a real missing table as loud. The mapping lives on the driver
+  instance; no call site can fold it away.
+  
+  **The channel (maintainer ruling 2026-09-01, option 2).** A driver that knows the
+  table it targeted declares it on the error it composes:
+  
+  - `DRIVER_TARGETED_TABLE` — `Symbol.for('objectstack.driver.targetedTable')`, the
+    well-known key, from the global registry so a duplicated package resolves it;
+  - `declareTargetedTable(error, table)` — the producer's half: defines the name
+    **non-enumerable and non-writable** (invisible to `JSON.stringify`, `{ ...err }`,
+    `Object.keys`), first declaration wins, an empty or non-string name declares
+    nothing;
+  - `targetedTableOf(error)` — the reading half, `string | null`.
+  
+  `isMissingTableError` now compares the phrase against the **declared** table at
+  any node of the `cause` chain that carries one — the nearest declaration to the
+  dialect phrase wins — and ignores the caller-supplied `readObject` from that node
+  down. Without a declaration the comparison is the #13324 one, byte-for-byte. The
+  callers stay as they are: `crm_order` is still what they pass, and they never
+  learn a federated object's remote name.
+  
+  **Two consequences, both pinned.** A genuinely absent federated remote reads
+  benign again. And because a declaration is evidence the caller did not have, an
+  envelope whose phrase names a relation *other* than its declared table reads
+  **not benign even through the one-argument published form** — the #13324 verdict,
+  reached without the caller's help, in the direction the module docblock calls
+  cheap (one error line, never silent data loss). The #13324 narrowing itself does
+  not reopen: a different relation's error — a view over a dropped base, a join
+  target, a `sys_*` table hit inside the same statement — stays loud with the
+  declaration present, on every dialect fixture the existing pins carry.
+  
+  `@objectstack/driver-sql` adopts the channel in the same release; the pattern is
+  one call at any future driver's envelope. `isSchemaAlreadyExistsError` is
+  untouched.
+- 9735662: fix(security): walled postures elevate only the env-declared platform owner, never the first registrant (#11184, the framework leg of cloud#1509)
+  
+  **BREAKING** for walled deployments (`OS_TENANCY_POSTURE=group` or
+  `isolated`), shipped as `minor` under the repo's launch-window convention for
+  breaking changes. Single-org deployments are byte-for-byte unchanged.
+  
+  Measured defect (cloud#1509): on a walled multi-tenant SaaS with
+  `OS_TENANCY_POSTURE=isolated` and `OS_AUTH_MEMBERSHIP_POLICY=invite-only`, the
+  FIRST self-registrant received the cross-tenant `admin_full_access` grant
+  (`platform_admin`, `isPlatformAdmin: true`) and — because the default-org
+  bootstrap binds "the platform admin" — was merged into the deployment's
+  Default Organization as its owner. Whoever curls the public sign-up endpoint
+  first owned the platform.
+  
+  Per the maintainer ruling of 2026-08-23 (verbatim:
+  「1509 选择 env 指定 owner 邮箱」):
+  
+  - **Walled postures: platform admin comes ONLY from the env-declared owner.**
+    `bootstrapPlatformAdmin` (plugin-security) no longer promotes the oldest
+    human user when the requested posture is walled; it promotes exactly the
+    account whose email matches the new `OS_PLATFORM_OWNER_EMAIL` variable
+    (case-insensitive, matched whenever that account registers — arrival order
+    is irrelevant). Self-registrants are never promoted and, since the shared
+    `ensureDefaultOrganization` helper binds only the platform admin, are never
+    auto-merged into the Default Organization either.
+  - **Fail-closed startup refusal.** A walled posture with no
+    `OS_PLATFORM_OWNER_EMAIL` declared refuses to boot from `AuthPlugin.init()`
+    with a message naming the variable — never a silent fallback to
+    first-registrant elevation. The elevation site itself also refuses
+    (`reason: 'walled_owner_email_undeclared'`, logged at `error`) as
+    defense-in-depth for compositions that reach the bootstrap without
+    plugin-auth (`os meta resync`, bare embeddings).
+  - **Single-org posture unchanged.** "First user is owner" stays as ruled
+    reasonable there; the new variable is never consulted under `single`.
+  - The requested posture (`resolveTenancyPosture()`) is deliberately the input,
+    so a walled-requested deployment running degraded
+    (`OS_ALLOW_DEGRADED_TENANCY=1`) still refuses first-registrant elevation.
+  
+  Operator action for walled deployments: set `OS_PLATFORM_OWNER_EMAIL` to the
+  operator account's email address before upgrading. Deployments that already
+  hold a human platform admin are untouched (the bootstrap remains a no-op once
+  any human holds the cross-tenant grant); the variable governs installs that
+  have not yet minted their admin. `@objectstack/types` gains the
+  `resolvePlatformOwnerEmail()` resolver and the `PLATFORM_OWNER_EMAIL_ENV`
+  constant; the verify harness declares the owner email (defaulting to its dev
+  admin) for walled fixtures.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) nothing authorable is removed, renamed or narrowed: no spec key, no metadata spelling and no stored row changes shape, so there is nothing for `os migrate meta` to rewrite and no ledger entry to make. The prescription above is a deployment-environment requirement (declare an env var before boot), which the ADR-0087 ledger does not carry — the refusal itself names the variable at startup. -->
+- 4d5b4f8: feat(auth): walled deployment's declared owner is email-verified at operator-provisioned creation (#12751)
+  
+  On a **walled** deployment (`OS_TENANCY_POSTURE` in the wall-enforcing
+  family), the account whose email equals the declared platform owner
+  (`OS_PLATFORM_OWNER_EMAIL`) is stamped `emailVerified` **at creation** when
+  it comes into existence through an **operator provisioning path** — extending
+  the #11343 dev-boot seeded-admin precedent to production walled boots
+  (maintainer ruling 2026-08-28, cloud#1677: 「运营方创建即视为已验证」; the
+  trust anchor is the operator's env-var declaration plus the
+  operator-executed creation, not a mailbox round-trip; SMTP stays required
+  only for inviting others).
+  
+  **Which creation paths qualify** (the [#11739] audience taxonomy, not a
+  second classification):
+  
+  - the **bootstrap carve-out** — the very first account on a fresh install
+    (zero human users), the one self-serve creation a walled boot admits;
+  - **admin create-user / bulk import** (`method: 'admin'`) — an act only an
+    authenticated admin session can perform;
+  - **SCIM** (`method: 'scim'`) — provisioning executed by the
+    operator-registered directory.
+  
+  **Never**: non-bootstrap self-registration (including an
+  invitation-admitted registration typing the owner address), provider-class
+  JIT (the IdP asserts its own `emailVerified` at insert), any non-owner
+  address, any unwalled posture, and a later email **update** to the owner
+  address (the stamp is staged at the admission gate and consumed once by the
+  `user.create` before-hook — a seam an update cannot traverse). Dev-boot
+  behaviour (#11343) is unchanged.
+  
+  The `WALLED_OWNER_NO_VERIFICATION_PATH` boot warning now probes the owner
+  account's state: a fresh walled boot with no transport and no federated
+  sign-in is **silent** (the operator's own first-account creation arrives
+  verified — the case this closes), while an owner account that already
+  exists **unverified**, a populated store whose bootstrap window is spent,
+  and an unanswerable probe keep warning. A settled deployment whose owner is
+  verified stops re-warning on every boot.
+  
+  `@objectstack/types` gains `isEmailVerifiedUserRow` — the [#11343]
+  fail-closed verified-representation allow-list, moved from
+  `plugin-security`'s private copy so the elevation gate and the boot
+  diagnostic read ONE resolution (`plugin-security` now consumes it; no
+  behaviour change there).
+
+### Patch Changes
+
+- 101ad2c: fix(types): an aliased install (`"foo": "npm:bar@1"`) is now found by the host importer's ESM-only fallback
+  
+  `createHostImporter`'s #14041 fallback finder verifies the one directory it
+  consults — `<hostRoot>/node_modules/<key>` — by matching that directory's
+  `package.json` `name` against the declared package name. An aliased install
+  fails that check by construction: `{ "dependencies": { "foo": "npm:bar@1" } }`
+  puts a manifest named `bar` at `node_modules/foo`. The finder answered
+  `absent`, and an ESM-only aliased package therefore kept the pre-#14041 INSTALL
+  wording — a confidently-wrong remedy sending an operator to run `pnpm install`
+  against an install that is already correct, on a declaration shape
+  `packageNameFromSpecifier`'s own documentation blesses.
+  
+  The declaration is now parsed for the name it promises: `npm:bar@1`,
+  `npm:@acme/x@^2` and the aliased `workspace:bar@*` name the package installed
+  under the key, so that is the manifest name the finder expects there. An
+  aliased ESM-only package is rescued exactly as a plain one is, and an aliased
+  install publishing nothing loadable gets the message about the PACKAGE's own
+  shape instead of the INSTALL message.
+  
+  ⚠️ The manifest-name check itself is NOT loosened — that check is what keeps
+  the fallback strictly tighter than the CJS resolution it backs up (#4719's
+  declaration gate, from the fallback side). What moved is the EXPECTATION, still
+  authored by the host and still read out of the host's own `package.json`: an
+  alias naming one package refuses a directory holding another, a non-aliased
+  declaration is unchanged, and a value that is not a bare package name — a
+  `workspace:` range, an alias carrying a subpath — yields no expectation to move
+  to, so the key stays and today's refusal is kept. `link:` and `file:` name a
+  LOCATION rather than a package, so no name is derivable from them at all; they
+  keep the key expectation, and with it the conservative direction the finder had
+  before.
+- a81aa9d: fix(types): a DEMOTED `declaredCode` is withheld on a 5xx the producer did not declare (#12509, ADR-0112)
+  
+  **Wire change, for undeclared server faults only.** When a 5xx has its prose
+  withheld, the producer's demoted `declaredCode` is now withheld with it —
+  but only when the fallback-to-500 picked that code up from a producer that
+  declared no HTTP answer. An author-declared code is untouched at every status.
+  
+  FROM (`origin/main`, measured through the real routes):
+  
+  ```
+  POST /api/v1/packages/publish   → 500 {"error":{"code":"INTERNAL_ERROR",
+      "message":"Internal server error","declaredCode":"SQLITE_ERROR"}}
+  POST /api/v1/analytics/query    → 500 {"error":{"code":"INTERNAL_ERROR",
+      "message":"Internal server error","httpStatus":500,"declaredCode":"42P01"}}
+  ```
+  
+  TO:
+  
+  ```
+  POST /api/v1/packages/publish   → 500 {"error":{"code":"INTERNAL_ERROR",
+      "message":"Internal server error"}}
+  POST /api/v1/analytics/query    → 500 {"error":{"code":"INTERNAL_ERROR",
+      "message":"Internal server error","httpStatus":500}}
+  ```
+  
+  UNCHANGED — the author-authored channel the ADR-0112 amendment wrote
+  `declaredCode` for:
+  
+  ```
+  { status: 503, code: 'ACME_LEDGER_OFFLINE' }
+      → 503 {"error":{"code":"SERVICE_UNAVAILABLE",…,"declaredCode":"ACME_LEDGER_OFFLINE"}}
+  ```
+  
+  `SQLITE_ERROR` vs `42P01` names the backend, which is one of the two
+  disclosures the 5xx message withhold exists to prevent (the other,
+  identifiers, was already covered). Maintainer ruling 2026-08-27, option D.
+  
+  **What a consumer must know.** A `declaredCode` on a 5xx now means the
+  producer declared that fault itself, which is a stronger guarantee than the
+  field carried before; nothing that was a *registered* code moves, and no 4xx
+  moves. A producer that spells a code but declares no status loses that code
+  on a 5xx — declare the status the refusal means and the spelling is kept.
+  
+  The distinction lives in ONE place, `serverFaultProvenance`
+  (`packages/types/src/thrown-http-error.ts`), read by `demotedDeclaredCode` —
+  the read every door already makes — so all five emitting exits inherit it and
+  no registrar carries a variant. The prose axis of the same ruling (the
+  dispatcher door adopting the structural withhold for every declared 5xx
+  message) is #12281 and is deliberately not applied here.
+- 56c093c: fix(driver-memory): enforce field-level `unique`, so a colliding write is refused instead of landing silently (#13197)
+  
+  `InMemoryDriver` enforced **no uniqueness at all**. `create` was a
+  `table.push()` and `syncSchema` allocated an array, so a `unique: true` field
+  was declared-and-not-enforced — the ADR-0078 / Prime-Directive-#10 shape the
+  platform refuses everywhere else. A colliding write did not fail; it landed, and
+  a read returned both rows.
+  
+  The motivating instance is the worst-shaped one. The engine's
+  `createWithAutonumberResync` re-seeds the counter and re-issues a record number
+  when the STORE rejects it as a duplicate, so on a store that rejected nothing
+  the whole branch was unreachable: an autonumber allocated out of process
+  duplicated an existing business identifier with **no error anywhere**. The
+  remedy's location was already ruled in-tree at that method — «uniqueness
+  enforcement in the driver, NOT a pre-issue existence probe here» — and this is
+  that remedy. Nothing in the new code knows what an autonumber is; the defect was
+  that the driver constrained nothing.
+  
+  **The refusal** carries the ADR-0112 envelope the SQL family answers a conflict
+  with: `code: 'UNIQUE_VIOLATION'`, `status: 409`, no `[driver-memory]` prefix. So
+  a suite that swaps this driver for SQLite sees one envelope — the parity
+  `memory-filter-refusal-envelope.test.ts` already states for the filter family,
+  now held for the constraint family. It is checked before the row is written, so
+  a refused write leaves the table exactly as it found it, and `updateMany`
+  prepares and checks the whole batch before mutating any of it.
+  
+  **The scoping is `driver-sql`'s, measured — not a simpler invention.** Read off
+  `uniqueIndexesFromFields` (ADR-0120 D1/D3) and reproduced arm for arm:
+  `unique: 'global'` is platform-wide; bare `true` and `'organization'` are
+  per-organization (bare `true` is the POSITIONAL spelling of `'organization'` at
+  FIELD level — reading it as `'global'` is the #4986 trap and would make two
+  organizations' identical values collide on a constraint neither can see); both
+  degrade to a single column when the object has no tenant column, and a `unique`
+  declaration on the tenant column itself stays single-column. NULL values stay
+  NULL-DISTINCT, exactly as under SQL `UNIQUE`. The D3 NULL-organization fold
+  needs no `'__global__'` token here — that sentinel is a SQL-expression artefact,
+  and a JavaScript key holds `null` directly.
+  
+  **Not** widened into: object-level declared `indexes[]` (composite uniques),
+  primary keys, or row-level tenant isolation. This driver still refuses to boot
+  multi-tenant (#6915) and that guard is untouched.
+  
+  `@objectstack/types` (`patch`): `isUniqueViolationError` now reads the
+  platform's own registered `UNIQUE_VIOLATION` code on the `code` channel. Not
+  cosmetic — a conflict that predicate does not recognise leaves the autonumber
+  resync unable to re-seed, so the counter stays warm and every following insert
+  collides too (#5495's PROBE3 storm), i.e. a silent duplicate traded for a
+  non-converging insert loop. It is a tautology rather than a widened heuristic
+  (the code already MEANS this condition), and no existing in-repo producer's
+  classification changes: `@objectstack/rest`'s own response body is the only
+  other site carrying that string, and it is downstream of the predicate.
+  
+  **Grade.** `minor` for the driver, not `patch`: a write that previously
+  succeeded is now refused (`409`), which is an accept-set narrowing under the
+  repo's launch-window convention for breaking changes, and the package also gains
+  public exports (`UNIQUE_VIOLATION_CODE`, `uniqueConstraintsFromFields`,
+  `tenantFieldOf`, `uniqueKeyOf`, `assertNoUniqueViolation`,
+  `uniqueViolationError`). `patch` for `@objectstack/types`: no API added or
+  removed and no in-repo verdict changes — the limb exists to serve the new
+  producer. Fixtures that relied on duplicates landing on a declared-unique field
+  must stop declaring `unique`, or stop writing the duplicate; the repo's own
+  suites were measured and none did.
+- bfe13c8: fix(types,cli): resolve host-declared packages through the `import` condition, and read the cluster registry instead of assuming it (#13330)
+  
+  `createHostImporter`'s declared leg resolved with `hostRequire.resolve(pkg)` — a
+  **CommonJS** resolution, which answers the `require` condition. Every `tsup`
+  dual build publishes `{ "import": "./dist/index.js", "require": "./dist/index.cjs" }`,
+  so a package loaded through that leg evaluated as its **CommonJS** build while
+  the callers (`packages/cli` is `"type": "module"`) held the **ESM** build of the
+  same package. The process ended up with two instances of everything the loaded
+  package shares with its caller, each with its own module-scope state.
+  
+  Measured consequence, on the shipped EE multi-node path (ADR-0018): `os serve`
+  loaded `@objectstack/service-cluster-redis` through this leg, the driver's
+  load-time `registerClusterDriver('redis', …)` ran against the CommonJS copy of
+  `@objectstack/service-cluster`, and the ESM `Runtime` read the ESM copy and
+  found nothing — `OS_CLUSTER_DRIVER=redis` died at `defineCluster()` with
+  `Cluster driver "redis" is not registered`, about a package that was installed,
+  declared and resolvable. Any module-scope registry crossing this seam had the
+  same defect; the cluster driver is the instance that shipped.
+  
+  **The seam.** The declared leg now imports the entry the `import` condition
+  names. The host anchor is untouched — the CJS resolver still answers *where*
+  the package is, because no flagless Node API resolves a bare specifier against
+  an arbitrary parent; only the *condition* is re-decided, by reading that
+  package's own `exports` map. Deliberately narrow at the **resolution** level —
+  no load that works today resolves differently unless the package itself
+  publishes a valid, existing import-condition target: a package with no
+  `exports` map is untouched (CJS resolution already returned `main`), a package
+  publishing no import-condition target is untouched, and anything unreadable or
+  absent on disk falls back to the CJS-resolved path. That narrowness does not
+  extend to **evaluation**: a dual-published package whose `import` build exists
+  but throws while its `require` build works used to mask that break by silently
+  loading the CJS build, and now surfaces it — arguably the correct reading of a
+  broken published build, but a behaviour change, not a no-op.
+  
+  **The reading.** A residual split is still possible above the seam — two
+  *physical* copies of one package are two instances in any module system, and no
+  resolver condition merges them — so `os serve` no longer assumes the driver
+  registered. `@objectstack/service-cluster` exports `listClusterDrivers()`, the
+  registry `defineCluster()` itself consults, and `serve` queries it after the
+  load. The silent `catch` is gone: a driver that loaded but stayed invisible, one
+  that could not be resolved, and one that resolved and then crashed now read as
+  three different diagnoses instead of arriving as `not registered` one line
+  later. An app on an older `@objectstack/service-cluster` has no accessor to
+  call; that case is silent — `serve` declines to claim either answer rather
+  than printing one.
+  
+  No behaviour downstream of the diagnosis changed: an absent driver still reaches
+  `defineCluster()`'s documented error (`cluster.mdx` §8.1) rather than silently
+  downgrading to the in-memory cluster, and the only documented downgrade here —
+  a multi-node gate denial — is untouched.
+- 22e5236: fix(types,runtime): log every 5xx at `error` level instead of answering it silently (#14310)
+  
+  A 500 that leaves no server-side line is diagnosed from the browser or not at
+  all. Measured on `main`, through the real plugin and the real route handlers: a
+  plain `Error` thrown out of a dispatcher route answered `500 INTERNAL_ERROR`
+  with **zero** log records at any level — the only evidence was the client's
+  console and the response body. That is AGENTS.md "Route & surface ownership §3
+  — absence must be loud" inverted, and it is why a `/api/v1/packages` regression
+  stayed invisible for a week.
+  
+  The reporting that already existed was not a substitute, for two independent
+  reasons:
+  
+  - `ErrorReporter.captureException` defaults to `NoopErrorReporter`. A dev
+    server — the surface an operator actually watches — wires no APM, so the
+    capture was a no-op every time. A log line is the operator's floor; APM is
+    opt-in telemetry on top of it.
+  - It is fed by `res.__obsRecordedError`, which only the THROWN exit sets. A
+    route that catches its own fault and RETURNS a 5xx envelope — how every
+    `/packages` handler answers, via `deps.errorFromThrown` — recorded nothing,
+    so even a wired reporter never saw those.
+  
+  **The rule now has one definition.** `logServerFault` (new, in
+  `@objectstack/types`) emits exactly one `error`-level record carrying method,
+  path, request id, the message and — where the door still holds the throw — the
+  stack. It shares a home with `resolveThrownHttpError` for the same reason that
+  rule was moved there in #8016: a rule two doors must agree on cannot live
+  inside one of them, because `@objectstack/runtime` depends on
+  `@objectstack/rest` and an import could only ever point one way.
+  
+  Wired at each transport's single exit, so a fault costs one line and never two:
+  
+  - `sendError` — the one writer for every nested-envelope error in the repo. The
+    REST direct-mount registrars (the `/api/v1/packages` door that mounts first
+    in production) become loud through it with no per-door call, so a door added
+    later cannot forget one.
+  - The dispatcher's thrown exit (`errorResponseBase`), its returned exit
+    (`sendResultBase`) and the AI-route mount that writes its own result.
+  
+  `packages/rest`'s `/data` doors were already loud via `logUnexpectedRouteError`
+  and are untouched.
+  
+  `error` level is load-bearing: the CLI's default is `warn` and `error` (40)
+  outranks `warn` (30), so the record clears `--log-level`'s default without
+  bypassing the level system. `--log-level silent` still silences it, which is a
+  deliberate instruction rather than the default this fixes.
+  
+  **4xx stays quiet**, decided once inside the helper rather than at each call
+  site — client mistakes are already explained by the response, and logging them
+  is how a `?state=draft` probe once printed 45 stack traces in one browsing
+  session. The wire body is byte-identical at every door: this adds a side
+  effect, never a field.
+  
+  ⚠️ Behaviour change worth knowing before upgrading: a deployment that answers
+  a *declared* 5xx on a polled route — `501 NOT_IMPLEMENTED` from an uninstalled
+  optional service, say — now prints one `error` line per request where it
+  previously printed none. The band is the one the issue specifies ("4xx may stay
+  quiet; 5xx never"); narrowing it for declared capability-absence would be a
+  separate contract decision.
+- 2cf5a96: An organization no longer stops accepting members at 100 — membership is not a
+  limited axis, and the ceiling nobody chose is now stated explicitly
+  
+  A customer adding users was refused with `Organization membership limit
+  reached`. Nothing in this codebase set that ceiling: better-auth's organization
+  plugin substitutes a vendor default of **100** for an absent `membershipLimit`
+  (`count >= (membershipLimit || 100)` in `routes/crud-members`), and
+  `auth-manager` passed `organizationLimit` — how many organizations one user may
+  CREATE — while never passing `membershipLimit`, which is a different question.
+  
+  The two read almost identically in a config block and mean nothing alike, which
+  is why the gap survived: the option that WAS set looked like the option that
+  was not. In the field the refusal is worse than merely wrong — it arrives while
+  an operator is looking at licences and seat counts, and reads as an entitlement
+  problem on an axis that carries no entitlement at all. Seats are metered on AI
+  usage; plain membership has never been billed.
+  
+  - `membershipLimit` is now passed explicitly, defaulting to unbounded.
+  - `OS_ORG_MEMBERSHIP_LIMIT` is the opt-in for a deployment that DOES want a
+    ceiling (a pilot, a trial tenant). Unusable values (empty, non-numeric,
+    zero, negative) read as unset rather than as a cap — a typo must not be the
+    thing that locks an organization, which is exactly the failure mode being
+    fixed.
+  - The decision lives in `resolveMembershipLimitOption()` rather than inside the
+    plugin-construction expression, so it is testable: the unset case, the
+    explicit ceiling, the unusable-value direction, and — deliberately — that the
+    chosen value clears the vendor's 100 by a wide margin. If a future
+    better-auth changes that default, the test says so instead of leaving an
+    unexplained constant behind.
+  
+  The unbounded value is `Number.MAX_SAFE_INTEGER`, not `Infinity`: the option is
+  compared numerically but also travels through option plumbing that may assume a
+  finite value, and nine quadrillion members is unlimited by any measure that
+  reaches a real deployment.
+- Updated dependencies [809d417]
+- Updated dependencies [387e231]
+- Updated dependencies [f794e4e]
+- Updated dependencies [cae2169]
+- Updated dependencies [b812a54]
+- Updated dependencies [2d4fa75]
+- Updated dependencies [0e4e51b]
+- Updated dependencies [e84bbf6]
+- Updated dependencies [effae80]
+- Updated dependencies [d62f990]
+- Updated dependencies [c45d8e6]
+- Updated dependencies [2e3e8c7]
+- Updated dependencies [e621291]
+- Updated dependencies [40a93b5]
+- Updated dependencies [d5b330d]
+- Updated dependencies [dda969c]
+- Updated dependencies [1f45690]
+- Updated dependencies [277948f]
+- Updated dependencies [8bdd955]
+- Updated dependencies [f3bbbef]
+- Updated dependencies [4f24e9d]
+- Updated dependencies [474242f]
+- Updated dependencies [63cd487]
+- Updated dependencies [bd4aa4e]
+- Updated dependencies [803eaab]
+- Updated dependencies [f8e8f03]
+- Updated dependencies [eae824e]
+- Updated dependencies [f6fa22c]
+- Updated dependencies [8a483b3]
+- Updated dependencies [97bcd99]
+- Updated dependencies [df59de0]
+- Updated dependencies [96e25a8]
+- Updated dependencies [f75a38a]
+- Updated dependencies [7a25e7d]
+- Updated dependencies [1fa05a6]
+- Updated dependencies [c85a265]
+- Updated dependencies [dcb10a5]
+- Updated dependencies [773a999]
+- Updated dependencies [35dffea]
+- Updated dependencies [776a098]
+- Updated dependencies [5060877]
+- Updated dependencies [4f6325d]
+- Updated dependencies [52954c0]
+- Updated dependencies [2aa8456]
+- Updated dependencies [93809a3]
+- Updated dependencies [7c0d0c3]
+- Updated dependencies [daae7aa]
+- Updated dependencies [8dc22d6]
+- Updated dependencies [279431e]
+- Updated dependencies [948dd6b]
+- Updated dependencies [3b4c56c]
+- Updated dependencies [ae8edd2]
+- Updated dependencies [e25403c]
+- Updated dependencies [64baa68]
+- Updated dependencies [9fa70d7]
+- Updated dependencies [09db64a]
+- Updated dependencies [92916e7]
+- Updated dependencies [a84f3ea]
+- Updated dependencies [f2eaae8]
+- Updated dependencies [c09451b]
+- Updated dependencies [ba64877]
+- Updated dependencies [7345308]
+- Updated dependencies [79b6a22]
+- Updated dependencies [30d96ab]
+- Updated dependencies [f658793]
+- Updated dependencies [c95ad19]
+- Updated dependencies [e58ea8b]
+- Updated dependencies [4a17645]
+- Updated dependencies [3795c5f]
+- Updated dependencies [8ab926b]
+- Updated dependencies [7317cf2]
+- Updated dependencies [e25e839]
+- Updated dependencies [5997207]
+- Updated dependencies [8b13cc8]
+- Updated dependencies [4a4a35d]
+- Updated dependencies [86e765a]
+- Updated dependencies [1d7e76a]
+- Updated dependencies [53dc739]
+- Updated dependencies [fd289be]
+- Updated dependencies [03bf7b1]
+- Updated dependencies [f90e820]
+- Updated dependencies [18d816a]
+- Updated dependencies [e8bd715]
+- Updated dependencies [b91c351]
+- Updated dependencies [a28a3c0]
+- Updated dependencies [daeaaf9]
+- Updated dependencies [c459da6]
+- Updated dependencies [e914733]
+- Updated dependencies [f887e52]
+- Updated dependencies [881f8d8]
+- Updated dependencies [3bfa1e6]
+- Updated dependencies [901355c]
+- Updated dependencies [34ce8e7]
+- Updated dependencies [33681ea]
+- Updated dependencies [4635f3e]
+- Updated dependencies [ee3595c]
+- Updated dependencies [b2eab95]
+- Updated dependencies [93940d4]
+- Updated dependencies [3a04b01]
+- Updated dependencies [45b9051]
+- Updated dependencies [b9e9227]
+- Updated dependencies [d395692]
+- Updated dependencies [5894d30]
+- Updated dependencies [a3765f6]
+- Updated dependencies [e22158f]
+- Updated dependencies [7404925]
+- Updated dependencies [0c2334f]
+- Updated dependencies [778c59f]
+- Updated dependencies [d2619fd]
+- Updated dependencies [6acb11a]
+- Updated dependencies [33c5fd3]
+- Updated dependencies [20b0fdb]
+- Updated dependencies [905019b]
+- Updated dependencies [a286411]
+- Updated dependencies [98c0d33]
+- Updated dependencies [368a82e]
+- Updated dependencies [a3d5724]
+- Updated dependencies [93ea19b]
+- Updated dependencies [9ee2dcf]
+- Updated dependencies [8cb96ec]
+- Updated dependencies [8f10a79]
+- Updated dependencies [6269a55]
+- Updated dependencies [0fb8760]
+- Updated dependencies [e5ce2ed]
+- Updated dependencies [be21955]
+- Updated dependencies [bc56e18]
+- Updated dependencies [be21955]
+- Updated dependencies [a9ee989]
+- Updated dependencies [4d0d944]
+- Updated dependencies [15d58db]
+- Updated dependencies [d63b014]
+- Updated dependencies [9abe4e4]
+- Updated dependencies [2cc7122]
+- Updated dependencies [50d6c92]
+- Updated dependencies [9e0ba21]
+- Updated dependencies [311433f]
+- Updated dependencies [3e5ad08]
+- Updated dependencies [9abe4e4]
+- Updated dependencies [b7131f3]
+- Updated dependencies [e5812fa]
+- Updated dependencies [7085f90]
+- Updated dependencies [dee4dd4]
+- Updated dependencies [ce7e497]
+- Updated dependencies [51ecb2f]
+- Updated dependencies [9086761]
+- Updated dependencies [42a117b]
+- Updated dependencies [1401ae7]
+- Updated dependencies [4297fe7]
+- Updated dependencies [e398863]
+- Updated dependencies [d16df74]
+- Updated dependencies [f11fc61]
+- Updated dependencies [e808890]
+- Updated dependencies [8f79379]
+- Updated dependencies [e6ca40e]
+- Updated dependencies [0c77ea4]
+- Updated dependencies [52954c0]
+- Updated dependencies [89eb997]
+- Updated dependencies [aa5994e]
+- Updated dependencies [be93457]
+- Updated dependencies [a65db76]
+- Updated dependencies [15eb2c9]
+- Updated dependencies [5691b07]
+- Updated dependencies [2a6122b]
+- Updated dependencies [225e769]
+- Updated dependencies [8af88dd]
+- Updated dependencies [fb5fbb8]
+- Updated dependencies [d7b3963]
+- Updated dependencies [b72db01]
+- Updated dependencies [dce5cd4]
+- Updated dependencies [177ebdc]
+- Updated dependencies [8d237b4]
+- Updated dependencies [2d2e6f0]
+- Updated dependencies [2d8dd8d]
+- Updated dependencies [22d573e]
+- Updated dependencies [b5a2398]
+- Updated dependencies [348860c]
+- Updated dependencies [5383fa6]
+- Updated dependencies [5b3ff63]
+- Updated dependencies [1a6a19c]
+- Updated dependencies [527e050]
+- Updated dependencies [dd33bf9]
+- Updated dependencies [4cb2a90]
+- Updated dependencies [74a7804]
+- Updated dependencies [53d3689]
+- Updated dependencies [b3a63d3]
+- Updated dependencies [033a34c]
+- Updated dependencies [4d25d22]
+- Updated dependencies [1ffee51]
+- Updated dependencies [5ae4303]
+- Updated dependencies [ece4dad]
+- Updated dependencies [e9b377e]
+- Updated dependencies [146f448]
+- Updated dependencies [735f5c7]
+- Updated dependencies [a7e18de]
+- Updated dependencies [366f895]
+- Updated dependencies [dc75ba8]
+- Updated dependencies [cce0aa9]
+- Updated dependencies [e764507]
+- Updated dependencies [cff17af]
+- Updated dependencies [39404f3]
+- Updated dependencies [ca1965f]
+- Updated dependencies [8619f95]
+- Updated dependencies [b706af9]
+- Updated dependencies [fc9ba76]
+- Updated dependencies [0f94cc7]
+- Updated dependencies [a11c1a5]
+- Updated dependencies [71f9cd1]
+- Updated dependencies [ee17d86]
+- Updated dependencies [cdbd920]
+- Updated dependencies [18c432e]
+- Updated dependencies [3c418c4]
+- Updated dependencies [fa8715a]
+- Updated dependencies [a933ed7]
+- Updated dependencies [b3ca463]
+- Updated dependencies [a933ed7]
+- Updated dependencies [0d4a6a8]
+- Updated dependencies [518d5e5]
+- Updated dependencies [6643ba1]
+- Updated dependencies [eeba2ef]
+- Updated dependencies [ec4c4d2]
+- Updated dependencies [424f73c]
+- Updated dependencies [cccbe51]
+- Updated dependencies [a8d6b1d]
+- Updated dependencies [e4a7695]
+- Updated dependencies [87075b1]
+- Updated dependencies [fc58a99]
+- Updated dependencies [14cfc00]
+- Updated dependencies [1c6f7b4]
+- Updated dependencies [e854a53]
+- Updated dependencies [dfebfc8]
+- Updated dependencies [d028b37]
+- Updated dependencies [122ef38]
+- Updated dependencies [4a37870]
+- Updated dependencies [428f9b2]
+- Updated dependencies [aa7ff56]
+- Updated dependencies [c41b42e]
+- Updated dependencies [c4db311]
+- Updated dependencies [750fff5]
+- Updated dependencies [c19035e]
+- Updated dependencies [ececf7a]
+- Updated dependencies [d173125]
+- Updated dependencies [8eeca27]
+- Updated dependencies [8425c17]
+- Updated dependencies [a5ef1d8]
+- Updated dependencies [772d5de]
+- Updated dependencies [ce80ec2]
+- Updated dependencies [b372318]
+- Updated dependencies [97a2263]
+- Updated dependencies [29d0676]
+- Updated dependencies [0169d49]
+- Updated dependencies [6bd3231]
+- Updated dependencies [d2b5ba8]
+- Updated dependencies [b799ac5]
+- Updated dependencies [8f74307]
+- Updated dependencies [d23dc08]
+- Updated dependencies [644ad50]
+- Updated dependencies [0da7cd2]
+- Updated dependencies [28a5c3e]
+- Updated dependencies [4bc18e5]
+  - @objectstack/spec@17.3.0
+
 ## 17.2.0
 
 ### Minor Changes

@@ -1,5 +1,606 @@
 # Changelog — @objectstack/service-analytics
 
+## 17.3.0
+
+### Minor Changes
+
+- 74cee59: Resolve `{current_user_id}` (and every other filter placeholder) on the direct analytics query path, at parity with the list path and the dashboard dataset path.
+  
+  What changes for an app author: a widget or report whose filter says `owner: '{current_user_id}'` used to render `0` for every viewer whenever the query reached the SQL strategy — the literal text was bound into the `WHERE` and matched no row, silently. Now the same filter expression means the same thing on every surface: `AnalyticsService.query` and `generateSql` expand `where`, `timeDimensions[].dateRange`, and a registered dataset's own filter / measure filters against the requesting user before any strategy compiles, so each viewer gets their own rows. A placeholder that cannot be resolved — an unknown spelling, or `{current_user_id}` on an unauthenticated request — now refuses loudly with `FILTER_TOKEN_UNKNOWN` / `FILTER_TOKEN_UNRESOLVED` (HTTP 400) instead of charting a plausible zero.
+  
+  This also closes a gap on the dashboard dataset door: the dataset-scope channel used to hand strategies the registry's unresolved filter copy, which was ANDed in beside the resolved one (`owner = $viewer AND owner = '{current_user_id}'`) and selected nothing.
+- 399ecad: `ObjectQLStrategy` now refuses a cross-object leaf in a compiled measure's own `filter`, on both of its doors, instead of sending it to an engine that cannot join (#11461). This is the third producer of a predicate on that path — after the caller's `where` and the dataset's definition-level `filter` (#10861) — and the one `filterMemberView` did not fold in: #10413 phase 2 lowers `measureFilters[m]` onto that measure's `aggregations[].filter` entry (#10576), and the envelope check enumerated only two origins while its `query.measures` arm read each measure's resolved *field* and never its filter.
+  
+  Measured on one fixture before the change, both doors in one run: a measure declaring `filter: { 'account.region': 'West' }` on a cube with `include: ['account']` was ACCEPTED, `engine.aggregate` received `{field:"*",method:"count",alias:"west_count",filter:{"account.region":"West"}}`, and an honest evaluator answered `west_count: 0` where the truthful answer was `2` — beside a correct `total_count: 3`, so the wrong number came back wearing the same response shape as the right one. The `/analytics/sql` echo rendered `COUNT(CASE WHEN account.region = $1 THEN 1 END)` over a `FROM` carrying no join at all. Both doors now answer `INVALID_FIELD`/400 before the engine is reached, naming the offending field, the dataset, and — the locator neither sibling refusal has — the measure whose declaration holds the leaf.
+  
+  Ordinary per-measure filters are unaffected and still reach the engine carrying their own `aggregations[].filter`, and a cross-object filter declared on a measure a query does not ask for changes nothing: only the measures in `query.measures` are judged, which is exactly the set both doors lower. The same definition remains valid on a native-SQL driver, which the refusal says.
+- d5b330d: feat(spec,analytics): `AnalyticsResult.fields[].builtinAggregate` — a closed discriminator for a measure column whose display name is the server's built-in default (#14492)
+  
+  **What a consumer sees.** `queryDataset()` (and `POST /api/v1/analytics/dataset/query`,
+  which relays the result verbatim) now carries an optional
+  `fields[].builtinAggregate?: 'count' | 'sum' | 'avg' | 'min' | 'max' | 'count_distinct'`
+  on a measure column. It is present exactly when the dataset measure behind the
+  column declares an `aggregate` and **no** `label` — the producer then has nothing
+  but the aggregate to name the column by, so it says which aggregate that is. It is
+  absent whenever the author declared a label (a plain string or an inline locale
+  map, even one with no entry for the request locale: an author's text is never
+  re-labelled by a consumer), and absent on dimension columns and derived measures.
+  The vocabulary is `AggregationFunction` (`data/query.zod.ts`), the one closed
+  aggregate enum — no second spelling. `AnalyticsResultResponseSchema`
+  (`api/analytics.zod.ts`) mirrors the member, refusing a spelling outside the enum.
+  
+  **Why.** An AI-built dashboard's "count of customers by status" chart showed the
+  English axis title "Count" on a Chinese UI. The renderer (objectui
+  `buildChartSeries()` / `labelOf()`) treats `fields[].label` as resolved author
+  content and passes it through verbatim — correctly, since a real custom label
+  ("Tasks") must survive. What it could not tell apart was an author's text from
+  the server's built-in default for a bare `count`. Guessing from the label text
+  was refused (it would catch an author who really named a field `Count`, and break
+  the moment the default is spelled in another language); translating on the
+  server was not taken (it copies the front end's language decision into the
+  producer and leaves nothing for a per-widget override). The ruling (2026-09-02,
+  option B) is a structured discriminator on the contract: the consumer prefers a
+  locale lookup keyed by `builtinAggregate` — mirroring its existing
+  `report.aggregate.*` keys — and falls back to `label`, then `name`.
+  
+  **Producer-side changes.**
+  
+  - `@objectstack/service-analytics` — `queryDataset`'s measure enrichment sets
+    `builtinAggregate` from the dataset measure's own `aggregate` when the measure
+    has no authored `label`. Judged on the authored key, never on the resolved
+    string.
+  - `@objectstack/spec` — the `dataset` create seed (`metadata-create-seeds.ts`)
+    drops its hardcoded `label: 'Count'` from the seeded `count` measure, so a
+    dataset created from Studio is a built-in default (wire: `builtinAggregate:
+    'count'`) instead of an authored English literal. `getMeta()` for such a
+    dataset now titles the metric by its name (`count`) rather than `Count`;
+    `CubeMeta.measures[].type` already carried the aggregate there.
+  
+  Purely additive: no key is removed or renamed, no authorable schema changes shape,
+  and a consumer that ignores the member sees exactly the response it saw before.
+
+### Patch Changes
+
+- c8be110: refactor(service-analytics): derive the analytics auto-bridge's engine view from the declared contracts (#11833)
+  
+  `plugin.ts` named the data engine through a consumer-local structural
+  `DataEngineLike` — the second of the two sites #11833 records, after the
+  datasource half that landed as PR #12011. It is now derived from the declared
+  contracts: `IDataEngine.aggregate` / `execute?` /
+  `resolveEffectiveDatasource?` / `getDriverForObject?` and
+  `IObjectQLEngine.getObject`. Optionality is preserved exactly — `aggregate`
+  required, everything else `Partial<>` — because these probes are the plugin's
+  graceful-degradation seam.
+  
+  **Why this is `patch` and not a type-only no-op.** Four of the five members
+  substitute with no behaviour change. The fifth does not: the deleted structural
+  type declared `aggregations[].function` as `string`, while the contract
+  declares the six-value `AggregationFunction`. The bridge therefore forwarded
+  whatever method string reached it. That forward is now parsed with the spec's
+  own enum, so a method the engine contract does not declare is refused at the
+  bridge — loudly, naming the aggregation and the legal vocabulary — instead of
+  reaching the engine, where `driver-sql` blamed a `function` key the author
+  never wrote and the in-memory evaluator answered `null` for every bucket under
+  the author's own measure name.
+  
+  No authored analytics can trigger the new refusal: the one reachable producer
+  of a non-aggregate method — a custom-SQL measure (`AggregationMetricType`
+  `number` / `string` / `boolean`) — is already refused earlier, caller-facing,
+  by `ObjectQLStrategy.resolveMeasureAggregation` (#12209). What is left is host
+  drift (a cube object registered without meeting `CubeSchema`), which is why
+  the new refusal is a bare `Error` in the undeclared-500 tier rather than an
+  ADR-0112 400 that would blame the caller for something they did not write.
+- aa16721: fix(service-analytics): the consumer-local `executeAggregate` config mirrors narrow `aggregations[].method` to `AggregationFunction` (#12940)
+  
+  #12776 narrowed the contract — `StrategyContext.executeAggregate`'s
+  `aggregations[].method` went from `string` to the six-value
+  `AggregationFunction` — but this package's two CONSUMER-LOCAL config mirrors
+  of that same slot kept declaring `string`, so the compile-time vocabulary the
+  narrowing bought for strategy authors stopped at the package boundary and
+  never reached the people who write a custom bridge.
+  
+  FROM → TO, at all three sites the tree carries (the card enumerated two):
+  
+  - `AnalyticsServicePluginOptions.executeAggregate` (`plugin.ts`) —
+    `aggregations[].method: string` → `AggregationFunction`. This is the
+    declaration an app author's own `executeAggregate` bridge is typed against.
+  - `AnalyticsServiceConfig.executeAggregate` (`analytics-service.ts`) — the
+    same narrowing on the config twin whose own comment says it is kept in
+    lockstep with `StrategyContext.executeAggregate`; that claim is true again,
+    and now names the member so the next drift is visible.
+  - `parseEngineAggregateFunction`'s `method` parameter (`plugin.ts`), the
+    auto-bridge's runtime parse — narrowed for the same reason: it was the
+    third place a reader was told this vocabulary is open.
+  
+  Who breaks at compile time on upgrade: CALLERS that fill `method` with a
+  value typed `string` (or a literal outside the six) when invoking one of
+  these bridges — the values the bridge already refused at runtime (#11833).
+  IMPLEMENTORS are source-compatible: a handler that accepts `method: string`
+  accepts a superset and stays assignable to the narrowed member (parameter
+  contravariance), which is why the ~nine test doubles in this package that
+  declare their own `{ field, method: string, alias }` mirrors still compile
+  untouched.
+  
+  No runtime change. The auto-bridge's runtime parse-and-refuse (#11833) stays
+  exactly where it was — with both ends of the `method` → `function` rename now
+  declaring the same enum, it is defence in depth behind a compile-time check
+  rather than the only check, and the two comments that explained it by
+  pointing at the old `method: string` declaration say so instead.
+- e7191ce: fix(build): give each `exports` condition its own `types` target in the 28 dual-build packages (#13112)
+  
+  **Published-surface change, zero runtime change.** No emitted byte moves; what
+  moves is which declaration file a resolver READS. Maintainer ruling 2026-08-29
+  (decision batch #3, verbatim 「同意」) chose declaring the files over deleting
+  them.
+  
+  ## What was wrong
+  
+  These 28 packages are `"type": "module"` and dual-built, and each spelled one
+  `types` condition as a **sibling** of `import`/`require`:
+  
+  ```json
+  "exports": { ".": {
+    "types": "./dist/index.d.ts", "import": "./dist/index.js", "require": "./dist/index.cjs"
+  } }
+  ```
+  
+  A sibling `types` answers for **both** conditions, so a CommonJS consumer was
+  handed `dist/index.d.ts` — an ES-module declaration, because the package is
+  `"type": "module"` — for an entry point it reaches with `require`. Measured with
+  `tsc --traceResolution` on a `"type": "commonjs"` fixture at `moduleResolution:
+  node16`:
+  
+  ```
+  error TS1479: The current file is a CommonJS module whose imports will produce
+  'require' calls; however, the referenced file is an ECMAScript module and cannot
+  be imported with 'require'.
+  ```
+  
+  The JavaScript at `dist/index.cjs` loads perfectly (`check:dual-build-cjs-loads`
+  has asserted that for months). It is the **types** that told the consumer the
+  supported `require` entry point could not be required. The `dist/index.d.cts`
+  twin tsup emits beside it — 36 files, 5,517,701 B on this build — was named by
+  no condition at all and shipped in every tarball unreachable.
+  
+  ## What changed
+  
+  Each condition now names its own declaration, the shape TypeScript documents:
+  
+  ```json
+  "exports": { ".": {
+    "import":  { "types": "./dist/index.d.ts",  "default": "./dist/index.js" },
+    "require": { "types": "./dist/index.d.cts", "default": "./dist/index.cjs" }
+  } }
+  ```
+  
+  33 entry points across 27 packages, subpaths included. The root `types` field is
+  untouched, so `node10` resolvers are unaffected; the `import` condition resolves
+  exactly what it resolved before, measured as an unchanged control in the same
+  run.
+  
+  ## `@objectstack/core` is deliberately NOT changed
+  
+  Splitting a declaration in two makes TypeScript compare it nominally, and
+  `ObjectKernel` carries a `private plugins` member that reaches every plugin
+  through `PluginContext.getKernel()`. With core split, whole-repo `pnpm build`
+  fails in `@objectstack/verify` with 5 × TS2345 ("Types have separate
+  declarations of a private property 'plugins'"); with core held back and the
+  other 27 split, 71/71 tasks pass. So core keeps the sibling-`types` shape and
+  its two `.d.cts` files (220,854 B) stay unreachable, declared as such in
+  `check:dual-build-cjs-loads`. Splitting it needs a decision about core's public
+  types, not about an exports map.
+  
+  ## For consumers
+  
+  - **ESM consumers: nothing changes.** Same declaration file, byte for byte.
+  - **CJS consumers under `node16`/`nodenext`: TS1479 goes away** and the
+    declarations they get are the ones built for CommonJS.
+  - **`node10` / `moduleResolution: node` consumers: nothing changes** — they never
+    read `exports`.
+  - Nothing is removed: every path that resolved before still resolves.
+  
+  Packages that are CJS-first (`require` → `./dist/index.js`, no `"type": "module"`)
+  were already correct and are untouched — their `dist/index.d.ts` really is the
+  CommonJS declaration. Their ESM mirror (an unreachable `.d.mts` under the
+  `import` condition) is a separate, larger population and is filed separately per
+  the ruling, not fixed here.
+  
+  `check:dual-build-cjs-loads` grew a fourth invariant (TYPED) that reds on the old
+  shape, so the drift cannot return silently.
+- 017130a: The ObjectQL analytics strategy now refuses a custom-SQL measure (`AggregationMetricType` `number` / `string` / `boolean`) with a loud `400 INVALID_FIELD` naming the measure and its metric type, instead of forwarding the raw SQL expression into `engine.aggregate` — where `driver-sql` rejected it blaming a `function` key the author never wrote, and the in-memory evaluator silently answered `null` for every bucket under the measure's own name.
+  
+  What stops being served, and for whom: on deployments whose driver has no native SQL capability (the ObjectQL aggregate path — e.g. Mongo or in-memory), a query or dataset widget selecting a custom-SQL measure now answers a 400 that says to use an aggregate measure (count/sum/avg/min/max/count_distinct) or run the cube on a native-SQL driver. Those queries previously "succeeded" with a per-bucket `null` (or a mis-attributed driver error), never with a correct number. Native-SQL driver behaviour is unchanged: custom-SQL measures still run there, emitted verbatim.
+- 466b389: **Fix:** `/api/v1/analytics/query` on the ObjectQL door (MongoDB, the memory driver, or any deployment whose driver reports `objectqlAggregate` but not `nativeSql`) now honours a measure's own scoped `filter` — `won_count` and `won_amount`-style conditional measures answer the same numbers the dashboard door and the native-SQL door already did (#10413 phase 2).
+  
+  `ObjectQLStrategy.execute` lowers each measure's `filter` into the ONE aggregation it belongs to, via the per-aggregation `filter` field #10576 added to `engine.aggregate`'s contract (SQL `FILTER (WHERE …)` semantics) — not into the whole-call filter, which would have narrowed every measure (a fix shaped that way would make a conditional measure right while making every unconditional sibling measure in the same query wrong). An aggregation with no measure filter is unchanged and keeps the native-pushdown-eligible shape.
+  
+  `ObjectQLStrategy.generateSql` (the `/analytics/sql` echo) renders the same conditional aggregate — `COUNT(CASE WHEN … THEN … END)`-style — so the preview stays an honest description of what `execute()` now actually runs, matching the native-SQL strategy's existing echo for the same class of measure.
+  
+  Phase 1 (PR #10758) already ANDed a dataset's definition-level `filter` into the whole-call filter on this door; this closes the remaining half of the two-door disagreement #10413 reported. `NativeSQLStrategy` (#10298 / PR #10411) is unaffected by this change.
+- b0d7d54: `ObjectQLStrategy` now refuses a read scope that does not bind, before handing it to the engine (`READ_SCOPE_COMPILE_FAILED` / 500). That strategy merges `StrategyContext.getReadScope` output straight into the `FilterCondition` it gives `engine.aggregate` and never reaches `compileScopedFilterToSql`, so the empty-`$nin` refusal that compiler gained guarded the NativeSQL path and the `/analytics/sql` echo only. Measured against a real engine, a non-RLS scope provider handing `{ f: { $nin: [] } }`, `{ $not: { f: { $in: [] } } }`, `{ $not: { f: [] } }` or `{ $not: { f: { $in: [], $ne: 'x' } } }` received the WHOLE TABLE on any query this strategy served; all four are now refused, at both engine-bound merges (the aggregate filter and the FK→attribute resolution). Deliberately unchanged: `$in: []` keeps its ruled constant-FALSE fold, so the RLS compiler's live composite — an emptied membership `$or`-ed beside an own-rows grant — still admits exactly the own rows; and the NativeSQL path and the SQL echo keep the disposition they already had.
+- 967402a: The analytics read-scope compiler (`read-scope-sql.ts`) now refuses an empty `$nin` (`READ_SCOPE_COMPILE_FAILED` / 500) instead of folding it to constant TRUE. An emptied exclusion ("NOT IN () excludes nothing") vacated the whole read scope — every row admitted — on the ADR-0021 lowering, where a widening is scope over-reach; no in-repo producer can emit the shape (the CEL lowering never emits `$nin`, and the RLS guard drops even-polarity empty-`$nin` policies upstream), so the refusal costs no live traffic. Deliberately asymmetric: `$in: []` keeps its ruled constant-FALSE fold (#5322/#5243), which the RLS compiler's inert positive composite — an emptied membership `$or`-ed beside an own-rows grant — depends on.
+- 5c7cbe3: Refuse a non-binding (vacating) read scope at the two remaining `getReadScope` merge sites: the `/analytics/sql` echo (`ObjectQLStrategy.generateSql`) and `NativeSQLStrategy.applyReadScope`. The `$not`-over-`$in: []` family compiled to a constant-TRUE predicate on those routes, so the echo rendered — and the native strategy actually executed — a whole-table `WHERE` for a scope the ObjectQL execution path already refused (#13640). All three faces now answer one verdict, in the same `READ_SCOPE_COMPILE_FAILED` / 500 envelope; the ruled `$in: []` zero-rows reduction, the live RLS empty-membership composite, and `compileScopedFilterToSql` itself (the ruled #13571 residue included) are unchanged.
+- a3c4215: fix(service-analytics): wire the `typecheck` script so turbo stops silently no-opping the gate, and clear the 10 type errors it was hiding (#12939)
+  
+  `packages/services/service-analytics/package.json` declared only `build` and
+  `test`. Root `typecheck` is `turbo run typecheck`, which **no-ops a package
+  that has no such script and reports success** — so no tsc read this package's
+  `src/` from the typecheck lane at all. `build` is tsup (esbuild; the DTS pass
+  processes declarations only) and `test` is vitest (esbuild transform), and
+  neither type-checks. The package was reached only by the `check:type-check-debt`
+  ratchet, which asserts the error count does not *grow* — never that it is zero.
+  
+  Adding the one-line script (mirroring its sibling `service-settings`, repaired
+  the same way in #7925) makes the task real. The tests are already inside the
+  program — the package `tsconfig.json` includes `src` and the tests live in
+  `src/__tests__/**` — so `tsc --noEmit --listFiles` lists **83 of the 83**
+  `*.test.ts` files on disk. The new gate reads the tests, not just the source.
+  
+  All 10 errors were stale tests, not source defects; no non-test source file
+  changed. Nothing was silenced: no `any` added, no `@ts-expect-error`, no
+  `@ts-nocheck`, `strict` untouched, and the tsconfig `include`/`exclude` are
+  byte-identical — excluding the tests would have converted a missing gate into
+  a lying one.
+  
+  - `__tests__/measure-source-field-gate.test.ts` (7 x TS2339). `promise.catch(fn)`
+    does not drop the resolved branch from the type, so
+    `service.query(...).catch((e) => e as Error)` was `AnalyticsResult | Error`
+    and every `err.message` / `err.field` / `err.member` / `err.param` read was a
+    property access on `AnalyticsResult`. A local `refusalOf()` helper narrows it
+    once via `then<never, Refusal>`; as a bonus the resolved branch now fails by
+    name instead of surfacing later as `expect(undefined).toMatch(...)`.
+  - `__tests__/objectql-timedimension-projection.test.ts` (2 x TS7053). The
+    `TABLE` fixture was inferred as `{ id: number; due_date: string; priority:
+    string }[]` and the aggregate stand-in indexes it by a computed `string` key.
+    Annotated as the `Row` (`Record<string, unknown>`) the file already declares.
+  - `__tests__/analytics-service.test.ts` (1 x TS6133). An unused
+    `AnalyticsDriverCapabilities` type import. The capability literals in this
+    file are inline `ctx` objects checked contextually at each `canHandle` call
+    site, so the import added no coverage and is removed.
+  
+  `service-analytics` graduates out of the `check:type-check-coverage` DEBT
+  ledger: 65/78 -> 66/78 workspace packages type-checked, 382 -> 372 frozen raw
+  errors, 13 -> 12 ledger entries.
+- d028b37: fix(spec): `StrategyContext.executeAggregate` `aggregations[].method` narrows from `string` to `AggregationFunction` (#12776)
+  
+  <!-- adr-0087: registered strategy-context-aggregation-method-narrowed -->
+  
+  **BREAKING** accept-set narrowing on a published contract, landing after the
+  v17.0.0 cut (the lockstep launch-window convention ships it as `minor`).
+  
+  Two spec-declared surfaces described the same slot and disagreed about its
+  type: `IDataEngine.aggregate`'s `aggregations[].function` is the closed
+  six-value `AggregationFunction` enum, while the analytics strategy contract's
+  `StrategyContext.executeAggregate` declared the same value as
+  `aggregations[].method: string`. The analytics bridge renames one to the
+  other, so nothing on the analytics side of that seam was compile-checked
+  against the engine's vocabulary — a strategy author (very often an AI) got
+  no compile-time help and hit the bridge's runtime refusal instead.
+  
+  FROM → TO:
+  
+  - `aggregations[].method: string` →
+    `aggregations[].method: AggregationFunction`
+    (`'count' | 'sum' | 'avg' | 'min' | 'max' | 'count_distinct'`, the spec's
+    own enum from `@objectstack/spec/data`). One slot, one declaration.
+  
+  Who breaks at compile time on upgrade:
+  
+  - external CALLERS of `StrategyContext.executeAggregate` that fill `method`
+    with a value typed `string` (or a literal outside the six) — the values the
+    bridge already refused at runtime (#11833) now fail `tsc`.
+  - external IMPLEMENTORS of `StrategyContext` stay source-compatible: a
+    handler that accepts `method: string` accepts a superset and remains
+    assignable to the narrowed member.
+  
+  The bridge's runtime parse-and-refuse (#11833) stays as defence in depth.
+  In-repo, `ObjectQLStrategy`'s aggregation locals now carry the enum
+  end-to-end (`@objectstack/service-analytics`, runtime behaviour unchanged —
+  the census measured every reachable producer already emitting enum-legal
+  values only).
+- a40c0f9: Guard the analytics record-label lookup with `assertReadScopeCannotVacate` — the fourth read-scope door
+  
+  `AnalyticsServicePlugin`'s `fetchRecordLabels` hook `$and`s the **referenced** object's read scope with an `id $in [...]` filter and hands the result straight to `executeAggregate`. Unlike the three faces unified previously (the ObjectQL engine merge, the `/analytics/sql` echo merge, and `NativeSQLStrategy.applyReadScope`), it met neither `compileScopedFilterToSql` nor the vacancy guard, so a read scope that lowers to a boolean constant — the `$not`-over-`$in: []` family reachable from any out-of-repo `StrategyContext.getReadScope` producer — let that per-record read run effectively unscoped for the ids in hand, surfacing the display names the referenced object's RLS exists to hide.
+  
+  The hook now calls the already-exported `assertReadScopeCannotVacate` on the referenced object's scope before composing the filter, refusing in the same envelope as its siblings (`READ_SCOPE_COMPILE_FAILED` / 500). No behaviour changes for scopes that bind: an ordinary referenced-object scope still narrows the label lookup, and the `$in: []` zero-rows reduction (including the live RLS composite that pairs it with an own-rows grant) still passes through untouched. The read-scope SQL compiler is unchanged.
+- Updated dependencies [809d417]
+- Updated dependencies [387e231]
+- Updated dependencies [f794e4e]
+- Updated dependencies [cae2169]
+- Updated dependencies [b812a54]
+- Updated dependencies [2d4fa75]
+- Updated dependencies [0e4e51b]
+- Updated dependencies [e84bbf6]
+- Updated dependencies [effae80]
+- Updated dependencies [efb3513]
+- Updated dependencies [d62f990]
+- Updated dependencies [c45d8e6]
+- Updated dependencies [2e3e8c7]
+- Updated dependencies [e621291]
+- Updated dependencies [655b106]
+- Updated dependencies [40a93b5]
+- Updated dependencies [101ad2c]
+- Updated dependencies [d5b330d]
+- Updated dependencies [dda969c]
+- Updated dependencies [1f45690]
+- Updated dependencies [277948f]
+- Updated dependencies [8bdd955]
+- Updated dependencies [f3bbbef]
+- Updated dependencies [4f24e9d]
+- Updated dependencies [e27583e]
+- Updated dependencies [4bd6faa]
+- Updated dependencies [86cbe37]
+- Updated dependencies [6a180e4]
+- Updated dependencies [474242f]
+- Updated dependencies [63cd487]
+- Updated dependencies [bd4aa4e]
+- Updated dependencies [803eaab]
+- Updated dependencies [f8e8f03]
+- Updated dependencies [983edf1]
+- Updated dependencies [eae824e]
+- Updated dependencies [f6fa22c]
+- Updated dependencies [8a483b3]
+- Updated dependencies [97bcd99]
+- Updated dependencies [df59de0]
+- Updated dependencies [96e25a8]
+- Updated dependencies [f75a38a]
+- Updated dependencies [7a25e7d]
+- Updated dependencies [1fa05a6]
+- Updated dependencies [c85a265]
+- Updated dependencies [dcb10a5]
+- Updated dependencies [773a999]
+- Updated dependencies [35dffea]
+- Updated dependencies [d8024f0]
+- Updated dependencies [8120808]
+- Updated dependencies [776a098]
+- Updated dependencies [5060877]
+- Updated dependencies [4f6325d]
+- Updated dependencies [52954c0]
+- Updated dependencies [2aa8456]
+- Updated dependencies [93809a3]
+- Updated dependencies [7c0d0c3]
+- Updated dependencies [daae7aa]
+- Updated dependencies [8dc22d6]
+- Updated dependencies [279431e]
+- Updated dependencies [948dd6b]
+- Updated dependencies [3b4c56c]
+- Updated dependencies [ae8edd2]
+- Updated dependencies [e25403c]
+- Updated dependencies [a81aa9d]
+- Updated dependencies [64baa68]
+- Updated dependencies [9fa70d7]
+- Updated dependencies [09db64a]
+- Updated dependencies [92916e7]
+- Updated dependencies [a84f3ea]
+- Updated dependencies [f2eaae8]
+- Updated dependencies [56c093c]
+- Updated dependencies [c09451b]
+- Updated dependencies [ba64877]
+- Updated dependencies [7345308]
+- Updated dependencies [79b6a22]
+- Updated dependencies [30d96ab]
+- Updated dependencies [f658793]
+- Updated dependencies [c95ad19]
+- Updated dependencies [e58ea8b]
+- Updated dependencies [4a17645]
+- Updated dependencies [3795c5f]
+- Updated dependencies [8ab926b]
+- Updated dependencies [7317cf2]
+- Updated dependencies [e25e839]
+- Updated dependencies [5997207]
+- Updated dependencies [8b13cc8]
+- Updated dependencies [4a4a35d]
+- Updated dependencies [86e765a]
+- Updated dependencies [1d7e76a]
+- Updated dependencies [53dc739]
+- Updated dependencies [fd289be]
+- Updated dependencies [03bf7b1]
+- Updated dependencies [f90e820]
+- Updated dependencies [18d816a]
+- Updated dependencies [e8bd715]
+- Updated dependencies [b91c351]
+- Updated dependencies [a28a3c0]
+- Updated dependencies [daeaaf9]
+- Updated dependencies [c459da6]
+- Updated dependencies [e914733]
+- Updated dependencies [f887e52]
+- Updated dependencies [881f8d8]
+- Updated dependencies [3bfa1e6]
+- Updated dependencies [0a8ebf3]
+- Updated dependencies [901355c]
+- Updated dependencies [34ce8e7]
+- Updated dependencies [33681ea]
+- Updated dependencies [bfe13c8]
+- Updated dependencies [0fb3044]
+- Updated dependencies [4635f3e]
+- Updated dependencies [fd289be]
+- Updated dependencies [ee3595c]
+- Updated dependencies [b2eab95]
+- Updated dependencies [93940d4]
+- Updated dependencies [3a04b01]
+- Updated dependencies [45b9051]
+- Updated dependencies [b9e9227]
+- Updated dependencies [d395692]
+- Updated dependencies [5894d30]
+- Updated dependencies [a3765f6]
+- Updated dependencies [2d5cee3]
+- Updated dependencies [e22158f]
+- Updated dependencies [7404925]
+- Updated dependencies [0c2334f]
+- Updated dependencies [778c59f]
+- Updated dependencies [d2619fd]
+- Updated dependencies [af56546]
+- Updated dependencies [6acb11a]
+- Updated dependencies [33c5fd3]
+- Updated dependencies [20b0fdb]
+- Updated dependencies [905019b]
+- Updated dependencies [a286411]
+- Updated dependencies [98c0d33]
+- Updated dependencies [368a82e]
+- Updated dependencies [a3d5724]
+- Updated dependencies [93ea19b]
+- Updated dependencies [9ee2dcf]
+- Updated dependencies [8cb96ec]
+- Updated dependencies [8f10a79]
+- Updated dependencies [6269a55]
+- Updated dependencies [a17da05]
+- Updated dependencies [a8c00e2]
+- Updated dependencies [22e5236]
+- Updated dependencies [0fb8760]
+- Updated dependencies [e5ce2ed]
+- Updated dependencies [be21955]
+- Updated dependencies [bc56e18]
+- Updated dependencies [be21955]
+- Updated dependencies [a9ee989]
+- Updated dependencies [4d0d944]
+- Updated dependencies [15d58db]
+- Updated dependencies [d63b014]
+- Updated dependencies [9abe4e4]
+- Updated dependencies [2cc7122]
+- Updated dependencies [50d6c92]
+- Updated dependencies [9e0ba21]
+- Updated dependencies [311433f]
+- Updated dependencies [3e5ad08]
+- Updated dependencies [9abe4e4]
+- Updated dependencies [b7131f3]
+- Updated dependencies [e5812fa]
+- Updated dependencies [7085f90]
+- Updated dependencies [dee4dd4]
+- Updated dependencies [ce7e497]
+- Updated dependencies [51ecb2f]
+- Updated dependencies [9086761]
+- Updated dependencies [42a117b]
+- Updated dependencies [1401ae7]
+- Updated dependencies [4297fe7]
+- Updated dependencies [e398863]
+- Updated dependencies [d16df74]
+- Updated dependencies [f11fc61]
+- Updated dependencies [e808890]
+- Updated dependencies [8f79379]
+- Updated dependencies [e6ca40e]
+- Updated dependencies [0c77ea4]
+- Updated dependencies [52954c0]
+- Updated dependencies [89eb997]
+- Updated dependencies [7131f12]
+- Updated dependencies [aa5994e]
+- Updated dependencies [be93457]
+- Updated dependencies [a65db76]
+- Updated dependencies [2cf5a96]
+- Updated dependencies [15eb2c9]
+- Updated dependencies [5691b07]
+- Updated dependencies [2a6122b]
+- Updated dependencies [225e769]
+- Updated dependencies [8af88dd]
+- Updated dependencies [fb5fbb8]
+- Updated dependencies [d7b3963]
+- Updated dependencies [33184fd]
+- Updated dependencies [7c41693]
+- Updated dependencies [b72db01]
+- Updated dependencies [dce5cd4]
+- Updated dependencies [9688f58]
+- Updated dependencies [556ebc1]
+- Updated dependencies [177ebdc]
+- Updated dependencies [8d237b4]
+- Updated dependencies [2d2e6f0]
+- Updated dependencies [2d8dd8d]
+- Updated dependencies [22d573e]
+- Updated dependencies [b5a2398]
+- Updated dependencies [348860c]
+- Updated dependencies [5383fa6]
+- Updated dependencies [5b3ff63]
+- Updated dependencies [1a6a19c]
+- Updated dependencies [527e050]
+- Updated dependencies [dd33bf9]
+- Updated dependencies [4cb2a90]
+- Updated dependencies [74a7804]
+- Updated dependencies [53d3689]
+- Updated dependencies [b3a63d3]
+- Updated dependencies [49f0dcf]
+- Updated dependencies [033a34c]
+- Updated dependencies [4d25d22]
+- Updated dependencies [1ffee51]
+- Updated dependencies [5ae4303]
+- Updated dependencies [ece4dad]
+- Updated dependencies [e9b377e]
+- Updated dependencies [146f448]
+- Updated dependencies [735f5c7]
+- Updated dependencies [a7e18de]
+- Updated dependencies [366f895]
+- Updated dependencies [dc75ba8]
+- Updated dependencies [cce0aa9]
+- Updated dependencies [e764507]
+- Updated dependencies [cff17af]
+- Updated dependencies [39404f3]
+- Updated dependencies [ca1965f]
+- Updated dependencies [8619f95]
+- Updated dependencies [b706af9]
+- Updated dependencies [db8c288]
+- Updated dependencies [0e5fe7f]
+- Updated dependencies [add4360]
+- Updated dependencies [fc9ba76]
+- Updated dependencies [0f94cc7]
+- Updated dependencies [a11c1a5]
+- Updated dependencies [71f9cd1]
+- Updated dependencies [ee17d86]
+- Updated dependencies [cdbd920]
+- Updated dependencies [18c432e]
+- Updated dependencies [3c418c4]
+- Updated dependencies [fa8715a]
+- Updated dependencies [a933ed7]
+- Updated dependencies [b3ca463]
+- Updated dependencies [a933ed7]
+- Updated dependencies [0d4a6a8]
+- Updated dependencies [518d5e5]
+- Updated dependencies [6643ba1]
+- Updated dependencies [eeba2ef]
+- Updated dependencies [ec4c4d2]
+- Updated dependencies [424f73c]
+- Updated dependencies [cccbe51]
+- Updated dependencies [a8d6b1d]
+- Updated dependencies [e4a7695]
+- Updated dependencies [87075b1]
+- Updated dependencies [fc58a99]
+- Updated dependencies [14cfc00]
+- Updated dependencies [1c6f7b4]
+- Updated dependencies [e854a53]
+- Updated dependencies [dfebfc8]
+- Updated dependencies [d028b37]
+- Updated dependencies [f7b25c5]
+- Updated dependencies [122ef38]
+- Updated dependencies [4a37870]
+- Updated dependencies [428f9b2]
+- Updated dependencies [aa7ff56]
+- Updated dependencies [c41b42e]
+- Updated dependencies [c4db311]
+- Updated dependencies [750fff5]
+- Updated dependencies [c19035e]
+- Updated dependencies [ececf7a]
+- Updated dependencies [d173125]
+- Updated dependencies [8eeca27]
+- Updated dependencies [8425c17]
+- Updated dependencies [a5ef1d8]
+- Updated dependencies [87ad30c]
+- Updated dependencies [772d5de]
+- Updated dependencies [ce80ec2]
+- Updated dependencies [b372318]
+- Updated dependencies [97a2263]
+- Updated dependencies [29d0676]
+- Updated dependencies [0169d49]
+- Updated dependencies [6bd3231]
+- Updated dependencies [d2b5ba8]
+- Updated dependencies [b799ac5]
+- Updated dependencies [8f74307]
+- Updated dependencies [d23dc08]
+- Updated dependencies [644ad50]
+- Updated dependencies [9735662]
+- Updated dependencies [4d5b4f8]
+- Updated dependencies [0da7cd2]
+- Updated dependencies [28a5c3e]
+- Updated dependencies [4bc18e5]
+  - @objectstack/spec@17.3.0
+  - @objectstack/core@17.3.0
+  - @objectstack/types@17.3.0
+
 ## 17.2.0
 
 ### Minor Changes

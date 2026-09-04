@@ -1,5 +1,1455 @@
 # @objectstack/core
 
+## 17.3.0
+
+### Minor Changes
+
+- 655b106: fix(metadata): register a `packages[]` artifact per package at the metadata door so every object has one owner across every door (#14599)
+  
+  A release artifact carrying `packages[]` (ADR-0130 D4) was read at the metadata
+  door as if it carried one package: `MetadataPlugin._parseAndRegisterArtifact`
+  iterated the **flattened top level** and stamped every item with the artifact's
+  own `manifest.id`. For an artifact composed with `composeStacks(…, { manifest:
+  'preserve' })` that id is one arbitrary member's — `selectManifest`'s `'last'`
+  pick — so a two-package artifact registered the **module's** object under the
+  **App** package's identity, while the ObjectQL load path, reading the same
+  artifact's `packages[]`, owned it under the module's.
+  
+  The platform then held two answers to "who owns this object", and which one a
+  consumer saw depended on the door it went through. Measured on a real boot of
+  `examples/app-multi-package`:
+  
+  - `GET /api/v1/meta/object` served `crm_order` **twice** — the list merge keys
+    slots by `${packageId}${name}`, so the two differently-attributed copies
+    landed in two slots;
+  - `GET /api/v1/meta/object?package=<the App package>` returned the **module's**
+    object, because the App-stamped copy was re-ingested into the registry as that
+    package's contribution;
+  - the layers door named the App package while the item door and
+    `GET /api/v1/packages` named the module;
+  - Studio's Data pillar for the App package listed the module's object — ADR-0130
+    Consequences §1.3a ("Studio's scope is the package") did not hold.
+  
+  **The door now reads both shapes, and attributes every item to the body it was
+  found in.** `packages` present → each assembled package body's collections are
+  registered stamped with **that body's** id; `packages` absent → the single
+  `manifest` branch runs exactly as before (D7). The owner is read off the body an
+  item was found in — never reverse-derived by matching a top-level item's name
+  against a name-to-package index, which would be the second metadata-identity
+  resolution path #14512's triage rejected by name.
+  
+  **Ordering and the entry gate are reused, not re-derived (D5).** The door calls
+  the same `resolveArtifactPackageOrder` the ObjectQL load path calls, so the two
+  readers of one `packages[]` cannot disagree about the registration order **or**
+  about which artifacts are loadable at all.
+  
+  ⚠️ **`resolveArtifactPackageOrder` / `artifactPackageId` moved to
+  `@objectstack/core`** — hence the `minor` there. They were in
+  `@objectstack/objectql`, which **depends on** `@objectstack/metadata`, so the
+  metadata door could not import them from where they lived; `@objectstack/core`
+  already owns `resolvePluginOrder` and is already a dependency of both readers,
+  so hosting them there adds **no edge** to the package graph. `@objectstack/objectql`
+  re-exports both under their existing names — its published surface is unchanged,
+  which is why it is graded `patch`. `@objectstack/runtime` is `patch` for the
+  dispatcher error vocabulary's `file:` anchors, repointed at the new path.
+  
+  **Single-package artifacts are byte-for-byte unaffected (D7)**, measured rather
+  than asserted: the whole `manager.register` sequence for a single-`manifest`
+  artifact — every call, in order, with the id and version each item was stamped
+  with — is pinned as a literal in
+  `packages/metadata/src/plugin-artifact-packages-attribution.test.ts` and was
+  recorded identically on both legs of the ablation. A real boot of
+  `examples/app-todo` answers every door identically before and after.
+  
+  **Nothing a booted instance can see today disappears.** Every live
+  `ARTIFACT_FIELD_TO_TYPE` key is a member of `AssembledPackageBodySchema`
+  (measured, not assumed), so iterating bodies loses no collection; and because
+  `packages` composes by `concat`, an artifact whose top level carries a
+  definition no package body repeats keeps it — registered once, attributed to the
+  artifact's own identity, and logged, because it means the artifact's two halves
+  disagree about what it ships.
+  
+  ⛔ The **producer** half is untouched: `composeStacks` and `os build` keep
+  emitting the flattened top level alongside `packages[]`. Whether they should is
+  #14512's decision, not this door's.
+- 4bd6faa: feat(engine,core,cluster): the authorization-cache invalidation substrate — an engine-seam write epoch, the `authz.invalidated` channel, and a non-optional boot-time posture statement (#11968)
+  
+  The substrate step (§10.3) of the accepted #11633 cross-request caching design
+  (maintainer acceptance 2026-08-25, Fork 2 → B). It ships the invalidation
+  machinery once, before the grants cache (#11967) that will consume it, so that
+  leg does not carry it. **Nothing here caches anything.**
+  
+  - **`ObjectQL.writeEpoch`** — a monotonic counter advanced by the engine
+    middleware seam on every `insert` / `update` / `delete`, ahead of the whole
+    chain (and so ahead of any `isSystem` bypass a middleware applies). It
+    generalises the private counter `@objectstack/plugin-security` has carried
+    since #10757: the mechanism was always the engine's, and hoisting it lets a
+    second consumer share **one** signal instead of minting a parallel one that
+    watches a different set of writes. A seam rather than a list of call sites,
+    because a forgotten call site fails as silent over-permission and writing
+    through the engine is the only way to write at all — including better-auth's
+    own adapter.
+  - **`authz.invalidated`** — one new channel on the existing `IPubSub`, bridged
+    in the shape `MetadataClusterBridgePlugin` already uses. ⭐ **The TTL a
+    consuming cache carries is the correctness contract; this channel is not.** No
+    shipped driver delivers better than at-most-once (`cluster.mdx` §4.2), so a
+    missed message is *expected*, the bridge stays out of the write path (a
+    publish failure is logged and swallowed, never awaited by the writer), and the
+    channel only moves the *typical* convergence from one TTL to one network hop.
+    That statement lives in the code at the channel, where a consumer reads it.
+  - **The boot-time posture statement** — non-optional by the ruling. Whenever a
+    grants cache is enabled (`OS_AUTHZ_GRANTS_CACHE_TTL_MS` > 0) and there is no
+    cross-node invalidation bus, the deployment is told so at `warn`, every boot,
+    naming the window it accepted and the remedy. It is a statement, not a
+    refusal: a TTL-bounded per-process cache is a legitimate configuration. It is
+    said out loud because a silently-absent invalidation bridge is how a security
+    control gets disabled with nobody noticing (#4785). The in-process `memory`
+    driver counts as **no** bus — a cluster service exists on the shipped default
+    while fanning out to nobody, which is the case a "is a cluster service
+    registered?" check answers `yes` to and is wrong about.
+  
+  **Runtime behaviour is unchanged.** With no cache consumer the epoch has zero
+  subscribers, so nothing is published and nothing is invalidated; with the
+  shipped default TTL of `0` the bridge attaches nothing and logs nothing above
+  `debug`. The one composition change worth naming: `Runtime` now registers
+  `AuthzClusterBridgePlugin` **unconditionally**, including under `cluster: false`
+  — that is not an oversight, it is the loudest case the posture check has, and
+  skipping it there would put the statement's absence exactly where the missing
+  bus is.
+  
+  `@objectstack/plugin-security` is a `patch`: its permission-set memo now reads
+  the engine's epoch when the wired engine exposes one and keeps its private
+  counter otherwise (test doubles, embeddings). The covered set of writes is
+  identical — the plugin's own middleware was already global — and it is now
+  identical *by construction* rather than by two files agreeing on which
+  operations count.
+- 86cbe37: feat(core): cross-request authorization grants cache — leg B of #11633 (#11971)
+  
+  `resolveUserAuthzGrants` can now cache its resolved envelope across requests,
+  governed by `OS_AUTHZ_GRANTS_CACHE_TTL_MS`. **The default is `0` — the cache is
+  OFF and the shipped behaviour is unchanged** (Fork 4 of the accepted #11633
+  design): a deployment that enables it accepts the configured staleness window
+  explicitly, and the boot-time posture statement says so out loud when no
+  cross-node invalidation bus is attached.
+  
+  With the cache on:
+  
+  - **Coarse write-invalidation (Fork 1A).** Any engine write to a watched
+    authorization object (`sys_member`, `sys_user_position`,
+    `sys_user_permission_set`, `sys_position`, `sys_position_permission_set`,
+    `sys_permission_set`, `sys_user`) retires every entry on the writing node —
+    a grant/revoke/role change is observed by the very next request there, by
+    invalidation and not by TTL. `metadata.changed` and peer-node
+    `authz.invalidated` hints retire wholesale via the engine write epoch.
+    `sys_session` is deliberately not watched (its once-a-minute
+    `last_activity_at` cadence would turn the cache into a non-cache).
+  - **Expiry-boundary rule.** Entries expire at `min(ttl, nextBoundary)`, where
+    `nextBoundary` is the earliest upcoming ADR-0091 `valid_from`/`valid_until`
+    among the rows consulted — a validity window flipping is a permission change
+    with no write anywhere, so the timer is the only mechanism for that class.
+  - **Ruled bypass list.** The permission explainer
+    (`plugin-security` `buildContextForUser`) and `runAs:'user'` automation runs
+    (`service-automation`) always resolve fresh, and never populate the cache.
+  - The TTL remains the correctness contract; the `authz.invalidated` bus only
+    narrows the typical cross-node window (no shipped driver exceeds
+    at-most-once delivery).
+- 6a180e4: fix(core,rest,services)!: a permission-store read failure now fails LOUD instead of resolving as an authenticated caller holding zero capabilities (#13279)
+  
+  **BREAKING** runtime behaviour change on the shared authorization resolver,
+  shipped as `minor` under the repo's launch-window convention.
+  
+  `resolveAuthzContext`'s per-read helper `tryFind` answered a THROWN read exactly
+  the way it answered an EMPTY one: `[]`. So an outage of the permission store
+  resolved as a well-formed context for an authenticated principal holding no
+  capabilities, and the package-management door answered
+  `403 FORBIDDEN` — "Reading packages requires the `studio.access` or
+  `setup.access` capability." That answer was measured byte-identical
+  (`JSON.stringify` equal, against a control that separates two answers which do
+  differ) to what a caller who genuinely holds nothing receives. An administrator
+  was told they lack a capability, during an outage of the store that holds the
+  capability.
+  
+  Maintainer ruling 2026-08-30, verbatim 「第一批其余同意」: `tryFind` 区分「无行」
+  与「读失败」,读失败 fail-loud —— 权限库不可达时不再解析为「已认证零能力」,而是
+  响亮拒绝(与真实能力拒绝的 403 可区分)。
+  
+  Second maintainer ruling the same day (第 5 场总监席决裁批 #9, verbatim 「同意」),
+  after implementing the first one showed that "the read failed" is two facts:
+  采**选项 A** —— 把 `isMissingTableError` 从 `@objectstack/metadata` 迁至
+  `@objectstack/types`(core 已依赖),metadata 保留 re-export 兼容;`tryFind` 仅对
+  **未被判定为「表未 provision」**的读失败抛 `AuthzStoreUnavailableError`。
+  
+  **What changed.** A permission-store read that is issued and throws now raises
+  `AuthzStoreUnavailableError`, which carries the EXISTING ADR-0112 wire code
+  `SERVICE_UNAVAILABLE` and status `503`. No code is added to the closed wire
+  vocabulary and no response envelope gains or loses a key — only which declared
+  code an outage selects. Doors that map thrown errors through
+  `resolveThrownHttpError` answer 503 with no per-door change.
+  
+  **What did NOT change**, and is pinned:
+  
+  - A reachable, genuinely EMPTY store (reads return no rows) still resolves to
+    zero capabilities.
+  - A genuine capability denial still answers `403 FORBIDDEN` with its message.
+  - An ABSENT engine (`ql` unwired, so no read is ever issued) still resolves to
+    an empty-but-valid envelope.
+  - Anonymous requests never reach the store, so an outage cannot make them loud.
+  - A REAL engine whose `sys_*` tables were never provisioned resolves to zero
+    capabilities, quietly — pinned to be byte-identical to the empty-store
+    envelope, in every dialect spelling and in the production wrapper shape where
+    the driver's phrase is on `cause` rather than the outer message.
+  
+  **The boundary between the two kinds of read failure.** An earlier revision of
+  this changeset claimed "embedders without a data plane are unaffected". That
+  claim was too broad; it is retracted here, and the gap it named is now closed
+  rather than merely disclosed. A read also throws when the table was never
+  PROVISIONED — a real engine, wired and reachable, whose `sys_*` tables were
+  never created — and that is a supported deployment shape, not an outage. There
+  "zero capabilities" is the TRUE answer rather than a fabrication: nothing is
+  provisioned, so nothing was withheld. Only an UNREACHABLE store — the ruling's
+  own word 不可达 — leaves the capability set unknown, and only an unknown answer
+  may not be reported as a denial.
+  
+  Treating the two alike was measured, not theorised: it turned four CI suites
+  red, all from `no such table` on `sys_user` / `sys_member` /
+  `sys_user_position` / `sys_user_permission_set`. Ordinary CRUD in
+  `@objectstack/client` answered `503`; batch validation errors that owe `400`
+  answered `503`, because authorization refused before validation ran; runtime
+  notifications answered `401` where authenticated callers must be served `200`;
+  and two `.integration.test.ts` noise guards reported that the driver and engine
+  diagnostics for `sys_position` stopped being emitted — the eager throw aborted
+  the resolution before that later read was ever issued, so a change made to stop
+  a failed read being silent had made two other channels silent.
+  
+  `tryFind` therefore raises `AuthzStoreUnavailableError` only for a read failure
+  that is NOT positively identified as an unprovisioned table.
+  
+  **`isMissingTableError` moved to `@objectstack/types`.** The classifier that
+  draws that boundary already existed and was already right — driver-code based
+  rather than prose-sniffing, documented so that "cannot say" never means "be
+  loud". It lived in `@objectstack/metadata`, which DEPENDS ON `@objectstack/core`,
+  so the resolver could not import it. Rather than keep a second copy of a
+  security-relevant predicate, the ruling relocated the one classifier to
+  `@objectstack/types` — the package core already depends on, and the repo's own
+  stated Home rule for a cross-package error predicate ("every consumer of the
+  question already depends on it, so adopting the predicate never adds an edge",
+  `packages/types/src/unique-violation.ts`). `@objectstack/metadata/errors` still
+  exports `isMissingTableError`, re-exported from the new home, so no consumer of
+  that published subpath changes.
+  
+  Its sibling `isSchemaAlreadyExistsError` moved with it — the two are not two
+  modules but two signatures over one matcher, and separating them would have
+  meant re-rolling the matcher, which is the duplication the module exists to
+  prevent. Both are now exported from `@objectstack/types`; the metadata subpath
+  deliberately still publishes only `isMissingTableError`, which is the only one
+  anything imports through it.
+  
+  ⚠️ **Signed-off risk, recorded because it is load-bearing.** Gating loudness on
+  a driver-error predicate was approved with its false-positive direction stated:
+  mis-reading a genuine outage as "table not provisioned" silently restores the
+  quiet 403 this change removes, with no thrown error and no other failing test.
+  That direction is accepted, not overlooked — the predicate keys on driver codes,
+  SQLSTATEs and errnos first, excludes the known superstring traps up front, and
+  returns `false` for anything it does not positively recognise, so an
+  unrecognised outage stays loud by default. The risk is written beside the
+  predicate in `resolve-authz-context.ts` and both directions are pinned by name
+  in `authz-store-unavailable.test.ts`. ⛔ Do not widen `isMissingTableError` to
+  make a first boot quieter: every widening moves outages into the quiet branch.
+  
+  **All-transport, not just REST.** Every transport authorizing through
+  `resolveAuthzContext` inherits this. Six of the eight production transports
+  wrapped the call in a fail-closed `catch` that would have re-silenced the
+  outage — measured, not assumed: with the resolver loud but the nets untouched,
+  the package door answered `401`, i.e. the outage merely changed disguises. Those
+  `catch` blocks now re-raise via `isAuthzStoreUnavailableError` and keep their
+  previous behaviour for every other fault. The transport set is rebuilt from
+  source and audited for set equality on every test run, so a transport added
+  later cannot inherit the old silence unnoticed.
+  
+  Callers that treat any throw from `resolveAuthzContext` as "anonymous" should
+  re-raise `isAuthzStoreUnavailableError(err)` instead: degrading it restores the
+  disguise this removes.
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/core/src/security/resolve-authz-context.ts#ResolvedAuthzContext, packages/core/src/security/authz-store-unavailable.ts#AuthzStoreUnavailableError) The breaking surface is runtime TypeScript in `@objectstack/core`'s security module and nothing else: `resolveAuthzContext` stops always-resolving and raises `AuthzStoreUnavailableError` when a permission-store read is issued and throws. NO metadata surface is touched in either direction. No Zod schema changes, no `packages/spec` declaration is added or removed, no authorable key moves, no stored row shape changes, and no object definition is edited — a customer's metadata app is byte-for-byte unaffected, so `objectstack migrate meta` has nothing to visit and there is no tombstone to mint. The wire vocabulary is likewise untouched: `SERVICE_UNAVAILABLE` is an EXISTING `StandardErrorCode` member that `HttpStatusErrorCodeMap` already maps to 503, so this change only selects a different DECLARED code for an outage rather than adding one. Both named symbols resolve at HEAD as exported declarations whose files are not `*.zod.ts`, are not under `packages/spec/src/contracts/`, are not object definitions and are not `z.input` projections; neither is referenced in code by any metadata surface (the `packages/spec` hits for `resolveAuthzContext` are comment prose describing the envelope, which this gate masks). The channel that reaches an affected consumer is therefore code review and this changeset, never the upgrade guide: a ledger entry could not express "your fail-closed catch should re-raise this error", because there is no metadata for a migration to rewrite. -->
+- d8024f0: feat(core): `Plugin.type` is the closed set the spec declares — a `PluginType` derived from `CORE_PLUGIN_TYPES` (#13925)
+  
+  **BREAKING** accept-set narrowing on a published type, shipped as `minor`
+  under the repo's launch-window convention for breaking changes. `Plugin.type`
+  (and, through it, `PluginMetadata.type`) was declared `string`, so nothing
+  type-checked a plugin author against the eight values the platform accepts —
+  the TSDoc beside it carried the whole enumeration as prose, and prose drifted.
+  Maintainer ruling 2026-09-01: the Zod enum in `@objectstack/spec`
+  (`PluginSchema.type`, declared `z.enum(['standard', ...CORE_PLUGIN_TYPES])`)
+  is the authority and the contract was always a closed set; the `string` in
+  core was the mismatch, and narrowing it is core aligning to the declared
+  contract rather than a new restriction. Paid in one stroke — no warning window.
+  
+  What changes:
+  
+  - `@objectstack/core` now exports `PluginType`, derived from the spec's own
+    constant: `'standard' | (typeof CORE_PLUGIN_TYPES)[number]` — today
+    `standard`, `ui`, `driver`, `server`, `app`, `theme`, `agent`, `objectql`.
+    It is not re-spelled in core, so the compiler's accept set and the Zod gate's
+    cannot drift apart; a runtime parity test pins the two against each other.
+  - `Plugin.type` is typed `PluginType`. A literal outside the set, or a value
+    typed `string`, no longer compiles. Runtime behaviour is unchanged: the Zod
+    gate refused such a value before and still does (`invalid_value` at `type`).
+  
+  **Migration.** A plugin that declares one of the eight members needs no change.
+  A plugin that assigned a computed or `string`-typed value narrows it at the
+  producer — declare the literal, or type the variable `PluginType` — rather than
+  casting at the assignment; a value that was never one of the eight was never a
+  valid plugin type and was already refused at parse time.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A TypeScript narrowing on a published runtime interface, aligning `packages/core` to the accept set `packages/spec` already declared. No metadata key, spec symbol, Zod schema, object definition or stored representation is added, removed or renamed — `CORE_PLUGIN_TYPES` and `PluginSchema.type` are read, not changed — so `objectstack migrate meta` has nothing to rewrite and there is no tombstone to mint. The channel that reaches an affected author is the compiler, at the assignment, which is more precise than a ledger line; which member a formerly `string`-typed value should become is authoring intent no migration entry can decide. The in-repo census under the workspace typecheck is recorded on the PR. -->
+- 4635f3e: fix(spec,core): `HotReloadConfig.stateStrategy` refuses the two values it never implemented; `distributedConfig` retired (#12340, ADR-0049)
+  
+  <!-- adr-0087: registered hot-reload-inert-state-strategies-retired -->
+  
+  **BREAKING** accept-set narrowing + export removal, landing after the v17.0.0
+  cut (the lockstep launch-window convention ships it as `minor`; the
+  prescription is registered under protocol major 18 —
+  `RETIRED_DEFS_BY_MAJOR[18]` + the D3 semantic entry
+  `hot-reload-inert-state-strategies-retired` — where `os migrate meta` users
+  will look).
+  
+  This is ADR-0049 applied one level INSIDE the library the 2026-08-25 #11825
+  ruling deliberately kept. That ruling retired the authorable lifecycle-config
+  container and kept `HotReloadConfigSchema` as a host-driven library parameter
+  type; this change measures the kept vocabulary's own remainder and finds the
+  same defect in it. The keep itself stands — `HotReloadConfigSchema`,
+  `PluginStateSnapshotSchema` and the health vocabularies still export, and
+  `HotReloadManager` / `PluginHealthMonitor` are untouched.
+  
+  The `'disk'` and `'distributed'` arms of `PluginStateManager.saveState` both
+  wrote to the SAME in-memory `Map` as `'memory'` — the in-source comments said
+  "memory fallback" — and announced the substitution at DEBUG level only. A host
+  that asked for durable or cluster-replicated state got process-local memory
+  and no error: state that does not survive the restart it was configured to
+  survive. `distributedConfig` had ZERO readers anywhere, so an author could
+  name a Redis endpoint, a TTL and a replication factor and nothing ever opened
+  a connection.
+  
+  FROM → TO:
+  
+  - `stateStrategy: 'disk'` → `stateStrategy: 'memory'` — byte-identical runtime
+    behaviour, because `'disk'` already stored to memory. It is the spelling
+    that was false, not the behaviour.
+  - `stateStrategy: 'distributed'` → `stateStrategy: 'memory'` — same, or
+    `'none'` to disable state preservation outright.
+  - `distributedConfig: { … }` → *(removed)* — delete the key. It left with the
+    `'distributed'` value its own doc comment called it "required" for.
+  - `DistributedStateConfigSchema` / `DistributedStateConfig` /
+    `DistributedStateConfigParsed` → *(removed)* — the orphan value schema of
+    that one key.
+  
+  One-line fix: replace `'disk'` or `'distributed'` with `'memory'` and delete
+  any `distributedConfig` — you were already getting in-memory state. There is
+  no in-tree replacement for durable or distributed plugin state; persist it in
+  the host, which owns the process lifetime these strategies pretended to
+  outlive. Real disk or distributed persistence returns only via the ENFORCE
+  route of ADR-0049 — the implementation first, the declaration with it.
+  
+  The retirement kit:
+  
+  - **enum-value narrowing** (`['memory','disk','distributed','none']` →
+    `['memory','none']`): invisible to all four ratchets by construction (the
+    def still emits), so the prescription hangs on the enum's own `error` map
+    dispatched by `issue.input` — the `crypto.hash` / `managedBy: 'system'`
+    precedent. A value that was never legal still gets zod's own enum message,
+    so a typo is not told it "was removed".
+  - **whole-def deletion** (route 3 — `HotReloadConfig` is not an authorable
+    surface: no metadata-type binding, stack collection or manifest embed ever
+    carried it, and nothing in the tree parses `HotReloadConfigSchema` outside
+    its own unit test, so there is no authored document to rewrite and nobody
+    who could receive a parse-time tombstone): `kernel/DistributedStateConfig`
+    in `RETIRED_DEFS_BY_MAJOR[18]` plus the D3 semantic entry. Ratchets moved as
+    a def removal must — `api-surface` −3, `authorable-surface` −8,
+    `json-schema.manifest` −1.
+  - **runtime doors** in `@objectstack/core`, because route 3 leaves no
+    parse-time prescription: `HotReloadManager.registerPlugin` now refuses an
+    unhonoured `stateStrategy` and a leftover `distributedConfig` with an
+    ADR-0112 envelope (`code: VALIDATION_ERROR`, `status: 400`) carrying the
+    prescription. Refused BEFORE the `enabled` check, so a disabled config
+    cannot smuggle the false declaration through. TypeScript hosts never reach
+    it — `HotReloadConfigParsed['stateStrategy']` is now `'memory' | 'none'`, a
+    compile error at the call site.
+  - **pin move, declared**: `DistributedStateConfigSchema` was NAMED in the
+    #11825 survivor list, so this reverses one line of that ruling on new
+    evidence — #11825 measured the container's six groups, never this key's own
+    readers. The pin in `kernel/plugin-lifecycle-advanced-retirement.test.ts`
+    moves in the same commit with the reasoning recorded beside it, and asserts
+    the surrounding keep is intact.
+  - zero in-tree consumers passed `'disk'` or `'distributed'` (measured at
+    cdbd9204b6 with a firing positive control; every live caller passes
+    `'memory'` or `'none'`), so no in-repo source changes ride along.
+- ee3595c: fix(spec,core): `HotReloadManager.startWatching` refuses instead of reporting success; `HotReloadConfig.watchPatterns` retired (#12428, ADR-0049)
+  
+  <!-- adr-0087: registered hot-reload-watch-placeholder-retired -->
+  
+  **BREAKING** accept-set narrowing, landing after the v17.0.0 cut (the lockstep
+  launch-window convention ships it as `minor`; the prescription is registered
+  under protocol major 18 — `RETIRED_KEYS_BY_MAJOR[18]` + the D3 semantic entry
+  `hot-reload-watch-placeholder-retired` — where `os migrate meta` users will
+  look). Graded `minor` rather than `major` for the same reason #12340 was one
+  day earlier, in this same module.
+  
+  ADR-0049 applied one symbol over from #12340, in the same file and on the same
+  per-key test. The #11825 keep still stands: `HotReloadConfigSchema` and
+  `PluginStateSnapshotSchema` still export, and `HotReloadManager` /
+  `PluginHealthMonitor` are untouched apart from the two doors below.
+  
+  `HotReloadManager.startWatching` contained **no watcher**. Its whole body was a
+  guard plus `logger.info('File watching started', { patterns })`, above an
+  in-source note saying real watching "would require chokidar or similar". Where
+  #12340's inert fallback at least announced itself at DEBUG, this claimed
+  success at **INFO**: an operator who set `enabled: true` with `watchPatterns`
+  and read that line had been told the opposite of the truth. `watchHandles` was
+  only ever read, deleted, iterated and cleared and **never set**, so
+  `stopWatching`'s cleanup branch and the teardown loop over its keys were
+  structurally unreachable rather than merely untaken. `watchPatterns` therefore
+  had no reader that acted on it — its only two uses were log lines.
+  
+  FROM → TO:
+  
+  - `watchPatterns: ['src/**/*.ts']` → *(removed)* — delete the key. Declare your
+    globs wherever your own watcher reads them.
+  - `manager.startWatching(name)` → `manager.scheduleReload(name, reloadFn)`,
+    called from your own watcher's change handler. That is the debounced
+    integration point this class does implement, and it is unchanged.
+  
+  One-line fix: delete `watchPatterns`, and call `scheduleReload` from your own
+  file watcher instead of `startWatching` — nothing was ever watched, so nothing
+  that used to happen stops happening. File watching is the host's job in this
+  host-driven library; `chokidar` is already a dependency of
+  `@objectstack/metadata`, `@objectstack/metadata-fs` and `@objectstack/cli` —
+  never of `@objectstack/core` — so a host has a working model to copy.
+  
+  The retirement kit:
+  
+  - **key tombstone**, and the build is what chose it: the plain deletion was
+    tried first and `gen:schema` gate (a) refused it, because
+    `HotReloadConfigSchema` is not `.strict()` and a bare deletion would be a
+    silent strip (#3733, ADR-0104) — the very defect being retired, one layer
+    down. #12340 could take route 3 because what left there was a whole *def*; a
+    key leaving a *surviving* def has no such exit. So `watchPatterns` is
+    `retiredKey()`-tombstoned, its surface line carries `[RETIRED]`, and
+    `kernel/HotReloadConfig:watchPatterns` is registered by exact key in
+    `RETIRED_KEYS_BY_MAJOR[18]`. A key tombstone on a surviving def moves
+    `authorable-surface` only — the def still emits, so `api-surface` and
+    `json-schema.manifest` do not.
+  - **no D2 conversion**, deliberately: the chain walks a normalized stack, and
+    `HotReloadConfig` is not an authorable surface — no metadata-type binding,
+    stack collection or manifest embed ever carried it — so a conversion would be
+    a transform with no seam that ever runs. For the same reason the prescription
+    carries no `os migrate meta` sentence, exactly as its `stateStrategy` sibling
+    in this module does not.
+  - **runtime doors** in `@objectstack/core`, because nothing in the tree parses
+    `HotReloadConfigSchema` outside its own unit test, so the tombstone alone
+    reaches nobody: `startWatching` now throws an ADR-0112 envelope
+    (`code: VALIDATION_ERROR`, `status: 400`) carrying the prescription, and
+    `registerPlugin` refuses a leftover `watchPatterns` the same way — before the
+    `enabled` check, so a disabled config cannot smuggle the false declaration
+    through. `startWatching` is kept as a throwing door rather than deleted so
+    that caller meets a prescription instead of a bare `TypeError`.
+  - **dead code removed with a firing positive control**: `watchHandles` and both
+    of its unreachable readers are gone. The zero was pinned first —
+    `reloadTimers.set` resolves a real writer in the same file and the same scan,
+    while `watchHandles.set` resolves nothing anywhere. `stopWatching` keeps the
+    half that always did something (it cancels a pending debounced reload), and
+    `shutdown` is unchanged in effect: the loop it lost iterated `watchHandles`
+    and therefore ran zero times.
+  - **ENFORCE and EXPERIMENTAL were both unavailable**, which is why this is a
+    removal: no runtime composes `HotReloadManager`, so enforcing would build for
+    a caller that does not exist; and a scan of every planning doc returned zero
+    mentions of hot-reload file watching against 145 control hits in the same
+    files, so there is no roadmap for `experimental` to point at.
+- af56546: feat(platform-objects): packaged disable works without the automation service, and the activation ledger has one implementation (#12359, #12350)
+  
+  Two halves of ADR-0126's "ledger convergence", bundled by maintainer ruling
+  (2026-08-26, verbatim and untranslated: 「同意」).
+  
+  ## The registration follows the declaration (#12359)
+  
+  `sys_metadata_activation` is declared in `@objectstack/platform-objects`, but
+  the only thing that REGISTERED it was the automation service's manifest —
+  because flows were the ledger's first and, until packaged actions landed, only
+  consumer. Packaged actions are a second consumer with a different owner: their
+  consult and write path live on the ObjectQL engine, present in every
+  composition that can execute an action.
+  
+  So a deployment with actions and no automation service had no ledger table, and
+  the activation door answered **503 SERVICE_UNAVAILABLE** on every flip —
+  correctly (ADR-0126 §6 wall 3: a flip that cannot be made durable must not be
+  reported as one) and permanently. Measured on a real boot; it is now this
+  change's positive test, measured on the same boot:
+  
+  ```
+  POST /api/v1/actions/_activation/showcase_task/showcase_mark_done {"enabled":false}
+    before -> 503 SERVICE_UNAVAILABLE   after -> 200, and dispatch refuses 409 ACTION_DISABLED
+  ```
+  
+  `PlatformObjectsPlugin` registers it now, so every composition carrying
+  platform-objects has the ledger and each future ADR-0126 §8 consumer (`tool`,
+  `skill`, `position`) inherits it. **MOVE, not add** — the automation service no
+  longer names the object. That was not a style choice: a second code package
+  claiming one object throws `Object "…" is already owned by package "…"`
+  (ADR-0029 D3/D7), measured, so adding a registrant would have been a boot
+  failure rather than a duplicate.
+  
+  **Upgrade is a no-op for existing data, and that is measured rather than
+  asserted.** A manifest is also a ROUTING decision — `resolveDatasourceBinding`
+  step 4 routes an object by its owning package's `defaultDatasource` — so the
+  registrar carries the table's datasource with it:
+  
+  ```
+  owner com.objectstack.service-automation (defaultDatasource:'cloud') -> 'cloud'
+  owner com.objectstack.platform-objects   (none)                     -> undefined (global default driver)
+  ```
+  
+  The ledger table already exists in live databases, so on any deployment
+  carrying a `cloud` datasource that difference would leave the rows in one
+  database and read another — every disabled artifact silently re-arming. The
+  ledger therefore rides its own manifest from the same plugin, carrying the
+  automation manifest's `scope` / `namespace` / `defaultDatasource` triple
+  verbatim. The three siblings (`sys_migration`, `sys_migration_journal`,
+  `sys_secret`) deliberately do not get it and keep riding the project database.
+  
+  ## One implementation of the §4 row contract (#12350)
+  
+  ADR-0126 §4 declares one activation ledger; it had two independent
+  implementations of that one row contract — `ObjectStoreFlowActivationStore`
+  (service-automation) and `ObjectStoreActionActivationStore` (objectql). They
+  agreed because the second was written from the first, and nothing structurally
+  held them together; §8 pre-charts `tool`, `skill` and `position`, and a third
+  and fourth copy is where the org-row skip and the `0`-is-false read get lost
+  quietly, in the direction (an artifact re-arming) nothing else measures.
+  
+  Neither consumer could import the other, so the contract now lives once in
+  `@objectstack/core` — the package both already depend on — as
+  `ObjectStoreMetadataActivationStore(engine, metadataType)`, exported alongside
+  `InMemoryMetadataActivationStore`, `MetadataActivationRow`,
+  `MetadataActivationStore`, `MetadataActivationStoreEngine` and
+  `METADATA_ACTIVATION_TABLE`. Each consumer keeps its own name, its own
+  one-argument constructor and its own docs, and fixes the discriminator.
+  
+  **No behaviour change and no API break.** `ObjectStoreFlowActivationStore` /
+  `InMemoryFlowActivationStore` / `FlowActivationStoreEngine` and
+  `ObjectStoreActionActivationStore` / `InMemoryActionActivationStore` /
+  `ActionActivationRow` / `ActionActivationStore` / `ActionActivationStoreEngine`
+  / `ACTION_ACTIVATION_TABLE` are exported from the same modules with the same
+  shapes. Row semantics are byte-equivalent: deployment-level rows scoped only by
+  the `metadata_type` discriminator, a driver `0` read as false, read-then-write
+  rather than a blind upsert, and no `delete` in the engine slice because
+  re-enabling rewrites the row.
+  
+  Both existing pin suites stay green **unchanged**, which is what makes them the
+  proof the consolidation lost nothing — verified by ablation: mutating the one
+  shared implementation turns both of them red on their own assertions, so both
+  really reach it.
+- a8c00e2: feat(core): cache successful `sys_setting` localization reads, invalidated synchronously on write (#11966)
+  
+  Leg C (ship-first) of the accepted #11633 cross-request caching design
+  (maintainer acceptance 2026-08-25, forks 1A / 2B / 3A / TTL-0).
+  `resolveLocalizationContext` re-read `sys_setting` on **every** authenticated
+  request to answer the same three keys — `timezone` / `locale` / `currency` —
+  for a workspace whose values change roughly never. That read is now cached.
+  
+  **Grade: `minor`, not `patch`.** It adds a deployment variable
+  (`OS_LOCALIZATION_CACHE_TTL_MS`) and changes the query pattern of a shipped code
+  path. Not `major`: the observable contract callers actually depend on — a
+  settings write is visible to the very next read — is preserved, and pinned.
+  
+  Caching this read was tried once before and reverted. #10221's first version
+  memoized every outcome for 30s and CI went red on
+  `analytics-timezone.dogfood.test.ts`, which writes a new org timezone and
+  expects the very next analytics query to bucket under it; the cache was narrowed
+  to memoize **failures** only. That verdict was on **TTL-only** caching and it
+  still stands unamended. What changed is that the process now has invalidation
+  seams it did not have then:
+  
+  - **Primary — the settings change seam.** `SettingsService.subscribe(ns, handler)`
+    dispatches synchronously and in-process from the write path, after the row is
+    persisted. (⚠️ #11633 calls this a "settings change bus"; no such module
+    exists — `subscribe()` is the seam. No change was needed in
+    `@objectstack/service-settings`: the seam was already public and already does
+    exactly this.)
+  - **Backstop — the engine write epoch** from #11968's substrate. Needed because
+    this resolver's own fallback reads `sys_setting` *directly*, so a seeder or
+    any other direct engine write emits no settings event at all. It is read
+    structurally rather than imported, because `@objectstack/objectql` depends on
+    `@objectstack/core` and the substrate declared `WriteEpochLike` separately for
+    exactly this consumer. A peer node's hint arrives as a local bump, so an
+    attached `authz.invalidated` bridge narrows cross-node convergence for free.
+  - **TTL** — the residual bound, for what neither seam can see. Default 30s,
+    `0` disables the cache on a real path rather than a degenerate one.
+  
+  Two rules carry the change and are pinned rather than merely documented:
+  
+  1. **A success is cached only when the engine exposes the write epoch.** A `ql`
+     with no seam is a `ql` whose writes the cache cannot observe, so rather than
+     degrade to the TTL-only shape that was already reverted here once, the cache
+     declines. A partial `{ current }` shape is not a seam either — a counter
+     nothing can bump would read as a live invalidation source and pin the answer
+     for a whole TTL.
+  2. **Invalidation retires success entries only.** #10221's failure memo exists
+     for an environment where `sys_setting` is missing; retiring it on a write
+     would restart precisely the per-request driver log spam that memo removed,
+     and no write can create a missing table. It stays TTL-bound and behaves
+     exactly as #10221/#11877 shipped it.
+  
+  `analytics-timezone.dogfood.test.ts` is unchanged and unweakened — it is this
+  leg's acceptance test, and an ablation that reduces the cache to its TTL turns
+  it red on the same assertion the original revert was recorded against.
+- 7131f12: **Security:** the "is this user id a platform admin?" question is now asked in exactly one place, and the two copies that answered it differently are gone (#10348, #10949).
+  
+  ADR-0068 D2 defines platform standing as one thing — an unscoped `admin_full_access` grant, held now. `core/security/resolve-authz-context.ts` is the declared authority for authorization derivation and its header states that every entry point must resolve through it and never re-read the grant tables itself. `plugin-auth`'s `auth-manager.ts` did exactly that twice: once inside the `customSession` callback, and once in the predicate that authorizes `/sso/register` and, through the impersonation oracle, `/admin/impersonate-user`. Both copies are deleted. Both callers — and the session payload — now ask `hasPlatformAdminStanding(engine, userId)`, a projection of `resolveUserAuthzGrants` exported from `@objectstack/core`, so a platform-admin verdict is derived in one place for the whole platform.
+  
+  **What that changes, and it is a tightening on all three counts.** The deleted copies applied neither the ADR-0091 validity window nor the ADR-0049 `active` check, and resolved `admin_full_access` by matching a name over a page of the permission-set catalogue. The authority applies both checks before any derivation and resolves the set by id. So:
+  
+  - an **expired** platform-admin grant no longer authorizes `/sso/register` or `/admin/impersonate-user`, and no longer appears in the session payload;
+  - a **deactivated** `admin_full_access` permission set no longer confers platform standing anywhere — the deactivation dialog's promise now holds on these gates too;
+  - an environment holding **more permission sets than a single catalogue page** can no longer lose the `admin_full_access` row and demote every platform admin at once.
+  
+  **One behaviour widens, and it was ruled deliberately** (maintainer, 2026-08-24). The `customSession` copy read without a system identity while the other read with one. The single authority reads as system, so on a strictly org-scoped deployment the session payload stops under-reporting platform admin — the fail-closed drift between the payload and the gates ends. Open-core composition is unaffected: the two reads reached identical rows there already.
+  
+  **The org boundary is unchanged and now pinned at both gates.** An org owner, an org admin, a `TENANT_ADMIN`-posture principal and an org-scoped `admin_full_access` grant are all refused — the `PLATFORM_ADMIN` rung derives from the unscoped capability grant alone. The predicate takes an engine and a user id and nothing else: it deliberately does not accept the resolver's caller-supplied seeds, so no part of a request can supply part of its own verdict.
+  
+  Population queries are a different kind and are untouched: `ensure-default-organization.ts` asks *which* user is the platform admin, which a per-user predicate cannot express.
+- 33184fd: `PLATFORM_ADMIN` can now be anchored on deployment CONFIGURATION instead of a stored grant row: an account whose `sys_user.email` is on `OS_PLATFORM_OWNER_EMAIL` **and** whose `email_verified` reads verified resolves `PLATFORM_ADMIN` with the declared `admin_full_access` capability set, derived live on each authorization resolution (#11663 leg L2, design accepted 2026-08-25 as bundle 1A/2B/3A/4A/5A/6A/7A).
+  
+  **Additive — nothing is revoked.** The legacy unscoped `admin_full_access` grant still confers exactly as it did; a holder whose standing rests on the row alone now gets a once-per-process pointer at the configuration line that re-anchors them. A deployment that has declared no administrators resolves byte-identically to before: the config list is empty, the derivation answers "not an admin" before it reads any row, and the pinned batch-equivalence query multiset is unchanged.
+  
+  **The variable takes a list.** `OS_PLATFORM_OWNER_EMAIL` accepts one address or a comma-separated list of them — one normalization (`trim().toLowerCase()`), duplicates collapsed, blank entries dropped. ⛔ Any entry that is not an address **fails the whole variable closed** with a loud refusal naming it, rather than being skipped: silently dropping a typo would leave a narrower administrator set than the operator declared, with nothing anywhere to notice. Unset, blank or refused all mean **zero** config-derived administrators.
+  
+  **Verified-email match only.** An unverified account holding a configured address confers nothing, and an ABSENT `email_verified` column reads unverified. The match reads the caller's own **stored** `sys_user` row, never the caller-supplied session email.
+  
+  New exports from `@objectstack/core`: `resolvePlatformAdminEmails`, `parsePlatformAdminEmails`, `matchesConfiguredPlatformAdmin`, `normalizePlatformAdminEmail`, `PLATFORM_ADMIN_EMAIL_SEPARATOR`, `ADMIN_STANDING_NON_TABLE_INPUTS` and the test hooks beside them. `@objectstack/core` now depends on `@objectstack/types` (measured acyclic: `types` depends only on `spec`).
+  
+  `@objectstack/plugin-auth`'s break-glass guard follows the derivation, as it must: `ADMIN_STANDING_SURFACE.sys_user` is reclassified `derives`, the last-administrator enumeration counts config-derived administrators through the resolver's own predicate, and a fifth write shape is judged — a change of address or an `email_verified` reset that would leave the environment with no administrator is refused, naming the configuration as the remedy. An ordinary profile write still costs the guard no reads.
+- b72db01: fix(spec,core): `PluginHealthMonitor` stops claiming a restart it never performed; the three `PluginHealthCheck` restart keys retired (#12032, ADR-0049)
+  
+  <!-- adr-0087: registered plugin-auto-restart-never-reinitialised -->
+  
+  **BREAKING** accept-set narrowing, landing after the v17.0.0 cut (the lockstep
+  launch-window convention ships it as `minor`; the prescriptions are registered
+  under protocol major 18 — three `RETIRED_KEYS_BY_MAJOR[18]` entries plus the D3
+  semantic entry `plugin-auto-restart-never-reinitialised` — where
+  `os migrate meta` users will look). Graded `minor` rather than `major` for the
+  same reason #12340 and #12428 were, the day before, in this same module.
+  
+  ## What was measured
+  
+  `PluginHealthMonitor.attemptRestart` called `plugin.destroy()` and stopped
+  there. The comment above the call read *"Call destroy and init to restart"*,
+  and `init` appeared in `health-monitor.ts` **only inside that comment**. So a
+  plugin whose health checks crossed `failureThreshold` with `autoRestart: true`
+  got: `destroy()`, a log line reading `Plugin restarted`, status `recovering`,
+  and periodic health checks that carried on running against the destroyed
+  instance. The default check when no `checkMethod` resolves is
+  `{ name: 'plugin-loaded', status: 'passed' }`, which a destroyed object passes
+  indefinitely — so the **terminal** report on a torn-down, never-re-initialised
+  plugin was `healthy`.
+  
+  Reproduced at `ee3595cefd` before anything was changed, with
+  `successThreshold: 3`:
+  
+  ```
+  round 1 (failing): status=failed     destroyed=0 alive=true
+  after backoff:     status=recovering destroyed=1 alive=false
+  recovery round 1:  status=recovering destroyed=1 alive=false
+  recovery round 2:  status=recovering destroyed=1 alive=false
+  recovery round 3:  status=healthy    destroyed=1 alive=false
+  ```
+  
+  #11955 made that report *more* convincing rather than less: reaching `healthy`
+  now costs `successThreshold` consecutive passing rounds, so a destroyed plugin
+  has to earn a declared number of passes before it is misreported.
+  `restartAttempts` was incremented as though a restart had occurred, and
+  `maxRestartAttempts` / `restartBackoff` scheduled further "restarts" of a plugin
+  that was never brought back up.
+  
+  ## Why REMOVE and not the other two ADR-0049 states
+  
+  **ENFORCE** would have to build the restart, and the class cannot host one.
+  `Plugin.init(ctx)` needs a `PluginContext`; the only two `plugin.init(...)` call
+  sites in the tree are the kernel's own boot loops (`kernel-base.ts:202`,
+  `kernel.ts:607`), both over the full plugin list, with a context that is
+  `private` on `ObjectKernel` and `protected` on `KernelBase`. No host can obtain
+  one, so a host-provided re-init hook would have had nothing to call. (Positive
+  control for that scan: the same pass resolves five real non-test
+  `plugin.destroy()` call sites, so it does see lifecycle drivers.) Building a
+  per-plugin re-init API for a caller that does not exist — no runtime constructs
+  `PluginHealthMonitor` (#11825) — is the speculation ADR-0049's staged decision
+  names as the wrong default at this milestone, where the shippable liability is
+  the false promise and not the missing feature.
+  
+  **EXPERIMENTAL** requires a roadmap. A scan of the whole `docs/` planning + ADR
+  corpus returned **zero** mentions of plugin auto-restart, against 118 control
+  hits for "health" and 13 for "hot reload" in the same corpus.
+  
+  `maxRestartAttempts` and `restartBackoff` leave with `autoRestart` rather than
+  as a tidy-up: with no restart, *"Maximum restart attempts before giving up"* and
+  *"Backoff strategy for restart delays"* have nothing left to be the vocabulary
+  **of** — the test that took `distributedConfig` out with the `stateStrategy`
+  value it was documented as requiring (#12340).
+  
+  ## What changes for a host
+  
+  All three keys are **tombstoned**, not deleted: `PluginHealthCheckSchema` is not
+  `.strict()`, so a bare deletion would be a silent strip (#3733, ADR-0104) — a
+  milder form of the defect being retired. A TypeScript host gets a `tsc` error
+  (the keys are typed `never`); a parse raises the prescription; and
+  `PluginHealthMonitor.registerPlugin` refuses a hand-built config carrying any of
+  them with an ADR-0112 envelope (`code: VALIDATION_ERROR`, `status: 400`), thrown
+  before any state is stored so a refused config leaves no half-registered plugin
+  behind.
+  
+  `PluginHealthMonitor` no longer calls `plugin.destroy()` at all. A plugin that
+  crosses `failureThreshold` is reported `degraded` / `unhealthy` / `failed` and
+  left running; acting on that is the host's job in this host-driven library
+  (#11825 route 2). Poll `getHealthStatus(pluginName)` / `getHealthReport(pluginName)`
+  and restart at the level that owns the plugin's lifetime.
+  
+  Everything else in the monitor is unchanged: registration, periodic checks, the
+  `timeout` race and its refd-timer guard (#4875), both failure routes sharing the
+  counters (#11852), and `successThreshold` binding from every status that records
+  a failure (#11955). `recovering` is now written only by the success branch —
+  the one writer that ever meant it.
+- 49f0dcf: feat(core): retire the inert `PluginMetadata` surfaces — `configSchema` with `PluginConfigValidator`, and `hotReloadable` (#11982, #12587, ADR-0049)
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/core/src/plugin-loader.ts#PluginMetadata) PluginMetadata is a runtime TS interface in packages/core with no Zod schema, no spec declaration and no stored representation; no metadata surface references it (the PluginMetadata in packages/spec/src/kernel/plugin-validator.zod.ts is an unrelated locally-declared homonym). The deleted PluginConfigValidator / createPluginConfigValidator were runtime classes in the same non-metadata module family, so `objectstack migrate meta` has nothing to rewrite; the compiler is the notification channel — TS2353 on the removed fields, TS2305 on the removed exports. -->
+  
+  **BREAKING**: removes a published-but-inert capability from the `.` entry of
+  `@objectstack/core`. Shipped as `minor` under the lockstep launch-window
+  convention (a `major` bump is refused repo-wide by `check:changeset-no-major`).
+  
+  Removed, each measured at zero live consumers with positive controls (the
+  sibling `startupTimeout` is read live by the kernel's startup timeout guard);
+  maintainer ruled retire under ADR-0049 enforce-or-remove, 2026-08-27,
+  decision-inbox batch 5; recorded in ADR-0025 §3.7:
+  
+  - `PluginMetadata.configSchema` — declared "Configuration schema for
+    validation", but the mechanism could never run: the loader's only call
+    passed no config, and no caller could — plugin factories close over their
+    config, so the kernel never receives it. Every one of ~40 production
+    `kernel.use()` compositions already passes config as constructor arguments
+    and works.
+  - `PluginConfigValidator` / `createPluginConfigValidator` — the validator
+    behind that field: real code with zero reachable invocations, deleted along
+    with its unit test and its export from the security barrel.
+  - `PluginMetadata.hotReloadable` — declared "Whether plugin supports hot
+    reload" with zero reads and zero declarations: `HotReloadManager.reloadPlugin`
+    gates only on its own registered reload configs, so `hotReloadable: false`
+    was hot-reloaded identically to `true`.
+  - The `packages/core/ADVANCED_FEATURES.md` example whose inline comment
+    promised "Config is validated before init is called" — false on the
+    retired ref, and the retired surface's only in-repo declaration site.
+  
+  One-line fixes, per symbol. If you declared `configSchema` on a plugin:
+  delete the field and parse your config at the plugin's own seam —
+  `MyConfigSchema.parse(options)` in the plugin factory or constructor, the
+  pattern `packages/rest` uses. If you imported `PluginConfigValidator` or
+  `createPluginConfigValidator`: delete the import and hold your own
+  `schema.parse` call; the compiler (TS2305) locates every such site. If you
+  declared `hotReloadable`: delete the field — it never gated anything, and
+  hot-reload participation remains governed solely by
+  `HotReloadManager.registerReloadConfig`.
+  
+  Re-declaring a kernel-owned config-validation surface is a fresh decision for
+  the day ADR-0025's plugin distribution layer lands, with #11982's zero-caller
+  measurement as its starting evidence.
+- add4360: fix(core): tell "service never registered" apart from "service failed to construct" on the async path (#13905)
+  
+  `PluginLoader.getService` — reached through `Kernel.getServiceAsync` — answered two
+  different facts with the same bare `Error`. "Nothing ever registered this service" and
+  "the service is registered and could not be built" arrived at a caller as one
+  indistinguishable rejection, separated only by message text.
+  
+  That was load-bearing one layer out. `RestServer.computeExecCtx`'s kernel branch absorbs a
+  failed `getServiceAsync('objectql')` and degrades to "no engine is wired", and it must keep
+  doing so — a kernel with no data plane is a supported configuration, declared by
+  `rest-api-plugin.ts` as `optionalDependencies: ['com.objectstack.engine.objectql']`. So a
+  multi-tenant host whose engine *failed to construct* reached the same resolver as "no
+  engine is wired", degrading silently where it should have refused loudly. The branch could
+  not be repaired from outside, because the fact it needed had been collapsed before it
+  arrived.
+  
+  The asynchronous path now carries the distinction the **synchronous** context accessor in
+  `kernel.ts` has always drawn from the registry. `@objectstack/core` publishes exactly two
+  new symbols for it:
+  
+  - `isServiceNotRegisteredError(err)` — true only when nothing was ever registered under
+    that name;
+  - `SERVICE_NOT_REGISTERED_CODE` — the code the rejection carries.
+  
+  The test is closed and its default is loud: exactly one rejection in `getService` means
+  "never registered" and only that one is branded, so every other way it can fail — a factory
+  that threw, a missing scope id, an unset loader context, a circular service dependency —
+  stays unbranded, and a consumer that absorbs only the branded rejection is loud about
+  everything else, including rejections added later.
+  
+  ⛔ Not message matching. Adding a second text classifier on a resolution path is the failure
+  mode this change removes: reading "not found" off the async path once reported every
+  missing service as `is async - use await` — the wrong fix, pointing at the wrong layer.
+  
+  Nothing existing moves. The rejection keeps a byte-identical message and `name: 'Error'`;
+  the only observable change is the two added own-properties.
+
+### Patch Changes
+
+- efb3513: fix(platform-objects,core): `sys_metadata_activation` ships tenant-less — drop the reserved organization column (#15024)
+  
+  The ADR-0126 activation ledger records that **this environment** switched a
+  packaged artifact off. That is deployment-level state, owned by no
+  organization — so the table ships with no tenant column at all.
+  
+  It briefly declared one: an `organization_id` marked "RESERVED", nullable, and
+  written by nobody, held for a per-organization dimension ADR-0126 §5
+  pre-charted. A reserved nullable tenant column is exactly the shape the
+  total-organization-ownership record proposed in PR #14976 rules out, and this
+  one had no reader either. **This is a plain removal, not a migration:** the
+  table landed after the 17.2.0 tag, so no released version ever carried the
+  column and no deployment has data in it. Should a per-organization dimension
+  ever be wanted, it returns as a separate org-owned object — never as a column
+  on this ledger.
+  
+  What changed:
+  
+  - **`sys_metadata_activation` declares `systemFields: { tenant: false }`** and
+    no longer declares the column. Both halves are needed: the tenant anchor is
+    INJECTED at registration, so deleting the field alone would have left the
+    column exactly where it was. ⚠️ Deliberately NOT `tenancy: { enabled: false }`
+    — that key is the ADR-0066 D2 platform-global *posture*, which the sibling
+    `sys_sso_provider` uses for the opposite shape (a table that KEEPS its tenant
+    column and needs the wall over it stood down). Here there is no column to
+    wall. Both spellings reach `plugin-security`'s `tenancyDisabled`, which is
+    required rather than incidental: a Layer 0 wall composing an equality on a
+    column the table does not have denies every row.
+  - **The declared unique index states `unique: 'global'`** over
+    `(metadata_type, name)` instead of `'organization'`. ⚠️ The materialized DDL
+    is unchanged: `normalizeDeclaredIndex` prepends the NULL-safe tenant key part
+    only when the table HAS a tenant column, so `'organization'` already degraded
+    to exactly these two columns. What changes is that the declaration now states
+    the boundary it actually gets, rather than claiming a per-organization one
+    that does not exist. Still explicit rather than bare `unique: true`, which
+    lint `unique/unscoped-declared-index` warns on and protocol 18 rejects.
+  - **`ObjectStoreMetadataActivationStore` drops its NULL filter and its
+    org-row skip.** `list()` is now every activation row of its type, scoped by
+    the `metadata_type` discriminator alone, and `setActive` takes the single row
+    its keyed read returns instead of picking the NULL-organization one out of
+    the result. Both guarded a column that no longer exists; the declared unique
+    index over the two columns the lookup keys on is what makes that read
+    single-valued. `ObjectStoreFlowActivationStore` and
+    `ObjectStoreActionActivationStore` inherit the change.
+  
+  Unchanged, and pinned: the operator gate on activation writes under walled
+  postures (ADR-0126 D3), the `execute()`-time flow consult and the dispatch-time
+  action consult, "absence of a row means ACTIVE", re-enabling UPDATES the row
+  rather than deleting it, and a driver `0` reading as false. The pins that
+  asserted the reserved column and the org-row skip are rewritten to pin the
+  column's ABSENCE rather than deleted — including at the injection authority
+  (`resolveInjectedSystemColumns`, which decides whether the column exists) and
+  in a real booted stack, where the row's key set is a reading of the physical
+  table.
+- e27583e: docs(core): the `AuthzStoreUnavailableError` brand doc states the measured `structuredClone` behaviour instead of claiming survival (#14006)
+  
+  Documentation only — no runtime change, no type change, no accept/reject
+  behaviour moves. It ships as a patch because the docblock is a **published
+  byte**: `tsup`'s declaration rollup carries it into `dist/index.d.ts` and
+  `dist/index.d.cts`, so it is what a consumer reads on hover.
+  
+  The brand's docblock justified the string-keyed own property with two reasons
+  joined by an `and`, of which only the second was true:
+  
+  > A string-keyed own property (not a `Symbol.for` registry key) so it survives
+  > `structuredClone`, and so a duplicated copy of this module still brands
+  > identically.
+  
+  Measured on Node 22.22.2: the structured-clone algorithm gives `Error` a
+  dedicated serialization carrying `message`, `stack` and `cause` only, and drops
+  every other own property — the brand, the ADR-0112 `code`, `status` and
+  `object` alike (a subclass's own `name` returns as `'Error'`). The
+  plain-object control is the half that proves it: `{ __brand: true, code: 'C' }`
+  keeps **both** keys through the same call, so the loss is specific to `Error`,
+  not general to `structuredClone`.
+  
+  The property and the reason that actually earns it are kept — a duplicated copy
+  of the module still brands identically, which is exactly what `instanceof`
+  cannot do across two installed copies of `@objectstack/core`. The false half is
+  replaced by the measured behaviour, carrying the reproducible script and the
+  Node version rather than a second unsourced assertion, and phrased to match
+  what `service-not-registered.ts` already records for its own brand (one
+  phrasing across the two modules, not two).
+  
+  ⛔ The clone gap is deliberately NOT "fixed" with a `toJSON` or a custom
+  serialization: no call site crosses a clone boundary today
+  (`rethrowAuthzStoreUnavailable` on the rest rethrow paths,
+  `isAuthzStoreUnavailableError` inside service `catch` blocks — all in-process),
+  and adding one would widen the module's surface with nothing pulling on it. The
+  docblock instead names the trap the false claim invited: branching on the brand
+  across a worker or `postMessage` boundary would answer `false` and fail OPEN on
+  a security path.
+- 983edf1: fix(core): `autoRestart` now fires for a health check that throws or times out, not only for one that returns a failure (#11852)
+  
+  `PluginHealthMonitor.performHealthCheck` reaches its failure handling by two
+  disjoint routes, and only one of them could ever restart the plugin.
+  
+  A check that **returned** a failure (`false` or `{ status: 'unhealthy' }`)
+  incremented `failureCounters`, cleared `successCounters`, and — once
+  `failureThreshold` consecutive failures accumulated — consulted `autoRestart`
+  and restarted the plugin. A check that **threw** took a separate `catch` block
+  that incremented `failureCounters` and stopped there: it never cleared
+  `successCounters` and never read `autoRestart`. Because `raceCheckTimeout`
+  rejects rather than resolving, every `timeout` overrun lands in that `catch`,
+  so a plugin that hung was marked `failed` and never restarted no matter how
+  many rounds passed or what `autoRestart` said. The severer of the two failure
+  modes was the one that could not trigger recovery.
+  
+  Both routes now funnel into one `recordFailedRound` step that owns the
+  counters, the `failureThreshold` comparison and the `autoRestart` decision, so
+  a thrown or timed-out check is restart-eligible on exactly the same terms as a
+  returned failure.
+  
+  The per-route *status* label is deliberately unchanged: a throw is still the
+  separate `failed` status applied immediately with no threshold, as
+  `content/docs/protocol/kernel/lifecycle.mdx` documents. Only the counters and
+  the restart decision are shared — those are what `failureThreshold` and
+  `autoRestart` declare, and neither names a route.
+- 8120808: feat(tooling): `@objectstack/core` declares a `typecheck` script, and its test and examples layers enter the ratchet (#14613)
+  
+  `packages/core/package.json` declared exactly `build`, `test` and `test:watch`.
+  Around twenty sibling packages declare `typecheck`, and `turbo run typecheck`
+  selects only packages that declare the task — so the lint workflow's typecheck
+  job had no way to reach this package, and `pnpm --filter @objectstack/core
+  typecheck` failed with `ERR_PNPM_RECURSIVE_RUN_NO_SCRIPT` for anyone who tried
+  it. The package's types ship anyway: `build` emits a 233 KB `dist/index.d.ts`,
+  and rest, runtime, mcp, services and plugins all import it.
+  
+  The state was tracked but not runnable. `check:type-check-coverage` carried
+  `@objectstack/core` as a DEBT entry of 98 and had already re-measured it once
+  (91 to 98), so nothing was invisible — but a ledger only the gate can read is
+  not something a contributor working in the package can run, which is how a
+  dispatched task came to assume the script existed.
+  
+  **Measured at `84b8190ae`, dependency closure built first.** The undivided
+  program (`tsc --noEmit -p tsconfig.json`, exactly as the DEBT entry measured it)
+  reports 98 errors across 12 files, and every one of the 12 is a `.test.ts`. The
+  same program restricted to the 63 non-test source files reports **zero**. So the
+  build layer graduated as it stood, and the 98 did not have to be repaired before
+  the script could exist.
+  
+  **94 of the 98 were the check, not the code.** The repair is the split this
+  repo already runs for `spec`, `rest`, `objectql` and `client`: `tsconfig.json`
+  stays the build config and excludes the test layer; a new `tsconfig.test.json`
+  compiles that layer under the module semantics vitest actually executes it with
+  (`module: esnext`, `moduleResolution: bundler`), which retires 22 x TS2835, the
+  TS2347 beside them and the share of 71 x TS7006 they cascade into — an import
+  that does not resolve makes every symbol it names `any`. **No test file was
+  edited.** Strictness is inherited and untouched. The residue is 4 errors over 4
+  files, held per file and per signature in `test-typecheck-debt.json`, EXACT and
+  shrink-only.
+  
+  **The `examples/` half was found by the new script, not by the card.** Declaring
+  `typecheck` flips the package from COVERED-BY-LEDGER to COVERED-BY-SCRIPT, and
+  `check:type-check-coverage`'s SOURCES_COVERED invariant immediately reported
+  `packages/core/examples` — 2 non-test source files in no tsc program at all.
+  Neither had ever compiled: `kernel-features-example.ts` imported `../index.js`
+  (above the package root, never existed) and `phase2-integration.ts` imported
+  `@objectstack/core`, i.e. this package self-referencing by a name it declares in
+  no dependency block. Collapsing that cascade exposed rather than removed errors,
+  12 to 29, all of them real and none of them new: 20 reads of `ObjectKernel`'s
+  **private** `logger`; four members of the security scan result that do not exist
+  (`passed`, `score`, `summary.critical`, `summary.high`, where the type carries
+  `status` and per-severity counts); and two config literals passing the unparsed
+  shapes where `PluginHealthMonitor.registerPlugin` and
+  `HotReloadManager.registerPlugin` are declared over the `Parsed` ones. That last
+  pair is retirement drift — this file was edited by two retirements (restart keys,
+  `watchPatterns`) while no tsc program could check the result. Every correction is
+  pinned to this package's own signatures; `packages/spec` was not touched.
+  
+  `packages/core` therefore leaves the DEBT ledger: the coverage gate now reads
+  70/79 packages type-checked with 9 ledgered, where it read 68/78 with 10.
+- f658793: Restore the #10096 standing invariant (「浏览器可达的 spec 导出面必须
+  schema-free」) for `@objectstack/core`'s plural→singular store-key fold.
+  
+  `@objectstack/spec`: the `defineStack()` manifest-collection vocabulary
+  (`PLURAL_TO_SINGULAR`, `SINGULAR_TO_PLURAL`, `pluralToSingular`,
+  `singularToPlural`) moved to a schema-free module and is now ALSO exported
+  from the sanctioned schema-free entry `@objectstack/spec/meta-spelling`
+  (widened per the #10096 ruling's reference pattern). `@objectstack/spec/shared`
+  keeps the same four symbols as re-exports — no consumer-visible removal. The
+  manifest map and `META_URL_TO_SINGULAR` remain deliberately distinct contracts
+  (#8424).
+  
+  `@objectstack/core`: `canonicalMetadataServiceType`'s one value import moves
+  from `@objectstack/spec/shared` to `@objectstack/spec/meta-spelling`, so
+  browser consumers of `@objectstack/core` (every `@objectstack/client` bundle)
+  no longer link the zod schema closure through the store-key fold.
+- 0a8ebf3: Scope the legacy platform-admin deprecation pointer to walled tenancy postures
+  
+  The request-side notice that tells an operator their unscoped `admin_full_access`
+  grant row is the OLD anchor — "it is removed in a later release", "re-anchor this
+  deployment by declaring its administrators in configuration" — was emitted without
+  regard to the deployment's tenancy posture, so it fired on `single` rigs too.
+  
+  `single` is the DEFAULT posture, and on a `single` rig that row is not legacy at
+  all: the boot-time `bootstrapPlatformAdmin` mints it to promote the first human
+  user, and that promotion is ruled correct and unchanged. Such a deployment was
+  therefore being told, once per process, to migrate off an anchor that is not
+  scheduled to go away, toward a variable its own promotion is pinned never to read.
+  
+  The pointer is now gated on `postureEnforcesWall(resolveTenancyPosture())`, the
+  same predicate and the same source the boot-side detector already reads, so the
+  migration window's loudness is scoped to the walled postures actually in it.
+  Walled rigs are unaffected and still receive the notice.
+  
+  ⛔ Standing is not touched: this is a log-line trigger, not access control. Every
+  deployment resolves exactly the `PLATFORM_ADMIN` it resolved before.
+- fd289be: `HotReloadManager`'s refusal messages — the plugin-registration doors for retired `stateStrategy` values and removed config keys, and the `startWatching()` removal notice — no longer cite internal tracker ids. The prescriptions keep their customer-resolvable anchors (ADR-0049 enforce-or-remove, the `@objectstack/spec` / `@objectstack/core` versions, and the `scheduleReload` migration call); the `#NNNN` tokens, which resolve to nothing for the host author reading the refusal, are gone.
+- 2d5cee3: docs(core,service-cluster): retire the two docblocks left stale by `IPubSub`'s corrected delivery guarantee (#12836)
+  
+  #12651 corrected `IPubSub`'s contract docblock: delivery is whatever the
+  configured driver declares, no shipped driver exceeds at-most-once, a missed
+  message is EXPECTED, and handlers must be idempotent **and** tolerate loss.
+  Two docblocks elsewhere still described the world before that correction.
+  
+  **`@objectstack/core` — `security/authz-invalidation-channel.ts`.** It carried a
+  paragraph asserting, in the present tense, that the interface docblock "still
+  says" *At-least-once delivery*, and that repairing it was a `packages/spec`
+  change filed separately. That filing was #12651 and it has landed, so the
+  paragraph is now false rather than merely stale — it sends the next reader
+  looking for a live disagreement between the interface and the drivers that no
+  longer exists. Replaced with a plain pointer to the interface docblock.
+  Everything else in that docblock is unchanged: the at-most-once reasoning, the
+  TTL-is-the-bound rule, and the best-effort-at-the-publish-site note all still
+  hold.
+  
+  **`@objectstack/service-cluster` — `memory/pubsub.ts`.** The line "At-least-once
+  semantics held vacuously (a single in-process delivery)" was wrong on its own
+  terms even before #12651: the same docblock states that handler errors are
+  swallowed and logged via `onError`, so a handler that throws loses the message
+  with no retry and no persistence. That is not at-least-once in any sense, and
+  "vacuously" does not save it. Replaced with the honest statement — one
+  synchronous in-process delivery attempt per subscriber, no persistence, no
+  retry, no replay.
+  
+  Prose only. No behaviour change, and no test changed.
+- a17da05: fix(core): only a backend fault populates `resolveLocalizationContext`'s failure memo (#11877)
+  
+  `resolveLocalizationContext` memoizes an outcome for 30s whenever the read
+  "failed" (#10221 — so a repeatedly-failing `sys_setting` query does not re-run,
+  and the driver does not re-log it, on every request). The write condition was
+  wider than the cache's own docblock: six legs set the flag and only **one** of
+  them is the backend fault the docblock describes (the direct `ql.find` throw).
+  The other five are the **settings service refusing** — a thrown `getMany`, each
+  of the three older per-key `get`s, and the whole-block "service unavailable"
+  handler.
+  
+  Those five legs are reachable inside the settings engine's **bind window**
+  (`SettingsService.getMany` refuses all-or-nothing for a `localization`
+  namespace whose manifest is not yet registered), so:
+  
+  - A caller that deliberately re-reads **after** the bind — the #11580 stdio
+    repair re-resolves at `kernel:bootstrapped` for exactly this reason — was
+    answered from the memo taken **inside** the window for up to 30s. The
+    correction silently did not happen, with nothing in the output saying so.
+  - A settings refusal standing alongside a perfectly **successful** direct read
+    memoized that successful value — the staleness the docblock forbids outright
+    and that `analytics-timezone.dogfood.test.ts` (#1982/#2018) exists to catch.
+  
+  The memo is now written only for the direct-read fault. **#10221's protection
+  is unchanged for the legs it was built for**: its environment (table not
+  migrated yet) still memoizes, because the direct read throws there whether or
+  not a settings refusal stands in front of it — pinned in both directions. And
+  nothing is lost on the narrowed legs: those refusals throw out of an in-memory
+  registry check *before* any query and *before* any log line, so memoizing them
+  suppressed neither.
+  
+  No signature, export or accepted-input change — the flag is internal to the
+  module.
+- 7c41693: fix(core,plugin-auth,plugin-security): every `OS_PLATFORM_OWNER_EMAIL` reader asks the ONE list-aware parser (#13147)
+  
+  `OS_PLATFORM_OWNER_EMAIL` accepts one address **or a comma-separated list** of
+  them (#11663 Choice 2B). The list parse landed in a single home
+  (`@objectstack/core`'s `platform-admin.ts`) and the authorization derivation
+  consumed it — but every other reader kept calling `resolvePlatformOwnerEmail()`,
+  which returns the operator's value trimmed and otherwise verbatim, and kept
+  treating that whole string as ONE address.
+  
+  An operator who configured a list therefore entered a self-contradictory state:
+  authorization recognised them as a platform administrator, while four separate
+  capabilities silently did nothing. Every direction failed **closed** — no
+  privilege escalation existed at any point — but a declared capability vanished
+  with no error anywhere:
+  
+  - `bootstrap-platform-admin` promoted **nobody**, logging "will be promoted when
+    that account registers" on every boot forever;
+  - the walled operator stamp (`plugin-auth`) stamped **no** list member verified,
+    so the account it should have provisioned was then refused elevation as
+    `walled_owner_not_verified`;
+  - `isVerifiedPlatformOwnerSession` / `platform-owner-wall-bypass` let **nobody**
+    across the Layer 0 organization wall — the largest of the affected surfaces;
+  - the walled boot diagnostic printed the raw list in the slot where an operator
+    reads one address, and its dev-seed silence clause never matched.
+  
+  All six readers now ask the same parser. `@objectstack/core` gains
+  `isConfiguredPlatformAdminEmail(email, config)` — the membership half of
+  `matchesConfiguredPlatformAdmin`, spelled once and shared, for the readers that
+  hold a bare address rather than a `sys_user` row (the elevation gate keeps its
+  two halves apart so `walled_owner_not_registered` and `walled_owner_not_verified`
+  stay distinct answers; the stamp is handed an email before any row exists; the
+  wall takes a fast negative before spending a row read). `PlatformAdminEmailConfig`
+  gains `declaredSpellings`, the entries as the operator typed them, so the by-email
+  `sys_user` lookup and the boot diagnostic get the as-typed form **from the one
+  parse** instead of splitting the raw value a second time.
+  
+  Behaviour for a single declared address is unchanged, including the
+  case-insensitive match and the verbatim-spelling store lookup. A **refused**
+  list (Choice 2B fails the whole variable closed on one unparseable entry) now
+  reaches these readers as "zero administrators", which is the same answer they
+  already gave for an unset variable — never a silently narrower set.
+  
+  Two readers deliberately keep reading the raw value: the walled-boot refusal and
+  the verification-path probe guard in `auth-plugin.ts` both use it as a pure
+  truthiness test ("did the operator declare anything at all?"), which is
+  grammar-independent. A census pin now enumerates the raw readers across both
+  plugin packages and fails on a seventh.
+- 9688f58: `os plugin publish` now verifies the artifact's own declared `manifest.integrity` digests before uploading, and refuses the publish on a digest mismatch, a declared entry with no file, or a packaged file the map does not declare (an absent map still publishes — the field is optional). The pure checker, `verifyIntegrity`, lives in `@objectstack/core` beside the artifact-signature contract. Unpack-time re-verification remains the cloud control plane's obligation (#11331) and is not changed by this release.
+- 556ebc1: docs(core): correct `Plugin.type`'s TSDoc enumeration — it omitted `objectql` (#13762)
+  
+  `Plugin.type` is typed `string` in `@objectstack/core`, so its TSDoc is the only
+  enumeration a plugin author reading the interface ever sees; nothing type-checks
+  them against it. That comment listed seven values while the declared set is
+  eight: `PluginSchema.type` in `@objectstack/spec` is
+  `z.enum(['standard', ...CORE_PLUGIN_TYPES])`, and `CORE_PLUGIN_TYPES` carries
+  `objectql` — the type `packages/objectql/src/plugin.ts` declares on the engine
+  plugin essentially every runtime loads first.
+  
+  The comment now lists all eight and names `CORE_PLUGIN_TYPES` as the
+  authoritative set. The same omission in the hand-written
+  `content/docs/plugins/anatomy.mdx` transcription of this interface is corrected
+  in the same change.
+- f7b25c5: fix(core): `successThreshold` now binds from every status that records a failure, so a declared count above 2 stops being unreachable (#11955)
+  
+  `PluginHealthMonitor` consulted `successThreshold` only while a plugin's status
+  was `unhealthy` or `degraded`. The first success in a recovery wrote
+  `recovering` — a status that gate did not name — so the **second** success took
+  the outer `else` and went straight to `healthy` without the counter being read
+  at all. `failed` was in neither set either, so a plugin whose check threw
+  recovered on its **first** success.
+  
+  The declared value was therefore capped in practice:
+  
+  | Status when the successes start | Consecutive successes actually required |
+  | :--- | :--- |
+  | `unhealthy` / `degraded` | 2, whatever `successThreshold` said |
+  | `failed` / `recovering` | 1, whatever `successThreshold` said |
+  
+  A declared `successThreshold: 5` was indistinguishable from `2`. The default is
+  `1`, which is exactly the value at which the defect is invisible — every
+  declared value above it was the one that misbehaved.
+  
+  The counter is now consulted on the way out of every status that records an
+  observed failure — `degraded`, `unhealthy`, `failed` and `recovering` — so
+  `successThreshold: N` requires N consecutive successes from each of them, as
+  its declaration says ("Consecutive successes needed to mark healthy"). The gate
+  is a map that is exhaustive over `PluginHealthStatus`, so a status added to the
+  spec fails to compile until it is placed on one side or the other; that is what
+  `recovering` slipped through before.
+  
+  `healthy` and `unknown` still promote on the first success, deliberately: the
+  count is declared as a **recovery** criterion ("Number of consecutive successes
+  to recover from unhealthy state") and neither of those records a failure to
+  recover from — `unknown` is the status `registerPlugin` writes before any check
+  has run.
+  
+  **Behaviour change, only for configs that declare `successThreshold` above 1.**
+  At the default `1` every route is byte-for-byte what it was: one success has
+  always been enough and still is. A plugin declaring a higher count now takes
+  the number of consecutive successes it asked for before it is reported
+  `healthy`, including after a `failed` round and after an `autoRestart`.
+  
+  This also makes #11852's `successCounters` reset load-bearing. That fix cleared
+  the counter on the thrown failure route, and could not be pinned: the counter's
+  only read site was unreachable with a stale non-zero value, so any test would
+  have passed for the wrong reason. With `failed` gated on the counter, a throw
+  that interrupts a recovery now demonstrably starts the count over.
+- Updated dependencies [809d417]
+- Updated dependencies [387e231]
+- Updated dependencies [f794e4e]
+- Updated dependencies [cae2169]
+- Updated dependencies [b812a54]
+- Updated dependencies [2d4fa75]
+- Updated dependencies [0e4e51b]
+- Updated dependencies [e84bbf6]
+- Updated dependencies [effae80]
+- Updated dependencies [d62f990]
+- Updated dependencies [c45d8e6]
+- Updated dependencies [2e3e8c7]
+- Updated dependencies [e621291]
+- Updated dependencies [40a93b5]
+- Updated dependencies [101ad2c]
+- Updated dependencies [d5b330d]
+- Updated dependencies [dda969c]
+- Updated dependencies [1f45690]
+- Updated dependencies [277948f]
+- Updated dependencies [8bdd955]
+- Updated dependencies [f3bbbef]
+- Updated dependencies [4f24e9d]
+- Updated dependencies [6a180e4]
+- Updated dependencies [474242f]
+- Updated dependencies [63cd487]
+- Updated dependencies [bd4aa4e]
+- Updated dependencies [803eaab]
+- Updated dependencies [f8e8f03]
+- Updated dependencies [eae824e]
+- Updated dependencies [f6fa22c]
+- Updated dependencies [8a483b3]
+- Updated dependencies [97bcd99]
+- Updated dependencies [df59de0]
+- Updated dependencies [96e25a8]
+- Updated dependencies [f75a38a]
+- Updated dependencies [7a25e7d]
+- Updated dependencies [1fa05a6]
+- Updated dependencies [c85a265]
+- Updated dependencies [dcb10a5]
+- Updated dependencies [773a999]
+- Updated dependencies [35dffea]
+- Updated dependencies [776a098]
+- Updated dependencies [5060877]
+- Updated dependencies [4f6325d]
+- Updated dependencies [52954c0]
+- Updated dependencies [2aa8456]
+- Updated dependencies [93809a3]
+- Updated dependencies [7c0d0c3]
+- Updated dependencies [daae7aa]
+- Updated dependencies [8dc22d6]
+- Updated dependencies [279431e]
+- Updated dependencies [948dd6b]
+- Updated dependencies [3b4c56c]
+- Updated dependencies [ae8edd2]
+- Updated dependencies [e25403c]
+- Updated dependencies [a81aa9d]
+- Updated dependencies [64baa68]
+- Updated dependencies [9fa70d7]
+- Updated dependencies [09db64a]
+- Updated dependencies [92916e7]
+- Updated dependencies [a84f3ea]
+- Updated dependencies [f2eaae8]
+- Updated dependencies [56c093c]
+- Updated dependencies [c09451b]
+- Updated dependencies [ba64877]
+- Updated dependencies [7345308]
+- Updated dependencies [79b6a22]
+- Updated dependencies [30d96ab]
+- Updated dependencies [f658793]
+- Updated dependencies [c95ad19]
+- Updated dependencies [e58ea8b]
+- Updated dependencies [4a17645]
+- Updated dependencies [3795c5f]
+- Updated dependencies [8ab926b]
+- Updated dependencies [7317cf2]
+- Updated dependencies [e25e839]
+- Updated dependencies [5997207]
+- Updated dependencies [8b13cc8]
+- Updated dependencies [4a4a35d]
+- Updated dependencies [86e765a]
+- Updated dependencies [1d7e76a]
+- Updated dependencies [53dc739]
+- Updated dependencies [fd289be]
+- Updated dependencies [03bf7b1]
+- Updated dependencies [f90e820]
+- Updated dependencies [18d816a]
+- Updated dependencies [e8bd715]
+- Updated dependencies [b91c351]
+- Updated dependencies [a28a3c0]
+- Updated dependencies [daeaaf9]
+- Updated dependencies [c459da6]
+- Updated dependencies [e914733]
+- Updated dependencies [f887e52]
+- Updated dependencies [881f8d8]
+- Updated dependencies [3bfa1e6]
+- Updated dependencies [901355c]
+- Updated dependencies [34ce8e7]
+- Updated dependencies [33681ea]
+- Updated dependencies [bfe13c8]
+- Updated dependencies [0fb3044]
+- Updated dependencies [4635f3e]
+- Updated dependencies [ee3595c]
+- Updated dependencies [b2eab95]
+- Updated dependencies [93940d4]
+- Updated dependencies [3a04b01]
+- Updated dependencies [45b9051]
+- Updated dependencies [b9e9227]
+- Updated dependencies [d395692]
+- Updated dependencies [5894d30]
+- Updated dependencies [a3765f6]
+- Updated dependencies [e22158f]
+- Updated dependencies [7404925]
+- Updated dependencies [0c2334f]
+- Updated dependencies [778c59f]
+- Updated dependencies [d2619fd]
+- Updated dependencies [6acb11a]
+- Updated dependencies [33c5fd3]
+- Updated dependencies [20b0fdb]
+- Updated dependencies [905019b]
+- Updated dependencies [a286411]
+- Updated dependencies [98c0d33]
+- Updated dependencies [368a82e]
+- Updated dependencies [a3d5724]
+- Updated dependencies [93ea19b]
+- Updated dependencies [9ee2dcf]
+- Updated dependencies [8cb96ec]
+- Updated dependencies [8f10a79]
+- Updated dependencies [6269a55]
+- Updated dependencies [22e5236]
+- Updated dependencies [0fb8760]
+- Updated dependencies [e5ce2ed]
+- Updated dependencies [be21955]
+- Updated dependencies [bc56e18]
+- Updated dependencies [be21955]
+- Updated dependencies [a9ee989]
+- Updated dependencies [4d0d944]
+- Updated dependencies [15d58db]
+- Updated dependencies [d63b014]
+- Updated dependencies [9abe4e4]
+- Updated dependencies [2cc7122]
+- Updated dependencies [50d6c92]
+- Updated dependencies [9e0ba21]
+- Updated dependencies [311433f]
+- Updated dependencies [3e5ad08]
+- Updated dependencies [9abe4e4]
+- Updated dependencies [b7131f3]
+- Updated dependencies [e5812fa]
+- Updated dependencies [7085f90]
+- Updated dependencies [dee4dd4]
+- Updated dependencies [ce7e497]
+- Updated dependencies [51ecb2f]
+- Updated dependencies [9086761]
+- Updated dependencies [42a117b]
+- Updated dependencies [1401ae7]
+- Updated dependencies [4297fe7]
+- Updated dependencies [e398863]
+- Updated dependencies [d16df74]
+- Updated dependencies [f11fc61]
+- Updated dependencies [e808890]
+- Updated dependencies [8f79379]
+- Updated dependencies [e6ca40e]
+- Updated dependencies [0c77ea4]
+- Updated dependencies [52954c0]
+- Updated dependencies [89eb997]
+- Updated dependencies [aa5994e]
+- Updated dependencies [be93457]
+- Updated dependencies [a65db76]
+- Updated dependencies [2cf5a96]
+- Updated dependencies [15eb2c9]
+- Updated dependencies [5691b07]
+- Updated dependencies [2a6122b]
+- Updated dependencies [225e769]
+- Updated dependencies [8af88dd]
+- Updated dependencies [fb5fbb8]
+- Updated dependencies [d7b3963]
+- Updated dependencies [b72db01]
+- Updated dependencies [dce5cd4]
+- Updated dependencies [177ebdc]
+- Updated dependencies [8d237b4]
+- Updated dependencies [2d2e6f0]
+- Updated dependencies [2d8dd8d]
+- Updated dependencies [22d573e]
+- Updated dependencies [b5a2398]
+- Updated dependencies [348860c]
+- Updated dependencies [5383fa6]
+- Updated dependencies [5b3ff63]
+- Updated dependencies [1a6a19c]
+- Updated dependencies [527e050]
+- Updated dependencies [dd33bf9]
+- Updated dependencies [4cb2a90]
+- Updated dependencies [74a7804]
+- Updated dependencies [53d3689]
+- Updated dependencies [b3a63d3]
+- Updated dependencies [033a34c]
+- Updated dependencies [4d25d22]
+- Updated dependencies [1ffee51]
+- Updated dependencies [5ae4303]
+- Updated dependencies [ece4dad]
+- Updated dependencies [e9b377e]
+- Updated dependencies [146f448]
+- Updated dependencies [735f5c7]
+- Updated dependencies [a7e18de]
+- Updated dependencies [366f895]
+- Updated dependencies [dc75ba8]
+- Updated dependencies [cce0aa9]
+- Updated dependencies [e764507]
+- Updated dependencies [cff17af]
+- Updated dependencies [39404f3]
+- Updated dependencies [ca1965f]
+- Updated dependencies [8619f95]
+- Updated dependencies [b706af9]
+- Updated dependencies [db8c288]
+- Updated dependencies [0e5fe7f]
+- Updated dependencies [fc9ba76]
+- Updated dependencies [0f94cc7]
+- Updated dependencies [a11c1a5]
+- Updated dependencies [71f9cd1]
+- Updated dependencies [ee17d86]
+- Updated dependencies [cdbd920]
+- Updated dependencies [18c432e]
+- Updated dependencies [3c418c4]
+- Updated dependencies [fa8715a]
+- Updated dependencies [a933ed7]
+- Updated dependencies [b3ca463]
+- Updated dependencies [a933ed7]
+- Updated dependencies [0d4a6a8]
+- Updated dependencies [518d5e5]
+- Updated dependencies [6643ba1]
+- Updated dependencies [eeba2ef]
+- Updated dependencies [ec4c4d2]
+- Updated dependencies [424f73c]
+- Updated dependencies [cccbe51]
+- Updated dependencies [a8d6b1d]
+- Updated dependencies [e4a7695]
+- Updated dependencies [87075b1]
+- Updated dependencies [fc58a99]
+- Updated dependencies [14cfc00]
+- Updated dependencies [1c6f7b4]
+- Updated dependencies [e854a53]
+- Updated dependencies [dfebfc8]
+- Updated dependencies [d028b37]
+- Updated dependencies [122ef38]
+- Updated dependencies [4a37870]
+- Updated dependencies [428f9b2]
+- Updated dependencies [aa7ff56]
+- Updated dependencies [c41b42e]
+- Updated dependencies [c4db311]
+- Updated dependencies [750fff5]
+- Updated dependencies [c19035e]
+- Updated dependencies [ececf7a]
+- Updated dependencies [d173125]
+- Updated dependencies [8eeca27]
+- Updated dependencies [8425c17]
+- Updated dependencies [a5ef1d8]
+- Updated dependencies [87ad30c]
+- Updated dependencies [772d5de]
+- Updated dependencies [ce80ec2]
+- Updated dependencies [b372318]
+- Updated dependencies [97a2263]
+- Updated dependencies [29d0676]
+- Updated dependencies [0169d49]
+- Updated dependencies [6bd3231]
+- Updated dependencies [d2b5ba8]
+- Updated dependencies [b799ac5]
+- Updated dependencies [8f74307]
+- Updated dependencies [d23dc08]
+- Updated dependencies [644ad50]
+- Updated dependencies [9735662]
+- Updated dependencies [4d5b4f8]
+- Updated dependencies [0da7cd2]
+- Updated dependencies [28a5c3e]
+- Updated dependencies [4bc18e5]
+  - @objectstack/spec@17.3.0
+  - @objectstack/types@17.3.0
+
 ## 17.2.0
 
 ### Minor Changes

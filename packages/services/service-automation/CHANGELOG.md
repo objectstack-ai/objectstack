@@ -1,5 +1,1398 @@
 # @objectstack/service-automation
 
+## 17.3.0
+
+### Minor Changes
+
+- 4bb09e8: feat(service-automation): an operator can put back a suspension a failed resume consumed (#13909)
+  
+  A run that was resumed and whose downstream node merely **threw** was
+  terminally unresumable, and nothing anywhere could move it. The engine consumes
+  the suspension *before* running downstream nodes, so such a node throws with
+  the pause already gone and the catch arm records the run `failed`: `resume`
+  then answers `RUN_NOT_FOUND`, `cancelRun` is a no-op, and none of the engine's
+  other public methods takes the run anywhere. A deployment could enter that
+  state and never leave it.
+  
+  `AutomationEngine.restoreConsumedSuspension(runId, { requestedBy, reason })`
+  is the exit. It puts the consumed suspension back — verbatim, as it stood at
+  the pause — so the run is resumable again through an ordinary `resume`, with
+  the same authority gate, the same screen validation and the same idempotency
+  guard as any other.
+  
+  - **Deliberate, never automatic.** Nothing calls it on its own: no retry, no
+    sweeper. An operator asks for one run, by id.
+  - **Safe to refuse, with the reason named.** A run that is still suspended, one
+    whose resume is *in flight*, one that completed, one that was cancelled, one
+    that never suspended, and an unknown id each get their own refusal — as does
+    an unreadable store, which is refused rather than guessed at.
+  - **Idempotent.** A suspension is keyed by run id, so however many operators
+    ask there is one resumable pause and no extra traversal — the verb re-arms
+    and stops. Two racing callers in one process get one restore and one refusal.
+  - **It leaves a trace.** The restore is logged with the run, flow, node, when
+    the suspension was consumed, who asked and why, and the run is recorded
+    `paused` again so the repair is not invisible. Across a restart the exit
+    still works: the consumed suspension rides the run's own terminal history row
+    (in `sys_automation_run` columns that already existed), and a run that is
+    restored and then finishes clears it.
+  
+  ⚠️ A repair, not a prevention. The failed attempt's side effects are **not**
+  undone and the original resume signal is **not** replayed — the continuation
+  must be re-issued. Whether the pause should survive a downstream throw at all
+  is a separate, unruled decision (#13937); this change leaves the resume
+  ordering, `forgetSuspendedRun` and `traverseNext` exactly as they are, mints no
+  new run status, and works whichever way that is ruled — the runs already stuck
+  today are not released by changing what future resumes do.
+  
+  `plugin-approvals` carries a comment correction only: its organization backfill
+  documented `context_json` as never written on terminal rows, which this change
+  makes false for that one class of row. No behaviour change there.
+- 803eaab: Automation write doors answer the canonicalized (parsed) flow (#12206, Option A — maintainer ruling 2026-08-26).
+  
+  `POST /api/v1/automation` and `PUT /api/v1/automation/:name` now answer the canonicalized, parsed flow the engine stored — the same shape `GET /api/v1/automation/:name` already answers — instead of echoing the caller's own pre-parse request bytes. `IAutomationService.registerFlow` returns that `FlowParsed` (previously `void`), and the SDK's `client.automation.create` / `client.automation.update` bind `Promise<FlowParsed>` (previously deliberate `Promise<any>`). `CreateFlowResponseSchema` / `UpdateFlowResponseSchema` are now conformant with the real wire body, and `UpdateFlowRequestSchema.definition` requires the complete flow definition the engine actually requires (its former `.partial()` declared a partial-update capability nothing implements; a real partial update would be its own feature).
+  
+  **Migration note (behaviour change on a published SDK surface).** A caller that read the write response back gets the canonicalized flow rather than its own bytes: schema defaults are materialized (`version`, `status`, `runAs`, per-edge `type` / `isDefault`), keys re-emit in schema order, and the PUT answer always carries `name`. The #12206 consumer survey measured zero non-test consumers of the old echo across objectstack and objectui. The one residual risk, named verbatim from that survey: "One real TYPE change — the only shape-breaking difference in the whole measurement": a string `edge.condition` becomes the lowered CEL envelope — the `edge.condition` string → `{dialect, source}` type change, zero measured consumers. A consumer doing `typeof edge.condition === 'string'` on the write response would break; per the survey no such consumer exists in either repo (the cloud repo was not measurable and is the declared gap). Implementers of `IAutomationService.registerFlow` must now return the stored parsed flow.
+- 4368411: fix(service-automation): make the resume advance a conditional claim on the suspended-run store, so two replicas cannot both advance one run (#14333)
+  
+  `AutomationEngine.resumeInternal` guarded a duplicate resume with `this.resuming`,
+  an in-process `Set`. That is a complete guard for exactly one deployment shape: a
+  single process. Behind a load balancer, two decisions on one run arriving in the
+  same instant on two replicas each passed their **own** `resuming` check, both read
+  the same fresh row out of the shared store, both consumed it, and both traversed
+  forward — so every downstream side effect ran twice. #13617 closed the sequential
+  half of this family (a replica resuming from a snapshot it had gone stale on); it
+  deliberately did not close the concurrent one.
+  
+  Measured before the fix on the two-engines-over-one-shared-store harness, at
+  `packages/services/service-automation/src/concurrent-replica-resume-race.test.ts`:
+  **25 of 25** raced runs advanced twice — one action fired twice and one approval
+  level opened twice per run — for both reachable shapes the report named (parallel /
+  any-of approvers, and duplicated automated approve calls). A single approver per
+  level deciding sequentially does **not** race, and is pinned as the negative
+  control.
+  
+  `SuspendedRunStore` therefore gains `claimSuspension(runId, parkedAt)`: consume the
+  durable record **only** if it is still parked at the node the caller read (and, when
+  the caller has one, still carrying that correlation), atomically, answering
+  `'claimed'` / `'lost'` / `'unsupported'`. The winner advances; the loser is refused
+  `RESUME_IN_PROGRESS` — the existing code, because the remedy is identical to the
+  in-process refusal's and `plugin-approvals` already branches on it that way — and
+  runs nothing. The per-process `resuming` set stays as the cheap first gate; it is
+  not replaced, and the single-replica path is unchanged.
+  
+  Both shipped stores implement it: `InMemorySuspendedRunStore` tests and removes
+  with no `await` between the two, and `ObjectStoreSuspendedRunStore` issues one
+  `DELETE … WHERE id = ? AND node_id = ?` through the data engine's documented
+  compare-and-set route (`multi: true` with a full `where`), reading the affected-row
+  count. ⛔ No platform-object schema change: `node_id` and `correlation` are columns
+  `sys_automation_run` already carried.
+  
+  The member is **optional**, so no existing implementation is broken, and its absence
+  is a declared degradation rather than a silent one: an engine whose store cannot
+  express the condition says once, at `warn`, that resume idempotency is in-process
+  only and what that costs — the same posture `AutomationEngine.claim()` already takes
+  when no persisted flow-dispatch ledger is attached.
+- 0d7b1f3: fix(service-automation): one renderer for the contested-flow phrase, and the two spellings it had drifted into (#12563)
+  
+  `minor`, not `patch`, and not empty: this adds a new export
+  (`renderFlowContender`) to a published package's public API, and it changes
+  **shipped operator-facing log text**. Both are real changes a consumer can
+  observe.
+  
+  ## What changed
+  
+  One event — a flow name claimed by more than one definition — was described to
+  an operator in three places, each with its own private `const describe` beside
+  the log call: `flow-precedence.ts`'s precedence warning, `plugin.ts`'s bootstrap
+  audit, and (in `@objectstack/cli`) the startup banner. Nothing held them equal,
+  and two axes had already drifted:
+  
+  - **Quoting.** `flow-precedence.ts` rendered `package "crm"`; the other two
+    rendered `package 'crm'`.
+  - **Absent package id.** The two engine copies interpolated a bare `undefined`
+    into the sentence; the CLI copy rendered a real fallback.
+  
+  The two copies in this package are now one exported renderer. The choice on
+  each axis was measured, not voted:
+  
+  - **Single quotes**, measured against this package rather than across the three
+    copies: of the interpolated identifiers in operator prose under
+    `service-automation/src`, 203 are single-quoted and 3 double-quoted — one of
+    those 3 being this phrase. The sentence already single-quotes the flow name
+    beside it.
+  - **A named fallback** (`a code-shipped package (id unknown)`) instead of
+    `package 'undefined'`. This package's own callers cannot reach that branch
+    today, because `isCodeArtifactBody` is false on a falsy `_packageId` — but
+    that is a property of today's callers, not of an exported function.
+  
+  ## Log text a consumer may be matching on
+  
+  `[Automation] Flow name collision: …` (the precedence warning) now renders a
+  packaged contender as `package 'crm'` rather than `package "crm"`.
+  `plugin.ts`'s bootstrap `[Automation] flow '<name>' is claimed by …` warning is
+  byte-identical to before for every input its callers can produce; only its
+  unreachable absent-id branch changed.
+  
+  ## Why the CLI still renders its own
+  
+  `@objectstack/cli` deliberately keeps its own spelling and takes no value
+  import of this package for the banner: its engine reads are structural and
+  feature-detected so a host on an older automation package still boots. The
+  third copy is held equal by a test-only agreement pin
+  (`packages/cli/src/utils/format.flow-contender-agreement.test.ts`) that asserts
+  the banner line through this renderer, so it goes red in both directions.
+- 8155855: Flow value expressions (`create_record`/`update_record` `config.fields`, `assignment` `config.assignments`) now support a small numeric function table — `round`, `floor`, `ceil`, `abs`, `min`, `max` — with every name and semantic mirrored 1:1 from the `@objectstack/formula` CEL stdlib (no second dialect: `round` is integer-only exactly like CEL's; for N-decimal rounding write `round(x * 100) / 100`, the same pattern CEL authors use). A flow can finally write a computed money value that satisfies its field's declared `scale` (`{round(amount * (1 - discount / 100) * 100) / 100}` → a `scale: 2` currency field).
+  
+  Loud diagnostic in the same stroke: an identifier in call position that is not a supported function — `ROUND(...)`, `Math.round(...)`, `(x).toFixed(2)`, or the next name anyone invents — now fails the node with a named `FlowExpressionFunctionError` (guard-marked, so a `fault` edge cannot swallow it) instead of being silently rewritten to `null` and writing the field as `undefined`. Non-call template resolution is unchanged: unresolved plain tokens still become `null`/empty, and `NOW()`/`TODAY()` whole-token macros behave exactly as before.
+- 1524927: Packaged flows can be switched off durably, and the process-local off-switch is retired
+  
+  Disabling a packaged flow now writes an install-level row to the
+  `sys_metadata_activation` ledger (ADR-0126 §4/§7.2) instead of setting a
+  process-local map. The engine consults that ledger at the `execute()` seam —
+  the one seam every entry path crosses (record-change, schedule, time-relative,
+  api, subflow) — and refuses a disabled flow there with the existing
+  `FLOW_DISABLED` code; the ledger case is distinguished by the message, so no
+  new error code joins the ADR-0112 ledger. An install-level disable also unbinds
+  the flow's trigger, and re-enabling rebinds it. Absence of a row means the
+  packaged default, active, so a deployment that never flips anything behaves
+  exactly as before.
+  
+  This retires the mechanism behind #10243 rather than refining it. The old
+  `flowEnabled` map was not a row, so no organization wall scoped it: on a walled
+  multi-organization deployment a tenant org owner could switch a shipped flow
+  off environment-wide and an unrelated tenant read it off. The durable row
+  replaces it, and because a durable install-wide switch writable by tenants
+  would be that leak with persistence, the write is now authority-gated:
+  `POST /automation/:name/toggle` requires the platform operator in the `group`
+  and `isolated` postures, while the `single` posture — where install-level and
+  org-level are the same scope — is unchanged for the org admin who already holds
+  `manage_metadata`. The refusal names the posture and points at the clone path.
+  
+  Disabling a flow that packaged flows still call as a subflow is refused, and
+  the refusal names the callers (ADR-0126 §7.3). Without it a vendor flow breaks
+  mid-run at its subflow node with an inexplicable late failure. The check is a
+  definition scan at disable time over both `subflow` and `map` nodes; no
+  reference index is built. Enabling is never guarded.
+  
+  One behaviour change worth calling out: a disable now survives
+  unregister-and-re-register, which is what a package upgrade, a Studio publish
+  and the boot pull all do. ADR-0126 §6 requires it — the ledger records the
+  customer's choice, and no upgrade un-makes a choice — but it is the opposite of
+  what the retired in-process map did, where any re-registration silently
+  re-armed the flow.
+- af56546: feat(platform-objects): packaged disable works without the automation service, and the activation ledger has one implementation (#12359, #12350)
+  
+  Two halves of ADR-0126's "ledger convergence", bundled by maintainer ruling
+  (2026-08-26, verbatim and untranslated: 「同意」).
+  
+  ## The registration follows the declaration (#12359)
+  
+  `sys_metadata_activation` is declared in `@objectstack/platform-objects`, but
+  the only thing that REGISTERED it was the automation service's manifest —
+  because flows were the ledger's first and, until packaged actions landed, only
+  consumer. Packaged actions are a second consumer with a different owner: their
+  consult and write path live on the ObjectQL engine, present in every
+  composition that can execute an action.
+  
+  So a deployment with actions and no automation service had no ledger table, and
+  the activation door answered **503 SERVICE_UNAVAILABLE** on every flip —
+  correctly (ADR-0126 §6 wall 3: a flip that cannot be made durable must not be
+  reported as one) and permanently. Measured on a real boot; it is now this
+  change's positive test, measured on the same boot:
+  
+  ```
+  POST /api/v1/actions/_activation/showcase_task/showcase_mark_done {"enabled":false}
+    before -> 503 SERVICE_UNAVAILABLE   after -> 200, and dispatch refuses 409 ACTION_DISABLED
+  ```
+  
+  `PlatformObjectsPlugin` registers it now, so every composition carrying
+  platform-objects has the ledger and each future ADR-0126 §8 consumer (`tool`,
+  `skill`, `position`) inherits it. **MOVE, not add** — the automation service no
+  longer names the object. That was not a style choice: a second code package
+  claiming one object throws `Object "…" is already owned by package "…"`
+  (ADR-0029 D3/D7), measured, so adding a registrant would have been a boot
+  failure rather than a duplicate.
+  
+  **Upgrade is a no-op for existing data, and that is measured rather than
+  asserted.** A manifest is also a ROUTING decision — `resolveDatasourceBinding`
+  step 4 routes an object by its owning package's `defaultDatasource` — so the
+  registrar carries the table's datasource with it:
+  
+  ```
+  owner com.objectstack.service-automation (defaultDatasource:'cloud') -> 'cloud'
+  owner com.objectstack.platform-objects   (none)                     -> undefined (global default driver)
+  ```
+  
+  The ledger table already exists in live databases, so on any deployment
+  carrying a `cloud` datasource that difference would leave the rows in one
+  database and read another — every disabled artifact silently re-arming. The
+  ledger therefore rides its own manifest from the same plugin, carrying the
+  automation manifest's `scope` / `namespace` / `defaultDatasource` triple
+  verbatim. The three siblings (`sys_migration`, `sys_migration_journal`,
+  `sys_secret`) deliberately do not get it and keep riding the project database.
+  
+  ## One implementation of the §4 row contract (#12350)
+  
+  ADR-0126 §4 declares one activation ledger; it had two independent
+  implementations of that one row contract — `ObjectStoreFlowActivationStore`
+  (service-automation) and `ObjectStoreActionActivationStore` (objectql). They
+  agreed because the second was written from the first, and nothing structurally
+  held them together; §8 pre-charts `tool`, `skill` and `position`, and a third
+  and fourth copy is where the org-row skip and the `0`-is-false read get lost
+  quietly, in the direction (an artifact re-arming) nothing else measures.
+  
+  Neither consumer could import the other, so the contract now lives once in
+  `@objectstack/core` — the package both already depend on — as
+  `ObjectStoreMetadataActivationStore(engine, metadataType)`, exported alongside
+  `InMemoryMetadataActivationStore`, `MetadataActivationRow`,
+  `MetadataActivationStore`, `MetadataActivationStoreEngine` and
+  `METADATA_ACTIVATION_TABLE`. Each consumer keeps its own name, its own
+  one-argument constructor and its own docs, and fixes the discriminator.
+  
+  **No behaviour change and no API break.** `ObjectStoreFlowActivationStore` /
+  `InMemoryFlowActivationStore` / `FlowActivationStoreEngine` and
+  `ObjectStoreActionActivationStore` / `InMemoryActionActivationStore` /
+  `ActionActivationRow` / `ActionActivationStore` / `ActionActivationStoreEngine`
+  / `ACTION_ACTIVATION_TABLE` are exported from the same modules with the same
+  shapes. Row semantics are byte-equivalent: deployment-level rows scoped only by
+  the `metadata_type` discriminator, a driver `0` read as false, read-then-write
+  rather than a blind upsert, and no `delete` in the engine slice because
+  re-enabling rewrites the row.
+  
+  Both existing pin suites stay green **unchanged**, which is what makes them the
+  proof the consolidation lost nothing — verified by ablation: mutating the one
+  shared implementation turns both of them red on their own assertions, so both
+  really reach it.
+
+### Patch Changes
+
+- efb3513: fix(platform-objects,core): `sys_metadata_activation` ships tenant-less — drop the reserved organization column (#15024)
+  
+  The ADR-0126 activation ledger records that **this environment** switched a
+  packaged artifact off. That is deployment-level state, owned by no
+  organization — so the table ships with no tenant column at all.
+  
+  It briefly declared one: an `organization_id` marked "RESERVED", nullable, and
+  written by nobody, held for a per-organization dimension ADR-0126 §5
+  pre-charted. A reserved nullable tenant column is exactly the shape the
+  total-organization-ownership record proposed in PR #14976 rules out, and this
+  one had no reader either. **This is a plain removal, not a migration:** the
+  table landed after the 17.2.0 tag, so no released version ever carried the
+  column and no deployment has data in it. Should a per-organization dimension
+  ever be wanted, it returns as a separate org-owned object — never as a column
+  on this ledger.
+  
+  What changed:
+  
+  - **`sys_metadata_activation` declares `systemFields: { tenant: false }`** and
+    no longer declares the column. Both halves are needed: the tenant anchor is
+    INJECTED at registration, so deleting the field alone would have left the
+    column exactly where it was. ⚠️ Deliberately NOT `tenancy: { enabled: false }`
+    — that key is the ADR-0066 D2 platform-global *posture*, which the sibling
+    `sys_sso_provider` uses for the opposite shape (a table that KEEPS its tenant
+    column and needs the wall over it stood down). Here there is no column to
+    wall. Both spellings reach `plugin-security`'s `tenancyDisabled`, which is
+    required rather than incidental: a Layer 0 wall composing an equality on a
+    column the table does not have denies every row.
+  - **The declared unique index states `unique: 'global'`** over
+    `(metadata_type, name)` instead of `'organization'`. ⚠️ The materialized DDL
+    is unchanged: `normalizeDeclaredIndex` prepends the NULL-safe tenant key part
+    only when the table HAS a tenant column, so `'organization'` already degraded
+    to exactly these two columns. What changes is that the declaration now states
+    the boundary it actually gets, rather than claiming a per-organization one
+    that does not exist. Still explicit rather than bare `unique: true`, which
+    lint `unique/unscoped-declared-index` warns on and protocol 18 rejects.
+  - **`ObjectStoreMetadataActivationStore` drops its NULL filter and its
+    org-row skip.** `list()` is now every activation row of its type, scoped by
+    the `metadata_type` discriminator alone, and `setActive` takes the single row
+    its keyed read returns instead of picking the NULL-organization one out of
+    the result. Both guarded a column that no longer exists; the declared unique
+    index over the two columns the lookup keys on is what makes that read
+    single-valued. `ObjectStoreFlowActivationStore` and
+    `ObjectStoreActionActivationStore` inherit the change.
+  
+  Unchanged, and pinned: the operator gate on activation writes under walled
+  postures (ADR-0126 D3), the `execute()`-time flow consult and the dispatch-time
+  action consult, "absence of a row means ACTIVE", re-enabling UPDATES the row
+  rather than deleting it, and a driver `0` reading as false. The pins that
+  asserted the reserved column and the org-row skip are rewritten to pin the
+  column's ABSENCE rather than deleted — including at the injection authority
+  (`resolveInjectedSystemColumns`, which decides whether the column exists) and
+  in a real booted stack, where the row's key set is a reading of the physical
+  table.
+- 86cbe37: feat(core): cross-request authorization grants cache — leg B of #11633 (#11971)
+  
+  `resolveUserAuthzGrants` can now cache its resolved envelope across requests,
+  governed by `OS_AUTHZ_GRANTS_CACHE_TTL_MS`. **The default is `0` — the cache is
+  OFF and the shipped behaviour is unchanged** (Fork 4 of the accepted #11633
+  design): a deployment that enables it accepts the configured staleness window
+  explicitly, and the boot-time posture statement says so out loud when no
+  cross-node invalidation bus is attached.
+  
+  With the cache on:
+  
+  - **Coarse write-invalidation (Fork 1A).** Any engine write to a watched
+    authorization object (`sys_member`, `sys_user_position`,
+    `sys_user_permission_set`, `sys_position`, `sys_position_permission_set`,
+    `sys_permission_set`, `sys_user`) retires every entry on the writing node —
+    a grant/revoke/role change is observed by the very next request there, by
+    invalidation and not by TTL. `metadata.changed` and peer-node
+    `authz.invalidated` hints retire wholesale via the engine write epoch.
+    `sys_session` is deliberately not watched (its once-a-minute
+    `last_activity_at` cadence would turn the cache into a non-cache).
+  - **Expiry-boundary rule.** Entries expire at `min(ttl, nextBoundary)`, where
+    `nextBoundary` is the earliest upcoming ADR-0091 `valid_from`/`valid_until`
+    among the rows consulted — a validity window flipping is a permission change
+    with no write anywhere, so the timer is the only mechanism for that class.
+  - **Ruled bypass list.** The permission explainer
+    (`plugin-security` `buildContextForUser`) and `runAs:'user'` automation runs
+    (`service-automation`) always resolve fresh, and never populate the cache.
+  - The TTL remains the correctness contract; the `authz.invalidated` bus only
+    narrows the typical cross-node window (no shipped driver exceeds
+    at-most-once delivery).
+- 8bb05ea: fix(service-automation): the documented broken-sweep predicate is a first FILTER, not the detector (#12685)
+  
+  `patch`, and not empty: `sys_automation_run`'s field descriptions are shipped,
+  translated, operator-facing text — they are what an admin reads in Setup while
+  wiring an alert they will then trust for months. No counter, no schema and no
+  engine behaviour changes here; the run summary measured by #4354 is correct and
+  untouched.
+  
+  ## The wrong claim
+  
+  `acted_count` advertised `selected_count > 0 AND acted_count = 0 AND
+  unmeasured_count = 0` as *the* broken-sweep signal, unqualified. Measured A/B on
+  one graph pair through the real engine — a healthy idempotent sweep (re-select
+  the same records, gate each one on "was this already handled") and a dead gate
+  (#4347's shape, the gate sitting in front of the lookup) — **both** report
+  `selected > 0, acted 0, unmeasured 0`. The predicate cannot make the one
+  distinction it was advertised to make.
+  
+  "Over N consecutive runs" does not rescue it either: the healthy steady state
+  trips it on *every* run for as long as the outstanding work stands, so it is
+  persistent rather than transient. Consecutiveness filters flapping, which is a
+  different failure.
+  
+  Why a wrong sentence here is worse than a wrong sentence elsewhere: a detector
+  that fires during normal operation gets muted, and a muted broken-sweep detector
+  is the same silence #4347 produced — with the added cost that it now *looks*
+  monitored.
+  
+  ## What the descriptions say now
+  
+  - `acted_count` states the predicate as the **first filter** and names the
+    discriminator: a healthy skip is accounted for by a read the run performed
+    (the lookup the gate depends on shows `runs > 0` and `selected > 0` in
+    `summary_json.nodes[]`), while a dead gate skips just as often with nothing
+    behind it (`runs: 0`, or `selected: 0`).
+  - `skipped_count` points at the same fold — `gates[]` names which edge closed
+    and how often, `nodes[]` says whether the lookup behind it found anything.
+  - `unmeasured_count` keeps its own point (why the third clause exists) and now
+    calls the query a filter rather than an alert.
+  
+  The discriminating data was already shipped by #4354; nothing new is measured
+  and no detector is implemented in the platform. `run-summary.test.ts` pins the
+  pair as executable evidence: both shapes match the filter, and the per-node fold
+  separates them. `content/docs/automation/flows.mdx` carries the same correction
+  with the measured table and the two authoring shapes that make a sweep's signal
+  quiet in its healthy steady state.
+- c5a7448: fix(automation): `create_record` now surfaces the engine's `DUPLICATE_RECORD` code, so a `try_catch` / `fault` edge can finally tell "already there" from "the store is down" (#14419)
+  
+  `engine.insert` (#14095) already raises `DuplicateRecordError` — `code: 'DUPLICATE_RECORD'` (ADR-0112) — for a unique-constraint violation, driver-independent. The `create_record` node executor threw that away: every failure, from a duplicate key to a downed connection, collapsed into one opaque string (`create_record(<object>) failed: <message>`). A flow's only two error-handling primitives, `try_catch` and a `fault` edge, saw the same shape either way — the only expressible reading of "swallow the duplicate" was "swallow everything".
+  
+  `NodeExecutionResult` gains an optional `code?: string` field, beside the existing `errorClass`, set when the caught error carries the platform's classified `DUPLICATE_RECORD` code. `AutomationEngine` now copies it onto the `$error` run variable alongside `message` (both the direct `fault`-edge path and the `try_catch` catch-region binding, which previously reconstructed `errorVariable` from the caught exception's message alone and silently dropped it), so a flow can actually branch on `{$error.code}`:
+  
+  ```
+  try:   create_record(lead, { email })
+  catch: { $error.code === 'DUPLICATE_RECORD' } → swallow, continue
+         else                                   → re-raise / route the fault edge
+  ```
+  
+  Additive only — no existing field, message text or routing behaviour changes; an executor that never sets `code` (every one except `create_record` today) is unaffected. Deliberately scoped to `create_record` alone: `update_record` / `delete_record` collapse the same way, but `engine.update` still leaks the raw driver error (#14390, not yet fixed), so those node results have nothing structured to surface yet. `create_record` itself forwards `code` only when it equals `DUPLICATE_RECORD` — narrowly, on purpose, matching the ADR-0112 vocabulary member this repair was actually scoped to surface, not any code an as-yet-unaudited driver error might someday carry.
+  
+  **Patch round 1 (tier contract review):** `try_catch`'s catch region reads `code` off the run-wide `$error`, but the engine only rewrites `$error` when a failing node *returns* a failure, or *throws* through a node with its own `fault` edge — and a node inside a `try_catch`'s `try` region never has one (the region's synthetic sub-flow carries only the region's own edges). A node that fails by throwing (a `timeoutMs` firing, a dying nested container) therefore used to leave `$error` exactly as an *earlier, unrelated* failure left it — its `code` included. An identity guard (`$error` must have *changed*, not merely still be present, since this attempt started) closes that; two flows now pin it: a `loop` sweeping two rows where row 1 is a genuine duplicate and row 2 times out, and a plain flow where an earlier fault-routed duplicate must not leak into a later, unrelated `try_catch`.
+  
+  A custom `IDataEngine` implementation whose thrown error already carries `code: 'DUPLICATE_RECORD'` (without being an instance of `@objectstack/objectql`'s `DuplicateRecordError`) is treated as a duplicate too — correct under ADR-0112, since `code` is the classified envelope's public contract, not the concrete class.
+  
+  **Known gap, filed rather than fixed here (out of this lane's scope):** `packages/spec`'s `TryCatchErrorValueSchema` — the ONE declared shape for the `errorVariable` binding shared by author, engine and run log — does not declare `code` yet, and strips it on a strict parse. `packages/spec` is single-owner (`domain:spec`); tracked as #14954.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) additive optional field; no authorable key, export removal or rename for an upgrader to migrate -->
+- fa5d137: feat(devx,datasource,automation): published `src/**` may only import workspace packages it declares (#10062)
+  
+  A package's non-test `src/**` was free to import any workspace package,
+  declared or not, and nothing checked it. The class was filed with one member
+  and a mitigation — the import was type-only, so nothing reached the emitted
+  JavaScript and rollup-plugin-dts inlined the declaration rather than naming an
+  unresolvable module. It grew to four members with no signal, and one of them
+  killed the mitigation: `service-automation/src/flow-precedence.ts` **value**
+  imports from `@objectstack/objectql`, which it does not declare, and because
+  the shared tsup config externalises only `dependencies`/`peerDependencies`, the
+  bundler answered by inlining objectql's implementation into
+  `service-automation/dist/index.js` — a second copy of another package's code,
+  kept correct by build configuration alone.
+  
+  `pnpm check:undeclared-dep-imports` is the gate, and the per-member fixes here
+  are decided one at a time rather than by a uniform policy — declaring makes a
+  coupling real and installable, routing it away removes it, and the two are not
+  interchangeable:
+  
+  * **`@objectstack/service-datasource`** now declares `@objectstack/driver-sql`
+    and `@objectstack/driver-memory` as **dependencies**. Both are loaded through
+    an *unguarded* `await import(...)` on the postgres, mysql, sqlite and memory
+    arms, so a consumer reaching one of those paths needed a package it was never
+    told to install, and would have met `ERR_MODULE_NOT_FOUND` rather than a
+    diagnosis. The three *guarded* driver arms — `@objectstack/driver-sqlite-wasm`,
+    `@objectstack/driver-mongodb`, `@objectstack/driver-turso` — are deliberately
+    left undeclared: each load sits in a `try`/`catch` that answers an absent
+    package with the fault, the consequence and the install command, and each
+    rides as an optional install. Declaring them would install them (turso drags
+    `@libsql/client`'s native bindings) and, measured on this branch, takes a live
+    assertion out of the tree: `default-datasource-driver-factory.test.ts` reaches
+    the missing-package arm with no stub precisely because the package does not
+    resolve from here.
+  * **`@objectstack/metadata-core`** now owns the ADR-0029 D9.6 provenance pair,
+    `isCodeArtifactBody` and `isTenantAuthored`, sunk out of
+    `@objectstack/objectql`'s registry by the same criterion as the write-verb
+    dispatch predicates and the audit governance table beside them: a second layer
+    needs the answer and the reverse import would either close a cycle or make the
+    consumer depend on the whole data engine for one predicate. `objectql`
+    re-exports `isCodeArtifactBody` from its original path, so its public API is
+    unchanged; `service-automation` imports it from `metadata-core`, which it
+    already declared, and its bundle no longer carries a copy of objectql's code.
+  
+  Two members stay recorded rather than remediated, because the tree already
+  carries the decision not to declare them together with its reason
+  (`@objectstack/runtime` → `@objectstack/driver-turso`, whose bare `import()` is
+  a host-replaceable default thunk under #6268; `@objectstack/rest` →
+  `@objectstack/objectql`, whose absence must degrade to `501 NOT_IMPLEMENTED`
+  rather than fail module load). Their ledger rows carry mechanical evidence and
+  go red the moment that evidence stops holding — in particular, a `type-only`
+  row reds on the day its import becomes a value import, which is exactly the
+  transition nothing caught the first time.
+- e7191ce: fix(build): give each `exports` condition its own `types` target in the 28 dual-build packages (#13112)
+  
+  **Published-surface change, zero runtime change.** No emitted byte moves; what
+  moves is which declaration file a resolver READS. Maintainer ruling 2026-08-29
+  (decision batch #3, verbatim 「同意」) chose declaring the files over deleting
+  them.
+  
+  ## What was wrong
+  
+  These 28 packages are `"type": "module"` and dual-built, and each spelled one
+  `types` condition as a **sibling** of `import`/`require`:
+  
+  ```json
+  "exports": { ".": {
+    "types": "./dist/index.d.ts", "import": "./dist/index.js", "require": "./dist/index.cjs"
+  } }
+  ```
+  
+  A sibling `types` answers for **both** conditions, so a CommonJS consumer was
+  handed `dist/index.d.ts` — an ES-module declaration, because the package is
+  `"type": "module"` — for an entry point it reaches with `require`. Measured with
+  `tsc --traceResolution` on a `"type": "commonjs"` fixture at `moduleResolution:
+  node16`:
+  
+  ```
+  error TS1479: The current file is a CommonJS module whose imports will produce
+  'require' calls; however, the referenced file is an ECMAScript module and cannot
+  be imported with 'require'.
+  ```
+  
+  The JavaScript at `dist/index.cjs` loads perfectly (`check:dual-build-cjs-loads`
+  has asserted that for months). It is the **types** that told the consumer the
+  supported `require` entry point could not be required. The `dist/index.d.cts`
+  twin tsup emits beside it — 36 files, 5,517,701 B on this build — was named by
+  no condition at all and shipped in every tarball unreachable.
+  
+  ## What changed
+  
+  Each condition now names its own declaration, the shape TypeScript documents:
+  
+  ```json
+  "exports": { ".": {
+    "import":  { "types": "./dist/index.d.ts",  "default": "./dist/index.js" },
+    "require": { "types": "./dist/index.d.cts", "default": "./dist/index.cjs" }
+  } }
+  ```
+  
+  33 entry points across 27 packages, subpaths included. The root `types` field is
+  untouched, so `node10` resolvers are unaffected; the `import` condition resolves
+  exactly what it resolved before, measured as an unchanged control in the same
+  run.
+  
+  ## `@objectstack/core` is deliberately NOT changed
+  
+  Splitting a declaration in two makes TypeScript compare it nominally, and
+  `ObjectKernel` carries a `private plugins` member that reaches every plugin
+  through `PluginContext.getKernel()`. With core split, whole-repo `pnpm build`
+  fails in `@objectstack/verify` with 5 × TS2345 ("Types have separate
+  declarations of a private property 'plugins'"); with core held back and the
+  other 27 split, 71/71 tasks pass. So core keeps the sibling-`types` shape and
+  its two `.d.cts` files (220,854 B) stay unreachable, declared as such in
+  `check:dual-build-cjs-loads`. Splitting it needs a decision about core's public
+  types, not about an exports map.
+  
+  ## For consumers
+  
+  - **ESM consumers: nothing changes.** Same declaration file, byte for byte.
+  - **CJS consumers under `node16`/`nodenext`: TS1479 goes away** and the
+    declarations they get are the ones built for CommonJS.
+  - **`node10` / `moduleResolution: node` consumers: nothing changes** — they never
+    read `exports`.
+  - Nothing is removed: every path that resolved before still resolves.
+  
+  Packages that are CJS-first (`require` → `./dist/index.js`, no `"type": "module"`)
+  were already correct and are untouched — their `dist/index.d.ts` really is the
+  CommonJS declaration. Their ESM mirror (an unreachable `.d.mts` under the
+  `import` condition) is a separate, larger population and is filed separately per
+  the ruling, not fixed here.
+  
+  `check:dual-build-cjs-loads` grew a fourth invariant (TYPED) that reds on the old
+  shape, so the drift cannot return silently.
+- 0dc0eff: refactor(service-automation): take the trigger KIND from spec's `resolveFlowTriggerKind` instead of a second private copy of the chain (#14328)
+  
+  No behaviour change and no API change — `patch` because nothing observable moves.
+  `resolveTriggerBinding` is `private`, no export is added or removed, no payload
+  key changes, and the kind reported for every flow is the kind reported before
+  (1,223 `service-automation` cases and 81 `trigger-record-change` cases green
+  unchanged, plus new pins across the whole precedence chain). What changes is that
+  one rule now has one home.
+  
+  **The defect.** `AutomationEngine.resolveTriggerBinding` hand-kept the chain that
+  decides which trigger a flow asks for — string `record-*` token, array form,
+  `timeRelative` descriptor, `schedule` cadence or `type: 'schedule'`, `type: 'api'`
+  or `triggerType: 'api'` — in parallel with `@objectstack/spec`'s
+  `resolveFlowTriggerKind`, the authoring-time mirror of that same rule. Both
+  authoring surfaces already read the spec one: `defineStack`'s trigger-capability
+  refusal and `@objectstack/lint`'s `validate-flow-trigger-readiness`. The engine
+  did not, and nothing pinned the two together. A branch added to one side leaves
+  `defineStack` accepting a stack the runtime leaves inert, or refusing one it would
+  arm — the drift the shared resolver was hoisted to prevent, reopened one layer
+  down. The two agreed on every string-form flow, so this was an observation rather
+  than a live defect; the harm was future drift.
+  
+  **The shape.** `resolveTriggerBinding` now takes its kind from
+  `resolveFlowTriggerKind(flow)` and keeps only the per-kind BINDING construction —
+  which start-node fields each trigger needs. `getTriggerBindingAudit` and the boot
+  banner therefore name the kind authoring named, by construction.
+  
+  **The one deliberate divergence is preserved, not unified.** The ARRAY form of
+  `triggerType` (`['record-after-create', 'record-after-delete']`) resolves to *no*
+  kind in spec — multi-event unions are unsupported (#3457), and reading the shape
+  as "asks for a record-change trigger" would have `defineStack` demand a capability
+  the flow can never use and would widen the lint rule's auto-triggered set. The
+  engine routes it to the record-change trigger anyway, from an explicit pre-check
+  that runs BEFORE the resolver, for one reason: so that trigger refuses it LOUDLY
+  at bind time (#3481) instead of the flow folding into "manual" and vanishing from
+  every surface. Pre-check *ordering* is load-bearing too — array form outranks
+  `timeRelative`, which the resolver, blind to the array, would otherwise answer for
+  a start node carrying both.
+  
+  **What now catches the drift.** Two guards, one static and one runtime. The
+  per-kind `switch` is exhaustive over `FlowTriggerKind` with a `never` default, so a
+  kind added to spec fails this package's type-check until its binding shape is
+  written; and a new case asserts every kind in `FLOW_TRIGGER_KINDS` is reachable
+  through the real engine. The preserved divergence is pinned on both sides: engine
+  routing and pre-check precedence in `service-automation`, and the refusal itself —
+  asserted as a refusal, on a binding the real engine produced — end-to-end against
+  the real trigger in `@objectstack/trigger-record-change`.
+- b6d3d76: A definition-level input-schema refusal is now non-retryable and classified as a
+  never-dispatched exit (#10025, maintainer ruling 2026-08-20). When a node's
+  static `config` violates the `inputSchema` its own flow definition declares,
+  `execute()` refuses once with the ADR-0112 code `FLOW_INPUT_SCHEMA_INVALID`
+  (registered by #11504) and **no** `status`, and never hands the throw to the
+  retry loop — the guard's verdict is a pure function of the flow definition, so
+  re-running it cannot change the answer. All flow-dispatch doors (trigger,
+  `/actions`, declared endpoints) answer it `422` through the shared
+  `classifyFlowRefusal` table.
+  
+  Retry accounting and run-log volume change for affected flows, deliberately: a
+  `strategy: 'retry'` flow with a mis-declared `inputSchema` now writes exactly
+  **one** failed run-log row instead of `1 + maxRetries` identical ones, consumes
+  no retry budget and no backoff delay, and its result carries the code instead of
+  `status: 'failed'` (previously answered `400 FLOW_FAILED`; now
+  `422 FLOW_INPUT_SCHEMA_INVALID`). The #9889 parity floor is unchanged
+  underneath: the guard still runs on every attempt path.
+- 99d23b1: fix(service-messaging,service-automation,plugin-webhooks): stamp `organization_id` on `sys_http_delivery` rows so the cross-organization wall on `redeliver()` actually excludes other tenants' rows (#13546)
+  
+  `sys_http_delivery` is tenant-scoped and `redeliver()` — the one
+  request-reachable door on it — deliberately scopes by the caller's
+  organization (#10740). But the enqueue door never stamped the
+  `organization_id` column, and the SQL driver's tenant term is
+  `(organization_id = :tenantId OR organization_id IS NULL)` — a deliberate
+  global-row fail-open — so 100% of delivery rows landed in the NULL arm:
+  visible to, and replayable by, every organization on a walled deployment.
+  
+  The repair mirrors the notification outbox's existing convention
+  (`EnqueueDeliveryInput.organizationId`), end to end:
+  
+  - `EnqueueHttpInput` gains an **optional** `organizationId` member (inherited
+    by `UndeliverableHttpInput`, so parked rows are tenant-stamped too), and
+    `HttpDelivery` surfaces it on read-back. `SqlHttpOutbox.insert` writes
+    `organization_id: input.organizationId ?? null` exactly like
+    `SqlOutbox.enqueue`; `MemoryHttpOutbox` stores the same field and — now
+    that its rows carry a tenant — applies `RedeliverOptions.tenantId` in
+    `redeliver()` with the driver's exact semantics (another organization's row
+    is invisible/`RESOURCE_NOT_FOUND`; an org-less row stays a global row; a
+    tenant-less caller stays unscoped).
+  - The flow `http` node (durable mode) threads its run's acting organization
+    (`AutomationContext.tenantId` — the same source as the `notify` node's
+    #11303 repair) and warns loudly when a multi-org run has none to thread.
+  - The webhook auto-enqueuer stamps each delivery with its subscription's own
+    organization (`sys_webhook.organization_id`); org-less subscriptions
+    enqueue org-less, unchanged.
+  
+  Forward-stamping only: existing NULL rows are untouched (their disposition is
+  a separate decision). Producers with genuinely no organization — a
+  `single`-posture deployment, a stack before its first organization — keep
+  working unchanged; their rows land NULL, which is the honest global-row shape.
+- 9dd022a: fix(service-automation): a dying `loop` no longer discards the record of the writes it already made (#13803)
+  
+  A `loop` that died mid-sweep reported `acted: 0` for a run that had genuinely
+  written rows. The engine splices a container's `childSteps` into the run log
+  only after a **successful** node result, and a `loop` whose body throws never
+  produces a result — the throw unwinds past the splice, taking the accumulated
+  body steps with the stack frame. A five-row sweep failing on the third row had
+  committed three flag writes and two notifies, and reported
+  `{ selected: 5, acted: 0 }` with no step record of any of them.
+  
+  The direction is what made it a bug rather than a miscount. `acted: 0` on a
+  failed sweep reads as "nothing happened, safe to re-run", so for a
+  non-idempotent body — notifications, counters, external calls — the summary
+  invited double-execution of writes that had already landed. The run summary is
+  the platform's own honesty instrument (#4354); on this path it was wrong in the
+  one direction that causes harm.
+  
+  A dying container now carries its completed body steps out on the thrown error
+  (a non-enumerable symbol brand, the same idiom #3863 uses to mark un-routable
+  guard refusals on this identical throw path), and the engine's catch path folds
+  them into the run log in the same position the success path splices
+  `childSteps` — behind the container's own step, ahead of any `fault` handler's.
+  The same five-row sweep now reports `acted: 5` and keeps `loop-body` steps for
+  iterations 0, 1 and 2, with the failure attributed to iteration 2.
+  
+  **Record-only: failure propagation is untouched.** The error is rethrown with
+  its identity, message and guard-refusal marking intact, so which failures a
+  `fault` edge routes, what `$error` holds, what the run reports as its error and
+  the `EXECUTION_ERROR` code on the container's own step are all exactly what
+  they were. The alternative shape — having `loop` swallow the failure and return
+  `{ success: false }` — was rejected for precisely this reason: it would have
+  made a guard refusal raised inside a loop body routable by a `fault` edge on
+  the loop, the one-edge switch #3863 exists to prevent.
+  
+  A sweep that fails before writing anything still reports `acted: 0`, because
+  there that is the honest answer; an all-succeeding sweep and the
+  `try_catch`-contained path are byte-identical to before.
+- 1401ae7: feat(service-messaging): notification locale is resolved per recipient — `sys_user.locale`, then the deployment default (#13881)
+  
+  Maintainer ruling 2026-09-01, quoted verbatim and untranslated:
+  
+  > **解析点移到 fan-out 后按收件人**:`payload.locale` 不再是 fan-out 前单值,插进 `email-channel.ts` L86-99 自留的 seam
+  > **解析链 = 收件人 `locale` → 部署默认**(`II18nService.getDefaultLocale()`),缺失恒回退,⛔ 任何路径不得死信
+  
+  Before, the delivery path resolved ONE locale per notification: `payload.locale`
+  if the producer set one (interpolated once, before fan-out), else the deployment
+  default. Every recipient of a notify node got the same `sys_email_template` row,
+  whatever language they read — the hotcrm measurement that lifted the 2026-08-13
+  deferral.
+  
+  Now the locale is resolved PER RECIPIENT, at delivery time, through ONE read
+  point (`recipient-locale.ts`, `resolveRecipientLocale`): the recipient's own
+  `sys_user.locale` — email and SMS read it off the same row they already fetch
+  for the address, so it costs no second query there; the inbox channel, which
+  never read the row before, makes one read for it on the template path — else
+  the deployment default, probed
+  lazily so live `localization` changes are honoured. The same chain serves the
+  email channel's two arms (`sendTemplate` and `sys_notification_template`), the
+  inbox channel's template path, and the SMS channel, so one notification cannot
+  arrive in two languages across channels.
+  
+  **Never a dead letter from this seam.** A recipient value that is absent, empty,
+  whitespace, non-string, malformed, or the literal string `"undefined"` /
+  `"null"` (the exact shape hotcrm measured dead-lettering every user without a
+  preference row) falls back to the deployment default; nothing named anywhere
+  arrives at the downstream ladders as an absent key, which is their documented
+  `en-US` floor. A locale read that throws (a `userObject` override without the
+  column) is retried address-only and falls back — the delivery still goes out.
+  
+  **Behaviour change for producers:** a `payload.locale` set by a producer is no
+  longer consulted. It was never a declared key of the notify node (only the
+  generic `payload` passthrough carried it) and no in-repo producer writes it;
+  the ruling retired it as the pre-fan-out single value. A node that relied on
+  it now sends each recipient their own language, else the deployment default —
+  which is the ruled behaviour, not a regression. Nothing to migrate: remove the
+  key, or leave it, it is inert either way.
+  
+  Second behaviour change: on the `sys_notification_template` arm (email topic
+  path, SMS) the deployment default (`II18nService.getDefaultLocale()`) is now
+  the second rung; before, that arm fell straight from `payload.locale` to the
+  static `en` and never consulted it. A deployment whose `localization.locale`
+  is e.g. `zh-CN` with a topic bundle holding `en` and `zh` rows renders `zh`
+  there now for recipients without a column. SMS is newly handed the
+  deployment-default probe.
+  
+  `@objectstack/spec` ships the contract text: the `notify` node's `template`
+  description and its refusal messages now state the per-recipient chain and
+  name `payload.locale` as not consulted (`automation/io-node-config.zod.ts`),
+  mirrored on the runtime descriptor in `@objectstack/service-automation`.
+  
+  Interaction with the `TEMPLATE_*` permanent-failure class is unchanged in
+  kind: `sendTemplate`'s ladder for a NAMED locale still ends at `en-US`, so a
+  recipient locale can dead-letter a delivery only against a bundle that has
+  neither the requested row nor an `en-US` row — off the documented contract.
+  Two asymmetries against the old single value, both on such bundles: (a) the
+  bundle carries the deployment default's row but no `en-US` row — old delivered,
+  new fails for a recipient whose own tag is a third language; (b) there is NO
+  deployment default (i18n absent or `getDefaultLocale` unimplemented) — old
+  called `sendTemplate` with no locale and the ladder's any-row rung delivered,
+  new names the recipient's tag, the any-row rung is skipped, and a tag absent
+  from the bundle is `TEMPLATE_NOT_FOUND` (permanent). The fix in both is the
+  bundle (`en-US` is the ladder's floor), not a third rung.
+- e577445: The `notify` node's Studio form and the messaging registration log now state the locale the delivery path actually resolves — one per notification, not one per recipient
+  
+  `NotifyConfigSchema` was corrected in `packages/spec` to say that the `template`
+  path resolves `(name, locale)` with **one** locale for the whole notification.
+  The same retired promise survived outside the spec file, in the places an app
+  author is most likely to read it:
+  
+  - `service-automation/src/builtin/notify-node.ts` — the `template` field's
+    `configSchema` description, i.e. the text rendered in the **Studio form** the
+    author fills in. It said the row is "resolved by (name, recipient locale) at
+    delivery time and rendered per recipient".
+  - `content/docs/automation/email-templates.mdx` — the only site that stated the
+    conclusion outright rather than merely licensing it: "so one node mails each
+    person in their own language".
+  - `service-messaging/src/messaging-service-plugin.ts` — the channel-registration
+    log line, which advertised "resolve sys_email_template per recipient locale".
+  - Two internal comments in `notify-node.ts` and one in its test, describing the
+    payload the outbox snapshots as carrying a per-recipient-locale resolution.
+  
+  None of that is what the delivery path does. `payload.locale` is interpolated
+  **once, before fan-out**, so it is a single value for the whole notification, and
+  its fallback is the deployment default (`II18nService.getDefaultLocale()`). The
+  platform has no per-user locale to read — `sys_user` carries no locale column,
+  and request-scoped locale does not exist at async delivery time — so recipients
+  whose personal languages differ all receive the same template row. A per-user
+  locale is deferred until measured pull (maintainer ruling, 2026-08-13) and layers
+  in as an override at that same seam when it lands; the corrected wording dates
+  the deferral so it reads as a decision with provenance rather than an oversight.
+  
+  The gap was worth correcting because the wording licensed exactly one action —
+  convert `notify` nodes on the belief that non-English recipients get non-English
+  mail — and that action is a **net regression**: `TEMPLATE_*` failures classify
+  `permanent` and dead-letter, and the inbox channel starts requiring an email
+  service with `renderTemplate()` where inline text needed none.
+  
+  Text only: no schema accepts or refuses anything it did not before, no delivery
+  behaviour moves, and no wire value changes. A new pin in `notify-node.test.ts`
+  asserts the form description names `payload.locale` and the deployment default
+  and refuses a bare "recipient locale", so a later edit cannot quietly restore the
+  promise.
+- c616c2c: **The last three readers of suspended-run state read the shared store, not this replica's memory of it.** #13617 made the resume path store-authoritative; `cancelRun`, `failAncestors` and `listSuspendedRunsDurable` still preferred the per-process `suspendedRuns` map, so on a replica holding a stale entry each acted on the node a run was parked at the last time THIS replica touched it. All three now take one answer to "where is this run parked", through the existing `loadSuspendedRun` / `loadSuspendedRunStrict` pair, with the degrading or strict loader chosen per site so each recorded degradation posture is preserved by choice rather than re-derived.
+  
+  - **`cancelRun` — the strict loader.** Before: a stale replica cancelled from its own snapshot; the row deletion is by id and was right either way, but `forgetSuspendedRun` told the executor of the node in the SNAPSHOT that its pause was over, so the live node's pause stayed armed and a node the run had already left was released a second time. Now the shared row decides which pause is torn down. The strict loader is deliberate: "not found" still returns `false` (already terminal / unknown) exactly as before, and an unreadable store still lands on this seam's own #4632 DURABILITY record at `error` — the degrading loader would have answered `null` under its best-effort `warn` and silently downgraded that verdict. ⚠️ One consequence, stated: while a store is configured this process's map is no longer an answer, so a store outage now reaches that `error` record even for a run this replica is holding, where the old cache-first read cancelled from the local snapshot.
+  - **`failAncestors` — the degrading loader.** Before: a stale parent was failed at a node it had already left (#13617's own harm shape, one level up). The degrading loader is deliberate: this walk runs inside the catch arm already handling a run's failure, so it must not throw, and "a store failure reads as no ancestor here and stops the walk" is exactly the posture the bare `.catch(() => null)` had. The one thing gained beyond the fix: that silent swallow is now recorded, at the loader's declared best-effort `warn` — no new `error` seam.
+  - **`listSuspendedRunsDurable` — the merge direction, and the comment.** The durable row now wins an id collision; the comment claiming "In-memory entries win — they are the freshest copy" is corrected, since it is true of exactly one deployment shape. Map entries the durable listing does not carry are still included, deliberately: `store.list()` is a capped, best-effort enumeration (at most 1000 `paused` rows) and the same merge is reached on the degraded path, so "absent from the list" is not the per-id "the store answered and has no row" the strict loader rests on.
+  
+  No signature, export or return-shape change on any of the three.
+- 460134a: fix(service-automation): put the test layer in front of tsc, and repair the TS2341 x3 it was hiding (#15048)
+  
+  `packages/services/service-automation` had **no `typecheck` script at all** —
+  its scripts were `build` and `test` — so no tsc program anywhere read this
+  package (`turbo run typecheck` selects only packages that declare the task, so
+  it skipped this one silently). `tsup` transpiles with esbuild and `vitest`
+  runs through esbuild type-**stripping**; neither type-checks. The package's
+  own `tsconfig.json` does include the tests and always did, so the program that
+  would have read them already existed and was simply never invoked. This is
+  the `packages/services/**` sibling of `@objectstack/service-cluster`'s same
+  graduation (#14181 / PR #15032), reached by the same road in.
+  
+  What that hid was three `TS2341`s, all in
+  `src/nested-region-parity.test.ts` (lines 95/151/180):
+  
+  ```
+  error TS2341: Property 'flows' is private and only accessible within class 'AutomationEngine'.
+  ```
+  
+  Three tests dot-read the private `AutomationEngine#flows` map directly
+  instead of going through the class's own public accessor,
+  `await engine.getFlow(name)` — already the idiom every other test file in
+  this package uses. The fix replaces the three private reads with that
+  existing public call (making the two synchronous test bodies `async` where
+  they were not already); no source signature was widened, no cast was added.
+  
+  Wired by the route the `packages/plugins/**` family settled on in #14062 and
+  `service-cluster` carried into `packages/services/**` in #14181: a sibling
+  `tsconfig.test.json` that changes **module semantics only** (`esnext` /
+  `bundler` / `lib: ES2022`, matching how vitest actually executes these files)
+  with **strictness inherited and untouched**, named by a new `typecheck`
+  script through the shared `check:test-typecheck` gate. Measured before the
+  repair: 3 errors under build semantics (`tsc -p tsconfig.json`, which already
+  included the tests), 3 under the new config — the two readings agree, so this
+  package carried no config-tier pile, and all 3 were genuinely code-tier from
+  the start. After: 0 and 0, across a 555-file program covering all 103 of its
+  `src/**/*.test.ts`.
+  
+  No `test-typecheck-debt.json` is added, and its **absence is the zero**: the
+  gate reads a missing ledger as `{ entries: {} }`, under which any error in any
+  file here is red immediately. The package's `DEBT` entry in
+  `scripts/check-type-check-coverage.mjs` (`errors: 3`) is deleted in this PR
+  rather than lowered — that is the graduation the ratchet's own invariant
+  requires, and it is why the errors were fixed rather than ledgered.
+  
+  `scripts/check-type-source-resolution.mjs` also gains a registry entry for
+  this package: onboarding `tsconfig.test.json` moved the package's tsc program
+  set (per that gate's documented onboarding-limb terms), exposing 9 workspace
+  deps whose types resolve through `dist/` with no pre-existing program for them
+  to have been laundered through. `paths` was measured and rejected as the
+  alternative — it takes this package's test layer from 0 errors to 648, nearly
+  all billed to other packages' source.
+  
+  No runtime code changes: `src/**` (excluding the one edited test file, whose
+  own assertions are unchanged — only how it reaches the flow moved) is
+  otherwise byte-identical, so no shipped behaviour moves. The `patch` level
+  reflects the published `package.json` gaining `typecheck` /
+  `check:test-typecheck` scripts and a `tsx` devDependency.
+- 1272f0a: Promote `resolveRecordOrganizationField` to the shared platform-row organization resolver (the cloud#1395 Option A ruling): a platform row's organization is the SUBJECT record's organization; actor context is the fallback, never the primary.
+  
+  - `@objectstack/metadata-core` now owns the resolver (`resolveRecordOrganizationField`, `createFieldPresenceProbe`, and the new memoized `createRecordOrganizationResolver` factory) so all three sanctioned writers share one precedence.
+  - `@objectstack/plugin-approvals`: `openNodeRequest` stamps `sys_approval_request`, `sys_approval_action` and the `sys_approval_approver` index from the subject record's organization (acting context as fallback). Fixes the measured defect where every schedule / time-relative / api triggered approval persisted `organization_id = NULL` — locking the record it was about while being invisible in every inbox, its owner's included.
+  - `@objectstack/service-automation`: `sys_automation_run` rows (paused and terminal) resolve their organization from the trigger-record snapshot, with the acting tenant as fallback. Terminal rows previously never carried an organization at all.
+  - `@objectstack/plugin-audit`: the resolver moved out; the package re-exports it from the original paths, behavior unchanged.
+  
+  The `sys_api_key` divergence is preserved and pinned: `tenancy.organizationField` (who a row is ABOUT) still wins over the tenant wall answer, and the credential table stays unwalled.
+- 7307191: `AutomationEngine.resume(runId)` called with no signal object is now held to the suspended `screen` node's declared field contract exactly like a signal-carrying resume: a run paused on a screen with an unconditional `required` field is refused with `INVALID_SCREEN_INPUT` and stays paused, instead of proceeding with that variable unbound. The bare `if (!signal) return null` early return in `refuseInvalidScreenInput` is gone — an absent signal is an empty submission, the same shape the HTTP resume route has always assembled for an empty body — and the engine's own continuations (subflow output mapping, `map` item handoff) remain exempt only through the existing engine-built-signal mechanism. Pauses that declare no input contract are unaffected: `wait` and `approval` nodes, message-only and object-form screens, and screens whose fields are all optional or hidden resume without a signal exactly as before.
+- ffbb7a1: Stamp `organization_id` on flow-produced notifications and on `markRead`
+  receipts, so the notification family stops writing org-less rows
+  
+  An application project's read-only inventory found `sys_inbox_message`,
+  `sys_notification`, `sys_notification_receipt` and `sys_notification_delivery`
+  carrying `organization_id = NULL` on **100%** of their rows — existing rows and
+  same-day new ones alike, while `sys_approval_request` in the same database
+  carried an organization on every row. Ruled a gap, not a design choice.
+  
+  Everything below the messaging ingress was already threaded: `emit()` stamps the
+  `sys_notification` event, the inbox channel stamps `sys_inbox_message` and its
+  `delivered` receipt, and the outbox carries the value onto
+  `sys_notification_delivery`. Each of them reads `EmitInput.organizationId` —
+  and the `notify` flow node, the dominant producer, never supplied it. Its local
+  structural mirror of `emit()` did not even declare the field, so the value could
+  not have been passed. One missing argument, four tables at 100% null.
+  
+  The node now threads the organization from the run's own acting context
+  (`AutomationContext.tenantId`), the same source the `collab.mention` producer in
+  `@objectstack/plugin-audit` already uses, so the two notification producers agree
+  about whose organization a notification carries.
+  
+  A second producer of the same table is fixed alongside it: the `read` receipt
+  `markRead` inserts — written when a user reads a notification whose delivered
+  receipt never landed — named no organization at all. It now carries the
+  organization of the `sys_notification` row it is about.
+  
+  There is deliberately **no fallback limb** in either producer: not "the current
+  organization", not the install's first organization, not the recipient's first
+  membership. A run with no organization in scope still emits and still writes its
+  rows, and the `notify` node warns audibly naming the topic and the consequence.
+  A wrong `organization_id` is worse than a null — a null is visibly missing,
+  while a wrong value is silently authoritative to every report, export and
+  cleanup script that filters by organization.
+  
+  Forward-stamping only. Existing rows are not backfilled and no migration ships.
+- 5563bfb: Answer a delegated subflow child's retryable refusal as a refusal, not as a terminal child failure.
+  
+  A run paused at a `subflow` node forwards a resume down to the child it is parked on — the screen-flow path, where the caller holds one stable run id (the parent's) and posts every wizard step to it. When the child *refused* that bag (`INVALID_SCREEN_INPUT` for a missing `required` field, `INVALID_SIGNAL`, `RESUME_IN_PROGRESS`, `STORE_UNAVAILABLE`), the delegation read it as a child that ran and died: it failed the parent run, consumed the parent's suspension, orphaned the still-paused child, and answered a **code-less** envelope, which a transport maps to `400 FLOW_FAILED`. The corrected retry on the same run id then answered `RUN_NOT_FOUND` — one mistyped form field destroyed a running workflow.
+  
+  The delegation now branches on the child's own `code`. A refusal is returned verbatim with its `code` intact (and the parent's `durationMs`), **both** pauses left live, so the corrected submission still lands on the same parent run id. A child that genuinely ran and failed still fails the parent exactly as before.
+- 06017ed: fix(automation): the healthy subflow up-bubble no longer logs the degraded "child run is gone" warning
+  
+  Every successful subflow completion logged, at `warn`:
+  
+  ```
+  [automation] run 'R' is paused at subflow node 'N' but child run 'C' is gone — continuing without child output
+  ```
+  
+  Both halves of that sentence were false on this path. The child had not gone
+  anywhere — it had *completed*, which is the normal outcome — and the parent was
+  continuing **with** the child's output, not without it: the very signal the
+  engine was holding when it wrote the line already carried it.
+  
+  The cause is that the branch keyed off a suspension lookup. A parent parked at a
+  `subflow` node correlates to its child as `subflow:CHILDID`, and on resume the
+  engine calls `loadSuspendedRun(CHILDID)`. That finds only **SUSPENDED** runs, so
+  a child that finished has no suspension to find, and the miss fell through to an
+  `else` written for the genuinely degraded case. The lookup answers "is the child
+  still parked", which on the up-bubble is a question about nothing: the child is
+  supposed to be finished there.
+  
+  The branch now asks the fact the message is actually about — whether the incoming
+  resume signal already carries the child's output, which is what the engine's own
+  `buildSubflowResumeSignal` mints when a completed child bubbles into its parent.
+  When it does, the run continues from the subflow node with a `debug` line naming
+  the carried output. When there is no child run **and** no carried output, the
+  degraded case is real and keeps its existing sentence at its existing level.
+  
+  The engine-built marker is part of the test, not decoration: `output` is a
+  caller-writable field and on this node a caller's signal is delegated down to the
+  child, so matching on shape alone would let a caller's own bag silence a genuine
+  degraded warning. Only the engine can mint that marker.
+  
+  No behaviour changes: both branches continue the parent exactly as before, no log
+  call site changes level, and the degraded sentence is untouched. This is a
+  logging correctness fix — an ordinary outcome had been reported as a fault on
+  every healthy subflow completion, which is the cry-wolf shape that trains an
+  operator to skip the line on the one occasion it means what it says.
+- 8094834: Resume a paused flow run from the shared store, not from the replica's own memory of it
+  
+  On a multi-replica deployment over one database, approving a level of a multi-level
+  approval flow could re-create the level that was just approved instead of opening the
+  next one — so the same approver had to approve each level twice, and a three-level flow
+  produced five approval requests. Landing the same stale read on the final level rolled
+  the run back to the previous one and left it parked forever instead of completing.
+  
+  The engine kept paused runs in a per-process map and read that map before the durable
+  `sys_automation_run` row, so a replica that had handled the run earlier answered from
+  its own snapshot of the node the run was parked at — a snapshot nothing invalidates.
+  Whichever replica the next decision reached then traversed forward from a node the run
+  had already left. A single replica never showed it, because there is only one map and
+  it is never behind.
+  
+  The resume path is now store-authoritative: with a `SuspendedRunStore` configured, the
+  store answers where a run is parked, and the in-memory map is consulted only for a run
+  whose durable save failed (the existing degradation, which keeps such a run resumable
+  in-process and reports the lost durability at `error`). The ordering of the resume
+  itself is unchanged — the suspension is still consumed before downstream traversal.
+  
+  Two consequences worth knowing: every resume now reads the store, so an unreadable
+  store is reported as `STORE_UNAVAILABLE` for a run this process parked itself rather
+  than being served a possibly-stale snapshot; and the approvals pre-flight
+  (`hasSuspendedRun`) is answered from the same authoritative read, so a decision is no
+  longer recorded against a run that another replica has already advanced or finished.
+- 4a0141c: fix(automation): a `try_catch` whose `catch` region itself fails now keeps the step record of both regions
+  
+  `try_catch` returns a failure from three sites. #13803 taught the engine to fold
+  a dying container's carried steps off the THROW channel, #14184 taught its
+  returned-failure branch (`if (!result.success)`) to do the same, and #14184 also
+  taught the first producer — a `try_catch` with no `catch` region — to supply
+  them. The second producer was left unfolded: when a `catch` region is present
+  and the handler itself fails, the return dropped `childSteps` entirely.
+  
+  That is the same defect one path over, and the worst of the three for an
+  operator, because TWO regions ran. The try region may have written rows before
+  it failed; the handler may have written more before IT failed; the run log kept
+  a step for neither, so the run summary folded over that log reported `acted: 0`
+  over writes that had genuinely landed. `acted: 0` on a failed run reads as
+  "nothing happened, safe to re-run", which for a non-idempotent region invites
+  double-execution.
+  
+  Closing it needed the half that was genuinely missing rather than the available
+  one: the failed try attempts were already in scope, but the catch region ran
+  without a `partialSteps` sink, so when the handler threw, the handler's own
+  completed steps unwound with the stack. The catch region now receives the same
+  sink the try region already had (`runRegion`'s fifth argument), and the failing
+  return carries `[...failedTryAttempts, ...catchAttempts]` — failed try attempts
+  first, because they happened first, which is the ordering the successful-catch
+  return has always used. `runRegion`'s existing tagger supplies `regionKind:
+  'try'` / `'catch'` and `parentNodeId` on its failure path as well as its
+  success path, so the two halves stay distinguishable in the log.
+  
+  Additive to the RECORD only. This return already reported failure with the same
+  error text, already produced a `NODE_FAILURE` step, already set `$error` and was
+  already routable by a `fault` edge; none of that moves, and neither does the
+  successful-catch path or the retry/throw semantics. No engine change was needed
+  — the fold that reads these steps has been in place since #14184.
+- 7d3b1b7: fix(service-automation): a `try_catch` with no `catch` region keeps the record of the writes its try region already made (#14184)
+  
+  The returned-failure half of the engine's `childSteps` asymmetry. #13803 closed
+  the **throw** half — a dying `loop` brands its thrown error with the body steps
+  it completed and the engine's `catch` arm folds them into the run log — and
+  deliberately left the `if (!result.success)` branch alone, because at that
+  moment no executor returned `childSteps` on a failing result and a fold for
+  zero producers is speculative.
+  
+  `try_catch` is the producer that makes it real. It does not throw: it catches
+  the try region's failure and RETURNS it, and on that return it withheld its
+  `childSteps` on purpose — correct while the engine spliced them only after a
+  successful result, and stale the moment the failing branch learned to fold. So
+  for a `try_catch` with **no** `catch` region, the try region's completed steps
+  were recorded nowhere: the run log kept no step for them, and the #4354 summary
+  folded over that log reported `acted: 0` for a region that had genuinely
+  written rows.
+  
+  That is wrong in the one direction that causes harm. `acted: 0` on a failed run
+  reads as "nothing happened, safe to re-run", and for a non-idempotent region
+  (notifications, counters, external calls) that misread invites double-execution.
+  
+  Two halves, mirroring #13803:
+  
+  - `try_catch`'s no-`catch` failing return now carries `childSteps`.
+  - The engine folds `result.childSteps` in its `if (!result.success)` branch, in
+    the same position the throw arm and the success path use — right behind the
+    container's own step, ahead of any `fault` handler's steps.
+  
+  **A record fix only; accept/reject is untouched and measured so.** `try_catch`
+  still returns failure with the same error text, still produces a `NODE_FAILURE`
+  step with the same message, still writes the same `$error`, still routes down
+  the same `fault` edge, and the run still ends `failed`. Those four were green
+  before this change and are green after it. The contained (with-`catch`) path,
+  the all-succeeding path and the failing-`catch` path are unchanged, and a try
+  region that fails before writing anything still reports `acted: 0` — there 0 is
+  the honest answer.
+  
+  Every folded step carries a `parentNodeId`, so the ADR-0044 runaway guard, which
+  counts only top-level visits, does not see them. Nesting was measured for
+  double-folding: a container's sink already absorbs an inner container's steps,
+  so each step object still reaches the run log exactly once.
+- aa0688a: Arm a deterministic flow when a runtime-authored flow reuses a packaged flow's name
+  
+  A runtime-authored flow that reused a packaged flow's name silently replaced it,
+  and which of the two ended up armed depended on registration order. The metadata
+  registry keys items `packageId:name` and deliberately coexists both (ADR-0048
+  §3.4), `listItems('flow')` returns both with no precedence, and the automation
+  engine keys flows by bare name — so the boot pull registered both under one key
+  and Map iteration order picked the survivor. Measured: registering the package
+  first armed the runtime flow, registering the runtime row first armed the
+  packaged flow, with no warning and no way to tell which had won.
+  
+  The boot pull now collapses same-named definitions before anything is armed,
+  applying the ADR-0005 overlay precedence ADR-0048 §3.4 routes this case to: the
+  runtime/DB overlay wins over the packaged artifact, which is the sanctioned
+  override path. Two packages shipping one bare name resolve by package id, so
+  boot order no longer decides anything.
+  
+  Collisions are no longer silent. The pull warns once per colliding name — naming
+  the name, every contender, and which one is armed — and repeats it at bootstrap
+  beside the other automation audits. `getShadowedFlows()` is a new receipt listing
+  each contested name with its armed and shadowed definitions, and
+  `getFlowRuntimeStates()` rows now carry `armedFrom`/`shadowed` for contested
+  names; previously the displaced definition was invisible by construction, since
+  the flow map holds one entry per name. The `Pulled N flow(s)` line now counts
+  distinct names rather than registrations.
+  
+  `isCodeArtifactBody` is exported from `@objectstack/objectql` so consumers that
+  collapse same-named metadata answer "does a code package ship this?" with the
+  registry's own test instead of re-deriving it from `_packageId`.
+- Updated dependencies [809d417]
+- Updated dependencies [387e231]
+- Updated dependencies [f794e4e]
+- Updated dependencies [cae2169]
+- Updated dependencies [b812a54]
+- Updated dependencies [2d4fa75]
+- Updated dependencies [0e4e51b]
+- Updated dependencies [e84bbf6]
+- Updated dependencies [effae80]
+- Updated dependencies [efb3513]
+- Updated dependencies [d62f990]
+- Updated dependencies [c45d8e6]
+- Updated dependencies [2e3e8c7]
+- Updated dependencies [e621291]
+- Updated dependencies [655b106]
+- Updated dependencies [40a93b5]
+- Updated dependencies [d5b330d]
+- Updated dependencies [dda969c]
+- Updated dependencies [1f45690]
+- Updated dependencies [277948f]
+- Updated dependencies [8bdd955]
+- Updated dependencies [54e2d36]
+- Updated dependencies [b745157]
+- Updated dependencies [f3bbbef]
+- Updated dependencies [4f24e9d]
+- Updated dependencies [e27583e]
+- Updated dependencies [4bd6faa]
+- Updated dependencies [86cbe37]
+- Updated dependencies [6a180e4]
+- Updated dependencies [474242f]
+- Updated dependencies [63cd487]
+- Updated dependencies [bd4aa4e]
+- Updated dependencies [803eaab]
+- Updated dependencies [f8e8f03]
+- Updated dependencies [983edf1]
+- Updated dependencies [eae824e]
+- Updated dependencies [f6fa22c]
+- Updated dependencies [8a483b3]
+- Updated dependencies [3bc2e38]
+- Updated dependencies [97bcd99]
+- Updated dependencies [df59de0]
+- Updated dependencies [96e25a8]
+- Updated dependencies [713f83f]
+- Updated dependencies [77d4b3c]
+- Updated dependencies [f75a38a]
+- Updated dependencies [7a25e7d]
+- Updated dependencies [1fa05a6]
+- Updated dependencies [c85a265]
+- Updated dependencies [dcb10a5]
+- Updated dependencies [773a999]
+- Updated dependencies [35dffea]
+- Updated dependencies [d8024f0]
+- Updated dependencies [8120808]
+- Updated dependencies [776a098]
+- Updated dependencies [5060877]
+- Updated dependencies [4f6325d]
+- Updated dependencies [52954c0]
+- Updated dependencies [2aa8456]
+- Updated dependencies [d23ebb9]
+- Updated dependencies [93809a3]
+- Updated dependencies [7c0d0c3]
+- Updated dependencies [daae7aa]
+- Updated dependencies [8dc22d6]
+- Updated dependencies [fa5d137]
+- Updated dependencies [a392dbf]
+- Updated dependencies [279431e]
+- Updated dependencies [948dd6b]
+- Updated dependencies [3b4c56c]
+- Updated dependencies [ae8edd2]
+- Updated dependencies [e25403c]
+- Updated dependencies [64baa68]
+- Updated dependencies [9fa70d7]
+- Updated dependencies [09db64a]
+- Updated dependencies [92916e7]
+- Updated dependencies [a84f3ea]
+- Updated dependencies [f2eaae8]
+- Updated dependencies [c09451b]
+- Updated dependencies [ba64877]
+- Updated dependencies [e7191ce]
+- Updated dependencies [7345308]
+- Updated dependencies [79b6a22]
+- Updated dependencies [30d96ab]
+- Updated dependencies [f658793]
+- Updated dependencies [0fd4899]
+- Updated dependencies [c95ad19]
+- Updated dependencies [e58ea8b]
+- Updated dependencies [4a17645]
+- Updated dependencies [3795c5f]
+- Updated dependencies [8ab926b]
+- Updated dependencies [7317cf2]
+- Updated dependencies [e25e839]
+- Updated dependencies [5997207]
+- Updated dependencies [8b13cc8]
+- Updated dependencies [00d8f65]
+- Updated dependencies [4a4a35d]
+- Updated dependencies [4a4a35d]
+- Updated dependencies [86e765a]
+- Updated dependencies [1d7e76a]
+- Updated dependencies [53dc739]
+- Updated dependencies [fd289be]
+- Updated dependencies [03bf7b1]
+- Updated dependencies [f90e820]
+- Updated dependencies [18d816a]
+- Updated dependencies [e8bd715]
+- Updated dependencies [b91c351]
+- Updated dependencies [a28a3c0]
+- Updated dependencies [200d255]
+- Updated dependencies [2852acc]
+- Updated dependencies [daeaaf9]
+- Updated dependencies [c459da6]
+- Updated dependencies [e914733]
+- Updated dependencies [1d8ad0f]
+- Updated dependencies [9738c35]
+- Updated dependencies [f887e52]
+- Updated dependencies [881f8d8]
+- Updated dependencies [3bfa1e6]
+- Updated dependencies [0a8ebf3]
+- Updated dependencies [901355c]
+- Updated dependencies [34ce8e7]
+- Updated dependencies [33681ea]
+- Updated dependencies [4635f3e]
+- Updated dependencies [fd289be]
+- Updated dependencies [ee3595c]
+- Updated dependencies [09b4f4e]
+- Updated dependencies [b2eab95]
+- Updated dependencies [93940d4]
+- Updated dependencies [3a04b01]
+- Updated dependencies [45b9051]
+- Updated dependencies [3954fb7]
+- Updated dependencies [4805b56]
+- Updated dependencies [b9e9227]
+- Updated dependencies [d395692]
+- Updated dependencies [5894d30]
+- Updated dependencies [a3765f6]
+- Updated dependencies [2d5cee3]
+- Updated dependencies [e22158f]
+- Updated dependencies [7404925]
+- Updated dependencies [0c2334f]
+- Updated dependencies [778c59f]
+- Updated dependencies [d2619fd]
+- Updated dependencies [af56546]
+- Updated dependencies [6acb11a]
+- Updated dependencies [33c5fd3]
+- Updated dependencies [20b0fdb]
+- Updated dependencies [905019b]
+- Updated dependencies [a286411]
+- Updated dependencies [98c0d33]
+- Updated dependencies [368a82e]
+- Updated dependencies [a3d5724]
+- Updated dependencies [93ea19b]
+- Updated dependencies [9ee2dcf]
+- Updated dependencies [8cb96ec]
+- Updated dependencies [8f10a79]
+- Updated dependencies [6269a55]
+- Updated dependencies [a17da05]
+- Updated dependencies [a8c00e2]
+- Updated dependencies [0fb8760]
+- Updated dependencies [e5ce2ed]
+- Updated dependencies [be21955]
+- Updated dependencies [bc56e18]
+- Updated dependencies [be21955]
+- Updated dependencies [a9ee989]
+- Updated dependencies [4d0d944]
+- Updated dependencies [15d58db]
+- Updated dependencies [d63b014]
+- Updated dependencies [9abe4e4]
+- Updated dependencies [2cc7122]
+- Updated dependencies [50d6c92]
+- Updated dependencies [15d55fb]
+- Updated dependencies [9e0ba21]
+- Updated dependencies [311433f]
+- Updated dependencies [3e5ad08]
+- Updated dependencies [9abe4e4]
+- Updated dependencies [b7131f3]
+- Updated dependencies [e5812fa]
+- Updated dependencies [7085f90]
+- Updated dependencies [dee4dd4]
+- Updated dependencies [ce7e497]
+- Updated dependencies [51ecb2f]
+- Updated dependencies [9086761]
+- Updated dependencies [f6344e7]
+- Updated dependencies [42a117b]
+- Updated dependencies [1401ae7]
+- Updated dependencies [4297fe7]
+- Updated dependencies [e398863]
+- Updated dependencies [d16df74]
+- Updated dependencies [d79c602]
+- Updated dependencies [f11fc61]
+- Updated dependencies [e808890]
+- Updated dependencies [8f79379]
+- Updated dependencies [e6ca40e]
+- Updated dependencies [0c77ea4]
+- Updated dependencies [52954c0]
+- Updated dependencies [89eb997]
+- Updated dependencies [7131f12]
+- Updated dependencies [aa5994e]
+- Updated dependencies [be93457]
+- Updated dependencies [a65db76]
+- Updated dependencies [15eb2c9]
+- Updated dependencies [5691b07]
+- Updated dependencies [2a6122b]
+- Updated dependencies [225e769]
+- Updated dependencies [8af88dd]
+- Updated dependencies [fb5fbb8]
+- Updated dependencies [d7b3963]
+- Updated dependencies [33184fd]
+- Updated dependencies [7c41693]
+- Updated dependencies [b72db01]
+- Updated dependencies [dce5cd4]
+- Updated dependencies [9688f58]
+- Updated dependencies [556ebc1]
+- Updated dependencies [177ebdc]
+- Updated dependencies [8d237b4]
+- Updated dependencies [2d2e6f0]
+- Updated dependencies [2d8dd8d]
+- Updated dependencies [22d573e]
+- Updated dependencies [b5a2398]
+- Updated dependencies [348860c]
+- Updated dependencies [5383fa6]
+- Updated dependencies [5b3ff63]
+- Updated dependencies [1a6a19c]
+- Updated dependencies [064d484]
+- Updated dependencies [527e050]
+- Updated dependencies [dd33bf9]
+- Updated dependencies [4cb2a90]
+- Updated dependencies [74a7804]
+- Updated dependencies [53d3689]
+- Updated dependencies [b3a63d3]
+- Updated dependencies [49f0dcf]
+- Updated dependencies [033a34c]
+- Updated dependencies [4d25d22]
+- Updated dependencies [1ffee51]
+- Updated dependencies [5ae4303]
+- Updated dependencies [ece4dad]
+- Updated dependencies [e9b377e]
+- Updated dependencies [146f448]
+- Updated dependencies [735f5c7]
+- Updated dependencies [a7e18de]
+- Updated dependencies [366f895]
+- Updated dependencies [dc75ba8]
+- Updated dependencies [cce0aa9]
+- Updated dependencies [e764507]
+- Updated dependencies [cff17af]
+- Updated dependencies [39404f3]
+- Updated dependencies [ca1965f]
+- Updated dependencies [8619f95]
+- Updated dependencies [b706af9]
+- Updated dependencies [add4360]
+- Updated dependencies [e0abc38]
+- Updated dependencies [fc9ba76]
+- Updated dependencies [1272f0a]
+- Updated dependencies [0f94cc7]
+- Updated dependencies [a11c1a5]
+- Updated dependencies [71f9cd1]
+- Updated dependencies [ee17d86]
+- Updated dependencies [cdbd920]
+- Updated dependencies [18c432e]
+- Updated dependencies [3c418c4]
+- Updated dependencies [fa8715a]
+- Updated dependencies [a933ed7]
+- Updated dependencies [b3ca463]
+- Updated dependencies [a933ed7]
+- Updated dependencies [0d4a6a8]
+- Updated dependencies [518d5e5]
+- Updated dependencies [6643ba1]
+- Updated dependencies [eeba2ef]
+- Updated dependencies [ec4c4d2]
+- Updated dependencies [424f73c]
+- Updated dependencies [cccbe51]
+- Updated dependencies [a8d6b1d]
+- Updated dependencies [e4a7695]
+- Updated dependencies [87075b1]
+- Updated dependencies [fc58a99]
+- Updated dependencies [14cfc00]
+- Updated dependencies [1c6f7b4]
+- Updated dependencies [e854a53]
+- Updated dependencies [dfebfc8]
+- Updated dependencies [598b7ec]
+- Updated dependencies [d028b37]
+- Updated dependencies [f7b25c5]
+- Updated dependencies [122ef38]
+- Updated dependencies [4a37870]
+- Updated dependencies [428f9b2]
+- Updated dependencies [aa7ff56]
+- Updated dependencies [811a3c2]
+- Updated dependencies [1401ae7]
+- Updated dependencies [2fd3f1c]
+- Updated dependencies [c41b42e]
+- Updated dependencies [d41d166]
+- Updated dependencies [c4db311]
+- Updated dependencies [750fff5]
+- Updated dependencies [c19035e]
+- Updated dependencies [ececf7a]
+- Updated dependencies [d173125]
+- Updated dependencies [8eeca27]
+- Updated dependencies [8425c17]
+- Updated dependencies [a5ef1d8]
+- Updated dependencies [772d5de]
+- Updated dependencies [ce80ec2]
+- Updated dependencies [b372318]
+- Updated dependencies [97a2263]
+- Updated dependencies [29d0676]
+- Updated dependencies [0169d49]
+- Updated dependencies [6bd3231]
+- Updated dependencies [d2b5ba8]
+- Updated dependencies [b799ac5]
+- Updated dependencies [8f74307]
+- Updated dependencies [d23dc08]
+- Updated dependencies [038f333]
+- Updated dependencies [644ad50]
+- Updated dependencies [5d16379]
+- Updated dependencies [0da7cd2]
+- Updated dependencies [28a5c3e]
+- Updated dependencies [4bc18e5]
+- Updated dependencies [9f57f1e]
+  - @objectstack/spec@17.3.0
+  - @objectstack/platform-objects@17.3.0
+  - @objectstack/core@17.3.0
+  - @objectstack/metadata-core@17.3.0
+  - @objectstack/formula@17.3.0
+
 ## 17.2.0
 
 ### Minor Changes
