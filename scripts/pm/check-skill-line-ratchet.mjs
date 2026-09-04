@@ -1488,6 +1488,209 @@ function run() {
   if (failed) process.exit(1);
 }
 
+// -- The self-test's own battery roster and floor (#13489) ------------------
+//
+// `--self-test` reaching its verdict used to be this self-test's ONLY success
+// condition, so "every case held" and "the cases never ran" printed the same
+// line. Closed the PR #13487 way: what is pinned is the registered NAMES, not a
+// number.
+//
+// This self-test is TABLE-DRIVEN -- one `cases` table, one loop over it, and a
+// sink (`failed++`) that writes only when a case FAILS. Routing THAT sink
+// through `registerCase()` would register a case only when it fails: a fully
+// green run would register 0 and every battery would read DID NOT RUN, the
+// floor inverted rather than installed. So the roster is the table's own rows.
+// Each row LABEL is a declared battery, verbatim, with a floor of 1, and
+// `registerCase(name)` is the first statement of the driving loop body -- so the
+// case is attributed to the row actually being run. There is no `battery()`
+// opener: for a table-driven self-test the ROW is the battery.
+//
+// ⭐ ALL 155 rows are floored, the four `...(() => { ... })()` spreads included.
+// Those spreads were flagged in the batch-8 census as an IIFE-produced block
+// whose rows could not take a literal roster key. Measured here, that premise
+// does not hold for this file: each IIFE is a SCOPING device that declares
+// local fixture consts and then `return [...]`s an array of LITERAL
+// `[label, actual, expected]` rows. No row label is a template string, none is
+// computed, and no row is produced by a `map`/`push`/loop. Three independent
+// readings agree on 155 -- the source labels extracted by indentation, the
+// literal row starts, and the `cases.length` the green line prints on a run --
+// so nothing here is the `extra`-call residue of PR #15286, and leaving any row
+// outside the roster would have been the lossy reading.
+//
+// A pinned TOTAL is not the repair, and neither is a roster DERIVED from the
+// table: `cases.length` moves with the table, so a deleted row would delete its
+// own floor. The roster below is a LITERAL the table is checked against, which
+// is what lets a deleted or renamed row name ITSELF in the refusal.
+//
+// The counts are a FLOOR, not an equality -- a row that grows into several
+// registrations must not red. 1 is the honest floor for a table row: the loop
+// reaches it exactly once per run.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'under the ceiling -> green': 1,
+  'at the ceiling -> green': 1,
+  'over the ceiling -> red': 1,
+  'red message names the file': 1,
+  'red message names the remedy': 1,
+  'red message names the authoring rule': 1,
+  'empty read -> red, not a skip': 1,
+  'every covered file has a positive ceiling': 1,
+  'SKILL.md is covered': 1,
+  'the dev-agent definition is covered': 1,
+  'all five compressed references are covered': 1,
+  'all eight lane/seat job descriptions are covered': 1,
+  'the other four skills are covered (#9473)': 1,
+  'root AGENTS.md is covered (#9792)': 1,
+  'root CLAUDE.md is covered (#9965)': 1,
+  'references/compile-surfaces.md is covered (#12098)': 1,
+  'every separator-less ceiling declares a root-file watch hint': 1,
+  'and the declaration names no file the map does not cover': 1,
+  'both root instruction files are declared': 1,
+  'the declared form is NOT a CEILINGS key': 1,
+  'the published skills/ catalog is deliberately uncovered': 1,
+  'budget is 120 bytes': 1,
+  'a short ASCII line -> green': 1,
+  'a long ASCII line -> RED': 1,
+  'a short CJK line -> green': 1,
+  'a long CJK line -> RED': 1,
+  'the RED message names the budget': 1,
+  'the RED message names the line number': 1,
+  'the RED message offers NO allowlist to add a line to': 1,
+  'no offenders -> green verdict': 1,
+  'a long line inside a fence is exempt': 1,
+  '...and the SAME line outside one is RED': 1,
+  'scan: a fenced long line yields no offender': 1,
+  'scan: the fence closes again': 1,
+  'a long table row is exempt': 1,
+  '...and the same cells as prose are RED': 1,
+  'a long heading is exempt': 1,
+  '...and the same text as a paragraph is RED': 1,
+  'front matter is exempt': 1,
+  'scan: front matter closes at the second ---': 1,
+  'an anchored Blocked-by: line is exempt': 1,
+  'Restart-when: too': 1,
+  'Restart-touch: too': 1,
+  'but a MID-PROSE mention is not exempt — the escape hatch is line-anchored only': 1,
+  'a long blockquote line is exempt': 1,
+  '...including one indented inside a list': 1,
+  '...and the same quotation unquoted is RED': 1,
+  'a bare over-long URL is exempt': 1,
+  'a single over-long code span is exempt': 1,
+  '...but prose LEADING to that URL is RED (wrap first, URL lands alone)': 1,
+  'wrapLine splits a long CJK line': 1,
+  'every wrapped CJK segment is within budget': 1,
+  'wrapping a CJK line changes NOTHING but whitespace': 1,
+  'wrapping an ASCII line changes NOTHING but whitespace': 1,
+  'a list continuation is indented under the marker': 1,
+  'no continuation line opens a new markdown block': 1,
+  'wrapLine is idempotent — its output is the canonical form': 1,
+  'wrapLine leaves a short line untouched': 1,
+  'wrapLine never breaks inside a code span': 1,
+  'wrapLine never breaks inside a 「…」 ruling quote': 1,
+  '...nor inside a 『…』 one': 1,
+  'a quote longer than the budget makes its line unbreakable, not RED': 1,
+  'a line OPENING an unterminated 「 is exempt': 1,
+  'a line INSIDE an open quote is exempt': 1,
+  '...and the same line outside one is RED — the exemption is the quote, not the text': 1,
+  'a SHORT line inside a quote is simply green, not counted exempt': 1,
+  'advanceState opens on an unmatched 「': 1,
+  'advanceState closes on the matching 」': 1,
+  'a quote opened and closed on ONE line does not open the state': 1,
+  'advanceState does not track quotes inside a fence': 1,
+  'scan: a two-line quote yields quotation exemptions, not offenders': 1,
+  'wrapLine never strands a closing 。 at a line head': 1,
+  'an ASCII , after a Han character is a no-break-after mark': 1,
+  '...and ; and : are the same mark class': 1,
+  '...but after a LATIN word it stays an ordinary break point': 1,
+  '...and a mark with a space before it follows nothing': 1,
+  '...and an atom not ending in one is never the mark': 1,
+  'breakLegal refuses the break after a Han+ASCII mark': 1,
+  '...a mark with no following space was never a break point to begin with': 1,
+  '...still allows the CJK-to-CJK break one atom earlier': 1,
+  '...and still allows an ordinary ASCII space break': 1,
+  'wrapLine splits the trap line': 1,
+  'no wrapped line ends on a Han+ASCII mark — the break is no longer OFFERED': 1,
+  '...the line it took instead is still within budget': 1,
+  '...and it moved only whitespace, as every wrap must': 1,
+  'the SAME shape with a Latin word before the mark still breaks there': 1,
+  'wrapLine is still idempotent under the new rule': 1,
+  'a long table row is EXEMPT from the 120-byte line rule': 1,
+  '...and the same row is METERED by its file pin': 1,
+  'at exactly the pin -> green': 1,
+  'one byte wider -> RED (widening a cell is the measured defect)': 1,
+  'narrower than the pin -> green': 1,
+  'a pin of 0 is a measurement — a file with no table row passes it': 1,
+  '...and the FIRST table row in such a file is RED': 1,
+  'a missing pin is RED, not a skip (#4690)': 1,
+  '...and says so rather than naming a width': 1,
+  'the RED message names the width': 1,
+  'the RED message names the line': 1,
+  'the RED message names the remedy': 1,
+  'the RED message names consolidation as the way to pay it down': 1,
+  'the RED message offers NO allowlist': 1,
+  'the RED message says raising needs a maintainer ruling': 1,
+  'scanTableRows finds the widest row': 1,
+  '...and reports its line number': 1,
+  'a `|` line inside a FENCE is not a table row': 1,
+  'a `|` line in FRONT MATTER is not a table row': 1,
+  'a file with no table row measures 0': 1,
+  'every ceilinged file carries a pin': 1,
+  'and the pin map names no file the ceiling map does not cover': 1,
+  'every pin is a non-negative integer': 1,
+  'the published skills/ catalog is uncovered here too': 1,
+  'the citation is the ruling this file was given': 1,
+  'cross-file move — a raise covered by its sources\' net decrease PASSES': 1,
+  '...and the green verdict states the arithmetic it read': 1,
+  'cross-file move — a raise whose sources did NOT shrink is RED (the whole defect: a `move` that licenses an ordinary raise would run green forever)': 1,
+  '...and the RED verdict names the raise and the net decrease it fell short of': 1,
+  '...and sends the author to the ordinary path rather than to a bigger declaration': 1,
+  'cross-file move — a raise EXCEEDING the net decrease is RED, even by one line': 1,
+  '...while a raise exactly equal to it is legal': 1,
+  'cross-file move — a declaration citing no ruling is RED, however sound its arithmetic': 1,
+  '...and the RED verdict spells the citation it wanted': 1,
+  'cross-file move — declarations whose net movement is 0 leave the map total unchanged': 1,
+  'cross-file move — a declaration whose participants net POSITIVE fails the total (+2 here)': 1,
+  '...and the RED total names the lines it grew by': 1,
+  '...and a net-negative move reports the corpus shrinking': 1,
+  'cross-file move — one source may not pay for two destinations': 1,
+  'cross-file move — a destination lowered back to or below its pre-move ceiling reads as PAID DOWN, never as red (lowering is always legitimate)': 1,
+  '...and says so rather than reporting an arithmetic it can no longer measure': 1,
+  'cross-file move — a SOURCE grown back past what it paid re-opens the move (the loophole: the destination keeps the lines while the payers grow back)': 1,
+  'cross-file move — an unknown destination is RED, not a skip (#4690)': 1,
+  'cross-file move — an unknown source is RED, not a skip (#4690)': 1,
+  'cross-file move — a file may not pay its own raise': 1,
+  'cross-file move — a declaration naming no source at all is RED': 1,
+  'every live declaration cites the ruling': 1,
+  'every live declaration names its destination\'s pre-move ceiling and at least one source': 1,
+  'every live participant is a file this map covers': 1,
+  'ruled raise — a destination that later took an ordinary ruled raise PASSES with `was` at its literal pre-move value': 1,
+  '...and the verdict prices the MOVE, not the ruling: +10 against the sources\' net 11': 1,
+  '...and names the ruled lines it took out, so the arithmetic can be read back': 1,
+  '...while the SAME tree with the raise unrecorded is the double red this record ends': 1,
+  '...whose first half reads the ruling as the move\'s: +44 against 11': 1,
+  '...and which now sends the author to the record rather than to `was`': 1,
+  'ruled raise — the map-wide total subtracts it too, and reads the corpus DOWN 1': 1,
+  '...where the unrecorded twin reports the corpus growing by 33': 1,
+  'ruled raise — a record quoting NO ruling is RED (the licence is the maintainer\'s or it does not exist)': 1,
+  '...and the RED verdict says what it wanted': 1,
+  '...while an ENGLISH ruling quoted the way this map already quotes one passes': 1,
+  'ruled raise — a record with no line count is RED': 1,
+  'ruled raise — a NEGATIVE line count is RED: lowering is always legitimate and is never recorded here': 1,
+  'ruled raise — a record with no ruling DATE is RED': 1,
+  'ruled raise — records claiming MORE lines than the ceiling stands above `was` are RED': 1,
+  '...which is the loophole that closes: an inflated record would otherwise read the move as paid down and pass forever': 1,
+  'ruled raise — a destination whose whole rise is ruled keeps none of it for the move, and reads as paid down': 1,
+  'ruled raise — a declaration carrying no record behaves exactly as before (every case above this group is one)': 1,
+  'every live ruled-raise record quotes its ruling, dates it, and names a positive line count': 1,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too. This pin is also half of
+// the duplicate-label refusal: two rows sharing a label collapse to ONE key in
+// the literal above, so the roster falls below this number; the table
+// cross-check in the floor block is the other half, and names WHICH label
+// collided.
+const SELF_TEST_BATTERY_FLOOR = 155;
+
 // Returned by `selfTest()` only after its verdict is printed. The dispatch
 // refuses anything else: a `return` that leaves the function above that line
 // prints nothing and still exits 0 — a self-test that never finished, reported
@@ -1786,14 +1989,77 @@ function selfTest() {
       ];
     })(),
   ].map((c) => (Array.isArray(c[1]) || (c[1] && typeof c[1] === 'object') ? [c[0], JSON.stringify(c[1]), JSON.stringify(c[2])] : c));
+  // The ledger this self-test's floor is evaluated against (#13489).
+  const batterySeen = new Map();
+  const registerCase = (name) => {
+    batterySeen.set(name, (batterySeen.get(name) ?? 0) + 1);
+  };
+
   let failed = 0;
   for (const [name, actual, expected] of cases) {
+    registerCase(name);
     const ok = actual === expected;
     if (!ok) failed++;
     console.log(`  ${ok ? '✓' : '✗'} ${name}`);
   }
+  // -- The floor: every declared row RAN, and ran its case (#13489) --------
+  //
+  // Evaluated after every row has had its chance and BEFORE the verdict, so the
+  // success line below can only be printed by a run in which the set of rows
+  // that registered EQUALS the set declared. A set difference names WHICH row
+  // stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    console.error(`✗ self-test floor: ${message}`);
+    failed++;
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned `
+        + `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  const rowLabels = cases.map(([name]) => name);
+  const duplicated = [...new Set(rowLabels.filter((name, i) => rowLabels.indexOf(name) !== i))];
+  if (duplicated.length > 0) {
+    floorBreached = true;
+    floorFailure(
+      `the cases table uses ${duplicated.map((n) => JSON.stringify(n)).join(', ')} as a row label more than once — `
+        + 'two rows sharing a label are ONE battery, so the second can stop running while the first keeps the floor met.',
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in `
+        + 'SELF_TEST_BATTERIES — a case attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. `
+          + 'The verdict below would have claimed that case holds.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of `
+          + `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the '
+        + 'number. Find what stopped registering (a deleted row, a renamed label, a loop that no longer '
+        + 'reaches it) and restore it.',
+    );
+  }
+
   if (failed) {
-    console.error(`✗ check-skill-line-ratchet self-test: ${failed} of ${cases.length} case(s) failed.`);
+    console.error(`✗ check-skill-line-ratchet self-test: ${failed} failure(s) (cases and floor).`);
     process.exit(1);
   }
   console.log(`✓ check-skill-line-ratchet self-test: ${cases.length} cases pass.`);
