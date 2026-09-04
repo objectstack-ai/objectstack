@@ -14,7 +14,8 @@
  *
  *   - invokes a reader this repo SHIPS (`collectBundleActions`,
  *     `resolveStandaloneDatabase`, `createStandaloneStack`,
- *     `appSecurityPluginOptions`, …) and reports its return value, or
+ *     `appSecurityPluginOptions`, `devI18nPluginOptions`, …) and reports its
+ *     return value, or
  *   - boots a real kernel carrying the real `AppPlugin` and reports what that
  *     plugin HANDED to a subsystem (a job scheduled, a datasource connected, a
  *     mapping set, an i18n service registered, a seed dataset merged).
@@ -62,6 +63,7 @@ import {
   resolveStandaloneDatabase,
 } from '@objectstack/runtime';
 import { appSecurityPluginOptions } from '@objectstack/plugin-security';
+import { devI18nPluginOptions } from '@objectstack/plugin-dev';
 import { ObjectStackDefinitionSchema, normalizeStackInput } from '@objectstack/spec';
 
 // The lowering itself, not a copy of it — reached as SOURCE, by relative path,
@@ -363,6 +365,21 @@ export async function measureShape(project: unknown, projectRoot: string): Promi
   //    pass its export through untouched, so the collection loss is not IN the
   //    loader — it is in the readers each of them then drives, which is what
   //    these rows are.
+
+  // `DevPlugin` takes its stack from a CALLER-SUPPLIED object
+  // (`new DevPlugin({ stack: config })`, the documented construction), so there
+  // is no load boundary between the composed config and this reader — the same
+  // object `os dev` boots from source is handed straight to the plugin. The row
+  // calls the SHIPPED decision (`devI18nPluginOptions`), which is what the
+  // plugin itself calls to decide whether to register `I18nServicePlugin`; a
+  // row that re-read `stack.translations` here would be a second copy of the
+  // read the reader program changes and would stay red after it was fixed.
+  const devI18n = devI18nPluginOptions(project);
+  rows.push(row(
+    'B2 · plugin-dev I18nServicePlugin auto-detect over the caller-supplied stack · translations',
+    devI18n ? `I18nServicePlugin(fallbackLocale=${devI18n.fallbackLocale})` : undefined,
+    devI18n === undefined,
+  ));
 
   const fromSourceProfile = appSecurityPluginOptions(project)?.fallbackPermissionSet;
   rows.push(row(
