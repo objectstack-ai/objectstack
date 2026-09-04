@@ -589,7 +589,75 @@ function exportsSubpathOf(specifier: string, packageName: string): string {
 }
 
 /**
- * The directory of the package named `packageName` that owns `resolvedFile`.
+ * Declaration values whose grammar is `<protocol>:<name>[@<range>]` — the two
+ * spellings in which a host DECLARES that a key is an alias for a package with
+ * a different name (#14278).
+ *
+ * `npm:` always names a package: `npm:bar@1`, `npm:@acme/x@^2`, or `npm:bar`
+ * with no range at all. `workspace:` names one ONLY in its aliased form
+ * (`workspace:bar@*`) — a bare `workspace:*` / `workspace:^1.2.3` is a RANGE,
+ * so the key stays the name. Everything else — a plain range, `link:`,
+ * `file:`, a git or tarball URL — carries no package name to expect: those
+ * name a LOCATION or a version, and the manifest name they install under is
+ * not derivable from the declaration at all.
+ */
+const ALIAS_DECLARATION_PROTOCOLS = [
+  { prefix: 'npm:', rangeRequired: false },
+  { prefix: 'workspace:', rangeRequired: true },
+] as const;
+
+/**
+ * The manifest `name` the host's own declaration promises the package it
+ * declares will carry — the key itself for an ordinary dependency, the ALIASED
+ * package's name for `"foo": "npm:bar@1"` (#14278).
+ *
+ * ⚠️ Read by BOTH legs, which is why it sits above both rather than inside
+ * either. They ask about different directories and it answers the same question
+ * for each — *what name does the host say this key is?*
+ *
+ * - the #14041 fallback ({@link hostInstalledPackageDir}) verifies the one
+ *   directory it consults, `<hostRoot>/node_modules/<key>`;
+ * - the #13330 succeeding leg ({@link packageRootOf}) recognises the package
+ *   root while walking up from the entry the CJS resolver already returned
+ *   (#15044).
+ *
+ * ⚠️ This moves each leg's EXPECTATION, never its strictness. The
+ * manifest-name check is what keeps the fallback strictly tighter than the CJS
+ * resolution it backs up (#14041's property, #4719's gate): a finder that
+ * accepted a directory without confirming it holds the declared package would
+ * be a looser finder, and loosening it would trade a confidently-wrong remedy
+ * for a wrong LOAD — the worse direction. So the expectation is still authored
+ * by the host, read out of the same `package.json` the declaration gate reads;
+ * only the sentence it spells changes, from "the key" to "what the host says
+ * the key is an alias for". An aliased install pointing at one package still
+ * refuses a directory holding another.
+ *
+ * Anything that does not parse as a bare package name yields no expectation to
+ * move to, so the key stays and the pre-#14278 refusal is kept: a `workspace:`
+ * range, a `link:` / `file:` location, an alias value carrying a subpath, a
+ * malformed value. Deliberate — {@link packageNameFromSpecifier} is the one
+ * authority on what a package name is here, and its own documentation blesses
+ * the aliased declaration shape. On the #13330 leg that residue is a load
+ * rather than a refusal: a `link:` target whose manifest names something else
+ * keeps today's `require`-condition entry, unchanged by #15044 and pinned as
+ * such.
+ */
+function declaredManifestName(declaration: HostDeclaration): string {
+  const { packageName, specifier } = declaration;
+  if (specifier === undefined) return packageName;
+  const protocol = ALIAS_DECLARATION_PROTOCOLS.find((p) => specifier.indexOf(p.prefix) === 0);
+  if (protocol === undefined) return packageName;
+  const value = specifier.slice(protocol.prefix.length);
+  // `<name>@<range>`: the LAST `@` separates them, so a scoped name's own
+  // leading `@` (index 0) is never mistaken for the separator.
+  const at = value.lastIndexOf('@');
+  if (at <= 0 && protocol.rangeRequired) return packageName;
+  const name = at > 0 ? value.slice(0, at) : value;
+  return packageNameFromSpecifier(name) === name ? name : packageName;
+}
+
+/**
+ * The directory of the package named `manifestName` that owns `resolvedFile`.
  *
  * Walked up from the resolved entry rather than computed from the specifier,
  * because the resolver's answer is a REALPATH: under pnpm that is inside
@@ -597,8 +665,17 @@ function exportsSubpathOf(specifier: string, packageName: string): string {
  * whose `node_modules` the package's own transitive imports resolve against —
  * and exactly what makes one physical copy shared between the app and the
  * framework.
+ *
+ * ⚠️ `manifestName` is what {@link declaredManifestName} reads out of the
+ * host's declaration, NOT the declaration key (#15044). For an aliased install
+ * — `{"foo": "npm:bar@1"}` — the realpath this walk climbs is `bar`'s own
+ * package directory, whose manifest is named `bar`; matching the key `foo`
+ * never succeeded, so the caller fell back to the CJS resolver's answer and an
+ * aliased dual-published package silently kept loading its `require` build,
+ * beside the `import` build the caller's own ESM chain holds. Matching the
+ * key made the walk unable to recognise the very package it had been handed.
  */
-function packageRootOf(resolvedFile: string, packageName: string): string | undefined {
+function packageRootOf(resolvedFile: string, manifestName: string): string | undefined {
   let dir = dirname(resolvedFile);
   // Bounded on purpose: a package root is a few segments above its entry, and
   // an unbounded walk on a broken layout would stat every ancestor up to `/`.
@@ -609,7 +686,7 @@ function packageRootOf(resolvedFile: string, packageName: string): string | unde
       };
       // A NESTED manifest — the `{"type":"commonjs"}` marker a dual build drops
       // in `dist/` — carries no name, so it is walked THROUGH, not stopped at.
-      if (manifest.name === packageName) return dir;
+      if (manifest.name === manifestName) return dir;
     } catch {
       // Not a manifest, or not readable. Keep walking.
     }
@@ -624,16 +701,28 @@ function packageRootOf(resolvedFile: string, packageName: string): string | unde
  * The file the `import` condition names for `specifier`, or `undefined` when
  * this seam has nothing to change — see the narrowness list in the #13330 note.
  *
+ * ⚠️ The two names here are different questions and only look alike (#15044).
+ * The package ROOT is recognised by the name the DECLARATION promises
+ * ({@link declaredManifestName}); the exports SUBPATH is cut from the
+ * declaration KEY, because the key is what the specifier is spelled with —
+ * `aliased/plugin` addresses `./plugin` of whatever `aliased` aliases. They
+ * coincide for every ordinary dependency, which is why one name served both
+ * until an aliased install pulled them apart.
+ *
+ * @param declaration What the host's `package.json` says about the key — the
+ * same value the #14041 fallback leg is handed, so both legs read one
+ * expectation from one place.
  * @param cjsResolved What `hostRequire.resolve(specifier)` answered. It is the
  * host-anchored part of the answer and is never second-guessed here; only the
  * CONDITION is re-decided.
  */
 function esmEntryForDeclared(
   specifier: string,
-  packageName: string,
+  declaration: HostDeclaration,
   cjsResolved: string,
 ): string | undefined {
-  const root = packageRootOf(cjsResolved, packageName);
+  const { packageName } = declaration;
+  const root = packageRootOf(cjsResolved, declaredManifestName(declaration));
   if (root === undefined) return undefined;
 
   let exportsField: unknown;
@@ -758,60 +847,6 @@ function hasInvalidExportsSubpathSegments(subpath: string): boolean {
       const segment = raw.toLowerCase();
       return segment === '' || segment === '.' || segment === '..' || segment === 'node_modules';
     });
-}
-
-/**
- * Declaration values whose grammar is `<protocol>:<name>[@<range>]` — the two
- * spellings in which a host DECLARES that a key is an alias for a package with
- * a different name (#14278).
- *
- * `npm:` always names a package: `npm:bar@1`, `npm:@acme/x@^2`, or `npm:bar`
- * with no range at all. `workspace:` names one ONLY in its aliased form
- * (`workspace:bar@*`) — a bare `workspace:*` / `workspace:^1.2.3` is a RANGE,
- * so the key stays the name. Everything else — a plain range, `link:`,
- * `file:`, a git or tarball URL — carries no package name to expect: those
- * name a LOCATION or a version, and the manifest name they install under is
- * not derivable from the declaration at all.
- */
-const ALIAS_DECLARATION_PROTOCOLS = [
-  { prefix: 'npm:', rangeRequired: false },
-  { prefix: 'workspace:', rangeRequired: true },
-] as const;
-
-/**
- * The manifest `name` the host's own declaration says
- * `<hostRoot>/node_modules/<key>` must carry — the key itself for an ordinary
- * dependency, the ALIASED package's name for `"foo": "npm:bar@1"` (#14278).
- *
- * ⚠️ This moves the finder's EXPECTATION, never its strictness. The
- * manifest-name check is what keeps the fallback strictly tighter than the CJS
- * resolution it backs up (#14041's property, #4719's gate): a finder that
- * accepted a directory without confirming it holds the declared package would
- * be a looser finder, and loosening it would trade a confidently-wrong remedy
- * for a wrong LOAD — the worse direction. So the expectation is still authored
- * by the host, read out of the same `package.json` the declaration gate reads;
- * only the sentence it spells changes, from "the key" to "what the host says
- * the key is an alias for". An aliased install pointing at one package still
- * refuses a directory holding another.
- *
- * Anything that does not parse as a bare package name yields no expectation to
- * move to, so the key stays and the pre-#14278 refusal is kept: a `workspace:`
- * range, an alias value carrying a subpath, a malformed value. Deliberate —
- * {@link packageNameFromSpecifier} is the one authority on what a package name
- * is here, and its own documentation blesses the aliased declaration shape.
- */
-function declaredManifestName(declaration: HostDeclaration): string {
-  const { packageName, specifier } = declaration;
-  if (specifier === undefined) return packageName;
-  const protocol = ALIAS_DECLARATION_PROTOCOLS.find((p) => specifier.indexOf(p.prefix) === 0);
-  if (protocol === undefined) return packageName;
-  const value = specifier.slice(protocol.prefix.length);
-  // `<name>@<range>`: the LAST `@` separates them, so a scoped name's own
-  // leading `@` (index 0) is never mistaken for the separator.
-  const at = value.lastIndexOf('@');
-  if (at <= 0 && protocol.rangeRequired) return packageName;
-  const name = at > 0 ? value.slice(0, at) : value;
-  return packageNameFromSpecifier(name) === name ? name : packageName;
 }
 
 /**
@@ -1059,7 +1094,14 @@ export function createHostImporter(
       // stays the authority on WHERE the package is; this asks that package
       // which entry an `import()` gets, so the caller's ESM chain and this
       // load share one instance of everything the package brings with it.
-      const entry = esmEntryForDeclared(pkg, declaration.packageName, resolved) ?? resolved;
+      //
+      // #15044: the whole DECLARATION goes in, not just the key. Recognising
+      // the package root by the key made an aliased install unrecognisable to
+      // its own re-decision — the walk failed, the `?? resolved` here caught
+      // it, and the load silently stayed on the `require` build #13330 exists
+      // to move it off. The fallback below the catch has taken the same
+      // declaration since #14278; the two legs now expect one name.
+      const entry = esmEntryForDeclared(pkg, declaration, resolved) ?? resolved;
       return import(pathToFileURL(entry).href);
     }
 
