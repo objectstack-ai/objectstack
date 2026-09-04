@@ -664,6 +664,23 @@ jobs:
             1. It releases something
                -> run 'pnpm changeset' and name the packages it releases.
 
+               WHICH LEVEL: A purely additive widening of a published package's
+               public surface (a new exported symbol on an `index`, a new accepted
+               key or value) takes at least `minor`. The commit type may raise a
+               bump but never lower it below what the act requires; a `fix(` that
+               widens an index is therefore `minor`, and a `fix(` that changes no
+               public surface stays `patch`. During the launch window `major` stays
+               refused by `check-changeset-no-major` and breaking-ness is carried by
+               the BREAKING banner plus the ADR-0087 disposition, not by the level.
+               Ruled by the maintainer on 2026-09-04 (decision batch #35) on #15294,
+               which recorded two contract reviews reading the repo's own history to
+               OPPOSITE bumps for the same additive act. The commit type is not the
+               discriminator it looked like: it correlates with the act, and when
+               they disagree the act wins. The 64 historical `patch` precedents are
+               pre-rule and nothing is retro-fixed. This is prose, not a gate -- no
+               check computes it; `check-changeset-no-major.mjs` refuses `major` and
+               says why in its header, and the two remaining levels are yours.
+
             2. It releases nothing (.github/, .claude/, skills/, docs/, content/,
                examples/, tests-only, and the like)
                -> apply the 'skip-changeset' label.   <<< PREFERRED
