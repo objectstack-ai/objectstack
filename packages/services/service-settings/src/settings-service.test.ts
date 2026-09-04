@@ -2096,12 +2096,15 @@ describe('SettingsService — a declared valueDomain is the save-time boundary (
         fields: [
           {
             field: 'timezone',
-            // No `FieldErrorCode` member names a standard-domain breach, so it
-            // takes `invalid_value` — the catalog's slot for "rejected for a
-            // reason no other member names" (ADR-0114), the #6199 precedent.
-            // NOT `invalid_option`: the declared options are exactly the list
-            // a domain-bearing value may legitimately be outside of.
-            code: 'invalid_value',
+            // `value_domain` — ADR-0114's rule is that the code is the
+            // constraint's own name, as `max_length` names the bound it
+            // breached. This branch answered `invalid_value` (the catalog's
+            // slot for "rejected for a reason no other member names") only
+            // while no member named a standard-domain breach; the field-level
+            // card's spec half added one, and the settings door adopts it.
+            // Still NOT `invalid_option`: the declared options are exactly the
+            // list a domain-bearing value may legitimately be outside of.
+            code: 'value_domain',
             label: 'Default timezone',
             constraint: { valueDomain: 'iana_time_zone' },
             value: tz,
@@ -2112,7 +2115,7 @@ describe('SettingsService — a declared valueDomain is the save-time boundary (
     await expect(svc.setMany('localization', { currency: 'XYZ' })).rejects.toMatchObject({
       code: 'SETTINGS_VALIDATION',
       fields: [
-        { field: 'currency', code: 'invalid_value', constraint: { valueDomain: 'iso_4217_currency' } },
+        { field: 'currency', code: 'value_domain', constraint: { valueDomain: 'iso_4217_currency' } },
       ],
     });
     // Atomic: nothing landed.
@@ -2128,7 +2131,7 @@ describe('SettingsService — a declared valueDomain is the save-time boundary (
     for (const cc of ['ZZ', 'UK']) {
       await expect(svc.setMany('localization', { default_country: cc })).rejects.toMatchObject({
         fields: [
-          { field: 'default_country', code: 'invalid_value', constraint: { valueDomain: 'iso_3166_alpha2' } },
+          { field: 'default_country', code: 'value_domain', constraint: { valueDomain: 'iso_3166_alpha2' } },
         ],
       });
     }
@@ -2194,7 +2197,7 @@ describe('SettingsService — a declared valueDomain is the save-time boundary (
     } as any);
     await expect(svc.setMany('multi', { currencies: ['USD', 'CHF'] })).resolves.toBeDefined();
     await expect(svc.setMany('multi', { currencies: ['USD', 'XYZ'] })).rejects.toMatchObject({
-      fields: [{ field: 'currencies', code: 'invalid_value', value: 'XYZ' }],
+      fields: [{ field: 'currencies', code: 'value_domain', value: 'XYZ' }],
     });
   });
 
@@ -2211,7 +2214,7 @@ describe('SettingsService — a declared valueDomain is the save-time boundary (
     } as any);
     const err = await svc.setMany('vaultdom', { region_code: 'ZZ' }).catch((e) => e);
     expect(err.code).toBe('SETTINGS_VALIDATION');
-    expect(err.fields[0]).toMatchObject({ field: 'region_code', code: 'invalid_value' });
+    expect(err.fields[0]).toMatchObject({ field: 'region_code', code: 'value_domain' });
     expect(err.fields[0].value).toBeUndefined();
     expect(err.message).not.toContain('ZZ');
     // The domain still travels, so the caller learns what to do.
@@ -2240,7 +2243,7 @@ describe('SettingsService — a declared valueDomain is the save-time boundary (
     await expect(svc.setMany('localization', { currency: 'CHF' })).resolves.toBeDefined();
     // Only re-writing the key itself is refused.
     await expect(svc.setMany('localization', { timezone: 'Mars/Olympus' })).rejects.toMatchObject({
-      fields: [{ field: 'timezone', code: 'invalid_value' }],
+      fields: [{ field: 'timezone', code: 'value_domain' }],
     });
   });
 });
@@ -2381,7 +2384,7 @@ describe('SettingsService — company.country adopts iso_3166_alpha2 (#6579)', (
         fields: [
           {
             field: 'country',
-            code: 'invalid_value',
+            code: 'value_domain',
             label: 'Country',
             constraint: { valueDomain: 'iso_3166_alpha2' },
             value: cc,
@@ -2409,7 +2412,7 @@ describe('SettingsService — company.country adopts iso_3166_alpha2 (#6579)', (
     const svc = companyService();
     await expect(svc.setMany('company', { country: 'us' })).rejects.toMatchObject({
       fields: [
-        { field: 'country', code: 'invalid_value', constraint: { valueDomain: 'iso_3166_alpha2' } },
+        { field: 'country', code: 'value_domain', constraint: { valueDomain: 'iso_3166_alpha2' } },
       ],
     });
   });

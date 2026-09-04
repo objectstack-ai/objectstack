@@ -243,7 +243,7 @@ describe('settings-routes', () => {
     expect(state.body.data.values.currency.value).toBe('CHF');
   });
 
-  it('PUT /api/settings/localization rejects garbage with 400 + SETTINGS_VALIDATION + invalid_value', async () => {
+  it('PUT /api/settings/localization rejects garbage with 400 + SETTINGS_VALIDATION + value_domain', async () => {
     const http = new MockHttp();
     const svc = new SettingsService({ env: {} });
     svc.registerManifest(localizationSettingsManifest);
@@ -260,7 +260,11 @@ describe('settings-routes', () => {
     expect(state.body.error.details.fields).toEqual([
       expect.objectContaining({
         field: 'timezone',
-        code: 'invalid_value',
+        // The wire-visible half of the re-point onto the shared predicate:
+        // this refusal answered `invalid_value` until the catalog gained a
+        // member named for the constraint itself (ADR-0114, maintainer ruling
+        // 2026-09-02). A client branching on the code sees `value_domain`.
+        code: 'value_domain',
         constraint: { valueDomain: 'iana_time_zone' },
         value: 'Mars/Olympus',
       }),

@@ -1,32 +1,63 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * Membership pins for the enforcement half of `Specifier.valueDomain` (#5712).
+ * The settings door's half of `Specifier.valueDomain` (#5712), after the
+ * re-point onto the ONE shared predicate (maintainer ruling 2026-09-02).
  *
- * The DEFINITIONS (probe vs. enumeration, and why `Intl.supportedValuesOf
- * ('timeZone')` / `Intl.DisplayNames` are the wrong oracles) are pinned where
- * they are declared — `packages/spec/src/system/settings-manifest.test.ts`
- * measures the traps themselves. What is pinned HERE is that this side
- * implements those definitions: the values the spec's TSDoc names as legal are
- * admitted, the ones it names as the reason each trap matters are refused.
+ * The DEFINITIONS (probe vs. enumeration, the CLDR currency snapshot, and why
+ * `Intl.supportedValuesOf('timeZone')` / `Intl.DisplayNames` are the wrong
+ * oracles) are pinned where they are declared —
+ * `packages/spec/src/shared/value-domain.test.ts` measures the traps
+ * themselves. What is pinned HERE is what the DOOR does with them: the values
+ * the shared module names as legal are admitted through
+ * `firstRejectedDomainMember`, the ones it names as the reason each trap
+ * matters are refused, and the door's own prose does not drift from the
+ * published catalog.
+ *
+ * ⚠️ ONE PIN WENT VACUOUS WITH THE RE-POINT, deliberately and on the record.
+ * Before the re-point this file's first case compared two independently
+ * written things: the spec's vocabulary against this package's own
+ * `DOMAIN_MEMBERSHIP` table. `knownValueDomain` now answers from
+ * `ValueDomainSchema` itself, so "every member of the vocabulary is
+ * enforceable" can no longer detect divergence — there is nothing left here to
+ * diverge FROM, which is the point of the ruling. The equality that still
+ * matters is pinned where both sides live: `value-domain.test.ts` holds
+ * `SpecifierValueDomainSchema` to BE `ValueDomainSchema` (identity, not equal
+ * members). What replaces the vacuous half below is the question the door can
+ * still answer alone: does every declared member actually REFUSE something
+ * here — i.e. is any member enforced by an accept-everything stub — and does
+ * every member have door prose that agrees with the catalog.
  */
 
 import { describe, it, expect } from 'vitest';
-import { SpecifierValueDomainSchema } from '@objectstack/spec/system';
+import { ISO_3166_ALPHA2_CODES, ValueDomainSchema } from '@objectstack/spec/shared';
+import { BUILTIN_VALIDATION_MESSAGES, VALIDATION_MESSAGE_FALLBACK_LOCALE } from '@objectstack/spec/system';
 import {
   firstRejectedDomainMember,
-  ISO_3166_ALPHA2_CODES,
   knownValueDomain,
   valueDomainPhrasing,
 } from './value-domains.js';
 
-describe('value domains — vocabulary parity with the spec', () => {
-  it('enforces exactly the members SpecifierValueDomainSchema declares', () => {
-    // A spec-side vocabulary change must go red HERE rather than becoming a
-    // declared-but-unenforced member (Prime Directive #10). Every declared
-    // member resolves to an enforcer, and nothing beyond the vocabulary does.
-    for (const member of SpecifierValueDomainSchema.options) {
+describe('value domains — what the door still owns after the re-point', () => {
+  it('accepts every declared member, and every member actually refuses something', () => {
+    // The enforceability half is now structural (see the file header). What is
+    // NOT structural: that each member's shared enforcer is a membership test
+    // at all. A member wired to `() => true` would type-check, would satisfy
+    // "the vocabulary is fully covered", and would silently open the door to
+    // everything — so each one is required to reject its own garbage probe.
+    const garbage: Record<string, string> = {
+      iana_time_zone: 'Mars/Olympus',
+      iso_4217_currency: 'XYZ',
+      iso_3166_alpha2: 'ZZ',
+    };
+    for (const member of ValueDomainSchema.options) {
       expect(knownValueDomain(member), `${member} must be enforceable`).toBe(member);
+      const probe = garbage[member];
+      expect(probe, `${member} needs a garbage probe in this table`).toBeTruthy();
+      expect(
+        firstRejectedDomainMember(member, probe),
+        `${member} must actually refuse ${probe} — an accept-everything enforcer is the failure this pin exists for`,
+      ).toEqual({ value: probe });
       // …and each has phrasing, so neither door can hit an undefined sentence.
       const p = valueDomainPhrasing(member);
       expect(p.member.length).toBeGreaterThan(0);
@@ -42,9 +73,34 @@ describe('value domains — vocabulary parity with the spec', () => {
     expect(knownValueDomain('')).toBeNull();
     expect(knownValueDomain(undefined)).toBeNull();
     expect(knownValueDomain(42)).toBeNull();
-    // Prototype-chain names must not read as members (`'toString' in obj`).
+    // Prototype-chain names must not read as members. The old implementation
+    // looked the domain up in an object literal, where `'toString' in obj` is
+    // true, and excluded these by a hand-written `hasOwnProperty` guard; the
+    // re-point replaced that guard with the closed enum's own `safeParse`.
+    // Same two names, pinned across the swap: a `z.enum` matches literal
+    // members only, and this case is what says so out loud.
     expect(knownValueDomain('toString')).toBeNull();
     expect(knownValueDomain('constructor')).toBeNull();
+    expect(knownValueDomain('__proto__')).toBeNull();
+    expect(knownValueDomain('hasOwnProperty')).toBeNull();
+  });
+
+  it('the door prose and the published catalog describe one domain in one set of words', () => {
+    // `valueDomainPhrasing` survived the re-point because the env-override
+    // door writes a LOG line, which has no error code, no locale and no
+    // `{{label}}` — the catalog's finished sentences do not fit it. The save
+    // door renders the catalog. This pin is what keeps the two from drifting:
+    // each domain's fragments must appear in that domain's catalog template.
+    const en = BUILTIN_VALIDATION_MESSAGES[VALIDATION_MESSAGE_FALLBACK_LOCALE];
+    for (const member of ValueDomainSchema.options) {
+      const template = en[`value_domain_${member}`];
+      expect(template, `catalog must carry value_domain_${member}`).toBeTruthy();
+      const { member: noun, example } = valueDomainPhrasing(member);
+      expect(template, `${member}: the log line's noun must be the catalog's`).toContain(noun);
+      expect(template, `${member}: the log line's example must be the catalog's`).toContain(`e.g. ${example}`);
+    }
+    // And the code-named default exists, since that is the wire code itself.
+    expect(en['value_domain']).toBeTruthy();
   });
 });
 
@@ -70,7 +126,7 @@ describe('iana_time_zone — the Intl.DateTimeFormat probe', () => {
   });
 });
 
-describe('iso_4217_currency — Intl.supportedValuesOf("currency")', () => {
+describe('iso_4217_currency — the checked-in CLDR snapshot', () => {
   const ok = (v: unknown) => firstRejectedDomainMember('iso_4217_currency', v);
 
   it('admits CHF and every curated localization option', () => {
@@ -83,15 +139,37 @@ describe('iso_4217_currency — Intl.supportedValuesOf("currency")', () => {
     expect(ok('XYZ')).toEqual({ value: 'XYZ' });
     expect(ok('usd')).toEqual({ value: 'usd' });
   });
+
+  it('still answers exactly what the run-time probe answered, on this runtime', () => {
+    // The one definition that MOVED with the re-point: a run-time
+    // `Intl.supportedValuesOf('currency')` probe became the key set of the
+    // checked-in CLDR snapshot. Measured equivalence was the bar the card set,
+    // so it is measured here rather than asserted — and measured through the
+    // DOOR, which is the thing that has to keep answering the same way. The
+    // spec's own test pins snapshot-vs-probe directly; this one pins that no
+    // settings value changed verdict.
+    const intl = Intl as typeof Intl & { supportedValuesOf(k: 'currency'): string[] };
+    const probed = intl.supportedValuesOf('currency');
+    expect(probed.length).toBeGreaterThan(100); // the probe is real, not an empty list
+    for (const code of probed) {
+      expect(ok(code), `${code} was admitted by the run-time probe and must still be`).toBeNull();
+    }
+  });
 });
 
-describe('iso_3166_alpha2 — the explicit code list the spec says this side must carry', () => {
+describe('iso_3166_alpha2 — the explicit code list, now carried by the spec', () => {
   const ok = (v: unknown) => firstRejectedDomainMember('iso_3166_alpha2', v);
 
-  it('is structurally the officially assigned set: 249 unique uppercase pairs', () => {
+  it('admits the whole officially assigned set the shared module publishes', () => {
+    // Was a structural pin on this package's own table (`size === 249`). The
+    // table moved to `@objectstack/spec/shared`, where its structure is pinned;
+    // what is worth pinning HERE is stronger and not a duplicate — that the
+    // door actually admits every one of the published codes, end to end
+    // through `firstRejectedDomainMember`.
     expect(ISO_3166_ALPHA2_CODES.size).toBe(249);
     for (const code of ISO_3166_ALPHA2_CODES) {
       expect(code).toMatch(/^[A-Z]{2}$/);
+      expect(ok(code), `${code} is officially assigned and must be admitted`).toBeNull();
     }
   });
 
