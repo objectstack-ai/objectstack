@@ -78,10 +78,17 @@ let appWithoutPackage: string;
  * resolver, and `bootStack` used to mount multi-tenant off it.
  */
 let appInstalledButUndeclared: string;
+/**
+ * #14041/#14270 — declared AND installed, and the package's own `exports` names
+ * no runtime entry Node can load (a `types`-only publish). The third
+ * `HostImportFailureKind`, and the one this file's remedy branch used to hand
+ * the "declare it and install it" line to.
+ */
+let appDeclaredNoLoadableEntry: string;
 
 function writeApp(
   prefix: string,
-  opts: { withOrganizations: boolean; declare?: boolean },
+  opts: { withOrganizations: boolean; declare?: boolean; typesOnly?: boolean },
 ): string {
   const declare = opts.declare ?? opts.withOrganizations;
   const dir = mkdtempSync(join(tmpdir(), prefix));
@@ -102,17 +109,35 @@ function writeApp(
   if (opts.withOrganizations) {
     const pkgDir = join(dir, 'node_modules', '@objectstack', 'organizations');
     mkdirSync(pkgDir, { recursive: true });
-    writeFileSync(
-      join(pkgDir, 'package.json'),
-      JSON.stringify({
-        name: '@objectstack/organizations',
-        version: '0.0.0-fixture',
-        type: 'module',
-        main: 'index.js',
-      }),
-      'utf8',
-    );
-    writeFileSync(join(pkgDir, 'index.js'), FAKE_ORGANIZATIONS, 'utf8');
+    if (opts.typesOnly) {
+      // A publish whose `exports` names a `types` target and nothing else: no
+      // `require` condition (so the CJS resolver throws) and no `import`
+      // condition (so the #14041 fallback finder has nothing to load either).
+      // Ordinary outside this workspace, and unfixable by any install action.
+      writeFileSync(
+        join(pkgDir, 'package.json'),
+        JSON.stringify({
+          name: '@objectstack/organizations',
+          version: '0.0.0-fixture',
+          type: 'module',
+          exports: { '.': { types: './index.d.ts' } },
+        }),
+        'utf8',
+      );
+      writeFileSync(join(pkgDir, 'index.d.ts'), 'export declare class OrganizationsPlugin {}\n', 'utf8');
+    } else {
+      writeFileSync(
+        join(pkgDir, 'package.json'),
+        JSON.stringify({
+          name: '@objectstack/organizations',
+          version: '0.0.0-fixture',
+          type: 'module',
+          main: 'index.js',
+        }),
+        'utf8',
+      );
+      writeFileSync(join(pkgDir, 'index.js'), FAKE_ORGANIZATIONS, 'utf8');
+    }
   }
   return dir;
 }
@@ -124,10 +149,19 @@ beforeAll(() => {
     withOrganizations: true,
     declare: false,
   });
+  appDeclaredNoLoadableEntry = writeApp('os-verify-org-host-no-entry-', {
+    withOrganizations: true,
+    typesOnly: true,
+  });
 });
 
 afterAll(() => {
-  for (const dir of [appWithPackage, appWithoutPackage, appInstalledButUndeclared]) {
+  for (const dir of [
+    appWithPackage,
+    appWithoutPackage,
+    appInstalledButUndeclared,
+    appDeclaredNoLoadableEntry,
+  ]) {
     if (dir) rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -220,6 +254,39 @@ describe('bootStack multiTenant — host-app package resolution (#4700)', () => 
       await expect(
         bootStack(app as never, { multiTenant: true, hostRoot: appInstalledButUndeclared }),
       ).rejects.toThrow(/DECLARE it in that app's package\.json/);
+    },
+    BOOT_TIMEOUT,
+  );
+
+  it(
+    'DEFERS to the importer for a declared, installed package that publishes no entry (#14270)',
+    async () => {
+      // #14041 added a THIRD failure kind and this remedy was a two-way branch
+      // written when there were two, so `declared-no-loadable-entry` fell into
+      // the else leg and rendered the UNDECLARED arm — "Install/link it in THIS
+      // APP … and DECLARE it in that app's package.json" — to an operator whose
+      // app has already done both. Same confidently-wrong-verdict class #4700
+      // and #4719 removed from this very sentence, one kind along.
+      const boot = bootStack(app as never, {
+        multiTenant: true,
+        hostRoot: appDeclaredNoLoadableEntry,
+      });
+      const err = await boot.then(
+        (stack) => stack.stop().then(() => new Error('bootStack resolved; it must refuse')),
+        (e: unknown) => e as Error,
+      );
+      // Which arm fired: the deferral, naming the two things that are NOT the
+      // problem and handing the remedy to the importer's own message, which is
+      // interpolated at the end of this same string.
+      expect(err.message).toMatch(/AND installed there, so neither is the problem/);
+      expect(err.message).toMatch(/publishes no entry Node can load/);
+      // ⛔ Neither of the other two arms: both are unfollowable here.
+      expect(err.message).not.toMatch(/Install\/link it in THIS APP/);
+      expect(err.message).not.toMatch(/repair the install there/);
+      // The importer's own wording is what the remedy defers TO, so it has to
+      // still be there — the deferral is only honest if the message arrives.
+      expect(err.message).toMatch(/publishes no entry that Node can load/);
+      expect(process.env.OS_TENANCY_POSTURE).toBeUndefined();
     },
     BOOT_TIMEOUT,
   );
