@@ -92,7 +92,7 @@ describe('[#14244] AutomationContext.recordLoadDenied mirrors the producer signa
     expect(seen).toEqual([true, undefined]);
   });
 
-  it('the contract JSDoc names the producer, both doors, and the not-yet-populated flow face', () => {
+  it('the contract JSDoc names the producer, both doors, and the now-populated flow face', () => {
     const source = readFileSync(fileURLToPath(new URL('./automation-service.ts', import.meta.url)), 'utf8');
     const declaration = 'recordLoadDenied?: true;';
     const at = source.indexOf(declaration);
