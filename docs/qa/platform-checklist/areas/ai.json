@@ -89,11 +89,11 @@
       ],
       "traps": ["stale-dist"],
       "source": [
-        "packages/spec/src/ai/agent.zod.ts (requireds, aliases, retiredKey tools/knowledge, visibility/tenantId guidance)",
-        "packages/spec/src/ai/tool.zod.ts (.strict() + TOOL_RETIRED_KEY_GUIDANCE; READ-ONLY PROJECTION note)",
-        "packages/spec/src/ai/skill.zod.ts (requireds, retiredKey triggerPhrases, permissions/trigger guidance #5013)",
-        "packages/spec/src/kernel/metadata-type-schemas.ts (agent/tool/skill registered with schemas)",
-        "packages/spec/src/kernel/metadata-plugin.zod.ts (registry rows: agent allowRuntimeCreate:false ADR-0063 §2; tool/skill true; file patterns)",
+        "packages/spec/src/ai/agent.zod.ts#tenantId (requireds, aliases, retiredKey tools/knowledge, visibility/tenantId guidance)",
+        "packages/spec/src/ai/tool.zod.ts#TOOL_RETIRED_KEY_GUIDANCE (.strict() + TOOL_RETIRED_KEY_GUIDANCE; READ-ONLY PROJECTION note)",
+        "packages/spec/src/ai/skill.zod.ts#triggerPhrases (requireds, retiredKey triggerPhrases, permissions/trigger guidance #5013)",
+        "packages/spec/src/kernel/metadata-type-schemas.ts#registered (agent/tool/skill registered with schemas)",
+        "packages/spec/src/kernel/metadata-plugin.zod.ts#allowRuntimeCreate (registry rows: agent allowRuntimeCreate:false ADR-0063 §2; tool/skill true; file patterns)",
         "packages/runtime/src/route-ledger.ts (GET /meta, GET /meta/types, GET/PUT /meta/:type/:name)",
         "packages/spec/liveness/agent.json + tool.json + skill.json (which props are live, and that live evidence sits in cloud)"
       ],
@@ -178,9 +178,9 @@
       "automated": { "kind": "e2e", "ref": "packages/qa/dogfood/test/showcase-mcp-http-identity.dogfood.test.ts" },
       "source": [
         "packages/runtime/src/domains/mcp.ts (404/501/401/403/405 branches, exact messages)",
-        "packages/spec/src/ai/mcp.zod.ts (MCP_OAUTH_SCOPES + scopesToAgentPermissionSets, ADR-0090 D10)",
-        "packages/mcp/src/mcp-http-tools.ts (registered tool set; scope → tool-family narrowing)",
-        "packages/mcp/src/plugin.ts (OS_MCP_SERVER_ENABLED default-on semantics)",
+        "packages/spec/src/ai/mcp.zod.ts#MCP_OAUTH_SCOPES (MCP_OAUTH_SCOPES + scopesToAgentPermissionSets, ADR-0090 D10)",
+        "packages/mcp/src/mcp-http-tools.ts#registered (registered tool set; scope → tool-family narrowing)",
+        "packages/mcp/src/plugin.ts#OS_MCP_SERVER_ENABLED (OS_MCP_SERVER_ENABLED default-on semantics)",
         "packages/runtime/src/route-ledger.ts ('* /mcp/**', 'GET /mcp/skill')",
         "packages/qa/dogfood/test/showcase-mcp-self-connection.dogfood.test.ts (#3167 self-connection pin)",
         "#3358 §9 (the swept config was off; both sides are now explicit)"
@@ -282,9 +282,9 @@
       "source": [
         "packages/mcp/src/plugin.ts (the three refusal strings + per-call re-resolution, ADR-0101)",
         "packages/mcp/src/__tests__/plugin.test.ts ('stdio principal admission — fail-closed')",
-        "packages/runtime/src/domains/mcp.ts (the aggregate bridge routes through callData('aggregate') → the ObjectQL engine so RLS + the FLS aggregate gate always run; the raw driver is deliberately NOT passed)",
-        "packages/mcp/src/mcp-http-tools.ts (aggregate_records registration: 'Runs under the caller's permissions, row-level security and field-level security'; registered only when the bridge exposes aggregate)",
-        "packages/plugins/plugin-security/src/security-plugin.test.ts (FLS aggregate-INPUT gate: aggregating OR grouping-by an unreadable field is denied fail-closed with details.forbiddenFields; readable fields aggregate fine)",
+        "packages/runtime/src/domains/mcp.ts#callData (the aggregate bridge routes through callData('aggregate') → the ObjectQL engine so RLS + the FLS aggregate gate always run; the raw driver is deliberately NOT passed)",
+        "packages/mcp/src/mcp-http-tools.ts#registered (aggregate_records registration: 'Runs under the caller's permissions, row-level security and field-level security'; registered only when the bridge exposes aggregate)",
+        "packages/plugins/plugin-security/src/security-plugin.test.ts#fields (FLS aggregate-INPUT gate: aggregating OR grouping-by an unreadable field is denied fail-closed with details.forbiddenFields; readable fields aggregate fine)",
         "#3358 §9 (verified PASS: fail-closed guard present, reads honor RLS/FLS)",
         "docs/plans/release-15.1-test-plan.md §G1 (#2976 — aggregate_records走 ENGINE 读路径; RLS/tenant 与 find 一致; FLS 输入门 fail-closed)"
       ],
@@ -357,9 +357,9 @@
       ],
       "traps": ["wrong-persona"],
       "source": [
-        "packages/runtime/src/action-execution.ts (actionAiExposureError exact string; system-object guard; [action-audit] line; shared REST/MCP gate #3915)",
-        "packages/mcp/src/mcp-http-tools.ts (list_actions/run_action registration + exposed-and-permitted filter)",
-        "examples/app-showcase/src/ui/actions/index.ts (showcase_portfolio_snapshot — the seeded ai.exposed fixture)",
+        "packages/runtime/src/action-execution.ts#actionAiExposureError (actionAiExposureError exact string; system-object guard; [action-audit] line; shared REST/MCP gate #3915)",
+        "packages/mcp/src/mcp-http-tools.ts#list_actions (list_actions/run_action registration + exposed-and-permitted filter)",
+        "examples/app-showcase/src/ui/actions/index.ts#showcase_portfolio_snapshot (showcase_portfolio_snapshot — the seeded ai.exposed fixture)",
         "docs/plans/release-15.1-test-plan.md §A9 (#2964) + §G2 (#3010/#3020 standalone action on the bridge)"
       ],
       "history": [
@@ -427,7 +427,7 @@
       ],
       "automated": { "kind": "unit", "ref": "packages/mcp/src/mcp-validate-expression.test.ts" },
       "source": [
-        "packages/mcp/src/mcp-http-tools.ts (validate_expression registration: input schema incl. the 4-value site enum, VALIDATE_SITE_MAP, response shape)",
+        "packages/mcp/src/mcp-http-tools.ts#VALIDATE_SITE_MAP (validate_expression registration: input schema incl. the 4-value site enum, VALIDATE_SITE_MAP, response shape)",
         "packages/mcp/src/mcp-validate-expression.test.ts (tier pins: error vs warning vs ok, unknown object, system-object guard)",
         "#3358 §9 (underlying validateExpression works; MCP path was blocked on the disabled transport)"
       ],
@@ -503,7 +503,7 @@
       "source": [
         "packages/mcp/src/skill-prompts.ts (#3905 — the projection, its narrowness, and the two-halves boundary)",
         "packages/mcp/src/skill-prompts.test.ts (list/get/absence/-32602/capability pins)",
-        "packages/spec/src/ai/skill.zod.ts (instructions served everywhere; tools/surface/triggerConditions cloud-only)",
+        "packages/spec/src/ai/skill.zod.ts#triggerConditions (instructions served everywhere; tools/surface/triggerConditions cloud-only)",
         "packages/spec/liveness/skill.json (instructions/name/label/description/active live in-repo via skill-prompts.ts since 2026-08-06)"
       ],
       "history": [
@@ -569,7 +569,7 @@
       "source": [
         "packages/runtime/src/domains/ai.ts (the /ai/agents empty-list courtesy #4058/#4053 + the shared 501 exit)",
         "packages/runtime/src/domains/unavailable.ts (501-vs-404-vs-503 rationale; message single-sourced from spec)",
-        "packages/spec/src/system/core-services.zod.ts (REMEDY_DETAIL['ai'] exact sentence; ai slot 'optional')",
+        "packages/spec/src/system/core-services.zod.ts#REMEDY_DETAIL (REMEDY_DETAIL['ai'] exact sentence; ai slot 'optional')",
         "packages/runtime/src/route-ledger.ts ('* /ai/**' dynamic row — routes owned by cloud; this repo cannot enumerate them)",
         "packages/spec/src/ai/model-registry.zod.ts + conversation.zod.ts (schemas exist; no in-repo runtime consumer — the knownGaps basis)"
       ],
@@ -662,7 +662,7 @@
         "objectui packages/app-shell/src/console/ConsoleShell.tsx (RequireAiSurface — waits for resolve, splash-preserving redirect, objectui#6507)",
         "objectui apps/console/src/pages/system/SystemHubPage.tsx (the 'AI Approvals' card built UNconditionally — the K2 gap) + AppContent.tsx (the system/ai-approvals route) + pages/system/AiPendingActionsPage.tsx (thin wrapper, 'Polled every 5 seconds')",
         "objectui packages/plugin-chatbot/src/usePendingActions.ts,217-300 (cookie-only call(), error → error.message, pollInterval 5000 re-arming regardless of errors) + AiPendingActionsInbox.tsx (destructive alert + the error-blind 'No actions waiting' empty state)",
-        "packages/runtime/src/domains/ai.ts (#7653 anonymous-deny first; the /ai/agents empty-catalog courtesy #4058/#4053; every other /ai/* → capabilityUnavailable 501) + domains/unavailable.ts (single-sourced remedy sentence)",
+        "packages/runtime/src/domains/ai.ts#capabilityUnavailable (#7653 anonymous-deny first; the /ai/agents empty-catalog courtesy #4058/#4053; every other /ai/* → capabilityUnavailable 501) + domains/unavailable.ts (single-sourced remedy sentence)",
         "ai.open-edition-honest-degradation (the API half this item mirrors in the browser — 501 body/discovery parity is proven THERE, not re-proven here)"
       ],
       "history": [

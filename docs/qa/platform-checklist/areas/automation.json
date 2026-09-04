@@ -23,7 +23,7 @@
             "enableOnInstall": true
           },
           "expect": "2xx with the installed package echoed back. The id is deliberately distinct from the other QA recipes so this one installs and tears down independently. A re-run against a live DB 409s on the duplicate id — send `overwrite: true` deliberately, never by reflex.",
-          "source": "POST /api/v1/packages is the dispatcher install route (packages/rest/src/rest-route-ledger.ts note; client `packages.install`); body shape { manifest, enableOnInstall?, overwrite? } pinned in packages/client/src/client.test.ts"
+          "source": "POST /api/v1/packages is the dispatcher install route (packages/rest/src/rest-route-ledger.ts#packages note; client `packages.install`); body shape { manifest, enableOnInstall?, overwrite? } pinned in packages/client/src/client.test.ts"
         },
         {
           "step": 2,
@@ -54,13 +54,13 @@
             "edges": [{ "id": "e1", "source": "start", "target": "boom" }]
           },
           "expect": "2xx on the author. On trigger the run DISPATCHES, the http node fails against the unroutable host, and — with no try_catch region and no errorHandling.strategy — the run ends `status: 'failed'`, which is the 400 FLOW_FAILED row. ⚠️ Do NOT wrap it in try_catch: a handled failure is a SUCCESSFUL run and scores the wrong row. The unroutable-host technique (api.example.com) is the one automation.flow-error-handling already relies on for a deterministic failure.",
-          "source": "the 400 row keys on the engine's lifecycle verdict `status: 'failed'`, never on message text (packages/runtime/src/flow-dispatch-status.ts, classifyFlowRefusal); examples/app-showcase/src/automation/flows/index.ts (showcase_resilient_sync) is the precedent for the unroutable host"
+          "source": "the 400 row keys on the engine's lifecycle verdict `status: 'failed'`, never on message text (packages/runtime/src/flow-dispatch-status.ts#classifyFlowRefusal, classifyFlowRefusal); examples/app-showcase/src/automation/flows/index.ts#showcase_resilient_sync (showcase_resilient_sync) is the precedent for the unroutable host"
         },
         {
           "step": 4,
           "call": "toggle a stock record-change flow OFF for the 409 row: POST /api/v1/automation/showcase_urgent_task_alert/toggle {\"enabled\": false}",
           "expect": "2xx. No authoring needed — the 409 FLOW_DISABLED row is reachable on stock fixtures. ⚠️ Toggle it back ON in teardown: it is the fixture automation.flow-toggle-kill-switch drives, and leaving it off silently changes that item's baseline.",
-          "source": "packages/runtime/src/domains/automation.ts (POST /:name/toggle → engine.toggleFlow); automation.flow-toggle-kill-switch names showcase_urgent_task_alert as the only type:'record_change' flow"
+          "source": "packages/runtime/src/domains/automation.ts#flow (POST /:name/toggle → engine.toggleFlow); automation.flow-toggle-kill-switch names showcase_urgent_task_alert as the only type:'record_change' flow"
         }
       ],
       "teardown": "POST /api/v1/automation/showcase_urgent_task_alert/toggle {\"enabled\": true} to undo step 4, then DELETE /api/v1/packages/com.objectstack.qa.automation (client `packages.uninstall`, ledgered at rest-route-ledger.ts) — or discard the isolated file DB, the cheaper path an isolated boot makes free. The toggle is NOT covered by discarding the DB if you reused a boot, so undo it explicitly.",
@@ -138,9 +138,9 @@
       ],
       "source": [
         "#3358 §2 — 'the developer Flow Runs page renders steps flat; looking there alone reads as a miss'",
-        "packages/spec/src/automation/execution.zod.ts (ExecutionStepLogSchema parentNodeId/iteration/regionKind)",
+        "packages/spec/src/automation/execution.zod.ts#ExecutionStepLogSchema (ExecutionStepLogSchema parentNodeId/iteration/regionKind)",
         "objectui packages/app-shell/src/views/metadata-admin/previews/FlowRunsPanel.tsx (#1505 buildStepTree)",
-        "examples/app-showcase/src/automation/flows/index.ts (BatchRemindersFlow)"
+        "examples/app-showcase/src/automation/flows/index.ts#BatchRemindersFlow (BatchRemindersFlow)"
       ],
       "history": [
         {
@@ -231,7 +231,7 @@
       "source": [
         "#3358 §2",
         "packages/spec/src/automation/time-relative-trigger.zod.ts",
-        "examples/app-showcase/src/automation/flows/index.ts (TaskDueReminderFlow, #1874)",
+        "examples/app-showcase/src/automation/flows/index.ts#TaskDueReminderFlow (TaskDueReminderFlow, #1874)",
         "packages/triggers/trigger-schedule/src/time-relative-trigger.ts"
       ],
       "history": [
@@ -317,7 +317,7 @@
       "source": [
         "#3358 §2 (recompute half proven; editor half explicitly left unticked)",
         "examples/app-showcase/src/data/objects/expense-report.object.ts (the six roll-up shapes and their filters)",
-        "packages/runtime/src/domains/packages.ts (POST /packages/:id/duplicate — ADR-0070 D4 'duplicate base', the writable-target route)",
+        "packages/runtime/src/domains/packages.ts#packages (POST /packages/:id/duplicate — ADR-0070 D4 'duplicate base', the writable-target route)",
         "docs/adr/0070-package-first-authoring.md §D4 ('clone a base into a new writable package')"
       ],
       "history": [
@@ -447,14 +447,14 @@
         "ref": "packages/qa/dogfood/test/flow-node.dogfood.test.ts"
       },
       "source": [
-        "packages/spec/src/automation/flow.zod.ts (FlowNodeAction — the built-in seed set; type validated at registerFlow, not by a closed enum)",
-        "packages/spec/src/automation/control-flow.zod.ts (LOOP_NODE_TYPE / PARALLEL_NODE_TYPE / TRY_CATCH_NODE_TYPE, ADR-0031)",
-        "packages/spec/src/automation/approval.zod.ts (APPROVAL_NODE_TYPE, APPROVAL_REVISE_NODE_TYPE)",
-        "examples/app-showcase/src/coverage.ts (flowNodeTypes + FLOW_NODE_WAIVERS)",
+        "packages/spec/src/automation/flow.zod.ts#FlowNodeAction (FlowNodeAction — the built-in seed set; type validated at registerFlow, not by a closed enum)",
+        "packages/spec/src/automation/control-flow.zod.ts#LOOP_NODE_TYPE (LOOP_NODE_TYPE / PARALLEL_NODE_TYPE / TRY_CATCH_NODE_TYPE, ADR-0031)",
+        "packages/spec/src/automation/approval.zod.ts#APPROVAL_NODE_TYPE (APPROVAL_NODE_TYPE, APPROVAL_REVISE_NODE_TYPE)",
+        "examples/app-showcase/src/coverage.ts#flowNodeTypes (flowNodeTypes + FLOW_NODE_WAIVERS)",
         "examples/app-showcase/src/automation/flows/index.ts",
         "packages/runtime/src/route-ledger.ts (GET /automation/actions, POST /automation/:name/trigger, GET /automation/:name/runs)",
         "docs/adr/0018-unified-node-action-registry.md §M1 (registerFlow() soft-validates node types against the live registry — 'warn, don't hard-fail')",
-        "packages/services/service-automation/src/engine.ts (registerFlow's ADR-0018 §M1 comment + the post-seal warn branch; warnUnknownNodeTypes's message and its unknownTypes/knownTypes meta; the NO_EXECUTOR step error in executeNode)",
+        "packages/services/service-automation/src/engine.ts#registerFlow (registerFlow's ADR-0018 §M1 comment + the post-seal warn branch; warnUnknownNodeTypes's message and its unknownTypes/knownTypes meta; the NO_EXECUTOR step error in executeNode)",
         "#7545 (maintainer ruling 2026-08-11 — status quo upheld: soft-fail at registration is the intended posture, so 200-on-unknown-type is pass-by-design)"
       ],
       "history": [
@@ -570,11 +570,11 @@
         "ref": "packages/qa/dogfood/test/flow-trigger-conformance.test.ts"
       },
       "source": [
-        "packages/spec/src/automation/flow.zod.ts (Flow.type enum: autolaunched|record_change|schedule|screen|api)",
+        "packages/spec/src/automation/flow.zod.ts#Flow (Flow.type enum: autolaunched|record_change|schedule|screen|api)",
         "packages/qa/dogfood/test/flow-trigger-conformance.ledger.ts (one enforced row per type, each with its runtime + proof)",
-        "packages/triggers/trigger-api/src/plugin.ts (HOOKS_PATH /api/v1/automation/hooks/:flowName/:hookId)",
-        "examples/app-showcase/src/automation/flows/index.ts (UrgentTaskAlertFlow #3427, ScheduledDigestFlow, InboundTaskWebhookFlow)",
-        "packages/spec/src/automation/execution.zod.ts (ExecutionLogSchema.trigger)"
+        "packages/triggers/trigger-api/src/plugin.ts#HOOKS_PATH (HOOKS_PATH /api/v1/automation/hooks/:flowName/:hookId)",
+        "examples/app-showcase/src/automation/flows/index.ts#UrgentTaskAlertFlow (UrgentTaskAlertFlow #3427, ScheduledDigestFlow, InboundTaskWebhookFlow)",
+        "packages/spec/src/automation/execution.zod.ts#ExecutionLogSchema (ExecutionLogSchema.trigger)"
       ],
       "history": [
         {
@@ -668,12 +668,12 @@
         "single-datapoint"
       ],
       "source": [
-        "examples/app-showcase/src/automation/flows/index.ts (ResilientSyncFlow, ADR-0031 try/catch/retry; canonical retry keys #4661)",
-        "packages/spec/src/automation/control-flow.zod.ts (TryCatchConfigSchema)",
-        "packages/spec/src/automation/execution.zod.ts (ExecutionStatus 'failed'; step status/error; regionKind; retryAttempt — declared since the schema was written, given its first producer by #7546)",
-        "packages/services/service-automation/src/engine.ts (runRegion's partialSteps sink — the failed attempt's tagged steps handed to the caller before the throw propagates; StepLogEntry.retryAttempt)",
-        "packages/services/service-automation/src/builtin/try-catch-node.ts (failed attempts accumulated across the retry ladder and folded into childSteps ahead of the surviving region's steps)",
-        "packages/services/service-automation/src/builtin/try-catch-failed-attempt-steps.test.ts (the #7546 unit pins, including 'a recovered container still reports success')",
+        "examples/app-showcase/src/automation/flows/index.ts#ResilientSyncFlow (ResilientSyncFlow, ADR-0031 try/catch/retry; canonical retry keys #4661)",
+        "packages/spec/src/automation/control-flow.zod.ts#TryCatchConfigSchema (TryCatchConfigSchema)",
+        "packages/spec/src/automation/execution.zod.ts#ExecutionStatus (ExecutionStatus 'failed'; step status/error; regionKind; retryAttempt — declared since the schema was written, given its first producer by #7546)",
+        "packages/services/service-automation/src/engine.ts#runRegion (runRegion's partialSteps sink — the failed attempt's tagged steps handed to the caller before the throw propagates; StepLogEntry.retryAttempt)",
+        "packages/services/service-automation/src/builtin/try-catch-node.ts#childSteps (failed attempts accumulated across the retry ladder and folded into childSteps ahead of the surviving region's steps)",
+        "packages/services/service-automation/src/builtin/try-catch-failed-attempt-steps.test.ts#container (the #7546 unit pins, including 'a recovered container still reports success')",
         "objectui packages/app-shell/src/views/metadata-admin/previews/FlowRunsPanel.tsx (run-level string error vs step-level {code,message})",
         "packages/runtime/src/route-ledger.ts (POST /automation — automation.create)",
         "#7546 (maintainer ruling 2026-08-11 — surface the failed try-region's steps; Option C's 'recovered' container status NOT adopted)"
@@ -786,9 +786,9 @@
       "source": [
         "objectui e2e/live/screen-flow.spec.ts (framework#3528 — the trigger → dialog → resume → refresh seam)",
         "objectui packages/app-shell/src/views/FlowRunner.tsx (onClose = dismiss without POSTing resume; the durable suspension is untouched, so the paused run stays resumable)",
-        "examples/app-showcase/src/automation/flows/index.ts (ReassignWizardFlow)",
+        "examples/app-showcase/src/automation/flows/index.ts#ReassignWizardFlow (ReassignWizardFlow)",
         "packages/services/service-automation/src/builtin/screen-resume-validation.test.ts + src/screen-input-contract.ts (400 on missing required inputs)",
-        "packages/runtime/src/route-ledger.ts (resume + getScreen routes)"
+        "packages/runtime/src/route-ledger.ts#getScreen (resume + getScreen routes)"
       ],
       "history": [
         {
@@ -885,7 +885,7 @@
       },
       "source": [
         "packages/qa/dogfood/test/flow-durable-suspend.dogfood.test.ts (#4470 · #4420 · #4518)",
-        "examples/app-showcase/src/automation/flows/index.ts (TaskFollowUpFlow, ProjectClosureFlow/ClosureSignoffSubflow — nested durable pause, linked-runs model)"
+        "examples/app-showcase/src/automation/flows/index.ts#TaskFollowUpFlow (TaskFollowUpFlow, ProjectClosureFlow/ClosureSignoffSubflow — nested durable pause, linked-runs model)"
       ],
       "history": [
         {
@@ -969,8 +969,8 @@
         "single-datapoint"
       ],
       "source": [
-        "examples/app-showcase/src/automation/flows/index.ts (TaskCompletedRestPingFlow, ShowcaseDeclarativeConnectorPingFlow, ShowcaseMcpConnectorEchoFlow)",
-        "examples/app-showcase/objectstack.config.ts (ConnectorRestPlugin/ConnectorSlackPlugin/ConnectorMcpPlugin + declarative connectors)",
+        "examples/app-showcase/src/automation/flows/index.ts#TaskCompletedRestPingFlow (TaskCompletedRestPingFlow, ShowcaseDeclarativeConnectorPingFlow, ShowcaseMcpConnectorEchoFlow)",
+        "examples/app-showcase/objectstack.config.ts#ConnectorRestPlugin (ConnectorRestPlugin/ConnectorSlackPlugin/ConnectorMcpPlugin + declarative connectors)",
         "packages/runtime/src/route-ledger.ts (GET /automation/connectors)",
         "ADR-0097 (provider-bound declarative connector instances)"
       ],
@@ -1064,8 +1064,8 @@
         "objectui apps/console/src/pages/developer/FlowRunsPage.tsx (FlowTestRunner + inline FlowRunsPanel; framework#3528 — hands a paused screen run to FlowRunner so it no longer orphans a paused row)",
         "objectui packages/app-shell/src/views/FlowRunner.tsx (the shared screen runner reused here)",
         "objectui apps/console/src/AppContent.tsx (Route path 'developer/flow-runs') + registerDeveloperComponents.tsx (ref 'developer:flow-runs')",
-        "packages/runtime/src/route-ledger.ts (POST /automation/:name/trigger, GET /automation/:name/runs, POST /automation/:name/runs/:runId/resume)",
-        "examples/app-showcase/src/automation/flows/index.ts (BatchRemindersFlow tasks input, ReassignWizardFlow screen)"
+        "packages/runtime/src/route-ledger.ts#runId (POST /automation/:name/trigger, GET /automation/:name/runs, POST /automation/:name/runs/:runId/resume)",
+        "examples/app-showcase/src/automation/flows/index.ts#BatchRemindersFlow (BatchRemindersFlow tasks input, ReassignWizardFlow screen)"
       ],
       "history": [
         {
@@ -1140,10 +1140,10 @@
         "dispatcher-vs-hono-route"
       ],
       "source": [
-        "packages/runtime/src/route-ledger.ts (POST /automation/:name/toggle → automation.toggle; GET /automation/_status → automation.getRuntimeStatus)",
-        "packages/services/service-automation/src/engine.ts (toggleFlow — writes the sys_metadata_activation row FIRST, then updates the flowLedgerDisabled projection and activateFlowTrigger/deactivateFlowTrigger; the process-local flowEnabled map this item originally cited is RETIRED by ADR-0126 §7.2) + (flowLedgerDisabled is a projection of the ledger, not the old map under a new name) + getFlowRuntimeStates enabled/bound",
+        "packages/runtime/src/route-ledger.ts#getRuntimeStatus (POST /automation/:name/toggle → automation.toggle; GET /automation/_status → automation.getRuntimeStatus)",
+        "packages/services/service-automation/src/engine.ts#toggleFlow (toggleFlow — writes the sys_metadata_activation row FIRST, then updates the flowLedgerDisabled projection and activateFlowTrigger/deactivateFlowTrigger; the process-local flowEnabled map this item originally cited is RETIRED by ADR-0126 §7.2) + (flowLedgerDisabled is a projection of the ledger, not the old map under a new name) + getFlowRuntimeStates enabled/bound",
         "docs/adr/0126-packaged-metadata-customization-model.md §7.2 (the durable ledger row replaces the process-local flowEnabled map as the sanctioned off-switch)",
-        "examples/app-showcase/src/automation/flows/index.ts (UrgentTaskAlertFlow — the record_change flow, #3427)",
+        "examples/app-showcase/src/automation/flows/index.ts#UrgentTaskAlertFlow (UrgentTaskAlertFlow — the record_change flow, #3427)",
         "automation.packaged-flow-disable-durable owns the halves this item deliberately does not: the durable row's shape, restart survival, and the ledger-message oracle; automation.packaged-flow-subflow-disable-refusal owns the §7.3 disable guard (showcase_urgent_task_alert has no packaged subflow callers, so this item's toggles are never refused by it)"
       ],
       "history": [
@@ -1265,14 +1265,14 @@
       ],
       "traps": ["wrong-persona", "single-datapoint"],
       "source": [
-        "packages/runtime/src/flow-dispatch-status.ts — the ONE definition of the trigger-side table (FlowRefusalCode, classifyFlowRefusal, isPausedRun, FLOW_NOT_FOUND_STATUS) and the note on why it is a module rather than a route mapper",
+        "packages/runtime/src/flow-dispatch-status.ts#FlowRefusalCode — the ONE definition of the trigger-side table (FlowRefusalCode, classifyFlowRefusal, isPausedRun, FLOW_NOT_FOUND_STATUS) and the note on why it is a module rather than a route mapper",
         "packages/runtime/src/domains/automation.ts — both trigger routes and the resume route's code→status arms",
         "packages/runtime/src/action-execution.ts and packages/runtime/src/endpoint-executor.ts — the other two doors reading the same table",
-        "packages/services/service-automation/src/engine.ts — the FLOW_NO_START_NODE exit; the disabled-flow exit stamps FLOW_DISABLED, and neither carries `status`, which is what lets a transport tell a never-dispatched exit from a run that dispatched and failed",
-        "packages/spec/src/contracts/automation-service.ts — AutomationResult.code, the closed union the two trigger-time refusals were added to",
-        "packages/spec/src/api/error-code-ledger.zod.ts — ADR-0112 registration of FLOW_DISABLED / FLOW_NO_START_NODE / FLOW_FAILED to @objectstack/runtime",
+        "packages/services/service-automation/src/engine.ts#disabled — the FLOW_NO_START_NODE exit; the disabled-flow exit stamps FLOW_DISABLED, and neither carries `status`, which is what lets a transport tell a never-dispatched exit from a run that dispatched and failed",
+        "packages/spec/src/contracts/automation-service.ts#AutomationResult — AutomationResult.code, the closed union the two trigger-time refusals were added to",
+        "packages/spec/src/api/error-code-ledger.zod.ts#FLOW_DISABLED — ADR-0112 registration of FLOW_DISABLED / FLOW_NO_START_NODE / FLOW_FAILED to @objectstack/runtime",
         "packages/client/CHANGELOG.md 17.1.0 (bc6434b resume, 9aa8890 disabled/no-start-node, 48032c9 ran-and-failed) — the three BREAKING changesets whose own status table this matrix is derived from",
-        "packages/runtime/src/domains/automation-trigger-route-status.test.ts, automation-trigger-paused-run.test.ts, endpoint-flow-dispatch-status.test.ts, actions-flow-dispatch-status.test.ts — the per-door pins"
+        "packages/runtime/src/domains/automation-trigger-route-status.test.ts#automation, automation-trigger-paused-run.test.ts, endpoint-flow-dispatch-status.test.ts, actions-flow-dispatch-status.test.ts — the per-door pins"
       ],
       "history": [
         {
@@ -1358,12 +1358,12 @@
       ],
       "source": [
         "docs/adr/0126-packaged-metadata-customization-model.md §4 (the generic ledger + row shape), §7.2 (the durable row replaces the process-local flowEnabled map; FLOW_DISABLED code reused, distinction rides the message)",
-        "packages/services/service-automation/src/engine.ts (toggleFlow — durable row FIRST), (describeDisabledFlow — the ledger message), (hydrateFlowActivations), (registerFlow does not re-arm a ledger-disabled flow — restart survival's other half), (flowLedgerDisabled projection)",
+        "packages/services/service-automation/src/engine.ts#toggleFlow (toggleFlow — durable row FIRST), (describeDisabledFlow — the ledger message), (hydrateFlowActivations), (registerFlow does not re-arm a ledger-disabled flow — restart survival's other half), (flowLedgerDisabled projection)",
         "packages/services/service-automation/src/plugin.ts (hydrate AFTER the boot flow pull — the ordering that makes the unbind stick)",
-        "packages/core/src/utils/metadata-activation-store.ts (org-carrying rows skipped on read), (setActive read-then-update; organization_id never written), (no delete on the engine slice)",
-        "packages/platform-objects/src/system/sys-metadata-activation.object.ts (apiMethods ['get','list'] — reads open, generic-data-API writes refused)",
-        "packages/services/service-automation/src/flow-activation-ledger.test.ts (engine-level pins: hydration unbinds what a PREVIOUS process disabled, ledger-disabled survives re-registration — the HTTP+real-restart path here is what those pins cannot cover)",
-        "examples/app-showcase/src/automation/flows/index.ts (UrgentTaskAlertFlow) + examples/app-showcase/objectstack.config.ts (com.example.showcase)",
+        "packages/core/src/utils/metadata-activation-store.ts#setActive (org-carrying rows skipped on read), (setActive read-then-update; organization_id never written), (no delete on the engine slice)",
+        "packages/platform-objects/src/system/sys-metadata-activation.object.ts#apiMethods (apiMethods ['get','list'] — reads open, generic-data-API writes refused)",
+        "packages/services/service-automation/src/flow-activation-ledger.test.ts#engine (engine-level pins: hydration unbinds what a PREVIOUS process disabled, ledger-disabled survives re-registration — the HTTP+real-restart path here is what those pins cannot cover)",
+        "examples/app-showcase/src/automation/flows/index.ts#UrgentTaskAlertFlow (UrgentTaskAlertFlow) + examples/app-showcase/objectstack.config.ts (com.example.showcase)",
         "#12438 (sweep) · Epic #12150",
         "cross-refs: automation.flow-toggle-kill-switch (the single-boot kill-switch half — not repeated here), automation.durable-suspend-restart (the cold-restart recipe + file-DB discipline)"
       ],
@@ -1449,9 +1449,9 @@
       ],
       "source": [
         "docs/adr/0126-packaged-metadata-customization-model.md §7.3 (the subflow cascade: refused, callers named, attached to disable only)",
-        "packages/services/service-automation/src/engine.ts (packagedSubflowCallers — definition scan at disable time, subflow AND map via config.flowName, non-packaged and self skipped), (the guard, before the durable write; the thrown {code:'DELETE_RESTRICTED', status:409, subflowCallers})",
-        "packages/spec/src/api/errors.zod.ts (DELETE_RESTRICTED — standard 409 catalog member, no new code minted; its DELETE_ prefix fits per the #10243 ruling quoted at the throw site)",
-        "packages/services/service-automation/src/flow-activation-ledger.test.ts (the engine-level pins: names every caller, map counts, non-packaged and self do not guard, enable never guarded, no-callers lands)",
+        "packages/services/service-automation/src/engine.ts#packagedSubflowCallers (packagedSubflowCallers — definition scan at disable time, subflow AND map via config.flowName, non-packaged and self skipped), (the guard, before the durable write; the thrown {code:'DELETE_RESTRICTED', status:409, subflowCallers})",
+        "packages/spec/src/api/errors.zod.ts#DELETE_RESTRICTED (DELETE_RESTRICTED — standard 409 catalog member, no new code minted; its DELETE_ prefix fits per the #10243 ruling quoted at the throw site)",
+        "packages/services/service-automation/src/flow-activation-ledger.test.ts#engine (the engine-level pins: names every caller, map counts, non-packaged and self do not guard, enable never guarded, no-callers lands)",
         "examples/app-showcase/src/automation/flows/index.ts,707,795,816,1322,1339 (the three stock caller→child pairs)",
         "#12438 (sweep) · Epic #12150",
         "cross-ref: automation.packaged-flow-disable-durable (what a disable that LANDS must do); automation.setup-packaged-automation-board (the refusal rendered in the UI)"
@@ -1550,12 +1550,12 @@
       ],
       "source": [
         "docs/adr/0126-packaged-metadata-customization-model.md §7.1 (mandatory new name, whole-definition copy, no linkage), §9 (no re-pointing, no ancestry), §1.3 (the shipped 'customize in Studio' promise the honest clause holds the clone to)",
-        "packages/runtime/src/flow-clone.ts (FLOW_CLONE_STATUS draft — and why it is deliberately not an off-switch), (FLOW_CLONE_MUTATED_FIELDS), (FLOW_CLONE_DROPPED_KEYS derived from spec), (FLOW_CLONE_NOTICE), (409 + name-taken message), (deep copy via structuredClone; _packageId et al. stripped)",
-        "packages/runtime/src/domains/automation.ts (the clone arm: body-first validation, mandatory name+label, 404/409 probes, registerFlow-only registration, no ancestry on the response), (clone in the manage_metadata write set)",
-        "packages/runtime/src/domains/automation-flow-clone.test.ts (route-level pins for the validation and refusal arms — a mocked-service pin; it cannot see the live dispatcher, the double-fire, or the restart — which is exactly the remainder this item drives)",
+        "packages/runtime/src/flow-clone.ts#FLOW_CLONE_STATUS (FLOW_CLONE_STATUS draft — and why it is deliberately not an off-switch), (FLOW_CLONE_MUTATED_FIELDS), (FLOW_CLONE_DROPPED_KEYS derived from spec), (FLOW_CLONE_NOTICE), (409 + name-taken message), (deep copy via structuredClone; _packageId et al. stripped)",
+        "packages/runtime/src/domains/automation.ts#clone (the clone arm: body-first validation, mandatory name+label, 404/409 probes, registerFlow-only registration, no ancestry on the response), (clone in the manage_metadata write set)",
+        "packages/runtime/src/domains/automation-flow-clone.test.ts#dispatcher (route-level pins for the validation and refusal arms — a mocked-service pin; it cannot see the live dispatcher, the double-fire, or the restart — which is exactly the remainder this item drives)",
         "packages/spec/src/automation/flow.zod.ts (machine-name regex)",
         "objectui packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx (the Automations rail is package-scoped — the reachability half of the honest clause)",
-        "examples/app-showcase/src/automation/flows/index.ts (UrgentTaskAlertFlow; TaskDoneNotifyOwnerFlow → showcase_notify_owner)",
+        "examples/app-showcase/src/automation/flows/index.ts#UrgentTaskAlertFlow (UrgentTaskAlertFlow; TaskDoneNotifyOwnerFlow → showcase_notify_owner)",
         "#12438 (sweep) · Epic #12150",
         "cross-ref: access-security.packaged-flow-write-door-parity (owns the packaged-base write-door question this item's ordinariness clause must not be read as answering); automation.setup-packaged-automation-board (the clone dialog UI half)"
       ],
@@ -1673,7 +1673,7 @@
         "objectui packages/app-shell/src/views/setup/PackagedAutomationPage.tsx (529 clone-dialog validation,516 role=alert refusal rendering) + PackagedActionsSection.tsx (header: ⛔ no clone on actions) + packagedFlows.ts (isPackagedFlowItem + runtime-spine join)",
         "objectui packages/app-shell/src/services/builtinComponents.tsx (registerAppComponent ref 'automation:packaged') + views/ComponentNavView.tsx (ref resolution, no gate) + views/setup/PackagedAutomationPage.navContribution.test.tsx (ref→URL resolution — the mocked half of the nav clause)",
         "objectui packages/core/src/actions/actionErrorDetail.ts (error → error.message → message; details[] dropped)",
-        "packages/platform-objects/src/apps/setup-nav.contributions.ts (nav_packaged_automation → componentRef 'automation:packaged', landed by #12457; the entry's comment records why it lives in platform-objects, not service-automation) + setup-packaged-automation-nav.test.ts (the framework-half pin)",
+        "packages/platform-objects/src/apps/setup-nav.contributions.ts#nav_packaged_automation (nav_packaged_automation → componentRef 'automation:packaged', landed by #12457; the entry's comment records why it lives in platform-objects, not service-automation) + setup-packaged-automation-nav.test.ts (the framework-half pin)",
         "packages/runtime/src/domains/automation.ts (the exact enablement 403 sentence)",
         "packages/platform-objects/src/system/sys-metadata-activation.object.ts (reads open)",
         "docs/adr/0054 (locator stability / UI-testability contract — the repo-ownership split recorded in fixtures)",

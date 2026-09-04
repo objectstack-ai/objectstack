@@ -91,7 +91,7 @@
       "source": [
         "#3358 §3 (four stray-key variants all rejected with the named error)",
         "packages/spec/src/ui/dashboard.zod.ts (LEGACY key list + strict error map, ADR-0021 single-form cutover)",
-        "packages/spec/src/ui/chart.zod.ts (ChartConfigSchema wrong-layer guidance: dataset/aggregate/objectName/drillDown)"
+        "packages/spec/src/ui/chart.zod.ts#ChartConfigSchema (ChartConfigSchema wrong-layer guidance: dataset/aggregate/objectName/drillDown)"
       ],
       "history": [
         {
@@ -398,12 +398,12 @@
         "stale-console-bundle"
       ],
       "source": [
-        "packages/spec/src/ui/chart.zod.ts (ChartTypeSchema — 20 members; NOTE on trimmed variants and single-value synonyms)",
+        "packages/spec/src/ui/chart.zod.ts#ChartTypeSchema (ChartTypeSchema — 20 members; NOTE on trimmed variants and single-value synonyms)",
         "examples/app-showcase/src/ui/dashboards/chart-gallery.dashboard.ts",
         "examples/app-showcase/src/ui/datasets/chart-gallery.dataset.ts",
-        "examples/app-showcase/src/coverage.ts + examples/app-showcase/test/coverage.test.ts (SAME_AS_METRIC waiver)",
-        "packages/spec/src/ui/dashboard-compareto.test.ts (#5011 — compareTo converged on the executor's { kind, dimension? } contract; parses through the dashboard root; retired spellings rejected with the upgrade)",
-        "packages/spec/src/ui/dashboard.zod.ts (DashboardWidgetSchema compareTo slot — union-free strict object so its prescription reaches the wire)"
+        "examples/app-showcase/src/coverage.ts + examples/app-showcase/test/coverage.test.ts#SAME_AS_METRIC (SAME_AS_METRIC waiver)",
+        "packages/spec/src/ui/dashboard-compareto.test.ts#dashboard (#5011 — compareTo converged on the executor's { kind, dimension? } contract; parses through the dashboard root; retired spellings rejected with the upgrade)",
+        "packages/spec/src/ui/dashboard.zod.ts#DashboardWidgetSchema (DashboardWidgetSchema compareTo slot — union-free strict object so its prescription reaches the wire)"
       ],
       "history": [
         {
@@ -538,7 +538,7 @@
         "seed-data-thin"
       ],
       "source": [
-        "packages/spec/src/ui/report.zod.ts (ReportType enum; block type enum excludes joined)",
+        "packages/spec/src/ui/report.zod.ts#ReportType (ReportType enum; block type enum excludes joined)",
         "packages/spec/src/ui/dashboard.zod.ts (ADR-0021 dataset+dimensions+values single form)",
         "packages/spec/src/ui/dataset.zod.ts",
         "examples/app-showcase/src/ui/reports/index.ts (the four reports + Phase 2 tabular conversion note)",
@@ -634,8 +634,8 @@
       "source": [
         "packages/qa/dogfood/test/date-bucket-parity-conformance.test.ts (#3773)",
         "packages/qa/dogfood/test/empty-group-bucket-parity.test.ts (#3839)",
-        "examples/app-showcase/src/ui/dashboards/ops-dashboard.dashboard.ts (dateRange + global filter levers)",
-        "examples/app-showcase/src/data/seed/index.ts (prospects carry no signed_on — the deliberate NULL population)"
+        "examples/app-showcase/src/ui/dashboards/ops-dashboard.dashboard.ts#dateRange (dateRange + global filter levers)",
+        "examples/app-showcase/src/data/seed/index.ts#signed_on (prospects carry no signed_on — the deliberate NULL population)"
       ],
       "history": [
         {
@@ -748,7 +748,7 @@
       "source": [
         "examples/app-showcase/src/ui/dashboards/revenue-pulse.dashboard.ts (framework#2501 / objectui#2578 acceptance fixture)",
         "examples/app-showcase/src/ui/dashboards/ops-dashboard.dashboard.ts",
-        "examples/app-showcase/src/data/seed/index.ts (sales_region + signed_on seeding, prospects unset by design)",
+        "examples/app-showcase/src/data/seed/index.ts#sales_region (sales_region + signed_on seeding, prospects unset by design)",
         "examples/app-showcase/src/coverage.ts (dashboard kind notes: revenue-pulse demonstrates dashboard-level filters)",
         "objectui packages/app-shell/src/views/metadata-admin/inspectors/DashboardWidgetInspector.tsx (Filter Bindings section — Apply toggle writes false for opt-out, field-override combo, data-testid widget-filter-binding-<name>, patches draft.widgets[i].filterBindings; objectui#2586)",
         "objectui packages/plugin-dashboard/src/DashboardFilterBar.tsx (isDirty→Reset affordance RotateCcw, data-testid dashboard-filter-bar; SelectFilter {value,label} options + server GROUP BY via queryDataset, #2578 item 5)",
@@ -836,7 +836,7 @@
       ],
       "source": [
         "packages/rest/src/rest-route-ledger.ts (reports family)",
-        "packages/plugins/plugin-reports/src/report-service.ts (canAccessReport #2980; unscheduleReport/listSchedules owner-gated in #6683)",
+        "packages/plugins/plugin-reports/src/report-service.ts#canAccessReport (canAccessReport #2980; unscheduleReport/listSchedules owner-gated in #6683)",
         "packages/platform-objects/src/audit/sys-saved-report.object.ts",
         "docs/plans/release-15.1-test-plan.md §A10 (#2980/#2981/#2975)"
       ],
@@ -937,9 +937,9 @@
         "wrong-persona"
       ],
       "source": [
-        "packages/platform-objects/src/apps/dashboards/system_overview.dashboard.ts (widget ids, requiresService/requiresObject gates, globalFilters date range)",
+        "packages/platform-objects/src/apps/dashboards/system_overview.dashboard.ts#requiresService (widget ids, requiresService/requiresObject gates, globalFilters date range)",
         "packages/platform-objects/src/apps/dashboards/system.datasets.ts (the five sys_*_metrics datasets and their count measures)",
-        "packages/platform-objects/src/apps/setup-nav.contributions.ts (nav_system_overview → dashboard system_overview in the Setup app)"
+        "packages/platform-objects/src/apps/setup-nav.contributions.ts#nav_system_overview (nav_system_overview → dashboard system_overview in the Setup app)"
       ],
       "history": [
         {
@@ -1033,12 +1033,12 @@
         "single-datapoint"
       ],
       "source": [
-        "examples/app-showcase/src/data/analytics/showcase.cube.ts (the showcase_delivery cube — measures, dimensions, base table, showcase_project join, public:false)",
-        "examples/app-showcase/src/coverage.ts (analyticsCubes registration → src/data/analytics/showcase.cube.ts, served by /api/v1/analytics/*)",
-        "packages/runtime/src/domains/analytics.ts (route contract: POST /analytics/query, GET /analytics/meta[?cube], entry validation, ExecutionContext scoping #2852, handled:false 404 for an absent/stub slot #3891/#4000)",
-        "packages/spec/src/api/analytics.zod.ts (AnalyticsQueryRequestSchema bare shape + retiredKey query/format; meta response cubes[])",
-        "packages/services/service-analytics/src/analytics-service.ts (getMeta keys measures/dimensions as `${cube}.${key}`, returns all registry cubes)",
-        "packages/cli/src/commands/serve.ts (CAPABILITY_PROVIDERS.analytics → @objectstack/service-analytics, configKey analyticsCubes)"
+        "examples/app-showcase/src/data/analytics/showcase.cube.ts#showcase_project (the showcase_delivery cube — measures, dimensions, base table, showcase_project join, public:false)",
+        "examples/app-showcase/src/coverage.ts#analyticsCubes (analyticsCubes registration → src/data/analytics/showcase.cube.ts, served by /api/v1/analytics/*)",
+        "packages/runtime/src/domains/analytics.ts#cube (route contract: POST /analytics/query, GET /analytics/meta[?cube], entry validation, ExecutionContext scoping #2852, handled:false 404 for an absent/stub slot #3891/#4000)",
+        "packages/spec/src/api/analytics.zod.ts#AnalyticsQueryRequestSchema (AnalyticsQueryRequestSchema bare shape + retiredKey query/format; meta response cubes[])",
+        "packages/services/service-analytics/src/analytics-service.ts#getMeta (getMeta keys measures/dimensions as `${cube}.${key}`, returns all registry cubes)",
+        "packages/cli/src/commands/serve.ts#CAPABILITY_PROVIDERS (CAPABILITY_PROVIDERS.analytics → @objectstack/service-analytics, configKey analyticsCubes)"
       ],
       "history": [
         {
@@ -1137,11 +1137,11 @@
         "ref": "packages/plugins/plugin-reports/src/report-service.test.ts — the dispatch describes: owner-scoped execution + fails-closed-without-resolver (#2980), csv attachment, subject template, cron/interval advance; the LIVE halves (dispatcher registration, the fail-closed row write on a real boot, the log arms) still need the run"
       },
       "source": [
-        "packages/plugins/plugin-reports/src/report-service.ts (dispatchDue: due filter on next_run_at; owner fail-closed with the verbatim #2849/#2980 refusal; format fork + CJK-safe filename; renderSubject; skipped arm), (nextRunAt — cron wins, schedule timezone, warned fallback), (advanceSchedule 'ok'/markSchedule), (scheduleReport — first next_run_at, eager cron validation, recipients required)",
-        "packages/plugins/plugin-reports/src/reports-plugin.ts (optional email + the no-email warn), (resolveOwnerContext: undefined — the recorded fail-closed posture pending ADR-0073 M2), (dispatcher: job-service arm 'reports.dispatch' or setInterval fallback, min 5s / default 60s)",
+        "packages/plugins/plugin-reports/src/report-service.ts#dispatchDue (dispatchDue: due filter on next_run_at; owner fail-closed with the verbatim #2849/#2980 refusal; format fork + CJK-safe filename; renderSubject; skipped arm), (nextRunAt — cron wins, schedule timezone, warned fallback), (advanceSchedule 'ok'/markSchedule), (scheduleReport — first next_run_at, eager cron validation, recipients required)",
+        "packages/plugins/plugin-reports/src/reports-plugin.ts#resolveOwnerContext (optional email + the no-email warn), (resolveOwnerContext: undefined — the recorded fail-closed posture pending ADR-0073 M2), (dispatcher: job-service arm 'reports.dispatch' or setInterval fallback, min 5s / default 60s)",
         "packages/plugins/plugin-reports/src/report-service.test.ts (the unit pins cited by clauses 3-5)",
-        "packages/cli/src/commands/serve.ts (CAPABILITY_PROVIDERS.reports → @objectstack/plugin-reports — the dispatcher runs on stock boots)",
-        "packages/plugins/plugin-email/src/email-plugin.ts (stock provider 'log' → LogTransport, 'mail will NOT be sent' — why delivery evidence is a log line)",
+        "packages/cli/src/commands/serve.ts#CAPABILITY_PROVIDERS (CAPABILITY_PROVIDERS.reports → @objectstack/plugin-reports — the dispatcher runs on stock boots)",
+        "packages/plugins/plugin-email/src/email-plugin.ts#provider (stock provider 'log' → LogTransport, 'mail will NOT be sent' — why delivery evidence is a log line)",
         "docs/plans/release-15.1-test-plan.md §A10 (reports IDOR / 定时报表 RLS — #2980/#2981/#2975; the ownership half was imported as dashboards.saved-report-ownership, this item is the 定时报表-RLS dispatch leg that never was)",
         "cross-ref: dashboards.saved-report-ownership (the /reports* owner-isolation surfaces, including schedule routes #6683)"
       ],

@@ -70,9 +70,9 @@
       "source": [
         "#3358 §9",
         "packages/spec/src/api/batch.zod.ts (ADR-0119 D4)",
-        "packages/spec/src/api/error-code-ledger.zod.ts (BATCH_NOT_ATOMIC, BATCH_TOO_LARGE, NOT_ATTEMPTED, ROLLED_BACK — #4793)",
+        "packages/spec/src/api/error-code-ledger.zod.ts#BATCH_NOT_ATOMIC (BATCH_NOT_ATOMIC, BATCH_TOO_LARGE, NOT_ATTEMPTED, ROLLED_BACK — #4793)",
         "packages/rest/src/rest-route-ledger.ts (batch family)",
-        "packages/spec/src/api/discovery.zod.ts (transactionalBatch)"
+        "packages/spec/src/api/discovery.zod.ts#transactionalBatch (transactionalBatch)"
       ],
       "history": [
         {
@@ -419,9 +419,9 @@
         "dispatcher-vs-hono-route"
       ],
       "source": [
-        "packages/spec/src/data/filter.zod.ts (AST_OPERATOR_MAP / FieldOperatorsSchema — the operator variant source)",
-        "packages/spec/src/data/query.zod.ts (QueryAST keys)",
-        "packages/metadata-protocol/src/protocol.ts (supported $-params + UNSUPPORTED_QUERY_PARAM #2926 ⑩, INVALID_FIELD #4134)",
+        "packages/spec/src/data/filter.zod.ts#AST_OPERATOR_MAP (AST_OPERATOR_MAP / FieldOperatorsSchema — the operator variant source)",
+        "packages/spec/src/data/query.zod.ts#QueryAST (QueryAST keys)",
+        "packages/metadata-protocol/src/protocol.ts#UNSUPPORTED_QUERY_PARAM (supported $-params + UNSUPPORTED_QUERY_PARAM #2926 ⑩, INVALID_FIELD #4134)",
         "#5869 (commit 10c4ea9)",
         "release-15.1 plan §A6",
         "examples/app-showcase/src/data/seed/index.ts"
@@ -521,7 +521,7 @@
       ],
       "source": [
         "packages/spec/src/api/error-code-ledger.zod.ts (ADR-0112 D3)",
-        "packages/spec/src/api/errors.zod.ts (StandardErrorCode, FieldErrorCode, HttpStatusErrorCodeMap)",
+        "packages/spec/src/api/errors.zod.ts#StandardErrorCode (StandardErrorCode, FieldErrorCode, HttpStatusErrorCodeMap)",
         "packages/spec/src/shared/error-map.zod.ts",
         "packages/rest/src/rest-route-ledger.ts (sampled families)",
         "ADR-0114 D2/D4"
@@ -627,7 +627,7 @@
       "source": [
         "packages/rest/src/rest-route-ledger.ts (batch family — the four doors)",
         "packages/spec/src/api/batch.zod.ts",
-        "packages/spec/src/api/error-code-ledger.zod.ts (BATCH_TOO_LARGE, ERR_BULK_RESULT_MISMATCH)",
+        "packages/spec/src/api/error-code-ledger.zod.ts#BATCH_TOO_LARGE (BATCH_TOO_LARGE, ERR_BULK_RESULT_MISMATCH)",
         "#2982",
         "release-15.1 plan §A3/A4"
       ],
@@ -782,20 +782,20 @@
         "absence-inference"
       ],
       "source": [
-        "packages/rest/src/rest-route-ledger.ts (variant source — the 19 REST families)",
+        "packages/rest/src/rest-route-ledger.ts#REST (variant source — the 19 REST families)",
         "packages/rest/src/rest-route-ledger.conformance.test.ts",
-        "packages/runtime/src/route-ledger.ts (dispatcher ledger — share-links/keys/notifications/suggested-bindings/i18n/analytics families + the meta.getLegalNextStates state route)",
-        "packages/plugins/plugin-auth/src/auth-route-ledger.ts (AUTH_ROUTE_LEDGER — the enumerated better-auth table, #3656; raw-app mount)",
+        "packages/runtime/src/route-ledger.ts#getLegalNextStates (dispatcher ledger — share-links/keys/notifications/suggested-bindings/i18n/analytics families + the meta.getLegalNextStates state route)",
+        "packages/plugins/plugin-auth/src/auth-route-ledger.ts#AUTH_ROUTE_LEDGER (AUTH_ROUTE_LEDGER — the enumerated better-auth table, #3656; raw-app mount)",
         "packages/services/service-storage/src/storage-route-ledger.ts + packages/services/service-i18n/src/i18n-route-ledger.ts (tranche-3 per-service ledgers, #3636)",
         "packages/services/service-settings/src/settings-route-ledger.ts (#7526 — the /api/settings family, ledgered; guarded by the parity dogfood gate, no per-package test by design)",
         "packages/services/service-datasource/src/datasource-route-ledger.ts + datasource-route-ledger.conformance.test.ts (#7744 — the admin family, ledgered)",
-        "packages/services/service-datasource/src/admin-routes.ts (the #9391/#9593 manage_platform_settings floor on all eleven routes, drivers catalog included)",
+        "packages/services/service-datasource/src/admin-routes.ts#manage_platform_settings (the #9391/#9593 manage_platform_settings floor on all eleven routes, drivers catalog included)",
         "packages/metadata/src/metadata-route-ledger.ts (metadata HMR — raw-app mount, dev-only posture #12140/#5673)",
-        "packages/triggers/trigger-api/src/trigger-api-route-ledger.ts (#11863 — POST /api/v1/automation/hooks/:flowName/:hookId, raw-app mount)",
+        "packages/triggers/trigger-api/src/trigger-api-route-ledger.ts#flowName (#11863 — POST /api/v1/automation/hooks/:flowName/:hookId, raw-app mount)",
         "packages/cloud-connection/src/cloud-connection-route-ledger.ts (#11882 — 16 rows / four registrar families, raw-app mounts unfindable by the parity gate by construction)",
         "packages/cli/src/utils/console-route-ledger.ts (#11882 — the four static-asset rows)",
-        "packages/qa/dogfood/test/route-ledger-live-mount-parity.dogfood.test.ts (#7526 — the parity gate whose getMountedRoutes() blind spot the raw-app clause covers)",
-        "examples/app-showcase/src/data/objects/task.object.ts (task_status_flow transitions for the meta state-route clause)",
+        "packages/qa/dogfood/test/route-ledger-live-mount-parity.dogfood.test.ts#getMountedRoutes (#7526 — the parity gate whose getMountedRoutes() blind spot the raw-app clause covers)",
+        "examples/app-showcase/src/data/objects/task.object.ts#task_status_flow (task_status_flow transitions for the meta state-route clause)",
         "#3587",
         "#3361"
       ],
@@ -979,10 +979,10 @@
         "dispatcher-vs-hono-route"
       ],
       "source": [
-        "packages/runtime/src/domains/packages.ts (POST install: pkgId-required 400, 409-duplicate guard + overwrite opt-in #2995; PATCH partial-patch validators; routes through protocol.installPackage / protocol.updatePackage)",
+        "packages/runtime/src/domains/packages.ts#pkgId (POST install: pkgId-required 400, 409-duplicate guard + overwrite opt-in #2995; PATCH partial-patch validators; routes through protocol.installPackage / protocol.updatePackage)",
         "packages/runtime/src/route-ledger.ts (POST /packages → packages.install, PATCH /packages/:id → packages.update, GET /packages → packages.list)",
         "packages/rest/src/rest-route-ledger.ts (POST /api/v1/packages/publish moved off the bare POST /packages in #3610; GET/DELETE /packages/:id direct-mount shadows)",
-        "packages/spec/src/api/errors.zod.ts (HttpStatusErrorCodeMap 409 → RESOURCE_CONFLICT)",
+        "packages/spec/src/api/errors.zod.ts#HttpStatusErrorCodeMap (HttpStatusErrorCodeMap 409 → RESOURCE_CONFLICT)",
         "PENDING-GAPS §G3 (#2995 dup-clobber, #2971, #3007)"
       ],
       "history": [
@@ -1065,7 +1065,7 @@
       "source": [
         "objectui apps/console/src/pages/developer/ApiConsolePage.tsx (the API console: raw fetch to `${client.baseUrl}${url}`, status/duration/JSON pane, request history)",
         "objectui apps/console/src/pages/developer/hooks/useApiDiscovery.ts (tree built from GET /api/v1/discovery services/routes + client.meta types/objects; isServiceUsable gate per ADR-0076 D12)",
-        "packages/rest/src/rest-route-ledger.ts (the REST families the tree is spot-checked against)",
+        "packages/rest/src/rest-route-ledger.ts#REST (the REST families the tree is spot-checked against)",
         "packages/spec/src/api/discovery.zod.ts (the discovery payload)"
       ],
       "history": [
@@ -1157,10 +1157,10 @@
       },
       "traps": ["silent-coercion"],
       "source": [
-        "packages/spec/src/data/filter-comparand-type.ts (ACCEPTED_FILTER_COMPARAND_TYPES, ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE, FILTER_COMPARAND_BIGINT_EXACT_LIMIT, isAcceptedFilterComparand, normalizeFilterComparandTypes)",
+        "packages/spec/src/data/filter-comparand-type.ts#ACCEPTED_FILTER_COMPARAND_TYPES (ACCEPTED_FILTER_COMPARAND_TYPES, ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE, FILTER_COMPARAND_BIGINT_EXACT_LIMIT, isAcceptedFilterComparand, normalizeFilterComparandTypes)",
         "packages/spec/src/data/filter-comparand-shape.ts",
         "packages/spec/src/data/filter-comparand-type-conformance.ts",
-        "packages/spec/src/data/filter-dotted-head.ts (classifyDottedFilterHead, DottedFilterHeadClass)",
+        "packages/spec/src/data/filter-dotted-head.ts#classifyDottedFilterHead (classifyDottedFilterHead, DottedFilterHeadClass)",
         "packages/spec/src/data/filter-subtree-provenance.ts",
         "packages/spec/src/migrations/entries/semantic/18.engine-dotted-filter-refused.ts",
         "packages/spec/src/migrations/entries/semantic/17.engine-dotted-projection-refused.ts",
@@ -1261,7 +1261,7 @@
       },
       "traps": ["clock-skew", "timezone-boundary"],
       "source": [
-        "packages/spec/src/data/date-range-presets.ts (DATE_RANGE_PRESETS, DATE_RANGE_PRESET_MACRO_WINDOWS, isDateRangePresetName, bareDateRangePresetComparandMessage)",
+        "packages/spec/src/data/date-range-presets.ts#DATE_RANGE_PRESETS (DATE_RANGE_PRESETS, DATE_RANGE_PRESET_MACRO_WINDOWS, isDateRangePresetName, bareDateRangePresetComparandMessage)",
         "packages/spec/src/migrations/entries/semantic/18.filter-preset-ordering-comparand-refused.ts",
         "packages/spec/src/data/temporal-comparand.ts + packages/core/src/utils/temporal-comparand.ts",
         "packages/objectql/src/temporal-comparand-door.ts"
@@ -1451,10 +1451,10 @@
         "first-boot-cold-start"
       ],
       "source": [
-        "packages/runtime/src/domains/actions.ts (the REST door's ordered gates: ADR-0066 D4 capability gate → activation consult → type branch → ADR-0104 param contract → best-effort record load)",
-        "packages/runtime/src/action-execution.ts (disabledActionRefusal — ACTION_DISABLED_CODE/STATUS 409, the shared consult both doors call; invokeBusinessAction — the MCP door, whose AI-exposure + capability gates run ahead of the consult)",
-        "packages/objectql/src/engine.ts (isActionEnabled / describeDisabledAction / hydrateActionActivations / setActionActive — projection over the durable ledger, row-first then projection)",
-        "packages/spec/src/api/error-code-ledger.zod.ts (ACTION_DISABLED registered — the *_DISABLED family)",
+        "packages/runtime/src/domains/actions.ts#record (the REST door's ordered gates: ADR-0066 D4 capability gate → activation consult → type branch → ADR-0104 param contract → best-effort record load)",
+        "packages/runtime/src/action-execution.ts#disabledActionRefusal (disabledActionRefusal — ACTION_DISABLED_CODE/STATUS 409, the shared consult both doors call; invokeBusinessAction — the MCP door, whose AI-exposure + capability gates run ahead of the consult)",
+        "packages/objectql/src/engine.ts#isActionEnabled (isActionEnabled / describeDisabledAction / hydrateActionActivations / setActionActive — projection over the durable ledger, row-first then projection)",
+        "packages/spec/src/api/error-code-ledger.zod.ts#ACTION_DISABLED (ACTION_DISABLED registered — the *_DISABLED family)",
         "examples/app-showcase/src/ui/actions/index.ts + predicate-matrix.action.ts (the four probe actions)",
         "docs/adr/0126-packaged-metadata-customization-model.md (§8 item 2, §4 absence-means-active, §6 wall 3)",
         "#12438",
@@ -1569,10 +1569,10 @@
         "auth-state-leak"
       ],
       "source": [
-        "packages/runtime/src/domains/actions.ts (ACTION_ACTIVATION_SEGMENT, handleActionActivationWrite — the five ordered steps: authority → shape → body → declaration/ambiguity → durable write; refuseAmbiguousActionActivation)",
-        "packages/runtime/src/domains/activation-gate.ts (refuseUngrantedActivationAuthoring — manage_metadata tier, #10243 sentence; refuseUngrantedActivationWrite — the §5 posture tier; ACTION_ACTIVATION_SUBJECT's no-clone remedy)",
-        "packages/runtime/src/route-ledger.ts (the #12160 server-only row: servedBy reconstruction through /actions/:object/:action/:recordId, the 4-segment router-404, and why the segment is reserved)",
-        "packages/objectql/src/engine.ts (setActionActive — durable row first, projection second; the 503-on-no-ledger contract)",
+        "packages/runtime/src/domains/actions.ts#ACTION_ACTIVATION_SEGMENT (ACTION_ACTIVATION_SEGMENT, handleActionActivationWrite — the five ordered steps: authority → shape → body → declaration/ambiguity → durable write; refuseAmbiguousActionActivation)",
+        "packages/runtime/src/domains/activation-gate.ts#refuseUngrantedActivationAuthoring (refuseUngrantedActivationAuthoring — manage_metadata tier, #10243 sentence; refuseUngrantedActivationWrite — the §5 posture tier; ACTION_ACTIVATION_SUBJECT's no-clone remedy)",
+        "packages/runtime/src/route-ledger.ts#servedBy (the #12160 server-only row: servedBy reconstruction through /actions/:object/:action/:recordId, the 4-segment router-404, and why the segment is reserved)",
+        "packages/objectql/src/engine.ts#setActionActive (setActionActive — durable row first, projection second; the 503-on-no-ledger contract)",
         "sibling item api-backend.packaged-action-disabled-dispatch (what DISPATCH does with the row this door writes) · access-security.activation-write-operator-gate owns the gate's posture depths",
         "docs/adr/0126-packaged-metadata-customization-model.md (§4, §5, §6 walls, §8 item 2)",
         "#12438",
@@ -1687,12 +1687,12 @@
         "wrong-persona"
       ],
       "source": [
-        "packages/spec/src/data/query.zod.ts (AggregationFunction + ARRAY_AGG_RETIRED/STRING_AGG_RETIRED error map), (DateGranularity), GroupByNodeSchema (dateGranularity spelling)",
-        "packages/objectql/src/in-memory-aggregation.ts (the six function arms incl. #11152 boolean-as-number and the #10576 per-aggregation filter; bucketDateValue ISO shapes; the #3839 real-null bucket rule at the module head)",
-        "packages/spec/src/data/aggregation-policy.ts (emptyGroupValueFor — the ruled empty-set identities; objectui#3136)",
-        "packages/runtime/src/action-execution.ts (the aggregate door: engine-only, at-least-one-aggregation, the raw-rows degradation hazard)",
-        "packages/rest/src/rest-server.ts (POST /data/:object/query — the wire door that accepts groupBy/aggregations)",
-        "packages/metadata-protocol/src/protocol.ts (assertAggregationFieldsExist — the located unknown-field refusal)",
+        "packages/spec/src/data/query.zod.ts#AggregationFunction (AggregationFunction + ARRAY_AGG_RETIRED/STRING_AGG_RETIRED error map), (DateGranularity), GroupByNodeSchema (dateGranularity spelling)",
+        "packages/objectql/src/in-memory-aggregation.ts#bucketDateValue (the six function arms incl. #11152 boolean-as-number and the #10576 per-aggregation filter; bucketDateValue ISO shapes; the #3839 real-null bucket rule at the module head)",
+        "packages/spec/src/data/aggregation-policy.ts#emptyGroupValueFor (emptyGroupValueFor — the ruled empty-set identities; objectui#3136)",
+        "packages/runtime/src/action-execution.ts#engine (the aggregate door: engine-only, at-least-one-aggregation, the raw-rows degradation hazard)",
+        "packages/rest/src/rest-server.ts#data (POST /data/:object/query — the wire door that accepts groupBy/aggregations)",
+        "packages/metadata-protocol/src/protocol.ts#assertAggregationFieldsExist (assertAggregationFieldsExist — the located unknown-field refusal)",
         "#10576, #11152, #3839, #3773"
       ],
       "history": [
@@ -1784,8 +1784,8 @@
         "timezone-boundary"
       ],
       "source": [
-        "packages/formula/src/stdlib.ts (registerStdLib — the 27 registerFunction calls; calendarDayUtc ADR-0053 D1; addMonthsUtc clamp; the floor/ceil #3306 note), (registerNumericCoercions #1928)",
-        "packages/objectql/src/engine.ts (applyFormulaPlan — evaluate-fault → null, the silent-null contract; the evaluateFormulaField docblock states the compile-throws vs evaluate-nulls split)",
+        "packages/formula/src/stdlib.ts#registerStdLib (registerStdLib — the 27 registerFunction calls; calendarDayUtc ADR-0053 D1; addMonthsUtc clamp; the floor/ceil #3306 note), (registerNumericCoercions #1928)",
+        "packages/objectql/src/engine.ts#applyFormulaPlan (applyFormulaPlan — evaluate-fault → null, the silent-null contract; the evaluateFormulaField docblock states the compile-throws vs evaluate-nulls split)",
         "content/docs/data-modeling/formulas.mdx (the advertised catalog the matrix cross-checks)",
         "examples/app-showcase/src/data/objects/field-zoo.object.ts + project.object.ts (the stock live-leg formulas)",
         "ADR-0053 Phase 2 D1 (calendar-day timezone contract)",
@@ -1903,11 +1903,11 @@
         "auth-state-leak"
       ],
       "source": [
-        "packages/spec/src/data/object.zod.ts (ApiMethod — the six primitives), (LEGACY_API_METHODS + LEGACY_API_METHOD_GUIDANCE), (stripLegacyApiMethods — strip-and-warn + the deny-all cliff), (the z.preprocess wiring)",
-        "packages/spec/src/data/api-derivation.ts (resolveEffectiveApiMethods three-state, isApiOperationAllowed bulk∧child + writeMode precision, effectiveOperationsArray)",
-        "packages/rest/src/rest-server.ts (apiAccessDenialFromEnable — the 404/405 fork + effective allowed[]), (enforceApiAccess — external boundary only, default-allow, #3770 unknown-object pass-through), (writeMode-precise import), (batch per-op before txn), (bulk doors with bulkChild)",
-        "packages/objectql/src/registry.ts (warnStrippedLegacyApiMethods — the per-object registration diagnostic)",
-        "packages/spec/src/api/error-code-ledger.zod.ts (OBJECT_API_DISABLED, OBJECT_API_METHOD_NOT_ALLOWED)",
+        "packages/spec/src/data/object.zod.ts#ApiMethod (ApiMethod — the six primitives), (LEGACY_API_METHODS + LEGACY_API_METHOD_GUIDANCE), (stripLegacyApiMethods — strip-and-warn + the deny-all cliff), (the z.preprocess wiring)",
+        "packages/spec/src/data/api-derivation.ts#resolveEffectiveApiMethods (resolveEffectiveApiMethods three-state, isApiOperationAllowed bulk∧child + writeMode precision, effectiveOperationsArray)",
+        "packages/rest/src/rest-server.ts#apiAccessDenialFromEnable (apiAccessDenialFromEnable — the 404/405 fork + effective allowed[]), (enforceApiAccess — external boundary only, default-allow, #3770 unknown-object pass-through), (writeMode-precise import), (batch per-op before txn), (bulk doors with bulkChild)",
+        "packages/objectql/src/registry.ts#warnStrippedLegacyApiMethods (warnStrippedLegacyApiMethods — the per-object registration diagnostic)",
+        "packages/spec/src/api/error-code-ledger.zod.ts#OBJECT_API_DISABLED (OBJECT_API_DISABLED, OBJECT_API_METHOD_NOT_ALLOWED)",
         "packages/platform-objects/src/identity/sys-session.object.ts + sys-device-code.object.ts + sys-api-key.object.ts + sys-oauth-consent.object.ts (the stock narrowed objects)",
         "ADR-0049 / #1889 (shipping a non-enforcing apiEnabled is false security), #3391 (three-state), #3543 (enum shrink + strip), #3545 (non-array fails closed), #7912 (apiExposureDenialReason order)",
         "sibling clause: identity-auth.session-list-revoke (the sys_session 405-before-403 precedent this item generalizes)"

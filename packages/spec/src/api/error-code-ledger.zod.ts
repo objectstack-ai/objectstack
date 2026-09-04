@@ -1182,6 +1182,21 @@ export const PROVENANCE_WAIVERS: readonly ProvenanceWaiver[] = [
       '(ADR-0010 §3.3). Spec ships schemas and pure helpers, never an HTTP door.',
   },
   {
+    package: '@objectstack/plugin-sharing',
+    code: 'ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED',
+    registeredUnder: '@objectstack/objectql',
+    reason: 'Matches the code, never emits it (#14754, adjudicated on #14937 — maintainer ' +
+      'ruling A, 2026-09-04): `ENGINE_ORGANIZATION_REFUSAL_CODE` in ' +
+      '`plugin-sharing/src/sharing-rule-service.ts` is a `constdef` the per-grant catch in BOTH ' +
+      'reconcile loops compares an incoming `err.code` against, so exactly one engine refusal is ' +
+      'absorbed and a refused grant no longer aborts the pass or its stale-row revocations. The ' +
+      'emitter is `@objectstack/objectql` (`SystemWriteOrganizationRequiredError`, ' +
+      'tenancy/system-write-organization.ts) and the objectql owner key already carries the row ' +
+      '(#8844). Recognising a code is not emitting it; the named constant is typed FROM the ' +
+      'engine\'s own declaration so it cannot drift from what the engine throws. Removed together ' +
+      'with the stamp site when #14936 lands and objectql publishes a recognizer.',
+  },
+  {
     package: '@objectstack/types',
     code: 'VALIDATION_FAILED',
     registeredUnder: '@objectstack/runtime',
