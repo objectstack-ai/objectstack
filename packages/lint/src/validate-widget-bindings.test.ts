@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
+import { ChartTypeSchema } from '@objectstack/spec/ui';
 import { runAuthoringRules, splitBySeverity } from './authoring-rules.js';
 import {
   validateWidgetBindings,
+  MARK_MIXING_CHART_TYPES,
   TABLE_COUNT_ONLY,
   WIDGET_DATASET_UNKNOWN,
   WIDGET_DIMENSION_UNKNOWN,
@@ -192,17 +194,25 @@ describe('validateWidgetBindings (reference integrity, issue #1721)', () => {
     expect(findings[0].hint).toContain('Add "ticket_count" to the widget\'s values');
   });
 
-  it('(d) warns when a chart-type widget has no chartConfig at all', () => {
-    const findings = validateWidgetBindings(chartStack({ chartConfig: undefined }));
+  it('(d) warns when a `combo` widget has no chartConfig at all', () => {
+    const findings = validateWidgetBindings(chartStack({ type: 'combo', chartConfig: undefined }));
     expect(findings).toHaveLength(1);
     expect(findings[0].severity).toBe('warning');
     expect(findings[0].rule).toBe(CHART_CONFIG_MISSING);
-    expect(findings[0].message).toContain("'bar'");
+    expect(findings[0].message).toContain("'combo'");
+    // The message names the REAL consequence — the mark, not the binding. The
+    // old wording ("cannot determine which measure to plot, so the series
+    // renders empty") was false against the pinned renderer (#14436), so it is
+    // pinned here as absent rather than merely replaced.
+    expect(findings[0].message).toContain('per-series mark');
+    expect(findings[0].message).not.toContain('renders empty');
+    expect(findings[0].hint).toContain('chartConfig: { series: [{ name:');
     expect(findings[0].hint).toContain(`suppressWarnings: ['${CHART_CONFIG_MISSING}']`);
   });
 
   it('(d) missing chartConfig is suppressible per widget', () => {
     expect(validateWidgetBindings(chartStack({
+      type: 'combo',
       chartConfig: undefined,
       suppressWarnings: [CHART_CONFIG_MISSING],
     }))).toHaveLength(0);
@@ -214,18 +224,83 @@ describe('validateWidgetBindings (reference integrity, issue #1721)', () => {
     }
   });
 
-  it('(d) every multi-series family in the taxonomy warns — including a newly added one', () => {
-    // The set of chart families that need a measure mapping is derived from
-    // `ChartTypeSchema`, so a family added to the taxonomy is covered without
-    // editing a list here. `combo` is the case that proved it: as a hand-written
-    // list, an unlisted family read as "not a chart" and the missing mapping
-    // went unreported. objectui#2945.
+  it('(d) [#14436] a chart family whose binding the renderer DERIVES is silent', () => {
+    // The over-reach this rule shipped with. `DatasetWidget` derives the axis
+    // key from `dimensions[0]` and one series per `values` entry, and refuses an
+    // authored `ChartAxis.field` / `ChartSeries.name` — pinned in objectui's
+    // `DatasetWidget.chartConfig.test.tsx` by the names quoted in the rule's
+    // docblock. So a bar/line/pie with a resolvable selection and no
+    // `chartConfig` renders correctly, and a warning on it is a false finding.
     for (const type of ['bar', 'horizontal-bar', 'column', 'line', 'area', 'pie',
-      'donut', 'funnel', 'scatter', 'treemap', 'sankey', 'radar', 'combo']) {
+      'donut', 'funnel', 'scatter', 'treemap', 'sankey', 'radar']) {
       const findings = validateWidgetBindings(chartStack({ type, chartConfig: undefined }));
-      expect(findings, `expected a warning for chart type '${type}'`).toHaveLength(1);
-      expect(findings[0].rule).toBe(CHART_CONFIG_MISSING);
+      expect(findings, `expected NO finding for chart type '${type}'`).toHaveLength(0);
     }
+  });
+
+  it('(d) [#14436] every mark-mixing family is a declared chart type', () => {
+    // objectui#2945's lesson, kept as a check rather than as a derivation:
+    // membership is a fact about the RENDERER (which families carry their shape
+    // in `chartConfig`), which the taxonomy cannot know — but a member that is
+    // not a chart type at all is a typo or a retired family, and reds here.
+    for (const type of MARK_MIXING_CHART_TYPES) {
+      expect(ChartTypeSchema.options, `'${type}' is not a declared chart type`)
+        .toContain(type);
+    }
+  });
+
+  it('(d) [#14436] the SHIPPED `system_overview` chart tiles report nothing', () => {
+    // The card's repro, as a fixture rather than a cross-package import: the two
+    // Row 3 widgets of `packages/platform-objects/src/apps/dashboards/
+    // system_overview.dashboard.ts`, bound to the `sys_audit_log_metrics`
+    // dataset from `system.datasets.ts` in the same directory. Copied verbatim
+    // (one dimension, one measure, no `chartConfig`) because that is the exact
+    // shape the rule used to warn on — the platform's OWN metadata, on the
+    // Setup dashboard every customer opens first.
+    //
+    // Kept as a shape rather than a snapshot: if either widget later gains a
+    // `chartConfig` this test still asserts the thing that matters, which is
+    // that not declaring one is not a finding.
+    const findings = validateWidgetBindings({
+      datasets: [{
+        name: 'sys_audit_log_metrics',
+        label: 'Audit Log Metrics',
+        object: 'sys_audit_log',
+        dimensions: [
+          { name: 'action', label: 'Action', field: 'action', type: 'string' },
+          { name: 'user_id', label: 'User', field: 'user_id', type: 'lookup' },
+        ],
+        measures: [{ name: 'event_count', label: 'Events', aggregate: 'count' }],
+      }],
+      dashboards: [{
+        name: 'system_overview',
+        label: 'System Overview',
+        widgets: [
+          {
+            id: 'widget_events_by_type',
+            dataset: 'sys_audit_log_metrics', dimensions: ['action'], values: ['event_count'],
+            title: 'Audit Events by Action',
+            type: 'pie',
+            layout: { x: 0, y: 4, w: 6, h: 4 },
+          },
+          {
+            id: 'widget_events_by_user',
+            dataset: 'sys_audit_log_metrics', dimensions: ['user_id'], values: ['event_count'],
+            title: 'Events by User',
+            type: 'bar',
+            layout: { x: 6, y: 4, w: 6, h: 4 },
+          },
+        ],
+      }],
+    });
+    expect(findings).toEqual([]);
+  });
+
+  it('(d) [#14436] a combo that DOES declare its per-series marks is clean', () => {
+    expect(validateWidgetBindings(chartStack({
+      type: 'combo',
+      chartConfig: { series: [{ name: 'sum_amount', type: 'line' }] },
+    }))).toHaveLength(0);
   });
 
   it('errors are NOT suppressible via suppressWarnings', () => {

@@ -108,7 +108,7 @@
  */
 
 import { readFileSync, existsSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { requireDefaultExport } from './import-prerequisite.mjs';
 const ts = await requireDefaultExport('typescript', () => import('typescript'), import.meta.url);
@@ -122,6 +122,38 @@ const SCAN_FILES = [
   join('packages', 'drivers', 'driver-sql', 'src', 'sql-driver.ts'),
   join('packages', 'drivers', 'driver-sqlite-wasm', 'src', 'sqlite-wasm-driver.ts'),
   join('packages', 'drivers', 'driver-turso', 'src', 'turso-driver.ts'),
+];
+
+/**
+ * The population this gate reads, declared for `scripts/pm/dispatch-gates.mjs`.
+ *
+ * `SCAN_FILES` is assembled with `join()`, one SEGMENT per literal, so the
+ * derivation — which reads SOURCE TEXT — saw a handful of bare words and no path
+ * at all. This gate was scored `undetermined` for EVERY card: absent from every
+ * dispatch brief and every `--commands` harvest, while CI ran it on each pull
+ * request. Worse than the usual cost, because this gate's population is THREE
+ * FILES: the cards that actually implicate it are rare and precisely nameable,
+ * and it was reaching none of them.
+ *
+ * The spelling is `DECLARED_WATCH_HINTS` rather than the directory idiom: this
+ * is an enumerated population, not a walked subtree, and each hint is a whole
+ * repo-relative FILE path — which carries a separator, so `hintCovers` reads it
+ * without a glob suffix.
+ *
+ * ⛔ Not `packages/drivers/**`, and not a whole-tree marker. Both would put this
+ * gate on cards it does not read a byte for; a lead that is wrong on thousands
+ * of files is worse than the silence it replaces.
+ *
+ * The self-test derives the coupling from `SCAN_FILES` on both sides rather than
+ * re-spelling it, so a driver added to or removed from the family cannot leave
+ * this declaration describing the old population. The POSIX normalisation is
+ * load-bearing: `join()` yields a platform separator, and the declaration is
+ * read as text by a scanner that only knows `/`.
+ */
+const DECLARED_WATCH_HINTS = [
+  'packages/drivers/driver-sql/src/sql-driver.ts',
+  'packages/drivers/driver-sqlite-wasm/src/sqlite-wasm-driver.ts',
+  'packages/drivers/driver-turso/src/turso-driver.ts',
 ];
 
 /**
@@ -521,6 +553,24 @@ function selfTest() {
     const { builders } = run(`async nothing() { return 1; }`);
     assert(builders.length === 0, 'the empty fixture must discover no builders');
   }
+
+  // ── the dispatch-gates population declaration ────────────────────────────
+  const scannedPosix = SCAN_FILES.map((f) => f.split(sep).join('/'));
+  assert(
+    scannedPosix.every((f) => DECLARED_WATCH_HINTS.includes(f)),
+    'every SCAN_FILES entry is declared for dispatch-gates — a join()-assembled path is invisible to '
+      + 'the hint extractor, which is how this gate came to declare nothing at all',
+  );
+  assert(
+    DECLARED_WATCH_HINTS.every((h) => scannedPosix.includes(h)),
+    'and nothing is declared that this gate does not read — a declaration that has drifted from the '
+      + 'scan replaces a silent gate with a lying one',
+  );
+  assert(
+    DECLARED_WATCH_HINTS.every((h) => !h.includes('*')),
+    'the declaration stays file-exact — a `packages/drivers/**` widening would name this gate on '
+      + 'cards it does not read a byte for',
+  );
 
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
   //
