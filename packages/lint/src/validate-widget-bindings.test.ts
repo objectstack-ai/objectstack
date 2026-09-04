@@ -4,6 +4,11 @@ import { runAuthoringRules, splitBySeverity } from './authoring-rules.js';
 import {
   validateWidgetBindings,
   MARK_MIXING_CHART_TYPES,
+  METRIC_WIDGET_TYPES,
+  TABULAR_WIDGET_TYPES,
+  CHART_FAMILY_WIDGET_TYPES,
+  CHART_MEASURES_MISSING,
+  CHART_DIMENSIONS_MISSING,
   TABLE_COUNT_ONLY,
   WIDGET_DATASET_UNKNOWN,
   WIDGET_DIMENSION_UNKNOWN,
@@ -1444,6 +1449,227 @@ describe('#14148 acceptance — both limbs gate `validate` AND `build`', () => {
         WIDGET_FILTER_FIELD_UNKNOWN, WIDGET_FILTER_FIELD_NOT_INCLUDED, WIDGET_SORTBY_UNSELECTED,
       ].includes(f.rule));
       expect(mine).toEqual([]);
+    });
+  }
+});
+
+/**
+ * [#15462] The two empty-selection shapes. Both are read at the `@object-ui`
+ * revision this repo PINS (`.objectui-sha`), in
+ * `packages/plugin-dashboard/src/DatasetWidget.tsx`:
+ *
+ *   - `:683` — `if (values.length === 0)` returns the authoring placeholder
+ *     "Pick measures (values) for this dataset widget.", above every family
+ *     branch, so no chart is drawn at all;
+ *   - `:423` — `const isMetric = METRIC_TYPES.has(widgetType) ||
+ *     dimensions.length === 0;`, so a dimensionless `bar` renders as a KPI
+ *     number instead of the family the author declared.
+ *
+ * Warning tier for both: an empty selection is a state an author passes
+ * through, and this family's errors are reserved for bindings the analytics
+ * service cannot satisfy.
+ */
+describe('chart-measures-missing / chart-dimensions-missing (#15462)', () => {
+  const rules = (findings: { rule: string }[]) => findings.map((f) => f.rule);
+
+  it('(1) warns when a chart-family widget selects no measures', () => {
+    const findings = validateWidgetBindings(chartStack({ values: [], chartConfig: undefined }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe('warning');
+    expect(findings[0].rule).toBe(CHART_MEASURES_MISSING);
+    expect(findings[0].where).toContain('spend_by_category');
+    expect(findings[0].path).toBe('dashboards[0].widgets[0]');
+    // The message names the PINNED consequence — the placeholder string the
+    // renderer returns — not an inferred one.
+    expect(findings[0].message).toContain('Pick measures (values) for this dataset widget.');
+    expect(findings[0].message).toContain('no chart is drawn at all');
+    expect(findings[0].hint).toContain('declared measures: sum_amount, ticket_count');
+    expect(findings[0].hint).toContain(`suppressWarnings: ['${CHART_MEASURES_MISSING}']`);
+  });
+
+  it('(1) an absent `values` key reports the same shape as an empty array', () => {
+    const stack = chartStack({ chartConfig: undefined });
+    delete (stack as { dashboards: { widgets: Record<string, unknown>[] }[] })
+      .dashboards[0].widgets[0].values;
+    const findings = validateWidgetBindings(stack);
+    expect(rules(findings)).toEqual([CHART_MEASURES_MISSING]);
+  });
+
+  it('(2) warns when a chart-family widget selects no dimensions', () => {
+    const findings = validateWidgetBindings(chartStack({ dimensions: [], chartConfig: undefined }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe('warning');
+    expect(findings[0].rule).toBe(CHART_DIMENSIONS_MISSING);
+    expect(findings[0].path).toBe('dashboards[0].widgets[0]');
+    // The pinned expression, quoted, and the consequence it produces.
+    expect(findings[0].message).toContain('METRIC_TYPES.has(widgetType) || dimensions.length === 0');
+    expect(findings[0].message).toContain('draws a single KPI number');
+    expect(findings[0].hint).toContain('declared dimensions: category');
+    // The honest alternative repair: declare the family that actually renders.
+    expect(findings[0].hint).toContain("'metric' or 'kpi'");
+    expect(findings[0].hint).toContain(`suppressWarnings: ['${CHART_DIMENSIONS_MISSING}']`);
+  });
+
+  it('each shape is suppressible per widget', () => {
+    expect(validateWidgetBindings(chartStack({
+      values: [], chartConfig: undefined, suppressWarnings: [CHART_MEASURES_MISSING],
+    }))).toHaveLength(0);
+    expect(validateWidgetBindings(chartStack({
+      dimensions: [], chartConfig: undefined, suppressWarnings: [CHART_DIMENSIONS_MISSING],
+    }))).toHaveLength(0);
+  });
+
+  it('an unrelated suppressWarnings entry suppresses neither', () => {
+    expect(rules(validateWidgetBindings(chartStack({
+      values: [], chartConfig: undefined, suppressWarnings: [CHART_DIMENSIONS_MISSING],
+    })))).toEqual([CHART_MEASURES_MISSING]);
+    expect(rules(validateWidgetBindings(chartStack({
+      dimensions: [], chartConfig: undefined, suppressWarnings: [CHART_MEASURES_MISSING],
+    })))).toEqual([CHART_DIMENSIONS_MISSING]);
+  });
+
+  it('a widget missing BOTH reports only the measures id — the pin returns first', () => {
+    // `values.length === 0` short-circuits at `:683`, ABOVE the `isMetric`
+    // branch, so this widget never renders the KPI number the other id
+    // describes. Reporting both would attribute two consequences to one widget.
+    const findings = validateWidgetBindings(chartStack({
+      values: [], dimensions: [], chartConfig: undefined,
+    }));
+    expect(rules(findings)).toEqual([CHART_MEASURES_MISSING]);
+    // The dimension is still named, so one fix round closes both.
+    expect(findings[0].hint).toContain(CHART_DIMENSIONS_MISSING);
+  });
+
+  it('a single-value or tabular family with no dimensions is NOT the dimensions finding', () => {
+    // The renderer routes these away from the chart branch on their TYPE
+    // (`METRIC_TYPES` / `isTable`), so a dimensionless one renders exactly what
+    // the author declared. `table`/`pivot` keep `table-count-only` as their own
+    // dimensionless rule.
+    for (const type of ['metric', 'kpi', 'gauge', 'solid-gauge', 'bullet', 'table', 'pivot']) {
+      const findings = validateWidgetBindings(chartStack({ type, dimensions: [], chartConfig: undefined }));
+      expect(rules(findings), `'${type}' must not report a chart-family finding`)
+        .not.toContain(CHART_DIMENSIONS_MISSING);
+    }
+  });
+
+  it('a single-value or tabular family with no measures is NOT the measures finding', () => {
+    for (const type of ['metric', 'kpi', 'gauge', 'solid-gauge', 'bullet', 'table', 'pivot']) {
+      const findings = validateWidgetBindings(chartStack({ type, values: [], chartConfig: undefined }));
+      expect(rules(findings), `'${type}' must not report a chart-family finding`)
+        .not.toContain(CHART_MEASURES_MISSING);
+    }
+  });
+
+  it('a chart-family widget that selects both is clean', () => {
+    for (const type of CHART_FAMILY_WIDGET_TYPES) {
+      const findings = validateWidgetBindings(chartStack({ type, chartConfig: undefined }));
+      const mine = findings.filter((f) => f.rule === CHART_MEASURES_MISSING
+        || f.rule === CHART_DIMENSIONS_MISSING);
+      expect(mine, `'${type}' with one dimension and one measure must be clean`).toEqual([]);
+    }
+  });
+
+  it('every chart family reports, and no other family does', () => {
+    for (const type of ChartTypeSchema.options as readonly string[]) {
+      const noMeasures = rules(validateWidgetBindings(chartStack({ type, values: [], chartConfig: undefined })));
+      const noDims = rules(validateWidgetBindings(chartStack({ type, dimensions: [], chartConfig: undefined })));
+      if (CHART_FAMILY_WIDGET_TYPES.has(type)) {
+        expect(noMeasures, `'${type}' selects no measures`).toContain(CHART_MEASURES_MISSING);
+        expect(noDims, `'${type}' selects no dimensions`).toContain(CHART_DIMENSIONS_MISSING);
+      } else {
+        expect(noMeasures, `'${type}' is not a chart family`).not.toContain(CHART_MEASURES_MISSING);
+        expect(noDims, `'${type}' is not a chart family`).not.toContain(CHART_DIMENSIONS_MISSING);
+      }
+    }
+  });
+
+  it('a widget type outside the taxonomy is judged by neither id', () => {
+    expect(validateWidgetBindings(chartStack({ type: 'barr', values: [], dimensions: [], chartConfig: undefined })))
+      .toEqual([]);
+  });
+
+  it('the exception sets mirror the PINNED renderer verbatim', () => {
+    // `DatasetWidget.tsx:343` `METRIC_TYPES` and `:424` `isTable`. Our copies
+    // drifting from the quoted lines reds here; the renderer's own set moving
+    // is caught by re-reading the pin when `.objectui-sha` bumps, which is the
+    // same contract `DATE_RANGE_DEFAULT_FIELD` carries in this file.
+    expect([...METRIC_WIDGET_TYPES]).toEqual(['metric', 'kpi', 'gauge', 'solid-gauge', 'bullet']);
+    expect([...TABULAR_WIDGET_TYPES]).toEqual(['table', 'pivot']);
+  });
+
+  it('every member of both exception sets is a declared chart type', () => {
+    // #14436's check for `MARK_MIXING_CHART_TYPES`, applied to the two sets the
+    // chart family is derived from: a member that is not a chart type at all is
+    // a typo or a retired family, and would silently WIDEN the family.
+    for (const type of [...METRIC_WIDGET_TYPES, ...TABULAR_WIDGET_TYPES]) {
+      expect(ChartTypeSchema.options, `'${type}' is not a declared chart type`).toContain(type);
+    }
+  });
+
+  it('the chart family is the taxonomy minus those two sets', () => {
+    for (const type of ['bar', 'horizontal-bar', 'column', 'line', 'area', 'pie', 'donut',
+      'funnel', 'scatter', 'treemap', 'sankey', 'combo', 'radar']) {
+      expect(CHART_FAMILY_WIDGET_TYPES.has(type), `'${type}' should be a chart family`).toBe(true);
+    }
+    for (const type of [...METRIC_WIDGET_TYPES, ...TABULAR_WIDGET_TYPES]) {
+      expect(CHART_FAMILY_WIDGET_TYPES.has(type), `'${type}' should NOT be a chart family`).toBe(false);
+    }
+  });
+
+  it('the SHIPPED `system_overview` single-value tiles report nothing', () => {
+    // The other half of #15461's fixture: the Row 1/2 tiles of
+    // `packages/platform-objects/src/apps/dashboards/system_overview.dashboard.ts`
+    // select a measure and NO dimensions — which is exactly shape 2's input,
+    // and is correct here because they are `metric` widgets. Copied verbatim,
+    // for the same reason that fixture was: first-party metadata is where a
+    // mis-scoped warning-tier rule does its damage (ADR-0072 D1).
+    const findings = validateWidgetBindings({
+      datasets: [{
+        name: 'sys_user_metrics',
+        label: 'User Metrics',
+        object: 'sys_user',
+        dimensions: [{ name: 'is_active', label: 'Active', field: 'is_active', type: 'boolean' }],
+        measures: [{ name: 'user_count', label: 'Users', aggregate: 'count' }],
+      }],
+      dashboards: [{
+        name: 'system_overview',
+        label: 'System Overview',
+        widgets: [{
+          id: 'widget_total_users',
+          dataset: 'sys_user_metrics', values: ['user_count'],
+          title: 'Total Users',
+          type: 'metric',
+          layout: { x: 0, y: 0, w: 3, h: 2 },
+        }],
+      }],
+    });
+    expect(findings).toEqual([]);
+  });
+});
+
+/**
+ * [#15462] Tier, pinned end-to-end rather than inferred from the constant: both
+ * ids ride the advisory channel on `validate` AND `build`. Shape 1 was the one
+ * the card left open (`error` "looks right — the renderer draws nothing"), and
+ * it was ruled warning because an empty selection is a work-in-progress state a
+ * build must tolerate — erroring would gate the `sys_metadata` publish path on
+ * a half-authored widget. Nothing else in this file would notice a later flip.
+ */
+describe('#15462 acceptance — both ids are advisory on `validate` and `build`', () => {
+  const noMeasures = chartStack({ values: [], chartConfig: undefined });
+  const noDims = chartStack({ dimensions: [], chartConfig: undefined });
+
+  for (const command of ['validate', 'build'] as const) {
+    it(`chart-measures-missing advises (never gates) \`${command}\``, () => {
+      const { errors, advisories } = splitBySeverity(runAuthoringRules(command, { normalized: noMeasures }));
+      expect(errors.map((f) => f.rule)).not.toContain(CHART_MEASURES_MISSING);
+      expect(advisories.map((f) => f.rule)).toContain(CHART_MEASURES_MISSING);
+    });
+
+    it(`chart-dimensions-missing advises (never gates) \`${command}\``, () => {
+      const { errors, advisories } = splitBySeverity(runAuthoringRules(command, { normalized: noDims }));
+      expect(errors.map((f) => f.rule)).not.toContain(CHART_DIMENSIONS_MISSING);
+      expect(advisories.map((f) => f.rule)).toContain(CHART_DIMENSIONS_MISSING);
     });
   }
 });
