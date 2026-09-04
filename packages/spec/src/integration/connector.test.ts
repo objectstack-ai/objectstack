@@ -1391,6 +1391,16 @@ describe('[#14676] connector.errorMapping retirement', () => {
     // conversion output is exactly what the tombstone accepts.
     const stripped = (stack.connectors as unknown[])[0];
     expect(DeclarativeConnectorEntrySchema.safeParse(stripped).success).toBe(true);
+
+    // Idempotence, measured rather than asserted from `stripKeys`'s shape: a
+    // second replay over the converted snapshot converts nothing — zero
+    // notices, and the copy-on-write contract hands the input back by
+    // reference. This is the property the CLI `migrate-meta` e2e checks over
+    // the whole chain (`applied` empty on the migrated snapshot), pinned here
+    // at the spec seam for THIS conversion.
+    const replay = collectConversionNotices(stack, { includeRetired: true });
+    expect(replay.notices).toHaveLength(0);
+    expect(replay.stack).toBe(stack);
   });
 });
 

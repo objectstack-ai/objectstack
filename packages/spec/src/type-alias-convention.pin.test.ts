@@ -270,7 +270,7 @@ import type * as M183 from './api/sortability.zod.js';
 import type * as M184 from './shared/value-domain.zod.js';
 
 // ---------------------------------------------------------------------------
-// 828 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 826 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -1682,7 +1682,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 828 isomorphic pins', () => {
+  it('still declares all 826 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2129,7 +2129,11 @@ describe('ADR-0122 type-alias convention', () => {
     // disjoint pins.)
     const self = readFileSync(fileURLToPath(import.meta.url), 'utf8');
     const pins = self.match(/^export type Iso\d+ = Assert</gm) ?? [];
-    expect(pins).toHaveLength(828);
+    // 828 -> 826 is #14676's ADR-0049 retirement of `connector.errorMapping`:
+    // `ErrorMappingRuleSchema` and `ConnectorErrorCategorySchema` left whole
+    // with the key (whole-def removal, `RETIRED_DEFS_BY_MAJOR[18]`), so the
+    // two pins that named them (`Iso381` / `Iso382`) leave with the schemas.
+    expect(pins).toHaveLength(826);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until #6605 nothing read either
