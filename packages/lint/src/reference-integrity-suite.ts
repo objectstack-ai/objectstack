@@ -103,6 +103,7 @@ import { validateObjectReferences } from './validate-object-references.js';
 import { validateSearchableFields } from './validate-searchable-fields.js';
 import { validateSortableFields } from './validate-sortable-fields.js';
 import { validateListViewFieldRefs } from './validate-list-view-field-refs.js';
+import { validateObjectFieldRefs } from './validate-object-field-refs.js';
 import { validateActionNameRefs } from './validate-action-name-refs.js';
 import { validatePageFieldBindings } from './validate-page-field-bindings.js';
 import { validatePageVisualizationBindings } from './validate-page-visualization-bindings.js';
@@ -232,6 +233,27 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // MCP/AI author writes goes through that door and no CLI, so a
   // build-time-only rule would never reach the author who made the typo.
   { name: 'validateListViewFieldRefs', runtimeTypes: ['flow', 'view'], run: validateListViewFieldRefs },
+  // [#15254] The same question, one surface IN: the field-name lists the
+  // OBJECT itself carries (`highlightFields`, `publicSharing.redactFields`),
+  // which the three list-view members above do not walk because they are not
+  // on a list view. Placed directly after them because it completes the same
+  // sweep — every field name an object or its built-in views write down.
+  //
+  // `runtimeTypes` gains `object`, and that is the point of the member rather
+  // than a convenience: Studio's app builder mints no `view` items at all, so
+  // the list-view members have nothing to inspect on the only artifacts the
+  // click path authors. What it authors is the OBJECT. The crossing carries
+  // the #9313 property that makes it safe — this member resolves only against
+  // `stack.objects`, the collection the per-write snapshot does carry, so it
+  // has no missing-collection false-positive channel; and it resolves each
+  // name against the object's OWN field map, so a one-object snapshot is not
+  // merely sufficient, it is the whole universe the question has.
+  //
+  // `flow` and `view` ride along on the default reasoning: an object reached
+  // as context on either snapshot is judged for its own lists exactly as the
+  // CLI judges it, and the gate's differential means a stored object already
+  // in violation is never charged to someone else's write.
+  { name: 'validateObjectFieldRefs', runtimeTypes: ['flow', 'view', 'object'], run: validateObjectFieldRefs },
   { name: 'validateActionNameRefs', run: validateActionNameRefs },
   { name: 'validatePageFieldBindings', run: validatePageFieldBindings },
   // [#14073] The same page, one question out. `validatePageFieldBindings`

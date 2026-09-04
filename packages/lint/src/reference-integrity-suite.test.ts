@@ -22,6 +22,12 @@ describe('reference-integrity suite — membership', () => {
       // field-naming position the two members above do not own. Placed beside
       // them because the three walk the identical rungs.
       'validateListViewFieldRefs',
+      // [#15254] The object-level half of the same sweep: the field-name lists
+      // an object writes about its OWN fields. Placed beside the list-view
+      // members because it completes the object's field surface — and because
+      // Studio's app builder mints no `view` items, which is what left those
+      // members with nothing to inspect on the click path.
+      'validateObjectFieldRefs',
       'validateActionNameRefs',
       'validatePageFieldBindings',
       // [#14073] The same page, one question out: the BINDING behind each

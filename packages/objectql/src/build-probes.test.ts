@@ -167,7 +167,11 @@ describe('runBuildProbes — dashboard widgets', () => {
       ],
     });
     // getItem failures mean no object bindings resolve — nothing probed, nothing thrown.
-    expect(report.checked).toEqual({ seeds: 0, views: 0, widgets: 0 });
+    // [#15254] `objects: 0` for the same reason as the other three here:
+    // `getItem` threw, so no published object body was readable and none was
+    // judged. The plane is present and counted nothing, which is exactly the
+    // distinction the counter exists to make.
+    expect(report.checked).toEqual({ seeds: 0, views: 0, widgets: 0, objects: 0 });
   });
 });
 
