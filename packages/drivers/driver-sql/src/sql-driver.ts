@@ -4162,6 +4162,26 @@ interface RowWidthContribution {
   bytes: number;
 }
 
+/**
+ * Render the duplicate groups a unique pre-flight probe found, for an operator
+ * message: at most five groups, then a count of the rest.
+ *
+ * Module-local on purpose (#14902). The two sites that report a blocked unique
+ * — the drift entry and the boot-time durability log — must name the SAME rows
+ * in the SAME shape, and a second hand-rolled `.slice(0, 5).join('; ')` is
+ * exactly how the plain and the NULL-safe path drifted apart in the first
+ * place. Not a method, and not exported: `SqlDriver`'s `.d.ts` carries its
+ * protected members, so a new method there would move a published entry point
+ * for a string helper.
+ */
+function formatDuplicateGroups(duplicates: ReadonlyArray<{ key: string; rows: number }>): string {
+  const shown = duplicates
+    .slice(0, 5)
+    .map((g) => `(${g.key}) \u00d7 ${g.rows} rows`)
+    .join('; ');
+  return duplicates.length > 5 ? `${shown}; \u2026and ${duplicates.length - 5} more group(s)` : shown;
+}
+
 export class SqlDriver implements IDataDriver {
   // IDataDriver metadata
   public readonly name: string = 'com.objectstack.driver.sql';
@@ -10686,10 +10706,12 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
-   * ADR-0120 D4 — duplicate pre-flight for NULL-safe organization uniques.
+   * ADR-0120 D4 — duplicate pre-flight for unique index CREATEs.
    *
-   * Probes every index op that would CREATE a unique index whose organization
-   * key part is the NULL-safe COALESCE form, by grouping over that exact key:
+   * Probes every index op that would create a UNIQUE index over data that
+   * already violates it, grouping by the exact key the index will enforce —
+   * `COALESCE(<org>, '__global__')` for a NULL-safe organization key part, the
+   * bare column otherwise:
    *
    *   - `recreate_index` marked `tightenNullSafeOnly` (the bare composite
    *     tightening into its COALESCE form — same identities, physical fully
@@ -10697,10 +10719,26 @@ export class SqlDriver implements IDataDriver {
    *     `autoMigrate: 'safe'` and a plain `os migrate apply` may apply it; a
    *     dirty probe keeps it blocked (`destructive` + a re-probe refusal in
    *     {@link applyIndexDriftOp}) and reports the offending rows.
-   *   - `create_index` for a unique NULL-safe index: a dirty probe demotes the
-   *     default `safe` to blocked with the same row report — the CREATE could
-   *     only fail at apply time otherwise, with a raw driver error naming no
-   *     rows.
+   *   - `create_index` for a unique index: a dirty probe demotes the default
+   *     `safe` to blocked with the same row report — the CREATE could only
+   *     fail at apply time otherwise, with a raw driver error naming no rows.
+   *
+   * ⚠️ #14902 — the second bullet covers the PLAIN unique too: an index with no
+   * organization key part at all, reached by an object with
+   * `tenancy: { enabled: false }` or by any explicit `unique: 'global'`. The
+   * `nullSafeColumns.length > 0` guard used to exclude it, so `os migrate plan`
+   * classified the one op that was about to take the boot down `safe` — an
+   * instrument reporting nothing wrong about the thing that kills the boot.
+   * Nothing new was needed to probe it:
+   * {@link probeNullSafeUniqueDuplicates} groups by the bare columns when the
+   * NULL-safe set is empty, so the guard MOVED rather than a second copy of the
+   * check appearing beside the first — one pre-flight, two key shapes, no way
+   * for them to drift apart again.
+   *
+   * A PLAIN unique `recreate_index` stays unprobed: it has no
+   * `tightenNullSafeOnly` shape, and `diffManagedIndexes` already categorises a
+   * unique recreate `destructive`, so it never carried the `safe` claim this
+   * pre-flight exists to withdraw.
    *
    * `replace_unique_index` is deliberately NOT probed: the legacy index it
    * retires is a platform-wide unique, strictly stronger than the NULL-safe
@@ -10710,15 +10748,20 @@ export class SqlDriver implements IDataDriver {
     for (const d of entries) {
       const op = d.op;
       if (op.type !== 'recreate_index' && op.type !== 'create_index') continue;
-      if (!op.unique || !op.nullSafeColumns || op.nullSafeColumns.length === 0) continue;
+      if (!op.unique) continue;
+      const nullSafeColumns = op.nullSafeColumns ?? [];
+      const nullSafeKey = nullSafeColumns.length > 0;
       const tighten = op.type === 'recreate_index' && op.tightenNullSafeOnly === true;
       // A generic unique recreate (columns differ beyond the key-part form)
       // keeps its pre-ADR-0120 semantics untouched.
       if (op.type === 'recreate_index' && !tighten) continue;
+      // …and a PLAIN unique has no tightening shape at all, so only its CREATE
+      // reaches the probe (#14902).
+      if (!nullSafeKey && op.type !== 'create_index') continue;
 
       let duplicates: Array<{ key: string; rows: number }>;
       try {
-        duplicates = await this.probeNullSafeUniqueDuplicates(op.table, op.columns, op.nullSafeColumns);
+        duplicates = await this.probeNullSafeUniqueDuplicates(op.table, op.columns, nullSafeColumns);
       } catch (e: any) {
         // Probe failure must fail SAFE: without evidence the data is clean the
         // op may not claim eligibility for auto-apply.
@@ -10743,18 +10786,23 @@ export class SqlDriver implements IDataDriver {
         continue;
       }
 
-      const report = duplicates
-        .slice(0, 5)
-        .map((g) => `(${g.key}) × ${g.rows} rows`)
-        .join('; ');
-      const more = duplicates.length > 5 ? `; …and ${duplicates.length - 5} more group(s)` : '';
+      const report = formatDuplicateGroups(duplicates);
       d.category = 'destructive';
       d.severity = 'error';
-      d.message =
-        `${op.table}: cannot ${tighten ? 'tighten' : 'create'} '${op.indexName}' as ${signature} — existing rows ` +
-        `already violate the NULL-safe unique constraint (duplicates the old index wrongly admitted, #5030): ` +
-        `${report}${more}. The op is BLOCKED: apply re-probes and refuses, and the existing index stays in place ` +
-        `(ADR-0120 D4). Deduplicate the listed rows, then re-run "os migrate plan".`;
+      d.message = nullSafeKey
+        ? `${op.table}: cannot ${tighten ? 'tighten' : 'create'} '${op.indexName}' as ${signature} — existing rows ` +
+          `already violate the NULL-safe unique constraint (duplicates the old index wrongly admitted, #5030): ` +
+          `${report}. The op is BLOCKED: apply re-probes and refuses, and the existing index stays in place ` +
+          `(ADR-0120 D4). Deduplicate the listed rows, then re-run "os migrate plan".`
+        : // #14902: the plain unique has no #5030 history behind it — nothing
+          // ever admitted these rows, the constraint is simply newly declared
+          // over data that does not satisfy it. So the message says what IS
+          // true, and above all withdraws the `safe` claim: this op is not
+          // applied by `os migrate apply` and not auto-applied at boot.
+          `${op.table}: cannot create '${op.indexName}' as ${signature} — existing rows already violate it: ` +
+          `${report}. The op is BLOCKED: neither "os migrate apply" nor dev autoMigrate: 'safe' will create it, ` +
+          `so the constraint is NOT enforced. Deduplicate the listed rows, then re-run "os migrate plan" ` +
+          `(ADR-0120 D4).`;
     }
   }
 
@@ -11708,6 +11756,11 @@ export class SqlDriver implements IDataDriver {
    *   at `error` (a declared constraint is not enforced — the
    *   durability-degradation rule) and surfaces as drift with a row report via
    *   the ADR-0120 D4 pre-flight, instead of failing the whole boot.
+   * - #14902: a PLAIN unique — no organization key part, i.e.
+   *   `tenancy: { enabled: false }` or an explicit `unique: 'global'` — over
+   *   data that already violates it gets the SAME disposition, where it used to
+   *   throw the database's raw error and take the boot down naming no rows and
+   *   no remedy.
    */
   protected async syncDeclaredIndexes(
     tableName: string,
@@ -11873,6 +11926,40 @@ export class SqlDriver implements IDataDriver {
               `violate it (duplicates the previous NULL-distinct index admitted, #5030). The constraint ` +
               `'${columns.join(', ')}' is NOT enforced until the data is deduplicated: run "os migrate plan" ` +
               `for the conflicting rows (ADR-0120 D4).`,
+            msg,
+          );
+          continue;
+        }
+        if (unique && isUniqueViolationError(e)) {
+          // #14902 — the PLAIN unique: no organization key part at all, reached
+          // by `tenancy: { enabled: false }` or by an explicit
+          // `unique: 'global'`. It used to fall through to `throw e`, so the
+          // boot DIED carrying the database's own error, which names the index
+          // and the column and NO rows and NO remedy — while the arm above,
+          // one branch away, kept the boot up and told the operator exactly
+          // what to do. Same defect, same disposition: the declared constraint
+          // is not enforced, say so on the durability channel, name the
+          // conflicting groups, and let the boot continue. The D4 pre-flight
+          // reports the same rows in `os migrate plan`.
+          //
+          // ⚠️ The `unique` limb is load-bearing, not decoration. A NON-unique
+          // index cannot raise a uniqueness violation, so a failure that reads
+          // as one while creating a non-unique index is something else
+          // entirely and must keep failing loudly rather than being absorbed
+          // into a log line here.
+          let report = '';
+          try {
+            const duplicates = await this.probeNullSafeUniqueDuplicates(tableName, columns, []);
+            if (duplicates.length > 0) {
+              report = ` Conflicting group(s): ${formatDuplicateGroups(duplicates)}.`;
+            }
+          } catch {
+            // The probe is a diagnostic; the report below stands without it.
+          }
+          this.logDurabilityFailure(
+            `[sql-driver] cannot create unique index '${name}' on "${tableName}" — existing rows violate ` +
+              `it.${report} The constraint '${columns.join(', ')}' is NOT enforced until the data is ` +
+              `deduplicated: run "os migrate plan" for the conflicting rows.`,
             msg,
           );
           continue;
