@@ -932,7 +932,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       gap: {
         label: "Gap",
-        helpText: "Grid gap (Tailwind units)"
+        helpText: "Space between widgets, in steps of 0.25rem (4 = 1rem)"
       },
       refreshInterval: {
         label: "Refresh Interval",
