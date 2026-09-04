@@ -1163,6 +1163,23 @@ export class RestServer {
     private defaultEnvironmentIdProvider?: () => string | undefined;
     private authServiceProvider?: (environmentId?: string) => Promise<any | undefined>;
     private objectQLProvider?: (environmentId?: string) => Promise<any | undefined>;
+    /**
+     * [#15256 — maintainer ruling 2026-09-04, decision 1A] The lone local
+     * kernel's `tenancy` service, on the SINGLE-KERNEL wiring — the seam that
+     * made {@link computeExecCtx}'s posture `undefined` on every deployment the
+     * open core builds, so both posture-conditional API-key refusals were
+     * gated off and an ex-member's org-stamped key read AND wrote another
+     * organization's rows (measured twice: objectstack#15163 on the framework,
+     * cloud#1982 with the real `@objectstack/organizations`).
+     *
+     * Wired by `rest-api-plugin` in the same SHAPE as
+     * {@link authServiceProvider} — a provider closure over the lone kernel —
+     * but with `objectQLProvider`'s CLASSIFICATION, because decision 1 option A
+     * governs what its faults mean: only the branded not-registered rejection
+     * may resolve quietly, and every other rejection must stay loud. See the
+     * posture block in `computeExecCtx`.
+     */
+    private tenancyServiceProvider?: (environmentId?: string) => Promise<any | undefined>;
     private emailServiceProvider?: (environmentId?: string) => Promise<any | undefined>;
     private sharingServiceProvider?: (environmentId?: string) => Promise<any | undefined>;
     private reportsServiceProvider?: (environmentId?: string) => Promise<any | undefined>;
@@ -1222,6 +1239,12 @@ export class RestServer {
         securityServiceProvider?: (environmentId?: string) => Promise<any | undefined>,
         requestEnvResolver?: RestRequestEnvResolver,
         metadataServiceProvider?: (environmentId?: string) => Promise<unknown>,
+        /**
+         * [#15256] Appended LAST on purpose: 135 files construct a
+         * `RestServer`, and inserting the parameter beside its sibling
+         * providers would silently re-bind every positional argument after it.
+         */
+        tenancyServiceProvider?: (environmentId?: string) => Promise<any | undefined>,
     ) {
         this.protocol = protocol;
         this.config = this.normalizeConfig(config);
@@ -1243,6 +1266,7 @@ export class RestServer {
         this.securityServiceProvider = securityServiceProvider;
         this.requestEnvResolver = requestEnvResolver;
         this.metadataServiceProvider = metadataServiceProvider;
+        this.tenancyServiceProvider = tenancyServiceProvider;
     }
 
     /**
@@ -2385,9 +2409,33 @@ export class RestServer {
             // discipline. Without that guard the single-kernel provider path
             // (where `kernel` is `undefined`) would raise a `TypeError` from the
             // dereference and every embedder on that wiring would take the loud
-            // answer. That path carries no posture at all; its half of this
-            // ruling (decision 1 option B′) is refused at BOOT instead — see
-            // `rest-api-plugin.ts`.
+            // answer.
+            //
+            // [#15256 — maintainer ruling 2026-09-04, decision 1A] ⭐ SUPERSEDED
+            // TEXT, quoted so the correction is legible from this file alone.
+            // The paragraph above used to end:
+            //
+            //     "That path carries no posture at all; its half of this
+            //      ruling (decision 1 option B′) is refused at BOOT instead —
+            //      see `rest-api-plugin.ts`."
+            //
+            // Both halves of that sentence were wrong on this tree. B′ (the
+            // boot refusal) was WITHDRAWN on 2026-09-04 and `rest-api-plugin.ts`
+            // never carried it — a p0 seam documented as covered when it was
+            // not. And "that path carries no posture at all" is no longer true:
+            // the single-kernel branch below DERIVES the posture, from a
+            // provider `rest-api-plugin` wires to the lone local kernel's
+            // `tenancy` service — the same way this method already obtains
+            // `authService`. Measured consequence of the absence, on this exact
+            // wiring under a healthy `isolated` posture, with an API key stamped
+            // with an organization its owner had left:
+            //
+            // | wiring                          | before | after |
+            // |:--|:--|:--|
+            // | ex-member's org-stamped key     | **GET 200 / POST 201, row lands in the other org** | **401 / 401** |
+            // | organization-less key           | **GET 200 total 0 (silent) / POST 403** | **401** |
+            // | CURRENT member's key (control)  | 200 / 201 | 200 / 201 — unchanged |
+            // | no credential (control)         | 401 | 401 — unchanged |
             //
             // ⚠️ The ASYNC ACCESSOR's presence is part of the wiring fact, for
             // the same reason the shipped `objectQLProvider` splits on it: a
@@ -2412,6 +2460,33 @@ export class RestServer {
                     }
                     // Never registered ⇒ the supported no-tenancy composition:
                     // quiet `undefined`, no posture-conditional refusal.
+                    tenancyPosture = undefined;
+                }
+            } else if (this.tenancyServiceProvider) {
+                // [#15256 / 1A] The SINGLE-KERNEL branch — the wiring every
+                // deployment the open core builds actually runs, and the one
+                // that carried no posture at all. Reached only when no `kernel`
+                // was bound above, exactly as `authServiceProvider` is: the
+                // kernelManager branches already read the per-environment
+                // kernel's own `tenancy` service, and asking twice would let a
+                // provider bound to the LOCAL kernel answer for a request that
+                // resolved to another environment.
+                //
+                // Same classification as the branch above, and it is the whole
+                // reason this is not `seamOrUndefined`: decision 1 option A
+                // governs BOTH halves of this seam, so "never registered" stays
+                // quiet (the supported no-tenancy composition) and every other
+                // rejection is the outage it is. The provider re-raises
+                // unbranded rejections for precisely that reason — see
+                // `rest-api-plugin.ts`.
+                try {
+                    tenancyPosture = effectiveTenancyPosture(
+                        await this.tenancyServiceProvider(environmentId) as any,
+                    );
+                } catch (err) {
+                    if (!isServiceNotRegisteredError(err)) {
+                        throw new AuthzStoreUnavailableError('tenancy', err);
+                    }
                     tenancyPosture = undefined;
                 }
             }
