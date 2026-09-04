@@ -178,7 +178,6 @@
     "api/ScheduledExport:enabled = true",
     "api/ScheduledExport:format = \"csv\"",
     "api/SessionUser:emailVerified = false",
-    "api/SessionUser:language = \"en\"",
     "api/SessionUser:roles = []",
     "api/VersioningConfig:headerName = \"ObjectStack-Version\"",
     "api/VersioningConfig:includeInDiscovery = true",
