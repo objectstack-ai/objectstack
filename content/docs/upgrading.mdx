@@ -25,6 +25,19 @@ window is one major wide. See [when a platform move forces an app
 move](#when-a-platform-move-forces-an-app-move).
 </Callout>
 
+<Callout type="warn">
+**A minor is not automatically a no-op.** The paragraph above is about *metadata
+compatibility* across a major boundary, and that is the only thing the major
+number promises. It does not promise that moving between two releases **inside**
+one major changes nothing. v17's own minors have narrowed what the write path
+accepts, flipped a self-registration default to the safe end, renamed a published
+SDK namespace with no aliases, and started enforcing constraints that were
+declared but inert — none of which the protocol handshake or the metadata
+conversion window has anything to say about. Read the checklist for **every
+release you cross**, not only for every major: [the table
+below](#per-release-specifics) lists them.
+</Callout>
+
 ## The platform runtime
 
 The platform ships as a single version-locked train: every `@objectstack/*`
@@ -38,7 +51,7 @@ The official image is `ghcr.io/objectstack-ai/objectstack`, and its tags mirror
 
 ```bash
 # docker-compose.yml, or your orchestrator's manifest
-image: ghcr.io/objectstack-ai/objectstack:17.2.0
+image: ghcr.io/objectstack-ai/objectstack:17.3.0
 ```
 
 On a host running the artifact directly under systemd, the same move is a file
@@ -182,25 +195,38 @@ writes no artifact, which makes it the fast inner loop while you work through
 the to-dos. Full command reference in the [CLI
 documentation](/docs/deployment/cli).
 
-## Per-major specifics
+## Per-release specifics
 
-Everything above is the mechanism. The *contents* of a given major — which keys
+Everything above is the mechanism. The *contents* of a given release — which keys
 were renamed, which defaults changed, which grant you now have to declare
 explicitly — live on that major's release page, written for app authors and
 compiled at release time.
 
-Read the checklist for **every major you are crossing**, not only the one you
-are landing on:
+Read the checklist for **every release you are crossing**, not only the one you
+are landing on — and that means every **minor** inside a major as well as every
+major boundary. A minor moves the runtime without moving your metadata's protocol
+major, so `os migrate meta` has nothing to replay for it; that is exactly why the
+minor's own accept-set tightenings, default flips and authorization narrowings
+have no other channel to reach you than the page below.
 
-| Release | Upgrade checklist |
+| Release | Where its upgrade notes live |
 | :--- | :--- |
-| v17.0.0 | [Upgrade checklist](/docs/releases/v17#upgrade-checklist) |
+| v17.3.0 | [Breaking changes & migration in 17.3.0](/docs/releases/v17#breaking-changes--migration-in-1730) |
+| v17.2.0 | [Breaking changes & migration in 17.2.0](/docs/releases/v17#breaking-changes--migration-in-1720) |
+| v17.1.0 | [Upgrade checklist — 17.1.0](/docs/releases/v17#1710) |
+| v17.0.0 | [Upgrade checklist — 17.0.0](/docs/releases/v17#1700) |
 | v16.0.0 | [Upgrade checklist](/docs/releases/v16#upgrade-checklist) |
 | v15.0.0 | [Upgrade checklist](/docs/releases/v15#upgrade-checklist) |
 | v14.0.0 | [Upgrade checklist](/docs/releases/v14#upgrade-checklist) |
 | v13.0.0 | [Upgrade checklist](/docs/releases/v13#upgrade-checklist) |
 | v12.0.0 | [Upgrade checklist](/docs/releases/v12#upgrade-checklist) |
 | v9.0.0 | [Upgrade checklist](/docs/releases/v9#upgrade-checklist) |
+
+Only the v17 line is broken out per release. Each of its three minors shipped
+breaking changes under the repo's launch-window convention — which ships a
+breaking change as `minor` rather than `major`, so the version number is not the
+migration signal and the changelog entry is. Earlier majors' release pages carry
+one checklist per major, which is what those rows link to.
 
 Curated notes for v10 and v11 were never backfilled; consult the per-package
 `CHANGELOG.md` files for those two. The [release notes

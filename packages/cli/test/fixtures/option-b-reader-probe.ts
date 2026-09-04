@@ -14,7 +14,8 @@
  *
  *   - invokes a reader this repo SHIPS (`collectBundleActions`,
  *     `resolveStandaloneDatabase`, `createStandaloneStack`,
- *     `appSecurityPluginOptions`, …) and reports its return value, or
+ *     `appSecurityPluginOptions`, `devI18nPluginOptions`, …) and reports its
+ *     return value, or
  *   - boots a real kernel carrying the real `AppPlugin` and reports what that
  *     plugin HANDED to a subsystem (a job scheduled, a datasource connected, a
  *     mapping set, an i18n service registered, a seed dataset merged).
@@ -46,7 +47,7 @@
  * that shipped an empty package.
  */
 
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { LiteKernel } from '@objectstack/core';
@@ -62,6 +63,7 @@ import {
   resolveStandaloneDatabase,
 } from '@objectstack/runtime';
 import { appSecurityPluginOptions } from '@objectstack/plugin-security';
+import { devI18nPluginOptions } from '@objectstack/plugin-dev';
 import {
   declaredPositionNames,
   deriveCrudCases,
@@ -74,8 +76,22 @@ import { ObjectStackDefinitionSchema, normalizeStackInput } from '@objectstack/s
 // `compile.ts` runs, so the artifact written below is the artifact `os build`
 // would write (minus `docs`, which is filesystem input rather than stack input).
 import { lowerCallables } from '../../src/utils/lower-callables.js';
+// [#15006] The CLI's OWN reads of a package-owned collection. Until that card
+// these were inline expressions inside oclif command bodies — no exported
+// reader, nothing a probe could call — which is why the four rows they carry
+// below did not exist when this file was written. They are the seam now, so the
+// rows CALL the decision each command makes rather than re-deriving it.
+import {
+  artifactObjectNames,
+  authoringRuleUnionStack,
+  bundleDeclaresTranslations,
+  shouldAutoRegisterObjectQL,
+  shouldAutoRegisterStorageDriver,
+  stackDeclaresMetadata,
+} from '../../src/utils/stack-collections.js';
 
 import {
+  PACKAGE_OWNED_COLLECTION_KEYS,
   PROBE_DEFAULT_PERMISSION_SET,
   PROBE_FEDERATED_OBJECT,
   PROBE_FUNCTION,
@@ -356,6 +372,21 @@ export async function measureShape(project: unknown, projectRoot: string): Promi
   //    loader — it is in the readers each of them then drives, which is what
   //    these rows are.
 
+  // `DevPlugin` takes its stack from a CALLER-SUPPLIED object
+  // (`new DevPlugin({ stack: config })`, the documented construction), so there
+  // is no load boundary between the composed config and this reader — the same
+  // object `os dev` boots from source is handed straight to the plugin. The row
+  // calls the SHIPPED decision (`devI18nPluginOptions`), which is what the
+  // plugin itself calls to decide whether to register `I18nServicePlugin`; a
+  // row that re-read `stack.translations` here would be a second copy of the
+  // read the reader program changes and would stay red after it was fixed.
+  const devI18n = devI18nPluginOptions(project);
+  rows.push(row(
+    'B2 · plugin-dev I18nServicePlugin auto-detect over the caller-supplied stack · translations',
+    devI18n ? `I18nServicePlugin(fallbackLocale=${devI18n.fallbackLocale})` : undefined,
+    devI18n === undefined,
+  ));
+
   const fromSourceProfile = appSecurityPluginOptions(project)?.fallbackPermissionSet;
   rows.push(row(
     'B2 · plugin-security appSecurityPluginOptions over the from-source config (default permission set) · permissions',
@@ -373,6 +404,82 @@ export async function measureShape(project: unknown, projectRoot: string): Promi
   rows.push(countRow(
     'B2 · runtime collectBundleFunctionEntries over the from-source config · functions',
     Object.keys(collectBundleFunctionEntries(project as never)).length,
+  ));
+
+  // ── B2/B3/B4 · the CLI's OWN reads, through the #15006 seam ──────────────
+  //
+  // Four of the six rows below are the ones this file's "Boundaries" note used
+  // to say a probe could not reach. They were not unreachable because of the
+  // artifact — they were unreachable because the reads were EXPRESSIONS inside
+  // oclif command bodies. #15006 made each of them a callable, and a callable is
+  // what a row can attach to. The other two are the reads that sit beside them
+  // on the same boundaries: the `AppPlugin` wrap gate (which, MEASURED, does not
+  // lose — `manifest` is an envelope key) and the i18n auto-registration gate
+  // (which does).
+  //
+  // ⛔ Note what these rows deliberately are NOT: an assertion that
+  // `config.objects` is non-empty on an option-B config. That row would be a
+  // second copy of the very read it watches — it would stay red after the read
+  // beside it was fixed, and a gate that cannot go green gets deleted. Each row
+  // below calls the DECISION the command now makes, with the real (empty)
+  // plugin list, so a green row means the boot really would register the thing.
+
+  const objectQLDecision = shouldAutoRegisterObjectQL(project, []);
+  rows.push(row(
+    'B2 · cli serve ObjectQL engine auto-registration gate (from source) · objects',
+    objectQLDecision ? 'engine auto-registered' : 'NO QUERY ENGINE registered',
+    !objectQLDecision,
+  ));
+
+  const driverDecision = shouldAutoRegisterStorageDriver(project, []);
+  rows.push(row(
+    'B2 · cli serve storage-driver auto-registration gate (from source) · objects',
+    driverDecision ? 'storage driver auto-registered' : 'NO STORAGE DRIVER registered',
+    !driverDecision,
+  ));
+
+  // The master gate for the whole B2 `AppPlugin` family — if it went false,
+  // every collection those rows measure would go silent at once. Shared with
+  // `os migrate`'s own second `loadConfig` (B4), which is the only reader that
+  // boundary has of its own.
+  const wrapDecision = stackDeclaresMetadata(project);
+  rows.push(row(
+    'B2/B4 · cli AppPlugin wrap gate (configHasMetadata — serve and migrate) · manifest + objects + apps + flows + apis',
+    wrapDecision ? 'AppPlugin wrap composed' : 'app metadata NOT served',
+    !wrapDecision,
+  ));
+
+  const i18nDecision = bundleDeclaresTranslations(project);
+  rows.push(row(
+    'B2 · cli serve i18n service auto-registration gate (from source) · translations',
+    i18nDecision ? 'i18n plugin auto-registered' : 'NO i18n plugin — REST i18n routes absent',
+    !i18nDecision,
+  ));
+
+  // `os dev`'s own `readFileSync` + `JSON.parse` of the artifact, kept as its
+  // own boundary because it never passes through `loadArtifactBundle`.
+  const devInventory = artifactObjectNames(JSON.parse(readFileSync(artifactPath, 'utf8')));
+  rows.push(countRow(
+    'B1 · cli dev artifact object inventory (readArtifactObjects recompile diff) · objects',
+    devInventory.length,
+  ));
+
+  // `os build`'s UNION author-time rule run. What the rules can SEE is the
+  // measurement — an empty input reports no findings and publishes green, which
+  // is the failure this row exists for. Counted over the seam's OUTPUT, so the
+  // row reports a reader's return value rather than re-deriving the read.
+  const unionStack = authoringRuleUnionStack(
+    JSON.parse(readFileSync(artifactPath, 'utf8')) as Record<string, unknown>,
+  );
+  const unionItems = PACKAGE_OWNED_COLLECTION_KEYS.reduce((n, key) => {
+    const value = (unionStack as Bag)[key];
+    if (Array.isArray(value)) return n + value.length;
+    if (value && typeof value === 'object') return n + Object.keys(value as Bag).length;
+    return n;
+  }, 0);
+  rows.push(countRow(
+    'B3 · cli build union author-time rule input (os build) · every package-owned collection',
+    unionItems,
   ));
 
   // ── B2 · `os verify`'s readers (#15229) ──────────────────────────────────

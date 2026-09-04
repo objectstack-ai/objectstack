@@ -811,6 +811,40 @@ function setOriginMain(dir, sha) {
   git(['update-ref', 'refs/remotes/origin/main', sha], { cwd: dir });
 }
 
+// ── The self-test's own battery roster and floor (#13489) ─────────────────
+//
+// `failed === 0` used to be this self-test's ONLY success condition, so "every
+// case held" and "the cases never ran" printed the same line. Closed the way
+// PR #13487 validated on check-doc-authoring: what is pinned is the registered
+// NAMES, not a number. The floor requires the OPENED set to equal the DECLARED
+// set with each battery at or above its own count.
+//
+// This file declares ONE battery, opened at the top of the self-test body. It
+// carries no named section banner (its `--- n/m: ... ---` comments label
+// fixtures, not sections), and ⛔ a comment is NOT promoted to a section head —
+// that is a judgement per comment this transplant does not make. The hoisted
+// single battery is the shape PR #14896, PR #15003 and PR #15217 landed for
+// exactly this case.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The count is a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'check-skill-frame-freshness self-test': 12,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 1;
+
+// The key a case is filed under when no battery is open. It is not a declared
+// battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 // Set by `selfTest()` only after its verdict is printed, and read at the
 // dispatch: a `return` that leaves the function above that line prints nothing
 // and still exits 0 — a self-test that never finished, reported as one that
@@ -819,6 +853,20 @@ function setOriginMain(dir, sha) {
 let selfTestReachedVerdict = false;
 
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every case below is attributed to the one most
+  // recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const batterySeen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+  };
+  battery('check-skill-frame-freshness self-test');
   const real = realFrameFiles();
   const twoAxis = twoAxisFrameFiles();
   const temps = [];
@@ -835,6 +883,15 @@ function selfTest() {
   };
 
   const cases = [];
+  // ONE block-bodied helper for the sink the 12 inline `cases.push({...})`
+  // sites below used to write to directly. It registers the case and then
+  // performs the identical push: the case object is passed through untouched,
+  // so no case is rewritten, reordered or re-judged, and the loop that runs
+  // them is not touched at all.
+  const addCase = (c) => {
+    registerCase();
+    cases.push(c);
+  };
 
   // --- 1/2: the SAME stale tree, judged online vs offline -------------------
   // The pair is the whole point of the degradation contract: identical fixture,
@@ -843,13 +900,13 @@ function selfTest() {
     const { dir, a: stale, b: current } = linear('stale', twoAxis, real);
     git(['checkout', '-q', stale], { cwd: dir });
     setOriginMain(dir, current);
-    cases.push({
+    addCase({
       label: 'stale tree + authoritative ref → ERROR naming the stale files (the #5866 shape)',
       run: () => evaluate({ root: dir, ref: current }),
       expect: 'error',
       wants: [/STRUCTURALLY BEHIND/, SAMPLE_FRAME_FILE_RX, /3 axes: long-term-soundness/, /4 axes: business-need/, new RegExp(REMEDY.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))],
     });
-    cases.push({
+    addCase({
       label: 'the SAME stale tree, fetch impossible → degrades to WARN, exit 0, same diagnosis',
       run: () => evaluate({ root: dir }),
       expect: 'warn',
@@ -857,7 +914,7 @@ function selfTest() {
       alsoAssert: (v) => (v.clamped ? null : 'expected the verdict to be marked as clamped'),
     });
     // The independence proof: the sync gate is GREEN on this very fixture.
-    cases.push({
+    addCase({
       label: 'the sync gate is GREEN on that same stale tree — the two invariants are independent',
       run: () => {
         const copies = COPIES.map((c) => ({ ...c, text: twoAxis.get(c.file) }));
@@ -873,7 +930,7 @@ function selfTest() {
   {
     const { dir, b: current } = linear('fresh', twoAxis, real);
     setOriginMain(dir, current);
-    cases.push({
+    addCase({
       label: 'tree equals origin/main → OK',
       run: () => evaluate({ root: dir, ref: current }),
       expect: 'ok',
@@ -888,7 +945,7 @@ function selfTest() {
     const { dir, a: older, b: newer } = linear('wording', real, wording);
     git(['checkout', '-q', older], { cwd: dir });
     setOriginMain(dir, newer);
-    cases.push({
+    addCase({
       label: 'tree is BEHIND in commits but the frame is unchanged → OK (bytes are not the criterion)',
       run: () => evaluate({ root: dir, ref: newer }),
       expect: 'ok',
@@ -902,7 +959,7 @@ function selfTest() {
     const base = git(['rev-parse', 'HEAD~1'], { cwd: dir }).stdout.trim();
     git(['checkout', '-q', local], { cwd: dir });
     setOriginMain(dir, base);
-    cases.push({
+    addCase({
       label: 'HEAD already contains the ref → the difference is a LOCAL edit, WARN not ERROR',
       run: () => evaluate({ root: dir, ref: base }),
       expect: 'warn',
@@ -917,7 +974,7 @@ function selfTest() {
     git(['rm', '-q', SAMPLE_FRAME_FILE], { cwd: dir });
     const without = commitAll(dir, 'drop a framework file');
     setOriginMain(dir, current);
-    cases.push({
+    addCase({
       label: 'a framework file exists on the ref but not in the tree → ERROR',
       run: () => evaluate({ root: dir, ref: current }),
       expect: 'error',
@@ -936,7 +993,7 @@ function selfTest() {
     writeFiles(dir, real);
     commitAll(dir, 'tree adds it');
     setOriginMain(dir, refSha);
-    cases.push({
+    addCase({
       label: 'a framework file exists here but not on the ref → WARN, both readings stated',
       run: () => evaluate({ root: dir, ref: refSha }),
       expect: 'warn',
@@ -950,7 +1007,7 @@ function selfTest() {
     const { dir, b: current } = linear('anchors', real, moved);
     git(['checkout', '-q', git(['rev-parse', 'HEAD~1'], { cwd: dir }).stdout.trim()], { cwd: dir });
     setOriginMain(dir, current);
-    cases.push({
+    addCase({
       label: 'the ref\'s copy no longer parses with our anchors → ERROR, read as staleness',
       run: () => evaluate({ root: dir, ref: current }),
       expect: 'error',
@@ -964,7 +1021,7 @@ function selfTest() {
     const { dir, b: current } = linear('broken-here', broken, real);
     git(['checkout', '-q', git(['rev-parse', 'HEAD~1'], { cwd: dir }).stdout.trim()], { cwd: dir });
     setOriginMain(dir, current);
-    cases.push({
+    addCase({
       label: 'our own copy does not parse → ERROR pointing at check:skill-frame-sync',
       run: () => evaluate({ root: dir, ref: current }),
       expect: 'error',
@@ -978,7 +1035,7 @@ function selfTest() {
     temps.push(dir);
     writeFiles(dir, twoAxis);
     commitAll(dir, 'stale tree, no remote-tracking ref anywhere');
-    cases.push({
+    addCase({
       label: 'no origin/main reference at all → WARN and pass, stating that nothing was proven',
       run: () => evaluate({ root: dir }),
       expect: 'warn',
@@ -992,7 +1049,7 @@ function selfTest() {
     temps.push(dir);
     writeFiles(dir, real);
     commitAll(dir, 'only commit');
-    cases.push({
+    addCase({
       label: '--ref names a rev that does not exist → ERROR (never silently judged against something else)',
       run: () => evaluate({ root: dir, ref: 'v99.99.99-nope' }),
       expect: 'error',
@@ -1039,6 +1096,56 @@ function selfTest() {
     }
   } finally {
     for (const dir of temps) rmSync(dir, { recursive: true, force: true });
+  }
+
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered cases EQUALS the set declared. A set difference
+  // names WHICH battery stopped; a count says only that something did.
+  //
+  // A breach is filed into this self-test's OWN `failed` counter, so the
+  // existing verdict reds on it with no verdict line rewritten.
+  const floorFailure = (message) => {
+    failed += 1;
+    console.error(`  ✗ ${message}`);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned `
+        + `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in `
+        + 'SELF_TEST_BATTERIES — a case attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. `
+          + 'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of `
+          + `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the '
+        + 'number. Find what stopped registering (an early return, a deleted block, a guard that now '
+        + 'skips) and restore it.',
+    );
   }
 
   if (failed > 0) {

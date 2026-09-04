@@ -1,5 +1,813 @@
 # @objectstack/verify
 
+## 17.3.0
+
+### Minor Changes
+
+- 50cf294: fix(security,verify): the last two tolerant `reference_to` readers — one made loud, one narrowed with a named reason (#13250)
+  
+  `@objectstack/spec` declares `reference` as the only relationship spelling and
+  `FieldSchema` rejects `reference_to` / `referenceTo` (#11567, "one key, one
+  answer"). Three live consumers still read the rejected alias as an accepted
+  fallback. The lint reader was narrowed in #13322; the two remaining ones get
+  **different** dispositions, because their failure modes are different in kind
+  (maintainer ruling, 2026-08-30).
+  
+  **`@objectstack/plugin-security` — the tolerance STAYS, and is now LOUD.**
+  `resolveCbpRelation` reads `ql.getSchema()`, i.e. the `SchemaRegistry`, and a
+  raw `registerObject` skips Zod by design, so the alias genuinely reaches it
+  (re-measured: a raw round-trip serves the field back as
+  `["name","type","required","reference_to"]`, canonical absent). A miss there is
+  not a quiet wrong answer, it is a **denial** — `resolveCbpRelation` returning
+  null is fail-closed, giving `RLS_DENY_FILTER` (zero rows for every non-admin
+  caller) on read and throwing `MasterDetailRelationMissingError` on write. So
+  narrowing it would take a raw-registered, alias-spelled `controlled_by_parent`
+  object from "access derived from its master" to "everything denied, and writes
+  throw": an availability outage on a population that provably exists. The alias
+  therefore still resolves, unchanged, and the plugin now reports it **once per
+  object** through its own report sink — the same `warn` channel and console
+  backed default as every other report site there. The message names the object,
+  the field, the alias key and the rename, and states that access is unaffected
+  so nobody goes hunting for an outage that did not happen. Nothing is reported
+  for the canonical spelling, or when a canonical `reference` won over a stale
+  alias on the same field.
+  
+  The report's granularity is the cache's: it sits inside `resolveCbpRelation`'s
+  resolution body, which runs only on a `cbpRelCache` miss, so 25 reads of one
+  object produce one report — and it re-arms when `metadata.watch('*')` clears
+  that cache, which is exactly when a Studio / AI-authoring author is listening.
+  
+  **`@objectstack/verify` — narrowed, and the finding says WHY.** `deriveCrudCases`
+  reads its config from `loadConfig()`, which does not validate ("the gate lives
+  in the loaded module"), so the alias reaches it through two unparsed doors —
+  a plain-object config, and the documented `defineStack(cfg, { strict: false })`
+  (re-measured: the same fixture is refused by the default strict parse with
+  *"Unrecognized key(s) on this field: `reference_to`"*, and survives both doors
+  verbatim). Unlike the security reader, verify's failure mode is a **report
+  line** rather than a refusal, so narrowing costs coverage, not availability —
+  and it is safe. But a verifier that silently under-verifies is the defect
+  #5262 was about, so the narrowing ships **with** its reason: an alias-spelled
+  required relation now reports
+  
+  > required lookup field "company_id" spells the rejected alias `reference_to`
+  > instead of `reference` — `reference` is the only relationship spelling
+  > @objectstack/spec declares, so this app's target "company" was not derived;
+  > rename the key
+  
+  rather than degrading to the generic "has no `reference` target", and an
+  optional one is skipped under `relation-rejected-reference-alias:<key>` rather
+  than the generic `relation-missing-reference`. Both land in the existing
+  free-form `CrudCase.blocked` / `skippedFields[].reason` strings — no new
+  exported type, no new status, no widened published surface.
+  
+  No shipped metadata spells either alias: the repo-wide sweep finds the spelling
+  only in tests, the spec's own alias tables and other readers' documentation —
+  no example app or platform object uses it.
+  
+  ⛔ Narrowing the security reader for real remains out of scope here, and is
+  only honest behind a migration that sweeps stored / raw-registered metadata
+  first.
+
+### Patch Changes
+
+- 4f24e9d: feat(spec,plugin-auth)!: one declared audience posture — `invite_only | email_domain | open`, default `invite_only`
+  
+  **BREAKING CHANGE (ships as `minor` under the launch-window rule; every publishable package rides the fixed group).** "Who may become a user of an environment's apps" is now ONE declaration instead of an emergent property of five switches — and its default flips to the safe end.
+  
+  - New authorable surface `auth.audience` on `AuthConfig` (`@objectstack/spec/system`): `posture` (`invite_only` | `email_domain` | `open`), `allowedEmailDomains` (required non-empty for `email_domain`), `selfRegistrationPermissionSet` (required whenever the posture permits self-registration; `admin_full_access` refused). Off-vocabulary postures and inert declarations (domains outside `email_domain`, a permission set under `invite_only`) are refused at parse AND at plugin-auth's config entry — never coerced.
+  - **FROM:** an undeclared audience meant open email/password self-registration with no email verification, and self-registrants implicitly fell back to the `member_default` permission set. **TO:** an undeclared audience IS `invite_only` — self-serve sign-up (email/password, social-provider OAuth JIT, magic-link/OTP/phone/anonymous, and any unclassified creation method) is refused `403 SELF_REGISTRATION_CLOSED` unless the address holds a pending `sys_invitation` (the first account on a fresh install is exempt — the bootstrap bypass). One-line fix for deployments that mean to stay open: declare `auth: { audience: { posture: 'open', selfRegistrationPermissionSet: 'member_default' } }`.
+  - `email_domain` admits only allowlisted domains (`403 EMAIL_DOMAIN_NOT_ALLOWED` otherwise; exact case-insensitive match, subdomains not implied, `+tag` local parts irrelevant). Any self-registration-permitting posture FORCES `requireEmailVerification` on (an explicit `false` beside it is refused at boot) and grants each self-registrant the DECLARED permission set (`sys_user_permission_set`); a declaration that cannot be resolved refuses admission (`403 AUTH_CONFIG_ERROR`) rather than admitting ungranted.
+  - Operator-driven creation is never posture-gated: admin create-user / bulk import, SCIM provisioning, and JIT through operator-registered identity providers (`oidcProviders`, `@better-auth/sso`) keep working under every posture.
+  - `/api/v1/auth/config` now serves `features.audiencePosture` and mirrors the forced verification flag; `SELF_REGISTRATION_CLOSED` and `EMAIL_DOMAIN_NOT_ALLOWED` are registered in the ADR-0112 ledger.
+  - The BOOTSTRAP bypass counts non-system HUMANS, not `sys_user` rows, so a database still carrying the legacy `usr_system` service row is still a fresh install; the same predicate now backs the dev-admin seed's own precondition. The `emailAndPassword.disableSignUp` bootstrap bypass reads it too.
+  - `@objectstack/verify`: `stack.signUp(...)` seeds a pending `sys_invitation` for the address before signing up, so harness fixtures that mint a second/third identity enter through the invitation carve-out under the new default. Fixtures asserting on their environment's pending invitations should filter by their own `organization_id` (the harness rows carry `org_verify_audience_gate`).
+  
+  <!-- adr-0087: registered audience-posture-default-invite-only -->
+- e7191ce: fix(build): give each `exports` condition its own `types` target in the 28 dual-build packages (#13112)
+  
+  **Published-surface change, zero runtime change.** No emitted byte moves; what
+  moves is which declaration file a resolver READS. Maintainer ruling 2026-08-29
+  (decision batch #3, verbatim 「同意」) chose declaring the files over deleting
+  them.
+  
+  ## What was wrong
+  
+  These 28 packages are `"type": "module"` and dual-built, and each spelled one
+  `types` condition as a **sibling** of `import`/`require`:
+  
+  ```json
+  "exports": { ".": {
+    "types": "./dist/index.d.ts", "import": "./dist/index.js", "require": "./dist/index.cjs"
+  } }
+  ```
+  
+  A sibling `types` answers for **both** conditions, so a CommonJS consumer was
+  handed `dist/index.d.ts` — an ES-module declaration, because the package is
+  `"type": "module"` — for an entry point it reaches with `require`. Measured with
+  `tsc --traceResolution` on a `"type": "commonjs"` fixture at `moduleResolution:
+  node16`:
+  
+  ```
+  error TS1479: The current file is a CommonJS module whose imports will produce
+  'require' calls; however, the referenced file is an ECMAScript module and cannot
+  be imported with 'require'.
+  ```
+  
+  The JavaScript at `dist/index.cjs` loads perfectly (`check:dual-build-cjs-loads`
+  has asserted that for months). It is the **types** that told the consumer the
+  supported `require` entry point could not be required. The `dist/index.d.cts`
+  twin tsup emits beside it — 36 files, 5,517,701 B on this build — was named by
+  no condition at all and shipped in every tarball unreachable.
+  
+  ## What changed
+  
+  Each condition now names its own declaration, the shape TypeScript documents:
+  
+  ```json
+  "exports": { ".": {
+    "import":  { "types": "./dist/index.d.ts",  "default": "./dist/index.js" },
+    "require": { "types": "./dist/index.d.cts", "default": "./dist/index.cjs" }
+  } }
+  ```
+  
+  33 entry points across 27 packages, subpaths included. The root `types` field is
+  untouched, so `node10` resolvers are unaffected; the `import` condition resolves
+  exactly what it resolved before, measured as an unchanged control in the same
+  run.
+  
+  ## `@objectstack/core` is deliberately NOT changed
+  
+  Splitting a declaration in two makes TypeScript compare it nominally, and
+  `ObjectKernel` carries a `private plugins` member that reaches every plugin
+  through `PluginContext.getKernel()`. With core split, whole-repo `pnpm build`
+  fails in `@objectstack/verify` with 5 × TS2345 ("Types have separate
+  declarations of a private property 'plugins'"); with core held back and the
+  other 27 split, 71/71 tasks pass. So core keeps the sibling-`types` shape and
+  its two `.d.cts` files (220,854 B) stay unreachable, declared as such in
+  `check:dual-build-cjs-loads`. Splitting it needs a decision about core's public
+  types, not about an exports map.
+  
+  ## For consumers
+  
+  - **ESM consumers: nothing changes.** Same declaration file, byte for byte.
+  - **CJS consumers under `node16`/`nodenext`: TS1479 goes away** and the
+    declarations they get are the ones built for CommonJS.
+  - **`node10` / `moduleResolution: node` consumers: nothing changes** — they never
+    read `exports`.
+  - Nothing is removed: every path that resolved before still resolves.
+  
+  Packages that are CJS-first (`require` → `./dist/index.js`, no `"type": "module"`)
+  were already correct and are untouched — their `dist/index.d.ts` really is the
+  CommonJS declaration. Their ESM mirror (an unreachable `.d.mts` under the
+  `import` condition) is a separate, larger population and is filed separately per
+  the ruling, not fixed here.
+  
+  `check:dual-build-cjs-loads` grew a fourth invariant (TYPED) that reds on the old
+  shape, so the drift cannot return silently.
+- 5cf1c88: fix(cli,verify): the multi-org runtime's remedy stops telling an operator to declare a package the app already declares
+  
+  The three consumers that turn a failed `@objectstack/organizations` import into
+  operator-facing advice picked their remedy with a two-way branch, written when
+  `HostImportFailureKind` had exactly two members. A third one — a package the app
+  DECLARES, that the install DELIVERED, and whose own `exports` names no runtime
+  entry Node can load (a `types`-only or `browser`-only publish, or an unexported
+  subpath) — fell into the else leg and rendered the *declare* remedy:
+  
+  - `objectstack serve`'s ADR-0093 D5 stage-1 fatal ("add the package to THIS APP
+    — declare it in the app's package.json and install"),
+  - `bootStack({ multiTenant: true })`'s refusal ("Install/link it in THIS APP —
+    and DECLARE it in that app's package.json"),
+  - the enterprise dogfood probe's skip reason and its `MULTI_ORG=1` throw.
+  
+  Each of those three also prints the importer's own message, which words the case
+  correctly — so the bullet an operator reads first contradicted the diagnosis
+  printed underneath it, and prescribed two actions (declare it, install it) that
+  were already done and could not have helped: no edit to the app and no install
+  action changes what a package publishes.
+  
+  Every branch now asks *is the declaration the problem?* rather than testing one
+  kind. `undeclared` keeps the declare remedy and `declared-unresolvable` keeps
+  the install remedy, both byte-for-byte unchanged. The third kind prescribes
+  nothing: it names the two things that are NOT the problem and defers to the
+  importer's message, which already states that the remedy lives in the package
+  and what the package has to publish. No fourth remedy sentence is minted — one
+  wording of the package-shape case, in the one place that measured it.
+- 9735662: fix(security): walled postures elevate only the env-declared platform owner, never the first registrant (#11184, the framework leg of cloud#1509)
+  
+  **BREAKING** for walled deployments (`OS_TENANCY_POSTURE=group` or
+  `isolated`), shipped as `minor` under the repo's launch-window convention for
+  breaking changes. Single-org deployments are byte-for-byte unchanged.
+  
+  Measured defect (cloud#1509): on a walled multi-tenant SaaS with
+  `OS_TENANCY_POSTURE=isolated` and `OS_AUTH_MEMBERSHIP_POLICY=invite-only`, the
+  FIRST self-registrant received the cross-tenant `admin_full_access` grant
+  (`platform_admin`, `isPlatformAdmin: true`) and — because the default-org
+  bootstrap binds "the platform admin" — was merged into the deployment's
+  Default Organization as its owner. Whoever curls the public sign-up endpoint
+  first owned the platform.
+  
+  Per the maintainer ruling of 2026-08-23 (verbatim:
+  「1509 选择 env 指定 owner 邮箱」):
+  
+  - **Walled postures: platform admin comes ONLY from the env-declared owner.**
+    `bootstrapPlatformAdmin` (plugin-security) no longer promotes the oldest
+    human user when the requested posture is walled; it promotes exactly the
+    account whose email matches the new `OS_PLATFORM_OWNER_EMAIL` variable
+    (case-insensitive, matched whenever that account registers — arrival order
+    is irrelevant). Self-registrants are never promoted and, since the shared
+    `ensureDefaultOrganization` helper binds only the platform admin, are never
+    auto-merged into the Default Organization either.
+  - **Fail-closed startup refusal.** A walled posture with no
+    `OS_PLATFORM_OWNER_EMAIL` declared refuses to boot from `AuthPlugin.init()`
+    with a message naming the variable — never a silent fallback to
+    first-registrant elevation. The elevation site itself also refuses
+    (`reason: 'walled_owner_email_undeclared'`, logged at `error`) as
+    defense-in-depth for compositions that reach the bootstrap without
+    plugin-auth (`os meta resync`, bare embeddings).
+  - **Single-org posture unchanged.** "First user is owner" stays as ruled
+    reasonable there; the new variable is never consulted under `single`.
+  - The requested posture (`resolveTenancyPosture()`) is deliberately the input,
+    so a walled-requested deployment running degraded
+    (`OS_ALLOW_DEGRADED_TENANCY=1`) still refuses first-registrant elevation.
+  
+  Operator action for walled deployments: set `OS_PLATFORM_OWNER_EMAIL` to the
+  operator account's email address before upgrading. Deployments that already
+  hold a human platform admin are untouched (the bootstrap remains a no-op once
+  any human holds the cross-tenant grant); the variable governs installs that
+  have not yet minted their admin. `@objectstack/types` gains the
+  `resolvePlatformOwnerEmail()` resolver and the `PLATFORM_OWNER_EMAIL_ENV`
+  constant; the verify harness declares the owner email (defaulting to its dev
+  admin) for walled fixtures.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) nothing authorable is removed, renamed or narrowed: no spec key, no metadata spelling and no stored row changes shape, so there is nothing for `os migrate meta` to rewrite and no ledger entry to make. The prescription above is a deployment-environment requirement (declare an env var before boot), which the ADR-0087 ledger does not carry — the refusal itself names the variable at startup. -->
+- Updated dependencies [809d417]
+- Updated dependencies [387e231]
+- Updated dependencies [f794e4e]
+- Updated dependencies [cae2169]
+- Updated dependencies [bd8795e]
+- Updated dependencies [b812a54]
+- Updated dependencies [2d4fa75]
+- Updated dependencies [0e4e51b]
+- Updated dependencies [e84bbf6]
+- Updated dependencies [f19475c]
+- Updated dependencies [effae80]
+- Updated dependencies [efb3513]
+- Updated dependencies [d62f990]
+- Updated dependencies [c45d8e6]
+- Updated dependencies [8064e6d]
+- Updated dependencies [6dd3e69]
+- Updated dependencies [1dcb995]
+- Updated dependencies [2e3e8c7]
+- Updated dependencies [e621291]
+- Updated dependencies [655b106]
+- Updated dependencies [40a93b5]
+- Updated dependencies [99ccbb9]
+- Updated dependencies [101ad2c]
+- Updated dependencies [c8be110]
+- Updated dependencies [aa16721]
+- Updated dependencies [74cee59]
+- Updated dependencies [6747718]
+- Updated dependencies [340c5e5]
+- Updated dependencies [399ecad]
+- Updated dependencies [d5b330d]
+- Updated dependencies [39d625f]
+- Updated dependencies [dda969c]
+- Updated dependencies [1f45690]
+- Updated dependencies [277948f]
+- Updated dependencies [8bdd955]
+- Updated dependencies [3171324]
+- Updated dependencies [c5a9a43]
+- Updated dependencies [7ef0268]
+- Updated dependencies [f3bbbef]
+- Updated dependencies [4f24e9d]
+- Updated dependencies [e238c79]
+- Updated dependencies [8e31083]
+- Updated dependencies [cd288b4]
+- Updated dependencies [4bb412b]
+- Updated dependencies [a5b95ee]
+- Updated dependencies [450e73b]
+- Updated dependencies [2efa1e1]
+- Updated dependencies [35e94c9]
+- Updated dependencies [3798424]
+- Updated dependencies [e27583e]
+- Updated dependencies [4bd6faa]
+- Updated dependencies [86cbe37]
+- Updated dependencies [6a180e4]
+- Updated dependencies [4bb09e8]
+- Updated dependencies [474242f]
+- Updated dependencies [63cd487]
+- Updated dependencies [bd4aa4e]
+- Updated dependencies [fe3d74f]
+- Updated dependencies [266436a]
+- Updated dependencies [803eaab]
+- Updated dependencies [f8e8f03]
+- Updated dependencies [983edf1]
+- Updated dependencies [c6c895c]
+- Updated dependencies [c33f185]
+- Updated dependencies [eae824e]
+- Updated dependencies [9c4c431]
+- Updated dependencies [f6fa22c]
+- Updated dependencies [56d3c7a]
+- Updated dependencies [8bb05ea]
+- Updated dependencies [8a483b3]
+- Updated dependencies [e560b4d]
+- Updated dependencies [3bc2e38]
+- Updated dependencies [97bcd99]
+- Updated dependencies [7181101]
+- Updated dependencies [df59de0]
+- Updated dependencies [96e25a8]
+- Updated dependencies [f75a38a]
+- Updated dependencies [bbbac0f]
+- Updated dependencies [a7a7390]
+- Updated dependencies [7a25e7d]
+- Updated dependencies [d3bee87]
+- Updated dependencies [1fa05a6]
+- Updated dependencies [5cb62d8]
+- Updated dependencies [c85a265]
+- Updated dependencies [23843d3]
+- Updated dependencies [dcb10a5]
+- Updated dependencies [773a999]
+- Updated dependencies [35dffea]
+- Updated dependencies [ce744bc]
+- Updated dependencies [4368411]
+- Updated dependencies [77b91bd]
+- Updated dependencies [6171331]
+- Updated dependencies [73ad0bb]
+- Updated dependencies [dc7c226]
+- Updated dependencies [d8024f0]
+- Updated dependencies [8120808]
+- Updated dependencies [c5a7448]
+- Updated dependencies [0010797]
+- Updated dependencies [776a098]
+- Updated dependencies [a58eac3]
+- Updated dependencies [5060877]
+- Updated dependencies [5a9b7a0]
+- Updated dependencies [4f6325d]
+- Updated dependencies [52954c0]
+- Updated dependencies [2aa8456]
+- Updated dependencies [c393b56]
+- Updated dependencies [0db5520]
+- Updated dependencies [3d79144]
+- Updated dependencies [ef8a4b9]
+- Updated dependencies [a35fb43]
+- Updated dependencies [93809a3]
+- Updated dependencies [e755295]
+- Updated dependencies [7c0d0c3]
+- Updated dependencies [daae7aa]
+- Updated dependencies [8dc22d6]
+- Updated dependencies [25b1b81]
+- Updated dependencies [fa5d137]
+- Updated dependencies [a392dbf]
+- Updated dependencies [279431e]
+- Updated dependencies [948dd6b]
+- Updated dependencies [3b4c56c]
+- Updated dependencies [ae8edd2]
+- Updated dependencies [e25403c]
+- Updated dependencies [a81aa9d]
+- Updated dependencies [c54d4d3]
+- Updated dependencies [1a68552]
+- Updated dependencies [d2b2381]
+- Updated dependencies [5c9e40a]
+- Updated dependencies [0783d7b]
+- Updated dependencies [a21d2a9]
+- Updated dependencies [67ceb9a]
+- Updated dependencies [64baa68]
+- Updated dependencies [9fa70d7]
+- Updated dependencies [09db64a]
+- Updated dependencies [92916e7]
+- Updated dependencies [a84f3ea]
+- Updated dependencies [f2eaae8]
+- Updated dependencies [56c093c]
+- Updated dependencies [c09451b]
+- Updated dependencies [ba64877]
+- Updated dependencies [e7191ce]
+- Updated dependencies [35202f1]
+- Updated dependencies [7345308]
+- Updated dependencies [79b6a22]
+- Updated dependencies [30d96ab]
+- Updated dependencies [30d96ab]
+- Updated dependencies [30d96ab]
+- Updated dependencies [f658793]
+- Updated dependencies [b1b7d60]
+- Updated dependencies [0fd4899]
+- Updated dependencies [0dc0eff]
+- Updated dependencies [836a29c]
+- Updated dependencies [c95ad19]
+- Updated dependencies [e58ea8b]
+- Updated dependencies [9a71af3]
+- Updated dependencies [4a17645]
+- Updated dependencies [3795c5f]
+- Updated dependencies [919beca]
+- Updated dependencies [8ab926b]
+- Updated dependencies [01da105]
+- Updated dependencies [7317cf2]
+- Updated dependencies [e7dfb1d]
+- Updated dependencies [e25e839]
+- Updated dependencies [5997207]
+- Updated dependencies [8b13cc8]
+- Updated dependencies [4a4a35d]
+- Updated dependencies [86e765a]
+- Updated dependencies [1d7e76a]
+- Updated dependencies [53dc739]
+- Updated dependencies [fd289be]
+- Updated dependencies [c3c72a4]
+- Updated dependencies [03bf7b1]
+- Updated dependencies [7bd6447]
+- Updated dependencies [86df0c9]
+- Updated dependencies [5a22dd7]
+- Updated dependencies [0d7b1f3]
+- Updated dependencies [8155855]
+- Updated dependencies [f90e820]
+- Updated dependencies [b6d3d76]
+- Updated dependencies [18d816a]
+- Updated dependencies [e8bd715]
+- Updated dependencies [b91c351]
+- Updated dependencies [a28a3c0]
+- Updated dependencies [daeaaf9]
+- Updated dependencies [c459da6]
+- Updated dependencies [e914733]
+- Updated dependencies [f887e52]
+- Updated dependencies [881f8d8]
+- Updated dependencies [3bfa1e6]
+- Updated dependencies [0a8ebf3]
+- Updated dependencies [901355c]
+- Updated dependencies [1524927]
+- Updated dependencies [34ce8e7]
+- Updated dependencies [8542bd4]
+- Updated dependencies [2af5eac]
+- Updated dependencies [c34f693]
+- Updated dependencies [00ff228]
+- Updated dependencies [33681ea]
+- Updated dependencies [bfe13c8]
+- Updated dependencies [0fb3044]
+- Updated dependencies [4635f3e]
+- Updated dependencies [fd289be]
+- Updated dependencies [ee3595c]
+- Updated dependencies [99d23b1]
+- Updated dependencies [c61ad20]
+- Updated dependencies [09b4f4e]
+- Updated dependencies [30928a6]
+- Updated dependencies [de47336]
+- Updated dependencies [b2eab95]
+- Updated dependencies [93940d4]
+- Updated dependencies [3a04b01]
+- Updated dependencies [45b9051]
+- Updated dependencies [3954fb7]
+- Updated dependencies [4805b56]
+- Updated dependencies [ddea371]
+- Updated dependencies [b9e9227]
+- Updated dependencies [bbf1167]
+- Updated dependencies [e7f56d6]
+- Updated dependencies [6aea1f5]
+- Updated dependencies [d395692]
+- Updated dependencies [f074616]
+- Updated dependencies [0e0bf80]
+- Updated dependencies [5894d30]
+- Updated dependencies [a3765f6]
+- Updated dependencies [2d5cee3]
+- Updated dependencies [e22158f]
+- Updated dependencies [7404925]
+- Updated dependencies [963e2f1]
+- Updated dependencies [0c2334f]
+- Updated dependencies [66bbb4c]
+- Updated dependencies [778c59f]
+- Updated dependencies [d2619fd]
+- Updated dependencies [af56546]
+- Updated dependencies [bd0c5cc]
+- Updated dependencies [6acb11a]
+- Updated dependencies [33c5fd3]
+- Updated dependencies [20b0fdb]
+- Updated dependencies [905019b]
+- Updated dependencies [a286411]
+- Updated dependencies [98c0d33]
+- Updated dependencies [368a82e]
+- Updated dependencies [a3d5724]
+- Updated dependencies [93ea19b]
+- Updated dependencies [9ee2dcf]
+- Updated dependencies [8cb96ec]
+- Updated dependencies [8f10a79]
+- Updated dependencies [6269a55]
+- Updated dependencies [a17da05]
+- Updated dependencies [a8c00e2]
+- Updated dependencies [a8fac3a]
+- Updated dependencies [e170b0a]
+- Updated dependencies [22e5236]
+- Updated dependencies [0fb8760]
+- Updated dependencies [9dd022a]
+- Updated dependencies [e5ce2ed]
+- Updated dependencies [3e9c0d8]
+- Updated dependencies [9e72090]
+- Updated dependencies [be21955]
+- Updated dependencies [bc56e18]
+- Updated dependencies [be21955]
+- Updated dependencies [a9ee989]
+- Updated dependencies [4d0d944]
+- Updated dependencies [15d58db]
+- Updated dependencies [aaa4e65]
+- Updated dependencies [d63b014]
+- Updated dependencies [9abe4e4]
+- Updated dependencies [2cc7122]
+- Updated dependencies [a4e4d2d]
+- Updated dependencies [48d8ff3]
+- Updated dependencies [50d6c92]
+- Updated dependencies [9e0ba21]
+- Updated dependencies [b8562ff]
+- Updated dependencies [311433f]
+- Updated dependencies [3a86a65]
+- Updated dependencies [3e5ad08]
+- Updated dependencies [9abe4e4]
+- Updated dependencies [4cda78c]
+- Updated dependencies [b7131f3]
+- Updated dependencies [e5812fa]
+- Updated dependencies [7085f90]
+- Updated dependencies [dee4dd4]
+- Updated dependencies [ce7e497]
+- Updated dependencies [c351a84]
+- Updated dependencies [51ecb2f]
+- Updated dependencies [9086761]
+- Updated dependencies [20b79be]
+- Updated dependencies [f6344e7]
+- Updated dependencies [42a117b]
+- Updated dependencies [1401ae7]
+- Updated dependencies [e577445]
+- Updated dependencies [4297fe7]
+- Updated dependencies [e398863]
+- Updated dependencies [d16df74]
+- Updated dependencies [d79c602]
+- Updated dependencies [f11fc61]
+- Updated dependencies [e808890]
+- Updated dependencies [8f79379]
+- Updated dependencies [e6ca40e]
+- Updated dependencies [066dd3b]
+- Updated dependencies [0c77ea4]
+- Updated dependencies [017130a]
+- Updated dependencies [52954c0]
+- Updated dependencies [466b389]
+- Updated dependencies [c5b9ccc]
+- Updated dependencies [9e5cd71]
+- Updated dependencies [b0d7d54]
+- Updated dependencies [3800e42]
+- Updated dependencies [c68c670]
+- Updated dependencies [1f6d047]
+- Updated dependencies [c616c2c]
+- Updated dependencies [89eb997]
+- Updated dependencies [7131f12]
+- Updated dependencies [a02540f]
+- Updated dependencies [d81838c]
+- Updated dependencies [aa5994e]
+- Updated dependencies [be93457]
+- Updated dependencies [7c342f4]
+- Updated dependencies [159e05e]
+- Updated dependencies [090f230]
+- Updated dependencies [a65db76]
+- Updated dependencies [2cf5a96]
+- Updated dependencies [15eb2c9]
+- Updated dependencies [5691b07]
+- Updated dependencies [14b1145]
+- Updated dependencies [092b9da]
+- Updated dependencies [9cfc1f7]
+- Updated dependencies [dd999ce]
+- Updated dependencies [63f3b43]
+- Updated dependencies [8ce628a]
+- Updated dependencies [2a6122b]
+- Updated dependencies [225e769]
+- Updated dependencies [5619aac]
+- Updated dependencies [8af88dd]
+- Updated dependencies [31bb2e7]
+- Updated dependencies [502ff8b]
+- Updated dependencies [fb5fbb8]
+- Updated dependencies [d7b3963]
+- Updated dependencies [33184fd]
+- Updated dependencies [7c41693]
+- Updated dependencies [db39dfc]
+- Updated dependencies [3c0f3ea]
+- Updated dependencies [4f65837]
+- Updated dependencies [26deb31]
+- Updated dependencies [b72db01]
+- Updated dependencies [f64668d]
+- Updated dependencies [dce5cd4]
+- Updated dependencies [9688f58]
+- Updated dependencies [9690d11]
+- Updated dependencies [556ebc1]
+- Updated dependencies [177ebdc]
+- Updated dependencies [ad54eb3]
+- Updated dependencies [599515d]
+- Updated dependencies [8d237b4]
+- Updated dependencies [936aa2d]
+- Updated dependencies [b003cf2]
+- Updated dependencies [c4e8bbc]
+- Updated dependencies [7286dd5]
+- Updated dependencies [2d2e6f0]
+- Updated dependencies [2d8dd8d]
+- Updated dependencies [6a571d3]
+- Updated dependencies [22d573e]
+- Updated dependencies [b5a2398]
+- Updated dependencies [348860c]
+- Updated dependencies [d48929e]
+- Updated dependencies [5383fa6]
+- Updated dependencies [5b3ff63]
+- Updated dependencies [967402a]
+- Updated dependencies [5c7cbe3]
+- Updated dependencies [356bd71]
+- Updated dependencies [878aa2e]
+- Updated dependencies [1a6a19c]
+- Updated dependencies [064d484]
+- Updated dependencies [527e050]
+- Updated dependencies [dd33bf9]
+- Updated dependencies [4cb2a90]
+- Updated dependencies [3f64fe6]
+- Updated dependencies [f4e741b]
+- Updated dependencies [fe72aa5]
+- Updated dependencies [bc5156f]
+- Updated dependencies [5700d83]
+- Updated dependencies [df657d9]
+- Updated dependencies [9c7d9d4]
+- Updated dependencies [21196cf]
+- Updated dependencies [74a7804]
+- Updated dependencies [a548550]
+- Updated dependencies [3519f8d]
+- Updated dependencies [1394768]
+- Updated dependencies [53d3689]
+- Updated dependencies [da43fde]
+- Updated dependencies [10220a7]
+- Updated dependencies [a933ed7]
+- Updated dependencies [ec4c4d2]
+- Updated dependencies [87075b1]
+- Updated dependencies [6202043]
+- Updated dependencies [8519095]
+- Updated dependencies [bb4ea80]
+- Updated dependencies [d38ad7f]
+- Updated dependencies [8965398]
+- Updated dependencies [add6a1b]
+- Updated dependencies [6e33394]
+- Updated dependencies [b3a63d3]
+- Updated dependencies [1c7adc7]
+- Updated dependencies [6d178a4]
+- Updated dependencies [f60ab90]
+- Updated dependencies [911da5f]
+- Updated dependencies [89448a5]
+- Updated dependencies [7986d97]
+- Updated dependencies [49f0dcf]
+- Updated dependencies [033a34c]
+- Updated dependencies [4d25d22]
+- Updated dependencies [1ffee51]
+- Updated dependencies [ab47816]
+- Updated dependencies [192b2ba]
+- Updated dependencies [09b0d7b]
+- Updated dependencies [5ae4303]
+- Updated dependencies [ece4dad]
+- Updated dependencies [469cbc9]
+- Updated dependencies [e9b377e]
+- Updated dependencies [e6ac0c6]
+- Updated dependencies [84199cb]
+- Updated dependencies [146f448]
+- Updated dependencies [735f5c7]
+- Updated dependencies [7303cbf]
+- Updated dependencies [a7e18de]
+- Updated dependencies [366f895]
+- Updated dependencies [29ef1e1]
+- Updated dependencies [73c8466]
+- Updated dependencies [dc75ba8]
+- Updated dependencies [90ff957]
+- Updated dependencies [cce0aa9]
+- Updated dependencies [e764507]
+- Updated dependencies [cff17af]
+- Updated dependencies [39404f3]
+- Updated dependencies [18b53ac]
+- Updated dependencies [71627f7]
+- Updated dependencies [e1d773e]
+- Updated dependencies [ca1965f]
+- Updated dependencies [8619f95]
+- Updated dependencies [b706af9]
+- Updated dependencies [db8c288]
+- Updated dependencies [0e5fe7f]
+- Updated dependencies [a3c4215]
+- Updated dependencies [460134a]
+- Updated dependencies [add4360]
+- Updated dependencies [fc8627e]
+- Updated dependencies [050d8d8]
+- Updated dependencies [e0abc38]
+- Updated dependencies [1e4d2eb]
+- Updated dependencies [b853cf3]
+- Updated dependencies [fc9ba76]
+- Updated dependencies [13bf05d]
+- Updated dependencies [20293d6]
+- Updated dependencies [67192ce]
+- Updated dependencies [953a81f]
+- Updated dependencies [4af6c44]
+- Updated dependencies [1272f0a]
+- Updated dependencies [6c3f9f5]
+- Updated dependencies [18b53ac]
+- Updated dependencies [b70a55d]
+- Updated dependencies [0f94cc7]
+- Updated dependencies [8d06347]
+- Updated dependencies [3194c91]
+- Updated dependencies [65759ba]
+- Updated dependencies [7307191]
+- Updated dependencies [a11c1a5]
+- Updated dependencies [71f9cd1]
+- Updated dependencies [ee17d86]
+- Updated dependencies [cdbd920]
+- Updated dependencies [18c432e]
+- Updated dependencies [3c418c4]
+- Updated dependencies [47d9b77]
+- Updated dependencies [fa8715a]
+- Updated dependencies [a933ed7]
+- Updated dependencies [b3ca463]
+- Updated dependencies [a933ed7]
+- Updated dependencies [0d4a6a8]
+- Updated dependencies [518d5e5]
+- Updated dependencies [6643ba1]
+- Updated dependencies [eeba2ef]
+- Updated dependencies [ec4c4d2]
+- Updated dependencies [424f73c]
+- Updated dependencies [cccbe51]
+- Updated dependencies [a8d6b1d]
+- Updated dependencies [e4a7695]
+- Updated dependencies [87075b1]
+- Updated dependencies [fc58a99]
+- Updated dependencies [14cfc00]
+- Updated dependencies [1c6f7b4]
+- Updated dependencies [e854a53]
+- Updated dependencies [dfebfc8]
+- Updated dependencies [598b7ec]
+- Updated dependencies [ffbb7a1]
+- Updated dependencies [9981f31]
+- Updated dependencies [a23603e]
+- Updated dependencies [d028b37]
+- Updated dependencies [5563bfb]
+- Updated dependencies [06017ed]
+- Updated dependencies [f7b25c5]
+- Updated dependencies [122ef38]
+- Updated dependencies [4a37870]
+- Updated dependencies [428f9b2]
+- Updated dependencies [aa7ff56]
+- Updated dependencies [811a3c2]
+- Updated dependencies [1401ae7]
+- Updated dependencies [2fd3f1c]
+- Updated dependencies [ebb0822]
+- Updated dependencies [c41b42e]
+- Updated dependencies [aae0cb3]
+- Updated dependencies [8094834]
+- Updated dependencies [e49d988]
+- Updated dependencies [c4db311]
+- Updated dependencies [a40c0f9]
+- Updated dependencies [50cf294]
+- Updated dependencies [750fff5]
+- Updated dependencies [c19035e]
+- Updated dependencies [ececf7a]
+- Updated dependencies [d173125]
+- Updated dependencies [4a0141c]
+- Updated dependencies [7d3b1b7]
+- Updated dependencies [8eeca27]
+- Updated dependencies [8425c17]
+- Updated dependencies [7cbe705]
+- Updated dependencies [a5ef1d8]
+- Updated dependencies [87ad30c]
+- Updated dependencies [772d5de]
+- Updated dependencies [ce80ec2]
+- Updated dependencies [cc837db]
+- Updated dependencies [9d7f725]
+- Updated dependencies [b372318]
+- Updated dependencies [97a2263]
+- Updated dependencies [29d0676]
+- Updated dependencies [0169d49]
+- Updated dependencies [6bd3231]
+- Updated dependencies [d2b5ba8]
+- Updated dependencies [3c1bbd2]
+- Updated dependencies [b799ac5]
+- Updated dependencies [8f74307]
+- Updated dependencies [d23dc08]
+- Updated dependencies [644ad50]
+- Updated dependencies [b997272]
+- Updated dependencies [c0714eb]
+- Updated dependencies [9735662]
+- Updated dependencies [bf8d129]
+- Updated dependencies [4d5b4f8]
+- Updated dependencies [e3f056f]
+- Updated dependencies [5d16379]
+- Updated dependencies [aa0688a]
+- Updated dependencies [0da7cd2]
+- Updated dependencies [28a5c3e]
+- Updated dependencies [4bc18e5]
+- Updated dependencies [cad8b42]
+- Updated dependencies [9f57f1e]
+  - @objectstack/spec@17.3.0
+  - @objectstack/runtime@17.3.0
+  - @objectstack/objectql@17.3.0
+  - @objectstack/plugin-security@17.3.0
+  - @objectstack/platform-objects@17.3.0
+  - @objectstack/core@17.3.0
+  - @objectstack/service-automation@17.3.0
+  - @objectstack/plugin-auth@17.3.0
+  - @objectstack/service-settings@17.3.0
+  - @objectstack/types@17.3.0
+  - @objectstack/service-analytics@17.3.0
+  - @objectstack/rest@17.3.0
+  - @objectstack/service-datasource@17.3.0
+  - @objectstack/plugin-sharing@17.3.0
+  - @objectstack/plugin-hono-server@17.3.0
+
 ## 17.2.0
 
 ### Patch Changes

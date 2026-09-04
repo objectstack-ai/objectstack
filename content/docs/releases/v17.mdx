@@ -1,6 +1,6 @@
 ---
 title: v17.0.0
-description: Files become platform records with governed download, bulk export becomes its own opt-in privilege, the SDK reaches every route the server actually mounts, approvals route approvers dynamically, and a boot that cannot reach its datasource stops pretending it can. Backend and Console notes for 17.0.0, 17.1.0, and 17.2.0.
+description: Files become platform records with governed download, bulk export becomes its own opt-in privilege, the SDK reaches every route the server actually mounts, approvals route approvers dynamically, and a boot that cannot reach its datasource stops pretending it can. Backend and Console notes for 17.0.0, 17.1.0, 17.2.0, and 17.3.0.
 ---
 
 **The v17 line** is a truth-telling release. Where v16 made *declared metadata*
@@ -13,11 +13,12 @@ readable by everyone in the tenant. Alongside that, `agent.tools[]`, the
 GraphQL surface, the `ObjectStackProtocol` alias, and a long tail of
 parsed-but-never-enforced spec clusters are removed rather than maintained.
 
-> **Release status: 17.2.0 is released**, and is the current version of the v17
-> line. It was published to the `latest` tag on 2026-08-23, taking over from
-> 17.1.0 — published 2026-08-20, which took over from 17.0.0 — published
-> 2026-08-14, closing a train that ran through `17.0.0-rc.0` … `rc.6` (the last
-> of them cut 2026-08-10). A plain install now resolves 17.2.0. `changeset pre
+> **Release status: 17.3.0 is released**, and is the current version of the v17
+> line. It was published to the `latest` tag on 2026-09-04, taking over from
+> 17.2.0 — published 2026-08-23, which took over from 17.1.0 — published
+> 2026-08-20, which took over from 17.0.0 — published 2026-08-14, closing a
+> train that ran through `17.0.0-rc.0` … `rc.6` (the last of them cut
+> 2026-08-10). A plain install now resolves 17.3.0. `changeset pre
 > exit` ran with the 17.0.0 cut, so the `@objectstack/*` packages no longer
 > publish as `17.0.0-rc.N`. Caret ranges on `^16.x` hold at 16.x until you opt
 > in, which is the reason this train is a major at all: its breaking density
@@ -25,13 +26,21 @@ parsed-but-never-enforced spec clusters are removed rather than maintained.
 > dead-cluster retirements) is too high to auto-upgrade `^16.x` consumers into
 > on their next install.
 >
-> ⚠️ **17.1.0 and 17.2.0 are minors by version number, not by blast radius.**
-> Several of 17.1.0's security corrections change who can read or write on an
-> existing deployment — read its upgrade checklist below. 17.2.0 adds write-path
-> accept-set tightenings of the same shape: a by-id `update`/`delete` that used
-> to silently drop an extra `where` predicate, or a mismatched `data.id` /
-> `where.id`, now refuses loudly instead (#11009, #11142) — read **Highlights —
-> 17.2.0** below before upgrading.
+> ⚠️ **17.1.0, 17.2.0 and 17.3.0 are minors by version number, not by blast
+> radius. Moving between them is not a tag swap.** Several of 17.1.0's security
+> corrections change who can read or write on an existing deployment — read its
+> upgrade checklist below. 17.2.0 adds write-path accept-set tightenings of the
+> same shape: a by-id `update`/`delete` that used to silently drop an extra
+> `where` predicate, or a mismatched `data.id` / `where.id`, now refuses loudly
+> instead (#11009, #11142). 17.3.0 goes further still: it renames a published
+> SDK namespace with **no aliases** (`client.projects.*` →
+> `client.environments.*`), flips the self-registration default to
+> `invite_only`, starts enforcing `unique` / `indexes[]` on `driver-memory`,
+> makes a permission-store outage fail loudly, and tenant-scopes
+> `sys_record_share` with an operator-invoked backfill for the rows written
+> before it. Read **[Breaking changes & migration in
+> 17.2.0](#breaking-changes--migration-in-1720)** and **[Breaking changes &
+> migration in 17.3.0](#breaking-changes--migration-in-1730)** before upgrading.
 
 ## Highlights — 17.0.0
 
@@ -203,6 +212,85 @@ parsed-but-never-enforced spec clusters are removed rather than maintained.
   sitting env-wide. A publish that states `?package=` no longer discovers a
   package-less draft of the same `(type, name)` — retry without the query
   parameter for that draft.
+
+## Highlights — 17.3.0
+
+- **`client.projects.*` becomes `client.environments.*`, with no aliases**
+  (`87042b5`, ADR-0006 D2). The SDK half of one coordinated cross-repo rename:
+  the method namespace, the environment-scoped sub-client (`client.project(id)`
+  → `client.environment(id)`, `ScopedProjectClient` → `ScopedEnvironmentClient`)
+  and the response keys (`res.projects` → `res.environments`, `res.project` →
+  `res.environment`) all move together. There is deliberately no
+  `client.projects` getter and no `res.project ?? res.environment` hedge —
+  ADR-0006 D3 declined a mapping layer with reasons. The URL paths do not move;
+  they were already on the `environments` spelling. `os environments --format
+  json` payloads change with the wire.
+- **Who may become a user of an environment's apps is one declaration, and its
+  default flips to the safe end** (`4f24e9d`). `auth.audience.posture` is
+  `invite_only | email_domain | open`, and an **undeclared** audience now means
+  `invite_only`: self-serve sign-up is refused `403
+  SELF_REGISTRATION_CLOSED` unless the address holds a pending `sys_invitation`
+  (the first account on a fresh install is exempt). ⚠️ **A deployment that
+  relied on open registration changes behaviour with nothing to parse-fail on.**
+  The one-line fix is to declare it — `auth: { audience: { posture: 'open',
+  selfRegistrationPermissionSet: 'member_default' } }`.
+- **A permission-store read failure fails LOUD** (`6a180e4`). `tryFind` answered
+  a thrown read exactly the way it answered an empty one, so an outage of the
+  store resolved as a well-formed context for an authenticated principal holding
+  no capabilities — an administrator was told they lack a capability, during an
+  outage of the store that holds the capability. An unreachable store now raises
+  `AuthzStoreUnavailableError`, carrying the existing `SERVICE_UNAVAILABLE` code
+  and `503`. A reachable-but-empty store, an unprovisioned `sys_*` table and a
+  genuine denial all keep their previous answers.
+- **`driver-memory` enforces the uniqueness it always declared** (`56c093c`,
+  `b7f645a`). `InMemoryDriver` enforced none: a `unique: true` field and a
+  `unique` object-level `indexes[]` entry were declared-and-not-enforced, so a
+  colliding write landed and a read returned both rows. Both surfaces now refuse
+  with the SQL family's envelope — `UNIQUE_VIOLATION`, `409`. **Most likely to
+  present as "our seed data stopped loading"** on a dev or demo stack that
+  relied on the store accepting a duplicate; every one of those refusals is a
+  write the SQL family already refused.
+- **`sys_record_share` is tenant-scoped, and the rows written before it need an
+  operator-invoked backfill** (`3f64fe6`). Every grant row on every deployment
+  was written with `organization_id = NULL`; the writer is repaired and
+  `planSysRecordShareOrganizationBackfill` / `runSysRecordShareOrganizationBackfill`
+  (dry run first, by default) stamp the existing rows from the record they grant
+  access to.
+- **`POST /api/v1/automation/:name/toggle` requires `manage_metadata`**
+  (`266436a`). An authenticated caller without it is answered **403
+  `PERMISSION_DENIED`** where it previously received `200` with the flow's
+  enablement changed. The execution doors (`trigger`, `resume`) and the reads are
+  untouched.
+- **Four SDK methods stop handing you the dispatcher envelope** (`db16b94`).
+  `analytics.query` / `analytics.meta` / `analytics.explain` and
+  `automation.trigger` now resolve to the payload like every other method:
+  `r.data.rows` → `r.rows`. Three of the four turn every old read into a compile
+  error; `automation.trigger` is the exception, because `r.success` and `r.error`
+  compile before *and* after while their meaning moves from the envelope's flag
+  to the run's own.
+- **Compound metadata addressing is retired** (`7986d97`).
+  `GET`/`PUT /api/v1/meta/:type/:section/:name` and the `.../published` sibling
+  answer `404 ROUTE_NOT_FOUND`; address every item through the single-segment
+  route with the name percent-encoded. `@objectstack/client` already sends the
+  new spelling, and the encoding is a no-op for every name the item-name grammar
+  admits.
+- **The `RestServerConfig` blocks are parsed rather than ignored** (`1394768`,
+  `8965398`, `f60ab90`, `b3a63d3`). `config.api`, `api.projectResolution` and
+  `config.crud` are now parsed by name, and the ten inert keys the liveness
+  ledger recorded as `dead` are gone — a key that used to be accepted and
+  silently dropped is refused by name.
+- **The largest ADR-0049 enforce-or-remove wave of the line.** Authorable
+  surfaces that were declared and never enforced are removed rather than
+  maintained: the plugin manifest's `contributes` block loses its last ten
+  members and `manifest:` itself goes strict (`be21955`, `bc56e18`, `dce5cd4`,
+  `4d0d944`), `page.components[].responsive` and the `ResponsiveConfig`
+  vocabulary go (`2a6122b`), the `allowRestore` / `allowPurge` object-permission
+  bits go (`8af88dd`), and preview mode goes with them (`0c2334f`). Because the
+  authorable surface has been strict since 17.0.0 (#4001), each of these is a
+  **parse-time refusal naming the key** rather than a silent drop.
+- **Console:** four objectui pin moves — `190fbd01d061 → 9602dc820450 →
+  d8ec8d6d4f01 → 67dadd602a3a → 00d3f09c500c` (`df59de0`, `83be460`, `7642aac`,
+  `41b5a44`).
 
 ---
 
@@ -3949,9 +4037,809 @@ Two pin moves in this release (`665661ab0932 → 82a94170c405`, then
   private `?runAction=` string convention retires; and the current organization
   shows in the top bar for users with exactly one membership.
 
-### Upgrade checklist
+---
 
-#### 17.0.0
+## What's new in 17.2.0
+
+17.2.0 was published to the `latest` tag on **2026-08-23**, three days after
+17.1.0. The version-locked train moved the same **69 packages**, carrying **204
+distinct changelog entries and no major** — **19** of which mark themselves
+BREAKING. (Counted across the 69 package `CHANGELOG.md` files; an entry that
+lands in several packages is counted once.) The bundled Console advances one pin,
+`9a3daf8d37ad → 190fbd01d061`.
+
+⚠️ **Read this before treating the version number as a safety guarantee.** As
+with 17.1.0, several entries here landed after the 17.0.0 cut and ship as `minor`
+under the lockstep launch-window convention while being explicitly breaking —
+they say so in their own changelog entries. The theme is the same one 17.0.0 and
+17.1.0 established, one surface further in: **a write that declared a condition
+nobody evaluated stops reading as a working conditional write**, and a
+declared-but-unenforced authorable key is removed rather than maintained.
+
+### Breaking changes & migration in 17.2.0
+
+#### Two write-path guardrails close the "silently dropped predicate" hole (#11009, #11142)
+
+The by-id dispatch routes to `driver.update(object, id, …)` /
+`driver.delete(object, id, …)`, which bind **only** the primary key — every other
+`where` key was discarded with no diagnostic. A compare-and-set written as
+`{ where: { id, status: { $in: [...] } }, multi: false }` therefore evaluated to
+nothing and the write landed unconditionally, reading exactly like a working
+conditional write (`8cc8401`).
+
+Per call shape:
+
+- A `where` naming a scalar `id` **and nothing else** is unchanged — by-id, with
+  or without `multi: true`.
+- A `where` carrying a scalar `id` **plus other keys**, with a declared
+  `multi: true`, now routes to the **predicate path** (`driver.updateMany` /
+  `driver.deleteMany`), which compiles every `where` key. Previously this
+  dispatched by-id and dropped the extra keys.
+- The same shape **without** `multi: true` — and any by-id call via a scalar
+  `data.id` beside extra `where` keys — now **throws**, naming the keys the by-id
+  path would have dropped.
+
+A second shape refuses under its own code (`2810695`): a by-id `update` whose
+truthy scalar `options.where.id` names a **different** row than the truthy scalar
+payload `data.id` now answers `UPDATE_ID_MISMATCH`, HTTP `400`, naming both ids —
+including ids differing only in type (`42` beside `'42'`). Equal ids are
+unchanged, which is the normal REST spelling. A declared `multi: true` does not
+rescue the call.
+
+**Migration.** Each refusal is a one-line edit at the call site, and which edit is
+an intent decision no codemod may make for you:
+
+| You wrote | Decide |
+| :--- | :--- |
+| `{ where: { id, …other } }` without `multi` | declare `multi: true` so the full `where` is honoured (the result becomes the matched count), or drop the extra `where` keys to keep an unconditional single-row write |
+| `data.id` ≠ `where.id` | make the two ids equal (or drop `where.id`) to address the row by the payload id, or remove `id` from the payload to address it by `where.id` |
+
+⚠️ **Flow authors reach this through `update_record` / `delete_record` nodes**
+whose `filter` names `id` plus other keys without declaring `multi: true`. Those
+configs were silently unconditional before and refuse loudly now.
+
+#### `http_request_errors_total` is retired (#9834)
+
+⛔ **If you have a Grafana panel, an alert rule or a recording rule keyed on
+`http_request_errors_total`, it will read a FLAT ZERO after this upgrade.** That
+zero is the removal, not a healthy server, and it is the one way this change can
+hurt you — nothing throws, nothing warns, the series simply stops receiving
+samples (`914c413`). Its only emitter was the dispatcher's own route Proxy, so it
+never saw the auth mount, the REST data API, or any other inbound surface: it
+undercounted from day one.
+
+| Wrote | Write instead |
+| :--- | :--- |
+| `rate(http_request_errors_total[5m])` | `rate(http_requests_total{status=~"5.."}[5m])` — emitted by the transport, so it covers every inbound surface instead of the dispatcher's routes only |
+| `sum by (route) (http_request_errors_total)` | `sum by (route) (http_requests_total{status=~"5.."})` |
+| `SEMCONV.httpRequestErrorsTotal` / `RUNTIME_METRICS.httpRequestErrorsTotal` in host code | Delete the read. Both members are gone; `tsc` reports the missing property at the read site. |
+
+#### Four ADR-0049 enforce-or-remove retirements on the authorable surface
+
+Each of these was declared, projected and accepted while nothing read it. Because
+the authorable surface has been strict since 17.0.0 (#4001), an authored document
+that still carries one of these keys is now **refused by name at parse**, not
+silently dropped.
+
+| Retired | Where it lived | Write instead |
+| :--- | :--- | :--- |
+| `sys_position.permissions` (`3ee8ddf`, #9885) | a "JSON-serialized array of permission strings" textarea on the platform position object | Delete the key. Capability reaches a position **only** through permission-set bindings (`sys_position_permission_set` rows); prose documenting intent belongs in `description`. |
+| `MetricSchema.filters` (`a40dcc1`, #10414) | the per-metric raw-SQL filter | Delete the key. |
+| `record:highlights` highlight-field `icon` (`c684d00`, #10054) | advertised on six surfaces, drawn by nothing | Delete the key. |
+| the `themes` carrier key and `ThemeSchema` (`35ad101`, #10485) | the authoring surface nothing ever applied | `app.branding` remains the one color-authoring surface. |
+
+Physical columns on already-deployed databases are untouched — ADR-0045 schema
+sync is additive.
+
+#### Analytics stops answering the wrong number on a cross-object filter
+
+A filter nested inside a combinator (`$or`, `$not`, a nested `$and`) on the
+ObjectQL path used to reach `engine.aggregate` unchecked, because the
+cross-object envelope check only saw a top-level AND-ed leaf. Both analytics doors
+now refuse it the same way a top-level cross-object filter already was
+(`57e4571`, #10759), and a dataset's own definition-level `filter` gets the
+identical guard (`13a3dca`, #10861).
+
+#### Driver introspection stops guessing (#11161)
+
+`driver-sql`'s `introspectPrimaryKeys` / `introspectForeignKeys` /
+`introspectUniqueConstraints` wrapped their whole dialect dispatch in a bare
+`catch {}` and returned `[]`, so a query a live server rejected degraded to "this
+table has no primary key" with no diagnostic — a wrong answer downstream code
+acted on, not "we don't know". A failed read now **throws** by default;
+`{ onFailure: 'partial' }` opts a caller with a self-correcting short read back
+into the old behaviour (`9cc1940`). The un-hiding immediately paid: the Postgres
+arm of `introspectUniqueConstraints` had been invalid SQL all along, so live
+Postgres never reported a unique constraint through this method. That query is
+repaired in the same change.
+
+#### The external-datasource federation family requires a capability
+
+These routes previously admitted **any authenticated caller**. This is published
+SDK surface — `datasources.external.*` on `ObjectStackClient` and the CLI's
+`datasource` commands reach exactly these routes — so an existing integration
+presenting a valid credential that holds neither capability was served before and
+is **refused now**, `403 PERMISSION_DENIED` naming the missing capability
+(`9a1ed7a`, #9901; `6ce58a7`, #10255).
+
+| Route | SDK call | Now requires |
+| :--- | :--- | :--- |
+| `GET /:name/external/tables` | `datasources.external.listTables` | `manage_platform_settings` |
+| `POST /:name/external/tables/:remote/draft` | `datasources.external.draft` | `manage_platform_settings` |
+| `POST /:name/external/tables/:remote/import` | `datasources.external.import` | `manage_metadata` |
+| `POST /:name/external/refresh-catalog` | `datasources.external.refreshCatalog` | `manage_metadata` |
+| `POST /:name/external/validate` | `datasources.external.validate` | `manage_platform_settings` |
+
+**Migration.** Grant the calling credential's permission set the named capability.
+The platform's `admin_full_access` set carries both; a purpose-built operator set
+is the case to check.
+
+#### A per-item publish naming `?package=` stops matching another package's draft
+
+`POST /api/v1/meta/:type/:name/publish?package=PKG_ID` now resolves its draft's
+org scope **package-exactly**, closing a path where the scope probe could match a
+different package's draft in the caller's org and the package-exact promote then
+`404`'d over the caller's own publishable draft (`c74aefe`). What you may newly
+see: a publish that states `?package=` no longer discovers a draft of the same
+`(type, name)` authored with **no** package binding — it answers `404 [no_draft]`.
+**Remedy:** if the draft you mean is the package-less one, retry the publish
+without the `?package=` query parameter.
+
+#### Two dead CLI authoring surfaces are gone
+
+- **`os g agent` is retired** (`15b63e8`, ADR-0063 §2, #10359). ⛔ If a script, a
+  Makefile or a CI step runs it, **it now exits 1** — that is the intended
+  outcome and the one way this change interrupts you. The kernel ships exactly
+  two agents, `ask` and `build`, bound by surface, and the runtime catalog filters
+  out every non-platform agent record: the scaffolded file parsed, validated,
+  published, and then never appeared anywhere. The refusal names skills as the
+  surface to author instead.
+- **The `@capabilities` hook-body directive comment is retired** (`7940de5`,
+  #10917). **Nothing an author wrote has to change**: `loadConfig` runs every
+  config through `bundle-require` and esbuild, which strips `//` line comments
+  before the handler is ever a runtime function, so the directive reached the
+  extractor from none of the four ordinary authoring shapes. A config that still
+  carries the comment builds to the same artifact. Declare capabilities as data in
+  `body.capabilities` on the hook or action.
+
+#### Smaller breaking changes in 17.2.0
+
+- The better-auth-native `/api/v1/auth/admin/` routes refuse an anonymous caller
+  with the declared ADR-0112 envelope instead of a `401` whose body was the empty
+  string under an `application/json` header (`4d7c564`, #10349). Statuses and
+  admission are unchanged; what is added is the machine-readable `code`.
+- `IHttpOutbox.redeliver` and `MessagingService.redeliverHttp` change signature so
+  the caller's tenant is threaded rather than swept globally (`cdaa72f`, #10740).
+  `SqlHttpOutbox.redeliver` now rides the predicate path, so a delivery row
+  claimed between its read and its write is not reset and `redeliver` reports
+  `DELIVERY_NOT_ELIGIBLE` instead of success.
+- Thirteen logger sink types now declare a **non-optional** `warn`, so a
+  durability report always has somewhere to land (`e222a53`, `b47ba2c`, #9754,
+  #10556). Compile-time only — `error` stays optional, call sites keep the
+  `logger?.warn?.(…)` backstop, and no runtime behaviour changes. It can break a
+  host that injects its own reduced sink.
+- `driver-sql`'s `introspectSchema()` emits the spec introspection contract —
+  `primaryKey`, `dialect`, `introspectedAt` (`95437e7`, #10676, #10998).
+- The `/meta` FSM state route is singular: `meta.getLegalNextStates` moves and the
+  plural registration is retired (`67630c4`, #10077).
+
+### New capabilities in 17.2.0
+
+- **`lifecycle.ttl` accepts an `onlyWhen` row filter** mirroring
+  `retention.onlyWhen`, and the shared `onlyWhen` value union gains the platform's
+  canonical relative-date vocabulary (`8012960`).
+- **`os g skill NAME` scaffolds an AI skill**, written as `NAME.skill.ts` so the
+  loader finds it (`1c3a46f`, #11025) — the replacement surface `os g agent` now
+  points at.
+- **A per-column sortability projection** is served on
+  `GET /api/v1/meta/:type/:name` (`e5ea701`), so a console can disable the sort
+  affordance on a column the query engine will refuse rather than discovering it
+  at query time.
+- **`sharingModel` on the solution blueprint's object schema** — the enum
+  `private | public_read | public_read_write | controlled_by_parent` reaches the
+  design stage (`7d2d112`), and `nameField` joins the strict blueprint mirror
+  (`ceb33a9`).
+- **`theme` and `analytics_cube` are validated at the `/meta` write door**
+  (`2306a76`, #10194), so a Studio or API write is judged by the same rules as an
+  `os build`.
+- **`os migrate duplicates` reports the rows blocking the three `kernel:ready`
+  uniqueness reconciliations** (`2866d5f`) instead of leaving a boot to fail on
+  them.
+- **`MetadataRepository.watch()` replays from the durable log on a numeric
+  `since`** (`f334d66`), so a reconnecting watcher no longer silently starts from
+  now.
+- The runtime publish gate reaches further: list-view field rules judge a
+  standalone `view` write, and a standalone `ViewItem` record's nested
+  `config.sort` / `config.searchableFields` are judged there too (`adbcbfd`,
+  `f1b5ad3`, `def0d3e`) — Studio and metadata-API writes are held to the rules
+  `os build` already applied.
+- `os lint` reports an unparseable source instead of scoring it CLEAN
+  (`78818ec`, #10653); `os serve` refuses a relative `plugins: [...]` entry,
+  naming the two spellings that work (`e598b1c`).
+- Time-relative sweeps are idempotent per matched window (`73d9795`, #10220);
+  `sys_session` gains a declared ADR-0057 lifecycle policy (`dccbcec`, #7826); the
+  `manager` approver is screened to the request's organization (`13f533a`,
+  #10153); and the `__search` companion is no longer provisioned on objects whose
+  only companion source is the primary key (`2570ab0`, #10290).
+
+### New in Console (Studio) — objectui pin `9a3daf8d37ad → 190fbd01d061`
+
+One pin move (`208bd22`), derived from 113 releasing changesets over 141 objectui
+commits. What a console host or an author notices:
+
+- ⚠️ **Console hosts:** `options.actor` is removed from `MetadataClient`'s `save`
+  / `reset` / `publish` / `rollback`, and the `X-Actor` request header is no
+  longer emitted (objectui `8e00bfd28`). The six retired `@objectstack/spec/ui`
+  theme-schema re-exports leave `@object-ui/types/zod` with the `themes`
+  retirement above (objectui `920165d18`), and `ThemeComponentSchema`
+  (`type: 'theme'`) — a component kind no renderer implemented — is retired
+  (objectui `78cbdb530`), as is the register-meta key `defaultChildren`
+  (objectui `fa429cf6f`).
+- **`stack` reads its spacing from `gap` and nothing else** — the undeclared
+  `spacing` key it also accepted is gone (objectui `dd194635d`).
+- Authored predicates are actually consulted: `record:alert` binds its row through
+  `usePredicateRecordContext` so `properties.visible` is read (objectui
+  `8a4439081`), and a hoisted `properties.visible` stops swallowing a declared
+  `visibleWhen` (objectui `c86185eb5`).
+- `object-grid` / `object-form` / `detail-view` resolve their data source the same
+  way, and a block that resolves none says so (objectui `ebce5a367`); `ReportView`
+  reads `dataSource.object`, the one key the contract declares (objectui
+  `60d452ee0`); `data-table` reads the declared `header` (objectui `e719ebdd9`).
+- Create forms pre-fill the `current_user` `defaultValue` token with the acting
+  user (objectui `3c9fca3dc`); three more secret-field spellings stop rendering a
+  secret in clear text on the unregistered-widget branch (objectui `91783c47b`);
+  and a screen flow's resume result reaches the user on both outcomes (objectui
+  `c40f3b8ca`).
+
+The per-commit list is in `packages/console/CHANGELOG.md` under `## 17.2.0`,
+which records the upstream objectui commit for every entry.
+
+---
+
+## What's new in 17.3.0
+
+17.3.0 was published to the `latest` tag on **2026-09-04**, twelve days after
+17.2.0. The version-locked train moved the same **69 packages**, carrying **862
+distinct changelog entries and no major** — **100** of which mark themselves
+BREAKING. (Counted across the 69 package `CHANGELOG.md` files; an entry that
+lands in several packages is counted once.) It is by a wide margin the largest
+release of the v17 line. The bundled Console advances four pins,
+`190fbd01d061 → 9602dc820450 → d8ec8d6d4f01 → 67dadd602a3a → 00d3f09c500c`.
+
+⚠️ **Read this before treating the version number as a safety guarantee.** As with
+17.1.0 and 17.2.0, entries that landed after the 17.0.0 cut ship as `minor` under
+the lockstep launch-window convention while being explicitly breaking. Three
+things in this release change behaviour on a **running** deployment with nothing
+to parse-fail on — the audience-posture default, the tenant-scoping of
+`sys_record_share`, and the newly-enforced `driver-memory` uniqueness — and one
+renames a published SDK namespace with **no aliases at all**.
+
+### Breaking changes & migration in 17.3.0
+
+**This section is triaged, not exhaustive.** An entry is written up here when the
+change can be reached from something an application ships or operates — its
+metadata, its data, its own code calling the SDK / REST / CLI, its deployment
+config, or a plugin it authors. On that rule 94 of the release's 100 self-marked
+BREAKING entries are named below, by changeset hash, and six are left to the
+per-package `CHANGELOG.md` files because nothing an application can author or
+call reaches them: the six branded identifier schemas and `EventNameSchema`
+(`45b9051`), `MetadataChangedEventPayloadSchema` — a payload nothing ever emitted
+or consumed (`50d6c92`), `RestApiEndpoint.handlerStatus` with the Route Coverage
+Report shapes (`53d3689`), the orphan `CLICommandContributionSchema` export
+(`7a25e7d`), `SendTemplateInput.org` (`8619f95`), and `FilesystemLoader.list()`
+reporting only the names its siblings can resolve (`4b4d5a3`). The four Console
+pin refreshes are named once under [New in
+Console](#new-in-console-studio--objectui-pins-in-1730) rather than enumerated
+here.
+
+#### `client.projects.*` becomes `client.environments.*` (#12866, #12882, ADR-0006 D2)
+
+**No aliases exist.** The old namespace is gone, not deprecated — there is no
+`client.projects` getter, no `res.project ?? res.environment` hedge, and none is
+coming (ADR-0006 D3 declined a mapping layer with reasons; the v5.0 rename rule
+「no aliases」 is the standing one). Every call site moves in one edit
+(`87042b5`). This is the **SDK half** of one coordinated cross-repo rename; the
+producer half is the cloud control plane, renaming the same field keys on the same
+endpoints.
+
+**Method namespace.** Every member moves, `list` / `get` / `create` / `update` /
+`delete` / `activate` / `rotateCredential` / `updateHostname` / `updateVisibility`
+/ `listRevisions` / `listBranches` / `renameBranch` / `deleteBranch` /
+`retryProvisioning` / `listDrivers`, and the nested `client.projects.packages.*`
+with them:
+
+```ts
+client.projects.list(…)          // before
+client.environments.list(…)      // now
+```
+
+**The environment-scoped sub-client** moves in the same edit — `client.project(id)`
+→ `client.environment(id)`, and the exported class `ScopedProjectClient` →
+`ScopedEnvironmentClient`. An `import { ScopedProjectClient }` fails at the import
+line, which is the loudest and most precise channel this change has. Nothing about
+its behaviour moves.
+
+**Response keys.**
+
+| before | after | where |
+| :--- | :--- | :--- |
+| `res.projects` | `res.environments` | `list` (the `total` key is unchanged) |
+| `res.project` | `res.environment` | `get`, `update`, `activate`, `updateHostname`, `updateVisibility`, `retryProvisioning` |
+
+The joined blocks on `get` (`database`, `credential`, `membership`,
+`organization`) keep their names, as do every `packages.*` key, the `delete` /
+`listBranches` / `renameBranch` / `deleteBranch` payloads and `listRevisions`.
+The **URL paths are unchanged** — they were already on the `environments`
+spelling.
+
+**CLI.** `os environments list | show | create | switch | bind` follow the same
+rename. No flag, argument, exit code or command id changes, but `--format json` /
+`--format yaml` payloads are the control-plane response verbatim, so **a script
+reading `.projects` or `.project` from those payloads reads `.environments` /
+`.environment` instead.**
+
+Two declarations that were *false* before this change are corrected rather than
+carried forward: `create` never answered a `project` key at all (it has always
+answered `{ environment, warnings, durationMs, hostnameAssignment? }`), and it
+declares no `database` key. `os environments create --activate` silently never
+activated because it read `res.project.id` through the wrong declaration; both are
+fixed here.
+
+⛔ Deliberately **not** renamed, each needing its own decision: `setProjectId` /
+`getProjectId` on the client (a cross-package protocol contract), and the REST API
+config keys `enableProjectScoping` / `projectResolution`.
+
+#### One declared audience posture, defaulting to `invite_only` (`4f24e9d`)
+
+"Who may become a user of an environment's apps" is now **one** declaration
+instead of an emergent property of five switches — and its default flips to the
+safe end.
+
+- **FROM:** an undeclared audience meant open email/password self-registration
+  with no email verification, and self-registrants implicitly fell back to the
+  `member_default` permission set.
+- **TO:** an undeclared audience **is** `invite_only`. Self-serve sign-up —
+  email/password, social-provider OAuth JIT, magic-link/OTP/phone/anonymous, and
+  any unclassified creation method — is refused `403 SELF_REGISTRATION_CLOSED`
+  unless the address holds a pending `sys_invitation`. The first account on a
+  fresh install is exempt (the bootstrap bypass).
+
+⚠️ **Nothing parse-fails.** A deployment that meant to stay open upgrades into a
+closed door. **One-line fix:**
+
+```ts
+auth: { audience: { posture: 'open', selfRegistrationPermissionSet: 'member_default' } }
+```
+
+The new `auth.audience` surface on `AuthConfig` declares `posture`
+(`invite_only | email_domain | open`), `allowedEmailDomains` (required non-empty
+for `email_domain`) and `selfRegistrationPermissionSet` (required whenever the
+posture permits self-registration; `admin_full_access` is refused). Off-vocabulary
+postures and inert declarations are refused at parse **and** at plugin-auth's
+config entry — never coerced. `email_domain` admits only allowlisted domains
+(`403 EMAIL_DOMAIN_NOT_ALLOWED`; exact case-insensitive match, subdomains not
+implied). Any self-registration-permitting posture **forces**
+`requireEmailVerification` on, and an explicit `false` beside it is refused at
+boot.
+
+⛔ **Operator-driven creation is never posture-gated:** admin create-user, bulk
+import, SCIM provisioning and JIT through operator-registered identity providers
+keep working under every posture.
+
+#### A permission-store read failure fails LOUD (#13279)
+
+`resolveAuthzContext`'s per-read helper answered a **thrown** read exactly the way
+it answered an **empty** one, so an outage of the permission store resolved as a
+well-formed context for an authenticated principal holding no capabilities — and
+the door answered `403 FORBIDDEN`, measured byte-identical to what a caller who
+genuinely holds nothing receives. An administrator was told they lack a
+capability, during an outage of the store that holds the capability (`6a180e4`).
+
+An **unreachable** store now raises `AuthzStoreUnavailableError`, carrying the
+existing ADR-0112 code `SERVICE_UNAVAILABLE` and status `503`. No code is added to
+the closed wire vocabulary. What did **not** change, and is pinned: a reachable
+but genuinely empty store still resolves to zero capabilities; a genuine denial
+still answers `403 FORBIDDEN`; a real engine whose `sys_*` tables were never
+provisioned still resolves to zero capabilities, quietly; anonymous requests never
+reach the store.
+
+**Migration.** This is all-transport, not just REST. A caller that treats *any*
+throw from `resolveAuthzContext` as "anonymous" should re-raise
+`isAuthzStoreUnavailableError(err)` instead — degrading it restores the disguise
+this removes. `isMissingTableError` moved to `@objectstack/types`;
+`@objectstack/metadata/errors` still re-exports it, so no consumer of that
+published subpath changes.
+
+#### `driver-memory` enforces the uniqueness it always declared (#13197, #13239)
+
+`InMemoryDriver` enforced **no uniqueness at all**: `create` was a `table.push()`,
+so a `unique: true` field (`56c093c`) and a `unique` object-level `indexes[]`
+entry (`b7f645a`) were declared-and-not-enforced — the colliding write landed and
+a read returned both rows. Both surfaces now refuse with the SQL family's
+envelope: `code: 'UNIQUE_VIOLATION'`, `status: 409`. The scoping is `driver-sql`'s,
+reproduced arm for arm rather than reinvented.
+
+⚠️ **This is the entry most likely to present as "our seed data stopped
+loading".** 57 in-repo production and metadata declaration sites carry a `unique`
+`indexes[]` entry — `sys_user`, `sys_session`, `sys_setting`, `sys_metadata`,
+`sys_member`, `sys_team_member` and most of the identity surface among them — so
+any stack served by `InMemoryDriver` newly enforces constraints the SQL family
+already enforced. Every one of those refusals is a write SQL would have refused
+too, and existing rows are never retroactively refused. **Migration:** a fixture
+that relied on duplicates landing on a declared-unique field must stop declaring
+`unique`, or stop writing the duplicate.
+
+⚠️ **Bare `true` means the opposite on the two surfaces, and this reproduces the
+disagreement rather than smoothing it.** At **field** level `unique: true` is the
+positional spelling of `'organization'`; on a **declared index** it is the
+positional spelling of `'global'` — the listed columns verbatim, no organization
+key part. That is deliberate, and it is staged for retirement at protocol 18.
+
+#### `sys_record_share` is tenant-scoped, and pre-existing rows need a backfill (#14484)
+
+Every `sys_record_share` row on every deployment was written with
+`organization_id = NULL`: `SharingService.grant` wrote under a bare system context
+and the row literal never carried the column. Reads agreed with writes, so nothing
+was visibly broken; what the NULL cost was the cliff — the first tenant-facing read
+of the table inherits plugin-security's Layer 0, whose strict
+`organization_id = :tenant` wins, and **every existing grant silently disappears**
+(not refused; simply "this person was never granted access") (`3f64fe6`).
+
+**Writer.** `SharingService.grant` now stamps `organization_id` on both halves of
+its upsert. A rule-materialised grant carries the granting rule's organization; a
+direct grant carries the shared record's organization, with the acting session's
+organization as the fallback only for a record that carries none.
+
+**Ops — the backfill, dry run first and by default.** An operator-invoked module
+scans only rows whose organization column is unset, re-reads each row's record at
+repair time, and stamps the row with the record's own organization:
+
+- `planSysRecordShareOrganizationBackfill(engine)` reads only and returns a report
+  naming every row it would touch.
+- `runSysRecordShareOrganizationBackfill(engine, { dryRun: false })` writes.
+
+Nothing runs at boot and nothing is scheduled. It is idempotent by construction.
+Orphan rows — grants whose record no longer exists — are left NULL, counted and
+logged, never deleted here: that population is already owned by the
+`kernel:bootstrapped` orphan sweep.
+
+⚠️ **On a walled install, two shipped paths that can resolve no organization now
+meet a loud refusal** (`ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED`, status 500) where
+they previously wrote a NULL row: a platform-global sharing rule matching an
+organization-less record, and a direct grant whose read of the shared record's
+organization failed. On a `single` install with exactly one organization both
+derive it.
+
+#### `POST /api/v1/automation/:name/toggle` requires `manage_metadata` (`266436a`)
+
+| | before | after |
+| :--- | :--- | :--- |
+| authenticated caller **with** `manage_metadata` | 200, flow toggled | 200 — unchanged |
+| authenticated caller **without** it | 200, flow toggled | **403 `PERMISSION_DENIED`** |
+| anonymous caller | 401 | 401 — unchanged |
+| engine self-invocation (`isSystem`) | 200 | 200 — unchanged |
+
+Nothing else on the domain moves: `POST /:name/trigger`, the legacy
+`POST /trigger/:name` and `POST /:name/runs/:runId/resume` are untouched, so
+ordinary members can still run the flows built for them, and
+`GET /automation/_status` still serves enablement to any authenticated caller.
+
+The measurement behind it: the enabled bit is not a row, so no organization wall
+scopes it. A tenant org owner without the capability — refused `403` by
+`PUT /meta/:type/:name` at the same session — switched a shipped flow off, and an
+unrelated tenant in a **different** organization read it off. Disabling a shipped
+flow is functionally equivalent to deleting it for as long as it stays off, and
+`DELETE /:name` was already gated.
+
+**Migration.** A caller that toggles flows programmatically —
+`client.automation.toggle(name, enabled)` — must present a principal holding
+`manage_metadata`.
+
+#### Four SDK methods stop handing you the dispatcher envelope (#13079)
+
+`analytics.query` / `analytics.meta` / `analytics.explain` and
+`automation.trigger` ended `return res.json()`, so their callers alone had to read
+`.data`. All four now resolve to the payload, as every other dispatcher-served
+method already did (`db16b94`).
+
+| method | resolves to (now) | rewrite |
+| :--- | :--- | :--- |
+| `client.analytics.query(q)` | `AnalyticsResult` | `r.data.rows` → `r.rows` |
+| `client.analytics.meta(cube?)` | the bare cube list | `r.data[0].name` → `r[0].name` |
+| `client.analytics.explain(q)` | `{ sql, params }` | `r.data.sql` → `r.sql` |
+| `client.automation.trigger(name, payload)` | `AutomationResult` | `r.data.status` → `r.status` |
+
+For the three analytics methods every old read is a compile error (TS2339), so a
+TypeScript consumer finds each site at build time. ⚠️ **`automation.trigger` is
+the exception the compiler will not point at:** `r.success` and `r.error` compile
+before *and* after, because `AutomationResult` declares them itself — but their
+**meaning** moves, from the envelope's always-`true` flag to the run's own. A
+consumer branching on either must re-read that branch by hand. A JavaScript
+consumer reads `undefined` from `.data`.
+
+⛔ **Your `catch` blocks are unchanged.** Non-2xx answers threw before and throw
+now, carrying the ADR-0112 envelope; this convergence is not "errors now throw".
+`client.analytics.queryDataset(...)` is not converted — it never had an envelope.
+
+#### Compound metadata addressing is retired (`7986d97`)
+
+Stage 3 of the retirement of slash-bearing metadata item names. Stage 1 declared
+the item-name grammar and refuses every slash-bearing name at the publish door
+(`311433f`, #12194), so the routes removed here addressed only names that can no
+longer be created.
+
+| stops answering | use instead |
+| :--- | :--- |
+| `GET /api/v1/meta/:type/:section/:name` | `GET /api/v1/meta/:type/:name` |
+| `PUT /api/v1/meta/:type/:section/:name` | `PUT /api/v1/meta/:type/:name` |
+| `GET /api/v1/meta/:type/:section/:name/published` | `GET /api/v1/meta/:type/:name/published` |
+
+A request to a retired path now answers `404 ROUTE_NOT_FOUND`. Address every item
+through the single-segment route and percent-encode the name:
+
+```
+GET /api/v1/meta/lead/views/all_leads   →   GET /api/v1/meta/lead/views%2Fall_leads
+```
+
+**`@objectstack/client` callers need no change** — the SDK already sends the new
+spelling, and the encoding is a no-op for every name the item-name grammar admits,
+so the bytes on the wire are unchanged for every name that can be written today. A
+pre-grammar residue row whose stored name contains a slash stays readable,
+writable and deletable.
+
+#### The `RestServerConfig` blocks are parsed, not ignored
+
+`RestServer` now parses `config.api` (`1394768`), `api.projectResolution`
+(`8965398`) and `config.crud` (`f60ab90`) by name, and the ten inert keys the
+liveness ledger recorded as `dead` are removed (`b3a63d3`, #14691). A key that
+used to be accepted and silently dropped — leaving the server on its defaults — is
+now refused by name.
+
+#### Author-time refusals that can fail a stack which built clean on 17.2.0
+
+Re-run `os validate` / `os build` after upgrading. Each of these is a parse-time
+refusal naming the key, not a silent drop:
+
+- **Plugin manifests go strict.** `manifest:` refuses unknown keys, with its
+  nested `contributes` / `kinds[]` / `engine` / `engines` blocks (`4d0d944`), and
+  the `contributes` block loses its last ten dead members — `events`, `menus`,
+  `themes`, `translations`, `actions`, `drivers`, `fieldTypes`, `functions`,
+  `commands` (`be21955`, #10724) and `routes` (`bc56e18`, #10726) — as do the
+  three dead top-level containers `capabilities`, `configuration`, `extensions`
+  (`dce5cd4`, #11332).
+- **`page.components[].responsive` and the `ResponsiveConfig` layout vocabulary
+  are retired** (`2a6122b`, #11027).
+- **The `allowRestore` / `allowPurge` object-permission bits are retired** —
+  declared gates on operations that do not exist (`8af88dd`, #12497).
+- **`lookup` / `master_detail` fields require a non-empty `reference`**
+  (`0fb8760`, #13632).
+- **An `autonumber` field is `unique: 'organization'` by default**; explicit
+  `unique: false` opts out (`f8e8f03`, #13894). Read this beside the
+  `driver-memory` enforcement above — the two compose.
+- **`null` is refused in comparand positions**: `$in` / `$nin` members and
+  `$between` bounds (`e398863`), and the ordering comparands `$gt` / `$gte` /
+  `$lt` / `$lte` (`d16df74`).
+- **`address` and `location` values refuse undeclared keys** (`d62f990`, #13802).
+- **An authored `radio` with `multiple: true` is refused at the schema layer**
+  (`348860c`, #11437).
+- **Calendar in `appearance.allowedVisualizations` requires
+  `calendar.startDateField`** on list views (`96e25a8`, #13817).
+- **`defineStack` refuses two actions resolving to one scope-qualified runtime
+  key**, and `composeStacks` refuses two input stacks that do (`279431e`,
+  `35dffea`); `defineStack` also refuses a stack declaring an auto-launched flow
+  while `requires` omits `'triggers'` (`948dd6b`, #14153).
+- **A `type: 'script'` action may not declare both post-success navigation
+  channels** — `onSuccess` beside `opensInNewTab: true` is refused, and
+  `newTabUrl` without `opensInNewTab` is refused (`387e231`, `2d4fa75`). Pick one
+  destination: keep `onSuccess`, or keep `opensInNewTab` plus the handler's
+  returned `redirectUrl`.
+- **`ComponentPropsMap` convergences:** `element:number`'s `filter` onto the
+  `ViewFilterRule` array form (`79b6a22`), `object-grid`'s `data` onto
+  `ViewDataSchema` (`8f79379`), `object-grid`'s legacy `defaultSort` fallback
+  retired (`e6ca40e`), the per-option `default` key narrowed out of the form-view
+  options vocabulary (`c459da6`), and `user:profile` refused by name as not
+  author-placeable (`97a2263`).
+- **The `sys_scim_provider` platform object is retired** (`4d25d22`, #11757), and
+  with it the `AUTH_SCIM_PROVIDER_SCHEMA` / `AUTH_SSO_PROVIDER_SCHEMA` public
+  exports (`911da5f`, `89448a5`).
+- **Further ADR-0049 retirements of authorable surfaces**, each a refusal naming
+  the key with "delete the key" as the whole migration: the `element:form`
+  element at element grain (`7345308`, #9249), the import-mapping `lookup`
+  transform's steering params (`15d58db`, #10329), the authorable
+  `AdvancedPluginLifecycleConfig` surface (`40a93b5`, #11825),
+  `HotReloadConfig.distributedConfig` and `watchPatterns` together with the two
+  `stateStrategy` values that were never implemented (`4635f3e`, #12340;
+  `ee3595c`, #12428), the inert `PluginMetadata` surfaces `configSchema` and
+  `hotReloadable` (`49f0dcf`, #11982, #12587), the three `PluginHealthCheck`
+  restart keys the monitor never performed (`b72db01`, #12032), the
+  component-translation `submitLabel` copy key (`d173125`, #10926), and the paper
+  metadata-customization protocol with its full coupling set (`9e0ba21`, #13135).
+
+#### Runtime and driver behaviour changes worth checking
+
+- **A `multi: true` update whose per-row `beforeUpdate` hooks write divergent key
+  sets is refused** (`dee4dd4`, #14099), and **an undeclared field a `before*` hook
+  writes is refused identically on every driver** (`b003cf2`).
+- **A third `UPDATE_ID_MISMATCH` shape refuses** — a bound truthy scalar payload
+  `data.id` beside a *declared but non-scalar* `options.where.id` (`{ $in: [...] }`,
+  an array, `null`) (`5d16379`, #11230). This is the shape 17.2.0's #11142
+  deliberately left standing.
+- **`update()` on a missing id answers `null` on MongoDB and on Turso's remote
+  face** (`ca3fd4b`), and `driver-memory`'s `update()` / `upsert()` publish their
+  honest types (`93940d4`).
+- **`redshift` / `cockroachdb` DDL is refused by name** and `pgnative` joins the
+  Postgres family (`dfebfc8`, #11991); the dangling `postgres` and `nats` values
+  leave `ClusterDriverSchema` (`c85a265`, #13393).
+- **`sys_oauth_resource.identifier` narrows 1024 → 255**, and the referring column
+  with it (`d79c602`, #12313).
+- **Walled postures elevate only the env-declared platform owner, never the first
+  registrant** (`9735662`, #11184), and the metadata HMR door is gated on an
+  explicit development posture (`f4e7ae5`, #12140).
+- **`publicSharing.eligibility` and `publicSharing.enabled` are held at
+  redemption, not only at mint** (`fc9ba76`, `13bf05d`, `20293d6`) — a share link
+  minted while sharing was enabled stops redeeming once it is disabled.
+- **`escalation.enabled` defaults to `true` and the SLA sweep finally reads it**
+  (`277948f`, #12278) — an approval process that declared escalation and saw none
+  now escalates.
+- **`controlled_by_parent` composes across a chain**: a child whose master is
+  itself derived is no longer readable and writable org-wide (`6171331`, #11082).
+- **`ExecutionStepLog.iteration` is single-valued** — the enclosing loop iteration
+  — and the parallel branch index moves to a new optional `branch` key (`8ab926b`,
+  #14414).
+- **`os serve` defaults `NODE_ENV` to `production` when unset**, exactly as
+  `os start` already did (`918988a`, #11113); `os validate --json --strict` exits
+  1 on the configs `--strict` already exits 1 for (`ab23c67`, #11174); and the
+  multi-node cluster gate fails **closed** when unregistered, mounted on every
+  boot route (`4d672c4`, #13537).
+
+#### Smaller breaking changes in 17.3.0
+
+- **Four SDK response contracts are declared where they were unbound or wrong.**
+  The 17 previously-unbound client-SDK methods get their published response
+  contracts, and the false `PackageRollbackResponseSchema` is retired
+  (`dc75ba8`, #12038); `meta.deleteItem` declares the response the reset door
+  actually sends (`426ad58`, #13023); `SaveReportInput`'s requirements are stated
+  at the `reports.save` door (`3519f8d`, #11926). A TypeScript caller reading a
+  member the route never sent now sees it at build time.
+- **A published package must declare an `exports` map**, and that is now a gate
+  (`6a571d3`, #12879).
+- **`Plugin.type` is the closed set the spec declares** — a `PluginType` derived
+  from `CORE_PLUGIN_TYPES` (`d8024f0`, #13925), so a plugin declaring an
+  off-vocabulary type is refused rather than silently unrouted.
+- **`getUiView`'s list branch honours `hidden` on the priority pass**, not just
+  the fill pass (`2a75270`, #13259) — a field marked hidden stops appearing in a
+  served list view's leading columns.
+- **A quoted-empty `If-Match` entity-tag is refused** instead of silently
+  disabling optimistic concurrency (`47389b3`, #13576).
+- **The flat-input proxy refuses a symbol key** at `set` / `defineProperty`
+  instead of silently persisting it (`c34f693`, #12603).
+- **A deleted record's pending approvals auto-cancel** instead of stranding in the
+  inbox (`dda969c`, #13568), and a contained per-iteration flow failure becomes
+  visible in the run contract — run-level `failed`, loop iteration through `try` /
+  `catch`, row identity on `$error` (`18d816a`, #13681).
+- **Wizard view v1** tightens `FormViewSchema` `type: 'wizard'` into a
+  declaration-and-refusal shape (`4bc18e5`, #13704); `cloud-connection:panel`,
+  `marketplace:installed-list` (`772d5de`) and `mcp:connect-agent` (`ce80ec2`)
+  are declared in `ComponentPropsMap`, so undeclared keys on those three widgets
+  are refused; and `KnowledgeRefreshPolicy.cron` is typed with the shared cron
+  dialect (`778c59f`, #14825).
+- **Deleting a datasource evicts its driver from the data-engine registry**, so
+  `/api/v1/ready` recovers without a process restart (`ba64877`); a nested
+  datasource-config credential position is treated identically to the top-level
+  key it mirrors (`51ecb2f`, #13405).
+- **Driver-level storage corrections that change stored or returned bytes:** the
+  SQLite `Field.json` codec becomes injective, one encoding across all three
+  dialects (`4045b95`, #12380), and MySQL stamps `updated_at` at the audit
+  column's own precision so an updated row stops reading as modified *before* it
+  was created (`64505a5`, #11224).
+- **Interfaces a custom driver or plugin implements move:** `IDataDriver.update()`
+  declares its not-found arm (`93940d4`, #13878), `DatasourceDriverHandle.introspectSchema`
+  declares the spec introspection contract (`3d79144`),
+  `StrategyContext.executeAggregate`'s `aggregations[].method` narrows from
+  `string` to `AggregationFunction` (`d028b37`, #12776), `INotificationOutbox.ack()`
+  takes back the claimed record instead of a bare row id (`d9cf78e`), and
+  `sweepOrphanedRowsByRecordExistence`'s published parameter is tightened
+  (`3194c91`).
+
+### New capabilities in 17.3.0
+
+- **A project of N packages compiles into one `packages[]` artifact**, with the
+  assembled package body declared (`7085f90`, #14439; ADR-0130). `composeStacks`
+  gains `manifest: 'preserve'` so N package identities survive composition
+  (`2e3e8c7`), and `EnvironmentArtifactSchema` declares `grantedPermissions` — the
+  install-time granted permission set per plugin (`e58ea8b`).
+- **A row action gets the declarative single-record field write** —
+  `operation: 'update'` plus `patch`, with no handler to write (`effae80`,
+  #14092).
+- **A layout section can reference a declared field group** instead of copying its
+  members (`39404f3`, #13855), and `fieldGroups[].visibleWhen` returns — this time
+  with its enforcement (`53dc739`, #12715).
+- **An already-published page can be mounted on an object view** — a `page` member
+  on the `view` type enum (`d23dc08`, #13216) — and the command palette indexes
+  published pages through a page hit kind on `GET /api/v1/search` (`e764507`).
+- **A sharing rule can share each matched record with the user or users named by a
+  field on that record** — `ShareRecipientType` gains `field` (`0f94cc7`).
+- **`sys_user.locale` is a first-class column** carrying the user's own
+  notification language (`1401ae7`, #13881), a user may set their own
+  (`2fd3f1c`, #14787), and auth mail follows the caller's `Accept-Language` with
+  the deployment default second (`4bb412b`, #14319).
+- **A rank-and-file member may edit their own `sys_user` row** (`ebb0822`,
+  #14959), and the verified platform owner bypasses the Layer 0 org wall
+  (`db39dfc`, #12974).
+- **An org-scoped presentation-authoring capability, `manage_org_presentation`**
+  (`15eb2c9`, #12702).
+- **The authorization-cache invalidation substrate** — an engine-seam write epoch
+  and the `authz.invalidated` channel (`4bd6faa`) — plus a cross-request
+  authorization grants cache (`86cbe37`, #11971) and a cached, synchronously
+  invalidated `sys_setting` localization read (`a8c00e2`, #11966).
+- **Runtime metadata mutations and datasource record writes fan out to peer
+  replicas** (`1403d94`, `ef8a4b9`), so a runtime-authored object no longer answers
+  from one node only and a deleted datasource stops draining on the others.
+- **`os lint` refuses a hook body that silently stopped being metadata**
+  (`ada3834`, #13651) and refuses a visibility predicate calling a CEL function the
+  environment does not register (`038f333`, #13594); list-view field references
+  (`aca23ab`) and an interface page's whitelisted visualizations (`e38da2b`) are
+  resolved at validate/build.
+- **`--format json` failure envelopes carry the ADR-0112 `code` and `httpStatus`**
+  (`098a08f`, #13347), and `os validate --json` / `os build --json` carry the
+  computed advisory lists and `conversions` on **every** failure exit, not the
+  success payload alone (`33e81a5`, `d114d5e`, `79cf692`). `os lint` surfaces
+  ADR-0087 conversion notices (`9fd45a9`, #12297).
+- **`os migrate plan` reports the platform-namespaced tables no declaration
+  accounts for** (`3f7f8f5`, #13204), and `os migrate apply` refuses **before**
+  writing any DDL when the host config exists but could not be loaded (`b4f2cda`,
+  #13118).
+- **`meta.saveItem` can send the `If-Match` OCC header it already told callers to
+  send** (`6274a1a`, #11713), and `meta.deleteItem` — with `os meta delete` — can
+  pin a reset and discard only the pending draft (`cf71d73`, `2331b1e`).
+- **`AutomationResult.status` names the terminally-failed-but-repairable run,
+  `'stranded'`** (`bd4aa4e`, #14384), `AutomationContext.recordLoadDenied` gives
+  the flow the caller-scope record-load signal (`63cd487`, #14244), and
+  `FLOW_INPUT_SCHEMA_INVALID` becomes a registered never-dispatched exit
+  (`f90e820`).
+- **`DataEvent` and `BulkDataEvent` name the organization** the record or the
+  affected records belong to (`2aa8456`, `97bcd99`), so a tenant-scoped consumer
+  can tell whose event it is.
+- **`Field.valueDomain`** — one closed standard-domain vocabulary shared by
+  settings specifiers and object fields (`1d7e76a`) — and `editMode?: 'modal' |
+  'page'` on the object document (`f11fc61`, #11408).
+- **The SQL connection pool is sized from `OS_DATABASE_POOL_MAX`** (`c4e8bbc`);
+  SQLite-family JSON columns declare `TEXT` while server dialects keep native JSON
+  (`9f4a6d5`, #12738); and `driver-mongodb` indexes `lookup` joins off the
+  canonical `reference` key (`eaba72e`, #13222).
+- **`@better-auth/scim` moves from `1.7.0-rc.1` to stable `1.7.1`** — the
+  whole-model SCIM migration (`366f895`, epic #11632).
+
+### New in Console (Studio) — objectui pins in 17.3.0
+
+Four pin moves (`df59de0`, `83be460`, `7642aac`, `41b5a44`) carrying the console
+half of this release. The per-commit lists are in `packages/console/CHANGELOG.md`
+under `## 17.3.0`, which records the upstream objectui commit for every entry —
+including the entries objectui shipped with no changeset of their own, listed by
+subject there rather than counted.
+
+⚠️ **Console hosts and authors:** several published `@object-ui/types` surfaces
+are retired in this range — `MobileComponentConfig` (objectui `90665e07a`),
+`DetailViewSection.hideEmpty` (objectui `1f31d3af6`), `ObjectTrigger` and
+`ObjectRelationship` (objectui `41df89320`), and the `ActionCondition`
+`{ expression, then, else }` branch shape on `ActionSchema.condition` (objectui
+`6a9158602`). Relationship-target readers resolve a lookup's target from
+`reference` alone, dropping the `reference_to` fallback arm (objectui
+`045d20ba8`).
+
+---
+
+## Upgrade checklist
+
+One checklist per release, for the release you are landing on **and** every
+release you cross to get there. 17.2.0 and 17.3.0 do not have a consolidated
+checklist here yet; until they do, their migration steps are the per-change
+**Migration** notes in [Breaking changes & migration in
+17.2.0](#breaking-changes--migration-in-1720) and [Breaking changes & migration
+in 17.3.0](#breaking-changes--migration-in-1730), which is where
+[Upgrading](/docs/upgrading#per-release-specifics) points for those two releases.
+
+### 17.0.0
 
 - **Node:** move to Node 22+ (and pin CI to 22).
 - **Export:** add `allowExport: true` to every environment-authored permission
@@ -4280,7 +5168,7 @@ Two pin moves in this release (`665661ab0932 → 82a94170c405`, then
   computing nothing.
 
 
-#### 17.1.0
+### 17.1.0
 
 ⚠️ Despite the minor version number, four of these are behaviour changes on live
 data or on a published wire contract. Work through them before upgrading.
@@ -4380,7 +5268,7 @@ data or on a published wire contract. Work through them before upgrading.
   `errorMessage` and the run `summary` in `error.details` — review anything that
   parsed the previous generic text.
 
-### References
+## References
 
 ADR-0104 (field runtime value-shape contract / file-as-reference) · ADR-0105
 (group tenancy posture) · ADR-0106 (metadata-plane FLS, proposed) · ADR-0108

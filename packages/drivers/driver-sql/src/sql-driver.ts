@@ -6905,7 +6905,16 @@ export class SqlDriver implements IDataDriver {
     }
   }
 
-  async update(object: string, id: string | number, data: Record<string, any>, options?: DriverOptions): Promise<any> {
+  /**
+   * [#14438] Declared as `IDataDriver.update()` declares it: the updated
+   * record, or `null` when no row carries `id` — the un-rotated path answers
+   * `formatOutput(...) || null` and the rotation path answers `null` once
+   * every shard has been probed. The annotation used to be an explicit
+   * `Promise<any>`, which an un-narrowed caller could read fields off with no
+   * compiler complaint; it is the contract's type now, pinned by
+   * `sql-driver-update-declared-null.test.ts`.
+   */
+  async update(object: string, id: string | number, data: Record<string, any>, options?: DriverOptions): Promise<Record<string, unknown> | null> {
     this.auditMissingTenant(object, 'update', options);
     const rotationShards = this.rotationShardsOf(object);
     if (rotationShards) return this.rotatedUpdateById(object, rotationShards, id, data, options);
@@ -7987,7 +7996,7 @@ export class SqlDriver implements IDataDriver {
     id: string | number,
     data: Record<string, any>,
     options?: DriverOptions,
-  ): Promise<any> {
+  ): Promise<Record<string, unknown> | null> {
     const formatted = this.applyWriteColumnMap(object, this.formatInput(object, data));
     // [#11067] One definition of the decision, shared with {@link update}. No
     // fallback is threaded here, and that is a property of the path rather than

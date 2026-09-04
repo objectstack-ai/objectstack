@@ -23,7 +23,7 @@
  * The key set that separates them is **derived from the two schemas**, never
  * transcribed here — `ObjectStackDefinitionSchema` ∩ `AssembledPackageBodySchema`
  * is precisely "the collections a package owns", and the complement is the
- * seven artifact-envelope keys `packages/spec/src/assembled-package-body.test.ts`
+ * nine artifact-envelope keys `packages/spec/src/assembled-package-body.test.ts`
  * classifies. A hand-written list would be a third transcription of a set the
  * implementation already refuses to transcribe, and — the half that matters
  * here — a collection family added to the stack schema next month would join
@@ -64,7 +64,7 @@ export const PACKAGE_OWNED_COLLECTION_KEYS: readonly string[] = (() => {
   return shapeKeys(ObjectStackDefinitionSchema).filter((k) => bodyKeys.has(k)).sort();
 })();
 
-/** The seven keys an option-B artifact still carries at its top level. */
+/** The nine keys an option-B artifact still carries at its top level. */
 export const ARTIFACT_ENVELOPE_KEYS: readonly string[] = (() => {
   const owned = new Set(PACKAGE_OWNED_COLLECTION_KEYS);
   return shapeKeys(ObjectStackDefinitionSchema).filter((k) => !owned.has(k)).sort();

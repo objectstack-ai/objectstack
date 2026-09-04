@@ -66,9 +66,17 @@
  *
  * Run with `OPTION_B_LOSSES` emptied on `origin/main` `33681eaef`, the pin
  * reports **24 subsystems** losing their collections, across all three packages
- * the program scopes — the full red output is recorded in this card's PR body.
+ * the program scopes — the full red output is recorded in #15004's PR body.
  * In the SAME run the additive baseline and the `packages[]` control both pass,
  * which is what makes the red a discrimination rather than a broken fixture.
+ *
+ * Re-verified at the empty ledger, which is the state that could go vacuous:
+ * with `@objectstack/runtime`'s `resolveArtifactCollections` neutered to the
+ * identity function and that package REBUILT (the pin reaches it through its
+ * `exports` map, so `dist/` is what it measures), this pin goes RED naming
+ * exactly 23 rows — the same 23, byte for byte, that the ledger carried before
+ * #15005. Restored and rebuilt, 7 passed. So the empty ledger is a measurement
+ * of the readers, not of a probe that stopped looking.
  *
  * One row in that output is worth naming here, because it is a loss no
  * presence-check would have found: on the compiled path a function declared
@@ -80,27 +88,38 @@
  *
  * ## Boundaries — what this pin does NOT reach, stated rather than implied
  *
- * Three reads in the enumeration are expressions inline inside oclif command
- * bodies, with no exported reader and no service on the far side, so no probe
- * short of running the command reaches them. They are named here so the next
- * reader does not mistake this file for full coverage of the enumeration:
+ * ### Closed by #15006 (card 3/4)
  *
- *   - `serve.ts` `config.objects` gating ObjectQL engine auto-registration, and
- *     the sibling gate for storage-driver auto-registration. The artifact half
- *     of both IS covered — `createStandaloneStack` surfaces `objects` precisely
- *     so that path can drive them, and that row is in the table — but the
- *     from-source half is reachable only through a real `os serve`.
- *   - `dev.ts` `readArtifactObjects()`, a module-private function that opens the
- *     artifact with its own `JSON.parse(readFileSync(...))` to diff the object
- *     inventory across recompiles. Non-fatal; it goes permanently empty.
- *   - `compile.ts`'s union authoring-rule run, which under option B would judge
- *     an empty stack.
+ * Four reads were named here as unreachable: `serve.ts`'s two `config.objects`
+ * auto-registration gates on the FROM-SOURCE leg, `dev.ts`
+ * `readArtifactObjects()`, and `compile.ts`'s union authoring-rule run. They
+ * were unreachable not because of the artifact but because each was an
+ * EXPRESSION inside an oclif command body — no exported reader, nothing a probe
+ * could call. Card 3/4 introduced the seam
+ * (`packages/cli/src/utils/stack-collections.ts`), so the probe now carries a
+ * row per site and each one CALLS the decision the command makes. The
+ * prohibition that stood beside them still stands and is repeated where those
+ * rows live: ⛔ a row that asserts `config.objects` on an option-B config is a
+ * second copy of the read it watches, stays red after that read is fixed, and
+ * then gets deleted.
  *
- * ⛔ Do not "cover" these by asserting `config.objects` in this file. A row
- * shaped like the read it is watching is a second copy of the code the reader
- * program is about to change: it stays red after the reader beside it is fixed,
- * and a gate that cannot go green gets deleted. Cards 3/4 and 4/4 own those
- * sites; a probe for them belongs beside whatever seam those cards introduce.
+ * ⚠️ The two `serve.ts` gates were only HALF covered before, and the half that
+ * was covered is the ARTIFACT leg — `createStandaloneStack` surfaces `objects`
+ * precisely so that path can drive them, and that row is in the ledger. That
+ * row stays: `standalone-stack.ts` omits the key entirely when the array is
+ * absent, and no CLI-side seam can resolve what the runtime never surfaced. It
+ * is card 2/4's (#15005) to delete, not this file's.
+ *
+ * ### Still open
+ *
+ * `plugins` and `devPlugins` are package-owned collections by the same
+ * derivation every row here uses, and `serve.ts` / `schema-migration-plugins.ts`
+ * read them off the top level only. The zoo declares none, so no row measures
+ * them, and the fix is NOT mechanical: a JSON artifact's `packages[i].plugins`
+ * would be inert data where the call site expects a live plugin instance, and
+ * whether a live-object collection belongs in the package-owned key set at all is
+ * a `packages/spec` question upstream of every reader here. Filed as #15219
+ * rather than folded in.
  */
 
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -118,44 +137,44 @@ import { measureShape, type ProbeRow, type ShapeMeasurement } from './fixtures/o
 
 /**
  * The subsystems that silently lose their collection when the flattened top
- * level is gone — MEASURED on `origin/main` `33681eaef`, not curated.
+ * level is gone — MEASURED, not curated. ⭐ EMPTY: the reader half of the
+ * option-B program is done, and the emitter half (#14512) is unblocked.
  *
- * ⛔ SHRINK-ONLY, audited in BOTH directions (see the header). Each line names
- * a boundary, a subsystem and the collection it reads.
+ * How it got here, in the order the rows actually went:
  *
- * `@objectstack/verify`'s four rows are absent for a reason worth stating
- * rather than inferring: the by-shape sweep (#15210) found those sites, not
- * this pin, so card 5/4 (#15229) ADDED them here and DELETED them again inside
- * one PR — ledgered red first, then fixed. Both halves are in that card's
- * history; the probe still measures all four, which is what keeps a regression
- * in them red.
+ *   - opened at **24 rows** on `origin/main` `33681eaef` (#15004);
+ *   - **23 → 23** when #15007 (`@objectstack/plugin-security`) landed, deleting
+ *     `B2 · plugin-security appSecurityPluginOptions over the from-source
+ *     config`, the one row no artifact-side change could reach;
+ *   - **23 → 0** here (#15005), when `@objectstack/runtime` learned to resolve
+ *     `packages[]`: the whole of boundaries B1 and B5, and every B2 row whose
+ *     reader ships in that package.
+ *
+ * ⚠️ The last row to go was a plugin-security one and it is NOT #15007's twin
+ * arriving late: `B1 · plugin-security appSecurityPluginOptions over the
+ * artifact-serve config` runs that same reader over `createStandaloneStack`'s
+ * RESULT. Nothing inside `@objectstack/plugin-security` could move it — the
+ * standalone result carried neither the permission sets nor a route to them —
+ * and it goes green because that result now surfaces `permissions` resolved
+ * across both shapes, which plugin-security's existing top-level branch then
+ * answers. One reader, two boundaries, each owned by a different card: that
+ * split is what the header's B1/B2 distinction is for.
+ *
+ * ⛔ SHRINK-ONLY, audited in BOTH directions (see the header). An empty ledger
+ * is the STRONGEST state this pin has, not a disabled one: every row the probe
+ * measures must now be `present` in BOTH shapes, so a reader that regresses —
+ * or a new reader that arrives unresolved — is red on arrival with nothing left
+ * to absorb it. Adding a line is never how that red is fixed.
+ *
+ * `@objectstack/verify`'s four rows (#15229) are absent from this list for
+ * exactly that reason, and the reason is worth stating rather than inferring:
+ * the by-shape sweep (#15210) found those sites, not this pin, so that card
+ * LEDGERED them red first and then DELETED the entries again inside one PR, by
+ * fixing the readers rather than the ledger. Both halves are in its history;
+ * the probe still measures all four, which is what keeps a regression in them
+ * red.
  */
-const OPTION_B_LOSSES: readonly string[] = [
-  'B1 · AppPlugin declared-datasource auto-connect (compiled artifact) · datasources',
-  'B1 · AppPlugin job scheduling (compiled artifact) · jobs',
-  'B1 · AppPlugin objects handed to datasource connect (compiled artifact) · objects',
-  'B1 · AppPlugin ql.setDatasourceMapping (object routing) (compiled artifact) · datasourceMapping',
-  'B1 · AppPlugin seed datasets merged (compiled artifact) · data',
-  'B1 · AppPlugin translation loading into the i18n service (compiled artifact) · translations',
-  'B1 · createStandaloneStack surfaced objects (CLI tier resolution + engine/driver auto-registration) · objects',
-  'B1 · createStandaloneStack surfaced permissions (ADR-0056 D7) · permissions',
-  'B1 · createStandaloneStack surfaced positions · positions',
-  'B1 · plugin-security appSecurityPluginOptions over the artifact-serve config (default permission set) · permissions',
-  'B1 · runtime collectBundleActions (action dispatch registration) · actions + objects[].actions',
-  'B1 · runtime collectBundleFunctionEntries (declared function effect) · functions',
-  'B1 · runtime collectBundleHooks (declarative hook binding) · hooks',
-  'B2 · AppPlugin declared-datasource auto-connect (from source) · datasources',
-  'B2 · AppPlugin job scheduling (from source) · jobs',
-  'B2 · AppPlugin objects handed to datasource connect (from source) · objects',
-  'B2 · AppPlugin ql.setDatasourceMapping (object routing) (from source) · datasourceMapping',
-  'B2 · AppPlugin seed datasets merged (from source) · data',
-  'B2 · AppPlugin translation loading into the i18n service (from source) · translations',
-  'B2 · plugin-security appSecurityPluginOptions over the from-source config (default permission set) · permissions',
-  'B2 · runtime collectBundleActions over the from-source config · actions + objects[].actions',
-  'B2 · runtime collectBundleFunctionEntries over the from-source config · functions',
-  'B2 · runtime collectBundleHooks over the from-source config · hooks',
-  'B5 · resolve-project-database readConfigDeclaredDefault (project database tier) · datasourceMapping + datasources',
-];
+const OPTION_B_LOSSES: readonly string[] = [];
 
 const render = (rows: ProbeRow[], only?: (r: ProbeRow) => boolean): string =>
   rows
@@ -193,7 +212,7 @@ describe('#15004 — option-B acceptance pin: every subsystem must see its colle
     // than two empties agreeing.
     expect(PACKAGE_OWNED_COLLECTION_KEYS.length).toBeGreaterThan(30);
     expect(ARTIFACT_ENVELOPE_KEYS).toEqual(
-      ['api', 'i18n', 'manifest', 'onEnable', 'packages', 'runtimeModule', 'server'],
+      ['api', 'devPlugins', 'i18n', 'manifest', 'onEnable', 'packages', 'plugins', 'runtimeModule', 'server'],
     );
 
     // Every key option B drops is a package-owned collection, and every key it
@@ -236,8 +255,33 @@ describe('#15004 — option-B acceptance pin: every subsystem must see its colle
         `platform emits TODAY. This is never an option-B finding — it means the fixture stopped ` +
         `carrying a collection, or a reader regressed on the additive path.\n${render(additive.rows)}`,
     ).toEqual([]);
-    // Anti-vacuity: a probe that measured no rows would satisfy the line above.
-    expect(additive.rows.length).toBeGreaterThanOrEqual(OPTION_B_LOSSES.length);
+    // Anti-vacuity: the assertion above is satisfied by an EMPTY row set, so a
+    // probe that quietly stopped measuring has to be caught right here.
+    //
+    // ⚠️ RE-ANCHORED when the ledger reached zero. The floor used to be
+    // `OPTION_B_LOSSES.length`, which was a real bound only while the ledger
+    // was non-empty; at zero it reads `rows.length >= 0` — true of every
+    // array, including an empty one. It was dead code wearing a control's
+    // comment, and the fourth direction this file's header claims ("the probe
+    // itself quietly measuring less ⇒ RED") had silently stopped existing.
+    //
+    // 30 is MEASURED, not remembered: with this line temporarily written
+    // `expect(additive.rows.length).toBe(-1)`, the run reports
+    // `expected 30 to be -1`. Verified live at the boundary in the same
+    // session — a floor of 31 goes RED on the same fixture, so the assertion
+    // is not satisfied by construction.
+    //
+    // `>=` rather than `toBe` on purpose, and it is the same shrink-only
+    // direction the ledger uses: a row ADDED to the probe is welcome and stays
+    // green, a row that stops being measured is red. Raise the floor when the
+    // probe grows; ⛔ never lower it to make a red run green.
+    expect(
+      additive.rows.length,
+      `The probe measured ${additive.rows.length} rows, fewer than the 30 it measured when ` +
+        `this floor was set. A row that stops being measured stops being able to fail, which ` +
+        `is the one direction this pin cannot detect anywhere else — fix the probe rather ` +
+        `than the floor.`,
+    ).toBeGreaterThanOrEqual(30);
   });
 
   // ── The pin ──────────────────────────────────────────────────────────────
@@ -285,5 +329,21 @@ describe('#15004 — option-B acceptance pin: every subsystem must see its colle
     // are the B2 rows. The header's "Boundaries" section states what that does
     // and does not cover.
     expect(ids.some((id) => id.startsWith('B5 · resolve-project-database'))).toBe(true);
+  });
+
+  it('#15006 — the four cli reads that had no callable seam are each represented', () => {
+    // These four were named in this file's header as OUT of reach. They are in
+    // reach now, and this test is what stops them from quietly leaving again:
+    // the pin asserts set EQUALITY against the ledger, so a row that stopped
+    // being measured while it was GREEN would take nothing red with it.
+    const ids = optionB.rows.map((r) => r.id);
+    for (const site of [
+      'B2 · cli serve ObjectQL engine auto-registration gate (from source) · objects',
+      'B2 · cli serve storage-driver auto-registration gate (from source) · objects',
+      'B1 · cli dev artifact object inventory (readArtifactObjects recompile diff) · objects',
+      'B3 · cli build union author-time rule input (os build) · every package-owned collection',
+    ]) {
+      expect(ids, `#15006 site no longer measured: ${site}`).toContain(site);
+    }
   });
 });

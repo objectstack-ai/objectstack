@@ -5314,7 +5314,21 @@ const step18: MigrationStep = {
     '`reference` wins, a disagreeing pair is kept for the author), replays on every ' +
     'stored-row rehydration so the serve face only ever emits the canonical spelling, ' +
     'and `os migrate meta` rewrites old sources; the authoring-surface rejection with ' +
-    'its rename prescription is unchanged.',
+    'its rename prescription is unchanged. ' +
+    'It also retires `connector.errorMapping` (#14676, ADR-0049 enforce-or-remove; triage ' +
+    'ruling 2026-09-02): `ErrorMappingConfig` (4 keys) and its `ErrorMappingRule[]` (7 keys) ' +
+    'were authorable through `ConnectorSchema` — and, via `DeclarativeConnectorEntrySchema`, ' +
+    'through `stack.connectors[]` and the `/meta/connector` door — and read by nothing: no ' +
+    'provider, dispatcher or materializer ever mapped an external error through the rules, so ' +
+    '`unmappedBehavior` configured nothing and a rule\'s `userMessage` was never shown to ' +
+    'anyone. That spelling is the live API-error channel\'s (`ApiError.userMessage`), so an ' +
+    'author who wrote a rule here reasonably believed they were marking a refusal for an end ' +
+    'user; the failure was silent in both directions. The carrier key is a retiredKey ' +
+    'tombstone on the non-strict `ConnectorSchema` (a bare deletion would be a silent strip), ' +
+    'the three defs — `integration/ErrorMappingConfig`, `integration/ErrorMappingRule` and the ' +
+    'orphaned `integration/ConnectorErrorCategory` enum — leave via RETIRED_DEFS_BY_MAJOR, and ' +
+    'the mechanical conversion strips the block from `connectors[]` (pure lossless delete; ' +
+    'it never had an effect to lose).',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5331,6 +5345,7 @@ const step18: MigrationStep = {
     'permission-allow-restore-purge-removed',
     'form-view-option-default-removed',
     'field-reference-to-alias',
+    'connector-error-mapping-removed',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by
@@ -5521,6 +5536,53 @@ const step18: MigrationStep = {
         + 'keys at every level (cube, refreshKey, measures, dimensions, joins); '
         + 'every `/analytics/query` body\'s `timeDimensions[]` items carry only '
         + '`dimension`/`granularity`/`dateRange`. Declared keys parse byte-identically to before.',
+    },
+    // #15219 — maintainer ruling A for both keys (2026-09-04, director relay,
+    // verbatim 「同意」): `plugins` and `devPlugins` are artifact ENVELOPE keys —
+    // top level only, never inside `packages[]`. Registered as D3 SEMANTIC and
+    // deliberately NOT as a D2 conversion, on the D2 scope guard (lossless only):
+    // a plugin declared inside an assembled package body has no lossless target.
+    // `plugins` is `z.array(z.unknown())` and may hold live instances that never
+    // survived JSON in the first place, and hoisting a serialisable entry to the
+    // artifact top level changes WHO loads it (the host, not a package) — a
+    // judgment the author makes. Nothing is retired: both keys stay declared on
+    // the stack schema at the top level, so no RETIRED_KEYS entry, and the
+    // refusal inside a body is the manifest's own strict close naming the key.
+    {
+      id: 'assembled-package-body-plugins-envelope',
+      surface:
+        'artifact `packages[].manifest.plugins` and `packages[].manifest.devPlugins` — the two '
+        + 'keys inside an ASSEMBLED package body (`AssembledPackageBodySchema`, ADR-0130 D4)',
+      replacement:
+        'Declare `plugins` / `devPlugins` at the stack TOP LEVEL only — the artifact envelope, '
+        + 'where `os serve` / `os migrate` / `os dev` read them and where `composeStacks` still '
+        + 'concatenates them (`concat` is unchanged for in-memory composition). Delete both keys '
+        + 'from every `packages[i].manifest` body: a multi-package artifact that carried them is '
+        + 'rebuilt from source (`os build` / `composeStacks(…, { manifest: \'preserve\' })` no '
+        + 'longer folds them into a body), and a hand-written `packages[]` entry drops them.',
+      reason:
+        'A classification error, not a new special case (#15219; epic #14122 / #14512). '
+        + '`plugins` and `devPlugins` were the only members of the assembled-body key set whose '
+        + 'values are runtime ASSEMBLY instructions rather than serialisable metadata: `plugins` '
+        + 'holds what a host hands to `kernel.use()` — live plugin instances, manifests or package '
+        + 'names — and `devPlugins` is the `os dev` load list. Inside an artifact a package body is '
+        + 'inert JSON, so a plugin written under `packages[i].manifest` could never be constructed '
+        + 'by any loader; every reader (`serve.ts`, `schema-migration-plugins.ts`) reads the top '
+        + 'level, and the "resolve `packages[]` when the top level is absent" repair every other '
+        + 'reader took would have turned a silent skip into a boot that registers garbage. Options '
+        + 'B (readers resolve JSON descriptions into live plugins) and C (the emitter special-cases '
+        + 'the two keys) were refused. After the ruling, "an artifact carries metadata, a host '
+        + 'assembles plugins" is one sentence every reader inherits. Not losslessly convertible: '
+        + 'hoisting a body-level plugin to the envelope changes who loads it, and a live instance '
+        + 'has no JSON form to move.',
+      acceptanceCriteria:
+        'No `packages[i].manifest` in any artifact carries `plugins` or `devPlugins`; the body '
+        + 'schema refuses either with `unrecognized_keys` naming the key (pinned in '
+        + '`assembled-package-body.test.ts`), and `artifact-packages.ts` refuses the entry at '
+        + 'load with that path. A stack declaring `plugins` / `devPlugins` at the top level '
+        + 'parses byte-identically to before, `composeStacks` still concatenates both in stack '
+        + 'order, and `manifest: \'preserve\'` emits package bodies without them. An existing '
+        + 'multi-package artifact that carried a body-level `plugins` is rebuilt from source.',
     },
     {
       id: 'audience-posture-default-invite-only',
@@ -6469,6 +6531,62 @@ const step18: MigrationStep = {
         + 'the `shared/EventName` def key leaves '
         + '`json-schema.manifest/shared.json` in the same change that registers '
         + 'this entry.',
+    },
+    {
+      id: 'execution-step-iteration-single-valued',
+      surface:
+        '`ExecutionStepLog.iteration` on a step whose `regionKind` is '
+        + '`parallel-branch` — the per-step records under `ExecutionLog.steps`, as '
+        + 'the automation run endpoints return them — and the new optional '
+        + '`ExecutionStepLog.branch` key',
+      replacement:
+        'Read the parallel branch index from `branch`. `iteration` is now '
+        + 'single-valued: the zero-based iteration of the enclosing `loop`, carried '
+        + 'through any nesting, so a branch step of a `parallel` node that sits '
+        + 'inside a loop body carries BOTH keys — `iteration` for the row and '
+        + '`branch` for the branch. A consumer that grouped or labelled steps by '
+        + '`iteration` under `regionKind: parallel-branch` moves that read to '
+        + '`branch`; a consumer reading `iteration` on `loop-body`, `try` or '
+        + '`catch` steps changes nothing.',
+      reason:
+        'The key was declared as the zero-based loop iteration OR the parallel '
+        + 'branch index of the enclosing region — one field, two meanings, told '
+        + 'apart only by reading `regionKind` first. The engine tagged each step '
+        + 'with its innermost region only, so for a `parallel` node inside a `loop` '
+        + 'body every branch step recorded the branch index and no step of that '
+        + 'branch recorded the loop iteration: a per-row failure inside a branch '
+        + 'was attributable to a branch, never to the row the sweep was processing. '
+        + 'The sibling try/catch rule had already settled the containment case — a '
+        + 'try/catch region has no index of its own, so it carries the loop '
+        + 'iteration — and deliberately left `parallel` open, because there the '
+        + 'two indexes genuinely compete for one field. The maintainer ruling of '
+        + '2026-09-03 took option A: `iteration` always means the enclosing loop '
+        + 'iteration and the branch index moves to its own optional key, so a '
+        + 'reader no longer has to branch on `regionKind` to know which number it '
+        + 'holds, and getting that wrong no longer silently books a failure against '
+        + 'the wrong row. Option B — keep the overload and add a second index whose '
+        + 'presence depends on nesting shape — was not taken. This is not a '
+        + 'mechanical conversion: a step record written before this change carries '
+        + '`iteration` under `parallel-branch` with the branch-index meaning, and '
+        + 'only its producer knows whether the parallel node sat inside a loop. The '
+        + 'measured corpus held zero `loop { parallel }` nestings and one consumer '
+        + 'reading the key — a grouping key in the objectui flow-runs panel — so '
+        + 'the migration is a consumer-side read move, not a data rewrite. The '
+        + 'engine tagger that writes both keys follows this contract change as its '
+        + 'own card; until it lands, `branch` is declared and unwritten, and '
+        + '`iteration` on a `parallel-branch` step written by an older engine still '
+        + 'holds the branch index.',
+      acceptanceCriteria:
+        'No consumer reads `iteration` as a branch index: every read of a '
+        + '`parallel-branch` step\'s index goes through `branch`, and every read of '
+        + 'the enclosing loop iteration goes through `iteration` regardless of '
+        + '`regionKind`. A step record carrying `regionKind: parallel-branch`, '
+        + '`iteration: 3`, `branch: 1` parses under `ExecutionStepLogSchema` with '
+        + 'both numbers intact, and a negative or fractional `branch` is refused at '
+        + 'the `branch` path. A record written before the engine follow-on carries '
+        + 'no `branch` key; treat its `iteration` under `parallel-branch` as the '
+        + 'legacy branch index only when the record predates the engine build that '
+        + 'writes `branch`.',
     },
     {
       id: 'field-master-detail-set-null-refused',
@@ -8862,6 +8980,43 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // conversion `metric-filters-removed`, which strips the key from every metric
     // in `analyticsCubes[].measures`.
     'data/Metric:filters',
+    // #14676 — ADR-0049 enforce-or-remove on `ConnectorSchema.errorMapping` (triage
+    // ruling 2026-09-02: removal via the `spec-property-retirement` playbook; the
+    // split condition — a downstream consumer in objectui or a customer stack —
+    // measured empty at objectui `0d8fd7c`, hotcrm not measurable). The key carried
+    // `ErrorMappingConfig` (4 keys) and its `ErrorMappingRule[]` (7 keys), and
+    // NOTHING read them: outside the declaring file and its unit test the only
+    // reference in the tree was a type-identity pin. No provider, dispatcher or
+    // materializer ever mapped an external error through the rules, so
+    // `unmappedBehavior` configured nothing and a rule's `userMessage` was never
+    // shown to anyone — and that spelling is the name of the LIVE API-error channel
+    // (`ApiError.userMessage`), so an author who had read that documentation and
+    // wrote a rule here reasonably believed they were marking a refusal for an end
+    // user; the failure was silent in both directions (it validated, it published,
+    // nothing was shown). Removal resolves the collision by deletion. Tombstoned
+    // with `retiredKey()`: `ConnectorSchema` is a non-strict `z.object`, so a bare
+    // deletion would be a silent strip (#3733, ADR-0104). The def shapes leave
+    // whole — `integration/ErrorMappingConfig`, `integration/ErrorMappingRule` and
+    // the orphaned `integration/ConnectorErrorCategory` enum, all in
+    // `RETIRED_DEFS_BY_MAJOR[18]`. Sources are rewritten by the D2 conversion
+    // `connector-error-mapping-removed` (one strip per `connectors[]` entry; the
+    // eleven nested keys leave with the block).
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // removal ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look (the #12497 / #13823 grading).
+    'integration/Connector:errorMapping',
+    // #14676 — the same tombstone seen through the second carrier.
+    // `DeclarativeConnectorEntrySchema` is `ConnectorSchema.superRefine(...)`, so the
+    // `errorMapping` tombstone on the base is inherited by the shape that
+    // `stack.connectors[]` (`stack.zod.ts`) and the `PUT /meta/connector/:name` door
+    // (`kernel/metadata-type-schemas.ts`) actually parse, and the authorable-surface
+    // walk publishes the `[RETIRED]` row under this def key as well. One tombstone,
+    // two registered keys: gate (b) of `scripts/build-schemas.ts` reads EXACT
+    // `${defKey}:${name}` membership per def, never by radiating from a neighbour.
+    // See `18.integration__Connector__errorMapping.ts` for the retirement record.
+    'integration/DeclarativeConnectorEntry:errorMapping',
     // #12428 — ADR-0049 enforce-or-remove, one symbol over from #12340 (PR #12425)
     // in the same file and on the same per-key test. `HotReloadManager.startWatching`
     // contained NO watcher: a guard plus `logger.info('File watching started',
@@ -10302,6 +10457,42 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // narrowings ride minor releases) and the prescription lives at the major
     // boundary where `migrate meta` users look (the #8586 / PR #8702 precedent).
     'identity/ApiKey',
+    // #14676 — `integration/ConnectorErrorCategory` (the 8-value connector-side
+    // error category enum) left with its two carriers: `ErrorMappingRule.targetCategory`
+    // and `ErrorMappingConfig.defaultCategory`, both retired in this same major
+    // (`RETIRED_DEFS_BY_MAJOR[18]`). Measured before removal: outside the declaring
+    // file its only references were a value round-trip in `connector.test.ts` and a
+    // type-identity pin — no runtime reader — so the enum had no remaining consumer,
+    // and an exported value schema with no consumer reads as a capability (#3950,
+    // the `api/HandlerStatus` precedent). `api/ErrorCategory` — the HTTP-response
+    // vocabulary this enum was deliberately kept from sharing a name with
+    // (ADR-0112 D9a) — is unaffected. See
+    // `retired-keys/18.integration__Connector__errorMapping.ts` for the retirement
+    // record.
+    'integration/ConnectorErrorCategory',
+    // #14676 — `integration/ErrorMappingConfig` (`rules`, `defaultCategory`,
+    // `unmappedBehavior`, `logUnmapped`) leaves with its only carrier:
+    // `ConnectorSchema.errorMapping`, tombstoned in this same major under ADR-0049
+    // enforce-or-remove (`RETIRED_KEYS_BY_MAJOR[18]`). Nothing outside the declaring
+    // file ever parsed or constructed one, and an exported value schema with no
+    // consumer reads as a capability (#3950). Its two `.default()`s
+    // (`defaultCategory: 'integration_error'`, `logUnmapped: true`) were only ever
+    // materialized INSIDE an authored `errorMapping` block, so there is no
+    // residue window on the carrier (#12840 does not apply: the key itself carried
+    // no default). See `retired-keys/18.integration__Connector__errorMapping.ts`
+    // for the retirement record.
+    'integration/ErrorMappingConfig',
+    // #14676 — `integration/ErrorMappingRule` (`sourceCode`, `sourceMessage`,
+    // `targetCode`, `targetCategory`, `severity`, `retryable`, `userMessage`) leaves
+    // with `integration/ErrorMappingConfig`, whose `rules[]` was its only carrier.
+    // The `userMessage` member is the reason the census filed the card: its
+    // `describe` read, to the letter, like the LIVE `ApiError.userMessage` channel
+    // (the user-facing refusal text a thrown HTTP error declares), while no code
+    // path ever read this one — two keys meaning different things under one
+    // spelling in the same spec package. Deletion resolves the collision without a
+    // rename. See `retired-keys/18.integration__Connector__errorMapping.ts` for the
+    // retirement record.
+    'integration/ErrorMappingRule',
     // #11825 — kernel/plugin-lifecycle-advanced.zod.ts
     // `AdvancedPluginLifecycleConfigSchema`, retired whole (ADR-0049
     // enforce-or-remove; maintainer ruling 2026-08-25, route 2). The aggregating

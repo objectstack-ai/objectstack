@@ -131,7 +131,7 @@
  *    correct warning from a wolf-crying one, and the controls are what do.
  */
 
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, vi, assert } from 'vitest';
 import { TursoDriver } from './index.js';
 import { RemoteTransport } from './remote-transport.js';
 import { makeLibsqlSqliteStub, type LibsqlSqliteStub } from './libsql-sqlite-stub.testkit.js';
@@ -367,6 +367,8 @@ describe('[#6944] REMOTE: what is deliberately NOT refused', () => {
       case_number: 'CASE-00043',
     });
     const updated = await driver.update('crm_case', 'fixed2', { title: 'renamed' });
+    // [#14438] `update()` declares its not-found arm; a seeded id must answer the row.
+    assert(updated !== null, 'update on a seeded id answered the not-found arm');
     expect(updated.case_number).toBe('CASE-00043');
     expect(updated.title).toBe('renamed');
   });

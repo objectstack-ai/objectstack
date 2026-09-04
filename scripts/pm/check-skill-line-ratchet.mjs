@@ -133,6 +133,37 @@
  * because it is the ruling's own wording, and because it is the condition that
  * would still be right if (a) were ever loosened.
  *
+ * ### A move's raise and an ORDINARY ruled raise are separate quantities
+ *
+ * A destination does not stop being an ordinary ceiling once a move lands on it.
+ * When the maintainer later raises it the ordinary way — the header's own exit, a
+ * ruling quoted in the raising PR — that raise belongs to the RULING, not to the
+ * move, and this declaration must not claim it. `was` is a single number, so the
+ * first author to meet the case had one lever only: carry the destination's `was`
+ * forward by the ruled amount, which keeps the move's arithmetic right while
+ * making the field mean two things at once. Measured on the tree, with `was` left
+ * at its literal pre-move value: the gate read the move as `314 → 358 = +44
+ * against −11` and went red twice — condition (a) and the map-wide total — for
+ * lines no source was ever asked to pay.
+ *
+ * So the two quantities are recorded separately. A declaration may carry
+ * `ruledRaises`: one record per ordinary ruled raise taken on the destination
+ * SINCE the move, each with the ruling's own words and its date, subtracted
+ * before the move's own raise is measured. `was` goes back to meaning exactly one
+ * thing — the destination's ceiling on the day the move landed — which is what
+ * the reviewer's completeness check has always held it to, for the destination
+ * and its sources alike.
+ *
+ * ⛔ The subtraction is the load-bearing risk, and it mirrors the one (a) already
+ * guards: a record nobody ruled would license corpus growth under a move's
+ * warrant, silently and for as long as the declaration stands. Two shape bars
+ * answer it — a record quoting no ruling is RED, and so is a set of records
+ * claiming more lines than the destination's ceiling actually stands above `was`,
+ * which is what stops an inflated record from reading as PAID DOWN. Neither bar
+ * can prove the maintainer said the words, and neither pretends to: that is the
+ * same completeness check the reviewer already runs on every `was` here, and it
+ * is why the bar is a QUOTATION rather than a flag an author may simply set.
+ *
  *
  * ## The max-line-length rule (#11106) — what makes a LINE a unit again
  *
@@ -465,7 +496,36 @@ export const CEILINGS = new Map([
   // bytes spread over three bullets, none of them completing a line inside its own
   // bullet), and re-wrap funding is refused per the 2026-08-17 rule. Landed count,
   // headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/references/platform-readings.md', 358],
+  // Raised 358 -> 397 by the third-increment ruling — again an ORDINARY raise
+  // under this map's own maintainer exit, ⛔ not a cross-file move. Maintainer,
+  // decision batch #34, 2026-09-04, verbatim and untranslated: 「决裁批 #34 同意」
+  // on the presented recommendation, item 1 = A; the director record's own
+  // sentence for that item: "raise the ceiling by the measured +39, 358 → 397".
+  // Spent in full, and measured the same way — each member written in the file's
+  // voice and wrapped by this module's own `wrapLine` rather than estimated:
+  // attribution-footer scoping +12 (the row is true per CHANNEL and per
+  // ACTION/INPUT over four observations, and names what is untested instead of
+  // resolving the mechanism into a law), the MCP-side rate refusal read as a
+  // window reading rather than a signal about the PR +6, the CDN cause behind
+  // 「本档的缺席不是读数」 +5, and the Routine transport family +16 (no connector
+  // tools in a fired session · self-binding's trade and its orphan-recovery rule
+  // · neither `sources` nor `model` on the create end) = +39 exactly. Two members
+  // shrank against `origin/main` before landing, because the file already carried
+  // the fact: a reading the table states is cited, never re-spelled. Nothing was
+  // paid in place — the deletions this file can offer were measured at 0 whole
+  // lines under the previous raise and nothing has been added since to delete —
+  // and re-wrap funding is refused per the 2026-08-17 rule. Landed count,
+  // headroom 0, same convention.
+  // Item 2 of the same ruling = C: the two quota sentences this increment leaves
+  // in tension — the standing 「⛔ 不据限流报文里的 user ID 推…」 and the new
+  // member's 未裁 clause beside it — BOTH STAY AS WRITTEN, pending a
+  // discriminating read. ⛔ Neither is edited here or there.
+  // ⚠️ This entry is also the DESTINATION of the cross-file move declared below,
+  // and NEITHER ordinary raise above is part of it. Both are recorded there as
+  // `ruledRaises` records quoting their own rulings, which is what keeps that
+  // declaration's `was` at this file's literal pre-move 314 while the move's own
+  // raise still reads +10 against the sources' −11.
+  ['.claude/skills/pm-dispatch/references/platform-readings.md', 397],
   // Per-operation REST/GraphQL/git channel mapping — which fleet operation has
   // a REST twin (each row executed in a real session, provenance date carried
   // per row), the handful that are GraphQL-only, and the queue-routing
@@ -692,8 +752,16 @@ export const RULING_CITATION = '#14685 item 5 (comment 5520452691)';
  * which is what makes the whole arithmetic computable from this file alone:
  *
  *   ruling   the authorising ruling — must name {@link RULING_CITATION}
- *   was      the destination's ceiling before the raise
+ *   was      the destination's ceiling before the move — its LITERAL pre-move
+ *            value, never carried forward past a later ordinary raise
  *   sources  [path, ceiling-before-the-move] for every file that paid for it
+ *   ruledRaises
+ *            optional; one `{ruling, date, delta}` record per ORDINARY ruled
+ *            raise taken on the destination SINCE the move, subtracted before
+ *            this move's raise is measured (header: the two quantities). Its
+ *            `ruling` carries the maintainer's own words as a verbatim
+ *            quotation, in either spelling the ceilings above already use —
+ *            「…」 or "…" — and a record without one is RED.
  *
  * ⛔ NOT somewhere to record a raise no move paid for. A declaration is a CLAIM
  * about an arithmetic, and {@link crossFileMoveVerdict} re-derives that
@@ -710,6 +778,11 @@ export const RULING_CITATION = '#14685 item 5 (comment 5520452691)';
  * pre-move values for as long as the declaration stands. That red belongs to
  * the later raise, not to this one, and its author is holding the ruling that
  * has to account for it.
+ *
+ * ⚠️ A later ORDINARY raise on the destination is a THIRD direction and is
+ * neither of those two: it is the maintainer's, so it neither re-opens the move
+ * nor pays it down. It belongs in `ruledRaises`, where it is subtracted — which
+ * is what lets `was` stay one fact instead of a running total.
  */
 export const CROSS_FILE_MOVES = new Map([
   // The readings consolidation — the first move taken under the ruling, and the
@@ -719,26 +792,55 @@ export const CROSS_FILE_MOVES = new Map([
     '.claude/skills/pm-dispatch/references/platform-readings.md',
     {
       ruling: 'per-repo readings consolidation, authorised by #14685 item 5 (comment 5520452691)',
-      // CARRIED FORWARD through an ordinary ruled raise on the destination: 348 is
-      // the 314 this move rose from, plus the +34 the 2026-09-04 intake ruling took
-      // on the same entry (quoted beside its ceiling above). The field's only job
-      // is to make THIS move's raise computable from the tree, and carrying it
-      // keeps that number at the +10 the move landed with, against the same net
-      // source decrease of 11. Left at 314 it would price a maintainer's
-      // independent raise as though this move had claimed it — 314 to 358 reads
-      // +44 against −11 — and go red for lines the sources were never asked to
-      // pay, which is the one arithmetic this declaration must not assert.
-      // Nothing it guards moves: a source that grows back still drives the
-      // decrease under 10 and reds, and the destination still reads PAID DOWN at
-      // or below `was`.
-      // ⚠️ The reviewer's completeness check changes shape with it, so it is
-      // stated rather than left to be inferred: the SOURCES' `was` remain their
-      // `origin/main` values at f3ae441fa2 and are held against that diff, while
-      // the DESTINATION's is that value plus every ordinary ruled raise taken
-      // since — each one carrying its own quoted maintainer ruling beside its
-      // ceiling. A raise carrying no such ruling has no business moving this
-      // number.
-      was: 348,
+      // The destination's LITERAL ceiling on the day this move landed, and one
+      // fact: it is NOT carried forward past the ordinary ruled raise the same
+      // entry took on 2026-09-04, which is recorded below instead. So the
+      // reviewer's completeness check keeps the single shape it has always had —
+      // every `was` here, destination and sources alike, is that participant's
+      // ceiling on `origin/main` at f3ae441fa2, held against that diff.
+      was: 314,
+      // ORDINARY ruled raises taken on this destination SINCE the move. Each is
+      // the maintainer's rather than this move's, so each is subtracted before
+      // the move's raise is measured: 397 − 314 − (34 + 39) leaves the +10 the
+      // move landed with, against the same net source decrease of 11. Recording
+      // them here rather than inside `was` is the whole point — with neither, the
+      // same tree reads the move as +83 against −11 and reds twice, for lines no
+      // source was ever asked to pay. The list GROWS by one record per ruled
+      // raise; ⛔ `was` never moves, so the reviewer's completeness check keeps
+      // the one shape it has always had.
+      ruledRaises: [
+        {
+          // Quoted beside this entry's ceiling above, where the +34 is accounted
+          // for line by line. Copied from there, not paraphrased.
+          ruling:
+            'the intake-family raise on `.claude/skills/pm-dispatch/references/platform-readings.md`'
+            + ' — maintainer, live PM chat, 2026-09-04, decision batch #27, verbatim and'
+            + ' untranslated: 「同意」 on option A, and the sentences that ruling adopts, in the'
+            + ' director record\'s own words: "the ceiling for'
+            + ' `.claude/skills/pm-dispatch/references/platform-readings.md` is raised by the'
+            + ' measured need, +34, to 358 — a named, sized raise under the ratchet\'s own'
+            + ' maintainer exit … The +34 is a ceiling of the raise, not a target: if the eight'
+            + ' readings land in fewer lines, the raise is the smaller number."',
+          date: '2026-09-04',
+          delta: 34,
+        },
+        {
+          // The third increment, ruled the same day as the one above and in the
+          // same way. Quoted beside this entry's ceiling too, where the +39 is
+          // accounted for member by member. Copied from there, not paraphrased.
+          ruling:
+            'the third-increment raise on `.claude/skills/pm-dispatch/references/platform-readings.md`'
+            + ' — maintainer, decision batch #34, 2026-09-04, verbatim and untranslated:'
+            + ' 「决裁批 #34 同意」 on the presented recommendation, item 1 = A; and the director'
+            + ' record\'s own sentence for that item: "raise the ceiling by the measured +39,'
+            + ' 358 → 397". Measured per member rather than estimated: attribution-footer'
+            + ' scoping +12, the MCP-side rate refusal read as a window reading +6, the CDN'
+            + ' cause behind the payload channel\'s absence rule +5, and the Routine transport'
+            + ' family +16 = +39 exactly.',
+          date: '2026-09-04',
+          delta: 39,
+        },
+      ],
       sources: [
         ['.claude/skills/pm-dispatch/references/lanes/cli.md', 35],
         ['.claude/skills/pm-dispatch/references/lanes/services.md', 30],
@@ -896,6 +998,69 @@ function countLines(text) {
 }
 
 /**
+ * A VERBATIM QUOTATION, in either spelling the ceilings above already use: 「…」
+ * for the maintainer's own Chinese, and "…" for the English text a ruling adopts
+ * (both are present up there — the 2026-08-25 generated-artifact carve-out is
+ * quoted the second way). The bar is the quotation, never the bracket.
+ */
+const VERBATIM_QUOTATION = /「[^」]+」|"[^"]+"|“[^”]+”/u;
+
+/** When the ruling was given, `YYYY-MM-DD` — how a reader gets back to it. */
+const RULED_RAISE_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * The ORDINARY ruled raises recorded against a move's DESTINATION — validated,
+ * then summed, so {@link crossFileMoveVerdict} can take them out of the rise
+ * before it prices the move.
+ *
+ * Every bar here exists because the subtraction is a licence to grow: lines it
+ * removes from the move's raise are lines the sources are never asked to pay
+ * for. So a record must name a positive line count, quote the ruling that
+ * authorised it, and date it. None of that proves the maintainer said the words
+ * — that is the reviewer's completeness check, the same one every `was` in this
+ * map has always relied on — but it does mean a record nobody ruled has to be
+ * written as a forgery rather than reached by an oversight.
+ *
+ * @param {string} dest destination path, for the message
+ * @param {{ruledRaises?: Array<{ruling?: string, date?: string, delta?: number}>}} move
+ * @returns {{ok: true, total: number} | {ok: false, msg: string}}
+ */
+function ruledRaisesVerdict(dest, move) {
+  const bad = (msg) => ({ ok: false, msg });
+  const records = move?.ruledRaises ?? [];
+  if (!Array.isArray(records)) {
+    return bad(`cross-file move into ${dest} states its ordinary ruled raises as something other than a list, so they cannot be measured — red, not a skip (#4690).`);
+  }
+  let total = 0;
+  for (const record of records) {
+    const where = `cross-file move into ${dest}: an ordinary ruled raise recorded against the destination`;
+    if (!Number.isInteger(record?.delta) || record.delta <= 0) {
+      return bad(`${where} names no usable line count ("delta"). A ruled raise is a positive number of lines; lowering is always legitimate and is never recorded here.`);
+    }
+    if (!VERBATIM_QUOTATION.test(String(record?.ruling ?? ''))) {
+      return bad(`${where} (${record.delta} lines) quotes no ruling. A raise is the maintainer's or it is not a raise, so the record carries the ruling's own words verbatim — 「…」 or "…", the way every ceiling in this map quotes one. Un-ruled, this subtraction would take lines out of the move's raise that the sources were never asked to pay for.`);
+    }
+    if (!RULED_RAISE_DATE.test(String(record?.date ?? ''))) {
+      return bad(`${where} (${record.delta} lines) carries no ruling date (YYYY-MM-DD), which is how a reader gets from this record back to the ruling it quotes.`);
+    }
+    total += record.delta;
+  }
+  return { ok: true, total };
+}
+
+/**
+ * The same sum with no verdict, for {@link crossFileMoveTotalVerdict}. A
+ * malformed record is already RED in {@link crossFileMoveVerdict}, which reads
+ * every declaration on every run, so a green run never reaches this with one.
+ *
+ * @param {{ruledRaises?: Array<{delta?: number}>}} move
+ */
+function ruledRaiseSum(move) {
+  const records = Array.isArray(move?.ruledRaises) ? move.ruledRaises : [];
+  return records.reduce((sum, r) => sum + (Number.isInteger(r?.delta) && r.delta > 0 ? r.delta : 0), 0);
+}
+
+/**
  * One declared cross-file move, re-derived from the live ceiling map.
  *
  * Conditions (a) and (c) of the ruling; (b) is map-wide and lives in
@@ -927,16 +1092,26 @@ export function crossFileMoveVerdict(dest, move, ceilings) {
     if (!ceilings.has(src)) return bad(`cross-file move into ${dest} names source ${src}, which carries no ceiling — red, not a skip (#4690).`);
     if (!Number.isInteger(wasSrc) || wasSrc <= 0) return bad(`cross-file move into ${dest} records no usable pre-move ceiling for source ${src}.`);
   }
-  const raise = ceilings.get(dest) - move.was;
+  const gross = ceilings.get(dest) - move.was;
   const parts = sources.map(([src, wasSrc]) => `${src} ${wasSrc}→${ceilings.get(src)}`).join(', ');
-  if (raise <= 0) {
+  if (gross <= 0) {
     return { ok: true, msg: `cross-file move into ${dest} is paid down: its ceiling is ${ceilings.get(dest)}, at or below the ${move.was} it moved from (sources: ${parts}).` };
+  }
+  const ruled = ruledRaisesVerdict(dest, move);
+  if (!ruled.ok) return ruled;
+  if (ruled.total > gross) {
+    return bad(`cross-file move into ${dest} states ${ruled.total} lines of ordinary ruled raise on its destination, an over-claim: its ceiling stands only ${gross} above the ${move.was} it moved from. Lowering is always legitimate, but a ruled raise since given back is spent — retire its record, because leaving it here prices this move's own raise below what the move actually took.`);
+  }
+  const raise = gross - ruled.total;
+  const less = ruled.total > 0 ? `, less ${ruled.total} line${ruled.total === 1 ? '' : 's'} of ordinary ruled raise` : '';
+  if (raise <= 0) {
+    return { ok: true, msg: `cross-file move into ${dest} is paid down: its ceiling is ${ceilings.get(dest)}, and all ${gross} line${gross === 1 ? '' : 's'} it stands above the ${move.was} it moved from are ordinary ruled raises recorded against it, so this move keeps none of them (sources: ${parts}).` };
   }
   const decrease = sources.reduce((sum, [src, wasSrc]) => sum + (wasSrc - ceilings.get(src)), 0);
   if (raise > decrease) {
-    return bad(`cross-file move into ${dest} raises its ceiling ${move.was}→${ceilings.get(dest)} (+${raise}) against a net source decrease of ${decrease} (${parts}). A move pays for itself by DELETION at the source; re-wrapping does not pay, and a raise the sources do not cover is an ordinary raise, which needs a maintainer ruling quoted in the raising PR.`);
+    return bad(`cross-file move into ${dest} raises its ceiling ${move.was}→${ceilings.get(dest)}${less} (+${raise}) against a net source decrease of ${decrease} (${parts}). A move pays for itself by DELETION at the source; re-wrapping does not pay, and a raise the sources do not cover is an ordinary raise, which needs a maintainer ruling quoted in the raising PR. If part of that rise IS such a raise, record it under \`ruledRaises\` with the ruling's own words instead of carrying \`was\` forward: an ordinary ruled raise and a move's raise are separate quantities, and this arithmetic measures only the second.`);
   }
-  return { ok: true, msg: `cross-file move into ${dest}: +${raise} (${move.was}→${ceilings.get(dest)}) against a net source decrease of ${decrease} (${parts}); authorised by ${RULING_CITATION}.` };
+  return { ok: true, msg: `cross-file move into ${dest}: +${raise} (${move.was}→${ceilings.get(dest)}${less}) against a net source decrease of ${decrease} (${parts}); authorised by ${RULING_CITATION}.` };
 }
 
 /**
@@ -944,7 +1119,12 @@ export function crossFileMoveVerdict(dest, move, ceilings) {
  *
  * Computed as the map-wide sum with every declared participant restored to its
  * pre-move value, minus the map-wide sum today — untouched entries cancel, so
- * the difference is exactly the declared participants' net movement. Disjoint
+ * the difference is exactly the declared participants' net movement. A
+ * destination's ordinary ruled raises are restored ALONGSIDE its `was`, for the
+ * same reason {@link crossFileMoveVerdict} subtracts them: those lines are the
+ * maintainer's and were never this move's to move, so they must cancel here
+ * exactly as an untouched entry does. Left in, they would report a corpus
+ * growing by lines the ruling already paid for. Disjoint
  * participants are REQUIRED, and that is what keeps the reduction honest: a
  * source named by two declarations would have its single decrease counted twice
  * by (a) and once here, and the two conditions would stop agreeing.
@@ -956,7 +1136,7 @@ export function crossFileMoveTotalVerdict(moves, ceilings) {
   const seen = new Map();
   let net = 0;
   for (const [dest, move] of moves) {
-    for (const [path, was] of [[dest, move.was], ...(move.sources ?? [])]) {
+    for (const [path, was] of [[dest, move.was + ruledRaiseSum(move)], ...(move.sources ?? [])]) {
       if (seen.has(path)) {
         return { ok: false, msg: `${path} is a participant in two cross-file moves (${seen.get(path)} and ${dest}). Declarations must be disjoint: one file's single decrease cannot pay for two raises, and counting it twice is how a total that grew reads as a total that did not.` };
       }
@@ -1350,6 +1530,209 @@ function run() {
   if (failed) process.exit(1);
 }
 
+// -- The self-test's own battery roster and floor (#13489) ------------------
+//
+// `--self-test` reaching its verdict used to be this self-test's ONLY success
+// condition, so "every case held" and "the cases never ran" printed the same
+// line. Closed the PR #13487 way: what is pinned is the registered NAMES, not a
+// number.
+//
+// This self-test is TABLE-DRIVEN -- one `cases` table, one loop over it, and a
+// sink (`failed++`) that writes only when a case FAILS. Routing THAT sink
+// through `registerCase()` would register a case only when it fails: a fully
+// green run would register 0 and every battery would read DID NOT RUN, the
+// floor inverted rather than installed. So the roster is the table's own rows.
+// Each row LABEL is a declared battery, verbatim, with a floor of 1, and
+// `registerCase(name)` is the first statement of the driving loop body -- so the
+// case is attributed to the row actually being run. There is no `battery()`
+// opener: for a table-driven self-test the ROW is the battery.
+//
+// ⭐ ALL 155 rows are floored, the four `...(() => { ... })()` spreads included.
+// Those spreads were flagged in the batch-8 census as an IIFE-produced block
+// whose rows could not take a literal roster key. Measured here, that premise
+// does not hold for this file: each IIFE is a SCOPING device that declares
+// local fixture consts and then `return [...]`s an array of LITERAL
+// `[label, actual, expected]` rows. No row label is a template string, none is
+// computed, and no row is produced by a `map`/`push`/loop. Three independent
+// readings agree on 155 -- the source labels extracted by indentation, the
+// literal row starts, and the `cases.length` the green line prints on a run --
+// so nothing here is the `extra`-call residue of PR #15286, and leaving any row
+// outside the roster would have been the lossy reading.
+//
+// A pinned TOTAL is not the repair, and neither is a roster DERIVED from the
+// table: `cases.length` moves with the table, so a deleted row would delete its
+// own floor. The roster below is a LITERAL the table is checked against, which
+// is what lets a deleted or renamed row name ITSELF in the refusal.
+//
+// The counts are a FLOOR, not an equality -- a row that grows into several
+// registrations must not red. 1 is the honest floor for a table row: the loop
+// reaches it exactly once per run.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'under the ceiling -> green': 1,
+  'at the ceiling -> green': 1,
+  'over the ceiling -> red': 1,
+  'red message names the file': 1,
+  'red message names the remedy': 1,
+  'red message names the authoring rule': 1,
+  'empty read -> red, not a skip': 1,
+  'every covered file has a positive ceiling': 1,
+  'SKILL.md is covered': 1,
+  'the dev-agent definition is covered': 1,
+  'all five compressed references are covered': 1,
+  'all eight lane/seat job descriptions are covered': 1,
+  'the other four skills are covered (#9473)': 1,
+  'root AGENTS.md is covered (#9792)': 1,
+  'root CLAUDE.md is covered (#9965)': 1,
+  'references/compile-surfaces.md is covered (#12098)': 1,
+  'every separator-less ceiling declares a root-file watch hint': 1,
+  'and the declaration names no file the map does not cover': 1,
+  'both root instruction files are declared': 1,
+  'the declared form is NOT a CEILINGS key': 1,
+  'the published skills/ catalog is deliberately uncovered': 1,
+  'budget is 120 bytes': 1,
+  'a short ASCII line -> green': 1,
+  'a long ASCII line -> RED': 1,
+  'a short CJK line -> green': 1,
+  'a long CJK line -> RED': 1,
+  'the RED message names the budget': 1,
+  'the RED message names the line number': 1,
+  'the RED message offers NO allowlist to add a line to': 1,
+  'no offenders -> green verdict': 1,
+  'a long line inside a fence is exempt': 1,
+  '...and the SAME line outside one is RED': 1,
+  'scan: a fenced long line yields no offender': 1,
+  'scan: the fence closes again': 1,
+  'a long table row is exempt': 1,
+  '...and the same cells as prose are RED': 1,
+  'a long heading is exempt': 1,
+  '...and the same text as a paragraph is RED': 1,
+  'front matter is exempt': 1,
+  'scan: front matter closes at the second ---': 1,
+  'an anchored Blocked-by: line is exempt': 1,
+  'Restart-when: too': 1,
+  'Restart-touch: too': 1,
+  'but a MID-PROSE mention is not exempt — the escape hatch is line-anchored only': 1,
+  'a long blockquote line is exempt': 1,
+  '...including one indented inside a list': 1,
+  '...and the same quotation unquoted is RED': 1,
+  'a bare over-long URL is exempt': 1,
+  'a single over-long code span is exempt': 1,
+  '...but prose LEADING to that URL is RED (wrap first, URL lands alone)': 1,
+  'wrapLine splits a long CJK line': 1,
+  'every wrapped CJK segment is within budget': 1,
+  'wrapping a CJK line changes NOTHING but whitespace': 1,
+  'wrapping an ASCII line changes NOTHING but whitespace': 1,
+  'a list continuation is indented under the marker': 1,
+  'no continuation line opens a new markdown block': 1,
+  'wrapLine is idempotent — its output is the canonical form': 1,
+  'wrapLine leaves a short line untouched': 1,
+  'wrapLine never breaks inside a code span': 1,
+  'wrapLine never breaks inside a 「…」 ruling quote': 1,
+  '...nor inside a 『…』 one': 1,
+  'a quote longer than the budget makes its line unbreakable, not RED': 1,
+  'a line OPENING an unterminated 「 is exempt': 1,
+  'a line INSIDE an open quote is exempt': 1,
+  '...and the same line outside one is RED — the exemption is the quote, not the text': 1,
+  'a SHORT line inside a quote is simply green, not counted exempt': 1,
+  'advanceState opens on an unmatched 「': 1,
+  'advanceState closes on the matching 」': 1,
+  'a quote opened and closed on ONE line does not open the state': 1,
+  'advanceState does not track quotes inside a fence': 1,
+  'scan: a two-line quote yields quotation exemptions, not offenders': 1,
+  'wrapLine never strands a closing 。 at a line head': 1,
+  'an ASCII , after a Han character is a no-break-after mark': 1,
+  '...and ; and : are the same mark class': 1,
+  '...but after a LATIN word it stays an ordinary break point': 1,
+  '...and a mark with a space before it follows nothing': 1,
+  '...and an atom not ending in one is never the mark': 1,
+  'breakLegal refuses the break after a Han+ASCII mark': 1,
+  '...a mark with no following space was never a break point to begin with': 1,
+  '...still allows the CJK-to-CJK break one atom earlier': 1,
+  '...and still allows an ordinary ASCII space break': 1,
+  'wrapLine splits the trap line': 1,
+  'no wrapped line ends on a Han+ASCII mark — the break is no longer OFFERED': 1,
+  '...the line it took instead is still within budget': 1,
+  '...and it moved only whitespace, as every wrap must': 1,
+  'the SAME shape with a Latin word before the mark still breaks there': 1,
+  'wrapLine is still idempotent under the new rule': 1,
+  'a long table row is EXEMPT from the 120-byte line rule': 1,
+  '...and the same row is METERED by its file pin': 1,
+  'at exactly the pin -> green': 1,
+  'one byte wider -> RED (widening a cell is the measured defect)': 1,
+  'narrower than the pin -> green': 1,
+  'a pin of 0 is a measurement — a file with no table row passes it': 1,
+  '...and the FIRST table row in such a file is RED': 1,
+  'a missing pin is RED, not a skip (#4690)': 1,
+  '...and says so rather than naming a width': 1,
+  'the RED message names the width': 1,
+  'the RED message names the line': 1,
+  'the RED message names the remedy': 1,
+  'the RED message names consolidation as the way to pay it down': 1,
+  'the RED message offers NO allowlist': 1,
+  'the RED message says raising needs a maintainer ruling': 1,
+  'scanTableRows finds the widest row': 1,
+  '...and reports its line number': 1,
+  'a `|` line inside a FENCE is not a table row': 1,
+  'a `|` line in FRONT MATTER is not a table row': 1,
+  'a file with no table row measures 0': 1,
+  'every ceilinged file carries a pin': 1,
+  'and the pin map names no file the ceiling map does not cover': 1,
+  'every pin is a non-negative integer': 1,
+  'the published skills/ catalog is uncovered here too': 1,
+  'the citation is the ruling this file was given': 1,
+  'cross-file move — a raise covered by its sources\' net decrease PASSES': 1,
+  '...and the green verdict states the arithmetic it read': 1,
+  'cross-file move — a raise whose sources did NOT shrink is RED (the whole defect: a `move` that licenses an ordinary raise would run green forever)': 1,
+  '...and the RED verdict names the raise and the net decrease it fell short of': 1,
+  '...and sends the author to the ordinary path rather than to a bigger declaration': 1,
+  'cross-file move — a raise EXCEEDING the net decrease is RED, even by one line': 1,
+  '...while a raise exactly equal to it is legal': 1,
+  'cross-file move — a declaration citing no ruling is RED, however sound its arithmetic': 1,
+  '...and the RED verdict spells the citation it wanted': 1,
+  'cross-file move — declarations whose net movement is 0 leave the map total unchanged': 1,
+  'cross-file move — a declaration whose participants net POSITIVE fails the total (+2 here)': 1,
+  '...and the RED total names the lines it grew by': 1,
+  '...and a net-negative move reports the corpus shrinking': 1,
+  'cross-file move — one source may not pay for two destinations': 1,
+  'cross-file move — a destination lowered back to or below its pre-move ceiling reads as PAID DOWN, never as red (lowering is always legitimate)': 1,
+  '...and says so rather than reporting an arithmetic it can no longer measure': 1,
+  'cross-file move — a SOURCE grown back past what it paid re-opens the move (the loophole: the destination keeps the lines while the payers grow back)': 1,
+  'cross-file move — an unknown destination is RED, not a skip (#4690)': 1,
+  'cross-file move — an unknown source is RED, not a skip (#4690)': 1,
+  'cross-file move — a file may not pay its own raise': 1,
+  'cross-file move — a declaration naming no source at all is RED': 1,
+  'every live declaration cites the ruling': 1,
+  'every live declaration names its destination\'s pre-move ceiling and at least one source': 1,
+  'every live participant is a file this map covers': 1,
+  'ruled raise — a destination that later took an ordinary ruled raise PASSES with `was` at its literal pre-move value': 1,
+  '...and the verdict prices the MOVE, not the ruling: +10 against the sources\' net 11': 1,
+  '...and names the ruled lines it took out, so the arithmetic can be read back': 1,
+  '...while the SAME tree with the raise unrecorded is the double red this record ends': 1,
+  '...whose first half reads the ruling as the move\'s: +44 against 11': 1,
+  '...and which now sends the author to the record rather than to `was`': 1,
+  'ruled raise — the map-wide total subtracts it too, and reads the corpus DOWN 1': 1,
+  '...where the unrecorded twin reports the corpus growing by 33': 1,
+  'ruled raise — a record quoting NO ruling is RED (the licence is the maintainer\'s or it does not exist)': 1,
+  '...and the RED verdict says what it wanted': 1,
+  '...while an ENGLISH ruling quoted the way this map already quotes one passes': 1,
+  'ruled raise — a record with no line count is RED': 1,
+  'ruled raise — a NEGATIVE line count is RED: lowering is always legitimate and is never recorded here': 1,
+  'ruled raise — a record with no ruling DATE is RED': 1,
+  'ruled raise — records claiming MORE lines than the ceiling stands above `was` are RED': 1,
+  '...which is the loophole that closes: an inflated record would otherwise read the move as paid down and pass forever': 1,
+  'ruled raise — a destination whose whole rise is ruled keeps none of it for the move, and reads as paid down': 1,
+  'ruled raise — a declaration carrying no record behaves exactly as before (every case above this group is one)': 1,
+  'every live ruled-raise record quotes its ruling, dates it, and names a positive line count': 1,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too. This pin is also half of
+// the duplicate-label refusal: two rows sharing a label collapse to ONE key in
+// the literal above, so the roster falls below this number; the table
+// cross-check in the floor block is the other half, and names WHICH label
+// collided.
+const SELF_TEST_BATTERY_FLOOR = 155;
+
 // Returned by `selfTest()` only after its verdict is printed. The dispatch
 // refuses anything else: a `return` that leaves the function above that line
 // prints nothing and still exits 0 — a self-test that never finished, reported
@@ -1575,6 +1958,16 @@ function selfTest() {
       const uncited = { ...decl, ruling: 'moved from a.md + b.md' };
       const mv = (map, d = decl) => crossFileMoveVerdict('dest.md', d, map);
       const total = (map, moves) => crossFileMoveTotalVerdict(new Map(moves), map);
+      // The shape this separation exists for, at the real numbers it was measured
+      // on: a live move whose destination later took an ORDINARY ruled raise. The
+      // ceilings are platform-readings.md's and its three sources', so the pin
+      // fails if the two quantities are ever folded back together.
+      const readings = ceil({ 'dest.md': 358, 'a.md': 31, 'b.md': 28, 'c.md': 88 });
+      const ruledRec = { ruling: 'maintainer, 2026-09-04, verbatim: 「同意」', date: '2026-09-04', delta: 34 };
+      const moved = { ...decl, was: 314, sources: [['a.md', 35], ['b.md', 30], ['c.md', 93]] };
+      const withRuled = { ...moved, ruledRaises: [ruledRec] };
+      const rr = (over) => crossFileMoveVerdict('dest.md', { ...moved, ruledRaises: [{ ...ruledRec, ...over }] }, readings);
+      const mvR = (d = withRuled) => crossFileMoveVerdict('dest.md', d, readings);
       return [
         ['the citation is the ruling this file was given', RULING_CITATION, '#14685 item 5 (comment 5520452691)'],
         // (1) A legal move passes — the assertion the other three are read against.
@@ -1613,17 +2006,102 @@ function selfTest() {
         ['every live declaration cites the ruling', [...CROSS_FILE_MOVES.values()].every((m) => String(m.ruling ?? '').includes(RULING_CITATION)), true],
         ['every live declaration names its destination\'s pre-move ceiling and at least one source', [...CROSS_FILE_MOVES.values()].every((m) => Number.isInteger(m.was) && Array.isArray(m.sources) && m.sources.length > 0), true],
         ['every live participant is a file this map covers', [...CROSS_FILE_MOVES].every(([d, m]) => CEILINGS.has(d) && m.sources.every(([s]) => CEILINGS.has(s))), true],
+        // (10) An ORDINARY ruled raise on the destination is not this move's.
+        // The whole group is one pair: the same tree, recorded and unrecorded.
+        ['ruled raise — a destination that later took an ordinary ruled raise PASSES with `was` at its literal pre-move value', mvR().ok, true],
+        ['...and the verdict prices the MOVE, not the ruling: +10 against the sources\' net 11', mvR().msg.includes('+10') && mvR().msg.includes('decrease of 11'), true],
+        ['...and names the ruled lines it took out, so the arithmetic can be read back', mvR().msg.includes('less 34 lines of ordinary ruled raise'), true],
+        ['...while the SAME tree with the raise unrecorded is the double red this record ends', mvR(moved).ok, false],
+        ['...whose first half reads the ruling as the move\'s: +44 against 11', mvR(moved).msg.includes('+44') && mvR(moved).msg.includes('decrease of 11'), true],
+        ['...and which now sends the author to the record rather than to `was`', mvR(moved).msg.includes('ruledRaises'), true],
+        ['ruled raise — the map-wide total subtracts it too, and reads the corpus DOWN 1', total(readings, [['dest.md', withRuled]]).ok && total(readings, [['dest.md', withRuled]]).msg.includes('down 1 line'), true],
+        ['...where the unrecorded twin reports the corpus growing by 33', total(readings, [['dest.md', moved]]).msg.includes('by 33 lines'), true],
+        // The subtraction is a licence to grow, so every bar on it is pinned.
+        ['ruled raise — a record quoting NO ruling is RED (the licence is the maintainer\'s or it does not exist)', rr({ ruling: 'the intake-family raise, +34 lines' }).ok, false],
+        ['...and the RED verdict says what it wanted', rr({ ruling: 'the intake-family raise, +34 lines' }).msg.includes('quotes no ruling'), true],
+        ['...while an ENGLISH ruling quoted the way this map already quotes one passes', rr({ ruling: 'maintainer 2026-09-04, verbatim: "the ceiling is raised by the measured need, +34"' }).ok, true],
+        ['ruled raise — a record with no line count is RED', rr({ delta: undefined }).ok, false],
+        ['ruled raise — a NEGATIVE line count is RED: lowering is always legitimate and is never recorded here', rr({ delta: -34 }).ok, false],
+        ['ruled raise — a record with no ruling DATE is RED', rr({ date: undefined }).ok, false],
+        ['ruled raise — records claiming MORE lines than the ceiling stands above `was` are RED', rr({ delta: 90 }).ok, false],
+        ['...which is the loophole that closes: an inflated record would otherwise read the move as paid down and pass forever', rr({ delta: 90 }).msg.includes('over-claim'), true],
+        ['ruled raise — a destination whose whole rise is ruled keeps none of it for the move, and reads as paid down', rr({ delta: 44 }).ok && rr({ delta: 44 }).msg.includes('paid down'), true],
+        ['ruled raise — a declaration carrying no record behaves exactly as before (every case above this group is one)', mv(paid).ok && mv(paid).msg.includes('+5'), true],
+        ['every live ruled-raise record quotes its ruling, dates it, and names a positive line count', [...CROSS_FILE_MOVES.values()].every((m) => (m.ruledRaises ?? []).every((r) => VERBATIM_QUOTATION.test(String(r?.ruling ?? '')) && RULED_RAISE_DATE.test(String(r?.date ?? '')) && Number.isInteger(r?.delta) && r.delta > 0)), true],
       ];
     })(),
   ].map((c) => (Array.isArray(c[1]) || (c[1] && typeof c[1] === 'object') ? [c[0], JSON.stringify(c[1]), JSON.stringify(c[2])] : c));
+  // The ledger this self-test's floor is evaluated against (#13489).
+  const batterySeen = new Map();
+  const registerCase = (name) => {
+    batterySeen.set(name, (batterySeen.get(name) ?? 0) + 1);
+  };
+
   let failed = 0;
   for (const [name, actual, expected] of cases) {
+    registerCase(name);
     const ok = actual === expected;
     if (!ok) failed++;
     console.log(`  ${ok ? '✓' : '✗'} ${name}`);
   }
+  // -- The floor: every declared row RAN, and ran its case (#13489) --------
+  //
+  // Evaluated after every row has had its chance and BEFORE the verdict, so the
+  // success line below can only be printed by a run in which the set of rows
+  // that registered EQUALS the set declared. A set difference names WHICH row
+  // stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    console.error(`✗ self-test floor: ${message}`);
+    failed++;
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned `
+        + `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  const rowLabels = cases.map(([name]) => name);
+  const duplicated = [...new Set(rowLabels.filter((name, i) => rowLabels.indexOf(name) !== i))];
+  if (duplicated.length > 0) {
+    floorBreached = true;
+    floorFailure(
+      `the cases table uses ${duplicated.map((n) => JSON.stringify(n)).join(', ')} as a row label more than once — `
+        + 'two rows sharing a label are ONE battery, so the second can stop running while the first keeps the floor met.',
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in `
+        + 'SELF_TEST_BATTERIES — a case attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. `
+          + 'The verdict below would have claimed that case holds.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of `
+          + `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the '
+        + 'number. Find what stopped registering (a deleted row, a renamed label, a loop that no longer '
+        + 'reaches it) and restore it.',
+    );
+  }
+
   if (failed) {
-    console.error(`✗ check-skill-line-ratchet self-test: ${failed} of ${cases.length} case(s) failed.`);
+    console.error(`✗ check-skill-line-ratchet self-test: ${failed} failure(s) (cases and floor).`);
     process.exit(1);
   }
   console.log(`✓ check-skill-line-ratchet self-test: ${cases.length} cases pass.`);

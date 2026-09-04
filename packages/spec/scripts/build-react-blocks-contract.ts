@@ -4,9 +4,14 @@
 // react-blocks.ts: the `data` (config) props are read from each block's SPEC
 // zod schema via z.toJSONSchema (single source — no re-authoring); the
 // binding/controlled/callback props come from the hand-authored interaction
-// overlay. Emits:
-//   - skills/objectstack-ui/contracts/react-blocks.contract.json  (machine)
+// overlay. Emits ONE artifact:
 //   - skills/objectstack-ui/references/react-blocks.md            (AI-facing)
+//
+// It used to emit a second, machine-readable rendering of the same table at
+// skills/objectstack-ui/contracts/react-blocks.contract.json. That rendering
+// had zero consumers in either repo and cost the published skill bundle a
+// second copy of one table, so it was retired (#14296 item 3 = A): one table,
+// one rendering. Do not reinstate a second output here without a ruling.
 //
 // Run:
 //   pnpm --filter @objectstack/spec gen:react-blocks            # write
@@ -20,7 +25,6 @@ import { REACT_BLOCKS, type ReactInteractionProp } from '../src/ui/react-blocks'
 import { createSink } from './lib/generated-output';
 
 const REPO = path.resolve(__dirname, '../../..');
-const OUT_JSON = path.join(REPO, 'skills/objectstack-ui/contracts/react-blocks.contract.json');
 const OUT_MD = path.join(REPO, 'skills/objectstack-ui/references/react-blocks.md');
 
 const CHECK = process.argv.includes('--check');
@@ -126,14 +130,13 @@ const blocks = REACT_BLOCKS.map((b) => {
   return { tag: b.tag, schemaType: b.schemaType, summary: b.summary, specSchema: b.schema ? true : false, props };
 });
 
+// The contract, as the ONE rendering below prints it. `version` and `source`
+// were the retired JSON envelope's own fields and went with it: the markdown
+// states its provenance in the frontmatter `description` it emits instead.
 const contract = {
-  version: 2,
   adr: 'ADR-0081',
-  source: "GENERATED from the REACT_BLOCKS definition in the '@objectstack/spec/ui' module — data props from the spec zod schemas, binding/controlled/callback from the React overlay.",
   note: "Props each component accepts in kind:'react' page source. Reference blocks by their PascalCase tag. kind: data=declarative config (from the spec schema) · binding=connects to data · controlled=React state · callback=React function. These blocks are for DATA. Live data: const adapter = useAdapter(); adapter.find/findOne/create/update. STYLING (ADR-0065) — a page's source is runtime metadata, so the console's build-time Tailwind NEVER scans it: utility classNAMES silently produce no CSS. Do NOT use Tailwind className in page source. (a) Layout/chrome: inline style={} with hsl(var(--token)) theme colors — e.g. color:'hsl(var(--foreground))', background:'hsl(var(--card))', border:'1px solid hsl(var(--border))', and px/flex for layout. (b) Overlays: render <ObjectForm formType='drawer'|'modal' open onOpenChange> (a pre-styled Sheet/Dialog) — never hand-roll a fixed inset-0 backdrop.",
-  blocks,
 };
-emit(OUT_JSON, JSON.stringify(contract, null, 2) + '\n');
 
 // markdown
 const esc = (s: string) => String(s).replace(/\|/g, '\\|');
@@ -169,7 +172,7 @@ L.push('`React` · `useAdapter` · `data` · `variables` · `page`. Kanban/calen
 L.push('');
 emit(OUT_MD, L.join('\n'));
 
-console.log(`react-blocks contract: ${blocks.length} blocks → ${path.relative(REPO, OUT_JSON)} + ${path.relative(REPO, OUT_MD)}`);
+console.log(`react-blocks contract: ${blocks.length} blocks → ${path.relative(REPO, OUT_MD)}`);
 for (const b of blocks) console.log(`   <${b.tag}> ${b.props.length} props`);
 
 flush({
