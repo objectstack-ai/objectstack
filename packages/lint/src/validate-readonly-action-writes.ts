@@ -33,9 +33,10 @@
 // both production dispatch paths build it that way: REST `/actions` in
 // `domains/actions.ts` and MCP `run_action` in `action-execution.ts`. The
 // engine's static strip runs under `if (!opCtx.context?.isSystem)`, so it is
-// SKIPPED for an action body. The conditional strip is not: it runs before that
-// guard, over the caller-supplied keys, and `isSystem` is explicitly NOT an
-// exemption there (#9107's LOCK 2, pinned in
+// SKIPPED for an action body - on the create path as well, since #14147 put a
+// static strip there under the SAME gate. The conditional strip is not: it runs
+// before that guard, over the caller-supplied keys, and `isSystem` is explicitly
+// NOT an exemption there (#9107's LOCK 2, pinned in
 // `engine-readonly-when-derived-writes.test.ts`).
 //
 // So a static-`readonly` finding on this surface would state something FALSE -
@@ -54,12 +55,30 @@
 //
 // --- SCOPE - deliberately narrow, so a finding is worth reporting ----------
 //
-//   - Only `update` / `updateById`. INSERT is exempt from BOTH strips: a
-//     `readonlyWhen` predicate has no prior record to evaluate on a create, and
-//     the static one is skipped for the author-declared reason the flow sibling
-//     skips `create_record` (#3043/#3413). Measured on the same harness - an
-//     elevated `insert` seeding a `readonly` AND a `readonlyWhen`-locked column
-//     keeps both values.
+//   - Only `update` / `updateById`, and since #14147 for ONE reason rather than
+//     two. The premise this bullet used to carry - "INSERT is exempt from BOTH
+//     strips" - is SUPERSEDED: the maintainer ruling of 2026-09-03 (option C,
+//     overturning their own 2026-07-24 "INSERT (all callers) exempt" row) put
+//     the static-`readonly` strip inside `engine.insert`, `isSystem`-gated,
+//     exactly as on update, and DELETED the metadata-protocol boundary copy
+//     this bullet cited. So INSERT is no longer engine-exempt from anything.
+//
+//     What actually keeps `insert` / `create` out of this rule's match set is
+//     the pair of facts in {@link READONLY_ACTION_INSERT_SILENCE}, and neither
+//     is the superseded row: the CONDITIONAL lock has no prior record to
+//     evaluate on a create (`stripReadonlyWhenFields` is update-path-only,
+//     engine.ts: "INSERT stays exempt"), and the STATIC one is skipped on THIS
+//     surface for the same reason it is skipped on `update` here - an action
+//     body runs `isSystem`-elevated. Re-measured on the harness above after the
+//     ruling landed: an elevated `insert` seeding a `readonly` AND a
+//     `readonlyWhen`-locked column still keeps both values.
+//
+//     ⚠️ That is a fact about ELEVATION, not about INSERT, and it does not
+//     travel: a NON-elevated create - a flow `create_record` without
+//     `runAs:'system'`, a hook body's `ctx.api.insert` - now IS stripped. The
+//     flow sibling's own `create_record` gap rests on the superseded premise
+//     and is reported rather than widened here (a new error-severity finding
+//     class is not this card's to introduce).
 //
 //   - Only the `api-crud-literal` shape. `ctx.record` is not a write surface at
 //     all here, and that is the whole false-positive class this rule had to
@@ -149,11 +168,44 @@ export const READONLY_ACTION_WRITE_EXCLUSIONS: readonly BodyWritePatternExclusio
 const APPLICABLE_PATTERN_IDS: ReadonlySet<string> = new Set(READONLY_ACTION_WRITE_PATTERN_IDS);
 
 /**
- * `ctx.api` write methods whose payload is subject to the conditional strip.
+ * The REFUSAL this rule owes a reason for, declared as data (#14147).
  *
- * `insert` / `create` are absent BY DECISION, not by omission: INSERT is exempt
- * from both strips, which is the same reason the flow sibling never looks at a
- * `create_record` node.
+ * `insert` / `create` are absent from {@link STRIP_SUBJECT_METHODS}, and until
+ * the 2026-09-03 ruling the reason was a one-liner - "INSERT is exempt from both
+ * strips" - that has since been SUPERSEDED on its static half. A silence whose
+ * stated reason has been overturned is indistinguishable from a scan gap, so the
+ * surviving reasons are written down here and pinned, the same way
+ * {@link READONLY_ACTION_WRITE_EXCLUSIONS} pins the shapes this rule leaves
+ * alone. ⛔ Neither reason may be restated as "INSERT is exempt": that sentence
+ * is false about the engine as of #14147.
+ */
+export const READONLY_ACTION_INSERT_SILENCE = {
+  methods: ['insert', 'create'] as readonly string[],
+  reasons: [
+    {
+      id: 'conditional-lock-has-no-prior-record',
+      reason:
+        'the CONDITIONAL strip this rule reports (`stripReadonlyWhenFields`) is update-path-only - a ' +
+        '`readonlyWhen` predicate is evaluated against the record being written over, which a create ' +
+        'does not have. `engine.ts` states it at the bulk strip: "INSERT stays exempt". Unchanged by ' +
+        'the 2026-09-03 ruling, which moved the STATIC strip only',
+    },
+    {
+      id: 'action-body-is-system-elevated',
+      reason:
+        'the STATIC strip now runs inside `engine.insert` for a non-system caller (#14147), but an ' +
+        "action body's `ctx.api` is `ql.createContext(buildActionExecutionContext(ec))` and that is " +
+        '`{ ...ec, isSystem: true }` - so it is skipped on THIS surface for exactly the reason it is ' +
+        'skipped on `update` here, and a finding would state something false about a write that lands. ' +
+        '⚠️ A fact about ELEVATION, not about INSERT: a non-elevated create IS stripped',
+    },
+  ] as readonly { id: string; reason: string }[],
+} as const;
+
+/**
+ * `ctx.api` write methods whose payload is subject to the conditional strip.
+ * `insert` / `create` are absent for the reasons {@link
+ * READONLY_ACTION_INSERT_SILENCE} records - never for the superseded one.
  */
 const STRIP_SUBJECT_METHODS: ReadonlySet<string> = new Set(['update', 'updateById']);
 
