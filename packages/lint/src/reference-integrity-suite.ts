@@ -239,21 +239,29 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // on a list view. Placed directly after them because it completes the same
   // sweep — every field name an object or its built-in views write down.
   //
-  // `runtimeTypes` gains `object`, and that is the point of the member rather
-  // than a convenience: Studio's app builder mints no `view` items at all, so
-  // the list-view members have nothing to inspect on the only artifacts the
-  // click path authors. What it authors is the OBJECT. The crossing carries
-  // the #9313 property that makes it safe — this member resolves only against
-  // `stack.objects`, the collection the per-write snapshot does carry, so it
-  // has no missing-collection false-positive channel; and it resolves each
-  // name against the object's OWN field map, so a one-object snapshot is not
+  // `runtimeTypes` is `['object']` — the ONLY member of this suite that names
+  // that type, and the only one that does not name `flow`. Both halves are
+  // deliberate.
+  //
+  // It names `object` because that is the point of the member: Studio's app
+  // builder mints no `view` items at all, so the list-view members have
+  // nothing to inspect on the only artifacts the click path authors. What it
+  // authors is the OBJECT. The crossing carries the #9313 property that makes
+  // it safe — this member resolves only against `stack.objects`, the
+  // collection the per-write snapshot does carry, so it has no
+  // missing-collection false-positive channel; and it resolves each name
+  // against the object's OWN field map, so a one-object snapshot is not
   // merely sufficient, it is the whole universe the question has.
   //
-  // `flow` and `view` ride along on the default reasoning: an object reached
-  // as context on either snapshot is judged for its own lists exactly as the
-  // CLI judges it, and the gate's differential means a stored object already
-  // in violation is never charged to someone else's write.
-  { name: 'validateObjectFieldRefs', runtimeTypes: ['flow', 'view', 'object'], run: validateObjectFieldRefs },
+  // It does NOT name `flow` or `view`, and that is not an omission. On either
+  // of those snapshots the objects are CONTEXT, present in the baseline and
+  // the candidate alike, so every finding this member could raise there
+  // cancels in the gate's differential (#4463 D4 — a stored object already in
+  // violation is never charged to someone else's write). Declaring them would
+  // buy two extra passes over the tenant's object model per flow write and
+  // change no verdict. CLI commands ignore this field entirely, so all three
+  // commands judge every object either way.
+  { name: 'validateObjectFieldRefs', runtimeTypes: ['object'], run: validateObjectFieldRefs },
   { name: 'validateActionNameRefs', run: validateActionNameRefs },
   { name: 'validatePageFieldBindings', run: validatePageFieldBindings },
   // [#14073] The same page, one question out. `validatePageFieldBindings`

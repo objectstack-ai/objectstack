@@ -195,11 +195,89 @@ describe('validateObjectFieldRefs — the three shared skips', () => {
     })).toEqual([]);
   });
 
-  it('is inert on junk: no objects, junk entries, non-array lists', () => {
+  it('is inert on junk: no objects, unnamed entries, non-array lists, non-string members', () => {
     expect(validateObjectFieldRefs({})).toEqual([]);
-    expect(validateObjectFieldRefs({ objects: [null, 7, 'x'] as never })).toEqual([]);
+    expect(validateObjectFieldRefs({ objects: [] })).toEqual([]);
+    // An entry with no `name` indexes into no graph and is skipped.
+    expect(validateObjectFieldRefs({ objects: [{ highlightFields: ['x'] }] })).toEqual([]);
     expect(validateObjectFieldRefs(stackOf({ highlightFields: 'not-an-array' }))).toEqual([]);
     expect(validateObjectFieldRefs(stackOf({ highlightFields: [null, 3, ''] }))).toEqual([]);
+    // A name-keyed `objects` map, the other shape the raw `lint` path carries.
+    expect(validateObjectFieldRefs({
+      objects: { proj_task: { fields: { name: {} }, highlightFields: ['nope'] } },
+    })).toHaveLength(1);
+    // ⛔ NOT asserted here: `objects: [null, …]`. `indexObjectGraph` throws a
+    // TypeError on a null collection entry before any member of this suite is
+    // reached — a pre-existing fragility of the shared seam, filed separately
+    // rather than worked around in one member (a local guard here would leave
+    // the same crash in every sibling and hide it).
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [#5378] The injected-column derivation, at the position that moved.
+//
+// These counter-examples used to stand in `validate-semantic-roles.test.ts`,
+// against the warning-tier clause this rule took over. They are re-pinned here
+// at `error` rather than dropped: the derivation is exactly as load-bearing
+// under a gate as it was under an advisory, and a false finding now REFUSES a
+// publish instead of adding a line to a warning list.
+// ---------------------------------------------------------------------------
+describe('validateObjectFieldRefs — the #5378 derivation under a gate', () => {
+  const tag = (over: Record<string, unknown>) => ({
+    objects: [{ name: 'crm_tag', fields: { name: {} }, ...over }],
+  });
+
+  it.each(['none', 'org'])(
+    "REFUSES highlightFields: [owner_id] on ownership: '%s' — the platform injects none",
+    (ownership) => {
+      const findings = validateObjectFieldRefs(tag({
+        ownership, highlightFields: ['name', 'owner_id'],
+      }));
+      expect(findings).toHaveLength(1);
+      expect(findings[0]).toMatchObject({ severity: 'error', rule: OBJECT_FIELD_REF_UNKNOWN });
+      expect(findings[0]!.message).toContain('owner_id');
+    },
+  );
+
+  it('REFUSES an organization_id highlight when the object opts out of tenancy', () => {
+    const findings = validateObjectFieldRefs(tag({
+      tenancy: { enabled: false }, highlightFields: ['organization_id'],
+    }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]!.message).toContain('organization_id');
+  });
+
+  it('REFUSES a typo that merely LOOKS like a system column', () => {
+    const findings = validateObjectFieldRefs({
+      objects: [{ name: 'crm_contact', fields: { name: {} }, highlightFields: ['owner_ids', 'creatd_at'] }],
+    });
+    expect(findings).toHaveLength(2);
+    expect(findings.map((f) => f.message).join(' ')).toMatch(/owner_ids/);
+    expect(findings.map((f) => f.message).join(' ')).toMatch(/creatd_at/);
+  });
+
+  it.each([
+    'created_at', 'created_by', 'updated_at', 'updated_by',
+    'organization_id', 'owning_business_unit_id', 'id',
+  ])('stays silent on highlightFields: [%s] — a real column at render time', (column) => {
+    expect(validateObjectFieldRefs({
+      objects: [{ name: 'crm_contact', fields: { name: {} }, highlightFields: ['name', column] }],
+    })).toEqual([]);
+  });
+
+  it('a withheld anchor on an EXTERNAL object is still the existence verdict (#8116)', () => {
+    const findings = validateObjectFieldRefs({
+      objects: [{
+        name: 'ext_customer',
+        external: { remoteName: 'customers' },
+        fields: { email: { type: 'email' } },
+        ownership: 'none',
+        highlightFields: ['owner_id'],
+      }],
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0]!.rule).toBe(OBJECT_FIELD_REF_UNKNOWN);
   });
 });
 
