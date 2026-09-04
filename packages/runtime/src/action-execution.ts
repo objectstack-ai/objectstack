@@ -787,20 +787,32 @@ export function isFlowActionRefusal(e: unknown): e is FlowActionRefusal {
  * flow ACTION and triggering its flow directly must land the same run, or
  * "the actions endpoint dispatches flows for you" is a claim the runtime
  * doesn't keep.
+ *
+ * [#15168] **The wiring takes the subject LOAD, not a bare record.** The flow
+ * face of #14143's signal (`AutomationContext.recordLoadDenied`, declared by
+ * #14244) is derived here, once, from {@link loadActionSubjectRecord}'s
+ * outcome — so a caller cannot hand this door a record while dropping the
+ * verdict that says the caller could not read it. Both call sites already held
+ * that outcome and were passing `subject.record` out of it; taking the whole
+ * `subject` removes the second de-facto source rather than adding a key beside
+ * it, and makes the omission a compile error instead of a silent inertness one
+ * door over (the shape #14143 was filed for).
  */
 export async function dispatchFlowAction(deps: ActionExecutionDeps,
     requestContext: HttpProtocolContext,
     action: any,
     wiring: {
         objectName: string;
-        record: Record<string, unknown>;
+        /** The caller-scope load outcome — `record` AND its verdict, from ONE producer. */
+        subject: ActionSubjectRecordLoad;
         params: Record<string, unknown>;
         recordId?: string;
         ec: any;
         envId?: string;
     },
 ): Promise<any> {
-    const { objectName, record, params, recordId, ec, envId } = wiring;
+    const { objectName, subject, params, recordId, ec, envId } = wiring;
+    const record = subject.record;
     const automation = await resolveAutomationService(deps, requestContext, envId);
     if (!automation) {
         throw new Error(flowActionUnavailableError(action));
@@ -819,6 +831,15 @@ export async function dispatchFlowAction(deps: ActionExecutionDeps,
     // `triggerData` envelope).
     const result: any = await automation.execute(action.target, {
         record,
+        // [#15168] The caller-scope load's verdict, a SIBLING of `record` —
+        // never a key on it, and spread so it is ABSENT rather than `false`
+        // when nothing was refused (`AutomationContext.recordLoadDenied` is
+        // `true | undefined`; a flow reads `recordLoadDenied === true`). The
+        // same producer, the same spelling and the same absence convention the
+        // handler face already carries at the two script-body call sites — the
+        // flow face is where the declared key had no populator at all, so a
+        // `runAs: 'system'` flow guarding on it was inert, never wrong.
+        ...actionRecordLoadSignal(subject),
         ...(isObjectLessActionKey(objectName) ? {} : { object: objectName }),
         userId: ec?.userId,
         ...(Array.isArray(ec?.positions) && ec.positions.length ? { positions: ec.positions } : {}),
@@ -1404,7 +1425,10 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
 
     // ── flow dispatch ── (shared with the REST /actions route, #3915)
     if (action.type === 'flow') {
-        const result = await dispatchFlowAction(deps, requestContext, action, { objectName, record, params, recordId, ec, envId });
+        // [#15168] `subject`, not `record`: the shared door derives the flow
+        // context's `record` AND its `recordLoadDenied` sibling from the one
+        // load outcome, so this door cannot forward the row without the verdict.
+        const result = await dispatchFlowAction(deps, requestContext, action, { objectName, subject, params, recordId, ec, envId });
         return { ok: true, action: action.name, objectName, ...(recordId ? { recordId } : {}), result };
     }
 
