@@ -2631,14 +2631,21 @@ describe('AuthManager', () => {
         expect(sms.sent[0].body).toContain('验证码');
         expect(sms.sent[0].body).toContain('555555');
       });
+    });
 
-      // ── #14641 — the SMS INVITE path's two branches ───────────────────
-      //
+    // ── #14641 — the SMS INVITE path gets the same rung ──────────────────
+    //
+    // Its OWN describe, sibling to #14762 above rather than nested inside it:
+    // the reporter path is what the next reader greps, and these pins answer
+    // for #14641, not for the card that gave the OTP send its rung.
+    describe("#14641 — the invitation SMS reads the invitee's own locale", () => {
       // Was a scope fence ("untouched — its rung is #14641's") until #14641
-      // landed. This is the branch-1 case in its purest form: the one in-repo
-      // caller (the identity import endpoint's `invite` policy) CREATES the
-      // account and only then sends this SMS, so the row exists before the
-      // send does — the existing-row branch is not a hypothetical here.
+      // landed. The existing-row branch is reachable by construction: the one
+      // in-repo caller (the identity import endpoint's `invite` policy) CREATES
+      // the account before sending. ⚠️ It does NOT populate `locale`, and the
+      // column has no default, so that caller still lands on the deployment
+      // rung today — these pins drive the engine directly, which is what lets
+      // them measure the rung the in-repo flow does not yet exercise.
       //
       // ⚠️ The two built-in invite bodies genuinely differ, so each assertion
       // names one locale in BOTH directions: the marker for the locale that

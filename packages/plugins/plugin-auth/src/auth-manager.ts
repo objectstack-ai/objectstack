@@ -4805,13 +4805,20 @@ export class AuthManager {
     // templates that still interpolate `{{baseUrl}}`.
     //
     // #14641 — the invitee's OWN stored language, on the same two branches the
-    // invitation EMAIL takes. This surface is the branch-1 case in its purest
-    // form: the doc comment above is not describing a possibility but the
-    // invariant of the one in-repo caller — the identity import endpoint
-    // CREATES the account and only then sends this SMS, so the row exists
-    // before the send does. A number that resolves no row (a caller outside
-    // that flow) keeps the deployment default. Matched exactly on
+    // invitation EMAIL takes. A number that resolves no row, or a row naming no
+    // language, keeps the deployment default. Matched exactly on
     // `phone_number`, the same predicate {@link deliverPhoneOtp} matches on.
+    //
+    // ⚠️ What this yields TODAY, so the next reader does not over-read it: the
+    // one in-repo caller (the identity import endpoint's `invite` policy)
+    // CREATES the account before sending, so a ROW is always there — but
+    // `admin-import-users.ts` never writes `locale` and the column declares no
+    // default, so the value is empty at send time and this path still resolves
+    // to the deployment default, exactly as it did before #14641. The rung is
+    // wired, not yet exercised in-repo: it answers for an out-of-repo caller,
+    // or for a future import that populates the column. ⛔ Do not read this
+    // site as a behaviour change users see today — that one is on the
+    // invitation EMAIL, whose invitee may already hold a locale-bearing row.
     const storedLocale = await this.storedRecipientLocale({ phone_number: phone });
     const body = await this.renderPhoneSmsBody(
       PHONE_SMS_TOPICS.invite,
@@ -4850,9 +4857,9 @@ export class AuthManager {
    * reads the recipient's own `sys_user.locale` first (#13881, ruling
    * 2026-09-01, the same column the messaging channels resolve per recipient)
    * and falls here when the account holds none. #14641 gave the SMS INVITE
-   * path the same rung — matched on `phone_number`, and for the one in-repo
-   * caller (identity import) the row always exists, since the account is
-   * created before the invitation SMS is sent. This rung answers when the
+   * path the same rung, matched on `phone_number` — though the one in-repo
+   * caller (identity import) creates a row that never carries a `locale`, so
+   * that flow still lands HERE in practice. This rung answers when the
    * number resolves no row, or the row names no language.
    */
   setDefaultSmsLocale(locale: string | undefined): void {

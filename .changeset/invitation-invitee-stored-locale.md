@@ -16,11 +16,13 @@ That reason covers only one of the two populations an invitation reaches. This
 change gives both invitation sends the same top rung the other four already
 read, on a **two-branch** shape:
 
-1. the address (or phone number) **already carries** a `sys_user` row — an
-   existing platform user invited into a second organization, a re-invitation,
-   or an imported phone-only account — the row's `locale` wins;
+1. the address (or phone number) **already carries** a `sys_user` row whose
+   `locale` is set — an existing platform user invited into a second
+   organization, or a re-invitation — that row's `locale` wins;
 2. a genuinely **new** invitee with **no** row keeps the deployment default,
-   because their language is still truly unknown at invitation time.
+   because their language is still truly unknown at invitation time. So does an
+   invitee whose row exists but names no language: an unset column is not a
+   choice.
 
 ⛔ The inviter direction stays rejected on both branches, and is now pinned
 against a manager that has the top rung wired rather than against one with no
@@ -33,10 +35,20 @@ inviter's header.
 address that is already a member of *this* organization
 (`USER_IS_ALREADY_A_MEMBER_OF_THIS_ORGANIZATION`, `routes/crud-invites.mjs` in
 the installed 1.7.2), so an existing account invited elsewhere — and the
-`resend` branch — reach the callback normally. `sendPhoneInviteSms` is the
-branch-1 case in its purest form: its one in-repo caller, the identity import
-endpoint's `invite` policy, **creates** the account and only then sends the SMS,
-so the row exists before the send does.
+`resend` branch — reach the callback normally. `sendPhoneInviteSms` reaches a row by
+construction: its one in-repo caller, the identity import endpoint's `invite`
+policy, **creates** the account and only then sends the SMS.
+
+⚠️ **What the SMS path yields today, stated precisely, because a changeset
+becomes release notes.** The rung is wired there and reads the row whenever the
+row carries a locale — but `admin-import-users.ts` never writes `locale` (0
+occurrences; positive control: `sendInviteSms` appears twice in the same file),
+and `sys_user.locale` declares no column default. So on the only in-repo caller
+the column is empty at send time and the invitation SMS still resolves to the
+**deployment default** — the pre-change behaviour, unchanged for that flow. What
+this buys on that surface is the rung itself: an out-of-repo caller, or a future
+import that populates `locale`, is read rather than ignored. The behaviour users
+see change today is on the invitation **email**.
 
 **Matching is exact, and that is safe rather than merely tolerable here.**
 better-auth lowercases the invitee address on the invite route and the stored

@@ -22,11 +22,13 @@
  * send-OTP callbacks `{ phoneNumber, code }` and nothing else, so the ruled
  * chain (#14788 option D, 2026-09-03) collapses to stored → deployment here.
  *
- * #14641 gave the SMS **invite** path the same two rungs. Its recipient is
- * matched on `phone_number`, and for the one in-repo caller — the identity
- * import endpoint's `invite` policy — the account is CREATED before the SMS is
- * sent, so the row is there to read. A number that resolves no row keeps the
- * deployment default.
+ * #14641 gave the SMS **invite** path the same two rungs, matched on
+ * `phone_number`. A number that resolves no row — or a row naming no language
+ * — keeps the deployment default. ⚠️ That is what the one in-repo caller gets
+ * today: the identity import endpoint creates the account before sending, so a
+ * ROW is always there, but it never writes `locale` and the column has no
+ * default, so that flow still resolves to the deployment rung. The rung is
+ * wired for an out-of-repo caller, or a future import that populates it.
  *
  * Whatever arrives, {@link phoneSmsLocaleChain}'s terminal `en` remains the
  * floor: this module never returns nothing, and an OTP never fails to render.
