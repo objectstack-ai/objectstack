@@ -16,8 +16,10 @@
  *   GET  /api/v1/cloud-connection/org-packages  — owning org's own catalog ("Your organization")
  *
  * History: these routes started as app-level wiring in
- * `apps/objectos/cloud-runtime-plugins.ts` (two ad-hoc plugins). ADR-0008
- * Phase 1 consolidates them here as ONE plugin so both deployment shapes —
+ * `apps/objectos/cloud-runtime-plugins.ts` (two ad-hoc plugins; every
+ * `apps/` path named in this paragraph lives in the separate
+ * `objectstack-ai/cloud` repo, never in this one). ADR-0008 Phase 1
+ * consolidates them here as ONE plugin so both deployment shapes —
  * `apps/objectos` (multi-tenant) and `apps/objectos-ee` (single-environment)
  * — wire the same canonical implementation. ADR-0008 Phase 2 moves this
  * surface into the open `@objectstack/cloud-connection` package; keep this

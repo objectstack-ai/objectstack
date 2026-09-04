@@ -96,7 +96,7 @@
  * rebuilt. The transport and `TursoDriver` themselves ARE this package's `src`.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, assert } from 'vitest';
 
 import { RemoteTransport } from './remote-transport.js';
 import { TursoDriver } from './turso-driver.js';
@@ -240,8 +240,10 @@ describe('[#14428] both TursoDriver faces answer a missing id the same way', () 
     const localHit = await local.update('task', 't1', { title: 'after' });
     const remoteHit = await remote.update('task', 't1', { title: 'after' });
 
-    expect(localHit).not.toBeNull();
-    expect(remoteHit).not.toBeNull();
+    // [#14438] `update()` declares its not-found arm on both faces; the positive
+    // control asserts the row arm before reading it (a narrowing assertion, not a `!`).
+    assert(localHit !== null, 'local face answered the not-found arm for an existing id');
+    assert(remoteHit !== null, 'remote face answered the not-found arm for an existing id');
     expect(localHit.id).toBe('t1');
     expect(remoteHit.id).toBe('t1');
     expect(localHit.title).toBe('after');
