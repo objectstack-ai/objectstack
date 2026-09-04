@@ -288,11 +288,11 @@ export const CEILINGS = new Map([
   // ≤5-same-family batch convention that replaces them costs less than they
   // did. Landed count, headroom 0, same convention (lowering is always
   // legitimate).
-  // Lowered 1005 → 804 by the rules-only rewrite (maintainer ruling: provenance
+  // Lowered 1005 → 811 by the rules-only rewrite (maintainer ruling: provenance
   // narratives, incident post-mortems and rationale tails leave the corpus; one
   // rule per ≤120-byte line, 红线 first, templates last). Landed count, headroom
   // 0, same convention (lowering is always legitimate).
-  ['.claude/skills/pm-dispatch/SKILL.md', 804],
+  ['.claude/skills/pm-dispatch/SKILL.md', 811],
   // Raised 223 → 244 by the triage reading-cost card (maintainer ruling
   // 2026-08-20, quoted in the raising PR): three mandated conventions land in
   // the runbook's triage sections. Landed count, headroom 0, same convention.
