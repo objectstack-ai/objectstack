@@ -565,6 +565,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'a package that never runs vitest is ignored entirely': 1,
   'prose naming the key does not satisfy the check': 1,
   'prose naming bootStack does not SELECT the package (the packages/cli shape)': 1,
+  'a code signal spelled only in a string or a comment does not SELECT': 1,
   'a level the engine does not recognise is RED': 1,
   'the key outside any env block does not count': 1,
   'S2: importing bootStack from @objectstack/verify selects': 1,
@@ -580,7 +581,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // zeroing it, so the roster's own size is pinned too. This pin is also half of
 // the duplicate-label refusal: two rows sharing a label collapse to ONE key in
 // the literal above, so the roster falls below this number.
-const SELF_TEST_BATTERY_FLOOR = 15;
+const SELF_TEST_BATTERY_FLOOR = 16;
 
 // The key an assertion is filed under when a row carries no label. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -658,6 +659,33 @@ function selfTest() {
       },
       expectFindings: 0,
       expectSelected: 0,
+    },
+    {
+      // The other direction of the row above, for the CODE mask: a signal
+      // spelled inside a string literal or a comment must not select, and the
+      // same spelling in real code still must. Package `a` carries both
+      // non-code spellings, package `b` the code one, so a mask that stopped
+      // blanking either span shows up as a SECOND selected package rather than
+      // as a silent widening of the population.
+      name: 'a code signal spelled only in a string or a comment does not SELECT',
+      packages: {
+        a: {
+          'package.json': TEST_MANIFEST,
+          'test/x.test.ts':
+            `// new SchemaRegistry() is what this file describes; bootStack too.\n`
+            + `/* const described = new SchemaRegistry(); */\n`
+            + `export const doc = 'new SchemaRegistry() quoted, and bootStack, never called';\n`,
+          'vitest.config.ts': `export default { test: { globals: true } };\n`,
+        },
+        b: {
+          'package.json': TEST_MANIFEST,
+          'test/x.test.ts': BOOTS,
+          'vitest.config.ts': `export default { test: { globals: true } };\n`,
+        },
+      },
+      expectFindings: 1,
+      expectSelected: 1,
+      expectText: 'S1 constructs a SchemaRegistry',
     },
     {
       name: 'a level the engine does not recognise is RED',
