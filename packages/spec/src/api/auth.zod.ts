@@ -54,7 +54,7 @@ export const SessionUserSchema = lazySchema(() => z.object({
    * there is no authored source for a D2 conversion to rewrite.
    */
   language: retiredKey(
-    '`SessionUser.language` was removed in @objectstack/spec 17.4.0 (#14788, ADR-0049) — ' +
+    '`SessionUser.language` was removed in @objectstack/spec 17.4.0 (ADR-0049 enforce-or-remove) — ' +
     'it was declared with a permanent default of `\'en\'` and never produced by any session ' +
     'endpoint nor read by any client, so a reader keying on it saw a constant, not the ' +
     "user's language. Delete the key. Read the signed-in user's language from " +
