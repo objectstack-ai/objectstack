@@ -441,6 +441,184 @@ function main({ prePush = false } = {}) {
 // import — only when this file IS the entry point.
 const invokedDirectly = isEntrypoint(import.meta.url);
 
+/* ------------------------------------------------ self-test: battery roster */
+
+// The self-test's own battery roster and floor (#13799).
+//
+// `noDist && noTree && armed && table && fixture` was this self-test's ONLY
+// success condition, so "every sub-check held" and "the sub-checks never ran"
+// printed the same line. A callee whose body stops doing its work still returns
+// whatever its last surviving statement produces, and the green verdict below
+// then claims this file's whole deferred-merge wiring is sound. Closed the way
+// the Tier C pilot closed it (PR #15326, `git-merge-regen.mjs`): what is pinned
+// is the registered NAMES, not a number.
+//
+// -- Why the CALLEE NAME is the battery --
+//
+// This file has no `selfTest()` entry function: the `--self-test` dispatch at
+// the bottom invokes THREE named callees, each printing its own section and
+// returning a boolean. So the roster's unit is the CALLEE, and its label is the
+// one the SOURCE ALREADY CARRIES -- the function's own name. Nothing is invented
+// and nothing is judged per comment, and a set difference names WHICH sub-check
+// stopped rather than saying only that something did.
+// `registerCase('<calleeName>')` is the FIRST statement of every callee, above
+// any early return, so what the ledger records is that the callee RAN -- which
+// is why each floor is 1 rather than the number of assertions the callee
+// happens to contain.
+//
+// STOP -- the three callees' own inner sinks are NOT batteries here, and they
+// are worth naming because all three are different shapes: `fixtureSelfTest`'s
+// `check()` helper (14 calls), `decisionTableSelfTest`'s literal 8-row table
+// with its driving loop, and `prePushIsArmedSelfTest`'s bare boolean. Recipe A
+// (PR #15271, `check-sdui-manifest`) does make a table row a battery -- for a
+// file whose SELF-TEST *is* the table: one literal table, one driving loop over
+// it, one sink. Here the table is a local of ONE callee among three, and that
+// callee already reduces its rows to a single returned verdict of its own.
+// Flooring those rows would floor one callee's internals while the other two
+// stayed at callee granularity -- a roster whose unit changes per entry. The
+// rule: the battery is the unit the DISPATCH names.
+//
+// STOP -- the TWO assertions written INLINE in the dispatch block (`noDist`,
+// `noTree`) are deliberately OUTSIDE this roster, and that is a DECLARED GAP,
+// not an oversight (ruled Q1 = A on #13799; the pilot and batches 7a/7b set the
+// precedent). They are not callees: the dispatch names no unit for them, so
+// there is no name the source already carries. Inventing a label would put a
+// hand-written string into a roster whose entire property is that every entry
+// is read off a declaration, and hoisting them into named callees is a reshape
+// with its own card, never a rider here. What the gap costs, stated plainly:
+// those two lines can stop running and this floor will not say so.
+//
+// STOP -- a pinned TOTAL is not the repair: one callee dropping all its work
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality -- a callee that grows a second
+// registration must not red. 1 is the honest floor for a callee: the dispatch
+// reaches it exactly once per run.
+const SELF_TEST_BATTERIES = Object.freeze({
+  prePushIsArmedSelfTest: 1,
+  decisionTableSelfTest: 1,
+  fixtureSelfTest: 1,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too. This pin is also half of
+// the duplicate refusal: two dispatch entries naming ONE callee collapse to one
+// key in the literal above, so the roster falls below this number; the
+// roster/dispatch cross-check in `batteryFloorFailures()` is the other half, and
+// it names WHICH callee was listed twice.
+const SELF_TEST_BATTERY_FLOOR = 3;
+
+// The key a registration is filed under when a callee registers no name at all.
+// It is not a declared battery, so it reds by the same set difference rather
+// than silently inflating whichever battery registered last.
+const UNATTRIBUTED_BATTERY = '(no callee named)';
+
+// The battery ledger, read by `batteryFloorFailures()` from the dispatch block
+// at the very bottom of this file. It is MODULE-level rather than local to a
+// self-test body because this file HAS no self-test body: the registrations
+// happen inside three separate callees and the floor is read at the dispatch's
+// verdict site, so the ledger has to outlive every one of those frames.
+//
+// Named for the roster's role, deliberately WITHOUT a self-test spelling:
+// `check:pm-dispatch-gates` anchors on a top-level declaration whose NAME spells
+// self-test, and every such name owes a row in its COMPOUND_ANCHOR_LEDGER. The
+// three callee names above already spell self-test and already carry their rows;
+// an object KEY is not a column-0 declaration, so the roster owes no new row.
+// `battery` is also the accurate word.
+const batterySeen = new Map();
+
+/**
+ * Record that a self-test callee RAN.
+ *
+ * Called as the FIRST statement of each of the three callees the `--self-test`
+ * dispatch invokes -- above any early return, so a callee that bails out early
+ * still reports that it ran, and the floor is never met by a frame that returned
+ * before doing anything.
+ */
+function registerCase(name) {
+  const key = name ?? UNATTRIBUTED_BATTERY;
+  batterySeen.set(key, (batterySeen.get(key) ?? 0) + 1);
+}
+
+/**
+ * The floor: every declared callee RAN (#13799).
+ *
+ * Evaluated at the dispatch's verdict site -- after all three callees have had
+ * their chance and immediately before the success line -- and reached only from
+ * the `--self-test` branch, so a production `pre-commit` / `pre-push` run never
+ * reads the ledger at all.
+ *
+ * @param {string[]} invoked the callee names the dispatch block actually invokes
+ * @returns {string[]} floor breaches; empty means the floor held
+ */
+function batteryFloorFailures(invoked) {
+  const declared = Object.keys(SELF_TEST_BATTERIES);
+  const problems = [];
+  if (declared.length < SELF_TEST_BATTERY_FLOOR) {
+    problems.push(
+      `SELF_TEST_BATTERIES declares ${declared.length} batteries, below the pinned `
+        + `${SELF_TEST_BATTERY_FLOOR} -- a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+
+  // -- Roster vs dispatch, both directions --
+  // `invoked` is read off the dispatch's own list of callees, so this pair says
+  // WHICH name lost its counterpart. A declared name nothing invokes would also
+  // read DID NOT RUN below; naming it here reports the cause (nothing calls it)
+  // rather than only the symptom (nothing registered).
+  const duplicated = [...new Set(invoked.filter((name, i) => invoked.indexOf(name) !== i))];
+  if (duplicated.length) {
+    problems.push(
+      `the dispatch invokes ${duplicated.map((n) => JSON.stringify(n)).join(', ')} more than once -- `
+        + 'two entries naming one callee are ONE battery, so the second can stop running while the '
+        + 'first keeps the floor met.',
+    );
+  }
+  for (const name of invoked) {
+    if (declared.includes(name)) continue;
+    problems.push(
+      `the dispatch invokes "${name}", which is not declared in SELF_TEST_BATTERIES -- a callee `
+        + 'nothing declares is a sub-check nothing floors.',
+    );
+  }
+  for (const name of declared) {
+    if (invoked.includes(name)) continue;
+    problems.push(
+      `SELF_TEST_BATTERIES declares "${name}", which the dispatch block does not invoke -- a floor `
+        + 'over a battery nothing can reach.',
+    );
+  }
+
+  // -- Roster vs ledger, both directions --
+  for (const [name, count] of batterySeen) {
+    if (declared.includes(name)) continue;
+    problems.push(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in `
+        + 'SELF_TEST_BATTERIES -- a case attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declared) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    problems.push(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN -- 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. `
+          + 'The verdict below would have claimed that sub-check holds.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of `
+          + `${SELF_TEST_BATTERIES[name]} -- cases that used to run no longer do.`,
+    );
+  }
+
+  if (problems.length) {
+    problems.push(
+      'A battery at or below its floor means a sub-check STOPPED RUNNING -- the battery is the bug, '
+        + 'not the number. Find what stopped registering (a deleted invocation, a renamed callee, a '
+        + '`registerCase()` moved below an early return) and restore it.',
+    );
+  }
+  return problems;
+}
+
 /**
  * Replay the deferred-merge sequence against a THROWAWAY git repo (#8047).
  *
@@ -456,6 +634,7 @@ const invokedDirectly = isEntrypoint(import.meta.url);
  * a full spec build.
  */
 function fixtureSelfTest() {
+  registerCase('fixtureSelfTest');
   const dir = mkdtempSync(join(tmpdir(), 'os-regen-defer-'));
   const git = (args, opts = {}) =>
     execFileSync('git', args, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], ...opts });
@@ -606,6 +785,7 @@ function fixtureSelfTest() {
  * undischarged deferral leaves the machine in silence.
  */
 function prePushIsArmedSelfTest() {
+  registerCase('prePushIsArmedSelfTest');
   let mode = '';
   try {
     mode = execFileSync('git', ['ls-files', '-s', '.githooks/pre-push'], {
@@ -630,6 +810,7 @@ function prePushIsArmedSelfTest() {
 
 /** The five `decide` cases, including the ones a fixture cannot reach. */
 function decisionTableSelfTest() {
+  registerCase('decisionTableSelfTest');
   const cases = [
     [{ blocked: 0, merging: null, deferral: null }, 'clear'],
     [{ blocked: 0, merging: null, deferral: { head: 'a' } }, 'discharged'],
@@ -658,19 +839,67 @@ if (invokedDirectly) {
   if (process.argv.includes('--self-test')) {
     // Touches no repo state: the interesting logic is the staleness rules, and
     // their dangerous direction is "says fresh when stale".
+    //
+    // STOP -- these TWO assertions are written INLINE here rather than inside a
+    // named callee, so they are outside SELF_TEST_BATTERIES and the floor below
+    // cannot see them stop running (ruled Q1 = A on #13799). The gap, and why
+    // labelling or hoisting them is not this card's business, is stated at the
+    // roster declaration above.
     const noDist = distIsStale(join(REPO_ROOT, 'scripts')) === true;
     console.log(`${noDist ? '✓' : '✗'} a directory with no dist/ reads as STALE (conservative default)`);
     const noTree = schemaTreeIsStale(join(REPO_ROOT, 'scripts')) === true;
     console.log(`${noTree ? '✓' : '✗'} a directory with no json-schema/ reads as STALE (conservative default)`);
-    console.log('\ndeferred-merge collection point:');
-    const armed = prePushIsArmedSelfTest();
-    console.log('\ndeferred-merge decision table:');
-    const table = decisionTableSelfTest();
-    console.log('\ndeferred-merge sequence, replayed on a throwaway repo:');
-    const fixture = fixtureSelfTest();
-    const ok = noDist && noTree && armed && table && fixture;
-    console.log(ok ? '\n✓ check-regen-pending self-test passed.' : '\n✗ self-test failed.');
-    process.exit(ok ? 0 : 1);
+
+    // The three callees as a literal LIST rather than three bare calls, so the
+    // names this block invokes are data the floor below can cross-check the
+    // roster against, in both directions. The names are read off the function
+    // declarations themselves (`fn.name`), so a renamed callee moves this list
+    // with it and cannot drift from the roster in silence. Each entry carries
+    // the section banner that already sat immediately above its call, so what is
+    // printed is byte-identical to the three banner + `const ... = callee()`
+    // pairs this replaces.
+    //
+    // EVALUATION ORDER AND COMPLETENESS ARE UNCHANGED, on the red path too. The
+    // original invoked all three eagerly -- one `const` per callee, executed
+    // unconditionally -- and only THEN reduced the five booleans with `&&`, so
+    // the short-circuit was always over VALUES, never over calls. `.map()` runs
+    // the same three in the same order: nothing that used to run stops, and
+    // nothing that used to be skipped now runs.
+    const callees = [
+      ['\ndeferred-merge collection point:', prePushIsArmedSelfTest],
+      ['\ndeferred-merge decision table:', decisionTableSelfTest],
+      ['\ndeferred-merge sequence, replayed on a throwaway repo:', fixtureSelfTest],
+    ];
+    const results = callees.map(([banner, run]) => {
+      console.log(banner);
+      return run();
+    });
+
+    // -- The assertion floor, at the verdict site --
+    // There is no verdict site inside a self-test body here, because there is no
+    // self-test body: this dispatch IS the verdict site, and the reduction below
+    // is the verdict. So the floor is evaluated here, after every callee has had
+    // its chance and immediately before the success line -- the only place a run
+    // in which a callee never ran can still be stopped from reporting that the
+    // self-test passed. It sits inside the `--self-test` branch, so the
+    // production path (`main()`, which `pre-commit` and `pre-push` spawn) never
+    // reads the ledger.
+    const floorBreaches = batteryFloorFailures(callees.map(([, run]) => run.name));
+    for (const breach of floorBreaches) console.error(`✗ self-test floor: ${breach}`);
+
+    // The verdict is an explicit BRANCH rather than a ternary over
+    // `process.exit`, so the failure path literally IS a `process.exit(1)`.
+    // That is what `measure-self-test-floor.mjs` reads as a floor that PRODUCES
+    // A FAILURE rather than one that merely names a roster: this file's previous
+    // `process.exit(ok ? 0 : 1)` classified NONE on that instrument even with a
+    // sound floor above it. The success line's text is unchanged.
+    const failures = [noDist, noTree, ...results].filter((ok) => !ok).length + floorBreaches.length;
+    if (failures > 0) {
+      console.log(`\n✗ self-test failed -- ${failures} failure(s) (cases and floor).`);
+      process.exit(1);
+    }
+    console.log('\n✓ check-regen-pending self-test passed.');
+    process.exit(0);
   }
   process.exit(main({ prePush: process.argv.includes('--pre-push') }));
 }

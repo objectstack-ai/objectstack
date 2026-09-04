@@ -73,7 +73,7 @@ Server-connected object table with toolbar and switchable visualizations (grid/k
 | `searchableFields` | `string[]` | data |  | Fields enabled for search |
 | `userFilters` | `object` | data |  | End-user quick-filter bar: dropdown/toggle fields or tab presets. Omit to let the renderer derive filters from select/boolean fields |
 | `pagination` | `object` | data |  | Pagination configuration |
-| `grouping` | `object` | data |  | Group records by one or more fields |
+| `grouping` | `object` | data |  | Group records by one or more fields — server-side: the groups and their header numbers come from an aggregate query over the whole filtered set, rows within a … |
 | `rowHeight` | `'compact' \| 'short' \| 'medium' \| 'tall' \| 'extra_tall'` | data |  | Row height / density setting |
 | `selection` | `object` | data |  | Row selection configuration |
 | `rowActions` | `string[]` | data |  | Actions available for individual row items |

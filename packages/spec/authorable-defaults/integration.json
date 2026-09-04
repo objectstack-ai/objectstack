@@ -24,8 +24,6 @@
     "integration/DeclarativeConnectorEntry:enabled = true",
     "integration/DeclarativeConnectorEntry:requestTimeoutMs = 30000",
     "integration/DeclarativeConnectorEntry:status = \"inactive\"",
-    "integration/ErrorMappingConfig:defaultCategory = \"integration_error\"",
-    "integration/ErrorMappingConfig:logUnmapped = true",
     "integration/HealthCheckConfig:expectedStatus = 200",
     "integration/HealthCheckConfig:healthyThreshold = 1",
     "integration/HealthCheckConfig:intervalMs = 60000",
