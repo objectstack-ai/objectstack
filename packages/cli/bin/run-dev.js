@@ -200,31 +200,55 @@ keepStderrNonBlocking();
  * still gets this CLI's own exit status instead of a crash. #14858.
  *
  * `process.stderr` is an `EventEmitter`, and an `error` event with nothing
- * listening IS an uncaught exception. Measured on this shim with the parent's
- * read end DESTROYED (`stdio: ['ignore', 'ignore', 'pipe']`, then
- * `child.stderr.destroy()`): oclif's `displayWarnings()` makes the first write,
- * the pipe is already gone, node raises `write EPIPE` on `process.stderr`, and
- * the process dies of an uncaught exception before this file's `.catch()` — and
- * before `writeStderr()` above — has run at all. __REPRO__
+ * listening IS an uncaught exception. With the parent's read end DESTROYED
+ * (`stdio: ['ignore', 'ignore', 'pipe']`, then `child.stderr.destroy()`)
+ * oclif's `displayWarnings()` makes the first write, the pipe is already gone,
+ * node raises `write EPIPE` on `process.stderr`, and this process died of an
+ * uncaught exception — 12 of 12 runs, 938-1174 ms in, well before `run()`
+ * settles and before `writeStderr()` above is ever called. Traced with a
+ * `--import` observer that installs NO listener on this stream and wraps no
+ * write (`uncaughtExceptionMonitor`, which observes without preventing the
+ * default crash — an `uncaughtException` handler would have changed the very
+ * thing being read):
  *
- * Every OTHER reader of the same child answers **2**, the status oclif's
- * `handle()` produces and the one #14715 pinned for the never-read reader.
- * __READERS__ So the closed reader was the single shape that could not tell
- * "the command failed" from "the CLI crashed", on the only channel it had left.
+ *     uncaughtException  code=EPIPE  msg=write EPIPE
+ *           at afterWriteDispatched (node:internal/stream_base_commons:159:15)
+ *     exit  code=1
  *
- * ⛔ Deliberately NOT narrowed to `error.code === 'EPIPE'`, though that is the
- * code the first failure carries. __CODES__ A predicate would therefore have to
- * enumerate the codes a dead pipe produces AFTER the first one, and get that
- * enumeration right forever, to buy a distinction nothing here can act on:
- * every error event on this stream means one thing — a write to stderr failed —
- * and the only channel it could be reported on is the stream that just failed.
+ * Every OTHER reader of the same child answers **2** — drained (1209-1217 ms,
+ * 147699 bytes delivered) and never-read (16178-16471 ms) both did, in the same
+ * conditions. 2 is what oclif's `handle()` produces, and #14715 pinned it for
+ * the never-read reader. So the closed reader was the one shape that could not
+ * tell "the command failed" from "the CLI crashed", on the only channel it had
+ * left.
+ *
+ * ⛔ Deliberately NOT narrowed to `error.code === 'EPIPE'`, even though EPIPE is
+ * the only code this path was measured to raise (4 events per run, no other
+ * code, observed with a listener installed on purpose for that one question).
+ * The reason to tolerate is not WHICH error it is: every event here means one
+ * thing — a write to stderr failed — the only channel it could be reported on
+ * is the stream that just failed, and there is no other action to take. A
+ * predicate would buy no decision and would keep exactly this crash for
+ * whatever code turns up next.
  *
  * ⚠️ What it costs, and it is not nothing. With the write no longer fatal the
- * run continues into `writeStderr()`'s drain, which for this path had never
- * executed at all. Re-measured on this tree, destroyed read end, `bin/run-dev.js`
- * ablated 2x2 (this listener present/absent x the `write` callback kept/removed):
+ * run continues into `writeStderr()`'s drain, which for this path had NEVER
+ * executed at all. Ablated 2x2 on this file, one contiguous run, shared box —
+ * so read the ratios, not the absolutes:
  *
- * __ABLATION__
+ *     this listener   write callback     exit   elapsed
+ *     -------------   ---------------    ----   ---------------
+ *     present         kept (= HEAD)        2    1237-1312 ms
+ *     present         removed              2    16271-16294 ms   the 15 s bound
+ *     absent          kept                 1     983-1028 ms     the defect
+ *     absent          removed              1     843-1031 ms
+ *
+ * Row 1 against row 3 is the whole change, and it is ~250 ms: the child now
+ * ends the way a drained reader's child ends instead of dying on its first
+ * write. (The two runs are comparable because their unfixed rows agree — 938-
+ * 1174 ms above, 983-1028 ms here.) Row 2 is what the drain costs when only the
+ * no-progress bound can end it — a cost that is REACHABLE now and was not
+ * before, because rows 3-4 never got there at all.
  */
 process.stderr.on('error', () => {
   // Nothing to report, and nowhere left to report it.
