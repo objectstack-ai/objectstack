@@ -17685,11 +17685,10 @@ function selfTest() {
     }
     return { sites, perRoot };
   };
-  // `relative` from `node:path` is SHADOWED inside this function — a fixture
-  // string a few thousand lines up binds that name — so the repo-relative
-  // spelling comes from ROOT, the prefix every sibling case here already joins
-  // against. A prefix that stops holding yields an empty root, which the walk
-  // above reports rather than turning into a pass.
+  // The repo-relative spelling here comes from ROOT, the prefix every sibling
+  // case in this block already joins against — the consistent spelling, not a
+  // workaround. A prefix that stops holding yields an empty root, which the
+  // walk above reports rather than turning into a pass.
   const tierOwnAbs = fileURLToPath(import.meta.url);
   const tierOwnRel = tierOwnAbs.startsWith(ROOT) ? tierOwnAbs.slice(ROOT.length) : '';
   // The definition line is FOUND, not remembered: the one line carrying both
