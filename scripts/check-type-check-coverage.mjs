@@ -2493,6 +2493,17 @@ function skippedClauses(packages) {
     .filter((row) => row.skipped.length > 0);
 }
 
+// The one population this line CANNOT speak for, said out loud rather than left
+// to the word "every" (#15483). `evaluate` asks the per-package invariants
+// inside a loop over the enumerated packages, and the workspace ROOT is not one
+// of them -- `observed()` builds it from its manifest alone, with none of the
+// four observation fields -- so TESTS_COVERED, SOURCES_COVERED, PINS_CHECKED
+// and GENERATED_COVERED are never asked of it, while this file's own header
+// says the root is included "like any other package's". A self-report that
+// silently inherited that boundary would be the very defect it reports on.
+const SCOPE_LINE_BOUNDARY = ' ⚠️ Counted over the enumerated workspace packages: the ROOT package is not '
+  + 'one of them, and four per-package clauses are never asked of it (#15483).';
+
 /**
  * That report as the line the green verdict prints.
  *
@@ -2508,7 +2519,7 @@ function skippedClauses(packages) {
 function clauseScopeLine(rows, total, limit = 6) {
   if (rows.length === 0) {
     return `\n  clause scope: every per-package invariant was asked of all ${total} package(s) -- `
-      + 'no clause went quiet about a population this run (#14918).';
+      + `no clause went quiet about a population this run (#14918).${SCOPE_LINE_BOUNDARY}`;
   }
   const named = rows.map(({ clause, why, skipped }) => {
     const shown = skipped.slice(0, limit).join(', ');
@@ -2517,7 +2528,7 @@ function clauseScopeLine(rows, total, limit = 6) {
   });
   return `\n  clause scope: ${named.join('; ')}. Every other per-package invariant was asked of all `
     + `${total}. ⭐ This line exists because SOURCES_COVERED was scoped exactly like that and said so `
-    + 'nowhere (#14918).';
+    + `nowhere (#14918).${SCOPE_LINE_BOUNDARY}`;
 }
 
 /**
@@ -5039,13 +5050,13 @@ function selfTest() {
       label: 'no skipped population still PRINTS a sentence -- silence is what this line replaces',
       rows: [],
       total: 79,
-      expect: /every per-package invariant was asked of all 79 package\(s\) -- no clause went quiet/,
+      expect: /every per-package invariant was asked of all 79 package\(s\) -- no clause went quiet[\s\S]*ROOT package is not one of them[\s\S]*#15483/,
     },
     {
       label: 'a skipped population is named, counted, and carries its reason',
       rows: [{ clause: 'GENERATED_COVERED', why: 'they declare no `typecheck` script', skipped: ['a', 'b'] }],
       total: 5,
-      expect: /GENERATED_COVERED was NOT asked of 2 of them \(a, b\) -- they declare no `typecheck` script\. Every other per-package invariant was asked of all 5\./,
+      expect: /GENERATED_COVERED was NOT asked of 2 of them \(a, b\) -- they declare no `typecheck` script\. Every other per-package invariant was asked of all 5\.[\s\S]*ROOT package is not one of them[\s\S]*#15483/,
     },
     {
       label: 'a long list is truncated with a remainder, never silently cut',
