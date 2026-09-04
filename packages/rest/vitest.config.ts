@@ -12,6 +12,19 @@ export default defineConfig({
     // Mechanism + measured costs: examples/app-showcase/vitest.config.ts.
     // Enforced repo-wide by scripts/check-console-intercept-disarm.mjs.
     disableConsoleIntercept: true,
+    // #13517 / #15425: quiet the SchemaRegistry's per-item registration
+    // chatter — the engine's OWN `OS_REGISTRY_LOG` seam
+    // (`SchemaRegistryOptions.logLevel` / `REGISTRY_LOG_LEVELS`, objectql's
+    // registry.ts), not a change to its shipped 'info' default and not a
+    // library that sniffs `process.env.VITEST`. ⭐ This suite is the one
+    // `docs/audits/2026-09-test-log-volume-census.md` kept as its untouched
+    // CONTROL while #13985/#14016 quieted four others, and it measures 528
+    // residual `[Registry]` lines here — eight times what declared objectql
+    // still emits. Six test files in this package construct bare registries.
+    // The ADR-0005 `[Registry] Collision` diagnostics go through a bare
+    // `console.warn` the level never gates, so a real shadowing still speaks.
+    // Enforced by scripts/check-registry-log-declared.mjs.
+    env: { OS_REGISTRY_LOG: 'warn' },
     globals: true,
     environment: 'node',
   },

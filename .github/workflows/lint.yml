@@ -3188,6 +3188,23 @@ jobs:
       - name: Console-intercept disarm
         run: node scripts/check-console-intercept-disarm.mjs --self-test && node scripts/check-console-intercept-disarm.mjs
 
+      # Declared registry log level (#15425, origin #13517). objectql's
+      # SchemaRegistry logs one `[Registry] Registered …` line per registered
+      # item per construction, at its shipped `info` default; a suite that boots
+      # app stacks pays items x boots of that on a shard log nobody reads.
+      # PR #13985 and PR #14016 declared `OS_REGISTRY_LOG` in four harnesses and
+      # removed ~47,900 lines — and nothing held them there, so deleting the
+      # line restored five figures of output with every suite still green. This
+      # asserts the declaration in every package whose OWN TEST SOURCES boot the
+      # engine, a DERIVED population (registry construction / `bootStack` /
+      # example-app import), not a roster: the tree's own audit
+      # (docs/audits/2026-09-test-log-volume-census.md) measures packages/rest at
+      # 528 residual `[Registry]` lines, so a roster of the four that already
+      # declared would have shipped a known-incomplete list. Self-test first,
+      # then the real scan; reads ~72 manifests and their test sources.
+      - name: Declared registry log level
+        run: node scripts/check-registry-log-declared.mjs --self-test && node scripts/check-registry-log-declared.mjs
+
       # Live-server database isolation (#10382). CI provisions ONE Postgres and
       # ONE MySQL for the whole temporal-conformance job and points every live
       # leg at them, and every live suite in the repo issues a `drop` when it

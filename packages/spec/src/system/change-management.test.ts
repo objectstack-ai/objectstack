@@ -72,7 +72,6 @@ describe('ChangeImpactSchema', () => {
       affectedUsers: 5000,
       downtime: {
         required: true,
-        durationMinutes: 30,
       },
     };
 
@@ -131,17 +130,14 @@ describe('RollbackPlanSchema', () => {
         {
           order: 1,
           description: 'Stop application servers',
-          estimatedMinutes: 5,
         },
         {
           order: 2,
           description: 'Restore database backup',
-          estimatedMinutes: 15,
         },
         {
           order: 3,
           description: 'Restart application servers',
-          estimatedMinutes: 5,
         },
       ],
       testProcedure: 'Verify application login and basic functionality',
@@ -157,7 +153,6 @@ describe('RollbackPlanSchema', () => {
         {
           order: 1,
           description: 'Revert changes',
-          estimatedMinutes: 10,
         },
       ],
     };
@@ -172,22 +167,18 @@ describe('RollbackPlanSchema', () => {
         {
           order: 1,
           description: 'Step 1',
-          estimatedMinutes: 5,
         },
         {
           order: 2,
           description: 'Step 2',
-          estimatedMinutes: 10,
         },
         {
           order: 3,
           description: 'Step 3',
-          estimatedMinutes: 15,
         },
         {
           order: 4,
           description: 'Step 4',
-          estimatedMinutes: 20,
         },
       ],
     };
@@ -213,7 +204,6 @@ describe('ChangeRequestSchema', () => {
         affectedUsers: 5000,
         downtime: {
           required: true,
-          durationMinutes: 30,
         },
       },
       implementation: {
@@ -222,12 +212,10 @@ describe('ChangeRequestSchema', () => {
           {
             order: 1,
             description: 'Backup current database',
-            estimatedMinutes: 10,
           },
           {
             order: 2,
             description: 'Run migration scripts',
-            estimatedMinutes: 15,
           },
         ],
         testing: 'Run integration test suite',
@@ -238,7 +226,6 @@ describe('ChangeRequestSchema', () => {
           {
             order: 1,
             description: 'Restore backup',
-            estimatedMinutes: 15,
           },
         ],
       },
@@ -271,7 +258,6 @@ describe('ChangeRequestSchema', () => {
           {
             order: 1,
             description: 'Execute change',
-            estimatedMinutes: 5,
           },
         ],
       },
@@ -281,7 +267,6 @@ describe('ChangeRequestSchema', () => {
           {
             order: 1,
             description: 'Revert',
-            estimatedMinutes: 5,
           },
         ],
       },
@@ -310,7 +295,6 @@ describe('ChangeRequestSchema', () => {
           {
             order: 1,
             description: 'Execute',
-            estimatedMinutes: 10,
           },
         ],
       },
@@ -320,7 +304,6 @@ describe('ChangeRequestSchema', () => {
           {
             order: 1,
             description: 'Revert',
-            estimatedMinutes: 5,
           },
         ],
       },
@@ -345,7 +328,6 @@ describe('ChangeRequestSchema', () => {
         affectedUsers: 50000,
         downtime: {
           required: true,
-          durationMinutes: 15,
         },
       },
       implementation: {
@@ -354,7 +336,6 @@ describe('ChangeRequestSchema', () => {
           {
             order: 1,
             description: 'Deploy patch',
-            estimatedMinutes: 10,
           },
         ],
       },
@@ -364,7 +345,6 @@ describe('ChangeRequestSchema', () => {
           {
             order: 1,
             description: 'Rollback',
-            estimatedMinutes: 5,
           },
         ],
       },
@@ -389,7 +369,6 @@ describe('ChangeRequestSchema', () => {
         affectedUsers: 100000,
         downtime: {
           required: true,
-          durationMinutes: 120,
         },
       },
       implementation: {
@@ -398,12 +377,10 @@ describe('ChangeRequestSchema', () => {
           {
             order: 1,
             description: 'Phase 1: Database upgrade',
-            estimatedMinutes: 30,
           },
           {
             order: 2,
             description: 'Phase 2: Application upgrade',
-            estimatedMinutes: 45,
           },
         ],
         testing: 'Comprehensive integration testing',
@@ -414,7 +391,6 @@ describe('ChangeRequestSchema', () => {
           {
             order: 1,
             description: 'Restore infrastructure snapshot',
-            estimatedMinutes: 60,
           },
         ],
       },
@@ -456,7 +432,6 @@ describe('ChangeRequestSchema', () => {
           {
             order: 1,
             description: 'Update',
-            estimatedMinutes: 20,
           },
         ],
       },
@@ -466,7 +441,6 @@ describe('ChangeRequestSchema', () => {
           {
             order: 1,
             description: 'Revert',
-            estimatedMinutes: 10,
           },
         ],
       },
@@ -501,7 +475,6 @@ describe('ChangeRequestSchema', () => {
           {
             order: 1,
             description: 'Deploy',
-            estimatedMinutes: 15,
           },
         ],
       },
@@ -511,7 +484,6 @@ describe('ChangeRequestSchema', () => {
           {
             order: 1,
             description: 'Revert',
-            estimatedMinutes: 10,
           },
         ],
       },
@@ -550,7 +522,6 @@ describe('ChangeRequestSchema', () => {
           {
             order: 1,
             description: 'Test',
-            estimatedMinutes: 5,
           },
         ],
       },
@@ -560,7 +531,6 @@ describe('ChangeRequestSchema', () => {
           {
             order: 1,
             description: 'Test',
-            estimatedMinutes: 5,
           },
         ],
       },
@@ -595,7 +565,6 @@ describe('ChangeRequestSchema', () => {
           {
             order: 1,
             description: 'Update schema',
-            estimatedMinutes: 20,
           },
         ],
       },
@@ -605,7 +574,6 @@ describe('ChangeRequestSchema', () => {
           {
             order: 1,
             description: 'Restore',
-            estimatedMinutes: 15,
           },
         ],
       },
@@ -634,7 +602,6 @@ describe('ChangeRequestSchema', () => {
           {
             order: 1,
             description: 'Deploy',
-            estimatedMinutes: 15,
           },
         ],
       },
@@ -644,7 +611,6 @@ describe('ChangeRequestSchema', () => {
           {
             order: 1,
             description: 'Rollback',
-            estimatedMinutes: 10,
           },
         ],
         testProcedure: 'Verify app functionality',
@@ -674,7 +640,6 @@ describe('ChangeRequestSchema', () => {
           {
             order: 1,
             description: 'Deploy configuration',
-            estimatedMinutes: 10,
           },
         ],
       },
@@ -684,7 +649,6 @@ describe('ChangeRequestSchema', () => {
           {
             order: 1,
             description: 'Restore previous config',
-            estimatedMinutes: 5,
           },
         ],
       },
@@ -721,11 +685,11 @@ describe('ChangeRequestSchema', () => {
       },
       implementation: {
         description: 'Update CSS',
-        steps: [{ order: 1, description: 'Deploy', estimatedMinutes: 5 }],
+        steps: [{ order: 1, description: 'Deploy' }],
       },
       rollbackPlan: {
         description: 'Revert CSS',
-        steps: [{ order: 1, description: 'Revert', estimatedMinutes: 5 }],
+        steps: [{ order: 1, description: 'Revert' }],
       },
       securityImpact: {
         assessed: true,
@@ -754,11 +718,11 @@ describe('ChangeRequestSchema', () => {
         impact: { level: 'low', affectedSystems: ['test'] },
         implementation: {
           description: 'Test',
-          steps: [{ order: 1, description: 'Test', estimatedMinutes: 5 }],
+          steps: [{ order: 1, description: 'Test' }],
         },
         rollbackPlan: {
           description: 'Test',
-          steps: [{ order: 1, description: 'Test', estimatedMinutes: 5 }],
+          steps: [{ order: 1, description: 'Test' }],
         },
         securityImpact: {
           assessed: true,
