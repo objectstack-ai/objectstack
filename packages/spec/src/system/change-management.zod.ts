@@ -2,6 +2,7 @@
 
 import { z } from 'zod';
 import { DataClassificationSchema } from './security-context.zod';
+import { retiredKey } from '../shared/retired-key';
 
 /**
  * Change Type Enum
@@ -16,6 +17,48 @@ export const ChangeTypeSchema = lazySchema(() => z.enum([
   'emergency',     // Fast-track approval for critical issues
   'major',         // Requires CAB (Change Advisory Board) approval
 ]));
+
+// ─── RETIRED duration keys (ADR-0049 enforce-or-remove) ─────────────────────
+//
+// Three minute-shaped duration keys were declared on the change-management
+// schemas and read by NOTHING: no change-management engine scheduled a
+// maintenance window, executed or timed an implementation or rollback step,
+// or compared an estimate with what happened — the schemas are exported,
+// mounted by no stack key and registered as no metadata type, and the reader
+// census over every package outside `packages/spec` (and over objectui at the
+// pinned sha) returned zero hits for every key. Maintainer ruling 2026-09-02
+// (recorded on #14477): retire the family under enforce-or-remove.
+//
+// Route: `retiredKey()` tombstones, NOT plain deletion (the schemas are not
+// `.strict()`; a bare deletion would be a silent strip, ADR-0104). The three
+// sites are nested (`downtime.durationMinutes`, `steps[].estimatedMinutes`
+// twice), so the authorable-surface ratchet — which walks top-level def
+// properties — never listed them; they are registered by their nested
+// spelling in `RETIRED_KEYS_BY_MAJOR[18]` for the spec-changes / upgrade-guide
+// projection, the `kernel/Manifest:contributes.actions` precedent. No D2
+// conversion and no `os migrate meta` sentence: none of these schemas is a
+// stack collection member (the `kernel/MetadataPluginConfig:additionalTypes`
+// precedent); the D3 semantic entry is `change-management-duration-keys-retired`.
+
+const DOWNTIME_DURATION_MINUTES_RETIRED =
+  '`ChangeImpact.downtime.durationMinutes` was removed in @objectstack/spec 17 (ADR-0049 '
+  + 'enforce-or-remove) — nothing ever read it: no engine scheduled a maintenance window or '
+  + 'measured an outage against it, so the declared downtime was never enforced, announced or '
+  + 'compared with what happened. Delete the key. There is no replacement, because no '
+  + 'change-management engine exists.';
+
+const ROLLBACK_STEP_ESTIMATED_MINUTES_RETIRED =
+  '`RollbackPlan.steps[].estimatedMinutes` was removed in @objectstack/spec 17 (ADR-0049 '
+  + 'enforce-or-remove) — nothing ever read it: no engine executed, timed or summed rollback '
+  + 'steps, so the estimate was never compared with anything. Delete the key from every step. '
+  + 'There is no replacement, because no change-management engine exists.';
+
+const IMPLEMENTATION_STEP_ESTIMATED_MINUTES_RETIRED =
+  '`ChangeRequest.implementation.steps[].estimatedMinutes` was removed in @objectstack/spec 17 '
+  + '(ADR-0049 enforce-or-remove) — nothing ever read it: no engine executed, timed or summed '
+  + 'implementation steps, so the estimate never fed a schedule and was never compared with '
+  + '`schedule.plannedStart` / `plannedEnd`. Delete the key from every step. There is no '
+  + 'replacement, because no change-management engine exists.';
 
 /**
  * Change Priority Enum
@@ -60,8 +103,7 @@ export const ChangeStatusSchema = lazySchema(() => z.enum([
  *   "affectedSystems": ["crm-api", "customer-portal"],
  *   "affectedUsers": 5000,
  *   "downtime": {
- *     "required": true,
- *     "durationMinutes": 30
+ *     "required": true
  *   }
  * }
  * ```
@@ -92,9 +134,9 @@ export const ChangeImpactSchema = lazySchema(() => z.object({
     required: z.boolean().describe('Downtime required'),
 
     /**
-     * Duration of downtime in minutes
+     * REMOVED (ADR-0049 enforce-or-remove) — see `DOWNTIME_DURATION_MINUTES_RETIRED` above.
      */
-    durationMinutes: z.number().optional().describe('Downtime duration'),
+    durationMinutes: retiredKey(DOWNTIME_DURATION_MINUTES_RETIRED),
   }).optional().describe('Downtime information'),
 }));
 
@@ -111,13 +153,11 @@ export const ChangeImpactSchema = lazySchema(() => z.object({
  *   "steps": [
  *     {
  *       "order": 1,
- *       "description": "Stop application servers",
- *       "estimatedMinutes": 5
+ *       "description": "Stop application servers"
  *     },
  *     {
  *       "order": 2,
- *       "description": "Restore database backup",
- *       "estimatedMinutes": 15
+ *       "description": "Restore database backup"
  *     }
  *   ],
  *   "testProcedure": "Verify application login and basic functionality"
@@ -145,9 +185,9 @@ export const RollbackPlanSchema = lazySchema(() => z.object({
     description: z.string().describe('Step description'),
 
     /**
-     * Estimated time to complete this step
+     * REMOVED (ADR-0049 enforce-or-remove) — see `ROLLBACK_STEP_ESTIMATED_MINUTES_RETIRED` above.
      */
-    estimatedMinutes: z.number().describe('Estimated duration'),
+    estimatedMinutes: retiredKey(ROLLBACK_STEP_ESTIMATED_MINUTES_RETIRED),
   })).describe('Rollback steps'),
 
   /**
@@ -178,8 +218,7 @@ export const RollbackPlanSchema = lazySchema(() => z.object({
  *     "affectedSystems": ["crm-api", "customer-portal"],
  *     "affectedUsers": 5000,
  *     "downtime": {
- *       "required": true,
- *       "durationMinutes": 30
+ *       "required": true
  *     }
  *   },
  *   "implementation": {
@@ -187,8 +226,7 @@ export const RollbackPlanSchema = lazySchema(() => z.object({
  *     "steps": [
  *       {
  *         "order": 1,
- *         "description": "Backup current database",
- *         "estimatedMinutes": 10
+ *         "description": "Backup current database"
  *       }
  *     ],
  *     "testing": "Run integration test suite"
@@ -198,8 +236,7 @@ export const RollbackPlanSchema = lazySchema(() => z.object({
  *     "steps": [
  *       {
  *         "order": 1,
- *         "description": "Restore backup",
- *         "estimatedMinutes": 15
+ *         "description": "Restore backup"
  *       }
  *     ]
  *   },
@@ -280,9 +317,9 @@ export const ChangeRequestSchema = lazySchema(() => z.object({
       description: z.string().describe('Step description'),
 
       /**
-       * Estimated time to complete this step
+       * REMOVED (ADR-0049 enforce-or-remove) — see `IMPLEMENTATION_STEP_ESTIMATED_MINUTES_RETIRED` above.
        */
-      estimatedMinutes: z.number().describe('Estimated duration'),
+      estimatedMinutes: retiredKey(IMPLEMENTATION_STEP_ESTIMATED_MINUTES_RETIRED),
     })).describe('Implementation steps'),
 
     /**
