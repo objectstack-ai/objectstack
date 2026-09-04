@@ -19,7 +19,7 @@
 // the THIRD one ownerless, `flag` always succeeding and `notify` failing on the
 // ownerless row.
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { AutomationEngine } from '../engine.js';
 import type { NodeExecutor } from '../engine.js';
 import type { AutomationContext } from '@objectstack/spec/contracts';
