@@ -26,6 +26,42 @@ export interface AutomationContext {
     /** Record that triggered the automation (if applicable) */
     record?: Record<string, unknown>;
     /**
+     * `true` exactly when the dispatcher's caller-scope load of the subject row
+     * did NOT deliver it — so {@link record} is the stamped `{ id }` stub the
+     * dispatcher puts in place of the row, not the row (#14244; the flow face of
+     * #14143's handler-face signal, `ctx.recordLoadDenied`). Absent — never
+     * `false` — otherwise, including for a record-less start that attempted no
+     * load, so a consumer reads `recordLoadDenied === true`.
+     *
+     * Who sets it: the runtime's action dispatch, both doors — REST
+     * `POST /api/v1/actions/...` and the MCP `run_action` bridge — through ONE
+     * producer, `loadActionSubjectRecord` in `@objectstack/runtime`'s
+     * `action-execution.ts`, whose `actionRecordLoadSignal(load)` returns
+     * exactly `{ recordLoadDenied?: true }` (line 1278 on `2cc46103`). This key
+     * IS that producer's spelling, mirrored — not a second one.
+     *
+     * What a flow guards on: a `type: 'flow'` action's dispatcher stamps the
+     * requested `recordId` onto `record.id` whether or not the caller could
+     * read the row (new-record / record-less actions depend on the stamp), so
+     * `record.id` is present either way and a node branching on it never
+     * refuses. A `runAs: 'user'` flow re-derives the caller's scope on its own
+     * reads and the stub resolves to nothing; a `runAs: 'system'` flow runs
+     * elevated AND receives the stub — this key is what such a flow guards on
+     * before acting on a row its invoker has not demonstrated read access to.
+     * It reports "the row did not resolve for this caller", not "an
+     * authorization error was caught": an RLS-hidden row and an id that names
+     * nothing both arrive as `RECORD_NOT_FOUND`, deliberately, and the key does
+     * not pretend to separate them.
+     *
+     * Declared, NOT YET POPULATED on the flow face: the handler face carries it
+     * today, but `dispatchFlowAction` still hands `automation.execute` a context
+     * without it, so until the runtime half lands a flow run never sees this key
+     * and a guard on it is inert (never `true`), never wrong. Additive — no
+     * existing key changes value. Callers other than the action dispatcher do
+     * NOT set this.
+     */
+    recordLoadDenied?: true;
+    /**
      * Prior state of the record for update triggers (the "old" row). Lets
      * record-change-triggered flows gate on transitions (e.g.
      * `status == "done" && previous.status != "done"`). Absent for
