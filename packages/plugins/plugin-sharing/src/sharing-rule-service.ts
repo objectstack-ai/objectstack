@@ -1350,9 +1350,11 @@ export class SharingRuleService implements ISharingRuleService {
    */
   private async expandRecipient(rule: SharingRuleRow, pass: RuleEvaluationPass = {}): Promise<string[]> {
     if (rule.recipient_type === 'field') {
+      // The card: #15072. Kept out of the string — a runtime message reaches
+      // readers who cannot resolve a tracker id (check:doc-authoring).
       throw new Error(
         `[sharing-rule] rule '${rule.name ?? rule.id}' has a field recipient, which expands per RECORD — ` +
-          'there is no rule-wide expansion to answer (#15072)',
+          'there is no rule-wide expansion to answer',
       );
     }
     const team = new TeamGraphService({
