@@ -38,7 +38,19 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
+// The repo's ONE answer to "is this span a comment, or code?" — a private
+// stripper here would be the drift its header records (and
+// `check:comment-mask-adoption` refuses one). `stripComments` is the right
+// projection: every finding below reports a bare file name, never an offset.
+// The `.mjs` specifier is deliberate; `scripts/js-comment-mask.d.mts` beside
+// it is a hand-written declaration, so this import needs no `allowJs`.
+import { stripComments } from '../../../../scripts/js-comment-mask.mjs';
 
+/**
+ * Seeded from `import.meta.url` in a spelling `check:cross-package-test-inputs`
+ * resolves statically. The READS below do not escape the package — they are
+ * this package's own `src/`.
+ */
 const SRC = fileURLToPath(new URL('.', import.meta.url));
 const DOOR = join(SRC, 'value-domains.ts');
 
@@ -95,8 +107,3 @@ describe('no membership table anywhere in this package', () => {
     expect(callers.map(([name]) => name)).toEqual(['value-domains.ts']);
   });
 });
-
-/** Drop line and block comments, so prose naming a banned shape is not a hit. */
-function stripComments(src: string): string {
-  return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
-}

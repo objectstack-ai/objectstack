@@ -272,6 +272,52 @@ describe('settings-routes', () => {
   });
 
   /**
+   * The wire-visible change, stated AS a change.
+   *
+   * Measured on this endpoint with `timezone: 'Mars/Olympus'`, base
+   * `a56baa2bd` vs this branch:
+   *
+   * - before — `code: 'invalid_value'`, message `Default timezone must be a
+   *   valid IANA time zone identifier (e.g. 'Europe/Zurich'). Received
+   *   'Mars/Olympus'.`
+   * - after — `code: 'value_domain'`, message `Default timezone must be a
+   *   valid IANA time zone identifier, e.g. Europe/Zurich (got
+   *   "Mars/Olympus")` — the published catalog template
+   *   `value_domain_iana_time_zone`, rendered in `en`.
+   *
+   * UNCHANGED across it, and asserted here so the blast radius is stated and
+   * not merely believed: HTTP 400, the envelope code `SETTINGS_VALIDATION`,
+   * `field`, `label`, `constraint.valueDomain` and the echoed `value`. A
+   * client reading `constraint.valueDomain` is unaffected; one branching on
+   * `code === 'invalid_value'` is, and that is the whole of the break.
+   */
+  it('the domain refusal is `value_domain` with the catalog sentence — not `invalid_value`', async () => {
+    const http = new MockHttp();
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest(localizationSettingsManifest);
+    registerSettingsRoutes(http, svc, { contextFromRequest: adminProvider });
+
+    const h = http.routes.get('PUT /api/settings/:namespace')!;
+    const { req, res, state } = makeReqRes({
+      params: { namespace: 'localization' },
+      body: { timezone: 'Mars/Olympus' },
+    });
+    await h(req, res);
+
+    expect(state.status).toBe(400);
+    expect(state.body.error.code).toBe('SETTINGS_VALIDATION');
+    const field = state.body.error.details.fields[0];
+    expect(field.code).toBe('value_domain');
+    expect(field.code).not.toBe('invalid_value');
+    expect(field.message).toBe(
+      'Default timezone must be a valid IANA time zone identifier, e.g. Europe/Zurich (got "Mars/Olympus")',
+    );
+    expect(field.label).toBe('Default timezone');
+    expect(field.constraint).toEqual({ valueDomain: 'iana_time_zone' });
+    expect(field.value).toBe('Mars/Olympus');
+  });
+
+  /**
    * #7169 — the STATUS half of the fail-closed refusal.
    *
    * `SettingsValidationError` carries `code` and the service suite pins that; a

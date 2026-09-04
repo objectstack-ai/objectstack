@@ -2217,6 +2217,12 @@ describe('SettingsService — a declared valueDomain is the save-time boundary (
     expect(err.fields[0]).toMatchObject({ field: 'region_code', code: 'value_domain' });
     expect(err.fields[0].value).toBeUndefined();
     expect(err.message).not.toContain('ZZ');
+    // The catalog template always interpolates the offending value, so the
+    // redaction is the REST boundary's own mask rather than a truncated
+    // sentence — the rejected value still never appears.
+    expect(err.fields[0].message).toBe(
+      'Region code must be a valid ISO 3166-1 alpha-2 country code, e.g. CH (got "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022")',
+    );
     // The domain still travels, so the caller learns what to do.
     expect(err.fields[0].constraint).toMatchObject({ valueDomain: 'iso_3166_alpha2' });
   });

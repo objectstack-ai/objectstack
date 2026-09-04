@@ -646,6 +646,24 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'scripts/js-comment-mask.d.mts',
     ],
   },
+  '@objectstack/service-settings': {
+    // src/value-domains.shared-predicate.pin.test.ts (#15162) imports
+    // `stripComments` from `js-comment-mask.mjs` to decide which text in this
+    // package's `src/` is prose and which is code — the ratchet that keeps the
+    // settings door answering from the ONE shared value-domain predicate
+    // instead of re-acquiring a membership table of its own. The coupling is
+    // real in both directions: the guard's verdicts are census over the whole
+    // non-test source, and its banned tokens (`supportedValuesOf`,
+    // `Intl.DateTimeFormat`) are named in the very TSDoc that explains why they
+    // are banned — so a change in what the module counts as a comment changes
+    // every verdict here. The `.d.mts` sibling is declared alongside it because
+    // it is what types the import, so this package's `tsc --noEmit` verdict is
+    // a function of it too.
+    globs: [
+      'scripts/js-comment-mask.mjs',
+      'scripts/js-comment-mask.d.mts',
+    ],
+  },
   '@objectstack/trigger-api': {
     // src/trigger-api-route-ledger.conformance.test.ts (#12398) imports
     // `stripComments` from `js-comment-mask.mjs` for the same reason and in the
