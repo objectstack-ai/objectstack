@@ -44,13 +44,11 @@ describe('Metadata History', () => {
     await manager.register('object', 'test_object', objectDef);
 
     // Check that history was created
-    if (manager.getHistory) {
-      const history = await manager.getHistory('object', 'test_object');
+    const history = await manager.getHistory('object', 'test_object');
 
-      expect(history.records.length).toBeGreaterThan(0);
-      expect(history.records[0].operationType).toBe('create');
-      expect(history.records[0].version).toBe(1);
-    }
+    expect(history.records.length).toBeGreaterThan(0);
+    expect(history.records[0].operationType).toBe('create');
+    expect(history.records[0].version).toBe(1);
   });
 
   it('should create history record on metadata update', async () => {
@@ -78,13 +76,11 @@ describe('Metadata History', () => {
     await manager.register('object', 'test_object', updatedDef);
 
     // Check history
-    if (manager.getHistory) {
-      const history = await manager.getHistory('object', 'test_object');
+    const history = await manager.getHistory('object', 'test_object');
 
-      expect(history.records.length).toBeGreaterThanOrEqual(2);
-      expect(history.records[0].operationType).toBe('update');
-      expect(history.records[0].version).toBe(2);
-    }
+    expect(history.records.length).toBeGreaterThanOrEqual(2);
+    expect(history.records[0].operationType).toBe('update');
+    expect(history.records[0].version).toBe(2);
   });
 
   it('should rollback to previous version', async () => {
@@ -108,12 +104,10 @@ describe('Metadata History', () => {
     await manager.register('object', 'test_object', version2);
 
     // Rollback to version 1
-    if (manager.rollback) {
-      const restored = await manager.rollback('object', 'test_object', 1);
+    const restored = await manager.rollback('object', 'test_object', 1);
 
-      expect(restored).toBeDefined();
-      expect((restored as any).label).toBe('Version 1');
-    }
+    expect(restored).toBeDefined();
+    expect((restored as any).label).toBe('Version 1');
 
     // Verify current metadata is version 1
     const current = await manager.get('object', 'test_object');
@@ -143,13 +137,11 @@ describe('Metadata History', () => {
     await manager.register('object', 'test_object', version2);
 
     // Compare versions
-    if (manager.diff) {
-      const diffResult = await manager.diff('object', 'test_object', 1, 2);
+    const diffResult = await manager.diff('object', 'test_object', 1, 2);
 
-      expect(diffResult.identical).toBe(false);
-      expect(diffResult.patch!.length).toBeGreaterThan(0);
-      expect(diffResult.summary).toContain('modified');
-    }
+    expect(diffResult.identical).toBe(false);
+    expect(diffResult.patch!.length).toBeGreaterThan(0);
+    expect(diffResult.summary).toContain('modified');
   });
 
   it('should handle history query with filters', async () => {
@@ -164,22 +156,20 @@ describe('Metadata History', () => {
       await new Promise(resolve => setTimeout(resolve, 10));
     }
 
-    if (manager.getHistory) {
-      // Query with limit
-      const limitedHistory = await manager.getHistory('object', 'test_object', {
-        limit: 3,
-      });
+    // Query with limit
+    const limitedHistory = await manager.getHistory('object', 'test_object', {
+      limit: 3,
+    });
 
-      expect(limitedHistory.records.length).toBeLessThanOrEqual(3);
-      expect(limitedHistory.total).toBeGreaterThanOrEqual(5);
+    expect(limitedHistory.records.length).toBeLessThanOrEqual(3);
+    expect(limitedHistory.total).toBeGreaterThanOrEqual(5);
 
-      // Query with operation type filter
-      const createHistory = await manager.getHistory('object', 'test_object', {
-        operationType: 'create',
-      });
+    // Query with operation type filter
+    const createHistory = await manager.getHistory('object', 'test_object', {
+      operationType: 'create',
+    });
 
-      expect(createHistory.records.every(r => r.operationType === 'create')).toBe(true);
-    }
+    expect(createHistory.records.every(r => r.operationType === 'create')).toBe(true);
   });
 
   it('should skip history record when checksum is unchanged', async () => {
@@ -194,23 +184,19 @@ describe('Metadata History', () => {
     // Re-register with exact same content
     await manager.register('object', 'test_object', objectDef);
 
-    if (manager.getHistory) {
-      const history = await manager.getHistory('object', 'test_object');
+    const history = await manager.getHistory('object', 'test_object');
 
-      // Should only have one history record (the create)
-      // The second register should be skipped due to identical checksum
-      expect(history.records.length).toBe(1);
-    }
+    // Should only have one history record (the create)
+    // The second register should be skipped due to identical checksum
+    expect(history.records.length).toBe(1);
   });
 
   it('should return empty history for non-existent metadata', async () => {
-    if (manager.getHistory) {
-      const history = await manager.getHistory('object', 'nonexistent');
+    const history = await manager.getHistory('object', 'nonexistent');
 
-      expect(history.records).toEqual([]);
-      expect(history.total).toBe(0);
-      expect(history.hasMore).toBe(false);
-    }
+    expect(history.records).toEqual([]);
+    expect(history.total).toBe(0);
+    expect(history.hasMore).toBe(false);
   });
 
   it('should throw error when rolling back to non-existent version', async () => {
@@ -219,10 +205,8 @@ describe('Metadata History', () => {
       label: 'Test',
     });
 
-    if (manager.rollback) {
-      await expect(
-        manager.rollback('object', 'test_object', 999)
-      ).rejects.toThrow();
-    }
+    await expect(
+      manager.rollback('object', 'test_object', 999)
+    ).rejects.toThrow();
   });
 });
