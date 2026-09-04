@@ -51,6 +51,13 @@
  * change that states neither). They are not documentation niceties — during the
  * window they are the only signal there is.
  *
+ * CHOOSING BETWEEN THE TWO LEVELS THIS GUARD LEAVES: a purely additive widening
+ * of a published package's public surface takes at least `minor`, and the commit
+ * type may raise a bump but never lower it — the rule is written out in full in
+ * the `Check Changeset` step's prose in `.github/workflows/pr-automation.yml`
+ * ("WHICH LEVEL"), where the author who is told a changeset is missing reads it
+ * (maintainer ruling, 2026-09-04 decision batch #35, on #15294).
+ *
  * ⇒ **THIS GUARD IS WHAT GETS DISARMED AT GA.** The end condition lives in the
  * file that enforces the convention, rather than in a prose home elsewhere, so
  * that declared = enforced stays in one place: whoever closes the launch window
