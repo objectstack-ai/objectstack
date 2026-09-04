@@ -553,14 +553,30 @@ function cloneOf(root, source, name, { depth = 0 } = {}) {
 // battery is the shape PR #14896, PR #15003 and PR #15217 landed for exactly
 // this case.
 //
+// ⚠️ What the floor deliberately does NOT count (#15317): C10's two wiring
+// cases, each guarded by an `existsSync` — the rehearsal doc and `lint.yml`.
+// They still assert exactly as they always did; they go through
+// `tConditional`, which reports into the same `failures` tally and registers
+// nothing. A floor over an ENVIRONMENT-CONDITIONAL case counts what the
+// checkout happens to contain, so it would red for the environment rather than
+// for a case that stopped running — and the remedy an author reaches for is
+// editing the floor down, the one habit these floors exist to prevent (#13797's
+// ruling, carried forward from the ALLOWLIST loops in
+// check-whole-set-label-write.mjs). A skipped guard names ITSELF on C10's
+// `cases skipped` line. The floor pins the part that does not move with the
+// checkout.
+//
 // ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
 // keeps a total "right" the moment a sibling grows.
 //
 // The count is a FLOOR, not an equality — adding cases is ordinary work and must
 // not red. A battery BELOW its floor means cases stopped running; the remedy is
 // to find what stopped registering.
+//
+// 30 = the cases that run in EVERY checkout, measured off a run (#15317), never
+// derived by subtracting the guarded cases by hand.
 const SELF_TEST_BATTERIES = Object.freeze({
-  'release-rehearsal-clone self-test': 32,
+  'release-rehearsal-clone self-test': 30,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -591,14 +607,30 @@ function selfTest() {
   battery('release-rehearsal-clone self-test');
   const root = mkdtempSync(join(tmpdir(), 'rehearsal-clone-selftest-'));
   let failures = 0;
-  const t = (name, cond, extra = '') => {
-    registerCase();
+  const report = (name, cond, extra = '') => {
     if (cond) {
       process.stdout.write(`  ✓ ${name}\n`);
     } else {
       failures += 1;
       process.stdout.write(`  ✗ ${name}${extra ? `\n      ${extra.replace(/\n/g, '\n      ')}` : ''}\n`);
     }
+  };
+  const t = (name, cond, extra = '') => {
+    registerCase();
+    report(name, cond, extra);
+  };
+  // The sink for C10's two `existsSync`-guarded cases: it asserts and reports
+  // EXACTLY as `t` does — same condition, same message, same `failures` tally —
+  // and registers nothing, because those cases run only where the two wiring
+  // files are present. A floor over them would count what the CHECKOUT happens
+  // to contain (a sparse or partial tree carries neither), so it would red for
+  // the environment rather than for a case that stopped running, and the remedy
+  // an author reaches for is editing the floor down — the one habit these floors
+  // exist to prevent (#15317, applying #13797's ruling; the precedent is the
+  // ALLOWLIST loops in check-whole-set-label-write.mjs). A skipped guard NAMES
+  // ITSELF on the `cases skipped` line at C10 instead of going quiet.
+  const tConditional = (name, cond, extra = '') => {
+    report(name, cond, extra);
   };
 
   try {
@@ -705,12 +737,24 @@ function selfTest() {
     // to end, so the two places that invoke it are pinned here.
     const doc = join(REPO_ROOT, 'docs', 'releases-maintenance.md');
     const lint = join(REPO_ROOT, '.github', 'workflows', 'lint.yml');
+    // Both cases are ENVIRONMENT-CONDITIONAL and therefore outside the roster —
+    // see `tConditional` above. They assert unchanged.
+    const skippedWiring = [];
     if (existsSync(doc)) {
-      t('C10 the rehearsal doc names this script', readFileSync(doc, 'utf8').includes(SELF));
+      tConditional('C10 the rehearsal doc names this script', readFileSync(doc, 'utf8').includes(SELF));
+    } else {
+      skippedWiring.push(doc);
     }
     if (existsSync(lint)) {
       const body = readFileSync(lint, 'utf8');
-      t('C10 lint.yml still runs this self-test', body.includes(SELF) && body.includes('--self-test'));
+      tConditional('C10 lint.yml still runs this self-test', body.includes(SELF) && body.includes('--self-test'));
+    } else {
+      skippedWiring.push(lint);
+    }
+    if (skippedWiring.length) {
+      process.stdout.write(
+        `  (C10 wiring cases skipped: ${skippedWiring.join(', ')} not present)\n`,
+      );
     }
   } finally {
     rmSync(root, { recursive: true, force: true });

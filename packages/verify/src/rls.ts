@@ -51,8 +51,9 @@
 // against `positions: ['contributor']` rules.
 //
 // So a run now FANS OUT: one persona per position the app DECLARES
-// (`declaredPositionNames`, read from `config.positions` — never a transcribed
-// list, so a position added next month is covered without touching this file),
+// (`declaredPositionNames`, read from the app's DECLARED positions — never a
+// transcribed list, so a position added next month is covered without touching
+// this file),
 // each holding that position and nothing else, i.e. exactly the capability the app
 // itself binds to it. The same invariant then runs unchanged for each.
 //
@@ -84,6 +85,7 @@ import type { PermissionSet } from '@objectstack/spec/security';
 
 import type { VerifyStack } from './harness.js';
 import { deriveCrudCases, fillRelationalRefs } from './derive.js';
+import { declaredCollection } from './artifact-collections.js';
 
 const PROBE_TYPES = new Set(['text', 'textarea', 'string']);
 const MUTATION = 'rls-mutated-by-B';
@@ -111,8 +113,9 @@ export function rlsPositionProbeEmail(position: string): string {
 }
 
 /**
- * Machine names of the positions the app DECLARES (`config.positions`), in
- * declaration order, deduplicated.
+ * Machine names of the positions the app DECLARES, in declaration order,
+ * deduplicated — read from the flattened `config.positions` when it carries
+ * them and from `packages[]` when it does not (ADR-0130 D4, #15229).
  *
  * ⛔ DERIVED, never transcribed. A hand-written roster is how a verifier quietly
  * stops covering the position someone adds next month — it keeps passing, over a
@@ -131,7 +134,7 @@ export function declaredPositionNames(config: any): string[] {
   const anchors = AUDIENCE_ANCHOR_POSITIONS as readonly string[];
   const seen = new Set<string>();
   const names: string[] = [];
-  for (const declared of (config?.positions ?? []) as any[]) {
+  for (const declared of declaredCollection(config, 'positions')) {
     const name = typeof declared === 'string' ? declared : declared?.name;
     if (typeof name !== 'string' || name.length === 0) continue;
     if (anchors.includes(name) || seen.has(name)) continue;
@@ -343,7 +346,7 @@ function rowsOf(payload: any): any[] {
 export function rlsProbePermissionSet(config: any): PermissionSet {
   const objects: Record<string, { allowRead: boolean; allowEdit: boolean }> = {};
   const rowLevelSecurity: Array<Record<string, unknown>> = [];
-  for (const o of (config?.objects ?? []) as any[]) {
+  for (const o of declaredCollection(config, 'objects')) {
     if (!o?.name) continue;
     objects[o.name] = { allowRead: true, allowEdit: true };
     rowLevelSecurity.push({

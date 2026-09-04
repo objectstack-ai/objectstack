@@ -106,6 +106,7 @@ import { join, posix, resolve } from 'node:path';
 import {
   readWorkspaceGlobs,
   selfTest as workspaceEnumeratorSelfTest,
+  workspaceEnumeratorFloorFailures,
   workspacePackageDirs,
 } from './workspace-enumerator.mjs';
 
@@ -654,6 +655,7 @@ function selfTest() {
   // self-test ran and returned nothing.
   expect(enumeratorFailures.length === 0, `the shared workspace enumerator reported ${enumeratorFailures.length} failure(s)`);
   failures.push(...enumeratorFailures);
+  failures.push(...workspaceEnumeratorFloorFailures());
 
   // -- The floor: every declared battery RAN, and ran its cases (#13489) -----
   //
