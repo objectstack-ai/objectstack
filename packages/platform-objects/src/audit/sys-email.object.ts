@@ -192,7 +192,8 @@ export const SysEmail = ObjectSchema.create({
     error: Field.textarea({
       label: 'Error',
       required: false,
-      description: 'Transport error message when status=failed',
+      description:
+        'Why the message failed — a transport error, or the validation that rejected it before delivery.',
       group: 'State',
     }),
 
