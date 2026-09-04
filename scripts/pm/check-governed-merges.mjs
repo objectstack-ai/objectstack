@@ -701,7 +701,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the generator co-edit fence (#11084), pinned in BOTH directions': 10,
   'the #11705 generator-owned rows inside `skills/**`': 23,
   '#11705 end to end, against the REAL generator': 7,
-  "the live battery's prerequisite, and the floor it was misread as": 15,
+  "the live battery's prerequisite, and the floor it was misread as": 16,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -1373,6 +1373,9 @@ export function generatorToolchainPrerequisite(root, entry) {
         `installed, the recompute cannot exec \`${GENERATOR_TOOLCHAIN_RUNNER}\`; the run comes back with no output`,
         'set, and the battery registers fewer cases than it pins. That is a battery that could',
         'not LOAD, not one that shrank.',
+        '',
+        'Re-run:  pnpm check:pm-governed-merges — the advisory below names this file by PATH,',
+        'and without `--self-test` that command runs the network SWEEP, not these cases.',
       ],
       fix: INSTALL_FIX,
     };
@@ -1387,6 +1390,9 @@ export function generatorToolchainPrerequisite(root, entry) {
         `runner \`${generator}\` execs is not on it, which a partial, pruned or interrupted`,
         'install produces. The live #11705 case reaches the generator exactly as it does in a',
         'checkout with nothing installed at all, and measures nothing either way.',
+        '',
+        'Re-run:  pnpm check:pm-governed-merges — the advisory below names this file by PATH,',
+        'and without `--self-test` that command runs the network SWEEP, not these cases.',
       ],
       fix: INSTALL_FIX,
     };
@@ -3783,6 +3789,8 @@ async function selfTest() {
       said.includes('PREREQUISITE NOT MET') && said.includes('node_modules') && said.includes(INSTALL_FIX), said.slice(0, 400));
     assert('and-states-in-words-that-NOTHING-was-measured',
       said.includes('Nothing was measured') && said.includes('It is NOT a finding'), said.slice(0, 400));
+    assert('and-hands-the-reader-the-command-that-actually-re-runs-these-cases',
+      said.includes('pnpm check:pm-governed-merges'), said.slice(0, 400));
     assert('and-the-confidently-wrong-diagnosis-is-GONE-from-what-it-prints',
       !said.includes('below its pinned floor') && !said.includes('cases that used to run no longer do'), said.slice(0, 400));
 
