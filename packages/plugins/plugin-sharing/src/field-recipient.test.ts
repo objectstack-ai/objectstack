@@ -114,7 +114,19 @@ function makeEngine() {
       const f = opts?.filter ?? opts?.where;
       return ensure(o).filter((r) => matches(r, f)).slice(0, opts?.limit ?? 10000);
     },
+    /**
+     * [#14754] A recipient whose `sys_record_share` INSERT the engine refuses,
+     * with the organization-rule code the per-grant catch absorbs (or another
+     * code, to prove the catch stays narrow). Empty = nothing refused.
+     */
+    _refuseGrantFor: '' as string,
+    _refuseGrantCode: 'ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED' as string,
     async insert(o: string, data: any) {
+      if (o === 'sys_record_share' && engine._refuseGrantFor && data?.recipient_id === engine._refuseGrantFor) {
+        const err: any = new Error(`Insert on '${o}' was refused: the write resolves no organization`);
+        err.code = engine._refuseGrantCode;
+        throw err;
+      }
       const row = { id: data.id ?? `${o}_${++seq}`, ...data };
       ensure(o).push(row);
       return row;
@@ -804,5 +816,101 @@ describe('#15072 authoring seams', () => {
       const help = String((SysSharingRule as any).fields.recipient_id.description);
       expect(help).toMatch(/field/i);
     });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+/**
+ * [#15072 × #14754] The per-grant catch (#14930, landed while this card was in
+ * flight) and the per-record recipient kind compose — pinned in both
+ * directions, because they meet in the same `reconcile`:
+ *
+ *  - a refused grant inside a FIELD rule's pass is counted and the pass, with
+ *    its stale-row revocations, continues (the #14754 contract holds for the
+ *    new kind on both reconcile paths);
+ *  - the catch is NARROW and does not absorb this card's deliberate refusal:
+ *    the rule-wide `expandRecipient` THROWS for a field rule (never `[]`), that
+ *    error carries no engine code, and no production pass ever reaches it.
+ */
+describe('#15072 × #14754 — the per-grant catch and the per-record kind compose', () => {
+  let h: ReturnType<typeof harness>;
+
+  /** The organization-refusal lines the pass logged. */
+  const refusalWarns = () =>
+    h.warn.mock.calls.filter((c) => String(c[0]).includes('refused by the engine organization rule'));
+
+  beforeEach(() => {
+    h = harness();
+    h.engine.seed('sys_sharing_rule', [fieldRule()]);
+    h.engine.seed(OBJECT, [
+      { id: 'req_1', status: 'approved', owner_id: 'boss', assignees: ['u_a'] },
+      { id: 'req_2', status: 'approved', owner_id: 'boss', assignees: ['u_refused', 'u_c'] },
+    ]);
+  });
+
+  it('whole-rule pass: ONE refused pair is counted, the other pairs land, and the stale row is still revoked', async () => {
+    h.seedStaleGrant('req_1', 'u_old');
+    h.engine._refuseGrantFor = 'u_refused';
+
+    const result = await h.rules.evaluateRule(RULE, SYS);
+
+    expect(h.granteesOf('req_1')).toEqual(['u_a']);          // u_old revoked — the security half
+    expect(h.granteesOf('req_2')).toEqual(['u_c']);          // the pair AFTER the refused one landed
+    expect(result).toMatchObject({ matchedRecords: 2, expandedUsers: 3, grantsCreated: 2, grantsRevoked: 1, grantsRefused: 1 });
+    const warns = refusalWarns();
+    expect(warns).toHaveLength(1);
+    expect(warns[0][1]).toMatchObject({ rule: RULE, object: OBJECT, record: 'req_2', recipient: 'u_refused', code: 'ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED' });
+  });
+
+  it('per-record pass: the refused user does not stop that record\'s other user, nor its own stale revocation', async () => {
+    h.seedStaleGrant('req_2', 'u_old');
+    h.engine._refuseGrantFor = 'u_refused';
+
+    const [result] = await h.rules.evaluateAllForRecord(OBJECT, 'req_2', SYS);
+
+    expect(h.granteesOf('req_2')).toEqual(['u_c']);
+    expect(result).toMatchObject({ matchedRecords: 1, expandedUsers: 2, grantsCreated: 1, grantsRevoked: 1, grantsRefused: 1 });
+  });
+
+  it('the catch stays NARROW on the new kind too: an unrelated engine error still aborts the pass', async () => {
+    h.engine._refuseGrantFor = 'u_refused';
+    h.engine._refuseGrantCode = 'SOME_OTHER_ENGINE_ERROR';
+    await expect(h.rules.evaluateRule(RULE, SYS)).rejects.toMatchObject({ code: 'SOME_OTHER_ENGINE_ERROR' });
+    expect(refusalWarns()).toEqual([]);
+  });
+
+  it('the rule-wide switch REFUSES a field rule with a code-less error — nothing the per-grant catch could absorb', async () => {
+    const rule = (await h.rules.getRule('srule_assignees', SYS))!;
+    let thrown: any;
+    try {
+      await (h.rules as any).expandRecipient(rule);
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(Error);
+    expect(String(thrown.message)).toMatch(/field recipient, which expands per RECORD/);
+    // No `code` at all: `grantOrAbsorbOrganizationRefusal` compares `err.code`
+    // against the ONE engine code it absorbs, and this error can never equal it.
+    expect(thrown.code).toBeUndefined();
+    expect(thrown.code).not.toBe('ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED');
+  });
+
+  it('no production pass reaches that refusal for a field rule — and the rule-wide switch still serves the other kinds', async () => {
+    h.engine.seed('sys_sharing_rule', [fieldRule({
+      id: 'srule_alice', name: 'approved_to_alice', recipient_type: 'user', recipient_id: 'alice',
+    })]);
+    const spy = vi.spyOn(h.rules as any, 'expandRecipient');
+
+    await h.rules.evaluateRule(RULE, SYS);
+    await h.rules.evaluateAllRulesForObject(OBJECT);
+    await h.rules.evaluateAllForRecord(OBJECT, 'req_2', SYS);
+
+    const kinds = spy.mock.calls.map((c: any[]) => (c[0] as Row).recipient_type);
+    expect(kinds).not.toContain('field');
+    expect(kinds.filter((k) => k === 'user').length).toBeGreaterThan(0);   // the control kind went through it
+    // …and every pass completed with the field grants materialised.
+    expect(h.granteesOf('req_2')).toEqual(['u_c', 'u_refused']);
+    expect(h.granteesOf('req_1', 'srule_alice')).toEqual(['alice']);
+    spy.mockRestore();
   });
 });

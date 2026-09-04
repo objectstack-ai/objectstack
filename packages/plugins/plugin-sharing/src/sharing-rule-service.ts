@@ -1695,7 +1695,6 @@ export class SharingRuleService implements ISharingRuleService {
     }
   }
 
-
   /**
    * Diff a whole-rule pass's desired pairs against the rule's materialised
    * grants: upsert what is wanted, revoke the remainder.
