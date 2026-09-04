@@ -484,8 +484,19 @@ function main() {
   // phantom this card is about, and admitting one would re-create it one layer
   // down. It is not a refusal either: this gate does not own what a workflow is
   // allowed to name, and the anchor above already declines to invent keys.
+  //
+  // ⛔ The skip is membership in the WALK'S OWN OUTPUT, never `startsWith` on a
+  // re-spelling of its root. That spelling is a bare top-level word wearing a
+  // separator, so it reaches the dispatch derivation's hint set as the plain
+  // literal `scripts` and joins the SHRINK-ONLY escapable-literal species
+  // (#10705) -- a population no `hintCovers` can name, declared by a gate that
+  // already declares the nameable spelling three lines up. Measured when this
+  // landed: the `startsWith` form added exactly that row, FRESH, to both of
+  // this gate's families. The set form says what the predicate means -- "the
+  // root walk did not already produce this path" -- and declares nothing.
+  const walked = new Set(files);
   for (const relPath of named.keys()) {
-    if (relPath.startsWith('scripts/')) continue;
+    if (walked.has(relPath)) continue;
     const source = sourceOf(relPath);
     if (source === null) continue;
     if (carriesSelfTest(relPath, source)) carriers.add(relPath);
@@ -498,7 +509,7 @@ function main() {
 
   const members = [...carriers].filter((s) => named.has(s));
   const wired = members.filter((s) => selfTested.has(s));
-  const packageLocal = [...carriers].filter((s) => !s.startsWith('scripts/'));
+  const packageLocal = [...carriers].filter((s) => !walked.has(s));
   const scope =
     `  scope: ${files.length} file(s) under scripts/, ${carriers.size} carrying \`--self-test\` in code ` +
     `(comments masked, ${packageLocal.length} of them package-local gate(s) CI names by path); ` +
