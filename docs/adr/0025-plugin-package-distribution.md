@@ -513,6 +513,9 @@ the developers and operators who compose Apps and provision runtimes.
 - `packages/runtime/src/sandbox/quickjs-runner.ts` — QuickJS-WASM sandbox (T1)
 - `packages/runtime/src/cloud/marketplace-install-local-plugin.ts` — local inline install (ADR-0016 §9)
 - `packages/runtime/src/cloud/marketplace-proxy-plugin.ts` — marketplace browse proxy
+  *(Path note, 2026-09: both `marketplace-install-local-plugin.ts` and `marketplace-proxy-plugin.ts`
+  are historical and deliberately unlinked — `packages/runtime/src/cloud/` was removed by ADR-0006
+  Phase 4, `15fcd360d`, 2026-06-11.)*
 - `packages/runtime/src/package-state-store.ts` — per-environment disable-state persistence
 - `packages/cli/src/commands/package/publish.ts` — existing package publish pipeline
 - `packages/drivers/driver-memory/objectstack.config.ts` — example plugin manifest (`ObjectStackManifest`)
