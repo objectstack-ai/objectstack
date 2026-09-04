@@ -1974,13 +1974,26 @@ function advisoryObjectName(objectSchema: unknown): string {
   return typeof name === 'string' && name.length > 0 ? name : '(unknown)';
 }
 
-/** One example row id for an advisory group, when the write carries one. */
-function advisoryRecordId(
+/**
+ * One example row reference for an advisory group, when the write carries one.
+ *
+ * The `name` fallback is not a nicety. On the path this exists for — a seed
+ * INSERT — the driver has not issued an id yet when rules are evaluated, so an
+ * id-only reference is `undefined` for exactly the rows the summary is about,
+ * and the 「详见…」 half of the ruling's shape would always be empty. `name` is
+ * this framework's canonical row handle (and the seed loader's own errors
+ * already name a row that way: `Failed to write sd_acct record #1
+ * (name=bad_row)`), so the spelling is the loader's, not a new convention.
+ */
+function advisoryRecordRef(
   merged: Record<string, unknown>,
   data: Record<string, unknown>,
 ): string | undefined {
   const id = merged.id ?? data.id;
-  return typeof id === 'string' || typeof id === 'number' ? String(id) : undefined;
+  if (typeof id === 'string' || typeof id === 'number') return String(id);
+  const name = merged.name ?? data.name;
+  if (typeof name === 'string' && name.length > 0) return `name=${name}`;
+  return undefined;
 }
 
 /**
@@ -2228,7 +2241,7 @@ export function evaluateValidationRules(
         rule: String(rule.name ?? '(unnamed)'),
         severity,
         message: violation.message,
-        recordId: advisoryRecordId(merged, data),
+        recordRef: advisoryRecordRef(merged, data),
       })
     ) {
       opts.logger?.warn?.(

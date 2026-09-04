@@ -437,8 +437,8 @@ export class SeedLoaderService implements ISeedLoaderService {
    */
   private reportAdvisorySummary(groups: AdvisoryGroup[]): void {
     for (const group of groups) {
-      const examples = group.sampleRecordIds.length > 0
-        ? ` Example row(s): ${group.sampleRecordIds.join(', ')}${group.rows > group.sampleRecordIds.length ? ', …' : ''}.`
+      const examples = group.sampleRows.length > 0
+        ? ` Example row(s): ${group.sampleRows.join(', ')}${group.rows > group.sampleRows.length ? ', …' : ''}.`
         : '';
       this.logger.warn(
         `[SeedLoader] ${group.rows} row(s) triggered advisory rule '${group.rule}' (${group.severity}) on '${group.object}': ` +
@@ -450,7 +450,7 @@ export class SeedLoaderService implements ISeedLoaderService {
           severity: group.severity,
           rows: group.rows,
           message: group.message,
-          sampleRecordIds: group.sampleRecordIds,
+          sampleRows: group.sampleRows,
         },
       );
     }
