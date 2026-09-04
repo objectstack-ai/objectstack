@@ -134,6 +134,7 @@
     "check:examples-live-imports": "node scripts/check-examples-live-imports.mjs --self-test && node scripts/check-examples-live-imports.mjs",
     "examples:live-imports": "node scripts/check-examples-live-imports.mjs --list",
     "check:test-source-alias": "node scripts/check-test-source-alias.mjs --self-test && node scripts/check-test-source-alias.mjs",
+    "check:registry-log-declared": "node scripts/check-registry-log-declared.mjs --self-test && node scripts/check-registry-log-declared.mjs",
     "check:refd-timer-probe": "node scripts/check-refd-timer-probe.mjs --self-test && node scripts/check-refd-timer-probe.mjs",
     "check:type-source-resolution": "node scripts/check-type-source-resolution.mjs --self-test && node scripts/check-type-source-resolution.mjs",
     "check:undeclared-dep-imports": "node scripts/check-undeclared-dep-imports.mjs --self-test && node scripts/check-undeclared-dep-imports.mjs",
