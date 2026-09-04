@@ -115,11 +115,51 @@ export interface GraphObject {
 /** object name → its resolvable surface, or `null` (skip 2). */
 export type ObjectGraph = ReadonlyMap<string, GraphObject | null>;
 
-/** Coerce a collection (array or name-keyed map) to an array of records. */
+/** A plain record — not `null`, not an array. */
+function isRec(v: unknown): v is AnyRec {
+  return !!v && typeof v === 'object' && !Array.isArray(v);
+}
+
+/**
+ * Coerce a collection (array or name-keyed map) to an array of records,
+ * DROPPING every member that is not one.
+ *
+ * The drop is the whole point, and it is a SKIP rather than a finding.
+ *
+ * This seam is the first statement of every rule that resolves a field path,
+ * so an entry it cannot read decides the fate of the entire family: an
+ * unguarded read here threw `TypeError: Cannot read properties of null` out of
+ * `indexObjectGraph` before any member's own per-object guard could run, which
+ * on the runtime publish door is an exception on a WRITE path rather than the
+ * silent miss this family exists to end. These rules are pure
+ * `(stack) => Finding[]` (ADR-0019) and run on the RAW `lint` path as well as
+ * the parsed one, so `objects` here is whatever the author's files deserialised
+ * to — a YAML list item left empty is `null`, and nothing upstream of the raw
+ * path has judged the shape.
+ *
+ * Skipping, not reporting, for three reasons that all point the same way:
+ *
+ *  1. It is what the rest of the family already does. Every sibling `asArray`
+ *     in this package that spells the defensive read at all drops the member
+ *     silently (`validate-nav-target-refs.ts`, `validate-flow-node-writes.ts`,
+ *     `validate-hook-body-writes.ts`, `validate-page-visualization-bindings.ts`
+ *     and the rest); not one of them emits a finding about it. Driving the
+ *     whole `AUTHORING_RULES` table over `{ objects: [null, validObject] }`
+ *     measured 28 rules judging it in silence and none reporting the junk
+ *     entry — the seam was the outlier, not the reporters.
+ *  2. Each member of this family ALREADY answers the question three lines
+ *     below the call, with `if (!isRec(obj)) continue` in its own per-object
+ *     loop. A report from here would contradict the guard the same rule is
+ *     about to run.
+ *  3. This module decides no severities and holds no rule ids by contract (see
+ *     the module note). A junk `objects` member is a SHAPE defect — the
+ *     schema's subject, not reference integrity's — and reporting it here
+ *     would emit the same finding once per member for one bad entry.
+ */
 function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v as AnyRec[];
-  if (v && typeof v === 'object') {
-    return Object.entries(v as AnyRec).map(([name, def]) => ({ name, ...(def as AnyRec) }));
+  if (Array.isArray(v)) return v.filter(isRec);
+  if (isRec(v)) {
+    return Object.entries(v).map(([name, def]) => ({ name, ...(isRec(def) ? def : {}) }));
   }
   return [];
 }
