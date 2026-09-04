@@ -111,8 +111,6 @@
     "MetadataBulkResult": "kernel/MetadataBulkResult",
     "MetadataBulkResultSchema": "kernel/MetadataBulkResult",
     "MetadataCategoryEnum": "kernel/MetadataCategoryEnum",
-    "MetadataChangeOperation": "kernel/MetadataChangeOperation",
-    "MetadataChangeOperationSchema": "kernel/MetadataChangeOperation",
     "MetadataChangeType": "kernel/MetadataChangeType",
     "MetadataChangeTypeSchema": "kernel/MetadataChangeType",
     "MetadataDependency": "kernel/MetadataDependency",

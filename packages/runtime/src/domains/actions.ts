@@ -281,8 +281,8 @@ async function handleActionActivationWrite(
 /**
  * [ADR-0126 §4] Refuse a flip whose NAME does not identify one action.
  *
- * The ledger's row identity is `(metadata_type, name, organization_id)` — one
- * row per machine name — and ADR-0110 D1 says the same about actions: identity
+ * The ledger's row identity is `(metadata_type, name)` — one row per machine
+ * name — and ADR-0110 D1 says the same about actions: identity
  * is the declarative `name`. Two objects may nevertheless declare the same
  * action name, and then one row would address both. The three ways out were
  * weighed and only this one is honest:

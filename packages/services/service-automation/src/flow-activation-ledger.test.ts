@@ -457,7 +457,7 @@ describe('ADR-0126 §4/§5 — the row this line writes', () => {
         };
     }
 
-    it('writes metadata_type `flow` and leaves organization_id UNSET (install-level, §5)', async () => {
+    it('writes metadata_type `flow` and no tenant column — the table has none', async () => {
         const fake = fakeEngine();
         const store = new ObjectStoreFlowActivationStore(fake as any);
 
@@ -470,15 +470,16 @@ describe('ADR-0126 §4/§5 — the row this line writes', () => {
             package_id: 'crm',
             active: false,
         });
-        // ⛔ The absence of the key is what leaves the column NULL, which is
-        // the whole of §5's install-level scope on this line. Writing an
-        // organization here would be #10243 with persistence.
+        // A row here is DEPLOYMENT-level state, owned by no organization, and
+        // the table carries no tenant column at all. Asserted as an absent key
+        // because the payload is the one place a tenant write could reappear
+        // without touching the object declaration.
         expect(fake.inserted[0]).not.toHaveProperty('organization_id');
     });
 
     it('UPDATES the existing install-level row rather than inserting a second one', async () => {
         const fake = fakeEngine([
-            { id: 'r1', metadata_type: 'flow', name: 'welcome', package_id: 'crm', active: false, organization_id: null },
+            { id: 'r1', metadata_type: 'flow', name: 'welcome', package_id: 'crm', active: false },
         ]);
         const store = new ObjectStoreFlowActivationStore(fake as any);
 
@@ -488,23 +489,25 @@ describe('ADR-0126 §4/§5 — the row this line writes', () => {
         expect(fake.updated).toEqual([{ id: 'r1', active: true, package_id: 'crm' }]);
     });
 
-    it('SKIPS rows carrying an organization_id — a per-org row is not an install-level answer', async () => {
+    it('reads EVERY flow row — the ledger is deployment-wide, with no tenant axis', async () => {
         const fake = fakeEngine([
-            { id: 'r1', metadata_type: 'flow', name: 'install_wide', active: false, organization_id: null },
-            { id: 'r2', metadata_type: 'flow', name: 'one_tenant_only', active: false, organization_id: 'org_42' },
+            { id: 'r1', metadata_type: 'flow', name: 'first', active: false },
+            { id: 'r2', metadata_type: 'flow', name: 'second', active: false },
         ]);
         const store = new ObjectStoreFlowActivationStore(fake as any);
 
         const rows = await store.list();
 
-        // Reading `r2` as install-level would apply one organization's choice
-        // to the whole installation — the #10243 direction, from the read side.
-        expect(rows.map((r: FlowActivationRow) => r.name)).toEqual(['install_wide']);
+        // ⚠️ This replaces a pin that asserted rows carrying an organization
+        // were SKIPPED. That skip guarded a reserved, never-written tenant
+        // column, dropped before the table ever shipped — so no row can carry
+        // an organization for a read to mistake for a deployment-wide answer.
+        expect(rows.map((r: FlowActivationRow) => r.name)).toEqual(['first', 'second']);
     });
 
     it('reads a driver 0/1 boolean as disabled, not as active', async () => {
         const fake = fakeEngine([
-            { id: 'r1', metadata_type: 'flow', name: 'f', active: 0, organization_id: null },
+            { id: 'r1', metadata_type: 'flow', name: 'f', active: 0 },
         ]);
         const store = new ObjectStoreFlowActivationStore(fake as any);
 

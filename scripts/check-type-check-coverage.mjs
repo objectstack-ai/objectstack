@@ -679,6 +679,27 @@ const ROOT_PROGRAM_COUPLED_SCRIPT = 'scripts/check-test-typecheck.mts';
 // ran even though that config DOES include the tests. Repaired by the #5286
 // route -- a `tsconfig.test.json` over the test layer, named by a new `typecheck`
 // script -- so the entry is deleted rather than lowered.
+//
+// `@objectstack/service-knowledge` GRADUATED from this ledger too (#15049,
+// PR #15032's sibling for `packages/services/**`; entry: 10 raw, repaired to
+// 0 under BOTH the build config and the new `tsconfig.test.json` split). This
+// one is worth a line because the split did NOT confirm this entry's own
+// 3-code-tier guess -- it found 4, the same "a tier split read off an
+// unrepaired config is a guess about what is UNDER it" lesson the paragraph
+// above states for `metadata` and `service-storage`. Fixing the 3 TS2835 (the
+// config-tier third, and the noise: the unresolved imports made
+// `KnowledgeService` `any`, which suppressed the TypeScript excess-property
+// check on an `ExecutionContext` literal) uncovered a 4th real error the
+// undivided reading had masked: `roles: ['member']`, a field the spec renamed
+// to `positions` (`execution-context.zod.ts`: "Formerly `roles`") that no
+// check had ever read with the renamed type. The other 3 code-tier errors
+// were exactly this entry's guess: two `vi.fn()` mocks stubbing
+// `IDataEngine.find` typed with fewer parameters than the call site they
+// stand in for, so `.mock.calls[N]` indexed past a TS-inferred EMPTY tuple
+// (TS2493/TS2352), and a third mock's parameter type omitted the `where`
+// field the real call passes (TS2339). All 4 are fixed in the test file,
+// matching each mock's type to the call site it stubs; `ExecutionContext`
+// itself was not touched (it was correct -- the test's field name was stale).
 const DEBT = {
   '@objectstack/cloud-connection': {
     errors: 13,
@@ -705,12 +726,6 @@ const DEBT = {
       + 'entry is the specimen #5278 cites for composition drift and has now drifted BOTH ways -- 2 -> 5 '
       + 'by acquiring a second file, then 5 -> 3 by graduating the first -- so re-read what the pile is '
       + 'made of before sizing it, never just the number.',
-  },
-  '@objectstack/service-knowledge': {
-    errors: 10,
-    note: 'code-tier 3 (TS2339/TS2352/TS2493); config-tier 3 (TS2835); noise 4 (TS7006). Re-measured 10 at '
-      + '5ab08428, up from 8; code-tier is unchanged at 3, so the +2 is config-tier/noise. 8 of the 10 are '
-      + 'in __tests__/knowledge-service.test.ts.',
   },
   '@objectstack/service-storage': {
     errors: 51,

@@ -59,7 +59,6 @@
     "kernel/ManifestPermissions",
     "kernel/MetadataBulkResult",
     "kernel/MetadataCategoryEnum",
-    "kernel/MetadataChangeOperation",
     "kernel/MetadataChangeType",
     "kernel/MetadataDependency",
     "kernel/MetadataDiffItem",

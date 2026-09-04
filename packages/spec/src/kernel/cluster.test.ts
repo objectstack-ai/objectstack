@@ -10,7 +10,6 @@ import {
   ServiceClusterAnnotationsSchema,
   ClusterDriverSchema,
   ClusterCapabilityConfigSchema,
-  MetadataChangedEventPayloadSchema,
 } from './cluster.zod';
 import { EventMetadataSchema } from './events/core.zod';
 import { ServiceMetadataSchema, ServiceFactoryRegistrationSchema } from './service-registry.zod';
@@ -193,38 +192,38 @@ describe('cluster.zod', () => {
     });
   });
 
-  describe('MetadataChangedEventPayload', () => {
-    it('parses a canonical change payload', () => {
-      const parsed = MetadataChangedEventPayloadSchema.parse({
-        type: 'object',
-        name: 'account',
-        version: 42n,
-        operation: 'update',
-      });
-      expect(parsed.type).toBe('object');
-      expect(parsed.version).toBe(42n);
-      expect(parsed.operation).toBe('update');
+  describe('MetadataChangedEventPayload retirement (ADR-0049 enforce-or-remove)', () => {
+    // Runtime namespace probes, the registry-retirement.test.ts pattern: a
+    // removed export cannot be imported by name (would not compile), so the
+    // pin asks the namespace object. The payload schema declared a MUST-emit /
+    // MUST-subscribe `metadata:changed` contract that nothing ever produced or
+    // consumed, and its `z.bigint()` version could not cross a JSON transport;
+    // the `MetadataChangeOperationSchema` enum existed only to type its
+    // `operation` field and left with it as the orphan value schema. ADR-0087:
+    // `RETIRED_DEFS_BY_MAJOR[18]` + the D3 entry
+    // `metadata-changed-event-payload-retired`. Anti-vacuity guard on each
+    // probe: a neighbour that stayed.
+    const RETIRED = [
+      'MetadataChangedEventPayloadSchema',
+      'MetadataChangeOperationSchema',
+    ] as const;
+    const SURVIVOR = 'ClusterCapabilityConfigSchema';
+
+    it('the payload schema and its orphan operation enum are no longer exported from kernel/cluster.zod', async () => {
+      const mod = (await import('./cluster.zod')) as unknown as Record<string, unknown>;
+      for (const name of RETIRED) {
+        expect(Object.prototype.hasOwnProperty.call(mod, name)).toBe(false);
+      }
+      // Anti-vacuity: the sibling that deliberately stayed still resolves.
+      expect(Object.prototype.hasOwnProperty.call(mod, SURVIVOR)).toBe(true);
     });
 
-    it('accepts tenant-scoped overlay changes', () => {
-      const parsed = MetadataChangedEventPayloadSchema.parse({
-        type: 'view',
-        name: 'account_list',
-        tenantId: 'tnt_abc',
-        version: 7n,
-        operation: 'publish',
-      });
-      expect(parsed.tenantId).toBe('tnt_abc');
-    });
-
-    it('rejects payload without a version', () => {
-      expect(() =>
-        MetadataChangedEventPayloadSchema.parse({
-          type: 'object',
-          name: 'account',
-          operation: 'update',
-        }),
-      ).toThrow();
+    it('nor from the `@objectstack/spec/kernel` entry', async () => {
+      const kernel = (await import('./index')) as unknown as Record<string, unknown>;
+      for (const name of RETIRED) {
+        expect(Object.prototype.hasOwnProperty.call(kernel, name)).toBe(false);
+      }
+      expect(Object.prototype.hasOwnProperty.call(kernel, SURVIVOR)).toBe(true);
     });
   });
 });

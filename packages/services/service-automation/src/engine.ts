@@ -1490,11 +1490,11 @@ export interface FlowDispatchStore {
 }
 
 /**
- * [ADR-0126 §4] One packaged flow's install-level activation row, as the engine
- * sees it. The ledger's own columns are `metadata_type` / `name` /
- * `package_id` / `organization_id` / `active`; `metadata_type` is fixed to
- * `'flow'` by the store and `organization_id` is never written on this line
- * (§5), so those two never reach the engine.
+ * [ADR-0126 §4] One packaged flow's deployment-level activation row, as the
+ * engine sees it. The ledger's own columns are `metadata_type` / `name` /
+ * `package_id` / `active`; `metadata_type` is fixed to `'flow'` by the store,
+ * so it never reaches the engine. There is no tenant column on the table —
+ * a row records that THIS ENVIRONMENT switched a packaged flow off.
  */
 export interface FlowActivationRow {
     /** The packaged flow's machine name. */
@@ -1521,9 +1521,9 @@ export interface FlowActivationRow {
  * always has.
  */
 export interface FlowActivationStore {
-    /** Every install-level flow activation row (`organization_id IS NULL`). */
+    /** Every flow activation row — the ledger is deployment-wide. */
     list(): Promise<FlowActivationRow[]>;
-    /** Insert or update the install-level row for one packaged flow. */
+    /** Insert or update the row for one packaged flow. */
     setActive(row: FlowActivationRow): Promise<void>;
 }
 
