@@ -484,6 +484,7 @@ import { join, posix, resolve } from 'node:path';
 import { getHeapStatistics } from 'node:v8';
 import {
   selfTest as workspaceEnumeratorSelfTest,
+  workspaceEnumeratorFloorFailures,
   workspacePackageDirs,
 } from './workspace-enumerator.mjs';
 // `typecheck`-script -> tsconfig program set. Shared with
@@ -5929,6 +5930,7 @@ function selfTest() {
   // above: its cases are defined and run in `workspace-enumerator.mjs`, and a
   // floor written here would pin a count that module is free to change.
   failures.push(...workspaceEnumeratorSelfTest({ root: ROOT }));
+  failures.push(...workspaceEnumeratorFloorFailures());
 
   if (failures.length) {
     console.error(`✗ check:type-check-coverage --self-test — ${failures.length} failure(s)\n`);
