@@ -272,7 +272,8 @@ describe('#14147 — the neighbouring rules keep their INSERT posture', () => {
     expect(line, 'the request is refused OUT LOUD, not silently').toBeDefined();
     expect(line).toContain('completed_at');
     expect(line).toContain('context.isSystem');
-    expect(line).toContain('#6640');
+    expect(line, 'the remedy the line offers must be the one that actually works on a create')
+      .toContain('may not seed a readonly column');
   });
 
   it('...but preserveAudit still reinstates a RUNTIME-owned autonumber (#3493/#5503)', async () => {
