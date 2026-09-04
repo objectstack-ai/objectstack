@@ -129,10 +129,12 @@ function calendarDate(value: unknown): string {
  * used to carry existed only because the completion UPDATE was impossible"),
  * and its `GATES:` case drives this identical write shape (a user-context
  * predicate update to `status: 'completed'` on a task created without the
- * column) green today. The seed was a stale copy of a workaround whose reason
- * had already been fixed: `task.hook.ts`'s `beforeUpdate` leg stamps
+ * column) green today — because that harness BINDS the app's hook, which this
+ * one did not. The seed was a stale copy of a workaround whose reason had
+ * already been fixed: `task.hook.ts`'s `beforeUpdate` leg stamps
  * `completed_date` on the transition into `completed`, which is what satisfies
- * the object's `completed_date_required` rule.
+ * the object's `completed_date_required` rule. Both halves had to change here:
+ * bind the hook (above) and drop the seed.
  *
  * It had to go now because it was also a NON-SYSTEM caller seeding a
  * `readonly: true`, server-owned column on create — the act the maintainer
