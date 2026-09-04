@@ -113,11 +113,20 @@ export const SysAutomationRun = ObjectSchema.create({
 
     flow_version: Field.number({ label: 'Flow Version', required: false, group: 'Identity' }),
 
+    // [#13937] The stranded-class carve-out in this description mirrors
+    // `node_type`'s below, for the same reason: the restore verb re-arms the
+    // pause from this column (`ObjectStoreSuspendedRunStore` rebuilds the
+    // consumed snapshot's node from it — there is no other column), so on that
+    // one terminal-row class the writer (`AutomationEngine.recordLog`) puts
+    // the PAUSED node here, not the last step. This column is also what the
+    // Runs surface titles and highlights a row with (`titleFormat` /
+    // `highlightFields` above), so the carve-out is visible there too, by
+    // design: the row names the pause an operator can re-arm.
     node_id: Field.text({
       label: 'Node',
       required: false,
       maxLength: 255,
-      description: 'For a suspended run, the node it is paused at (resume continues from its out-edges); for a terminal run, the last node reached.',
+      description: 'For a suspended run, the node it is paused at (resume continues from its out-edges); for a terminal run, the last node reached — except the one class of terminal row that carries a consumed suspension (a run whose resume consumed its pause and then failed downstream, answered `status: \'stranded\'`), which keeps the PAUSED node so a restore re-arms the pause rather than the node that threw. On that row the last node reached is the final entry of steps_json and the failure is in error; the Runs surface titles the row with this column, so a stranded run reads as its pause node there.',
       group: 'State',
     }),
 
@@ -235,11 +244,16 @@ export const SysAutomationRun = ObjectSchema.create({
 
     // [#13909] The presence-discriminator named in this description lives in
     // ObjectStoreSuspendedRunStore.deserializeConsumedSuspension — one writer,
-    // one reader, this column is the key for both.
+    // one reader, this column is the key for both. [#13937] The same column
+    // carries the store's drop notice when the snapshot was over its row
+    // budget (`$consumedSuspensionDropped`, read back as
+    // `RunRecord.consumedSuspensionDropped`), so "present" now has two shapes
+    // and only one of them is a restorable snapshot — stated in the
+    // description rather than left to the reader of the column.
     variables_json: Field.textarea({
       label: 'Variables',
       required: false,
-      description: 'JSON snapshot of the flow variable map at suspend time. On a terminal row its PRESENCE is the discriminator: nothing but the consumed-suspension path writes it there, so variables_json present on a completed/failed row ⇔ the row carries a restorable suspension — the store\'s deserializer keys off exactly this.',
+      description: 'JSON snapshot of the flow variable map at suspend time. On a terminal row its PRESENCE is the discriminator: nothing but the consumed-suspension path writes it there, so variables_json present on a completed/failed row ⇔ the row\'s run had a pause that its resume consumed before a downstream node failed — the store\'s deserializer keys off exactly this. Two shapes on such a row: the snapshot itself (a restorable suspension), or a one-key notice `{"$consumedSuspensionDropped": …}` recording that the snapshot existed and was NOT persisted (over the store\'s row budget) — the notice is not a restorable snapshot; such a run can be restored only by the process that stranded it, while it runs.',
       group: 'State',
     }),
 
