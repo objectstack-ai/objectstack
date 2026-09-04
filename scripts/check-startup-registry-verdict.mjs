@@ -154,6 +154,29 @@ import { parseSourceFile } from './ts-parse.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
+
+/** The trees this gate walks by default. Plugin units live under `packages/`. */
+const SCAN_ROOTS = ['packages'];
+
+/**
+ * The population this gate walks, declared for `scripts/pm/dispatch-gates.mjs`.
+ *
+ * The default scan root used to be an inline `'packages'` argument. The
+ * derivation reads SOURCE TEXT and `hintCovers` refuses a bare single-segment
+ * literal by design (admitting them was priced at +139084 fabricated
+ * (gate, file) pairs, because `packages` is a path COMPONENT in dozens of gates
+ * that never read that root), so this gate declared no path at all: scored
+ * `undetermined` for EVERY card, absent from every dispatch brief and every
+ * `--commands` harvest, while CI ran it on each pull request. The subtree
+ * spelling is the escape the idiom exists to be.
+ *
+ * The declaration is held against the DEFAULT root, which is what CI schedules
+ * and what a card can implicate; `--packages-dir` retargets a single manual run
+ * and is not a population any card can predict.
+ *
+ * ⛔ Not a whole-tree marker: `packages/**` is a subtree.
+ */
+const ROOT_DIR_WATCH_HINTS = ['packages/**'];
 const BASELINE_PATH = join(ROOT, 'scripts', 'startup-registry-verdict.baseline.json');
 
 // ── Vocabulary ───────────────────────────────────────────────────────────────
@@ -905,7 +928,7 @@ function baselineKey(f) {
 }
 
 function run({ list = false, packagesDir } = {}) {
-    const scanRoot = packagesDir ? resolve(packagesDir) : join(ROOT, 'packages');
+    const scanRoot = packagesDir ? resolve(packagesDir) : join(ROOT, SCAN_ROOTS[0]);
     const relBase = packagesDir ? resolve(packagesDir, '..') : ROOT;
     // The scan root must resolve BEFORE anything is concluded from the scan. The
     // old guard was `existsSync`, which accepts a file: the run then fell through
@@ -1505,6 +1528,19 @@ function selfTest() {
     } finally {
         rmSync(dir, { recursive: true, force: true });
     }
+
+    // --- The dispatch-gates population declaration. ---------------------------
+    // Filed through `expectRoot` rather than as a battery, deliberately: the
+    // roster above is one row per CASE in the table, and the floor block
+    // cross-checks the two — a battery with no table row would red that
+    // cross-check for a case that ran.
+    expectRoot('every separator-less SCAN_ROOT is declared in the subtree spelling',
+        SCAN_ROOTS.filter((r) => !r.includes('/')).every((r) => ROOT_DIR_WATCH_HINTS.includes(`${r}/**`)), true);
+    expectRoot('no root is declared that this gate does not walk',
+        ROOT_DIR_WATCH_HINTS.every((h) => SCAN_ROOTS.includes(h.replace(/\/\*+$/, ''))), true);
+    expectRoot('the declared form is NOT a SCAN_ROOTS entry (the glob form would send the walk at a directory the tree does not have)',
+        SCAN_ROOTS.some((r) => ROOT_DIR_WATCH_HINTS.includes(r)), false);
+    expectRoot('one hint per walked root', ROOT_DIR_WATCH_HINTS.length, SCAN_ROOTS.length);
 
     // ── The floor: every declared row RAN, and ran its case (#13489) ───────
     //

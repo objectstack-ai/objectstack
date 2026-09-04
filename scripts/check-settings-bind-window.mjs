@@ -113,6 +113,27 @@ import { parseSourceFile } from './ts-parse.mjs';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 
+/** The trees this gate walks. Plugin units live under `packages/`. */
+const SCAN_ROOTS = ['packages'];
+
+/**
+ * The population this gate walks, declared for `scripts/pm/dispatch-gates.mjs`.
+ *
+ * The walk root used to be an inline `'packages'` argument. The derivation reads
+ * SOURCE TEXT and `hintCovers` refuses a bare single-segment literal by design
+ * (admitting them was priced at +139084 fabricated (gate, file) pairs, because
+ * `packages` is a path COMPONENT in dozens of gates that never read that root),
+ * so this gate declared no path at all: scored `undetermined` for EVERY card,
+ * absent from every dispatch brief and every `--commands` harvest, while CI ran
+ * it on each pull request. The subtree spelling is the escape the idiom exists
+ * to be, and `SCAN_ROOTS` is the constant it is held against — the walk reads
+ * the same constant, so a moved read reds in this file's own self-test.
+ *
+ * ⛔ Not a whole-tree marker: `packages/**` is a subtree, and a whole-tree row
+ * lands on every card in the repo whether or not the gate reads the file.
+ */
+const ROOT_DIR_WATCH_HINTS = ['packages/**'];
+
 const DECLARATION_FIELDS = ['dependencies', 'optionalDependencies', 'requiresServices', 'providesServices'];
 
 /** The service name whose provider late-binds its engine — see the header. */
@@ -177,7 +198,7 @@ function discoverFiles() {
       out.push(relative(ROOT, full).split(sep).join('/'));
     }
   };
-  walk(join(ROOT, 'packages'));
+  for (const root of SCAN_ROOTS) walk(join(ROOT, root));
   return out.sort();
 }
 
@@ -1037,6 +1058,29 @@ function selfTest() {
     const { stale } = auditSource(PROVIDER, [{ plugin: 'plugin.gone', verdict: 'undeclared', issue: '#0' }]);
     assert(stale.length === 1, 'a ledger entry with no matching problem is stale');
   }
+
+  // 17. The dispatch-gates population declaration: the subtree spelling names
+  //     the roots the walk really reads, and only those.
+  assert(
+    SCAN_ROOTS.filter((r) => !r.includes('/')).every((r) => ROOT_DIR_WATCH_HINTS.includes(`${r}/**`)),
+    'every separator-less SCAN_ROOT is declared in the subtree spelling — a bare root is refused as '
+      + 'too generic, so without the glob this gate scores `undetermined` for every card',
+  );
+  assert(
+    ROOT_DIR_WATCH_HINTS.every((h) => SCAN_ROOTS.includes(h.replace(/\/\*+$/, ''))),
+    'no root is declared that this gate does not walk — a declaration that has drifted from the scan '
+      + 'replaces a silent gate with a lying one',
+  );
+  assert(
+    !SCAN_ROOTS.some((r) => ROOT_DIR_WATCH_HINTS.includes(r)),
+    'the declared form is NOT a SCAN_ROOTS entry — the glob form would send the walk at a directory '
+      + 'the tree does not have',
+  );
+  assert(
+    discoverFiles().every((f) => ROOT_DIR_WATCH_HINTS.some((h) => f.startsWith(`${h.replace(/\/\*+$/, '')}/`))),
+    'and the WALK agrees with the declaration on the live tree — the half the assertions above cannot '
+      + 'hold, since they read the constant rather than what discoverFiles() returns',
+  );
 
   console.log(`✓ settings bind-window guard self-test: all cases pass.`);
 }

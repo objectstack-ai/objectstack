@@ -2342,13 +2342,6 @@ export function wholeTreePopulationRefusal(entry) {
  */
 export const ROOT_WALK_RESIDUE_LEDGER = [
   [
-    'check:org-identifier',
-    'its enumeration is `git ls-files -- examples apps packages` (the ROOTS constant) — three SUBTREES, not the '
-      + 'tree. The liveness predicate selects it on limb A and is documented as too weak to tell that apart, so a '
-      + 'whole-tree marker here would be precisely the mis-declaration that predicate cannot catch. Its remedy is '
-      + 'the ordinary ROOT_DIR_WATCH_HINTS declaration naming those three roots, after which it is MATCHED here.',
-  ],
-  [
     'scripts/check-console-intercept-disarm.mjs',
     'its `scan(REPO_ROOT)` walks `workspacePackageDirs(root)` — every workspace PACKAGE ROOT\'s package.json and '
       + 'vitest.config.*, read off pnpm-workspace.yaml. That is workspace-wide but it is not every file: a new test '

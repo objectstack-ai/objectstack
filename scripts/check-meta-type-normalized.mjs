@@ -91,6 +91,30 @@ const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 const SCAN_DIRS = [join('packages', 'rest', 'src')];
 
 /**
+ * The population this gate walks, declared for `scripts/pm/dispatch-gates.mjs`.
+ *
+ * `SCAN_DIRS` is assembled with `join()`, one SEGMENT per literal, so the
+ * derivation — which reads SOURCE TEXT — sees three bare words and no path at
+ * all. This gate was therefore scored `undetermined` for EVERY card, absent from
+ * every dispatch brief and every `--commands` harvest, while CI ran it on each
+ * pull request.
+ *
+ * ⚠️ The hint is `packages/rest/src/**`, NOT `packages/**`. The scan is one
+ * package's source directory; the wider spelling would paste this gate onto
+ * every card under `packages/`, which is the costlier error — a lead that is
+ * wrong on thousands of files rather than a gate that is quiet.
+ *
+ * ⛔ And not a whole-tree marker for the same reason, one size up.
+ *
+ * The self-test derives the coupling from `SCAN_DIRS` on both sides rather than
+ * re-spelling it, so a moved or widened scan directory cannot leave this
+ * declaration describing the old population. The POSIX normalisation is
+ * load-bearing: `join()` yields a platform separator, and the declaration is
+ * read as text by a scanner that only knows `/`.
+ */
+const ROOT_DIR_WATCH_HINTS = ['packages/rest/src/**'];
+
+/**
  * Blessed raw comparisons: `'<relative-path>::<trimmed source text>'` -> reason.
  * Empty by design — see the header.
  */
@@ -218,11 +242,12 @@ const SELF_TEST_VERDICT = 'check-meta-type-normalized self-test reached its verd
 // to find what stopped registering.
 const SELF_TEST_BATTERIES = Object.freeze({
   'check-meta-type-normalized self-test': 4,
+  'the dispatch-gates population declaration': 3,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 1;
+const SELF_TEST_BATTERY_FLOOR = 2;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -293,6 +318,28 @@ function selfTest() {
     });
     check(() => {
         if (hits.length !== 5) problems.push(`expected 5 findings total, saw ${hits.length} — a pass-through or a comment was flagged`);
+    });
+
+    // ── The dispatch-gates population declaration ────────────────────────
+    battery('the dispatch-gates population declaration');
+    const scannedPosix = SCAN_DIRS.map((d) => d.split(sep).join('/'));
+    check(() => {
+        if (!scannedPosix.every((d) => ROOT_DIR_WATCH_HINTS.includes(`${d}/**`))) {
+            problems.push('a SCAN_DIRS entry is not declared in the subtree spelling — the hint extractor '
+                + 'reads source text, and a join()-assembled path is invisible to it');
+        }
+    });
+    check(() => {
+        if (!ROOT_DIR_WATCH_HINTS.every((h) => scannedPosix.includes(h.replace(/\/\*+$/, '')))) {
+            problems.push('ROOT_DIR_WATCH_HINTS declares a directory this gate does not walk — a declaration '
+                + 'that has drifted from the scan replaces a silent gate with a lying one');
+        }
+    });
+    check(() => {
+        if (ROOT_DIR_WATCH_HINTS.some((h) => !h.startsWith('packages/rest/src'))) {
+            problems.push('the declaration widened past this gate\'s own package — `packages/**` would paste '
+                + 'this gate onto every card under packages/, which is worse than the silence it replaces');
+        }
     });
 
     // ── The floor: every declared battery RAN, and ran its cases (#13489) ────

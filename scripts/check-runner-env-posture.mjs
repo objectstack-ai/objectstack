@@ -111,11 +111,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'Population.': 7,
   'Wiring. Unwiring the gate must redden HERE rather than go quiet.': 3,
   'The corpus itself, as a case rather than as the run\'s only evidence.': 1,
+  'The dispatch-gates population declaration.': 4,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 8;
+const SELF_TEST_BATTERY_FLOOR = 9;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -194,6 +195,31 @@ const ROOT = resolve(HERE, '..');
 
 /** Trees that can hold product source. */
 export const SCANNED_ROOTS = ['packages', 'apps', 'examples'];
+
+/**
+ * The population this gate walks, declared for `scripts/pm/dispatch-gates.mjs`.
+ *
+ * `SCANNED_ROOTS` is a runtime constant and the derivation reads SOURCE TEXT,
+ * so three bare top-level words contribute NOTHING: `hintCovers` refuses a
+ * single-segment literal by design, because `packages`, `apps` and `examples`
+ * are path COMPONENTS in dozens of gates that never read those roots. This gate
+ * therefore declared no path at all and was scored `undetermined` for EVERY
+ * card — absent from every dispatch brief and every `--commands` harvest, while
+ * CI ran it on every pull request. The subtree spelling is the escape the idiom
+ * exists to be.
+ *
+ * ⛔ Not a whole-tree marker: three subtrees are not the tree, and a whole-tree
+ * row appears on every card whether or not the gate reads the file.
+ *
+ * The hints name the WALKED roots, not the narrower `isProductSource` filter
+ * applied inside them. That is the honest claim for a lead: the filter decides
+ * what the gate REPORTS on, the roots decide what it READS, and a card under a
+ * walked root can move this gate's verdict by adding a `src/` file to it.
+ *
+ * The self-test derives the coupling from `SCANNED_ROOTS` on both sides rather
+ * than re-spelling it.
+ */
+export const ROOT_DIR_WATCH_HINTS = ['packages/**', 'apps/**', 'examples/**'];
 
 /** Directory names never descended into. */
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', '.turbo', '.next', 'coverage', '.git']);
@@ -420,6 +446,16 @@ export function selfTest() {
   // --- The corpus itself, as a case rather than as the run's only evidence.
   battery('The corpus itself, as a case rather than as the run\'s only evidence.');
   t('today\'s tree is clean', scanTree().length, 0);
+
+  // --- The dispatch-gates population declaration.
+  battery('The dispatch-gates population declaration.');
+  t('every separator-less scanned root is declared in the subtree spelling',
+    SCANNED_ROOTS.filter((r) => !r.includes('/')).every((r) => ROOT_DIR_WATCH_HINTS.includes(`${r}/**`)), true);
+  t('and no root is declared that this gate does not walk',
+    ROOT_DIR_WATCH_HINTS.every((h) => SCANNED_ROOTS.includes(h.replace(/\/\*+$/, ''))), true);
+  t('the declared form is NOT a SCANNED_ROOTS entry',
+    SCANNED_ROOTS.some((r) => ROOT_DIR_WATCH_HINTS.includes(r)), false);
+  t('one hint per walked root', ROOT_DIR_WATCH_HINTS.length, SCANNED_ROOTS.length);
 
   // The floor runs BEFORE the verdict below, so a success line can only be
   // printed by a run in which every declared battery registered its cases.

@@ -243,6 +243,27 @@ const BASELINE_PATH = join(HERE, 'optional-error-sink-contract.baseline.json');
 /** Where the PUBLISHED contracts live. See "Scope" in the header. */
 const SCAN_ROOTS = ['packages'];
 
+/**
+ * The population this gate walks, declared for `scripts/pm/dispatch-gates.mjs`.
+ *
+ * `SCAN_ROOTS` is a runtime constant and the derivation reads SOURCE TEXT, so
+ * the bare word `packages` contributes NOTHING: `hintCovers` refuses a
+ * single-segment literal by design, because `packages` is a path COMPONENT in
+ * dozens of gates that never read that root. This gate therefore declared no
+ * path at all, was scored `undetermined` for EVERY card, and appeared in no
+ * dispatch brief and no `--commands` harvest while CI ran it on every pull
+ * request. The subtree spelling is the escape the idiom exists to be.
+ *
+ * ⛔ Not a whole-tree marker: `packages/**` is a subtree, and a whole-tree
+ * declaration would put this gate on every card in the repo on a population it
+ * does not read.
+ *
+ * The self-test derives the coupling from `SCAN_ROOTS` on both sides rather
+ * than re-spelling it, so a widened or renamed root cannot leave this
+ * declaration describing the old population.
+ */
+const ROOT_DIR_WATCH_HINTS = ['packages/**'];
+
 const SKIP_DIRS = new Set([
     'node_modules', 'dist', 'build', 'coverage', '.turbo', '.next', '.cache', 'json-schema', '.git',
 ]);
@@ -826,11 +847,12 @@ let selfTestReachedVerdict = false;
 // to find what stopped registering.
 const SELF_TEST_BATTERIES = Object.freeze({
   'check-optional-error-sink-contract self-test': 66,
+  'the dispatch-gates population declaration': 4,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 1;
+const SELF_TEST_BATTERY_FLOOR = 2;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1145,6 +1167,36 @@ check(() => {
             console.error(`  ✗ baseline entry ${baselineKey(e)} carries a non-red verdict \`${e.verdict}\``);
         }
     }
+
+    // ── The dispatch-gates population declaration ───────────────────────────
+    battery('the dispatch-gates population declaration');
+    const declFail = (msg) => { failures++; console.error(`  ✗ ${msg}`); };
+check(() => {
+        const separatorless = SCAN_ROOTS.filter((r) => !r.includes('/'));
+        if (!separatorless.every((r) => ROOT_DIR_WATCH_HINTS.includes(`${r}/**`))) {
+            declFail('a separator-less SCAN_ROOT is not declared in the subtree spelling — a bare root is '
+                + 'refused as too generic, so the hint extractor sees nothing and this gate goes back to '
+                + 'scoring `undetermined` for every card.');
+        }
+});
+check(() => {
+        if (!ROOT_DIR_WATCH_HINTS.every((h) => SCAN_ROOTS.includes(h.replace(/\/\*+$/, '')))) {
+            declFail('ROOT_DIR_WATCH_HINTS declares a root this gate does not walk — a declaration that has '
+                + 'drifted from the scan replaces a silent gate with a lying one.');
+        }
+});
+check(() => {
+        if (SCAN_ROOTS.some((r) => ROOT_DIR_WATCH_HINTS.includes(r))) {
+            declFail('the declared form is a SCAN_ROOTS entry — the glob form would send the walk at a '
+                + 'directory the tree does not have.');
+        }
+});
+check(() => {
+        if (ROOT_DIR_WATCH_HINTS.length !== SCAN_ROOTS.length) {
+            declFail('the declaration is not one hint per walked root — an empty or short hint list reads '
+                + 'exactly like the undetermined verdict it exists to leave.');
+        }
+});
 
     // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
     //

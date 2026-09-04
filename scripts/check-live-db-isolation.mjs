@@ -94,11 +94,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '7. comments are not source -- the reason codeOf exists': 1,
   '8. the live-file needle must MATCH a real read and not the cell form': 2,
   '9. `use strict` and friends are not live DDL': 1,
+  '10. the dispatch-gates population declaration': 4,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 9;
+const SELF_TEST_BATTERY_FLOOR = 10;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -174,6 +175,29 @@ function batteryFloorFailures() {
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ROOTS = ['packages', 'apps', 'examples'];
+
+/**
+ * The population this gate walks, declared for `scripts/pm/dispatch-gates.mjs`.
+ *
+ * `ROOTS` is a runtime constant, and the derivation reads SOURCE TEXT: three
+ * bare top-level words carry no separator, and `hintCovers` refuses a bare
+ * single-segment literal by design (accepting them was priced at +139084
+ * fabricated (gate, file) pairs, because `packages`, `apps` and `examples` are
+ * path COMPONENTS in dozens of gates that never read those roots). So this gate
+ * declared no path at all and was scored `undetermined` for EVERY card: it
+ * appeared in no dispatch brief and in no `--commands` harvest, while CI ran it
+ * on every pull request. The subtree spelling is the escape the idiom exists to
+ * be — the same claim `ROOTS` makes, written where a text scanner can read it.
+ *
+ * ⛔ Not a whole-tree marker: this gate reads three subtrees, and the liveness
+ * predicate that vouches for a whole-tree declaration is documented as too weak
+ * to tell a seeded subtree walk apart from a repo-root one.
+ *
+ * The self-test derives the coupling from `ROOTS` on both sides rather than
+ * re-spelling it, so widening or renaming a root cannot leave this declaration
+ * describing the old population.
+ */
+const ROOT_DIR_WATCH_HINTS = ['packages/**', 'apps/**', 'examples/**'];
 const SKIP_DIRS = new Set(['node_modules', 'dist', '.turbo', 'coverage', '.next', 'build']);
 
 /**
@@ -435,6 +459,29 @@ function selfTest() {
   // 9. `use strict` and friends are not live DDL
   battery('9. `use strict` and friends are not live DDL');
   check('does not flag a non-identifier use', violationsIn(`'use strict';`).length === 0);
+
+  // 10. the dispatch-gates population declaration
+  battery('10. the dispatch-gates population declaration');
+  check(
+    'every separator-less ROOT is declared in the subtree spelling (a bare root is refused as too '
+      + 'generic, so it needs the glob)',
+    ROOTS.filter((r) => !r.includes('/')).every((r) => ROOT_DIR_WATCH_HINTS.includes(`${r}/**`)),
+  );
+  check(
+    'and it declares no root this gate does not walk — a declaration that can drift from the scan '
+      + 'replaces a silent gate with a lying one',
+    ROOT_DIR_WATCH_HINTS.every((h) => ROOTS.includes(h.replace(/\/\*+$/, ''))),
+  );
+  check(
+    'the declared form is NOT a ROOTS entry — the glob form would send the walk at a directory the '
+      + 'tree does not have',
+    !ROOTS.some((r) => ROOT_DIR_WATCH_HINTS.includes(r)),
+  );
+  check(
+    'the declaration is not empty — an empty hint list reads exactly like the undetermined verdict '
+      + 'it exists to leave',
+    ROOT_DIR_WATCH_HINTS.length === ROOTS.length,
+  );
 
   // The floor runs BEFORE the verdict below, so a success line can only be
   // printed by a run in which every declared battery registered its cases.

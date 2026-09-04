@@ -83,6 +83,25 @@ import { parseSourceFile } from './ts-parse.mjs';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 
+/** The trees this gate walks. Router mounts live under `packages/`. */
+const SCAN_ROOTS = ['packages'];
+
+/**
+ * The population this gate walks, declared for `scripts/pm/dispatch-gates.mjs`.
+ *
+ * The walk root used to be an inline `'packages'` argument, and every path-shaped
+ * literal this file DOES carry is a LEDGER KEY (`<file>:<method> <pattern>`),
+ * which the extractor cannot read as a path. So the derivation saw no population
+ * at all: this gate was scored `undetermined` for EVERY card, absent from every
+ * dispatch brief and every `--commands` harvest, while CI ran it on each pull
+ * request. `hintCovers` refuses a bare single-segment literal by design, so the
+ * subtree spelling is the escape — held against `SCAN_ROOTS`, which the walk
+ * now reads, so a moved read reds in this file's own self-test.
+ *
+ * ⛔ Not a whole-tree marker: `packages/**` is a subtree.
+ */
+const ROOT_DIR_WATCH_HINTS = ['packages/**'];
+
 /**
  * Every namespace-claiming wildcard mount in the repo. Keyed by
  * `<file>:<method> <pattern>` so two mounts in one file stay distinguishable.
@@ -195,7 +214,7 @@ function discoverFiles() {
       out.push(relative(ROOT, full).split(sep).join('/'));
     }
   };
-  walk(join(ROOT, 'packages'));
+  for (const root of SCAN_ROOTS) walk(join(ROOT, root));
   return out.sort();
 }
 
@@ -480,11 +499,12 @@ const SELF_TEST_VERDICT = 'check-wildcard-fallthrough self-test reached its verd
 // to find what stopped registering.
 const SELF_TEST_BATTERIES = Object.freeze({
   'check-wildcard-fallthrough self-test': 18,
+  'the dispatch-gates population declaration': 4,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 1;
+const SELF_TEST_BATTERY_FLOOR = 2;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -572,6 +592,29 @@ function selfTest() {
   assert(
     keyOf({ file: 'a.ts', method: 'all', pattern: '/x/*' }) !== keyOf({ file: 'a.ts', method: 'use', pattern: '/x/*' }),
     'method is part of the key',
+  );
+
+  // ── The dispatch-gates population declaration ─────────────────────────────
+  battery('the dispatch-gates population declaration');
+  assert(
+    SCAN_ROOTS.filter((r) => !r.includes('/')).every((r) => ROOT_DIR_WATCH_HINTS.includes(`${r}/**`)),
+    'every separator-less SCAN_ROOT is declared in the subtree spelling — a bare root is refused as '
+      + 'too generic, so without the glob this gate scores `undetermined` for every card',
+  );
+  assert(
+    ROOT_DIR_WATCH_HINTS.every((h) => SCAN_ROOTS.includes(h.replace(/\/\*+$/, ''))),
+    'no root is declared that this gate does not walk — a declaration that has drifted from the scan '
+      + 'replaces a silent gate with a lying one',
+  );
+  assert(
+    !SCAN_ROOTS.some((r) => ROOT_DIR_WATCH_HINTS.includes(r)),
+    'the declared form is NOT a SCAN_ROOTS entry — the glob form would send the walk at a directory '
+      + 'the tree does not have',
+  );
+  assert(
+    discoverFiles().every((f) => ROOT_DIR_WATCH_HINTS.some((h) => f.startsWith(`${h.replace(/\/\*+$/, '')}/`))),
+    'and the WALK agrees with the declaration on the live tree — the half the assertions above cannot '
+      + 'hold, since they read the constant rather than what discoverFiles() returns',
   );
 
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
