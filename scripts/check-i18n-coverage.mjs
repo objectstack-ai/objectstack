@@ -1257,7 +1257,21 @@ if (process.argv.includes('--self-test')) {
  * the same defect, one step later, as the diagnosis it replaces.
  */
 function reportPrerequisiteNotMet(headline, detail) {
-  console.error(
+  console.error(prerequisiteNotMetText(headline, detail));
+  process.exit(EXIT_PREREQUISITE_NOT_MET);
+}
+
+/**
+ * The text `reportPrerequisiteNotMet` prints, as a value — so `--self-test` can
+ * assert on the advisory (and on the code it names) without spawning a process
+ * or stubbing `process.exit`. The extraction is the whole point: while the
+ * string was built inline inside `console.error(...)`, there was no value for a
+ * test to read, so the number this gate answers `PREREQUISITE NOT MET` with was
+ * pinned by nothing (#14857). Same shape as `import-prerequisite.mjs`'s
+ * `prerequisiteNotMetText` and the three sibling gates that followed it.
+ */
+function prerequisiteNotMetText(headline, detail) {
+  return (
     `\ncheck-i18n-coverage: PREREQUISITE NOT MET — ${headline}\n\n` +
       detail.map((l) => (l ? `  ${l}` : '')).join('\n') +
       `\n\n  Fix:  ${WORKSPACE_BUILD_FIX}\n\n` +
@@ -1279,9 +1293,8 @@ function reportPrerequisiteNotMet(headline, detail) {
       `  is the false green, and no pipe shape repairs it. \`\${PIPESTATUS[0]}\`/\`pipefail\` do recover\n` +
       `  this gate's own code: \`| tail\` reads to EOF and forwards it, while \`| head -N\` closes the\n` +
       `  read end early — the gate takes EPIPE, its verdict text is TRUNCATED, and a producer that\n` +
-      `  dies on SIGPIPE reports 141 rather than what it meant to say.)`,
+      `  dies on SIGPIPE reports 141 rather than what it meant to say.)`
   );
-  process.exit(EXIT_PREREQUISITE_NOT_MET);
 }
 
 /**
@@ -1305,6 +1318,20 @@ function reportPrerequisiteNotMet(headline, detail) {
  * what that code means everywhere else in this repo.
  */
 function reportUnmeasuredConfigs(failures, measuredCount) {
+  console.error(unmeasuredConfigsText(failures, measuredCount));
+  process.exit(EXIT_PREREQUISITE_NOT_MET);
+}
+
+/**
+ * The text `reportUnmeasuredConfigs` prints, as a value — so `--self-test` can
+ * assert on the advisory (and on the code it names) without spawning a process
+ * or stubbing `process.exit`. The extraction is the whole point: while the
+ * string was built inline inside `console.error(...)`, there was no value for a
+ * test to read, so the number this gate answers `PREREQUISITE NOT MET` with was
+ * pinned by nothing (#14857). Same shape as `import-prerequisite.mjs`'s
+ * `prerequisiteNotMetText` and the three sibling gates that followed it.
+ */
+function unmeasuredConfigsText(failures, measuredCount) {
   const groups = groupFailuresByCause(failures);
   const total = failures.length + measuredCount;
   const blocks = groups.map((g, i) =>
@@ -1324,7 +1351,7 @@ function reportUnmeasuredConfigs(failures, measuredCount) {
       .map((l) => (l ? `  ${l}` : ''))
       .join('\n'),
   );
-  console.error(
+  return (
     `\ncheck-i18n-coverage: COULD NOT MEASURE — ${failures.length} of ${total} config(s) failed to lint ` +
       `(${groups.length} distinct cause${groups.length === 1 ? '' : 's'})\n\n` +
       blocks.join('\n\n') +
@@ -1342,9 +1369,8 @@ function reportUnmeasuredConfigs(failures, measuredCount) {
       `  is the false green, and no pipe shape repairs it. \`\${PIPESTATUS[0]}\`/\`pipefail\` do recover\n` +
       `  this gate's own code: \`| tail\` reads to EOF and forwards it, while \`| head -N\` closes the\n` +
       `  read end early — the gate takes EPIPE, its verdict text is TRUNCATED, and a producer that\n` +
-      `  dies on SIGPIPE reports 141 rather than what it meant to say.)`,
+      `  dies on SIGPIPE reports 141 rather than what it meant to say.)`
   );
-  process.exit(EXIT_PREREQUISITE_NOT_MET);
 }
 
 /**
@@ -1364,7 +1390,21 @@ function reportUnmeasuredConfigs(failures, measuredCount) {
  * @param {{ headline: string, detail: string[] }} verdict
  */
 function reportEmptyPopulation(verdict) {
-  console.error(
+  console.error(emptyPopulationText(verdict));
+  process.exit(EXIT_PREREQUISITE_NOT_MET);
+}
+
+/**
+ * The text `reportEmptyPopulation` prints, as a value — so `--self-test` can
+ * assert on the advisory (and on the code it names) without spawning a process
+ * or stubbing `process.exit`. The extraction is the whole point: while the
+ * string was built inline inside `console.error(...)`, there was no value for a
+ * test to read, so the number this gate answers `PREREQUISITE NOT MET` with was
+ * pinned by nothing (#14857). Same shape as `import-prerequisite.mjs`'s
+ * `prerequisiteNotMetText` and the three sibling gates that followed it.
+ */
+function emptyPopulationText(verdict) {
+  return (
     `\ncheck-i18n-coverage: POPULATION EMPTY — ${verdict.headline}\n\n` +
       verdict.detail.map((l) => (l ? `  ${l}` : '')).join('\n') +
       `\n\n  Fix:  run this gate from a complete checkout of the repo. \`pnpm check:i18n-coverage\`\n` +
@@ -1378,9 +1418,8 @@ function reportEmptyPopulation(verdict) {
       `  is the false green, and no pipe shape repairs it. \`\${PIPESTATUS[0]}\`/\`pipefail\` do recover\n` +
       `  this gate's own code: \`| tail\` reads to EOF and forwards it, while \`| head -N\` closes the\n` +
       `  read end early — the gate takes EPIPE, its verdict text is TRUNCATED, and a producer that\n` +
-      `  dies on SIGPIPE reports 141 rather than what it meant to say.)`,
+      `  dies on SIGPIPE reports 141 rather than what it meant to say.)`
   );
-  process.exit(EXIT_PREREQUISITE_NOT_MET);
 }
 
 /**
