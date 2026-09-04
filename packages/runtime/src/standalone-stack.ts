@@ -57,6 +57,7 @@ import { mkdirSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { z } from 'zod';
 import { stampSearchPinyinEnabled } from '@objectstack/types';
+import { resolveArtifactCollections } from '@objectstack/core';
 import {
     BUILTIN_DRIVER_IDS,
     DATABASE_DRIVER_SELECTION_ALIASES,
@@ -777,20 +778,34 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
     // and driver auto-registration. We copy *references* — no clone — so
     // the caller can `{ ...originalConfig, ...standaloneStack }` without
     // double-merging large object arrays.
+    //
+    // [ADR-0130 D4 / option B, #15005] Read through the RESOLVED stack, never
+    // `artifactBundle` directly: on a multi-package artifact that carries these
+    // collections under `packages[]` the top level is ABSENT, and every key
+    // below would be silently omitted from the result — taking the CLI's tier
+    // resolution, its engine/driver auto-registration gates and the ADR-0056 D7
+    // default permission set with it, with nothing thrown. Identical reference
+    // (so identical output) for every artifact without `packages[]`.
+    //
+    // ⚠️ This is one of the TWO boundaries feeding the D7 permission surface.
+    // The other is the from-source config path (`appSecurityPluginOptions` in
+    // `@objectstack/cli` / `@objectstack/plugin-security`, cards #15006 / #15007)
+    // — fixing one side leaves the other empty.
+    const artifactStack: any = artifactBundle ? resolveArtifactCollections(artifactBundle) : artifactBundle;
     const requires: string[] | undefined =
-        Array.isArray(artifactBundle?.requires)
-            ? (artifactBundle.requires.filter((c: unknown) => typeof c === 'string') as string[])
+        Array.isArray(artifactStack?.requires)
+            ? (artifactStack.requires.filter((c: unknown) => typeof c === 'string') as string[])
             : undefined;
     const objects: any[] | undefined =
-        Array.isArray(artifactBundle?.objects) ? artifactBundle.objects : undefined;
+        Array.isArray(artifactStack?.objects) ? artifactStack.objects : undefined;
     const manifest: any | undefined = artifactBundle?.manifest;
     // ADR-0056 D7 — surface app-declared RBAC so the CLI's artifact-serve
     // path honours an `isDefault` profile (appDefaultPermissionSetName) and
     // registers application org names, exactly like the config-load path.
     const permissions: any[] | undefined =
-        Array.isArray(artifactBundle?.permissions) ? artifactBundle.permissions : undefined;
+        Array.isArray(artifactStack?.permissions) ? artifactStack.permissions : undefined;
     const positions: any[] | undefined =
-        Array.isArray(artifactBundle?.positions) ? artifactBundle.positions : undefined;
+        Array.isArray(artifactStack?.positions) ? artifactStack.positions : undefined;
     const i18n: any | undefined =
         artifactBundle?.i18n && typeof artifactBundle.i18n === 'object' ? artifactBundle.i18n : undefined;
 

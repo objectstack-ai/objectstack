@@ -17,6 +17,14 @@ export * from './plugin-order.js';
 // because the ordering it performs is `resolvePluginOrder` directly above.
 // `@objectstack/objectql` re-exports it, so its published surface is unchanged.
 export * from './artifact-packages.js';
+// ADR-0130 D4 / option B (#15005) — the ONE way to read a top-level
+// collection out of an artifact that may carry it flattened, under
+// `packages[]`, or both. Beside `artifact-packages.js` and for the same
+// reason: its readers live in packages that cannot import each other
+// (`@objectstack/runtime`, `@objectstack/cli`, `@objectstack/plugin-security`),
+// and N private `packages[]` walks would disagree about what an artifact
+// CONTAINS rather than merely about the order.
+export * from './artifact-collections.js';
 export * from './lite-kernel.js';
 export * from './types.js';
 export * from './logger.js';

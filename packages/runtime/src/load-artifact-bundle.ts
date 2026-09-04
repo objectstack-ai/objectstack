@@ -30,6 +30,8 @@ import { readFile } from 'node:fs/promises';
 import { resolve as resolvePath, isAbsolute, dirname } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+import { resolveArtifactCollections } from '@objectstack/core';
+
 export interface LoadArtifactBundleOptions {
     /** Optional log tag for warnings (defaults to `[loadArtifactBundle]`). */
     tag?: string;
@@ -138,6 +140,19 @@ export async function mergeRuntimeModule(bundle: any, artifactAbsPath: string, t
             console.warn(`${tag} runtime module '${moduleAbsPath}' exported no \`functions\` map`);
             return;
         }
+        // [ADR-0130 D4 / option B, #15005] The DECLARATION half is read
+        // through the resolved stack, because on a multi-package artifact it
+        // lives under `packages[i].manifest.functions` and the top level may
+        // carry nothing at all. This is the sharpest of the option-B losses and
+        // the only one no presence-check finds: the module below re-supplies
+        // every CALLABLE regardless of shape, so `functions` is not ABSENT — a
+        // function declared `effect: 'writes'` simply comes back as a BARE
+        // callable, which `normalizeFlowFunctionEntry` then defaults to
+        // `'pure'`. The function still registers, still runs, and its writes
+        // are still counted as none (#4396's silent un-declaring, third
+        // spelling; #4354's broken-sweep filter stays quiet on the one run that
+        // needed it). Identical reference on any bundle without `packages[]`.
+        const declaredFunctions = (resolveArtifactCollections(bundle) as { functions?: unknown })?.functions;
         // The ARRAY form (`[{ name, handler: '<ref>', effect }]`) carries its
         // declaration exactly like the map form, but names itself by an entry's
         // `name` instead of by a map key. Rebuilding it as a map below would
@@ -147,10 +162,10 @@ export async function mergeRuntimeModule(bundle: any, artifactAbsPath: string, t
         // writes are still counted as none, so #4354's broken-sweep alert stays
         // quiet on the one run that needed it. Unreachable until #6238 let the
         // array form past the parse; reachable now, so it is handled here.
-        if (Array.isArray(bundle.functions)) {
+        if (Array.isArray(declaredFunctions)) {
             const moduleFns = fns as Record<string, unknown>;
             const attached = new Set<string>();
-            const mergedEntries = (bundle.functions as unknown[]).map((entry) => {
+            const mergedEntries = (declaredFunctions as unknown[]).map((entry) => {
                 if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return entry;
                 const record = entry as Record<string, unknown>;
                 const name = typeof record.name === 'string' ? record.name : undefined;
@@ -170,8 +185,8 @@ export async function mergeRuntimeModule(bundle: any, artifactAbsPath: string, t
             bundle.functions = mergedEntries;
             return;
         }
-        const existing = (bundle.functions && typeof bundle.functions === 'object')
-            ? bundle.functions as Record<string, unknown>
+        const existing = (declaredFunctions && typeof declaredFunctions === 'object')
+            ? declaredFunctions as Record<string, unknown>
             : {};
         // The module supplies the CALLABLE; the JSON supplies what the function
         // DECLARED about itself (`{ handler: '<ref>', effect: 'writes' }`,

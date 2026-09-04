@@ -118,36 +118,28 @@ import { measureShape, type ProbeRow, type ShapeMeasurement } from './fixtures/o
 
 /**
  * The subsystems that silently lose their collection when the flattened top
- * level is gone — MEASURED on `origin/main` `33681eaef`, not curated.
+ * level is gone — MEASURED, not curated. Opened at 24 rows on `origin/main`
+ * `33681eaef` (#15004); 23 of them were deleted by #15005 when
+ * `@objectstack/runtime` learned to resolve `packages[]` — the whole of
+ * boundaries B1 and B5, plus every B2 row whose reader ships in that package.
+ *
+ * The one row left is NOT a runtime reader: `appSecurityPluginOptions`
+ * (`@objectstack/plugin-security`) reads `config.permissions` off the
+ * from-source config directly, so nothing on the artifact side can reach it.
+ * Card #15007 owns it, and the ledger is empty — the reader half done, the
+ * emitter half #14512 unblocked — when it goes.
+ *
+ * Its B1 twin is already gone: that row runs `appSecurityPluginOptions` over
+ * `createStandaloneStack`'s RESULT, and the result now surfaces `permissions`
+ * resolved across both shapes. Same reader, two boundaries, one of them fed by
+ * a producer this card fixed — which is the two-boundary split #15005 warns
+ * about, seen from the ledger's side.
  *
  * ⛔ SHRINK-ONLY, audited in BOTH directions (see the header). Each line names
  * a boundary, a subsystem and the collection it reads.
  */
 const OPTION_B_LOSSES: readonly string[] = [
-  'B1 · AppPlugin declared-datasource auto-connect (compiled artifact) · datasources',
-  'B1 · AppPlugin job scheduling (compiled artifact) · jobs',
-  'B1 · AppPlugin objects handed to datasource connect (compiled artifact) · objects',
-  'B1 · AppPlugin ql.setDatasourceMapping (object routing) (compiled artifact) · datasourceMapping',
-  'B1 · AppPlugin seed datasets merged (compiled artifact) · data',
-  'B1 · AppPlugin translation loading into the i18n service (compiled artifact) · translations',
-  'B1 · createStandaloneStack surfaced objects (CLI tier resolution + engine/driver auto-registration) · objects',
-  'B1 · createStandaloneStack surfaced permissions (ADR-0056 D7) · permissions',
-  'B1 · createStandaloneStack surfaced positions · positions',
-  'B1 · plugin-security appSecurityPluginOptions over the artifact-serve config (default permission set) · permissions',
-  'B1 · runtime collectBundleActions (action dispatch registration) · actions + objects[].actions',
-  'B1 · runtime collectBundleFunctionEntries (declared function effect) · functions',
-  'B1 · runtime collectBundleHooks (declarative hook binding) · hooks',
-  'B2 · AppPlugin declared-datasource auto-connect (from source) · datasources',
-  'B2 · AppPlugin job scheduling (from source) · jobs',
-  'B2 · AppPlugin objects handed to datasource connect (from source) · objects',
-  'B2 · AppPlugin ql.setDatasourceMapping (object routing) (from source) · datasourceMapping',
-  'B2 · AppPlugin seed datasets merged (from source) · data',
-  'B2 · AppPlugin translation loading into the i18n service (from source) · translations',
   'B2 · plugin-security appSecurityPluginOptions over the from-source config (default permission set) · permissions',
-  'B2 · runtime collectBundleActions over the from-source config · actions + objects[].actions',
-  'B2 · runtime collectBundleFunctionEntries over the from-source config · functions',
-  'B2 · runtime collectBundleHooks over the from-source config · hooks',
-  'B5 · resolve-project-database readConfigDeclaredDefault (project database tier) · datasourceMapping + datasources',
 ];
 
 const render = (rows: ProbeRow[], only?: (r: ProbeRow) => boolean): string =>

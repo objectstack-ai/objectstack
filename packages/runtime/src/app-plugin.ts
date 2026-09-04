@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { Plugin, PluginContext, wireAuthoredTranslationSync } from '@objectstack/core';
+import { Plugin, PluginContext, resolveArtifactCollections, wireAuthoredTranslationSync } from '@objectstack/core';
 import { applyArtifactForwardConversions, assertProtocolCompat } from '@objectstack/metadata-core';
 import { resolveTenancyPosture } from '@objectstack/types';
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
@@ -113,6 +113,8 @@ export class AppPlugin implements Plugin {
     requiresServices: string[] = ['manifest'];
 
     private bundle: any;
+    /** Memoized backing store for {@link collections}. */
+    private resolvedCollections?: any;
     private projectContext?: AppPluginProjectContext;
     /**
      * The context handed to `init()`, retained so `destroy()` can emit the
@@ -138,6 +140,35 @@ export class AppPlugin implements Plugin {
      * composition test can pin which registrar a boot shape declared.
      */
     readonly securityMetadataRegistrar: AppPluginSecurityMetadataRegistrar;
+
+    /**
+     * `this.bundle` with every package-owned collection resolved across BOTH
+     * artifact shapes — the flattened top level and `packages[]` (ADR-0130 D4 /
+     * option B, #15005; the resolution itself is
+     * `resolveArtifactCollections` in `@objectstack/core`, shared with the
+     * other readers of the same key).
+     *
+     * ⛔ Read COLLECTIONS through this, never `this.bundle` — `this.bundle` is
+     * what the caller handed us and, on a multi-package option-B artifact, its
+     * `objects` / `jobs` / `data` / `translations` / `datasources` /
+     * `datasourceMapping` / `permissions` / `positions` are simply ABSENT while
+     * `packages[]` carries every one of them. Nothing throws on that path: the
+     * subsystem is handed an empty list and the app boots having lost the
+     * collection (#15004 measured 24 such subsystems).
+     *
+     * ENVELOPE keys stay on `this.bundle`, and the two are the same object
+     * whenever the bundle carries no `packages[]` — which is every
+     * single-package artifact and every `defineStack()` config — so this
+     * accessor cannot move the shape that ships today.
+     *
+     * Lazy so construction stays free of the ADR-0112 refusal a malformed
+     * `packages[]` raises: that refusal belongs to the boot, where the
+     * `manifest` service already raises it on the same bytes, not to `new
+     * AppPlugin(...)`.
+     */
+    private get collections(): any {
+        return (this.resolvedCollections ??= resolveArtifactCollections(this.bundle));
+    }
 
     constructor(
         bundle: any,
@@ -533,12 +564,13 @@ export class AppPlugin implements Plugin {
         ctx.logger.debug('Retrieved ObjectQL engine service', { appId });
 
         // Configure datasourceMapping if provided in the stack definition
-        if (this.bundle.datasourceMapping && Array.isArray(this.bundle.datasourceMapping)) {
+        const datasourceMapping = this.collections.datasourceMapping;
+        if (datasourceMapping && Array.isArray(datasourceMapping)) {
             ctx.logger.info('Configuring datasource mapping rules', {
                 appId,
-                ruleCount: this.bundle.datasourceMapping.length
+                ruleCount: datasourceMapping.length
             });
-            ql.setDatasourceMapping(this.bundle.datasourceMapping);
+            ql.setDatasourceMapping(datasourceMapping);
         }
 
         // Surface code-defined datasources (ADR-0015 Addendum) in the metadata
@@ -556,7 +588,7 @@ export class AppPlugin implements Plugin {
         // reject at load, loudly (outside the lenient catch below), instead of
         // letting the collision produce undefined routing.
         {
-            const dsDefs = this.bundle.datasources;
+            const dsDefs = this.collections.datasources;
             const declared = Array.isArray(dsDefs)
                 ? dsDefs
                 : dsDefs && typeof dsDefs === 'object'
@@ -574,7 +606,7 @@ export class AppPlugin implements Plugin {
             }
         }
         try {
-            const dsDefs = this.bundle.datasources;
+            const dsDefs = this.collections.datasources;
             const dsList = Array.isArray(dsDefs)
                 ? dsDefs
                 : dsDefs && typeof dsDefs === 'object'
@@ -616,7 +648,7 @@ export class AppPlugin implements Plugin {
         // so the kernel's init-all-then-start-all ordering guarantees the
         // connection service was already registered during init.
         try {
-            const dsDefs = this.bundle.datasources;
+            const dsDefs = this.collections.datasources;
             const dsList: any[] = Array.isArray(dsDefs)
                 ? dsDefs
                 : dsDefs && typeof dsDefs === 'object'
@@ -643,7 +675,7 @@ export class AppPlugin implements Plugin {
                     connection = undefined;
                 }
                 if (typeof connection?.connectDeclared === 'function') {
-                    const objects = Array.isArray(this.bundle.objects) ? this.bundle.objects : [];
+                    const objects = Array.isArray(this.collections.objects) ? this.collections.objects : [];
                     const results = await connection.connectDeclared({
                         datasources: dsList,
                         objects,
@@ -757,9 +789,9 @@ export class AppPlugin implements Plugin {
                         },
                     );
                 } else {
-                    const rawSecurityBundle: any = this.bundle.manifest
-                        ? { ...this.bundle.manifest, ...this.bundle }
-                        : this.bundle;
+                    const rawSecurityBundle: any = this.collections.manifest
+                        ? { ...this.collections.manifest, ...this.collections }
+                        : this.collections;
                     // [#12844] Same bytes, same conversion policy — one funnel.
                     //
                     // A `defineStack()` module can declare an `engines.protocol`
@@ -969,8 +1001,8 @@ export class AppPlugin implements Plugin {
         // resolved through `collectBundleFunctions(bundle)` — the same
         // registry used by hooks/actions, keeping the surface uniform.
         try {
-            const jobs: any[] = Array.isArray(this.bundle.jobs)
-                ? this.bundle.jobs
+            const jobs: any[] = Array.isArray(this.collections.jobs)
+                ? this.collections.jobs
                 : Array.isArray((this.bundle.manifest || {}).jobs)
                     ? (this.bundle.manifest as any).jobs
                     : [];
@@ -1029,7 +1061,14 @@ export class AppPlugin implements Plugin {
                                     const jobContext: JobHandlerContext = {
                                         ...jobCtx,
                                         jobId: jobName,
-                                        bundle: this.bundle,
+                                        // The RESOLVED view, not `this.bundle`:
+                                        // a handler reading `ctx.bundle.objects`
+                                        // on a multi-package option-B artifact
+                                        // would otherwise read `undefined` with
+                                        // nothing thrown (ADR-0130 D4, #15005).
+                                        // Identical reference on every bundle
+                                        // that carries no `packages[]`.
+                                        bundle: this.collections,
                                         ql,
                                         logger: ctx.logger,
                                     };
@@ -1107,8 +1146,8 @@ export class AppPlugin implements Plugin {
         const seedDatasets: any[] = [];
         
         // 1. Top-level `data` field (new standard location on ObjectStackDefinition)
-        if (Array.isArray(this.bundle.data)) {
-            seedDatasets.push(...this.bundle.data);
+        if (Array.isArray(this.collections.data)) {
+            seedDatasets.push(...this.collections.data);
         }
         
         // 2. Legacy: `manifest.data` (backward compatibility)
@@ -1555,7 +1594,7 @@ export class AppPlugin implements Plugin {
         if (this.organizationWallActive(ctx)) return;
 
         const knownObjects = new Set<string>(
-            (Array.isArray(this.bundle.objects) ? this.bundle.objects : [])
+            (Array.isArray(this.collections.objects) ? this.collections.objects : [])
                 .map((o: any) => o?.name)
                 .filter((n: any): n is string => typeof n === 'string'),
         );
@@ -1698,11 +1737,11 @@ export class AppPlugin implements Plugin {
 
         // Collect translation bundles early to determine if we have data
         const bundles: Array<Record<string, unknown>> = [];
-        if (Array.isArray(this.bundle.translations)) {
-            bundles.push(...this.bundle.translations);
+        if (Array.isArray(this.collections.translations)) {
+            bundles.push(...this.collections.translations);
         }
         const manifest = this.bundle.manifest || this.bundle;
-        if (manifest && Array.isArray(manifest.translations) && manifest.translations !== this.bundle.translations) {
+        if (manifest && Array.isArray(manifest.translations) && manifest.translations !== this.collections.translations) {
             bundles.push(...manifest.translations);
         }
 
@@ -1838,8 +1877,21 @@ export class AppPlugin implements Plugin {
 // some legacy bundles still nest them under `manifest.hooks`. We dedupe
 // (by reference) so the same array isn't bound twice when both shapes
 // happen to point at the same list.
+//
+// [ADR-0130 D4 / option B, #15005] Each collector below reads its collection
+// through `resolveArtifactCollections` FIRST, so a multi-package artifact that
+// carries the collection under `packages[]` instead of flattened at the top
+// level is read rather than silently seen as empty. The resolution is shared
+// (`@objectstack/core`) rather than open-coded per collector: three walks of
+// one `packages[]` that ordered or de-duplicated differently would disagree
+// about what the artifact CONTAINS. On any bundle without `packages[]` it
+// returns the argument itself, so these three functions are unchanged for every
+// single-package artifact and every `defineStack()` config.
 
-/** Collect declarative `Hook` definitions from a bundle (top-level + manifest). */
+/**
+ * Collect declarative `Hook` definitions from a bundle — top-level,
+ * `manifest.hooks`, and (ADR-0130 D4) every package body's `hooks`.
+ */
 export function collectBundleHooks(bundle: any): any[] {
     const out: any[] = [];
     const seen = new Set<any>();
@@ -1852,8 +1904,9 @@ export function collectBundleHooks(bundle: any): any[] {
             }
         }
     };
-    push(bundle?.hooks);
-    push(bundle?.manifest?.hooks);
+    const stack = resolveArtifactCollections(bundle) as any;
+    push(stack?.hooks);
+    push(stack?.manifest?.hooks);
     return out;
 }
 
@@ -1893,13 +1946,18 @@ export function collectBundleActions(
             out.push(inferredObject ? { ...a, object: inferredObject } : { ...a });
         }
     };
-    push(bundle?.actions);
-    push(bundle?.manifest?.actions);
-    if (Array.isArray(bundle?.objects)) {
-        for (const o of bundle.objects) push(o?.actions, o?.name);
+    // Both walks read the RESOLVED stack: an option-B artifact loses the
+    // object-embedded actions with the top-level `objects` array that carried
+    // them, which is the widening #14512 comment 5523603341 measured (4 -> 0,
+    // every declarative action 404-ing at dispatch).
+    const stack = resolveArtifactCollections(bundle) as any;
+    push(stack?.actions);
+    push(stack?.manifest?.actions);
+    if (Array.isArray(stack?.objects)) {
+        for (const o of stack.objects) push(o?.actions, o?.name);
     }
-    if (Array.isArray(bundle?.manifest?.objects)) {
-        for (const o of bundle.manifest.objects) push(o?.actions, o?.name);
+    if (Array.isArray(stack?.manifest?.objects)) {
+        for (const o of stack.manifest.objects) push(o?.actions, o?.name);
     }
     return out;
 }
@@ -1935,8 +1993,9 @@ export function collectBundleFunctionEntries(bundle: any): Record<string, Normal
             }
         }
     };
-    merge(bundle?.functions);
-    merge(bundle?.manifest?.functions);
+    const stack = resolveArtifactCollections(bundle) as any;
+    merge(stack?.functions);
+    merge(stack?.manifest?.functions);
     return out;
 }
 
