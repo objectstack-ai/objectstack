@@ -228,7 +228,17 @@ export function walkRegexBody(src, at) {
  * @param {{ mayBeginAt: (src: string, at: number) => boolean }} options
  * @returns {(src: string, at: number) => number}
  */
-export function makeRegexRecogniser({ mayBeginAt } = {}) {
+export function makeRegexRecogniser(options) {
+  // ⛔ No `= {}` default on this parameter, and the reason is mechanical:
+  // `Function.length` counts the parameters BEFORE the first defaulted one, so a
+  // default here reports this function as taking ZERO required arguments and
+  // `check-declaration-mirrors` reds the hand-written `.d.mts` next door for
+  // declaring one. The DECLARATION is the honest side -- the options really are
+  // required, since there is no default rule -- so the guard is written longhand
+  // rather than destructured, which also keeps the message below instead of
+  // letting a bare destructuring TypeError replace it with one that explains
+  // nothing.
+  const mayBeginAt = options == null ? undefined : options.mayBeginAt;
   if (typeof mayBeginAt !== 'function') {
     throw new TypeError(
       'makeRegexRecogniser({ mayBeginAt }) needs a position rule, and there is no default: the two '
@@ -872,12 +882,19 @@ export function selfTest() {
     overMasking(cls, clsAt) === clsClose && neverSkip(cls, clsAt) === clsClose,
     [overMasking(cls, clsAt), neverSkip(cls, clsAt), clsClose]);
 
-  let threw = false;
-  try { makeRegexRecogniser(); } catch { threw = true; }
-  let threwOnJunk = false;
-  try { makeRegexRecogniser({ mayBeginAt: 'yes' }); } catch { threwOnJunk = true; }
+  // Three facts, one row: it throws with NO argument, it throws on a non-function
+  // rule, and the message is this module's own rather than a destructuring
+  // TypeError. The ARITY is pinned here too — `makeRegexRecogniser.length` is
+  // what `check-declaration-mirrors` compares against the `.d.mts`, and a `= {}`
+  // default silently drops it to 0. That was a real CI red, and it belongs in
+  // the module's own self-test rather than only in a gate one layer away.
+  const caught = (fn) => { try { fn(); return null; } catch (e) { return e; } };
+  const noArg = caught(() => makeRegexRecogniser());
+  const junkRule = caught(() => makeRegexRecogniser({ mayBeginAt: 'yes' }));
+  const names = (e) => e instanceof TypeError && e.message.includes('needs a position rule');
   xr('omitting mayBeginAt throws instead of defaulting to a failure direction',
-    threw && threwOnJunk, [threw, threwOnJunk]);
+    names(noArg) && names(junkRule) && makeRegexRecogniser.length === 1,
+    [noArg && noArg.message, junkRule && junkRule.message, makeRegexRecogniser.length]);
 
   for (const [name, ok, detail] of recog) {
     if (!ok) failed++;
