@@ -23,6 +23,14 @@
  *     or `examples/`, so the command only did anything sensible when it was run
  *     from a checkout of ObjectStack itself.
  *
+ * A fourth followed from making the emission real: the `plugin` template wrote
+ * an `initialize` method, which is not part of the `Plugin` contract. `Plugin`
+ * carries an index signature, so the excess property was accepted but got no
+ * contextual type — the scaffold failed its own `strict` type-check with TS7006
+ * — and the kernel loader refuses a plugin without `init` outright. It emits
+ * `init` now; the warning the kernel protocol docs carried about renaming it is
+ * gone with the defect.
+ *
  * The fix is not to narrow the promise but to deliver it, so the DEFAULT is now
  * a standalone project:
  *
@@ -234,7 +242,7 @@ export const ${toCamelCase(name)}Plugin: Plugin = {
   name: '${name}',
   version: '0.1.0',
   
-  async initialize(context) {
+  async init(context) {
     console.log('Initializing ${name} plugin...');
     // Plugin initialization logic
   },
