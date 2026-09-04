@@ -147,6 +147,10 @@ const OPTION_B_LOSSES: readonly string[] = [
   'B2 · runtime collectBundleActions over the from-source config · actions + objects[].actions',
   'B2 · runtime collectBundleFunctionEntries over the from-source config · functions',
   'B2 · runtime collectBundleHooks over the from-source config · hooks',
+  'B2 · verify declaredPositionNames (one RLS persona per declared position) · positions',
+  'B2 · verify deriveCrudCases (CRUD round-trip case derivation) · objects',
+  'B2 · verify deriveCrudCases federated write gate (ADR-0015 double opt-in) · datasources',
+  'B2 · verify rlsProbePermissionSet (RLS probe grants + owner narrowing) · objects',
   'B5 · resolve-project-database readConfigDeclaredDefault (project database tier) · datasourceMapping + datasources',
 ];
 
@@ -204,10 +208,19 @@ describe('#15004 — option-B acceptance pin: every subsystem must see its colle
     // control for every LOST row below: it proves the option-B fixture really
     // carries every definition under `packages[]`, so a zero is a reader losing
     // a collection and never a fixture that shipped an empty package.
-    expect(additive.registryObjectsFromArtifact).toEqual(['probe_account', 'probe_order']);
+    // `probe_federated_order` is the ADR-0015 federated object #15229 added to
+    // the zoo: `deriveCrudCases`'s datasource-by-name map decides exactly one
+    // thing — whether that object's probe insert clears the double write gate —
+    // so watching the map required carrying one. It registers like any other
+    // object, which is why it is in this control's list.
+    expect(additive.registryObjectsFromArtifact).toEqual(
+      ['probe_account', 'probe_federated_order', 'probe_order'],
+    );
     expect(optionB.registryObjectsFromArtifact).toEqual(additive.registryObjectsFromArtifact);
     expect(optionB.registryObjectsFromSource).toEqual(additive.registryObjectsFromSource);
-    expect(optionB.registryObjectsFromSource).toEqual(['probe_account', 'probe_order']);
+    expect(optionB.registryObjectsFromSource).toEqual(
+      ['probe_account', 'probe_federated_order', 'probe_order'],
+    );
   });
 
   // ── The baseline: green today, and it must stay green ────────────────────
