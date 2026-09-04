@@ -277,22 +277,27 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
     id: 'cron-job-schedule',
     summary: 'declarative background-job cron schedule (CronSchedule.expression)',
     dialect: 'cron', mode: 'interpret', state: 'enforced', failPolicy: 'throw',
+    // The lowering seam and its containment are #4567; croner, not cron-parser,
+    // is the library behind the adapter.
     enforcement:
-      'runtime/job-schedule.ts `toBoundaryJobSchedule` — the #4567 authoring→boundary seam: it lowers the parsed `{dialect:"cron",source}` envelope to the bare cron string the adapter takes, and THROWS naming the job on a non-cron dialect, an AST-only envelope, or a missing/blank source. Called from runtime/app-plugin.ts `start`; the boundary value reaches service-job/cron-job-adapter.ts `CronJobAdapter.schedule` → **croner** `Cron` (db-job-adapter.ts routes the cron variant there and persists the shape onto sys_job). The throw is CONTAINED at the call site, deliberately and visibly: AppPlugin catches per job, logs `Background job FAILED TO SCHEDULE — it will never run` at ERROR with the `jobScheduleFailuresTotal` counter, then reports the failed count — boot continues and the job does not run. Cron SYNTAX is not judged on this path at all: `toBoundaryJobSchedule` only checks dialect/source shape, and a syntactically invalid pattern throws later inside croner, into the same catch',
+      'runtime/job-schedule.ts `toBoundaryJobSchedule` — the authoring→boundary seam: it lowers the parsed `{dialect:"cron",source}` envelope to the bare cron string the adapter takes, and THROWS naming the job on a non-cron dialect, an AST-only envelope, or a missing/blank source. Called from runtime/app-plugin.ts `start`; the boundary value reaches service-job/cron-job-adapter.ts `CronJobAdapter.schedule` → **croner** `Cron` (db-job-adapter.ts routes the cron variant there and persists the shape onto sys_job). The throw is CONTAINED at the call site, deliberately and visibly: AppPlugin catches per job, logs `Background job FAILED TO SCHEDULE — it will never run` at ERROR with the `jobScheduleFailuresTotal` counter, then reports the failed count — boot continues and the job does not run. Cron SYNTAX is not judged on this path at all: `toBoundaryJobSchedule` only checks dialect/source shape, and a syntactically invalid pattern throws later inside croner, into the same catch',
     covers: ['system/job.zod.ts:expression'],
     proof: 'packages/runtime/src/job-schedule.test.ts',
     note: 'The ONE cron slot in the spec with a measured evaluator. `@objectstack/formula` cronEngine is NOT on this path — see `cron-declared-unwired` for what that means for the rest.',
   },
   {
+    // The key and its documented hand-off arrived with #14825.
     id: 'cron-knowledge-refresh',
     summary: 'knowledge-source periodic reindex cron (KnowledgeRefreshPolicy.cron) — surfaced, deliberately not scheduled',
     dialect: 'cron', mode: 'interpret', state: 'experimental', failPolicy: 'compile-error',
     enforcement:
       'PARSE ONLY — `CronExpressionInputSchema` refuses a blank/non-string, non-envelope value and normalizes to `{dialect:"cron",source}`; nothing evaluates the result. service-knowledge/knowledge-service.ts reads `refresh.onRecordChange` and NEVER `refresh.cron` (measured: the only `refresh` reads in that package are the two `onRecordChange` sites)',
     covers: ['ai/knowledge-source.zod.ts:cron'],
-    note: 'EXPERIMENTAL by DESIGN, and separated from `cron-declared-unwired` for that reason: the key documents its own hand-off — service-knowledge surfaces the value so an automation flow / external scheduler can call `reindexSource`, and the field docblock says so (#14825). Nothing in this repo schedules it, which is the intended state rather than an undelivered one. It still has no evaluator, so it is not `enforced`.',
+    note: 'EXPERIMENTAL by DESIGN, and separated from `cron-declared-unwired` for that reason: the key documents its own hand-off — service-knowledge surfaces the value so an automation flow / external scheduler can call `reindexSource`, and the field docblock says so. Nothing in this repo schedules it, which is the intended state rather than an undelivered one. It still has no evaluator, so it is not `enforced`.',
   },
   {
+    // Sibling cards named in this row's note: #15500 (ratchet-key granularity)
+    // and #15028 (the envelope arm accepts any dialect).
     id: 'cron-declared-unwired',
     summary: 'cron slots on subsystems that were declared but never built — export schedules, flow schedule state, connector sync, cache warmup, DR backup/test',
     dialect: 'cron', mode: 'interpret', state: 'experimental', failPolicy: 'compile-error',
@@ -305,11 +310,12 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
       'system/cache.zod.ts:schedule',
       'system/disaster-recovery.zod.ts:schedule',
     ],
-    note: 'EXPERIMENTAL — five declared cron slots with no runtime evaluator (ADR-0049 enforce-or-remove candidates; each wants its own look, and the card that surfaced them says so rather than proposing a sweep). ⚠️ TWO of these keys each cover TWO declaring positions, because a ratchet key is `file:field`: `api/export.zod.ts:cronExpression` is `:576` (ScheduledExport) and `:706` (ScheduleExportRequest), and `system/disaster-recovery.zod.ts:schedule` is `:57` (BackupConfig) and `:238` (the DR `testing` block). Both pairs are genuinely the same surface twice, so one row is honest here — but see #15500, where the same collapse hides surfaces that are NOT the same. ⚠️ The `failPolicy` on this row is `compile-error` because the PARSE is the only thing that ever refuses one of these values; it is not a claim that cron SYNTAX is checked. It is not: `@objectstack/formula` cronEngine validates 5/6-field patterns and `@` aliases, and has ZERO consumers outside packages/formula — nothing routes these slots through it. And per #15028 the envelope arm of `CronExpressionInputSchema` accepts any declared dialect, so even the parse does not pin these to `cron`.',
+    note: 'EXPERIMENTAL — five declared cron slots with no runtime evaluator (ADR-0049 enforce-or-remove candidates; each wants its own look, and the card that surfaced them says so rather than proposing a sweep). ⚠️ TWO of these keys each cover TWO declaring positions, because a ratchet key is `file:field`: `api/export.zod.ts:cronExpression` is `:576` (ScheduledExport) and `:706` (ScheduleExportRequest), and `system/disaster-recovery.zod.ts:schedule` is `:57` (BackupConfig) and `:238` (the DR `testing` block). Both pairs are genuinely the same surface twice, so one row is honest here — but see the sibling card on ratchet-key GRANULARITY, where the same collapse hides surfaces that are NOT the same. ⚠️ The `failPolicy` on this row is `compile-error` because the PARSE is the only thing that ever refuses one of these values; it is not a claim that cron SYNTAX is checked. It is not: `@objectstack/formula` cronEngine validates 5/6-field patterns and `@` aliases, and has ZERO consumers outside packages/formula — nothing routes these slots through it. And per the sibling finding on the dialect union, the envelope arm of `CronExpressionInputSchema` accepts any declared dialect, so even the parse does not pin these to `cron`.',
   },
 
   // ── TEMPLATE dialect (#15027) ─────────────────────────────────────────────
   {
+    // The apparent owner was #14797 (closed completed), delivered by PR #14819.
     id: 'template-prompt',
     summary: 'AI prompt-template system/user prompts (PromptTemplate.system, .user) — `{{var}}` interpolation',
     dialect: 'template', mode: 'interpret', state: 'experimental', failPolicy: 'compile-error',
@@ -319,7 +325,7 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
       'ai/model-registry.zod.ts:system',
       'ai/model-registry.zod.ts:user',
     ],
-    note: 'EXPERIMENTAL — declared prompt templates with no runtime evaluator (ADR-0049). Ownership was checked before classifying rather than assumed: #14797 is CLOSED as completed, and its delivered diff (`d355c361157`, PR #14819) touched exactly one file, `skills/objectstack-ai/SKILL.md` — it corrected a prose clause that called these keys CEL, and never owned a ledger row. No open card owns them.',
+    note: 'EXPERIMENTAL — declared prompt templates with no runtime evaluator (ADR-0049). Ownership was checked before classifying rather than assumed: the card that appeared to own these keys is closed as completed, and its delivered diff (`d355c361157`) touched exactly one file, `skills/objectstack-ai/SKILL.md` — it corrected a prose clause that called these keys CEL, and never owned a ledger row. No open card owns them.',
   },
   {
     id: 'template-title-format',
