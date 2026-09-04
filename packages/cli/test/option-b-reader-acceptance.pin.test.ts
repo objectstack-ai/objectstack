@@ -143,10 +143,6 @@ const OPTION_B_LOSSES: readonly string[] = [
   'B2 · AppPlugin ql.setDatasourceMapping (object routing) (from source) · datasourceMapping',
   'B2 · AppPlugin seed datasets merged (from source) · data',
   'B2 · AppPlugin translation loading into the i18n service (from source) · translations',
-  // [#15232] The by-shape sweep (#15210) found this site, not this pin — so it
-  // is LEDGERED here first, red, before the reader beside it is touched. The
-  // fix and this line's deletion land in the next commit.
-  'B2 · plugin-dev I18nServicePlugin auto-detect over the caller-supplied stack · translations',
   'B2 · plugin-security appSecurityPluginOptions over the from-source config (default permission set) · permissions',
   'B2 · runtime collectBundleActions over the from-source config · actions + objects[].actions',
   'B2 · runtime collectBundleFunctionEntries over the from-source config · functions',
