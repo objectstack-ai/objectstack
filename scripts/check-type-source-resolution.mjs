@@ -312,7 +312,31 @@ const KNOWN_DIST_RESOLVED_TYPE_IMPORTS = {
     '@objectstack/types', '@objectstack/verify',
   ],
   '@objectstack/driver-memory': ['@objectstack/core', '@objectstack/spec', '@objectstack/types'],
-  '@objectstack/driver-mongodb': ['@objectstack/core', '@objectstack/spec', '@objectstack/types'],
+  // #14917: `packages/drivers/driver-mongodb` had NO tsc program compiling any
+  // of its 30 test files (the build config's `exclude` named `**/*.test.ts`),
+  // and its new `tsconfig.test.json` (the #5286 sibling route) is the first one
+  // that does — the same shape `@objectstack/rest` took below. Exactly ONE dep
+  // arrives from that program: `@objectstack/objectql`, a devDependency no
+  // non-test file in `src/` imports (measured: 0 non-test importers, and the
+  // gate's own provenance annotation reads `via tsconfig.test.json`).
+  //
+  // ⚠️ This is a program-set widening and its numbers are stated, per this
+  // registry's own rule: before, at 061d62e50 with the sibling config removed
+  // and unnamed, `--list` reported 61 of 78 packages / 123 tsc programs / 309
+  // pairs / 17 clean; after, 61 of 78 packages / 124 programs / 310 pairs / 17
+  // clean. +1 program, +0 entries (this package was already listed), +1 pair —
+  // that one pair, in this one package, reached only through the onboarded
+  // program.
+  //
+  // Why the entry and not `paths` rules, which is what this gate's failure text
+  // asks for: this is the onboarding case the doc-block above rules on, where
+  // `paths` is measured to be the WRONG tool (PR #12570). Redirecting objectql
+  // to source here would put its `src` tree in this package's test program and
+  // bill objectql's own diagnostics to a driver package that cannot pay them
+  // down. The test layer measures 0 errors as it stands.
+  '@objectstack/driver-mongodb': [
+    '@objectstack/core', '@objectstack/objectql', '@objectstack/spec', '@objectstack/types',
+  ],
   '@objectstack/driver-sql': [
     '@objectstack/core', '@objectstack/formula', '@objectstack/observability', '@objectstack/spec',
     '@objectstack/types',

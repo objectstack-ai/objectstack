@@ -40,6 +40,18 @@
  * reading a copy that a gate keeps honest, rather than the thing itself.
  */
 
+// ## The dispatch-gates population
+//
+// `main()` shells out to `pnpm -r list` and `pnpm pack`; it opens no path this
+// file names, and it runs only from `scripts/publish-smoke.sh` during a release.
+// The family CI schedules on a pull request is `check:publish-smoke-pin`, which
+// is this file's `--self-test`: pure fixtures, no workspace, no network, no
+// tracked file. There is no path population for a card to implicate, so the
+// marker is the honest declaration -- and `packages/**` would be the costly
+// error, naming this family on thousands of cards for reads it never performs.
+//
+// dispatch-gates: no-path-population -- check:publish-smoke-pin runs this packer's --self-test against in-memory fixtures; the workspace enumeration and the pack itself belong to the release smoke, which no pull request schedules
+
 import { execFile } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';

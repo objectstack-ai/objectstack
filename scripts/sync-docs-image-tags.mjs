@@ -75,6 +75,22 @@
 // historical facts across three files with nothing downstream to complain, so
 // --self-test asserts a clean corpus is left BYTE-IDENTICAL, with no write at all.
 
+// ## The dispatch-gates population, read rather than assumed
+//
+// This file is a REWRITER, and in rewrite mode it opens the three doc surfaces
+// plus `packages/cli/package.json` -- all of them inherited from
+// `check-docs-image-tag.mjs`, which declares them and is judged on them. But the
+// family CI schedules is `check:docs-image-tag-sync`, and both of its call sites
+// (lint.yml and release.yml) run `--self-test`, which works entirely inside a
+// `mkdtempSync` fixture tree and reads not one tracked file. So there is no
+// population for a card to implicate, and the honest declaration is the marker
+// rather than a hint set copied from the gate next door -- a hint here would
+// name this family on every `content/docs/**` card for reads its CI invocation
+// never performs. The SURFACES themselves are already declared where they are
+// read: `check:docs-image-tag` carries them.
+//
+// dispatch-gates: no-path-population -- both CI call sites (lint.yml, release.yml) run this rewriter's --self-test, which works inside a mkdtemp fixture tree and reads no tracked file; the doc surfaces and the version source belong to check:docs-image-tag, which declares them
+
 import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync, statSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
