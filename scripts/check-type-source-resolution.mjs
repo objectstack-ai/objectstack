@@ -698,6 +698,50 @@ const KNOWN_DIST_RESOLVED_TYPE_IMPORTS = {
   '@objectstack/service-messaging': ['@objectstack/spec'],
   '@objectstack/service-realtime': ['@objectstack/spec'],
   '@objectstack/service-sms': ['@objectstack/core', '@objectstack/plugin-auth', '@objectstack/spec'],
+  // #15050 re-baseline (the onboarding limb above): a NEW entry, reached ONLY
+  // through `tsconfig.test.json` (all 7 deps) and `tsconfig.scripts.json`
+  // (`@objectstack/spec` again, no new pairs). Same shape as `service-cluster`
+  // (#14181, above): this package had NO `typecheck` script AT ALL before (its
+  // scripts were `build` and `test`), so it ran ZERO counted programs and
+  // there is no pre-existing program a dep could be laundered through.
+  //
+  // Provenance measured four ways on one checkout, by varying only what the
+  // `typecheck` script NAMES (`--list`, totals as printed):
+  //
+  //   no `typecheck` script                absent   119 programs / 290 pairs
+  //   names `tsconfig.json` only            absent   119 programs / 290 pairs
+  //   names `tsconfig.test.json` only       PRESENT  120 programs / 297 pairs
+  //   names all three (this card)           PRESENT  121 programs / 297 pairs
+  //
+  // Row 2 is the load-bearing one, exactly as it was for `service-cluster`:
+  // the BUILD program carries no dist-resolved workspace type import at all,
+  // so the exposure is only REACHABLE through the onboarded programs, not
+  // merely first seen there. (`tsconfig.json` has never excluded tests, so
+  // module semantics — NodeNext vs bundler — is the axis that differs for the
+  // test program; `tsconfig.scripts.json` reads a directory BUILD's `include`
+  // never reached at all.)
+  //
+  // Numbers: +1 package (58 -> 59 of 78), +2 programs (119 -> 121, one per
+  // onboarded config), +7 pairs (290 -> 297) -- this entry and nothing else.
+  //
+  // Why the entry and not `paths`, which is what this gate's failure text
+  // asks for: MEASURED on this checkout (temporary `paths` added to
+  // `tsconfig.test.json`, `tsc --noEmit -p` run, then removed — never
+  // committed), and `paths` is decisively the wrong tool here, same as
+  // `service-cluster` found. Redirecting all 7 deps to source takes this
+  // package's test layer from 0 errors to 306 (305 x TS6059 "not under
+  // rootDir" + 1 x TS6133), every TS6059 in ANOTHER package's source
+  // (`packages/types/src/**`, `packages/spec/src/**`, `packages/objectql/
+  // src/**`, `packages/observability/src/**`, `packages/drivers/
+  // driver-sql/src/**`) -- billed to a package that cannot pay them down. The
+  // #5286 route this card took makes its OWN test files compile clean (0/0,
+  // both readings agree), and `paths` would immediately re-bury that result
+  // under other packages' diagnostics.
+  '@objectstack/service-storage': [
+    '@objectstack/core', '@objectstack/driver-sql', '@objectstack/objectql',
+    '@objectstack/observability', '@objectstack/platform-objects', '@objectstack/spec',
+    '@objectstack/types',
+  ],
   '@objectstack/setup': ['@objectstack/platform-objects', '@objectstack/spec'],
   '@objectstack/studio': ['@objectstack/platform-objects', '@objectstack/spec'],
   '@objectstack/trigger-api': ['@objectstack/core', '@objectstack/spec'],
