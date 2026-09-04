@@ -248,7 +248,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the sdk bridge\'s REACH over the declared surface (#9572)': 11,
   '#11178: WHY a row is unreachable, and the two causes that printed as one': 28,
   '`causes` GETS THE SAME TREATMENT, AT BOTH ENDS (#11867)': 16,
-  'the ROUTE SOURCE concept: two kinds, and the runtime-registration guard (#11857)': 21,
+  'the ROUTE SOURCE concept: two kinds, and the runtime-registration guard (#11857)': 23,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -5552,7 +5552,19 @@ function selfTest() {
     check('scanRouteSurface', 'counterfactual: unguarded, that real file WOULD be admitted — the guard is what excludes it',
       'registry.ts tails, unguarded', true, registryText === null || parseRouteSource(registryText).size > 0);
 
-    // (2) The five spec contract declarations the ruling admits, each carrying the signal.
+    // (2) THE CONTRACT KIND ADMITS SOMETHING — the anti-vacuity floor, and the case that
+    // names kind (b) when it stops running. ⚠️ Without it the `every()` below passes on an
+    // EMPTY list: disabling the evidence route entirely left this whole battery green,
+    // measured, which is how this pin came to exist. A shape assertion over a population
+    // is only as strong as a floor under that population's size.
+    check('scanRouteSurface', 'the CONTRACT kind admits at least one route source — kind (b) is still running',
+      'kind=contract count', true, liveKind('contract').length >= 1);
+    // …and the one the headline rests on by NAME: `storage.zod.ts` is what closes the
+    // storage ledger from 7-of-7 unreachable to 0-of-7. If it is legitimately renamed,
+    // move this pin with it — do not delete it, or the closure goes back to being asserted.
+    check('scanRouteSurface', 'and the declaration that closes the storage ledger is among them',
+      'packages/spec/src/api/storage.zod.ts', true,
+      liveKind('contract').includes('packages/spec/src/api/storage.zod.ts'));
     check('scanRouteSurface', 'every contract declaration admitted is a packages/spec API declaration',
       'kind=contract', true, liveKind('contract').every((f) => f.startsWith('packages/spec/src/api/')));
 
