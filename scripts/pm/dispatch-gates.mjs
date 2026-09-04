@@ -1110,6 +1110,73 @@ export function jobPathPopulations(workflowText, workflowFile) {
 }
 
 /**
+ * ## The DIRECTORY PREFIX both matchers below carry, and why it is shared (#15342)
+ *
+ * This repo has a package-local gate lane, and `lint.yml` really runs one of
+ * its gates by path — `node packages/lint/scripts/check-reference-carrier-
+ * shape.mjs --self-test`, with the bare production invocation on the next line.
+ * Both patterns used to open on the literal `scripts/` immediately after
+ * `node `, so neither matched that step AT ALL. The gate was in no family, and
+ * `--residue` could not report it either: it is absent from the universe the
+ * matched / silent / undetermined buckets partition, which is the #11397 state
+ * one lane over. Measured on the base tree for a card editing that gate's OWN
+ * file: `--commands` named it zero times, every one of the 27 `--residue`
+ * mentions was the dev's own CHANGED PATH echoed back as an input, and the step
+ * surfaced only in the always-runs STEP tail, as one of the 33 unconditional CI
+ * steps this derivation names no family for.
+ *
+ * ## What the prefix admits, and what it deliberately refuses
+ *
+ *   - A prefix segment must START with an alphanumeric or `_`, so `..` is not
+ *     one. A climbing spelling cannot be resolved against this ROOT without
+ *     knowing what it is relative to, and `entry.files` would then carry a key
+ *     with no file behind it — the phantom `resolveCheckToFiles`' docblock
+ *     prices at "strictly worse than the bug being fixed". Zero occur in the
+ *     workflow corpus today; refusing to match is the safe direction, and the
+ *     sibling anchor in `scripts/check-self-test-wired.mjs` refuses it in the
+ *     same spelling for the same reason.
+ *   - A `scripts/` segment is still REQUIRED, so no new file species is
+ *     admitted. `node packages/cli/bin/run.js` is the only other non-root path
+ *     any workflow invokes with `node`, and it stays out.
+ *   - The prefix cannot RE-ATTRIBUTE an existing match. For a path that already
+ *     began at `scripts/` the group matches empty and the remainder of each
+ *     pattern is byte-identical, so every key this tool minted before it is
+ *     minted after it. Asserted below rather than left as this sentence.
+ *
+ * ## Priced in both directions, over 7472 tracked files (base `65846bc46`)
+ *
+ *   check families discovered        252 -> 254       (+2, ZERO lost)
+ *   gate files                       201 -> 202       (+1, ZERO lost)
+ *   watch-hint (gate, file) pairs  240947 -> 254181   (+13234, ZERO lost)
+ *   existing families re-attributed  0 — every pre-existing family's pair count
+ *                                    is byte-identical before and after
+ *   always-runs steps naming NO family  33 -> 32 (18 -> 17 distinct commands)
+ *
+ * The +13234 is exactly 2 x 6617: the gate declares four subtree hints
+ * (`packages/**`, `examples/**`, `scripts/**`, `apps/**`) and CI runs it twice,
+ * so it arrives as two families under two keys — the split #14880 made, working
+ * as designed. Becoming a GATE FILE is the one direction of this change that
+ * could SUBTRACT (`discoverFamilies` excludes gate files from import-following),
+ * so it is measured rather than argued: no existing family's pair count moved,
+ * in either direction, so the net subtraction is zero.
+ *
+ * ## Why `SELF_TEST_INVOCATION` is widened too, on ZERO specimens
+ *
+ * Today's one package-local specimen carries a `check-` basename, so the direct
+ * matcher takes it and the self-test matcher skips it by design — that half
+ * gains no recall at all. It is widened anyway because the two matchers'
+ * coordination contract is that they mint BYTE-IDENTICAL keys for one script,
+ * and two adjacent patterns with two different path grammars cannot hold it: a
+ * package-local gate NOT named `check-*` would then be discovered by neither,
+ * which is this card's silence wearing a different filename. Same standard as
+ * the extension right-boundary in `resolveCheckToFiles` — zero recall today,
+ * zero cost today (both numbers above are the direct matcher's alone), class
+ * closed before the first specimen arrives. ⛔ Keep the two prefixes spelled
+ * identically; the self-test asserts that both accept the same package-local
+ * path, so a drift reds rather than going quiet.
+ */
+
+/**
  * A `run:` step that invokes a repo script with `--self-test`. The flag is the
  * SCRIPT'S OWN declaration that this invocation verifies the script rather than
  * doing its work, which is what makes the step a gate.
@@ -1130,7 +1197,7 @@ export function jobPathPopulations(workflowText, workflowFile) {
  * its own, which is correct: the inner script is the gate.
  */
 const SELF_TEST_INVOCATION =
-  /node[ \t]+(scripts\/[\w./-]+\.mjs)(?:[ \t]+-{1,2}[A-Za-z0-9][\w-]*)*[ \t]+--self-test\b/g;
+  /node[ \t]+((?:[A-Za-z0-9_][\w.-]*\/)*scripts\/[\w./-]+\.mjs)(?:[ \t]+-{1,2}[A-Za-z0-9][\w-]*)*[ \t]+--self-test\b/g;
 
 /**
  * A `run:` step that invokes a `check-`named repo script directly, WITH the
@@ -1150,7 +1217,7 @@ const SELF_TEST_INVOCATION =
  * outcomes. Joining is how that hazard is removed rather than merely refused.
  */
 const DIRECT_CHECK_INVOCATION =
-  /node[ \t]+(scripts\/[\w./-]*check-[\w.-]+\.mjs)([^\n;|&<>()]*)/g;
+  /node[ \t]+((?:[A-Za-z0-9_][\w.-]*\/)*scripts\/[\w./-]*check-[\w.-]+\.mjs)([^\n;|&<>()]*)/g;
 
 /**
  * Splice a shell line-continuation back into ONE line, so a matcher reading a
@@ -11519,6 +11586,67 @@ function selfTest() {
   t('extracts direct node scripts/check-*.mjs', invs.some((i) => i.check === 'scripts/check-nul-bytes.mjs' && i.direct));
   t('ignores non-check runs', !invs.some((i) => String(i.check).includes('build')));
 
+  // ── The package-local gate lane: a path is keyed WHOLE (#15342) ───────────
+  //
+  // `lint.yml` invokes `packages/lint/scripts/check-reference-carrier-shape.mjs`
+  // by path, twice. Before the directory prefix documented beside the patterns,
+  // `node ` had to be followed IMMEDIATELY by `scripts/`, so neither matcher saw
+  // that step at all: no family, no hints, and nothing for `--residue` to place.
+  //
+  // Cases 1-3 and 6 FAIL against the base spelling — measured by applying this
+  // battery to `/node[ \t]+(scripts\/…)/` in a scratch ablation — which is what
+  // makes them an instrument rather than a restatement of the operators. Cases
+  // 4, 5, 7 and 8 hold on BOTH spellings: they are the controls that prove the
+  // widening did not buy its new answers by dropping the old ones.
+  {
+    const PKG = 'packages/lint/scripts/check-reference-carrier-shape.mjs';
+    const pkgInvs = extractCheckInvocations(
+      ['jobs:', '  lint:', '    steps:', '      - name: package-local gate', '        run: |',
+        `          node ${PKG} --self-test`, `          node ${PKG}`].join('\n'),
+      'lint.yml',
+    );
+    t(
+      'a gate CI invokes by a PACKAGE-LOCAL path is discovered at all — unfound, it is in no family, so no '
+        + 'card can be told to run it and --residue has no bucket to place it in either (#15342)',
+      pkgInvs.some((i) => i.check === `${PKG} --self-test` && i.direct),
+    );
+    t(
+      '…and its bare production invocation arrives as the SECOND family under its own key, the #14880 split',
+      pkgInvs.some((i) => i.check === PKG && i.direct),
+    );
+    t(
+      '…both keyed by the REAL path, which is what `entry.files` carries and `existsSync` then opens',
+      pkgInvs.length === 2 && pkgInvs.every((i) => i.script === PKG),
+    );
+    t(
+      'control — no PHANTOM root key is minted beside them: a `scripts/…` TAIL keyed as a path in its own '
+        + 'right names a file this ROOT does not hold, and every audit downstream then passes for the wrong reason',
+      !pkgInvs.some((i) => String(i.script ?? i.check).startsWith('scripts/')),
+    );
+    t(
+      'control — a CLIMBING spelling is refused rather than resolved: `..` is not a prefix segment, because '
+        + 'a path this ROOT cannot resolve is exactly how a phantom identity key gets minted',
+      extractCheckInvocations('    - run: node ../scripts/check-x.mjs\n', 'x.yml').length === 0,
+    );
+    t(
+      'the SELF-TEST matcher carries the same prefix grammar — a package-local gate not named `check-*` '
+        + 'would otherwise be discovered by neither matcher, which is this silence one filename over',
+      extractCheckInvocations('    - run: node packages/lint/scripts/carrier-census.mjs --self-test\n', 'x.yml')
+        .some((i) => i.check === 'packages/lint/scripts/carrier-census.mjs --self-test' && i.direct),
+    );
+    t(
+      'control — the prefix widens the DIRECTORY a gate may sit under and never the SPECIES of file: a path '
+        + 'with no `scripts/` segment is still admitted by neither matcher (`packages/cli/bin/run.js` is live)',
+      extractCheckInvocations('    - run: node packages/cli/bin/run.js check\n', 'x.yml').length === 0,
+    );
+    t(
+      'control — a root-spelled invocation is keyed BYTE-IDENTICALLY to before, so the prefix re-attributes '
+        + 'nothing: it matches empty there and the remainder of each pattern is unchanged',
+      extractCheckInvocations('    - run: node scripts/check-nul-bytes.mjs\n', 'x.yml')
+        .every((i) => i.check === 'scripts/check-nul-bytes.mjs' && i.script === 'scripts/check-nul-bytes.mjs'),
+    );
+  }
+
   // Block-scalar bodies (#8410). A step written `run: |` keeps its commands on
   // the following lines; reading only the `run:` line collected "|" and missed
   // every gate invoked this way. Both scalar styles and both invocation shapes
@@ -11989,6 +12117,20 @@ function selfTest() {
     }
     const direct = liveInvs.filter((i) => i.direct);
     const valueBearing = direct.filter((i) => (i.argvVariables ?? []).length > 0);
+    // The live half of the package-local lane (#15342). The fixtures above prove
+    // the pattern; these two read the tree CI actually runs, so the day the lane
+    // moves this reds here instead of going quiet — and the second one holds the
+    // phantom class over EVERY direct invocation, not only over the specimen.
+    t(
+      '⭐ the live corpus really carries the package-local lane the directory prefix exists for, so the '
+        + 'fixtures above judge a live class. If this reds, the lane moved — re-point it, never widen further',
+      direct.some((i) => i.script === 'packages/lint/scripts/check-reference-carrier-shape.mjs'),
+    );
+    t(
+      `every one of the ${direct.length} direct invocation(s) in the live tree resolves to a file that EXISTS `
+        + 'on disk — a key with no file behind it reads as a confident gate identity in both directions (#15342)',
+      direct.length > 0 && direct.every((i) => existsSync(nodePath.join(ROOT, i.script))),
+    );
     t(
       `the live tree really carries ${valueBearing.length} value-bearing invocation(s) across ${new Set(valueBearing.map((i) => i.script)).size} script(s), so the cases above judge a live class`,
       valueBearing.length > 0,
@@ -18749,7 +18891,20 @@ function selfTest() {
   const tail = alwaysRunSteps([{ file: 'fixture.yml', text: tailWf }]);
   const tailNames = tail.rows.map((r) => r.step);
   t('a step whose family the derivation names is NOT in the tail', !tailNames.includes('A discoverable family'));
-  t('a package-local gate invoked by path IS in the tail', tailNames.includes('A package-local gate invoked by path'));
+  // #15342 retired this member from the tail by giving the derivation the anchor
+  // to discover it, so what is pinned is the RETIREMENT WITH ITS CAUSE: the step
+  // has left the tail AND the derivation names a family for it. Either half
+  // alone goes green for the wrong reason — a tail that stopped walking, or a
+  // family list that claims the step while CI's step sits unaccounted for. The
+  // tail's own class ("a step the derivation names NOTHING for is listed") is
+  // unweakened: the interpreter member below still holds it, on this fixture and
+  // on the live tree.
+  t(
+    'a package-local gate invoked by path is NOT in the tail any more (#15342) — the derivation names it',
+    !tailNames.includes('A package-local gate invoked by path')
+      && extractCheckInvocations(tailWf, 'fixture.yml')
+        .some((i) => i.script === 'packages/lint/scripts/check-fixture-shape.mjs'),
+  );
   t('a gate run by another interpreter IS in the tail', tailNames.includes('A gate run by another interpreter'));
   t('a conditional STEP is excluded and counted', !tailNames.includes('Conditional, so no claim is made about it') && tail.counts.conditionalSteps === 1);
   t('a conditional JOB is excluded and counted', !tailNames.includes('Never claimed as always-run') && tail.counts.conditionalJobs === 1);
@@ -18806,9 +18961,21 @@ function selfTest() {
   );
   const liveCommands = liveTail.rows.flatMap((r) => r.commands);
   t('the live tail is not empty — an empty one would mean the walk broke, not that CI runs nothing', liveTail.rows.length > 0);
+  // #13333's first live instance was a package-local gate invoked by path. It is
+  // no longer here, and that is #15342 landing rather than this pin rotting —
+  // both halves are asserted for the reason the fixture case above states.
+  const liveDirectScripts = new Set(
+    readdirSync(nodePath.join(ROOT, '.github/workflows'))
+      .filter((f) => /\.ya?ml$/.test(f))
+      .flatMap((f) => extractCheckInvocations(readFileSync(nodePath.join(ROOT, '.github/workflows', f), 'utf8'), f))
+      .filter((i) => i.direct)
+      .map((i) => i.script),
+  );
   t(
-    'the live tail names the INSTANCE the card was filed about: a package-local gate invoked by path',
-    liveCommands.some((c) => /^node\s+packages\/\S+\/check-[\w.-]+\.mjs/.test(c)),
+    'the INSTANCE the card was filed about has LEFT the live tail (#15342), and the derivation now names a '
+      + 'family for it — the tail shrank because the step became accounted for, not because the walk broke',
+    !liveCommands.some((c) => /^node\s+packages\/\S+\/check-[\w.-]+\.mjs/.test(c))
+      && liveDirectScripts.has('packages/lint/scripts/check-reference-carrier-shape.mjs'),
   );
   // The class assertion. The instance above is invisible because its path is
   // not under `scripts/`; this one is invisible because its INTERPRETER is not

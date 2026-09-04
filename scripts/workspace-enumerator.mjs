@@ -314,6 +314,143 @@ export function workspacePackages(root) {
   return out;
 }
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition,
+// so "every case held" and "the cases never ran" printed the same line — and
+// here that line is printed by SEVEN other files, none of which could tell the
+// difference either. Closed the way PR #13487 validated on check-doc-authoring:
+// what is pinned is the registered NAMES, not a number.
+//
+// This body carries FOUR named section banners, so each banner is one battery,
+// opened by a `battery()` call on the banner's own line — the sectioned shape
+// PR #15327 landed, rather than the single hoisted battery PR #15217 landed for
+// bodies carrying fewer than two. Sectioning is what lets the parse cases stop
+// running while the expansion cases keep going and still have something name
+// the half that went quiet.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+//
+// ── Why the LEDGER is module-level and the CHECK sits in the CALLERS ───────
+//
+// This module is deliberately NOT a gate (see the header), so unlike every
+// other file in this recipe it has no `--self-test` dispatch and no verdict
+// site of its own: `selfTest()` REGISTERS and returns its failures, and the
+// seven folding callers DECIDE. So the check is exported instead of placed —
+// `workspaceEnumeratorFloorFailures()` below — and each caller adopts it
+// exactly where it already adopts the failures, immediately after the call.
+// The ledger it reads therefore has to outlive `selfTest()`'s frame — hence
+// module scope rather than the local map the single-body recipe closes over.
+//
+// ⛔ The floor is NOT evaluated at the end of `selfTest()` before its `return`:
+// an early return anywhere above that line would skip the check and the cases
+// TOGETHER, which is the one defect this card exists to catch. Adopted AFTER
+// the call, in a caller, the same early return lands as a count below the floor
+// and reds — in all seven callers at once, which is the accepted cost of a
+// module that seven gates fold in and none of them owns.
+//
+// ⛔ A pinned TOTAL is not the repair: this body's 25 registrations split 18 /
+// 3 / 1 / 3, so the parse battery could drop from 18 cases to 3 and keep a
+// total "right" the moment a sibling grows.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'the parse, one case per divergence the consolidation settled': 18,
+  'the expansion': 3,
+  'the property this module exists to keep: NO path population': 1,
+  'the live half, when a caller supplies the repo root': 3,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 4;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
+// The battery ledger, read by `workspaceEnumeratorFloorFailures()` below from
+// the OTHER function. `battery()` opens a battery; every assertion registered
+// after that line is attributed to the one most recently opened, so a section
+// that stops running stops registering and names ITSELF at the floor rather
+// than going quiet.
+//
+// ⚠️ Named for the roster's role, deliberately NOT with a self-test spelling:
+// `check:pm-dispatch-gates` anchors on a top-level declaration whose NAME spells
+// self-test and every such name owes a row in its COMPOUND_ANCHOR_LEDGER. This
+// machinery holds no fixtures to mask and reads no path literal, so the accurate
+// name is the one that says `battery`.
+const batterySeen = new Map();
+let openBattery = null;
+
+/** Open a battery. Every assertion registered after this line is attributed to it. */
+function battery(name) {
+  openBattery = name;
+}
+
+/** Called by `selfTest()`'s own assertion sink, once per assertion. */
+function registerCase() {
+  const name = openBattery ?? UNATTRIBUTED_BATTERY;
+  batterySeen.set(name, (batterySeen.get(name) ?? 0) + 1);
+}
+
+/**
+ * The floor: every declared battery RAN, and ran its cases (#13489).
+ *
+ * Guards the registrations made by **`selfTest()`** — the body whose assertion
+ * sink `t()` routes through `registerCase()`. Every folding caller calls this
+ * immediately after it adopts `selfTest()`'s failures and BEFORE its own
+ * verdict line, so that line can only be printed by a run in which the set of
+ * batteries that registered assertions EQUALS the set declared, each at or
+ * above its own count. A set difference says WHICH battery stopped; a count
+ * says only that something did.
+ *
+ * ⚠️ EXPORTED, and prefixed with this module's name, because the callers are
+ * the verdict sites: seven gates import it, and each of them already declares
+ * a `batteryFloorFailures` of its OWN for its OWN roster. The unprefixed name
+ * this recipe uses everywhere else would collide in all seven import lists —
+ * the same reason they all import `selfTest as workspaceEnumeratorSelfTest`.
+ *
+ * @returns {string[]} floor breaches; empty means the floor held
+ */
+export function workspaceEnumeratorFloorFailures() {
+  const declared = Object.keys(SELF_TEST_BATTERIES);
+  const problems = [];
+  if (declared.length < SELF_TEST_BATTERY_FLOOR) {
+    problems.push(
+      `workspace-enumerator: SELF_TEST_BATTERIES declares ${declared.length} batteries, below the pinned `
+        + `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declared.includes(name)) continue;
+    problems.push(
+      `workspace-enumerator: self-test battery "${name}" registered ${count} case(s) but is not declared in `
+        + 'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declared) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    problems.push(
+      count === 0
+        ? `workspace-enumerator: self-test battery "${name}" DID NOT RUN — 0 cases registered, `
+          + `${SELF_TEST_BATTERIES[name]} pinned. The verdict below would have claimed those cases hold.`
+        : `workspace-enumerator: self-test battery "${name}" registered ${count} case(s), below its pinned floor of `
+          + `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (problems.length) {
+    problems.push(
+      'workspace-enumerator: a battery at or below its floor means cases STOPPED RUNNING — the battery is the '
+        + 'bug, not the number. Find what stopped registering (an early return, a deleted block, a guard that '
+        + 'now skips) and restore it.',
+    );
+  }
+  return problems;
+}
+
 /**
  * The shared assertions, returned rather than printed so each importing gate
  * can fold them into its own `--self-test` report.
@@ -328,6 +465,7 @@ export function workspacePackages(root) {
 export function selfTest({ root = null } = {}) {
   const failures = [];
   const t = (name, ok) => {
+    registerCase();
     if (!ok) failures.push(`workspace-enumerator: ${name}`);
   };
   // Every fixture path is ASSEMBLED, never spelled. A path-shaped literal
@@ -352,6 +490,7 @@ export function selfTest({ root = null } = {}) {
   const flat = JSON.stringify([PKGS]);
 
   // ── the parse, one case per divergence the consolidation settled ──────────
+  battery('the parse, one case per divergence the consolidation settled');
   t('a plain list parses', answer(`packages:\n  - ${PKGS}\n  - ${APPS}\n`) === both);
   t('quotes are stripped', answer(`packages:\n  - '${PKGS}'\n  - "${APPS}"\n`) === both);
   t('CRLF parses the same', answer(`packages:\r\n  - ${PKGS}\r\n  - ${APPS}\r\n`) === both);
@@ -384,6 +523,7 @@ export function selfTest({ root = null } = {}) {
   t('the flow-sequence form is REFUSED rather than read as empty', answer(`packages: [${PKGS}, ${APPS}]\n`) === 'REFUSED');
 
   // ── the expansion ─────────────────────────────────────────────────────────
+  battery('the expansion');
   const NOWHERE = P('', 'nonexistent');
   const expandRefused = (glob) => {
     try {
@@ -401,6 +541,7 @@ export function selfTest({ root = null } = {}) {
   );
 
   // ── the property this module exists to keep: NO path population ───────────
+  battery('the property this module exists to keep: NO path population');
   //
   // Pinned mechanically, not by review, and read off THIS FILE's own bytes so
   // a stale copy cannot satisfy it. A path-shaped literal added here — in the
@@ -448,6 +589,7 @@ export function selfTest({ root = null } = {}) {
   }
 
   // ── the live half, when a caller supplies the repo root ───────────────────
+  battery('the live half, when a caller supplies the repo root');
   if (root !== null) {
     let live = null;
     try {

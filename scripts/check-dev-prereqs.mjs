@@ -240,6 +240,7 @@ import { fileURLToPath } from 'url';
 import {
   WorkspaceEnumerationError,
   selfTest as workspaceEnumeratorSelfTest,
+  workspaceEnumeratorFloorFailures,
   workspaceMemberDirs,
 } from './workspace-enumerator.mjs';
 
@@ -898,6 +899,7 @@ function selfTest() {
   // its own (#11510 — being a gate is exactly what it must not be); every gate
   // that consolidated onto it folds in its checks.
   failures.push(...workspaceEnumeratorSelfTest({ root: ROOT }));
+  failures.push(...workspaceEnumeratorFloorFailures());
 
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
   //

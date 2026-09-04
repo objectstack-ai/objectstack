@@ -1420,6 +1420,141 @@ function report({ wide = false } = {}) {
   }
 }
 
+// ── The assertion floor, per battery (#13489) ───────────────────────────────
+//
+// One battery per NAMED SECTION of `selfTest()`, each key byte-equal to the
+// box-drawing banner it stands for, so a battery that stops registering names
+// the banner a reader can go find instead of a number that says only that
+// something moved.
+//
+// The counts are FLOORS MEASURED ON A RUN, never static `t(` site counts: eight
+// of this body's sites sit inside loops — four over the recorded spellings and
+// four over the DECLARED-NARROWER rows of `TRIAGE` — so two of these batteries
+// run several times their static site count, and a floor planned from the
+// source would sit far below what actually runs and would floor nothing.
+//
+// ⛔ A pinned TOTAL is not the repair: one battery falling from 60 cases to 3
+// keeps a total "right" the moment a sibling grows. That is what six batteries
+// buy over one number.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+//
+// ⚠️ The seven cases that run BEFORE the first banner have no section head of
+// their own. They are attributed to the FIRST banner's battery, whose opener is
+// hoisted to the top of the body so that banner carries no second opener —
+// PR #13487's shape, as batches 1b and 2 landed it. Promoting their comment to
+// a section head would be a source change this batch does not make, and leaving
+// them unattributed reds by the set difference below, which is the point.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'The FOLD: one row per literal, however many invocations reach it': 14,
+  'The triage coupling, both directions': 6,
+  'The MECHANISM a repaired reason turns on, held mechanically': 4,
+  'The RECORDED SPELLINGS, pinned: LIVENESS and PRECISION': 65,
+  "The DECLARATION a row describes, read from the gate's own SOURCE": 43,
+  'CENSUS_REFUSE_WIDE, pinned on its OWN terms (#14695)': 5,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 6;
+
+// The key a case is filed under when no battery is open. It is not a declared
+// battery, so it reds by the same set difference rather than silently inflating
+// whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
+// ── Why the CHECK sits inside `selfTest()`, at its verdict site ─────────────
+//
+// This body both REGISTERS and DECIDES: it prints its own verdict and exits 1
+// itself, so the success line and the floor are in the same frame and the floor
+// goes immediately above that line — the only place a run that registered
+// nothing can still be stopped from reporting that every case held.
+//
+// The landed recipe refuses a floor placed before a plain `return`, because an
+// early return above it skips the check. That hole is not open here, and the
+// reason is mechanical rather than argued: this body's only exit that a caller
+// accepts is the `SELF_TEST_VERDICT` sentinel returned BELOW the success line
+// (#13798), and the dispatch refuses anything else. An early return therefore
+// reds at the HANDSHAKE, not silently — while a section that keeps running to
+// the bottom with its cases gone reds at the FLOOR. The two holes stay
+// orthogonal, each with its own guard, which is how that card ruled them.
+
+// The battery ledger, read by `batteryFloorFailures()` at `selfTest()`'s verdict
+// site. `battery()` opens a battery; every case registered after that line is
+// attributed to the one most recently opened, so a section that stops running
+// stops registering and names ITSELF at the floor rather than going quiet.
+//
+// ⚠️ Named for the roster's role, deliberately NOT with a self-test spelling:
+// `check:pm-dispatch-gates` anchors on a top-level declaration whose NAME spells
+// self-test and every such name owes a row in its COMPOUND_ANCHOR_LEDGER. This
+// machinery holds no fixtures to mask and reads no path literal, so the accurate
+// name is the one that says `battery`.
+const batterySeen = new Map();
+let openBattery = null;
+
+/** Open a battery. Every case registered after this line is attributed to it. */
+function battery(name) {
+  openBattery = name;
+}
+
+/** Called by `selfTest()`'s own case sink, once per case. */
+function registerCase() {
+  const name = openBattery ?? UNATTRIBUTED_BATTERY;
+  batterySeen.set(name, (batterySeen.get(name) ?? 0) + 1);
+}
+
+/**
+ * The floor: every declared battery RAN, and ran its cases (#13489).
+ *
+ * Guards the registrations made by `selfTest()` — the body whose case sink
+ * `t()` routes through `registerCase()`. It is called at that body's verdict
+ * site, after every battery has had its chance and before the success line, so
+ * that line can only be printed by a run in which the set of batteries that
+ * registered cases EQUALS the set declared, each at or above its own count. A
+ * set difference says WHICH battery stopped; a count says only that something
+ * did.
+ *
+ * @returns {string[]} floor breaches; empty means the floor held
+ */
+function batteryFloorFailures() {
+  const declared = Object.keys(SELF_TEST_BATTERIES);
+  const problems = [];
+  if (declared.length < SELF_TEST_BATTERY_FLOOR) {
+    problems.push(
+      `SELF_TEST_BATTERIES declares ${declared.length} batteries, below the pinned `
+        + `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declared.includes(name)) continue;
+    problems.push(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in `
+        + 'SELF_TEST_BATTERIES — a case attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declared) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    problems.push(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. `
+          + 'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of `
+          + `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (problems.length) {
+    problems.push(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the '
+        + 'number. Find what stopped registering (an early return, a deleted block, a guard that now '
+        + 'skips, a loop that no longer reaches it) and restore it.',
+    );
+  }
+  return problems;
+}
+
 // Returned by `selfTest()` only after its verdict is printed. The dispatch
 // refuses anything else: a `return` that leaves the function above that line
 // prints nothing and still exits 0 — a self-test that never finished, reported
@@ -1428,7 +1563,17 @@ const SELF_TEST_VERDICT = 'bare-root-worklist self-test reached its verdict';
 
 function selfTest() {
   const failures = [];
-  const t = (label, ok) => { if (!ok) failures.push(label); };
+  // The one case sink, unchanged in what it judges: the only addition is that a
+  // case is COUNTED whether it holds or not, which is what lets the floor at the
+  // verdict site tell "held" from "never ran".
+  const t = (label, ok) => {
+    registerCase();
+    if (!ok) failures.push(label);
+  };
+  // Cases run before the first banner, so the first battery is opened at the
+  // top of the body and that banner carries no second opener — PR #13487's own
+  // shape, as batches 1b and 2 landed it.
+  battery('The FOLD: one row per literal, however many invocations reach it');
 
   const files = trackedFiles();
   const dirs = topLevelDirs(files);
@@ -1479,6 +1624,11 @@ function selfTest() {
   //
   // Every (invocation, file, constant, word) the derivation reaches, walked
   // through the same predicates the sweep uses and with no dedupe of its own.
+  //
+  // ⚠️ This section's battery is opened at the TOP of the body, not here: the
+  // seven cases above run before any banner and have no section head of their
+  // own, so they are attributed to THIS battery rather than left unattributed.
+  // This banner therefore carries no second opener.
   const perInvocation = new Set();
   for (const [check, entry] of families) {
     for (const file of entry.files ?? []) {
@@ -1563,6 +1713,7 @@ function selfTest() {
   // takes a declaration, or a family is renamed, the verdict must come out with
   // it. A verdict describing a row the sweep no longer finds is the shape that
   // rots into an allowlist nobody re-reads, which #10840 refused by name.
+  battery('The triage coupling, both directions');
   const stale = [...TRIAGE.keys()].filter((k) => !keys.has(k)).sort();
   t(`no recorded verdict outlives its row${stale.length ? ` — STALE: ${stale.join(' · ')}. `
     + 'Delete the entry; do not re-point it at another row.' : ''}`, stale.length === 0);
@@ -1664,6 +1815,7 @@ function selfTest() {
   // are joined rather than spelled, for the same reason the probes above take
   // their root from the tree: a glob literal here would hand this file a
   // population of its own.
+  battery('The MECHANISM a repaired reason turns on, held mechanically');
   const PKG = 'packages';
   const seg = (f) => f.split('/');
   const underPkg = files.filter((f) => seg(f)[0] === PKG);
@@ -1712,6 +1864,7 @@ function selfTest() {
   // zero-segment forms of `**`). A divergence means the record stopped
   // describing the tree. ⛔ The remedy is to re-measure the ROW, never to relax
   // `holds` until it agrees again.
+  battery('The RECORDED SPELLINGS, pinned: LIVENESS and PRECISION');
   const spellingRows = [...TRIAGE.entries()].filter(([, v]) => v.spelling);
   // The two verdicts whose whole content is a claim only a spelling records, so
   // a record without one records nothing for the pins to hold. SPELLABLE-
@@ -1805,6 +1958,7 @@ function selfTest() {
   // been removed. ⛔ When this reds the remedy is to re-measure
   // the ROW -- never to extend `omits` until it agrees again, which is the same
   // move as relaxing `holds`, refused above in as many words.
+  battery("The DECLARATION a row describes, read from the gate's own SOURCE");
   const declaredHintsAt = (file, root) => {
     const abs = join(ROOT, file);
     if (!existsSync(abs)) return null;
@@ -1871,6 +2025,7 @@ function selfTest() {
   // battery skips out of laziness. What CAN be held mechanically instead:
   // every row's own internal shape, and that this table never collides with
   // `TRIAGE`'s key space or contributes a population hint of its own.
+  battery('CENSUS_REFUSE_WIDE, pinned on its OWN terms (#14695)');
   {
     const overlap = [...CENSUS_REFUSE_WIDE.keys()].filter((k) => TRIAGE.has(k)).sort();
     t(`no CENSUS_REFUSE_WIDE key collides with a TRIAGE key${overlap.length
@@ -1904,9 +2059,16 @@ function selfTest() {
         + 'each row was actually measured at instead of one shared field.' : ''}`, bases.size === 1);
   }
 
+  // ── The assertion floor, at the verdict site (#13489) ─────────────────────
+  // The batteries above REGISTER but do not decide, so the floor over their
+  // registrations is evaluated here, into the same sink the cases use — the
+  // only place a run that registered nothing can still be stopped from
+  // reporting that every case held.
+  for (const breach of batteryFloorFailures()) failures.push(breach);
+
   if (failures.length) {
     for (const f of failures) console.error(`  x self-test: ${f}`);
-    console.error(`\nbare-root-worklist --self-test: ${failures.length} failure(s).\n`);
+    console.error(`\nbare-root-worklist --self-test: ${failures.length} failure(s) (cases and floor).\n`);
     process.exit(1);
   }
   console.log(

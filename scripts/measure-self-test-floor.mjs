@@ -111,8 +111,32 @@ const PROBE_MARKER = 'OS_SELF_TEST_FLOOR_PROBE';
 /**
  * A FLOOR must PRODUCE A FAILURE, not merely be named. Keying on a name is the
  * mistake this card is about one level up, and the control below proves it.
+ *
+ * The criterion is published in two halves so a control can test each on its own:
+ *
+ *   NAMED    the failure is produced by a spelling that names itself --
+ *            `failures.push`, a literal `process.exit(1)`, `throw new Error`,
+ *            `exitCode = 1`, `ok(false`.
+ *   TERNARY  the EXIT CODE is the verdict: `process.exit(<cond> ? 0 : 1)`, the
+ *            same with any non-zero failing arm (`? 0 : N`), and the inverted
+ *            `process.exit(<cond> ? 1 : 0)`. A failing arm that is a non-zero
+ *            LITERAL produces a failure exactly as `process.exit(1)` does; it is
+ *            an ordinary spelling, and reading only the literal form called a
+ *            complete, working roster floor NONE (#15339) -- the roster half
+ *            matched, the file carried no other recognised spelling, and the
+ *            failure half missed.
+ *
+ * BOUNDARY -- a bare `process.exit(<expr>)` is deliberately NOT a failure
+ * producer, however likely the expression is to be non-zero. That is the
+ * accident shape this file's header is about: over a self-test that returned
+ * early, `process.exit(runSelfTest())` is `process.exit(undefined)` -- exit 0,
+ * nothing produced, nothing noticed. Source text cannot tell what an opaque
+ * expression yields; a non-zero literal in the failing arm it can.
  */
-const PRODUCES_FAILURE = /failures\.push|process\.exit\(1\)|throw new Error|exitCode = 1|ok\(false/;
+const PRODUCES_FAILURE_NAMED = /failures\.push|process\.exit\(1\)|throw new Error|exitCode = 1|ok\(false/;
+const PRODUCES_FAILURE_TERNARY_EXIT =
+  /process\.exit\(\s*[^;]{0,200}?\?\s*(?:0\s*:\s*[1-9]\d*|[1-9]\d*\s*:\s*0)\s*\)/;
+const PRODUCES_FAILURE = new RegExp(`${PRODUCES_FAILURE_NAMED.source}|${PRODUCES_FAILURE_TERNARY_EXIT.source}`);
 const ROSTER_COMPARISON =
   /(?:declaredBatteries|SELF_TEST_BATTERIES|BATTERY_FLOOR)[^;]{0,400}?(?:\.length|\.size|includes\(|has\(|!==|===|<)/s;
 const COUNT_COMPARISON = [
@@ -300,6 +324,41 @@ const ACCIDENT_GATE = [
 ].join('\n');
 
 /**
+ * The ternary exit, reduced: a roster floor whose ONLY failure production is
+ * `process.exit(<cond> ? 0 : 1)`. It carries none of the NAMED spellings -- no
+ * `failures.push`, no literal `process.exit(1)`, no `throw`, no `exitCode = 1`,
+ * no `ok(false` -- and a control asserts that, so reading it ROSTER can only be
+ * the ternary being recognised and never some other half of the criterion
+ * sneaking in. This is the shape `scripts/check-regen-pending.mjs` carried while
+ * its floor was sound, its ablations all fired, and this instrument still said
+ * NONE (#15339).
+ *
+ * The classifier is a pure function of source text, so unlike the three fixtures
+ * above this one is never spawned -- it is read, not run.
+ */
+const TERNARY_EXIT_GATE = [
+  '#!/usr/bin/env node',
+  'const SELF_TEST_BATTERIES = Object.freeze({ only: 1 });',
+  'function runSelfTest() {',
+  '  const seen = new Map();',
+  '  const battery = (n) => seen.set(n, (seen.get(n) ?? 0) + 1);',
+  "  battery('only');",
+  '  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);',
+  '  let held = declaredBatteries.length >= 1;',
+  '  for (const n of declaredBatteries) if ((seen.get(n) ?? 0) < SELF_TEST_BATTERIES[n]) held = false;',
+  "  console.log('fixture self-test: floor ' + (held ? 'held' : 'shrank'));",
+  '  return held;',
+  '}',
+  "if (process.argv.includes('--self-test')) {",
+  '  process.exit(runSelfTest() ? 0 : 1);',
+  '}',
+  '',
+].join('\n');
+
+/** The one dispatch line of `TERNARY_EXIT_GATE`, the anchor the variants replace. */
+const TERNARY_EXIT_DISPATCH = 'runSelfTest() ? 0 : 1';
+
+/**
  * Both instruments, against both directions. Returns the failures; the caller
  * refuses on any. Nothing here reads the repo, so a control failure is always
  * the instrument and never the tree.
@@ -313,6 +372,31 @@ export function runControls() {
     'POSITIVE CONTROL FAILED: a self-test deciding success by failures.length alone was not classified NONE');
   say(classifyFloor(maskComments(SOUND_GATE)) === 'ROSTER',
     'NEGATIVE CONTROL FAILED: a roster-floored self-test was not classified ROSTER');
+
+  // The ternary exit, both directions. The failing arm being a NON-ZERO LITERAL
+  // is what produces the failure; the roster half still has to match on its own,
+  // and an opaque expression still has to produce nothing.
+  const ternaryExit = (dispatchArgs) =>
+    maskComments(TERNARY_EXIT_GATE.replace(TERNARY_EXIT_DISPATCH, dispatchArgs));
+  say(!PRODUCES_FAILURE_NAMED.test(maskComments(TERNARY_EXIT_GATE)),
+    'CONTROL FIXTURE INVALID: the ternary fixture picked up one of the NAMED failure spellings; every verdict below it would then be passing for the wrong reason');
+  say(classifyFloor(maskComments(TERNARY_EXIT_GATE)) === 'ROSTER',
+    'NEGATIVE CONTROL FAILED: a roster floor whose only failure production is `process.exit(<cond> ? 0 : 1)` was not classified ROSTER');
+  say(classifyFloor(ternaryExit('runSelfTest() ? 0 : 2')) === 'ROSTER',
+    'NEGATIVE CONTROL FAILED: a ternary exit whose failing arm is a non-zero literal other than 1 was not classified ROSTER');
+  say(classifyFloor(ternaryExit('!runSelfTest() ? 1 : 0')) === 'ROSTER',
+    'NEGATIVE CONTROL FAILED: the inverted ternary exit (`? 1 : 0`, the failing arm first) was not classified ROSTER');
+  say(classifyFloor(ternaryExit('runSelfTest()')) === 'NONE',
+    'POSITIVE CONTROL FAILED: a bare `process.exit(<expr>)` was read as producing a failure -- an opaque expression is the accident shape (it is `process.exit(undefined)` after an early return), not a floor');
+  say(classifyFloor(maskComments(TERNARY_EXIT_GATE
+    .replaceAll('SELF_TEST_BATTERIES', 'FIXTURE_BATTERIES_BY_NAME')
+    .replaceAll('declaredBatteries', 'declaredNames'))) === 'NONE',
+    'POSITIVE CONTROL FAILED: the ternary exit alone was classified ROSTER -- producing a failure is HALF the criterion; a roster this criterion can NAME is the other half');
+  // Reuse rather than invention: the shape now recognised is the one the ACCIDENT
+  // fixture above actually dispatches with (and the audit file it is reduced
+  // from), so the criterion stays pinned to a spelling measured in this tree.
+  say(PRODUCES_FAILURE_TERNARY_EXIT.test(ACCIDENT_GATE.split('\n').find((l) => l.includes('process.exit(')) ?? ''),
+    'CONTROL FAILED: the accident fixture no longer dispatches with the ternary exit this criterion was extended to read; the two have drifted apart');
 
   // Instrument 2, both directions, against real processes on disk.
   const dir = mkdtempSync(join(tmpdir(), 'self-test-floor-control-'));
