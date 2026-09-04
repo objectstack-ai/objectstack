@@ -127,7 +127,7 @@ Compound-cell prefix configuration
 
 ## ColumnSummary
 
-Aggregation function for column footer summary
+Aggregation function for the column footer summary — and, on a grouped list view, the per-group header summary (server-side): count (COUNT(*), the group count), count_unique (count_distinct), sum, avg, min, max map onto the query AST's AggregationFunction; count_empty, count_filled, percent_empty, percent_filled have no counterpart yet and are refused loudly by the group-header compiler (an open contract question) — never dropped silently
 
 ### Allowed Values
 
@@ -600,21 +600,21 @@ Gallery/card view configuration
 
 ## GroupingConfig
 
-Record grouping configuration
+Record grouping configuration — SERVER-SIDE: the set of groups and every number in a group header (the count and the per-column summaries) are properties of the query, not of the fetched page, answered by one aggregate query (`groupBy` = the fields in nesting order, `count` + the mapped column summaries, the view filter); rows inside a group are paged by the existing find with the group key AND-ed into the view filter. Compiled by `compileListViewGroupQuery` / `compileListViewGroupRowsQuery`
 
 ### Properties
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **fields** | `{ field: string; order: Enum<'asc' \| 'desc'>; collapsed: boolean }[]` | ✅ | Fields to group by, in nesting order — the first entry is the outermost group and each later entry nests one level deeper (at least one field) |
+| **fields** | `{ field: string; order: Enum<'asc' \| 'desc'>; collapsed: boolean }[]` | ✅ | Fields to group by, in nesting order — the first entry is the outermost group and each later entry nests one level deeper (at least one field); the same order as the group header query's `groupBy` |
 
 ### Nested Shape: `GroupingConfig.fields[number]`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **field** | `string` | ✅ | Field name to group by |
-| **order** | `Enum<'asc' \| 'desc'>` | optional (default: `"asc"`) | Group sort order |
-| **collapsed** | `boolean` | optional (default: `false`) | Collapse groups by default |
+| **field** | `string` | ✅ | Field name to group by — one `groupBy` column of the group header query; the header row carries its raw stored value (null for the empty group) |
+| **order** | `Enum<'asc' \| 'desc'>` | optional (default: `"asc"`) | Group sort order — applied by the consumer over the header rows (the aggregate query carries no orderBy) |
+| **collapsed** | `boolean` | optional (default: `false`) | Collapse groups by default (presentation only) |
 
 
 ---
@@ -625,9 +625,9 @@ Record grouping configuration
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **field** | `string` | ✅ | Field name to group by |
-| **order** | `Enum<'asc' \| 'desc'>` | optional (default: `"asc"`) | Group sort order |
-| **collapsed** | `boolean` | optional (default: `false`) | Collapse groups by default |
+| **field** | `string` | ✅ | Field name to group by — one `groupBy` column of the group header query; the header row carries its raw stored value (null for the empty group) |
+| **order** | `Enum<'asc' \| 'desc'>` | optional (default: `"asc"`) | Group sort order — applied by the consumer over the header rows (the aggregate query carries no orderBy) |
+| **collapsed** | `boolean` | optional (default: `false`) | Collapse groups by default (presentation only) |
 
 
 ---
@@ -783,7 +783,7 @@ Map view configuration
 | **description** | `string \| Record<string, string>` | optional | View description for documentation/tooltips |
 | **sharing** | `{ type?: Enum<'personal' \| 'collaborative'>; lockedBy?: string }` | optional | View sharing and access configuration |
 | **rowHeight** | `Enum<'compact' \| 'short' \| 'medium' \| 'tall' \| 'extra_tall'>` | optional | Row height / density setting |
-| **grouping** | `{ fields: object[] }` | optional | Group records by one or more fields |
+| **grouping** | `{ fields: object[] }` | optional | Group records by one or more fields — server-side: the groups and their header numbers come from an aggregate query over the whole filtered set, rows within a group are paged (see GroupingConfigSchema) |
 | **rowColor** | `{ field: string; colors?: Record<string, string> }` | optional | Color rows based on field value |
 | **hiddenFields** | `string[]` | optional | Fields to hide in this specific view |
 | **fieldOrder** | `string[]` | optional | Explicit field display order for this view |
@@ -1003,7 +1003,7 @@ View filter rule
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **fields** | `{ field: string; order?: Enum<'asc' \| 'desc'>; collapsed?: boolean }[]` | ✅ | Fields to group by, in nesting order — the first entry is the outermost group and each later entry nests one level deeper (at least one field) |
+| **fields** | `{ field: string; order?: Enum<'asc' \| 'desc'>; collapsed?: boolean }[]` | ✅ | Fields to group by, in nesting order — the first entry is the outermost group and each later entry nests one level deeper (at least one field); the same order as the group header query's `groupBy` |
 
 ### Nested Shape: `ListView.rowColor`
 
@@ -1178,7 +1178,7 @@ Tab configuration for multi-tab view interface
 | **description** | `string \| Record<string, string>` | optional | View description for documentation/tooltips |
 | **sharing** | `{ type?: Enum<'personal' \| 'collaborative'>; lockedBy?: string }` | optional | View sharing and access configuration |
 | **rowHeight** | `Enum<'compact' \| 'short' \| 'medium' \| 'tall' \| 'extra_tall'>` | optional | Row height / density setting |
-| **grouping** | `{ fields: object[] }` | optional | Group records by one or more fields |
+| **grouping** | `{ fields: object[] }` | optional | Group records by one or more fields — server-side: the groups and their header numbers come from an aggregate query over the whole filtered set, rows within a group are paged (see GroupingConfigSchema) |
 | **rowColor** | `{ field: string; colors?: Record<string, string> }` | optional | Color rows based on field value |
 | **hiddenFields** | `string[]` | optional | Fields to hide in this specific view |
 | **fieldOrder** | `string[]` | optional | Explicit field display order for this view |
@@ -1389,7 +1389,7 @@ View filter rule
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **fields** | `{ field: string; order?: Enum<'asc' \| 'desc'>; collapsed?: boolean }[]` | ✅ | Fields to group by, in nesting order — the first entry is the outermost group and each later entry nests one level deeper (at least one field) |
+| **fields** | `{ field: string; order?: Enum<'asc' \| 'desc'>; collapsed?: boolean }[]` | ✅ | Fields to group by, in nesting order — the first entry is the outermost group and each later entry nests one level deeper (at least one field); the same order as the group header query's `groupBy` |
 
 ### Nested Shape: `ObjectListView.rowColor`
 
@@ -1764,7 +1764,7 @@ Tab configuration for multi-tab view interface
 | **description** | `string \| Record<string, string>` | optional | View description for documentation/tooltips |
 | **sharing** | `{ type?: Enum<'personal' \| 'collaborative'>; lockedBy?: string }` | optional | View sharing and access configuration |
 | **rowHeight** | `Enum<'compact' \| 'short' \| 'medium' \| 'tall' \| 'extra_tall'>` | optional | Row height / density setting |
-| **grouping** | `{ fields: object[] }` | optional | Group records by one or more fields |
+| **grouping** | `{ fields: object[] }` | optional | Group records by one or more fields — server-side: the groups and their header numbers come from an aggregate query over the whole filtered set, rows within a group are paged (see GroupingConfigSchema) |
 | **rowColor** | `{ field: string; colors?: Record<string, string> }` | optional | Color rows based on field value |
 | **hiddenFields** | `string[]` | optional | Fields to hide in this specific view |
 | **fieldOrder** | `string[]` | optional | Explicit field display order for this view |
@@ -1849,7 +1849,7 @@ Tab configuration for multi-tab view interface
 | **description** | `string \| Record<string, string>` | optional | View description for documentation/tooltips |
 | **sharing** | `{ type?: Enum<'personal' \| 'collaborative'>; lockedBy?: string }` | optional | View sharing and access configuration |
 | **rowHeight** | `Enum<'compact' \| 'short' \| 'medium' \| 'tall' \| 'extra_tall'>` | optional | Row height / density setting |
-| **grouping** | `{ fields: object[] }` | optional | Group records by one or more fields |
+| **grouping** | `{ fields: object[] }` | optional | Group records by one or more fields — server-side: the groups and their header numbers come from an aggregate query over the whole filtered set, rows within a group are paged (see GroupingConfigSchema) |
 | **rowColor** | `{ field: string; colors?: Record<string, string> }` | optional | Color rows based on field value |
 | **hiddenFields** | `string[]` | optional | Fields to hide in this specific view |
 | **fieldOrder** | `string[]` | optional | Explicit field display order for this view |
@@ -2090,7 +2090,7 @@ This schema accepts one of the following structures:
 | **description** | `string \| Record<string, string>` | optional | View description for documentation/tooltips |
 | **sharing** | `{ type?: Enum<'personal' \| 'collaborative'>; lockedBy?: string }` | optional | View sharing and access configuration |
 | **rowHeight** | `Enum<'compact' \| 'short' \| 'medium' \| 'tall' \| 'extra_tall'>` | optional | Row height / density setting |
-| **grouping** | `{ fields: object[] }` | optional | Group records by one or more fields |
+| **grouping** | `{ fields: object[] }` | optional | Group records by one or more fields — server-side: the groups and their header numbers come from an aggregate query over the whole filtered set, rows within a group are paged (see GroupingConfigSchema) |
 | **rowColor** | `{ field: string; colors?: Record<string, string> }` | optional | Color rows based on field value |
 | **hiddenFields** | `string[]` | optional | Fields to hide in this specific view |
 | **fieldOrder** | `string[]` | optional | Explicit field display order for this view |
@@ -2266,7 +2266,7 @@ This schema accepts one of the following structures:
 | **description** | `string \| Record<string, string>` | optional | View description for documentation/tooltips |
 | **sharing** | `{ type?: Enum<'personal' \| 'collaborative'>; lockedBy?: string }` | optional | View sharing and access configuration |
 | **rowHeight** | `Enum<'compact' \| 'short' \| 'medium' \| 'tall' \| 'extra_tall'>` | optional | Row height / density setting |
-| **grouping** | `{ fields: object[] }` | optional | Group records by one or more fields |
+| **grouping** | `{ fields: object[] }` | optional | Group records by one or more fields — server-side: the groups and their header numbers come from an aggregate query over the whole filtered set, rows within a group are paged (see GroupingConfigSchema) |
 | **rowColor** | `{ field: string; colors?: Record<string, string> }` | optional | Color rows based on field value |
 | **hiddenFields** | `string[]` | optional | Fields to hide in this specific view |
 | **fieldOrder** | `string[]` | optional | Explicit field display order for this view |

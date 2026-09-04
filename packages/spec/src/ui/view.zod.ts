@@ -684,6 +684,29 @@ export type ViewFilterRuleParsed = z.infer<typeof ViewFilterRuleSchema>;
 /**
  * Column Summary Function Schema
  * Aggregation function for column footer (Airtable-style column summaries)
+ *
+ * On a GROUPED list view the same declaration is the per-group HEADER summary
+ * (#14556, ruling A on objectui#7189: grouping is server-side, so a group's
+ * numbers are properties of the query, not of the fetched page). The header
+ * is one aggregate query in the query AST's own vocabulary — `AggregationFunction`
+ * (`data/query.zod.ts`), the vocabulary datasets already use, one and not two
+ * (objectui#4576) — and this enum maps onto it in
+ * `view-grouping-query.ts` (`COLUMN_SUMMARY_AGGREGATION`):
+ *
+ *   * `count` → a fieldless `count` (`COUNT(*)`, every row of the group — the
+ *     group count itself), `count_unique` → `count_distinct`, and
+ *     `sum` / `avg` / `min` / `max` → the same name; `none` declares nothing.
+ *   * `count_empty` / `count_filled` / `percent_empty` / `percent_filled` have
+ *     NO counterpart yet. Their mapping is an open contract question on #14556
+ *     (fork i); until it is ruled, a grouped view declaring one of them is
+ *     refused LOUDLY by `compileListViewGroupQuery` (`NOT_IMPLEMENTED` / 501,
+ *     with the path of the summary) — never dropped, never given a third
+ *     vocabulary. The footer keeps computing them client-side over the rows
+ *     it holds, as it always has.
+ *
+ * ⛔ Adding a member here without deciding its row in
+ * `COLUMN_SUMMARY_AGGREGATION` is a type error by construction, so the fork
+ * cannot widen silently.
  */
 export const ColumnSummarySchema = lazySchema(() => z.enum([
   'none',
@@ -697,7 +720,15 @@ export const ColumnSummarySchema = lazySchema(() => z.enum([
   'avg',
   'min',
   'max',
-]).describe('Aggregation function for column footer summary'));
+]).describe(
+  // The tracking card for the open mapping question is named in the JSDoc
+  // above; `.describe()` prose reaches readers who cannot resolve an issue id.
+  'Aggregation function for the column footer summary — and, on a grouped list view, the per-group '
+  + 'header summary (server-side): count (COUNT(*), the group count), count_unique '
+  + '(count_distinct), sum, avg, min, max map onto the query AST\'s AggregationFunction; '
+  + 'count_empty, count_filled, percent_empty, percent_filled have no counterpart yet and are refused '
+  + 'loudly by the group-header compiler (an open contract question) — never dropped silently',
+));
 
 /**
  * Column Summary Configuration Schema
@@ -802,26 +833,76 @@ export const RowHeightSchema = lazySchema(() => z.enum([
 /**
  * Grouping Field Configuration
  * Defines a single grouping level for record grouping.
+ *
+ * `field` is one `groupBy` column of the group header query
+ * ({@link GroupingConfigSchema}); the header row carries its RAW STORED value
+ * under the field's own name — a lookup's group key is the referenced id, the
+ * empty group's key is `null`. `order` and `collapsed` are presentation:
+ * `EngineAggregateOptions` carries no `orderBy`, so the consumer sorts the
+ * header rows (a set the size of the group count) and folds/unfolds them.
  */
 export const GroupingFieldSchema = lazySchema(() => strictObject({
   surface: 'this grouping field',
   history: VIEW_HISTORY,
 }, {
-  field: z.string().describe('Field name to group by'),
-  order: z.enum(['asc', 'desc']).default('asc').describe('Group sort order'),
-  collapsed: z.boolean().default(false).describe('Collapse groups by default'),
+  field: z.string().describe('Field name to group by — one `groupBy` column of the group header query; the header row carries its raw stored value (null for the empty group)'),
+  order: z.enum(['asc', 'desc']).default('asc').describe('Group sort order — applied by the consumer over the header rows (the aggregate query carries no orderBy)'),
+  collapsed: z.boolean().default(false).describe('Collapse groups by default (presentation only)'),
 }));
 
 /**
  * Grouping Configuration Schema (Airtable-style)
  * Supports multi-level grouping for grid/gallery views.
+ *
+ * ## Grouping is SERVER-SIDE (#14556)
+ *
+ * Maintainer ruling A on objectui#7189 (2026-09-02): *the set of groups and
+ * every number in a group header (the count and any per-group aggregation)
+ * are properties of the query, not of the fetched page; rows inside a group
+ * are paged.* Grouping the rows of one fetched window — what a grouped grid
+ * did before this contract — rendered two headers (86, 14) or five
+ * (31/31/30/7/1) for the same 186 rows in five units depending on row order,
+ * and left the rows past the first window unreachable. That is the interim
+ * state, not the contract.
+ *
+ * What the platform returns for a grouped list view, in the vocabulary the
+ * query AST already declares (seat ruling: reuse, no new query shape):
+ *
+ * 1. **The group keys and every header number — ONE aggregate query**
+ *    (`EngineAggregateOptions`, executed by `IDataEngine.aggregate`):
+ *    `groupBy` = `fields[].field` in nesting order (multi-level grouping is
+ *    a multi-column `groupBy`), `aggregations` = a `count` node (the group's
+ *    TOTAL row count, alias `count`) plus the view's declared column
+ *    summaries (`ListColumn.summary`, mapped onto `AggregationFunction` — see
+ *    {@link ColumnSummarySchema}), `where` = the view's composed filter.
+ *    One header row per group, keyed by the grouped fields' own names.
+ * 2. **The rows inside a group — the EXISTING paged `find`**
+ *    (`EngineQueryOptions`, `IDataEngine.find`) with the group's key
+ *    predicate AND-ed into the same view filter, `limit` / `offset` per
+ *    group (`$top` / `$skip` on the wire).
+ * 3. No new engine verb, no new envelope.
+ *
+ * The checkable form of this contract is `view-grouping-query.ts` —
+ * `compileListViewGroupQuery` (1) and `compileListViewGroupRowsQuery` (2),
+ * pinned on the 186-row fixture: 86/61/31/7/1 regardless of row order.
+ *
+ * Follow-ons, in order: the platform half of #14556 (the route that carries
+ * the header query on the REST/ObjectQL path — no `aggregate` route exists on
+ * the data endpoint today), then objectui#7189 (`plugin-grid` consumes the
+ * header rows and stops grouping the page).
  */
 export const GroupingConfigSchema = lazySchema(() => strictObject({
   surface: 'this grouping configuration',
   history: VIEW_HISTORY,
 }, {
-  fields: z.array(GroupingFieldSchema).min(1).describe('Fields to group by, in nesting order — the first entry is the outermost group and each later entry nests one level deeper (at least one field)'),
-}).describe('Record grouping configuration'));
+  fields: z.array(GroupingFieldSchema).min(1).describe('Fields to group by, in nesting order — the first entry is the outermost group and each later entry nests one level deeper (at least one field); the same order as the group header query\'s `groupBy`'),
+}).describe(
+  'Record grouping configuration — SERVER-SIDE: the set of groups and every number in a group '
+  + 'header (the count and the per-column summaries) are properties of the query, not of the fetched page, '
+  + 'answered by one aggregate query (`groupBy` = the fields in nesting order, `count` + the mapped column '
+  + 'summaries, the view filter); rows inside a group are paged by the existing find with the group key '
+  + 'AND-ed into the view filter. Compiled by `compileListViewGroupQuery` / `compileListViewGroupRowsQuery`',
+));
 
 /**
  * Gallery View Configuration (Airtable-style)
@@ -1783,8 +1864,8 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
   /** Row Height / Density (Airtable-style) */
   rowHeight: RowHeightSchema.optional().describe('Row height / density setting'),
 
-  /** Record Grouping (Airtable-style) */
-  grouping: GroupingConfigSchema.optional().describe('Group records by one or more fields'),
+  /** Record Grouping (Airtable-style) — server-side, see {@link GroupingConfigSchema} (#14556). */
+  grouping: GroupingConfigSchema.optional().describe('Group records by one or more fields — server-side: the groups and their header numbers come from an aggregate query over the whole filtered set, rows within a group are paged (see GroupingConfigSchema)'),
 
   /** Row Color (Airtable-style) */
   rowColor: RowColorConfigSchema.optional().describe('Color rows based on field value'),
