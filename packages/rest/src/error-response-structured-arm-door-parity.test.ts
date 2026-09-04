@@ -659,16 +659,20 @@ describe('#14541 · structured arms are consulted by BOTH doors', () => {
             },
             {
                 code: 'RECORD_NOT_FOUND',
-                kind: 'known-gap',
-                card: 14725,
-                why: 'a REAL instance of this card\'s defect, found by this very guard: '
-                    + '`recordNotFoundError` (@objectstack/core) declares code, `status = 404` '
-                    + 'and `object`, so the bulk doors take the passthrough and drop `object` '
-                    + 'while the single door reaches the arm. Not lifted here because (a) its '
-                    + 'second limb is a message-TEXT gate, outside the declared-code boundary, '
-                    + 'and (b) this PR\'s wire delta was measured and contract-reviewed over a '
-                    + 'fixed set of codes — an eleventh body change after that verdict would be '
-                    + 'an unreviewed delta. #14725 carries it.',
+                kind: 'by-design',
+                why: 'its second limb is a message-TEXT gate '
+                    + '(`/^Record \\S+ not found in \\S+/i`) and the shared classification is '
+                    + 'declared-code only — lifting a text sniff above the passthrough is what '
+                    + '`resolveErrorResponse` argues against. It does not NEED lifting: #14725 '
+                    + 'closed the divergence at the generic passthrough instead, and both limbs '
+                    + 'now converge measurably — the declared-status limb because that '
+                    + 'passthrough answers it identically at both doors (`recordNotFoundError`, '
+                    + '@objectstack/core, declares code + `status = 404` + `object`, so its '
+                    + 'declared status carries it there rather than to this arm), and the '
+                    + 'text-sniff limb because an error declaring no status falls through to '
+                    + '`mapDataError` from both doors. Pinned end to end in '
+                    + '`error-response-generic-passthrough-object-parity.test.ts` §2/§3, which '
+                    + 'is also where the boundary this entry names is held.',
             },
         ];
 
