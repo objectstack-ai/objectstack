@@ -165,6 +165,35 @@ Why this shape:
   tell a rotted one from a fresh one — so it keeps reading as "verified against source"
   while pointing somewhere else. The file plus the symbol name is already the
   load-bearing half. `check:platform-checklist` fails on any that reappear.
+- **Write the symbol as an ANCHOR where the gate can resolve one** — the file path, a
+  `#`, and the symbol, with the prose beside it unchanged:
+
+  ```text
+  packages/core/src/security/platform-admin.ts#parsePlatformAdminEmails (whole-variable refusal)
+  ```
+
+  `check:platform-checklist` resolves every anchor: the file must be in this repo and the
+  symbol must still be in it, **comments masked** — a symbol surviving only in a docblock
+  is ABSENT, because prose about a symbol is not a symbol. A symbol inside a string
+  literal counts as present: much of what this ledger cites *is* a string (capability
+  names, error codes, `sys_*` machine names). Dotted anchors resolve segment by segment.
+  This is presence-in-code, not a declaration analysis — what it catches is the rename or
+  deletion that leaves the pointer naming nothing, which is exactly the rot the line
+  numbers used to carry.
+- **A citation the gate cannot resolve stays BARE — that is honest, not a gap.** Anchors
+  are only for extensions the gate reads symbols out of (`.ts .tsx .mts .cts .js .mjs
+  .cjs .json`); an anchor on a `.md` or a `.yml` is an ERROR rather than a silent skip,
+  since a spelling that resolves nowhere is the false pointer all over again. Same for a
+  sibling-repo citation (`objectui …`) and for a file with no symbol worth naming: cite
+  the path, put the detail in prose.
+- **Anchors are shrink-never.** Deleting a `#symbol` is the silent way past any red the
+  resolver prints, so the count per family file is floored in
+  [`scripts/checklist-symbol-anchor-baseline.json`](../../../scripts/checklist-symbol-anchor-baseline.json)
+  (authored from `node scripts/check-platform-checklist.mjs --anchor-census`, which is a
+  census and not a verdict). Adding anchors never reds; ⛔ lowering a floor is
+  MAINTAINER-ONLY. ⚠️ Note what a red here reaches: `check:platform-checklist` is not
+  CI-wired (see "Operating cadence"), so it reaches whoever runs the gate — **not every
+  PR**. #11730 holds that gap.
 - **`why` is the debt marker.** A recipe exists because stock fixtures cannot demonstrate
   something — the same discipline as a coverage waiver. Landing the fixture in the
   showcase seeds proper retires the recipe; until then `why` says what is missing and

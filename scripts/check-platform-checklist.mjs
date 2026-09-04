@@ -764,12 +764,12 @@ const BATTERY_SOURCE_LINE_CITATIONS = 'selfTestSourceLineCitations: the `:NNN` r
 const BATTERY_SYMBOL_ANCHORS = 'selfTestSymbolAnchors: the anchor detector, the resolver and the floor';
 
 const SELF_TEST_BATTERIES = Object.freeze({
-  [BATTERY_TRAP_VOCABULARY]: 0,
-  [BATTERY_PROVISIONING_USE]: 0,
-  [BATTERY_UNREFERENCED_RECIPES]: 0,
-  [BATTERY_META_CALL_SPELLING]: 0,
-  [BATTERY_SOURCE_LINE_CITATIONS]: 0,
-  [BATTERY_SYMBOL_ANCHORS]: 0,
+  [BATTERY_TRAP_VOCABULARY]: 22,
+  [BATTERY_PROVISIONING_USE]: 34,
+  [BATTERY_UNREFERENCED_RECIPES]: 19,
+  [BATTERY_META_CALL_SPELLING]: 53,
+  [BATTERY_SOURCE_LINE_CITATIONS]: 19,
+  [BATTERY_SYMBOL_ANCHORS]: 29,
 });
 const SELF_TEST_BATTERY_FLOOR = 6;
 
@@ -1283,8 +1283,17 @@ export const NEIGHBOURING_MAP: Readonly<Record<string, string>> = Object.freeze(
 // silent — HTTP status (`status:409`), config literals (`{maxRetries:3}`),
 // ports (`http://localhost:3000`), clock times (`08:00`, `...T00:00:00Z`) and
 // JSON quoted in prose (`{"scannedTypes":1}`). Each is pinned below.
+//
+// A THIRD branch was added by #13788, measured rather than reasoned: sweeping
+// the ledger for anchorable citations turned up four line pins the two
+// branches above do not reach — `AiChatPage.tsx:~605-615` (the tilde INSIDE
+// the colon form, where the battery only ever pinned `~:`) and the `~L7246-7331`
+// spelling, which carries no colon at all. Both read exactly like the class
+// step (1) removed, and both sat green through it. The `L` form needs its own
+// left boundary so an identifier ending in a capital L before digits
+// (`SQL2019`) is not read as a line pin.
 const SOURCE_LINE_CITATION =
-  /(?:\.(?:ts|tsx|mts|cts|js|mjs|cjs|json|jsonc|md|mdx|ya?ml|sql|css|html|sh|py|toml)|(?<![A-Za-z0-9_"])):\d+(?:-\d+)?/g;
+  /(?:\.(?:ts|tsx|mts|cts|js|mjs|cjs|json|jsonc|md|mdx|ya?ml|sql|css|html|sh|py|toml)|(?<![A-Za-z0-9_"])):~?\d+(?:-\d+)?|(?<![A-Za-z0-9_])~?L\d{2,}(?:-\d+)?(?![A-Za-z0-9_])/g;
 
 /**
  * @param {string} text
@@ -1322,6 +1331,11 @@ function selfTestSourceLineCitations() {
   t('C5 an approximate `~:` citation is caught', n('computeAuthGate ~:5084-5160') === 1);
   t('C6 a comma/slash-chained run is caught in full', n('storage-routes.ts:241-243,:255,:267') === 3);
 
+  // FIRES — the two spellings #13788 measured still in the ledger after step (1).
+  t('C7 a colon-TILDE citation is caught — the tilde inside the colon form', n('AiChatPage.tsx:~605-615') === 1);
+  t('C8 a `~L` line pin is caught, colon or no colon', n('registerRecordShareEndpoints ~L7246-7331') === 1);
+  t('C9 a bare `L` line pin is caught', n('the evaluate leg L7477-7493') === 1);
+
   // STAYS SILENT — the neighbours that share the colon-then-digit shape.
   t('S1 an HTTP status in prose is not a citation', n("thrown {code:'DELETE_RESTRICTED', status:409}") === 0);
   t('S2 a config literal is not a citation', n('retry {maxRetries:3, backoffMs:1000}') === 0);
@@ -1330,6 +1344,9 @@ function selfTestSourceLineCitations() {
   t('S5 JSON quoted in prose is not a citation', n('a 200 {"scannedTypes":1,"stats":{}}') === 0);
   t('S6 an ADR section reference is not a citation', n('ADR-0025 §3.3 and #13479') === 0);
   t('S7 the README placeholder spelling of the ban is not itself a citation', n('never pin `file.ts:NNN` or a bare `:NNN`') === 0);
+  t('S8 a capital L ending an identifier before digits is not a line pin', n('SQL2019 and a TTL3600 budget') === 0);
+  t('S9 an i18n-style token is not a line pin', n('the L10n bundle') === 0);
+  t('S10 a one-digit `L` reference is not a line pin — the floor is two digits', n('lane L1 of the queue') === 0);
 
   citationsReachedVerdict = true;
   return { failures, checked };

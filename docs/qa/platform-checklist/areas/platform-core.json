@@ -2163,7 +2163,7 @@
         "objectui packages/app-shell/src/context/CommandPaletteProvider.tsx (⌘/Ctrl+K — wired)",
         "objectui packages/components/src/ui/sidebar.tsx (SIDEBAR_KEYBOARD_SHORTCUT = 'b'), (the handler requires metaKey||ctrlKey — the source of the B-vs-⌘B display mismatch)",
         "objectui packages/app-shell/src/layout/chatDockState.ts (matchChatDockShortcut — ⌘/Ctrl+Shift+I, composer-safe)",
-        "objectui packages/app-shell/src/console/ai/AiChatPage.tsx:~605-615 (matchAiChatShortcut — ⌘⇧O/⌘⇧S, PAGE-scoped)",
+        "objectui packages/app-shell/src/console/ai/AiChatPage.tsx (matchAiChatShortcut — ⌘⇧O/⌘⇧S, PAGE-scoped)",
         "repo-grep evidence for the five dead accelerators: no handler for ⌘/ / N / R / ⌘E / ⌘D anywhere in app-shell, console or components (the only near-misses are page-scoped: ApprovalsInboxPage's plain `r` quick-decide and useDebugMode's Ctrl+Shift+D — neither matches an advertised accelerator)"
       ],
       "history": [

@@ -1111,7 +1111,7 @@
       ],
       "source": [
         "packages/rest/src/rest-route-ledger.ts#shareId (record-shares family: GET/POST /data/:object/:id/shares, DELETE .../:shareId; sharing-rules family evaluate)",
-        "packages/rest/src/rest-server.ts#registerSharingRuleEndpoints (registerRecordShareEndpoints ~L7246-7331; registerSharingRuleEndpoints evaluate ~L7477-7493)",
+        "packages/rest/src/rest-server.ts#registerSharingRuleEndpoints (the evaluate leg; the record-shares family GET/POST /data/:object/:id/shares + DELETE .../:shareId is registered inline, under no registrar of its own — #13788 measured that the registerRecordShareEndpoints this citation used to name is not in the file)",
         "packages/plugins/plugin-sharing/src/objects/sys-record-share.object.ts#recipient_type (recipient_type/recipient_id/access_level/source fields)",
         "packages/plugins/plugin-sharing/src/sharing-rule-service.ts#evaluateRule (evaluateRule → SharingRuleEvaluationResult)",
         "examples/app-showcase/src/security/sharing-rules.ts#share_key_account_qualified_contacts_with_managers (share_key_account_qualified_contacts_with_managers seeded criteria rule)",
@@ -1752,7 +1752,7 @@
         "hydration-race"
       ],
       "source": [
-        "packages/rest/src/rest-server.ts#registerSharingRuleEndpoints (registerSharingRuleEndpoints ~L7345-7494: list/create/get/delete)",
+        "packages/rest/src/rest-server.ts#registerSharingRuleEndpoints (list/create/get/delete)",
         "packages/spec/src/security/sharing.zod.ts (criteria rule authoring + match-all refusal #3896)",
         "packages/plugins/plugin-sharing/src/objects/sys-sharing-rule.object.ts + sys-record-share.object.ts",
         "objectui packages/plugins/plugin-sharing/src/sharing-plugin.ts#nav_sharing_rules (nav_sharing_rules Setup nav → sys_sharing_rule)",
