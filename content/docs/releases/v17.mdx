@@ -5348,27 +5348,6 @@ application moving 17.2.0 → 17.3.0 using published artifacts only; lines marke
 changes & migration in 17.3.0](#breaking-changes--migration-in-1730) and were not
 reached by that run.
 
-<Callout type="warn">
-**⛔ Known issue — `objectstack dev` cannot be signed into on 17.3.0
-([#15337](https://github.com/objectstack-ai/objectstack/issues/15337)).** The dev
-server prints a seeded admin credential and then refuses it: `POST
-/api/v1/auth/sign-in/email` answers `401 INVALID_EMAIL_OR_PASSWORD` where 17.2.0
-answered `200` for the same seed. Because the default audience posture is
-`invite_only`, self-registration is closed too (`403
-SELF_REGISTRATION_CLOSED`) — so on an affected dev environment there is **no way
-into the application at all**. Reproduced four times across two databases created
-from scratch; transplanting the 17.2.0 password hash changed nothing, and
-authentication is otherwise healthy (an account created on 17.3.0 signs in
-correctly). **No workaround was found.** Nothing else in this checklist is
-blocked by it — validation, build, migration and tests all run — and a diagnosis
-is in progress on that issue; watch it rather than this page for the resolution.
-
-⚠️ Note what this cost to discover: on the app where it was measured, the full
-gate suite was green — validation, typecheck, lint, i18n, build and 3,401 tests —
-and the boot log carried zero `ERROR` lines. Every automated signal said the
-upgrade had succeeded.
-</Callout>
-
 **Getting onto the release**
 
 - **Move all twelve-or-so `@objectstack/*` pins as one set, regenerate the
@@ -5443,11 +5422,9 @@ upgrade had succeeded.
   rows. If a test or a fixture leaned on implicit first-user promotion, give that
   actor an authored grant instead.
 - **Decide your audience posture explicitly (`4f24e9d`).** It collapses to
-  `invite_only | email_domain | open` and **defaults to `invite_only`**, which
-  closes self-registration on a deployment that relied on it being open. *Measured
-  only as a non-change:* the `403 SELF_REGISTRATION_CLOSED` was byte-identical on
-  17.2.0, so this default did not move in 17.3.0 — it is listed because it is what
-  makes the known issue above a total lockout rather than an inconvenience.
+  `invite_only | email_domain | open` and **defaults to `invite_only`**, so a
+  deployment that relied on open self-registration must declare it. *Not
+  exercised.*
 - **A permission-store read failure now fails LOUD (#13279).** A deployment that
   had been quietly running degraded starts erroring. *Not exercised.*
 - **`POST /api/v1/automation/:name/toggle` requires `manage_metadata`
