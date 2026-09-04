@@ -270,7 +270,7 @@ import type * as M183 from './api/sortability.zod.js';
 import type * as M184 from './shared/value-domain.zod.js';
 
 // ---------------------------------------------------------------------------
-// 826 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 825 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -1557,7 +1557,10 @@ export type Iso817 = Assert<Eq< z.input< typeof M155.ActionType >, z.infer< type
 // own input ≠ infer (`operator` is normalized on parse — `ViewFilterRuleParsed`
 // exists for exactly that reason), so `ElementNumberPropsParsed` is declared
 // and the pin deleted.
-export type Iso819 = Assert<Eq< z.input< typeof M170.ElementRecordPickerPropsSchema >, z.infer< typeof M170.ElementRecordPickerPropsSchema > >>;
+// `ElementRecordPickerPropsSchema` (Iso819) left the family the same way on
+// #14406 — the LAST record-form `filter` in `ComponentPropsMap`: its `filter`
+// now carries `z.array(ViewFilterRuleSchema)` too, so `ElementRecordPickerPropsParsed`
+// is declared and this pin deleted.
 export type Iso820 = Assert<Eq< z.input< typeof M170.RecordHighlightsField >, z.infer< typeof M170.RecordHighlightsField > >>;
 export type Iso821 = Assert<Eq< z.input< typeof M170.RecordPathProps >, z.infer< typeof M170.RecordPathProps > >>;
 // `record:reference_rail` (#8691) — deliberately default-free on the same
@@ -1682,7 +1685,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 826 isomorphic pins', () => {
+  it('still declares all 825 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2133,7 +2136,17 @@ describe('ADR-0122 type-alias convention', () => {
     // `ErrorMappingRuleSchema` and `ConnectorErrorCategorySchema` left whole
     // with the key (whole-def removal, `RETIRED_DEFS_BY_MAJOR[18]`), so the
     // two pins that named them (`Iso381` / `Iso382`) leave with the schemas.
-    expect(pins).toHaveLength(826);
+    //
+    // 826 -> 825 is #14406's ui#6206-B convergence of the LAST record-form
+    // `filter` in `ComponentPropsMap`: `ElementRecordPickerPropsSchema.filter`
+    // now carries `z.array(ViewFilterRuleSchema)`, whose own input ≠ infer
+    // (`operator` is normalized on parse — `ViewFilterRuleParsed` exists for
+    // exactly that reason), so `element:record_picker` left the isomorphic
+    // family the way ADR-0122 prescribes and `element:number` did one entry
+    // earlier: `ElementRecordPickerPropsParsed` declared, the Iso819 pin
+    // deleted. -1 converted to an `XParsed` pair; the Iso number stays vacant
+    // (ids are claims about pins, not positions).
+    expect(pins).toHaveLength(825);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until #6605 nothing read either
