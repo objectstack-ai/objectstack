@@ -3686,6 +3686,18 @@ describe('assignment value envelope — located findings (#15137)', () => {
     })).toHaveLength(0);
   });
 
+  it('is silent on a whitespace-only `source` — the seam this pass cannot see (#15430)', () => {
+    // `ExpressionSchema.source` is `z.string().min(1)`, so `'   '` passes the
+    // shape rule, and `validateExpression` trims it to empty and answers
+    // `ok: true` ("not authored"). Build says nothing; the CEL engine parses it
+    // untrimmed and the run faults loudly (pinned in `service-automation`'s
+    // `assignment-value-envelope.test.ts`). Pinned as the BOUND of the
+    // build/run agreement, not as desired behaviour — ⛔ do not close it with a
+    // trim rule invented here: that is a third notion of "malformed", which is
+    // the defect this arm exists to avoid. The fix belongs in the shape rule.
+    expect(valueIssues({ digest: { dialect: 'cel', source: '   ' } })).toHaveLength(0);
+  });
+
   it('says nothing about the legacy array form — it is not a declared slot', () => {
     // The seat's ask-3 disposition, from the lint side: refusing the array form
     // would fail builds that pass today, and that refusal is a ruling rather

@@ -248,6 +248,39 @@ describe('assignment value envelope — one notion of malformed (#15137)', () =>
     expect(() => engine.evaluateValueEnvelope({ dialect: 'cel', ast: { op: 'value' } }, new Map(), 'assignments.digest'))
       .toThrow(/AST-only evaluation not yet supported/);
   });
+
+  /**
+   * The BOUND of the property above, pinned rather than papered over (found by
+   * the #15137 contract review).
+   *
+   * A whitespace-only `source` REGISTERS — `ExpressionSchema.source` is
+   * `z.string().min(1)`, so `'   '` passes the shape rule, and
+   * `validateExpression` trims it to empty and answers `ok: true` ("not
+   * authored") — and then faults at run time, because the CEL engine parses the
+   * string untrimmed.
+   *
+   * So the true statement of the property is narrower than "a registered flow
+   * can never fault": registration and evaluation refuse the same set THE TWO
+   * PUBLISHED VALIDATORS DEFINE, and the shapes both of them accept while no
+   * engine can run them fault loudly at run time rather than assigning a wrong
+   * value. Same seam class as the `ast`-only case above, tracked in the same
+   * finding (#15430).
+   *
+   * ⛔ Not fixable here by adding a trim rule of the engine's own: a third,
+   * locally-invented notion of "malformed" is exactly what this file exists to
+   * prevent. The fix belongs where the shape rule is declared.
+   */
+  it('a whitespace-only `source` registers and then faults loudly — the bound of the property (#15430)', async () => {
+    const flow = assignmentFlow({ assignments: { digest: { dialect: 'cel', source: '   ' } } });
+    expect(() => engine.registerFlow('assign_flow', flow), 'both validators accept it').not.toThrow();
+
+    const result = await engine.execute('assign_flow', {} as any);
+    expect(result.success).toBe(false);
+    // Loud, located and carrying the source — never a silent `undefined` in the
+    // variable, which is the property that does hold for every shape.
+    expect(result.error).toContain('assignments.digest');
+    expect(result.error).toContain('failed to evaluate as CEL');
+  });
 });
 
 describe('assignment value envelope — the discriminator, and what it must NOT capture (#15137)', () => {
