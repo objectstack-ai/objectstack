@@ -51,6 +51,11 @@ export type {
     // no barrel-reachable signature.
     SuspensionRestoreResult,
     SuspensionRestoreRefusal,
+    // [#13937] What a store records in place of a snapshot it could not
+    // persist — the type of `RunRecord.consumedSuspensionDropped`, which a
+    // host store implementing `recordTerminal` / `loadTerminal` writes and
+    // reads; unnameable, the field would be writable only by structural luck.
+    ConsumedSuspensionDropNotice,
 } from './engine.js';
 
 // [#11997] ADR-0005 overlay precedence for same-named flow definitions. The boot

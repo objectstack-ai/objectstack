@@ -496,12 +496,36 @@ export const CEILINGS = new Map([
   // bytes spread over three bullets, none of them completing a line inside its own
   // bullet), and re-wrap funding is refused per the 2026-08-17 rule. Landed count,
   // headroom 0, same convention.
+  // Raised 358 -> 397 by the third-increment ruling — again an ORDINARY raise
+  // under this map's own maintainer exit, ⛔ not a cross-file move. Maintainer,
+  // decision batch #34, 2026-09-04, verbatim and untranslated: 「决裁批 #34 同意」
+  // on the presented recommendation, item 1 = A; the director record's own
+  // sentence for that item: "raise the ceiling by the measured +39, 358 → 397".
+  // Spent in full, and measured the same way — each member written in the file's
+  // voice and wrapped by this module's own `wrapLine` rather than estimated:
+  // attribution-footer scoping +12 (the row is true per CHANNEL and per
+  // ACTION/INPUT over four observations, and names what is untested instead of
+  // resolving the mechanism into a law), the MCP-side rate refusal read as a
+  // window reading rather than a signal about the PR +6, the CDN cause behind
+  // 「本档的缺席不是读数」 +5, and the Routine transport family +16 (no connector
+  // tools in a fired session · self-binding's trade and its orphan-recovery rule
+  // · neither `sources` nor `model` on the create end) = +39 exactly. Two members
+  // shrank against `origin/main` before landing, because the file already carried
+  // the fact: a reading the table states is cited, never re-spelled. Nothing was
+  // paid in place — the deletions this file can offer were measured at 0 whole
+  // lines under the previous raise and nothing has been added since to delete —
+  // and re-wrap funding is refused per the 2026-08-17 rule. Landed count,
+  // headroom 0, same convention.
+  // Item 2 of the same ruling = C: the two quota sentences this increment leaves
+  // in tension — the standing 「⛔ 不据限流报文里的 user ID 推…」 and the new
+  // member's 未裁 clause beside it — BOTH STAY AS WRITTEN, pending a
+  // discriminating read. ⛔ Neither is edited here or there.
   // ⚠️ This entry is also the DESTINATION of the cross-file move declared below,
-  // and the +34 above is not part of it. It is recorded there as a `ruledRaises`
-  // record quoting this same ruling, which is what keeps that declaration's `was`
-  // at this file's literal pre-move 314 while the move's own raise still reads
-  // +10 against the sources' −11.
-  ['.claude/skills/pm-dispatch/references/platform-readings.md', 358],
+  // and NEITHER ordinary raise above is part of it. Both are recorded there as
+  // `ruledRaises` records quoting their own rulings, which is what keeps that
+  // declaration's `was` at this file's literal pre-move 314 while the move's own
+  // raise still reads +10 against the sources' −11.
+  ['.claude/skills/pm-dispatch/references/platform-readings.md', 397],
   // Per-operation REST/GraphQL/git channel mapping — which fleet operation has
   // a REST twin (each row executed in a real session, provenance date carried
   // per row), the handful that are GraphQL-only, and the queue-routing
@@ -777,11 +801,13 @@ export const CROSS_FILE_MOVES = new Map([
       was: 314,
       // ORDINARY ruled raises taken on this destination SINCE the move. Each is
       // the maintainer's rather than this move's, so each is subtracted before
-      // the move's raise is measured: 358 − 314 − 34 leaves the +10 the move
-      // landed with, against the same net source decrease of 11. Recording it
-      // here rather than inside `was` is the whole point — with neither, the same
-      // tree reads the move as +44 against −11 and reds twice, for lines no
-      // source was ever asked to pay.
+      // the move's raise is measured: 397 − 314 − (34 + 39) leaves the +10 the
+      // move landed with, against the same net source decrease of 11. Recording
+      // them here rather than inside `was` is the whole point — with neither, the
+      // same tree reads the move as +83 against −11 and reds twice, for lines no
+      // source was ever asked to pay. The list GROWS by one record per ruled
+      // raise; ⛔ `was` never moves, so the reviewer's completeness check keeps
+      // the one shape it has always had.
       ruledRaises: [
         {
           // Quoted beside this entry's ceiling above, where the +34 is accounted
@@ -797,6 +823,22 @@ export const CROSS_FILE_MOVES = new Map([
             + ' readings land in fewer lines, the raise is the smaller number."',
           date: '2026-09-04',
           delta: 34,
+        },
+        {
+          // The third increment, ruled the same day as the one above and in the
+          // same way. Quoted beside this entry's ceiling too, where the +39 is
+          // accounted for member by member. Copied from there, not paraphrased.
+          ruling:
+            'the third-increment raise on `.claude/skills/pm-dispatch/references/platform-readings.md`'
+            + ' — maintainer, decision batch #34, 2026-09-04, verbatim and untranslated:'
+            + ' 「决裁批 #34 同意」 on the presented recommendation, item 1 = A; and the director'
+            + ' record\'s own sentence for that item: "raise the ceiling by the measured +39,'
+            + ' 358 → 397". Measured per member rather than estimated: attribution-footer'
+            + ' scoping +12, the MCP-side rate refusal read as a window reading +6, the CDN'
+            + ' cause behind the payload channel\'s absence rule +5, and the Routine transport'
+            + ' family +16 = +39 exactly.',
+          date: '2026-09-04',
+          delta: 39,
         },
       ],
       sources: [

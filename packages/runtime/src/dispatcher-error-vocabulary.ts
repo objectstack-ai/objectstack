@@ -820,6 +820,30 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             'repo\'s rejection tests assert on, not evidence of a door. If an install door ever answers with ' +
             'this code itself, the verdict becomes pending-registration and it belongs in the ledger batch.'
     },
+    // [ADR-0130 D4 / option B] The reader half's own refusal, raised where the
+    // three above are merely propagated. Same pre-HTTP reasoning; what is
+    // specific to it is recorded in its `why`.
+    {
+        code: 'MIXED_ARTIFACT_COLLECTION_SHAPE',
+        file: 'packages/runtime/src/artifact-collections.ts',
+        shape: 'codehelper',
+        door: 'none',
+        verdict: 'boot-refusal',
+        why:
+            'The refusal for one collection key declared in the ARRAY form by one source and in the ' +
+            'RECORD form by another inside the same artifact — `functions` is ' +
+            '`z.union([z.record(…), z.array(…)])` and `datasources` is read in either shape, so both ' +
+            'sides can pass `AssembledPackageBodySchema` and still disagree. Raised by ' +
+            '`resolveArtifactCollections`, whose every call site ships in this package and runs BEFORE ' +
+            'any HTTP boundary exists: `app-plugin.ts` resolves inside plugin init (a throw aborts boot), ' +
+            '`load-artifact-bundle.ts` and `standalone-stack.ts` resolve while the artifact is being ' +
+            'loaded into a stack that has no transport yet, and `resolve-project-database.ts` opens the ' +
+            'artifact file to pick a database before a kernel exists at all. The function is not exported ' +
+            'from `packages/runtime/src/index.ts`, so no package outside this one can reach it to put the ' +
+            'code on a wire. Its `status: 422` is the ADR-0112 envelope shape this repo\'s rejection ' +
+            'tests assert on, not evidence of a door. If an install or serve door ever answers with this ' +
+            'code itself, the verdict becomes pending-registration and it belongs in the ledger batch.'
+    },
     {
         code: 'DUPLICATE_ARTIFACT_OBJECT_NAME',
         file: 'packages/objectql/src/registry.ts',

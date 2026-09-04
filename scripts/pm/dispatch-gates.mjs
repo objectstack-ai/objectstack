@@ -3105,6 +3105,7 @@ const COMPOUND_ANCHOR_LEDGER = [
   ['scripts/check-comment-mask-corpus.mjs', 'runSelfTestCases', false],
   ['scripts/check-doc-authoring.mjs', 'selfTestRule3', false],
   ['scripts/check-doc-authoring.mjs', 'selfTestPackagesProse', false],
+  ['scripts/check-durability-degradation-log-level.mjs', 'checkSelfTestFloor', false],
   ['scripts/check-durability-degradation-log-level.mjs', 'selfTestReadSeams', false],
   ['scripts/check-platform-checklist.mjs', 'selfTestTrapVocabulary', false],
   ['scripts/check-platform-checklist.mjs', 'selfTestProvisioningUse', false],
@@ -19066,10 +19067,50 @@ function selfTest() {
     // CONTROL: --changed really does combine with a stdout-shape flag — the
     // usage-line fix above would otherwise be cosmetic on a refusal that does
     // not exist.
+    //
+    // ⛔ The claim is about the COMBINATION — that it PARSES and REACHES the
+    // derivation — so it must not be hostage to whether the tree this run
+    // happens to stand in has a diff. The first spelling demanded
+    // `status === 0`, which made the verdict a property of the caller's tree:
+    // where HEAD equals origin/main the derivation refuses BY DESIGN (exit 2,
+    // the NO_DIFF_REFUSAL sentence) and the case went red with nothing wrong
+    // with the tool. That is not only the fresh-worktree baseline it was found
+    // on. `main`'s own `push` run of lint.yml has exactly that shape — the
+    // pushed head IS origin/main — so every push to main was red at this
+    // file's gate step from the commit that added this case until this one,
+    // while the `merge_group` run of the same head stayed green because a
+    // queue branch HAS a diff (#15278).
+    //
+    // Both outcomes prove the claim, and nothing else does: exit 0 with a
+    // command list, or the exit-2 refusal that ONLY the derivation reaches. An
+    // illegal combination never gets that far — argv refuses it first, with
+    // its own sentence at the same exit code — which is why the predicate
+    // matches on the sentence and never on the code alone, and why the
+    // POSITIVE CONTROL below puts an illegal run through the SAME predicate
+    // and requires it to FAIL. A case widened to accept a second outcome is
+    // one reading away from accepting every outcome; that reading is made
+    // here, mechanically, instead of being left to the next author's eye.
+    const reachedDerivation = (run) =>
+      (run.status === 0 && (run.stdout ?? '').length > 0)
+      || (run.status === 2 && (run.stderr ?? '').includes(NO_DIFF_REFUSAL));
     const changedCommandsRun = runCli(['--changed', '--commands']);
     t(
-      'CONTROL: --changed --commands is legal and answers, so the moved usage line describes a real combination',
-      changedCommandsRun.status === 0 && (changedCommandsRun.stdout ?? '').length > 0,
+      'CONTROL: --changed --commands parses and REACHES the derivation, so the moved usage line describes a real combination'
+        + ' — exit 0 with commands, or the exit-2 no-diff refusal on a tree that has nothing to derive (#15278)',
+      reachedDerivation(changedCommandsRun),
+    );
+    // POSITIVE CONTROL: the predicate above still REJECTS a combination the
+    // argv chain refuses before any derivation runs. `--changed` with a path is
+    // that combination — the two input modes answer different questions — and
+    // its refusal carries a different sentence at the same exit 2, which is
+    // exactly the confusion the predicate has to survive.
+    const changedPathRun = runCli(['--changed', '--commands', seamCard]);
+    t(
+      '…and that same predicate REJECTS the illegal --changed-with-a-path combination, so no parse failure can satisfy the control above',
+      !reachedDerivation(changedPathRun)
+        && changedPathRun.status === 2
+        && (changedPathRun.stderr ?? '').includes('--changed derives the paths itself')
+        && !(changedPathRun.stderr ?? '').includes(NO_DIFF_REFUSAL),
     );
   }
 
@@ -19563,6 +19604,18 @@ const invokedDirectly = isEntrypoint(import.meta.url);
  * where `changedPathsFromGit()` refuses, and a pin that cannot be run in the
  * self-test is not a pin.
  */
+/**
+ * The invariant half of the refusal `--changed` prints on a tree with NO diff.
+ *
+ * A CONSTANT for USAGE_LINE's reason and for one more that is this file's own
+ * subject. The self-test's `--changed --commands` CONTROL has to tell that
+ * refusal — which only the derivation can print — apart from an argv-parse
+ * refusal, and BOTH exit 2. Matching a retyped copy of the sentence would pin
+ * the case to a memory of the message rather than to the message, so the case
+ * and the print site read the same constant (#15278).
+ */
+const NO_DIFF_REFUSAL = 'changes nothing against';
+
 const USAGE_LINE =
   'usage: node scripts/pm/dispatch-gates.mjs'
   + ' [--tier | [--residue] [--commands | --json | --ran <file>]]'
@@ -19763,7 +19816,7 @@ if (invokedDirectly) {
         // and "no gates" is the most expensive thing this tool could say wrongly
         // (#4690: an unreadable input must never look like an empty answer).
         console.error(
-          `dispatch-gates: this branch changes nothing against '${derived.base}' (merge base ${derived.mergeBase.slice(0, 9)}) — ` +
+          `dispatch-gates: this branch ${NO_DIFF_REFUSAL} '${derived.base}' (merge base ${derived.mergeBase.slice(0, 9)}) — ` +
             'nothing to derive. On the base branch already, or in the wrong checkout? Pass explicit paths to ask about a hypothetical surface.',
         );
         process.exit(2);

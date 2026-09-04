@@ -44,6 +44,7 @@
 import { resolve as resolvePath, isAbsolute } from 'node:path';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
+import { resolveArtifactCollections } from './artifact-collections.js';
 import { resolveDatabaseDriverId, resolveDriverId } from '@objectstack/spec/data';
 
 /** The unified default database filename (`<state dir>/data/objectstack.db`). */
@@ -192,7 +193,22 @@ function readConfigDeclaredDefault(opts: {
     try {
         const parsed = JSON.parse(readFileSync(artifactPath, 'utf8'));
         // Same envelope unwrap as `loadArtifactBundle` (`{ schemaVersion, metadata }`).
-        bundle = parsed?.schemaVersion != null && parsed?.metadata !== undefined ? parsed.metadata : parsed;
+        const unwrapped = parsed?.schemaVersion != null && parsed?.metadata !== undefined ? parsed.metadata : parsed;
+        // [ADR-0130 D4 / option B, #15005] …and the same collection resolution
+        // every other reader of this artifact makes. This tier runs 112 lines
+        // BEFORE `loadArtifactBundle` inside `createStandaloneStack`, and is
+        // reached independently of any stack at all from `os dev`, `os start`
+        // and `os db clean` — so "the bundle path was taught" says nothing
+        // about it. Without this, a multi-package artifact whose
+        // `datasourceMapping` and `datasources` live under `packages[]`
+        // resolves NO declared default and falls through to the unified
+        // default database: the project boots, silently, against the wrong file.
+        //
+        // Inside this `try` on purpose — a malformed `packages[]` raises the
+        // ADR-0112 refusal `resolveArtifactPackageOrder` owns, and this
+        // resolver's posture for an artifact it cannot read is to DECLINE (the
+        // boot's own loader reports that loudly), never to brick a URL lookup.
+        bundle = resolveArtifactCollections(unwrapped);
     } catch {
         // Unreadable/malformed artifact — the boot's own loader reports that
         // loudly; the URL resolver just cannot consult it.
