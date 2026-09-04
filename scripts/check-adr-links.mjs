@@ -356,6 +356,35 @@ function runCheck() {
   );
 }
 
+// -- The self-test's own battery roster and floor (#13489) ------------------
+//
+// A pass used to be this self-test's ONLY success condition, so "every case
+// held" and "the cases never ran" printed the same line. Closed the way
+// PR #13487 validated on check-doc-authoring: what is pinned is the registered
+// NAMES, not a number. Every section opens with `battery('<name>')`, every
+// assertion is attributed to the battery most recently opened, and the floor
+// requires the OPENED set to equal the DECLARED set with each battery at or
+// above its own count.
+//
+// The counts are a FLOOR, not an equality -- adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'Discrimination: verbatim link shapes are invisible; prose ones are not.': 9,
+  'Reverse verification on a real directory: the dead one IS reported, the': 5,
+  'The ADR-0046 pin. The three illustrative strings must still BE in the': 8,
+  'Stale-baseline detection is what makes KNOWN_DEAD_TARGETS shrink-only.': 1,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 4;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 /* ------------------------------------------------------------------ self-test */
 
 function assert(cond, message) {
@@ -372,7 +401,28 @@ function assert(cond, message) {
 const SELF_TEST_VERDICT = 'check-adr-links self-test reached its verdict';
 
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const batterySeen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+  };
+  // A thin in-body wrapper over the module-level `assert`: it attributes the
+  // case to the open battery and then defers to the existing assertion, whose
+  // semantics (print and exit 1 on the first failure) are unchanged.
+  const check = (cond, message) => {
+    registerCase();
+    assert(cond, message);
+  };
   // 1. Discrimination: verbatim link shapes are invisible; prose ones are not.
+  battery('Discrimination: verbatim link shapes are invisible; prose ones are not.');
   const doc = [
     '# Fixture',
     '',
@@ -393,17 +443,18 @@ function selfTest() {
     'External [site](https://example.com/x.md) and an [anchor](#section).',
   ].join('\n');
   const targets = extractRelativeLinks(doc).map((l) => l.target);
-  assert(targets.includes('./0001-real.md'), 'prose link was not extracted');
-  assert(targets.includes('./0002-missing.md'), 'second prose link was not extracted');
-  assert(!targets.includes('./crm_lead_guide.md'), 'code-span link leaked into the extraction');
-  assert(!targets.includes('./crm_lead_guide.md#qualification'), 'fenced-block link leaked into the extraction');
-  assert(!targets.includes('…'), 'code-span image link leaked into the extraction');
-  assert(!targets.includes('./nope.md'), 'tilde-fenced link leaked into the extraction');
-  assert(!targets.some((t) => t.startsWith('http')), 'an http(s) destination was treated as repo-relative');
-  assert(targets.length === 2, `expected exactly 2 prose destinations, got ${targets.length}: ${targets.join(', ')}`);
-  assert(extractRelativeLinks(doc)[0].line === 3, 'line numbers did not survive verbatim stripping');
+  check(targets.includes('./0001-real.md'), 'prose link was not extracted');
+  check(targets.includes('./0002-missing.md'), 'second prose link was not extracted');
+  check(!targets.includes('./crm_lead_guide.md'), 'code-span link leaked into the extraction');
+  check(!targets.includes('./crm_lead_guide.md#qualification'), 'fenced-block link leaked into the extraction');
+  check(!targets.includes('…'), 'code-span image link leaked into the extraction');
+  check(!targets.includes('./nope.md'), 'tilde-fenced link leaked into the extraction');
+  check(!targets.some((t) => t.startsWith('http')), 'an http(s) destination was treated as repo-relative');
+  check(targets.length === 2, `expected exactly 2 prose destinations, got ${targets.length}: ${targets.join(', ')}`);
+  check(extractRelativeLinks(doc)[0].line === 3, 'line numbers did not survive verbatim stripping');
 
   // 2. Reverse verification on a real directory: the dead one IS reported, the
+  battery('Reverse verification on a real directory: the dead one IS reported, the');
   //    illustrative ones are not, and removing the dead one turns the sweep green.
   const tmp = mkdtempSync(join(tmpdir(), 'adr-links-'));
   try {
@@ -412,25 +463,26 @@ function selfTest() {
     writeFileSync(join(dir, '0001-real.md'), '# Real\n');
     writeFileSync(join(dir, '0003-linker.md'), doc);
     const red = sweep('records', tmp);
-    assert(red.checked === 2, `self-test sweep census expected 2, got ${red.checked}`);
-    assert(red.findings.length === 1, `expected exactly 1 finding, got ${red.findings.length}`);
-    assert(red.findings[0].target === './0002-missing.md', `wrong finding: ${red.findings[0].target}`);
+    check(red.checked === 2, `self-test sweep census expected 2, got ${red.checked}`);
+    check(red.findings.length === 1, `expected exactly 1 finding, got ${red.findings.length}`);
+    check(red.findings[0].target === './0002-missing.md', `wrong finding: ${red.findings[0].target}`);
     writeFileSync(join(dir, '0002-missing.md'), '# Now it exists\n');
     const green = sweep('records', tmp);
-    assert(green.findings.length === 0, `expected 0 findings after the target appeared, got ${green.findings.length}`);
-    assert(green.checked === 2, `census must not change when a target appears: ${green.checked}`);
+    check(green.findings.length === 0, `expected 0 findings after the target appeared, got ${green.findings.length}`);
+    check(green.checked === 2, `census must not change when a target appears: ${green.checked}`);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
 
   // 3. The ADR-0046 pin. The three illustrative strings must still BE in the
+  battery('The ADR-0046 pin. The three illustrative strings must still BE in the');
   //    record (otherwise this pin is measuring nothing), and none of them may
   //    reach the extractor.
   const conventionPath = join(process.cwd(), CONVENTION_RECORD);
-  assert(existsSync(conventionPath), `${CONVENTION_RECORD} is missing — re-point this pin at the record that now documents the link convention (#6592)`);
+  check(existsSync(conventionPath), `${CONVENTION_RECORD} is missing — re-point this pin at the record that now documents the link convention (#6592)`);
   const convention = readFileSync(conventionPath, 'utf8');
   for (const target of CONVENTION_ILLUSTRATIVE_TARGETS) {
-    assert(
+    check(
       convention.includes(target),
       `${CONVENTION_RECORD} no longer contains the illustrative destination ${JSON.stringify(target)}. ` +
         `This pin has gone stale — re-point it at whatever now documents the package-docs link convention (#6592); ` +
@@ -439,23 +491,70 @@ function selfTest() {
   }
   const conventionTargets = extractRelativeLinks(convention).map((l) => l.target);
   for (const target of CONVENTION_ILLUSTRATIVE_TARGETS) {
-    assert(
+    check(
       !conventionTargets.includes(target),
       `${CONVENTION_RECORD}'s illustrative destination ${JSON.stringify(target)} was extracted as a real link. ` +
         `That record DEFINES the package-docs link convention and names a doc that deliberately does not exist here; ` +
         `the gate must skip fenced blocks and code spans, not the file (#6592).`,
     );
   }
-  assert(conventionTargets.length > 0, `${CONVENTION_RECORD} yielded no real links at all — the extractor is over-stripping`);
+  check(conventionTargets.length > 0, `${CONVENTION_RECORD} yielded no real links at all — the extractor is over-stripping`);
 
   // 4. Stale-baseline detection is what makes KNOWN_DEAD_TARGETS shrink-only.
+  battery('Stale-baseline detection is what makes KNOWN_DEAD_TARGETS shrink-only.');
   const live = new Set(sweep().findings.map(keyOf));
   const staleEntries = KNOWN_DEAD_TARGETS.filter((e) => !live.has(keyOf(e)));
-  assert(
+  check(
     staleEntries.length === 0,
     `KNOWN_DEAD_TARGETS has ${staleEntries.length} entr(y/ies) that no longer match a broken link — delete them:\n` +
       staleEntries.map((e) => `  ${e.file} -> ${e.target}`).join('\n'),
   );
+
+  // -- The floor: every declared battery RAN, and ran its cases (#13489) -----
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorMessages = [];
+  const floorFailure = (message) => { floorMessages.push(message); };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned `
+        + `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in `
+        + 'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. `
+          + 'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of `
+          + `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the '
+        + 'number. Find what stopped registering (an early return, a deleted block, a guard that now '
+        + 'skips) and restore it.',
+    );
+  }
+  assert(!floorBreached, floorMessages.join('\n     '));
 
   console.log('✅ check-adr-links --self-test: discrimination, census, ADR-0046 pin and baseline staleness all verified');
 
