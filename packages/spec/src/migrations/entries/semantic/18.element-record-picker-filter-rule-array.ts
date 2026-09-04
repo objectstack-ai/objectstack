@@ -9,8 +9,9 @@ export const entry: SemanticMigration = {
     + '`FilterConditionSchema` record vs the `ViewFilterRule` array)',
   replacement:
     '`z.array(ViewFilterRuleSchema)` — the rule array `[{ field, operator, value }, ...]` '
-    + 'every other `filter` input in `ComponentPropsMap` declares (`record:related_list` and its '
-    + 'Add-affordance picker, the `object-*` blocks, `element:number`). A record-form filter '
+    + "the map's array-declared `filter` doors already carry (`record:related_list`, its nested "
+    + 'Add-affordance picker, `element:number`; the four `object-*` blocks declare `filter` as '
+    + '`z.unknown()`, #15449). A record-form filter '
     + "`{ status: 'active' }` becomes `[{ field: 'status', operator: 'equals', value: 'active' }]`; "
     + "an operator object `{ amount: { $gt: 100 } }` becomes "
     + "`[{ field: 'amount', operator: 'greater_than', value: 100 }]`; several keys become "
@@ -21,9 +22,11 @@ export const entry: SemanticMigration = {
     'One filter orthography platform-wide (objectui#6206, maintainer batch adjudication '
     + "2026-08-25, verbatim 「同意」, Option B). `ComponentPropsMap['element:record_picker'].filter` "
     + 'was the LAST `filter` input in the map still declared as the MongoDB-style record '
-    + '(`FilterConditionSchema`) after `element:number` converged (#12039 Key 2): six siblings '
-    + 'declared the `ViewFilterRule` array, so the filter a list view stores and renders was '
-    + 'refused by the picker beside them, and 6-of-7 is the state where the next author copies '
+    + '(`FilterConditionSchema`) after `element:number` converged (#12039 Key 2): the three '
+    + 'array-declared doors (`record:related_list`, its nested Add-affordance picker, '
+    + '`element:number`) carried the `ViewFilterRule` array and the four `object-*` doors '
+    + 'declare `z.unknown()` (#15449), so the filter a list view stores and renders was refused '
+    + 'by the picker beside them, and a lone holdout is the state where the next author copies '
     + 'the wrong form. Sequenced measurement-first, as that convergence had to be (the 2026-08-25 '
     + 'Option-A ordering ruling, #14406): at the objectui pin `00d3f09c` the renderer hands '
     + '`filter` to `query.$filter` and calls `adapter.find()` '

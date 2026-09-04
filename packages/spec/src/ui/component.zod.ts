@@ -2183,12 +2183,13 @@ export const ElementRecordPickerPropsSchema = lazySchema(() => strictObject({
   /**
    * Filter rules narrowing which records the picker offers — the
    * `ViewFilterRule` ARRAY form, `[{ field, operator, value }, ...]`, the one
-   * filter orthography every other `filter` input in this map declares
-   * (`record:related_list` and its Add-affordance picker, the `object-*`
-   * blocks, and — since #12039 Key 2 — `element:number`). Until #14406 this
-   * entry alone still said `FilterConditionSchema`, the MongoDB-style record
-   * form: the last record-form `filter` in `ComponentPropsMap` after the
-   * ui#6206 ruling (2026-08-25, Option B, verbatim 「同意」: one filter
+   * filter orthography the map's array-declared `filter` doors share
+   * (`record:related_list`, its nested Add-affordance picker, and — since
+   * #12039 Key 2 — `element:number`; the four `object-*` blocks declare
+   * `filter` as `z.unknown()`, no orthography at all — #15449). Until #14406
+   * this entry alone still said `FilterConditionSchema`, the MongoDB-style
+   * record form: the last record-form `filter` in `ComponentPropsMap` after
+   * the ui#6206 ruling (2026-08-25, Option B, verbatim 「同意」: one filter
    * orthography platform-wide).
    *
    * Sequenced measurement-first, as the `element:number` convergence had to
@@ -2211,7 +2212,7 @@ export const ElementRecordPickerPropsSchema = lazySchema(() => strictObject({
    * entry's subject.
    */
   filter: z.array(ViewFilterRuleSchema).optional()
-    .describe('Filter rules narrowing which records the picker offers — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` input in this map shares. The MongoDB-style record form is refused — see migration `element-record-picker-filter-rule-array`. The binding-level `dataSource.filter` wins outright when both are set'),
+    .describe('Filter rules narrowing which records the picker offers — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography the map's array-declared `filter` doors share. The MongoDB-style record form is refused — see migration `element-record-picker-filter-rule-array`. The binding-level `dataSource.filter` wins outright when both are set'),
   /**
    * Row order (#6276). The flat shorthand for `dataSource.sort`, and the same
    * shape — `SortItemSchema[]`, the pairs the renderer forwards to the query as

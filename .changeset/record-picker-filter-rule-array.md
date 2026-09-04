@@ -14,10 +14,12 @@ One filter orthography platform-wide (maintainer batch adjudication 2026-08-25,
 verbatim 「同意」, Option B): after `element:number` converged (#12039 Key 2),
 `element:record_picker`'s `filter` was the one `filter` input in
 `ComponentPropsMap` still declared as the MongoDB-style record
-(`FilterConditionSchema`) while every sibling declared
-`z.array(ViewFilterRuleSchema)` — so the filter a list view stores and renders
-was refused by the picker beside it. The entry now declares the same array form
-its siblings do, and the `FilterConditionSchema` import that existed for this
+(`FilterConditionSchema`) while the three array-declared siblings
+(`record:related_list`, its nested Add-affordance picker, `element:number`)
+declared `z.array(ViewFilterRuleSchema)` — the four `object-*` doors declare
+`filter` as `z.unknown()`, #15449 — so the filter a list view stores and
+renders was refused by the picker beside it. The entry now declares the same
+array form those siblings do, and the `FilterConditionSchema` import that existed for this
 one site leaves the file with it.
 
 Sequenced measurement-first, as that convergence had to be: the `record_picker`
@@ -27,8 +29,8 @@ renderer hands `filter` to `query.$filter` and calls `adapter.find()`, whose
 filter AST tuples — the door every list view's stored rule array already takes
 — and nothing on that path parses `properties` against the installed spec.
 
-**Migration** (`element-record-picker-filter-rule-array`, `os migrate meta --from 18`
-lists it): a record-form `filter: { status: 'active' }` becomes
+**Migration** (`element-record-picker-filter-rule-array` — listed by
+`os migrate meta --from 17` once the protocol major is 18): a record-form `filter: { status: 'active' }` becomes
 `filter: [{ field: 'status', operator: 'equals', value: 'active' }]`; an operator
 object `{ amount: { $gt: 100 } }` becomes
 `[{ field: 'amount', operator: 'greater_than', value: 100 }]`; several keys
