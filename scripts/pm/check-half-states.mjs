@@ -8109,6 +8109,15 @@ export const SWEEP_COUNT_KEYS = [
   'conflictProbed',
   'sharedFileCandidates',
   'sharedFileProbed',
+  // H43's coverage triple and its fourth state (#14967) — the register that
+  // did not load. `governedRegisterReason` is a STRING, not a counter, and it
+  // rides the same contract for the same reason: without it the clause would
+  // render a NOT-MEASURED row as `0 of 0`, which is the exact confusion the
+  // enumeration above exists to end.
+  'governedPrs',
+  'governedReviewCandidates',
+  'governedReviewProbed',
+  'governedRegisterReason',
   'liveFolds',
   'memberReadCandidates',
   'memberReadProbed',
@@ -17431,6 +17440,13 @@ function selfTest() {
 
   // The coverage clause, both branches, cut out of the summary line so only
   // H43's own words can answer for H43.
+  // ⚠️ The forwarding contract, and the reason this case exists at all: the
+  // live sweep on the day this row landed rendered `0 of the open PR(s) …`
+  // while filing FOUR H43 rows, because the counters were computed and never
+  // copied into `counts`. That is the documented failure this enumeration was
+  // built to end — `counts.x ?? 0` renders a missing key and a real zero
+  // identically — and it reappears the moment a new row forgets the list.
+  t('H43: every count key rides the enumerated forwarding contract', ['governedPrs', 'governedReviewCandidates', 'governedReviewProbed', 'governedRegisterReason'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
   t('H43 summary: the triple is reported', saidBy('h43GovernedReviews', summaryLine({ governedPrs: 8, governedReviewCandidates: 5, governedReviewProbed: 5 }, 0)).includes('8 of the open PR(s)'), true);
   t('H43 summary: …with the review leg named as a subset', saidBy('h43GovernedReviews', summaryLine({ governedPrs: 8, governedReviewCandidates: 5, governedReviewProbed: 5 }, 0)).includes('answered on 5 of 5'), true);
   t('H43 summary: an unloadable register reports NOT MEASURED, never 0 of 0', saidBy('h43GovernedReviews', summaryLine({ governedRegisterReason: 'the pair is not installed' }, 0)).includes('NOT MEASURED — the pair is not installed'), true);
