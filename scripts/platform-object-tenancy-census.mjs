@@ -111,9 +111,8 @@ import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import ts from 'typescript';
-
 import { isEntrypoint } from './invoked-as.mjs';
+import { transpileChecked } from './ts-parse.mjs';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 
@@ -219,9 +218,13 @@ export function createSourceLoader(root = ROOT) {
     const hit = cache.get(file);
     if (hit) return hit.exports;
     const source = readFileSync(file, 'utf8');
-    const js = ts.transpileModule(source, {
-      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
-      fileName: file,
+    // `transpileChecked`, never a raw `ts.transpileModule`: the raw call reports
+    // NOTHING on a source it could not read and still returns an `outputText`,
+    // so an unparseable module would be evaluated as whatever survived and the
+    // census would score the tree against wreckage with a clean exit. That is
+    // this artefact's own failure class one layer down (`check-parse-guard`).
+    const js = transpileChecked(file, source, {
+      compilerOptions: { module: 'commonjs', target: 'es2022' },
     }).outputText;
     const mod = { exports: {} };
     // Seeded BEFORE evaluation so an import cycle sees the partial module the
