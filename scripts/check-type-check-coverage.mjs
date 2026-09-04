@@ -1026,6 +1026,48 @@ const TEST_DEBT = {
 // Measured: with `rootDir` inherited, the same program reports 116 additional
 // TS6059 — a config-tier pile that says nothing about any test.
 
+// ── #14917: `@objectstack/driver-mongodb` GRADUATED — and this one really is
+// at ZERO, which the six above are not ────────────────────────────────────────
+//
+// `driver-mongodb` (10) left this ledger on 2026-09-04, by the same route as
+// `runtime`, `cli`, `lint` and the three plugins: it now has a
+// `tsconfig.test.json` its `typecheck` script NAMES, so `hidesTests` is false
+// for it and this gate's per-PACKAGE approximation has nothing left to
+// approximate. ⛔ This change repairs no test file and edits none.
+//
+// ⭐ WHAT IS DIFFERENT HERE, and it is the whole reading: those six graduated
+// into a per-file `test-typecheck-debt.json` holding a residue. This one
+// graduates into NO LEDGER AT ALL. Measured at 6ed4b811af with the dependency
+// closure built, `tsc --noEmit -p tsconfig.test.json` reports **0 errors across
+// all 30 test files**. The recorded 10 was config-tier IN FULL — the same
+// dissolution measured for `lint`'s 16, but complete rather than partial.
+//
+// The attribution has no remainder in either direction. RECORDED here was
+// `TS1309 x7, TS2550 x3`; re-measured on the way out at 6ed4b811af by dropping
+// only the test glob (this gate's own `remeasureProject` shape), the raw
+// program reports those same 10, class for class and file for file. All 7
+// TS1309 are "cannot use `await` at the top level" — this package has no
+// `"type": "module"`, so NodeNext compiles as CJS the suites that await
+// `startMongod()` at module scope, which vitest executes as ESM. All 3 TS2550
+// are the same `Array.prototype.at` message in `mongodb-findone-options.test.ts`
+// against a `lib` older than es2022. Both classes are the CHECK being
+// misconfigured; neither is a defect in a test. Under vitest-matching module
+// semantics both dissolve and NOTHING is exposed behind them — there is no
+// `+n` term here, because there was no unresolved-import cascade to collapse.
+//
+// ⚠️ So the shrink-only guarantee did not merely move to a finer instrument
+// here, it STRENGTHENED twice over. All 30 files are unledgered, so any error
+// any one of them gains is red on arrival. And what the package's own
+// `typecheck` script reports about its test layer is now a PASS rather than a
+// NUMBER — which was this card's actual finding, once its false headline (that
+// the `Equals` / `IsAny` pins here were phantoms) had been corrected on the
+// thread. The pins were always real; they were read by THIS ratchet, and a
+// ratchet fails when a number moves, not when a type is wrong.
+//
+// ⚠️ PINS_CHECKED reported nothing for this package in either direction and
+// still does not: measured on the way out, its test layer holds ZERO
+// `@ts-expect-error` directives, so that half had no subject here either.
+
   '@objectstack/mcp': {
     errors: 53,
     note: 'TS18046 x51 -- `json` is of type unknown, one `await res.json()` idiom repeated across four '
@@ -1055,21 +1097,6 @@ const TEST_DEBT = {
       + 'sentence is its history, not this entry\'s present state. RECORDED now equals what tsc reports, '
       + 're-confirmed at 53 at 62b2655d8, so the next new error in this package goes red on arrival -- '
       + 're-establishing a margin deliberately remains a maintainer call (#5278 option A).',
-  },
-  '@objectstack/driver-mongodb': {
-    errors: 10,
-    note: 'TS1309 x7, TS2550 x3. Was 43 (TS2345 x33 + these 10), measured at 5ab08428 and still exactly '
-      + '43 at d367f03d6^ -- the commit immediately before PR #6210. That PR (#6075) narrowed this '
-      + "driver's six IDataDriver query methods to `DriverQuery`, which is what retired all 33 TS2345: "
-      + "they were this package's OWN test literals failing `Property 'object' is missing in type` "
-      + 'against a `QueryAST` that still required it. The ledger was never ratcheted down, so 33 errors '
-      + 'of slack sat here. #6212 batch C lowers it to the measured 10 because that slack made the batch '
-      + "OWN change unpinnable: this package's tsconfig excludes `*.test.ts`, so `pnpm typecheck` cannot "
-      + "see `aggregate`'s narrowing at all, and its only consumers are those excluded tests. Reverting "
-      + '`aggregate(object, query: DriverQuery)` back to `QueryAST` measures 12 here -- which the old '
-      + '43-ceiling would have swallowed in silence. At 10 it goes red, which is the whole point of a '
-      + 'ratchet. Re-measured 10 at 2bc187641, and the pristine tree at that commit reports the same 10, '
-      + "so none of the -33 is this PR's doing.",
   },
   '@objectstack/formula': {
     errors: 17,

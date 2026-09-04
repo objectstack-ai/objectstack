@@ -367,7 +367,17 @@ export function createActionsDomain(deps: DomainHandlerDeps): DomainRoute {
  * sandboxed body reaches through `ctx.api.object(...)`. Both are bound to the
  * caller's ExecutionContext elevated with `isSystem` (#3914).
  *
- * Dispatch follows the DECLARED action type (#3915):
+ * Dispatch follows the DECLARED action type (#3915) — except that `operation`
+ * is read BEFORE `type` (#15079, contract point 1 of the #14092 ruling):
+ *  - `operation: 'update'` → the DECLARATIVE single-record field write. The
+ *    platform performs ONE data-plane update of the current record, under the
+ *    CALLER's own identity — ⛔ never the `isSystem` elevation the script arm
+ *    below gets, because there is no author body here to trust — so the
+ *    object's permissions, hooks and validations fire exactly as for a user
+ *    edit. `type` is `'script'` on such an action (this route IS where the
+ *    write happens) and carries no handler; see
+ *    `actionExec.executeDeclarativeUpdateAction`, which the MCP `run_action`
+ *    bridge calls too.
  *  - `script` (and any action with no resolvable declaration, which is
  *    handler-only by definition) → the registered handler, as before;
  *  - `flow` → `automation.execute(action.target, …)` with the caller's
@@ -598,7 +608,15 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
     // A flow action on a kernel with no automation service is a deployment
     // gap, not a business failure — report it like the missing data engine
     // above (503) instead of burying it in a `{ success: false }` body.
-    if (actionType === 'flow' && !(await actionExec.resolveAutomationService(deps, _context, _context?.environmentId))) {
+    //
+    // [#15079] `!isDeclarativeUpdateAction` is the last `type`-first read on
+    // this door, closed for the same reason as the two predicates: the parsed
+    // shape of a declarative update is `type: 'script'`, so this probe cannot
+    // fire for it — but data at rest whose `type` contradicts its `operation`
+    // would collect a 503 about an automation service the write never needs.
+    // `operation` before `type`, without exception.
+    if (actionType === 'flow' && !actionExec.isDeclarativeUpdateAction(actionDef)
+        && !(await actionExec.resolveAutomationService(deps, _context, _context?.environmentId))) {
         return { handled: true, response: deps.error(actionExec.flowActionUnavailableError(actionDef), 503) };
     }
 
@@ -648,31 +666,60 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
         await resolveActorDisplayName(() => ql, ec),
     );
 
-    const actionContext: any = {
-        record,
-        // [#14143] The caller-scope load's verdict — see
-        // `loadActionSubjectRecord`. `ctx.record.id` is stamped either way, so
-        // this is the only channel that distinguishes "the caller cannot read
-        // this row" from "this action legitimately has no record".
-        ...actionExec.actionRecordLoadSignal(subject),
-        user: userFromAuth,
-        session: actionExec.buildActionSession(deps, ec),
-        // Slim engine facade matching the ActionContext.engine shape used by
-        // CRM handlers. ⚠️ TRUSTED — system-elevated, RLS/FLS-bypassing by
-        // design; see buildActionEngineFacade + buildActionExecutionContext
-        // for the full security-model rationale (#2849, #3914).
-        engine: actionExec.buildActionEngineFacade(deps, ql, ec),
-        // [#3914] `ctx.api` — the ScopedContext a body's `ctx.api.object(...)`
-        // resolves to. Absent here, the sandbox synthesized a context-less
-        // facade and every owner-scoped write died FORBIDDEN. `executionContext`
-        // is the same envelope, carried so the sandbox's own last-resort facade
-        // is elevated identically instead of falling back to no identity.
-        api: actionExec.buildActionApi(deps, ql, ec),
-        executionContext: actionExec.buildActionExecutionContext(ec),
-        params: { ...reqParams, recordId, objectName },
-    };
-
     try {
+        // ── declarative update ── [#15079] FIRST, ahead of the `type` switch
+        // and ahead of the trusted-mode plumbing below. Contract point 1 reads
+        // `operation` before `type`; the ordering here is also load-bearing in
+        // a second way — the elevated `ctx.api` / `ctx.engine` /
+        // `executionContext` an action BODY receives are built below, and an
+        // `operation: 'update'` action must never be near them: it has no body
+        // to trust, so its write carries the CALLER's identity and nothing
+        // else. Inside the `try` so a data-plane refusal (a permission denial,
+        // a validation failure, a hook's throw) reaches the ONE catch this door
+        // already has, with its `.status` / `.code` honoured — the same exit
+        // the flow branch's refusals take.
+        if (actionExec.isDeclarativeUpdateAction(actionDef)) {
+            const result = await actionExec.executeDeclarativeUpdateAction(deps, actionDef, {
+                objectName,
+                actionName,
+                subject,
+                recordId,
+                params: reqParams,
+                // The caller's own envelope, exactly as `resolveExecutionContext`
+                // built it for this request. ⛔ Not `buildActionExecutionContext`.
+                ec,
+                driver: _context.dataDriver,
+                envId: _context?.environmentId,
+                callData: (a, params, dataDriver, scopeId, execCtx) =>
+                    actionExec.callData(deps, _context, a, params, dataDriver, scopeId, execCtx),
+            });
+            return { handled: true, response: deps.success(result) };
+        }
+
+        const actionContext: any = {
+            record,
+            // [#14143] The caller-scope load's verdict — see
+            // `loadActionSubjectRecord`. `ctx.record.id` is stamped either way, so
+            // this is the only channel that distinguishes "the caller cannot read
+            // this row" from "this action legitimately has no record".
+            ...actionExec.actionRecordLoadSignal(subject),
+            user: userFromAuth,
+            session: actionExec.buildActionSession(deps, ec),
+            // Slim engine facade matching the ActionContext.engine shape used by
+            // CRM handlers. ⚠️ TRUSTED — system-elevated, RLS/FLS-bypassing by
+            // design; see buildActionEngineFacade + buildActionExecutionContext
+            // for the full security-model rationale (#2849, #3914).
+            engine: actionExec.buildActionEngineFacade(deps, ql, ec),
+            // [#3914] `ctx.api` — the ScopedContext a body's `ctx.api.object(...)`
+            // resolves to. Absent here, the sandbox synthesized a context-less
+            // facade and every owner-scoped write died FORBIDDEN. `executionContext`
+            // is the same envelope, carried so the sandbox's own last-resort facade
+            // is elevated identically instead of falling back to no identity.
+            api: actionExec.buildActionApi(deps, ql, ec),
+            executionContext: actionExec.buildActionExecutionContext(ec),
+            params: { ...reqParams, recordId, objectName },
+        };
+
         // ── flow dispatch (#3915) ── the same `dispatchFlowAction` the MCP
         // `run_action` path uses: the automation engine runs `action.target`
         // with the caller's identity forwarded, so a `runAs: 'user'` flow
