@@ -279,8 +279,21 @@ describe('[#8502] a REAL driver fault is withheld from every batch row', () => {
         // The row now carries the machine-readable half too, which is what an
         // idempotent batch writer branches on — it was `INTERNAL_ERROR` with no
         // status while the sentence was withheld.
-        expect(res.results[0].errors[0].code).toBe('DUPLICATE_RECORD');
+        //
+        // ── [#14723] …and the row speaks the WIRE spelling ─────────────────
+        // The engine's envelope is `code: 'DUPLICATE_RECORD'` in-process (the
+        // objectql pins on `insert` / `insertMany` hold that), and this row
+        // used to relay it verbatim while the whole-request failure on the
+        // same route answered `UNIQUE_VIOLATION`. Maintainer ruling
+        // (2026-09-03): one wire spelling on every route. `toRowApiError` now
+        // maps the engine's envelope — name AND code, the whole-request arm's
+        // own gate — to `UNIQUE_VIOLATION`; the status and the platform
+        // sentence above are untouched by it. Pinned over the whole payload
+        // so a sibling `NOT_ATTEMPTED` / `ROLLED_BACK` row cannot carry the
+        // other spelling either.
+        expect(res.results[0].errors[0].code).toBe('UNIQUE_VIOLATION');
         expect(res.results[0].errors[0].httpStatus).toBe(409);
+        expect(payload).not.toContain('DUPLICATE_RECORD');
 
         // ── …and NOT ONE leak assertion moved ──────────────────────────────
         // These are what this file exists for, and they hold against the new

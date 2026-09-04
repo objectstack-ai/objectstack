@@ -1288,7 +1288,7 @@
       "title": "Disabling a packaged flow writes a durable sys_metadata_activation row that survives a cold restart with the trigger left unbound; re-enable UPDATES the row and restores firing",
       "since": "v17",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -1306,7 +1306,7 @@
         "boot showcase isolated against a file DB (dogfood §0); sign in as the dev admin",
         "baseline: POST /api/v1/data/showcase_task with priority='urgent' — one new run for showcase_urgent_task_alert (the single-boot toggle semantics are automation.flow-toggle-kill-switch's; this item takes only enough baseline to anchor the restart contrast)",
         "toggle OFF: POST /api/v1/automation/showcase_urgent_task_alert/toggle {\"enabled\": false}",
-        "read the ledger row over the data API: GET /api/v1/data/sys_metadata_activation (reads are open — apiMethods ['get','list'], sys-metadata-activation.object.ts) and locate the row where metadata_type='flow' AND name='showcase_urgent_task_alert' — record active, package_id, organization_id, and the row id",
+        "read the ledger row over the data API: GET /api/v1/data/sys_metadata_activation (reads are open — apiMethods ['get','list'], sys-metadata-activation.object.ts) and locate the row where metadata_type='flow' AND name='showcase_urgent_task_alert' — record active, package_id and the row id, plus the row's whole KEY SET: organization_id is ABSENT from it, because the table carries no tenant column (#15024 / ADR-0131 D7). ⛔ Do not record the tenant half as a value — `row.organization_id ?? null` answers `null` for a column that does not exist, so a value read passes while measuring nothing",
         "probe the refusal MESSAGE: POST /api/v1/automation/showcase_urgent_task_alert/trigger — record the full error body (status, code, message)",
         "cold restart: stop the server process entirely; boot a second server over the SAME database file; read the boot log for the automation plugin's activation-ledger line",
         "post-restart: GET /api/v1/automation/_status — record enabled/bound for showcase_urgent_task_alert",
@@ -1316,10 +1316,10 @@
       ],
       "acceptance": [
         {
-          "clause": "the toggle writes the durable row, not (only) process state: after {enabled:false} a sys_metadata_activation row exists with metadata_type='flow', name='showcase_urgent_task_alert', package_id='com.example.showcase', active=false, and organization_id NULL (install-level — §5 reserves the column, nothing on this line writes it)",
+          "clause": "the toggle writes the durable row, not (only) process state: after {enabled:false} a sys_metadata_activation row exists with metadata_type='flow', name='showcase_urgent_task_alert', package_id='com.example.showcase', active=false — and NO organization_id key on it. The row is DEPLOYMENT-level state no organization owns: ADR-0131 D7 WITHDREW ADR-0126 §5 D3's reserved-and-never-written column before 17.3 and names this table as not getting it back, so the column is not 'reserved', it is absent from the physical table",
           "oracle": "api",
-          "verify": "the step-4 data-API read returns exactly one such row (unique per (metadata_type, name) via the NULL-collapsed 'organization' index). toggleFlow writes this row FIRST and only then updates the in-process projection (engine.ts, core/src/utils/metadata-activation-store.ts) — so a 2xx toggle with no row is a FAIL even if the same-boot kill switch works",
-          "evidence": "the row read (all five columns) + the toggle response"
+          "verify": "the step-4 data-API read returns exactly one such row (unique per (metadata_type, name) via the declared unique:'global' index over exactly those two required key parts — ⚠️ NOT the NULL-collapsed 'organization' spelling this line used to name: with no tenant column normalizeDeclaredIndex has no part to prepend, so there is no COALESCE arm to reach, ADR-0120 D3 notwithstanding). toggleFlow writes this row FIRST and only then updates the in-process projection (engine.ts, core/src/utils/metadata-activation-store.ts) — so a 2xx toggle with no row is a FAIL even if the same-boot kill switch works. ⛔ Score the tenant half from the row's KEY SET, never from a value: `row.organization_id ?? null` is `null` for a column that does not exist, so a value read passes while measuring nothing (platform-core.activation-ledger-row-contract owns the schema-side probe)",
+          "evidence": "the row read (the four ledger columns, and the key set showing no tenant column) + the toggle response"
         },
         {
           "clause": "the FLOW_DISABLED refusal message names the LEDGER: triggering the disabled flow answers 409 FLOW_DISABLED whose message carries the sys_metadata_activation / activation-ledger phrasing and the two remedies (re-enable, or clone under a new name)",
@@ -1360,7 +1360,9 @@
         "docs/adr/0126-packaged-metadata-customization-model.md §4 (the generic ledger + row shape), §7.2 (the durable row replaces the process-local flowEnabled map; FLOW_DISABLED code reused, distinction rides the message)",
         "packages/services/service-automation/src/engine.ts#toggleFlow (toggleFlow — durable row FIRST), (describeDisabledFlow — the ledger message), (hydrateFlowActivations), (registerFlow does not re-arm a ledger-disabled flow — restart survival's other half), (flowLedgerDisabled projection)",
         "packages/services/service-automation/src/plugin.ts (hydrate AFTER the boot flow pull — the ordering that makes the unbind stick)",
-        "packages/core/src/utils/metadata-activation-store.ts#setActive (org-carrying rows skipped on read), (setActive read-then-update; organization_id never written), (no delete on the engine slice)",
+        "packages/core/src/utils/metadata-activation-store.ts#setActive (setActive read-then-update, keyed on exactly the index's two columns; organization_id never in the write payload), (no delete on the engine slice)",
+        "packages/core/src/utils/metadata-activation-store.ts#list — list() is the whole read path, scoped by metadata_type and by nothing else. ⚠️ The org-row skip this line used to cite is RETIRED, not merely unexercised: the module header records that the NULL-organization filter and the org-row skip both went with the column (#15024)",
+        "docs/adr/0131-total-organization-ownership-no-null-organization-id.md D7 (deployment-level state has no organization column — sys_metadata_activation is named there as reverted before 17.3 and not returning, which is why this item's row read asserts a key set rather than a NULL value)",
         "packages/platform-objects/src/system/sys-metadata-activation.object.ts#apiMethods (apiMethods ['get','list'] — reads open, generic-data-API writes refused)",
         "packages/services/service-automation/src/flow-activation-ledger.test.ts#engine (engine-level pins: hydration unbinds what a PREVIOUS process disabled, ledger-disabled survives re-registration — the HTTP+real-restart path here is what those pins cannot cover)",
         "examples/app-showcase/src/automation/flows/index.ts#UrgentTaskAlertFlow (UrgentTaskAlertFlow) + examples/app-showcase/objectstack.config.ts (com.example.showcase)",
@@ -1373,6 +1375,12 @@
           "date": "2026-08-26",
           "change": "new — ADR-0126 §7.2 turned the flow toggle from a process-local map into a durable sys_metadata_activation row, and no item asserted the durable half: the row's shape and install-level scope, the restart that must leave the trigger unbound, the ledger-naming FLOW_DISABLED message (code deliberately reused, so the message is the only observable distinction), and the update-never-delete re-enable. P0 because a regression here re-arms flows administrators switched off, silently, at the next deploy",
           "ref": "#12438"
+        },
+        {
+          "revision": 2,
+          "date": "2026-09-04",
+          "change": "re-grounded on the tenantless ledger — the durability contract is UNCHANGED (toggle, cold restart, unbound trigger, update-never-delete all stand) and only what the row read records moved. #15024 dropped sys_metadata_activation's reserved organization_id column before it ever shipped, so three lines here described a column that is not there. (1) Step 4 listed organization_id among the fields to capture and the row clause asserted it NULL; both now read the row's KEY SET, because the value spelling passes VACUOUSLY once the column is gone (`row.organization_id ?? null` is `null` either way) — the leg was green for exactly the reason it should have been red, the same inversion #15024 applied to the dogfood pin. (2) The gloss '§5 reserves the column' is wrong on the DECISION, not just the value: ADR-0131 D7 WITHDREW ADR-0126 §5 D3's reserved-and-never-written column ('a reserved nullable tenant column is the shape D1 forbids') and names this table as reverted before 17.3 and not returning, so the old wording told a runner the tenant dimension was coming back. (3) The verify line named the NULL-collapsed 'organization' index, and the source line still cited 'org-carrying rows skipped on read' plus 'organization_id never written' — the index is a plain unique:'global' over the two required key parts (no NULL arm left to collapse), and the read-side skip is retired, not merely unexercised. The store citation is split so #list carries that correction where the read path actually lives, and ADR-0131 D7 is now cited directly",
+          "ref": "#15253"
         }
       ]
     },

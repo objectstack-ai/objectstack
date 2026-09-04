@@ -131,6 +131,21 @@ export function isExpired(value: unknown, nowMs: number): boolean {
 export interface ApiKeyPrincipal {
   userId: string;
   /**
+   * [#15256 / 2A] The `sys_api_key` ROW id — a non-secret handle an operator
+   * can look the credential up by. Carried so the posture-conditional refusal
+   * log in `resolve-authz-context.ts` can name WHICH key was refused without
+   * naming the credential.
+   *
+   * ⛔ Never the raw key and never its hash: the raw key is returned exactly
+   * once by {@link generateApiKey} and only `sha256(raw)` is ever stored, and
+   * neither may enter a log line (see this module's SECURITY header). The row
+   * id is not derived from either.
+   *
+   * Optional because a row is only required to identify its owner; a store
+   * that answers without an `id` still yields a usable principal.
+   */
+  keyId?: string;
+  /**
    * The organization this key authenticates INTO — read from the row's
    * `active_organization_id` and adopted by `resolveAuthzContext` as the
    * request's active organization (`ExecutionContext.tenantId`), which is what
@@ -164,7 +179,24 @@ export type ApiKeyRefusalReason = 'organization_required' | 'organization_member
 export type ApiKeyAdmission =
   | { outcome: 'none' }
   | { outcome: 'admitted'; principal: ApiKeyPrincipal }
-  | { outcome: 'refused'; reason: ApiKeyRefusalReason; message: string };
+  | {
+      outcome: 'refused';
+      reason: ApiKeyRefusalReason;
+      message: string;
+      /**
+       * [#15256 / 2A] The refused key's `sys_api_key` row id — same non-secret
+       * handle as {@link ApiKeyPrincipal.keyId}, carried on this arm too so the
+       * refusal log can name the credential the operator must go look at. ⛔
+       * Never the raw key or its hash. The WIRE answer is unchanged (a generic
+       * `401 UNAUTHENTICATED`, no reason and no id), so nothing here reaches a
+       * caller holding someone else's key.
+       */
+      keyId?: string;
+      /** The owner this refused key authenticates as — for the same log line. */
+      userId?: string;
+      /** The organization the refusal is about, when the key names one. */
+      organizationId?: string;
+    };
 
 /**
  * The shape of the kernel's `tenancy` service this module reads a posture from.
@@ -278,6 +310,10 @@ export async function resolveApiKeyAdmission(
     ? row.active_organization_id
     : undefined;
 
+  // [#15256 / 2A] The row's own id — a non-secret handle for the refusal log.
+  // ⛔ Never `row.key` (the at-rest hash) and never the inbound `apiKey`.
+  const keyId = typeof row.id === 'string' && row.id ? row.id : undefined;
+
   // [#8287] Posture-conditional refusal for a key that carries no organization.
   //
   // ⛔ Never backfilled — inferring the org from the owner's CURRENT membership
@@ -298,16 +334,45 @@ export async function resolveApiKeyAdmission(
   // ⚠️ An ABSENT posture means "the caller could not tell us which posture is in
   // force", and the answer to that is to admit — i.e. today's behaviour. Not
   // fail-closed, deliberately, and this is the one place in this module where
-  // that is the right call: refusing on an unknown posture would break every
-  // org-less key on every `single` deployment whose transport has not been
-  // wired, to enforce a wall that may not exist. Fail-closed belongs on
-  // questions about THIS credential; this is a question about the deployment.
+  // that is the right call. Fail-closed belongs on questions about THIS
+  // credential; this is a question about the DEPLOYMENT, and refusing on an
+  // unknown one would break working automation to enforce a wall that may not
+  // exist at all.
+  //
+  // [#15256 — maintainer ruling 2026-09-04, decision 3A] ⭐ The behaviour is
+  // unchanged and its justification is rewritten, because the premise the
+  // justification rested on was measured FALSE. It read:
+  //
+  //     "refusing on an unknown posture would break every org-less key on
+  //      every `single` deployment whose transport has not been wired"
+  //
+  // The transport it called not-yet-wired was `@objectstack/rest`'s
+  // single-kernel branch — i.e. every deployment the open core builds, not a
+  // residual case. So the sentence described the shipped wiring as an
+  // exception, and the exception was the rule: on that wiring an org-less key
+  // answered `200 + total 0` and an ex-member's stamped key read AND wrote
+  // another organization's rows (objectstack#15163; cloud#1982 with the real
+  // `@objectstack/organizations`). That branch now derives the posture
+  // (`rest-server.ts`, wired by `rest-api-plugin.ts`), and a REST-level pin
+  // holds it derived.
+  //
+  // The only legitimate case left — the one this admission now exists for — is
+  // a HOST THAT REGISTERS NO `tenancy` SERVICE: an embedder composing the
+  // kernel without `plugin-auth`, or any host that never asks for tenancy at
+  // all. There is no wall on such a deployment, so there is nothing for an
+  // org-less key to be walled out of. ⛔ Note what is NOT in that set: a
+  // `tenancy` service that was registered and FAILED to build. That is an
+  // outage, it is classified apart at every transport seam
+  // (`isServiceNotRegisteredError`, #13906 decision 1 option A), and it never
+  // reaches here as an absent posture.
   if (!tenantId && tenancyPosture) {
     const posture = tenancyPosture;
     if (postureEnforcesWall(posture) && !postureUsesUnionScope(posture)) {
       return {
         outcome: 'refused',
         reason: 'organization_required',
+        keyId,
+        userId,
         message:
           'This API key carries no organization and cannot be used under the `isolated` tenancy '
           + 'posture, where every organization-scoped read is walled to an active organization. '
@@ -318,7 +383,7 @@ export async function resolveApiKeyAdmission(
 
   return {
     outcome: 'admitted',
-    principal: { userId, tenantId, scopes: parseScopes(row.scopes) },
+    principal: { userId, keyId, tenantId, scopes: parseScopes(row.scopes) },
   };
 }
 
