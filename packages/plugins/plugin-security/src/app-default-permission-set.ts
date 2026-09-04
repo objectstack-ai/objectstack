@@ -86,8 +86,9 @@ export function appDefaultPermissionSetName(permissions: unknown): string | unde
 }
 
 /**
- * [ADR-0130 D4, #15007] Every permission set a stack config DECLARES — from the
- * flattened top level, and from `packages[]`.
+ * [ADR-0130 D4, #15007] The app-declared default permission-set NAME, resolved
+ * from wherever the artifact carries the declaration — the flattened top
+ * level, or `packages[]`.
  *
  * ## What this exists to stop
  *
@@ -114,15 +115,41 @@ export function appDefaultPermissionSetName(permissions: unknown): string | unde
  * this function has to be a superset of the old read rather than a replacement
  * for it: for every artifact the platform emits today the flattened level
  * answers first and this returns exactly what it returned before. The
- * `packages[]` pass only supplies a set where the top level had none — which is
- * precisely the option-B artifact. That is what makes this card revertible on
- * its own and safe to land before the emitter half (#14512).
+ * `packages[]` pass is consulted ONLY where the top level named no default —
+ * which is precisely the option-B artifact. That is what makes this card
+ * revertible on its own and safe to land before the emitter half (#14512).
+ *
+ * ## The condition is the ANSWER, never the container
+ *
+ * "The top level had none" is spelled as `appDefaultPermissionSetName` coming
+ * back `undefined`, and deliberately NOT as the `permissions` array being
+ * absent or empty. Branching on the container re-creates the silent loss this
+ * card exists to remove, one shape further along: a config whose flattened
+ * level carries permission sets but marks none of them `isDefault` — legal
+ * today, and expressible by hand in any `objectstack.config.ts` — would
+ * short-circuit the whole `packages[]` pass and resolve `undefined`, with
+ * nothing thrown and nothing logged. Reading the container also hands back the
+ * `[]`-is-truthy trap for free. The answer is the only condition that cannot
+ * be wrong in either direction, so the answer is what this branches on.
+ *
+ * ⚠️ That is deliberately NOT the shape of the sibling reader's condition, and
+ * the difference is a property of the readers, not an inconsistency to
+ * converge away. `resolveStackCollection` (`packages/cli/src/utils/
+ * stack-collections.ts`, #15006) branches on the CONTAINER — `if
+ * (Array.isArray(top)) return top;` — and is right to: it returns a whole
+ * collection, so a top level that carries the key has, by construction,
+ * already answered, and `composeStacks` flattened that array into the union.
+ * This reader extracts a DISTINGUISHED ELEMENT out of the collection instead,
+ * so "the key is present" and "the key answers" are two different facts here
+ * and one of them is the wrong one to branch on. Same discipline — start from
+ * the expression this program replaced, consult `packages[]` only where it came
+ * back empty — read against what each reader's expression actually returns.
  *
  * ## The order is `resolveArtifactPackageOrder`'s, not the array's
  *
- * `appDefaultPermissionSetName` resolves the FIRST `isDefault` set, so with more
- * than one package declaring one, "first" has to mean the same thing here as it
- * does everywhere else the artifact is read. `resolveArtifactPackageOrder`
+ * The first package body that names a default wins, so with more than one
+ * package declaring one, "first" has to mean the same thing here as it does
+ * everywhere else the artifact is read. `resolveArtifactPackageOrder`
  * (`@objectstack/core`, ADR-0130 D4+D5, #14643) is the ONE place that turns an
  * artifact into its ordered package list — dependency-topological, so a package
  * that extends another is read after it regardless of which array slot it
@@ -130,36 +157,41 @@ export function appDefaultPermissionSetName(permissions: unknown): string | unde
  * traversal is a second ordering, and the depended-upon package would win or
  * lose by authoring accident.
  *
- * ## Two things it deliberately does NOT do
+ * ## The package order is resolved BEFORE the top level is consulted
  *
- *   • It does not look inside the SINGULAR `manifest`. That constraint is
- *     #7001's and it still holds — the harness must not honour a declaration
- *     `serve.ts` ignores. Note this is not a special case bolted on: an
- *     artifact carrying no `packages` key makes `resolveArtifactPackageOrder`
- *     return the caller's own object as the single package body (D4's second
- *     branch, D7's compatibility term), so that branch reads `permissions` from
- *     exactly where the old code read it and nowhere else.
- *   • It does not catch `resolveArtifactPackageOrder`'s refusals. A malformed
- *     `packages` (not an array, an unwrapped entry, a duplicate package id)
- *     raises an ADR-0112 envelope here, the same one the manifest service
- *     raises when it registers that artifact moments later. Swallowing it would
- *     resolve a permission surface out of an artifact the loader refuses to
- *     load — the gate travels with the read.
+ * Reading that line as a misplaced statement is the expected mistake, so: it is
+ * placed there on purpose, and moving it below the early return is a behaviour
+ * change. `resolveArtifactPackageOrder` REFUSES a malformed `packages` (not an
+ * array, an unwrapped entry, a duplicate package id) with an ADR-0112 envelope,
+ * and this reader does not catch it — swallowing it would resolve a permission
+ * surface out of an artifact the loader refuses to load. Resolving the order
+ * first is what keeps that refusal unconditional: an artifact is either
+ * loadable or refused, and which answer this reader gives about it must not
+ * depend on whether its flattened level happened to name a default first.
+ *
+ * ## One thing it deliberately does NOT do
+ *
+ * It does not look inside the SINGULAR `manifest`. That constraint is #7001's
+ * and it still holds — the harness must not honour a declaration `serve.ts`
+ * ignores. Note this is not a special case bolted on: an artifact carrying no
+ * `packages` key never reaches the package pass at all, so that branch reads
+ * `permissions` from exactly where the old code read it and nowhere else.
  */
-function declaredPermissionSets(config: unknown): unknown[] {
-  const sets: unknown[] = [];
+function declaredDefaultPermissionSetName(config: unknown): string | undefined {
+  const packages = (config as { packages?: unknown } | null | undefined)?.packages;
+  const bodies =
+    packages === undefined || packages === null ? [] : resolveArtifactPackageOrder(config);
 
   const flattened = (config as { permissions?: unknown } | null | undefined)?.permissions;
-  if (Array.isArray(flattened)) sets.push(...flattened);
+  const fromFlattened = appDefaultPermissionSetName(flattened);
+  if (fromFlattened !== undefined) return fromFlattened;
 
-  const packages = (config as { packages?: unknown } | null | undefined)?.packages;
-  if (packages === undefined || packages === null) return sets;
-
-  for (const body of resolveArtifactPackageOrder(config)) {
+  for (const body of bodies) {
     const declared = (body as { permissions?: unknown } | null | undefined)?.permissions;
-    if (Array.isArray(declared)) sets.push(...declared);
+    const fromPackage = appDefaultPermissionSetName(declared);
+    if (fromPackage !== undefined) return fromPackage;
   }
-  return sets;
+  return undefined;
 }
 
 /**
@@ -191,13 +223,14 @@ function declaredPermissionSets(config: unknown): unknown[] {
  * the result straight through — `new SecurityPlugin(appSecurityPluginOptions(config))`
  * — and a caller cannot get the undefined case subtly wrong.
  *
- * Reads the sets through {@link declaredPermissionSets} — the flattened top
- * level `serve.ts` has always read, and, for a multi-package artifact, the
- * `packages[]` bodies that carry the same declaration under ADR-0130 D4.
+ * Resolves the name through {@link declaredDefaultPermissionSetName} — the
+ * flattened top level `serve.ts` has always read, and, for a multi-package
+ * artifact, the `packages[]` bodies that carry the same declaration under
+ * ADR-0130 D4.
  */
 export function appSecurityPluginOptions(
   config: unknown,
 ): { fallbackPermissionSet: string } | undefined {
-  const name = appDefaultPermissionSetName(declaredPermissionSets(config));
+  const name = declaredDefaultPermissionSetName(config);
   return name ? { fallbackPermissionSet: name } : undefined;
 }
