@@ -454,14 +454,15 @@ describe('#14541 · structured arms are consulted by BOTH doors', () => {
             expect(single.status).toBe(400);
             expect(single.body.code).toBe('ERR_DATASOURCE_UNAVAILABLE');
             expect(bulk.body.code).toBe('ERR_DATASOURCE_UNAVAILABLE');
-            // ⚠️ The bodies still differ by ONE key, and it is not this card's
-            // defect: `classifyDataError`'s GENERIC declared-status passthrough
-            // appends `object` from the door's argument and
-            // `resolveErrorResponse`'s does not. Same door-disagreement class,
-            // one arm over, untouched here and filed as #14725 — pinned so the
-            // residue is visible rather than implied.
+            // [#14725] The bodies used to differ by ONE key here — the residue
+            // this case pinned so it was visible rather than implied:
+            // `classifyDataError`'s GENERIC declared-status passthrough
+            // appended `object` from the door's argument and
+            // `resolveErrorResponse`'s did not. That card added the limb, so
+            // the verdict this case is labelled with now holds for the BODY
+            // too, and the pin says so rather than describing a closed gap.
             expect(single.body).toHaveProperty('object', 'account');
-            expect(bulk.body).not.toHaveProperty('object');
+            expect(bulk.body).toEqual(single.body);
         });
 
         it('CONVERGED: the arm still answers 503 when the producer declared NO status', () => {
