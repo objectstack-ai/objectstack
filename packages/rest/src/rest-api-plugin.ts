@@ -1,9 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { Plugin, PluginContext, IHttpServer, isServiceNotRegisteredError, effectiveTenancyPosture } from '@objectstack/core';
-// [#13906] The wall predicate, from its single owner — the same vocabulary
-// `resolveAuthzContext` compiles against for the Layer 0 refusals.
-import { postureEnforcesWall } from '@objectstack/spec/security';
+import { Plugin, PluginContext, IHttpServer, isServiceNotRegisteredError } from '@objectstack/core';
 import { RestServer, RestKernelManager, RestProtocol, RestRequestEnvResolver, RestEnvRegistry } from './rest-server.js';
 import { RestServerConfig } from '@objectstack/spec/api';
 import { mountAndRecordDirectRoutes } from './direct-mount-composition.js';
@@ -176,88 +173,6 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
                 kernelManager = ctx.getService<RestKernelManager>(kernelManagerService);
             } catch (e) {
                 // Single-kernel deployment — fall back to the control protocol
-            }
-
-            // [#13906 — maintainer ruling 2026-09-02, decision 1 option B′]
-            // REFUSE a wall-enforcing tenancy posture on the single-kernel
-            // provider wiring, loudly, at BOOT — because this wiring cannot
-            // enforce it and must not pretend to.
-            //
-            // ## The measurement this exists to answer
-            //
-            // `RestServer.computeExecCtx` reads the posture off the LOCAL
-            // `kernel` variable, and that variable is assigned on the
-            // kernelManager branches ONLY. With no kernelManager the transport
-            // resolves auth and data through the injected providers instead, so
-            // `kernel` stays `undefined` and the posture is never asked for —
-            // not merely absent on failure, NEVER READ. Driven on one real
-            // `ObjectKernel` carrying a healthy `isolated` tenancy behind a
-            // RECORDING factory, wired both ways, same ex-member org-stamped key:
-            //
-            // | wiring                    | door | tenancy factory invocations |
-            // |:--|:--|:--|
-            // | via `kernelManager`       | 401 refused | 1 |
-            // | via the provider wiring   | **200 served** | **0** |
-            //
-            // ⇒ a healthy, correctly-configured, wall-enforcing tenancy service
-            // enforces NOTHING on this wiring, and no failure is required to
-            // reach that state — it is the NORMAL state. That is why the ruling
-            // put it here rather than in the seam: there is no posture to fix at
-            // request time, so the honest answer is to refuse the composition.
-            //
-            // ⛔ Option B — wiring a tenancy provider into the single-kernel path
-            // — was NOT taken (it needs a product answer about whether these
-            // deployments should run walled postures at all). This is B′: the
-            // deployment is told, at boot, that what it configured is not being
-            // enforced, instead of discovering it from a served request.
-            //
-            // ⚠️ Positive knowledge is REQUIRED to refuse: only a posture we
-            // actually READ and that actually enforces a wall trips this. A
-            // tenancy service that is absent (the overwhelmingly common
-            // single-kernel shape) or unreadable cannot assert a configured
-            // wall, so it is logged and allowed to proceed — refusing there
-            // would break embedders that never asked for a wall.
-            if (!kernelManager) {
-                const localKernel: any = typeof ctx.getKernel === 'function' ? ctx.getKernel() : undefined;
-                let tenancySource: unknown;
-                if (localKernel && typeof localKernel.getServiceAsync === 'function') {
-                    try {
-                        tenancySource = await localKernel.getServiceAsync('tenancy');
-                    } catch (err) {
-                        // Never registered is the supported shape and is quiet.
-                        // Anything else means we could not READ the posture, so
-                        // we cannot assert one is configured — loud in the log,
-                        // but not a refusal. See the RESIDUE note on the card.
-                        if (!isServiceNotRegisteredError(err)) {
-                            ctx.logger.error(
-                                '[security] RestApiPlugin: the `tenancy` service could not be read at boot, so it '
-                                + 'could not be checked against this single-kernel wiring, which carries NO tenancy '
-                                + 'posture into request authorization. If a wall-enforcing posture is '
-                                + 'configured here, it is NOT being enforced.',
-                                err as any,
-                            );
-                        }
-                        tenancySource = undefined;
-                    }
-                }
-                const bootPosture = effectiveTenancyPosture(tenancySource as any);
-                if (bootPosture && postureEnforcesWall(bootPosture)) {
-                    // ⛔ The tracker id stays in THIS comment and out of the
-                    // runtime string: an operator reading a boot failure cannot
-                    // resolve `#NNNN` (maintainer ruling 2026-08-12). The
-                    // reference is #13906 / the 2026-09-02 ruling, decision 1 B′.
-                    throw new Error(
-                        `[security] RestApiPlugin refuses to start: the kernel's \`tenancy\` service reports the `
-                        + `wall-enforcing posture \`${bootPosture}\`, but this deployment has no \`kernel-manager\` `
-                        + `service, so the REST transport resolves every request through the single-kernel `
-                        + `providers and NEVER reads a tenancy posture. The Layer 0 organization wall — including `
-                        + `the \`organization_required\` and \`organization_membership_ended\` API-key refusals — `
-                        + `would silently not be enforced. `
-                        + `Fix by mounting a kernel-manager service (the multi-environment wiring that can carry a `
-                        + `posture), or by setting the tenancy posture to \`single\` if this deployment is not `
-                        + `meant to run an organization wall.`,
-                    );
-                }
             }
 
             // Optional — only present in runtime mode. When available,

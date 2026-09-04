@@ -2,7 +2,7 @@
 '@objectstack/rest': minor
 ---
 
-REST no longer reads a FAILED authorization-input lookup as "this check does not apply" — the tenancy-posture and ADR-0069 auth-gate seams in `computeExecCtx` fail closed, and a wall-enforcing posture is refused at boot on wiring that cannot enforce it
+REST no longer reads a FAILED authorization-input lookup as "this check does not apply" — the tenancy-posture and ADR-0069 auth-gate seams in `computeExecCtx` fail closed
 
 Two seams inside `RestServer.computeExecCtx` absorbed a FAILURE into the same `undefined` an
 ABSENT wiring produces, and both feed authorization inputs. Unlike the sibling repairs in this
@@ -29,18 +29,12 @@ removed:
   outage instead of serving the request. The classification is the registry's, never message text.
   The WIRING fact is taken from the kernel's presence and never inferred from what the read
   returned.
-- **Single-kernel wiring.** On deployments with no `kernel-manager` service, `computeExecCtx`
-  never reads a tenancy posture at all — measured with a recording factory, invocation count 0 —
-  so a healthy, correctly-configured, wall-enforcing tenancy service enforced nothing there, with
-  no failure required. The REST plugin now **refuses to start** in exactly that composition, naming
-  the configured posture and how to fix it, rather than serving requests that silently skip the
-  Layer 0 organization wall. Deployments with no tenancy service, with a `single` posture, or with a
-  kernel-manager are untouched.
 - **ADR-0069 auth gate.** Fails closed in one precisely measured window only: `isAuthGateActive()`
   answered `true` **and** the gate's session re-read then failed. A gate the deployment declared
   active no longer vanishes silently. The common inactive path, a probe that throws, and a
   successful re-read carrying no gate all keep their existing behaviour.
 
-Operators running a wall-enforcing tenancy posture on a single-kernel REST deployment must mount a
-kernel-manager service or set the posture to `single`; that composition was never enforcing the
-wall it declared, and now says so at boot instead of at audit time.
+Boot behaviour is unchanged: no composition that starts today stops starting. Single-kernel REST
+deployments — the wiring with no `kernel-manager` service — keep their current behaviour exactly,
+including the fact that `computeExecCtx` reads no tenancy posture there. What that wiring actually
+skips is being measured separately and is not changed here.

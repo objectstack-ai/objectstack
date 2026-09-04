@@ -16,14 +16,15 @@
  * **Maintainer ruling, 2026-09-02** (director seat, summon #8; verbatim
  * 「14324 等我发版，其他同意」 adopting the recommendation as presented):
  *
- *  - **Decision 1 — tenancy posture: A + B′.** A: absorb ONLY the branded
+ *  - **Decision 1 — tenancy posture: A.** Absorb ONLY the branded
  *    not-registered rejection (`isServiceNotRegisteredError`, the
  *    discriminator the shipped `objectQLProvider` already uses one layer
  *    down); every unbranded failure fails closed instead of collapsing into
- *    the absent-posture path. B′: on the single-kernel provider wiring a
- *    configured wall-enforcing posture is refused LOUDLY AT BOOT — that
- *    wiring cannot enforce it, so it must not pretend to. ⛔ Option B (wiring
- *    a tenancy provider into the single-kernel path) was NOT taken.
+ *    the absent-posture path. ⛔ Option B (wiring a tenancy provider into the
+ *    single-kernel path) was NOT taken. ⭐ The 2026-09-02 ruling also carried
+ *    a B′ half — a BOOT refusal of a wall-enforcing posture on the
+ *    single-kernel wiring — and the **2026-09-04 ruling WITHDREW it**; see
+ *    the note below.
  *  - **Decision 2 — ADR-0069 auth gate: B.** Fail closed in the measured
  *    window ONLY: `isAuthGateActive()` answered `true` AND the gate re-read
  *    then failed. ⛔ The common inactive path, and a probe that throws, are
@@ -34,11 +35,26 @@
  * not widen either repair on the strength of this file — the narrowness
  * controls below exist precisely to make widening fail.
  *
- * B′'s own half is driven in `rest-api-plugin-tenancy-posture-boot-refusal
- * .test.ts`, because it is a BOOT refusal in the plugin rather than a
- * request-time seam. ⚠️ Consequently §3 below still measures 200 on the
- * provider wiring and that is CORRECT: B′ refuses the composition at boot, it
- * does not change `computeExecCtx`, which still never reads a posture there.
+ * **Maintainer ruling, 2026-09-04** (live chat, verbatim
+ * 「按照你的建议，你帮我跟进处理15020」, recorded on the card):
+ * decision 1 narrows to **A alone**; **B′ is WITHDRAWN** and its plugin block
+ * and dedicated test file are removed. It supersedes only the B′ half of the
+ * 2026-09-02 ruling — A and decision 2 stand exactly as ruled there.
+ *
+ * Why: the only registrar of a `kernel-manager` service in this repository was
+ * B′'s own narrowness control, so the refusal fired on every real walled
+ * composition the open core can build (`os serve` under `isolated`, the
+ * ADR-0105 harness, seven dogfood suites), and its premise was false where it
+ * fired — a wall-enforcing effective posture REQUIRES `org-scoping`, which is
+ * exactly what keeps the platform's `organization_id` row policies standing
+ * (ADR-0105 D3). B′'s underlying question — what the single-kernel provider
+ * wiring actually skips — survives as its own measurement card, #15163.
+ *
+ * ⚠️ §3 below therefore measures 200 on the provider wiring, and that stays
+ * CORRECT and stays PINNED: withdrawing B′ returns that wiring to `main`'s
+ * behaviour, and neither ruling changed `computeExecCtx`, which still never
+ * reads a posture there. ⛔ That 200 is the subject of #15163, not a
+ * regression introduced here.
  *
  * ## Why this card is not its siblings, and why the direction matters
  *
