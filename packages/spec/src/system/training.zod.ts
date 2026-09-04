@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
+import { retiredKey } from '../shared/retired-key';
 
 /**
  * Information Security Training Protocol — ISO 27001:2022 (A.6.3)
@@ -31,6 +32,61 @@ export const TrainingCategorySchema = lazySchema(() => z.enum([
   'other',                    // Other training categories
 ]));
 
+// ─── RETIRED deadline keys (ADR-0049 enforce-or-remove) ─────────────────────
+//
+// Five minute/day-shaped duration and deadline keys were declared on the
+// training schemas and read by NOTHING: no training engine scheduled a
+// course, computed a certification expiry, re-assigned training on an
+// interval, escalated an expired certification or sent a reminder — the
+// schemas are exported, mounted by no stack key and registered as no metadata
+// type, and the reader census over every package outside `packages/spec` (and
+// over objectui at the pinned sha) returned zero hits for every key. Maintainer
+// ruling 2026-09-02 (recorded on #14477): retire the family under
+// enforce-or-remove.
+//
+// Route: `retiredKey()` tombstones, NOT plain deletion (the schemas are not
+// `.strict()`; a bare deletion would be a silent strip, ADR-0104). No D2
+// conversion and no `os migrate meta` sentence: none of these schemas is a
+// stack collection member, so a conversion would have no seam that ever runs
+// (the `kernel/MetadataPluginConfig:additionalTypes` precedent). Registered
+// as `RETIRED_KEYS_BY_MAJOR[18]` entries plus the D3 semantic entry
+// `training-deadline-keys-retired`.
+
+const DURATION_MINUTES_RETIRED =
+  '`TrainingCourse.durationMinutes` was removed in @objectstack/spec 17 (ADR-0049 '
+  + 'enforce-or-remove) — nothing ever read it: no training engine scheduled, timed or '
+  + 'reported a course, so the duration was a number the platform displayed nowhere and acted '
+  + 'on never. Delete the key. There is no replacement, because no training-management engine '
+  + 'exists.';
+
+const VALIDITY_DAYS_RETIRED =
+  '`TrainingCourse.validityDays` was removed in @objectstack/spec 17 (ADR-0049 '
+  + 'enforce-or-remove) — nothing ever read it: no engine computed a certification expiry from '
+  + 'it, so a certificate declared valid for 365 days never expired on the platform and never '
+  + 'triggered recertification. Delete the key. There is no replacement, because no '
+  + 'training-management engine exists to keep a validity window.';
+
+const RECERTIFICATION_INTERVAL_DAYS_RETIRED =
+  '`TrainingPlan.recertificationIntervalDays` was removed in @objectstack/spec 17 (ADR-0049 '
+  + 'enforce-or-remove) — nothing ever read it: no engine re-assigned training on an interval, '
+  + 'so the interval never elapsed into anything, and its default of 365 days was materialized '
+  + 'into every parsed plan without ever being consulted. Delete the key. There is no '
+  + 'replacement, because no training-management engine exists.';
+
+const GRACE_PERIOD_DAYS_RETIRED =
+  '`TrainingPlan.gracePeriodDays` was removed in @objectstack/spec 17 (ADR-0049 '
+  + 'enforce-or-remove) — nothing ever read it: no engine escalated an expired certification, '
+  + 'so a grace period before that escalation had nothing to delay, and its default of 30 days '
+  + 'was materialized into every parsed plan without ever being consulted. Delete the key. '
+  + 'There is no replacement, because no training-management engine exists.';
+
+const REMINDER_DAYS_BEFORE_RETIRED =
+  '`TrainingPlan.reminderDaysBefore` was removed in @objectstack/spec 17 (ADR-0049 '
+  + 'enforce-or-remove) — nothing ever read it: no engine sent a training reminder, so the lead '
+  + 'time was never counted down, and its default of 14 days was materialized into every parsed '
+  + 'plan without ever being consulted. Delete the key. There is no replacement, because no '
+  + 'training-reminder engine exists.';
+
 /**
  * Training Completion Status Schema
  */
@@ -54,10 +110,8 @@ export const TrainingCompletionStatusSchema = lazySchema(() => z.enum([
  *   "title": "Information Security Fundamentals",
  *   "description": "Annual security awareness training for all employees",
  *   "category": "security_awareness",
- *   "durationMinutes": 60,
  *   "mandatory": true,
  *   "targetRoles": ["all_employees"],
- *   "validityDays": 365,
  *   "passingScore": 80
  * }
  * ```
@@ -84,9 +138,9 @@ export const TrainingCourseSchema = lazySchema(() => z.object({
   category: TrainingCategorySchema.describe('Training category'),
 
   /**
-   * Estimated duration in minutes
+   * REMOVED (ADR-0049 enforce-or-remove) — see `DURATION_MINUTES_RETIRED` above.
    */
-  durationMinutes: z.number().min(1).describe('Estimated course duration in minutes'),
+  durationMinutes: retiredKey(DURATION_MINUTES_RETIRED),
 
   /**
    * Whether this training is mandatory
@@ -99,9 +153,9 @@ export const TrainingCourseSchema = lazySchema(() => z.object({
   targetRoles: z.array(z.string()).describe('Target roles or groups'),
 
   /**
-   * Validity period in days before recertification is needed
+   * REMOVED (ADR-0049 enforce-or-remove) — see `VALIDITY_DAYS_RETIRED` above.
    */
-  validityDays: z.number().optional().describe('Certification validity period in days'),
+  validityDays: retiredKey(VALIDITY_DAYS_RETIRED),
 
   /**
    * Minimum passing score (percentage) for assessment
@@ -179,10 +233,9 @@ export const TrainingPlanSchema = lazySchema(() => z.object({
   courses: z.array(TrainingCourseSchema).describe('Training courses'),
 
   /**
-   * Default recertification interval in days
+   * REMOVED (ADR-0049 enforce-or-remove) — see `RECERTIFICATION_INTERVAL_DAYS_RETIRED` above.
    */
-  recertificationIntervalDays: z.number().default(365)
-    .describe('Default recertification interval in days'),
+  recertificationIntervalDays: retiredKey(RECERTIFICATION_INTERVAL_DAYS_RETIRED),
 
   /**
    * Whether to track training completion for compliance reporting
@@ -191,10 +244,9 @@ export const TrainingPlanSchema = lazySchema(() => z.object({
     .describe('Track training completion for compliance'),
 
   /**
-   * Grace period in days after expiry before non-compliance escalation
+   * REMOVED (ADR-0049 enforce-or-remove) — see `GRACE_PERIOD_DAYS_RETIRED` above.
    */
-  gracePeriodDays: z.number().default(30)
-    .describe('Grace period in days after certification expiry'),
+  gracePeriodDays: retiredKey(GRACE_PERIOD_DAYS_RETIRED),
 
   /**
    * Whether to send reminders for upcoming training deadlines
@@ -203,10 +255,9 @@ export const TrainingPlanSchema = lazySchema(() => z.object({
     .describe('Send reminders for upcoming training deadlines'),
 
   /**
-   * Days before deadline to send first reminder
+   * REMOVED (ADR-0049 enforce-or-remove) — see `REMINDER_DAYS_BEFORE_RETIRED` above.
    */
-  reminderDaysBefore: z.number().default(14)
-    .describe('Days before deadline to send first reminder'),
+  reminderDaysBefore: retiredKey(REMINDER_DAYS_BEFORE_RETIRED),
 }).describe('Organizational training plan per ISO 27001:2022 A.6.3'));
 
 // Type exports

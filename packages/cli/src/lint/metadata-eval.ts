@@ -37,7 +37,11 @@ export interface MetadataEvalCase {
 export interface MetadataEvalCaseResult {
   id: string;
   prompt: string;
-  /** True when the (generated or fixture) stack failed to materialize. */
+  /**
+   * Set when this case has no usable stack to judge — the generator threw, or
+   * the value it returned could not be scored. Present ⇒ the case FAILED, and
+   * the string names the cause.
+   */
   generationError?: string;
   score: MetadataScore;
   minScore: number;
@@ -62,7 +66,8 @@ export interface RunMetadataEvalOptions {
   /**
    * Live generator. When provided, the harness scores `generate(prompt, id)`
    * instead of the case fixture. Returning a rejected promise / throwing marks
-   * that case as a generation error (failed).
+   * that case as a generation error (failed) — and so does returning a value
+   * that cannot be scored, since scoring it is what the harness does next.
    */
   generate?: (prompt: string, caseId: string) => unknown | Promise<unknown>;
   /** Default pass threshold for cases that don't set their own `minScore`. */
@@ -72,8 +77,46 @@ export interface RunMetadataEvalOptions {
 const DEFAULT_MIN_SCORE = 75;
 
 /**
+ * The score attached to a case whose stack could not be scored AT ALL.
+ *
+ * ⛔ Deliberately NOT `scoreMetadata({})`, even though the throwing-generator
+ * path above substitutes an empty stack: the empty stack scores 100 / A /
+ * `valid: true` (pinned in `score.test.ts`), and stamping that on a stack
+ * nobody could parse would put a benign-looking verdict next to a failure.
+ * A stack that cannot be walked is not an empty stack, and `valid: true` for
+ * one that was never parsed is simply false.
+ *
+ * ⛔ This is not a measurement and must never be read as one — the case is
+ * already failed by its `generationError`. It exists so `MetadataScore` stays
+ * total and the report's shape never varies between a scored and an unscorable
+ * case. Fresh object per call: the report is handed to callers who may mutate.
+ */
+function unscorableScore(): MetadataScore {
+  return {
+    score: 0,
+    valid: false,
+    grade: 'F',
+    counts: { schemaErrors: 0, errors: 0, warnings: 0, suggestions: 0 },
+    schemaErrors: [],
+    issues: [],
+  };
+}
+
+/**
  * Run the eval over a set of cases. Offline (fixtures) unless `generate` is
- * supplied. Never throws — generation failures become failed cases.
+ * supplied.
+ *
+ * Never throws over its own work: producing a stack and scoring it are both
+ * inside the loop's guards, so a generator that throws, a generator that
+ * returns a value nobody can walk, and a fixture that cannot be scored all
+ * become that case's `generationError` — a FAILED case in the returned report,
+ * never an escaping error.
+ *
+ * ⚠️ The one thing outside that promise, stated rather than implied: reading
+ * the caller's own `cases` entries (`c.id`, `c.prompt`, `c.fixture`,
+ * `c.minScore`). A case object whose property reads themselves throw is a
+ * broken argument, not a failed case — there is no id to report it under. No
+ * in-repo caller can reach it: `os lint --eval` passes a static corpus.
  */
 export async function runMetadataEval(
   cases: MetadataEvalCase[],
@@ -99,7 +142,25 @@ export async function runMetadataEval(
       }
     }
 
-    const score = scoreMetadata(stack);
+    // Scoring walks a value this harness did not build, and walking it can
+    // throw. Two sites are driven: the normalizer spreads the stack's top
+    // level, and the schema parse one call further in walks the rest — so a
+    // poisoned property enumeration anywhere in a generated stack surfaces
+    // here, NOT inside the `try` above, which only ever covered `generate`
+    // itself. That is why the docblock's "Never throws" was false as written.
+    //
+    // ⛔ The throw is never absorbed: it becomes THIS CASE's failure rather
+    // than the process's, routed through the same per-case channel a throwing
+    // generator uses, so `passed` below is false and the caller's report says
+    // `ok: false`. Swallowing it into a passing case would be worse than the
+    // crash it replaces.
+    let score: MetadataScore;
+    try {
+      score = scoreMetadata(stack);
+    } catch (err: any) {
+      generationError = `Failed to score the ${source} stack: ${err?.message || String(err)}`;
+      score = unscorableScore();
+    }
     results.push({
       id: c.id,
       prompt: c.prompt,

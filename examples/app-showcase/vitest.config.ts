@@ -98,5 +98,18 @@ export default defineConfig({
     // test output behaves, because ObjectQL's logger writes to `process.stdout`
     // directly and never went through this path at all.
     disableConsoleIntercept: true,
+    // #13517 / #15425: quiet the SchemaRegistry's per-item registration
+    // chatter — the engine's OWN `OS_REGISTRY_LOG` seam
+    // (`SchemaRegistryOptions.logLevel` / `REGISTRY_LOG_LEVELS`, objectql's
+    // registry.ts), not a change to its shipped 'info' default and not a
+    // library that sniffs `process.env.VITEST`. ⭐ This answers the question
+    // the docblock above deferred in as many words — "most of it
+    // `[Registry]` registration chatter. Quieting THAT is a separate question
+    // about `@objectstack/objectql`'s own default log level, not about this
+    // setting." It is: the level is declared HERE, in the harness, and the
+    // shipped default is untouched. `gap-fill.test.ts` constructs the
+    // registry this reaches. Enforced by
+    // scripts/check-registry-log-declared.mjs.
+    env: { OS_REGISTRY_LOG: 'warn' },
   },
 });

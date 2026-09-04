@@ -595,6 +595,94 @@ const RESOLUTION_CONTROLS = [
 ];
 
 /**
+ * What the tier-1 worklist PRINTS, pinned against a declared population.
+ *
+ * ## Why a fixture, in an instrument that measures
+ *
+ * The worklist body has three readings and this tree can only reach one of
+ * them: it prints a row per file with an outstanding DARK member, and there is
+ * one outstanding member here (`auth-manager.ts::verifyMcpAccessToken`) beside
+ * three DETERMINED rows. So neither `(none …)` line has ever been printed by a
+ * run of this instrument, and an unreachable reading is a reading nobody
+ * proofreads.
+ *
+ * That is measured, not feared. The empty-worklist line said the ruling's gate
+ * handover step "is unblocked" — and went on saying it after PR #15458
+ * performed that step and PR #15472 closed #12981, and through the sweep that
+ * repaired the four stale statements around it (#15459, #15473, PR #15502),
+ * because a string no run can print is a string no run can contradict (#15503).
+ *
+ * ## What is asserted, and what is deliberately not
+ *
+ * `worklistLines` is handed a population this tree does not have, and what it
+ * returns is pinned BY VALUE below. The pin is a SECOND, INDEPENDENT spelling
+ * of each line on purpose: a control that compared the producer against a
+ * shared constant would pass whatever that constant said, which is the vacuous
+ * shape the rest of this file argues against.
+ *
+ * ⛔ No row here is a claim about the tree. Membership is measured from
+ * `packages/**` and is decided before this family is consulted; the only thing
+ * asserted is what the report SAYS about a population it is handed. The
+ * census's own reading is byte-identical across the change that added this
+ * family.
+ *
+ * The third row is the family's NEGATIVE leg and is not optional: without a
+ * population that must NOT print either `(none …)` line, the two pins above
+ * would stay green against a producer that had stopped consulting its
+ * population at all. It pins the row format and the by-file sort with the same
+ * stroke.
+ *
+ * Asserted in BOTH self-test modes, by the test `SELF_TEST_MODES` states: can a
+ * successful repair destroy it? No — the empty worklist it pins is the state
+ * the repair programme is trying to reach, so the day this family matters most
+ * is the day the programme succeeds.
+ */
+const WORKLIST_READING_CONTROLS = [
+  {
+    when: 'no outstanding member and no DETERMINED row — the programme has finished',
+    outstanding: [],
+    determined: [],
+    expect: [
+      '    (none — the family is repaired; the gate handover step landed in PR #15458, and #12981 closed with PR #15472)',
+    ],
+    why:
+      'The reading this family was added for (#15503). It must state the handover as LANDED: PR #15458 '
+      + 'declared `tryInsert`/`tryUpdate` in the gate\'s `DURABILITY_CRITICAL_CALLEES` and PR #15472 closed '
+      + '#12981. A future tense here would announce a step that already happened, on the one day this '
+      + 'instrument is finally read for its verdict rather than its worklist.',
+  },
+  {
+    when: 'no outstanding member, but the register still holds rows',
+    outstanding: [],
+    determined: [{ file: 'packages/fixture/src/register-only.ts' }],
+    expect: [
+      '    (none outstanding — every DARK member is DETERMINED below, and every one is still a member)',
+    ],
+    why:
+      'The other unreachable reading. It has to keep saying that a DETERMINED site is STILL A MEMBER — '
+      + 'the whole point of the #13886 register is that it partitions the printed worklist and moves no '
+      + 'count, and this is the one line a reader meets that claim in.',
+  },
+  {
+    when: 'two outstanding members in two files — the shape this tree actually prints',
+    outstanding: [
+      { file: 'packages/fixture/src/beta.ts' },
+      { file: 'packages/fixture/src/alpha.ts' },
+      { file: 'packages/fixture/src/alpha.ts' },
+    ],
+    determined: [],
+    expect: [
+      '    2×  packages/fixture/src/alpha.ts',
+      '    1×  packages/fixture/src/beta.ts',
+    ],
+    why:
+      'The NEGATIVE leg: a population with work in it must print the work and NEITHER `(none …)` line. '
+      + 'Without it the two pins above would also pass for a producer that ignored its population and '
+      + 'printed the empty reading unconditionally. It pins the count column and the by-file sort too.',
+  },
+];
+
+/**
  * The DETERMINED register (#13886) — DARK sites whose determination is settled.
  *
  * ## The defect it repairs, and the one thing it must NOT do
@@ -1588,6 +1676,35 @@ function formatSite(f) {
     + `${f.healthySummaryInFile ? '  healthySummary' : ''}\n      ${f.snippet}`;
 }
 
+/**
+ * The BODY of the tier-1 worklist: one row per file that still holds an
+ * outstanding DARK member, or the one line the report prints when it holds
+ * none.
+ *
+ * Split out of `report()` so the two `(none …)` readings can be exercised
+ * against a declared population instead of only against this tree — see
+ * `WORKLIST_READING_CONTROLS`, which is the reason this function exists as a
+ * function. It takes its population as arguments and reads nothing else, so a
+ * control can hand it a tree that does not exist without touching the census.
+ *
+ * @param outstanding tier-1 DARK members with no DETERMINED row honouring them.
+ * @param determined  tier-1 DARK members a DETERMINED row does honour. Only its
+ *                    LENGTH is read here: the rows themselves are printed by the
+ *                    register's own block below this one in `report()`.
+ */
+function worklistLines(outstanding, determined) {
+  const out = [];
+  const byFile = new Map();
+  for (const m of outstanding) byFile.set(m.file, (byFile.get(m.file) ?? 0) + 1);
+  for (const [file, count] of [...byFile.entries()].sort()) out.push(`    ${count}×  ${file}`);
+  if (byFile.size === 0 && determined.length === 0) {
+    out.push('    (none — the family is repaired; the gate handover step landed in PR #15458, and #12981 closed with PR #15472)');
+  } else if (byFile.size === 0) {
+    out.push('    (none outstanding — every DARK member is DETERMINED below, and every one is still a member)');
+  }
+  return out;
+}
+
 function report({ sites = false } = {}) {
   const { stats, members, quiet } = census();
   const dark = members.filter((m) => m.tier === 'dark');
@@ -1636,14 +1753,7 @@ function report({ sites = false } = {}) {
   const outstanding = dark.filter((m) => !excused.has(determinedKey(m)));
   const determined = dark.filter((m) => excused.has(determinedKey(m)));
   out.push('  [1] DARK members, by file — the repair worklist:');
-  const byFile = new Map();
-  for (const m of outstanding) byFile.set(m.file, (byFile.get(m.file) ?? 0) + 1);
-  for (const [file, count] of [...byFile.entries()].sort()) out.push(`    ${count}×  ${file}`);
-  if (byFile.size === 0 && determined.length === 0) {
-    out.push('    (none — the family is repaired; the gate handover step is unblocked)');
-  } else if (byFile.size === 0) {
-    out.push('    (none outstanding — every DARK member is DETERMINED below, and every one is still a member)');
-  }
+  for (const line of worklistLines(outstanding, determined)) out.push(line);
   if (determined.length > 0) {
     out.push('');
     out.push(`  DETERMINED, not outstanding                  ${determined.length} site(s) in ${memberFiles(determined).length} file(s)`);
@@ -1950,6 +2060,36 @@ function selfTest(mode = 'all') {
     }
   }
 
+  // ── What the WORKLIST PRINTS (#15503), asserted in BOTH modes ────────────
+  //
+  // See WORKLIST_READING_CONTROLS for why these readings are exercised against
+  // a declared population rather than against the tree — two of the three
+  // cannot be reached from `packages/**` today — and SELF_TEST_MODES for why
+  // this family is gated: it compares a producer against a declared population
+  // and never touches membership, so no repair can destroy it.
+  //
+  // The table is pinned to its own length first (#13799's floor recipe): a loop
+  // over an emptied table runs zero cases and prints nothing, which reads in a
+  // CI log exactly like a pass.
+  const WORKLIST_READING_CONTROL_COUNT = 3;
+  if (WORKLIST_READING_CONTROLS.length !== WORKLIST_READING_CONTROL_COUNT) {
+    problems.push(`the worklist reading table holds ${WORKLIST_READING_CONTROLS.length} control(s), not the `
+      + `${WORKLIST_READING_CONTROL_COUNT} it is pinned at. Both empty readings and the negative leg that `
+      + 'keeps them honest are declared there; a row deleted rather than re-pointed takes its reading out '
+      + 'of every run silently, which is the failure this family exists to close.');
+  }
+  for (const control of WORKLIST_READING_CONTROLS) {
+    const printed = worklistLines(control.outstanding, control.determined);
+    const same = printed.length === control.expect.length
+      && printed.every((line, i) => line === control.expect[i]);
+    if (!same) {
+      problems.push(`the worklist's reading moved: ${control.when}\n`
+        + `${control.expect.map((l) => `      declared: |${l}|`).join('\n')}\n`
+        + `${printed.map((l) => `      printed:  |${l}|`).join('\n') || '      printed:  (nothing)'}\n`
+        + `    ${control.why}`);
+    }
+  }
+
   // The durability filter must actually filter: the raw shape is ~3.5x this.
   if (members.length === 0) {
     problems.push('census found ZERO members — on this tree that is a broken matcher, not a clean repo.');
@@ -1968,6 +2108,7 @@ function selfTest(mode = 'all') {
       + `${RESOLUTION_CONTROLS.length} resolution control(s) resolve as declared, `
       + `${DETERMINED.size} DETERMINED register row(s) cross-check clean, `
       + `${copiedGateNames.length} copied gate-vocabulary name(s) match the gate's own declaration, `
+      + `${WORKLIST_READING_CONTROLS.length} worklist reading(s) print as declared over a fixture population, `
       + `${members.length} member site(s) total\n`
       + `   ${POSITIVE_CONTROLS.length} positive control(s) are NOT asserted here, permanently: they pin `
       + 'members of the #12981 worklist, which\n   that programme exists to remove — a control the repair '
@@ -1983,6 +2124,7 @@ function selfTest(mode = 'all') {
     + `${RESOLUTION_CONTROLS.length} resolution control(s) resolve as declared, `
     + `${DETERMINED.size} DETERMINED register row(s) cross-check clean, `
     + `${copiedGateNames.length} copied gate-vocabulary name(s) match the gate's own declaration, `
+    + `${WORKLIST_READING_CONTROLS.length} worklist reading(s) print as declared over a fixture population, `
     + `${members.length} member site(s) total\n`,
   );
   return 0;
