@@ -814,9 +814,14 @@ const TRIAGE = new Map([
     verdict: 'SPELLABLE-UNDECLARED',
     spelling: 'packages manifests',
     why: 'workspace manifests only — 74 of 5275 (1.4%), re-measured 2026-08-26. The recorded '
-      + 'spelling is live and reaches 74 of 74, 100% precise and complete. Deferred: nine rows '
-      + 'across three gates share this one population shape and no consumer has asked for any of '
-      + 'them, so declaring here is a nine-edit expansion ahead of demand',
+      + 'spelling is live and reaches 74 of 74, 100% precise and complete. Deferred: six rows '
+      + 'across two source files share this one population shape and no consumer has asked for '
+      + 'any of them, so declaring here is a six-edit expansion ahead of demand — RE-COUNTED '
+      + '2026-09-04. The "nine rows across three gates" this replaces counted CI invocation '
+      + 'names, not source files: check:changeset-gate-self-tests runs THIS script --self-test, '
+      + 'so it never was a third gate, and #15127 keying this table on the gate source file is '
+      + 'what made that visible: the six are three roots each under this gate and its '
+      + 'check-skill-compatibility-version.mjs sibling',
   }],
   ['scripts/check-adr-0087-registration.mjs PACKAGE_ROOTS apps', {
     verdict: 'SPELLABLE-UNDECLARED',
