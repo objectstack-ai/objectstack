@@ -118,6 +118,11 @@ export interface ResolvedAuthzContext {
    * and a refused credential's standard member is `UNAUTHENTICATED`. This is a
    * diagnostic discriminator for the message, deliberately lowercase so it can
    * never be mistaken for one.
+   *
+   * ⚠️ [#14273 A1] This field has ZERO consumers outside test assertions and is
+   * REMOVED by that card, in its own PR. The operator exit it was meant to be
+   * is now {@link warnApiKeyRefusal}'s server-side `warn` line (#15256 / 2A),
+   * which is why removing it costs nothing. ⛔ Not removed here.
    */
   authRefusal?: { reason: ApiKeyRefusalReason; message: string };
 }
@@ -151,6 +156,58 @@ export interface ResolveAuthzInput {
 
 function safeJsonParse<T>(s: string, fallback: T): T {
   try { return JSON.parse(s) as T; } catch { return fallback; }
+}
+
+/**
+ * [#15256 — maintainer ruling 2026-09-04, decision 2A] Say a posture-conditional
+ * API-key refusal OUT LOUD, on the SERVER side, where the refusal is decided.
+ *
+ * ## Why the operator needs this and the caller must not get it
+ *
+ * Both refusals surface by leaving `userId` unset, so every transport answers
+ * the generic anonymous `401 UNAUTHENTICATED` — byte-identical to sending no
+ * credential at all. That is deliberate on the wire: a holder of someone else's
+ * key must learn nothing about it, so ⛔ the response body is NOT changed by
+ * this log and no `reason`, key id, principal or organization ever reaches a
+ * caller. It is also why the operator was left with nothing: a key they can see
+ * is neither revoked nor expired, and a 401 that says only "unauthenticated".
+ *
+ * `ResolvedAuthzContext.authRefusal` was that exit and never got a consumer
+ * (zero readers outside two test assertions); #14273's A1 ruling REMOVES the
+ * field in its own PR. ⛔ Not removed here — cross-referenced only. This log
+ * line is the operator exit that field never delivered.
+ *
+ * ## What may appear here
+ *
+ * The `sys_api_key` ROW id, the owner, the organization, the reason. ⛔ Never
+ * the raw key and ⛔ never its at-rest hash — see `api-key.ts`'s SECURITY
+ * header; the row id is derived from neither.
+ *
+ * ## Volume
+ *
+ * Bounded by real credentials, not by traffic: an unknown, revoked, expired or
+ * absent key resolves to `outcome: 'none'` and is never a refusal, so a key
+ * scanner produces no lines here. One line per refused request, deliberately —
+ * a rate limiter would hide exactly the burst (an automation still running on a
+ * key whose membership ended) that the operator most needs to see.
+ *
+ * `console.warn` and not an injected logger: this resolver is deliberately
+ * kernel-agnostic and takes no host wiring, and a refusal that is only loud on
+ * hosts which happened to wire a sink is not loud.
+ */
+function warnApiKeyRefusal(details: {
+  reason: ApiKeyRefusalReason;
+  keyId?: string;
+  userId?: string;
+  organizationId?: string;
+}): void {
+  const { reason, keyId, userId, organizationId } = details;
+  console.warn(
+    `[security] API key refused (${reason}): `
+    + `key=${keyId ?? '<unknown>'} principal=${userId ?? '<unknown>'} `
+    + `organization=${organizationId ?? '<none>'}. `
+    + 'The caller received the generic 401 UNAUTHENTICATED — this reason is server-side only.',
+  );
 }
 
 async function tryFind(
@@ -275,6 +332,15 @@ export async function resolveAuthzContext(input: ResolveAuthzInput): Promise<Res
   // replaced (an API key already outranks a session), and a refusal that
   // quietly becomes a session login is not a refusal.
   if (admission.outcome === 'refused') {
+    // [#15256 / 2A] The `organization_required` decision point. One line, here,
+    // where the admission verdict is read — ⛔ not a second copy inside
+    // `api-key.ts`'s admission path, which would log the same refusal twice.
+    warnApiKeyRefusal({
+      reason: admission.reason,
+      keyId: admission.keyId,
+      userId: admission.userId,
+      organizationId: admission.organizationId,
+    });
     ctx.authRefusal = { reason: admission.reason, message: admission.message };
     return ctx;
   }
@@ -342,6 +408,14 @@ export async function resolveAuthzContext(input: ResolveAuthzInput): Promise<Res
   if (keyPrincipal?.tenantId && input.tenancyPosture) {
     const posture = input.tenancyPosture;
     if (postureEnforcesWall(posture) && !grants.accessible_org_ids.includes(keyPrincipal.tenantId)) {
+      // [#15256 / 2A] The `organization_membership_ended` decision point — AFTER
+      // grants, because the membership set is what decides it. One line, here.
+      warnApiKeyRefusal({
+        reason: 'organization_membership_ended',
+        keyId: keyPrincipal.keyId,
+        userId: keyPrincipal.userId,
+        organizationId: keyPrincipal.tenantId,
+      });
       return {
         positions: [],
         permissions: [],

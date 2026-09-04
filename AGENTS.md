@@ -72,12 +72,12 @@ graduated" to the next author.
 
 Three principles the ratchet's invariants encode, worth knowing before you fight them:
 
-- **Never `exclude` `*.test.ts` / `*.spec.ts` from a package's `tsconfig.json`** —
-  `tsc --noEmit` reads that config, so the exclusion hides the tests from the very
-  check the `typecheck` script advertises (a green gate over source nothing read). When
-  the build config must keep the exclusion, add a sibling `tsconfig.test.json` and name
-  it in the `typecheck` script (the `packages/spec` pattern); the sibling may carry its
-  own *module* semantics to match vitest, never its own *strictness*.
+- **A package's `tsconfig.json` reaches every `*.test.ts` / `*.spec.ts` in it** —
+  `tsc --noEmit` reads that config, so a test it misses is hidden from the very check
+  the `typecheck` script advertises (a green gate over source nothing read).
+  `check:type-check-coverage` fails both spellings per file: an `exclude` naming it, an
+  `include` that never does. A sibling `tsconfig.test.json` named in the `typecheck`
+  script may carry its own *module* semantics for vitest, never its own *strictness*.
 - **A `@ts-expect-error` in a file no tsc program compiles is a phantom check** — it
   evaluates never, and deleting it leaves every gate just as green. Before writing
   one, check the file is compiled. Test-layer residue lives in the per-file,

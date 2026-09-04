@@ -45,30 +45,19 @@ import {
   type ExpandedViewItem,
 } from '@objectstack/spec';
 import { applyProtection } from '@objectstack/spec/shared';
+import { deriveViewContainerObject } from './view-container.js';
 
 /**
- * Which object an aggregated view container binds to.
- *
- * The container's OWN top-level `object` field — `ViewSchema.object`,
- * documented there as "how a stack-level `views: [...]` entry says which object
- * its views belong to; read by `getViewsByObject()` / `GET /meta/view?object=`"
- * — is the authorial, explicit signal and is consulted FIRST (#13407). The
- * three-deep fallback below it is kept unchanged for every container written
- * before that field was read here: `list.data.object`, then `form.data.object`,
- * then the row's own `name` — which is the bound object only by convention, and
- * is why a container that set the top-level field but not `list.data.object`
- * used to bind under the wrong key or not at all.
- *
- * Returns `undefined` when no binding can be derived; every caller treats that
- * as "no expansion" rather than an error.
+ * Re-exported from {@link ./view-container.ts}, which is also the
+ * `@objectstack/metadata/view-container` LEAF entry point (#14680). The
+ * derivation moved there so a cross-package consumer can reach it without the
+ * two `@objectstack/spec` imports below, which esbuild keeps in any bundle
+ * that includes this module — it tree-shakes the unused function, not an
+ * external package's import statement. Re-exported HERE so every existing
+ * importer (`index.ts`'s root export, `plugin.ts`) keeps its spelling: this
+ * module is still the package's stated home for "how a container binds".
  */
-export function deriveViewContainerObject(container: unknown): string | undefined {
-  if (!container || typeof container !== 'object') return undefined;
-  const c = container as Record<string, any>;
-  const own = typeof c.object === 'string' && c.object ? c.object : undefined;
-  const byName = typeof c.name === 'string' && c.name ? c.name : undefined;
-  return own ?? c?.list?.data?.object ?? c?.form?.data?.object ?? byName;
-}
+export { deriveViewContainerObject };
 
 /**
  * Expand an aggregated `defineView` container into the same independent

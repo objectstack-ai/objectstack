@@ -7,6 +7,7 @@ import type { ValidationMessageTranslator } from '@objectstack/spec/system';
 import type { ValidateDataIssue, ValidateDataRequest, ValidateDataResponse } from '@objectstack/spec/api';
 import { bulkWrite, withTransientRetry, defaultIsTransientError, type BulkWriteRowResult } from '@objectstack/core';
 import { isUniqueViolationError, uniqueViolationColumn } from '@objectstack/types';
+import { isEngineDuplicateRecordEnvelope } from './error-response.js';
 
 /**
  * import-runner — the shared row-processing core for bulk import.
@@ -285,12 +286,29 @@ export function sanitizeRowError(raw: unknown): string {
  *
  * `code` therefore speaks one vocabulary across the whole row report: the
  * field-level catalog (ADR-0114) that `coerceRow`'s cell failures already use.
+ *
+ * ## One wire spelling for a unique-constraint refusal (#14723)
+ *
+ * The engine answers a driver's unique violation with its `DuplicateRecordError`
+ * envelope (`code: 'DUPLICATE_RECORD'`, `status: 409`, the driver's error on
+ * `cause`), and this report used to relay that code verbatim — while the
+ * WHOLE-REQUEST failure on the very same `POST /data/:object/import` answered
+ * `UNIQUE_VIOLATION` through `mapDataError`. Maintainer ruling (2026-09-03,
+ * #14723): one wire spelling on every route. So the engine's envelope is mapped
+ * to `UNIQUE_VIOLATION` here, by the same predicate the whole-request arm uses
+ * ({@link isEngineDuplicateRecordEnvelope}: registered code AND class name),
+ * before the producer's own code is read. A field-level finding still wins
+ * (the envelope carries none), and a producer that merely SPEAKS the registered
+ * `DUPLICATE_RECORD` without being the engine's class keeps its own code, as it
+ * does at the door. The engine's thrown identity is unchanged; only the row's
+ * wire spelling moves.
  */
 function toFailedResult(rowNo: number, err: unknown): ImportRowResult {
   const e = err as { code?: unknown; message?: unknown; fields?: unknown } | null | undefined;
   const fields = Array.isArray(e?.fields) ? (e.fields as Array<{ field?: unknown; code?: unknown }>) : [];
   const first = fields[0];
-  const code = first?.code ?? e?.code ?? 'IMPORT_ROW_FAILED';
+  const thrownCode = isEngineDuplicateRecordEnvelope(e) ? 'UNIQUE_VIOLATION' : e?.code;
+  const code = first?.code ?? thrownCode ?? 'IMPORT_ROW_FAILED';
   const message = sanitizeRowError(e?.message);
   return {
     row: rowNo, ok: false, action: 'failed', error: message, code: String(code),

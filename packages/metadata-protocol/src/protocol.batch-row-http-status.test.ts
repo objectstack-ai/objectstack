@@ -59,6 +59,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { resolveThrownHttpError } from '@objectstack/types';
+import { ErrorCode } from '@objectstack/spec/api';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 const SCHEMA = {
@@ -450,5 +451,143 @@ describe('[#8570] section 6 — anti-vacuity: the doubles are the shapes they cl
         expect(resolveThrownHttpError(engineValidationError('m', [])).declaredStatus).toBe(400);
         expect(resolveThrownHttpError(approvalsRecordLock('r1')).declaredStatus).toBe(409);
         expect(resolveThrownHttpError(declaredServiceUnavailable()).declaredStatus).toBe(503);
+    });
+});
+
+// ─── [#14723] The row speaks the WIRE spelling of a unique-constraint refusal ─
+
+/**
+ * MEASURED — `@objectstack/objectql`'s `DuplicateRecordError` as it reaches
+ * these catches (`node`, the built class, `new DuplicateRecordError('leave_request',
+ * raw, 'title')`): own properties `[stack, message, object, field, code,
+ * status, name, cause, developerMessage]`, `code: 'DUPLICATE_RECORD'`,
+ * `status: 409`, `name: 'DuplicateRecordError'`, the driver's error whole on
+ * `cause`, and the platform sentence on `message` — no statement, no bound
+ * value. Assignment ORDER matches the BUILT class: the two parameter
+ * properties land first, then the `readonly` initialisers, then the
+ * constructor body sets `name`, `cause` and `developerMessage`. The class
+ * itself is deliberately not imported —
+ * this package does not depend on `@objectstack/objectql`, and the row's rule
+ * reads the envelope's declared `code` / `name`, never its prototype.
+ */
+function engineDuplicateRecordEnvelope(object = 'leave_request', field = 'title'): Error {
+    const cause = driverFault(
+        `insert into \`${object}\` (\`${field}\`, \`id\`) values ('dup-value', 'new-4') returning * - ` +
+            `UNIQUE constraint failed: ${object}.${field}`,
+    );
+    const err = new Error(
+        `Duplicate record refused on '${object}': a unique constraint on '${field}' already holds this value. ` +
+            'No record was written.',
+    ) as Error & { code: string; status: number; object: string; field: string; cause: unknown; developerMessage: string };
+    err.object = object;
+    err.field = field;
+    err.code = 'DUPLICATE_RECORD';
+    err.status = 409;
+    err.name = 'DuplicateRecordError';
+    err.cause = cause;
+    err.developerMessage = 'The driver refused this write as a unique-constraint violation.';
+    return err;
+}
+
+/** A hook that deliberately THROWS the registered `DUPLICATE_RECORD` — a different producer. */
+function hookSpeakingDuplicateRecord(): Error {
+    const err = new Error('this row is already there, says the hook') as Error & { code: string; status: number };
+    err.code = 'DUPLICATE_RECORD';
+    err.status = 409;
+    return err;
+}
+
+const ENVELOPE_SENTENCE =
+    "Duplicate record refused on 'leave_request': a unique constraint on 'title' already holds this value. " +
+    'No record was written.';
+
+describe('[#14723] section 7 — a `DuplicateRecordError` row reports `UNIQUE_VIOLATION`, the route\'s one wire spelling', () => {
+    it('the create loop: `UNIQUE_VIOLATION` / 409 / the platform sentence, and no `DUPLICATE_RECORD` anywhere in the payload', async () => {
+        const { protocol } = makeEngine((verb) => (verb === 'insert' ? engineDuplicateRecordEnvelope() : undefined));
+
+        const res: any = await protocol.batchData({
+            object: 'leave_request',
+            request: { operation: 'create', records: [{ data: { title: 'dup-value' } }] },
+        });
+
+        // The whole row, exactly: the code moved, the status and the sentence
+        // did not (a declared 409 is quoted — #8502's positive list, unchanged).
+        expect(res.results[0].errors[0]).toEqual({
+            code: 'UNIQUE_VIOLATION',
+            message: ENVELOPE_SENTENCE,
+            httpStatus: 409,
+        });
+        const payload = JSON.stringify(res);
+        expect(payload).not.toContain('DUPLICATE_RECORD');
+        // …and the driver's text stays on `cause`, which never reaches a row.
+        expect(payload).not.toContain('insert into');
+        expect(payload).not.toContain('UNIQUE constraint failed');
+        expect(payload).not.toContain('SQLITE_ERROR');
+    });
+
+    it('the update and upsert loops report the same spelling — one helper, every loop', async () => {
+        const a = makeEngine((verb) => (verb === 'update' ? engineDuplicateRecordEnvelope() : undefined));
+        const updateRes: any = await a.protocol.updateManyData({
+            object: 'leave_request', records: [{ id: 'r1', data: { title: 'dup-value' } }],
+        });
+        expect(updateRes.results[0].errors[0].code).toBe('UNIQUE_VIOLATION');
+        expect(updateRes.results[0].errors[0].httpStatus).toBe(409);
+
+        const b = makeEngine((verb) => (verb === 'update' ? engineDuplicateRecordEnvelope() : undefined));
+        const upsertRes: any = await b.protocol.batchData({
+            object: 'leave_request',
+            request: { operation: 'upsert', records: [{ id: 'r1', data: { title: 'dup-value' } }] },
+        });
+        expect(upsertRes.results[0].errors[0].code).toBe('UNIQUE_VIOLATION');
+        expect(JSON.stringify(upsertRes)).not.toContain('DUPLICATE_RECORD');
+    });
+
+    it('[GUARD] a producer that merely SPEAKS `DUPLICATE_RECORD` is not the engine\'s envelope and keeps its own code', async () => {
+        // The same discrimination the whole-request arm makes (#14389 §5):
+        // the gate is the registered code AND the class name. A hook throwing
+        // the registered member from its own body is a different producer
+        // speaking a member of the vocabulary; the verbatim rule still applies.
+        const { protocol } = makeEngine((verb) => (verb === 'insert' ? hookSpeakingDuplicateRecord() : undefined));
+
+        const res: any = await protocol.batchData({
+            object: 'leave_request',
+            request: { operation: 'create', records: [{ data: { title: 'x' } }] },
+        });
+
+        expect(res.results[0].errors[0]).toEqual({
+            code: 'DUPLICATE_RECORD',
+            message: 'this row is already there, says the hook',
+            httpStatus: 409,
+        });
+    });
+
+    it('[GUARD] the name alone does not qualify either — a `DuplicateRecordError` carrying another code keeps that code', async () => {
+        const impostor = approvalsRecordLock('r1');
+        impostor.name = 'DuplicateRecordError';
+        const { protocol } = makeEngine((verb) => (verb === 'update' ? impostor : undefined));
+
+        const res: any = await protocol.updateManyData({
+            object: 'leave_request', records: [{ id: 'r1', data: { progress: 1 } }],
+        });
+
+        expect(res.results[0].errors[0].code).toBe('RECORD_LOCKED');
+    });
+
+    it('anti-vacuity: BOTH spellings are registered, so the verbatim rule alone would have kept `DUPLICATE_RECORD`', () => {
+        // The mapping is the only thing standing between the envelope and the
+        // row's old spelling: `toRowApiError`'s verbatim limb admits any
+        // registered code, and the engine's is registered. Reverting the
+        // mapping therefore reddens section 7's first case with the row
+        // reading `DUPLICATE_RECORD` again — measured, not assumed.
+        expect(ErrorCode.safeParse('DUPLICATE_RECORD').success).toBe(true);
+        expect(ErrorCode.safeParse('UNIQUE_VIOLATION').success).toBe(true);
+
+        const env = engineDuplicateRecordEnvelope() as any;
+        expect(Object.getOwnPropertyNames(env)).toEqual([
+            'stack', 'message', 'object', 'field', 'code', 'status', 'name', 'cause', 'developerMessage',
+        ]);
+        expect(env.name).toBe('DuplicateRecordError');
+        expect(env.code).toBe('DUPLICATE_RECORD');
+        expect(resolveThrownHttpError(env).declaredStatus).toBe(409);
     });
 });

@@ -1355,7 +1355,7 @@
       "title": "A disabled packaged action is refused 409 ACTION_DISABLED at BOTH dispatch doors — after the capability gate (a 403 is never an oracle for the switch), before the param contract and the record load, durable across restart",
       "since": "v17",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -1377,7 +1377,7 @@
       },
       "steps": [
         "boot showcase isolated on the real HTTP stack (os dev); sign in as admin",
-        "disable the probe: POST /api/v1/actions/_activation/showcase_task/showcase_mark_done {\"enabled\": false} → 200 (the door's own arms are api-backend.action-activation-door-contract's item — do not re-prove them here); confirm the row via GET /api/v1/data/sys_metadata_activation (metadata_type 'action', name showcase_mark_done, organization_id NULL, active false)",
+        "disable the probe: POST /api/v1/actions/_activation/showcase_task/showcase_mark_done {\"enabled\": false} → 200 (the door's own arms are api-backend.action-activation-door-contract's item — do not re-prove them here); confirm the row via GET /api/v1/data/sys_metadata_activation (metadata_type 'action', name showcase_mark_done, active false) and confirm the row's KEY SET carries NO organization_id at all — the ledger has no tenant column (#15024 / ADR-0131 D7). ⛔ Never confirm the tenant half by reading the value: a check of the shape `row.organization_id ?? null` answers `null` for a column that does not exist, so it passes while measuring nothing",
         "REST door: POST /api/v1/actions/showcase_task/showcase_mark_done with {\"recordId\": \"no-such-record-0000\"}; capture status + body; then re-read a REAL seeded task and confirm no done/progress write happened anywhere",
         "param-ordering discriminator: disable showcase_action_param_gallery (POST /actions/_activation/showcase_field_zoo/showcase_action_param_gallery {\"enabled\":false}), then invoke POST /actions/showcase_field_zoo/showcase_action_param_gallery with params: {\"bogus_key\": 1} (missing required p_text AND an unknown key) plus a nonexistent recordId; capture. Re-enable and repeat the IDENTICAL request; capture the contrast",
         "403-oracle: POST /actions/showcase_field_zoo/showcase_zoo_perm_missing while it is ENABLED; capture the 403 body. Disable it via /actions/_activation/showcase_field_zoo/showcase_zoo_perm_missing, repeat the identical invocation, capture again; byte-compare the two refusals",
@@ -1442,7 +1442,7 @@
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/qa/dogfood/test/packaged-activation-ledger-reach.dogfood.test.ts (live boots, both compositions: the flip lands 200, ONE install-level row with organization_id NULL, REST-door dispatch 409, re-enable UPDATES the row and re-arms, flows+actions share one table without touching each other's rows) + packages/runtime/src/domains/action-activation-dispatch.test.ts (unit: both doors incl. the MCP envelope, the 403-not-an-oracle leg, the flow-type-refused-by-its-own-switch leg, absence-means-active). ⚠️ Neither pin covers the RESTART leg, the param-ordering contrast, or a LIVE MCP transport call — those stay manual"
+        "ref": "packages/qa/dogfood/test/packaged-activation-ledger-reach.dogfood.test.ts (live boots, both compositions: the flip lands 200, ONE deployment-level row on a table with no tenant column at all — 'writes ONE deployment-level row, and the TABLE has no tenant column at all', a KEY-SET reading off the driver's own SELECT rather than a value read — REST-door dispatch 409, re-enable UPDATES the row and re-arms, flows+actions share one table without touching each other's rows) + packages/runtime/src/domains/action-activation-dispatch.test.ts (unit: both doors incl. the MCP envelope, the 403-not-an-oracle leg, the flow-type-refused-by-its-own-switch leg, absence-means-active). ⚠️ Neither pin covers the RESTART leg, the param-ordering contrast, or a LIVE MCP transport call — those stay manual"
       },
       "traps": [
         "dispatcher-vs-hono-route",
@@ -1466,6 +1466,12 @@
           "date": "2026-08-26",
           "change": "new — ADR-0126 §8 item 2 landed the packaged-action kill switch with a two-door consult and nothing in the ledger asserted the dispatch-side contract: the 409, its position in the gate order (after the D4 403, before params/record), the MCP twin, or restart durability. Register corrections folded in during source verification: the param-ordering discriminator must be showcase_action_param_gallery (showcase_mark_done declares no params, so enforceActionParams is a no-op for it and its enabled control proves nothing); the 403 leg must be an action with requiredPermissions (showcase_zoo_perm_missing — mark_done has none, every authed caller passes its gate); the live MCP leg must be showcase_portfolio_snapshot (the only ai.exposed stock action — the exposure gate refuses everything else ahead of the consult); and the record-load leg has no contrasting 404 because the load is best-effort by design",
           "ref": "#12438"
+        },
+        {
+          "revision": 2,
+          "date": "2026-09-04",
+          "change": "ledger read-back detail only — the dispatch contract itself is UNCHANGED and no clause moved. #15024 dropped sys_metadata_activation's reserved organization_id column before it ever shipped (systemFields { tenant: false } removes it rather than leaving it unwritten), so step 2's row confirmation asked a runner to read a column that is not there. It now asserts the row's KEY SET carries no organization_id, because the value spelling passes VACUOUSLY once the column is gone (`row.organization_id ?? null` is `null` either way) — green for exactly the reason it should be red. automated.ref was stale in the same direction: it described the dogfood pin as asserting 'ONE install-level row with organization_id NULL', and that pin has been a key-set reading named 'writes ONE deployment-level row, and the TABLE has no tenant column at all' since #15024; the ref now quotes the pin's live name so a runner who opens the file finds it",
+          "ref": "#15253"
         }
       ]
     },
@@ -1474,7 +1480,7 @@
       "title": "POST /actions/_activation/:object/:action — the activation door's ordered arms: authority before body and lookup, the exact 400 shapes, 404 undeclared, 409 ambiguity, 501/503 honesty, and the reserved segment surviving the real mount",
       "since": "v17",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -1500,7 +1506,7 @@
         "shape arms, as admin: POST /api/v1/actions/_activation/showcase_mark_done {} (2-segment); POST /api/v1/actions/_activation/showcase_task/showcase_mark_done/extra {} (4-segment); capture both",
         "body arms, as admin, against the declared action: {\"enable\": false} (one letter off); {\"enabled\": \"false\"} (string, not boolean); [] (non-object body); {} (empty); capture each with full envelope",
         "declaration arm: POST /actions/_activation/showcase_task/no_such_action {\"enabled\": false} as admin; capture; then GET /api/v1/data/sys_metadata_activation and confirm NO row was written by any refused probe so far",
-        "happy path: POST /actions/_activation/showcase_task/showcase_mark_done {\"enabled\": false} → capture the 200 body; read the ledger row (metadata_type 'action', name, organization_id NULL, active false); POST again {\"enabled\": true} → re-read: the SAME row updated in place, active true — never deleted, never duplicated",
+        "happy path: POST /actions/_activation/showcase_task/showcase_mark_done {\"enabled\": false} → capture the 200 body; read the ledger row (metadata_type 'action', name, active false) and capture its KEY SET — organization_id is ABSENT from it, because the table carries no tenant column (#15024 / ADR-0131 D7). ⛔ Do not record the tenant half as a value: `row.organization_id ?? null` is `null` for a column that does not exist, so a value read passes while measuring nothing; POST again {\"enabled\": true} → re-read: the SAME row updated in place, active true — never deleted, never duplicated",
         "record the ambiguity / 501 / 503 arms against their unit pins (knownGaps above) — run the pins and cite their output rather than skipping the clauses silently"
       ],
       "acceptance": [
@@ -1535,10 +1541,10 @@
           "evidence": "the 404 trace + the ledger read"
         },
         {
-          "clause": "the happy path writes exactly ONE install-level row and re-enable UPDATES it: 200 {name, objectName, enabled}; the row carries metadata_type 'action', the declarative name, organization_id NULL (the per-org dimension is reserved and unwritten); flipping back answers 200 and the same row flips active — never a second row, never a delete (§6 wall 3: the ledger records the choice)",
+          "clause": "the happy path writes exactly ONE DEPLOYMENT-level row and re-enable UPDATES it: 200 {name, objectName, enabled}; the row carries metadata_type 'action', the declarative name and active — and NO organization_id key, because the ledger has no tenant column to carry one (ADR-0131 D7 WITHDREW ADR-0126 §5 D3's reserved-and-never-written column before 17.3, and names this table as not getting it back — so the per-org dimension is not 'reserved', it is gone); flipping back answers 200 and the same row flips active — never a second row, never a delete (§6 wall 3: the ledger records the choice)",
           "oracle": "api",
-          "verify": "step-6: the 200 body + before/after ledger reads (one row throughout, active false then true)",
-          "evidence": "the traces + both row reads"
+          "verify": "step-6: the 200 body + before/after ledger reads (one row throughout, active false then true), each read scored on the row's KEY SET for the tenant half. ⛔ Never score it from a value: a check of the shape `row.organization_id ?? null` answers `null` for a column that does not exist, so it passes while measuring nothing (platform-core.activation-ledger-row-contract owns the schema-side probe)",
+          "evidence": "the traces + both row reads, key sets included"
         },
         {
           "clause": "the ambiguity arm refuses instead of switching off artifacts the caller did not name: a name declared on 2+ objects answers 409 RESOURCE_CONFLICT (standard catalog — no new code minted) naming every owner object, and writes nothing",
@@ -1561,7 +1567,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/runtime/src/domains/action-activation-posture-gate.test.ts (the door's own contract: both authority tiers across all three postures, unknown-key/non-boolean 400s, empty-body-enables, undeclared 404 + no row, ambiguity 409 + no write, 501 no-projection, 503 non-durable) + packages/qa/dogfood/test/action-params-contract.dogfood.test.ts ('[#12160] the reserved `_activation` segment survives the real mount' — the 2-segment 400 and undeclared 404 measured through the live dispatcher reconstruction) + packages/qa/dogfood/test/packaged-activation-ledger-reach.dogfood.test.ts (the live happy path: 200 flip, one org-NULL row, re-enable updates). The live-server body/authority arm sweep as a whole stays manual"
+        "ref": "packages/runtime/src/domains/action-activation-posture-gate.test.ts (the door's own contract: both authority tiers across all three postures, unknown-key/non-boolean 400s, empty-body-enables, undeclared 404 + no row, ambiguity 409 + no write, 501 no-projection, 503 non-durable) + packages/qa/dogfood/test/action-params-contract.dogfood.test.ts ('[#12160] the reserved `_activation` segment survives the real mount' — the 2-segment 400 and undeclared 404 measured through the live dispatcher reconstruction) + packages/qa/dogfood/test/packaged-activation-ledger-reach.dogfood.test.ts (the live happy path: 200 flip, then 'writes ONE deployment-level row, and the TABLE has no tenant column at all' — a key-set reading off the driver's own SELECT, not a value read — and re-enable updates). The live-server body/authority arm sweep as a whole stays manual"
       },
       "traps": [
         "dispatcher-vs-hono-route",
@@ -1574,7 +1580,8 @@
         "packages/runtime/src/route-ledger.ts#servedBy (the #12160 server-only row: servedBy reconstruction through /actions/:object/:action/:recordId, the 4-segment router-404, and why the segment is reserved)",
         "packages/objectql/src/engine.ts#setActionActive (setActionActive — durable row first, projection second; the 503-on-no-ledger contract)",
         "sibling item api-backend.packaged-action-disabled-dispatch (what DISPATCH does with the row this door writes) · access-security.activation-write-operator-gate owns the gate's posture depths",
-        "docs/adr/0126-packaged-metadata-customization-model.md (§4, §5, §6 walls, §8 item 2)",
+        "docs/adr/0126-packaged-metadata-customization-model.md (§4, §5, §6 walls, §8 item 2) — ⚠️ §5's operator-gate half STANDS (access-security.activation-write-operator-gate owns its depths); only §5 D3's separate 'the org column is reserved, written NULL' bullet was WITHDRAWN, which is why the happy path's row read names no organization_id",
+        "docs/adr/0131-total-organization-ownership-no-null-organization-id.md D7 (deployment-level state has no organization column — sys_metadata_activation is named there as reverted before 17.3 and not returning; a reserved nullable tenant column is the shape D1 forbids)",
         "#12438",
         "Epic #12150"
       ],
@@ -1584,6 +1591,12 @@
           "date": "2026-08-26",
           "change": "new — the ADR-0126 §8 activation door is the only non-invocation shape /actions serves, is absent from every REST-ledger sweep (server-only, servedBy reconstruction), and none of its arms were in the ledger. Register corrections folded in during source verification: the 400-shape message carries a '(use `global` for an object-less action)' tail; a 4-segment path 404s at the ROUTER rather than reaching the door's 400 (no mount pattern matches); the authority gates run ahead of even the path-shape check, not just body/lookup; an empty body ENABLES by contract (a trap for a runner reading it as a refusal); and the ambiguity arm's no-stock-fixture status was verified across both showcase action files rather than assumed",
           "ref": "#12438"
+        },
+        {
+          "revision": 2,
+          "date": "2026-09-04",
+          "change": "ledger read-back detail and one citation — the door's ordered arms are UNCHANGED and no arm moved. Two corrections, both downstream of #15024 dropping sys_metadata_activation's reserved organization_id column before it ever shipped. (1) VACUITY: step 6 and the happy-path clause read the column back and asserted it NULL. With the column gone that read passes rather than failing (`row.organization_id ?? null` is `null` either way), so the leg was green for the wrong reason; both now score the row's KEY SET, the same inversion #15024 applied to the dogfood pin. automated.ref carried the same staleness as 'one org-NULL row' and now quotes the pin's live name. (2) DECISION: the clause glossed the column as 'the per-org dimension is reserved and unwritten', citing ADR-0126 §5 D3 — a bullet ADR-0131 D7 WITHDREW ('a reserved nullable tenant column is the shape D1 forbids'), naming this table as reverted before 17.3 and not returning. Left as it stood it told a runner the tenant dimension was coming back. The source list now carries ADR-0131 D7 and marks which half of §5 survives: the operator gate stands, the reserved column does not",
+          "ref": "#15253"
         }
       ]
     },
