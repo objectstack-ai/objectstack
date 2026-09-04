@@ -43,8 +43,20 @@ export default defineStack({
       name: 'multi_crm',
       label: 'Multi-Package CRM',
       description: 'Accounts, plus whatever modules this artifact delivers alongside',
+      // The group is a CONTAINER this package owns and modules aim at
+      // (ADR-0029 D7). It is the App package's half of the split: a module
+      // cannot declare a group inside an app it does not own, so the app has
+      // to publish the container its modules contribute into — which is what
+      // makes `navigationContributions[].group` resolvable at all.
       navigation: [
-        { id: 'nav_accounts', type: 'object', objectName: 'crm_account', label: 'Accounts', icon: 'building' },
+        {
+          id: 'sales_group',
+          type: 'group',
+          label: 'Sales',
+          children: [
+            { id: 'nav_accounts', type: 'object', objectName: 'crm_account', label: 'Accounts', icon: 'building' },
+          ],
+        },
       ],
     },
   ],
