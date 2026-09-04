@@ -69,6 +69,14 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
+// ⛔ Never `ts.createSourceFile` directly. It does not throw on a source it
+// cannot read — the errors are parked on `parseDiagnostics` and the recovered
+// tree walks like any other, so a file this census could not parse would be
+// scored as a file with NO `beforeUpdate` handlers and quietly lower the
+// population. `parseSourceFile` reads those diagnostics and refuses loudly.
+// `pnpm check:parse-guard` enforces this; `scripts/ts-parse.mjs` is the
+// authority on why.
+import { parseSourceFile } from '../ts-parse.mjs';
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
 const REPO = join(HERE, '..', '..');
@@ -430,7 +438,7 @@ function analyzeSource(sf, rel, isTest, sites) {
 }
 
 function analyzeText(text, name = 'fixture.ts') {
-  const sf = ts.createSourceFile(name, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const sf = parseSourceFile(name, text);
   return analyzeSource(sf, name, false, []);
 }
 
@@ -550,12 +558,85 @@ for (const root of ROOTS) {
     let text;
     try { text = readFileSync(file, 'utf8'); } catch { continue; }
     if (!text.includes(EVENT)) continue;
-    const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+    const sf = parseSourceFile(file, text);
     analyzeSource(sf, rel, /\.(test|spec)\.ts$/.test(file), sites);
   }
 }
 
+/**
+ * What this instrument CANNOT see, enumerated rather than assumed away. A
+ * census that reports a population without bounding its own blind spots is a
+ * hypothesis wearing a number.
+ *
+ *  - `nonLiteralEventArg` — a `registerHook(<expr>, …)` whose event argument is
+ *    not a plain string literal. The walker keys on the literal, so any such
+ *    site is invisible to the population count and has to be read by hand.
+ *  - `nonTsFilesMentioningBeforeUpdate` — hooks can also arrive as METADATA
+ *    (a stored `sys_metadata` row, a JSON/YAML object definition) and be bound
+ *    by `bindHooksToEngine` at boot. Nothing in a TS syntax tree sees those.
+ *  - `tsFilesOutsideScannedRoots` — anything under a root this walk never
+ *    entered.
+ */
+function collectBlindSpots() {
+  const nonLiteral = [];
+  for (const root of ROOTS) {
+    for (const file of walkFiles(join(REPO, root), [])) {
+      let text;
+      try { text = readFileSync(file, 'utf8'); } catch { continue; }
+      if (!text.includes('registerHook')) continue;
+      const sf = parseSourceFile(file, text);
+      const v = (n) => {
+        if (ts.isCallExpression(n)) {
+          const c = ts.isPropertyAccessExpression(n.expression) ? n.expression.name.text
+            : ts.isIdentifier(n.expression) ? n.expression.text : null;
+          if (c === 'registerHook' && n.arguments.length > 0 && !ts.isStringLiteral(unwrap(n.arguments[0]))) {
+            nonLiteral.push({
+              file: relative(REPO, file), line: lineOf(sf, n),
+              arg: n.arguments[0].getText(sf).replace(/\s+/g, ' ').slice(0, 60),
+              isTest: /\.(test|spec)\.ts$/.test(file),
+            });
+          }
+        }
+        ts.forEachChild(n, v);
+      };
+      v(sf);
+    }
+  }
+  const nonTs = [];
+  const outside = [];
+  const scanAll = (dir) => {
+    let entries;
+    try { entries = readdirSync(dir); } catch { return; }
+    for (const name of entries) {
+      if (SKIP_DIR.has(name) || name === '.git') continue;
+      const full = join(dir, name);
+      let st;
+      try { st = statSync(full); } catch { continue; }
+      if (st.isDirectory()) { scanAll(full); continue; }
+      const rel = relative(REPO, full);
+      const isData = /\.(json|ya?ml|[cm]?js)$/.test(name);
+      const isTs = name.endsWith('.ts') && !name.endsWith('.d.ts');
+      if (!isData && !isTs) continue;
+      let text;
+      try { text = readFileSync(full, 'utf8'); } catch { continue; }
+      if (!text.includes(EVENT)) continue;
+      if (isData) nonTs.push(rel);
+      else if (!ROOTS.some((r) => rel.startsWith(`${r}/`))) outside.push(rel);
+    }
+  };
+  scanAll(REPO);
+  return {
+    nonLiteralEventArg: {
+      production: nonLiteral.filter((x) => !x.isTest),
+      testCount: nonLiteral.filter((x) => x.isTest).length,
+    },
+    nonTsFilesMentioningBeforeUpdate: nonTs,
+    tsFilesOutsideScannedRoots: outside,
+  };
+}
+
 const prod = sites.filter((s) => !s.isTest);
+const blindSpots = collectBlindSpots();
 const summary = {
   base: process.env.CENSUS_BASE ?? null,
   totalSites: sites.length,
@@ -571,4 +652,4 @@ const summary = {
     withUnresolvedDelegation: prod.filter((s) => (s.delegatesUnresolved ?? []).length > 0).length,
   },
 };
-process.stdout.write(JSON.stringify({ summary, sites }, null, 2));
+process.stdout.write(JSON.stringify({ summary, blindSpots, sites }, null, 2));
