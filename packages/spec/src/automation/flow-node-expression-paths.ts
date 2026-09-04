@@ -169,12 +169,13 @@ export interface FlowNodeExpressionPath {
  * 'cel', source }`, a shape no `{token}` interpolation ever produced — and only
  * that form is resolved. The `assignment` node's `assignments` map is the one
  * such slot; its `{token}` strings stay the generic text-with-holes case above.
- * It is declared through a third channel, the spec Zod contract
- * (`AssignmentConfigSchema`'s map value, `.meta({ xExpression: 'value' })`),
+ * It is declared through the spec Zod channel (`AssignmentConfigSchema`'s map
+ * value, `.meta({ xExpression: 'value' })`, exposed to the ratchet through
+ * `LEDGER_DECLARED_NODE_CONFIG_SCHEMAS` in `schemaless-node-config.zod.ts`)
  * because the node's descriptor declares the map as `additionalProperties:
- * true` with no marker and the ratchet's role table knows no `value` marker —
- * teaching the ratchet that channel (walk `additionalProperties` as `*`, map
- * `value` → `'value'`) is the executor half's edit, in `service-automation`.
+ * true` with no marker; the ratchet walks an object-valued
+ * `additionalProperties` as the `*` segment and maps the `value` marker to
+ * this role.
  */
 export const FLOW_NODE_EXPRESSION_PATHS: readonly FlowNodeExpressionPath[] = [
   {
@@ -211,10 +212,11 @@ export const FLOW_NODE_EXPRESSION_PATHS: readonly FlowNodeExpressionPath[] = [
     // with the `*` wildcard: every value of that map is a `value` slot
     // (#14149). Declared through the spec Zod channel
     // (`AssignmentConfigSchema` in `builtin-node-config.zod.ts`, whose map
-    // value carries `.meta({ xExpression: 'value' })`): the descriptor's own
-    // `assignments` is `additionalProperties: true` and carries no marker, and
-    // objectui's inspector reads `xExpression` on string properties only, so
-    // the marker does not reach the Studio form.
+    // value carries `.meta({ xExpression: 'value' })`, reaching the
+    // reconciliation ratchet through `LEDGER_DECLARED_NODE_CONFIG_SCHEMAS`):
+    // the descriptor's own `assignments` is `additionalProperties: true` and
+    // carries no marker, and objectui's inspector reads `xExpression` on
+    // string properties only, so the marker does not reach the Studio form.
     //
     // Deliberately NOT declared: the two legacy shapes the executor still reads
     // (`logic-nodes.ts` — the bare `{ <variable>: <value> }` config with no

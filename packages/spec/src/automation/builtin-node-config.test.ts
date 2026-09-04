@@ -32,6 +32,11 @@ import {
   ScreenFieldConfigSchema,
   UpdateRecordConfigSchema,
 } from './builtin-node-config.zod.js';
+import {
+  LEDGER_DECLARED_NODE_CONFIG_SCHEMAS,
+  SCHEMALESS_NODE_CONFIG_SCHEMAS,
+  getSchemalessNodeConfigJsonSchemas,
+} from './schemaless-node-config.zod.js';
 
 interface Parseable { safeParse(v: unknown): { success: boolean; error?: { issues: ReadonlyArray<{ code: string; message: string }> } } }
 
@@ -379,5 +384,18 @@ describe('assignment value contract — a CEL envelope beside `{token}` interpol
     }) as { properties?: Record<string, { additionalProperties?: Record<string, unknown> }> };
     expect(json.properties?.assignments?.additionalProperties?.xExpression).toBe('value');
     expect(String(json.properties?.assignments?.additionalProperties?.description)).toContain('joinNonEmpty');
+  });
+
+  it('reaches the reconciliation ratchet through the JSON map it already walks', () => {
+    // `service-automation`'s `config-expression-ledger.test.ts` derives its
+    // expectation from `getSchemalessNodeConfigJsonSchemas()`; `assignment`
+    // is carried there by `LEDGER_DECLARED_NODE_CONFIG_SCHEMAS` — NOT by
+    // `SCHEMALESS_NODE_CONFIG_SCHEMAS`, whose meaning ("publishes no
+    // descriptor") other readers depend on.
+    expect(Object.keys(LEDGER_DECLARED_NODE_CONFIG_SCHEMAS)).toEqual(['assignment']);
+    expect(Object.keys(SCHEMALESS_NODE_CONFIG_SCHEMAS).sort()).toEqual(['decision', 'script', 'subflow']);
+    const projected = getSchemalessNodeConfigJsonSchemas().assignment as
+      { properties?: Record<string, { additionalProperties?: Record<string, unknown> }> };
+    expect(projected.properties?.assignments?.additionalProperties?.xExpression).toBe('value');
   });
 });

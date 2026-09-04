@@ -599,10 +599,13 @@ export type AssignmentExpressionValueParsed = z.infer<typeof AssignmentExpressio
  * `.meta({ xExpression: 'value' })` is the declaration channel the expression
  * ledger reads for this slot (`FLOW_NODE_EXPRESSION_PATHS`'s `assignment`
  * entry, `flow-node-expression-paths.ts`): the marker rides `z.toJSONSchema`
- * onto the map's `additionalProperties`, where a ratchet walking that position
- * derives the ledger path `assignments.*`. objectui's inspector reads
- * `xExpression` on string properties only, so the marker changes no editor —
- * the keyValue widget stores an envelope typed as JSON in the value cell.
+ * onto the map's `additionalProperties` — `AssignmentConfigSchema` is exposed
+ * to the reconciliation ratchet through `LEDGER_DECLARED_NODE_CONFIG_SCHEMAS`
+ * (`schemaless-node-config.zod.ts`), and the ratchet walks that position as
+ * the `*` segment, deriving the ledger path `assignments.*`. objectui's
+ * inspector reads `xExpression` on string properties only, so the marker
+ * changes no editor — the keyValue widget stores an envelope typed as JSON in
+ * the value cell.
  *
  * Built eagerly, not through `lazySchema`: `.meta()` registers by schema
  * IDENTITY, and the lazy Proxy is not the identity the registry holds, so a
