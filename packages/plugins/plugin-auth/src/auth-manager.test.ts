@@ -2513,6 +2513,247 @@ describe('AuthManager', () => {
       expect(sms.sent[0].body).toContain('111222');
       expect(sms.sent[0].body).toContain('verification code');
     });
+
+    // ── #14762 — the recipient's own `sys_user.locale` as the top rung ──────
+    //
+    // #14788 was ruled option D on 2026-09-03: `sys_user.locale` when set →
+    // the request's `Accept-Language` → the deployment default. There is no
+    // request rung on this surface (better-auth's send-OTP callbacks receive
+    // `{ phoneNumber, code }` and nothing else), so the ruled chain collapses
+    // to stored → deployment here.
+    //
+    // ⚠️ Every case below asserts a body that DIFFERS between the two locales
+    // in both directions. `验证码` appears only in the zh row and
+    // `verification code` only in the en row, so a pin cannot pass on a
+    // template that reads the same either way.
+    describe('#14762 — the recipient locale outranks the deployment default', () => {
+      /** A data engine that answers the `sys_user` locale read and nothing else. */
+      const engineWithUserLocale = (locale: unknown, calls?: any[]) => ({
+        async find() { return []; },                     // no tenant template row
+        async findOne(object: string, query: any) {
+          calls?.push({ object, query });
+          if (object !== 'sys_user') return null;
+          return { locale };
+        },
+      });
+
+      it('renders a zh-CN user in Chinese even on an en-US deployment', async () => {
+        const { manager, opts } = await bootOtp({ dataEngine: engineWithUserLocale('zh-CN') });
+        const sms = fakeSms();
+        manager.setSmsService(sms.service);
+        manager.setDefaultSmsLocale('en-US');
+
+        await opts.sendOTP({ phoneNumber: PHONE, code: '246810' });
+        expect(sms.sent[0].body).toContain('验证码');
+        expect(sms.sent[0].body).toContain('246810');
+        // The direction that makes the pin real: the deployment's own row is
+        // NOT what went out.
+        expect(sms.sent[0].body).not.toContain('verification code');
+      });
+
+      it('and the reverse: an en-US user on a zh-CN deployment gets English', async () => {
+        const { manager, opts } = await bootOtp({ dataEngine: engineWithUserLocale('en-US') });
+        const sms = fakeSms();
+        manager.setSmsService(sms.service);
+        manager.setDefaultSmsLocale('zh-CN');
+
+        await opts.sendOTP({ phoneNumber: PHONE, code: '135791' });
+        expect(sms.sent[0].body).toContain('verification code');
+        expect(sms.sent[0].body).not.toContain('验证码');
+      });
+
+      it('reads the column off the recipient row, projected, by phone number', async () => {
+        // Establishes WHICH rung produced the value above: a pin that only
+        // looked at the rendered body could be satisfied by any resolution
+        // step that happened to reach the same locale.
+        const calls: any[] = [];
+        const { manager, opts } = await bootOtp({
+          dataEngine: engineWithUserLocale('zh-CN', calls),
+        });
+        manager.setSmsService(fakeSms().service);
+        manager.setDefaultSmsLocale('en-US');
+
+        await opts.sendOTP({ phoneNumber: PHONE, code: '111111' });
+        const userRead = calls.find((c) => c.object === 'sys_user');
+        expect(userRead, 'no sys_user read happened').toBeTruthy();
+        expect(userRead.query.where).toEqual({ phone_number: PHONE });
+        expect(userRead.query.fields).toEqual(['locale']);
+        expect(userRead.query.context?.isSystem).toBe(true);
+      });
+
+      it('a user with NO stored locale still falls to the deployment default', async () => {
+        // The floor the ruling preserves: an unset column is not a choice.
+        const { manager, opts } = await bootOtp({ dataEngine: engineWithUserLocale(null) });
+        const sms = fakeSms();
+        manager.setSmsService(sms.service);
+        manager.setDefaultSmsLocale('zh-CN');
+
+        await opts.sendOTP({ phoneNumber: PHONE, code: '222222' });
+        expect(sms.sent[0].body).toContain('验证码');
+      });
+
+      it('and with neither rung answering, the built-in en floor still holds', async () => {
+        const { manager, opts } = await bootOtp({ dataEngine: engineWithUserLocale(undefined) });
+        const sms = fakeSms();
+        manager.setSmsService(sms.service);
+        // No setDefaultSmsLocale at all.
+
+        await opts.sendOTP({ phoneNumber: PHONE, code: '333333' });
+        expect(sms.sent[0].body).toContain('verification code');
+        expect(sms.sent[0].body).toContain('333333');
+      });
+
+      it('refuses the stringified-nothing literal rather than naming it a locale', async () => {
+        // The shape hotcrm measured dead-lettering every delivery. Reusing
+        // `normalizeRecipientLocale` is what refuses it — a second normalizer
+        // here would be a second place for that refusal to rot.
+        const { manager, opts } = await bootOtp({ dataEngine: engineWithUserLocale('undefined') });
+        const sms = fakeSms();
+        manager.setSmsService(sms.service);
+        manager.setDefaultSmsLocale('zh-CN');
+
+        await opts.sendOTP({ phoneNumber: PHONE, code: '444444' });
+        expect(sms.sent[0].body).toContain('验证码');
+      });
+
+      it('a failing recipient read never blocks the OTP', async () => {
+        const { manager, opts } = await bootOtp({
+          dataEngine: {
+            async find() { return []; },
+            async findOne() { throw new Error('sys_user unavailable'); },
+          },
+        });
+        const sms = fakeSms();
+        manager.setSmsService(sms.service);
+        manager.setDefaultSmsLocale('zh-CN');
+
+        await opts.sendOTP({ phoneNumber: PHONE, code: '555555' });
+        expect(sms.sent[0].body).toContain('验证码');
+        expect(sms.sent[0].body).toContain('555555');
+      });
+    });
+
+    // ── #14641 — the SMS INVITE path gets the same rung ──────────────────
+    //
+    // Its OWN describe, sibling to #14762 above rather than nested inside it:
+    // the reporter path is what the next reader greps, and these pins answer
+    // for #14641, not for the card that gave the OTP send its rung.
+    describe("#14641 — the invitation SMS reads the invitee's own locale", () => {
+      // Was a scope fence ("untouched — its rung is #14641's") until #14641
+      // landed. The existing-row branch is reachable by construction: the one
+      // in-repo caller (the identity import endpoint's `invite` policy) CREATES
+      // the account before sending. ⚠️ It does NOT populate `locale`, and the
+      // column has no default, so that caller still lands on the deployment
+      // rung today — these pins drive the engine directly, which is what lets
+      // them measure the rung the in-repo flow does not yet exercise.
+      //
+      // ⚠️ The two built-in invite bodies genuinely differ, so each assertion
+      // names one locale in BOTH directions: the marker for the locale that
+      // should have won is present, and the marker for the other is absent.
+      // A phone-keyed engine drives both branches so "no row" is provably a
+      // live lookup that found nothing.
+      const phoneKeyedEngine = (rows: Record<string, unknown>, calls?: any[]) => ({
+        async find() { return []; },                     // no tenant template row
+        async findOne(object: string, query: any) {
+          calls?.push({ object, query });
+          if (object !== 'sys_user') return null;
+          const phone = (query?.where ?? {}).phone_number as string;
+          return Object.prototype.hasOwnProperty.call(rows, phone)
+            ? { locale: rows[phone] }
+            : null;
+        },
+      });
+      const OTHER_PHONE = '+8613900000001';
+
+      it('BRANCH 1 — an invitee whose row says zh-CN is texted in Chinese', async () => {
+        const { manager } = await bootOtp({
+          dataEngine: phoneKeyedEngine({ [PHONE]: 'zh-CN' }),
+        });
+        const sms = fakeSms();
+        manager.setSmsService(sms.service);
+        manager.setDefaultSmsLocale('en-US');
+
+        await manager.sendPhoneInviteSms(PHONE);
+        expect(sms.sent[0].body).toContain('账号已开通');
+        expect(sms.sent[0].body).not.toContain('Sign in with this phone number');
+      });
+
+      it('and the reverse — an en-US row on a zh-CN deployment is texted in English', async () => {
+        const { manager } = await bootOtp({
+          dataEngine: phoneKeyedEngine({ [PHONE]: 'en-US' }),
+        });
+        const sms = fakeSms();
+        manager.setSmsService(sms.service);
+        manager.setDefaultSmsLocale('zh-CN');
+
+        await manager.sendPhoneInviteSms(PHONE);
+        expect(sms.sent[0].body).toContain('Sign in with this phone number');
+        expect(sms.sent[0].body).not.toContain('账号已开通');
+      });
+
+      it('BRANCH 2 — a number with NO row still takes the deployment default', async () => {
+        // ⚠️ Positive control for the zero: ONE engine, one table, two numbers.
+        // It answers zh-CN for the number that carries a row and nothing for
+        // the one that does not — which is what separates "the read ran and
+        // found nothing" from "the read never ran", since both would land on
+        // the deployment default and render identically.
+        const calls: any[] = [];
+        const engine = phoneKeyedEngine({ [PHONE]: 'zh-CN' }, calls);
+
+        const known = await bootOtp({ dataEngine: engine });
+        const knownSms = fakeSms();
+        known.manager.setSmsService(knownSms.service);
+        known.manager.setDefaultSmsLocale('en-US');
+        await known.manager.sendPhoneInviteSms(PHONE);
+        expect(knownSms.sent[0].body).toContain('账号已开通');
+
+        const fresh = await bootOtp({ dataEngine: engine });
+        const freshSms = fakeSms();
+        fresh.manager.setSmsService(freshSms.service);
+        fresh.manager.setDefaultSmsLocale('en-US');
+        await fresh.manager.sendPhoneInviteSms(OTHER_PHONE);
+        expect(freshSms.sent[0].body).toContain('Sign in with this phone number');
+        expect(freshSms.sent[0].body).not.toContain('账号已开通');
+
+        // ...and the second send's read really was attempted, on its number.
+        expect(calls.filter((c) => c.object === 'sys_user').map((c) => c.query.where)).toEqual([
+          { phone_number: PHONE },
+          { phone_number: OTHER_PHONE },
+        ]);
+      });
+
+      it('reads the column projected, by phone number, under a system context', async () => {
+        const calls: any[] = [];
+        const { manager } = await bootOtp({
+          dataEngine: phoneKeyedEngine({ [PHONE]: 'zh-CN' }, calls),
+        });
+        manager.setSmsService(fakeSms().service);
+        manager.setDefaultSmsLocale('en-US');
+
+        await manager.sendPhoneInviteSms(PHONE);
+        const userRead = calls.find((c) => c.object === 'sys_user');
+        expect(userRead, 'no sys_user read happened').toBeTruthy();
+        expect(userRead.query.where).toEqual({ phone_number: PHONE });
+        expect(userRead.query.fields).toEqual(['locale']);
+        expect(userRead.query.context?.isSystem).toBe(true);
+      });
+
+      it('a failing recipient read never blocks the invitation SMS', async () => {
+        const { manager } = await bootOtp({
+          dataEngine: {
+            async find() { return []; },
+            async findOne() { throw new Error('sys_user unavailable'); },
+          },
+        });
+        const sms = fakeSms();
+        manager.setSmsService(sms.service);
+        manager.setDefaultSmsLocale('zh-CN');
+
+        await manager.sendPhoneInviteSms(PHONE);
+        expect(sms.sent).toHaveLength(1);
+        expect(sms.sent[0].body).toContain('账号已开通');
+      });
+    });
   });
 
   // #2766 V1.5 — placeholder addresses must never become real recipients.

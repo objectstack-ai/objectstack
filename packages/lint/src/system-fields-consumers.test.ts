@@ -407,6 +407,26 @@ const LEDGER: Record<string, LedgerRow> = {
     asksProvenance: true,
     why: 'Blanket .has read site. Provenance wired by #8340.',
   },
+  'validate-page-visualization-bindings.ts': {
+    kind: 'rule',
+    reach: ['direct'],
+    asksProvenance: false,
+    why:
+      'Landed 2026-09-03 (#14073). The one consumer that reads the union in the OPPOSITE direction, which is '
+      + 'why the #8116 obligation does not arise here. Every other rule in this ledger consults the union to '
+      + 'decide NOT TO FLAG an author-written reference — that silence is what owes a provenance question. '
+      + 'This rule resolves no reference at all: it mirrors objectui\'s binding DERIVATION, and reads the union '
+      + 'once, to drop framework-managed columns from the candidate set before any predicate sees them '
+      + '(`InterfaceListPage.tsx`\'s `isSystemManagedField` pre-filter). The union therefore makes this rule '
+      + 'MORE likely to report, never silent about a name, and no field name it skips ever leaves the rule: '
+      + 'the finding names a VISUALIZATION and the object, never a column. '
+      + 'The unprovisioned-anchor case cannot arise on the path that remains, either: a derivation candidate is '
+      + 'by construction an AUTHOR-DECLARED field, and `unprovisionedInjectedColumnsFor` excludes an '
+      + 'author-declared column of an anchor\'s name by design (#7859) — so no binding this rule blesses can '
+      + 'be an ADR-0015 anchor with no storage behind it. An external object that declares a mapped field map '
+      + 'is judged like any other (the shipped `showcase_ext_customer` shape the sortable-fields row measured); '
+      + 'one that declares none is skip 2 and unjudged.',
+  },
   'validate-react-page-props.ts': {
     kind: 'rule',
     reach: ['direct'],

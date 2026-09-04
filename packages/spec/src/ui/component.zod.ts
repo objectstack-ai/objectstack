@@ -9,6 +9,10 @@ import { FeedItemType, FeedFilterMode } from '../data/feed.zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { ExpressionInputSchema } from '../shared/expression.zod';
 import { retiredKey } from '../shared/retired-key';
+// `user:profile`'s retirement prescription — one string, three doors (#14159):
+// the enum's error map and the `PageComponentSchema.type` check in page.zod.ts,
+// and the kept `ComponentPropsMap` row below (`retiredComponentProps`).
+import { RETIRED_PAGE_COMPONENT_TYPES } from './page.zod';
 // `element:record_picker`'s flat `sort` shorthand is the SAME contract as
 // `ElementDataSourceSchema.sort` (page.zod.ts) — one shape, imported from the
 // shared source rather than re-spelled here (#6276).
@@ -318,15 +322,17 @@ const COMPONENT_LEVEL_GUIDANCE: readonly KeySetGuidance[] = [
 
 /**
  * A component that declares no props at all — `app:launcher`, `nav:menu`,
- * `nav:breadcrumb`, `global:search`, `global:notifications`, `user:profile`,
+ * `nav:breadcrumb`, `global:search`, `global:notifications`,
  * `element:divider`, and the three plugin console widgets
  * `cloud-connection:panel` and `marketplace:installed-list` (#11575) and
- * `mcp:connect-agent` (#12344).
+ * `mcp:connect-agent` (#12344). `user:profile` left this list at #14159 — it
+ * is not author-placeable at all, so its row refuses the whole bag
+ * ({@link retiredComponentProps}).
  *
  * A factory rather than one shared `EmptyProps` const, because the surface name
  * is the whole value of the rejection here: an empty shape has no candidate
  * keys, so the edit-distance fallback can say nothing, and "unrecognized key on
- * this component" would leave the author guessing which of the ten it meant.
+ * this component" would leave the author guessing which of the nine it meant.
  * One `strictObject(` call site either way — the ledger counts sites from the
  * AST, and this is one.
  *
@@ -344,6 +350,33 @@ const emptyProps = (type: string) =>
     },
     {},
   );
+
+/**
+ * A component RETIRED at element grain whose props bag is refused WHOLE —
+ * `user:profile` (#14159). The `retiredKey` channel one grain wider: where a
+ * tombstoned KEY accepts absence and refuses any value, a retired ELEMENT has
+ * nothing an author may write at all, so the row is `z.never` — `{}` is refused
+ * exactly like a populated bag, `expected: 'never'` / `code: 'invalid_type'` is
+ * the same issue shape a key tombstone raises, and the message is the element's
+ * retirement prescription from `RETIRED_PAGE_COMPONENT_TYPES` (page.zod.ts), so
+ * the row and the node-level refusal on `PageComponentSchema.type` cannot drift
+ * apart. A type that map does not name has no business here — the throw makes
+ * a row without its prescription a module-load error, not a silent `undefined`
+ * message.
+ *
+ * Why not delete the row: `component-type-vocabulary.ts` derives the KNOWN set
+ * from the row keys, the #5068 props gate skips a type with no row as an
+ * unregistered custom string, and `check-yaml-examples` judges only rowed types
+ * — deleting the row would demote a loud retirement to a silent skip on every
+ * reader that dispatches on it (the `element:filter` argument, #9220).
+ */
+const retiredComponentProps = (type: string) => {
+  const guidance = RETIRED_PAGE_COMPONENT_TYPES.get(type);
+  if (!guidance) {
+    throw new Error(`retiredComponentProps: \`${type}\` has no RETIRED_PAGE_COMPONENT_TYPES entry (page.zod.ts)`);
+  }
+  return z.never({ error: () => guidance }).describe(`[REMOVED] ${guidance}`);
+};
 
 /**
  * The composition slot every thin container renders: `page:section`,
@@ -642,18 +675,17 @@ export const PageTabsProps = strictObject({
      * false candidate a component over).
      *
      * The key is LIVE at the objectui pin this repo builds against
-     * (`.objectui-sha` = `67dadd602`; re-derived at that pin 2026-09-02 —
-     * `containers.tsx` DID change across the move off `d8ec8d6d4`, but that
-     * change lands from `:995` on, below both anchors, so neither moved: the
-     * icon block is still `729-735` and the registration input still `788`,
-     * each re-READ there with the cited text unchanged, never inferred; the
-     * earlier hop off `9602dc820` is the one that moved them, `662-668` →
-     * `729-735` and `721` → `788`): `containers.tsx:729-735`
+     * (`.objectui-sha` = `00d3f09c5`; re-derived at that pin 2026-09-04 —
+     * `containers.tsx` DID change across the move off `67dadd602` (117
+     * insertions, 63 deletions) and both anchors moved by exactly one line:
+     * the icon block from `729-735` and the registration input from `788`,
+     * each re-READ at the new pin with the cited text unchanged, never
+     * inferred): `containers.tsx:730-736`
      * renders
      * `{item.icon && <LazyIcon name={item.icon} …/>}` inside the
      * `TabsTrigger`, left of the label span (`mr-1.5 h-3.5 w-3.5 shrink-0
      * opacity-70`, `aria-hidden`), and the renderer's registration publishes
-     * the key to the Studio block designer at `:788` (the `items` input,
+     * the key to the Studio block designer at `:789` (the `items` input,
      * documented as `[{ label, value?, icon?, count?, visibleWhen?, children
      * }]`).
      *
@@ -1702,18 +1734,17 @@ export const PageAccordionProps = strictObject({
      * re-derive the same false candidate).
      *
      * The key is LIVE at the objectui pin this repo builds against
-     * (`.objectui-sha` = `67dadd602`; re-derived at that pin 2026-09-02 —
-     * `containers.tsx` DID change across the move off `d8ec8d6d4`, but that
-     * change lands from `:995` on, below both anchors, so neither moved: the
-     * icon block is still `918-924` and the registration input still `965`,
-     * each re-READ there with the cited text unchanged, never inferred; the
-     * earlier hop off `9602dc820` is the one that moved them, `851-857` →
-     * `918-924` and `898` → `965`): `containers.tsx:918-924`
+     * (`.objectui-sha` = `00d3f09c5`; re-derived at that pin 2026-09-04 —
+     * `containers.tsx` DID change across the move off `67dadd602` (117
+     * insertions, 63 deletions) and both anchors moved by exactly one line:
+     * the icon block from `918-924` and the registration input from `965`,
+     * each re-READ at the new pin with the cited text unchanged, never
+     * inferred): `containers.tsx:919-925`
      * renders
      * `{item.icon && <LazyIcon name={item.icon} …/>}` inside the
      * `AccordionTrigger`, grouped with the label in the trigger's one wrapping
      * span, and the renderer's registration publishes the key to the Studio
-     * block designer at `:965` (the `items` input, documented as
+     * block designer at `:966` (the `items` input, documented as
      * `[{ label, icon?, collapsed?, children }]`).
      *
      * Vocabulary is Lucide, resolved through objectui's `LazyIcon`
@@ -1910,15 +1941,19 @@ export const ElementButtonPropsSchema = lazySchema(() => strictObject({
    * the button.
    *
    * The key is LIVE at the objectui pin this repo builds against
-   * (`.objectui-sha` = `67dadd602`; re-derived at that pin 2026-09-02 —
-   * `button.tsx` and `resolve-icon.ts` are both byte-identical to the ones at
-   * `d8ec8d6d4` (and at `9602dc820` before it) and every anchor below is
-   * unmoved, each one re-READ at the new pin rather than carried on that
-   * identity (#10274). The read point MOVED
-   * rather than died on the earlier hop onto `9602dc820`, which is why the
-   * anchors below span a second file): `components/src/renderers/form/
-   * button.tsx:36` resolves `schema.icon` through the shared `resolveIcon`,
-   * and `:57` / `:59` render it on either side of the label per
+   * (`.objectui-sha` = `00d3f09c5`; re-derived at that pin 2026-09-04 — BOTH
+   * files changed across the move off `67dadd602`, and this is the first hop
+   * that moved the record's SUBSTANCE rather than only its line numbers:
+   * `resolve-icon.ts` was restructured (110 insertions) so the resolution now
+   * runs through a named `describeIconLookup` seam, and its tokeniser accepts
+   * more spellings than this record used to claim — see the corrected
+   * breakdown below. `button.tsx` changed by 18 insertions and its anchors
+   * moved. Every anchor below was re-READ at the new pin, never carried
+   * (#10274); the read point first MOVED rather than died on the earlier hop
+   * onto `9602dc820`, which is why the anchors span a second file):
+   * `components/src/renderers/form/
+   * button.tsx:43` resolves `schema.icon` through the shared `resolveIcon`,
+   * and `:72` / `:74` render it on either side of the label per
    * `iconPosition` (`mr-2 h-4 w-4` left, `ml-2 h-4 w-4` right), both
    * suppressed while `loading`.
    *
@@ -1926,11 +1961,16 @@ export const ElementButtonPropsSchema = lazySchema(() => strictObject({
    * this surface use — it is the `action:*` resolver, and the two accept
    * different spellings:
    *   - here: `resolveIcon`
-   *     (`components/src/renderers/action/resolve-icon.ts:30-35`) →
-   *     `toPascalCase`, which splits on `-` only, then a one-entry rename map
-   *     (`Home` → `House`), both at `:14-24` → `icons[name]` from
-   *     `lucide-react`. An unknown name resolves to `null` and the button
-   *     renders with NO icon and no diagnostic anywhere.
+   *     (`components/src/renderers/action/resolve-icon.ts:129-132`) delegates
+   *     to `describeIconLookup` (`:117-120`), which PascalCases through
+   *     `toPascalCase` (`:100-105`) and then applies a one-entry rename map
+   *     (`Home` becomes `House`, `:90-92`) before the `icons[key]` lookup from
+   *     `lucide-react`. ⚠️ The tokeniser splits on hyphen, underscore OR
+   *     whitespace (`/[-_\s]+/`) as of this pin; this record previously said
+   *     "splits on `-` only", which was true when written and is not now — a
+   *     re-READ caught it, a line-number refresh would not have. An unknown
+   *     name still resolves to `null` and the button renders with NO icon and
+   *     no diagnostic anywhere.
    *   - `LazyIcon` / `getLazyIcon` (`components/src/lib/lazy-icon.tsx:66-92`):
    *     normalises to kebab-case, checks the name against Lucide's own name
    *     list, and degrades an unknown name to the `Database` glyph.
@@ -2495,10 +2535,10 @@ export const ObjectMetricPropsSchema = lazySchema(() => strictObject({
    * same record for the metric tile.
    *
    * The key is LIVE at the objectui pin this repo builds against
-   * (`.objectui-sha` = `67dadd602`; re-derived at that pin 2026-09-02 — all
+   * (`.objectui-sha` = `00d3f09c5`; re-derived at that pin 2026-09-04 — all
    * five files in the chain below, `index.tsx`, `ObjectMetricWidget.tsx`,
    * `MetricWidget.tsx`, `MetricCard.tsx` and `lazy-icon.tsx`, are
-   * byte-identical to the ones at `d8ec8d6d4`, so NO anchor moved — the
+   * byte-identical to the ones at `67dadd602`, so NO anchor moved — the
    * `object-metric` registration still begins at `:194` and the icon input
    * still lands on `:204`. Every anchor below was re-READ at the new pin
    * rather than inferred from that identity), and the chain runs
@@ -2859,7 +2899,15 @@ export const ComponentPropsMap = {
   // Utility
   'global:search': emptyProps('global:search'),
   'global:notifications': emptyProps('global:notifications'),
-  'user:profile': emptyProps('user:profile'),
+  // RETIRED at element grain (#14159, ruling B: not author-placeable) — the
+  // row STAYS, as for `element:filter` / `element:form` below, so every reader
+  // that dispatches on the row (the #5068 props gate, `check-yaml-examples`,
+  // the vocabulary's known set) keeps recognising the name and refuses it with
+  // the prescription instead of skipping it as an unregistered custom string.
+  // Unlike those two, the WHOLE bag is refused — `{}` included — because the
+  // node itself is refused by name at `PageComponentSchema.type`; a row that
+  // accepted the empty bag would contradict the door one level up.
+  'user:profile': retiredComponentProps('user:profile'),
 
   // Plugin console widgets — #11575, the #8691/#8744 mechanism two instances
   // over, on `@objectstack/cloud-connection`'s published Setup pages: both

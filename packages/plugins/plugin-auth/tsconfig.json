@@ -2,10 +2,33 @@
   "extends": "../../../tsconfig.json",
   "compilerOptions": {
     "outDir": "./dist",
-    "rootDir": "./src",
+    // [#14762] Widened from `./src` as a CONSEQUENCE of the `paths` rule below,
+    // the same consequence `packages/plugins/plugin-security/tsconfig.json`
+    // (#11184) and `packages/rest/tsconfig.json` (#9960) each record:
+    // redirecting a workspace specifier to its source puts that package's
+    // `src/**` into this program, and `rootDir` is enforced over every program
+    // file even under `--noEmit`. `../..` (= `packages/`) is the directory that
+    // contains every file in the program. Emit is unaffected: this package
+    // builds with tsup, and `typecheck` passes `--noEmit`.
+    "rootDir": "../..",
     "types": [
       "node"
-    ]
+    ],
+    // [#14762] `@objectstack/service-messaging` is imported as a VALUE by
+    // `src/auth-manager.ts` (`normalizeRecipientLocale`, the platform's one
+    // reader of a `sys_user.locale` at rest — reused rather than copied).
+    // Without this rule tsc resolves the specifier through the dependency's
+    // `exports` map — `dist/index.d.ts`, a BUILD ARTIFACT — so this package's
+    // typecheck would render a verdict about the last `pnpm build` rather than
+    // about the producer's source in the checkout, which
+    // `check:type-source-resolution` refuses (its header states why the
+    // dangerous case is a typecheck that PASSES). ONE rule for the bare name
+    // only: this package imports no `@objectstack/service-messaging/*` subpath
+    // — that package declares none — and a `paths` target matching nothing on
+    // disk would silently fall back to node resolution.
+    "paths": {
+      "@objectstack/service-messaging": ["../../services/service-messaging/src/index.ts"]
+    }
   },
   "include": [
     "src/**/*"

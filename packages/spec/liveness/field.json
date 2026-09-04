@@ -221,6 +221,12 @@
       "evidence": "packages/objectql/src/validation/record-validator.ts#validateOne (`if (def.minLength !== undefined && s.length < def.minLength) return fail('min_length', { minLength: def.minLength, actual: s.length })`)",
       "note": "CAVEAT — server camel; client form reads min_length. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:130` had rotted onto `export class ValidationError extends Error`, the error class rather than any check; its sibling `maxLength` cited `:127` three lines above, so the pair had drifted together. Re-closed by hand against 8cb96ec41."
     },
+    "valueDomain": {
+      "status": "planned",
+      "verifiedAt": "2026-09-04",
+      "evidence": "packages/spec/src/data/field.zod.ts#VALUE_DOMAIN_FIELD_TYPES (the parse-time applicability door: the key is accepted on `text` only and refused with a located `custom` issue at [valueDomain] on every other type — the same superRefine mechanism `maxLength` / `minLength` use); packages/spec/src/shared/value-domain.zod.ts#isValueDomainMember (the ONE membership predicate the write path will call — shared with the settings door)",
+      "note": "PLANNED, deliberately not `dead`, and the difference is the point. Declared spec-first under the maintainer's 2026-09-02 ruling (option A on the field-level `valueDomain` card: one closed vocabulary — `iana_time_zone` / `iso_4217_currency` / `iso_3166_alpha2` — and one membership predicate shared by settings specifiers and object fields; the vocabulary does not widen). What ships here: the slot, its applicability refusal (a domain on a `number` field is refused at parse, not ignored), the shared predicate, the ADR-0114 catalog member `value_domain` and its four-locale message templates. What does NOT ship here and is the reason for `planned`: the record validator's call into the predicate — `record-validator.ts` does not yet read `def.valueDomain`, so a non-member WRITTEN to a `text` field declaring a domain is accepted today. That write-path refusal is the engine follow-up card the PM files at ACCEPT of the spec half (domain:engine, `Blocked-by:` the spec card); when it lands this row flips `live` with the record-validator seam cited beside `maxLength`'s. The settings door (`service-settings/value-domains.ts`) re-points onto the shared predicate in its own follow-up card and is unchanged until then."
+    },
     "rows": {
       "status": "live",
       "verifiedAt": "2026-08-31",
@@ -395,7 +401,7 @@
       "verifiedAt": "2026-08-17",
       "evidenceScope": "cross-repo",
       "evidence": "objectui: packages/app-shell/src/utils/deriveRelatedLists.ts (columns override on the derived descriptor) → views/RecordDetailView.tsx → plugin-detail/RelatedList.tsx (normalizeColumn hydrates STRING entries: header from the child field label, type-aware cell via makeCell)",
-      "note": "LIVE via objectui renderer. #9227 narrowed the elements to child FIELD-NAME STRINGS — the only authored form in-repo (three showcase objects) and the only form the renderer hydrates fully; the page-block sibling record:related_list.columns (ui/component.zod.ts) is the same strings-only shape. Measured 2026-08-17 against objectui main: object entries span two vocabularies (RelatedList resolves identity via columnIdentity, canonical `field`; the data-table accessor resolves `accessorKey || name` only), so a spec-canonical {field} object renders BLANK cells — refused at parse instead."
+      "note": "LIVE via objectui renderer. #9227 narrowed the elements to child FIELD-NAME STRINGS — the only authored form in-repo (three showcase objects) and the only form the renderer hydrates fully; the page-block sibling record:related_list.columns (ui/component.zod.ts) is the same strings-only shape. RE-CITED 2026-09-03 (#14166): the 2026-08-17 reading against objectui main had the data-table accessor resolving `accessorKey || name`; objectui#6963 retired the `name` alias, and at the `.objectui-sha` pin `67dadd602a3a` object entries span two vocabularies (RelatedList resolves identity via columnIdentity, canonical `field`; the data-table accessor resolves `accessorKey` only), so a spec-canonical {field} object renders BLANK cells — refused at parse instead. Verdict unchanged: LIVE."
     },
     "relatedListFilter": {
       "status": "planned",

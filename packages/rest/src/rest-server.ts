@@ -10,6 +10,10 @@ import {
     // takes the same loud answer rather than the quiet 403 it used to wear.
     AuthzStoreUnavailableError,
     effectiveTenancyPosture,
+    // [#13906] The REGISTRY's own "never registered" brand — the discriminator
+    // that lets the tenancy seam absorb the supported no-tenancy composition
+    // while every other rejection stays loud. Never message text (#13905).
+    isServiceNotRegisteredError,
     assembleExecutionContext, normalizeAuthGate, type AuthGate,
     shouldDenyAnonymous, ANONYMOUS_DENY_BODY, ANONYMOUS_DENY_STATUS,
     // [#7678] ADR-0090 D5/D9 suggested-binding `?status=` vocabulary — the one
@@ -2346,13 +2350,70 @@ export class RestServer {
             };
             // [#8287] The EFFECTIVE tenancy posture, from the kernel's `tenancy`
             // service — the same source plugin-security reconciles for the Layer 0
-            // wall, so API-key admission and the wall agree. Absent ⇒ undefined ⇒
-            // no posture-conditional refusal (behaviour unchanged).
+            // wall, so API-key admission and the wall agree.
+            //
+            // [#13906 — maintainer ruling 2026-09-02, decision 1 option A] The
+            // facts this seam used to answer with one `undefined` are now kept
+            // apart. Measured on a real `ObjectKernel` with a healthy `isolated`
+            // tenancy and an EX-MEMBER's org-stamped API key, the wiring
+            // differing ONLY in the tenancy service's health:
+            //
+            // | `tenancy` service              | before | after |
+            // |:--|:--|:--|
+            // | healthy, wall-enforcing        | 401 refused | 401 — unchanged |
+            // | never registered (supported)   | 200 served  | 200 — unchanged |
+            // | registered and FAILED to build | **200 served** | **503** |
+            //
+            // ⇒ the direction here was PERMISSIVE, and that is what makes this
+            // card's family different from its siblings: a tenancy service that
+            // could not be CONSTRUCTED skipped the Layer 0
+            // `organization_membership_ended` refusal (and its
+            // `organization_required` sibling), so a FAILURE read as "this check
+            // does not apply". #13476 and #13904 answered an unknown with a
+            // REFUSAL; this one answered it with ADMISSION.
+            //
+            // The classification is the REGISTRY's, never message text — the
+            // same discriminator the shipped `objectQLProvider` already uses one
+            // layer down (`isServiceNotRegisteredError`, #13905): "never
+            // registered" is branded and stays quiet; every other rejection (a
+            // factory that threw, a scoped registration resolved without a scope
+            // id, a circular service dependency) is unbranded, and the set is
+            // closed with a LOUD default.
+            //
+            // ⚠️ The WIRING fact is taken from `kernel`'s PRESENCE, asked here
+            // once, and never inferred from what the read returned — the #13476
+            // discipline. Without that guard the single-kernel provider path
+            // (where `kernel` is `undefined`) would raise a `TypeError` from the
+            // dereference and every embedder on that wiring would take the loud
+            // answer. That path carries no posture at all; its half of this
+            // ruling (decision 1 option B′) is refused at BOOT instead — see
+            // `rest-api-plugin.ts`.
+            //
+            // ⚠️ The ASYNC ACCESSOR's presence is part of the wiring fact, for
+            // the same reason the shipped `objectQLProvider` splits on it: a
+            // `KernelBase`-shaped host (`LiteKernel`) has no `getServiceAsync`
+            // at all, so dereferencing it would raise a `TypeError` — unbranded,
+            // and therefore LOUD — turning "this host shape has no async
+            // registry" into an outage. Such a host also has no service
+            // factories (`registerServiceFactory` throws "not supported"), so
+            // absence is the only fault it could report anyway. It keeps the
+            // previous quiet answer, unchanged.
             let tenancyPosture;
-            try {
-                tenancyPosture = effectiveTenancyPosture(await kernel.getServiceAsync('tenancy') as any);
-            } catch {
-                tenancyPosture = undefined;
+            if (kernel && typeof kernel.getServiceAsync === 'function') {
+                try {
+                    tenancyPosture = effectiveTenancyPosture(await kernel.getServiceAsync('tenancy') as any);
+                } catch (err) {
+                    // Registered and unable to answer. The posture is an
+                    // authorization INPUT, so admission was never decided — the
+                    // same loud answer `wiredEngineOrLoud` gives the engine seam,
+                    // carried to the door by the same nets.
+                    if (!isServiceNotRegisteredError(err)) {
+                        throw new AuthzStoreUnavailableError('tenancy', err);
+                    }
+                    // Never registered ⇒ the supported no-tenancy composition:
+                    // quiet `undefined`, no posture-conditional refusal.
+                    tenancyPosture = undefined;
+                }
             }
             const authz = await resolveAuthzContext({ ql, headers, getSession, tenancyPosture });
             // [#6216] The anonymous contract IS the shared assembler's default
@@ -2383,13 +2444,51 @@ export class RestServer {
             // (`{ code, message }`), so this is where the declaration is met —
             // a gate with a blank message no longer rides into a 403 body as
             // `undefined`.
+            //
+            // [#13906 — maintainer ruling 2026-09-02, decision 2 option B] The
+            // gate is best-effort NO LONGER in one precisely measured window:
+            // `isAuthGateActive()` answered `true` AND the gate's session
+            // re-read then FAILED. Measured before the repair, same fixture,
+            // the wiring differing only in how the gate faulted:
+            //
+            // | gate wiring                        | before | after |
+            // |:--|:--|:--|
+            // | INACTIVE (the common, correct case)| admitted | admitted — unchanged |
+            // | ACTIVE, healthy re-read, gated user| 403 code+message | 403 — unchanged |
+            // | `isAuthGateActive()` THROWS        | admitted | admitted — unchanged |
+            // | ACTIVE, re-read FAILS              | **admitted** | **503** |
+            //
+            // ⇒ an enforcement the deployment DECLARED active used to vanish
+            // with no wire trace, deep-equal to gate-off. A declared promise
+            // that disappears silently is the fail-OPEN this card measured.
+            //
+            // ⛔ The probe-throws row stays absorbed DELIBERATELY, and it is the
+            // narrowness the ruling asked for: a host whose probe faults never
+            // answered `true`, so it never declared a gate, and refusing on it
+            // would block deployments that never asked for one.
             let authGate: AuthGate | undefined;
+            let gateActive = false;
             try {
-                if (typeof authService.isAuthGateActive === 'function' && authService.isAuthGateActive()) {
-                    const gatedSession: any = await getSession(headers).catch(() => undefined);
-                    authGate = normalizeAuthGate(gatedSession?.user) ?? undefined;
+                gateActive = typeof authService.isAuthGateActive === 'function'
+                    && authService.isAuthGateActive() === true;
+            } catch {
+                gateActive = false;
+            }
+            if (gateActive) {
+                let gatedSession: any;
+                try {
+                    // ⛔ NOT the `getSession` closure above, and not its
+                    // `.catch(() => undefined)`: both convert a THROW into the
+                    // same `undefined` a gate-less user produces, which is
+                    // precisely the collapse being repaired. A session that
+                    // RESOLVES carrying no gate is not a failure — that user is
+                    // simply not gated, and still admits.
+                    gatedSession = await api.getSession({ headers });
+                } catch (err) {
+                    throw new AuthzStoreUnavailableError('auth_gate', err);
                 }
-            } catch { /* gate is best-effort — never break context resolution */ }
+                authGate = normalizeAuthGate(gatedSession?.user) ?? undefined;
+            }
 
             // [#6216 — maintainer ruling 2026-08-08, Option A] The assembly of
             // the ExecutionContext itself is now the SINGLE shared one

@@ -590,6 +590,12 @@ const PIN_ISSUE = 'https://github.com/objectstack-ai/objectstack/issues/5286';
 // finding later used ("the directory was never INCLUDED by anything"), which is
 // why the remedy names a file rather than describing a shape (#10756).
 const SPEC_SCRIPTS_PRECEDENT = 'packages/spec/tsconfig.scripts.json';
+// The in-tree precedents TESTS_COVERED's remedy points at for the `rootDir`
+// half of the sibling-config route. Both put a test tree that sits outside the
+// build config's `rootDir` into a program, and both had to widen `rootDir` to
+// the repo root to do it -- the step the remedy named no way to discover until
+// #14943, measured on #14835 at 116 x TS6059 inherited and 3 more at `"."`.
+const TEST_ROOTDIR_PRECEDENT = '`packages/client/tsconfig.test.json` and `packages/cli/tsconfig.test.json`';
 const GENERATED_INCLUDE_ISSUE = 'https://github.com/objectstack-ai/objectstack/issues/10880';
 
 // A path in the root program whose edits move the `@objectstack/spec-monorepo`
@@ -673,6 +679,27 @@ const ROOT_PROGRAM_COUPLED_SCRIPT = 'scripts/check-test-typecheck.mts';
 // ran even though that config DOES include the tests. Repaired by the #5286
 // route -- a `tsconfig.test.json` over the test layer, named by a new `typecheck`
 // script -- so the entry is deleted rather than lowered.
+//
+// `@objectstack/service-knowledge` GRADUATED from this ledger too (#15049,
+// PR #15032's sibling for `packages/services/**`; entry: 10 raw, repaired to
+// 0 under BOTH the build config and the new `tsconfig.test.json` split). This
+// one is worth a line because the split did NOT confirm this entry's own
+// 3-code-tier guess -- it found 4, the same "a tier split read off an
+// unrepaired config is a guess about what is UNDER it" lesson the paragraph
+// above states for `metadata` and `service-storage`. Fixing the 3 TS2835 (the
+// config-tier third, and the noise: the unresolved imports made
+// `KnowledgeService` `any`, which suppressed the TypeScript excess-property
+// check on an `ExecutionContext` literal) uncovered a 4th real error the
+// undivided reading had masked: `roles: ['member']`, a field the spec renamed
+// to `positions` (`execution-context.zod.ts`: "Formerly `roles`") that no
+// check had ever read with the renamed type. The other 3 code-tier errors
+// were exactly this entry's guess: two `vi.fn()` mocks stubbing
+// `IDataEngine.find` typed with fewer parameters than the call site they
+// stand in for, so `.mock.calls[N]` indexed past a TS-inferred EMPTY tuple
+// (TS2493/TS2352), and a third mock's parameter type omitted the `where`
+// field the real call passes (TS2339). All 4 are fixed in the test file,
+// matching each mock's type to the call site it stubs; `ExecutionContext`
+// itself was not touched (it was correct -- the test's field name was stale).
 const DEBT = {
   '@objectstack/cloud-connection': {
     errors: 13,
@@ -699,12 +726,6 @@ const DEBT = {
       + 'entry is the specimen #5278 cites for composition drift and has now drifted BOTH ways -- 2 -> 5 '
       + 'by acquiring a second file, then 5 -> 3 by graduating the first -- so re-read what the pile is '
       + 'made of before sizing it, never just the number.',
-  },
-  '@objectstack/service-knowledge': {
-    errors: 10,
-    note: 'code-tier 3 (TS2339/TS2352/TS2493); config-tier 3 (TS2835); noise 4 (TS7006). Re-measured 10 at '
-      + '5ab08428, up from 8; code-tier is unchanged at 3, so the +2 is config-tier/noise. 8 of the 10 are '
-      + 'in __tests__/knowledge-service.test.ts.',
   },
   '@objectstack/service-storage': {
     errors: 51,
@@ -2004,7 +2025,13 @@ function evaluate(packages, root, state) {
             `the check reports green over source it never read (${TRACKING_ISSUE}). Drop the ` +
             `\`*.test.ts\`/\`*.spec.ts\` entry from \`exclude\`, widen \`include\` to reach the test tree, add a ` +
             `sibling \`tsconfig.test.json\` and name it in the \`typecheck\` script (the #5286 route, when the ` +
-            `build config must keep the exclusion), or measure what surfaces and add a TEST_DEBT entry in ${SELF}.`,
+            `build config must keep the exclusion), or measure what surfaces and add a TEST_DEBT entry in ${SELF}. ` +
+            `⚠️ The sibling route usually needs \`rootDir\` widened as well, and leaving it inherited is the ` +
+            `way that route fails: test files outside the build config's \`rootDir\` report one TS6059 each -- ` +
+            `116 of them in one measured onboarding of a sibling \`test/\` tree under \`rootDir: "src"\`, and ` +
+            `\`"."\` still left 3 where tests read fixtures from another package. ${TEST_ROOTDIR_PRECEDENT} ` +
+            `widen it to \`"../.."\` (the repo root) for exactly this reason; \`rootDir\` steers emit layout ` +
+            `only and these programs emit nothing, so it widens the ROOT and never the strictness.`,
         );
       } else {
         const entry = state.testDebt[pkg.name];
@@ -2792,7 +2819,7 @@ function countTscErrors(output, { dropRootDirDiagnostics = false } = {}) {
 // same tree. ⚠️ The asymmetry IS the defect: a local pass was never a claim
 // about CI, and nothing said so out loud.
 //
-// ## Where the number comes from -- CI, never this box
+// ## Where the runner's DEFAULT old space comes from -- CI, never this box
 //
 // Read off the CI runner itself: run 33136681083, job `Type Check · debt
 // ledger`, at 6d097a604, Node v22.23.2. The `packages/qa/http-conformance`
@@ -2812,10 +2839,83 @@ function countTscErrors(output, { dropRootDirDiagnostics = false } = {}) {
 // with `NODE_OPTIONS` on a box under this file's own eyes), so a 4096 old space
 // reports 4144 and commits the 4147.5 above it.
 //
-// ⚠️ If 4096 is wrong, it is wrong DOWNWARD -- the only safe direction. This
-// number's entire job is to be no HIGHER than CI's ceiling. A pin ABOVE CI's is
-// worse than no pin at all: it makes local runs pass where CI still OOMs, which
-// is exactly this defect with extra confidence attached.
+// ## Re-measured FIRST-HAND on the runner, 2026-09-03 (#14569)
+//
+// The bracket above is archaeology through a failed job's GC trace. #14569
+// asked for a raise to 6144 to be taken on a measurement rather than on a
+// typed number, so the reading was taken where the verdict is taken: inside
+// the `Type Check · debt ledger` job itself, by a temporary probe step that
+// emitted its numbers as `::notice` annotations (run 33708954003, job
+// 100504131338, image `ubuntu24 20260831.293.1`, Node v22.23.2, 4 vCPU).
+//
+//   the runner        MemTotal 16,373,452 kB (~15.6 GiB) plus 3,145,724 kB of
+//                     swap -- NOT the 7 GB #14569 assumed. MemAvailable at the
+//                     point the re-measure starts: 14,329,064 kB.
+//   other consumers   153 processes holding 940,316 kB (~918 MB) altogether:
+//                     Runner.Worker 144 MB, Runner.Listener 98 MB, provjobd
+//                     96 MB, dockerd 73 MB, containerd 43 MB. The job's steps
+//                     are sequential, so nothing in it runs BESIDE the
+//                     re-measure -- the ledger's tsc has the box to itself.
+//   this gate's own   `heap_size_limit` 4144 MB with `NODE_OPTIONS` unset --
+//     ceiling         the runner's V8 default, read directly rather than
+//                     inferred. It confirms the 4096 MB old space the GC trace
+//                     above could only bracket.
+//   the heaviest      `packages/qa/http-conformance`'s TEST_DEBT program (906
+//     program         files, 692,003 lines of definitions, 7,328,937
+//                     instantiations) under `--extendedDiagnostics`, twice:
+//
+//                       cap 4096  Memory used 4,077,718K  peak RSS 4,212,904 kB
+//                                 check 26.84s
+//                       cap 6144  Memory used 4,420,706K  peak RSS 4,545,500 kB
+//                                 check 21.90s
+//
+//                     Neither OOMs, and the pair IS the headroom finding
+//                     #14569 asked for: handed 343 MB more heap the same
+//                     program keeps 343 MB more live and finishes ~5s sooner,
+//                     so under 4096 it is paying GC pressure to fit rather
+//                     than fitting. Lowest MemAvailable seen at any point
+//                     during either run: 10,562,192 kB.
+//
+// The scarce resource is therefore NOT the runner's memory -- 15.6 GiB with
+// ~918 MB of it spoken for -- but V8's DEFAULT old space on that runner, which
+// the reading above pins at 4096 MB from two directions.
+//
+// ## The raise, on that measurement (#14569, ruled A then A1, 2026-09-03)
+//
+// A default is not a budget. The ledger's heaviest program was paying GC
+// pressure to fit inside 4096 rather than fitting, and the tripwire (spec
+// declaration growth) is a weekly event, so the ruling raises the ceiling --
+// on the measurement above, never on a typed number. What that raise is NOT
+// is a bigger promise about the box. It is the pair below, and ⛔ neither
+// half is shippable alone:
+//
+//   the workflow   `.github/workflows/lint.yml`, job `typecheck-debt`, step
+//                  "Re-measure the type-check DEBT / TEST_DEBT ledger", now
+//                  runs under `NODE_OPTIONS: --max-old-space-size=6144`. That
+//                  is the half that actually hands the process the old space:
+//                  V8's default there is 4096 and no constant in this file can
+//                  move it.
+//   this constant  6144 -- a description of the old space that step now
+//                  really has, exactly as 4096 described the default before it.
+//
+// ⛔ Raising this constant ALONE cannot buy the ledger a roomier run --
+// measured on 2026-09-03, not reasoned. `remeasureHeapCeiling` below takes the
+// MINIMUM of this pin and the limit the running process actually has, so with
+// the pin at 6144 and the gate started under the runner's DEFAULT the chosen
+// ceiling is still 4144 -- and the `stale` arm below then refuses the run
+// outright: `--re-measure` exits 1 before the first tsc ("the pin is now ABOVE
+// the ceiling it claims to describe"), on every PR and on `main`. That
+// refusal is the pairing's enforcement -- it is what caught the bare raise
+// when it was attempted -- and both directions are pinned as self-test rows
+// below ("the runner as the workflow now starts it" and "the same runner
+// WITHOUT it"). Delete the `NODE_OPTIONS` line and the lane says so, loudly,
+// on the runner.
+//
+// ⚠️ If 6144 is wrong, it is wrong DOWNWARD -- the only safe direction. This
+// number's entire job is to be no HIGHER than the ceiling the process running
+// tsc on CI really has. A pin ABOVE it is worse than no pin at all: it makes
+// local runs pass where CI still OOMs, which is exactly this defect with extra
+// confidence attached.
 //
 // ⛔ Do not raise this to make a local measurement complete. `--re-measure`
 // OOMing under this ceiling is the gate WORKING -- it is CI's failure,
@@ -2823,8 +2923,21 @@ function countTscErrors(output, { dropRootDirDiagnostics = false } = {}) {
 // memory CI has. (`packages/spec/tsup.config.ts` carries the other half of this
 // lesson from the build side: a ceiling above the box's real memory does not
 // buy a bigger run, it converts a recoverable heap error into an exit-137
-// SIGKILL that carries no diagnostic at all.)
-const CI_TSC_HEAP_CEILING_MB = 4096;
+// SIGKILL that carries no diagnostic at all.) The 6144 is not an exception to
+// that rule, it is an application of it: the runner was MEASURED to carry the
+// heaviest program under a 6144 cap (4,420,706K used, 4,545,500 kB peak RSS,
+// 10,562,192 kB still available at the tightest moment) before it was pinned.
+//
+// ⚠️ One protection the pair costs, recorded here so nobody rediscovers it as
+// a surprise. With `NODE_OPTIONS` set explicitly on that step,
+// `heap_size_limit` there reads 6192 whatever the runner's physical memory
+// does -- so on THAT job the `stale` arm can no longer notice the runner
+// shrinking; it now only notices a pin above a DEFAULTED process. The margin
+// is what makes that acceptable: the pin asks for 6144 MB where the
+// measurement found 10,562,192 kB available at the heaviest moment, ~1.7x. If
+// that margin is ever in doubt the answer is a fresh runner measurement and a
+// smaller number in BOTH places, ⛔ never a bigger one here.
+const CI_TSC_HEAP_CEILING_MB = 6144;
 
 /**
  * The last `--max-old-space-size` in a `NODE_OPTIONS` string, in MB, or null.
@@ -3707,6 +3820,12 @@ function observed() {
     },
   };
 }
+
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'check-type-check-coverage self-test reached its verdict';
 
 /**
  * The ledger semantics are the one part of this gate that can be wrong while
@@ -5169,9 +5288,43 @@ function selfTest() {
       expect: { mb: CI_TSC_HEAP_CEILING_MB, stale: false },
     },
     {
+      // `+ 48` is the RUNNER's offset, not a construction: V8 reports the old
+      // space plus a fixed ~48 MB of other spaces, measured on the `Type Check
+      // · debt ledger` job itself (4144 for a 4096 old space, 2026-09-03,
+      // #14569). So this row is the machine whose limit EQUALS the pin with no
+      // caller flag in play -- and the row above it is every box roomier than
+      // that one.
       label: 'on a box shaped like CI the ceiling is a no-op that still names itself',
       where: { heapLimitMb: CI_TSC_HEAP_CEILING_MB + 48, onCi: true },
       expect: { mb: CI_TSC_HEAP_CEILING_MB, stale: false },
+    },
+    {
+      // THE RUNNER AS THE WORKFLOW NOW STARTS IT (#14569). `lint.yml`'s
+      // re-measure step sets `NODE_OPTIONS: --max-old-space-size=6144`, so the
+      // gate process reports 6192 AND carries a caller cap EQUAL to the pin.
+      // Both candidates tie, the tie-break keeps the CI ceiling's name, and
+      // that name is what the job's log then prints. Pinned because an
+      // off-by-one in either direction here reads as a caller cap overriding
+      // the pin on the one machine whose verdict counts.
+      label: "the workflow's own NODE_OPTIONS ties the pin and is not read as a tighter caller cap",
+      where: {
+        heapLimitMb: CI_TSC_HEAP_CEILING_MB + 48,
+        nodeOptions: `--max-old-space-size=${CI_TSC_HEAP_CEILING_MB}`,
+        onCi: true,
+      },
+      expect: { mb: CI_TSC_HEAP_CEILING_MB, stale: false },
+    },
+    {
+      // THE OTHER HALF OF THE PAIR, and the row that keeps the two halves
+      // inseparable. 4144 is the runner's DEFAULT `heap_size_limit`, measured
+      // on that job 2026-09-03. Take the `NODE_OPTIONS` line back out of
+      // `lint.yml` and this is the reading the gate gets: refused outright,
+      // before the first tsc, on every PR and on `main`. A bare raise of the
+      // constant was attempted and this is what caught it, so the pin above
+      // cannot quietly outlive the workflow line that pays for it.
+      label: 'the same runner WITHOUT the workflow NODE_OPTIONS -- its 4144 MB default -- is refused',
+      where: { heapLimitMb: 4144, onCi: true },
+      expect: { mb: 4144, stale: true },
     },
     {
       // Never RAISE. Promising V8 memory the box does not have trades a
@@ -5537,10 +5690,19 @@ function selfTest() {
       `${planCases.length + rewriteCases.length + roundTripCases.length} auto-lowering case(s) + ` +
       `${REFUSING.length * 2 + 1 + exitCodeCases.length + textCases.length} exit-code case(s) hold.`,
   );
+
+  return SELF_TEST_VERDICT;
 }
 
 if (process.argv.includes('--self-test')) {
-  selfTest();
+  if (selfTest() !== SELF_TEST_VERDICT) {
+    console.error(
+      '\n✗ check:type-check-coverage self-test: selfTest() returned without reaching its verdict,\n'
+        + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+        + 'that never finished as a self-test that passed.\n',
+    );
+    process.exit(1);
+  }
   process.exit(0);
 }
 

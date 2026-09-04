@@ -636,6 +636,7 @@
     "UnknownAuthoringKeyFinding (interface)",
     "UnorderedPaginationConformanceCase (interface)",
     "VALID_AST_OPERATORS (const)",
+    "VALUE_DOMAIN_FIELD_TYPES (const)",
     "VALUE_ROUNDTRIP_CASES (const)",
     "VALUE_ROUNDTRIP_COLLISION_PAIRS (const)",
     "VALUE_ROUNDTRIP_FIELDS (const)",

@@ -28,7 +28,7 @@
             "enableOnInstall": true
           },
           "expect": "2xx with the installed package echoed back. A re-run against a live DB 409s on the duplicate id — send `overwrite: true` deliberately rather than adding it by reflex (the guard exists so a second install never silently clobbers the first).",
-          "source": "POST /api/v1/packages is the dispatcher install route (packages/rest/src/rest-route-ledger.ts note; client `packages.install`); the body shape { manifest, enableOnInstall?, overwrite? } is URL- and body-pinned in packages/client/src/client.test.ts"
+          "source": "POST /api/v1/packages is the dispatcher install route (packages/rest/src/rest-route-ledger.ts#packages note; client `packages.install`); the body shape { manifest, enableOnInstall?, overwrite? } is URL- and body-pinned in packages/client/src/client.test.ts"
         },
         {
           "step": 2,
@@ -49,7 +49,7 @@
             }
           },
           "expect": "2xx. `enable.feeds` is stated EXPLICITLY false — unlike files it cannot be omitted, because omission means the spec default `true` (object.zod.ts) and would give a feeds-ENABLED object that scores both probes green for the wrong reason. `sharingModel` is public_read_write ON PURPOSE: the probes must be refused by the CAPABILITY gate, not by record access, and a caller who can read and edit this parent isolates FEEDS_DISABLED from the sibling RECORD_NOT_ACCESSIBLE refusal (packages/plugins/plugin-audit/src/comment-access-hooks.ts).",
-          "source": "`enable.feeds` is the #2707 opt-out, default true (packages/spec/src/data/object.zod.ts: 'Record comments/collaboration feed. Default on; explicit false hides the feed UI and rejects any write that makes a comment target this object (403 FEEDS_DISABLED) — a new comment and an update that re-threads an existing one alike'). `sharingModel` is a TOP-LEVEL object key, enum ['private','public_read','public_read_write','controlled_by_parent'] (packages/spec/src/data/object.zod.ts; ADR-0090 D4). `?package=` is read as `query.package` and threaded to saveMetaItem as packageId (packages/runtime/src/domains/meta.ts)"
+          "source": "`enable.feeds` is the #2707 opt-out, default true (packages/spec/src/data/object.zod.ts#Record: 'Record comments/collaboration feed. Default on; explicit false hides the feed UI and rejects any write that makes a comment target this object (403 FEEDS_DISABLED) — a new comment and an update that re-threads an existing one alike'). `sharingModel` is a TOP-LEVEL object key, enum ['private','public_read','public_read_write','controlled_by_parent'] (packages/spec/src/data/object.zod.ts#query; ADR-0090 D4). `?package=` is read as `query.package` and threaded to saveMetaItem as packageId (packages/runtime/src/domains/meta.ts)"
         }
       ],
       "teardown": "DELETE /api/v1/packages/com.objectstack.qa.feeds (client `packages.uninstall`, ledgered at rest-route-ledger.ts) — or simply discard the isolated file DB, which is the cheaper path and the one an isolated boot makes free. Any throwaway qa_nofeeds record and any sys_comment row created against it go with the package.",
@@ -160,7 +160,7 @@
         "dogfood-verification skill §3",
         "examples/app-showcase/src/data/objects/account.object.ts (requiredness + format/conditional validations)",
         "packages/runtime/src/route-ledger.ts (/data CRUD routes)",
-        "packages/rest/src/rest-server.ts (POST /data/:object/:id/clone → registerDataActionEndpoints) + packages/metadata-protocol/src/protocol.ts (cloneData: enable.clone gate, findOne-in-caller-context, CLONE_STRIP_FIELDS, stripReadonlyForInsert)",
+        "packages/rest/src/rest-server.ts#registerDataActionEndpoints (POST /data/:object/:id/clone → registerDataActionEndpoints) + packages/metadata-protocol/src/protocol.ts#cloneData (cloneData: enable.clone gate, findOne-in-caller-context, CLONE_STRIP_FIELDS, stripReadonlyForInsert)",
         "packages/rest/src/rest-route-ledger.ts (POST /api/v1/data/:object/:id/clone, client data.clone)",
         "objectui: e2e/live/record-history-display.spec.ts",
         "cross-ref: the inline-edit atomic two-surface behavior (ONE Save bar / ONE PATCH carrying exactly the changed keys + ifMatch) is folded into records-forms.concurrent-edit-conflict, not here"
@@ -347,9 +347,9 @@
         "ref": "packages/qa/dogfood/test/field-zoo-roundtrip.dogfood.test.ts (+ field-zoo.matrix.ts vectors, field-zoo-value-shape.test.ts contract)"
       },
       "source": [
-        "packages/spec/src/data/field.zod.ts (FieldType enum — 49 members, listed exhaustively in variants)",
+        "packages/spec/src/data/field.zod.ts#FieldType (FieldType enum — 49 members, listed exhaustively in variants)",
         "examples/app-showcase/src/data/objects/field-zoo.object.ts",
-        "examples/app-showcase/src/data/seed/index.ts (Specimen rows; expense/invoice roll-up expectations)",
+        "examples/app-showcase/src/data/seed/index.ts#Specimen (Specimen rows; expense/invoice roll-up expectations)",
         "packages/qa/dogfood/test/field-zoo.matrix.ts",
         "objectui: e2e/live/summary-rollup.spec.ts"
       ],
@@ -494,11 +494,11 @@
         "ref": "objectui: e2e/live/saved-view-filter.spec.ts, e2e/live/user-filters.spec.ts, e2e/live/inline-edit-polish-2572.spec.ts; packages/qa/dogfood/test/showcase-search.dogfood.test.ts"
       },
       "source": [
-        "examples/app-showcase/src/ui/views/task.view.ts (saved views, sort string form, inlineEdit, exportOptions, bulk/row actions, allowedVisualizations)",
-        "examples/app-showcase/src/ui/views/field-zoo.view.ts (conditionalFormatting, gated bulk actions)",
-        "packages/spec/src/ui/view.zod.ts (UserActionsConfigSchema, AppearanceConfigSchema/VisualizationTypeSchema)",
+        "examples/app-showcase/src/ui/views/task.view.ts#inlineEdit (saved views, sort string form, inlineEdit, exportOptions, bulk/row actions, allowedVisualizations)",
+        "examples/app-showcase/src/ui/views/field-zoo.view.ts#conditionalFormatting (conditionalFormatting, gated bulk actions)",
+        "packages/spec/src/ui/view.zod.ts#UserActionsConfigSchema (UserActionsConfigSchema, AppearanceConfigSchema/VisualizationTypeSchema)",
         "packages/spec/src/data/pagination-conformance.ts (deterministic paging property)",
-        "examples/app-showcase/src/data/seed/index.ts (10 tasks / 2 in_progress; CJK rows)"
+        "examples/app-showcase/src/data/seed/index.ts#tasks (10 tasks / 2 in_progress; CJK rows)"
       ],
       "history": [
         {
@@ -603,8 +603,8 @@
         "ref": "examples/app-showcase/e2e/showcase-smoke.spec.ts (page-level render for the view surfaces)"
       },
       "source": [
-        "packages/spec/src/ui/view.zod.ts (ListViewSchema type enum: grid|kanban|gallery|calendar|timeline|gantt|map|chart|tree)",
-        "examples/app-showcase/src/coverage.ts (LIST_VIEW_TYPES — the 8 the task object demonstrates)",
+        "packages/spec/src/ui/view.zod.ts#ListViewSchema (ListViewSchema type enum: grid|kanban|gallery|calendar|timeline|gantt|map|chart|tree)",
+        "examples/app-showcase/src/coverage.ts#LIST_VIEW_TYPES (LIST_VIEW_TYPES — the 8 the task object demonstrates)",
         "examples/app-showcase/src/ui/views/task.view.ts",
         "examples/app-showcase/src/ui/views/business-unit.view.ts (tree)",
         "examples/app-showcase/src/data/seed/index.ts (view-feeding seed shape)"
@@ -696,9 +696,9 @@
         "automation-input"
       ],
       "source": [
-        "packages/spec/src/ui/view.zod.ts (FormViewSchema type enum: simple|tabbed|wizard|split|drawer|modal)",
-        "examples/app-showcase/src/coverage.ts (FORM_VIEW_TYPES — the 5 authored)",
-        "examples/app-showcase/src/ui/views/task.view.ts (formViews incl. visibleWhen on notes)"
+        "packages/spec/src/ui/view.zod.ts#FormViewSchema (FormViewSchema type enum: simple|tabbed|wizard|split|drawer|modal)",
+        "examples/app-showcase/src/coverage.ts#FORM_VIEW_TYPES (FORM_VIEW_TYPES — the 5 authored)",
+        "examples/app-showcase/src/ui/views/task.view.ts#formViews (formViews incl. visibleWhen on notes)"
       ],
       "history": [
         {
@@ -793,8 +793,8 @@
         "ref": "objectui: e2e/live/field-conditional-rules.spec.ts, e2e/live/required-when-submit.spec.ts, e2e/live/list-row-action-cel.spec.ts"
       },
       "source": [
-        "examples/app-showcase/src/data/objects/invoice.object.ts (the B2 rules + userActions gating, with server-semantics comments)",
-        "packages/spec/src/data/field.zod.ts (requiredWhen/readonlyWhen/visibleWhen authoring surface)",
+        "examples/app-showcase/src/data/objects/invoice.object.ts#userActions (the B2 rules + userActions gating, with server-semantics comments)",
+        "packages/spec/src/data/field.zod.ts#requiredWhen (requiredWhen/readonlyWhen/visibleWhen authoring surface)",
         "packages/objectql/src/validation/rule-validator.ts (enforcement site)"
       ],
       "history": [
@@ -983,7 +983,7 @@
       },
       "source": [
         "examples/app-showcase/src/data/objects/cascading-select.object.ts (the B3 / #1583 fixture, with both-sides contract in its header comment)",
-        "examples/app-showcase/src/data/objects/invoice.object.ts (contact dependsOn account)",
+        "examples/app-showcase/src/data/objects/invoice.object.ts#dependsOn (contact dependsOn account)",
         "examples/app-showcase/src/data/seed/index.ts (contact spread per account)"
       ],
       "history": [
@@ -1083,7 +1083,7 @@
       },
       "source": [
         "#3358 §4",
-        "examples/app-showcase/src/data/objects/invoice.object.ts (inlineEdit grid, amount expression, total summary)",
+        "examples/app-showcase/src/data/objects/invoice.object.ts#inlineEdit (inlineEdit grid, amount expression, total summary)",
         "examples/app-showcase/src/data/seed/index.ts (product catalog rows)"
       ],
       "history": [
@@ -1195,10 +1195,10 @@
       },
       "source": [
         "#3358 §4 (evidence run captured exactly this trace)",
-        "examples/app-showcase/src/data/seed/index.ts (the 26-contact Northwind fixture, authored for objectui#2711)",
-        "examples/app-showcase/src/data/objects/invoice.object.ts (relatedList declaration)",
+        "examples/app-showcase/src/data/seed/index.ts#Northwind (the 26-contact Northwind fixture, authored for objectui#2711)",
+        "examples/app-showcase/src/data/objects/invoice.object.ts#relatedList (relatedList declaration)",
         "objectui: packages/app-shell/src/views/RecordDetailView.tsx (deriveRelatedLists canRead filter — object-level READ gate, objectui#2359)",
-        "examples/app-showcase/src/security/permission-sets.ts (showcase_manager child read vs showcase_contributor's omission); PENDING-GAPS §E3 / objectui#2565"
+        "examples/app-showcase/src/security/permission-sets.ts#showcase_manager (showcase_manager child read vs showcase_contributor's omission); PENDING-GAPS §E3 / objectui#2565"
       ],
       "history": [
         {
@@ -1386,7 +1386,7 @@
       "source": [
         "#3358 §4 ('leaving it unticked on the strength of a label')",
         "ADR-0059",
-        "examples/app-showcase/src/ui/actions/index.ts (maxSize declarations)"
+        "examples/app-showcase/src/ui/actions/index.ts#maxSize (maxSize declarations)"
       ],
       "history": [
         {
@@ -1579,9 +1579,9 @@
         "ref": "objectui: e2e/live/list-row-action-cel.spec.ts (row-level CEL visibility) + e2e/live/action-modal.spec.ts (dialog dispatch)"
       },
       "source": [
-        "packages/spec/src/ui/action.zod.ts (ACTION_LOCATIONS — the canonical 6-value enum, single source of truth; `global_nav` was the 7th until #6888 retired it — no product surface rendered it)",
-        "examples/app-showcase/src/ui/actions/index.ts (per-location fixture fleet + the record:quick_actions filter note + the two headless `locations: []` declarations)",
-        "packages/lint/src/validate-action-locations.ts (the `action-no-placement` rule — this repo's codification of the current contract: an action with no `locations` renders nowhere and is therefore inert, while `locations: []` is the deliberate headless declaration and is NOT flagged)",
+        "packages/spec/src/ui/action.zod.ts#ACTION_LOCATIONS (ACTION_LOCATIONS — the canonical 6-value enum, single source of truth; `global_nav` was the 7th until #6888 retired it — no product surface rendered it)",
+        "examples/app-showcase/src/ui/actions/index.ts#locations (per-location fixture fleet + the record:quick_actions filter note + the two headless `locations: []` declarations)",
+        "packages/lint/src/validate-action-locations.ts#action (the `action-no-placement` rule — this repo's codification of the current contract: an action with no `locations` renders nowhere and is therefore inert, while `locations: []` is the deliberate headless declaration and is NOT flagged)",
         "objectui: packages/types/src/ui-action.ts `actionRendersAt` (the single placement predicate — a membership test, so an undeclared or empty `locations` matches nothing) + packages/.../action-bar.tsx, its consumer since objectui#3142",
         "cross-ref: bulk dispatch-count semantics live in records-forms.list-view-capabilities (bulk-actions variant); param dialogs in records-forms.action-param-widgets"
       ],
@@ -1702,8 +1702,8 @@
         "wrong-persona"
       ],
       "source": [
-        "packages/spec/src/data/validation.zod.ts (ValidationRuleSchema, 6 discriminated variants; severity enum ['error','warning','info'] default 'error')",
-        "packages/objectql/src/validation/rule-validator.ts (evaluateRule switch + per-type codes; 'only error blocks', unevaluable-advisory stays non-blocking, the severity fork)",
+        "packages/spec/src/data/validation.zod.ts#ValidationRuleSchema (ValidationRuleSchema, 6 discriminated variants; severity enum ['error','warning','info'] default 'error')",
+        "packages/objectql/src/validation/rule-validator.ts#evaluateRule (evaluateRule switch + per-type codes; 'only error blocks', unevaluable-advisory stays non-blocking, the severity fork)",
         "examples/app-showcase/src/data/objects/{account,project,task}.object.ts (the seeded rules; project.object.ts the advisory project_health_progression)",
         "#1475 (declared ≠ enforced history: 9 declared → 6 declared+enforced)"
       ],
@@ -1796,7 +1796,7 @@
       "source": [
         "#3358 §8 (the three never-imported gantt rows)",
         "objectui: packages/plugin-gantt/src/GanttView.tsx + scheduling.ts (RescheduleResult.skippedLocked)",
-        "packages/spec/src/ui/view.zod.ts (GanttConfigSchema)",
+        "packages/spec/src/ui/view.zod.ts#GanttConfigSchema (GanttConfigSchema)",
         "examples/app-showcase/src/ui/views/task.view.ts (stock fixture limits)"
       ],
       "history": [
@@ -1866,7 +1866,7 @@
       ],
       "source": [
         "objectui: packages/plugin-kanban/src/KanbanImpl.tsx (onDragEnd)",
-        "examples/app-showcase/src/data/objects/task.object.ts (task_status_flow state_machine)"
+        "examples/app-showcase/src/data/objects/task.object.ts#task_status_flow (task_status_flow state_machine)"
       ],
       "history": [
         {
@@ -2191,7 +2191,7 @@
       "source": [
         "objectui: packages/plugin-calendar/src/ObjectCalendar.tsx (handleEventDropDefault optimistic update + rollback + toast; empty-day quick-create → dataSource.create)",
         "objectui: packages/plugin-calendar/src/CalendarView.tsx + CalendarView.dnd.test.tsx",
-        "examples/app-showcase/src/ui/views/task.view.ts (Calendar view: startDateField due_date, colorField status)",
+        "examples/app-showcase/src/ui/views/task.view.ts#startDateField (Calendar view: startDateField due_date, colorField status)",
         "cross-ref: records-forms.view-type-gallery (calendar render-only), records-forms.kanban-drag-persistence / gantt-interactions (sibling drag-persist items)"
       ],
       "history": [
@@ -2296,7 +2296,7 @@
       "source": [
         "objectui: packages/plugin-detail/src/ConcurrentUpdateDialog.tsx (Reload/Overwrite UX), packages/plugin-form/src/occSave.tsx (If-Match → 409, conflict dialog, re-key overwrite)",
         "objectui: packages/plugin-detail/src/InlineEditSaveBar.tsx + packages/react/src/context/InlineEditContext.tsx (one save bar, changed-keys draft, ifMatch)",
-        "framework: packages/rest/src/rest-server.ts (CONCURRENT_UPDATE → 409 mapping), packages/metadata-protocol/src/protocol.ts updateData (If-Match / expectedVersion)",
+        "framework: packages/rest/src/rest-server.ts#mapping (CONCURRENT_UPDATE → 409 mapping), packages/metadata-protocol/src/protocol.ts#updateData updateData (If-Match / expectedVersion)",
         "PENDING-GAPS §C concurrent-edit-conflict + §E1 inline-edit atomic two-surface (objectui#2542/2549/2604); cross-ref records-forms.crud-roundtrip"
       ],
       "history": [
@@ -2441,9 +2441,9 @@
         "objectui: packages/plugin-detail/src/{RecordChatterPanel,CommentInput,MentionAutocomplete,extractMentions}.tsx (compose + @mention)",
         "objectui: packages/app-shell/src/views/RecordDetailView.tsx (mergeFeedRows union-by-id, sys_comment + sys_activity fetch/merge, mentionSuggestions), packages/plugin-detail/src/renderers/recordActivityFeed.ts (activity→feed map)",
         "objectui: packages/collaboration/src/useMentionNotifications.ts (recipient-scoped bell, unreadCount)",
-        "framework: packages/spec/src/data/object.zod.ts (enable.feeds default true → FEEDS_DISABLED, 'a new comment and an update that re-threads an existing one alike'); PENDING-GAPS §B record-discussion-mentions",
-        "framework: packages/plugins/plugin-audit/src/audit-writers.ts (enforceFeedsCapability, registered on beforeInsert AND beforeUpdate per #10170), packages/plugins/plugin-audit/src/comment-access-hooks.ts (RECORD_NOT_ACCESSIBLE — the sibling refusal the probes isolate against), packages/plugins/plugin-audit/src/objects/sys-comment.object.ts (thread_id is conventionally `{object}:{record_id}`)",
-        "framework: packages/spec/src/data/feed.zod.ts (FeedFilterMode, 4 members — pinned above),+ (SYS_ACTIVITY_BUILTIN_TYPES + the #11507 open-vocabulary ruling: built-ins are the floor, never the ceiling); packages/plugins/plugin-audit/src/objects/sys-activity.object.ts (apiMethods ['get','list'] — why the probe cannot direct-POST)",
+        "framework: packages/spec/src/data/object.zod.ts#FEEDS_DISABLED (enable.feeds default true → FEEDS_DISABLED, 'a new comment and an update that re-threads an existing one alike'); PENDING-GAPS §B record-discussion-mentions",
+        "framework: packages/plugins/plugin-audit/src/audit-writers.ts#enforceFeedsCapability (enforceFeedsCapability, registered on beforeInsert AND beforeUpdate per #10170), packages/plugins/plugin-audit/src/comment-access-hooks.ts#RECORD_NOT_ACCESSIBLE (RECORD_NOT_ACCESSIBLE — the sibling refusal the probes isolate against), packages/plugins/plugin-audit/src/objects/sys-comment.object.ts#thread_id (thread_id is conventionally `{object}:{record_id}`)",
+        "framework: packages/spec/src/data/feed.zod.ts#FeedFilterMode (FeedFilterMode, 4 members — pinned above),+ (SYS_ACTIVITY_BUILTIN_TYPES + the #11507 open-vocabulary ruling: built-ins are the floor, never the ceiling); packages/plugins/plugin-audit/src/objects/sys-activity.object.ts#apiMethods (apiMethods ['get','list'] — why the probe cannot direct-POST)",
         "objectui: packages/plugin-detail/src/RecordActivityTimeline.tsx (FeedFilterMode imported from the spec), (the four filter options), (filterItems); packages/plugin-detail/src/renderers/recordActivityFeed.ts (ACTIVITY_TYPE_TO_FEED_TYPE superset map + UNMAPPED_ACTIVITY_FEED_TYPE fallback + its diagnostic; drift held by the objectui#5969 two-directional pin, recordActivityFeed.test.ts)"
       ],
       "automated": {
@@ -2739,7 +2739,7 @@
       },
       "source": [
         "objectui: packages/plugin-grid/src/ObjectGrid.tsx (selectAllMatching, resolveBulkRows paged fan-out + HARD_CAP, resetSelection #3056, totalMatching), packages/plugin-grid/src/components/BulkActionBar.tsx (cross-page banner)",
-        "examples/app-showcase/src/data/seed/index.ts (Northwind 26-contact fixture, objectui#2711)",
+        "examples/app-showcase/src/data/seed/index.ts#Northwind (Northwind 26-contact fixture, objectui#2711)",
         "PENDING-GAPS §C bulk-select-all-matching; cross-ref records-forms.list-view-capabilities (bulk-actions, page-local)"
       ],
       "history": [
@@ -2828,7 +2828,7 @@
       },
       "source": [
         "objectui: packages/fields/src/widgets/LookupField.tsx (allowCreate default-on, SYSTEM_REFERENCE_RX / USER_DIRECTORY_REFS, isUserFacingReference, handleCreateNew), packages/fields/src/widgets/RecordPickerDialog.tsx (scoped find)",
-        "examples/app-showcase/src/data/objects/business-unit.object.ts + category.object.ts (parent allowCreate:true)",
+        "examples/app-showcase/src/data/objects/business-unit.object.ts#allowCreate + category.object.ts (parent allowCreate:true)",
         "PENDING-GAPS §B lookup-picker-create-new"
       ],
       "history": [
@@ -3006,7 +3006,7 @@
         "ref": "objectui: e2e/import-console/import-console-undo.spec.ts, e2e/import-harness/import-undo.spec.ts (both self-gate)"
       },
       "source": [
-        "framework: packages/rest/src/rest-route-ledger.ts (POST /data/:object/import/jobs; /import/jobs/:jobId/{cancel,undo,results}; GET /import/jobs[/:jobId])",
+        "framework: packages/rest/src/rest-route-ledger.ts#jobId (POST /data/:object/import/jobs; /import/jobs/:jobId/{cancel,undo,results}; GET /import/jobs[/:jobId])",
         "objectui: e2e/import-console/import-console-undo.spec.ts, e2e/import-harness/import-undo.spec.ts",
         "PENDING-GAPS §C import-job-undo-cancel"
       ],
@@ -3163,14 +3163,14 @@
         "ref": "packages/qa/dogfood/test/showcase-public-form.dogfood.test.ts (pins the beforeInsert stamp: status='new'/source='web' on an anonymous inquiry submit); packages/qa/dogfood/test/hook-error-format.dogfood.test.ts (pins the beforeDelete onError:'abort' throw → REST error body). Declarative-wrapper semantics (two-root condition, async, retry, onError, fail-closed) are unit-pinned in packages/objectql/src/hook-wrappers.ts + hook-binder.ts tests. The transition audit / over-budget warn / priority-ordering LOG oracles and the abort/log/priority SCRATCH variants are NOT yet dogfood-pinned — drive them by hand."
       },
       "source": [
-        "examples/app-showcase/src/data/hooks/index.ts (the four fixture hooks + allHooks export; header comments spell out the two-root #4784 transition and the != null / not has() #4770 rationale verbatim)",
-        "packages/spec/src/data/hook.zod.ts (HookSchema + HookEvent enum beforeFind/afterFind/beforeInsert/afterInsert/beforeUpdate/afterUpdate/beforeDelete/afterDelete; defineHook; async 'after* only'; onError default 'abort'; empty-target refusal #4001)",
-        "packages/objectql/src/hook-wrappers.ts (wrapDeclarativeHook wrapping order condition→async→retry→timeout→onError; pickRecordPayload #4770 record = stored ⊕ payload total over declared fields; pickPreviousPayload #4784 previous binding; HookConditionError #4775 fail-closed, raised OUTSIDE onError; fireAndForget = async && isAfterEvent)",
-        "packages/objectql/src/hook-binder.ts (bindHooksToEngine: per-event × per-object engine.registerHook with priority; unresolved-body / empty-target skips)",
-        "packages/runtime/src/sandbox/body-runner.ts (log: engineCtx.logger — the ['log'] capability routing that makes the audit/warn lines an observable log oracle)",
-        "packages/spec/liveness/hook.json (object/events/body/priority/async/condition/retryPolicy/timeout/onError all 'live'; label/description 'dead' but kept as docs)",
+        "examples/app-showcase/src/data/hooks/index.ts#allHooks (the four fixture hooks + allHooks export; header comments spell out the two-root #4784 transition and the != null / not has() #4770 rationale verbatim)",
+        "packages/spec/src/data/hook.zod.ts#HookSchema (HookSchema + HookEvent enum beforeFind/afterFind/beforeInsert/afterInsert/beforeUpdate/afterUpdate/beforeDelete/afterDelete; defineHook; async 'after* only'; onError default 'abort'; empty-target refusal #4001)",
+        "packages/objectql/src/hook-wrappers.ts#wrapDeclarativeHook (wrapDeclarativeHook wrapping order condition→async→retry→timeout→onError; pickRecordPayload #4770 record = stored ⊕ payload total over declared fields; pickPreviousPayload #4784 previous binding; HookConditionError #4775 fail-closed, raised OUTSIDE onError; fireAndForget = async && isAfterEvent)",
+        "packages/objectql/src/hook-binder.ts#bindHooksToEngine (bindHooksToEngine: per-event × per-object engine.registerHook with priority; unresolved-body / empty-target skips)",
+        "packages/runtime/src/sandbox/body-runner.ts#engineCtx (log: engineCtx.logger — the ['log'] capability routing that makes the audit/warn lines an observable log oracle)",
+        "packages/spec/liveness/hook.json#retryPolicy (object/events/body/priority/async/condition/retryPolicy/timeout/onError all 'live'; label/description 'dead' but kept as docs)",
         "examples/app-showcase/src/data/objects/{task,inquiry,project}.object.ts (task.done boolean + task.title required; inquiry.status select['new' default:true]/source text no-default; project.budget/spent currency + spent_within_budget rule rejecting spent > budget*1.2)",
-        "examples/app-showcase/src/data/seed/index.ts (done tasks 'Audit current IA'/'App wireframes'; not-done 'Build homepage'; projects 'Data Platform' 600000/420000 and 'Website Relaunch' 150000/60000)",
+        "examples/app-showcase/src/data/seed/index.ts#tasks (done tasks 'Audit current IA'/'App wireframes'; not-done 'Build homepage'; projects 'Data Platform' 600000/420000 and 'Website Relaunch' 150000/60000)",
         "packages/qa/dogfood/test/showcase-public-form.dogfood.test.ts + hook-error-format.dogfood.test.ts (the two existing dogfood pins this item cites)"
       ],
       "history": [
@@ -3309,12 +3309,12 @@
         "ref": "packages/qa/dogfood/test/field-zoo-roundtrip.dogfood.test.ts (+ field-zoo.matrix.ts vectors, field-zoo-value-shape.test.ts) for round-trip & masking; packages/objectql/src/engine-lookup-referential-integrity.test.ts for reference_not_found (#4441); packages/objectql/src/engine-autonumber-runtime-owned.test.ts for the autonumber strip (#5503)"
       },
       "source": [
-        "packages/objectql/src/validation/record-validator.ts (validateOne: max_length/min_length, min_value/max_value/invalid_number, invalid_option for select+multiselect, normalizeMultiValueFields; NO scale/precision rounding)",
-        "packages/spec/src/api/errors.zod.ts (FieldErrorCode catalog — required, max_length, min_value/max_value, invalid_option, reference_not_found, invalid_type … ADR-0114)",
-        "packages/spec/src/data/field.zod.ts (per-type constraints: maxLength/minLength, precision/scale/min/max, options value-vs-label, lookupFilters/dependsOn, autonumberFormat tokens, formula expression, summaryOperations)",
-        "packages/drivers/driver-sql/src/sql-driver.ts (createColumn: number/currency/percent → table.float, NOT DECIMAL; datetime → DATETIME(3)/timestamptz)",
-        "packages/objectql/src/engine.ts (assertReferencesResolve #4441 — existence-only, unscoped)",
-        "packages/objectql/src/validation/rule-validator.ts (RUNTIME_OWNED_FIELD_TYPES=['autonumber']; stripRuntimeOwnedFields/stripReadonlyFields; formula-vs-summary note #6014)",
+        "packages/objectql/src/validation/record-validator.ts#validateOne (validateOne: max_length/min_length, min_value/max_value/invalid_number, invalid_option for select+multiselect, normalizeMultiValueFields; NO scale/precision rounding)",
+        "packages/spec/src/api/errors.zod.ts#FieldErrorCode (FieldErrorCode catalog — required, max_length, min_value/max_value, invalid_option, reference_not_found, invalid_type … ADR-0114)",
+        "packages/spec/src/data/field.zod.ts#maxLength (per-type constraints: maxLength/minLength, precision/scale/min/max, options value-vs-label, lookupFilters/dependsOn, autonumberFormat tokens, formula expression, summaryOperations)",
+        "packages/drivers/driver-sql/src/sql-driver.ts#createColumn (createColumn: number/currency/percent → table.float, NOT DECIMAL; datetime → DATETIME(3)/timestamptz)",
+        "packages/objectql/src/engine.ts#assertReferencesResolve (assertReferencesResolve #4441 — existence-only, unscoped)",
+        "packages/objectql/src/validation/rule-validator.ts#stripRuntimeOwnedFields (RUNTIME_OWNED_FIELD_TYPES=['autonumber']; stripRuntimeOwnedFields/stripReadonlyFields; formula-vs-summary note #6014)",
         "packages/spec/src/data/autonumber-format.ts (token grammar) + autonumber-format.test.ts",
         "examples/app-showcase/src/data/objects/field-zoo.object.ts, invoice.object.ts (status/account/total carriers)"
       ],
@@ -3413,10 +3413,10 @@
         "ref": "objectui: e2e/live/cascading-options.spec.ts (client clear-on-change); packages/objectql/src/validation/rule-validator.option-visibility.test.ts (server WRITTEN-value gate)"
       },
       "source": [
-        "packages/objectql/src/validation/rule-validator.ts (evaluateOptionVisibility — WRITTEN-value only via `!(name in data) continue`; fail-open on unevaluable; invalid_option/option_unavailable)",
-        "packages/objectql/src/engine.ts (assertReferencesResolve #4441 — existence-only, 'Why the probe is unscoped')",
+        "packages/objectql/src/validation/rule-validator.ts#evaluateOptionVisibility (evaluateOptionVisibility — WRITTEN-value only via `!(name in data) continue`; fail-open on unevaluable; invalid_option/option_unavailable)",
+        "packages/objectql/src/engine.ts#assertReferencesResolve (assertReferencesResolve #4441 — existence-only, 'Why the probe is unscoped')",
         "examples/app-showcase/src/data/objects/cascading-select.object.ts (2-level country→province; no 3rd level)",
-        "examples/app-showcase/src/data/objects/invoice.object.ts (contact dependsOn ['account'], account lookupFilters)",
+        "examples/app-showcase/src/data/objects/invoice.object.ts#dependsOn (contact dependsOn ['account'], account lookupFilters)",
         "examples/app-showcase/src/data/seed/index.ts (contact spread per account)",
         "objectui: e2e/live/cascading-options.spec.ts"
       ],
@@ -3509,12 +3509,12 @@
         "ref": "packages/objectql/src/secret-fields.test.ts (encrypt/mask/fail-closed); packages/qa/dogfood/test/field-zoo-roundtrip.dogfood.test.ts (+ field-zoo.matrix.ts masked vectors for f_secret & f_password)"
       },
       "source": [
-        "packages/objectql/src/secret-fields.ts (SECRET_MASK, SECRET_REF_PREFIX, collectSecretFields/collectMaskedReadFields/collectCredentialFields)",
-        "packages/objectql/src/engine.ts (encryptSecretFields — encrypt→sys_secret→ref, echoed-mask drop, fail-closed throw; decrypt path)",
-        "packages/spec/src/data/field.zod.ts (FieldType 'secret'/'password' ADR-0100 notes; ackPlaintextMasking)",
-        "packages/cli/src/commands/serve.ts (LocalCryptoProvider host wiring via setCryptoProvider)",
+        "packages/objectql/src/secret-fields.ts#SECRET_REF_PREFIX (SECRET_MASK, SECRET_REF_PREFIX, collectSecretFields/collectMaskedReadFields/collectCredentialFields)",
+        "packages/objectql/src/engine.ts#encryptSecretFields (encryptSecretFields — encrypt→sys_secret→ref, echoed-mask drop, fail-closed throw; decrypt path)",
+        "packages/spec/src/data/field.zod.ts#FieldType (FieldType 'secret'/'password' ADR-0100 notes; ackPlaintextMasking)",
+        "packages/cli/src/commands/serve.ts#host (LocalCryptoProvider host wiring via setCryptoProvider)",
         "packages/platform-objects/src/system/sys-secret.object.ts (ciphertext store)",
-        "examples/app-showcase/src/data/objects/field-zoo.object.ts (f_secret, f_password); packages/qa/dogfood/test/field-zoo.matrix.ts (masked vectors)"
+        "examples/app-showcase/src/data/objects/field-zoo.object.ts#f_secret (f_secret, f_password); packages/qa/dogfood/test/field-zoo.matrix.ts (masked vectors)"
       ],
       "history": [
         {
@@ -3600,10 +3600,10 @@
         "automation-input"
       ],
       "source": [
-        "packages/spec/src/data/object.zod.ts (visibleOn tombstone prescription), (visibleWhen, CEL via ExpressionInputSchema — #13030, commit 53dc739, Option-A maintainer ruling 2026-08-28)",
+        "packages/spec/src/data/object.zod.ts#visibleOn (visibleOn tombstone prescription), (visibleWhen, CEL via ExpressionInputSchema — #13030, commit 53dc739, Option-A maintainer ruling 2026-08-28)",
         "packages/spec/src/data/field-group-layout.ts (verbatim passthrough; evaluation ruled the renderer's), field-group-layout.test.ts+ and object-strictness-batch20.test.ts (the pins)",
         "objectui: packages/plugin-form/src/fieldGroups.ts and packages/plugin-detail/src/synth/buildDefaultPageSchema.ts — the two adapters that DROP the key at objectui 1e14d70 (clause 4's expected-fail); packages/components/src/renderers/form/form.tsx (#6236 section grouping contract) and packages/plugin-form/src/sectionPredicateDiagnostic.ts (wizard-arm design boundary) — the gating machinery derived sections would plug into",
-        "examples/app-showcase/src/data/objects/contact.object.ts, semantic-zoo.object.ts (stock fieldGroups declarations, none with a predicate)",
+        "examples/app-showcase/src/data/objects/contact.object.ts#fieldGroups, semantic-zoo.object.ts (stock fieldGroups declarations, none with a predicate)",
         "cross-ref: field-level FormField.visibleWhen is form-view-gallery's; view-section FormSection.visibleWhen is NOT this slot — this item is the object-level fieldGroups predicate #13030 re-introduced"
       ],
       "history": [
@@ -3699,10 +3699,10 @@
         "ref": "packages/drivers/driver-memory/src/memory-unique-constraint.test.ts (refusal shape, NULL-distinct, every write path, scope matrix, autonumber converge, boundary cases); packages/drivers/driver-sql/src/sql-driver-8577-tenant-scoped-declared-unique.test.ts + sql-driver-declared-index-organization-respelling.test.ts (SQL family, 409 UNIQUE_VIOLATION over real REST)"
       },
       "source": [
-        "packages/drivers/driver-memory/src/memory-unique-constraint.ts (#13197/#13249, commit 56c093c — single judgment point; scope table read off driver-sql, arm for arm)",
-        "packages/drivers/driver-memory/src/memory-driver.ts (updateMany check-before-mutate)",
-        "packages/drivers/driver-sql/src/schema-drift.ts (uniqueIndexesFromFields, ADR-0120 D1/D3)",
-        "packages/objectql/src/engine.ts (createWithAutonumberResync — the branch the enforcement makes reachable)",
+        "packages/drivers/driver-memory/src/memory-unique-constraint.ts#scope (#13197/#13249, commit 56c093c — single judgment point; scope table read off driver-sql, arm for arm)",
+        "packages/drivers/driver-memory/src/memory-driver.ts#updateMany (updateMany check-before-mutate)",
+        "packages/drivers/driver-sql/src/schema-drift.ts#uniqueIndexesFromFields (uniqueIndexesFromFields, ADR-0120 D1/D3)",
+        "packages/objectql/src/engine.ts#createWithAutonumberResync (createWithAutonumberResync — the branch the enforcement makes reachable)",
         "content/docs/capabilities/data.mdx ('Uniqueness … per-field switches' — the docs claim this item makes testable)"
       ],
       "history": [
@@ -3809,8 +3809,8 @@
         "ref": "packages/objectql/src/engine-cascade-delete.test.ts (+ engine-cascade-delete-atomic.test.ts, engine-cascade-delete-multivalue-probe.test.ts) — defaults, coercion+log, escalation, per-row multi-value narrowing"
       },
       "source": [
-        "packages/spec/src/data/field.zod.ts (deleteBehavior inline enum; #9689 parse rejection, #9784 default materialization)",
-        "packages/objectql/src/engine.ts (defaults, coercion + [cascade-delete] log, required-FK escalation incl. #9688 multi-value deferral), (DELETE_RESTRICTED envelope, #12166 count disclosure, cascade recursion)",
+        "packages/spec/src/data/field.zod.ts#deleteBehavior (deleteBehavior inline enum; #9689 parse rejection, #9784 default materialization)",
+        "packages/objectql/src/engine.ts#required (defaults, coercion + [cascade-delete] log, required-FK escalation incl. #9688 multi-value deferral), (DELETE_RESTRICTED envelope, #12166 count disclosure, cascade recursion)",
         "examples/app-showcase/src/data/objects/invoice.object.ts,184; contact.object.ts; field-zoo.object.ts; expense-report.object.ts (the four stock arms)"
       ],
       "history": [
@@ -3898,7 +3898,7 @@
         "ref": "packages/metadata-protocol — search-clone-schema-conformance.test.ts (parses the real cloneData producer); packages/rest — search-clone-route-schema-conformance.test.ts (drives the live mount); named on the ledger row rest-route-ledger.ts"
       },
       "source": [
-        "packages/metadata-protocol/src/protocol.ts (cloneData: registration gate #3770, CLONE_DISABLED, findOne-in-context, CLONE_STRIP_FIELDS + system/autonumber/formula/summary strip, overrides, stripReadonlyForInsert #3043, omitInternalFieldsFromWriteResponse #7823)",
+        "packages/metadata-protocol/src/protocol.ts#cloneData (cloneData: registration gate #3770, CLONE_DISABLED, findOne-in-context, CLONE_STRIP_FIELDS + system/autonumber/formula/summary strip, overrides, stripReadonlyForInsert #3043, omitInternalFieldsFromWriteResponse #7823)",
         "packages/rest/src/rest-route-ledger.ts (POST /api/v1/data/:object/:id/clone, client data.clone, bare-201 note #11924)",
         "objectui: packages/app-shell/src/views/studio-design/ObjectSettingsPanel.tsx (Studio authors the enable.clone opt-out switch)",
         "cross-ref: the clone HAPPY path + engine-column re-derivation + RLS-gated 404 are crud-roundtrip clauses 7-8 — this item drives only the contract edges that item does not, and deliberately re-states none of its oracles"
@@ -3987,8 +3987,8 @@
         "ref": "packages/plugins/plugin-audit/src/audit-lookup-summary.test.ts (reference titles + read plan); audit-option-label-summary.test.ts (option labels); objectui e2e/live/record-history-display.spec.ts (tab display contract, cited by crud-roundtrip)"
       },
       "source": [
-        "packages/plugins/plugin-audit/src/audit-writers.ts (planTrackedLookupReads), (renderTrackedChangeSummary — ADR-0052 §5b, #7230/#7289 localization), (zero-reads-by-default plan)",
-        "packages/spec/src/data/object.zod.ts (history derives from get ∧ trackHistory), (opt-in default false); packages/spec/src/data/api-derivation.ts",
+        "packages/plugins/plugin-audit/src/audit-writers.ts#planTrackedLookupReads (planTrackedLookupReads), (renderTrackedChangeSummary — ADR-0052 §5b, #7230/#7289 localization), (zero-reads-by-default plan)",
+        "packages/spec/src/data/object.zod.ts#trackHistory (history derives from get ∧ trackHistory), (opt-in default false); packages/spec/src/data/api-derivation.ts",
         "objectui: packages/app-shell/src/views/RecordDetailView.tsx (History tab three-precondition gate)",
         "examples/app-showcase/src/data/objects/account.object.ts (the deliberate both-halves fixture + its comment ruling the tab gate), task.object.ts,60"
       ],
@@ -4080,9 +4080,9 @@
         "expect": 7
       },
       "source": [
-        "packages/spec/src/data/mapping.zod.ts (TransformType — none/constant/lookup/split/join/javascript/map, 7 members, named export pinned above)",
-        "packages/rest/src/import-mapping.ts (format guard + the javascript refusal naming #2611), (the per-transform switch + around-the-seam unknown-transform refusal)",
-        "examples/app-showcase/src/data/mappings/index.ts (showcase_inquiry_feed — the stock none+map carrier)",
+        "packages/spec/src/data/mapping.zod.ts#TransformType (TransformType — none/constant/lookup/split/join/javascript/map, 7 members, named export pinned above)",
+        "packages/rest/src/import-mapping.ts#transform (format guard + the javascript refusal naming #2611), (the per-transform switch + around-the-seam unknown-transform refusal)",
+        "examples/app-showcase/src/data/mappings/index.ts#showcase_inquiry_feed (showcase_inquiry_feed — the stock none+map carrier)",
         "cross-ref: records-forms.named-import-mapping (header mapping, idempotence, unknown-name refusal — kept there; this item is the transform axis)"
       ],
       "history": [

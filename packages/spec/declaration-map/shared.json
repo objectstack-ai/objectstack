@@ -46,7 +46,9 @@
     "SystemIdentifier": "shared/SystemIdentifier",
     "SystemIdentifierSchema": "shared/SystemIdentifier",
     "TemplateExpressionInput": "shared/TemplateExpressionInput",
-    "TemplateExpressionInputSchema": "shared/TemplateExpressionInput"
+    "TemplateExpressionInputSchema": "shared/TemplateExpressionInput",
+    "ValueDomain": "shared/ValueDomain",
+    "ValueDomainSchema": "shared/ValueDomain"
   },
   "collisions": []
 }

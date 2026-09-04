@@ -571,8 +571,8 @@ interface HookContext {
     organizationId?: string; // Active org — the single blessed name. Matches the
                              // `organization_id` column + `current_user.organizationId` (RLS).
                              // The former `tenantId` alias was removed in v16.
-                             // No `roles` here (retired in 17.0.0) — privilege is judged
-                             // by the security service, never by a role name in a hook.
+                             // Privilege is judged by the security service,
+                             // never by a session claim.
     accessToken?: string;
     isSystem?: boolean;      // Elevated system context (engine self-writes).
   };
@@ -729,8 +729,8 @@ handler: async (ctx: HookContext) => {
   const users = ctx.api?.object('user');
 
   // Query users — `where` is canonical (`filter` is a tolerated object alias)
-  const admin = await users.findOne({
-    where: { role: 'admin' }
+  const owner = await users.findOne({
+    where: { id: ctx.input.owner_id }
   });
 
   // Create related record
@@ -819,11 +819,11 @@ const cascadeAccountUpdate = defineHook({
 
 ### 4. Data Masking on Read
 
-> For **static** field masking (a field is always hidden/masked for a role),
-> prefer declarative **field-level metadata** (secret/masked fields) — it applies
-> on every read path automatically. Use an `afterFind` hook only for masking that
-> depends on runtime logic the field metadata can't express. A single `afterFind`
-> subscription covers both `find` and `findOne`.
+> For **static** field masking (a field is always hidden/masked for a permission
+> set or position), prefer declarative **field-level metadata** (secret/masked
+> fields) — it applies on every read path automatically. Use an `afterFind` hook
+> only for masking that depends on runtime logic the field metadata can't
+> express. A single `afterFind` subscription covers both `find` and `findOne`.
 
 ```typescript
 const maskSensitiveData = defineHook({
@@ -834,12 +834,11 @@ const maskSensitiveData = defineHook({
     // Exempt the engine's own elevated reads (`isSystem`) — internal writes
     // and self-reads must see the real values.
     //
-    // ⚠️ Do NOT gate this on a role name. `ctx.session` carries no role list:
-    // `session.roles` was declared for years, never produced by any engine
-    // path, and retired in 17.0.0 — `ctx.session?.roles?.includes(…)`
-    // was always `undefined`, so a mask written that way looked role-aware and
-    // was not. A per-role exemption belongs in field-level permissions (the
-    // callout above), which the read path applies for you.
+    // ⚠️ Never gate this on a session claim: `ctx.session?.roles?.includes(…)`
+    // is always `undefined` (see the ctx table above), so a mask written that
+    // way never exempts anyone. A per-permission-set or per-position exemption
+    // belongs in field-level permissions (the callout above), which the read
+    // path applies for you.
     const isElevated = ctx.session?.isSystem === true;
 
     if (!isElevated) {

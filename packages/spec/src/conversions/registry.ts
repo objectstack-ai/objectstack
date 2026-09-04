@@ -7264,9 +7264,10 @@ const translationComponentSubmitLabelRemoved: MetadataConversion = {
  *   - `relatedListColumns` entries are child FIELD-NAME STRINGS. The
  *     conversion folds an object entry to its identity string
  *     (`field` → `name` → `fieldName`, objectui's `columnIdentity` order) and
- *     drops the decoration keys: measured on objectui main, an object entry's
- *     display keys span two vocabularies (`columnIdentity` is
- *     canonical-`field`, the data-table accessor reads `accessorKey || name`),
+ *     drops the decoration keys: re-measured at the `.objectui-sha` pin
+ *     `67dadd602a3a`, an object entry's display keys span two vocabularies
+ *     (`columnIdentity` is canonical-`field`, the data-table accessor reads
+ *     `accessorKey` only — objectui#6963 retired the `name` alias),
  *     so no object spelling renders reliably — the derived-from-schema string
  *     is the one form that always has. An object with no resolvable identity
  *     is left for the parse to refuse; a conversion must not invent data.

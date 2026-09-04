@@ -109,7 +109,8 @@
         "$TURBO_ROOT$/scripts/check-cross-package-test-inputs.mjs",
         "$TURBO_ROOT$/packages/create-objectstack/src/templates/blank/pnpm-workspace.yaml",
         "$TURBO_ROOT$/packages/drivers/driver-sql/src/sql-driver.ts",
-        "$TURBO_ROOT$/packages/drivers/driver-sql/src/schema-drift.ts"
+        "$TURBO_ROOT$/packages/drivers/driver-sql/src/schema-drift.ts",
+        "$TURBO_ROOT$/packages/spec/src/data/field.zod.ts"
       ]
     },
     "@objectstack/client#test": {
@@ -155,6 +156,9 @@
         "$TURBO_ROOT$/examples/app-showcase/src/ui/pages/capability-map.page.ts",
         "$TURBO_ROOT$/examples/app-showcase/src/ui/pages/command-center-jsx.page.ts",
         "$TURBO_ROOT$/examples/app-showcase/src/ui/pages/start-here.page.ts",
+        "$TURBO_ROOT$/examples/app-showcase/src/ui/pages/task-visualizations.pages.ts",
+        "$TURBO_ROOT$/examples/app-showcase/src/data/objects/task.object.ts",
+        "$TURBO_ROOT$/examples/app-showcase/src/ui/views/task.view.ts",
         "$TURBO_ROOT$/sdui.manifest.json"
       ]
     },
@@ -222,7 +226,21 @@
         "!coverage/**",
         "!.turbo/**",
         "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
-        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts"
+        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts",
+        "$TURBO_ROOT$/packages/**/*.ts",
+        "$TURBO_ROOT$/scripts/cross-package-test-inputs.mjs"
+      ]
+    },
+    "@objectstack/objectql#test": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "$TURBO_ROOT$/packages/**/*.ts",
+        "$TURBO_ROOT$/scripts/cross-package-test-inputs.mjs"
       ]
     },
     "@objectstack/driver-sql#test": {

@@ -1569,6 +1569,9 @@ importers:
       '@objectstack/rest':
         specifier: workspace:*
         version: link:../../rest
+      '@objectstack/service-messaging':
+        specifier: workspace:*
+        version: link:../../services/service-messaging
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../../spec
@@ -2523,6 +2526,9 @@ importers:
       '@types/node':
         specifier: ^26.2.0
         version: 26.2.0
+      tsx:
+        specifier: ^4.23.12
+        version: 4.23.12
       typescript:
         specifier: ^6.0.3
         version: 6.0.3

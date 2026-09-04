@@ -1009,7 +1009,7 @@ View filter rule
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **field** | `string` | ✅ | Field to derive color from (typically a select/status field) |
+| **field** | `string` | ✅ | Field whose value is looked up in the `colors` map below to pick a row colour (typically a select/status field). The map is what does the colouring — with no `colors`, no row is ever coloured, whatever this field holds. Author-time diagnostic `view/row-color-without-colors` reports that combination. |
 | **colors** | `Record<string, string>` | optional | Map of field value to color (hex/token) |
 
 ### Nested Shape: `ListView.bulkActionDefs[number]`
@@ -1395,7 +1395,7 @@ View filter rule
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **field** | `string` | ✅ | Field to derive color from (typically a select/status field) |
+| **field** | `string` | ✅ | Field whose value is looked up in the `colors` map below to pick a row colour (typically a select/status field). The map is what does the colouring — with no `colors`, no row is ever coloured, whatever this field holds. Author-time diagnostic `view/row-color-without-colors` reports that combination. |
 | **colors** | `Record<string, string>` | optional | Map of field value to color (hex/token) |
 
 ### Nested Shape: `ObjectListView.bulkActionDefs[number]`
@@ -1553,7 +1553,7 @@ Row color configuration based on field values
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **field** | `string` | ✅ | Field to derive color from (typically a select/status field) |
+| **field** | `string` | ✅ | Field whose value is looked up in the `colors` map below to pick a row colour (typically a select/status field). The map is what does the colouring — with no `colors`, no row is ever coloured, whatever this field holds. Author-time diagnostic `view/row-color-without-colors` reports that combination. |
 | **colors** | `Record<string, string>` | optional | Map of field value to color (hex/token) |
 
 

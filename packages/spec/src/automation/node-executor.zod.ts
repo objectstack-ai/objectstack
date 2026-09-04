@@ -267,6 +267,14 @@ export const ActionDescriptorSchema = lazySchema(() => z.object({
    *    unvalidated the way `screen.fields[].visibleWhen` did for four months
    *    (#3528). Slots marked `xExpression: 'template'` are recorded but not
    *    checked: no validator implements the single-brace `{var}` dialect they use.
+   *    The ledger's third role, `value` (#14149), names a slot whose authored
+   *    value may be a `{ dialect: 'cel', source }` envelope evaluated by the
+   *    expression engine to a value — today the `assignment` node's
+   *    `assignments.*` — declared through the spec Zod contract's
+   *    `.meta({ xExpression: 'value' })` (`AssignmentValueSchema`); only the
+   *    envelope form resolves, a plain string there stays `{var}` interpolation.
+   *    Its `validateExpression('value', …)` check and its run-time evaluation
+   *    are the executor half, in `service-automation`.
    *  - **Types and `required` are enforced at execute time for the
    *    contract-carrying builtins** (#4277): those executors `parse()` their
    *    config against the Zod contracts in `io-node-config.zod.ts` /

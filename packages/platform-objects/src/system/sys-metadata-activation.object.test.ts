@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
+import { resolveInjectedSystemColumns } from '@objectstack/spec/data';
 import { SysMetadataActivation } from './sys-metadata-activation.object.js';
 import { ACCOUNT_APP, SETUP_APP, SETUP_NAV_CONTRIBUTIONS, STUDIO_APP } from '../apps/index.js';
 
@@ -52,7 +53,6 @@ describe('sys_metadata_activation — the ADR-0126 §4 activation ledger', () =>
         'id',
         'metadata_type',
         'name',
-        'organization_id',
         'package_id',
       ]);
     });
@@ -73,23 +73,36 @@ describe('sys_metadata_activation — the ADR-0126 §4 activation ledger', () =>
       expect(f.name.type).toBe('text');
       expect(f.package_id.type).toBe('text');
       expect(f.active.type).toBe('boolean');
-      // `organization_id` is the platform's organization column — a lookup to
-      // sys_organization, the idiom every data-plane sibling uses
-      // (`sys_metadata_history`, `sys_automation_run`). It materializes as a
-      // string column, which is what §4's "string" names.
-      expect(f.organization_id.type).toBe('lookup');
-      expect(f.organization_id.reference).toBe('sys_organization');
     });
 
-    it('leaves `organization_id` nullable — it is RESERVED on this line', () => {
-      // §4: "nullable — reserved"; §5: the row is install-level. No writer in
-      // any leg of this line sets it. A later `required: true` would be the
-      // signal that the per-org dimension arrived without its own decision.
-      expect((SysMetadataActivation.fields as any).organization_id.required).toBe(false);
+    it('carries NO tenant column — this is deployment-level state, owned by no organization', () => {
+      // ⚠️ This replaces a pin that asserted the OPPOSITE: the column used to
+      // be declared here as "nullable — RESERVED", never written. A reserved
+      // nullable tenant column is the shape the total-organization-ownership
+      // record proposed in PR #14976 rules out, and a ledger row says "this
+      // ENVIRONMENT switched this managed item off" — a fact no organization
+      // owns. So the column is gone, and its absence is the contract.
+      //
+      // ⛔ Asserting only `fields` would be a phantom check. The tenant anchor
+      // is INJECTED at registration, not authored: an object that merely omits
+      // the field still gets the column. `resolveInjectedSystemColumns` is the
+      // spec's derivation of which system columns an object actually carries —
+      // the same one `applySystemFields` consumes to do the injecting — so it,
+      // not the declaration, is the authority on whether the column exists.
+      const plan = resolveInjectedSystemColumns(SysMetadataActivation);
+
+      expect(plan.tenant).toBe(false);
+      expect([...plan.names]).not.toContain('organization_id');
+      expect(Object.keys(SysMetadataActivation.fields ?? {})).not.toContain('organization_id');
+
+      // Anti-vacuity: the plan really does report columns for this object, so
+      // a `names` set that is empty for some unrelated reason cannot make the
+      // assertion above pass by saying nothing.
+      expect([...plan.names]).toContain('id');
     });
   });
 
-  describe('row identity — one row per (metadata_type, name, organization_id NULL-collapsed)', () => {
+  describe('row identity — one row per (metadata_type, name)', () => {
     const uniqueIndexes = (SysMetadataActivation.indexes ?? []).filter((i: any) => i.unique);
 
     it('declares exactly one unique index, on (metadata_type, name)', () => {
@@ -97,24 +110,32 @@ describe('sys_metadata_activation — the ADR-0126 §4 activation ledger', () =>
       expect((uniqueIndexes[0] as any).fields).toEqual(['metadata_type', 'name']);
     });
 
-    it("spells the scope 'organization' — NOT bare `true`, and NOT a hand-written composite", () => {
+    it("states the scope as 'global' — NOT bare `true`, and NOT 'organization'", () => {
       // ⛔ Asserted by EQUALITY, never by truthiness — bare `true` here IS a
       // bug and a truthy check passes on it. On a DECLARED index bare `true`
-      // is the positional spelling of `'global'` (ADR-0120 D1): installation-
-      // wide over exactly the listed columns, which would make the ledger
-      // un-scopable the moment the reserved per-org dimension is used.
-      expect((uniqueIndexes[0] as any).unique).toBe('organization');
+      // is the positional spelling of `'global'` (ADR-0120 D1) with the scope
+      // left unstated: same materialized shape, warned by lint
+      // (`unique/unscoped-declared-index`) and rejected at protocol 18.
+      //
+      // `'organization'` was the spelling while the table carried a reserved
+      // tenant column, and it is now wrong in a way nothing else would catch:
+      // `normalizeDeclaredIndex` prepends the tenant key part only when the
+      // table HAS a tenant column, so on this table it would silently degrade
+      // to exactly these two columns — identical DDL, and a declaration
+      // claiming a per-organization boundary that does not exist.
+      expect((uniqueIndexes[0] as any).unique).toBe('global');
       expect((uniqueIndexes[0] as any).unique).not.toBe(true);
+      expect((uniqueIndexes[0] as any).unique).not.toBe('organization');
     });
 
-    it('does NOT name organization_id in the column list — that spelling is the NULL hole', () => {
-      // This is the assertion that carries the "NULL-collapsed" half of §4.
-      // A hand-written `['metadata_type', 'name', 'organization_id']` composite
-      // is NULL-DISTINCT in SQL, and `organization_id` is NULL on every row
-      // this line writes — so that spelling enforces NOTHING (#5030, measured),
-      // and one artifact could carry two contradictory `active` rows.
-      // `unique: 'organization'` is the arm that closes it: the driver prepends
-      // `COALESCE(organization_id, '__global__')` at registration (ADR-0120 D3).
+    it('names no tenant column in the column list — the two real key parts are the whole identity', () => {
+      // Kept from the reserved-column era, where it carried the
+      // "NULL-collapsed" half of §4: a hand-written composite ending in the
+      // tenant column is NULL-DISTINCT in SQL, so with that column NULL on
+      // every row it enforced NOTHING (#5030, measured) and one artifact could
+      // carry two contradictory `active` rows. With no tenant column on the
+      // table the hazard cannot recur — and this assertion is what makes a
+      // re-added column loud here rather than silent.
       expect((uniqueIndexes[0] as any).fields).not.toContain('organization_id');
     });
   });

@@ -34,6 +34,11 @@ import {
   CROSS_FIELD_AUTHORED_CASES,
   CROSS_FIELD_CASES,
   CROSS_FIELD_OBJECT_FIELDS,
+  CROSS_FIELD_OFFSET_CASES,
+  CROSS_FIELD_OFFSET_OBJECT_FIELDS,
+  CROSS_FIELD_OFFSET_OPERAND_NAMES,
+  CROSS_FIELD_OFFSET_REFUSALS,
+  CROSS_FIELD_OFFSET_ROWS,
   CROSS_FIELD_OPERAND_NAMES,
   CROSS_FIELD_REFUSALS,
   CROSS_FIELD_ROWS,
@@ -147,6 +152,99 @@ describe('[#5222] driver-sqlite-wasm — cross-field `$field` push-down conforma
         }
         // …and the diagnostic half: the wording that says WHICH ruling bit is
         // in the server log, so the refusal is still debuggable by an operator.
+        const diagnostic = logged.join('\n');
+        for (const fragment of refusal.diagnosticIncludes) {
+          expect(diagnostic, `server log lost "${fragment}"`).toContain(fragment);
+        }
+      });
+    }
+  });
+});
+
+/**
+ * [#14104] The `addDays` offset arm, through this driver's own sql.js
+ * dialect. Inherited compiler, same argument as the bare arm above — and a
+ * sharper one here: the SQLite day-add is `date(col, 'N days')` /
+ * `strftime('%Y-%m-%dT%H:%M:%fZ', col, 'N days')` with the modifier BUILT
+ * from a bound value (`cast(coalesce(?, 0) as integer) || ' days'`), so a
+ * dialect that bound the literal or the identifier out of order would shift
+ * by the wrong number of days and still return rows.
+ */
+describe('[#14104] driver-sqlite-wasm — `addDays` offset push-down conformance', () => {
+  let driver: SqliteWasmDriver;
+  let records: Array<Record<string, unknown>>;
+
+  beforeAll(async () => {
+    driver = new SqliteWasmDriver({ filename: ':memory:' });
+    await driver.initObjects([
+      { name: 'cross_field_task', fields: CROSS_FIELD_OFFSET_OBJECT_FIELDS } as any,
+    ]);
+    for (const row of CROSS_FIELD_OFFSET_ROWS) await driver.create('cross_field_task', { ...row });
+    records = (await driver.find('cross_field_task', {})) as Array<Record<string, unknown>>;
+  });
+
+  afterAll(async () => {
+    await driver?.disconnect?.();
+  });
+
+  it('the fixture round-tripped with its NULLs intact', () => {
+    expect(records).toHaveLength(CROSS_FIELD_OFFSET_ROWS.length);
+    const byId = new Map(records.map((r) => [String(r.id), r]));
+    expect(byId.get('4')!.grace_days).toBeNull();
+    expect(byId.get('5')!.completed_at).toBeNull();
+    expect(byId.get('6')!.due_at).toBeNull();
+    expect(byId.get('7')!.due_on).toBeNull();
+    expect(byId.get('8')!.grace_days).toBe(-3);
+  });
+
+  const sqlIds = async (filter: unknown): Promise<string[]> => {
+    const rows = await driver.find('cross_field_task', {
+      fields: ['id'],
+      where: filter as FilterCondition,
+    });
+    return rows.map((r: any) => String(r.id)).sort();
+  };
+
+  const memoryIds = (filter: unknown): string[] =>
+    records
+      .filter((r) => matchesFilterCondition(r, filter as FilterCondition))
+      .map((r) => String(r.id))
+      .sort();
+
+  for (const testCase of CROSS_FIELD_OFFSET_CASES) {
+    it(`${testCase.name} — same rows on both paths`, async () => {
+      const expected = [...testCase.expected].sort();
+      const note = testCase.note ? `\n${testCase.note}` : '';
+      expect(memoryIds(testCase.filter), `in-memory evaluator disagreed${note}`).toEqual(expected);
+      expect(await sqlIds(testCase.filter), `wasm push-down disagreed${note}`).toEqual(expected);
+    });
+  }
+
+  describe('the offset refusal arm (ADR-0112 envelope, operands withheld)', () => {
+    for (const refusal of CROSS_FIELD_OFFSET_REFUSALS) {
+      it(`${refusal.name} → 400 INVALID_FILTER`, async () => {
+        const logged: string[] = [];
+        const restore = (driver as unknown as { logger: { warn: (m: string) => void } }).logger;
+        (driver as unknown as { logger: unknown }).logger = {
+          ...restore,
+          warn: (m: string) => { logged.push(m); },
+        };
+        let error: (Error & { code?: string; status?: number }) | null = null;
+        try {
+          await sqlIds(refusal.filter);
+        } catch (e) {
+          error = e as Error & { code?: string; status?: number };
+        } finally {
+          (driver as unknown as { logger: unknown }).logger = restore;
+        }
+        expect(error, `expected a refusal${refusal.note ? `\n${refusal.note}` : ''}`).not.toBeNull();
+        expect(error!.code).toBe('INVALID_FILTER');
+        expect(error!.status).toBe(400);
+        expect(error!).not.toBeInstanceOf(TypeError);
+        expect(error!.message).not.toContain('can only bind');
+        for (const name of CROSS_FIELD_OFFSET_OPERAND_NAMES) {
+          expect(error!.message, `caller-visible message names "${name}"`).not.toContain(name);
+        }
         const diagnostic = logged.join('\n');
         for (const fragment of refusal.diagnosticIncludes) {
           expect(diagnostic, `server log lost "${fragment}"`).toContain(fragment);

@@ -1076,6 +1076,302 @@ const SELF_TEST_INVOCATION =
   /node[ \t]+(scripts\/[\w./-]+\.mjs)(?:[ \t]+-{1,2}[A-Za-z0-9][\w-]*)*[ \t]+--self-test\b/g;
 
 /**
+ * A `run:` step that invokes a `check-`named repo script directly, WITH the
+ * argument tail that belongs to that invocation. The tail stops at the first
+ * shell construct that ENDS an argv — a separator, a redirection, a subshell —
+ * because everything past one of those belongs to a different command, or to
+ * the shell, and never to this argv.
+ *
+ * ⚠️ A line-continuation backslash is NOT a terminator, and since #15083 it is
+ * not a refusal either: `joinLineContinuations` splices the continued lines
+ * into one command text BEFORE this matcher runs, so the tail this captures is
+ * the invocation's WHOLE argv. Ending the tail at the backslash would still be
+ * wrong for the reason it always was — `node scripts/check-shard-attestation.mjs
+ * --emit` reads as the whole argv while `ci.yml` continues it with
+ * `--job test --shard N --total 6 --out "$RUNNER_TEMP/…"` on the next two
+ * lines, and a truncated argv that LOOKS runnable is the worst of the three
+ * outcomes. Joining is how that hazard is removed rather than merely refused.
+ */
+const DIRECT_CHECK_INVOCATION =
+  /node[ \t]+(scripts\/[\w./-]*check-[\w.-]+\.mjs)([^\n;|&<>()]*)/g;
+
+/**
+ * Splice a shell line-continuation back into ONE line, so a matcher reading a
+ * `run:` body sees the command the shell sees.
+ *
+ * The workflow corpus really does continue check invocations: measured on this
+ * tree, 107 lines inside `run:` bodies end in a backslash, and five of the nine
+ * scripts #15083 is about carry their values on a continued line. Before the
+ * join the matchers read only the first physical line of those, which is why
+ * `renderedArgv`'s predecessor had to refuse the whole tail rather than render
+ * half of it.
+ *
+ * ⛔ A COMMENT line is never joined, and that is shell semantics rather than
+ * caution: a `#` comment runs to the end of the line, so a trailing backslash
+ * is comment TEXT and the line below it is a command in its own right. Joining
+ * one would splice prose onto the command underneath and hand a matcher an
+ * invocation nobody wrote. Measured when this landed: zero comment lines in any
+ * `run:` body on this tree end in a backslash, so the guard costs nothing today
+ * and is here because the day one does is the day it matters.
+ */
+export function joinLineContinuations(text) {
+  const out = [];
+  for (const line of String(text ?? '').split('\n')) {
+    const prev = out.length > 0 ? out[out.length - 1] : null;
+    if (prev !== null && /\\$/.test(prev) && !/^[ \t]*#/.test(prev)) {
+      out[out.length - 1] = `${prev.slice(0, -1).replace(/[ \t]+$/, '')} ${line.replace(/^[ \t]+/, '')}`;
+      continue;
+    }
+    out.push(line);
+  }
+  return out.join('\n');
+}
+
+/**
+ * Split an argument tail into argv tokens the way the shell would — quotes and
+ * `${{ … }}` expressions hold their spaces.
+ *
+ * Two live spellings make a bare whitespace split wrong, and both are in
+ * `ci.yml`: `--gate 'Test Core'` (a quoted literal with a space in it) and
+ * `--shard ${{ matrix.shard }}` (a GitHub expression with two). A split that
+ * broke either into three tokens would classify the pieces separately and
+ * render an invocation no shell would accept.
+ */
+export function argvTokens(tail) {
+  const text = String(tail ?? '');
+  const tokens = [];
+  let i = 0;
+  while (i < text.length) {
+    while (i < text.length && (text[i] === ' ' || text[i] === '\t')) i += 1;
+    if (i >= text.length) break;
+    let token = '';
+    while (i < text.length && text[i] !== ' ' && text[i] !== '\t') {
+      if (text[i] === "'" || text[i] === '"') {
+        const close = text.indexOf(text[i], i + 1);
+        if (close === -1) {
+          token += text.slice(i);
+          i = text.length;
+          break;
+        }
+        token += text.slice(i, close + 1);
+        i = close + 1;
+        continue;
+      }
+      if (text.startsWith('${{', i)) {
+        const close = text.indexOf('}}', i + 3);
+        if (close === -1) {
+          token += text.slice(i);
+          i = text.length;
+          break;
+        }
+        token += text.slice(i, close + 2);
+        i = close + 2;
+        continue;
+      }
+      token += text[i];
+      i += 1;
+    }
+    if (token.length > 0) tokens.push(token);
+  }
+  return tokens;
+}
+
+/**
+ * The part of a token this tool could NOT resolve, or null when the token is
+ * whole — a token the tokeniser above had to swallow to the end of the tail
+ * because the construct it opened never closed, or a token left ending in a
+ * bare `$`.
+ *
+ * ## The seam, and why it is one predicate rather than three
+ *
+ * `DIRECT_CHECK_INVOCATION` ends the tail at the first `;|&<>()`, which is the
+ * shell boundary it has always drawn and is right: past one of those the text
+ * belongs to another command or to the shell. What this reads is what the CUT
+ * leaves behind. A value written as a command substitution is cut INSIDE its
+ * own construct — `--base "$(git merge-base origin/main HEAD)"` is cut at the
+ * `(` and leaves the tail `--base "$` — and `argvTokens` handles the unclosed
+ * quote by swallowing the rest into one token. That token carries no
+ * `WORKFLOW_VALUE_SOURCE` hit, so without this it classified as a LITERAL and
+ * the key `scripts/check-x.mjs --base "$` rendered into `--commands`: a
+ * truncated argv that LOOKS runnable, which `renderedArgv`'s docblock below
+ * names as the worst of the outcomes.
+ *
+ * Three spellings reach that state and they are ONE state, so they get one
+ * predicate rather than a list: an unclosed quote (`"$` from a `$(…)`, `'a`
+ * from a terminator inside a quoted value like `--gate 'a;b'`), an unclosed
+ * `${{ … }}` (a GitHub expression holding a terminator, `${{ inputs.x || 'y' }}`
+ * being the live-looking spelling), and a token ending in a bare `$` (the same
+ * cut with the value unquoted, `--base $(…)`). Each is the tokeniser's OWN
+ * unterminated branch, replayed here over the finished token — which is
+ * faithful because that branch copies the remainder verbatim (`text.slice(i)`)
+ * and a closing delimiter is always inside the token that used it, so the
+ * replay reaches the same verdict the tokeniser did.
+ *
+ * ⛔ NOT done here: widening `DIRECT_CHECK_INVOCATION`'s terminator set to
+ * carry the whole `$(…)` through. The cut at `(` is the shell's boundary and a
+ * matcher that reads past it would have to know which parens are a
+ * substitution and which end the command — this reads what the cut left, which
+ * needs no such knowledge.
+ *
+ * Measured when this landed: 114 direct invocations across `.github/workflows`
+ * and ZERO of them reach this branch, so nothing this tool prints today moves.
+ * The shape is latent, and this is here because the day a workflow writes a
+ * `$(…)` value is the day the derivation would otherwise render the truncation
+ * silently.
+ */
+function unresolvedRemainder(token) {
+  const text = String(token ?? '');
+  let i = 0;
+  while (i < text.length) {
+    if (text[i] === "'" || text[i] === '"') {
+      const close = text.indexOf(text[i], i + 1);
+      if (close === -1) return text.slice(i);
+      i = close + 1;
+      continue;
+    }
+    if (text.startsWith('${{', i)) {
+      const close = text.indexOf('}}', i + 3);
+      if (close === -1) return text.slice(i);
+      i = close + 2;
+      continue;
+    }
+    i += 1;
+  }
+  return /\$$/.test(text) ? '$' : null;
+}
+
+/**
+ * Every spelling by which a workflow puts a value into an argv WITHOUT writing
+ * the value down: a GitHub expression, a shell parameter expansion, a shell
+ * special. Anything else in a token is a literal — a value that appears
+ * verbatim in the workflow text and is the same on every run.
+ *
+ * This is the whole classifier #15083 asked for, and it is read from the
+ * workflow text rather than declared per script. The triage's ⛔ stands on that
+ * measurement: a per-script declaration table would be owed only if the split
+ * could NOT be read from the workflow, and over all fifteen live invocations of
+ * the nine scripts every value is one or the other by inspection.
+ */
+const WORKFLOW_VALUE_SOURCE = /\$\{\{[\s\S]*?\}\}|\$\{[A-Za-z_]\w*\}|\$[A-Za-z_]\w*|\$[@?*#!$0-9]/g;
+
+/**
+ * The captured tail, rendered as the argv half of a derivation key — or null
+ * when this tool cannot render it as a command a dev could paste.
+ *
+ * ## Why a key of (script, args) at all (#14880)
+ *
+ * The key used to be the script PATH, so CI's two invocations of one script
+ * collapsed into a single entry, and the entry kept was whichever the matcher
+ * saw first — the PLAIN one, because the old matcher captured the path and
+ * dropped the tail. Measured on PR #14958: `lint.yml` runs
+ * `node scripts/check-tenant-audit-census.mjs --self-test` beside
+ * `node scripts/check-tenant-audit-census.mjs`, the CI red was carried
+ * ENTIRELY by the `--self-test` invocation (exit 1, `1 of 19 case(s) failed`)
+ * while the plain one exited 0 — and the derived list named only the plain
+ * one. A dev following that list verbatim runs the green invocation of a
+ * script that is red in CI, with nothing on either stream saying an invocation
+ * had been elided. That is worse than an omission: the list returns a PASS for
+ * a family CI fails.
+ *
+ * The collapse was not rare. Read from this tree's workflow text rather than
+ * argued: 28 scripts in `lint.yml` are invoked more than once under different
+ * argv, and every one of them carries a `check-` basename, so every one of
+ * them collapsed. 41 across all workflow files.
+ *
+ * ## Why a VALUE-BEARING tail is rendered rather than refused (#15083)
+ *
+ * The first cut of this key admitted only a complete run of flag-shaped
+ * tokens. Nine scripts whose ONLY CI invocations carry a value or a line
+ * continuation therefore kept a BARE path key, and CI never runs any of them
+ * bare. That is not a neutral omission — it is a command this tool made up.
+ * Measured on this tree, invocation by invocation:
+ *
+ *   `node scripts/check-test-completeness.mjs`  →  exit 3, `PREREQUISITE NOT
+ *       MET — this gate grades a saved `turbo run test` log, and no log was
+ *       named.` A dev following the list runs it and gets a non-verdict.
+ *   `node scripts/check-required-contexts.mjs`  →  exit 0 — but it runs the
+ *       STATIC pin check, while `required-set-patrol.yml` runs
+ *       `--verify-required-set`, a live sweep of the repo's required set. Same
+ *       script, different question, and the row said `[required-set-patrol.yml]`.
+ *   `node scripts/check-shard-attestation.mjs` and
+ *       `node scripts/check-cross-package-test-inputs.mjs`  →  exit 0, and both
+ *       duplicate what `lint.yml` already runs under a `pnpm check:` alias
+ *       this derivation keys separately. The bare row added no gate and
+ *       misattributed the ci.yml `--emit`/`--verify`/`--union-into`
+ *       invocations to a run CI never makes.
+ *   `--base` gates (`check-empty-changeset`, `check-changeset-no-major`,
+ *       `check-adr-0087-registration`)  →  exit 0 against their DEFAULT base,
+ *       while CI pins the base to the PR's merge base or the cut's snapshot.
+ *
+ * ## The rule, and it is read from the workflow text
+ *
+ * Each argv token is a workflow LITERAL (it appears verbatim in the workflow
+ * and is the same on every run) or a workflow VARIABLE (`${{ … }}`, a shell
+ * expansion, a step output, a path an earlier step produced). The classifier
+ * is `WORKFLOW_VALUE_SOURCE` above; no per-script declaration is involved,
+ * which is the triage's ⛔ discharged by measurement rather than by assertion.
+ *
+ *   Every token literal  →  the invocation renders in full, exactly as CI runs
+ *       it, and goes into `--commands` as a command a dev can paste.
+ *       `check-engine-split-ratio.mjs --days 90` is one; so are
+ *       `check-required-contexts.mjs --verify-required-set` and
+ *       `check-prerelease-pin-watch.mjs --verbose`, whose argv were complete
+ *       all along and were refused only because a REDIRECTION and a
+ *       CONTINUATION sat behind them.
+ *   Any token a variable  →  the invocation still renders, with the variable's
+ *       own name in the value position, and the row is marked NOT RUNNABLE
+ *       LOCALLY on its own labelled line. It is named, its workflow is named,
+ *       and it is ⛔ NOT in `--commands` — that list promises runnable.
+ *
+ * ⛔ Both directions NOT taken, and they are the two ways this gets worse.
+ * Keying on the TRUNCATED flag run hands the dev `node scripts/… --base`, a
+ * command that exits non-zero for a reason that has nothing to do with the
+ * tree. Emitting the variable-bearing command INTO `--commands` hands them
+ * `--base ""`, which is worse still: it runs, and it answers a question CI
+ * never asked. A missing lead, never a fabricated one.
+ *
+ * Returns `null` for an invocation with no argv at all — that one keeps the
+ * bare path key, because bare is what CI runs.
+ */
+export function renderedArgv(tail) {
+  const tokens = argvTokens(tail);
+  if (tokens.length === 0) return null;
+  const variables = [];
+  for (const token of tokens) {
+    for (const hit of token.matchAll(WORKFLOW_VALUE_SOURCE)) {
+      if (!variables.includes(hit[0])) variables.push(hit[0]);
+    }
+    // A remainder this tool could not resolve is a value that comes FROM THE
+    // WORKFLOW just as surely as `${{ … }}` does — it is the visible half of a
+    // construct the cut ran through. Naming it here is the whole fix, and it
+    // rides the channel the classification already has: any entry in
+    // `variables` marks the row NOT RUNNABLE LOCALLY and keeps the key out of
+    // `--commands`, so the truncation is NAMED rather than rendered runnable.
+    const remainder = unresolvedRemainder(token);
+    if (remainder !== null && !variables.includes(remainder)) variables.push(remainder);
+  }
+  return { args: tokens.join(' '), variables };
+}
+
+/**
+ * The captured tail minus the file descriptor of a redirection that follows it.
+ *
+ * `DIRECT_CHECK_INVOCATION` stops the tail before `>`, which is right — the
+ * redirection is the shell's. But `2>&1` puts its fd on the argv side of that
+ * boundary, so `--verbose 2>&1` captured as ` --verbose 2` and the stray `2`
+ * read as an argument. It is the live spelling in `prerelease-pin-watch.yml`,
+ * and it is why an argv that was complete all along scored unrenderable.
+ *
+ * The discriminator is the shell's own: digits touching the operator are a
+ * descriptor (`2>`), digits with a space before it are an argument
+ * (`--total 6 > out`). Applied only when a redirection really follows.
+ */
+function tailBeforeRedirection(tail, nextChar) {
+  if (nextChar !== '>' && nextChar !== '<') return tail;
+  return String(tail ?? '').replace(/\d+$/, '');
+}
+
+/**
  * Pull every `check:*` invocation out of a workflow file's `run:` steps,
  * with the pnpm --filter package (if any) and the workflow's file name.
  *
@@ -1112,14 +1408,28 @@ const SELF_TEST_INVOCATION =
  * in `ci.yml` / `pr-automation.yml`. The flag separates the gate invocation
  * from the work invocation of one script, which no filename rule can.
  *
- * ## Why a `check-` basename is skipped here rather than re-keyed
+ * ## Why a `check-` basename is skipped HERE — and where the split moved to (#14880)
  *
- * 21 of the 30 scripts invoked this way on this tree already have a `check-`
- * basename and are therefore already families under their BARE path key. Admitting them again under a `… --self-test` key would SPLIT each into
- * two families and move its matches to the new key — a re-attribution reported
- * as a gain, which is the error this repo keeps catching. Skipping them makes
- * zero re-attribution a property of the code rather than a number that happened
- * to come out right (measured: 0 of the 52774 existing pairs changed key).
+ * A `check-` basename is admitted by `DIRECT_CHECK_INVOCATION` above, which
+ * since #14880 captures the invocation's argv tail too. So the flagged and the
+ * plain invocation of one `check-` script already arrive as two entries under
+ * two keys, and this matcher would produce a key byte-identical to the one the
+ * direct matcher just produced: one invocation counted twice, not a second
+ * family. That is the whole reason for the skip now.
+ *
+ * ⚠️ It is NOT the reason it originally carried. The skip landed (#11404)
+ * arguing that a `check-` script "is already a family under its BARE path key"
+ * and that splitting it would re-attribute matches — measured then at 0 of
+ * 52774 pairs changed. That argument held only while the bare key was the
+ * whole key: with the plain invocation and the `--self-test` invocation
+ * sharing one entry, the entry kept was the plain one, and CI's failing
+ * invocation had no entry at all (PR #14958, measured; `renderedArgv`'s
+ * docblock carries it). The split is the repair, not the hazard. What survives
+ * of the old argument is its standard of proof, and it is met the same way: a
+ * family whose invocation this tool can render keeps every pair it had — the
+ * plain entry is unchanged and the flagged entry is NEW, so the change adds
+ * families and re-attributes none, except where CI never ran the bare
+ * invocation at all and the bare key was therefore a command nobody runs.
  *
  * ## The price, measured the way #11512 priced import-following
  *
@@ -1166,16 +1476,45 @@ const SELF_TEST_INVOCATION =
  */
 export function extractCheckInvocations(workflowText, workflowFile) {
   const out = [];
-  for (const cmd of runCommandTexts(workflowText)) {
+  for (const raw of runCommandTexts(workflowText)) {
+    // ONE joined text for all three matchers, so no two of them can disagree
+    // about where a command ends — the discipline `discoverFamilies` follows
+    // for the workflow reads it makes.
+    const cmd = joinLineContinuations(raw);
     for (const m of cmd.matchAll(/pnpm\s+(?:--filter\s+(\S+)\s+)?(?:run\s+)?(check:[\w:-]+)/g)) {
       out.push({ check: m[2], filter: m[1] ?? null, workflow: workflowFile });
     }
-    for (const m of cmd.matchAll(/node\s+(scripts\/[\w./-]*check-[\w.-]+\.mjs)/g)) {
-      out.push({ check: m[1], script: m[1], filter: null, workflow: workflowFile, direct: true });
+    for (const m of cmd.matchAll(DIRECT_CHECK_INVOCATION)) {
+      const script = m[1];
+      // The KEY is (script, args), never the path alone — `renderedArgv`'s
+      // docblock carries the measurement and the classification it applies.
+      const argv = renderedArgv(tailBeforeRedirection(m[2], cmd[m.index + m[0].length]));
+      out.push({
+        check: argv ? `${script} ${argv.args}` : script,
+        script,
+        filter: null,
+        workflow: workflowFile,
+        direct: true,
+        // The values this invocation takes FROM THE WORKFLOW, in the workflow's
+        // own spelling — empty when every token is a literal. This is what
+        // decides whether the rendered command is one a dev can paste, and it
+        // travels on the invocation so every rendering downstream reads one
+        // answer rather than re-deriving it (#15083).
+        argvVariables: argv ? argv.variables : [],
+        // The same declaration the matcher below reads, on the same flag: this
+        // invocation runs the script's SELF-TEST rather than its work, and two
+        // narrowings downstream turn on knowing that (the import/spawn/manifest
+        // follows in `discoverFamilies`, and `ciOnlyMeasurement`). Before the
+        // key carried the argv there was nothing here to read it off.
+        selfTest: Boolean(argv) && argv.args.split(/[ \t]+/).includes('--self-test'),
+      });
     }
     for (const m of cmd.matchAll(SELF_TEST_INVOCATION)) {
       const script = m[1];
-      // Already admitted above, under its bare path key. See the docblock.
+      // Admitted above, under the SAME (script, args) key this matcher would
+      // produce — so re-admitting it here would be one invocation counted
+      // twice, not a second family. The skip is what keeps the two matchers
+      // from disagreeing; the split into two families is done by the key.
       if (nodePath.basename(script).includes('check-')) continue;
       out.push({
         // The flag is part of the KEY because it is part of the runnable
@@ -1814,6 +2153,17 @@ export function payloadEnvDependence(scriptSource) {
 export function ciOnlyMeasurement(entry, rootScripts = {}) {
   const env = entry?.payloadEnv ?? null;
   if (!env) return null;
+  // A `--self-test` invocation is never CI-measured-only, and the argument is
+  // the invocation-shaped one `discoverFamilies` already makes about the import
+  // follow (#14880). `payloadEnvDependence` reads the gate's module body with
+  // self-test bodies MASKED OUT, so the payload access it finds belongs to the
+  // script's WORK — the invocation this one is not. Suppressing the self-test
+  // entry from `--commands` on the strength of a read its run never performs
+  // would hide a command a dev CAN run, which is the direction this whole file
+  // refuses. Costs nothing on the tree today: all twelve self-test families
+  // score `payloadEnv` null and never reach this line; it is the split key
+  // above that first lets a payload-reading gate have a self-test entry at all.
+  if (entry.selfTest) return null;
   // A `check:*` family is invocable by name by construction — limb 2 fails
   // before the manifest is consulted at all.
   if (!entry.direct) return null;
@@ -2589,6 +2939,7 @@ const COMPOUND_ANCHOR_LEDGER = [
   ['scripts/check-platform-checklist.mjs', 'selfTestUnreferencedRecipes', false],
   ['scripts/check-platform-checklist.mjs', 'selfTestMetaCallSpelling', false],
   ['scripts/check-platform-checklist.mjs', 'selfTestSourceLineCitations', false],
+  ['scripts/check-platform-checklist.mjs', 'selfTestSymbolAnchors', false],
   ['scripts/check-regen-pending.mjs', 'fixtureSelfTest', false],
   ['scripts/check-regen-pending.mjs', 'prePushIsArmedSelfTest', false],
   ['scripts/check-regen-pending.mjs', 'decisionTableSelfTest', false],
@@ -4963,6 +5314,75 @@ export function artifactOnlyNote({ artifacts, dir, coversYourPath }) {
     `        Read the gate before treating it as one. If it scans ${dir}, the fix belongs there: declare the scan surface beside the`,
     `        roster (the subtree spelling, ${dir}/**), after which it is MATCHED here. If it really reads only those files, the silence is correct.`,
   ];
+}
+
+/**
+ * The artifact-roster families, as their own labelled block — printed on every
+ * run, never counted among the derived families (#14880).
+ *
+ * ## What this block is for, and what it deliberately does not say
+ *
+ * `artifactOnlyNote` above says all of this per family, but only under
+ * `--residue`, and only inside the silent listing a dev reading a dispatch
+ * brief is not told to ask for. Measured twice on this card: a dev derived the
+ * families for a diff, ran every one, and shipped a CI red carried by a gate
+ * whose declared literals are its own artifacts — `check:optional-error-sink`
+ * on PR #14866, then `check:error-code-provenance` on PR #14930, whose residue
+ * text names the remedy in its own words. Both are invisible to a `--commands`
+ * harvest by construction, for every card, not just theirs.
+ *
+ * So the block states the one thing that is true of every member and is not a
+ * guess about intent: this derivation scores them `silent` for EVERY card in
+ * the tree, so their silence is a fact about a LIST rather than a verdict about
+ * your paths.
+ *
+ * ⛔ It does NOT call them repo-wide scanners, and the refusal is the same one
+ * `artifactOnlyNote`'s docblock prices: whether a roster is a baseline sitting
+ * in a directory or a census taken OF that directory is exactly the intent this
+ * tool refuses to read out of the tree, and the two live side by side here
+ * (`check:where-matcher` names one baseline and walks `packages/**`;
+ * `check-entry-guard` named ten files under `scripts/` and walked all of it).
+ * A block asserting "these are scanners you must run" would be a fabricated
+ * lead over the members for which it is false — the expensive direction.
+ *
+ * ⛔ And it is NEVER merged into the derived list or into any count. The rows
+ * are `silent`, and `commandsFor`/`familyReconciliation` read only the matched,
+ * convention and always-runs rows, so the separation is structural rather than
+ * a filter someone has to remember. In `--commands` the block goes to STDERR
+ * for the reason every other accounting there does: stdout carries commands and
+ * nothing else, and a labelled block in that stream is prose for a harvest to
+ * pattern-match.
+ *
+ * The ⛔ subset is the correlation the card asks for by name — the rosters
+ * whose common directory contains one of THIS card's paths, where the silence
+ * is not evidence in either direction.
+ */
+export function artifactRosterLines(rosters = []) {
+  if (rosters.length === 0) return [];
+  const inverted = rosters.filter((r) => r.coversYourPath);
+  const lines = [
+    `Artifact rosters — ${rosters.length} famil(ies) whose \`silent\` verdict is a fact about a LIST, not about your paths:`,
+    '  Each declares only tracked FILES — a baseline, an allowlist of the members it already has. A list of the files that',
+    '  already exist can never contain one added tomorrow, so this derivation scores them silent for EVERY card in the tree,',
+    '  and no path you pass can move them. ⛔ They are NOT in the runnable total above and are NOT counted among the derived',
+    '  families. Run them, or read them — but ⛔ never read their silence as a clearance.',
+    '  ⇒ The fix is the gate\'s, not this tool\'s: declare the scan surface beside the roster (the subtree spelling), after',
+    '  which the family is MATCHED here and leaves this block.',
+  ];
+  if (inverted.length) {
+    lines.push(
+      `  ⛔ ${inverted.length} of them keep that roster in a directory one of YOUR paths is in (marked ⛔ below) — there the`,
+      '  silence is not evidence in EITHER direction. Read those gates before treating them as passed.',
+    );
+  } else {
+    lines.push('  None of their rosters sits in a directory your paths are in, so none of them is a lead about this card.');
+  }
+  for (const r of [...rosters].sort((a, b) => a.command.localeCompare(b.command))) {
+    lines.push(
+      `  - ${r.command}${r.coversYourPath ? `   ⛔ roster under ${r.dir}, which one of your paths is in` : ''}`,
+    );
+  }
+  return lines;
 }
 
 // ---------------------------------------------------------------------------
@@ -8087,7 +8507,8 @@ export function alwaysRunsPopulationLines(rows) {
     lines.push(`  - ${row.command}   [${row.workflows.join(', ')}]   declared whole-tree population — ${row.reason}`);
     lines.push(
       `      ↳ liveness: its own source carries ${row.rootWalk}` +
-        `${row.ciOnly ? ' · CI-MEASURED ONLY — no local run of it can produce a verdict, so it is NOT in --commands' : ''}`,
+        `${row.ciOnly ? ' · CI-MEASURED ONLY — no local run of it can produce a verdict, so it is NOT in --commands' : ''}` +
+        `${row.notRunnable ? ` · ⛔ NOT RUNNABLE LOCALLY — its argv takes ${row.notRunnable.variables.join(', ')} from the workflow, so it is NOT in --commands` : ''}`,
     );
   }
   lines.push(
@@ -8371,12 +8792,12 @@ export const MANDATORY_TIER_GLOBS = [
   {
     glob: '.claude/agents/os-dev.md',
     tier: CONTRACT_REVIEW_TIER,
-    why: 'clause ① (2026-08-20 narrowing): the dev-agent definition is protocol semantics — every dispatched dev runs under it, and it carries an enforced copy of the decision frame',
+    why: 'clause ① (2026-08-20 narrowing): the dev-agent definition is protocol semantics — every dispatched dev runs under it, and receives the decision frame the PM pastes into its prompt at dispatch time rather than carrying a copy of its own',
   },
   {
     glob: 'skills/objectstack-pm-dispatch/SKILL.md',
     tier: CONTRACT_REVIEW_TIER,
-    why: 'clause ① (2026-08-20 narrowing): the published PM skill carries two enforced copies of the decision frame (check:skill-frame-sync COPIES) and ships verbatim to third-party projects',
+    why: 'clause ① (2026-08-20 narrowing): the published PM skill carries one enforced copy of the decision frame (check:skill-frame-sync COPIES) and ships verbatim to third-party projects',
   },
 ];
 
@@ -8816,6 +9237,16 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
     // reached no file at all reaches no classification either.
     entry.payloadEnv ??= null;
     entry.ciOnly = ciOnlyMeasurement(entry, rootScripts);
+    // The SECOND not-runnable-here classification (#15083), and it is read off
+    // the INVOCATION rather than off the gate's source — which is the whole
+    // difference between the two. `ciOnly` is a fact about what the gate reads;
+    // this is a fact about what the workflow passes it. A family whose argv
+    // takes a value from the workflow has no local run at all, so it is named,
+    // its workflow is named, and it is kept out of `--commands` — the same
+    // treatment, reached by a different measurement.
+    entry.notRunnable = (entry.argvVariables ?? []).length > 0
+      ? { variables: [...entry.argvVariables] }
+      : null;
   }
   return { byCheck, workflows, workflowEntries };
 }
@@ -8856,6 +9287,18 @@ export function ciOnlyCommandSet(matchedRows = [], alwaysRunsRows = []) {
   return new Set([...matchedRows, ...alwaysRunsRows].filter((row) => row.ciOnly).map((row) => row.command));
 }
 
+/**
+ * The commands a VALUE-BEARING family renders — the second not-runnable-here
+ * set, built the same way and from the same rows as `ciOnlyCommandSet` above,
+ * and kept separate from it because the two are different facts a reader is
+ * owed separately: one family cannot be run here because it needs the workflow
+ * EVENT PAYLOAD, the other because it needs a workflow VALUE. Folding them
+ * would print one count for two omissions and tell nobody which.
+ */
+export function notRunnableCommandSet(matchedRows = [], alwaysRunsRows = []) {
+  return new Set([...matchedRows, ...alwaysRunsRows].filter((row) => row.notRunnable).map((row) => row.command));
+}
+
 export function commandsFor({ matchedRows = [], kindGroups = [], alwaysRunsRows = [] } = {}) {
   const commands = new Set();
   // A CI-MEASURED-ONLY family contributes NOTHING here (#14004). This list's
@@ -8868,13 +9311,21 @@ export function commandsFor({ matchedRows = [], kindGroups = [], alwaysRunsRows 
   // omission happens is this file's own rule for the pending-changeset
   // families, and it applies here unchanged.
   const ciOnly = ciOnlyCommandSet(matchedRows, alwaysRunsRows);
-  for (const row of matchedRows) if (!row.ciOnly) commands.add(row.command);
+  // The SECOND subtraction, and it is made for the identical reason (#15083):
+  // this list's caption promises one RUNNABLE command per line, and an
+  // invocation whose values come from the workflow has no value outside a CI
+  // run. Rendering it here with `$MERGE_BASE` unset would produce a command
+  // that RUNS and answers a question CI never asked — the one outcome worse
+  // than the bare key it replaces. Loud in both other renderings: its own
+  // heading in the human output, `notRunnable` on its row in `--json`.
+  const notRunnable = notRunnableCommandSet(matchedRows, alwaysRunsRows);
+  for (const row of matchedRows) if (!row.ciOnly && !row.notRunnable) commands.add(row.command);
   // The whole-tree channel is IN the union, on every card (#14189). It is not
   // a lead — nothing about `matched` moves — but it is a gate the card owes,
   // and this list's whole contract is that it is the complete runnable answer
   // for the paths it was given. A declaring family left out of it would be the
   // very omission the card was filed about, reproduced inside its own fix.
-  for (const row of alwaysRunsRows) if (!row.ciOnly) commands.add(row.command);
+  for (const row of alwaysRunsRows) if (!row.ciOnly && !row.notRunnable) commands.add(row.command);
   for (const group of kindGroups) {
     // The exclusion follows the COMMAND, not the section it was reached
     // through: a family named by change KIND as well as by path is one family,
@@ -8882,7 +9333,9 @@ export function commandsFor({ matchedRows = [], kindGroups = [], alwaysRunsRows 
     // Reachable only in a corner today — no CI-measured family is in
     // CHANGE_KIND_GATES — but a rule that held in one section and not the
     // other is exactly the two-renderings drift this file keeps closing.
-    for (const gate of group.gates) if (gate.command && !ciOnly.has(gate.command)) commands.add(gate.command);
+    for (const gate of group.gates) {
+      if (gate.command && !ciOnly.has(gate.command) && !notRunnable.has(gate.command)) commands.add(gate.command);
+    }
   }
   return [...commands].sort();
 }
@@ -8950,23 +9403,31 @@ export function familyReconciliation({ matchedRows = [], kindGroups = [], always
   // The SAME expression commandsFor uses for its matched half. Written as a
   // second traversal it would be a second answer to a question this file
   // already answers once.
-  const runnableRows = matchedRows.filter((row) => !row.ciOnly);
+  const runnableRows = matchedRows.filter((row) => !row.ciOnly && !row.notRunnable);
   const ciOnlyRows = matchedRows.filter((row) => row.ciOnly);
+  const notRunnableRows = matchedRows.filter((row) => row.notRunnable);
   const matchedCommands = new Set(runnableRows.map((row) => row.command));
   // Counted, never folded into the total: the total is the RUNNABLE answer and
   // a CI-measured family is outside it by construction. Kept as its own term so
   // the omission is a number the reader gets rather than a difference they have
   // to notice (#14004).
   const ciOnlyCommands = ciOnlyCommandSet(matchedRows, alwaysRunsRows);
+  // Counted and kept OUT of the total on the same rule as the term above: the
+  // total is the RUNNABLE answer, and an invocation whose values come from the
+  // workflow is outside it by construction (#15083).
+  const notRunnableCommands = notRunnableCommandSet(matchedRows, alwaysRunsRows);
   // The SAME expression `commandsFor` unions for the whole-tree channel, for
   // the reason this function's header gives for the other two terms: a count
   // built by a second traversal can drift from the section it claims to
   // reconcile, and this one is asserted against the union below.
-  const alwaysRunsCommands = new Set(alwaysRunsRows.filter((row) => !row.ciOnly).map((row) => row.command));
+  const alwaysRunsCommands = new Set(
+    alwaysRunsRows.filter((row) => !row.ciOnly && !row.notRunnable).map((row) => row.command),
+  );
   const conventionCommands = new Set();
   let conventionRows = 0;
   let staleRows = 0;
   let ciOnlyConventionRows = 0;
+  let notRunnableConventionRows = 0;
   for (const group of kindGroups) {
     for (const gate of group.gates) {
       conventionRows += 1;
@@ -8980,6 +9441,7 @@ export function familyReconciliation({ matchedRows = [], kindGroups = [], always
       // own so the rows-versus-commands note names this reason rather than
       // charging it to the two it already knows about.
       if (ciOnlyCommands.has(gate.command)) ciOnlyConventionRows += 1;
+      else if (notRunnableCommands.has(gate.command)) notRunnableConventionRows += 1;
       else conventionCommands.add(gate.command);
     }
   }
@@ -9000,12 +9462,15 @@ export function familyReconciliation({ matchedRows = [], kindGroups = [], always
     matchedRows: runnableRows.length,
     ciOnly: ciOnlyCommands.size,
     ciOnlyRows: ciOnlyRows.length,
+    notRunnable: notRunnableCommands.size,
+    notRunnableRows: notRunnableRows.length,
     convention: conventionCommands.size,
     conventionRows,
     conventionOnly: conventionCommands.size - both,
     both,
     staleRows,
     ciOnlyConventionRows,
+    notRunnableConventionRows,
   };
   if (recon.matched + recon.convention - recon.both + recon.alwaysRunsOnly !== recon.total) {
     throw new Error(
@@ -9046,11 +9511,23 @@ export function familyReconciliationLines(recon) {
         ' they read the workflow event payload, so no local run of them can produce a verdict. Named under their own' +
         ' heading above, carried on their row in --json, and omitted from --commands by design.'
       : null;
+  // The second omission term, rendered on both branches for the reason the
+  // first one is (#15083): a card whose only matched family is value-bearing
+  // must not read as "nothing matched" — the family matched, it is named
+  // above, and what is zero is what the dev can run.
+  const notRunnableLine =
+    (recon.notRunnable ?? 0) > 0
+      ? `  + ${recon.notRunnable} famil(ies) this card's paths reach take a VALUE FROM THE WORKFLOW and sit OUTSIDE this total —` +
+        ' their argv carries a variable that has no value outside a CI run, so there is no local invocation to hand you.' +
+        ' Named under their own heading above with the variable in the value position, carried on their row in --json,' +
+        ' and omitted from --commands by design.'
+      : null;
   if (recon.total === 0) {
     return [
       'Reconciliation — 0 famil(ies): this card\'s whole runnable answer, and the derivation COMPLETED to reach it.',
       '  0 named by PATH (the matched block) + 0 named by change KIND (the convention block). An empty answer, not a missing one.',
       ...(ciOnlyLine ? [ciOnlyLine] : []),
+      ...(notRunnableLine ? [notRunnableLine] : []),
       '  ⇒ --commands prints nothing for these paths and exits 0. The always-runs tail below still applies and is NOT covered by this number.',
     ];
   }
@@ -9068,6 +9545,7 @@ export function familyReconciliationLines(recon) {
     );
   }
   if (ciOnlyLine) lines.push(ciOnlyLine);
+  if (notRunnableLine) lines.push(notRunnableLine);
   if (recon.alwaysRuns > 0) {
     lines.push(
       `  + ${recon.alwaysRuns} of the ${recon.total} DECLARE that their population is the WHOLE TREE` +
@@ -9093,8 +9571,16 @@ export function familyReconciliationLines(recon) {
     // the kinds table rather than about a family nobody can run here (#14004).
     const ciOnlyConventionRows = recon.ciOnlyConventionRows ?? 0;
     if (ciOnlyConventionRows > 0) notes.push(`${ciOnlyConventionRows} CI-measured only, contributing no runnable command`);
-    if (recon.conventionRows - recon.staleRows - ciOnlyConventionRows > recon.convention) {
-      notes.push(`${recon.conventionRows - recon.staleRows - ciOnlyConventionRows - recon.convention} a repeat of a family another kind already hit`);
+    // Named for the same reason the term above it is: an unnamed reason is
+    // charged to "a repeat" and read as a fact about the kinds table rather
+    // than about a family nobody can run here (#15083).
+    const notRunnableConventionRows = recon.notRunnableConventionRows ?? 0;
+    if (notRunnableConventionRows > 0) {
+      notes.push(`${notRunnableConventionRows} value-bearing argv, contributing no runnable command`);
+    }
+    const accounted = recon.staleRows + ciOnlyConventionRows + notRunnableConventionRows;
+    if (recon.conventionRows - accounted > recon.convention) {
+      notes.push(`${recon.conventionRows - accounted - recon.convention} a repeat of a family another kind already hit`);
     }
     lines.push(
       `  (the convention block prints ${recon.conventionRows} rows for those ${recon.convention}: ${notes.join('; ')}.)`,
@@ -9245,9 +9731,20 @@ export function parseRunRecord(text) {
  * heading) and which deduplicates the two spellings of one family into one
  * command before this function ever sees them. What the tool CAN still meet in
  * a record it classifies itself — a CI-measured-only family, which `commandsFor`
- * subtracts by design, and a pending-changeset family, derived against a path
- * that did not exist at derivation time. Both are matched byte-exactly against
- * sets this same derivation produced.
+ * subtracts by design; a VALUE-BEARING family, which `commandsFor` subtracts for
+ * the same reason one step later because its argv takes a value from the
+ * workflow (#15083); and a pending-changeset family, derived against a path
+ * that did not exist at derivation time. All three are matched byte-exactly
+ * against sets this same derivation produced.
+ *
+ * ⭐ The third bucket is not a convenience: this file's own rule is that an
+ * omission is disclosed WHERE the omission happens, and a class `commandsFor`
+ * deliberately withholds is a class the runner cannot be expected to have
+ * derived. Left in the remainder it reads as a command "named by nothing this
+ * run derived" — the one sentence that is false about it, because this run
+ * derived it and then classified it out. The likeliest recorder is a dev who
+ * writes the bare spelling of one of these scripts out of habit, and what they
+ * are owed is the reason, not a shrug (#15115).
  *
  * What is left for the runner to explain is therefore only what the tool
  * genuinely cannot know: a gate that refused with its own prerequisite. That is
@@ -9266,6 +9763,12 @@ export function parseRunRecord(text) {
 export function runReconciliation({
   derived = [],
   ciOnlyCommands = new Set(),
+  // Beside `ciOnlyCommands` and not after `pendingCommands`, because the file
+  // already groups them: these are the TWO subtractions `commandsFor` makes
+  // from the runnable union, in that order, and the pending families are a
+  // different fact (a path that did not exist at derivation time). Defaulting
+  // to empty keeps every existing caller's verdict byte-identical.
+  notRunnableCommands = new Set(),
   pendingCommands = new Set(),
   record = [],
 } = {}) {
@@ -9307,6 +9810,7 @@ export function runReconciliation({
   }
 
   const explainedCiOnly = [];
+  const explainedNotRunnable = [];
   const explainedPending = [];
   const extra = [];
   const nearMiss = [];
@@ -9317,6 +9821,14 @@ export function runReconciliation({
     if (derivedSet.has(entry.command)) continue;
     if (ciOnlyCommands.has(entry.command)) {
       explainedCiOnly.push(entry.command);
+      continue;
+    }
+    // The order is the precedence, and it is the one `commandsFor` already
+    // states: `ciOnly` is the FIRST subtraction, so a family that were somehow
+    // both is reported as CI-measured — one bucket per command, chosen the same
+    // way in both places rather than two counts for one omission.
+    if (notRunnableCommands.has(entry.command)) {
+      explainedNotRunnable.push(entry.command);
       continue;
     }
     if (pendingCommands.has(entry.command)) {
@@ -9338,6 +9850,7 @@ export function runReconciliation({
     unrun,
     notMeasured,
     explainedCiOnly: explainedCiOnly.sort(),
+    explainedNotRunnable: explainedNotRunnable.sort(),
     explainedPending: explainedPending.sort(),
     extra: extra.sort(),
     nearMiss,
@@ -9400,6 +9913,13 @@ export function runReconciliationLines(recon) {
     );
     for (const command of recon.explainedCiOnly) lines.push(`    - ${command}`);
   }
+  if (recon.explainedNotRunnable.length > 0) {
+    lines.push(
+      `  Classified by this tool, no explanation owed (${recon.explainedNotRunnable.length}) — VALUE-BEARING famil(ies):`
+        + ' its argv takes a value from the workflow, so it is recorded, not derived as runnable:',
+    );
+    for (const command of recon.explainedNotRunnable) lines.push(`    - ${command}`);
+  }
   if (recon.explainedPending.length > 0) {
     lines.push(
       `  Classified by this tool, no explanation owed (${recon.explainedPending.length}) — pending-changeset famil(ies), derived against a path that did not exist at derivation time:`,
@@ -9450,7 +9970,7 @@ export function runReconciliationLines(recon) {
  * That distinction is the card's own subject matter: what is left out of a list
  * must be visible in the list.
  */
-export function derivationJson({ paths, matchedRows, kindGroups, pending, counts, identity, alwaysRunsRows = [] }) {
+export function derivationJson({ paths, matchedRows, kindGroups, pending, counts, identity, alwaysRunsRows = [], rosters = [] }) {
   const commands = commandsFor({ matchedRows, kindGroups, alwaysRunsRows });
   const { otherCommands, ...spelling } = spellingSplit(commands);
   return {
@@ -9469,6 +9989,15 @@ export function derivationJson({ paths, matchedRows, kindGroups, pending, counts
     // (that would be a lead on every card) and must not have to infer it from
     // the commands list either (#14189).
     alwaysRunsPopulation: alwaysRunsRows,
+    // IN this document and ⛔ NOT in `commands`, for the reason
+    // `artifactRosterLines` states: these families are `silent`, so no path a
+    // caller passes can move them, and merging them into the runnable union
+    // would make every card's total a different number for a reason unrelated
+    // to the card. Their own key instead, so a machine consumer reads the same
+    // omission the human block names rather than inferring it (#14880).
+    artifactRosterSilences: rosters.map(({ check, command, workflows, artifacts, dir, coversYourPath }) => ({
+      check, command, workflows, artifacts, dir, coversYourPath,
+    })),
     pendingChangeset: {
       probePath: CHANGESET_PROBE_PATH,
       families: pending.map(({ check, entry }) => ({
@@ -9497,23 +10026,24 @@ export function derivationJson({ paths, matchedRows, kindGroups, pending, counts
  * LOUD. A quiet omission is the defect this mode was added to fix, and adding a
  * new one inside the fix is how that defect reproduces itself one layer up.
  */
-function machineReadableOutput(mode, { paths, matchedRows, kindGroups, pending, counts, alwaysRunsRows = [] }) {
+function machineReadableOutput(mode, { paths, matchedRows, kindGroups, pending, counts, alwaysRunsRows = [], rosters = [] }) {
   const identity = repoIdentity();
   const commands = commandsFor({ matchedRows, kindGroups, alwaysRunsRows });
   const split = spellingSplit(commands);
 
   if (mode === 'json') {
-    console.log(JSON.stringify(derivationJson({ paths, matchedRows, kindGroups, pending, counts, identity, alwaysRunsRows }), null, 2));
+    console.log(JSON.stringify(derivationJson({ paths, matchedRows, kindGroups, pending, counts, identity, alwaysRunsRows, rosters }), null, 2));
   } else {
     for (const command of commands) console.log(command);
   }
 
   const conventionCount = kindGroups.reduce((n, g) => n + g.gates.filter((x) => x.command).length, 0);
   const ciOnlyRows = matchedRows.filter((row) => row.ciOnly);
-  const alwaysRunsRunnable = alwaysRunsRows.filter((row) => !row.ciOnly && !row.refused);
+  const notRunnableRows = matchedRows.filter((row) => row.notRunnable);
+  const alwaysRunsRunnable = alwaysRunsRows.filter((row) => !row.ciOnly && !row.notRunnable && !row.refused);
   console.error(
     `dispatch-gates --${mode}: ${commands.length} command(s) — ${split.pnpm} pnpm, ${split.node} direct node` +
-      `${split.other ? `, ${split.other} neither` : ''} (${matchedRows.length - ciOnlyRows.length} matched by path, ${conventionCount} by change KIND` +
+      `${split.other ? `, ${split.other} neither` : ''} (${matchedRows.length - ciOnlyRows.length - notRunnableRows.length} matched by path, ${conventionCount} by change KIND` +
       `${alwaysRunsRunnable.length ? `, ${alwaysRunsRunnable.length} declared WHOLE-TREE and named on every card` : ''}).`,
   );
   // Stated on stderr where every other provenance is stated, and stated even
@@ -9536,12 +10066,28 @@ function machineReadableOutput(mode, { paths, matchedRows, kindGroups, pending, 
         'they read the workflow event payload, so no local run of them can produce a verdict. Run without --commands/--json to see them named.',
     );
   }
+  // The FIFTH thing stdout deliberately omits (#15083), on stderr for the same
+  // reason as the four around it: a quiet omission is the defect this mode
+  // exists to fix, and this one subtracts commands the list used to carry —
+  // as a BARE key CI never ran.
+  if (notRunnableRows.length) {
+    console.error(
+      `  + ${notRunnableRows.length} famil(ies) matched by path take a VALUE FROM THE WORKFLOW and are ${mode === 'json' ? 'flagged as notRunnable on their matched row, not in commands' : 'NOT above'} — ` +
+        'their argv carries a variable with no value outside a CI run. Run without --commands/--json to see each one printed as CI spells it.',
+    );
+  }
   if (pending.length) {
     console.error(
       `  + ${pending.length} famil(ies) apply once this card's changeset exists and are ${mode === 'json' ? 'under pendingChangeset, not in commands' : 'NOT above'} — ` +
         'they are derived against a path that does not exist yet. Write the changeset, then derive again.',
     );
   }
+  // The FOURTH thing stdout deliberately omits (#14880), on stderr for exactly
+  // the reason the three above are: the block is prose, and prose in the stream
+  // a consumer executes is the harvest hazard this mode exists to make
+  // unreachable. ⛔ Never merged into the command list — these families are
+  // `silent`, and no path a caller passes can move them.
+  for (const line of artifactRosterLines(rosters)) console.error(`  ${line}`);
   console.error(
     '  ⛔ Not a complete account of what CI runs on this PR: the always-runs tail (workflows with no path filter) is NOT here. Run without --commands/--json for it.',
   );
@@ -9584,7 +10130,17 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
     else if (verdict === 'undetermined') undetermined.push([check, entry]);
     else silent.push([check, entry]);
   }
-  const rosters = silent.map(([, entry]) => artifactOnlySilence(entry, paths, tree)).filter(Boolean);
+  // The roster classification travels ON the row, for the same reason the
+  // matched provenance does: the human block, the `--commands` stderr
+  // accounting and the `--json` document are three readings of THESE rows, so
+  // none of them can name a different set than the residue summary counts
+  // (#14880).
+  const rosters = silent
+    .map(([check, entry]) => {
+      const roster = artifactOnlySilence(entry, paths, tree);
+      return roster ? { check, command: runnableInvocation(entry), workflows: [...entry.workflows], ...roster } : null;
+    })
+    .filter(Boolean);
 
   // ONE structured answer, rendered three ways below. The human block, the
   // `--commands` list and the `--json` document are readings of these same
@@ -9607,6 +10163,10 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
     // family cannot be runnable in one output and CI-measured in another
     // (#14004).
     ciOnly: entry.ciOnly ?? null,
+    // Travels on the row for the identical reason `ciOnly` does: every
+    // rendering below is a reading of these rows, so a family cannot be
+    // runnable in one output and value-bearing in another (#15083).
+    notRunnable: entry.notRunnable ?? null,
   }));
   // Built the same way `matchedRows` is, and for the same reason: every
   // rendering below is a reading of these rows, so the human block, the
@@ -9622,6 +10182,7 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
     rootWalk: entry.rootWalk ?? null,
     refused: wholeTreePopulationRefusal(entry),
     ciOnly: entry.ciOnly ?? null,
+    notRunnable: entry.notRunnable ?? null,
   }));
   const kindGroups = changeKindGates(paths, resolveInvocation);
   // The pending-changeset section is derived in BOTH input modes and is gated
@@ -9633,9 +10194,10 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
   const pending = pendingChangesetFamilies([...byCheck], new Set(matched.keys()));
 
   if (mode === 'ran') {
-    // Built from the SAME three expressions the other renderings read, in this
-    // process, on this tree: the union `--commands` prints, the CI-measured set
-    // that union subtracts, and the pending families it holds back. A second
+    // Built from the SAME four expressions the other renderings read, in this
+    // process, on this tree: the union `--commands` prints, the two sets that
+    // union subtracts — CI-measured, and value-bearing — and the pending
+    // families it holds back. A second
     // traversal here would be a second answer to a question this file already
     // answers once — and it would be the answer the reconciliation is judged
     // against, which is the worst possible place to keep a duplicate.
@@ -9646,6 +10208,11 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
       // makes it a contract rather than a note (#14189).
       derived: commandsFor({ matchedRows, kindGroups, alwaysRunsRows }),
       ciOnlyCommands: ciOnlyCommandSet(matchedRows, alwaysRunsRows),
+      // The SECOND set `commandsFor` subtracts, read from the SAME rows by the
+      // SAME expression it uses — so the union and the reconciliation cannot
+      // drift about which invocations are withheld, exactly as they cannot for
+      // the CI-measured set above it (#15115).
+      notRunnableCommands: notRunnableCommandSet(matchedRows, alwaysRunsRows),
       pendingCommands: new Set(pending.map(({ entry }) => runnableInvocation(entry))),
       record: runRecord,
     });
@@ -9660,6 +10227,7 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
       kindGroups,
       pending,
       alwaysRunsRows,
+      rosters,
       counts: {
         discovered: byCheck.size,
         workflows: workflows.length,
@@ -9693,8 +10261,14 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
   // the blank line the published harvest stops at, so the family stays named
   // and named ONCE, and no harvest of this block can pick up a command whose
   // only local outcome is a nonzero exit.
-  const runnableRows = matchedRows.filter((row) => !row.ciOnly);
+  const runnableRows = matchedRows.filter((row) => !row.ciOnly && !row.notRunnable);
   const ciOnlyRows = matchedRows.filter((row) => row.ciOnly);
+  // The second not-runnable channel (#15083). Kept out of the pasted block for
+  // the reason the CI-measured rows are: the block a dev pastes carries only
+  // families a dev can run, and these get their own heading below the blank
+  // line the published harvest stops at — named ONCE, and unable to reach a
+  // harvest of the block above.
+  const notRunnableRows = matchedRows.filter((row) => row.notRunnable);
   const viaText = (hits) => hits.map((h) => `${h.path} ⇢ ${h.via} '${h.hint}'`).join('; ');
   if (runnableRows.length) {
     console.log('Local gates for this card (paste into the dispatch prompt):');
@@ -9708,11 +10282,11 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
     for (const line of spellingFooterLines(spellingSplit(runnableRows.map((r) => r.command)), recon)) {
       console.log(line);
     }
-  } else if (ciOnlyRows.length) {
+  } else if (ciOnlyRows.length || notRunnableRows.length) {
     // ⛔ NOT the "nothing matched" sentence below: families DID match, and
     // saying otherwise would hide the one row this card is about behind a
     // claim the run just measured as false.
-    console.log('No LOCALLY runnable check family names the given paths — every family they matched is CI-measured only; see the heading below.');
+    console.log('No LOCALLY runnable check family names the given paths — every family they matched is CI-measured only or takes a value from the workflow; see the headings below.');
   } else {
     console.log("No check family names the given paths in its own source, and no workflow's path filter schedules one for them.");
   }
@@ -9730,6 +10304,32 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
       );
     }
     console.log('  ⇒ Derived from the gate\'s own source, not from a list of names: a family that reads the payload and has no local invocation classifies itself.');
+  }
+
+  // The value-bearing channel (#15083), rendered on the CI-measured section's
+  // exact shape and placed beside it because it answers the same question — a
+  // family this card owes that this machine cannot run — from a different
+  // measurement. The invocation prints in FULL, as CI spells it, so the reader
+  // can see which value is missing and where it comes from; the refusal is a
+  // labelled line of its own, never an ellipsis and never a truncated command.
+  if (notRunnableRows.length) {
+    console.log('');
+    console.log(`Value-bearing argv — matched by path, and NOT runnable here (${notRunnableRows.length} famil(ies)):`);
+    for (const { command, workflows: wfs, via: hits, notRunnable } of notRunnableRows) {
+      console.log(`  - ${command}   [${wfs.join(', ')}]   matched via ${viaText(hits)}`);
+      console.log(
+        `      ⛔ NOT RUNNABLE LOCALLY — ${notRunnable.variables.length} value(s) come from the workflow:` +
+          ` ${notRunnable.variables.join(', ')}`,
+      );
+    }
+    console.log(
+      '  ⇒ Printed as CI spells it, variable names in the value positions, so nothing above reads as a command to paste:' +
+        ' these are ⛔ NOT in --commands, and a BARE run of any of these scripts is an invocation CI never makes.',
+    );
+    console.log(
+      '  ⇒ Read from the workflow text, not from a table in this script: a token carrying ${{ … }} or a shell expansion' +
+        ' is a variable, everything else is a literal and renders in full under the heading above.',
+    );
   }
   const kindLines = changeKindLines(paths, resolveInvocation);
   if (kindLines.length) {
@@ -9754,6 +10354,19 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
   // Here it closes the runnable answer and the section boundary is the claim.
   console.log('');
   for (const line of familyReconciliationLines(recon)) console.log(line);
+
+  // Directly BELOW that total and above everything else it excludes (#14880).
+  // The placement IS the claim: the reconciliation line closes the runnable
+  // answer, and every section under it names something outside the answer. This
+  // one names the families no path can ever move — printed on every run, not
+  // only under `--residue`, because a dev reading a dispatch brief is never
+  // told to pass that flag and both measured CI reds on this card were carried
+  // by families of exactly this shape.
+  const rosterOut = artifactRosterLines(rosters);
+  if (rosterOut.length) {
+    console.log('');
+    for (const line of rosterOut) console.log(line);
+  }
 
   const pendingOut = pendingChangesetLines(pending);
   if (pendingOut.length) {
@@ -10594,7 +11207,11 @@ function selfTest() {
   ].join('\n');
   const blockInvs = extractCheckInvocations(blockWf, 'pr-automation.yml');
   const blockNames = blockInvs.map((i) => i.check);
-  t('extracts a direct script from a literal block body', blockNames.includes('scripts/check-adr-0087-registration.mjs'));
+  // The key carries the argv the block body really spells (#15083), so the
+  // subject of this case — a direct script pulled out of a literal block —
+  // is asserted on the invocation the body contains rather than on a bare path
+  // the body does not.
+  t('extracts a direct script from a literal block body', blockNames.includes('scripts/check-adr-0087-registration.mjs --base "$MERGE_BASE"'));
   t('extracts a pnpm check from a folded block body, with its filter', blockInvs.some((i) => i.check === 'check:folded-surface' && i.filter === '@objectstack/spec'));
   t('a dedented step ends the block body (the one-liner after it still parses)', blockNames.includes('scripts/check-nul-bytes.mjs'));
   t('a blank line does NOT end the block body', blockNames.includes('check:folded-surface'));
@@ -10671,20 +11288,411 @@ function selfTest() {
     '…while the second command, which really carries it, is discovered',
     stNames.includes('scripts/pm/git-history.mjs --self-test'),
   );
-  // The no-re-attribution property, held by construction rather than measured
-  // and hoped for: a `check-` basename is already a family under its BARE path
-  // key, and admitting it again under a flagged key would SPLIT it in two.
+  // The no-double-count property: ONE workflow invocation yields ONE family,
+  // whichever matcher admits it.
+  //
+  // ⚠️ This case was rewritten by #14880 and the rewrite is deliberate, so the
+  // two halves it used to assert together are separated here. Its COUNT half —
+  // one invocation, one family — is the invariant #11404 built the `check-`
+  // skip to protect, and it is untouched: the direct matcher admits this
+  // invocation and the self-test matcher skips it. Its KEY half asserted that
+  // the family lands under the BARE path key, and that half WAS the defect
+  // #14880 fixed: it is what collapsed CI's two invocations of one script into
+  // the plain one and left the failing `--self-test` invocation with no entry.
+  // The key now carries the argv (`renderedArgv`'s docblock has the
+  // measurement), so the expectation moves with it.
   const dualWf = [
     'jobs:',
     '  j:',
     '    steps:',
     '      - run: node scripts/check-adr-0087-registration.mjs --self-test',
   ].join('\n');
-  const dualNames = extractCheckInvocations(dualWf, 'x.yml').map((i) => i.check);
+  const dualInvs = extractCheckInvocations(dualWf, 'x.yml');
+  const dualNames = dualInvs.map((i) => i.check);
   t(
-    'a check- script invoked with the flag stays ONE family under its bare path key',
-    dualNames.length === 1 && dualNames[0] === 'scripts/check-adr-0087-registration.mjs',
+    'a check- script invoked with the flag is ONE family, not one per matcher',
+    dualNames.length === 1,
   );
+  t(
+    '⭐ …and its key carries the flag, so the invocation CI runs is the one derived (#14880)',
+    dualNames[0] === 'scripts/check-adr-0087-registration.mjs --self-test',
+  );
+  t(
+    '…resolving to the script FILE, never to the flagged key — the flag is not a path',
+    dualInvs[0]?.script === 'scripts/check-adr-0087-registration.mjs',
+  );
+  t(
+    '…and it is marked as a self-test invocation, which is what the follow narrowings read',
+    dualInvs[0]?.selfTest === true,
+  );
+
+  // ── The derivation KEY is (script, args) (#14880), and the argv is RENDERED
+  //    rather than refused (#15083) ───────────────────────────────────────────
+  //
+  // #14880's third mechanism, and the one no better output mode reaches: the
+  // derived list named the PLAIN invocation of a script CI also runs with a
+  // flag, and the flagged invocation was the red one. That split is pinned
+  // below, unchanged.
+  //
+  // ⚠️ #14880's other half — the REFUSAL — is what #15083 retired, so the two
+  // cases that pinned it are rewritten here rather than dropped. They asserted
+  // that a value-bearing tail and a continued tail keep the BARE path key, and
+  // that key is an invocation CI never runs: measured on this tree,
+  // `node scripts/check-test-completeness.mjs` exits 3 with `PREREQUISITE NOT
+  // MET`, and four more of the nine answer a different question than CI asks.
+  // The subject of each case is unchanged — same tail, same fixture — and what
+  // moved is the expectation, from "keeps the bare key" to "renders in full and
+  // says whether it is runnable". Every OTHER case in this block keeps its
+  // verdict untouched, the two census cases and the redirection case included.
+  //
+  // The fixtures below are QUOTED FROM the live workflow text, invocation for
+  // invocation, so no case can pin a shape the tree does not have. Their
+  // sources: `pr-automation.yml` (the `--base` gates), `ci.yml` (the shard
+  // attestation), `engine-split-metric.yml` (`--days 90`),
+  // `required-set-patrol.yml` (a complete argv behind a continuation and a
+  // redirection), `prerelease-pin-watch.yml` (`--verbose 2>&1`). The live half
+  // at the end of the block re-reads them from the workflows themselves.
+  const keyWf = [
+    'jobs:',
+    '  gates:',
+    '    steps:',
+    '      - name: Both invocations, the shape lint.yml really uses',
+    '        run: |',
+    '          node scripts/check-tenant-audit-census.mjs --self-test',
+    '          node scripts/check-tenant-audit-census.mjs',
+    '      - name: VARIABLE — pr-automation.yml pins the base to a step output',
+    '        run: node scripts/check-empty-changeset.mjs --base "$MERGE_BASE"',
+    '      - name: VARIABLE — ci.yml continues the attestation across two more lines',
+    '        run: |',
+    '          node scripts/check-shard-attestation.mjs --emit \\',
+    '            --job test --shard ${{ matrix.shard }} --total 6 \\',
+    '            --out "$RUNNER_TEMP/att"',
+    '      - name: LITERAL — engine-split-metric.yml writes the window down',
+    '        run: node scripts/check-engine-split-ratio.mjs --days 90',
+    "      - name: LITERAL behind a CONTINUATION and a REDIRECTION, both the shell's",
+    '        run: |',
+    '          node scripts/check-required-contexts.mjs --verify-required-set \\',
+    '            > "$RUNNER_TEMP/required-set.md" 2> "$RUNNER_TEMP/required-set.err"',
+    '      - name: LITERAL whose line ends in a REDIRECTION carrying its own fd',
+    '        run: node scripts/check-prerelease-pin-watch.mjs --verbose 2>&1',
+    '      - name: A complete flag run whose line ends in a REDIRECTION, not an argument',
+    '        run: node scripts/check-release-section-coverage.mjs --strict > "$RUNNER_TEMP/x.txt"',
+  ].join('\n');
+  const keyInvs = extractCheckInvocations(keyWf, 'lint.yml');
+  const keyNames = keyInvs.map((i) => i.check);
+  const censusKeys = keyNames.filter((n) => n.startsWith('scripts/check-tenant-audit-census.mjs'));
+  t(
+    '⭐ the two census invocations derive TWO entries, not one collapsed onto the plain run',
+    censusKeys.length === 2
+      && censusKeys.includes('scripts/check-tenant-audit-census.mjs --self-test')
+      && censusKeys.includes('scripts/check-tenant-audit-census.mjs'),
+  );
+  t(
+    'CONTROL: the plain census entry is still there — the fix ADDS the flagged invocation, it does not move the plain one',
+    keyNames.includes('scripts/check-tenant-audit-census.mjs'),
+  );
+  t(
+    '…and both print as commands a dev can paste, each reproducing the invocation CI runs',
+    keyInvs
+      .filter((i) => i.script === 'scripts/check-tenant-audit-census.mjs')
+      .map((i) => runnableInvocation(i))
+      .sort()
+      .join('|')
+      === 'node scripts/check-tenant-audit-census.mjs|node scripts/check-tenant-audit-census.mjs --self-test',
+  );
+  // ⭐ THE VARIABLE KIND (#15083). Rewritten from "keeps the bare path key": the
+  // bare key is an invocation `pr-automation.yml` never makes, and it answered
+  // against the DEFAULT base while CI pins it to the PR's merge base. The
+  // invocation now renders in full, with the variable's own name in the value
+  // position, and carries the variable so the row can be labelled.
+  const emptyKey = keyInvs.find((i) => i.script === 'scripts/check-empty-changeset.mjs');
+  t(
+    '⭐ an invocation whose tail carries a VARIABLE renders in FULL, and the bare key CI never runs is gone',
+    keyNames.includes('scripts/check-empty-changeset.mjs --base "$MERGE_BASE"')
+      && !keyNames.includes('scripts/check-empty-changeset.mjs'),
+  );
+  t(
+    '…and it carries the variable it takes from the workflow, which is what marks the row NOT RUNNABLE LOCALLY',
+    (emptyKey?.argvVariables ?? []).join(',') === '$MERGE_BASE',
+  );
+  // ⭐ The sharpest of them, and the one a terminator at the backslash would
+  // have got wrong in the direction that LOOKS right: ` --emit ` reads as a
+  // complete flag run and the invocation's real values are on the next two
+  // lines. Joining is how the whole argv arrives; refusing it was how a
+  // truncation was avoided before there was a join.
+  const shardKey = keyInvs.find((i) => i.script === 'scripts/check-shard-attestation.mjs');
+  t(
+    '⭐ an invocation CONTINUED across two lines renders as ONE command, values and all',
+    shardKey?.check
+      === 'scripts/check-shard-attestation.mjs --emit --job test --shard ${{ matrix.shard }} --total 6 --out "$RUNNER_TEMP/att"',
+  );
+  t(
+    '…with BOTH of its workflow variables named, the expression and the shell expansion',
+    (shardKey?.argvVariables ?? []).join(',') === '${{ matrix.shard }},$RUNNER_TEMP',
+  );
+  t(
+    '…and ⛔ no bare key survives beside it — a bare run of this script is an invocation ci.yml never makes',
+    !keyNames.includes('scripts/check-shard-attestation.mjs'),
+  );
+  // ⭐ THE LITERAL KIND (#15083) — three shapes, all of them renderable, and the
+  // last two were refused before this card only because a REDIRECTION and a
+  // CONTINUATION stood behind an argv that was already complete.
+  const literalKeys = [
+    'scripts/check-engine-split-ratio.mjs --days 90',
+    'scripts/check-required-contexts.mjs --verify-required-set',
+    'scripts/check-prerelease-pin-watch.mjs --verbose',
+  ];
+  t(
+    '⭐ an invocation whose every token is a LITERAL renders as the command CI runs, value included',
+    literalKeys.every((k) => keyNames.includes(k)),
+  );
+  t(
+    '…and every one of them is runnable — no variable, so nothing to label',
+    keyInvs.filter((i) => literalKeys.includes(i.check)).every((i) => i.argvVariables.length === 0),
+  );
+  t(
+    '…and none of the three keeps a bare key CI never runs',
+    !['scripts/check-engine-split-ratio.mjs', 'scripts/check-required-contexts.mjs', 'scripts/check-prerelease-pin-watch.mjs']
+      .some((k) => keyNames.includes(k)),
+  );
+  // ⛔ The truncation this card must not reintroduce, asserted as a shape over
+  // every key rather than as one expectation: a key ending in a dangling flag,
+  // a bare backslash or a stray redirection fd is the outcome #14880 refused
+  // the whole class to avoid, and rendering is only an improvement while none
+  // of them can appear.
+  //
+  // ⭐ The QUOTE half (#15116). `DIRECT_CHECK_INVOCATION` cuts at `(`, so a
+  // value written as a command substitution is cut INSIDE its own construct and
+  // leaves a tail whose quote never closes — `--base "$` from
+  // `--base "$(git merge-base origin/main HEAD)"`. Reading that shape here is
+  // deliberately INDEPENDENT of `argvTokens`: this scans the finished KEY with
+  // the shell's own outermost-quote rule (a `'` inside a `"…"` is text, not a
+  // delimiter), so a bug in the tokeniser cannot make the pin agree with it. A
+  // parity count would not do — measured on this tree zero live keys nest a
+  // quote, and the day one does a parity scan calls a balanced key truncated.
+  const carriesTruncation = (text) => {
+    const s = String(text);
+    let quote = null;
+    let i = 0;
+    while (i < s.length) {
+      if (quote !== null) {
+        if (s[i] === quote) quote = null;
+        i += 1;
+        continue;
+      }
+      if (s[i] === "'" || s[i] === '"') {
+        quote = s[i];
+        i += 1;
+        continue;
+      }
+      if (s.startsWith('${{', i)) {
+        const close = s.indexOf('}}', i + 3);
+        if (close === -1) return true;
+        i = close + 2;
+        continue;
+      }
+      i += 1;
+    }
+    return quote !== null || /\$(?=\s|$)/.test(s);
+  };
+  // The statement is over EVERY derived key and it is the contrapositive rather
+  // than a flat "every key is balanced": under this file's own rule a truncated
+  // tail is NAMED — its unresolved remainder is a value the workflow supplies,
+  // so the row is marked NOT RUNNABLE LOCALLY and the key stays out of
+  // `--commands`. What must never happen is a truncation that RENDERS as a
+  // command a dev can paste, and that is exactly what this says.
+  t(
+    '⛔ no derived key is a TRUNCATED argv — no continuation backslash, no redirection fd surviving as an argument, and ⭐ no key carrying an unclosed quote, an unclosed ${{ … }} or a bare `$` is RUNNABLE (#15116)',
+    keyNames.every((n) => !/\\/.test(n))
+      && keyNames.includes('scripts/check-prerelease-pin-watch.mjs --verbose')
+      && !keyNames.some((n) => /^scripts\/check-prerelease-pin-watch\.mjs --verbose\s+\d+$/.test(n))
+      && keyInvs.every((i) => !carriesTruncation(i.check) || (i.argvVariables ?? []).length > 0),
+  );
+
+  // ⭐ THE UNRENDERABLE KIND (#15116), and this fixture is the ONLY place the
+  // tree has it. Measured at this commit: 114 direct invocations across
+  // `.github/workflows` and ZERO carry a paren or a terminator inside a quoted
+  // value — the three paren hits in the workflow text are all comment lines. So
+  // unlike `keyWf` above, whose every step is quoted from live workflow text,
+  // this fixture is WRITTEN rather than quoted, and it says so: the shape is
+  // latent, and a fixture is what stands in for a tree that does not have it
+  // yet. The live half at the end of the block asserts the same property over
+  // the workflows and is vacuous today by that measurement, which is the whole
+  // reason these three steps exist.
+  const cutWf = [
+    'jobs:',
+    '  gates:',
+    '    steps:',
+    '      - name: a command substitution in the value position — the tail is cut at the paren',
+    '        run: node scripts/check-x.mjs --base "$(git merge-base origin/main HEAD)"',
+    '      - name: a terminator INSIDE a quoted value — the tail is cut at the semicolon',
+    "        run: node scripts/check-y.mjs --gate 'a;b'",
+    '      - name: CONTROL — the two live spellings, which must classify exactly as before',
+    "        run: node scripts/check-z.mjs --gate 'Test Core' --shard ${{ matrix.shard }}",
+  ].join('\n');
+  const cutInvs = extractCheckInvocations(cutWf, 'x.yml').filter((i) => i.direct);
+  const cutOf = (script) => cutInvs.find((i) => i.script === script);
+  t(
+    'the `$(…)` value really IS cut to a truncation — the fixture reproduces the key this card measured, so the cases below cannot go vacuous',
+    cutOf('scripts/check-x.mjs')?.check === 'scripts/check-x.mjs --base "$',
+  );
+  t(
+    '⭐ …and that truncation is NOT runnable: the unresolved remainder is named as the value the workflow supplies',
+    (cutOf('scripts/check-x.mjs')?.argvVariables ?? []).join(',') === '"$',
+  );
+  t(
+    '⭐ a terminator inside a quoted value lands the same way — named, never rendered as a command a dev could paste',
+    cutOf('scripts/check-y.mjs')?.check === "scripts/check-y.mjs --gate 'a"
+      && (cutOf('scripts/check-y.mjs')?.argvVariables ?? []).join(',') === "'a",
+  );
+  t(
+    "CONTROL: `--gate 'Test Core'` and `--shard ${{ matrix.shard }}` tokenise and classify EXACTLY as today — the expression is the one variable, the quoted literal contributes none",
+    cutOf('scripts/check-z.mjs')?.check === "scripts/check-z.mjs --gate 'Test Core' --shard ${{ matrix.shard }}"
+      && (cutOf('scripts/check-z.mjs')?.argvVariables ?? []).join(',') === '${{ matrix.shard }}',
+  );
+  t(
+    '⛔ …and the shape-level statement over every key this fixture derives: carrying a truncation and rendering as runnable are mutually exclusive — non-vacuously, 2 of the 3 carry one',
+    cutInvs.every((i) => !carriesTruncation(i.check) || i.argvVariables.length > 0)
+      && cutInvs.filter((i) => carriesTruncation(i.check)).length === 2,
+  );
+  // ...while a REDIRECTION really does end the argv, so the flag run before it
+  // is complete and is keyed. Unchanged by #15083, verdict and all: what the
+  // shell hands to this command and what it keeps for itself is the same
+  // boundary it always was.
+  t(
+    'a complete flag run followed by a redirection IS keyed — the redirection is the shell\'s, never this argv',
+    keyNames.includes('scripts/check-release-section-coverage.mjs --strict')
+      && !keyNames.includes('scripts/check-release-section-coverage.mjs'),
+  );
+  t(
+    'renderedArgv renders every tail and reports which values come from the workflow',
+    renderedArgv(' --self-test').args === '--self-test'
+      && renderedArgv(' --self-test').variables.length === 0
+      && renderedArgv(' --emit --verify').args === '--emit --verify'
+      && renderedArgv('') === null
+      && renderedArgv(' --days 90').args === '--days 90'
+      && renderedArgv(' --days 90').variables.length === 0
+      && renderedArgv(' --base "$MERGE_BASE"').variables.join(',') === '$MERGE_BASE'
+      && renderedArgv(' "$RUNNER_TEMP/test-core.log"').variables.join(',') === '$RUNNER_TEMP'
+      && renderedArgv(' --shard ${{ matrix.shard }}').args === '--shard ${{ matrix.shard }}'
+      // ⭐ #15116: the three spellings the CUT leaves unresolved. Each names its
+      // own remainder, which is what keeps the key out of `--commands`.
+      && renderedArgv(' --base "$').variables.join(',') === '"$'
+      && renderedArgv(' --base $').variables.join(',') === '$'
+      && renderedArgv(' --job ${{ inputs.a').variables.join(',') === '${{ inputs.a'
+      // …and the CONTROL, on the same call: a CLOSED quote resolves, so a
+      // quoted literal is still a literal and still renders as runnable.
+      && renderedArgv(" --gate 'Test Core'").args === "--gate 'Test Core'"
+      && renderedArgv(" --gate 'Test Core'").variables.length === 0,
+  );
+  t(
+    'argvTokens holds a quoted value and a ${{ … }} expression together, spaces and all — and ⭐ swallows an UNCLOSED one into a single token, which is the seam #15116 reads',
+    argvTokens(' --gate \'Test Core\' --shard ${{ matrix.shard }}').join('|')
+      === "--gate|'Test Core'|--shard|${{ matrix.shard }}"
+      && argvTokens(' --base "$').join('|') === '--base|"$'
+      && argvTokens(' --job ${{ inputs.a').join('|') === '--job|${{ inputs.a',
+  );
+  t(
+    'joinLineContinuations splices a continued command into one line, and ⛔ never joins a COMMENT',
+    joinLineContinuations('a \\\n  b').trim() === 'a b'
+      && joinLineContinuations('  # a comment \\\n  node scripts/check-x.mjs').split('\n').length === 2,
+  );
+  // The LIVE half, and the count is READ from the workflow rather than typed —
+  // a number typed here would rot the first time lint.yml moved. The point of
+  // the reading is that the fixture above judges a real convention: if this
+  // ever fell to zero, every case in this block would be about a shape the tree
+  // no longer has. Measured when this landed: 28 in lint.yml, 41 across all
+  // workflow files, every one of them carrying a `check-` basename and so
+  // collapsed by the old key.
+  {
+    const lintText = readFileSync(nodePath.join(ROOT, '.github/workflows/lint.yml'), 'utf8');
+    const argvOfScript = new Map();
+    for (const inv of extractCheckInvocations(lintText, 'lint.yml')) {
+      if (!inv.direct) continue;
+      if (!argvOfScript.has(inv.script)) argvOfScript.set(inv.script, new Set());
+      argvOfScript.get(inv.script).add(inv.check);
+    }
+    const multi = [...argvOfScript.entries()].filter(([, keys]) => keys.size > 1);
+    t(
+      `lint.yml really invokes ${multi.length} script(s) more than once under different argv, so the cases above judge a live convention`,
+      multi.length > 0,
+    );
+    t(
+      '⭐ and the census pair CI runs on two lines derives as two families on the real workflow, not one',
+      (argvOfScript.get('scripts/check-tenant-audit-census.mjs')?.size ?? 0) === 2,
+    );
+    t(
+      'every derived key is either the bare script path or that path plus the WHOLE argv, re-tokenising to itself',
+      [...argvOfScript.entries()].every(([script, keys]) =>
+        [...keys].every((k) => k === script || renderedArgv(k.slice(script.length))?.args === k.slice(script.length).trim())),
+    );
+  }
+
+  // ── The value-bearing class, read from the LIVE workflows (#15083) ─────────
+  //
+  // The card counted nine scripts whose only CI invocations carry a value or a
+  // continuation. The count is READ here rather than typed, for the reason the
+  // block above reads its own: a list typed into a self-test rots the first
+  // time a workflow moves, and this one already has — the same sweep over the
+  // tree at this commit finds `scripts/pm/check-half-states.mjs` too, a TENTH
+  // member the card's table does not name (`half-state-patrol.yml` runs it
+  // `--format=markdown --provenance="$PROVENANCE"` and nowhere else).
+  //
+  // What is asserted is the PROPERTY, not the roster: every direct invocation
+  // in the tree renders, and every rendered key is either all-literal (and
+  // therefore in `--commands`) or names the variables that keep it out. A
+  // script with both kinds gets both entries, which is the card's third clause.
+  {
+    const liveInvs = [];
+    for (const wf of readdirSync(nodePath.join(ROOT, '.github/workflows')).filter((f) => /\.ya?ml$/.test(f))) {
+      liveInvs.push(...extractCheckInvocations(readFileSync(nodePath.join(ROOT, '.github/workflows', wf), 'utf8'), wf));
+    }
+    const direct = liveInvs.filter((i) => i.direct);
+    const valueBearing = direct.filter((i) => (i.argvVariables ?? []).length > 0);
+    t(
+      `the live tree really carries ${valueBearing.length} value-bearing invocation(s) across ${new Set(valueBearing.map((i) => i.script)).size} script(s), so the cases above judge a live class`,
+      valueBearing.length > 0,
+    );
+    t(
+      '⭐ the card\'s named specimens all classify as VARIABLE from the workflow text — no per-script table was needed',
+      ['scripts/check-empty-changeset.mjs', 'scripts/check-test-completeness.mjs', 'scripts/check-shard-attestation.mjs',
+        'scripts/check-cross-package-test-inputs.mjs', 'scripts/check-adr-0087-registration.mjs', 'scripts/check-changeset-no-major.mjs']
+        .every((script) => valueBearing.some((i) => i.script === script)),
+    );
+    t(
+      '⭐ …and the three the card called value-bearing that are really LITERAL render as runnable commands instead',
+      ['scripts/check-engine-split-ratio.mjs --days 90', 'scripts/check-required-contexts.mjs --verify-required-set',
+        'scripts/check-prerelease-pin-watch.mjs --verbose']
+        .every((key) => direct.some((i) => i.check === key && i.argvVariables.length === 0)),
+    );
+    t(
+      '⛔ no live key survives as a bare path for a script CI only ever invokes WITH argv',
+      !direct.some((i) => i.check === i.script)
+        || direct.filter((i) => i.check === i.script).every((bare) => liveInvs.some((i) => i.script === bare.script && i.check === i.script)),
+    );
+    // The same property the fixture block asserts, read from the workflows. It
+    // is VACUOUS today and that is the reading, not an oversight: at this commit
+    // no live invocation carries an unclosed quote, an unclosed `${{ … }}` or a
+    // bare `$`, so the non-vacuous subjects live in the fixture above. What this
+    // half adds is the day the tree grows one — the property holds then too,
+    // because the classification names the remainder rather than rendering it.
+    t(
+      '⛔ and no live key is truncated: no continuation backslash reaches one, and ⭐ any key carrying an unclosed quote, an unclosed ${{ … }} or a bare `$` is NOT runnable (#15116)',
+      direct.every((i) => !i.check.includes('\\'))
+        && direct.every((i) => !carriesTruncation(i.check) || (i.argvVariables ?? []).length > 0),
+    );
+    // A script invoked BOTH ways gets BOTH entries — the card's third clause,
+    // read off the live tree. `check-release-section-coverage.mjs` is the
+    // specimen: `lint.yml` runs it bare, `release-coverage-patrol.yml` runs it
+    // bare AND `--strict`, and before the continuation join the `--strict` run
+    // had no entry of its own at all.
+    const coverageKeys = new Set(direct.filter((i) => i.script === 'scripts/check-release-section-coverage.mjs').map((i) => i.check));
+    t(
+      '⭐ a script CI invokes bare AND with argv keeps BOTH entries — the bare key is kept where CI really runs it bare',
+      coverageKeys.has('scripts/check-release-section-coverage.mjs')
+        && coverageKeys.has('scripts/check-release-section-coverage.mjs --strict'),
+    );
+  }
 
   // The live halves. Fixtures cannot prove the tree changed; these read it.
   const liveSelfTestFamilies = [...discoverFamilies().byCheck].filter(([, e]) => e.selfTest);
@@ -10765,7 +11773,23 @@ function selfTest() {
   // never earned, so nothing in the output would say so. Measured here: the
   // only newly-promoted module that declares a literal at all is pr-labels.mjs
   // (`.github/labeler.yml`), and no family imports it.
-  const promoted = liveSelfTestFamilies.flatMap(([, e]) => e.files ?? []);
+  // ⚠️ Narrowed by #14880, and the narrowing is what keeps this case measuring
+  // its own claim. A `check-`named script invoked with `--self-test` is now a
+  // self-test family too, but its file was ALREADY a gate file — CI also runs
+  // it plainly, or the direct matcher admits it under a `check-` basename
+  // either way — so counting it as "promoted BY the self-test admission" reads
+  // a refusal that predates that admission as a loss it caused. Measured: with
+  // the raw list, four families reported hints "lost" to modules
+  // (`check-adr-links.mjs`, `check-self-test-wired.mjs`) that were gate files
+  // on the base tree as well, and the follow had already been refusing them.
+  // What this case is about is the module a self-test family is the ONLY
+  // reason to treat as a gate file, so that is what it takes.
+  const namedByWorkFamilies = new Set(
+    [...discoverFamilies().byCheck.values()].filter((e) => !e.selfTest).flatMap((e) => e.files ?? []),
+  );
+  const promoted = liveSelfTestFamilies
+    .flatMap(([, e]) => e.files ?? [])
+    .filter((f) => !namedByWorkFamilies.has(f));
   const subtracted = [];
   for (const [check, entry] of discoverFamilies().byCheck) {
     if (entry.selfTest) continue;
@@ -12682,6 +13706,59 @@ function selfTest() {
       .includes('ordinary one'),
   );
 
+  // ── The roster block, printed where a dev without --residue will see it (#14880)
+  //
+  // The note above is per family and prints only inside the silent listing,
+  // which is behind a flag no dispatch brief tells anyone to pass. Two measured
+  // CI reds on this card were carried by families of exactly this shape
+  // (`check:optional-error-sink`, `check:error-code-provenance`), invisible to
+  // a `--commands` harvest for EVERY card. The block states the standing fact
+  // and names the families — and its whole contract is that it is a block
+  // BESIDE the derived list, never a part of it.
+  const blockRows = [
+    { check: 'check:b', command: 'pnpm check:b', workflows: ['lint.yml'], artifacts: ['scripts/a.mjs'], dir: 'scripts', coversYourPath: true },
+    { check: 'check:a', command: 'pnpm check:a', workflows: ['lint.yml'], artifacts: ['docs/x.md'], dir: 'docs', coversYourPath: false },
+  ];
+  const blockOut = artifactRosterLines(blockRows);
+  t('no rosters, no block — an empty section is never printed', artifactRosterLines([]).length === 0);
+  t('the block sizes itself and names every family, sorted by the command a dev would run', blockOut[0].includes('2 famil(ies)')
+    && blockOut.filter((l) => l.startsWith('  - ')).join('|') === '  - pnpm check:a|  - pnpm check:b   ⛔ roster under scripts, which one of your paths is in');
+  t(
+    '⭐ it says out loud that these are OUTSIDE the derived total, which is the whole reason it is a separate block',
+    blockOut.some((l) => l.includes('NOT counted among the derived')) && blockOut.some((l) => l.includes('NOT in the runnable total')),
+  );
+  t(
+    'and it marks the correlated subset — the rosters sitting in a directory one of the card\'s paths is in',
+    blockOut.some((l) => l.includes('1 of them keep that roster in a directory one of YOUR paths is in')),
+  );
+  t(
+    'a card no roster touches gets the standing fact instead of a warning about none of them',
+    artifactRosterLines([{ ...blockRows[1] }]).some((l) => l.includes('None of their rosters sits in a directory your paths are in')),
+  );
+  // ⛔ The refusal, and it is the one that keeps this block from being the
+  // fabricated lead `artifactOnlyNote`'s docblock prices: whether a roster is a
+  // baseline in a directory or a census OF it is intent, and intent is not in
+  // the tree. The block must not call them scanners, and must not tell anyone
+  // the gate reads their file.
+  t(
+    '⛔ and it never calls them scanners or claims they read your file — the half the tree cannot answer',
+    !/scanner|reads your file|very likely reads/.test(blockOut.join('\n')),
+    blockOut.join('\n'),
+  );
+  t(
+    'it names the producer-side remedy the residue already carries, so the block points at a fix and not only at work',
+    blockOut.some((l) => l.includes('declare the scan surface beside the roster')),
+  );
+  // ⛔ STRUCTURAL, not a filter someone has to remember: `commandsFor` reads the
+  // matched, convention and always-runs rows only, and a roster family is
+  // `silent`. Asserted against the real union so a future edit that started
+  // feeding rosters into it reddens here rather than in a dev's harvest.
+  t(
+    '⛔ a roster command is not in the runnable union, whatever the block prints',
+    !commandsFor({ matchedRows: [{ check: 'check:m', command: 'pnpm check:m', ciOnly: null }], kindGroups: [], alwaysRunsRows: [] })
+      .some((c) => c === 'pnpm check:a' || c === 'pnpm check:b'),
+  );
+
   // ── The classifier returned a plausible WRONG CATEGORY (#13520) ───────────
   //
   // ⚠️ Every case below asserts the CATEGORY, never "it did not crash" and
@@ -13219,9 +14296,23 @@ function selfTest() {
   // than deleting it.
   const liveWf = readFileSync(nodePath.join(ROOT, '.github/workflows/pr-automation.yml'), 'utf8');
   const liveInvs = extractCheckInvocations(liveWf, 'pr-automation.yml').map((i) => i.check);
-  t('the live Check Changeset job discovers its ADR-0087 gate', liveInvs.includes('scripts/check-adr-0087-registration.mjs'));
-  t('the live Check Changeset job discovers its empty-changeset gate', liveInvs.includes('scripts/check-empty-changeset.mjs'));
-  t('the live one-line gate in that file still discovers', liveInvs.includes('scripts/check-changeset-no-major.mjs'));
+  // ⚠️ Asserted on the SCRIPT, not on a key (#15083). All three of these gates
+  // are invoked by `pr-automation.yml` with `--base "$MERGE_BASE"` and by
+  // nothing bare, so their keys now carry that argv — the discovery this case
+  // is about is unchanged, and pinning the bare key here would pin the very
+  // invocation CI never makes. The keyed half is asserted immediately below,
+  // so a rewrite of the step cannot quietly satisfy this by discovering the
+  // script under some other argv.
+  const liveScripts = extractCheckInvocations(liveWf, 'pr-automation.yml').map((i) => i.script);
+  t('the live Check Changeset job discovers its ADR-0087 gate', liveScripts.includes('scripts/check-adr-0087-registration.mjs'));
+  t('the live Check Changeset job discovers its empty-changeset gate', liveScripts.includes('scripts/check-empty-changeset.mjs'));
+  t('the live one-line gate in that file still discovers', liveScripts.includes('scripts/check-changeset-no-major.mjs'));
+  t(
+    '…each under the argv that file really runs it with, merge base and all',
+    ['scripts/check-adr-0087-registration.mjs --base "$MERGE_BASE"',
+      'scripts/check-empty-changeset.mjs --base "$MERGE_BASE"',
+      'scripts/check-changeset-no-major.mjs --base "$MERGE_BASE"'].every((k) => liveInvs.includes(k)),
+  );
   // The end-to-end direction: a `.changeset/` path must now REACH the ADR-0087
   // gate through the ordinary watch-hint match. That gate names `.changeset` in
   // its own source, so this asserts the whole chain (discover -> resolve ->
@@ -15961,7 +17052,7 @@ function selfTest() {
   const fableOf = (paths) => deriveTier(paths);
   t('the pm-dispatch SKILL.md MAIN file is fable-mandatory', fableOf(['.claude/skills/pm-dispatch/SKILL.md']).tier === CONTRACT_REVIEW_TIER);
   t('the dev-agent definition is fable-mandatory', fableOf(['.claude/agents/os-dev.md']).tier === CONTRACT_REVIEW_TIER);
-  t('the published PM skill (two enforced frame copies) is fable-mandatory', fableOf(['skills/objectstack-pm-dispatch/SKILL.md']).tier === CONTRACT_REVIEW_TIER);
+  t('the published PM skill (one enforced frame copy) is fable-mandatory', fableOf(['skills/objectstack-pm-dispatch/SKILL.md']).tier === CONTRACT_REVIEW_TIER);
   t('a pm-dispatch REFERENCES path carries NO path mandate — the 2026-08-20 narrowing, inverted from the pre-narrowing pin', fableOf(['.claude/skills/pm-dispatch/references/review-checklist.md']).mandatory === false);
   const mixed = fableOf(['packages/spec/src/data/filter.zod.ts', '.claude/agents/os-dev.md']);
   t('a MIXED surface is mandatory — one mandatory path decides, ordinary paths do not dilute it', mixed.mandatory && mixed.tier === CONTRACT_REVIEW_TIER);
@@ -16871,9 +17962,26 @@ function selfTest() {
     const withOut = withChangeset.stdout ?? '';
     t('a run whose surface ALREADY carries a changeset answers at all', withChangeset.status === 0 && withOut.trim().length > 0);
     t('and prints no pending section — there is no temporal gap left to disclose', !/^Once a changeset exists,/m.test(withOut));
+    // ⚠️ Counted per COMMAND, not per substring (#14880). `check-empty-changeset`
+    // is invoked two ways by CI — `--self-test` beside a `--base` run — and
+    // since the derivation key became (script, args) those are two families,
+    // so a substring count of 2 is the tree being described correctly. The
+    // invariant this case protects is unchanged and is what is asserted: each
+    // family appears ONCE, in the matched list, and never also in the pending
+    // section whose heading makes a different claim about time.
+    const changesetCommands = withOut
+      .split('\n')
+      .filter((l) => l.startsWith('  - '))
+      .map((l) => l.slice(4).split('   ')[0].trim())
+      .filter((c) => c.includes('check-empty-changeset'));
     t(
       'because those families are in the MATCHED list instead, each one exactly once',
-      withOut.split('\n').filter((l) => l.startsWith('  - ') && l.includes('check-empty-changeset')).length === 1,
+      changesetCommands.length > 0
+        && new Set(changesetCommands).size === changesetCommands.length
+        // The `--base` run is the one this section is ABOUT — it is the family a
+        // changeset brings into scope — and since #15083 it renders with the
+        // merge base the workflow pins rather than as a bare path CI never runs.
+        && changesetCommands.filter((c) => c === 'node scripts/check-empty-changeset.mjs --base "$MERGE_BASE"').length === 1,
     );
 
     // REACHED THROUGH A SYMLINK — the form a plain path equality gets wrong.
@@ -17466,6 +18574,46 @@ function selfTest() {
       'and that refusal names --tier AND --residue, so the dropped one is never left to be guessed',
       (tierResidueRun.stderr ?? '').includes('--tier') && (tierResidueRun.stderr ?? '').includes('--residue'),
     );
+    // ⭐ #15036 — the OTHER half of that refusal, and the half a refusal cannot
+    // carry: the usage line the tool prints when it cannot derive a change set
+    // presented the pair above as legal. `--residue` sat outside the
+    // alternation, which is this notation's way of saying it combines with
+    // every member. Pinned on the constant rather than on a run, because the
+    // print site is reached only where `changedPathsFromGit()` refuses.
+    t(
+      '⭐ the usage line no longer presents --residue as combinable with --tier (#15036)',
+      !USAGE_LINE.includes('[--residue] [--tier'),
+    );
+    t(
+      '…and it still offers --residue with the three modes it really does modify',
+      USAGE_LINE.includes('[--tier | [--residue] [--commands | --json | --ran <file>]]'),
+    );
+    t(
+      '…and every mode the argv chain accepts is still named in it, so the fix narrowed the grammar and dropped no flag',
+      ['--tier', '--residue', '--commands', '--json', '--ran', '--repo', '--changed', '--self-test']
+        .every((flag) => USAGE_LINE.includes(flag)),
+    );
+    // ⭐ #14870 — the mirror-image fix: `--changed` sat OUTSIDE the alternation
+    // as a whole-invocation alternative, which reads as excluding every mode
+    // beside it, though `--changed --commands` is legal and answers (CONTROL
+    // below). Moved to the position `<path> ...` occupies, the other path
+    // source it stands in for.
+    t(
+      '⭐ the usage line no longer presents --changed as a whole-invocation alternative that takes no other flag (#14870)',
+      !USAGE_LINE.includes('] | --changed | --self-test'),
+    );
+    t(
+      '…and it still offers --changed where <path> ... sits, combining with the modes before it',
+      USAGE_LINE.includes('[<path> ... | --changed]'),
+    );
+    // CONTROL: --changed really does combine with a stdout-shape flag — the
+    // usage-line fix above would otherwise be cosmetic on a refusal that does
+    // not exist.
+    const changedCommandsRun = runCli(['--changed', '--commands']);
+    t(
+      'CONTROL: --changed --commands is legal and answers, so the moved usage line describes a real combination',
+      changedCommandsRun.status === 0 && (changedCommandsRun.stdout ?? '').length > 0,
+    );
   }
 
   // ── END TO END: the CI-measured family, on the card it was measured on (#14004)
@@ -17508,6 +18656,25 @@ function selfTest() {
       );
       t('and every command still on the list is one a dev can actually run here', cmdRows.length > 0 && cmdRows.every((l) => /^(pnpm|node) \S/.test(l)));
       t('the stderr accounting says the omission out loud, where it cannot corrupt the harvest', (cmdRun.stderr ?? '').includes('CI-MEASURED ONLY'));
+      // ⭐ #14880's block, on the same real run. Three claims, and the third is
+      // the one a unit case cannot make: the block exists, it is on STDERR, and
+      // not one of the families it names leaked into the stream a consumer
+      // executes. A block on stdout would be prose in the harvest — the exact
+      // hazard `--commands` exists to make unreachable.
+      const rosterBlockStart = (cmdRun.stderr ?? '').indexOf('Artifact rosters —');
+      t('⭐ the artifact-roster block is printed for a real card (#14880)', rosterBlockStart >= 0);
+      t('…on stderr, never in the stream a harvest executes', !(cmdRun.stdout ?? '').includes('Artifact rosters —'));
+      const rosterBlockCommands = (cmdRun.stderr ?? '')
+        .slice(rosterBlockStart < 0 ? 0 : rosterBlockStart)
+        .split('\n')
+        .filter((l) => /^\s+- (pnpm|node) /.test(l))
+        .map((l) => l.trim().slice(2).split('   ')[0].trim());
+      t('…and it really names families, so the two cases above judge something', rosterBlockCommands.length > 0);
+      t(
+        '⛔ and not one of them is in the runnable list — the block sits BESIDE the derivation, never inside it',
+        rosterBlockCommands.every((c) => !cmdRows.includes(c)),
+        rosterBlockCommands.filter((c) => cmdRows.includes(c)).join(', '),
+      );
     } finally {
       rmSync(harvestTmp, { recursive: true, force: true });
     }
@@ -17644,15 +18811,50 @@ function selfTest() {
     t('the malformed line is reported against its line number too', unexplained.malformed.length === 1 && unexplained.malformed[0].line === 1);
 
     // ── What the TOOL classifies, so no prose has to ────────────────────────
+    // ⭐ The value-bearing spelling is the LIVE one — `pr-automation.yml`
+    // really passes `--base "$MERGE_BASE"` to this script — for the reason the
+    // neighbouring cases take theirs from the live workflows: a fixture
+    // invented here would keep passing after the renderer that produces the
+    // real one changed shape, which is the failure this whole file is about.
+    const valueBearing = 'node scripts/check-empty-changeset.mjs --base "$MERGE_BASE"';
     const explained = runReconciliation({
       derived: ['pnpm check:a'],
       ciOnlyCommands: new Set(['node scripts/check-payload-guard.mjs']),
+      notRunnableCommands: new Set([valueBearing]),
       pendingCommands: new Set(['pnpm check:changeset-shape']),
-      record: parseRunRecord(['pnpm check:a', 'node scripts/check-payload-guard.mjs', 'pnpm check:changeset-shape'].join('\n')),
+      record: parseRunRecord(['pnpm check:a', 'node scripts/check-payload-guard.mjs', valueBearing, 'pnpm check:changeset-shape'].join('\n')),
     });
     t(
       'a CI-measured-only entry and a pending-changeset entry are classified by the tool, not dumped into the remainder',
       explained.ok && explained.explainedCiOnly.length === 1 && explained.explainedPending.length === 1 && explained.extra.length === 0,
+    );
+    // ⭐ #15115: the THIRD class `commandsFor` withholds gets the same
+    // courtesy. Recorded, derived by this run, classified out of the union —
+    // so `extra`'s caption ("named by nothing this run derived") would be the
+    // one sentence that is false about it.
+    t(
+      'a recorded VALUE-BEARING family is classified by the tool too, never folded into the remainder',
+      explained.explainedNotRunnable.length === 1 && explained.explainedNotRunnable[0] === valueBearing && !explained.extra.includes(valueBearing),
+    );
+    // CONTROL, and it is the load-bearing half: the bucket explains the class
+    // it was given and nothing else. A command named by no set is still
+    // `extra` — a third bucket that swallowed unknowns would have deleted the
+    // remainder rather than shrunk it.
+    const unknownBeside = runReconciliation({
+      derived: ['pnpm check:a'],
+      notRunnableCommands: new Set([valueBearing]),
+      record: parseRunRecord(['pnpm check:a', valueBearing, 'pnpm check:not-a-family'].join('\n')),
+    });
+    t(
+      'and an unknown command beside it still reads `extra` — the new bucket explains its class only',
+      unknownBeside.explainedNotRunnable.length === 1 && unknownBeside.extra.length === 1 && unknownBeside.extra[0] === 'pnpm check:not-a-family',
+    );
+    // The bucket is DIAGNOSTIC, exactly like the two beside it: the verdict
+    // reads `unrun` and nothing else, so classifying an entry can never move
+    // it in either direction (#15115).
+    t(
+      'the new bucket cannot move the verdict — it is diagnostic, like the two beside it',
+      unknownBeside.ok && unknownBeside.unrun.length === 0 && unknownBeside.ran.length === 1,
     );
 
     // ── Bookkeeping the classes cannot lose ─────────────────────────────────
@@ -17696,6 +18898,21 @@ function selfTest() {
     t(
       'the near-miss line refuses the pairing out loud rather than quietly',
       runReconciliationLines(nearMiss).join('\n').includes('is NOT paired with it'),
+    );
+    // ⭐ #15115, in the rendering: a bucket that classified an entry and then
+    // printed nothing would leave the runner exactly where `extra` left them.
+    const explainedText = runReconciliationLines(explained).join('\n');
+    t(
+      'the value-bearing bucket gets its OWN labelled line, naming the reason and the command',
+      explainedText.includes('VALUE-BEARING famil(ies)')
+        && explainedText.includes('its argv takes a value from the workflow')
+        && explainedText.includes(valueBearing),
+    );
+    t(
+      'and the two buckets beside it keep their own lines, with the remainder heading absent entirely',
+      explainedText.includes('CI-MEASURED ONLY')
+        && explainedText.includes('pending-changeset famil(ies)')
+        && !explainedText.includes("Outside this card's derivation"),
     );
 
     // ── argv: a two-token flag's value must not become a path ───────────────
@@ -17765,6 +18982,58 @@ function selfTest() {
     }
   }
 
+  // ── END TO END: the VALUE-BEARING bucket is WIRED, not merely present (#15115) ──
+  //
+  // Every unit case above stays green if the `--ran` call site never PASSES
+  // the value-bearing set — a parameter that defaults to empty is exactly the
+  // shape that keeps its own tests green while the live mode still dumps the
+  // class in the remainder, which is the state this card was filed about.
+  // Only a real run reads the wiring.
+  //
+  // The fixture is this tool's OWN answer on this tree, read from `--json`,
+  // rather than an invocation typed here: a hardcoded spelling would keep
+  // passing after the renderer that produces the real one changed shape, and
+  // the two sides of the comparison would stop being the same strings — the
+  // property the whole `--ran` design rests on.
+  {
+    const vbTmp = mkdtempSync(nodePath.join(tmpdir(), 'dg-ran-vb-'));
+    try {
+      // A changeset path, because that is what reaches the live value-bearing
+      // families — and it is the tool's own constant rather than a spelling
+      // this test invented.
+      const vbCard = CHANGESET_PROBE_PATH;
+      const jsonRun = runCli(['--json', vbCard]);
+      const doc = jsonRun.status === 0 ? JSON.parse(jsonRun.stdout ?? '{}') : null;
+      const vbRows = [...(doc?.matched ?? []), ...(doc?.alwaysRunsPopulation ?? [])].filter((row) => row.notRunnable);
+      t('CONTROL: this tree still derives at least one VALUE-BEARING family for a changeset path', Boolean(doc) && vbRows.length >= 1);
+      if (doc && vbRows.length >= 1) {
+        const vbCommand = vbRows[0].command;
+        t('CONTROL: and the runnable union WITHHOLDS it — which is the whole reason the bucket exists', !doc.commands.includes(vbCommand));
+        const vbRecord = nodePath.join(vbTmp, 'ran-value-bearing.list');
+        writeFileSync(vbRecord, `${[...doc.commands, vbCommand].join('\n')}\n`);
+        const vbRun = runCli([RAN_FLAG, vbRecord, vbCard]);
+        const vbOut = vbRun.stdout ?? '';
+        t(
+          '⭐ a real run that RECORDS it lands it in the VALUE-BEARING bucket, with the remainder heading gone entirely',
+          vbRun.status === 0
+            && vbOut.includes('VALUE-BEARING famil(ies)')
+            && vbOut.includes(vbCommand)
+            && !vbOut.includes("Outside this card's derivation"),
+        );
+        t(
+          'and the reason travels with it, so the runner learns why this invocation is not one they could have derived',
+          vbOut.includes('its argv takes a value from the workflow'),
+        );
+        t(
+          'while the verdict is unmoved — the bucket is diagnostic, and every derived family is still accounted for',
+          vbOut.includes(`${doc.commands.length} derived famil(ies) accounted for`),
+        );
+      }
+    } finally {
+      rmSync(vbTmp, { recursive: true, force: true });
+    }
+  }
+
   // The per-case line already printed inside `t()`, streamed as each verdict
   // was decided (#14281) — this tail is the summary only, unchanged in shape
   // and wording from the pre-streaming version.
@@ -17799,6 +19068,40 @@ function selfTest() {
 export { invokedAs };
 
 const invokedDirectly = isEntrypoint(import.meta.url);
+
+/**
+ * The one usage line, printed on the derivation-failure path — and held to the
+ * refusals the argv chain below really enforces (#15036).
+ *
+ * `--residue` used to sit OUTSIDE the alternation, which is the notation's way
+ * of saying it combines with every member of it. Three of the four it really
+ * does modify; the fourth it does not: `--tier --residue` exits 2 since
+ * #14753, because `--tier` derives no gate family and so leaves `--residue`
+ * nothing to list. A usage line that advertises a refused pair as legal costs
+ * a reader a second's confusion at exactly the moment the tool has already
+ * failed once — so the modifier moves INSIDE, attached to the three modes it
+ * still modifies, and `--tier` stands alone as the alternative it is.
+ *
+ * ⛔ Deleting `[--residue]` instead would understate it — the flag really is
+ * legal with the other three, and with the plain human rendering.
+ *
+ * `--changed` had the mirror-image problem: it sat OUTSIDE the alternation as
+ * a whole-invocation alternative, which reads as excluding every member next
+ * to it — `--commands`/`--json` included, though `--changed --commands` is
+ * legal and answers (it derives the path list `<path> ...` would otherwise
+ * supply, and nothing more). Moved to the position `<path> ...` occupies, the
+ * other path source it stands in for, so the line no longer implies a refusal
+ * the argv chain does not make (#14870).
+ *
+ * A CONSTANT rather than a literal at the print site, because the pin belongs
+ * beside the refusals it mirrors: reaching the print site needs a checkout
+ * where `changedPathsFromGit()` refuses, and a pin that cannot be run in the
+ * self-test is not a pin.
+ */
+const USAGE_LINE =
+  'usage: node scripts/pm/dispatch-gates.mjs'
+  + ' [--tier | [--residue] [--commands | --json | --ran <file>]]'
+  + ' [--repo owner/name] [<path> ... | --changed] | --self-test';
 
 /**
  * Executed only as a CLI. Importing this module must have NO side effect.
@@ -17987,7 +19290,7 @@ if (invokedDirectly) {
         derived = changedPathsFromGit();
       } catch (err) {
         console.error(`dispatch-gates: could not derive the change set — ${err.message}`);
-        console.error('usage: node scripts/pm/dispatch-gates.mjs [--residue] [--tier | --commands | --json | --ran <file>] [--repo owner/name] [<path> ...] | --changed | --self-test');
+        console.error(USAGE_LINE);
         process.exit(2);
       }
       if (derived.paths.length === 0) {

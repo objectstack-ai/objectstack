@@ -207,6 +207,43 @@ import {
 
 // dispatch-gates: no-path-population -- this gate reads no file in the tree at all; its whole input is the GitHub API (PRs, their labels, and the claim comments on their cards), so no card's file surface can predict it and the honest derivation is a repo-wide undetermined one (#13519)
 
+// -- The self-test's own battery roster and floor (#13489) ------------------
+//
+// `failed.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// The counts are a FLOOR, not an equality -- adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'the declaration reader: the fixed spelling, and everything that is not': 15,
+  'the card-level declaration: four states, none collapsed into another': 9,
+  'C1, replaying the 2026-08-31 measured table': 12,
+  'C2, the row this file exists for': 14,
+  'C3, the direction a carrier comparison cannot see': 7,
+  '#14155: the COMPLETED state, and the three it must stay distinct from': 18,
+  'the event reader itself': 9,
+  'the cost bound, stated as one predicate both sides read': 6,
+  'C4: the independence clause\'s carrier (maintainer 2026-09-01 「同意 A」)': 52,
+  'the #13910 specimen, end to end': 2,
+  'pairing, derived from the same relation H8/H31 read': 3,
+  'the exit register is distinct in every direction it must be': 3,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 12;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 const API = 'https://api.github.com';
 const TOKEN = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN ?? '';
 const SELF_PATH = fileURLToPath(import.meta.url);
@@ -1297,11 +1334,28 @@ const CLAIM = (extra) => ({
 let selfTestReachedVerdict = false;
 
 export function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const batterySeen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+  };
   const cases = [];
-  const t = (name, ok, detail) => cases.push({ name, ok: Boolean(ok), detail });
+  const t = (name, ok, detail) => {
+    registerCase();
+    cases.push({ name, ok: Boolean(ok), detail });
+  };
   const says = (s, frag) => typeof s === 'string' && s.includes(frag);
 
   // -- the declaration reader: the fixed spelling, and everything that is not --
+  battery('the declaration reader: the fixed spelling, and everything that is not');
   t('the two fixed spellings read as declarations', readClause2Line('Clause-②: yes')?.value === 'yes' && readClause2Line('Clause-②: no')?.value === 'no');
   t('a blockquoted claim line still reads (SKILL.md writes the claim as a blockquote)', readClause2Line('> Clause-②: no')?.value === 'no');
   t('a bulleted, bolded, backticked line still reads — decoration is markdown, not meaning', readClause2Line('- **`Clause-②`**: **`yes`**')?.value === 'yes');
@@ -1323,6 +1377,7 @@ export function selfTest() {
   t('⛔ the reader never invents a value from an adjacent word', readClause2Line('this card is clause 2 yes in substance')?.kind !== 'declared');
 
   // -- the card-level declaration: four states, none collapsed into another ---
+  battery('the card-level declaration: four states, none collapsed into another');
   t('a claim comment carrying the line reads DECLARED', cardDeclaration([CLAIM('Clause-②: no')]).state === 'declared');
   t('…and keeps the value', cardDeclaration([CLAIM('Clause-②: yes')]).value === 'yes');
   t('a thread with no claim comment at all reads ABSENT', cardDeclaration([{ body: 'just a comment', created_at: '2026-08-31T10:00:00Z' }]).state === 'absent');
@@ -1337,6 +1392,7 @@ export function selfTest() {
   ]).value === 'no');
 
   // -- C1, replaying the 2026-08-31 measured table ---------------------------
+  battery('C1, replaying the 2026-08-31 measured table');
   const L = CONTRACT_REVIEW_LABEL;
   const pair = (o) => ({ pr: 13910, card: 13476, draft: true, prLabels: [], cardLabels: [], cardComments: [CLAIM('Clause-②: no')], ...o });
   // The seven pairs the filing cards tabulated, at the moment a human looked.
@@ -1364,6 +1420,7 @@ export function selfTest() {
   t('C1 never prescribes a write from this script', says(split[5], '自查放行'));
 
   // -- C2, the row this file exists for --------------------------------------
+  battery('C2, the row this file exists for');
   const absent = c2DeclarationUnreadable(pair({ cardComments: [CLAIM('Domain: x')] }));
   t('a card with no Clause-② line in its claim comment produces a C2 row', typeof absent === 'string');
   t('…and says NO READING in as many words', says(absent, 'NO READING'));
@@ -1383,6 +1440,7 @@ export function selfTest() {
   t('…and the unjudged accounting names the thread that could not be read', says(pairUnjudged(pair({ cardComments: null })), 'comment thread'));
 
   // -- C3, the direction a carrier comparison cannot see ----------------------
+  battery('C3, the direction a carrier comparison cannot see');
   // A declared `yes`, bare on both carriers — C3's candidate shape. The event
   // stream is what says WHICH of the four states this is.
   const declaredYes = (o) => pair({ prLabels: [], cardLabels: [], cardComments: [CLAIM('Clause-②: yes')], ...o });
@@ -1410,6 +1468,7 @@ export function selfTest() {
   t('an unreadable carrier never manufactures a C3 row', c3DeclaredYesUngated(pair({ cardLabels: null, cardComments: [CLAIM('Clause-②: yes')] })) === null);
 
   // -- #14155: the COMPLETED state, and the three it must stay distinct from --
+  battery('#14155: the COMPLETED state, and the three it must stay distinct from');
   const completed = declaredYes({
     pr: 13864,
     card: 13657,
@@ -1452,6 +1511,7 @@ export function selfTest() {
   t('labels bare but the stream ending on a HANG is a disagreement, reported not resolved', says(c3DeclaredYesUngated(declaredYes({ cardEvents: [CARD_HUNG], prEvents: [PR_HUNG, PR_CLEARED] })), 'the labels say bare, the events say hung'));
 
   // -- the event reader itself ------------------------------------------------
+  battery('the event reader itself');
   t('an empty stream reads NEVER HUNG — readable, and nothing was hung', carrierGateHistory([]).state === 'never-hung');
   t('a null stream reads UNREADABLE — the distinction the whole row turns on', carrierGateHistory(null).state === 'unreadable');
   t('the LAST event decides, and the reader sorts rather than trusting arrival order', carrierGateHistory([CARD_CLEARED, CARD_HUNG]).state === 'cleared' && carrierGateHistory([CARD_HUNG, CARD_CLEARED]).state === 'cleared');
@@ -1463,6 +1523,7 @@ export function selfTest() {
   t('the gate label is the sibling\'s constant, not a second spelling', carrierGateHistory([EV('labeled', '2026-08-31T16:55:54Z')]).state === 'hung');
 
   // -- the cost bound, stated as one predicate both sides read ---------------
+  battery('the cost bound, stated as one predicate both sides read');
   t('a declared `no` owes NO event stream — the cost bound', needsGateHistory(pair({ cardComments: [CLAIM('Clause-②: no')] })) === false);
   t('a pair still carrying the gate owes none either', needsGateHistory(pair({ prLabels: [L], cardLabels: [L], cardComments: [CLAIM('Clause-②: yes')] })) === false);
   t('an ABSENT declaration owes none — C2 already owns that pair', needsGateHistory(pair({ cardComments: [CLAIM('Domain: x')] })) === false);
@@ -1471,6 +1532,7 @@ export function selfTest() {
   t('the page cap exists, because the stream arrives OLDEST FIRST and a short read loses the removal', Number.isInteger(EVENT_PAGE_CAP) && EVENT_PAGE_CAP > 0);
 
   // -- C4: the independence clause's carrier (maintainer 2026-09-01 「同意 A」) --
+  battery('C4: the independence clause\'s carrier (maintainer 2026-09-01 「同意 A」)');
   // The fixtures are the measured verdict shape, not an invented one: the live
   // verdicts open a fenced block whose first line is `VERDICT: PASS`, with
   // `REVIEWED-HEAD:` beside it, and the session IDs are the two real ones from
@@ -1566,22 +1628,69 @@ export function selfTest() {
   t('…and a self-reviewed pair is adverse even when every carrier reading is clean', pairRows(reviewed([VERDICT(SELF_PAIR)])).map((r) => r.code).join(',') === 'C4');
 
   // -- the #13910 specimen, end to end ---------------------------------------
+  battery('the #13910 specimen, end to end');
   const specimen = pair({ pr: 13910, card: 13476, prLabels: [], cardLabels: [L], cardComments: [CLAIM('Domain: `domain:engine`')] });
   const specimenRows = pairRows(specimen).map((r) => r.code);
   t('the measured #13910 specimen produces BOTH the split row and the no-reading row', specimenRows.includes('C1') && specimenRows.includes('C2'), JSON.stringify(specimenRows));
   t('…and no C3 row, because that card declared nothing at all', !specimenRows.includes('C3'));
 
   // -- pairing, derived from the same relation H8/H31 read --------------------
+  battery('pairing, derived from the same relation H8/H31 read');
   const prRow = (n, card, ref) => ({ number: n, draft: true, labels: [], body: `Fixes #${card}\n`, head: { ref } });
   t('a PR body naming its card pairs with it', derivePairs([prRow(13910, 13476, 'claude/issue-13476-x')], [13476]).length === 1);
   t('a PR body naming another card does NOT pair on a stale branch name', derivePairs([prRow(13910, 9999, 'claude/issue-13476-x')], [13476]).length === 0);
   t('a branch name is the fallback when the body says nothing', derivePairs([{ number: 1, labels: [], body: 'no refs here', head: { ref: 'claude/issue-13476-x' } }], [13476]).length === 1);
 
   // -- the exit register is distinct in every direction it must be -----------
+  battery('the exit register is distinct in every direction it must be');
   const codes = [EXIT_OK, EXIT_USAGE, EXIT_INCOMPLETE, EXIT_PREREQUISITE_NOT_MET, EXIT_PAIR_ADVERSE];
   t('every exit code is distinct — a verdict can never be read as an environment complaint', new Set(codes).size === codes.length, JSON.stringify(codes));
   t('the adverse-pair code is NOT the prerequisite code', EXIT_PAIR_ADVERSE !== EXIT_PREREQUISITE_NOT_MET);
   t('the prerequisite code is the sibling\'s, imported rather than re-picked', EXIT_PREREQUISITE_NOT_MET === 3);
+
+  // -- The floor: every declared battery RAN, and ran its cases (#13489) -----
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => { cases.push({ name: message, ok: false }); };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned `
+        + `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in `
+        + 'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. `
+          + 'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of `
+          + `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the '
+        + 'number. Find what stopped registering (an early return, a deleted block, a guard that now '
+        + 'skips) and restore it.',
+    );
+  }
 
   const failed = cases.filter((c) => !c.ok);
   for (const c of failed) console.error(`  ✗ ${c.name}${c.detail ? ` — ${c.detail}` : ''}`);
