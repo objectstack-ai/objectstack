@@ -23,6 +23,13 @@ export * from './thrown-http-error.js';
 // the CLIENT is told; this decides what the LOG says — 5xx always, 4xx never.
 export * from './server-fault-log.js';
 export * from './validation-failure.js';
+// [#13807, maintainer ruling 2026-09-04 batch #37] The sibling carrier for the
+// OTHER half-state a door can report: a decision that IS durably recorded whose
+// flow run could not be resumed. Producer `@objectstack/plugin-approvals`,
+// consumer the REST approvals door — and rest cannot import a plugin, so the
+// constructor and its recogniser share a home here exactly as the
+// validation-failure pair above do.
+export * from './stranded-decision.js';
 // [#6615] The one home for Postgres' `«sub-object» "x" of relation "y"` phrase,
 // whose missing-COLUMN spelling contains a legal missing-TABLE phrase as a
 // substring. Three packages had each repaired that superstring hole separately.

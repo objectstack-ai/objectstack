@@ -25,6 +25,11 @@ import {
     looksLikeInternalErrorLeak,
     declaresServerFault,
     INTERNAL_ERROR_MESSAGE,
+    // [#13807] The recogniser half of the stranded-decision carrier — see
+    // `handleApprovalError` below. Constructor and reader share one module in
+    // `@objectstack/types` because the producer is a PLUGIN and rest cannot
+    // import one.
+    strandedDecisionDetails,
 } from '@objectstack/types';
 import {
     allowPerfDisclosure,
@@ -11881,6 +11886,26 @@ export class RestServer {
                 // matching-organization context.
                 [/^READ_BACK_FAILED/, 500, 'READ_BACK_FAILED'],
             ];
+            // [#13807, maintainer ruling 2026-09-04 batch #37] The
+            // machine-readable half of a stranded decision, when the service
+            // attached one. The status code does NOT move — a recorded
+            // decision whose run strands is still a failure and the ruling
+            // upholds that — but the body stops being prose only: `finalized`
+            // says the decision stands, `decision` / `runId` name what and
+            // where, and `repairable` carries the engine's own `'stranded'`
+            // discriminator through instead of dying at the door.
+            //
+            // Before this, a caller reading 500 had exactly one honest move —
+            // assume the rejection did not happen — and it was the wrong one:
+            // the row IS terminal and the record's mirrored status HAS moved.
+            // An operator had to regex the run id out of a sentence.
+            //
+            // ⛔ Presence-gated, never synthesised. `strandedDecisionDetails`
+            // returns `undefined` for any error that did not carry a complete
+            // envelope, and this then answers exactly the body it always did —
+            // a `RESUME_FAILED` from a caller with no decision to report must
+            // not be dressed up as one.
+            const stranded = strandedDecisionDetails(err);
             for (const [re, status, code] of mapping) {
                 if (re.test(msg)) {
                     // [#13095] The strip is anchored to the CODE this row just
@@ -11894,7 +11919,15 @@ export class RestServer {
                     // message opening with a DIFFERENT capitalised word and a
                     // colon), where the anchored form can only ever remove a
                     // duplicate of the `code` already on the wire.
-                    res.status(status).json({ code, error: msg.replace(new RegExp(`^${code}:\\s*`), '') });
+                    res.status(status).json({
+                        code,
+                        error: msg.replace(new RegExp(`^${code}:\\s*`), ''),
+                        // Anchored to the code the envelope describes, for the
+                        // same reason the strip above is: these four facts are
+                        // about a recorded-decision-with-stranded-run and
+                        // about nothing else.
+                        ...(code === 'RESUME_FAILED' && stranded ? stranded : {}),
+                    });
                     return true;
                 }
             }
