@@ -199,10 +199,23 @@ export function formatRunSummaryLine(
     // `unmeasured` is a qualifier on `acted`: absent, the zero beside it is
     // trustworthy. `failed` answers a question the line otherwise cannot be
     // asked at all — a completed run says nothing about the rows it lost — so
-    // the token has to be there to be read, and `failed=0` is the reading
-    // "nothing failed" as against a line with no token at all, which is the
-    // older "not tracked". A run summarized by `summarizeRun` always carries
-    // it; only a summary persisted before this existed prints nothing here.
+    // the token has to be there to be read.
+    //
+    // What `failed=0` says, exactly: NO NODE EXECUTION OF THIS RUN FAILED.
+    // That is narrower than "nothing failed", and the difference is a
+    // `subflow`: the fold this prints is `Sigma nodes[].failures` over THIS
+    // run's own nodes, so a child run that CONTAINED failures of its own
+    // reports them on the child's summary and the parent still prints
+    // `failed=0` — measured, alongside the control where a child that FAILS
+    // rather than contains does reach the parent's count through the
+    // `subflow` node's own failure step. `acted` rolls a child's totals up
+    // and this does not; the declaration says both things in two paragraphs
+    // and is being reconciled in #15617. Until it is, this line is the node
+    // fold, and only that.
+    //
+    // A line with no token at all is a different reading again — the older
+    // "not tracked". A run summarized by `summarizeRun` always carries the
+    // count; only a summary persisted before this existed prints nothing here.
     if (summary.failed !== undefined) parts.push(`failed=${summary.failed}`);
     if (summary.unmeasured) parts.push(`unmeasured=${summary.unmeasured}`);
     const topGate = summary.gates[0];
