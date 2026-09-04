@@ -86,7 +86,7 @@ export const SysUser = ObjectSchema.create({
       locations: ['list_toolbar'],
       type: 'api',
       target: '/api/v1/auth/organization/invite-member',
-      // Gated on the org CAPABILITY, not multi-org (ADR-0081 D1): the
+      // Gated on the org CAPABILITY, not multi-org (cloud ADR-0081 D1): the
       // better-auth organization plugin is always mounted, and single-org
       // mode now bootstraps a Default Organization (plugin-auth) so the
       // endpoint's active-org resolution works there too. This is THE

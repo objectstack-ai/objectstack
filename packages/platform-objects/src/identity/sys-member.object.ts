@@ -44,7 +44,7 @@ export const SysMember = ObjectSchema.create({
     {
       // THIRD mirror of `invite_user` (sys_user, sys_invitation are the other
       // two — keep all three consistent). It is here because the org record
-      // page (ADR-0081) opens on tab-0 **Members**, and the email-invite entry
+      // page (cloud ADR-0081 D3) opens on tab-0 **Members**, and the email-invite entry
       // used to live only on tab-1 Invitations: an admin looking to "invite a
       // teammate by email" landed on Members, saw only "Add Member" (attach an
       // existing user by id), and concluded the product had no invite entry.

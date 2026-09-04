@@ -71,12 +71,12 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
       { id: 'nav_users', type: 'object', label: 'Users', objectName: 'sys_user', icon: 'user' },
       // The ACTIVE organization's record page (Members / Invitations / Teams
       // tabs with the better-auth row actions), rendered inside the app shell
-      // (ADR-0081). `{current_org_id}` resolves from the session's active
+      // (cloud ADR-0081 D3). `{current_org_id}` resolves from the session's active
       // organization; unresolved (e.g. org-less admin before bootstrap) it
       // falls back to the sys_organization list — one row in single-org.
       { id: 'nav_organization', type: 'object', label: 'Organization', objectName: 'sys_organization', recordId: '{current_org_id}', icon: 'building-2' },
       { id: 'nav_business_units', type: 'object', label: 'Business Units', objectName: 'sys_business_unit', icon: 'building', requiresObject: 'sys_business_unit' },
-      // Teams / Invitations no longer gate on `org-scoping` (ADR-0081 D1):
+      // Teams / Invitations no longer gate on `org-scoping` (cloud ADR-0081 D1):
       // the better-auth organization capability is always mounted, and
       // plugin-auth's single-org default-org bootstrap guarantees an org to
       // invite into — these are the OPEN member-management basics. Only the
