@@ -32,6 +32,22 @@ import { defineStack } from '@objectstack/spec';
  * legal and is the whole point of the split: cross-package lookups are accepted
  * (ADR-0130 §1.5), while a package's own app navigation pointing at a foreign
  * object is not — which is why the navigation lives with the App package.
+ *
+ * ## Why it also carries a `navigationContributions` entry (#14553)
+ *
+ * The other half of that same rule. R3 refuses an app's OWN `navigation` entry
+ * naming another package's object, so a module split converts every such entry
+ * into a contribution owned by the module — which is exactly what this one is:
+ * `crm_order` is reachable from the App's menu without the App package
+ * knowing the object exists.
+ *
+ * ⚠️ `group` names `sales_group`, a container the CORE package declares. A
+ * module cannot see that id at authoring time, and a typo in it does not fail:
+ * the runtime RELOCATES the items to the app's top level and says so
+ * (`nav_contribution_group_missing`, at `warn`), and `os build` reports the
+ * same finding at compile time. This fixture is where that is measured — keep
+ * the id spelled correctly here, so a build of this example stays clean and the
+ * pin that typos it has something to differ from.
  */
 export default defineStack({
   manifest: {
@@ -46,6 +62,19 @@ export default defineStack({
     // it as the topological edge that registers core BEFORE orders (ADR-0130
     // D5, ADR-0116's one sorter) — the array order below is not what decides.
     dependencies: { 'com.example.multi.core': '^1.0.0' },
+
+    // ADR-0029 D7 — `navigationContributions` is a MANIFEST key, not a stack
+    // collection: it describes what this PACKAGE injects into someone else's
+    // app, so it travels with the package identity.
+    navigationContributions: [
+      {
+        app: 'multi_crm',
+        group: 'sales_group',
+        items: [
+          { id: 'nav_orders', type: 'object', objectName: 'crm_order', label: 'Orders', icon: 'shopping-cart' },
+        ],
+      },
+    ],
   },
 
   objects: [

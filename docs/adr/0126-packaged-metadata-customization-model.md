@@ -1,6 +1,7 @@
 # ADR-0126: The platform customization model for packaged metadata — three regimes, one activation ledger
 
-**Status**: Proposed (2026-08-25) — awaiting the maintainer's hand-merge, which is itself the
+**Status**: **Amended** (2026-09-04) by [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D6 — maintainer, verbatim: 「所以 ADR-0126 不能简单的关掉」「hotcrm 是标准的软件包，客户安装之后能根据业务需求实现具体的定制」「同意」. The three regimes stand at **environment scope only**: O's per-organization reading is retired (ADR-0005 amended), C's activation ledger stays as tenant-less deployment state (D3's reserved `organization_id`, written NULL, is withdrawn — ADR-0131 D1 forbids a nullable tenant column), E stands; the unreleased implementation (#12185, #12190, #12296, #12348, #12419, framework half of #12491) ships in 17.3 with that column dropped. The install mode ADR-0131 D6 adds (managed = sealed definitions + these regimes; template = copied once, fully editable, refused on shared-DB multi-tenant) is the frame the regimes now sit in. Original status line follows.
+**Original status**: Proposed (2026-08-25) — awaiting the maintainer's hand-merge, which is itself the
 acceptance act for a governed surface (Prime Directive #14) **and the ruling that settles the
 tentative flow-instance directions in §7** (chartered on
 [#12049](https://github.com/objectstack-ai/objectstack/issues/12049); ⛔ none of §7 is settled
@@ -39,6 +40,8 @@ re-cited inline; the survey carries the instruments and positive controls.
 (the ledger object, when built); `content/docs` (the capability-page promises §1.3 names)
 
 ---
+
+> **Amended 2026-09-04 by [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D6** (see the Status line): regimes O, C and E stand at environment scope; the per-organization axis and D3's reserved `organization_id` are withdrawn; the activation ledger is tenant-less deployment state; §7 remains the contract the flow machinery implements. A third draft of ADR-0131 marked this record Superseded; the standard-package scenario (「hotcrm 是标准的软件包，客户安装之后能根据业务需求实现具体的定制」) reversed that the same day.
 
 ## TL;DR
 
