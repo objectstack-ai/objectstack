@@ -1,8 +1,28 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#15356] MEASUREMENT — can a `record-before-update` flow reach the BATCH
- * PAYLOAD of a `multi: true` update?
+ * [#15356 measured, #14744 closed] PIN — a `record-before-update` flow reaches
+ * NO write shape into the BATCH PAYLOAD of a `multi: true` update.
+ *
+ * ## What changed about this file, and what did not
+ *
+ * It was written for #15356 as a MEASUREMENT and it answered NOT BOUNDED: one
+ * shape (`S5`) reached the payload. #14744 then ruled the door closed —
+ * `buildContext` decouples the flow-facing roots from the engine's own objects
+ * (`decoupleFromEngineState`) — and this file was adopted whole as the pin.
+ * `S5`, `S5b` and the SQL replica were FLIPPED to their opposites in that same
+ * PR, keeping every observable they measured on: reference identity across the
+ * boundary, the per-row readings, and the persisted rows. ⛔ Nothing was
+ * weakened, and nothing was deleted: the paragraphs below still describe the
+ * defect as it was measured, because a pin whose reader cannot see what it is
+ * pinning against is a pin nobody dares repair.
+ *
+ * The two controls are why the negatives are readable, and BOTH must keep
+ * firing: the positive control (a script hook that ASSIGNS the payload — the
+ * #14744 residue shape — still lands the LAST dispatch's value on every row,
+ * because #14744's fix is about aliasing and deliberately does not touch that
+ * residue) and the #14099 armed control (divergent key sets are still refused
+ * whole). If either stops firing, this file has stopped measuring.
  *
  * ## Why this file exists
  *
@@ -17,12 +37,19 @@
  * batch payload — was labelled by its own author a SOURCE READING, explicitly
  * not a measurement.
  *
- * This file is the measurement, and it FALSIFIES the reading's conclusion for
- * one shape. The overlay is real, and it is a SHALLOW spread
- * (`{ ...previous, ...inputData }`): the top-level object is new, and every
- * NESTED value in it is the payload's own object, shared by reference. A flow
- * write shape that mutates a nested value IN PLACE therefore writes the batch
- * payload without ever assigning a top-level key. See `S5` below, measured.
+ * This file is the measurement, and it FALSIFIED the reading's conclusion for
+ * one shape. The overlay was real, and it was a SHALLOW spread
+ * (`{ ...previous, ...inputData }`): the top-level object was new, and every
+ * NESTED value in it was the payload's own object, shared by reference. A flow
+ * write shape that mutated a nested value IN PLACE therefore wrote the batch
+ * payload without ever assigning a top-level key. See `S5` below.
+ *
+ * ⭐ #14744 made the reading's sentence TRUE AS STATED rather than deleting it:
+ * the overlay still materialises a new object, and `decoupleFromEngineState`
+ * now makes that true of the object's CONTENTS too. The distinction is worth
+ * keeping in front of the next reader — "a new object" and "reaches nothing"
+ * were two different claims for the whole life of this package, and only one of
+ * them was ever checked.
  *
  * ## The mechanism the probes are aimed at
  *
@@ -64,8 +91,12 @@
  *    be refused whole, so "the refusal did not fire for the nested shape" is a
  *    measurement rather than an unarmed check.
  *
- * ⚠️ #15356 is a MEASUREMENT card: no guard, no write-shape change, no ADR.
- * The fix side is on the maintainer floor (ADR-0058 Addendum II D3).
+ * ⚠️ #15356 was a MEASUREMENT card: no guard, no write-shape change, no ADR.
+ * #14744 carries the fix, and it is still not a write-shape change: ADR-0058
+ * Addendum II D3 stands untouched — the engine does not split its own write,
+ * one payload still serves N rows, and every per-row context is still handed
+ * that one object (asserted in `S5`). What changed is only that the object a
+ * FLOW is handed no longer shares anything with it.
  */
 import { describe, it, expect } from 'vitest';
 import { ObjectKernel } from '@objectstack/core';
@@ -503,13 +534,19 @@ describe('[#15356] can a record-before-update flow reach a multi:true batch payl
   }, 20000);
 
   /**
-   * ⭐ S5 — THE FALSIFICATION. ⚠️ This test asserts a DEFECT as measured on
-   * 2026-09-04, not a property anyone wants: a red here means the door was
-   * CLOSED (by a copy at `buildContext`'s overlay, a freeze, or a guard), and
-   * the repair is to convert this into a cannot-reach pin and update #14744 /
-   * #15356 — ⛔ never to weaken the assertion.
+   * ⭐ S5 — THE PIN. This case was written on 2026-09-04 as a CHARACTERISATION
+   * of the defect (the nested in-place mutation REACHED the payload, and both
+   * rows carried both dispatches' contributions). #14744 closed the door on the
+   * same day by decoupling the flow-facing roots from the engine's own objects
+   * (`decoupleFromEngineState`, called at the end of `buildContext`), and the
+   * case was flipped in the same PR — the assertions below are the OPPOSITE of
+   * what they were, not a weakened version of them.
+   *
+   * ⚠️ A red here now means the door was RE-OPENED: some overlay on the way to
+   * the flow started sharing a nested reference with `ctx.input.data` again.
+   * The repair is at that overlay, ⛔ never in this file.
    */
-  it('S5 ⭐ script node mutating a NESTED payload value IN PLACE — REACHES the batch payload', async () => {
+  it('S5 ⭐ script node mutating a NESTED payload value IN PLACE — CANNOT reach the batch payload', async () => {
     const object = 's5';
     const stack = await bootStack(object);
     const observed: Array<Record<string, unknown>> = [];
@@ -541,26 +578,35 @@ describe('[#15356] can a record-before-update flow reach a multi:true batch payl
     await sleep(200);
 
     expect(observed, 'the script function must have RUN, once per row').toHaveLength(2);
-    // The flow saw row 1's mutation already present when row 2 dispatched —
-    // the two runs share ONE array, which is the batch payload's own.
+    // Row 2 does NOT see row 1's mutation: each dispatch is handed its own copy
+    // of the nested value, so neither run can observe the other's write. Before
+    // #14744 the second reading was `["seed","REACHED-alpha"]`.
     expect(observed[0]?.tagsAsSeen).toBe('["seed"]');
-    expect(observed[1]?.tagsAsSeen).toBe('["seed","REACHED-alpha"]');
-    // Reference identity, measured across the boundary: the array the flow
-    // mutated IS the array on `ctx.input.data`.
+    expect(observed[1]?.tagsAsSeen).toBe('["seed"]');
+    // Reference identity, measured across the same boundary the defect was
+    // measured on: the array the flow mutated is NOT the array on
+    // `ctx.input.data`, and the two rows did not even share it with each other.
     expect(stack.witness.length).toBe(2);
-    expect(flowSideRefs[0]).toBe(stack.witness[0]?.tagsRef);
-    expect(flowSideRefs[1]).toBe(stack.witness[1]?.tagsRef);
+    expect(flowSideRefs[0]).not.toBe(stack.witness[0]?.tagsRef);
+    expect(flowSideRefs[1]).not.toBe(stack.witness[1]?.tagsRef);
+    expect(flowSideRefs[0]).not.toBe(flowSideRefs[1]);
+    // ⭐ D3 is UNCHANGED and still the reason this matters: every per-row
+    // context is handed the ONE batch payload object. The fix is the copy on the
+    // way to the flow, not a split of the engine's write.
     expect(new Set(stack.witness.map((w) => w.payloadRef)).size).toBe(1);
+    // Read directly off the payload, after both flows have run: untouched.
+    expect(stack.witness.every((w) => JSON.stringify(w.data.tags) === '["seed"]')).toBe(true);
 
-    // ⭐ The reach, on the persisted rows: BOTH rows carry BOTH dispatches'
-    // contributions, including the one derived from the OTHER row's pre-image.
-    expect(wrote, 'and #14099 did NOT refuse it').toMatchObject({ ok: true });
+    // ⭐ The persisted rows: the SET clause carries what the CALLER wrote, and
+    // no row carries a value derived from the other row's pre-image. Before
+    // #14744 both rows read `['seed','REACHED-alpha','REACHED-beta']`.
+    expect(wrote, 'and the write still succeeds — this is not a refusal').toMatchObject({ ok: true });
     const rows = await rowsByTitle(stack.data, object);
-    expect(rows.get('alpha')?.tags).toEqual(['seed', 'REACHED-alpha', 'REACHED-beta']);
-    expect(rows.get('beta')?.tags).toEqual(['seed', 'REACHED-alpha', 'REACHED-beta']);
+    expect(rows.get('alpha')?.tags).toEqual(['seed']);
+    expect(rows.get('beta')?.tags).toEqual(['seed']);
   }, 20000);
 
-  it('S5b the same nested mutation on a BY-ID update stays on its own row — the harm is multi-specific', async () => {
+  it('S5b the same nested mutation on a BY-ID update reaches nothing either — the fix is not multi-specific', async () => {
     const object = 's5b';
     const stack = await bootStack(object);
     stack.objectql.registerFunction('mutate_nested_single', async (args: any) => {
@@ -583,9 +629,15 @@ describe('[#15356] can a record-before-update flow reach a multi:true batch payl
     await sleep(200);
 
     const rows = await rowsByTitle(stack.data, object);
-    // The mutation still reaches THIS write's payload — the aliasing is not
-    // multi-specific — but a by-id payload names one row, so nothing leaks.
-    expect(rows.get('alpha')?.tags).toEqual(['seed', 'REACHED']);
+    // ⚠️ THE BREAKING HALF, pinned deliberately. The aliasing was never
+    // multi-specific: on a by-id write the same in-place mutation reached this
+    // write's own payload and PERSISTED correctly (`['seed','REACHED']` before
+    // #14744), so it read as a working per-row write path rather than as
+    // corruption. It is the same alias, so closing the door closes it here too,
+    // and a stack author using it loses a write that used to land. That is why
+    // the changeset carries a BREAKING banner: the alternative is `update_record`
+    // (S6), which is a real write and lands per row.
+    expect(rows.get('alpha')?.tags).toEqual(['seed']);
     expect(rows.get('beta')?.tags ?? null).toBeNull();
     expect(rows.get('beta')?.status).toBe('blocked');
   }, 20000);
@@ -648,18 +700,21 @@ describe('[#15356] can a record-before-update flow reach a multi:true batch payl
 });
 
 /**
- * [#15356] S5 again, on the REAL SQL backend — `@objectstack/driver-sql` over
- * better-sqlite3 `:memory:`, built the canonical way this package's
- * `record-change-integration.test.ts` boots it.
+ * [#15356 measured it, #14744 closed it] S5 again, on the REAL SQL backend —
+ * `@objectstack/driver-sql` over better-sqlite3 `:memory:`, built the canonical
+ * way this package's `record-change-integration.test.ts` boots it.
  *
- * The reach itself is already proven above by reference identity measured
- * across the boundary (the array the flow mutated IS the array on
- * `ctx.input.data`), which no driver can affect. What only a real driver can
- * settle is the CONSEQUENCE the card names: one SET clause, issued once, so
- * the accumulated mutation lands on EVERY matched row of a real `UPDATE`.
+ * The reach was proven above by reference identity measured across the
+ * boundary, which no driver can affect; what only a real driver could settle
+ * was the CONSEQUENCE the card names — one SET clause, issued once, so the
+ * accumulated mutation landed on EVERY matched row of a real `UPDATE`. That is
+ * why the same probe is repeated here rather than trusted from the memory
+ * double, and it is why it stays here after the fix: a copy that held on the
+ * memory driver and not on a real `UPDATE` would be the same defect with a
+ * narrower audience.
  */
-describe('[#15356] S5 on the real SQL driver — the reach lands on every row of a real UPDATE', () => {
-  it('a flow script mutating `record.tags` in place writes both dispatches onto both rows', async () => {
+describe('[#15356/#14744] S5 on the real SQL driver — the mutation reaches no row of a real UPDATE', () => {
+  it('a flow script mutating `record.tags` in place leaves both rows carrying the caller\'s value', async () => {
     const kernel = new ObjectKernel({ logger: { level: 'silent' } });
     await kernel.use(new ObjectQLPlugin());
     await kernel.use(new AutomationServicePlugin());
@@ -705,8 +760,11 @@ describe('[#15356] S5 on the real SQL driver — the reach lands on every row of
     console.log('[#15356] SQL rows:', JSON.stringify([...rows.values()].map((r) => ({ title: r.title, tags: r.tags }))));
     const alpha = rows.get('alpha')?.tags;
     const beta = rows.get('beta')?.tags;
-    expect(alpha).toEqual(['seed', 'REACHED-alpha', 'REACHED-beta']);
-    expect(beta).toEqual(['seed', 'REACHED-alpha', 'REACHED-beta']);
+    // Before #14744 both read `['seed','REACHED-alpha','REACHED-beta']` — one
+    // SET clause carrying both dispatches, including the value derived from the
+    // other row's pre-image.
+    expect(alpha).toEqual(['seed']);
+    expect(beta).toEqual(['seed']);
 
     await driver.disconnect?.();
   }, 25000);
