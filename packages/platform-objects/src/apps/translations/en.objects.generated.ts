@@ -2476,7 +2476,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       error: {
         label: "Error",
-        help: "Transport error message when status=failed"
+        help: "Why the message failed — a transport error, or the validation that rejected it before delivery."
       },
       attempt_count: {
         label: "Attempts",
