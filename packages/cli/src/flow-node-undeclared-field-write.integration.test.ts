@@ -71,6 +71,15 @@ import { join } from 'node:path';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { AutomationEngine, registerCrudNodes } from '@objectstack/service-automation';
+import type { EngineQueryOptions } from '@objectstack/spec/data';
+
+/**
+ * The read-backs, TYPED rather than cast — `check:query-options-erasure`
+ * counts an `as any` options bag in test code too, and these are ordinary
+ * `where` bags with no reason to be erased.
+ */
+const allRows: EngineQueryOptions = { where: {} };
+const rowById = (id: unknown): EngineQueryOptions => ({ where: { id } });
 
 /** `stagee` is the typo under test; `stage` is the field that exists. */
 const DEAL = {
@@ -252,7 +261,7 @@ describe('#14241 a flow CRUD node writing an undeclared field', () => {
 
             await automation.execute('f_create_none', { userId: 'u1' });
 
-            expect(await ql.find('deal', { where: {} } as any)).toHaveLength(0);
+            expect(await ql.find('deal', allRows)).toHaveLength(0);
             // "before any statement is built", measured rather than asserted in
             // prose: the driver was never asked to write anything, which is why
             // no datasource can answer this differently.
@@ -267,7 +276,7 @@ describe('#14241 a flow CRUD node writing an undeclared field', () => {
             const res = await automation.execute('f_create_ok', { userId: 'u1' });
 
             expect(res.success).toBe(true);
-            const rows: any[] = await ql.find('deal', { where: {} } as any);
+            const rows: any[] = await ql.find('deal', allRows);
             expect(rows).toHaveLength(1);
             expect(rows[0].stage).toBe('won');
         }, 30000);
@@ -305,7 +314,7 @@ describe('#14241 a flow CRUD node writing an undeclared field', () => {
 
             await automation.execute('f_update_whole', { userId: 'u1' });
 
-            const after: any = (await ql.find('deal', { where: { id: seed.id } } as any))[0];
+            const after: any = (await ql.find('deal', rowById(seed.id)))[0];
             // `name` was spelled correctly and rode in the same payload. An
             // author reading "the unknown key is skipped" would expect it to
             // land; it does not.
@@ -326,7 +335,7 @@ describe('#14241 a flow CRUD node writing an undeclared field', () => {
             const res = await automation.execute('f_update_ok', { userId: 'u1' });
 
             expect(res.success).toBe(true);
-            const after: any = (await ql.find('deal', { where: { id: seed.id } } as any))[0];
+            const after: any = (await ql.find('deal', rowById(seed.id)))[0];
             expect(after.name).toBe('renamed');
             expect(after.stage).toBe('won');
         }, 30000);

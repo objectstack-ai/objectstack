@@ -175,6 +175,9 @@ import {
  */
 const rowById = (id: unknown): EngineQueryOptions => ({ where: { id } });
 
+/** [#14241] The unfiltered read, typed for the same reason `rowById` is. */
+const allRows: EngineQueryOptions = { where: {} };
+
 /** `stagee` is the typo under test; `stage` is the field that exists. */
 const DEAL = {
   name: 'deal',
@@ -568,7 +571,7 @@ describe('#4271 / #13657 an undeclared field written by an L2 body — one answe
       // The half that distinguishes a REFUSAL from a silent write: on the
       // schemaless family a persisted `stagee` would be an undeclared column
       // nothing downstream reads and field-level security can never gate.
-      const rows: any[] = await e.find('deal', { where: {} } as any);
+      const rows: any[] = await e.find('deal', allRows);
       expect(rows).toHaveLength(1);
       expect(rows[0].stage).toBe('open');
       expect(rows[0]).not.toHaveProperty('stagee');
