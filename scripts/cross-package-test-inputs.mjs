@@ -890,11 +890,16 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     // included -- and `scripts/pm/dispatch-gates.mjs`'s self-test pins that no
     // hint of that gate reaches a test file outside `packages/**`, which is the
     // whole reason it is listed there as a change-KIND instead of a path
-    // derivation. Measured: all 41 tracked test files outside `packages/` are
-    // under `examples/`, so that glob does not shrink the residue class, it
-    // EMPTIES it, and the case cannot be re-pointed at another member. Widening
-    // needs that residue measurement redone first; the pins' own headers carry
-    // what it costs meanwhile.
+    // derivation. Measured on c4d1354e3: all 41 tracked test files outside
+    // `packages/` are under `examples/`, so that glob empties the NARROW class
+    // the specimen case stands for -- test files outside `packages/**`, 41 to 0
+    // -- and exactly one case reds: that specimen. It does NOT empty the residue
+    // class the CLASS-LEVEL case guards, which counts every tracked test file no
+    // hint of this gate reaches: that one goes 13 to 3 and stays GREEN, the
+    // survivors being the three `.tsx` tests inside `packages/`. So the specimen
+    // COULD be re-pointed at one of those three -- that is option B on #15097,
+    // ruled OUT for now; ruling A accepts `packages/` as the radius, and the
+    // pins' own headers carry what that costs meanwhile.
     //
     // `cross-package-test-inputs.mjs` is NAMED in that pin's header (it is where
     // the widening instruction points) and never read, the same shape as the
@@ -931,11 +936,16 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     // included -- and `scripts/pm/dispatch-gates.mjs`'s self-test pins that no
     // hint of that gate reaches a test file outside `packages/**`, which is the
     // whole reason it is listed there as a change-KIND instead of a path
-    // derivation. Measured: all 41 tracked test files outside `packages/` are
-    // under `examples/`, so that glob does not shrink the residue class, it
-    // EMPTIES it, and the case cannot be re-pointed at another member. Widening
-    // needs that residue measurement redone first; the pins' own headers carry
-    // what it costs meanwhile.
+    // derivation. Measured on c4d1354e3: all 41 tracked test files outside
+    // `packages/` are under `examples/`, so that glob empties the NARROW class
+    // the specimen case stands for -- test files outside `packages/**`, 41 to 0
+    // -- and exactly one case reds: that specimen. It does NOT empty the residue
+    // class the CLASS-LEVEL case guards, which counts every tracked test file no
+    // hint of this gate reaches: that one goes 13 to 3 and stays GREEN, the
+    // survivors being the three `.tsx` tests inside `packages/`. So the specimen
+    // COULD be re-pointed at one of those three -- that is option B on #15097,
+    // ruled OUT for now; ruling A accepts `packages/` as the radius, and the
+    // pins' own headers carry what that costs meanwhile.
     //
     // `cross-package-test-inputs.mjs` is NAMED in that pin's header (it is where
     // the widening instruction points) and never read, the same shape as the

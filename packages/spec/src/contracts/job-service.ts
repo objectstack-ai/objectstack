@@ -158,6 +158,32 @@ export interface JobScheduleOptions {
     timeout?: number;
 }
 
+/**
+ * The optional third argument of {@link IJobService.replay} (#14766 — the
+ * contract half of the maintainer's A + a2 ruling on #14501).
+ *
+ * An options object rather than a bare positional boolean, by the convention
+ * this interface already follows for `schedule(…, options?: JobScheduleOptions)`:
+ * a named, exported options type reads at the call site —
+ * `replay(name, data, { force: true })` says what it does, `replay(name, data,
+ * true)` does not — and a later knob is a second key here, never a fourth
+ * positional. Omitting the argument is the pre-#14766 call exactly.
+ */
+export interface JobReplayOptions {
+    /**
+     * Re-send a scheduled flow's tick window even though that window's
+     * `(flow, tick-window)` dispatch claim has already **succeeded**.
+     *
+     * Absent or `false`, a replay of a delivered window is refused with the
+     * ADR-0112 envelope {@link IJobService.replay} declares. `true` is the
+     * explicit operator door the ruling kept open (option a2): the operator is
+     * stating that the window is known to have been delivered and is to be
+     * delivered again, and takes the duplicate knowingly. It never touches a
+     * window whose claim is absent or failed — those re-run either way.
+     */
+    force?: boolean;
+}
+
 export interface IJobService {
     /**
      * Schedule a recurring or one-time job
@@ -202,8 +228,50 @@ export interface IJobService {
      * `sys_audit_log`, with its own opt-in, writer and retention. Recording
      * anything durable depends on an adapter that persists run history at all
      * (e.g. `DbJobAdapter`'s `recordRuns` option).
+     *
+     * **Once-only delivery on the scheduled path** (#14766, the contract half
+     * of the maintainer's A + a2 ruling on #14501; the behaviour half is
+     * #14501 and lands in `DbJobAdapter.replay`). A scheduled (cron) flow
+     * takes a dispatch claim in the `sys_flow_dispatch` ledger keyed
+     * `(flow, tick-window)` — the same ledger a `time_relative` flow claims per
+     * `(flow, window, record)` (#10220). A replay of a scheduled flow reads
+     * that window's claim, and the contract admits exactly three outcomes:
+     *
+     * | The `(flow, tick-window)` claim is… | `replay(name, data)` | `replay(name, data, { force: true })` |
+     * |:---|:---|:---|
+     * | **absent** — the window was never claimed | re-runs the window (unchanged behaviour) | re-runs the window |
+     * | **failed** — claimed, and the dispatch did not succeed | re-runs the window (unchanged behaviour) | re-runs the window |
+     * | **succeeded** — the window was delivered | **refused**, loudly — see below | re-runs the window: sends anyway, the duplicate is the operator's, taken knowingly |
+     *
+     * A job that never takes a claim — every job that is not a scheduled
+     * flow — is the **absent** row: it re-runs, with or without `force`, and
+     * nothing about it changes.
+     *
+     * **The refusal is an ADR-0112 envelope, never a silent no-op.** The
+     * promise **rejects** (it does not resolve having done nothing — the
+     * ruling rejected that shape outright: an operator who pressed replay and
+     * saw nothing happen is the bad experience this clause exists to prevent)
+     * with an error carrying `code: 'RESOURCE_CONFLICT'` — the standard-catalog
+     * member HTTP 409 derives (`HttpStatusErrorCodeMap[409]`, `api/errors.zod.ts`;
+     * no service extension code is registered for this) — and `status: 409`,
+     * and its message names **the window** that was asked for (the flow and
+     * its tick window) and **the claim** that refused it (the
+     * `sys_flow_dispatch` row: when the window was claimed and that the
+     * dispatch succeeded). A consumer asserts the refusal on `code` and
+     * `status`; the message is for the operator reading it.
+     *
+     * `options.force: true` is the only door past the refusal (option a2).
+     * Option a1 (refuse always, no door) and option a3 (send anyway, accept
+     * the duplicate silently) were considered on #14501 and **not** taken.
+     *
+     * @param name - Job name
+     * @param data - Optional data to pass to the handler
+     * @param options - {@link JobReplayOptions}; omitted is the pre-#14766
+     * call and refuses a delivered window
+     * @throws `RESOURCE_CONFLICT` / 409 when the window's claim succeeded and
+     * `options.force` is not `true`
      */
-    replay?(name: string, data?: unknown): Promise<void>;
+    replay?(name: string, data?: unknown, options?: JobReplayOptions): Promise<void>;
 
     /**
      * List executions filtered by status across all jobs (admin/observability).
