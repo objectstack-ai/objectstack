@@ -5225,13 +5225,39 @@ export function formatI18nLoadDiagnostic(pkg: string, err: unknown): string {
  */
 
 /**
- * The install remedy bullet for a multi-org runtime that would not load — two
- * absences, two remedies (#4719).
+ * The install remedy bullet for a multi-org runtime that would not load — one
+ * bullet per ABSENCE, and the absences are what the branch reads (#4719).
  *
- * `declared-unresolvable` means the app's `package.json` DOES name the package
- * and the install is what is broken; anything else means the app never declared
- * it. Telling the first operator to re-read a file that is already correct is
- * the defect this branch exists to avoid.
+ * ## What the branch is ON, and why it is not a kind list
+ *
+ * The question each arm answers is **"is the declaration the problem?"**:
+ *
+ *   - `declared-unresolvable` — the app's `package.json` DOES name the package
+ *     and the INSTALL is what is broken. Telling that operator to re-read a
+ *     file that is already correct is the defect this branch exists to avoid.
+ *   - `declared-no-loadable-entry` (#14041) — the app declares it, the install
+ *     DELIVERED it, and the package's own `exports` names no runtime entry
+ *     Node can load. Neither absence applies: there is nothing to declare and
+ *     nothing to install, so this arm prescribes NOTHING and defers to the
+ *     importer's own message, which `formatOrganizationsAbsentFatal` prints
+ *     verbatim as the `cause:` line of the same refusal (#14270).
+ *   - anything else — the app never declared it, so the declare-and-install
+ *     remedy is the one that works.
+ *
+ * ⚠️ This was a TWO-WAY branch written when only two kinds existed, so the
+ * third fell into the else leg and told an operator whose app already declares
+ * AND installs the package to declare and install it — the
+ * confidently-wrong-verdict class #14041 removed one layer down, reintroduced
+ * by its consumer. ⛔ The third arm deliberately does NOT mint a fourth remedy
+ * sentence: the importer already words the package-shape case, and a local
+ * re-wording here would be a second copy to drift (the same reason
+ * {@link formatI18nLoadDiagnostic} interpolates only the kind TOKEN, and the
+ * same shape as {@link formatOrganizationsMountFatal}'s "its message is the
+ * authority on the remedy").
+ *
+ * An error carrying NO kind never came from the host importer at all and keeps
+ * the declare-and-install arm it has always had — narrowing that one is a
+ * different question, about a different fact, and is not this branch's.
  */
 export function formatOrganizationsInstallRemedy(
   kind: HostImportFailureKind | undefined,
@@ -5239,20 +5265,29 @@ export function formatOrganizationsInstallRemedy(
   hostRoot: string,
 ): string {
   const pkg = Serve.ORGANIZATIONS_RUNTIME_PKG;
-  return kind === 'declared-unresolvable'
-    ? `      • this app DECLARES ${pkg} ` +
+  if (kind === 'declared-unresolvable') {
+    return `      • this app DECLARES ${pkg} ` +
       `(${declaration.field}: ${JSON.stringify(declaration.specifier)}) — the\n` +
       '        declaration is NOT the problem and re-reading package.json will not help.\n' +
       `        Repair the INSTALL in ${hostRoot}: run \`pnpm install\`, check that a\n` +
-      '        production prune did not drop it, and that its dist is actually built — or\n'
-    : `      • add ${pkg} (the enterprise multi-org runtime) to THIS APP\n` +
-      "        — declare it in the app's package.json and install; the CLI resolves it from the\n" +
-      '          app, not from the framework it is linked out of. Being merely reachable\n' +
-      '          through NODE_PATH / a hoisted workspace store is deliberately not enough\n' +
-      '          (#4719) — that made this wall depend on how the process was launched.\n' +
-      '          NOTE: this runtime is closed-source and is NOT on the public npm registry —\n' +
-      '          it is distributed with an enterprise / cloud subscription. Without one this\n' +
-      '          bullet is not followable, and one of the two below is your path — or\n';
+      '        production prune did not drop it, and that its dist is actually built — or\n';
+  }
+  if (kind === 'declared-no-loadable-entry') {
+    return `      • this app DECLARES ${pkg} ` +
+      `(${declaration.field}: ${JSON.stringify(declaration.specifier)}) and it IS\n` +
+      '        INSTALLED — neither the declaration nor the install is the problem, and no change\n' +
+      '        you make in this app can fix it. The package publishes no entry Node can load;\n' +
+      '        the remedy is in the package, and the cause below is the authority on what it\n' +
+      '        has to publish — or\n';
+  }
+  return `      • add ${pkg} (the enterprise multi-org runtime) to THIS APP\n` +
+    "        — declare it in the app's package.json and install; the CLI resolves it from the\n" +
+    '          app, not from the framework it is linked out of. Being merely reachable\n' +
+    '          through NODE_PATH / a hoisted workspace store is deliberately not enough\n' +
+    '          (#4719) — that made this wall depend on how the process was launched.\n' +
+    '          NOTE: this runtime is closed-source and is NOT on the public npm registry —\n' +
+    '          it is distributed with an enterprise / cloud subscription. Without one this\n' +
+    '          bullet is not followable, and one of the two below is your path — or\n';
 }
 
 /**

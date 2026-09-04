@@ -85,6 +85,13 @@ let appInstalledButUndeclared: string;
  * the "declare it and install it" line to.
  */
 let appDeclaredNoLoadableEntry: string;
+/**
+ * The `declared-unresolvable` CONTROL: declared and NOT installed. Its arm is
+ * untouched by #14270, so this case must render byte-identically before and
+ * after — that is what makes the third arm's flip a measurement rather than a
+ * rewrite that moved everything.
+ */
+let appDeclaredNotInstalled: string;
 
 function writeApp(
   prefix: string,
@@ -153,6 +160,10 @@ beforeAll(() => {
     withOrganizations: true,
     typesOnly: true,
   });
+  appDeclaredNotInstalled = writeApp('os-verify-org-host-not-installed-', {
+    withOrganizations: false,
+    declare: true,
+  });
 });
 
 afterAll(() => {
@@ -161,6 +172,7 @@ afterAll(() => {
     appWithoutPackage,
     appInstalledButUndeclared,
     appDeclaredNoLoadableEntry,
+    appDeclaredNotInstalled,
   ]) {
     if (dir) rmSync(dir, { recursive: true, force: true });
   }
@@ -254,6 +266,27 @@ describe('bootStack multiTenant — host-app package resolution (#4700)', () => 
       await expect(
         bootStack(app as never, { multiTenant: true, hostRoot: appInstalledButUndeclared }),
       ).rejects.toThrow(/DECLARE it in that app's package\.json/);
+    },
+    BOOT_TIMEOUT,
+  );
+
+  it(
+    'CONTROL — the `declared-unresolvable` remedy is unchanged: declared, not installed (#4719)',
+    async () => {
+      // Not a new behaviour, a CONTROL. #14270 rewrote this branch's SHAPE
+      // (two-way → three-way); this arm's text has to come out byte-identical,
+      // or the third kind's fix moved something that was already right.
+      const err = await bootStack(app as never, {
+        multiTenant: true,
+        hostRoot: appDeclaredNotInstalled,
+      }).then(
+        (stack) => stack.stop().then(() => new Error('bootStack resolved; it must refuse')),
+        (e: unknown) => e as Error,
+      );
+      expect(err.message).toContain(
+        `It IS declared in ${appDeclaredNotInstalled}'s package.json, so the declaration is `
+        + 'not the problem — repair the install there (`pnpm install`, un-prune, rebuild its dist).',
+      );
     },
     BOOT_TIMEOUT,
   );

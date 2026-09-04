@@ -36,6 +36,11 @@ let hostInstalledButUndeclared: string;
  * publishes, so the "declare it and install it" remedy is unfollowable here.
  */
 let hostDeclaredNoLoadableEntry: string;
+/**
+ * The `declared-unresolvable` CONTROL: declared and NOT installed. #14270 left
+ * this arm alone, so its wording must come out byte-identical.
+ */
+let hostDeclaredNotInstalled: string;
 
 function writeHost(
   prefix: string,
@@ -102,6 +107,7 @@ beforeAll(() => {
   hostWithoutPkg = writeHost('os-dogfood-org-missing-', false);
   hostInstalledButUndeclared = writeHost('os-dogfood-org-undeclared-', true, { declare: false });
   hostDeclaredNoLoadableEntry = writeHost('os-dogfood-org-no-entry-', true, { typesOnly: true });
+  hostDeclaredNotInstalled = writeHost('os-dogfood-org-not-installed-', false, { declare: true });
 });
 
 afterAll(() => {
@@ -110,6 +116,7 @@ afterAll(() => {
     hostWithoutPkg,
     hostInstalledButUndeclared,
     hostDeclaredNoLoadableEntry,
+    hostDeclaredNotInstalled,
   ]) {
     if (dir) rmSync(dir, { recursive: true, force: true });
   }
@@ -164,6 +171,17 @@ describe('enterprise multi-org probe (#4700)', () => {
     // advice here — it is already installed; the missing act is declaring it.
     await expect(probeOrganizations(hostInstalledButUndeclared, true)).rejects.toThrow(
       new RegExp(`declare ${ORGANIZATIONS_PKG.replace('/', '\\/')} in .* package\\.json`),
+    );
+  });
+
+  it('CONTROL — the `declared-unresolvable` remedy is unchanged: declared, not installed', async () => {
+    // The arm #14270 did NOT touch. Pinned here so the three-way rewrite is a
+    // measurement: this text has to be byte-identical either side of it.
+    const probe = await probeOrganizations(hostDeclaredNotInstalled, false);
+    expect(probe.available).toBe(false);
+    expect(probe.reason).toContain(
+      `${hostDeclaredNotInstalled} DECLARES ${ORGANIZATIONS_PKG}, so repair its INSTALL there `
+      + '(`pnpm install`, un-prune, rebuild its dist)',
     );
   });
 
