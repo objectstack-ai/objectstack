@@ -23,6 +23,10 @@ export {
 export {
   SharingRuleService,
   type SharingRuleServiceOptions,
+  // [#14754] The spec's `SharingRuleEvaluationResult` plus the pass's
+  // `grantsRefused` count. Additive: the six declared fields are unchanged, and
+  // a consumer typed against the spec contract keeps compiling untouched.
+  type SharingRuleReconcilePassResult,
 } from './sharing-rule-service.js';
 export {
   ShareLinkService,
