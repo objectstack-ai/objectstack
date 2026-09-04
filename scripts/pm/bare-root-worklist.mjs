@@ -1352,6 +1352,12 @@ function report({ wide = false } = {}) {
   }
 }
 
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'bare-root-worklist self-test reached its verdict';
+
 function selfTest() {
   const failures = [];
   const t = (label, ok) => { if (!ok) failures.push(label); };
@@ -1654,9 +1660,19 @@ function selfTest() {
       + '(#14695) are well-formed, disjoint from TRIAGE, contribute no hint of their own, and share '
       + 'one base commit.',
   );
+
+  return SELF_TEST_VERDICT;
 }
 
 if (isEntrypoint(import.meta.url)) {
-  if (process.argv.includes('--self-test')) selfTest();
-  else report({ wide: process.argv.includes('--wide') });
+  if (process.argv.includes('--self-test')) {
+    if (selfTest() !== SELF_TEST_VERDICT) {
+      console.error(
+        '\n✗ bare-root-worklist self-test: selfTest() returned without reaching its verdict,\n'
+          + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+          + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
+  } else report({ wide: process.argv.includes('--wide') });
 }
