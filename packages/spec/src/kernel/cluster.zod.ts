@@ -327,71 +327,24 @@ export type ClusterCapabilityConfig = z.input<typeof ClusterCapabilityConfigSche
 export type ClusterCapabilityConfigParsed = z.infer<typeof ClusterCapabilityConfigSchema>;
 
 // ==========================================================================
-// Metadata Change Event Payload
+// Retired: the `metadata:changed` event payload (ADR-0049 enforce-or-remove)
 // ==========================================================================
-
-/**
- * Operation that triggered a `metadata:changed` event.
- */
-export const MetadataChangeOperationSchema = z.enum([
-  'create',
-  'update',
-  'delete',
-  'publish',
-]).describe('Persistence operation that triggered the change.');
-
-export type MetadataChangeOperation = z.input<typeof MetadataChangeOperationSchema>;
-
-/**
- * Canonical payload for the `metadata:changed` event.
- *
- * All metadata persistence layers MUST emit this event after any successful
- * write. Readers (registry caches, query engines, REST routers) MUST
- * subscribe to it and compare `version` with their cached value before
- * applying the invalidation — out-of-order older versions are ignored.
- *
- * @see content/docs/kernel/cluster.mdx §6
- */
-export const MetadataChangedEventPayloadSchema = lazySchema(() => z.object({
-  /**
-   * Metadata type — e.g. `'object'`, `'view'`, `'flow'`, `'agent'`.
-   * Matches the `MetadataTypeSchema` enum.
-   */
-  type: z.string().min(1).describe('Metadata type (e.g. "object", "view").'),
-
-  /**
-   * Machine name of the changed item.
-   */
-  name: z.string().min(1).describe('Machine name of the metadata item.'),
-
-  /**
-   * Tenant scope when the change is tenant-overlaid. Absent for
-   * platform-default metadata.
-   */
-  tenantId: z.string().optional().describe('Tenant id when the change is overlay-scoped.'),
-
-  /**
-   * Monotonic version of the record after the change. Readers compare
-   * this with their cached value; only strictly greater versions
-   * invalidate.
-   *
-   * Modelled as `bigint` in the schema to support long-running clusters
-   * without 32-bit wraparound concerns; persisted as `numeric` / `int8`
-   * in storage.
-   */
-  version: z.bigint().describe('Monotonic version of the record after the change.'),
-
-  /**
-   * The operation that produced this version.
-   */
-  operation: MetadataChangeOperationSchema,
-
-  /**
-   * Optional correlation id for tracing the change back to a request /
-   * deploy / migration that produced it.
-   */
-  correlationId: z.string().optional()
-    .describe('Trace correlation id of the originating request.'),
-}).describe('Canonical payload for the metadata:changed cluster event.'));
-
-export type MetadataChangedEventPayload = z.input<typeof MetadataChangedEventPayloadSchema>;
+//
+// `MetadataChangedEventPayloadSchema` (`type` / `name` / `tenantId` /
+// `version: z.bigint()` / `operation` / `correlationId`) and the
+// `MetadataChangeOperationSchema` enum that existed only to type its
+// `operation` field were removed whole. The ADR-0087 registry is the
+// declaration: `kernel/MetadataChangedEventPayload` and
+// `kernel/MetadataChangeOperation` in `RETIRED_DEFS_BY_MAJOR[18]` plus the D3
+// semantic entry `metadata-changed-event-payload-retired`. The docblock said
+// every metadata persistence layer MUST emit it and every reader MUST
+// subscribe and version-compare; nothing ever did either, and the `bigint`
+// version field could not have crossed a JSON transport without a codec no
+// pubsub driver ships. The cluster channels that actually run are documented
+// in `content/docs/kernel/cluster.mdx` §6.2: `metadata.changed`
+// (`ClusterMetadataChangedPayload`, `@objectstack/metadata`),
+// `metadata.mutated` (`ClusterMetadataMutationPayload`,
+// `@objectstack/metadata-protocol`) and `datasource.mutated` — address-only
+// signals whose receivers re-read their own store rather than compare
+// versions. A version-stamped payload returns only via the ENFORCE route of
+// ADR-0049: the emitter and the reader first, the declaration with them.
