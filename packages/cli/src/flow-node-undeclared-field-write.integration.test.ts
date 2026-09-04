@@ -191,13 +191,15 @@ describe('#14241 a flow CRUD node writing an undeclared field', () => {
     /**
      * The node's `fields` map IS a caller payload, so the refusal it meets is
      * the ADR-0112 envelope the three lint messages quote. The node folds that
-     * envelope into a string (see the step assertions below — `create_record`
-     * surfaces `code` only for `DUPLICATE_RECORD`, and `update_record` for
-     * nothing at all), so this is the one place in the flow chain where `code`
-     * and `status` are still observable. Asserted here rather than left to the
-     * step's prose: a message can be reworded, and a `toThrow()` would pass on
-     * any error at all — including the driver-level failure this door exists to
-     * make unreachable.
+     * envelope into a string, and the engine then stamps the step it failed
+     * `NODE_FAILURE` (`create_record` re-surfaces a node-level `code` only for
+     * `DUPLICATE_RECORD`, `update_record` for nothing at all, and neither
+     * reaches `step.error.code` anyway). So this is the one place in the flow
+     * chain where the DOOR's `code` and `status` are still observable, and the
+     * step assertions below pin what is left of them. Asserted here rather than
+     * left to the step's prose: a message can be reworded, and a `toThrow()`
+     * would pass on any error at all — including the driver-level failure this
+     * door exists to make unreachable.
      */
     it('the door answers INVALID_FIELD / 400 for the exact payload the node builds', async () => {
         const { ql } = await boot();
@@ -228,10 +230,18 @@ describe('#14241 a flow CRUD node writing an undeclared field', () => {
 
             expect(res.success).toBe(false);
             const step = await stepOf(automation, 'f_create_bad', 'c');
-            expect(step.status).toBe('failed');
-            // The door's own message, verbatim, inside the node's wrapper — the
-            // link that makes the step traceable to the envelope above.
-            expect(step.error).toBe("create_record(deal) failed: Unknown field 'stagee' on object 'deal'");
+            expect(step.status).toBe('failure');
+            // The step's error is an envelope of its own, and the WHOLE of it is
+            // pinned: the flow layer reclassifies every failing node to
+            // `NODE_FAILURE` (engine.ts, its single step-push site) and carries
+            // the door's message verbatim inside it. So `INVALID_FIELD` is NOT
+            // what a run reports — the message is the only channel that
+            // survives the fold, which is why it is asserted whole rather than
+            // by `toContain`.
+            expect(step.error).toEqual({
+                code: 'NODE_FAILURE',
+                message: "create_record(deal) failed: Unknown field 'stagee' on object 'deal'",
+            });
         }, 30000);
 
         it('creates NO row — so a later {<node>.id} has nothing to read', async () => {
@@ -276,8 +286,11 @@ describe('#14241 a flow CRUD node writing an undeclared field', () => {
 
             expect(res.success).toBe(false);
             const step = await stepOf(automation, 'f_update_bad', 'u');
-            expect(step.status).toBe('failed');
-            expect(step.error).toBe("update_record(deal) failed: Unknown field 'stagee' on object 'deal'");
+            expect(step.status).toBe('failure');
+            expect(step.error).toEqual({
+                code: 'NODE_FAILURE',
+                message: "update_record(deal) failed: Unknown field 'stagee' on object 'deal'",
+            });
         }, 30000);
 
         it('refuses the write WHOLE — the correctly named field in the same map does not land either', async () => {
