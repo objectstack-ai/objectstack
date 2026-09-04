@@ -10,7 +10,8 @@
  * These three are the platform's SOLE supply: `packages/rest` and
  * `packages/runtime` register no `/me/*` route at all, the objectui console
  * reads `/auth/me/permissions` for its whole permission layer and
- * `/auth/me/localization` for regional defaults, and `core`'s auth gate
+ * `/auth/me/localization` for its regional defaults and the signed-in user's
+ * language (#14788 — the ONE read face for that), and `core`'s auth gate
  * allow-lists `/me/apps` + `/me/localization` as endpoints a gated user MUST
  * still reach to bootstrap the remediation UI. #4079 lifted them out from under
  * `registerStandardEndpoints`, which also gated a DUPLICATE `/data` CRUD +
@@ -37,13 +38,14 @@
  * round-trip to an auth service that does not implement these paths.
  */
 
-import { IDataEngine, resolveUserAuthzGrants } from '@objectstack/core';
+import { IDataEngine, resolveLocalizationContext, resolveUserAuthzGrants } from '@objectstack/core';
 import {
     resolveEffectiveApiMethods,
     effectiveOperationsArray,
     type EnableLike,
 } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
+import { preferredLocaleFromHeader } from '@objectstack/spec/system';
 import type {
     IAuthService,
     IMetadataService,
@@ -633,6 +635,133 @@ export function makeExecutionContextResolver(ctx: CurrentUserEndpointsContext) {
     return resolveCtx;
 }
 
+/** The `sys_user` column that carries the user's own stated language (#13881). */
+const SYS_USER_LOCALE_FIELD = 'locale';
+
+/**
+ * The column's OWN shape rule(s) for `sys_user.locale`, read off the
+ * registered object exactly as objectql's rule validator will apply them on a
+ * write (`format` rule → `new RegExp(rule.regex)`, no flags). This is
+ * deliberately NOT a second locale parser: the one spelling of "what a locale
+ * looks like" is the `locale_bcp47_shape` rule declared on the object
+ * (`@objectstack/platform-objects`, pinned byte-equal to service-messaging's
+ * read-side `LOCALE_TAG_SHAPE`), and this surface evaluates that declaration
+ * rather than restating it. A rule objectql would skip as malformed is skipped
+ * here too — the acceptance below can only ever be a SUBSET of the write
+ * side's.
+ */
+function sysUserLocaleShapeRules(ql: unknown): RegExp[] {
+    let schema: { validations?: unknown } | undefined;
+    try {
+        const getSchema = (ql as { getSchema?: (name: string) => unknown } | undefined)?.getSchema;
+        schema = typeof getSchema === 'function' ? (getSchema.call(ql, 'sys_user') as typeof schema) : undefined;
+    } catch {
+        return [];
+    }
+    const rules = Array.isArray(schema?.validations) ? (schema.validations as Array<Record<string, unknown>>) : [];
+    const out: RegExp[] = [];
+    for (const rule of rules) {
+        if (rule?.type !== 'format' || rule?.field !== SYS_USER_LOCALE_FIELD || typeof rule?.regex !== 'string') continue;
+        try { out.push(new RegExp(rule.regex)); } catch { /* objectql fail-opens a malformed rule; unusable as a shape here */ }
+    }
+    return out;
+}
+
+/**
+ * Rung 1 of {@link resolveSignedInUserLocale}: the caller's own stored
+ * `sys_user.locale`, or `undefined` for every shape that cannot name a
+ * language — no engine, no row, no value, a value that fails the column's own
+ * shape rule, or a registry that declares no shape rule at all (then the value
+ * is UNVERIFIABLE, and unverifiable falls through rather than being trusted:
+ * the same fail direction as an unset column — the ruling's "malformed ⇒ next
+ * rung", never "malformed ⇒ served").
+ *
+ * The row is read under a SYSTEM context by the caller's own id — the shape
+ * `resolveUserAuthzGrants` already uses for the identical row (its `tryFind`),
+ * and what plugin-auth's stored-locale reader does for a recipient: a
+ * user-context read here would route the caller's own identity row through
+ * the `org_user_ids` RLS wall for the one column the caller is entitled to see
+ * about themselves. Never throws — a failed read is logged and falls through;
+ * the language is a courtesy, the answer is not.
+ */
+async function storedSignedInUserLocale(
+    ql: unknown,
+    userId: string,
+    logger: CurrentUserEndpointsContext['logger'],
+): Promise<string | undefined> {
+    const find = (ql as { find?: (object: string, opts: unknown) => Promise<unknown> } | undefined)?.find;
+    if (typeof find !== 'function') return undefined;
+    const rules = sysUserLocaleShapeRules(ql);
+    if (rules.length === 0) {
+        logger?.debug?.('[hono] /auth/me/localization: sys_user declares no locale shape rule — stored locale not read', { userId });
+        return undefined;
+    }
+    let row: { locale?: unknown } | undefined;
+    try {
+        let rows = await find.call(ql, 'sys_user', {
+            where: { id: userId },
+            limit: 1,
+            context: { isSystem: true },
+        });
+        if (rows && typeof rows === 'object' && 'value' in rows) rows = (rows as { value: unknown }).value;
+        row = Array.isArray(rows) ? (rows[0] as typeof row) : undefined;
+    } catch (err: any) {
+        logger?.warn?.('[hono] /auth/me/localization: sys_user read failed — stored locale skipped', { err: err?.message, userId });
+        return undefined;
+    }
+    const raw = row?.[SYS_USER_LOCALE_FIELD];
+    if (typeof raw !== 'string') return undefined;
+    const value = raw.trim();
+    if (!value) return undefined;
+    return rules.every((re) => re.test(value)) ? value : undefined;
+}
+
+/** Input of {@link resolveSignedInUserLocale}. */
+export interface ResolveSignedInUserLocaleInput {
+    /** The locator of the kernel that OWNS the request (see `withRequestContext`). */
+    ctx: CurrentUserEndpointsContext;
+    /** The signed-in user — this surface never resolves a language for an anonymous caller. */
+    userId: string;
+    /** Active org/tenant, for the deployment-default cascade. */
+    tenantId?: string;
+    /** The request's raw `Accept-Language` header value, if any. */
+    acceptLanguage?: string | null;
+}
+
+/**
+ * The signed-in user's language — the ONE read face (#14788, maintainer
+ * ruling 2026-09-03, option D):
+ *
+ *   1. `sys_user.locale` when set and shaped like the column's own rule says
+ *      ({@link storedSignedInUserLocale});
+ *   2. the request's `Accept-Language` preference — the SAME parse REST and
+ *      the runtime dispatcher feed `execCtx.locale` from
+ *      (`preferredLocaleFromHeader`, #3957), so this surface and a rejection
+ *      message cannot disagree about what the request asked for;
+ *   3. the deployment default — `resolveLocalizationContext`, the cascade
+ *      `execCtx.locale` already derives from on the dispatcher
+ *      (`localization.locale` settings → tenant `sys_setting` rows → `en-US`).
+ *
+ * Always answers a string for an authenticated caller: rung 3 has a floor.
+ * Exported for the serverless host path that composes the resolver directly
+ * (cloud#924) and for the pin that asserts the precedence.
+ */
+export async function resolveSignedInUserLocale(input: ResolveSignedInUserLocaleInput): Promise<string> {
+    const { ctx, userId, tenantId } = input;
+    const ql = (() => {
+        try { return ctx.getService<IDataEngine>('objectql'); } catch { return undefined; }
+    })();
+    const stored = await storedSignedInUserLocale(ql, userId, ctx.logger);
+    if (stored) return stored;
+    const requested = preferredLocaleFromHeader(input.acceptLanguage);
+    if (requested) return requested;
+    const settings = (() => {
+        try { return ctx.getService<unknown>('settings'); } catch { return undefined; }
+    })();
+    const localization = await resolveLocalizationContext({ ql, settings, tenantId, userId });
+    return localization.locale;
+}
+
 /**
  * Register the current-user endpoints — `/auth/me/permissions`,
  * `/auth/me/localization` and `/me/apps` — on `rawApp`.
@@ -869,20 +998,39 @@ export function registerCurrentUserEndpoints(
     }));
 
     // GET /me/localization — the resolved regional defaults (currency /
-    // locale / timezone) for the current request's tenant, exposed to EVERY
-    // authenticated user. The `localization` SETTINGS are gated to
-    // `setup.access`, but the resolved defaults are needed by every renderer
-    // to format currency/dates/numbers — so they ride on the request
-    // ExecutionContext (ADR-0053) and are surfaced here without that gate.
+    // timezone) for the current request's tenant plus the signed-in user's
+    // language (`locale`), exposed to EVERY authenticated user. The
+    // `localization` SETTINGS are gated to `setup.access`, but the resolved
+    // defaults are needed by every renderer to format currency/dates/numbers —
+    // so they ride on the request ExecutionContext (ADR-0053) and are surfaced
+    // here without that gate.
+    //
+    // [#14788] `locale` is the ONE read face for "this user's language"
+    // (maintainer ruling 2026-09-03, option D, which also retired the dead
+    // `SessionUser.language` on the session contract). It resolves, in order:
+    //   1. the user's own `sys_user.locale` when set — a user-stated
+    //      preference since the 2026-09-03 ruling on the column (#14787 B),
+    //      accepted only when it passes the column's OWN shape rule;
+    //   2. the request's `Accept-Language` preference;
+    //   3. the deployment default (`localization.locale`, the same cascade
+    //      that feeds `execCtx.locale` on the dispatcher).
+    // See {@link resolveSignedInUserLocale}. `currency` / `timezone` and the
+    // unauthenticated answer are unchanged by that ruling.
     rawApp.get(`${prefix}/auth/me/localization`, withRequestContext(async (c, ctx, resolveCtx) => {
         const execCtx = await resolveCtx(c);
         if (!execCtx?.userId) {
             return c.json({ authenticated: false });
         }
+        const locale = await resolveSignedInUserLocale({
+            ctx,
+            userId: execCtx.userId,
+            tenantId: execCtx.tenantId ?? undefined,
+            acceptLanguage: c.req.raw?.headers?.get?.('accept-language') ?? undefined,
+        });
         return c.json({
             authenticated: true,
             currency: execCtx.currency ?? null,
-            locale: execCtx.locale ?? null,
+            locale,
             timezone: execCtx.timezone ?? null,
         });
     }));

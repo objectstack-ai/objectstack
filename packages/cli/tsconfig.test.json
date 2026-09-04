@@ -126,9 +126,10 @@
     "moduleResolution": "bundler",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "types": ["node"],
-    // [#15004] THREE bare-name rules, no star, for the three workspace deps the
-    // option-B acceptance pin reaches (`test/option-b-reader-acceptance.pin.test.ts`
-    // and its two fixtures). Without them tsc resolves those specifiers through
+    // [#15004, #15229] FOUR bare-name rules, no star, for the four workspace
+    // deps the option-B acceptance pin reaches
+    // (`test/option-b-reader-acceptance.pin.test.ts` and its two fixtures;
+    // `@objectstack/verify` joined them with card 5/4's probe rows). Without them tsc resolves those specifiers through
     // each package's `exports` map to `dist/index.d.ts` — A BUILD ARTIFACT — so
     // this suite's type verdict about the readers the reader program is about to
     // CHANGE would be a verdict about the last `pnpm build` instead, which is
@@ -142,8 +143,8 @@
     // the specifier EXACTLY, which is load-bearing here rather than incidental:
     // `@objectstack/objectql` publishes a second subpath (`./core`), and that
     // specifier deliberately keeps resolving through the package's own
-    // `exports` map, untouched by this table. `plugin-security` and `runtime`
-    // each publish only `"."`. And a target matching nothing on disk is worse
+    // `exports` map, untouched by this table. `plugin-security`, `runtime` and
+    // `verify` each publish only `"."`. And a target matching nothing on disk is worse
     // than absent, because tsc then falls back to node resolution — i.e. to
     // `dist` — silently.
     //
@@ -159,7 +160,8 @@
       // package publishes only `"."`.
       "@objectstack/plugin-dev": ["../plugins/plugin-dev/src/index.ts"],
       "@objectstack/plugin-security": ["../plugins/plugin-security/src/index.ts"],
-      "@objectstack/runtime": ["../runtime/src/index.ts"]
+      "@objectstack/runtime": ["../runtime/src/index.ts"],
+      "@objectstack/verify": ["../verify/src/index.ts"]
     }
   },
   "include": ["test/**/*", "vitest.config.ts", "vitest-tiers.ts", "vitest-tiers.fixtures.ts"],
