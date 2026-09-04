@@ -56,3 +56,24 @@ was refused` (#14143), which shipped `minor` for the same reason.
 
 `grantsRefused > 0` does **not** mean the pass failed. It means the pass met a
 record it cannot grant on and carried on — which is the whole point.
+
+**Wire surface — declared, not lifted.** `grantsRefused` reaches the wire.
+`POST /api/v1/sharing/rules/:idOrName/evaluate` is a ledgered **SDK** route —
+`packages/rest/src/rest-route-ledger.ts:390`, the row carrying
+`disposition: 'sdk'` and `client: 'shares.rules.evaluate'` — and its REST handler
+passes the service return value through **unfiltered**
+(`packages/rest/src/rest-server.ts:11108`–`:11109`:
+`const result = await svc.evaluateRule(req.params.idOrName, context ?? {})`
+followed by `res.json(result)`). So the seventh key is on the response body every
+caller of that route already receives. The SDK method declares
+`SharingRuleEvaluationResult` as its resolved type
+(`packages/client/src/index.ts:4766`, unwrapped at `:4771` through
+`unwrapResponse` parameterised on that same type), and that type is the spec's
+six-field contract — so the **declared client type cannot name the seventh key**.
+That is a client-type **lag**, not a contract break: the key is additive on the
+wire, every declared field is unchanged, and a consumer typed against
+`SharingRuleEvaluationResult` keeps compiling exactly as before. Lifting the type
+is not this PR's to do — `SharingRuleEvaluationResult` lives in
+`@objectstack/spec`, a `domain:spec` single-owner file — so the lag is declared
+here and tracked as the follow-up #14969, which lifts `grantsRefused?: number`
+(optional) into `SharingRuleEvaluationResult`.
