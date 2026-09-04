@@ -352,6 +352,29 @@ describe('#14423 item 2 — `MetadataManager.loadManyKeyed`: the plural read und
         expect((keyed[0].data as any).from).toBe('database');
     });
 
+    it("COST of the audit's by-name rung: `loadDiagnosed` is exactly ONE `findOne` per name", async () => {
+        // The other half of the #14423 cost question (the ruling's item 6).
+        // The keyed enumeration above is `{find:1, findOne:0}`; the by-name
+        // rung the audit adds costs one `findOne` per name PROBED — and it
+        // probes only the handlers still unaccounted for after set
+        // reconciliation and the registry rung, which is zero on a healthy
+        // composition (pinned in objectql's own suite).
+        const { manager, calls } = planeOver([
+            row('a', { name: 'a' }), row('b', { name: 'b' }), row('c', { name: 'c' }),
+        ]);
+
+        expect((await manager.loadDiagnosed<any>(TYPE, 'a')).data).toBeTruthy();
+        expect(calls).toEqual({ find: 0, findOne: 1, count: 0 });
+
+        expect((await manager.loadDiagnosed<any>(TYPE, 'b')).data).toBeTruthy();
+        expect(calls).toEqual({ find: 0, findOne: 2, count: 0 });
+
+        // ...so N probes cost N `findOne`, linear and bounded by the
+        // accusation list — never by the population.
+        expect((await manager.loadDiagnosed<any>(TYPE, 'absent')).data).toBeNull();
+        expect(calls).toEqual({ find: 0, findOne: 3, count: 0 });
+    });
+
     it('reads the LOADERS, the same population `loadMany` and `loadDiagnosed` read — not the in-memory registry', async () => {
         const { manager } = planeOver([row('from_db', { name: 'from_db' })]);
         manager.registerInMemory(TYPE, 'from_code', { name: 'from_code' });
