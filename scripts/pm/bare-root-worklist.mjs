@@ -1723,10 +1723,14 @@ function selfTest() {
   // declare a hint at that very root — and nothing in this file reddened.
   const SPELLING_REQUIRED = new Set(['SPELLABLE-UNDECLARED', 'DECLARED-NARROWER']);
   const spellingHeld = (v) => !SPELLING_REQUIRED.has(v.verdict) || Boolean(v.spelling);
+  const unspelled = [...TRIAGE.entries()].filter(([, v]) => !spellingHeld(v)).map(([k]) => k);
   t('every SPELLABLE-UNDECLARED and every DECLARED-NARROWER record names a spelling — both '
     + 'verdicts are DEFINED only with one, and the ruling that created the first rejects the '
-    + 'whole option on an unpinned value',
-    [...TRIAGE.values()].every(spellingHeld));
+    + `whole option on an unpinned value${unspelled.length
+      ? ` — UNSPELLED: ${unspelled.join(' · ')}. Record the population as a SPELLINGS entry and `
+        + 'point the row at it, re-measuring BOTH terms on one tree; a row that cannot be spelled '
+        + 'is a row whose verdict is one of the two refusals.' : ''}`,
+    unspelled.length === 0);
   t('…and that rule can FAIL, asked of FIXTURE records rather than of the map it judges: a '
     + 'record carrying either verdict and no spelling is REFUSED, while the two refusals — which '
     + 'have no spelling to record — are not',
