@@ -484,16 +484,75 @@ Ownership rules, refusals and constraints are identical under `single`, `group` 
 whether the wall is enforced differs. Degraded tenancy stays a refused boot. `single` is never a
 reason for a row to be org-less.
 
-### D12 — The `group` posture: no group-shared business rows; the org-axis red lines stand
+### D12 — The `group` posture, rule by rule
 
-[ADR-0105](./0105-group-tenancy-posture-and-first-class-org-scope.md) D10 — layered master data
-(group template rows shared down an organization tree) — is **withdrawn** by the maintainer (verbatim:
-「不考虑集团级模板行，作废相关需求」「不考虑 分层主数据」); ADR-0105 carries the note. Under `group` there
-is exactly one kind of cross-organization visibility, membership union (D2 of that record); D6's red
-lines (no permission inheritance along `parent_organization_id`; business-unit trees stay
-org-internal) are untouched, and this record adds no sharing source of any kind. The catalog needs no
-per-organization copies under `group` either — D2 applies; a headquarters-authored position is an
-ordinary org-owned row of the headquarters.
+[ADR-0105](./0105-group-tenancy-posture-and-first-class-org-scope.md) defines `group` as "organizations =
+membership boundaries over one shared dataset". This record does not redefine the posture; it states,
+for each of its own decisions, what a group deployment gets. The maintainer asked for the list
+(2026-09-04: 「你目前新的 ADR 有重新考虑集团版的规则吗？帮我具体列一下」).
+
+**Unchanged from ADR-0105, restated so nothing is inferred:**
+
+1. **The wall is membership union.** Reads are bounded by `organization_id IN accessible_org_ids`
+   (ADR-0105 D2), resolved from the caller's valid memberships; an empty set fails closed. A
+   headquarters analyst sees every plant they are a member of, on one screen. This is D8's one
+   predicate under `group`, threaded identically to Layer 0 and to every driver — and with **no NULL
+   arm**, so a plant's unstamped row can no longer be seen by the whole group.
+2. **The active organization is the write target** (ADR-0105 D2/D5): a row written in plant A is owned
+   by plant A, NOT NULL (D1/D3).
+3. **The org-axis red lines stand** (ADR-0105 D6): no permission inheritance along
+   `parent_organization_id`; business-unit trees stay inside one organization. This record adds no
+   sharing source and no tree walk (D12, above).
+4. **Cross-organization approvals** (ADR-0105 D9): the request row belongs to the plant; a
+   headquarters approver reaches it through membership union or the system-context mirror; `$root`
+   resolution keeps its single chain walk. Unaffected.
+5. **Delegated administration and scoped invitations** (ADR-0105 D8): unaffected.
+6. **Layered master data** (ADR-0105 D10): **withdrawn** — 「不考虑集团级模板行，作废相关需求」「不考虑
+   分层主数据」. ADR-0105 carries the note. There are no group-shared business rows; a headquarters that
+   wants a plant to read its data makes the plant's users members of the organization that owns it.
+
+**What this record decides for `group`:**
+
+7. **One environment, one schema, one catalog.** A group deployment is one environment. Its managed
+   packages are sealed (D6); its Studio-authored metadata — objects, views, flows, positions, permission
+   sets, templates — is environment-wide and belongs to the deployment, not to any plant (D2/D6). The
+   metadata-authoring capability (`manage_metadata` / `studio.access`) is what headquarters IT holds and
+   plant admins do not. This is 集团统管 for roles by construction: the group defines positions and
+   permission sets once, every plant assigns from the same list (D3/D4).
+8. **Plants assign; plants do not define.** A plant admin assigns its members to positions and
+   permission sets (org-owned rows, NOT NULL, by name — D3/D4), authors its business units, sharing
+   rules and record shares, and manages its data. It cannot create a position, a permission set, a
+   capability, a template or any metadata (D3, verbatim ruling 「单库多租户我可以禁止他们创建。但是你要支持我
+   绑定到人员」). A plant that needs its own catalog is given its own environment.
+9. **No per-plant catalog copies.** #10103 Option C's one-pass-per-organization seeding under `group`
+   retires with the seeders (D2/D13); the catalog tables retire (D3). There is nothing to copy.
+10. **Template packages are refused; managed only.** A shared-DB deployment accepts only the managed
+    install mode (D6): a template import would hand every plant an editable shared schema.
+11. **No per-plant overlays and no per-plant template overrides.** ADR-0005's per-organization overlay
+    axis is retired (D6); a plant cannot re-word an email template or re-lay a view for itself.
+    Presentation customization per plant, if it is ever pulled for, returns as an org-owned overlay
+    object (D3 shape), never as a nullable column.
+12. **Seeds under `group` must name their organization.** D9 derives an owner only under `single`.
+    Application seed datasets on a group deployment carry an explicit `organizationId` (the plant they
+    populate) or the load is refused; a system writer without an organization is refused, never
+    defaulted (D9). Boot seeds no longer exist (D2), so nothing runs before the organizations do.
+13. **Platform standing is configuration.** Under `group` no grant row is written by first-user
+    promotion (D5); `OS_PLATFORM_OWNER_EMAIL` and the platform-exclusive capabilities decide who crosses
+    the wall (ADR-0095 D3, #12974 for the verified owner). Unchanged, restated.
+14. **Deployment-level state has no organization column** (D7) — the environment metadata ledger, the
+    audit ledger, operational plumbing, deployment settings. Recipient-anchored objects (a person who is
+    a member of several plants has one inbox) are decided by their writer facts in the C7 inventory,
+    with cloud's reading — anchor on the person, not on the active organization — as the evidence on
+    file.
+15. **Migration on a group database.** Existing NULL rows take D10's fates: mirrors deleted, business
+    rows attributed to the plant their parent anchor names, unattributable rows reported per table and
+    left NULL until an operator resolves them; the NOT NULL constraint lands per table only when that
+    table reports zero (D10). Nothing is attributed to a "group root" or to any default plant.
+
+**Costs specific to `group`, stated once:** a plant cannot define its own roles, templates or views
+(items 8, 11); a group that wants HQ-authored business data visible in plants expresses it through
+membership, not through a shared row (item 6). Both are the startup posture applied to the shared-DB
+shape; the escape hatch is an environment per plant.
 
 ### D13 — Retirements (ADR-0049)
 
