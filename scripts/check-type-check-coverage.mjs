@@ -590,6 +590,12 @@ const PIN_ISSUE = 'https://github.com/objectstack-ai/objectstack/issues/5286';
 // finding later used ("the directory was never INCLUDED by anything"), which is
 // why the remedy names a file rather than describing a shape (#10756).
 const SPEC_SCRIPTS_PRECEDENT = 'packages/spec/tsconfig.scripts.json';
+// The in-tree precedents TESTS_COVERED's remedy points at for the `rootDir`
+// half of the sibling-config route. Both put a test tree that sits outside the
+// build config's `rootDir` into a program, and both had to widen `rootDir` to
+// the repo root to do it -- the step the remedy named no way to discover until
+// #14943, measured on #14835 at 116 x TS6059 inherited and 3 more at `"."`.
+const TEST_ROOTDIR_PRECEDENT = '`packages/client/tsconfig.test.json` and `packages/cli/tsconfig.test.json`';
 const GENERATED_INCLUDE_ISSUE = 'https://github.com/objectstack-ai/objectstack/issues/10880';
 
 // A path in the root program whose edits move the `@objectstack/spec-monorepo`
@@ -2004,7 +2010,13 @@ function evaluate(packages, root, state) {
             `the check reports green over source it never read (${TRACKING_ISSUE}). Drop the ` +
             `\`*.test.ts\`/\`*.spec.ts\` entry from \`exclude\`, widen \`include\` to reach the test tree, add a ` +
             `sibling \`tsconfig.test.json\` and name it in the \`typecheck\` script (the #5286 route, when the ` +
-            `build config must keep the exclusion), or measure what surfaces and add a TEST_DEBT entry in ${SELF}.`,
+            `build config must keep the exclusion), or measure what surfaces and add a TEST_DEBT entry in ${SELF}. ` +
+            `⚠️ The sibling route usually needs \`rootDir\` widened as well, and leaving it inherited is the ` +
+            `way that route fails: test files outside the build config's \`rootDir\` report one TS6059 each -- ` +
+            `116 of them in one measured onboarding of a sibling \`test/\` tree under \`rootDir: "src"\`, and ` +
+            `\`"."\` still left 3 where tests read fixtures from another package. ${TEST_ROOTDIR_PRECEDENT} ` +
+            `widen it to \`"../.."\` (the repo root) for exactly this reason; \`rootDir\` steers emit layout ` +
+            `only and these programs emit nothing, so it widens the ROOT and never the strictness.`,
         );
       } else {
         const entry = state.testDebt[pkg.name];

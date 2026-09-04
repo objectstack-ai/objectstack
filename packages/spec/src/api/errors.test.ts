@@ -320,7 +320,9 @@ describe('FieldErrorCode', () => {
     // The whole argument for D1's casing: the code IS the schema property name.
     // If these ever diverge, the field vocabulary has lost its reason to be
     // lowercase and the decision should be revisited rather than patched.
-    for (const constraint of ['required', 'max_length', 'min_length', 'max_value', 'min_value'] as const) {
+    // `value_domain` joined 2026-09-04 (#14168): the field-level `valueDomain`
+    // slot's write-path code, named for its property like the four before it.
+    for (const constraint of ['required', 'max_length', 'min_length', 'max_value', 'min_value', 'value_domain'] as const) {
       expect(members).toContain(constraint);
     }
   });
