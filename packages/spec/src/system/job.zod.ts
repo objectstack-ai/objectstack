@@ -9,6 +9,7 @@ import { CronExpressionInputSchema } from '../shared/expression.zod';
  */
 import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
+import { retiredKey } from '../shared/retired-key';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 export const CronScheduleSchema = lazySchema(() => z.object({
   type: z.literal('cron'),
@@ -125,11 +126,24 @@ const JOB_ID_RETIRED =
   + 'different identity. '
   + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.';
 
+/**
+ * `job.timeout` → `job.timeoutMs` (#14478). The unit lived only in the
+ * description; the sibling `retryPolicy.backoffMs` spells its own, so one
+ * surface carried two conventions and an author copying a seconds value in
+ * got a limit 1000× too short with no error anywhere.
+ */
+const JOB_TIMEOUT_RETIRED =
+  '`job.timeout` was removed in @objectstack/spec 17 (#14478) — its unit (milliseconds) lived only '
+  + 'in the description while the sibling `retryPolicy.backoffMs` spells its own, so the same number '
+  + 'read as two conventions on one surface. Rename the key to `timeoutMs`; the value (milliseconds) '
+  + 'is unchanged. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+
 export const JobSchema = lazySchema(() => strictObject({
   surface: 'this job',
   history:
     'Until this shape was closed these were dropped silently — the item still registered, minus whatever the key was meant to configure.',
-  aliases: { cron: 'schedule', interval: 'schedule', fn: 'handler', function: 'handler', retry: 'retryPolicy', enabled_: 'enabled', timeoutMs: 'timeout' },
+  aliases: { cron: 'schedule', interval: 'schedule', fn: 'handler', function: 'handler', retry: 'retryPolicy', enabled_: 'enabled' },
   guidance: { id: JOB_ID_RETIRED },
 }, {
   // `id` removed in 17.0.0 (#4667) — see JOB_ID_RETIRED. `name` is the identity.
@@ -139,7 +153,11 @@ export const JobSchema = lazySchema(() => strictObject({
   schedule: ScheduleSchema.describe('Job schedule configuration'),
   handler: z.string().describe('Handler function name (must match a key in `defineStack({ functions })`)'),
   retryPolicy: RetryPolicySchema.optional().describe('Retry policy: failed runs (including timeouts) are retried with exponential backoff (delay = min(backoffMs * backoffMultiplier^(retry-1), maxRetryDelayMs), optionally jittered) up to maxRetries retries after the initial attempt. Omit the block for a single attempt; declaring it without `maxRetries` also means no retry since 17.0.0 — state a count to opt in.'),
-  timeout: z.number().int().positive().optional().describe('Per-attempt time limit in milliseconds; an over-limit run is recorded with execution status "timeout". The in-flight handler is abandoned, not forcibly cancelled. Omit for no time limit.'),
+  // Renamed from `timeout` (#14478): the unit (milliseconds) lived only in the
+  // description while the sibling `retryPolicy.backoffMs` spells its own.
+  // Tombstoned rather than deleted so the rejection carries the rename.
+  timeoutMs: z.number().int().positive().optional().describe('Per-attempt time limit in milliseconds; an over-limit run is recorded with execution status "timeout". The in-flight handler is abandoned, not forcibly cancelled. Omit for no time limit.'),
+  timeout: retiredKey(JOB_TIMEOUT_RETIRED),
   enabled: z.boolean().default(true).describe('Whether the job is enabled'),
 
   // ADR-0010 — runtime protection envelope (internal — set by the loader).

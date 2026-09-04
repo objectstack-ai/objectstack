@@ -19,8 +19,16 @@ export const DriverOptionsSchema = lazySchema(() => z.object({
 
   /**
    * Operation timeout in milliseconds.
+   *
+   * Renamed from `timeout` (#14478): the unit lived only in the description.
+   * Tombstoned rather than deleted because this shape is not `.strict()` — a
+   * plain deletion would strip the old key in silence.
    */
-  timeout: z.number().optional().describe('Timeout in ms'),
+  timeoutMs: z.number().optional().describe('Operation timeout in milliseconds'),
+  timeout: retiredKey(
+    '`DriverOptions.timeout` was removed in @objectstack/spec 17 (#14478) — its unit (milliseconds) ' +
+    'lived only in the description. Rename the key to `timeoutMs`; the value (milliseconds) is unchanged.',
+  ),
 
   /**
    * Whether to bypass cache and force a fresh read.

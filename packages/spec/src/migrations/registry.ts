@@ -5338,7 +5338,16 @@ const step18: MigrationStep = {
     'who wrote `triageDeadlineHours: 4` held a deadline the platform never kept. All ' +
     'fourteen are retiredKey tombstones (the schemas are not strict; a bare deletion ' +
     'would be a silent strip) with no D2 conversion, for the additionalTypes reason: ' +
-    'none of these schemas is a stack collection member, so the chain has no seam.',
+    'none of these schemas is a stack collection member, so the chain has no seam. ' +
+    'Finally, it moves the unit of every duration-shaped `z.number()` key whose unit lived ' +
+    'only in its description into the key name (#14478, maintainer ruling 2026-09-02, ' +
+    'no grandfathered baseline): `hook.timeout` and `job.timeout` become `timeoutMs` ' +
+    '(mechanical rename, retired from the load path), and the five keys with no stack ' +
+    'seam — `MetadataManagerConfig.cache.ttl` / `cache.databaseLoader.ttl` (seconds and ' +
+    'milliseconds fourteen lines apart under one name), `DriverOptions.timeout`, and the ' +
+    'tenant `connectionPool.idleTimeout` / `accessControl.sessionTimeout` whose unit the ' +
+    'reference pages never published (#14519) — are retiredKey tombstones with a ' +
+    'semantic entry each, naming the suffixed key.',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5356,6 +5365,8 @@ const step18: MigrationStep = {
     'form-view-option-default-removed',
     'field-reference-to-alias',
     'connector-error-mapping-removed',
+    'hook-timeout-to-timeout-ms',
+    'job-timeout-to-timeout-ms',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by
@@ -6264,6 +6275,27 @@ const step18: MigrationStep = {
         'has a username in that URL\'s userinfo and connects authenticated as that user; every ' +
         'datasource meant to connect anonymously carries no `credentialsRef`; no datasource ' +
         'parse reports the #9041 refusal.',
+    },
+    {
+      id: 'driver-options-timeout-to-timeout-ms',
+      surface: '`DriverOptions.timeout` (data/driver.zod.ts) — the per-call options argument of every `IDataDriver` method',
+      replacement: '`DriverOptions.timeoutMs` (milliseconds) — rename the key; the value is unchanged',
+      reason:
+        'Maintainer ruling 2026-09-02 on #14478 (ruled B — no grandfathered baseline): the unit of a '
+        + 'duration-shaped `z.number()` key lives in the key NAME, never only in the description. '
+        + '`timeout` said "Timeout in ms" in prose and nothing else. Tombstoned with retiredKey '
+        + '(`DriverOptionsSchema` is not strict, so a bare deletion would strip the old key in '
+        + 'silence) and registered as `data/DriverOptions:timeout`. Why a semantic entry and not a '
+        + 'D2 conversion: a `DriverOptions` object is built at a call site and handed to a driver '
+        + 'method — it is not a stack collection member and is never stored, so the chain has no '
+        + 'seam that runs on it. Measured on ca46f8f12: no in-repo driver reads the key (the '
+        + 'engine\'s own per-call budget is a separate `timeoutMs` on its options), so callers move '
+        + 'their spelling with no behaviour change.',
+      acceptanceCriteria:
+        'No caller passes `{ timeout }` in a `DriverOptions` argument; a call spelling it fails to '
+        + 'compile (input type `never`) and `DriverOptionsSchema.parse({ timeout: 5000 })` fails with '
+        + 'the rename prescription naming `timeoutMs`; `{ timeoutMs: 5000 }` parses to the same '
+        + 'number.',
     },
     {
       id: 'driver-sql-unresolvable-where-column-refused',
@@ -7385,6 +7417,34 @@ const step18: MigrationStep = {
         + 'remains listable and clearable.',
     },
     {
+      id: 'metadata-manager-config-cache-ttl-unit-in-key',
+      surface: 'MetadataManagerConfig `cache.ttl` / `cache.databaseLoader.ttl` (kernel/metadata-loader.zod.ts)',
+      replacement: '`cache.ttlSeconds` (seconds, default 3600) and `cache.databaseLoader.ttlMs` '
+        + '(milliseconds, default 60000) — rename each key; the values are unchanged',
+      reason:
+        'Maintainer ruling 2026-09-02 on #14478 (ruled B — no grandfathered baseline): the unit of a '
+        + 'duration-shaped `z.number()` key lives in the key NAME or in a unit-carrying value, never '
+        + 'only in the description. This block was the founding specimen: two keys spelled `ttl` '
+        + 'fourteen lines apart, the outer one in SECONDS (3600) and the nested DatabaseLoader one in '
+        + 'MILLISECONDS (60000), each unit named only in `.describe()`. An author who copied the outer '
+        + 'number into the inner block got a 3.6-second cache with no error anywhere — the number was '
+        + 'valid, the type was right, the cache was simply cold. Both keys are retiredKey tombstones '
+        + '(the nested objects are not strict; a bare deletion would strip the old key in silence). '
+        + 'Why a semantic entry and not a D2 conversion: `MetadataManagerConfig` is the runtime '
+        + 'MetadataManager\'s constructor config, not a stack collection member and never a stored '
+        + 'row, so the chain has no seam that ever runs on it (the `kernel/Manifest:loading` and '
+        + '`metadata-plugin-additional-types-retired` precedent). The one in-repo reader, '
+        + '`DatabaseLoader` (`packages/metadata`), reads `cache.databaseLoader.ttlMs` at the same '
+        + 'magnitude it read `ttl`; the outer `cache.ttl` had no runtime reader (measured on '
+        + 'ca46f8f12, and filed separately).',
+      acceptanceCriteria:
+        'Every `new MetadataManager({ cache: … })` / `MetadataManagerConfigSchema.parse(…)` site spells '
+        + '`cache.ttlSeconds` and `cache.databaseLoader.ttlMs`; authoring either old `ttl` fails to '
+        + 'compile (input type `never`) and fails to parse with the rename prescription naming the '
+        + 'suffixed key; a DatabaseLoader configured with `ttlMs: 60000` expires entries after 60 '
+        + 'seconds exactly as `ttl: 60000` did.',
+    },
+    {
       id: 'metadata-plugin-additional-types-retired',
       surface: 'metadata plugin `config.additionalTypes` (on `MetadataPluginConfig`)',
       replacement:
@@ -8262,6 +8322,32 @@ const step18: MigrationStep = {
         + 'the contract. Runtime behaviour is unchanged: the bridge\'s #11833 '
         + 'parse-and-refuse accepts and rejects exactly the same sets before and after, '
         + 'and no stored metadata or document needs editing.',
+    },
+    {
+      id: 'tenant-timeouts-unit-in-key',
+      surface: 'DatabaseLevelIsolationStrategy `connectionPool.idleTimeout` / TenantSecurityPolicy '
+        + '`accessControl.sessionTimeout` (system/tenant.zod.ts)',
+      replacement: '`connectionPool.idleTimeoutSeconds` (default 300) and `accessControl.sessionTimeoutSeconds` '
+        + '(default 3600) — rename each key; the values (seconds) are unchanged',
+      reason:
+        'Maintainer ruling 2026-09-02 on #14478 (ruled B), folding in #14519. Both keys carried their '
+        + 'unit (seconds) in a source JSDoc only; `.describe()` — the text `content/docs/references/**` '
+        + 'publishes — said "Idle pool timeout" and "Session timeout" with no unit at all. So the one '
+        + 'reader who most needs the unit, the reader of the published reference page, was the only '
+        + 'reader who never saw it: 300 is a plausible number of seconds and a plausible number of '
+        + 'milliseconds, and nothing on the page decided it. #14519 proposed adding the unit to the two '
+        + 'descriptions; under the #14478 gate that exact fix is a violation (unit in prose, none in '
+        + 'the name), so the keys are renamed instead — one breaking change per key, and the tree '
+        + 'never passes through a state the gate refuses. Both are retiredKey tombstones (the nested '
+        + 'objects are not strict). Why a semantic entry and not a D2 conversion: neither schema is a '
+        + 'stack collection member or a stored row (they describe cloud tenancy configuration), so the '
+        + 'chain has no seam that runs on them (the `kernel/Manifest:loading` precedent). Measured on '
+        + 'ca46f8f12: no in-repo runtime reads either key.',
+      acceptanceCriteria:
+        'Every tenant isolation / security-policy source spells `idleTimeoutSeconds` and '
+        + '`sessionTimeoutSeconds`; authoring `idleTimeout` or `sessionTimeout` fails to compile and '
+        + 'fails to parse with the rename prescription naming the suffixed key; the parsed defaults '
+        + 'are 300 and 3600 as before.',
     },
     {
       id: 'training-deadline-keys-retired',
@@ -9184,6 +9270,18 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // consumers through this tombstone plus the D3 semantic entry
     // `session-user-language-retired`.
     'api/SessionUser:language',
+    // #14478 — maintainer ruling 2026-09-02 ("ruled B"): the unit of a
+    // duration-shaped `z.number()` key lives in the key name, and no existing
+    // offender is grandfathered. `DriverOptions.timeout` said "Timeout in ms" in
+    // prose and nothing else; renamed to `timeoutMs`, value unchanged. Tombstoned
+    // with `retiredKey()` because `DriverOptionsSchema` is not `.strict()` (a bare
+    // deletion would strip the old key in silence). No D2 conversion: a
+    // `DriverOptions` object is a per-call options argument to driver methods,
+    // never a stack collection member or a stored row, so the chain has no seam
+    // (the `kernel/Manifest:loading` precedent); the semantic entry
+    // `driver-options-timeout-to-timeout-ms` carries the prescription. Registered
+    // under 18 for the launch-window reason its neighbours state.
+    'data/DriverOptions:timeout',
     // #10414 — ADR-0049 enforce-or-remove (triage routed REMOVE; the #10298 shape
     // one level up). `filters` was a declared, authorable per-metric raw-SQL
     // filter (`filters: [{ sql: string }]`) with ZERO consumers, measured with a
@@ -10086,6 +10184,22 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // parse) and the D3 semantic entry named below.
     // D3 semantic entry: `incident-response-deadline-keys-retired`.
     'system/IncidentResponsePolicy:triageDeadlineHours',
+    // #14478 — maintainer ruling 2026-09-02 (recorded on the card as "ruled B"):
+    // a duration-shaped `z.number()` key carries its unit in its NAME, never only
+    // in its `.describe()` prose, and no existing offender is grandfathered.
+    // `job.timeout` said "in milliseconds" in prose while its sibling
+    // `retryPolicy.backoffMs` spelled its unit — one surface, two conventions, and
+    // a seconds value copied in became a limit 1000× too short with no error.
+    // Renamed to `timeoutMs`; the value is unchanged. Tombstoned with
+    // `retiredKey()` on the strict `JobSchema` (the `ObjectGridProps:defaultSort`
+    // route — the baseline line carries `[RETIRED]`, and the tombstone carries the
+    // rename where a bare unknown-key error would only carry the key); sources
+    // are rewritten by the D2 conversion `job-timeout-to-timeout-ms`, retired from
+    // the load path (no alias window). Registered under 18, not 17: v17.0.0 was
+    // cut before this landed, so the rename ships on the 17.x line
+    // (launch-window convention) and the prescription lives at the major boundary
+    // where `migrate meta` users look.
+    'system/Job:timeout',
     // #14477 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-02, ruled A:
     // retire per family). One of the hour/minute/day-shaped deadline keys of the
     // incident-response / training / change-management families: declared on the

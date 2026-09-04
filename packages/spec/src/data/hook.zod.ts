@@ -28,10 +28,11 @@ import type { IScopedContext } from '../contracts/scoped-context';
  * a breaking change for anyone parsing a context they were handed. Same
  * reasoning as `RLSUserContextSchema` / `FlowVersionHistorySchema`.
  *
- * Two near-miss key names, both now aliased because they are genuinely easy to
- * cross:
- *   - hook-level `timeout` vs body-level `timeoutMs` (see hook-body.zod.ts)
+ * One near-miss key name, aliased because it is genuinely easy to cross:
  *   - hook `retryPolicy.backoffMs` vs datasource `retryPolicy.baseDelayMs`
+ * The other one — hook-level `timeout` vs body-level `timeoutMs` — was closed
+ * by #14478: both levels now spell `timeoutMs`, and the bare `timeout` is a
+ * tombstone carrying the rename.
  */
 
 /*
@@ -160,7 +161,6 @@ export const HookSchema = lazySchema(() => strictObject(
       when: 'condition',
       predicate: 'condition',
       retry: 'retryPolicy',
-      timeoutms: 'timeout',
       errorpolicy: 'onError',
       onfailure: 'onError',
       // [#14010] `run_as` / `run-as` / `RunAs` all probe-fold to this one entry.
@@ -322,8 +322,20 @@ export const HookSchema = lazySchema(() => strictObject(
 
   /**
    * Execution Timeout
+   *
+   * Renamed from `timeout` (#14478): the unit (milliseconds) lived only in the
+   * description, beside a body-level `timeoutMs` and a `retryPolicy.backoffMs`
+   * that spell theirs. Tombstoned rather than deleted so the rejection carries
+   * the rename (a bare unknown-key error would only carry the key).
    */
-  timeout: z.number().optional().describe('Maximum execution time in milliseconds before the hook is aborted'),
+  timeoutMs: z.number().optional().describe('Maximum execution time in milliseconds before the hook is aborted'),
+  timeout: retiredKey(
+    '`hook.timeout` was removed in @objectstack/spec 17 (#14478) — its unit (milliseconds) lived ' +
+    'only in the description, beside a body-level `timeoutMs` and a `retryPolicy.backoffMs` that ' +
+    'spell theirs, so the same number read as two conventions on one surface. ' +
+    'Rename the key to `timeoutMs`; the value (milliseconds) is unchanged. ' +
+    'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+  ),
 
   /**
    * Error Policy

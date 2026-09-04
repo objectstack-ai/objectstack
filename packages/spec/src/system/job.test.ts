@@ -343,12 +343,12 @@ describe('JobSchema', () => {
         backoffMs: 2000,
         backoffMultiplier: 2,
       },
-      timeout: 300000,
+      timeoutMs: 300000,
       enabled: true,
     };
 
     const parsed = JobSchema.parse(job);
-    expect(parsed.timeout).toBe(300000);
+    expect(parsed.timeoutMs).toBe(300000);
     expect(parsed.retryPolicy?.maxRetries).toBe(5);
   });
 
@@ -369,16 +369,49 @@ describe('JobSchema', () => {
     });
   });
 
-  it('should accept job with timeout', () => {
+  it('should accept job with timeoutMs', () => {
     const job = {
       name: 'long_running_job',
       schedule: { type: 'cron' as const, expression: '0 0 * * *' },
       handler: 'jobs/handler.ts',
-      timeout: 600000, // 10 minutes
+      timeoutMs: 600000, // 10 minutes
     };
 
     const parsed = JobSchema.parse(job);
-    expect(parsed.timeout).toBe(600000);
+    expect(parsed.timeoutMs).toBe(600000);
+  });
+
+  // #14478 — the unit of a duration-shaped number lives in the key name. The
+  // old `timeout` is a retiredKey tombstone on this strict shape: the
+  // rejection must carry the RENAME (the prescription is the payload), not a
+  // bare unrecognized-key error, and the value must survive the rename at the
+  // same magnitude.
+  describe('job.timeout → job.timeoutMs (#14478, ADR-0087 `job-timeout-to-timeout-ms`)', () => {
+    const base = {
+      name: 'long_running_job',
+      schedule: { type: 'cron' as const, expression: '0 0 * * *' },
+      handler: 'jobs/handler.ts',
+    };
+
+    it('REFUSES the retired `timeout` spelling with the rename in the message', () => {
+      const result = JobSchema.safeParse({ ...base, timeout: 600000 });
+      expect(result.success).toBe(false);
+      const issue = result.error!.issues.find((i) => i.path.join('.') === 'timeout');
+      expect(issue).toBeDefined();
+      expect(issue!.code).not.toBe('unrecognized_keys');
+      expect(issue!.message).toMatch(/`job\.timeout` was removed.*Rename the key to `timeoutMs`.*os migrate meta --from 17/s);
+    });
+
+    it('accepts `timeoutMs` at the same magnitude the retired key carried', () => {
+      const parsed = JobSchema.parse({ ...base, timeoutMs: 600000 });
+      expect(parsed.timeoutMs).toBe(600000);
+      expect(parsed).not.toHaveProperty('timeout');
+    });
+
+    it('no longer aliases `timeoutMs` onto anything — it IS the key', () => {
+      const result = JobSchema.safeParse({ ...base, timeoutMs: 1 });
+      expect(result.success).toBe(true);
+    });
   });
 
   it('should accept disabled job', () => {
