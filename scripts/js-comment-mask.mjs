@@ -418,6 +418,76 @@ export function maskComments(source) {
 // as one that passed (#13798).
 const SELF_TEST_VERDICT = 'js-comment-mask self-test reached its verdict';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failed === 0` used to be this self-test's ONLY success condition, so "every
+// case held" and "the cases never ran" printed the same line. Closed the PR
+// #13487 way: what is pinned is the registered NAMES, not a number.
+//
+// This self-test is TABLE-DRIVEN — one literal `cases` table, one loop over it,
+// and a sink (`failed++`) that writes only when a case FAILS. Routing THAT sink
+// through `registerCase()` would register a case only when it fails: a fully
+// green run would register 0 and every battery would read DID NOT RUN, the
+// floor inverted rather than installed. So the roster is the table's own rows.
+// Each row LABEL is a declared battery, verbatim, with a floor of 1, and
+// `registerCase(name)` is the first statement of the driving loop body — so the
+// case is attributed to the row actually being run, whatever that row asserts
+// afterwards. There is no `battery()` opener: for a table-driven self-test the
+// ROW is the battery, so attribution is the loop variable rather than a
+// most-recently-opened section.
+//
+// ⛔ A pinned TOTAL is not the repair, and neither is a roster DERIVED from the
+// table: `cases.length` moves with the table, so a deleted row would delete its
+// own floor. The roster below is a LITERAL the table is checked against, which
+// is what lets a deleted or renamed row name ITSELF in the refusal.
+//
+// The counts are a FLOOR, not an equality — a row that grows into several
+// registrations must not red. 1 is the honest floor for a table row: the loop
+// reaches it exactly once per run.
+//
+// SCOPE, stated so the next reader does not mistake the number: the
+// `interpolation` section below the corpus loop is NOT a second literal table.
+// Its rows exist only because an `x(...)` call pushed them onto `extra` at
+// runtime, so a roster taken from that loop would be DERIVED — a deleted `x`
+// call would silently delete its own floor, which is the one defect this shape
+// exists to prevent. Those twelve assertions are therefore left exactly as they
+// are, and the verdict line keeps counting them separately, as it always has.
+// Flooring them needs the literal-roster treatment of its own and is not a
+// table-row question.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'string containing a block-comment opener': 1,
+  'URL inside a string': 1,
+  'bare // inside a string': 1,
+  'block-comment opener inside a template literal': 1,
+  'regex character class holding a double quote': 1,
+  'regex character class holding a BACKTICK first': 1,
+  'markdown regex carrying a backtick': 1,
+  'regex literal containing an escaped //': 1,
+  'line comment immediately after a colon': 1,
+  'regex literal after the `return` keyword': 1,
+  'regex literal after the `case` keyword': 1,
+  'shebang is a comment': 1,
+  'division after a paren, then a quote-bearing regex': 1,
+  'nested template inside an interpolation': 1,
+  'escaped backtick inside a template, without nesting': 1,
+  'template nested inside a nested template': 1,
+  'template spanning lines, carrying a nested template': 1,
+  'a backtick inside a regex inside an interpolation': 1,
+  'an object literal, then a nested template, in one interpolation': 1,
+  'a brace and a backtick quoted inside an interpolation': 1,
+  'a real comment inside an interpolation': 1,
+  'a genuine docblock is still removed': 1,
+  'a genuine line comment is still removed': 1,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too. This pin is also half of
+// the duplicate-label refusal: two rows sharing a label collapse to ONE key in
+// the literal above, so the roster falls below this number; the table
+// cross-check in the floor block is the other half, and names WHICH label
+// collided.
+const SELF_TEST_BATTERY_FLOOR = 23;
+
 export function selfTest() {
   const BT = String.fromCharCode(96); // backtick, kept out of the literal below
   const cases = [
@@ -493,8 +563,15 @@ export function selfTest() {
   // Both projections are driven, on every shape: they share one scanner, so a
   // shape either family gets wrong is a scanner bug, and a disagreement between
   // them about what IS a comment is the thing that must never ship.
+  // The ledger this self-test's floor is evaluated against (#13489).
+  const batterySeen = new Map();
+  const registerCase = (name) => {
+    batterySeen.set(name, (batterySeen.get(name) ?? 0) + 1);
+  };
+
   let failed = 0;
   for (const [name, src] of cases) {
+    registerCase(name);
     const masked = maskComments(src);
     const stripped = stripComments(src);
     const problems = [];
@@ -571,8 +648,64 @@ export function selfTest() {
   }
   const total = cases.length + extra.length;
 
+  // ── The floor: every declared row RAN, and ran its case (#13489) ───────
+  //
+  // Evaluated after every row has had its chance and BEFORE the verdict, so the
+  // success line below can only be printed by a run in which the set of rows
+  // that registered EQUALS the set declared. A set difference names WHICH row
+  // stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    console.error(`✗ self-test floor: ${message}`);
+    failed++;
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  const rowLabels = cases.map(([name]) => name);
+  const duplicated = [...new Set(rowLabels.filter((name, i) => rowLabels.indexOf(name) !== i))];
+  if (duplicated.length > 0) {
+    floorBreached = true;
+    floorFailure(
+      `the cases table uses ${duplicated.map((n) => JSON.stringify(n)).join(', ')} as a row label more than once — ` +
+        'two rows sharing a label are ONE battery, so the second can stop running while the first keeps the floor met.',
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — a case attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed that case holds.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (a deleted row, a renamed label, a loop that no longer ' +
+        'reaches it) and restore it.',
+    );
+  }
+
   if (failed) {
-    console.error(`\u2717 js-comment-mask self-test: ${failed} of ${total} case(s) failed.`);
+    console.error(`\u2717 js-comment-mask self-test: ${failed} failure(s) (cases and floor).`);
     process.exit(1);
   }
   console.log(`\u2713 js-comment-mask self-test: ${total} cases pass (${cases.length} mask/strip corpus, ${extra.length} interpolation view).`);
