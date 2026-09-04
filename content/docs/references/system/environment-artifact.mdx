@@ -31,6 +31,13 @@ identity (`commitId`, `checksum`).
   `checksum`.
 - **Deployment Config (NOT in this schema):** business DB coordinates,
   credentials, environment identity, secrets. Injected at runtime.
+- **Consent state (this schema, `grantedPermissions`, #14865):** the
+  install-time GRANTED permission set per plugin, keyed by the plugin
+  manifest `id` — written by the control plane at consent-compile time,
+  read by the loader at materialize time. Control-plane state re-emitted
+  on every artifact assembly, not compiled metadata: it sits beside
+  `metadata`, outside the `checksum` digest. Absent ≠ `{}` — see the
+  key's docblock.
 
 See `content/docs/concepts/north-star.mdx` §6.3 for the
 runtime-inputs boundary.

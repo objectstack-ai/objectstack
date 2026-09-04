@@ -310,6 +310,23 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
 
     // ── foreign vocabularies: spelled `code`, not an ADR-0112 error.code ────
     {
+        code: 'TEXT',
+        file: 'packages/cli/src/commands/generate.ts',
+        shape: 'objlit',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'Not a vocabulary of codes at all — it is the SQL column type for the `code` FIELD TYPE ' +
+            "(a code editor), one entry of `FIELD_TYPE_SQL_MAP`, whose keys are `FieldType` members and " +
+            'whose values are DDL types. The scan reaches it because the key is spelled `code` and the ' +
+            'value happens to be upper-case; its siblings (`signature: \'TEXT\'`, `qrcode: \'TEXT\'`) ' +
+            'are the same string and are invisible only because their keys are not `code`. Nothing here ' +
+            'is thrown, returned, or stamped on an envelope: the value is interpolated into generated ' +
+            "`CREATE TABLE` text by `os generate migration --format sql`. The twin entry in " +
+            '`FIELD_TYPE_MAP` reads `code: \'string\'` and is below the grammar for the same reason ' +
+            'this one is above it — case, not meaning.',
+    },
+    {
         code: 'MODULE_NOT_FOUND',
         file: 'packages/types/src/node.ts',
         shape: 'objlit',
@@ -568,6 +585,44 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             'ADR-0112 D1 forbids registering it as spelled — the rename-or-keep-the-#9106-demote call is ' +
             "the `packages/spec` lane's, tracked as #9460 half (2) and NOT decided here. The row records " +
             'that a live wire code is outside the vocabulary; it does not prescribe the remedy.',
+    },
+
+    // ── pending registration [#14474]: an install-time refusal that GAINED an
+    // ── envelope, so the scan can see it for the first time ────────────────
+    // Not a widened scan and not a new producer: `NamespaceConflictError` has
+    // thrown from `SchemaRegistry.installPackage` since ADR-0048 Phase 1, but
+    // it carried no `code` at all, so there was no stamp for any pattern to
+    // match. #14474 gave it the ADR-0112 envelope its three install-time
+    // siblings already carried, which is what put a site here to classify.
+    // The door narrowing its `why` names is #9106's — the file header above
+    // carries it. The anchor lives here rather than in the string, because a
+    // runtime string reaches operators who cannot resolve a tracker id.
+    {
+        code: 'NAMESPACE_CONFLICT',
+        file: 'packages/objectql/src/registry.ts',
+        shape: 'classfield',
+        door: 'dispatcher',
+        verdict: 'pending-registration',
+        why:
+            'ADR-0048 Phase 1 — the install-time namespace gate\'s refusal, raised by ' +
+            '`SchemaRegistry.installPackage` when a package\'s `manifest.namespace` is already owned by an ' +
+            'installed package that is not a co-owner of it (ADR-0130 D1). ⭐ Its reachability is what ' +
+            'separates it from the three ADR-0130 install-time rows below, whose `door: none` turns on ' +
+            'needing an artifact install SCOPE that no HTTP caller builds: this gate needs no scope, so the ' +
+            'ordinary one-package install reaches it. MEASURED on a booted stack (`@objectstack/verify` ' +
+            '`bootStack`, dev admin, two `POST /api/v1/packages` installs declaring one namespace), not ' +
+            'inferred from the call graph. Before the envelope the door answered `500` with ' +
+            '`code: INTERNAL_ERROR` — `packages/runtime/src/domains/packages.ts` catches and calls ' +
+            '`errorFromThrown(e, 500)`, and `resolveThrownHttpError` found neither `.status` nor `.code` to ' +
+            'read, so the caller\'s fallback stood. With the envelope the SAME request answers `422` and ' +
+            'the body carries `declaredCode: NAMESPACE_CONFLICT` beside `code: VALIDATION_ERROR` (the ' +
+            'member 422 derives through `standardErrorCodeForHttpStatus`, which does not name 422 and ' +
+            'buckets it as a client error). That demote is the door narrowing described in this file\'s ' +
+            'header, and it is exactly what ' +
+            'a `pending-registration` row records: the body PARSES, and what the producer loses instead is ' +
+            'its semantic code, silently absent from `error.code` until a ledger row lands. ⛔ Registering ' +
+            'it is the `packages/spec` lane\'s call and is NOT made here — this row is that batch\'s input, ' +
+            'and registering the code is what ratchets the row out again.',
     },
 
     // ── boot refusals: no HTTP boundary exists yet ─────────────────────────

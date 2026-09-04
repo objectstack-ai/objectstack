@@ -17,16 +17,17 @@
  *
  * ## Row shape — ⛔ this module writes COLUMNS, never schema
  *
- * `metadata_type: 'action'` · `name` · `package_id` · `organization_id` ·
- * `active`, exactly the five ADR-0126 §4 declares (the object itself lives in
+ * `metadata_type: 'action'` · `name` · `package_id` · `active`, exactly the
+ * four ADR-0126 §4 declares (the object itself lives in
  * `packages/platform-objects`, which is why this leg needs zero `packages/spec`
  * surface). Two properties of that shape are load-bearing here:
  *
- *   - **`organization_id` is never written.** It is declared nullable and
- *     RESERVED (§5): every row this line writes is install-level, so the column
- *     stays NULL. The object's `unique: 'organization'` index collapses NULL
- *     through the driver's `COALESCE(organization_id, '__global__')`, so NULL
- *     rows are still unique per `(metadata_type, name)` — which is what lets
+ *   - **There is no tenant column.** A row is DEPLOYMENT-level state — "this
+ *     environment switched this action off" — owned by no organization. The
+ *     table briefly carried a reserved, never-written organization column;
+ *     it was dropped before it ever shipped. The object's declared
+ *     `unique: 'global'` index over `(metadata_type, name)` is therefore the
+ *     whole of the row identity, which is what lets
  *     {@link ObjectStoreActionActivationStore.setActive} treat "the row for this
  *     action" as at most one row.
  *   - **Absence of a row means ACTIVE.** Nothing here ever writes a row to say
@@ -115,9 +116,8 @@ const METADATA_TYPE = 'action';
 /**
  * [ADR-0126 §4] One packaged action's install-level activation row, as the
  * engine sees it. The ledger's own columns are `metadata_type` / `name` /
- * `package_id` / `organization_id` / `active`; `metadata_type` is fixed to
- * `'action'` by the store and `organization_id` is never written on this line
- * (§5), so those two never reach the projection.
+ * `package_id` / `active`; `metadata_type` is fixed to `'action'` by the store,
+ * so it never reaches the projection.
  *
  * An alias of the shared row (#12350): the ADR declares ONE row shape, so a
  * separate declaration here could only ever drift from it. `name` here is the

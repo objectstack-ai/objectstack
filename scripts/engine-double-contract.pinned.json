@@ -112,6 +112,11 @@
       "pinned": 3
     },
     {
+      "file": "packages/metadata-protocol/src/protocol-14038-list-commits-created-at-iso.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol-publish-drafts-advisories.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -1072,6 +1077,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.recovery-doors-mutation-projector.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.recovery-doors-mutation-projector.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.recovery-doors-mutation-projector.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.reference-derivation.test.ts",
       "verb": "findOne",
       "pinned": 1
@@ -1532,6 +1552,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/sys-metadata-repository-14037-event-ts-canonicalisation.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/sys-metadata-repository-14037-event-ts-canonicalisation.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/sys-metadata-repository-14037-event-ts-canonicalisation.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/sys-metadata-repository.contract.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -1634,6 +1669,11 @@
     {
       "file": "packages/metadata-protocol/src/view-container-runtime-expansion.test.ts",
       "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata/src/loaders/database-loader-14037-adapter-boundary-iso.test.ts",
+      "verb": "findOne",
       "pinned": 1
     },
     {
@@ -1673,6 +1713,16 @@
     },
     {
       "file": "packages/objectql/src/action-activation.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/hook-run-as.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/hook-run-as.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -2439,7 +2489,7 @@
     {
       "file": "packages/plugins/plugin-security/src/claim-seed-ownership.test.ts",
       "verb": "update",
-      "pinned": 1
+      "pinned": 5
     },
     {
       "file": "packages/plugins/plugin-security/src/controlled-by-parent-chain.test.ts",
@@ -2564,6 +2614,11 @@
     {
       "file": "packages/plugins/plugin-security/src/permission-set-resolution-memo.test.ts",
       "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/record-share-tenant-wall.test.ts",
+      "verb": "update",
       "pinned": 1
     },
     {
@@ -2692,6 +2747,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-sharing/src/backfill-sys-record-share-organizations.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-sharing/src/boot-backfill.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -2782,12 +2842,12 @@
       "pinned": 1
     },
     {
-      "file": "packages/plugins/plugin-sharing/src/system-write-skip-notice.test.ts",
+      "file": "packages/plugins/plugin-sharing/src/system-write-materialisation.test.ts",
       "verb": "delete",
       "pinned": 1
     },
     {
-      "file": "packages/plugins/plugin-sharing/src/system-write-skip-notice.test.ts",
+      "file": "packages/plugins/plugin-sharing/src/system-write-materialisation.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -3002,6 +3062,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/runtime/src/action-governance-scope-divergence.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/runtime/src/domains/meta-published-runtime-publish.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -3189,6 +3254,11 @@
     {
       "file": "packages/services/service-automation/src/runas-grant-resolution.integration.test.ts",
       "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-automation/src/suspended-run-store.test.ts",
+      "verb": "delete",
       "pinned": 1
     },
     {

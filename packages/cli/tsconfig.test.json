@@ -1,0 +1,160 @@
+// The TEST-layer type-check program (#14710), adopting the mechanism #5286 set
+// for `packages/spec` and #5449 generalised. `tsconfig.json` beside this file
+// stays exactly as it is: it is the BUILD config, and its `include: ["src"]` is
+// correct for a build — `tsconfig.build.json` ships `src` and nothing else.
+// This sibling puts the unread layer in front of tsc, and `package.json`'s
+// `typecheck` script NAMES it (via `check:test-typecheck --project`), because a
+// config no script invokes is exactly the phantom this whole change is about.
+//
+// ⚠️ THIS PACKAGE REACHED THE HIDDEN STATE BY THE OTHER SPELLING, and that is
+// the part worth carrying to the next package. AGENTS.md forbids `exclude`-ing
+// `*.test.ts` from a package tsconfig. This package has no `exclude` AT ALL —
+// it declares `include: ["src"]`, and its 115 test files live in a sibling
+// `test/` tree the glob simply never reaches. Identical end state, arriving
+// through a door the rule's text does not cover. Whether that gap should be
+// closed in AGENTS.md or in `check:type-check-coverage` itself is deliberately
+// NOT this file's business (the card's triage said so); what IS this file's
+// business is that `hiddenTests` — which walks the whole package rather than
+// the include roots — is the only detector that could ever have seen it.
+//
+// BEFORE THIS FILE, NO tsc PROGRAM COMPILED A SINGLE `test/` FILE HERE, and
+// that is measured rather than read off the config. At 5a5336b399 with the
+// workspace closure built first, `tsc --noEmit --listFiles -p tsconfig.json`
+// puts 1009 files in the program and **0** of the 115 `test/**/*.test.ts`
+// among them — while 119 of 119 non-test `src/**` files AND all 121 of the
+// package's `src/**` test files ARE there. So the zero is the `include` line
+// and not a probe that sees nothing, and the contrast is inside this one
+// package: tests under `src` always compiled, tests under `test/` never did.
+// The directional control is `packages/drivers/driver-memory`, whose tsconfig
+// carries no test exclusion: the same probe puts **40 of its 40** test files in
+// the program. Under this file the count is **115 of 115** (1416 files total).
+// `pnpm --filter @objectstack/cli typecheck` exiting 0 was a true sentence
+// carrying no information about any file in `test/`.
+//
+// THE THREE PACKAGE-ROOT HARNESS MODULES COME IN HERE TOO, deliberately and not
+// as a separate concern: `vitest.config.ts`, `vitest-tiers.ts` and
+// `vitest-tiers.fixtures.ts` were in no tsc program either (#14554 recorded
+// them as NOT MEASURED rather than claiming coverage). They fall out of this
+// same `include`, as does `test/helpers/serve-process.ts` — the one non-test
+// module in the test tree, which had its own `UNCHECKED_SOURCE_DEBT` row in
+// `scripts/check-type-check-coverage.mjs` predicting it would "graduate with
+// the TEST_DEBT one rather than before it". Both graduated in this change.
+//
+// What differs from the build config, and what deliberately does NOT:
+//   - module semantics, plus `rootDir`. The tests are written and executed as
+//     ESM by vitest (esbuild/vite), and this package IS `"type": "module"`, so
+//     the build config's NodeNext compiles them as ESM too — and then demands
+//     explicit `.js` extensions on relative imports, which vitest does not.
+//     Measured cost of that mismatch here: 120 of the 144 raw diagnostics —
+//     TS2835 x56 (extension-less relative import), the TS7006 x59 sitting above
+//     them (an import that does not resolve makes every symbol it names `any`),
+//     TS2307 x3 and TS18046 x2. Those 120 are about the CHECK, never about the
+//     code. Matching vitest is fidelity, not laxity. `lib` keeps the build
+//     config's `DOM`/`DOM.Iterable`, restated rather than narrowed: unlike
+//     `packages/runtime`, this package's own build config already declares them.
+//   - ⚠️ Collapsing that cascade EXPOSES errors as well as removing them, so
+//     144 − 120 is 24 and the real figure is 28:
+//     `test/i18n-extract-action-description.test.ts` gains 4 x TS18048 that its
+//     two unresolved imports (`../src/utils/i18n-extract`,
+//     `../src/utils/i18n-coverage`) had been hiding behind `any`. The 24 TS2339
+//     survive the move unchanged, file for file and count for count. Both
+//     directions are attributed in `test-typecheck-debt.json`; there is no
+//     unexplained remainder.
+//   - `rootDir` IS widened, to `../..`, and this is the one place this file
+//     departs from `packages/runtime`'s. Runtime's tests live under `src`, so
+//     its `rootDir` could stay inherited. This package's live in a sibling
+//     `test/` tree that is NOT under the inherited `rootDir` of `src`, and the
+//     measured cost of leaving it alone is 116 x TS6059 — one per file in
+//     `test/`, saying nothing about any test. `"."` is not enough either:
+//     three of these tests import fixtures from `examples/app-showcase/src/**`,
+//     outside this package entirely, and still report 3 x TS6059. `../..` is
+//     the repo root and is exactly the shape `packages/client`'s test config
+//     already uses for the same reason. ⛔ It widens the ROOT, never the
+//     strictness.
+//   - ⛔ STRICTNESS IS UNTOUCHED. `strict`, `esModuleInterop`,
+//     `forceConsistentCasingInFileNames` and the rest are inherited from
+//     `tsconfig.json`, and `types: ["node"]` restates it. Nothing here may
+//     loosen a type rule; if a test does not compile, that is the finding.
+//     ⛔ Not one `any` and not one `@ts-expect-error` was added to any test file
+//     to open this gate — that shape is what turns a real gate into a phantom.
+//
+// ⚠️ ONE THING THE FILING OVERSTATED, recorded so the next reader does not go
+// looking for it: the card's sharpest line — "a `@ts-expect-error` in any of
+// those 112 files is a phantom check that evaluates never" — is a statement
+// about what WOULD happen, not about an existing pin. Measured here: this layer
+// holds **zero** `@ts-expect-error` directives across all 115 test files and
+// the 3 root harness modules, so no pin was silently dead and none reports
+// TS2578 under this program. What the gap really cost is the other half: 144
+// real diagnostics that no gate has ever reported, and no way to write a
+// type-level pin in this tree at all. The first half is now ledgered; the
+// second is now possible.
+//
+// MEASURED at 5a5336b399, workspace closure built first (an error count taken
+// against an unbuilt closure is not a reading — unresolved-import cascades
+// inflate it): this program reports **28 errors across 3 files**, from a raw
+// 144 under the inherited NodeNext semantics. That 144 is the same number
+// `scripts/check-type-check-coverage.mjs` recorded for this package in its
+// per-PACKAGE `TEST_DEBT` ledger — reproduced class for class on re-measurement
+// (TS7006 x59, TS2835 x56, TS2339 x24, TS2307 x3, TS18046 x2) — which is why
+// that entry GRADUATES in this change rather than being paid down: the
+// identical population is now held one level finer, per file and per signature,
+// in `test-typecheck-debt.json` beside this config. By code the residue is
+// TS2339 x24 and TS18048 x4; `test/data-model-rules.test.ts` carries 23 of the
+// 28 on its own, all of them property reads off a lint-diagnostic type, so one
+// narrowing helper there is very nearly the whole ledger.
+//
+// Every one of the 28 is PRE-EXISTING: this change edits no test file, and each
+// would have been reported on `origin/main` had this program always existed.
+// They are ledgered per file and per signature in `test-typecheck-debt.json`,
+// EXACT and shrink-only — a file that gains an error is red, one that loses one
+// is red until re-recorded, one that reaches zero is red until its entry is
+// deleted, a signature that arrives or vanishes is red even at a constant
+// total, and a file NOT listed there may have no errors at all.
+// ⛔ The 28 are NOT repaired here, per this card's triage ruling: seeding the
+// ledger and letting the ratchet shrink is the deliverable, and turning the
+// onboarding into a cleanup is how it stops landing at all.
+//
+// ⚠️ 112 of the 115 files carry NO ledger entry, and that is load-bearing rather
+// than incidental: any error any one of them ever gains is red on arrival. That
+// is the half of this gate that starts working today.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "../..",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["node"],
+    // [#15004] THREE bare-name rules, no star, for the three workspace deps the
+    // option-B acceptance pin reaches (`test/option-b-reader-acceptance.pin.test.ts`
+    // and its two fixtures). Without them tsc resolves those specifiers through
+    // each package's `exports` map to `dist/index.d.ts` — A BUILD ARTIFACT — so
+    // this suite's type verdict about the readers the reader program is about to
+    // CHANGE would be a verdict about the last `pnpm build` instead, which is
+    // exactly what `check:type-source-resolution` refuses. That gate's registry
+    // is shrink-only and widening it is not the fix; `paths` is, for a dep
+    // exposed through an EXISTING program, which `tsconfig.test.json` is.
+    //
+    // ⛔ No star and no directory target. A starred rule matches by PREFIX and
+    // would swallow subpath imports, resolving them THROUGH a file
+    // (`…/src/index.ts/core`, ENOTDIR at run time). A star-less rule matches
+    // the specifier EXACTLY, which is load-bearing here rather than incidental:
+    // `@objectstack/objectql` publishes a second subpath (`./core`), and that
+    // specifier deliberately keeps resolving through the package's own
+    // `exports` map, untouched by this table. `plugin-security` and `runtime`
+    // each publish only `"."`. And a target matching nothing on disk is worse
+    // than absent, because tsc then falls back to node resolution — i.e. to
+    // `dist` — silently.
+    //
+    // `rootDir` above already spans the repo root, so pulling these source trees
+    // into this program needs no widening.
+    "paths": {
+      "@objectstack/objectql": ["../objectql/src/index.ts"],
+      "@objectstack/plugin-security": ["../plugins/plugin-security/src/index.ts"],
+      "@objectstack/runtime": ["../runtime/src/index.ts"]
+    }
+  },
+  "include": ["test/**/*", "vitest.config.ts", "vitest-tiers.ts", "vitest-tiers.fixtures.ts"],
+  "exclude": ["node_modules", "dist"]
+}

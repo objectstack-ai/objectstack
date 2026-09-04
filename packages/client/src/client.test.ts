@@ -1546,9 +1546,10 @@ describe('ObjectStackClient.automation', () => {
     // fetch layer throws on non-2xx before any unwrapping, so both surfaces
     // REJECT. No SDK code changed; the contract did, and these are its pins.
     //
-    // Both spellings are pinned, not one: `trigger()` reads `res.json()` while
-    // `execute()` reads `unwrapResponse()`, so a regression in either unwrap
-    // path would be invisible from the other's test.
+    // Both spellings are pinned, not one: `trigger()` and `execute()` are two
+    // URLs into one handler, and since #13079 both read `unwrapResponse()`;
+    // a regression on either door's rejection path would still be invisible
+    // from the other's test (the paths diverge before the shared reader).
     const failedRunBody = {
         success: false,
         error: {

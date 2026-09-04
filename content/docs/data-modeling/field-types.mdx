@@ -22,6 +22,7 @@ Single-line plain text input.
 | `maxLength` | `number` | — | Maximum character length |
 | `minLength` | `number` | — | Minimum character length |
 | `format` | `string` | — | Validation format pattern |
+| `valueDomain` | `'iana_time_zone' \| 'iso_4217_currency' \| 'iso_3166_alpha2'` | — | Standard the written value must be a member of (IANA time zone, ISO 4217 currency code, ISO 3166-1 alpha-2 country code); `text` only |
 
 ```typescript
 { name: 'first_name', label: 'First Name', type: 'text', maxLength: 100 }
@@ -652,7 +653,7 @@ These properties are available on **all** field types:
 | `description` | `string` | — | Field description / help text |
 | `type` | `FieldType` | **required** | One of the supported field types |
 | `required` | `boolean` | `false` | Whether the field is required |
-| `unique` | `boolean` | `false` | Enforce uniqueness |
+| `unique` | `boolean \| 'global' \| 'organization'` | `false` | Unique constraint **and its scope** (ADR-0120). `'organization'` = one holder per organization; `true` = that same per-organization scope (positional synonym — prefer the explicit spelling in new code); `'global'` = one holder across the whole installation; `false` = no constraint. `'tenant'`/`'org'` are rejected — the word is `'organization'`. Full rule in the `unique` doc block in [`FieldSchema`](/docs/references/data/field) |
 | `multiple` | `boolean` | `false` | Allow array of values (multi-record lookup, multi-select, multi-file). An emptied multi-value lookup reads back as `[]`, never `null` — the `multiple` doc block in [`FieldSchema`](/docs/references/data/field) |
 | `searchable` | `boolean` | `false` | Include in search index |
 | `sortable` | `boolean` | `true` | Allow sorting by this field |

@@ -19,10 +19,49 @@
  * `manager_id`, `ai_access`, …) or never-direct (email, credentials, every
  * system-managed stamp). See ADR-0092 D1 for the full tier table. Adding a
  * field to `sys_user` never silently opens it — absence means denied.
+ *
+ * ## Tier 1 has three members, not two (maintainer ruling 2026-09-03)
+ *
+ * `locale` joined `name` and `image` by a ruling on the "may a user set their
+ * own language" question, quoted verbatim and untranslated as adopted:
+ * 「同意」to option B. Widening this set is a SECURITY-BOUNDARY act and is
+ * the maintainer's to take — the ADR-0092 D1 tier table records the pre-ruling
+ * two, and this constant is now the widened one; a reader who finds them
+ * disagreeing should trust the ruling and the pins, and see the PR body for
+ * the ADR-amendment follow-up.
+ *
+ * Three things travel with the entry and none of them is optional:
+ *  - `sys_user.locale` drops its `readonly` (platform-objects) — otherwise the
+ *    engine strips the value before the guard can admit it;
+ *  - the column carries a `locale_bcp47_shape` `format` validation rule, so a
+ *    malformed tag is refused loudly instead of stored;
+ *  - the ADR-0092 D6 session-snapshot mirror does NOT gain it — better-auth
+ *    has no `locale` on its user model, so merging one into a cached snapshot
+ *    would invent a field only cached sessions carry (see
+ *    `SESSION_SNAPSHOT_MIRRORED_FIELDS` in `identity-write-guard.ts`).
+ *
+ * ⚠️ What this set does NOT decide is WHO — ADR-0092 D5 keeps that with the
+ * permission layer, and the two answers are independent. As of the 2026-09-03
+ * ruling recorded on the D5 AMENDMENT, `member_default` names `sys_user`
+ * explicitly with `allowEdit: true`, row-scoped to the caller by the
+ * `sys_user_self` RLS carve-out (`plugin-security`
+ * `objects/default-permission-sets.ts`), so a rank-and-file member reaches
+ * these columns on their OWN row through the generic data path. Every other
+ * row, and every column not listed here, is still refused — by the RLS
+ * pre-image check and by this whitelist respectively, and the two refusals
+ * come from different layers. Widening THIS set does not widen who; widening
+ * the permission set does not widen which columns.
  */
 
 /** Tier 1 — standard form / data-API editable (identity write guard whitelist). */
-export const SYS_USER_PROFILE_EDIT_FIELDS: ReadonlySet<string> = new Set(['name', 'image']);
+export const SYS_USER_PROFILE_EDIT_FIELDS: ReadonlySet<string> = new Set([
+  'name',
+  'image',
+  // Maintainer ruling 2026-09-03 (option B). Read per recipient at delivery
+  // time by service-messaging; shape-checked at the write by the column's own
+  // `locale_bcp47_shape` rule.
+  'locale',
+]);
 
 /** Import-upsert may additionally touch these (admin bulk-identity surface). */
 export const SYS_USER_IMPORT_UPDATE_FIELDS: ReadonlySet<string> = new Set([

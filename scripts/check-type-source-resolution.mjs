@@ -161,6 +161,45 @@ import { configsNamedByTypecheck, selfTest as typecheckConfigsSelfTest } from '.
 import { tmpdir } from 'node:os';
 import process from 'node:process';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'the defect is caught': 4,
+  'THE TRAP: `@fx/spec*`, star not after a separator': 2,
+  'a rule that matches nothing is not coverage': 2,
+  'the CORRECT spellings must stay quiet': 6,
+  'false positives': 3,
+  'fail-closed': 2,
+  '#11490: the population is per PROGRAM': 6,
+  'the registry, audited in BOTH directions': 10,
+  'census guard: sibling-config discovery going quiet is INVISIBLE': 14,
+  'the import clause is bounded to ONE statement (#12555)': 8,
+  'the declaration must still BE the workspace (#11510)': 22,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 11;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '..');
 
@@ -491,13 +530,144 @@ const KNOWN_DIST_RESOLVED_TYPE_IMPORTS = {
     '@objectstack/service-analytics', '@objectstack/service-datasource', '@objectstack/service-package',
     '@objectstack/spec', '@objectstack/types',
   ],
+  // ── #14504 re-baseline, on the onboarding limb above ─────────────────────
+  //
+  // This package's `typecheck` script began naming `tsconfig.test.json`, which
+  // is what onboarding a test layer IS, so the PROGRAM SET moved and this entry
+  // is re-measured rather than widened. The nine deps after `@objectstack/core`
+  // that are new here -- `driver-memory`, `driver-sqlite-wasm`,
+  // `platform-objects`, `plugin-hono-server`, `plugin-sharing`,
+  // `service-analytics`, `service-job`, `service-messaging`, `service-package`
+  // -- satisfy CONDITION 1 by measurement and not by assertion: the gate's own
+  // failure text annotates every one of them `(via tsconfig.test.json)`, and a
+  // `--list` taken with the wiring reverted (the ONLY difference between the
+  // two trees) reports this entry WITHOUT any of the nine. They are reached
+  // only through the program this change onboarded. Six of the nine are this
+  // package's devDependencies, which its `src/**` cannot import at all and its
+  // test layer does; the other three (`driver-memory`, `driver-sqlite-wasm`,
+  // `plugin-hono-server`) are runtime deps whose bare specifier only the test
+  // layer names.
+  //
+  // CONDITION 2 -- the numbers, both from `--list` on the same checkout, the
+  // wiring in `packages/runtime/package.json` the only difference:
+  //
+  //   before   114 programs / 78 packages, 56 non-clean, 270 package-dep pairs
+  //   after    115 programs / 78 packages, 56 non-clean, 279 package-dep pairs
+  //
+  // so +1 program, +9 pairs, +0 entries and +0 non-clean packages: this entry
+  // already existed, and nothing that was clean stopped being clean. The
+  // ratchet is shrink-only from 279.
+  //
+  // CONDITION 3 -- reviewed as a re-baseline. `paths` is deliberately NOT the
+  // tool here, on the onboarding limb's own measured grounds (PR #12570):
+  // redirecting these specifiers to source would bill other packages' source
+  // diagnostics into `packages/runtime/test-typecheck-debt.json`, a ledger
+  // those packages cannot see and nobody can pay down -- and that ledger is
+  // this change's whole deliverable.
   '@objectstack/runtime': [
-    '@objectstack/core', '@objectstack/driver-sql', '@objectstack/metadata', '@objectstack/metadata-core',
+    '@objectstack/core', '@objectstack/driver-memory', '@objectstack/driver-sql',
+    '@objectstack/driver-sqlite-wasm', '@objectstack/metadata', '@objectstack/metadata-core',
     '@objectstack/metadata-protocol', '@objectstack/objectql', '@objectstack/observability',
-    '@objectstack/plugin-auth', '@objectstack/plugin-security', '@objectstack/rest',
-    '@objectstack/service-cluster', '@objectstack/service-datasource', '@objectstack/spec',
-    '@objectstack/types',
+    '@objectstack/platform-objects', '@objectstack/plugin-auth', '@objectstack/plugin-hono-server',
+    '@objectstack/plugin-security', '@objectstack/plugin-sharing', '@objectstack/rest',
+    '@objectstack/service-analytics', '@objectstack/service-cluster', '@objectstack/service-datasource',
+    '@objectstack/service-job', '@objectstack/service-messaging', '@objectstack/service-package',
+    '@objectstack/spec', '@objectstack/types',
   ],
+  // ── #14710 re-baseline, on the onboarding limb above ─────────────────────
+  //
+  // A NEW entry, and this package was CLEAN before it -- unlike #14504's
+  // `runtime`, which already had one to re-measure. Read that first, because a
+  // package leaving the clean list normally means something regressed and here
+  // it does not: nothing about the code or the build state changed. This
+  // package's `typecheck` script began naming `tsconfig.test.json`, which is
+  // what onboarding a test layer IS, so a program that was always there became
+  // one this gate can SEE. The `packages/cli/test/` tree reached these nine
+  // deps on every vitest run already; no tsc program had ever been pointed at
+  // it, so no `--list` ever counted the pairs.
+  //
+  // CONDITION 1 by measurement, not assertion: the gate's own failure text
+  // annotates all nine `(via tsconfig.test.json)`, and a `--list` taken with
+  // the `package.json` wiring reverted -- the ONLY difference between the two
+  // trees, restored and verified by blob-hash equality -- reports NO
+  // `@objectstack/cli` entry at all. Every one of the nine is reached only
+  // through the program this change onboarded.
+  //
+  // CONDITION 2 -- the numbers, both from `--list` on the same checkout with
+  // the closure built:
+  //
+  //   before   115 programs / 78 packages, 56 non-clean, 279 package-dep pairs
+  //   after    116 programs / 78 packages, 57 non-clean, 288 package-dep pairs
+  //
+  // so +1 program, +9 pairs, +1 ENTRY and +1 non-clean package. The +1s are
+  // the honest cost of making an unseen program visible, and the ratchet is
+  // shrink-only from 288.
+  //
+  // CONDITION 3 -- reviewed, and `paths` is deliberately NOT the tool here, on
+  // the onboarding limb's own measured grounds (PR #12570, restated for
+  // `packages/rest` above): redirecting these specifiers to source would bill
+  // OTHER packages' source diagnostics into `packages/cli/test-typecheck-debt.json`,
+  // a ledger those packages cannot see and nobody can pay down -- and that
+  // ledger is this change's whole deliverable.
+  //
+  // ⚠️ One asymmetry recorded rather than repaired, because it is a property of
+  // this family and not of this card: `packages/cli/vitest.config.ts` aliases
+  // exactly four specifiers to source (`service-cache`, `plugin-auth`,
+  // `metadata-core`, and `create-objectstack/created-summary`), and
+  // `@objectstack/plugin-auth` is among the nine below -- so vitest reads it
+  // from `src` while this program reads its `dist`. That is the same trade
+  // `packages/rest`'s block above names (vitest aliases 2 of its 6), and it is
+  // why blanket `paths` would not be fidelity to vitest either. The
+  // source-vs-dist ledger for aliases is `scripts/check-test-source-alias.mjs`,
+  // which owns this question; this registry only records that the pair exists.
+  '@objectstack/cli': [
+    '@objectstack/cloud-connection', '@objectstack/core', '@objectstack/driver-sql',
+    '@objectstack/lint', '@objectstack/mcp', '@objectstack/platform-objects',
+    '@objectstack/plugin-auth', '@objectstack/spec', '@objectstack/types',
+  ],
+  // #14181 re-baseline (the onboarding limb above): a NEW entry, reached ONLY
+  // through `tsconfig.test.json` -- a program this card ADDED. This is the
+  // limb's cleanest case rather than a borderline one: `service-cluster` had NO
+  // `typecheck` script AT ALL before (its scripts were `build` and `test`), so
+  // it ran ZERO counted programs and there is no pre-existing program for a dep
+  // to be laundered through. Both deps here are annotated `via
+  // tsconfig.test.json` by this gate's own failure text.
+  //
+  // Provenance measured four ways on one checkout, by varying only what the
+  // `typecheck` script NAMES (`--list`, totals as printed):
+  //
+  //   no `typecheck` script (origin/main)  absent   118 programs / 288 pairs
+  //   names `tsconfig.json` only           absent   118 programs / 288 pairs
+  //   names `tsconfig.test.json` only      PRESENT  119 programs / 290 pairs
+  //   names both (this card)               PRESENT  119 programs / 290 pairs
+  //
+  // Row 2 is the load-bearing one: the BUILD program carries no dist-resolved
+  // workspace type import at all, so the exposure is not merely first SEEN
+  // through the onboarded program, it is only REACHABLE through it. (The two
+  // programs put the same files in -- this package's `tsconfig.json` has never
+  // excluded tests -- so module semantics, NodeNext vs bundler, is the only
+  // axis that differs.)
+  //
+  // Numbers, `--list` before/after on the same checkout (before at 44ffa2103,
+  // after with this card applied):
+  //
+  //   before   57 of 78 packages, 118 programs, 288 pairs, 21 clean
+  //   after    58 of 78 packages, 119 programs, 290 pairs, 20 clean
+  //
+  // so +1 package, +1 program, +2 pairs -- this entry and nothing else.
+  //
+  // Why the entry and not `paths`, which is what this gate's failure text asks
+  // for: MEASURED both ways on the same checkout, and `paths` is decisively the
+  // wrong tool here. Redirecting these two deps to source takes this package's
+  // test layer from 0 errors to 435, ALL of them TS6059 (`not under rootDir`)
+  // and every one of them in ANOTHER package's source -- `packages/spec/src/**`
+  // and `packages/core/src/**` -- billed to a package that cannot pay them down.
+  // That is the PR #12570 finding (+5 TS6133 for `rest`) and the #8021 one (247
+  // TS6059) reproduced at a much larger scale, on a package whose entire point
+  // in this card was to reach ZERO test-layer errors. Note the direction: the
+  // #5286 route it took makes its OWN test files compile clean, and `paths`
+  // would immediately re-bury that result under other packages' diagnostics.
+  '@objectstack/service-cluster': ['@objectstack/core', '@objectstack/spec'],
   // #14386 re-baseline (the onboarding limb above): a NEW entry, reached ONLY
   // through `tsconfig.typecheck.json` -- a program that card ADDED (this
   // package's `typecheck` was a bare `tsc --noEmit` before it, with no sibling
@@ -524,6 +694,50 @@ const KNOWN_DIST_RESOLVED_TYPE_IMPORTS = {
   //
   // so +1 program, +1 pair, +1 package -- this entry and nothing else.
   '@objectstack/service-i18n': ['@objectstack/spec'],
+  // #15049 re-baseline (the onboarding limb above): a NEW entry, reached ONLY
+  // through `tsconfig.test.json` -- a program this card ADDED, exactly the
+  // #14181 shape one package over (`service-cluster`, directly above): this
+  // package's `typecheck` script was ABSENT before this card, its build config
+  // (`tsconfig.json`) does NOT exclude tests and never did, so it ran ONE
+  // counted program (the build config) with ZERO dist-resolved deps, and there
+  // is no pre-existing program a dep could be laundered through. All three
+  // deps here are annotated `via tsconfig.test.json` by this gate's own
+  // failure text.
+  //
+  // Provenance measured by varying only what the `typecheck` script NAMES,
+  // same checkout (`--list`, totals as printed):
+  //
+  //   no `typecheck` script (origin/main)  absent   119 programs / 290 pairs
+  //   names `tsconfig.json` only           absent   119 programs / 290 pairs
+  //   names `tsconfig.test.json` only      PRESENT  120 programs / 293 pairs
+  //   names both (this card)               PRESENT  120 programs / 293 pairs
+  //
+  // Row 2 is the load-bearing one, same as `service-cluster`'s: the BUILD
+  // program carries no dist-resolved workspace type import at all, so the
+  // exposure is not merely first SEEN through the onboarded program, it is
+  // only REACHABLE through it.
+  //
+  // Numbers, `--list` before/after on the same checkout (before at the
+  // `service-cluster` merge, 2cc4610304; after with this card applied):
+  //
+  //   before   58 of 78 packages, 119 programs, 290 pairs, 20 clean
+  //   after    59 of 78 packages, 120 programs, 293 pairs, 19 clean
+  //
+  // so +1 package, +1 program, +3 pairs -- this entry and nothing else.
+  //
+  // Why the entry and not `paths`: MEASURED, not argued -- redirecting these
+  // three deps to source takes this package's test layer from 0 errors to
+  // 487, ALL of them TS6059 (`not under rootDir`) and every one of them in
+  // ANOTHER package's source (`packages/spec/src/**`, `packages/core/src/**`,
+  // `packages/objectql/src/**`) -- billed to a package that cannot pay them
+  // down. Same shape as `service-cluster`'s own 0 -> 435 (below) and #12570's
+  // +5 for `rest`, at a larger scale because this package's test layer pulls
+  // three workspace deps rather than two. The #5286 route this card took
+  // makes its OWN test files compile clean; `paths` would immediately re-bury
+  // that result under other packages' diagnostics.
+  '@objectstack/service-knowledge': [
+    '@objectstack/core', '@objectstack/objectql', '@objectstack/spec',
+  ],
   // #11490 re-baseline: NEW entries — reached only through `tsconfig.scripts.json`.
   '@objectstack/service-messaging': ['@objectstack/spec'],
   '@objectstack/service-realtime': ['@objectstack/spec'],
@@ -1687,10 +1901,30 @@ function buildFixtureTree() {
   return root;
 }
 
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'check-type-source-resolution self-test reached its verdict';
+
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const batterySeen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+  };
   const root = buildFixtureTree();
   const problems = [];
   const expect = (condition, message) => {
+    registerCase();
     if (!condition) problems.push(message);
   };
   const has = (failures, needle) => failures.some((f) => f.includes(needle));
@@ -1700,6 +1934,7 @@ function selfTest() {
     const bare = check(root, {});
 
     // ── the defect is caught ──────────────────────────────────────────────
+  battery('the defect is caught');
     expect(reported(bare, 'packages/violator'), 'a package with no `paths` at all was not reported');
     expect(
       reported(bare, 'packages/type-only'),
@@ -1711,6 +1946,7 @@ function selfTest() {
     // ── THE TRAP: `@fx/spec*`, star not after a separator ─────────────────
     // Every specifier in this fixture lands under `src/`, so "did it reach
     // source" says yes. The gate must still refuse the spelling.
+  battery('THE TRAP: `@fx/spec*`, star not after a separator');
     expect(reported(bare, 'packages/star-trap'), 'the `@pkg*` trap (star not preceded by a separator) was NOT flagged');
     expect(
       has(bare.failures, '@fx/spec-tools'),
@@ -1718,10 +1954,12 @@ function selfTest() {
     );
 
     // ── a rule that matches nothing is not coverage ───────────────────────
+  battery('a rule that matches nothing is not coverage');
     expect(reported(bare, 'packages/missing-target'), 'a `paths` target that does not exist was accepted as a rule');
     expect(has(bare.failures, 'does not exist'), 'the missing-target diagnostic did not say the target is missing');
 
     // ── the CORRECT spellings must stay quiet ─────────────────────────────
+  battery('the CORRECT spellings must stay quiet');
     expect(!reported(bare, 'packages/compliant'), 'the two-rule compliant config was reported');
     expect(!reported(bare, 'packages/jsonc'), 'a CORRECT config was reported because its comments were not stripped');
     expect(!reported(bare, 'packages/inherits'), 'a correct `paths` block inherited through `extends` was not seen');
@@ -1736,6 +1974,7 @@ function selfTest() {
     );
 
     // ── false positives ───────────────────────────────────────────────────
+  battery('false positives');
     expect(!reported(bare, 'packages/no-workspace-dep'), 'a package with no workspace dep at all was flagged');
     expect(!reported(bare, 'packages/consumes-source'), 'a dep whose types already point at source was flagged');
     expect(
@@ -1744,6 +1983,7 @@ function selfTest() {
     );
 
     // ── fail-closed ───────────────────────────────────────────────────────
+  battery('fail-closed');
     expect(reported(bare, 'packages/unparseable'), 'an unparseable tsconfig was read as resolving nothing');
     expect(has(bare.failures, 'cannot be read'), 'an unparseable tsconfig did not fail as unreadable');
 
@@ -1754,6 +1994,7 @@ function selfTest() {
     // import were REPORTED through the build config and SILENT through the
     // prescribed sibling, so what has to hold is that the two spellings now
     // report the SAME THING.
+  battery('#11490: the population is per PROGRAM');
     expect(
       reported(bare, 'packages/sibling-config'),
       'an exposure reachable only through the sibling `tsconfig.test.json` this repo PRESCRIBES was not '
@@ -1785,6 +2026,7 @@ function selfTest() {
     );
 
     // ── the registry, audited in BOTH directions ──────────────────────────
+  battery('the registry, audited in BOTH directions');
     const measuredNames = {
       '@fx/violator': ['@fx/spec'],
       '@fx/type-only': ['@fx/spec'],
@@ -1870,6 +2112,7 @@ function selfTest() {
     // line nobody has ever seen fire. Same shape as (17) minus the `typecheck`
     // script that names the sibling — which is also exactly what the whole
     // widening looks like after a regression.
+  battery('census guard: sibling-config discovery going quiet is INVISIBLE');
     const singleProgram = join(tmpdir(), `os-type-source-resolution-single-${process.pid}`);
     rmSync(singleProgram, { recursive: true, force: true });
     mkdirSync(join(singleProgram, 'packages'), { recursive: true });
@@ -1937,6 +2180,7 @@ function selfTest() {
     // a false GREEN on an axis whose whole job is fail-closed, so it is pinned
     // just as hard. A detector that silently stops matching reports a spotless
     // repo.
+  battery('the import clause is bounded to ONE statement (#12555)');
     const typeSpecs = (code) => [...new Set(extractTypeImports(code))].sort();
     const tA = typeSpecs("import 'pkg/kernel';\nconst x = 1;\n");
     const tB = typeSpecs("import 'pkg/kernel';\nimport { X } from 'other';\n");
@@ -1994,6 +2238,7 @@ function selfTest() {
     // #11190 measurement that made consolidation safe in the first place. So
     // the declaration stays and the live parse becomes its CHECK, in both
     // directions, the shape check-published-files.mjs already uses.
+  battery('the declaration must still BE the workspace (#11510)');
     const declaredParents = WORKSPACE_PARENT_GLOBS.map((g) => g.replace(/\/\*+$/, ''));
     const liveParents = readWorkspaceGlobs(REPO_ROOT)
       .filter((g) => !isExclusionGlob(g))
@@ -2019,19 +2264,72 @@ function selfTest() {
     rmSync(root, { recursive: true, force: true });
   }
 
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => { problems.push(message); };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
+  }
+
   if (problems.length > 0) {
     console.error('check-type-source-resolution --self-test FAILED:');
     for (const problem of problems) console.error(`  - ${problem}`);
     process.exit(1);
   }
   console.log('check-type-source-resolution --self-test OK');
+
+  return SELF_TEST_VERDICT;
 }
 
 // ── entry point ─────────────────────────────────────────────────────────────
 
 const argv = process.argv.slice(2);
 if (argv.includes('--self-test')) {
-  selfTest();
+  if (selfTest() !== SELF_TEST_VERDICT) {
+    console.error(
+      '\n✗ check-type-source-resolution self-test: selfTest() returned without reaching its verdict,\n'
+        + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+        + 'that never finished as a self-test that passed.\n',
+    );
+    process.exit(1);
+  }
 } else if (argv.includes('--list')) {
   printList(REPO_ROOT);
 } else {

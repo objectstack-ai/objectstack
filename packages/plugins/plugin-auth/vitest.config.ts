@@ -28,6 +28,15 @@ export default defineConfig({
         find: /^@objectstack\/plugin-security$/,
         replacement: path.resolve(here, '../plugin-security/src/index.ts'),
       },
+      // [#14762] `auth-manager.ts` takes a VALUE import on
+      // `@objectstack/service-messaging` (`normalizeRecipientLocale`). Same
+      // reason as the entry above, and the same anchoring: a unit test is a
+      // verdict about the SOURCE in this checkout, so the specifier must not
+      // resolve to a `dist/` that may predate the edit under test.
+      {
+        find: /^@objectstack\/service-messaging$/,
+        replacement: path.resolve(here, '../../services/service-messaging/src/index.ts'),
+      },
     ],
   },
 });

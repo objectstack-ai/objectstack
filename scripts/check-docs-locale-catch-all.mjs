@@ -133,6 +133,49 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from './invoked-as.mjs';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  '1. GREEN: the real shape passes, and the summary names its own scope.': 4,
+  '2. RED: the guard call deleted -- the exact regression this gate exists for.': 1,
+  '3. RED: the guard present but AFTER rendering starts.': 1,
+  '4. RED: the predicate stops reading the declared locales.': 1,
+  '5. RED: a NEW unguarded top-level dynamic segment -- the class, not the file.': 2,
+  '6. The condition is LIVE, not decorative: a matcher that DOES cover dotted': 3,
+  '6b. RED, THE ABLATION FROM THE PROXY SIDE. Nothing but the matcher moves:': 3,
+  '6c. GREEN control: the limb fires on the BREAK, not on the flag. This': 3,
+  '7. RED: a matcher that stops rewriting the dotless probe is reported, not': 1,
+  '8. RED: an uncompilable matcher is loud, never treated as inert.': 1,
+  '9. RED -- THE ABLATION. The marker keeps its position and loses only its': 3,
+  '10. GREEN control: the marker\'s name is free, so a differently-named dotted marker': 2,
+  '11. RED: the marker dropped entirely -- the URL now ends in a page slug.': 1,
+  '12. RED: the array literal is intact but no longer reaches the END of the': 1,
+  '13. RED: the builder is gone. An unreadable input is never a pass.': 1,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 15;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 /** Paths a crawler probes by default -- the reachable half of the defect. */
 const DOTTED_PROBES = ['/ads.txt', '/security.txt', '/sitemap_index.xml', '/anything.html'];
 
@@ -546,15 +589,31 @@ function writeFixture(
 const SELF_TEST_VERDICT = 'check-docs-locale-catch-all self-test reached its verdict';
 
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const batterySeen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+  };
+
   const failures = [];
   let checked = 0;
   const assert = (ok, what) => {
+    registerCase();
     checked += 1;
     if (!ok) failures.push(what);
   };
   const dir = mkdtempSync(join(tmpdir(), 'docs-locale-catch-all-'));
   try {
     // 1. GREEN: the real shape passes, and the summary names its own scope.
+    battery('1. GREEN: the real shape passes, and the summary names its own scope.');
     let paths = writeFixture(dir);
     let run = checkApp(paths);
     assert(run.findings.length === 0, `clean fixture must be silent -- got ${JSON.stringify(run.findings)}`);
@@ -566,11 +625,13 @@ function selfTest() {
     );
 
     // 2. RED: the guard call deleted -- the exact regression this gate exists for.
+    battery('2. RED: the guard call deleted -- the exact regression this gate exists for.');
     paths = writeFixture(dir, { layout: FIXTURE_LAYOUT.replace('  if (!isSupportedLanguage(lang)) notFound();\n', '') });
     run = checkApp(paths);
     assert(run.findings.length === 1 && /never calls/.test(run.findings[0]), `deleting the guard must be reported once -- got ${JSON.stringify(run.findings)}`);
 
     // 3. RED: the guard present but AFTER rendering starts.
+    battery('3. RED: the guard present but AFTER rendering starts.');
     paths = writeFixture(dir, {
       layout: FIXTURE_LAYOUT
         .replace('  if (!isSupportedLanguage(lang)) notFound();\n', '')
@@ -580,11 +641,13 @@ function selfTest() {
     assert(run.findings.length === 1 && /AFTER it has started rendering/.test(run.findings[0]), `a guard behind the return must be reported -- got ${JSON.stringify(run.findings)}`);
 
     // 4. RED: the predicate stops reading the declared locales.
+    battery('4. RED: the predicate stops reading the declared locales.');
     paths = writeFixture(dir, { i18n: FIXTURE_I18N.replace('return i18n.languages.includes(value);', 'return true;') });
     run = checkApp(paths);
     assert(run.findings.length === 1 && /does not read/.test(run.findings[0]), `a predicate that stopped reading i18n.languages must be reported -- got ${JSON.stringify(run.findings)}`);
 
     // 5. RED: a NEW unguarded top-level dynamic segment -- the class, not the file.
+    battery('5. RED: a NEW unguarded top-level dynamic segment -- the class, not the file.');
     paths = writeFixture(dir, { extra: { name: '[slug]', layout: 'export default function S({ children }) { return children; }\n' } });
     run = checkApp(paths);
     assert(run.findings.length === 1 && /app\/\[slug\]\//.test(run.findings[0]), `a new unguarded segment must be reported -- got ${JSON.stringify(run.findings)}`);
@@ -597,6 +660,7 @@ function selfTest() {
     //    widening takes every `og:image` to 404, so the OG limb reports it here
     //    and the run as a whole is red. Before that limb existed this fixture
     //    was silent, which is the hole this case now pins from both sides.
+    battery('6. The condition is LIVE, not decorative: a matcher that DOES cover dotted');
     paths = writeFixture(dir, {
       proxy: `export const config = { matcher: ['/((?!api|_next/static).*)'] };\n`,
       layout: FIXTURE_LAYOUT.replace('  if (!isSupportedLanguage(lang)) notFound();\n', ''),
@@ -617,6 +681,7 @@ function selfTest() {
     //     other limb is satisfied and the two conditional limbs have relaxed
     //     themselves. The surface is broken anyway, and this is the reading that
     //     says so -- taken from the built URL, not from either side alone.
+    battery('6b. RED, THE ABLATION FROM THE PROXY SIDE. Nothing but the matcher moves:');
     paths = writeFixture(dir, { proxy: `export const config = { matcher: ['/((?!api|_next/static).*)'] };\n` });
     run = checkApp(paths);
     assert(run.stats.ogFinalSegmentDotted === true, 'the marker must be untouched in the proxy-side ablation');
@@ -631,6 +696,7 @@ function selfTest() {
     //     relaxes exactly as in 6 -- but still excludes the `/og/` prefix, so
     //     the cards are still served and there is nothing to report. A limb
     //     wired to `dottedBypassesProxy` instead of to the URL would cry here.
+    battery('6c. GREEN control: the limb fires on the BREAK, not on the flag. This');
     paths = writeFixture(dir, {
       proxy: `export const config = { matcher: ['/((?!api|_next/static|og/).*)'] };\n`,
       layout: FIXTURE_LAYOUT.replace('  if (!isSupportedLanguage(lang)) notFound();\n', ''),
@@ -642,11 +708,13 @@ function selfTest() {
 
     // 7. RED: a matcher that stops rewriting the dotless probe is reported, not
     //    silently read as "everything bypasses".
+    battery('7. RED: a matcher that stops rewriting the dotless probe is reported, not');
     paths = writeFixture(dir, { proxy: `export const config = { matcher: ['/docs/(.*)'] };\n` });
     run = checkApp(paths);
     assert(run.findings.some((f) => /no longer rewrites/.test(f)), `a matcher that stops covering the dotless probe must be reported -- got ${JSON.stringify(run.findings)}`);
 
     // 8. RED: an uncompilable matcher is loud, never treated as inert.
+    battery('8. RED: an uncompilable matcher is loud, never treated as inert.');
     paths = writeFixture(dir, { proxy: `export const config = { matcher: ['/((?!unclosed.*)'] };\n` });
     run = checkApp(paths);
     assert(run.findings.length === 1 && /does not compile/.test(run.findings[0]), `an uncompilable matcher must be reported -- got ${JSON.stringify(run.findings)}`);
@@ -655,6 +723,7 @@ function selfTest() {
     //    dot. Nothing else in the tree moves: the route still slices off the
     //    last segment, every type still checks, every page still renders. This
     //    is the whole reason the limb exists, so it is observed failing here.
+    battery('9. RED -- THE ABLATION. The marker keeps its position and loses only its');
     paths = writeFixture(dir, { pageSource: FIXTURE_SOURCE.replace(`'image.png'`, `'image'`) });
     run = checkApp(paths);
     assert(
@@ -666,12 +735,14 @@ function selfTest() {
 
     // 10. GREEN control: the marker's name is free, so a differently-named dotted marker
     //     is GREEN -- the gate must pin the dot, not the filename.
+    battery('10. GREEN control: the marker\'s name is free, so a differently-named dotted marker');
     paths = writeFixture(dir, { pageSource: FIXTURE_SOURCE.replace(`'image.png'`, `'card.jpeg'`) });
     run = checkApp(paths);
     assert(run.findings.length === 0, `a renamed but still-dotted marker must stay green -- got ${JSON.stringify(run.findings)}`);
     assert(run.stats.ogMarker === 'card.jpeg', `the renamed marker must be read back -- got ${summarise(run.stats)}`);
 
     // 11. RED: the marker dropped entirely -- the URL now ends in a page slug.
+    battery('11. RED: the marker dropped entirely -- the URL now ends in a page slug.');
     paths = writeFixture(dir, { pageSource: FIXTURE_SOURCE.replace(`, 'image.png'`, '') });
     run = checkApp(paths);
     assert(
@@ -682,6 +753,7 @@ function selfTest() {
     // 12. RED: the array literal is intact but no longer reaches the END of the
     //     URL, so its last element is not the final segment. Checking the
     //     literal alone here would report GREEN over a broken surface.
+    battery('12. RED: the array literal is intact but no longer reaches the END of the');
     paths = writeFixture(dir, {
       pageSource: FIXTURE_SOURCE.replace(`\${segments.join('/')}\``, `\${segments.join('/')}/card\``),
     });
@@ -692,6 +764,7 @@ function selfTest() {
     );
 
     // 13. RED: the builder is gone. An unreadable input is never a pass.
+    battery('13. RED: the builder is gone. An unreadable input is never a pass.');
     paths = writeFixture(dir, { pageSource: 'export function somethingElse() {}\n' });
     run = checkApp(paths);
     assert(
@@ -700,6 +773,52 @@ function selfTest() {
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    failures.push(message);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
   }
 
   if (failures.length) {

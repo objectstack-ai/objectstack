@@ -47,6 +47,36 @@ describe('validateChartBindings — report charts', () => {
     expect(findings[0].hint).toContain('est_hours');
   });
 
+  // #14577 — this rule used to carry a private Levenshtein-only `suggest`,
+  // which gave NO hint for the issue's own headline example: `amount` →
+  // `sum_amount` is 4 edits, over the `max(2, floor(len/3))` budget of 2. Now
+  // delegating to the shared `suggestName` (#14268), the containment pre-pass
+  // catches it — a dataset measure name containing the raw base-column name is
+  // exactly the ADR-0021 cutover drift this rule exists to catch.
+  it('offers a did-you-mean via containment for the base-column → measure-name drift', () => {
+    const findings = validateChartBindings({
+      datasets: [
+        {
+          name: 'sales_metrics',
+          object: 'crm_opportunity',
+          dimensions: [{ name: 'stage', field: 'stage' }],
+          measures: [{ name: 'sum_amount', aggregate: 'sum', field: 'amount' }],
+        },
+      ],
+      reports: [
+        {
+          name: 'r',
+          dataset: 'sales_metrics',
+          values: ['sum_amount'],
+          chart: { type: 'bar', xAxis: 'stage', yAxis: 'amount' },
+        },
+      ],
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(CHART_MEASURE_UNKNOWN);
+    expect(findings[0].hint).toContain('Did you mean "sum_amount"?');
+  });
+
   // The dashboard rule's `Array.isArray(yAxis)` guard would skip this shape.
   it('handles the report string yAxis, not just the array form', () => {
     const clean = validateChartBindings({

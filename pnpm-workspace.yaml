@@ -239,6 +239,11 @@ overrides:
   #   fast-uri GHSA-7p8r-x3mc-p8w7 (7.5 high) — transitive-only via ajv@8.20.0
   #     (declares ^3.0.1), which reaches @modelcontextprotocol/sdk, objectql,
   #     secretlint and table. Nothing declares fast-uri directly.
+  #     2026-09-03 (#14732): four MORE fast-uri advisories, GHSA-5jgf-p345-68v8,
+  #     GHSA-f65p-4m7j-42xc, GHSA-fph4-wmhf-6fwf and GHSA-jqff-g426-hqxp (7.5
+  #     high each), fixed in 3.1.6 — target lifted from ^3.1.5, selector stays
+  #     at the 4.0.0 boundary. ajv@8.20.0's ^3.0.1 already admits 3.1.6, so
+  #     this is a dedupe onto the patched line, not a forced upgrade.
   #   hono GHSA-8j4g-w8fx-2239 (5.3) — the one entry here that is NOT
   #     transitive-only: two versions resolved, 4.12.32 from our own packages
   #     and 4.12.33 pulled by @modelcontextprotocol/sdk. The override moves the
@@ -250,7 +255,7 @@ overrides:
   #     peer states what host hono we work against, and a host that pins an old
   #     hono owns that copy; narrowing it fixes nothing here and only breaks
   #     compatibility. check-override-consistency.mjs covers both forms.
-  'fast-uri@<4.0.0': '^3.1.5'
+  'fast-uri@<4.0.0': '^3.1.6'
   'hono@<5.0.0': '^4.12.34'
   # OSV 2026-08-07 (#6407) — transitive-only, and the same "it has a fix, so
   # take the fix" disposition as the batch above:
@@ -295,3 +300,36 @@ overrides:
   #     `<3.3.17`, which would self-invalidate the day 3.3.17 is itself flagged
   #     (the undici 7.28.0 / brace-expansion 5.0.8 specimens, #4961 / #5032).
   'nanoid@<4.0.0': '^3.3.17'
+  # OSV 2026-09-02 (#14639) — four advisories, every one naming a fixed
+  # version, so this is the "take the fix" path osv-scanner.toml's own header
+  # describes and NOT an exemption; that ledger holds zero entries and the
+  # triage ruling is that it stays at zero.
+  #   @xmldom/xmldom GHSA-6gmq-8vp8-gcm6 (6.3 medium) — flagged on BOTH
+  #     resolved lines: 0.8.13 (fixed 0.8.15) and 0.9.11 (fixed 0.9.12). That
+  #     is why this needs TWO selectors and not one. A single lower-bounded
+  #     selector at the fixed 0.9.12 would drag the 0.8 consumers across a 0.x
+  #     MINOR — the compatibility boundary for a 0.x package — past every
+  #     range they declare. Measured dependents and their declared ranges:
+  #       0.8.13 <- @authenio/xml-encryption@2.0.2 (^0.8.6),
+  #                 samlify@2.13.1 (^0.8.11), xml-crypto@6.1.2 (^0.8.10)
+  #       0.9.11 <- @better-auth/sso@1.7.2 (^0.9.10)
+  #     Each of those ranges already admits its own fixed version, so both
+  #     entries are a dedupe onto the patched line rather than a forced
+  #     upgrade past what a dependent supports — the dompurify / nanoid shape
+  #     above, and the reason no dependent manifest has to move in lockstep.
+  #   qs GHSA-4mjr-xmp4-gh2g and GHSA-x5fp-wj9c-mxmx (6.3 medium each) — one
+  #     resolved line, 6.15.3, fixed 6.16.0. Dependents body-parser@2.3.0
+  #     (^6.15.2) and express@5.2.1 (^6.14.0) both admit it.
+  #   Transitive-only, like dompurify and nanoid above: no workspace manifest
+  #     declares either package, so there is no publishable declared range to
+  #     keep in lockstep and check-override-consistency.mjs lists both as
+  #     overrides it cannot cross-check against a declared range. That is
+  #     correct for this shape, and it is a report, never a failure.
+  #   Bounds sit at the compatibility boundary — 0.9.0 and 0.10.0 for the two
+  #     0.x lines, 7.0.0 for qs — per this block's header rule, never at the
+  #     fixed version itself, which would self-invalidate the day that version
+  #     is the one flagged (the undici 7.28.0 / brace-expansion 5.0.8
+  #     specimens, #4961 / #5032).
+  '@xmldom/xmldom@>=0.8.0 <0.9.0': '^0.8.15'
+  '@xmldom/xmldom@>=0.9.0 <0.10.0': '^0.9.12'
+  'qs@>=6.0.0 <7.0.0': '^6.16.0'

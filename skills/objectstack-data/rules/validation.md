@@ -6,14 +6,14 @@ Comprehensive guide for implementing validation rules in ObjectStack.
 
 The **complete** set of `type` discriminators accepted by `ValidationRuleSchema`:
 
-| Type | Purpose | When Validation Fails |
-|:-----|:--------|:---------------------|
-| `script` | CEL predicate over the record | When predicate evaluates to `true` |
-| `state_machine` | Legal state transitions | When transition not allowed |
-| `format` | Regex or built-in format | When format doesn't match |
-| `cross_field` | CEL predicate comparing fields | When predicate evaluates to `true` |
-| `json_schema` | Validate JSON field | When JSON doesn't match schema |
-| `conditional` | Apply nested rule when a predicate holds | When nested rule fails |
+| Type | Purpose | When Validation Fails | Judged against |
+|:-----|:--------|:---------------------|:---------------|
+| `script` | CEL predicate over the record | When predicate evaluates to `true` | Merged record — prior row plus this write |
+| `state_machine` | Legal state transitions | When transition not allowed | Written value vs the prior row's, only when the write sets the field (insert: `initialStates`) |
+| `format` | Regex or built-in format | When format doesn't match | Write payload only — an omitted field is never judged |
+| `cross_field` | CEL predicate comparing fields | When predicate evaluates to `true` | Merged record — prior row plus this write |
+| `json_schema` | Validate JSON field | When JSON doesn't match schema | Write payload only — an omitted field is never judged |
+| `conditional` | Apply nested rule when a predicate holds | When nested rule fails | Its `when` on the merged record; the nested rule as its own type |
 
 There is no other type. In particular:
 
@@ -35,6 +35,15 @@ see **objectstack-formula**.
 the **failure** condition — validation **fails** when it evaluates to `true`.
 
 ## Script Validation
+
+**Tool choice — this is the invariant tool.** `script` and `cross_field`
+are judged against the *merged* record on every write, with no pre-state
+exemption, so a row that already violates the rule is refused on any edit until
+a repairing write lands (frozen, not bricked). A condition that must hold only
+from a transition onward is not this tool: use `requiredWhen` or a field bound
+(`min` / `max` / `minLength` / `maxLength`), which judge the write, not the
+stored row (see **Choose by intent — invariant or transition gate** in
+`SKILL.md`).
 
 ```typescript
 import { P } from '@objectstack/spec';

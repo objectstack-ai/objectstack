@@ -103,6 +103,7 @@ import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { retiredKey } from '../shared/retired-key';
 import { strictObject } from '../shared/strict-object';
+import { AssignmentConfigSchema } from './builtin-node-config.zod';
 
 /**
  * What a rejected key on these contracts silently did before #4001 批 9 — and
@@ -449,24 +450,59 @@ export const SCHEMALESS_NODE_CONFIG_SCHEMAS = {
 export type SchemalessNodeType = keyof typeof SCHEMALESS_NODE_CONFIG_SCHEMAS;
 
 /**
- * {@link SCHEMALESS_NODE_CONFIG_SCHEMAS} as JSON Schema, memoized — the same
- * shape a descriptor's `configSchema` is, so a consumer can read both channels
- * with one walk instead of two notions of "a declared config property" (#4439).
+ * Node types that DO publish a descriptor `configSchema` and still declare an
+ * expression slot through a spec Zod, because the descriptor cannot carry the
+ * marker (#14149).
+ *
+ * `assignment`'s descriptor declares `assignments` as `additionalProperties:
+ * true` — the openness IS its contract, pinned by the form↔Zod ledger — so
+ * there is no descriptor property to mark. The value contract lives on
+ * `AssignmentConfigSchema`'s map value (`.meta({ xExpression: 'value' })`,
+ * `builtin-node-config.zod.ts`), and the expression ledger's reconciliation
+ * ratchet reads it from the JSON projection below, walking the map's
+ * `additionalProperties` as the `*` segment the ledger path `assignments.*`
+ * spells. Kept apart from {@link SCHEMALESS_NODE_CONFIG_SCHEMAS} on purpose:
+ * that map means "publishes no descriptor", its other readers
+ * (`metadata-protocol`'s reference-site attribution) walk it for that reason,
+ * and `assignment` is not a member of that class.
+ */
+export const LEDGER_DECLARED_NODE_CONFIG_SCHEMAS = {
+  assignment: AssignmentConfigSchema,
+} as const satisfies Record<string, z.ZodType>;
+
+/** Node types whose expression slots reach the ledger through {@link LEDGER_DECLARED_NODE_CONFIG_SCHEMAS}. */
+export type LedgerDeclaredNodeType = keyof typeof LEDGER_DECLARED_NODE_CONFIG_SCHEMAS;
+
+/** Every node type the reconciliation JSON map below carries. */
+export type ReconciledNodeConfigType = SchemalessNodeType | LedgerDeclaredNodeType;
+
+/**
+ * {@link SCHEMALESS_NODE_CONFIG_SCHEMAS} and
+ * {@link LEDGER_DECLARED_NODE_CONFIG_SCHEMAS} as JSON Schema, memoized — the
+ * same shape a descriptor's `configSchema` is, so a consumer can read both
+ * channels with one walk instead of two notions of "a declared config
+ * property" (#4439).
  *
  * Derived in `input` mode like {@link getApprovalNodeConfigJsonSchema}, which
- * is what carries `.meta({ xExpression })` markers through verbatim.
+ * is what carries `.meta({ xExpression })` markers through verbatim — on a
+ * property, and (since #14149) on a map's `additionalProperties`.
  *
  * These are **not** published on a descriptor — that is the whole point of the
- * schemaless class (see this module's header) — so nothing here reaches the
- * Studio property form. It exists so validation ledgers and reconciliation
- * ratchets can see these contracts at all.
+ * schemaless class (see this module's header), and `assignment`'s descriptor
+ * publishes its map without the marker — so nothing here reaches the Studio
+ * property form. It exists so validation ledgers and reconciliation ratchets
+ * can see these contracts at all.
  */
-let cachedSchemalessNodeConfigJsonSchemas: Readonly<Record<SchemalessNodeType, unknown>> | undefined;
-export function getSchemalessNodeConfigJsonSchemas(): Readonly<Record<SchemalessNodeType, unknown>> {
+let cachedSchemalessNodeConfigJsonSchemas: Readonly<Record<ReconciledNodeConfigType, unknown>> | undefined;
+export function getSchemalessNodeConfigJsonSchemas(): Readonly<Record<ReconciledNodeConfigType, unknown>> {
   if (cachedSchemalessNodeConfigJsonSchemas === undefined) {
-    const out = {} as Record<SchemalessNodeType, unknown>;
-    for (const [nodeType, schema] of Object.entries(SCHEMALESS_NODE_CONFIG_SCHEMAS)) {
-      out[nodeType as SchemalessNodeType] = z.toJSONSchema(schema, {
+    const out = {} as Record<ReconciledNodeConfigType, unknown>;
+    const sources: ReadonlyArray<readonly [ReconciledNodeConfigType, z.ZodType]> = [
+      ...(Object.entries(SCHEMALESS_NODE_CONFIG_SCHEMAS) as ReadonlyArray<readonly [SchemalessNodeType, z.ZodType]>),
+      ...(Object.entries(LEDGER_DECLARED_NODE_CONFIG_SCHEMAS) as ReadonlyArray<readonly [LedgerDeclaredNodeType, z.ZodType]>),
+    ];
+    for (const [nodeType, schema] of sources) {
+      out[nodeType] = z.toJSONSchema(schema, {
         target: 'draft-2020-12',
         io: 'input',
         unrepresentable: 'any',

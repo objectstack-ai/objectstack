@@ -142,6 +142,30 @@
 // addressing only `fix` would have left it splitting; readings belong in
 // `evidence`, which is not keyed. The classified branches (`WORKSPACE_BUILD_FIX` /
 // `INSTALL_THEN_BUILD_FIX`) group byte-for-byte as they did before.
+//
+// #14729 named a class the ratchet itself produces, not a defect in it: PR #14651
+// (#14376) taught this gate to walk three new families, one of them
+// `objects.OBJECT._validations.RULE.message`, and its committed baseline therefore
+// held counts only that branch could compute — on `main` the walk did not exist, so
+// other PRs moved those counts without being able to see that they did. Two PRs did
+// exactly that while it waited to land, each costing a patch round: merge `main`,
+// re-derive, rebuild every number in the PR body. Stated generally, because it is
+// not i18n-specific — type-check debt counts, token ratchets and liveness state
+// counts have the same shape: a PR that widens what a committed ratchet MEASURES
+// races every PR that changes what is MEASURED, for its whole review-and-queue
+// latency — and the race is invisible on `main`, because there the instrument does
+// not exist. The two collisions were not independent draws, either: both were steps
+// of one in-flight campaign moving the examples' authored `validations[].message`
+// onto a shared translation channel, and a campaign that systematically touches
+// exactly the family a PR makes measurable collides on every step it lands. As of
+// `224f8ea`, `app-showcase` has zero untranslated rule messages left — that leg is
+// finished — but the exposure is forward-looking, not closed: `app-crm` (5) and
+// `app-todo` (4) rule messages, plus `bulkActions` (18) and `datasets` (62), are
+// untranslated populations nobody is currently working, and a PR that starts
+// walking any of them will race this gate the same way. It fails safe either
+// direction — the DOWN-direction remedy below is what caught both collisions — so
+// the cost is latency and re-derive rounds, not correctness; that is why the fix
+// here is one sentence in that remedy, not a mechanism.
 import { execFileSync } from 'node:child_process';
 import { readdirSync, readFileSync, writeFileSync, existsSync, openSync, closeSync, unlinkSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -157,6 +181,39 @@ import {
   owningPackageOf,
   resolveCliCommandFile,
 } from './cli-build-prerequisite.mjs';
+import { EXIT_FINDINGS, EXIT_PREREQUISITE_NOT_MET } from './import-prerequisite.mjs';
+
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'The per-config failure classifier and the collecting round (#6033). Pinned': 29,
+  '#11395 — the same rule, pinned over EVERY failure branch instead of one.': 23,
+  'Root anchoring and the population classifier (#10907). These are the only': 4,
+  'The build-prerequisite CLOSURE (#12564). What makes the remedy worth naming': 15,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 4;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** This script lives in `scripts/`, so the repo root is one level up (#10907). */
@@ -636,8 +693,23 @@ function measureAllConfigs(configPaths, measure) {
 const SELF_TEST_VERDICT = 'check-i18n-coverage self-test reached its verdict';
 
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const batterySeen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+  };
+  battery('The per-config failure classifier and the collecting round (#6033). Pinned');
   const failures = [];
   const expect = (name, cond, detail) => {
+    registerCase();
     if (!cond) failures.push(`${name} — ${detail}`);
   };
 
@@ -809,6 +881,7 @@ function selfTest() {
   // Each branch is driven with THREE configs failing the SAME way, with per-config
   // detail in the CLI's words — the shape a real round produces.
   // -------------------------------------------------------------------------
+  battery('#11395 — the same rule, pinned over EVERY failure branch instead of one.');
 
   const SAME_CAUSE_CONFIGS = [
     'examples/app-crm/objectstack.config.ts',
@@ -893,6 +966,7 @@ function selfTest() {
   // recorded string, but "did this gate look at anything at all?" can only be
   // proven by looking.
   // -------------------------------------------------------------------------
+  battery('Root anchoring and the population classifier (#10907). These are the only');
 
   // The derivation must land on THIS repo's root — one level off would still find
   // a `scripts/` directory, so pin files only the root has, this gate's own two
@@ -942,6 +1016,7 @@ function selfTest() {
   // the population. A partial closure is the worse half of this card's defect: it
   // looks derived, it is specific, and it still does not converge.
   // -------------------------------------------------------------------------
+  battery('The build-prerequisite CLOSURE (#12564). What makes the remedy worth naming');
   const derivedClosure = closureBuildFix(onRoot);
   expect(
     '#12564 the live population yields a closure',
@@ -1080,6 +1155,50 @@ function selfTest() {
     `the real tree resolved to ${onRoot.length} config(s) and must be judged, not refused`,
   );
 
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => { failures.push(message); };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
+  }
+
   if (failures.length) {
     console.error(`✗ check:i18n-coverage --self-test — ${failures.length} failure(s)\n`);
     for (const f of failures) console.error(`  ${f}`);
@@ -1117,9 +1236,15 @@ if (process.argv.includes('--self-test')) {
  * ONE prerequisite and ONE command to satisfy it — never per config, and never
  * phrased so it can be mistaken for a verdict about a config's translations.
  *
- * Exits 1, the same code the real verdict uses: any wrapper that treats non-zero
- * as failure keeps behaving identically, and inventing a second failure code
- * would be a new contract nobody asked for.
+ * Exits `EXIT_PREREQUISITE_NOT_MET` — the constant `import-prerequisite.mjs`
+ * exports, imported rather than re-picked, and printed by the advisory in the
+ * same stroke. ⛔ NOT a second failure code invented here: 3 is what every
+ * other gate in this repo already means by these two words (#13983 moved the
+ * 45-gate shared frame onto it), and this site was one of the last three
+ * contradicting them. Nothing mechanical changes — every consumer of these
+ * gates treats any non-zero as failure — so the whole benefit is that a reader
+ * who sees only the number learns what the text already says: nothing was
+ * measured, and this is NOT a finding.
  *
  * The remedy is stated at TWO widths on purpose. `CLI_BUILD_FIX` is the command
  * that clears exactly what was checked, and nothing more — this probe measures the
@@ -1148,7 +1273,7 @@ function reportPrerequisiteNotMet(headline, detail) {
       `  Nothing was measured: no config was linted and no count was compared, so this\n` +
       `  result says NOTHING about whether any declared label went untranslated — and\n` +
       `  the baseline was left exactly as committed (\`--update\` included).\n` +
-      `  (Exit code 1 — capture it BEFORE any pipe:\n` +
+      `  (Exit code ${EXIT_PREREQUISITE_NOT_MET}, distinct from a finding's ${EXIT_FINDINGS} — capture it BEFORE any pipe:\n` +
       `  \`pnpm check:i18n-coverage > /tmp/i18n-coverage.log 2>&1; echo "EXIT=$?"\`.\n` +
       `  Piped, \`$?\` is the LAST command's status, and \`head\`/\`tail\` essentially never fail — that\n` +
       `  is the false green, and no pipe shape repairs it. \`\${PIPESTATUS[0]}\`/\`pipefail\` do recover\n` +
@@ -1156,7 +1281,7 @@ function reportPrerequisiteNotMet(headline, detail) {
       `  read end early — the gate takes EPIPE, its verdict text is TRUNCATED, and a producer that\n` +
       `  dies on SIGPIPE reports 141 rather than what it meant to say.)`,
   );
-  process.exit(1);
+  process.exit(EXIT_PREREQUISITE_NOT_MET);
 }
 
 /**
@@ -1174,7 +1299,10 @@ function reportPrerequisiteNotMet(headline, detail) {
  * The same invariant `reportPrerequisiteNotMet` states: nothing measured, nothing
  * written.
  *
- * Exits 1, the same code every other verdict here uses.
+ * Exits `EXIT_PREREQUISITE_NOT_MET`, NOT a finding's 1 — the closing paragraph
+ * already says nothing was compared, and the code now says the same thing. A
+ * partial round answered this gate's question about exactly nothing, which is
+ * what that code means everywhere else in this repo.
  */
 function reportUnmeasuredConfigs(failures, measuredCount) {
   const groups = groupFailuresByCause(failures);
@@ -1208,7 +1336,7 @@ function reportUnmeasuredConfigs(failures, measuredCount) {
       `  \`--update\` would freeze the survivors while silently dropping the rest. So this\n` +
       `  result says NOTHING about whether any declared label went untranslated, and the\n` +
       `  baseline was left exactly as committed (\`--update\` included).\n` +
-      `  (Exit code 1 — capture it BEFORE any pipe:\n` +
+      `  (Exit code ${EXIT_PREREQUISITE_NOT_MET}, distinct from a finding's ${EXIT_FINDINGS} — capture it BEFORE any pipe:\n` +
       `  \`pnpm check:i18n-coverage > /tmp/i18n-coverage.log 2>&1; echo "EXIT=$?"\`.\n` +
       `  Piped, \`$?\` is the LAST command's status, and \`head\`/\`tail\` essentially never fail — that\n` +
       `  is the false green, and no pipe shape repairs it. \`\${PIPESTATUS[0]}\`/\`pipefail\` do recover\n` +
@@ -1216,7 +1344,7 @@ function reportUnmeasuredConfigs(failures, measuredCount) {
       `  read end early — the gate takes EPIPE, its verdict text is TRUNCATED, and a producer that\n` +
       `  dies on SIGPIPE reports 141 rather than what it meant to say.)`,
   );
-  process.exit(1);
+  process.exit(EXIT_PREREQUISITE_NOT_MET);
 }
 
 /**
@@ -1229,7 +1357,9 @@ function reportUnmeasuredConfigs(failures, measuredCount) {
  * is to record it. Same invariant the two reports above state, and for the same
  * reason: nothing measured, nothing written.
  *
- * Exits 1, the code every other verdict here uses.
+ * Exits `EXIT_PREREQUISITE_NOT_MET`, NOT a finding's 1 — an empty population is
+ * the sharpest case of "nothing was measured", and that is the code this repo
+ * reserves for it.
  *
  * @param {{ headline: string, detail: string[] }} verdict
  */
@@ -1242,7 +1372,7 @@ function reportEmptyPopulation(verdict) {
       `  Nothing was measured: no config was linted and no count was compared, so this\n` +
       `  result says NOTHING about whether any declared label went untranslated — and\n` +
       `  the baseline was left exactly as committed (\`--update\` included).\n` +
-      `  (Exit code 1 — capture it BEFORE any pipe:\n` +
+      `  (Exit code ${EXIT_PREREQUISITE_NOT_MET}, distinct from a finding's ${EXIT_FINDINGS} — capture it BEFORE any pipe:\n` +
       `  \`pnpm check:i18n-coverage > /tmp/i18n-coverage.log 2>&1; echo "EXIT=$?"\`.\n` +
       `  Piped, \`$?\` is the LAST command's status, and \`head\`/\`tail\` essentially never fail — that\n` +
       `  is the false green, and no pipe shape repairs it. \`\${PIPESTATUS[0]}\`/\`pipefail\` do recover\n` +
@@ -1250,7 +1380,7 @@ function reportEmptyPopulation(verdict) {
       `  read end early — the gate takes EPIPE, its verdict text is TRUNCATED, and a producer that\n` +
       `  dies on SIGPIPE reports 141 rather than what it meant to say.)`,
   );
-  process.exit(1);
+  process.exit(EXIT_PREREQUISITE_NOT_MET);
 }
 
 /**
@@ -1338,7 +1468,8 @@ for (const [file, allowed] of Object.entries(baseline)) {
   } else if (now < allowed) {
     errors.push(
       `${file}: untranslated declared strings improved ${allowed} → ${now} — ratchet DOWN: ` +
-        `run \`node scripts/check-i18n-coverage.mjs --update\` and commit the baseline.`,
+        `run \`node scripts/check-i18n-coverage.mjs --update\` and commit the baseline. ` +
+        `If you did not touch this population, merge \`origin/main\` first — the movement is probably not yours.`,
     );
   }
 }

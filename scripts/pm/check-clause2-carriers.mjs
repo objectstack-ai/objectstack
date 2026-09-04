@@ -105,11 +105,13 @@
  * comment on the card.
  *
  * ⭐ C4 is the ONE thing this file reads out of a verdict comment, and it is not
- * the verdict: the `Implemented-by:` / `Reviewed-by:` session-ID pair the
- * verdict declares about its own AUTHORSHIP. No PASS or FAIL token is read to
- * reach it, so the boundary above is narrowed by exactly one fact and not
- * crossed — a self-issued verdict is refused on WHO wrote it, never on what it
- * concluded, and the row is report-only like every other one here.
+ * the verdict: the `Implemented-by:` / `Reviewed-by:` identity pair the verdict
+ * declares about its own AUTHORSHIP (a session id on both, or a `mode:subagent`
+ * dev's BRANCH on the left — the grammar note beside AUTHORSHIP_KEYS). No PASS
+ * or FAIL token is read to reach it, so the boundary above is narrowed by
+ * exactly one fact and not crossed — a self-issued verdict is refused on WHO
+ * wrote it, never on what it concluded, and the row is report-only like every
+ * other one here.
  *
  * ## How a COMPLETED review is told from a gate that never ran (#14155)
  *
@@ -204,6 +206,43 @@ import {
 } from './check-half-states.mjs';
 
 // dispatch-gates: no-path-population -- this gate reads no file in the tree at all; its whole input is the GitHub API (PRs, their labels, and the claim comments on their cards), so no card's file surface can predict it and the honest derivation is a repo-wide undetermined one (#13519)
+
+// -- The self-test's own battery roster and floor (#13489) ------------------
+//
+// `failed.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// The counts are a FLOOR, not an equality -- adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'the declaration reader: the fixed spelling, and everything that is not': 15,
+  'the card-level declaration: four states, none collapsed into another': 9,
+  'C1, replaying the 2026-08-31 measured table': 12,
+  'C2, the row this file exists for': 14,
+  'C3, the direction a carrier comparison cannot see': 7,
+  '#14155: the COMPLETED state, and the three it must stay distinct from': 18,
+  'the event reader itself': 9,
+  'the cost bound, stated as one predicate both sides read': 6,
+  'C4: the independence clause\'s carrier (maintainer 2026-09-01 「同意 A」)': 52,
+  'the #13910 specimen, end to end': 2,
+  'pairing, derived from the same relation H8/H31 read': 3,
+  'the exit register is distinct in every direction it must be': 3,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 12;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
 
 const API = 'https://api.github.com';
 const TOKEN = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN ?? '';
@@ -720,11 +759,12 @@ const VERDICT_MARKER = /^[ \t]*(?:>[ \t]*)?(?:[-*][ \t]+)?(?:\*\*)?`?VERDICT`?(?
  * The two lines a verdict carries about its own authorship, in the ONE spelling
  * that counts (maintainer 2026-09-01, verbatim and untranslated: 「同意 A」).
  *
- * `Implemented-by:` names the session that produced the diff — read from the
- * implementation claim, not invented — and `Reviewed-by:` names the session
- * rendering the verdict. Case-sensitive, exactly like the `Clause-②` key one
- * section up: this file has one convention for machine spellings and a second
- * one would be the drift it exists against.
+ * `Implemented-by:` names the IDENTITY that produced the diff — read from the
+ * implementation claim, not invented; a `mode:remote` dev's session id, a
+ * `mode:subagent` dev's branch (maintainer 2026-09-02, reading a) — and
+ * `Reviewed-by:` names the session rendering the verdict. Case-sensitive,
+ * exactly like the `Clause-②` key one section up: this file has one convention
+ * for machine spellings and a second one would be the drift it exists against.
  */
 export const AUTHORSHIP_KEYS = Object.freeze(['Implemented-by', 'Reviewed-by']);
 
@@ -736,18 +776,62 @@ const AUTHORSHIP_KEY_LINES = new Map(
 );
 
 /**
- * The value token — a session ID, read immediately after the colon.
+ * The value token — an IDENTITY, read immediately after the colon.
  *
  * The same calibration `readValueToken` states for `Clause-②`: the token must be
  * the FIRST thing after the colon, and what a seat writes after it is their
  * argument, which this file does not read. Real verdicts wrap the ID in
  * backticks, so the same decoration is tolerated and nothing else is.
+ *
+ * ⭐ TWO grammars, and which key admits which is the whole of the 2026-09-02
+ * ruling's reading a (verbatim and untranslated: 「同意」). A `mode:subagent` dev
+ * has no session of its own — under that backend the dev IS a subagent of the
+ * dispatching seat, so a seat-session token on `Implemented-by:` would name the
+ * REVIEWER by construction and make every subagent-dispatched card read as a
+ * self-review, which is the false positive this reading forecloses. Its identity
+ * bit is the one the claim protocol already gives it: its BRANCH, carried on the
+ * implementation claim's own `Branch:` line, so a reader can cross-check the
+ * token rather than take the verdict's word for it. `Implemented-by:` therefore
+ * admits a branch as a first-class value beside a session id (a `mode:remote`
+ * dev keeps its session), while `Reviewed-by:` admits a SESSION ONLY — a verdict
+ * is rendered by a seat, and a seat always has one.
+ *
+ * ⭐ The two grammars are DISJOINT, which is what keeps the comparison the
+ * ruling's own: `claude/…` can never equal `session_…`, so equality on the pair
+ * still means exactly what the ruling says it means — the SAME SESSION on both
+ * lines — and a branch on the left is silent without a second rule to say so.
  */
+const SESSION_TOKEN = /^(?:\*\*)?(?:`)?[ \t]*(session_[A-Za-z0-9]+)(?![A-Za-z0-9_])/;
+
+/**
+ * A `mode:subagent` dev's identity: the branch the claim protocol names it by.
+ * Anchored on the `claude/` prefix every dispatched branch carries and closed on
+ * an alphanumeric, so the seat's reasoning may follow the token — a trailing
+ * `,` or `.` belongs to the prose, never to the branch.
+ */
+const BRANCH_TOKEN = /^(?:\*\*)?(?:`)?[ \t]*(claude\/[A-Za-z0-9._/-]*[A-Za-z0-9])/;
+
 function readSessionToken(raw) {
-  const rest = String(raw ?? '').replace(/^[ \t]+/, '');
-  const m = /^(?:\*\*)?(?:`)?[ \t]*(session_[A-Za-z0-9]+)(?![A-Za-z0-9_])/.exec(rest);
+  const m = SESSION_TOKEN.exec(String(raw ?? '').replace(/^[ \t]+/, ''));
   return m ? m[1] : null;
 }
+
+/** The `Implemented-by:` value — a session id, or a dev branch. */
+function readImplementerToken(raw) {
+  const rest = String(raw ?? '').replace(/^[ \t]+/, '');
+  const m = SESSION_TOKEN.exec(rest) ?? BRANCH_TOKEN.exec(rest);
+  return m ? m[1] : null;
+}
+
+/**
+ * What each key admits, and what it is called when it admits nothing. Per KEY,
+ * because the two identities are not interchangeable: a reviewer is a seat and
+ * has a session, an implementer may be a subagent and has only its branch.
+ */
+const AUTHORSHIP_KEY_VALUES = new Map([
+  ['Implemented-by', { read: readImplementerToken, noun: 'identity — neither a session id nor a `claude/…` dev branch' }],
+  ['Reviewed-by', { read: readSessionToken, noun: 'session ID' }],
+]);
 
 /**
  * The authorship pair declared by ONE comment.
@@ -773,7 +857,7 @@ export function readVerdictAuthorship(text) {
     for (const [key, re] of AUTHORSHIP_KEY_LINES) {
       if (seen.has(key)) continue;
       const m = re.exec(line);
-      if (m) seen.set(key, { token: readSessionToken(m[1]), line: quoteLine(line) });
+      if (m) seen.set(key, { token: AUTHORSHIP_KEY_VALUES.get(key).read(m[1]), line: quoteLine(line) });
     }
   }
   if (seen.size === 0) return { kind: 'legacy' };
@@ -783,7 +867,7 @@ export function readVerdictAuthorship(text) {
   if (missing.length > 0 || unreadable.length > 0) {
     const parts = [];
     for (const key of missing) parts.push(`no \`${key}:\` line`);
-    for (const key of unreadable) parts.push(`\`${key}:\` carries no readable session ID (${JSON.stringify(seen.get(key).line)})`);
+    for (const key of unreadable) parts.push(`\`${key}:\` carries no readable ${AUTHORSHIP_KEY_VALUES.get(key).noun} (${JSON.stringify(seen.get(key).line)})`);
     return { kind: 'malformed', detail: parts.join('; ') };
   }
   return {
@@ -836,6 +920,12 @@ export function cardVerdictAuthorship(commentRows) {
     return { state: 'malformed', at: governing.at, detail: governing.read.detail };
   }
   const { implementedBy, reviewedBy } = governing.read;
+  // ⭐ Equality IS the same-session test, and needs no second rule to be one:
+  // the two identity grammars are disjoint, so a `mode:subagent` dev's branch on
+  // the left can never equal the reviewing seat's session on the right. That is
+  // reading a of the 2026-09-02 ruling, mechanized — a subagent-dispatched card
+  // reads INDEPENDENT, and only a seat that coded in-session and passed its own
+  // diff reads self-review.
   if (implementedBy !== reviewedBy) return { state: 'independent', implementedBy, reviewedBy };
   return { state: 'self-review', session: implementedBy, at: governing.at, detail: governing.read.line };
 }
@@ -863,9 +953,11 @@ export function c4VerdictSelfReview(pair) {
 
   const head = `card #${pair?.card} (delivering open PR #${pair?.pr}${pair?.draft ? ' (draft)' : ''})`;
   const fixed =
-    'the fixed spelling is `Implemented-by: session_…` (the session that produced the diff, read ' +
-    'from the implementation claim) and `Reviewed-by: session_…` (the session rendering this ' +
-    'verdict), each token immediately after its colon, the seat\'s reasoning free to follow it';
+    'the fixed spelling names the identity that produced the diff, read from the implementation ' +
+    'claim — `Implemented-by: session_…` for a `mode:remote` dev, `Implemented-by: claude/…` (its ' +
+    'BRANCH) for a `mode:subagent` dev, which has no session of its own — and `Reviewed-by: ' +
+    'session_…` for the session rendering this verdict, which is a seat and always has one; each ' +
+    'token immediately after its colon, the seat\'s reasoning free to follow it';
   const legacyIsSilent =
     '⚠️ A verdict carrying NEITHER line is a LEGACY verdict and is silent here — it predates the ' +
     'carrier and ⛔ is never turned red by its absence.';
@@ -1234,12 +1326,36 @@ const CLAIM = (extra) => ({
   body: `Claim: PM loop round R1\nBranch: \`claude/issue-13476-unresolvable-engine-403\`\n${extra ?? ''}`,
 });
 
+// Set by `selfTest()` only after its verdict is printed, and read at the
+// dispatch: a `return` that leaves the function above that line prints nothing
+// and still exits 0 — a self-test that never finished, reported as one that
+// passed (#13798). The self-test's own exit code stays load-bearing, so the
+// handshake is a flag rather than a returned sentinel.
+let selfTestReachedVerdict = false;
+
 export function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const batterySeen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+  };
   const cases = [];
-  const t = (name, ok, detail) => cases.push({ name, ok: Boolean(ok), detail });
+  const t = (name, ok, detail) => {
+    registerCase();
+    cases.push({ name, ok: Boolean(ok), detail });
+  };
   const says = (s, frag) => typeof s === 'string' && s.includes(frag);
 
   // -- the declaration reader: the fixed spelling, and everything that is not --
+  battery('the declaration reader: the fixed spelling, and everything that is not');
   t('the two fixed spellings read as declarations', readClause2Line('Clause-②: yes')?.value === 'yes' && readClause2Line('Clause-②: no')?.value === 'no');
   t('a blockquoted claim line still reads (SKILL.md writes the claim as a blockquote)', readClause2Line('> Clause-②: no')?.value === 'no');
   t('a bulleted, bolded, backticked line still reads — decoration is markdown, not meaning', readClause2Line('- **`Clause-②`**: **`yes`**')?.value === 'yes');
@@ -1261,6 +1377,7 @@ export function selfTest() {
   t('⛔ the reader never invents a value from an adjacent word', readClause2Line('this card is clause 2 yes in substance')?.kind !== 'declared');
 
   // -- the card-level declaration: four states, none collapsed into another ---
+  battery('the card-level declaration: four states, none collapsed into another');
   t('a claim comment carrying the line reads DECLARED', cardDeclaration([CLAIM('Clause-②: no')]).state === 'declared');
   t('…and keeps the value', cardDeclaration([CLAIM('Clause-②: yes')]).value === 'yes');
   t('a thread with no claim comment at all reads ABSENT', cardDeclaration([{ body: 'just a comment', created_at: '2026-08-31T10:00:00Z' }]).state === 'absent');
@@ -1275,6 +1392,7 @@ export function selfTest() {
   ]).value === 'no');
 
   // -- C1, replaying the 2026-08-31 measured table ---------------------------
+  battery('C1, replaying the 2026-08-31 measured table');
   const L = CONTRACT_REVIEW_LABEL;
   const pair = (o) => ({ pr: 13910, card: 13476, draft: true, prLabels: [], cardLabels: [], cardComments: [CLAIM('Clause-②: no')], ...o });
   // The seven pairs the filing cards tabulated, at the moment a human looked.
@@ -1302,6 +1420,7 @@ export function selfTest() {
   t('C1 never prescribes a write from this script', says(split[5], '自查放行'));
 
   // -- C2, the row this file exists for --------------------------------------
+  battery('C2, the row this file exists for');
   const absent = c2DeclarationUnreadable(pair({ cardComments: [CLAIM('Domain: x')] }));
   t('a card with no Clause-② line in its claim comment produces a C2 row', typeof absent === 'string');
   t('…and says NO READING in as many words', says(absent, 'NO READING'));
@@ -1321,6 +1440,7 @@ export function selfTest() {
   t('…and the unjudged accounting names the thread that could not be read', says(pairUnjudged(pair({ cardComments: null })), 'comment thread'));
 
   // -- C3, the direction a carrier comparison cannot see ----------------------
+  battery('C3, the direction a carrier comparison cannot see');
   // A declared `yes`, bare on both carriers — C3's candidate shape. The event
   // stream is what says WHICH of the four states this is.
   const declaredYes = (o) => pair({ prLabels: [], cardLabels: [], cardComments: [CLAIM('Clause-②: yes')], ...o });
@@ -1348,6 +1468,7 @@ export function selfTest() {
   t('an unreadable carrier never manufactures a C3 row', c3DeclaredYesUngated(pair({ cardLabels: null, cardComments: [CLAIM('Clause-②: yes')] })) === null);
 
   // -- #14155: the COMPLETED state, and the three it must stay distinct from --
+  battery('#14155: the COMPLETED state, and the three it must stay distinct from');
   const completed = declaredYes({
     pr: 13864,
     card: 13657,
@@ -1390,6 +1511,7 @@ export function selfTest() {
   t('labels bare but the stream ending on a HANG is a disagreement, reported not resolved', says(c3DeclaredYesUngated(declaredYes({ cardEvents: [CARD_HUNG], prEvents: [PR_HUNG, PR_CLEARED] })), 'the labels say bare, the events say hung'));
 
   // -- the event reader itself ------------------------------------------------
+  battery('the event reader itself');
   t('an empty stream reads NEVER HUNG — readable, and nothing was hung', carrierGateHistory([]).state === 'never-hung');
   t('a null stream reads UNREADABLE — the distinction the whole row turns on', carrierGateHistory(null).state === 'unreadable');
   t('the LAST event decides, and the reader sorts rather than trusting arrival order', carrierGateHistory([CARD_CLEARED, CARD_HUNG]).state === 'cleared' && carrierGateHistory([CARD_HUNG, CARD_CLEARED]).state === 'cleared');
@@ -1401,6 +1523,7 @@ export function selfTest() {
   t('the gate label is the sibling\'s constant, not a second spelling', carrierGateHistory([EV('labeled', '2026-08-31T16:55:54Z')]).state === 'hung');
 
   // -- the cost bound, stated as one predicate both sides read ---------------
+  battery('the cost bound, stated as one predicate both sides read');
   t('a declared `no` owes NO event stream — the cost bound', needsGateHistory(pair({ cardComments: [CLAIM('Clause-②: no')] })) === false);
   t('a pair still carrying the gate owes none either', needsGateHistory(pair({ prLabels: [L], cardLabels: [L], cardComments: [CLAIM('Clause-②: yes')] })) === false);
   t('an ABSENT declaration owes none — C2 already owns that pair', needsGateHistory(pair({ cardComments: [CLAIM('Domain: x')] })) === false);
@@ -1409,6 +1532,7 @@ export function selfTest() {
   t('the page cap exists, because the stream arrives OLDEST FIRST and a short read loses the removal', Number.isInteger(EVENT_PAGE_CAP) && EVENT_PAGE_CAP > 0);
 
   // -- C4: the independence clause's carrier (maintainer 2026-09-01 「同意 A」) --
+  battery('C4: the independence clause\'s carrier (maintainer 2026-09-01 「同意 A」)');
   // The fixtures are the measured verdict shape, not an invented one: the live
   // verdicts open a fenced block whose first line is `VERDICT: PASS`, with
   // `REVIEWED-HEAD:` beside it, and the session IDs are the two real ones from
@@ -1441,7 +1565,8 @@ export function selfTest() {
   t('ONE line alone is MALFORMED — half a pair compares to nothing', readVerdictAuthorship(VERDICT([`Reviewed-by: \`${REVIEW_SESSION}\``]).body)?.kind === 'malformed');
   t('…and the row can say WHICH line is missing', says(readVerdictAuthorship(VERDICT([`Reviewed-by: \`${REVIEW_SESSION}\``]).body)?.detail, 'Implemented-by'));
   t('a key with no readable session ID is MALFORMED, not a reading', readVerdictAuthorship(VERDICT(['Implemented-by: the dispatching seat', `Reviewed-by: \`${REVIEW_SESSION}\``]).body)?.kind === 'malformed');
-  t('…and says so rather than blaming the absent line', says(readVerdictAuthorship(VERDICT(['Implemented-by: the dispatching seat', `Reviewed-by: \`${REVIEW_SESSION}\``]).body)?.detail, 'no readable session ID'));
+  t('…and says so rather than blaming the absent line', says(readVerdictAuthorship(VERDICT(['Implemented-by: the dispatching seat', `Reviewed-by: \`${REVIEW_SESSION}\``]).body)?.detail, 'no readable identity'));
+  t('…naming BOTH identities that key admits, so the remedy is executable for either dev backend', says(readVerdictAuthorship(VERDICT(['Implemented-by: the dispatching seat', `Reviewed-by: \`${REVIEW_SESSION}\``]).body)?.detail, 'session id') && says(readVerdictAuthorship(VERDICT(['Implemented-by: the dispatching seat', `Reviewed-by: \`${REVIEW_SESSION}\``]).body)?.detail, 'claude/'));
 
   // the spelling, mirroring the Clause-② reader exactly
   t('the token may be followed by the seat\'s reasoning — the same calibration Clause-② uses', readVerdictAuthorship(VERDICT([`Implemented-by: ${IMPL_SESSION} (implementation claim, 09:24Z)`, `Reviewed-by: ${REVIEW_SESSION}`]).body)?.implementedBy === IMPL_SESSION);
@@ -1464,8 +1589,26 @@ export function selfTest() {
   const halfRow4 = c4VerdictSelfReview(reviewed([VERDICT([`Reviewed-by: \`${REVIEW_SESSION}\``])]));
   t('⭐ a ONE-LINE-only verdict is its own reportable malformed state', typeof halfRow4 === 'string' && says(halfRow4, 'HALF'));
   t('…and quotes the fixed spelling so the remedy is executable', says(halfRow4, 'Implemented-by: session_') && says(halfRow4, 'Reviewed-by: session_'));
+  t('…including the subagent BRANCH form, the half a session-only spelling could not express', says(halfRow4, 'Implemented-by: claude/'));
   t('…and says in the same breath that a legacy verdict is NOT this state', says(halfRow4, 'LEGACY') && says(halfRow4, 'never turned red'));
   t('C4 never prescribes a write from this script either', says(halfRow4, '自查放行'));
+
+  // the SUBAGENT identity — reading a (maintainer 2026-09-02, verbatim 「同意」)
+  // A `mode:subagent` dev has no session of its own, so the implementation claim
+  // names it by its BRANCH; a session token on that line would name the
+  // dispatching seat and make every subagent-dispatched card a false self-review.
+  const DEV_BRANCH = 'claude/issue-14209-review-template-half';
+  const SUBAGENT_PAIR = [`Implemented-by: \`${DEV_BRANCH}\``, `Reviewed-by: \`${REVIEW_SESSION}\``];
+  t('⭐ a `mode:subagent` dev is named by its BRANCH, and that reads as a first-class pair', readVerdictAuthorship(VERDICT(SUBAGENT_PAIR).body)?.kind === 'pair' && readVerdictAuthorship(VERDICT(SUBAGENT_PAIR).body)?.implementedBy === DEV_BRANCH);
+  t('⭐ …so a subagent-dispatched card is SILENT — the reviewing seat did not write the diff', c4VerdictSelfReview(reviewed([VERDICT(SUBAGENT_PAIR)])) === null);
+  t('…and it reads INDEPENDENT rather than unjudged — silence here is a reading, not a gap', cardVerdictAuthorship([VERDICT(SUBAGENT_PAIR)]).state === 'independent' && pairUnjudged(reviewed([VERDICT(SUBAGENT_PAIR)])) === null);
+  t('⭐ …while the same-session pair still FIRES: widening the grammar did not disarm the row', typeof c4VerdictSelfReview(reviewed([VERDICT(SELF_PAIR)])) === 'string');
+  t('the branch token ends at the branch — the seat\'s reasoning may follow it', readVerdictAuthorship(VERDICT([`Implemented-by: ${DEV_BRANCH} (implementation claim, 16:29Z)`, `Reviewed-by: ${REVIEW_SESSION}`]).body)?.implementedBy === DEV_BRANCH);
+  t('…and a trailing sentence mark belongs to the prose, never to the branch', readVerdictAuthorship(VERDICT([`Implemented-by: ${DEV_BRANCH}.`, `Reviewed-by: ${REVIEW_SESSION}`]).body)?.implementedBy === DEV_BRANCH);
+  t('⛔ `Reviewed-by:` admits a session ONLY — a verdict is rendered by a seat, and a seat has one', readVerdictAuthorship(VERDICT([`Implemented-by: \`${DEV_BRANCH}\``, `Reviewed-by: \`${DEV_BRANCH}\``]).body)?.kind === 'malformed');
+  t('…and says WHICH key refused the token, not the other one', says(readVerdictAuthorship(VERDICT([`Implemented-by: \`${DEV_BRANCH}\``, `Reviewed-by: \`${DEV_BRANCH}\``]).body)?.detail, 'Reviewed-by') && !says(readVerdictAuthorship(VERDICT([`Implemented-by: \`${DEV_BRANCH}\``, `Reviewed-by: \`${DEV_BRANCH}\``]).body)?.detail, '`Implemented-by:` carries'));
+  t('⛔ a bare `claude` with no branch path is not an identity', readVerdictAuthorship(VERDICT(['Implemented-by: claude', `Reviewed-by: \`${REVIEW_SESSION}\``]).body)?.kind === 'malformed');
+  t('⛔ nor is a branch that merely appears LATER in the line — the token is first after the colon', readVerdictAuthorship(VERDICT([`Implemented-by: the dev on ${DEV_BRANCH}`, `Reviewed-by: \`${REVIEW_SESSION}\``]).body)?.kind === 'malformed');
 
   // the governing verdict — why the newest one carrying the pair decides
   t('⭐ a self-review followed by an INDEPENDENT re-review reads clean — the remedy clears the row', c4VerdictSelfReview(reviewed([VERDICT(SELF_PAIR, '2026-09-01T11:21:18Z'), VERDICT(INDEPENDENT_PAIR, '2026-09-01T12:56:27Z')])) === null);
@@ -1485,22 +1628,69 @@ export function selfTest() {
   t('…and a self-reviewed pair is adverse even when every carrier reading is clean', pairRows(reviewed([VERDICT(SELF_PAIR)])).map((r) => r.code).join(',') === 'C4');
 
   // -- the #13910 specimen, end to end ---------------------------------------
+  battery('the #13910 specimen, end to end');
   const specimen = pair({ pr: 13910, card: 13476, prLabels: [], cardLabels: [L], cardComments: [CLAIM('Domain: `domain:engine`')] });
   const specimenRows = pairRows(specimen).map((r) => r.code);
   t('the measured #13910 specimen produces BOTH the split row and the no-reading row', specimenRows.includes('C1') && specimenRows.includes('C2'), JSON.stringify(specimenRows));
   t('…and no C3 row, because that card declared nothing at all', !specimenRows.includes('C3'));
 
   // -- pairing, derived from the same relation H8/H31 read --------------------
+  battery('pairing, derived from the same relation H8/H31 read');
   const prRow = (n, card, ref) => ({ number: n, draft: true, labels: [], body: `Fixes #${card}\n`, head: { ref } });
   t('a PR body naming its card pairs with it', derivePairs([prRow(13910, 13476, 'claude/issue-13476-x')], [13476]).length === 1);
   t('a PR body naming another card does NOT pair on a stale branch name', derivePairs([prRow(13910, 9999, 'claude/issue-13476-x')], [13476]).length === 0);
   t('a branch name is the fallback when the body says nothing', derivePairs([{ number: 1, labels: [], body: 'no refs here', head: { ref: 'claude/issue-13476-x' } }], [13476]).length === 1);
 
   // -- the exit register is distinct in every direction it must be -----------
+  battery('the exit register is distinct in every direction it must be');
   const codes = [EXIT_OK, EXIT_USAGE, EXIT_INCOMPLETE, EXIT_PREREQUISITE_NOT_MET, EXIT_PAIR_ADVERSE];
   t('every exit code is distinct — a verdict can never be read as an environment complaint', new Set(codes).size === codes.length, JSON.stringify(codes));
   t('the adverse-pair code is NOT the prerequisite code', EXIT_PAIR_ADVERSE !== EXIT_PREREQUISITE_NOT_MET);
   t('the prerequisite code is the sibling\'s, imported rather than re-picked', EXIT_PREREQUISITE_NOT_MET === 3);
+
+  // -- The floor: every declared battery RAN, and ran its cases (#13489) -----
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => { cases.push({ name: message, ok: false }); };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned `
+        + `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in `
+        + 'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. `
+          + 'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of `
+          + `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the '
+        + 'number. Find what stopped registering (an early return, a deleted block, a guard that now '
+        + 'skips) and restore it.',
+    );
+  }
 
   const failed = cases.filter((c) => !c.ok);
   for (const c of failed) console.error(`  ✗ ${c.name}${c.detail ? ` — ${c.detail}` : ''}`);
@@ -1514,13 +1704,26 @@ export function selfTest() {
       'replayed from the 2026-09-01 clear, the verdict-authorship pair and its legacy silence, ' +
       'and the exit register).',
   );
+
+  selfTestReachedVerdict = true;
   return 0;
 }
 
 // ---------------------------------------------------------------------------
 
 async function main(argv) {
-  if (argv.includes('--self-test')) return selfTest();
+  if (argv.includes('--self-test')) {
+    const selfTestCode = selfTest();
+    if (!selfTestReachedVerdict) {
+      console.error(
+        '\n✗ check-clause2-carriers self-test: selfTest() returned without reaching its verdict,\n'
+          + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+          + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
+    return selfTestCode;
+  }
 
   const repoRes = resolveSweepRepo(process.env);
   if (!repoRes.valid) {
@@ -1577,7 +1780,16 @@ async function main(argv) {
 
 if (isEntrypoint(import.meta.url)) {
   if (process.argv.includes('--self-test')) {
-    process.exit(selfTest());
+    const selfTestCode = selfTest();
+    if (!selfTestReachedVerdict) {
+      console.error(
+        '\n✗ check-clause2-carriers self-test: selfTest() returned without reaching its verdict,\n'
+          + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+          + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
+    process.exit(selfTestCode);
   } else {
     const rearmed = rearmThroughProxy(process.argv.slice(2));
     if (rearmed !== null) process.exit(rearmed);

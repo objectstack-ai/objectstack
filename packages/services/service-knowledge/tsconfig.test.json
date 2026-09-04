@@ -1,0 +1,98 @@
+// The TEST-layer type-check program (#15049 — the `packages/services/**`
+// instance of the class #14062 settled for `packages/plugins/**`, itself
+// adopting the mechanism #5286 set for `packages/spec`, #5449 generalised,
+// #12542 carried to `packages/rest`, #13176 to `packages/plugins/
+// plugin-security`, and #14181 / PR #15032 to `packages/services/
+// service-cluster` — the worked example this file is copied from).
+// `tsconfig.json` beside this one stays exactly as it is: it is the BUILD
+// config. This sibling puts the test layer in front of tsc under the module
+// semantics vitest really executes it with, and `package.json`'s `typecheck`
+// script NAMES it (via `check:test-typecheck --project`), because a config no
+// script invokes is exactly the phantom this whole change is about.
+//
+// ⚠️ WHY `service-knowledge`, LIKE `service-cluster` AND UNLIKE `plugin-auth` /
+// `plugin-sharing` / `core`: this package's `tsconfig.json` does NOT exclude
+// tests (`include: ["src"]`, no `**/*.test.ts` exclusion) and never did, so the
+// program that would have read them already existed and was simply never
+// invoked -- no `typecheck` script named it. `tsup` type-strips, `vitest`
+// type-strips; neither ran tsc.
+//
+// What differs from the build config, and what deliberately does NOT:
+//   - MODULE SEMANTICS ONLY, plus `lib`. The tests are written and executed as
+//     ESM by vitest (esbuild/vite). Matching that is FIDELITY, not laxity: it is
+//     the same subtraction `packages/spec`, `packages/rest`, the
+//     `packages/plugins/**` family and `service-cluster` each made.
+//   - ⛔ STRICTNESS IS UNTOUCHED. `strict`, `noUnusedLocals`,
+//     `noUnusedParameters`, `noImplicitReturns`, `noFallthroughCasesInSwitch`,
+//     `rootDir`, `paths` and `types` are all INHERITED from `tsconfig.json`
+//     (and through it the root config), and none of them is re-declared here.
+//     ⚠️ A child that declared its own `paths` would REPLACE the parent map
+//     rather than merge into it, silently sending a source-resolved specifier
+//     back to `dist/` — a BUILD ARTIFACT — so this file declares none.
+//     Nothing here may loosen a type rule; if a test does not compile, that is
+//     the finding.
+//   - `lib: ["ES2022"]`, for the same reason `packages/rest` states: the root
+//     config's `lib` is ES2020 and vitest runs on a Node that has es2022
+//     builtins, so the gap is reported as TS2550 about the CHECK. No `DOM`:
+//     nothing in this layer touches a browser global.
+//
+// MEASURED, workspace closure built first (`tsc --noEmit --pretty false
+// --listFiles -p <config>`, and the same command without `--listFiles`), on a
+// checkout at merge-base 2cc4610304, BEFORE any repair:
+//
+//   files in this program (test config)     409
+//   files in tsconfig.json (build config)   441
+//   own `src/**/*.test.ts` in the program     4
+//   errors under BUILD semantics (tsconfig.json, undivided)   10
+//   errors under THIS config (the split)                       4
+//
+// The 10 undivided matched the DEBT entry this PR deletes exactly: 3 TS2835
+// (config-tier -- three relative test imports missing `.js`, required by
+// `moduleResolution: NodeNext`) + 4 TS7006 (noise -- `KnowledgeService`
+// resolving to `any` through the unresolved imports cascades into every
+// `(h) => h.documentId)` callback over its return value) + 3 code-tier the
+// ledger's note itemised (TS2339/TS2352/TS2493).
+//
+// The split did NOT confirm the ledger's 3-code-tier guess -- it found 4, the
+// same "a tier split read off an unrepaired config is a guess about what is
+// UNDER it" lesson this file's sibling ledger note states for `metadata` and
+// `service-storage`: stripping the config-tier noise re-enabled an EXCESS
+// PROPERTY CHECK that the `any`-typed parameter had been suppressing, and it
+// caught a real one -- `roles: ['member']` in one `ExecutionContext` literal,
+// stale since the field was renamed to `positions` (`execution-context.zod.ts`
+// docs it: "Formerly `roles`"). The other 3 were exactly the ledger's guess:
+// two `vi.fn()` mocks stubbing `IDataEngine.find` typed with fewer parameters
+// than the real call site they stand in for, so `.mock.calls[N]` indexed past
+// a TS-inferred EMPTY tuple (TS2493, plus the `as` cast off it reading TS2352)
+// and a third mock's param type omitted the `where` field the real call
+// passes (TS2339). All 4 are fixed in the test file, matching each mock's type
+// to the call site it stubs -- never widening the mock, never touching
+// `ExecutionContext` (which is correct; the test's stale field name was not).
+//
+// The three TS2835 are ALSO repaired directly (`.js` added to the three
+// relative specifiers), because `tsconfig.json` genuinely DOES include the
+// tests -- same as `service-cluster` -- so the package's `typecheck` script's
+// bare `tsc --noEmit` step reads these same files under NodeNext and needs
+// them resolvable regardless of this sibling config; unlike `service-cluster`,
+// this package's test files had NOT already been written with the extension.
+// After both repairs, BOTH readings are 0 -- see the PR body / changeset for
+// the fix-by-fix account.
+//
+// There is NO `test-typecheck-debt.json` beside this config, and its ABSENCE is
+// the zero: `check:test-typecheck` reads a missing ledger as `{ entries: {} }`,
+// under which ANY error in ANY file here is red immediately, with no entry to be
+// added to. If this package ever acquires residue that cannot be fixed in the
+// PR that causes it, THAT is when a ledger and a `gen:test-typecheck-debt`
+// script are owed — and adding one is maintainer-only (#5286), exactly as the
+// gate says when it refuses.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"]
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}

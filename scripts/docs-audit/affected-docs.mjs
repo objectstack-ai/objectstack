@@ -203,6 +203,62 @@ import { join, relative } from 'node:path';
 // side-effect-free on import, so the no-install contract this script runs under holds.
 import { blank, maskComments, scanSource } from '../js-comment-mask.mjs';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'the ADR-0049 ledger-entry exclusion (#12966)': 33,
+  'the WALK\'s admission decision, against a fake tree (#11866)': 67,
+  'the container qualifier every anchor case below runs under (#13713)': 10,
+  'anchor PROVENANCE (#12824)': 12,
+  'CONTAINER-QUALIFIED DATA-PROPERTY ANCHORS (option D, #13713)': 20,
+  'the two ruled true positives, against the LIVE generated artifacts': 61,
+  'A PARTIAL LEDGER READ MUST SAY SO (#9896)': 14,
+  'why the verdict keys on the SPELLING and not on a shortfall': 4,
+  'A NON-LITERAL `route:` IS A VERDICT TOO (#10500)': 10,
+  'A DECLARED `client:` ON A ROW THAT WAS NEVER ASSEMBLED (#10636)': 26,
+  'A LITERAL-UNION `route:` TYPE MEMBER IS NOT A ROW (#10793)': 16,
+  'THE SAME TYPE MEMBER, IN THE TWO QUOTES THE RECOGNIZER DECLINES (#10901)': 42,
+  '(3) THE WINDOW DELIMITER (`nextRouteRe`) — the worst of the seven, and the reason this is': 1,
+  '(4) THE IN-WINDOW `client:` MATCH (`windowClientRe`). `window.match()` takes the FIRST': 2,
+  '(5) THE DECLINED SWEEP (`declinedIn`), which is the LOUD direction: a double-quoted': 2,
+  '(6) THE RAW SWEEP behind `outsideCode`. A `subroute:` in a COMMENT was reported to the': 1,
+  '(7) …and `codeLeads`, the other half of that pair, which has no behaviour of its own:': 1,
+  '(8) …AND THE EIGHTH SCAN\'S ANSWER IS UNCHANGED, which is the whole point: it is the one': 26,
+  'the route bridge admits LEAF symbols only (#9294)': 15,
+  'the handler-window scan reads CODE, never PROSE (#9432)': 8,
+  'a registration BOUNDS the previous window even when its path is a variable (#9503)': 9,
+  'the CLI command anchor kind (#9230)': 40,
+  'the rule-block anchor kind (#9282)': 49,
+  'THE PAIR MUST AGREE ON SCREAMING_SNAKE (#13471)': 9,
+  '`computedOn` (#9519): the record that names WHICH TREE the answer is about': 12,
+  'the sdk bridge\'s REACH over the declared surface (#9572)': 11,
+  '#11178: WHY a row is unreachable, and the two causes that printed as one': 28,
+  '`causes` GETS THE SAME TREATMENT, AT BOTH ENDS (#11867)': 16,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 28;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 const repoRoot = execSync('git rev-parse --show-toplevel').toString().trim();
 const args = process.argv.slice(2);
 const asJson = args.includes('--json');
@@ -2586,9 +2642,25 @@ function parseLedgerSource(text) {
  * filesystem lookup is injected as a fake tree.
  */
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const batterySeen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+  };
+  battery('the ADR-0049 ledger-entry exclusion (#12966)');
+
   let failed = 0;
   let total = 0;
   const check = (fn, label, path, want, got) => {
+    registerCase();
     total++;
     if (got !== want) {
       console.error(`  ✗ self-test "${label}": ${path} → expected ${fn}=${JSON.stringify(want)}, got ${JSON.stringify(got)}`);
@@ -2682,6 +2754,7 @@ function selfTest() {
   // `REGISTRAR_FILE_RE`, and a test double contributed production route tails — the exact
   // failure this is here to keep out. Verified RED against the pre-fix line: 4 registrar
   // files and 6 source files, against the 1 and 2 asserted here.
+  battery('the WALK\'s admission decision, against a fake tree (#11866)');
   const fakeSrcTree = [
     'packages/foo/src/engine.ts',                        // plain implementation
     'packages/foo/src/real-route.ts',                    // a genuine registrar — must survive
@@ -2921,6 +2994,7 @@ function selfTest() {
   // `ui.json` collision — and the containers deliberately LEFT OUT (`MetaOverlayCacheKey`,
   // `DatasourceDef`, `SysScimConnectionBinding`, `RestServer`, …) are exactly the ones the
   // real map does not carry either. That absence is what the case-(c) pins below exercise.
+  battery('the container qualifier every anchor case below runs under (#13713)');
   const selfTestSurface = buildContainerSurface(
     [
       { entries: { ObjectSchemaBase: 'data/Object', DatasourceSchema: 'data/Datasource' }, collisions: [] },
@@ -2976,6 +3050,7 @@ function selfTest() {
   // the tool mints, the other is the most valuable one — disproven discriminator #1 on
   // the card is exactly that no syntactic test separates them. The container does, and
   // that is the field these rows now print.
+  battery('anchor PROVENANCE (#12824)');
   const cacheStructSource = [
     '/** The identity of one cached overlay read. */',
     'export interface MetaOverlayCacheKey {',
@@ -3038,6 +3113,7 @@ function selfTest() {
   // The DROP leg is a deliberate false negative, so it is pinned twice: once for the
   // anchor it removes and once for the ledger entry that names the removal. A drop no
   // field reports is one no reviewer can audit.
+  battery('CONTAINER-QUALIFIED DATA-PROPERTY ANCHORS (option D, #13713)');
   const authorableUseSite = [
     'const DatasourceSchema = strictObject({',                 // maps to data/Datasource
     '    managedBy: z.literal("system"),',                     // an authorable key NAME, not of THIS type
@@ -3151,6 +3227,7 @@ function selfTest() {
   // proves nothing about the map the tool actually reads: if `gen:declaration-map` or
   // `gen:schema` stops emitting what this reads, the qualification silently reverts to
   // pre-#13713 behaviour and no fixture pin would notice. These cases are what notice.
+  battery('the two ruled true positives, against the LIVE generated artifacts');
   const live = liveContainerSurface();
   check('liveContainerSurface', 'the generated artifacts are readable — a silent revert to pre-#13713 behaviour is itself the regression', 'available', true, live.available);
   check('liveContainerSurface', 'ObjectSchemaBase resolves — the `userActions` pin runs through case (a)', 'data/Object', 'data/Object', String(live.resolve('ObjectSchemaBase')));
@@ -3330,6 +3407,7 @@ function selfTest() {
   // Every one of those is ordinary TypeScript; the template-literal spellings are the
   // realistic ones, because the repo's formatter rewrites double quotes back to single and
   // leaves a template literal alone.
+  battery('A PARTIAL LEDGER READ MUST SAY SO (#9896)');
   const partialSource = [
     'export const REST_ROUTE_LEDGER = [',
     "  { route: 'GET /api/v1/meta/:type/:name/references', family: 'metadata', disposition: 'sdk', client: 'meta.getReferences' },",
@@ -3393,6 +3471,7 @@ function selfTest() {
   // claim `meta.getTypes`. Measured on the real tree at a718ee3dd, backtick-quoting
   // `GET /api/v1/meta` in `rest-route-ledger.ts` did exactly this, and `clientRows` stayed
   // 221 — a count comparison cannot see it, which is why `declined` is what fires.
+  battery('why the verdict keys on the SPELLING and not on a shortfall');
   const stealSource = [
     'export const REST_ROUTE_LEDGER = [',
     "  { route: 'GET /api/v1/docs', family: 'ops', disposition: 'server-only' },",
@@ -3422,6 +3501,7 @@ function selfTest() {
   // is inside a type declaration and a row never is — so the counter can widen without
   // billing that member as a row. Both directions are pinned here, because counting the
   // interface member is precisely how a fix here goes wrong.
+  battery('A NON-LITERAL `route:` IS A VERDICT TOO (#10500)');
   const nonLiteralSource = [
     'export interface Entry { route: string; client: string }',
     'export const L = [',
@@ -3486,6 +3566,7 @@ function selfTest() {
   // four. The row DOES land in a verdict after #10500 (its `route:` is named as unread), so
   // what was wrong here is a sub-count, not a silence — and a denominator that omits a
   // declaration renders a partial read as more complete than it is.
+  battery('A DECLARED `client:` ON A ROW THAT WAS NEVER ASSEMBLED (#10636)');
   const orphanSource = [
     // The reject side lives on line 1, in the spelling that makes it hostile: a
     // literal-union TYPE member opens with the very quote this counter reads, so the quote
@@ -3647,6 +3728,7 @@ function selfTest() {
   // ⚠️ PINNED IN BOTH DIRECTIONS, like the mask cases: a fix that reached the type member by
   // swallowing the table AFTER it — a brace match that ran away — would pass a test asserting
   // only that the phantom is gone, while silently dropping all 259 live rows.
+  battery('A LITERAL-UNION `route:` TYPE MEMBER IS NOT A ROW (#10793)');
   const typeUnionSource = [
     "export interface Entry { route: 'GET /api/v1/gone' | 'GET /api/v1/meta'; client: string }",
     'export const L = [',
@@ -3745,6 +3827,7 @@ function selfTest() {
   // code path, and were measured behaving identically — which is the reason to pin them
   // apart rather than to trust one for both: a later narrowing of that alternation would
   // otherwise take one of them with nothing to say so.
+  battery('THE SAME TYPE MEMBER, IN THE TWO QUOTES THE RECOGNIZER DECLINES (#10901)');
   for (const [spelling, q] of [['double-quoted', '"'], ['backtick-quoted', '`']]) {
     const src = [
       `export interface Entry { route: ${q}GET /api/v1/gone${q} | ${q}GET /api/v1/meta${q}; client: string }`,
@@ -3990,6 +4073,7 @@ function selfTest() {
   // PHANTOM took it: a WRONG binding, on a path nobody mounts, which then joined the
   // UNREACHABLE population. A count comparison is blind to it by construction — the same
   // shape #10636 measured for the quote spellings, arriving through the key.
+  battery('(3) THE WINDOW DELIMITER (`nextRouteRe`) — the worst of the seven, and the reason this is');
   const keyWindow = parseLedgerSource([
     'export const L = [',
     "  { route: 'GET /api/v1/meta', family: 'metadata',",
@@ -4005,6 +4089,7 @@ function selfTest() {
   // hit, so a `myclient:` written ahead of the real `client:` became the row's binding, and
   // the real one — spelled exactly the way this recognizer reads — fell through to #10636's
   // unclaimed sweep and was NAMED as a value no row read, on a ledger that binds it correctly.
+  battery('(4) THE IN-WINDOW `client:` MATCH (`windowClientRe`). `window.match()` takes the FIRST');
   const keyClient = parseLedgerSource([
     'export const L = [',
     "  { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk',",
@@ -4021,6 +4106,7 @@ function selfTest() {
   // `subroute:` was billed as a `route:` value the parse FAILED to read, so it entered the
   // denominator, was NAMED with its line, and fired a PARTIAL-read verdict with exit 1 on a
   // wholly accurate ledger. A false red costs the same trust a false green does.
+  battery('(5) THE DECLINED SWEEP (`declinedIn`), which is the LOUD direction: a double-quoted');
   const keyDeclined = parseLedgerSource([
     'export const L = [',
     '  { subroute: "GET /api/v1/gone", family: \'metadata\', disposition: \'sdk\' },',
@@ -4036,6 +4122,7 @@ function selfTest() {
   // (6) THE RAW SWEEP behind `outsideCode`. A `subroute:` in a COMMENT was reported to the
   // reader as a lead sitting where the mask says code is not — a finding printed on every
   // `--bridge-coverage` run, naming something that is not a lead at all.
+  battery('(6) THE RAW SWEEP behind `outsideCode`. A `subroute:` in a COMMENT was reported to the');
   const keyProse = parseLedgerSource([
     "// The retired row read subroute: 'GET /api/v1/gone' before #1234.",
     'export const L = [',
@@ -4049,12 +4136,14 @@ function selfTest() {
   // only `codeLeads` anchored, a `subroute:` in CODE position would fall OUT of the filter and
   // be reported as prose — the card's own fixture, pinned here explicitly so the pair cannot
   // drift apart while every other fixture stays green.
+  battery('(7) …and `codeLeads`, the other half of that pair, which has no behaviour of its own:');
   check('parseLedgerSource', 'and a `subroute:` in CODE position is not reported as one either',
     'outsideCode', 0, unanchoredKey.outsideCode.length);
 
   // (8) …AND THE EIGHTH SCAN'S ANSWER IS UNCHANGED, which is the whole point: it is the one
   // that was already right. A `subroute:` whose value is not a string literal at all was never
   // billed as an unreadable declaration — before the anchor moved or after.
+  battery('(8) …AND THE EIGHTH SCAN\'S ANSWER IS UNCHANGED, which is the whole point: it is the one');
   const keyUnreadable = parseLedgerSource([
     'export const L = [',
     "  { subroute: ROUTES.gone, family: 'metadata', disposition: 'sdk' },",
@@ -4295,6 +4384,7 @@ function selfTest() {
   // method must stay bridgeable, and the identifier scan must still SEE the qualifier —
   // that last one is what stops this block going green because the fixture drifted into
   // deriving no route at all.
+  battery('the route bridge admits LEAF symbols only (#9294)');
   const serverSource = [
     'export class RestServer {',
     '    /**',
@@ -4376,6 +4466,7 @@ function selfTest() {
   // must NOT bridge, the code-named leaf MUST, and the raw scan must still SEE the prose
   // name — that last one is the counterfactual, and it is what stops this block going green
   // because the fixture drifted into carrying no comment at all.
+  battery('the handler-window scan reads CODE, never PROSE (#9432)');
   const commentaryRegistrar = [
     'export class RestServer {',
     '    private registerPublishRoutes() {',
@@ -4481,6 +4572,7 @@ function selfTest() {
   // reaches this block: the fixture is hermetic and models the variable-path SHAPE,
   // which is still the shape the scan cannot see wherever it survives. Kept verbatim
   // for that reason — ⛔ do not "refresh" a hermetic fixture to match today's tree.
+  battery('a registration BOUNDS the previous window even when its path is a variable (#9503)');
   const variablePathRegistrar = [
     'export class RestServer {',
     '    private registerStateRoutes() {',
@@ -4555,6 +4647,7 @@ function selfTest() {
   // are pinned — the phrase that must now be derived, AND the bare token that must stay
   // dropped, because buying recall by loosening the shape guard is the one fix this card
   // rules out (19 pages → 49, measured).
+  battery('the CLI command anchor kind (#9230)');
 
   const commandIdCases = [
     // [path under the commands root, expected id, label]
@@ -4649,6 +4742,7 @@ function selfTest() {
   // check". Pinned here in three directions: the expressions that must now be derived,
   // the CALLER-LIST names that must stay dropped (they took the specimen from 7 pages to
   // 27), and the honest-failure property that made the defect filable at all.
+  battery('the rule-block anchor kind (#9282)');
 
   // Block detection. The tag is an opt-in, so an untagged block must contribute nothing
   // however well-formed it is.
@@ -4775,6 +4869,7 @@ function selfTest() {
   // identifier (pinned in `shapeCases` above) while `literalAnchorsFromLines` declined to
   // mint any anchor from it. Pin the agreement itself, so neither side can drift back out
   // of step silently — a check on one predicate alone could not have caught this.
+  battery('THE PAIR MUST AGREE ON SCREAMING_SNAKE (#13471)');
   for (const t of ['OS_CLOUD_URL', 'OS_MODE', 'OS_TENANCY_POSTURE', 'ERROR_CODE_LEDGER', 'FLOW_INPUT_SCHEMA_INVALID']) {
     check('isCodeShaped/isLiteralAnchorShape', 'the pair agrees on a SCREAMING_SNAKE token', t,
       true, isCodeShaped(t) === isLiteralAnchorShape(t) && isLiteralAnchorShape(t));
@@ -4801,6 +4896,7 @@ function selfTest() {
   // commit's parents must survive as a PAIR — that pair is the only durable handle on
   // an ephemeral `refs/pull/N/merge` tree — and "could not tell" must never be
   // flattened into "checked, clean".
+  battery('`computedOn` (#9519): the record that names WHICH TREE the answer is about');
   const mergeParents = '097fe96e1228f7da71f87e8f5ed95ae2739b53f1 047457ca3a8757012043460b8ded6090cbc9b114';
   const computedOnCases = [
     // [label, want, got]
@@ -4833,6 +4929,7 @@ function selfTest() {
   // A ledger record as `parseLedgerSource` returns one. Spelled through a helper so a
   // fixture cannot quietly omit the declared counts — `bridgeCoverageFrom` reads them with
   // no default on purpose, and a fixture that skipped them would throw rather than pass.
+  battery('the sdk bridge\'s REACH over the declared surface (#9572)');
   const covLedger = (file, rows) => ({
     file,
     rows,
@@ -4890,6 +4987,7 @@ function selfTest() {
   // `56 of 56` (auth) and `46 of 87` (rest) render identically today and are not the same
   // finding: the first surface has NO in-repo registration site, so the discovery widening
   // the second one wants moves it by zero rows — measured, before this split existed.
+  battery('#11178: WHY a row is unreachable, and the two causes that printed as one');
   const ceilSrc = [
     ['r-registers.ts', "app.get({ path: '/api/v1/storage/upload/presigned' }, handler);"],
     ['r-comments.ts', "// path: '/api/v1/never/registered' — an illustration, not a registration\n"],
@@ -5013,6 +5111,7 @@ function selfTest() {
   // at all (measured: zero occurrences of `causes` in that file). Either half alone is
   // the half-wired state — a ceiling nobody renders is cost paid for no reader, and a
   // render branch with no ceiling prints `unmeasured` in a nicer shape.
+  battery('`causes` GETS THE SAME TREATMENT, AT BOTH ENDS (#11867)');
   check('emit', 'the ADVISORY path measures causes — it passes a ceiling, not just tails', 'affected-docs.mjs',
     true, /bridgeCoverageFrom\(ledgers, registrarByTail\.keys\(\), ceilingTailsFrom\(sourceFiles\)\.keys\(\)\)/.test(ownSource));
   // ⚠️ READ THE CODE, NOT THE COMMENT THAT FORBIDS IT. These three pins are about what
@@ -5147,6 +5246,53 @@ function selfTest() {
       'code points 0..0x2FFF', '12225 / 12223 / 25', `${admitsB} / ${admitsPrev} / ${admitsLead}`);
   }
 
+
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    failed++;
+      console.error(`  ✗ ${message}`);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
+  }
 
   if (failed) {
     console.error(`\n✗ affected-docs self-test failed (${failed} case(s)).`);

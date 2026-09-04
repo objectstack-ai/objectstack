@@ -45,7 +45,8 @@ jobs:
             with no activity. Please feel free to reopen and update if needed.
           
           # Exempt labels
-          exempt-issue-labels: 'pinned,security,roadmap'
+          # tracking: the half-state patrol's anchor issue carries only this label and stays alive solely via the patrol's own heartbeat (its periodic body rewrite) -- without this exemption a dead patrol's anchor goes stale at 60 days and closes 14 days later, silencing the one artifact whose job is to make that death visible.
+          exempt-issue-labels: 'pinned,security,roadmap,tracking'
           exempt-pr-labels: 'pinned,security,work-in-progress'
           
           # Operations per run

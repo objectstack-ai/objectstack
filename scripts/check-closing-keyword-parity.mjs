@@ -95,6 +95,8 @@
  * pinning an unmeasured spelling here would launder a guess into a contract.
  */
 
+// dispatch-gates: whole-tree-population -- the sweep reads every tracked file (node_modules and dist aside) hunting the closing-keyword grammar, so a card adding prose or a workflow anywhere implicates it; the literals below are the parsers it grades.
+
 import { execFileSync } from 'node:child_process';
 import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';

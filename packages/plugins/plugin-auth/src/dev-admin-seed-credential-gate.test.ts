@@ -55,21 +55,11 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import type { PluginContext } from '@objectstack/core';
 import { AuthManager } from './auth-manager.js';
+import { authIdentityObjects } from './manifest.js';
 import { AuthPlugin } from './auth-plugin.js';
 import { SELF_REGISTRATION_CLOSED } from './audience-posture.js';
 import { decideDevAdminSeedGate } from './dev-admin-seed-gate.js';
 import { recoverInternalFieldsForSystemRead } from './internal-field-readback.js';
-import {
-  SysUser,
-  SysSession,
-  SysAccount,
-  SysVerification,
-  SysOrganization,
-  SysMember,
-  SysInvitation,
-  SysTeam,
-  SysTeamMember,
-} from '@objectstack/platform-objects';
 
 const BASE = 'http://localhost:3000';
 const AUTH_BASE = '/api/v1/auth';
@@ -78,17 +68,12 @@ const SEED_EMAIL = 'admin@objectos.ai';
 const SEED_PASSWORD = 'admin123';
 const SYSTEM = { context: { isSystem: true } } as never;
 
-const AUTH_OBJECTS = [
-  SysUser,
-  SysSession,
-  SysAccount,
-  SysVerification,
-  SysOrganization,
-  SysMember,
-  SysInvitation,
-  SysTeam,
-  SysTeamMember,
-];
+/**
+ * The objects a deployment that mounts plugin-auth registers, imported from the
+ * plugin's own manifest rather than re-spelled here, so this harness cannot
+ * drift from what `auth-plugin.ts` registers at runtime (#14615).
+ */
+const AUTH_OBJECTS = authIdentityObjects;
 
 /** The env the seed is HARD-gated on (`isDevAdminSeedArmed`). */
 const SEED_ENV_KEYS = [
@@ -483,5 +468,113 @@ describe('[#14157] the dev-admin seed gates on a LOGIN, not on user rows', () =>
     const { manager } = await runDevAdminSeed(engine);
 
     expect(await bootstrapStatus(mountBootstrapStatus(manager))).toEqual({ hasOwner: true });
+  });
+
+  it('⑨ [#14373] binding beats timing: a stranger posting the seed address WHILE the ticket is open is still refused', async () => {
+    const engine = await bootEngine();
+    await seedPeople(engine, 13);
+    const manager = makeManager(engine);
+
+    // Open the exact window the seed's own `signUpEmail` call sits inside —
+    // staged directly, not via `maybeSeedDevAdmin`, so the window's OPEN for
+    // as long as this test needs it rather than for one async call's
+    // duration. This is the precondition the vulnerability needed: the
+    // ticket for SEED_EMAIL exists, unconsumed, right now.
+    const ticket = manager.stageOperatorProvisioning(SEED_EMAIL);
+    try {
+      // A stranger's own concurrent request for the SAME address, carrying
+      // NONE of the ticket — the only shape available to an outside caller,
+      // since the ticket value is generated in-process and never
+      // transmitted anywhere a stranger could observe or replay it. Before
+      // #14373 this peeked `isOperatorProvisioning(SEED_EMAIL)` as `true` on
+      // email alone and was admitted as the `operator` class — same as the
+      // seed itself.
+      const strangerRes = await manager.handleRequest(
+        new Request(`${BASE}${AUTH_BASE}/sign-up/email`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', origin: BASE },
+          body: JSON.stringify({
+            email: SEED_EMAIL,
+            password: 'Attacker!Passw0rd-14373',
+            name: 'Attacker',
+          }),
+        }),
+      );
+      expect(strangerRes.status, `stranger sign-up: ${await strangerRes.clone().text()}`).toBe(403);
+      expect(((await strangerRes.json()) as { code?: string }).code).toBe(SELF_REGISTRATION_CLOSED);
+      expect(
+        await readRows(engine, 'sys_account'),
+        'the ticket window must not have let the stranger create ANY account',
+      ).toEqual([]);
+
+      // POSITIVE CONTROL, same still-open window: the correctly-bound call
+      // IS admitted — the fix narrows admission to the ticket holder, it
+      // does not also break the seed's own path. This calls `signUpEmail`
+      // directly (as `maybeSeedDevAdmin` does), not the seed's OWN separate
+      // post-creation `email_verified` write (#11343, a step in
+      // `auth-plugin.ts` outside the admission gate this card touches), so
+      // admission is what this proves — creation, and that the credential
+      // actually authenticates.
+      const api = (await manager.getApi()) as unknown as {
+        signUpEmail(input: { body: Record<string, unknown> }): Promise<unknown>;
+      };
+      await api.signUpEmail({
+        body: {
+          email: SEED_EMAIL,
+          password: SEED_PASSWORD,
+          name: 'Dev Admin',
+          [AuthManager.OPERATOR_PROVISIONING_TICKET_FIELD]: ticket,
+        },
+      });
+      const accounts = await readRows(engine, 'sys_account');
+      expect(accounts.map((a) => a.provider_id)).toEqual(['credential']);
+      const seeded = (await readRows(engine, 'sys_user')).find(
+        (u) => String(u.email).toLowerCase() === SEED_EMAIL,
+      );
+      expect(seeded, 'the correctly-bound call must have created the seed address').toBeTruthy();
+      const signInRes = await manager.handleRequest(
+        new Request(`${BASE}${AUTH_BASE}/sign-in/email`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', origin: BASE },
+          body: JSON.stringify({ email: SEED_EMAIL, password: SEED_PASSWORD }),
+        }),
+      );
+      expect(
+        signInRes.status,
+        `the correctly-bound credential must actually authenticate: ${await signInRes.clone().text()}`,
+      ).toBeLessThan(300);
+    } finally {
+      manager.clearOperatorProvisioning(SEED_EMAIL);
+    }
+  });
+
+  it('⑨ (b) [#14373] a wrong ticket value is refused exactly like no ticket at all', async () => {
+    const engine = await bootEngine();
+    await seedPeople(engine, 13);
+    const manager = makeManager(engine);
+
+    manager.stageOperatorProvisioning(SEED_EMAIL);
+    try {
+      const res = await manager.handleRequest(
+        new Request(`${BASE}${AUTH_BASE}/sign-up/email`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', origin: BASE },
+          body: JSON.stringify({
+            email: SEED_EMAIL,
+            password: 'Attacker!Passw0rd-14373',
+            name: 'Attacker',
+            // A guess at the field's shape — the wrong VALUE, not a missing
+            // field. The credential is the exact random value, not merely
+            // knowledge of the field's name (which is visible in this very
+            // source file).
+            [AuthManager.OPERATOR_PROVISIONING_TICKET_FIELD]: 'guessed-ticket-value',
+          }),
+        }),
+      );
+      expect(res.status).toBe(403);
+      expect(((await res.json()) as { code?: string }).code).toBe(SELF_REGISTRATION_CLOSED);
+    } finally {
+      manager.clearOperatorProvisioning(SEED_EMAIL);
+    }
   });
 });

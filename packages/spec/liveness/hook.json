@@ -71,6 +71,14 @@
       "producer": "packages/objectql/src/hook-binder.ts#bindHooksToEngine (the same `wrapDeclarativeHook` call as retryPolicy)",
       "note": "'log' suppresses+continues; 'abort' rethrows. 2026-08-28: RE-ANCHORED (#13003) — accurate producer line migrated; the path-only evidence pointer is now an anchor (see `retryPolicy`). Re-closed by hand against 8cb96ec41."
     },
+    "runAs": {
+      "status": "live",
+      "verifiedAt": "2026-09-03",
+      "evidenceScope": "in-repo",
+      "evidence": "packages/objectql/src/hook-wrappers.ts#wrapDeclarativeHook (`hookRunAs(meta)` read once at wrap time, then `installRunAsApi(ctx, runAs, …)` swaps `ctx.api` for the handler call — 'system' elevates, 'user' pins to the triggering user or refuses data operations, 'inherit' leaves the engine-built api untouched); packages/objectql/src/engine.ts#withRunAs (the ScopedContext derivation both surfaces reach)",
+      "producer": "packages/objectql/src/hook-binder.ts#bindHooksToEngine (the same `wrapDeclarativeHook(hook, resolved, …)` call as retryPolicy — the binder hands the AUTHORED hook to the wrapper)",
+      "note": "#14010 (ruling 2026-09-01): 'system' | 'user' | 'inherit', default 'inherit' = the pre-runAs behaviour. Scope is ctx.api data operations only (condition, readonly strip, session, async untouched). Honoured on both the in-process handler and the sandboxed body because the sandbox reads ctx.api from the engine context at call time (runtime/src/sandbox/body-runner.ts buildSandboxApi). Pinned in packages/objectql/src/hook-run-as.test.ts and packages/runtime/src/sandbox/hook-run-as.integration.test.ts."
+    },
     "label": {
       "status": "dead",
       "evidence": "pure docs, zero runtime readers (runtime uses only name)",

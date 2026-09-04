@@ -172,6 +172,23 @@ export const PLATFORM_OBJECT_TENANCY: Readonly<Record<string, PlatformObjectTena
       '`SqlOutbox.enqueue` writes `organization_id` from the organization the messaging service derives ' +
       'for the notification (`sql-outbox.ts`, `messaging-service.ts#notificationOrganization`).',
   },
+  // #14484 (writer + backfill), ruled 2026-09-02 — decision batch #11 item 3,
+  // maintainer verbatim 「#13564 转维护者处理；其他同意」 ("其他同意" adopts A:
+  // tenant-scoped, writer-repaired, existing rows backfilled from the record
+  // they grant access to). The per-table order the `sys_file` precedent
+  // requires; it covers `sys_record_share` and no other table.
+  sys_record_share: {
+    tenancy: 'tenant-scoped',
+    evidence:
+      'The writer was repaired to stamp `organization_id` on every insert and update ' +
+      '(`SharingService.grant`, `plugin-sharing/src/sharing-service.ts`): a rule-materialised grant ' +
+      "carries the granting rule's organization, a direct grant the shared record's. The maintainer ordered " +
+      'the rows written before it backfilled from the record they reference on 2026-09-02 ' +
+      '(`backfill-sys-record-share-organizations.ts`). A grant table that cannot say which organization ' +
+      'a grant belongs to is a defect, not a design: under a wall, a tenant-scoped read would AND ' +
+      "plugin-security's strict `organization_id = :tenant` over the driver's NULL-tolerant arm and every " +
+      'organization-less grant would silently disappear.',
+  },
 
   // ── global ───────────────────────────────────────────────────────────────
   // #8672, named verbatim by the 2026-08-31 ruling; the driver predicate is #2734.

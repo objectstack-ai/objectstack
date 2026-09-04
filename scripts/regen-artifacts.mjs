@@ -542,6 +542,83 @@ export const NOT_DRIVER_MANAGED = Object.freeze([
       + 'only 6 errors over 2 files, which makes it MORE exposed to the failure this row prevents '
       + 'rather than less.',
   },
+  // ── #14504: `packages/runtime`'s starting ledger, same instrument ───────────
+  //
+  // The sixth row this manifest adds for the mechanism, and the largest ledger
+  // in the family: 191 errors over 27 of the package's 214 test files. Size is
+  // the reason to read this row rather than skim it — a recomputation on a
+  // half-merged tree writes a number nobody measured, and at 191 nobody would
+  // spot the difference by eye. The package's `TEST_DEBT` entry in
+  // `scripts/check-type-check-coverage.mjs` graduated in the same change, so
+  // this file is now the ONLY record of that population anywhere in the tree.
+  {
+    path: 'packages/runtime/test-typecheck-debt.json',
+    gen: 'gen:test-typecheck-debt',
+    owner: '@objectstack/runtime',
+    why:
+      'a SHRINK-ONLY ratchet — see `packages/plugins/plugin-approvals/test-typecheck-debt.json` '
+      + 'above; same generator, same per-package ledger, same reason a merge must never recompute '
+      + 'it: the half-merged tree is not the tree whose type errors this file records, so a file '
+      + 'that GAINED errors would enter the ledger as merge noise instead of as red. This is the '
+      + 'BIGGEST ledger in the family (191 errors over 27 files), which makes the failure this row '
+      + 'prevents both more likely and harder to see: at that size a recomputed number reads as '
+      + 'plausible, and the per-signature keys underneath it would be silently rewritten with it.',
+  },
+  // ── #14613: `packages/core`'s starting ledger, same instrument ─────────────
+  //
+  // The package declared NO `typecheck` script at all until this PR, so this row
+  // both opens the ledger and is the reason `pnpm --filter @objectstack/core
+  // typecheck` now exists.
+  {
+    path: 'packages/core/test-typecheck-debt.json',
+    gen: 'gen:test-typecheck-debt',
+    owner: '@objectstack/core',
+    why:
+      'a SHRINK-ONLY ratchet — see `packages/plugins/plugin-approvals/test-typecheck-debt.json` '
+      + 'above; same generator, same per-package ledger, same reason a merge must never recompute '
+      + 'it: the half-merged tree is not the tree whose type errors this file records, so a file '
+      + 'that GAINED errors would enter the ledger as merge noise instead of as red. This file also '
+      + 'carries the family\'s clearest instance of the second thing at stake, in its hand-authored '
+      + '`_note` (never written by `gen:test-typecheck-debt` — `--update` only ever preserves an '
+      + 'EXISTING `_note` verbatim, it never invents or edits one): a human triaged all 4 entries '
+      + 'and decided to fix NONE of them in the PR that opened this gate — 2 are one defect twice '
+      + 'over (a mock `PluginContext` literal missing three methods) deliberately left for a '
+      + "shared-fixture repair already in flight on `@objectstack/metadata`'s own ledger, 1 is a "
+      + "genuine open question about whether a test's assertion or a parameter's type is wrong, and "
+      + 'the 4th — though mechanical — was left beside them on purpose so the diff that opens this '
+      + 'gate stays readable. It also records WHY the ledger opens at 4 and not the 98 the retired '
+      + '`check:type-check-coverage` DEBT entry once measured: 94 of those 98 were `tsconfig.json`\'s '
+      + 'NodeNext judging vitest-executed ESM, a config-tier artifact this PR\'s `tsconfig.test.json` '
+      + 'fixes, not a test repair. None of that triage is reconstructable from source — a mid-merge '
+      + 'regeneration can only recompute COUNTS from whatever the half-merged tree compiles to, '
+      + 'never re-derive which of those counts a human already chose to defer, or why.',
+  },
+  // ── #14710: `packages/cli`'s starting ledger, same instrument ──────────────
+  //
+  // The seventh row this manifest adds for the mechanism, and the SMALLEST
+  // ledger in the family — 28 errors over 3 of the package's 115 test files.
+  // Size is the reason to read this row rather than skim it, and the reason is
+  // the opposite of the runtime row's above: at 28 errors over 3 files, a
+  // recomputation on a half-merged tree does not read as plausible noise, it
+  // reads as a CLEAN result. Three quarters of this package's test files that
+  // carry errors would have to vanish for the ledger to look wrong, and a
+  // recompute that silently drops an entry looks exactly like a repair somebody
+  // landed. The package's `TEST_DEBT` entry in
+  // `scripts/check-type-check-coverage.mjs` graduated in the same change, so
+  // this file is now the ONLY record of that population anywhere in the tree.
+  {
+    path: 'packages/cli/test-typecheck-debt.json',
+    gen: 'gen:test-typecheck-debt',
+    owner: '@objectstack/cli',
+    why:
+      'a SHRINK-ONLY ratchet — see `packages/plugins/plugin-approvals/test-typecheck-debt.json` '
+      + 'above; same generator, same per-package ledger, same reason a merge must never recompute '
+      + 'it: the half-merged tree is not the tree whose type errors this file records, so a file '
+      + 'that GAINED errors would enter the ledger as merge noise instead of as red. This ledger '
+      + 'is the SMALLEST in the family (28 errors over 3 files) and that cuts the other way from '
+      + 'the runtime row above: a recomputed value here reads as a clean, plausible REPAIR rather '
+      + 'than as noise, and a dropped entry is indistinguishable from a file somebody fixed.',
+  },
   {
     path: 'packages/sdui-parser/objectui-lockstep.json',
     gen: 'gen:sdui-lockstep',

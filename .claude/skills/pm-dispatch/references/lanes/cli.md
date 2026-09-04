@@ -14,10 +14,6 @@
 
 ## 常设承诺
 
-- **Required checks 六个**:`TypeScript Type Check` · `Lint & Repo Gates` ·
-  `Test Core` · `Dogfood Regression Gate` · `Build Core` ·
-  `Temporal Conformance (live PG + MySQL)` —— 逐 job 读各自 `conclusion`,⛔ 不认
-  聚合,`in_progress` 不是过;advisory 门禁红进 main 是共享损伤,照样止血立单。
 - **PR 侧绿 ≠ 队列侧绿**;队列分支读法与边界在 platform-readings(条目名
   `main/pr-{number}-{parent sha}`,parent sha 可重建队序;⚠️ ref 在出队后滞留)。
 - `dispatch-gates.mjs` 只报**路径推导**的地板 —— 条款②从卡**内容**判且优先于它;已知盲

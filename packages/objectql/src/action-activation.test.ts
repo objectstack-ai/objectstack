@@ -11,10 +11,10 @@
 //    `action` writer that touched a flow row, or read one, would corrupt a
 //    neighbour's state through a table both are told to treat as generic.
 //    Pinned on both sides — the discriminator is in the read AND in the write.
-// 2. **`organization_id` stays NULL**, which is the whole of §5's install-level
-//    scope on this line. Asserted as an ABSENT key rather than a null value:
-//    writing it explicitly would be a different row shape, and the one the
-//    reserved per-org dimension is not.
+// 2. **No tenant column is written**, because the table has none — a row is
+//    deployment-level state. Asserted as an ABSENT key on the payload, which is
+//    the one place a tenant write could reappear without touching the object
+//    declaration.
 // 3. **Absence means ACTIVE.** The stock-boot state is "no rows", and it must
 //    change nothing anywhere (§4). A projection that defaulted the other way
 //    would switch off an entire installation's actions on its first boot.
@@ -130,20 +130,20 @@ describe('ObjectStoreActionActivationStore — the ADR-0126 §4 row contract', (
         }));
     });
 
-    it('SKIPS a row carrying an organization_id — the per-org dimension is reserved (§5)', async () => {
+    it('reads EVERY action row — the ledger is deployment-wide, with no tenant axis', async () => {
         const { engine } = makeStoreEngine([
-            { id: 'r1', metadata_type: 'action', name: 'install_wide', package_id: 'crm', active: false },
-            {
-                id: 'r2', metadata_type: 'action', name: 'org_scoped', package_id: 'crm',
-                active: false, organization_id: 'org_northwind',
-            },
+            { id: 'r1', metadata_type: 'action', name: 'first', package_id: 'crm', active: false },
+            { id: 'r2', metadata_type: 'action', name: 'second', package_id: 'crm', active: false },
         ]);
 
         const rows = await new ObjectStoreActionActivationStore(engine).list();
 
-        // Reading it as install-level would apply ONE organization's choice to
-        // the whole installation — #10243 arrived at from the read side.
-        expect(rows.map((r) => r.name)).toEqual(['install_wide']);
+        // ⚠️ This replaces a pin that asserted a row carrying an organization
+        // was SKIPPED. That skip guarded a reserved, never-written tenant
+        // column, which was dropped before the table ever shipped — so there is
+        // no per-organization row for a read to mistake for a deployment-wide
+        // one, and every row of this type is an answer.
+        expect(rows.map((r) => r.name)).toEqual(['first', 'second']);
     });
 
     it('reads a driver `0` as DISABLED, not as truthy-by-accident', async () => {

@@ -1252,10 +1252,29 @@ function toRecordManifest(manifest: ObjectStackManifest): ObjectStackManifest {
  * install up front with an actionable error, instead of letting a half-applied
  * install blow up later at table creation. Shareable platform namespaces
  * (`base`/`system`/`sys`) are exempt.
+ *
+ * [#14474] Carries the ADR-0112 envelope (`code` + `status`), like its sibling
+ * {@link ArtifactObjectNameConflictError} below. Unlike that sibling, this
+ * refusal IS reachable from a wire: `POST /api/v1/packages`
+ * (`packages/runtime/src/domains/packages.ts`) calls `installPackage` with no
+ * artifact scope — which this gate, unlike the D3 object-name one, does not
+ * need — and the domain's terminal catch answers `errorFromThrown(e, 500)`.
+ * `resolveThrownHttpError` reads `.status`/`.code` off the throw, so with no
+ * envelope the door fell through to that `500` fallback. Measured on a booted
+ * stack before this change: `500 INTERNAL_ERROR` carrying this refusal's prose,
+ * which tells an operator "the server broke" when the truth is "your package's
+ * namespace is already taken" — it invites a retry instead of a rename. With
+ * the envelope the same door answers `422`. The message is unchanged: it was
+ * already correct and specific.
  */
 export class NamespaceConflictError extends Error {
+  readonly code = 'NAMESPACE_CONFLICT';
+  readonly status = 422;
+  /** The namespace both packages claim. */
   readonly namespace: string;
+  /** The installed package that already owns the namespace. */
   readonly existingPackageId: string;
+  /** The package whose install this refusal stopped. */
   readonly incomingPackageId: string;
 
   constructor(namespace: string, existingPackageId: string, incomingPackageId: string) {

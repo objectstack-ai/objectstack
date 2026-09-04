@@ -110,6 +110,35 @@ export { ReadonlyFieldRejectedError } from './readonly-strict-errors.js';
 // 'DUPLICATE_RECORD'` is the boundary-crossing identity, the class is the
 // in-process convenience.
 export { DuplicateRecordError, DUPLICATE_RECORD_CODE } from './duplicate-record-error.js';
+// [#14099] Thrown by `engine.update` when a `multi: true` batch's per-row
+// `beforeUpdate` dispatches assigned DIFFERENT sets of payload keys — the
+// enforcement half of ADR-0058 Addendum II D3. Exported for the same reason as
+// its neighbour above: an application whose hook has to switch to a per-row
+// `ctx.api` write (or to by-id updates) needs to NAME the condition, and
+// `code === 'MULTI_UPDATE_HOOK_KEY_DIVERGENCE'` is the boundary-crossing
+// identity. `divergingHookPayloadKeys` rides along because it is the whole
+// criterion, pure and total, and a consumer reasoning about the refusal should
+// be able to read it rather than re-derive it.
+export {
+  MultiUpdateHookKeyDivergenceError,
+  MULTI_UPDATE_HOOK_KEY_DIVERGENCE_CODE,
+  MULTI_UPDATE_HOOK_KEY_DIVERGENCE_STATUS,
+  divergingHookPayloadKeys,
+} from './multi-update-hook-key-divergence.js';
+// [#14010] `Hook.runAs` — the declared execution identity of a hook's `ctx.api`
+// data operations. The refusal a `runAs: 'user'` hook raises when its trigger
+// resolved no user (ADR-0112 code + status), the api that raises it, and the
+// reader the wrapper applies per hook.
+export {
+  HookUnscopedDataAccessError,
+  HOOK_UNSCOPED_DATA_ACCESS_CODE,
+  HOOK_UNSCOPED_DATA_ACCESS_STATUS,
+  HOOK_RUN_AS_VALUES,
+  UnscopedHookApi,
+  hookRunAs,
+  deriveHookApi,
+} from './hook-run-as.js';
+export type { HookRunAs, HookRunAsRef, RunAsDerivableApi } from './hook-run-as.js';
 // Boot guard: thrown by `ObjectQL.init()` when a registered driver's connect()
 // fails (framework#3741). Hosts that boot the engine themselves can catch it to
 // render their own "database unreachable" message.

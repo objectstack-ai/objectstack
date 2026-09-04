@@ -175,8 +175,6 @@
     "CrossObjectBatchRequestSchema": "api/CrossObjectBatchRequest",
     "CrossObjectBatchResponse": "api/CrossObjectBatchResponse",
     "CrossObjectBatchResponseSchema": "api/CrossObjectBatchResponse",
-    "CrudEndpointPattern": "api/CrudEndpointPattern",
-    "CrudEndpointPatternSchema": "api/CrudEndpointPattern",
     "CrudEndpointsConfig": "api/CrudEndpointsConfig",
     "CrudEndpointsConfigSchema": "api/CrudEndpointsConfig",
     "CrudOperation": "api/CrudOperation",

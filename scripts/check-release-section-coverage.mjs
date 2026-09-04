@@ -615,7 +615,57 @@ const NO_PARENTHETICAL_INDEX_V13 =
 // handshake is a flag rather than a returned sentinel.
 let selfTestReachedVerdict = false;
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'Scope: the floor is INHERITED, and that inheritance is enforced': 1,
+  'The READ itself: cwd-independent, and a failed read REFUSES': 12,
+  'Severity: advisory is the DEFAULT, and it is explained in the output': 5,
+  'Instrument guards': 3,
+  'The GA parse: prereleases never enter the set': 3,
+  'newest-of-major: the `sort -V` trap, structurally absent': 5,
+  'Assertion 1, against the REAL pages, both directions': 10,
+  'Assertion 2, against the REAL index entries, both directions': 8,
+  'The report itself': 3,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 9;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 export function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const seen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    seen.set(b, (seen.get(b) ?? 0) + 1);
+  };
   // ⛔ FIRST, and it RETURNS rather than recording a case. The floor lives in
   // another file; a read that did not happen measured nothing — least of all
   // the sibling's floor — so it refuses with a code of its own instead of
@@ -633,11 +683,13 @@ export function selfTest() {
   const failures = [];
   let cases = 0;
   const expect = (label, cond) => {
+    registerCase();
     cases += 1;
     if (!cond) failures.push(label);
   };
 
   // ── Scope: the floor is INHERITED, and that inheritance is enforced ────────
+  battery('Scope: the floor is INHERITED, and that inheritance is enforced');
   expect(
     `scope — the floor is READ from ${SIBLING_GATE} and equals this gate's (sibling: `
     + `${reading.floor}, here: ${SCOPE_FLOOR_MAJOR}). Two gates reading the same pages under `
@@ -647,6 +699,7 @@ export function selfTest() {
   );
 
   // ── The READ itself: cwd-independent, and a failed read REFUSES ────────────
+  battery('The READ itself: cwd-independent, and a failed read REFUSES');
   expect(
     'scope/read — the sibling path is ABSOLUTE, resolved from this file. An absolute path cannot '
     + 'depend on the working directory, which is the whole of the cwd repair: the bare relative '
@@ -754,6 +807,7 @@ export function selfTest() {
   );
 
   // ── Severity: advisory is the DEFAULT, and it is explained in the output ───
+  battery('Severity: advisory is the DEFAULT, and it is explained in the output');
   expect(
     'severity — SEVERITY_NOTE carries the MEASUREMENT behind the advisory choice (the two real gaps '
     + 'and the PR count a hard fail would have charged), not just the choice',
@@ -779,6 +833,7 @@ export function selfTest() {
   );
 
   // ── Instrument guards ─────────────────────────────────────────────────────
+  battery('Instrument guards');
   expect(
     'instrument — an EMPTY parse is a BROKEN INSTRUMENT, never "nothing shipped"',
     instrumentProblems({ versions: [], inScopeMajors: [] })
@@ -796,6 +851,7 @@ export function selfTest() {
   );
 
   // ── The GA parse: prereleases never enter the set ─────────────────────────
+  battery('The GA parse: prereleases never enter the set');
   expect(
     'parse — a prerelease heading yields NO version; an unanchored match would put 17.0.0 into the '
     + 'set out of `## 17.0.0-rc.0` and then assertion 2 would take a maximum over prereleases',
@@ -814,6 +870,7 @@ export function selfTest() {
   );
 
   // ── newest-of-major: the `sort -V` trap, structurally absent ──────────────
+  battery('newest-of-major: the `sort -V` trap, structurally absent');
   {
     // To `sort -V | tail -1` the "latest" of these is 17.0.0-rc.6.
     const versions = gaVersions('## 17.0.0-rc.6\n## 17.1.0\n## 17.0.0\n## 16.1.0\n');
@@ -843,6 +900,7 @@ export function selfTest() {
   );
 
   // ── Assertion 1, against the REAL pages, both directions ──────────────────
+  battery('Assertion 1, against the REAL pages, both directions');
   expect(
     'coverage/RED — THE DEFECT: the real pre-#10232 v17 headings do not cover 17.1, so 17.1.0 is '
     + 'reported. check-release-page-status returns EXIT=0 on this exact tree',
@@ -899,6 +957,7 @@ export function selfTest() {
   );
 
   // ── Assertion 2, against the REAL index entries, both directions ──────────
+  battery('Assertion 2, against the REAL index entries, both directions');
   expect(
     'index/RED — THE DEFECT: "(current series: 17.0.0, released 2026-08-14)" while 17.1.0 is the '
     + 'newest release. The sibling gate passes this — it only rejects a PRE-release here',
@@ -945,6 +1004,7 @@ export function selfTest() {
   );
 
   // ── The report itself ─────────────────────────────────────────────────────
+  battery('The report itself');
   expect(
     'report — the advisory report carries SCOPE_NOTE and SEVERITY_NOTE, so a reader of the OUTPUT '
     + 'learns the blind spot and why the finding is not fatal without opening this file',
@@ -962,6 +1022,51 @@ export function selfTest() {
     && !renderFindings(['x'], true).includes(SEVERITY_NOTE),
   );
 
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    failures.push(message);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of seen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = seen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
+  }
   if (failures.length > 0) {
     for (const f of failures) console.error(`  x self-test: ${f}`);
     console.error(`\ncheck-release-section-coverage --self-test: ${failures.length} failure(s).\n`);

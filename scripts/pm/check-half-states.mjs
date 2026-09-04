@@ -11930,6 +11930,12 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
 // Self-test — predicates and the transport classifier; no network.
 // ---------------------------------------------------------------------------
 
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'check-half-states self-test reached its verdict';
+
 function selfTest() {
   const cases = [];
   const t = (name, actual, expected) => cases.push([name, actual, expected]);
@@ -17109,6 +17115,8 @@ function selfTest() {
     process.exit(1);
   }
   console.log(`✓ check-half-states self-test: ${cases.length} cases pass.`);
+
+  return SELF_TEST_VERDICT;
 }
 
 const isMain = isEntrypoint(import.meta.url);
@@ -17140,7 +17148,14 @@ if (isMain) {
     process.exit(2);
   }
   if (process.argv.includes('--self-test')) {
-    selfTest();
+    if (selfTest() !== SELF_TEST_VERDICT) {
+      console.error(
+        '\n✗ check-half-states self-test: selfTest() returned without reaching its verdict,\n'
+          + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+          + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
   } else if (process.argv.includes('--probe')) {
     // Transport before questions about it (#13544): the probe's own requests go
     // through the same fetch the sweep uses, so a probe that answers on the

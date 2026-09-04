@@ -29,6 +29,7 @@
 import { z } from 'zod';
 
 import { valueSchemaFor } from '../data/field-value.zod';
+import type { FilterCondition } from '../data/filter.zod';
 import type { FieldErrorCode } from '../api/errors.zod';
 import { lazySchema } from '../shared/lazy-schema';
 
@@ -229,12 +230,50 @@ export function validateActionParams(
  * The slim engine facade an action handler's `ctx.engine` exposes. TRUSTED —
  * context-less, RLS/FLS-bypassing by design (#2849); the boundary is enforced
  * at invoke time (`ai.exposed` + the ADR-0066 D4 capability gate), not here.
+ *
+ * `find` is the one member whose argument shape the signature alone never
+ * settled: it takes a bare FILTER — the `where` half of a query — and never
+ * an ObjectQL query envelope; read its doc comment before writing a handler
+ * or a test double against it (#14175).
  */
 export interface ActionEngineFacade {
   insert(object: string, data: Record<string, unknown>): Promise<{ id: string }>;
   update(object: string, id: string, data: Record<string, unknown>): Promise<void>;
   delete(object: string, id: string): Promise<void>;
-  find(object: string, query: Record<string, unknown>): Promise<Array<Record<string, unknown>>>;
+  /**
+   * Read the rows of `object` that match `filter`.
+   *
+   * `filter` is a FILTER — the `where` HALF of an ObjectQL query, the same
+   * {@link FilterCondition} that `QueryAST.where` carries: implicit equality
+   * `{ field: value }`, explicit operators `{ field: { $in: [...] } }`,
+   * `$and` / `$or` / `$not`. It is NOT the query ENVELOPE
+   * (`{ where, fields, orderBy, limit }`) that `DataEngine.find` and ObjectQL's
+   * own `engine.find` take — the shape this parameter's former name, `query`,
+   * invited. The runtime builds the envelope itself: `buildActionEngineFacade`'s
+   * `find` arm (`packages/runtime/src/action-execution.ts`, `:1183` on
+   * `369da918`) wraps a non-empty filter as `{ where: filter }` and passes an
+   * EMPTY filter (`{}`) through unwrapped — the unfiltered read.
+   *
+   * Two consequences, both silent (#14175):
+   *
+   * - An envelope passed here becomes `{ where: { where: … } }`. No object has
+   *   a field named `where`, so the read matches nothing and resolves to `[]`
+   *   with no error. A handler that made this mistake ran to completion over
+   *   zero rows for as long as it shipped, and its own hand-written test
+   *   double — written to the same belief, reading `query.where` — passed
+   *   every assertion.
+   * - Because `{}` skips the wrap, an unfiltered call works under EITHER
+   *   reading, so a handler mixing one unfiltered read with envelope-shaped
+   *   ones looks partially alive rather than uniformly dead.
+   *
+   * What the type buys, exactly: `FilterCondition` refuses a primitive and a
+   * mistyped logical operator (`$and` / `$or` not arrays, `$not` not a
+   * filter). It does NOT refuse `{ where: … }` — its string index signature is
+   * what lets any field name stand as a key, and `where` is a string — so the
+   * envelope mistake still compiles, and this doc comment, not the type, is
+   * the contract of record. Both halves are pinned in `action-params.test.ts`.
+   */
+  find(object: string, filter: FilterCondition): Promise<Array<Record<string, unknown>>>;
 }
 
 /**

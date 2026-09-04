@@ -51,7 +51,7 @@
 #   1. "is this diff governed?"  →  `check-governed-merges.mjs --test --json`,
 #      the very predicate a seat runs before flipping ready. Exit 3 = governed,
 #      exit 0 = clear. Its register (`GOVERNED_SURFACES`) is repo-agnostic, so
-#      the same call answers for all four governed repos.
+#      the same call answers for every repo configured in `GOVERNED_REPOS`.
 #   2. "is it approved, pinned?"  →  `pinnedApprovalVerdict` +
 #      `GOVERNED_APPROVERS` imported from `check-governed-queue-guard.mjs` —
 #      the same function the queue build decides on, applied to the same review

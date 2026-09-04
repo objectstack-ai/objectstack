@@ -64,7 +64,6 @@ class SimulatedOrgScopingPlugin {
   readonly type = 'standard';
   readonly providesServices = ['org-scoping'];
   readonly supportedPostures = ['group', 'isolated'] as const;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async init(ctx: any): Promise<void> {
     ctx.registerService('org-scoping', this);
   }
@@ -320,7 +319,6 @@ export interface BootOptions {
  * bootstrap provisions a known, loginable admin (mirrors `objectstack dev`).
  */
 export async function bootStack(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   config: any,
   opts: BootOptions = {},
 ): Promise<VerifyStack> {
@@ -517,16 +515,27 @@ export async function bootStack(
       })(organizationsPkg);
     } catch (e) {
       restoreTenancyPosture();
-      // Two absences, two remedies (#4719). "Install/link it in THIS APP" is
-      // exactly wrong for an app that already declared it and has a pruned or
-      // unbuilt install — it sends the operator back to a correct package.json.
+      // One remedy per ABSENCE (#4719), and the branch reads "is the
+      // declaration the problem?" — not one kind. "Install/link it in THIS
+      // APP" is exactly wrong for an app that already declared it and has a
+      // pruned or unbuilt install: it sends the operator back to a correct
+      // package.json. #14041's third kind is neither absence — declared,
+      // installed, and the package publishes nothing loadable — so that arm
+      // prescribes nothing and defers to the importer's own message, which is
+      // interpolated at the end of this same error (#14270).
+      const kind = hostImportFailureKind(e);
       const remedy =
-        hostImportFailureKind(e) === 'declared-unresolvable'
+        kind === 'declared-unresolvable'
           ? `It IS declared in ${hostRoot}'s package.json, so the declaration is not the problem — ` +
             `repair the install there (\`pnpm install\`, un-prune, rebuild its dist).`
-          : `Install/link it in THIS APP (${hostRoot}) — and DECLARE it in that app's ` +
-            'package.json, which is what is actually checked: a package merely reachable through ' +
-            'NODE_PATH or a hoisted workspace store is not accepted (#4719) — to run multi-org fixtures.';
+          : kind === 'declared-no-loadable-entry'
+            ? `It IS declared in ${hostRoot}'s package.json AND installed there, so neither is ` +
+              'the problem and no install action can help — the package publishes no entry Node ' +
+              "can load. The remedy is in the package; the importer's message below is the " +
+              'authority on what it has to publish.'
+            : `Install/link it in THIS APP (${hostRoot}) — and DECLARE it in that app's ` +
+              'package.json, which is what is actually checked: a package merely reachable through ' +
+              'NODE_PATH or a hoisted workspace store is not accepted (#4719) — to run multi-org fixtures.';
       throw new Error(
         'verify: multiTenant=true requires the enterprise @objectstack/organizations package (migrated from plugin-org-scoping, ADR-0105 D12). ' +
           `${remedy} (${(e as Error).message})`,
@@ -557,7 +566,6 @@ export async function bootStack(
   // Caller-supplied optional service pairs (see BootOptions.extraPlugins).
   // Before SecurityPlugin, mirroring the CLI's ordering for service pairs.
   for (const plugin of opts.extraPlugins ?? []) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await kernel.use(plugin as any);
   }
 
@@ -627,9 +635,7 @@ export async function bootStack(
   // assuming it: no `sys_member` row for the harness admin, no stack.
   if (opts.orgContext) {
     const sys = { isSystem: true } as const;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const engine = await kernel.getServiceAsync<any>('objectql');
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const rowsOf = (r: any): any[] => (Array.isArray(r) ? r : Array.isArray(r?.records) ? r.records : []);
     const users = rowsOf(
       await engine?.find('sys_user', { where: { email: admin.email }, limit: 1, context: sys }),
@@ -639,7 +645,6 @@ export async function bootStack(
       ? rowsOf(await engine.find('sys_member', { where: { user_id: adminUserId }, limit: 1, context: sys }))
       : [];
     if (!members[0]?.organization_id) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (kernel as any).shutdown?.().catch?.(() => {});
       throw new Error(
         `verify: orgContext:true did not bind the harness admin (${admin.email}) to an organization. ` +
@@ -693,7 +698,6 @@ export async function bootStack(
    */
   const inviteForAudienceGate = async (email: string): Promise<void> => {
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const engine = await kernel.getServiceAsync<any>('objectql');
       if (!engine || typeof engine.insert !== 'function') return;
       await engine.insert(
@@ -803,7 +807,6 @@ export async function bootStack(
       /* best-effort */
     }
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (kernel as any).shutdown?.();
     } catch {
       /* best-effort */

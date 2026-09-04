@@ -96,6 +96,42 @@ import { join } from 'node:path';
 import { isEntrypoint } from './invoked-as.mjs';
 import { maskComments } from './js-comment-mask.mjs';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'The red case the card asks for': 1,
+  'The two discoverable doors': 2,
+  'Comment masking, both directions': 3,
+  'The noise classes, refused by construction': 3,
+  'The computed-carrier recognizer, both directions': 2,
+  'Primitives': 2,
+  'The live tree, through the SAME pass production runs': 4,
+  'The declared population, held mechanically': 2,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 8;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 const ROOT = new URL('..', import.meta.url).pathname;
 
 /**
@@ -365,9 +401,30 @@ function findingMessage({ file, line, name, decl }) {
 // Self-test
 // ---------------------------------------------------------------------------
 
+// Set by `selfTest()` only after its verdict is printed, and read at the
+// dispatch: a `return` that leaves the function above that line prints nothing
+// and still exits 0 — a self-test that never finished, reported as one that
+// passed (#13798). The self-test's own exit code stays load-bearing, so the
+// handshake is a flag rather than a returned sentinel.
+let selfTestReachedVerdict = false;
+
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const batterySeen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+  };
   let failed = 0;
   const t = (label, ok) => {
+    registerCase();
     console.log(`${ok ? 'ok  ' : 'FAIL'} ${label}`);
     if (!ok) failed++;
   };
@@ -391,6 +448,7 @@ function selfTest() {
   };
 
   // ── The red case the card asks for ────────────────────────────────────────
+  battery('The red case the card asks for');
   t('an un-annotated raw-literal page in a bundle `pages:` array is FOUND (the '
     + '#11480 shape: `export const X = { ... }` reaching the kernel)',
     judge(`
@@ -399,6 +457,7 @@ function selfTest() {
     `).join(',') === 'ConnectPage');
 
   // ── The two discoverable doors ────────────────────────────────────────────
+  battery('The two discoverable doors');
   t('the `: Page` annotation clears it', judge(`
       export const P: Page = { name: 'p', regions: [] };
       export const BUNDLE = { pages: [P] };
@@ -410,6 +469,7 @@ function selfTest() {
     `).length === 0);
 
   // ── Comment masking, both directions ──────────────────────────────────────
+  battery('Comment masking, both directions');
   t('a `pages:` array MENTIONED in a docblock does not count as a carrier — the '
     + 'sibling gates\' own headers quote one', judge(`
       /** Registered as \`pages: [GhostPage]\` by the plugin. */
@@ -428,6 +488,7 @@ function selfTest() {
     `).join(',') === 'P');
 
   // ── The noise classes, refused by construction ────────────────────────────
+  battery('The noise classes, refused by construction');
   t('a BOOK\'s page-NAME list is ignored — a string is a reference, never a '
     + 'declaration (`pages: [\'showcase_index\']`, book.zod.ts)',
     judge(`export const BOOK = { groups: [{ pages: ['showcase_index', 'tour'] }] };`).length === 0);
@@ -440,6 +501,7 @@ function selfTest() {
     judge(`export const X = { subpages: [Ghost] }; const y = a.pages[0];`).length === 0);
 
   // ── The computed-carrier recognizer, both directions ─────────────────────
+  battery('The computed-carrier recognizer, both directions');
   const computed = computedCarrierSites();
   t('the computed-carrier recognizer finds the one real unenumerable carrier '
     + '(`pages: Object.values(pages)`, examples/app-crm/objectstack.config.ts)',
@@ -450,6 +512,7 @@ function selfTest() {
     !computed.some((c) => c.file.endsWith('.zod.ts') || c.file.endsWith('utils/format.ts')));
 
   // ── Primitives ────────────────────────────────────────────────────────────
+  battery('Primitives');
   t('matchBracket is quote-aware — a `]` inside a string cannot close the array',
     (() => {
       const s = `[ 'a]b', C ]`;
@@ -459,6 +522,7 @@ function selfTest() {
     splitEntries(`A, { pages: [X, Y] }, B`).length === 3);
 
   // ── The live tree, through the SAME pass production runs ──────────────────
+  battery('The live tree, through the SAME pass production runs');
   const live = scan();
   t(`the walk reaches a real population (${live.files} sources, ${live.carriers.length} `
     + 'identifier entries) — a gate that silently reads nothing is green forever',
@@ -473,6 +537,7 @@ function selfTest() {
     live.carriers.some((c) => live.declarations.get(c.name)?.door === 'definePage'));
 
   // ── The declared population, held mechanically ────────────────────────────
+  battery('The declared population, held mechanically');
   t('every declared glob names a root this gate really walks — a declaration '
     + 'that can drift from the scan is worse than none',
     carrierRoots().every((r) => existsSync(join(ROOT, r))));
@@ -480,7 +545,52 @@ function selfTest() {
     + 'it and neither shrink-only bare-root ledger is owed a row',
     PAGE_CARRIER_GLOBS.every((g) => g.includes('/')));
 
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => { console.log(`FAIL ${message}`); failed++; };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
+  }
+
   console.log(failed ? `\ncheck-page-declaration-shape --self-test: ${failed} FAILED` : '\ncheck-page-declaration-shape --self-test: all passed');
+  selfTestReachedVerdict = true;
   return failed === 0;
 }
 
@@ -488,7 +598,16 @@ function selfTest() {
 
 if (isEntrypoint(import.meta.url)) {
   if (process.argv.includes('--self-test')) {
-    process.exit(selfTest() ? 0 : 1);
+    const selfTestOk = selfTest();
+    if (!selfTestReachedVerdict) {
+      console.error(
+        '\n✗ check-page-declaration-shape self-test: selfTest() returned without reaching its verdict,\n'
+          + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+          + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
+    process.exit(selfTestOk ? 0 : 1);
   }
   const result = scan();
   const computed = computedCarrierSites();

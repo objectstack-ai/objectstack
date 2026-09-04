@@ -615,6 +615,60 @@ function buildSqlConnection(spec: DatasourceConnectionSpec, client: 'pg' | 'bett
 }
 
 /**
+ * The operator-facing ceiling for a factory-built SQL datasource's knex pool.
+ *
+ * Named per AGENTS.md Prime Directive #9 (`OS_{DOMAIN}_{NAME}`): the domain is
+ * `DATABASE`, which is the family this joins (`OS_DATABASE_URL`,
+ * `OS_DATABASE_DRIVER`, `OS_DATABASE_SQLITE_JOURNAL_MODE`). `OS_DB_*` is not a
+ * prefix this repo uses.
+ */
+const POOL_MAX_ENV = 'OS_DATABASE_POOL_MAX';
+
+/**
+ * The pool a `postgres` / `mysql` datasource gets when it declares no `pool`
+ * and the operator sets no env. ⛔ Do not move these: an unset env is the
+ * upgrade path for every existing deployment, and changing either number here
+ * changes how many connections every running cluster opens on upgrade.
+ */
+const DEFAULT_SQL_POOL_MIN = 0;
+const DEFAULT_SQL_POOL_MAX = 5;
+
+function invalidPoolMaxMessage(raw: string): string {
+  return (
+    `${POOL_MAX_ENV} must be a positive integer, got ${JSON.stringify(raw)}. ` +
+    'It caps the connections each replica opens to postgres / mysql; size it so ' +
+    `replicas × ${POOL_MAX_ENV} stays below the database's max_connections, leaving ` +
+    'headroom for migrations and admin connections. ' +
+    `Unset ${POOL_MAX_ENV} to keep the default of ${DEFAULT_SQL_POOL_MAX}.`
+  );
+}
+
+/**
+ * `OS_DATABASE_POOL_MAX`, or `undefined` when the operator set nothing.
+ *
+ * Strict on purpose, and loud rather than lenient: the repo's older numeric env
+ * reads are `Number(process.env.X ?? default)`, which turns a typo into a
+ * silent `NaN` and hands knex a pool it cannot size. A pool ceiling is measured
+ * only in production, so a value that does not parse must refuse the boot
+ * instead of quietly reverting to the default the operator was trying to raise.
+ * Blank is read as unset, not as garbage — `OS_DATABASE_POOL_MAX=` in a compose
+ * file is a declared-but-unfilled variable, and refusing that would break boots
+ * that are asking for today's behaviour.
+ */
+function readPoolMaxEnv(): number | undefined {
+  const raw = process.env[POOL_MAX_ENV];
+  if (raw === undefined) return undefined;
+  const trimmed = raw.trim();
+  if (trimmed === '') return undefined;
+  // Reject before Number(): it accepts '0x10', '1e3', ' 12 ' and '12.0', none of
+  // which an operator meant to write as a connection count.
+  if (!/^[0-9]+$/.test(trimmed)) throw new Error(invalidPoolMaxMessage(raw));
+  const value = Number(trimmed);
+  if (!Number.isSafeInteger(value) || value < 1) throw new Error(invalidPoolMaxMessage(raw));
+  return value;
+}
+
+/**
  * Knex pool options for a SQL driver, from the datasource's own `pool` block.
  *
  * `datasource.pool` is declared, strict, documented and — until #4410 — read by
@@ -622,12 +676,33 @@ function buildSqlConnection(spec: DatasourceConnectionSpec, client: 'pg' | 'bett
  * hardcoded `{ min: 0, max: 5 }` over the top, so an author who sized their pool
  * got the defaults and no indication. Those defaults are preserved for the
  * unspecified case, so nothing that did not set `pool` changes behaviour.
+ *
+ * ## Why the env is read HERE and not in the driver (#14176)
+ *
+ * The primary datasource — the one behind `OS_DATABASE_URL` — is composed by
+ * the CLI as `config: { url, ...autoMigrate }` with **no `pool` block**, so the
+ * `max: 5` fallback on this line is the number that reaches knex on every
+ * self-hosted deployment. `SqlDriver` therefore never sees an "unspecified"
+ * pool from this path: an env read in the driver would be dead code, because
+ * this function's explicit `{min, max}` always wins. This is the only site that
+ * decides the unspecified case, which is why it is the only site that needs to
+ * know the env exists — the precedence below is expressed once, here.
+ *
+ * Precedence: a declared `pool.max` > `OS_DATABASE_POOL_MAX` > `5`. An operator
+ * knob must not override what an author wrote about their own datasource, and
+ * with the env unset nothing changes at all.
+ *
+ * ⛔ Reaches only `postgres` / `mysql` — the two arms that call this function.
+ * `memory` / `sqlite` / `sqlite-wasm` / `turso` receive no pool parameter at all
+ * and reject a declared one outright (`POOL_UNSUPPORTED_DRIVER_IDS`, rulings
+ * #5714 / #5931 / #7243); the env cannot change that, because it is read inside
+ * a function those arms never call.
  */
 function buildSqlPool(spec: DatasourceConnectionSpec): Record<string, unknown> {
   const pool = (spec.pool ?? {}) as Record<string, unknown>;
   return {
-    min: typeof pool.min === 'number' ? pool.min : 0,
-    max: typeof pool.max === 'number' ? pool.max : 5,
+    min: typeof pool.min === 'number' ? pool.min : DEFAULT_SQL_POOL_MIN,
+    max: typeof pool.max === 'number' ? pool.max : (readPoolMaxEnv() ?? DEFAULT_SQL_POOL_MAX),
     ...(typeof pool.idleTimeoutMillis === 'number' ? { idleTimeoutMillis: pool.idleTimeoutMillis } : {}),
     ...(typeof pool.connectionTimeoutMillis === 'number'
       ? { acquireTimeoutMillis: pool.connectionTimeoutMillis }

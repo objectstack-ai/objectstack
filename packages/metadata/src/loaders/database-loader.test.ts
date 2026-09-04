@@ -1,10 +1,10 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { DatabaseLoader, type DatabaseLoaderOptions } from './database-loader';
+import { DatabaseLoader } from './database-loader.js';
 import type { IDataDriver } from '@objectstack/spec/contracts';
-import { MetadataManager } from '../metadata-manager';
-import { MemoryLoader } from './memory-loader';
+import { MetadataManager } from '../metadata-manager.js';
+import { MemoryLoader } from './memory-loader.js';
 
 // Suppress logger output during tests. Stable object (not a fresh one per
 // `createLogger()` call) so the #5108 block can assert on what `list()` says

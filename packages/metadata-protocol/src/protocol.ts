@@ -30,6 +30,7 @@ import { ensureMetadataOverlayIndexes } from './migrations/overlay-index.js';
 import { driverCanRunSql, resolveDriverExec } from './migrations/driver-exec.js';
 import { SysMetadataRepository, type SysMetadataEngine } from './sys-metadata-repository.js';
 import {
+    bumpWriteEpoch,
     metaOverlayCacheTtlMs,
     readMetaOverlayCache,
     readWriteEpoch,
@@ -1678,6 +1679,54 @@ function compareAuditInstants(a: unknown, b: unknown): number {
     const aToken = auditInstantToken(a);
     const bToken = auditInstantToken(b);
     return aToken < bToken ? -1 : aToken > bToken ? 1 : 0;
+}
+
+/**
+ * Canonicalise the ONE driver materialisation {@link listCommits} was
+ * measured to produce for `sys_metadata_commit.created_at` — a valid JS
+ * `Date` — into the ISO-8601 string the return type declares (`createdAt?:
+ * string`). Every other shape, INCLUDING an Invalid `Date`, is returned
+ * UNTOUCHED.
+ *
+ * [#14038] `created_at` is an engine-injected audit column: it is not in
+ * `datetimeFields`, and `SqlDriver#formatOutput` repairs it only inside its
+ * `if (this.isSqlite)` arm (pinned live in driver-sql's
+ * `sql-driver-13567-audit-stamp-materialisation.test.ts`), so Postgres and
+ * MySQL hand it out of the record read door as a JS `Date` while the
+ * mapping below assigned it straight through as `r.created_at` — an
+ * unchecked value from an `any[]` row, never a measurement against the
+ * declared `string` return type.
+ *
+ * ⚠️ Deliberately NOT the `canonicalIsoInstant` spelling next door in
+ * `sys-metadata-repository.ts` / `database-loader.ts` (#14037's sibling
+ * sites): that spelling reaches `value.toISOString()` for ANY `Date`, which
+ * raises `RangeError: Invalid time value` on an Invalid `Date` — measured
+ * reachable on BOTH live dialects (a MySQL zero datetime; any Postgres year
+ * in 275760..294276) and the open subject of #14078, which #13973 is
+ * blocked on. Whether the shared spelling should throw there (option A) or
+ * fall back to a rendering (option B) is a maintainer call across four
+ * packages, so this repair imports NEITHER answer into a new call site: an
+ * Invalid `Date` is returned unchanged, exactly as the raw assignment
+ * passed it through today. When #14078 rules, this helper collapses into
+ * the shared spelling.
+ *
+ * ⛔ NOT a tolerant fallback (#13973's standing prohibition): it teaches no
+ * consumer to accept an off-spec shape; it converts the one measured
+ * producer materialisation at the producer. The
+ * `!Number.isNaN(value.getTime())` guard is the same one #14037 used for
+ * its two sibling sites, not a new spelling.
+ *
+ * ⛔ Not exported and not merged into {@link canonicalVersionInstant} above:
+ * that helper answers a different question (does this token denote AN
+ * instant at all, returning `null` when it does not) and callers of
+ * `listCommits` are promised the RAW value back untouched when it is not a
+ * valid `Date` — an absent/opaque column must still reach `sort`'s fallback
+ * branch and any in-process reader exactly as before. Consolidating the
+ * family's near-identical copies is #14078's call, not this card's.
+ */
+function isoFromValidDate(value: unknown): unknown {
+    if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString();
+    return value;
 }
 
 // Lifecycle columns the engine always owns; the clone path drops them by NAME
@@ -5169,6 +5218,19 @@ export class ObjectStackProtocolImplementation implements
      * first, listeners second — the #5109 invalidate-before-notify rule: a
      * listener that re-reads must not observe the event and the pre-event
      * registry at the same time.
+     *
+     * [#13609] The convergence above heals THIS replica's registry, but on its
+     * own leaves this replica's `meta-overlay-cache` row set stamped at the
+     * PRE-mutation write epoch — nothing above performs a local engine write,
+     * so nothing retires it. A read of `getMetaItems` landing before that
+     * cache's TTL lapses then re-hydrates the very row this method just healed
+     * the registry of (measured: `protocol.datasource-delete-prolongation.test.ts`).
+     * `bumpWriteEpoch` closes that gap the same way
+     * `authz-invalidation-bridge.ts` already closes it for the authorization
+     * cache on the identical substrate (#11968) — called here, AFTER
+     * convergence and BEFORE {@link notifyMutationListenersLocal}, so a
+     * listener that re-reads through `getMetaItems` sees a cold cache too, not
+     * only a healed registry.
      */
     private async applyRemoteMetadataMutation(evt: MetadataMutationEvent): Promise<void> {
         const type = canonicalMetaType(evt.type);
@@ -5195,6 +5257,10 @@ export class ObjectStackProtocolImplementation implements
         } else {
             await this.restoreArtifactRegistryView(type, evt.name, orgId);
         }
+        // [#13609] Retire this replica's overlay-row cache at the moment of
+        // convergence — never a direct `@objectstack/objectql` import, see
+        // `bumpWriteEpoch`'s header in `meta-overlay-cache.ts`.
+        bumpWriteEpoch(this.engine, 'remote');
         this.notifyMutationListenersLocal({ ...evt, type });
     }
 
@@ -6768,6 +6834,78 @@ export class ObjectStackProtocolImplementation implements
         // overlay row shadowed the entire code-authored listing.
         request = canonicalizeMetaRequestType(request);
         const { packageId } = request;
+        // ── [#14683] The registry read gate, resolved ONCE, HERE ──────────────────
+        //
+        // {@link organizationIdForMetaRead} — the predicate the REST `/meta`
+        // read doors have applied since #9454, twin of the write side's
+        // `organizationIdForMetaWrite` (#6190 / #7018). Until this line
+        // `getMetaItems` applied NO gate of its own: whatever organization
+        // arrived was used for whatever type arrived, so the scope of a
+        // metadata sweep was decided per type, BY THE CALLER — and a request
+        // carrying ONE `organizationId` can only be correct when it sweeps ONE
+        // type. Three live callers sweep more than one: `getMetaDiagnostics`'
+        // untyped arm walks the whole registry; `findReferencesToMeta` spends
+        // the request's organization on `matcher.fromType` — the SOURCES —
+        // while `request.type` is the TARGET, so the target's own flag says
+        // nothing about the types actually read; and the runtime's package
+        // export sweep (`domains/packages.ts`) walks every plural key with one
+        // raw active organization.
+        //
+        // ⭐ THE HARM IS RESURRECTION, NOT CONCEALMENT, and which one it is
+        // decides that the registry-gated predicate is the right instrument.
+        // `SysMetadataRepository.history()` filters `organization_id` by strict
+        // equality, so naming the tenant THERE hides an `allowOrgOverride:
+        // false` type's rows. Here the two `queryByOrg` reads are UNIONed, so
+        // naming it can only ADD — and what it adds are the pre-#6190
+        // phantoms: org-scoped rows of types with no per-org read channel,
+        // which `loadMetaFromDb` walks past and
+        // {@link reportUnhydratableOrgScopedRows} exists to say out loud. Read
+        // back, they surface in the admin "Used by" panel and the Studio
+        // governance directory — inside a clearance shown before a
+        // destructive action, where a resurrected row is worse than an
+        // omission because it reads as evidence.
+        //
+        // ── Why this is a repair, not a tenancy read-scope change ───────────
+        //
+        // Let `f(t, o) = organizationIdForMetaRead(t, o)`. `f` answers `o` when
+        // the registry declares `t` per-org overridable and `undefined`
+        // otherwise, so `f(t, f(t, o)) === f(t, o)` for EVERY `t` and `o`. A
+        // caller that already gates therefore sees no change, provided it gated
+        // on the same type this line gates on. Every such caller does:
+        //
+        //  • `packages/rest`'s `GET /meta/:type` list door — the only door
+        //    that both gates and reaches this method — computes
+        //    `organizationIdForMetaRead(canonicalMetaUrlType(req.params.type),
+        //    ctx?.tenantId)` and then passes `type: req.params.type`, the RAW
+        //    segment. The first statement of this method folds that segment
+        //    through {@link canonicalizeMetaRequestType}, which IS
+        //    `canonicalMetaUrlType` — so `request.type` here is the identical
+        //    STRING the door gated on, and the second application is the
+        //    algebraic no-op above.
+        //  • the search sweep's page read below gates on `'page'` and passes
+        //    `'page'`; `page` is non-overridable, so both readings are
+        //    `undefined` whatever the session holds.
+        //  • the four remaining `organizationIdForMetaRead` call sites in
+        //    `rest-server.ts` (`/layers`, the by-name read, `/history`,
+        //    `/diff`) reach `getMetaItemLayered` / `getMetaItem` /
+        //    `historyMetaItem` / `diffMetaItem` — never this method — so this
+        //    line cannot move them at all.
+        //
+        // ⛔ Gate AFTER the fold, never before it. `declaresOrgOverride`
+        // tolerates the MANIFEST plurals and not the URL-only ones
+        // (`translations` / `email_templates` have no manifest key), and
+        // #10340 measured what that costs when the raw segment reaches the
+        // predicate: one item in two partitions, addressed by spelling. Folding
+        // happens at the boundary and only there; this line reads what the
+        // boundary produced.
+        //
+        // ⚠️ ONE resolution for BOTH arms, deliberately — the active-overlay
+        // read below and the `previewDrafts` read further down both spend it.
+        // A gate threaded into only one arm would leave the draft preview
+        // resurrecting exactly the phantoms the active list had just stopped
+        // serving, which is the half-fix shape #9454's own hoist comment
+        // refuses one package over.
+        const orgId = organizationIdForMetaRead(request.type, request.organizationId);
         let items: unknown[] = [];
 
         // Unscoped kernels (control plane): read everything from SchemaRegistry.
@@ -6808,7 +6946,6 @@ export class ObjectStackProtocolImplementation implements
         // (when an active org is provided) and env-wide (organization_id IS NULL)
         // overlays; org-scoped rows win on name collision.
         try {
-            const orgId = (request as any).organizationId as string | undefined;
             const queryByOrg = async (oid: string | null): Promise<any[]> => {
                 const whereClause: Record<string, unknown> = {
                     type: request.type,
@@ -7040,7 +7177,6 @@ export class ObjectStackProtocolImplementation implements
         // process-wide registry or to non-preview reads.
         if (request.previewDrafts) {
             try {
-                const orgId = (request as any).organizationId as string | undefined;
                 const queryDrafts = async (oid: string | null): Promise<any[]> => {
                     const whereClause: Record<string, unknown> = { type: request.type, state: 'draft', organization_id: oid };
                     if (packageId) whereClause.package_id = packageId;
@@ -7275,7 +7411,126 @@ export class ObjectStackProtocolImplementation implements
         // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}.
         request = canonicalizeMetaRequestType(request);
         let item: unknown;
-        const orgId = request.organizationId;
+        // ── [#14770] The registry read gate, resolved ONCE, HERE ────────────────────
+        //
+        // {@link organizationIdForMetaRead} — the read-side twin of
+        // `organizationIdForMetaWrite` (#6190 / #7018), which the REST `/meta`
+        // read doors have applied since #9454 and which #14683 moved INSIDE the
+        // plural verb, `getMetaItems` above. Until this line the SINGULAR verb
+        // applied no gate of its own: whatever organization arrived was spent on
+        // whatever type arrived.
+        //
+        // ⭐ THE SHARPER HALF, and why the plural verb's fix did not cover it.
+        // `getMetaItems` UNIONs its two `queryByOrg` reads, so an ungated
+        // organization can only ADD rows — the resurrection #14683 is about.
+        // The two `findOverlay` reads below combine with `??`, which is
+        // PRECEDENCE: an ungated organization can SUBSTITUTE. On a type the
+        // registry declares `allowOrgOverride: false`, a pre-#6190 phantom
+        // org-scoped row — the kind `loadMetaFromDb` walks past and
+        // {@link reportUnhydratableOrgScopedRows} exists to warn about — was
+        // served INSTEAD OF the live env-wide document, to a caller that asked
+        // for the live one. Not an extra row in a list: the served document.
+        //
+        // ── ⛔ The `??` is the RULING, not the defect ────────────────────────
+        //
+        // Do not "repair" this by turning the precedence read into a layering or
+        // union of the org overlay OVER the env-wide row.
+        //
+        // ⚠️ Read the citations at their real scope. ADR-0005's decision block
+        // names THIS method — `RUNTIME READ getMetaItem(type, name)` → `1.
+        // sys_metadata … ← overlay (wins)`, `2. SchemaRegistry /
+        // MetadataService ← artifact default` — but the pair it RANKS is
+        // overlay-vs-artifact-default, not org-row-vs-env-wide-row. It settles
+        // that an overlay WINS rather than merges; it does not by itself settle
+        // this method's inner `??`.
+        //
+        // What settles the inner one:
+        //  • ADR-0005 design principle 3 — "Customizations are full-JSON
+        //    deltas, not field-level patches" — stores the ENTIRE item
+        //    document per overlay row, so a layering would have nothing to
+        //    layer. The field-level patch model that would have given
+        //    "layering" a meaning was retired and deleted whole under ADR-0049
+        //    (#13185, PR #13186, maintainer ruling 2026-08-29), recorded as a
+        //    correction inside principle 3 itself, with ADR-0126 §6 ruling out
+        //    the phase it was held for.
+        //  • {@link organizationIdForMetaRead}'s own docblock quotes THIS
+        //    expression — `(orgId ? findOverlay(orgId) : undefined) ??
+        //    findOverlay(null)` — as the intended shape while defining #9454.
+        //    Precedence is the behaviour that card was written against, not the
+        //    thing it reported.
+        //  • ADR-0029 D9 reaches the same shape one type over. ⚠️ Quoted, not
+        //    paraphrased: `resolveObject` "selects its base layer as `overlay ??
+        //    owner` instead of `owner`, then folds `extend` contributions". Its
+        //    status line reads "Design only — nothing is implemented yet", so
+        //    it is corroboration, not an authority this method rests on.
+        // ⇒ The defect is which ROW `orgId` selects, never how the two rows
+        // combine.
+        //
+        // ── The idempotence proof this change was made conditional on ───────
+        //
+        // Let `f(t, o) = organizationIdForMetaRead(t, o)`.
+        //
+        //  • `f(t, undefined) === undefined` for every `t`, so every caller that
+        //    names no organization — `import-mapping.ts`, `import-prepare.ts`,
+        //    plugin-email's template read, service-analytics' draft probe,
+        //    plugin-auth's `metaReader` — reads exactly what it reads today.
+        //  • `f(t, f(t, o)) === f(t, o)`, so a caller that already gated on the
+        //    same type sees no change. The REST by-name door computes
+        //    `organizationIdForMetaRead(canonicalMetaUrlType(req.params.type),
+        //    ctx?.tenantId)` and then passes `type: req.params.type`, the RAW
+        //    segment; the first statement of this method folds that segment
+        //    through {@link canonicalizeMetaRequestType}, which IS
+        //    `canonicalMetaUrlType` — so `request.type` here is the identical
+        //    STRING the door gated on, and this is the algebraic no-op.
+        //  • That door's CACHED arm reaches here through `getMetaItemCached`,
+        //    which folds first and forwards the same hoisted `readOrganizationId`
+        //    — the same no-op, one hop later.
+        //  • `organizationIdForMetaWrite` has the identical body, so the
+        //    write-side pre-reads (`saveMetaItem`'s destructive-change probe,
+        //    `publishMetaItem`'s seed-loader adapter, `publishPackageDrafts`'
+        //    build probes) now read the partition their write LANDS in. Read
+        //    scope and write scope cannot disagree — the property #9454 chose
+        //    this predicate for. ⚠️ True BY DEFAULT, and deliberately not under
+        //    the operator hatch: {@link orgScopedWriteRefusal} returns early
+        //    when `isOverlayAllowed` is satisfied via `OS_METADATA_WRITABLE`,
+        //    so a non-overridable type CAN still land an org-scoped write while
+        //    this read resolves env-wide. That divergence is the hatch's own
+        //    stated contract — its refusal message says it "unlocks the write,
+        //    not the read" — and the row it admits is exactly the kind boot
+        //    hydration walks past.
+        //
+        // ⇒ What is left to move is the runtime callers that hand this method a
+        // RAW active organization. FOUR, across two files — the population is
+        // stated with the method that establishes it, because the first
+        // enumeration of it named only the first file and was wrong: grep every
+        // `getMetaItem(` / `getMetaItemCached(` invocation in the repo, then
+        // trace each `organizationId` argument to its source.
+        //  • `runtime/src/domains/meta.ts:703` and `:745` — hard-coded `type:
+        //    'object'`, which is `allowOrgOverride: false`: callers that cannot
+        //    be right about scope, by construction.
+        //  • `runtime/src/domains/meta.ts:768` — `singularType` off the URL, so
+        //    it moves only for the non-overridable half of what it serves.
+        //  • `runtime/src/domains/packages.ts:1239` (`applyPublishedSeeds`,
+        //    organization from `deps.resolveActiveOrganizationId`) — `type:
+        //    'seed'`, also non-overridable, so its org-first attempt now reads
+        //    the env-wide partition directly. It hand-rolls the same fallback
+        //    as a second attempt, so what it used to reach on the second try it
+        //    now gets on the first.
+        // Every other invocation either names no organization at all or is a
+        // REST door that already computed `organizationIdForMetaRead` — the
+        // idempotence legs above are what make those two cases no-ops.
+        //
+        // ⚠️ ONE resolution for BOTH arms, deliberately — the ADR-0033
+        // `previewDrafts` read below and the active-overlay read under it both
+        // spend this binding. A gate threaded into only one would leave the
+        // draft preview serving exactly the phantom the active read had just
+        // stopped serving, the half-fix shape #9454's hoist comment refuses.
+        //
+        // ⛔ Gate AFTER the fold, never before it. `declaresOrgOverride`
+        // tolerates the MANIFEST plurals and not the URL-only ones
+        // (`translations` / `email_templates` have no manifest key); #10340
+        // measured what that costs when a raw segment reaches the predicate.
+        const orgId = organizationIdForMetaRead(request.type, request.organizationId);
         // Studio's editor opens a draft buffer with `state: 'draft'`;
         // runtime loaders omit it and get the live published row.
         const readState: 'active' | 'draft' = request.state === 'draft' ? 'draft' : 'active';
@@ -18862,7 +19117,12 @@ export class ObjectStackProtocolImplementation implements
                 ...(r.parent_commit_id ? { parentCommitId: r.parent_commit_id } : {}),
                 itemCount: typeof r.item_count === 'number' ? r.item_count : 0,
                 items: this.parseCommitItems(r.items),
-                ...(r.created_at ? { createdAt: r.created_at } : {}),
+                // [#14038] Canonicalise the ONE driver materialisation this
+                // column is measured to produce (a valid JS `Date`, on
+                // Postgres/MySQL); every other shape — including an
+                // Invalid `Date` — passes through unchanged. See {@link
+                // isoFromValidDate}.
+                ...(r.created_at ? { createdAt: isoFromValidDate(r.created_at) as string } : {}),
             }));
             // Newest-first; tolerate drivers that don't order by returning
             // insertion order, then sort by the audit instant.
@@ -19243,6 +19503,22 @@ export class ObjectStackProtocolImplementation implements
                     // heal above still runs unconditionally — it is a
                     // self-heal, not a mutation.
                     if (current) {
+                        // [ADR-0094] Awaited projection BEFORE the
+                        // fire-and-forget emit below — same order
+                        // `saveMetaItem`'s comment establishes, and the same
+                        // `state: 'deleted'` shape {@link deleteMetaItem}'s
+                        // repository branch already sends: the row is gone,
+                        // and the projector re-reads the layered state to
+                        // decide whether the derived record retires or falls
+                        // back to the artifact baseline. No `body` — a
+                        // soft-remove has none to hand over, exactly as the
+                        // sibling delete call passes none.
+                        await this.runMutationProjector({
+                            type: PLURAL_TO_SINGULAR[it.type] ?? it.type,
+                            name: it.name,
+                            state: 'deleted',
+                            organizationId: itemOrgId,
+                        });
                         this.emitMetadataMutation({
                             type: PLURAL_TO_SINGULAR[it.type] ?? it.type,
                             name: it.name,
@@ -19335,6 +19611,19 @@ export class ObjectStackProtocolImplementation implements
                         // said "the row's OWN scope" while passing the REQUEST's
                         // org; the resolution above is what makes the comment true.
                         organizationId: itemOrgId,
+                    });
+                    // [ADR-0094] Awaited projection BEFORE the
+                    // fire-and-forget emit below — the order `saveMetaItem`'s
+                    // comment establishes. This limb restores an existing
+                    // artifact's pre-commit body, so the derived read-model
+                    // gets exactly that body, the same one the write-through
+                    // just registered under the same singular key and scope.
+                    await this.runMutationProjector({
+                        type: PLURAL_TO_SINGULAR[it.type] ?? it.type,
+                        name: it.name,
+                        state: 'active',
+                        organizationId: itemOrgId,
+                        body: restored.item.body,
                     });
                     // [#14179] The restore limb's half of the same repair: a
                     // revert is a live write, so it funnels through the ONE
@@ -19713,6 +20002,22 @@ export class ObjectStackProtocolImplementation implements
                 ...(request.actor ? { actor: request.actor } : {}),
                 source: 'protocol.rollbackMetaItem',
                 note: `restored from version ${request.toVersion}`,
+            });
+            // [ADR-0094] Awaited projection BEFORE the fire-and-forget
+            // listener below — the order `saveMetaItem`'s comment
+            // establishes. A rollback restores the row and the in-memory
+            // registry to the target version; a derived read-model (e.g.
+            // `permission` -> `sys_permission_set`) must be just as current
+            // when this call returns, not only after the next unrelated
+            // write or boot reconciliation (ADR-0094 D3) eventually heals it.
+            // `body` is the restored version's own — the same value the
+            // write-through above registered.
+            await this.runMutationProjector({
+                type: singularType,
+                name: request.name,
+                state: 'active',
+                organizationId: orgId,
+                body: result.item.body,
             });
             // [#14179] A rollback is a live write like any other (#4521, the
             // line the write-through above is made under) — so it announces
@@ -20424,6 +20729,20 @@ export class ObjectStackProtocolImplementation implements
                 );
             }
 
+            // [ADR-0094] Awaited projection — the SAME call {@link
+            // deleteMetaItem}'s repository branch already makes above
+            // (`state: 'deleted'`), now made from the legacy exit too: a
+            // delete may retire the derived record or reset it to the
+            // artifact baseline, and the projector re-reads the layered
+            // state to decide either way. Awaited BEFORE the emit below, the
+            // order `saveMetaItem`'s comment establishes.
+            const legacyDeleteProjection = await this.runMutationProjector({
+                type: singularTypeForRepo,
+                name: request.name,
+                state: 'deleted',
+                organizationId: request.organizationId ?? null,
+            });
+
             // [#14179] A real deletion announces itself on the ONE choke
             // point, {@link emitMetadataMutation} — the repository path's
             // row-deleted exit does, and this one performs the same removal
@@ -20448,6 +20767,7 @@ export class ObjectStackProtocolImplementation implements
                 // and emits no watch event (see the block comment opening this
                 // path), so there is no cursor to report. That asymmetry is
                 // pre-existing and deliberate — the split does not touch it.
+                ...(legacyDeleteProjection ? { projectionApplied: legacyDeleteProjection } : {}),
                 message: artifactBacked
                     ? `Customization overlay deleted — ${request.type}/${request.name} reset to artifact default.`
                     : `Deleted ${singularTypeForRepo} '${request.name}' — it no longer exists.`,

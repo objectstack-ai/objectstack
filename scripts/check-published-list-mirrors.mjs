@@ -138,6 +138,117 @@ import process from 'node:process';
 
 import { isEntrypoint } from './invoked-as.mjs';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// This self-test used to decide success by "no failure was recorded" and
+// nothing else, so "every case held" and "the cases never ran" printed the same
+// line. Closed the way PR #13487 validated on check-doc-authoring: what is
+// pinned is the registered NAMES, not a number. Every section opens with
+// `battery('<name>')`, every assertion is attributed to the battery most
+// recently opened, and the floor requires the OPENED set to equal the DECLARED
+// set with each battery at or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3 keeps
+// a total "right" the moment a sibling grows. A set difference says WHICH
+// battery stopped; a count says only that something did.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+//
+// The machinery lives HERE, at module scope, rather than inside the self-test:
+// this self-test's assertion sink is not a block-bodied helper in its body (it
+// is a concise arrow, or a module-scope function), so there is no in-body
+// helper to thread a per-run ledger through. Module scope is safe because the
+// self-test runs once per process, and it is what lets the existing sink route
+// through `registerCase()` with no case rewritten and no assertion changed.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'the positive control: the ordinary case is GREEN, and it reads the right block': 4,
+  'direction 1: the constant grew and the doc did not (the card\'s own case)': 1,
+  'direction 2: the doc publishes a spelling the scanner cannot see (wrong on arrival)': 1,
+  'the nastiest drift: comment/prohibition prose only, which containment cannot see': 3,
+  'the projection: a spelling keeps its comments, a note paragraph is not published': 9,
+  'every unreadable state REFUSES rather than passing empty': 9,
+  'the code side refuses just as loudly (the #11871 refactor shape)': 4,
+  'the live table, which is what actually rots': 6,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 8;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
+// ⚠️ None of these helpers is named with a self-test spelling, deliberately and
+// on the record: `check:pm-dispatch-gates` anchors on a top-level declaration
+// whose NAME spells self-test, and every such name owes a row in that gate's
+// COMPOUND_ANCHOR_LEDGER. These are the battery ROSTER's machinery -- they hold
+// no fixtures to mask and read no path literal -- so the accurate name is the
+// one that says `battery`, not the one that would owe a ledger row for a role
+// this code does not have.
+
+/** Cases registered per battery: `battery()` opens one, `registerCase()` files into it. */
+const batteryCases = new Map();
+let openBattery = null;
+
+/** Open a battery. Every assertion after this line is attributed to it. */
+function battery(name) {
+  openBattery = name;
+}
+
+/** Called by the self-test's own assertion sink, once per assertion. */
+function registerCase() {
+  const name = openBattery ?? UNATTRIBUTED_BATTERY;
+  batteryCases.set(name, (batteryCases.get(name) ?? 0) + 1);
+}
+
+/**
+ * The floor: every declared battery RAN, and ran its cases (#13489).
+ *
+ * Evaluated after every battery has had its chance and BEFORE the verdict, so
+ * the success line can only be printed by a run in which the set of batteries
+ * that registered assertions EQUALS the set declared.
+ */
+function batteryFloorFailures() {
+  const declared = Object.keys(SELF_TEST_BATTERIES);
+  const problems = [];
+  if (declared.length < SELF_TEST_BATTERY_FLOOR) {
+    problems.push(
+      `SELF_TEST_BATTERIES declares ${declared.length} batteries, below the pinned `
+        + `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batteryCases) {
+    if (declared.includes(name)) continue;
+    problems.push(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in `
+        + 'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declared) {
+    const count = batteryCases.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    problems.push(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. `
+          + 'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of `
+          + `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (problems.length) {
+    problems.push(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the '
+        + 'number. Find what stopped registering (an early return, a deleted block, a guard that now '
+        + 'skips) and restore it.',
+    );
+  }
+  return problems;
+}
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '..');
 
@@ -362,7 +473,10 @@ const SELF_TEST_VERDICT = 'check-published-list-mirrors self-test reached its ve
 
 async function selfTest() {
   const cases = [];
-  const ok = (label, cond) => cases.push({ label, cond });
+  const ok = (label, cond) => {
+    registerCase();
+    return cases.push({ label, cond });
+  };
 
   const SPEC = { id: 'fixture', module: 'scripts/nonexistent.mjs', constant: 'FIXTURE', doc: 'FIXTURE.md', heading: '### The mirror heading', lang: 'ts' };
   const doc = (body) => [
@@ -391,6 +505,7 @@ async function selfTest() {
   const ENTRIES = ['const A = 1;   // seed', '  ⛔ NOT a manifest name belonging to some OTHER package'];
 
   // ── the positive control: the ordinary case is GREEN, and it reads the right block ──
+  battery('the positive control: the ordinary case is GREEN, and it reads the right block');
   const good = locateBlock(doc(FENCED), SPEC);
   ok('the ordinary case locates a block', Array.isArray(good.lines));
   ok('and it is the block under the declared heading, not the decoy in a later section', !good.lines?.includes('const DECOY = 0;'));
@@ -398,6 +513,7 @@ async function selfTest() {
   ok('and an exact copy judges clean', judge(ENTRIES, good.lines ?? []).length === 0);
 
   // ── direction 1: the constant grew and the doc did not (the card's own case) ──
+  battery('direction 1: the constant grew and the doc did not (the card\'s own case)');
   ok(
     'a spelling in the constant and absent from the doc is RED',
     judge([...ENTRIES, "const REPO = findUp((dir) => existsSync(join(dir, 'pnpm-workspace.yaml')));"], good.lines ?? [])
@@ -405,12 +521,14 @@ async function selfTest() {
   );
 
   // ── direction 2: the doc publishes a spelling the scanner cannot see (wrong on arrival) ──
+  battery('direction 2: the doc publishes a spelling the scanner cannot see (wrong on arrival)');
   ok(
     'a spelling published that the constant does not hold is RED',
     judge(ENTRIES, [...(good.lines ?? []), 'const P = process.cwd();']).some((p) => p.includes('PUBLISHED but not in the constant')),
   );
 
   // ── the nastiest drift: comment/prohibition prose only, which containment cannot see ──
+  battery('the nastiest drift: comment/prohibition prose only, which containment cannot see');
   ok(
     "a COMMENT-only drift is RED (round 1 and round 2 were both comment prose)",
     judge(['const A = 1;   // seed (ESM)', ENTRIES[1]], good.lines ?? []).some((p) => p.includes('differs')),
@@ -422,6 +540,7 @@ async function selfTest() {
   ok('trailing whitespace alone is NOT a difference (the one stated slack)', judge(ENTRIES, [`${ENTRIES[0]}   `, `${ENTRIES[1]}\t`]).length === 0);
 
   // ── the projection: a spelling keeps its comments, a note paragraph is not published ──
+  battery('the projection: a spelling keeps its comments, a note paragraph is not published');
   const RAW = [
     'const A = 1;   // seed',
     '               // continued here',
@@ -447,6 +566,7 @@ async function selfTest() {
   );
 
   // ── every unreadable state REFUSES rather than passing empty ──
+  battery('every unreadable state REFUSES rather than passing empty');
   ok('a renamed heading REFUSES', locateBlock(doc(FENCED).replace(SPEC.heading, '### A different heading entirely'), SPEC).refusal?.includes('heading not found'));
   ok('a duplicated heading REFUSES as ambiguous', locateBlock(`${doc(FENCED)}\n${SPEC.heading}\n`, SPEC).refusal?.includes('occurs 2 times'));
   ok('a re-tagged fence REFUSES', locateBlock(doc(['```js', ...FENCED.slice(1)]), SPEC).refusal?.includes('no ````ts` fence'));
@@ -458,12 +578,14 @@ async function selfTest() {
   ok('a heading spec that is not a heading REFUSES', locateBlock(doc(FENCED), { ...SPEC, heading: 'not a heading' }).refusal?.includes('not a markdown heading'));
 
   // ── the code side refuses just as loudly (the #11871 refactor shape) ──
+  battery('the code side refuses just as loudly (the #11871 refactor shape)');
   ok('a renamed or vanished constant REFUSES', validateEntries(undefined, SPEC).refusal?.includes('not exported'));
   ok('an EMPTY constant REFUSES', validateEntries([], SPEC).refusal?.includes('EMPTY'));
   ok('a non-array constant REFUSES', validateEntries('a string', SPEC).refusal?.includes('not an array'));
   ok('a non-string entry REFUSES', validateEntries(['fine', 42], SPEC).refusal?.includes('not a string'));
 
   // ── the live table, which is what actually rots ──
+  battery('the live table, which is what actually rots');
   ok('the mirror table is not empty', MIRRORS.length >= 1);
   for (const spec of MIRRORS) {
     const live = readDoc(spec);
@@ -479,6 +601,10 @@ async function selfTest() {
     const located = live.text ? locateBlock(live.text, spec) : { refusal: 'unreadable' };
     ok(`live: the block still LOCATES in ${spec.doc} (heading + fence, never a line number)`, Array.isArray(located.lines));
   }
+
+  // The floor runs BEFORE the verdict below, so a success line can only be
+  // printed by a run in which every declared battery registered its cases.
+  for (const message of batteryFloorFailures()) cases.push({ label: message, cond: false });
 
   const failed = cases.filter((c) => !c.cond);
   for (const c of cases) console.log(`${c.cond ? 'ok  ' : 'FAIL'} ${c.label}`);

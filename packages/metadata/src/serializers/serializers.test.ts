@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { JSONSerializer } from '../serializers/json-serializer';
-import { YAMLSerializer } from '../serializers/yaml-serializer';
-import { TypeScriptSerializer } from '../serializers/typescript-serializer';
+import { JSONSerializer } from '../serializers/json-serializer.js';
+import { YAMLSerializer } from '../serializers/yaml-serializer.js';
+import { TypeScriptSerializer } from '../serializers/typescript-serializer.js';
 
 describe('Serializers', () => {
   describe('JSONSerializer', () => {

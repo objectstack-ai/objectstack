@@ -799,10 +799,65 @@ function main(argv) {
 // as one that passed (#13798).
 const SELF_TEST_VERDICT = 'check-changeset-no-major self-test reached its verdict';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'The three quoting dialects the header names': 8,
+  'THE FIX (#6923): a leading blank line': 3,
+  'What must NOT be caught, each paired with its control': 9,
+  'THE FIX (#7004): the shapes the old `([A-Za-z]+)\\s*$` anchor hid': 13,
+  'The exemption switch, in BOTH directions': 17,
+  'Order of operations is contract': 3,
+  'Missing input is a failure, never a pass (#4690 / #7006)': 5,
+  'The readers': 12,
+  'The diff scoping, on real temp git repositories': 18,
+  '#7107: an `R` row whose BASE side is README.md subtracts NOTHING': 4,
+  '#6129 proper: main drift must not move the verdict': 5,
+  'Missing input is a failure, never a pass (#4690)': 4,
+  'The wiring: these fixtures must actually run on every PR': 15,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 13;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const seen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    seen.set(b, (seen.get(b) ?? 0) + 1);
+  };
   const failures = [];
   let checked = 0;
   const assert = (condition, description) => {
+    registerCase();
     checked += 1;
     if (!condition) failures.push(description);
   };
@@ -830,6 +885,7 @@ function selfTest() {
   };
 
   // ── The three quoting dialects the header names ───────────────────────────
+  battery('The three quoting dialects the header names');
   caught('a double-quoted name', MAJOR, ['@objectstack/spec']);
   caught('a single-quoted name', "---\n'@objectstack/spec': major\n---\n\nbody\n", ['@objectstack/spec']);
   caught('an unquoted name', '---\ndocs: major\n---\n\nbody\n', ['docs']);
@@ -854,11 +910,13 @@ function selfTest() {
   // `lines[0]?.trim() !== '---'` turns exactly these two red. Measured with
   // @changesets/parse@0.4.3: both of these DO release a major, so a miss here is
   // a whole-stack major promoted past a guard that printed a tick.
+  battery('THE FIX (#6923): a leading blank line');
   caught('a leading blank line before the fence', '\n' + MAJOR, ['@objectstack/spec']);
   caught('two leading blank lines', '\n\n' + MAJOR, ['@objectstack/spec']);
   caught('a leading blank line, single-quoted', "\n---\n'@objectstack/spec': major\n---\n\nbody\n", ['@objectstack/spec']);
 
   // ── What must NOT be caught, each paired with its control ─────────────────
+  battery('What must NOT be caught, each paired with its control');
   assert(majorPackagesIn(MINOR).length === 0, 'parser: a `minor` bump is not a major');
   assert(majorPackagesIn('---\n"@objectstack/spec": patch\n---\n\nbody\n').length === 0, 'parser: a `patch` bump is not a major');
   // Control for both: the SAME text with `major` in the bump slot is caught, so
@@ -894,6 +952,7 @@ function selfTest() {
   // (`([A-Za-z]+)\s*$`) turns exactly these red. Measured with
   // @changesets/parse@0.4.3: every one of them DOES release a major, so a miss
   // here is a whole-stack major promoted past a guard that printed a tick.
+  battery('THE FIX (#7004): the shapes the old `([A-Za-z]+)\\s*$` anchor hid');
   caught('a trailing YAML comment', '---\n"@objectstack/spec": major # keep\n---\n\nbody\n', ['@objectstack/spec']);
   caught('a trailing comment after a tab', '---\n"@objectstack/spec": major\t# keep\n---\n\nbody\n', ['@objectstack/spec']);
   caught('a trailing comment containing a colon', '---\n"@objectstack/spec": major # note: keep\n---\n\nbody\n', ['@objectstack/spec']);
@@ -934,6 +993,7 @@ function selfTest() {
   // ── The exemption switch, in BOTH directions ──────────────────────────────
   // This is the half that no CI run has ever executed. Everything below drives
   // it directly. `introduced` is now scan()'s output shape, never the stock.
+  battery('The exemption switch, in BOTH directions');
   const pending = [{ file: '.changeset/a.md', majors: ['@objectstack/spec'] }];
 
   const exempt = judge({ introduced: pending, pre: { mode: 'pre', tag: 'rc' } });
@@ -984,6 +1044,7 @@ function selfTest() {
   }
 
   // ── Order of operations is contract ───────────────────────────────────────
+  battery('Order of operations is contract');
   const cleanInPre = judge({ introduced: [], pre: { mode: 'pre', tag: 'rc' } });
   assert(cleanInPre.verdict === 'clean', 'a diff introducing no major, in pre-mode ⇒ the ordinary tick, not the RC notice');
   assert(
@@ -1012,6 +1073,7 @@ function selfTest() {
   // contract.
 
   // ── Missing input is a failure, never a pass (#4690 / #7006) ──────────────
+  battery('Missing input is a failure, never a pass (#4690 / #7006)');
   const unreadable = judge({ introduced: null, pre: { mode: 'exit' } });
   assert(unreadable.verdict === 'unreadable-diff', 'a diff that could not be computed is its OWN verdict, not `clean`');
   assert(
@@ -1025,6 +1087,7 @@ function selfTest() {
   // ── The readers ──────────────────────────────────────────────────────────
   // `readChangesets` no longer feeds the verdict; it feeds `--list`. These pins
   // stay because `--list` is now the only stock view a curator has.
+  battery('The readers');
   {
     const real = readChangesets(REPO_ROOT);
     // Reachability only, never SIZE (#8654): `.changeset/` itself is tracked
@@ -1093,6 +1156,7 @@ function selfTest() {
   // fixture that is not two real commits would be testing an imitation of the
   // code path that ships.
 
+  battery('The diff scoping, on real temp git repositories');
   const repos = [];
   const initRepo = (prefix) => {
     const dir = mkdtempSync(join(tmpdir(), prefix));
@@ -1284,6 +1348,7 @@ function selfTest() {
     // is subtracted today. The fixture therefore has to COMMIT a major-shaped
     // README to reach the path at all — without that, the case would pass with
     // or without the guard and would certify the hole instead of closing it.
+    battery('#7107: an `R` row whose BASE side is README.md subtracts NOTHING');
     {
       const long = '\n\nbody long enough for git to score this as a rename rather than an add plus a delete\n';
       const majorReadme = '---\n"@objectstack/spec": major\n---' + long;
@@ -1319,6 +1384,7 @@ function selfTest() {
     // offenders); judged from the moved main tip it would be 0 too — but judged
     // as this gate USED to judge, reading the stock at HEAD, it is 1. All three
     // are asserted, so the fixture cannot be green because nothing is produced.
+    battery('#6129 proper: main drift must not move the verdict');
     {
       const dir = initRepo('changeset-no-major-mergeref-');
       writeInto(dir, { '.changeset/stock.md': MINOR });
@@ -1380,6 +1446,7 @@ function selfTest() {
     }
 
     // ── Missing input is a failure, never a pass (#4690) ─────────────────────
+    battery('Missing input is a failure, never a pass (#4690)');
     {
       const { dir } = makeRepo({}, { 'a.txt': 'x\n' });
       assert(resolveCommit('definitely-not-a-ref', dir) === null, 'an unresolvable base resolves to null (⇒ exit 1)');
@@ -1425,6 +1492,7 @@ function selfTest() {
   // pins, so a PR deleting both the step and this script is not caught here.
   // That is a deletion plainly visible in a `.github/**` diff rather than a
   // silent no-op.
+  battery('The wiring: these fixtures must actually run on every PR');
   {
     const uncommented = (text) => text.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
 
@@ -1507,6 +1575,51 @@ function selfTest() {
     );
   }
 
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    failures.push(message);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of seen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = seen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
+  }
   if (failures.length > 0) {
     console.error(`✗ check-changeset-no-major --self-test — ${failures.length} failure(s)\n`);
     for (const failure of failures) console.error(`  • ${failure}`);

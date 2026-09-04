@@ -356,6 +356,82 @@ import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from './invoked-as.mjs';
 import { blank, maskComments, scanSource } from './js-comment-mask.mjs';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'G1: a non-breaking changeset is not this gate\'s business': 1,
+  'R1: THE #6011 SHAPE -- declared breaking, no ledger entry, no marker': 5,
+  'R2: the catch-all exemption cannot cover a FROM -> TO prescription': 4,
+  'G2: THE RECONCILIATION STEP -- register it and the same input passes': 1,
+  'R3: `registered` naming an id that does not exist': 3,
+  'R4: `registered` claiming a registration this PR did not make': 3,
+  'G3: already-registered, naming a genuinely pre-existing entry': 1,
+  'R5: already-registered pointing at an id this diff just added': 3,
+  'R6: `unpublished` claimed for a published package': 3,
+  'G4: `unpublished` on a genuinely private package': 1,
+  'R7: an unknown category is refused (the vocabulary is closed)': 3,
+  'R8: an empty justification is refused': 2,
+  'G5: the catch-all, on a changeset carrying no prescription': 1,
+  'R9: two markers is ambiguous, not "the first one wins"': 2,
+  'R10: THE #6419 SHAPE -- a REAL prescription, written in Chinese with -': 4,
+  'R11: the same, framed by a HEADING instead of an inline label': 3,
+  'G7: ordinary prose arrows under the catch-all stay GREEN': 1,
+  'R12: THE #6497 SHAPE -- a rewrite TABLE with no arrow in it': 4,
+  'R13: THE #6559 SHAPE -- the frame is the TABLE\'S OWN HEADER ROW': 4,
+  'G8: a CAPABILITY table under the same framing stays GREEN': 1,
+  'G9: THE #6967 SHAPE -- a changeset that POINTS AT prescriptions': 1,
+  'R14: ...and the SAME sentence with the goods still refuses the catch-all': 4,
+  'The #8299 category: `runtime-interface-only`': 12,
+  '#12881: a metadata surface that names the symbol only in PROSE': 30,
+  'The #13080 category: `type-surface-only`': 26,
+  'TSO-6048: THE REGRESSION PIN -- the founding case must never admit': 7,
+  'TSO-N: the predicate set is pinned BY NAME, never by count': 3,
+  'TSO-U: unit pins on predicate 4\'s readers': 19,
+  'G6: a changeset that was ALREADY breaking at base is inherited': 1,
+  'R15: a changeset RENAMED AND turned breaking in the same commit': 5,
+  'G10: a PURE rename of an ALREADY-breaking stock changeset': 3,
+  'R16: an `R` row whose BASE side is README.md inherits NOTHING': 4,
+  'Input assertions (#4690)': 5,
+  'I2c: the #4690 posture SURVIVES the #8658 repair -- a rev with no': 1,
+  'I2d: the synthetic convention-rot controls run on a repo whose stock DOES': 4,
+  'V3: the real repository is the case that matters -- this gate\'s own vocabulary': 10,
+  'Unit pins on the two pattern-shaped judgements': 29,
+  'the floors: what the new vocabulary must refuse': 9,
+  'the floors: labels that are NOT mentions, and mentions that ARE evidenced': 9,
+  'P51-P60: the HARD-WRAPPED mention, and the floors that keep the cure from': 11,
+  'P62-P68: the framed region closes at the same or a SHALLOWER heading, not': 7,
+  'U1-U12 (#8299): unit pins on the runtime-interface-only primitives': 13,
+  'S1-S5: the `--audit-stock` classifier (#6350)': 7,
+  'PRE1-PRE3: `.changeset/pre/` is CONSUMED stock, not pending stock': 4,
+  'PRE3: `entries` stays UNFILTERED. A tree whose changesets have all moved': 4,
+  'P9-P14 (#7004): the shapes the old entry anchor hid from signal (1)': 7,
+  'I1 (#6566): a bare `import` of this module must NOT run the gate': 3,
+  'I2 (#6566): the SAME file, run as the entry point, still dispatches': 4,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 48;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..');
 
@@ -3231,9 +3307,24 @@ function auditStock(cwd, head) {
 const SELF_TEST_VERDICT = 'check-adr-0087-registration self-test reached its verdict';
 
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const batterySeen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+  };
+
   const failures = [];
   let checked = 0;
   const assert = (cond, msg) => {
+    registerCase();
     checked++;
     if (!cond) failures.push(msg);
   };
@@ -3325,6 +3416,7 @@ function selfTest() {
   };
 
   // ---- G1: a non-breaking changeset is not this gate's business -------------
+  battery('G1: a non-breaking changeset is not this gate\'s business');
   green('G1 non-breaking changeset ignored', run(mk({
     files: { '.changeset/nb.md': CS({ bumps: [['@objectstack/spec', 'patch']], body: 'a patch\n\nprose.\n' }) },
   })));
@@ -3332,6 +3424,7 @@ function selfTest() {
   // ---- R1: THE #6011 SHAPE -- declared breaking, no ledger entry, no marker --
   // #6048's changeset reconstructed: major + **BREAKING** + a FROM -> TO block,
   // and nothing said about the ledger.
+  battery('R1: THE #6011 SHAPE -- declared breaking, no ledger entry, no marker');
   const SIX048 = CS({
     bumps: [['@objectstack/runtime', 'major']],
     body: '**BREAKING**: `ctx.user.roles` removed\n\n### 迁移:FROM → TO\n\n```js\n// FROM\nctx.user.roles;\n// TO\nctx.user.positions;\n```\n',
@@ -3342,6 +3435,7 @@ function selfTest() {
   })), [/tidy-donkeys-yawn/, /no `adr-0087:` disposition marker/, /#6148/, /adr-0087: registered/]);
 
   // ---- R2: the catch-all exemption cannot cover a FROM -> TO prescription ----
+  battery('R2: the catch-all exemption cannot cover a FROM -> TO prescription');
   red('R2 no-migration-prescription contradicted by the body', run(mk({
     files: {
       '.changeset/tidy-donkeys-yawn.md': SIX048.replace(
@@ -3353,6 +3447,7 @@ function selfTest() {
   })), [/contradicts the changeset's own body/, /Evidence \(from-to-label\)/, /#6048/]);
 
   // ---- G2: THE RECONCILIATION STEP -- register it and the same input passes --
+  battery('G2: THE RECONCILIATION STEP -- register it and the same input passes');
   green('G2 same input, registered by this diff', run(mk({
     headIds: ['old-entry-one', 'old-entry-two', 'actor-user-roles-to-positions'],
     files: {
@@ -3365,16 +3460,19 @@ function selfTest() {
   })));
 
   // ---- R3: `registered` naming an id that does not exist --------------------
+  battery('R3: `registered` naming an id that does not exist');
   red('R3 registered names a nonexistent id', run(mk({
     files: { '.changeset/x.md': CS({ body: '**BREAKING** x\n\n<!-- adr-0087: registered no-such-entry -->\n' }) },
   })), [/do not exist in/, /no-such-entry/]);
 
   // ---- R4: `registered` claiming a registration this PR did not make --------
+  battery('R4: `registered` claiming a registration this PR did not make');
   red('R4 registered names only pre-existing ids', run(mk({
     files: { '.changeset/x.md': CS({ body: '**BREAKING** x\n\n<!-- adr-0087: registered old-entry-one -->\n' }) },
   })), [/none of those ids is NEW in this diff/, /already-registered/]);
 
   // ---- G3: already-registered, naming a genuinely pre-existing entry --------
+  battery('G3: already-registered, naming a genuinely pre-existing entry');
   green('G3 already-registered on a base entry', run(mk({
     files: {
       '.changeset/x.md': CS({ body: '**BREAKING** x\n\n<!-- adr-0087: not-required (already-registered old-entry-one) the same rename this entry already covers, second half -->\n' }),
@@ -3382,6 +3480,7 @@ function selfTest() {
   })));
 
   // ---- R5: already-registered pointing at an id this diff just added --------
+  battery('R5: already-registered pointing at an id this diff just added');
   red('R5 already-registered names a freshly added id', run(mk({
     headIds: ['old-entry-one', 'old-entry-two', 'brand-new-entry'],
     files: {
@@ -3390,6 +3489,7 @@ function selfTest() {
   })), [/names only id\(s\) this very diff ADDS/, /adr-0087: registered brand-new-entry/]);
 
   // ---- R6: `unpublished` claimed for a published package --------------------
+  battery('R6: `unpublished` claimed for a published package');
   red('R6 unpublished is false', run(mk({
     files: {
       '.changeset/x.md': CS({ body: '**BREAKING** x\n\n<!-- adr-0087: not-required (unpublished) this is only our internal build tooling and ships to nobody -->\n' }),
@@ -3397,6 +3497,7 @@ function selfTest() {
   })), [/is PUBLISHED/, /@objectstack\/spec/]);
 
   // ---- G4: `unpublished` on a genuinely private package ---------------------
+  battery('G4: `unpublished` on a genuinely private package');
   green('G4 unpublished on a private package', run(mk({
     files: {
       '.changeset/x.md': CS({
@@ -3411,16 +3512,19 @@ function selfTest() {
   })));
 
   // ---- R7: an unknown category is refused (the vocabulary is closed) --------
+  battery('R7: an unknown category is refused (the vocabulary is closed)');
   red('R7 unknown category', run(mk({
     files: { '.changeset/x.md': CS({ body: '**BREAKING** x\n\n<!-- adr-0087: not-required (whatever-i-like) because I say so and this is a long enough sentence -->\n' }) },
   })), [/unknown `not-required` category/, /vocabulary is closed/]);
 
   // ---- R8: an empty justification is refused --------------------------------
+  battery('R8: an empty justification is refused');
   red('R8 justification too short', run(mk({
     files: { '.changeset/x.md': CS({ body: '**BREAKING** x\n\n<!-- adr-0087: not-required (no-migration-prescription) n/a -->\n' }) },
   })), [/character justification/]);
 
   // ---- G5: the catch-all, on a changeset carrying no prescription -----------
+  battery('G5: the catch-all, on a changeset carrying no prescription');
   green('G5 no-migration-prescription with no FROM/TO in the body', run(mk({
     files: {
       '.changeset/x.md': CS({ body: '**BREAKING** x\n\n<!-- adr-0087: not-required (no-migration-prescription) an internal error string changed; no key, symbol or stored value moves -->\n' }),
@@ -3428,6 +3532,7 @@ function selfTest() {
   })));
 
   // ---- R9: two markers is ambiguous, not "the first one wins" ---------------
+  battery('R9: two markers is ambiguous, not "the first one wins"');
   red('R9 two disposition markers', run(mk({
     files: {
       '.changeset/x.md': CS({ body: '**BREAKING** x\n\n<!-- adr-0087: registered old-entry-one -->\n<!-- adr-0087: not-required (unpublished) whatever this says it is ambiguous -->\n' }),
@@ -3443,6 +3548,7 @@ function selfTest() {
   // author had written real identifiers instead of the placeholder words FROM/TO.
   // Reverse-verified: restore the old pattern and this case reports "expected RED,
   // got green" -- it is green for the empty reason, which is exactly the defect.
+  battery('R10: THE #6419 SHAPE -- a REAL prescription, written in Chinese with -');
   red('R10 the #6419 shape (a real Chinese prescription under the catch-all)', run(mk({
     files: {
       '.changeset/x.md': CS({
@@ -3457,6 +3563,7 @@ function selfTest() {
   // ---- R11: the same, framed by a HEADING instead of an inline label ---------
   // `## 迁移` + a list of rewrites is the other natural spelling; a line-only rule
   // would read the list as unframed prose and pass it.
+  battery('R11: the same, framed by a HEADING instead of an inline label');
   red('R11 a prescription under a migration HEADING', run(mk({
     files: {
       '.changeset/x.md': CS({
@@ -3473,6 +3580,7 @@ function selfTest() {
   // version step, a dependency direction, a request trace. None is a prescription,
   // and refusing them would leave an entitled author with no honest disposition --
   // the #6419 shape pointed the other way.
+  battery('G7: ordinary prose arrows under the catch-all stay GREEN');
   green('G7 prose arrows are not prescriptions', run(mk({
     files: {
       '.changeset/x.md': CS({
@@ -3494,6 +3602,7 @@ function selfTest() {
   // on top. Both pre-#6497 branches required an arrow, so this was read as "no
   // prescription at all" and the exemption was granted. Reverse-verified: delete
   // the table arm and this case reports "expected RED, got green".
+  battery('R12: THE #6497 SHAPE -- a rewrite TABLE with no arrow in it');
   const SIX497 = CS({
     bumps: [['@objectstack/runtime', 'major']],
     body:
@@ -3523,6 +3632,7 @@ function selfTest() {
   // "expected RED, got green". It is the ONLY integration case in this file that
   // can move that way, which is why the arm's other assertions (P33-P38) are
   // labelled floors rather than counted as coverage.
+  battery('R13: THE #6559 SHAPE -- the frame is the TABLE\'S OWN HEADER ROW');
   const SIX559 = CS({
     bumps: [['@objectstack/spec', 'major']],
     body:
@@ -3550,6 +3660,7 @@ function selfTest() {
   // NOTE, honestly: this case is green with the table arm and green without it.
   // Deleting an arm can only make a detector match LESS, so no false-positive floor
   // can move under reverse verification. It pins the boundary, not the capability.
+  battery('G8: a CAPABILITY table under the same framing stays GREEN');
   green('G8 a one-coded-cell capability table is not a prescription', run(mk({
     files: {
       '.changeset/x.md': CS({
@@ -3576,6 +3687,7 @@ function selfTest() {
   //
   // This is the RED set under reverse verification: restore the branch-1 limb
   // (accept every placeholder occurrence) and this case goes red -- verified.
+  battery('G9: THE #6967 SHAPE -- a changeset that POINTS AT prescriptions');
   green('G9 the #6967 shape (a POINTER to prescriptions is not a prescription)', run(mk({
     files: {
       '.changeset/v17-anchor.md': CS({
@@ -3597,6 +3709,7 @@ function selfTest() {
   // FROM → TO mappings baked into it include:` over a list of real renames), so the
   // pair G9/R14 pins that the rule separates POINTERS from PRESCRIPTIONS and not
   // prose from markup.
+  battery('R14: ...and the SAME sentence with the goods still refuses the catch-all');
   red('R14 a cited FROM → TO with the rewrites present still contradicts the catch-all', run(mk({
     files: {
       '.changeset/x.md': CS({
@@ -3617,6 +3730,7 @@ function selfTest() {
   // Every accept/refuse pair below is driven off that collision on purpose: the
   // predicate is only worth having if the SAME NAME under two paths comes out two
   // different ways, which is what a bare-name grep cannot do.
+  battery('The #8299 category: `runtime-interface-only`');
   const RIO_FILES = {
     'packages/services/service-package/src/index.ts':
       'export interface PackagePublishDriverFault { message: string }\n\n' +
@@ -3703,6 +3817,7 @@ function selfTest() {
   // an ordinary runtime module, and a metadata surface that names it -- with only
   // WHERE the name sits changing between them. That is the whole content of the
   // rule, so a case that passed for any other reason would not discriminate.
+  battery('#12881: a metadata surface that names the symbol only in PROSE');
 
   // RIO-G2: THE #12881 CASE. A `*.zod.ts` docblock explains what the runtime type
   // keys on. It is a sentence: nothing is declared, nothing is imported, and
@@ -3876,6 +3991,7 @@ function selfTest() {
   // attributable to the predicate it is named for. The greens and reds share one
   // fixture family for the reason RIO's do: a case that passed for another reason
   // would not discriminate.
+  battery('The #13080 category: `type-surface-only`');
   const TSO_BASE_CLIENT =
     'export class ObjectStackClient {\n' +
     '  analytics = {\n' +
@@ -4035,6 +4151,7 @@ function selfTest() {
   //       pin -- never a silent skip (#4690).
   //   (b) a SCAN-level pin driving the full shipping `scan()` over a two-commit
   //       reconstruction of the #6048 diff, claiming this category.
+  battery('TSO-6048: THE REGRESSION PIN -- the founding case must never admit');
   const REAL_ACTOR_USER = 'packages/runtime/src/security/actor-user.ts';
   let realActorUserText = null;
   try { realActorUserText = readFileSync(join(REPO_ROOT, REAL_ACTOR_USER), 'utf8'); } catch { /* reported below */ }
@@ -4084,6 +4201,7 @@ function selfTest() {
   // exactly that defect. Both halves are needed: the exported NAMES are the
   // contract, and the second assertion is what proves the exported list is the
   // list the shipping function actually evaluates rather than a decorative one.
+  battery('TSO-N: the predicate set is pinned BY NAME, never by count');
   assert(
     JSON.stringify(TYPE_SURFACE_PREDICATES) ===
       JSON.stringify(['published', 'no-spec-diff', 'no-metadata-surface-diff', 'narrowed-from-erased']),
@@ -4111,6 +4229,7 @@ function selfTest() {
   }
 
   // ---- TSO-U: unit pins on predicate 4's readers ------------------------------
+  battery('TSO-U: unit pins on predicate 4\'s readers');
   assert(unwrapPromise('Promise<AnalyticsResult>') === 'AnalyticsResult', 'TSO-U1: a whole-string Promise unwraps');
   assert(unwrapPromise('Promise< any >') === 'any', 'TSO-U2: spacing does not defeat the unwrap');
   assert(unwrapPromise('Promise<any> | undefined') === null, 'TSO-U3: a Promise that is only PART of the type does not unwrap -- a greedy match here reads `any> | undefined` and is wrong in the ADMITTING direction');
@@ -4135,6 +4254,7 @@ function selfTest() {
   assert(readDeclaredTypeSurface('export interface Other { a: 1 }\n', 'Missing') === null, 'TSO-U19: a symbol that is not there reads as null -- never as "it must have been erased"');
 
   // ---- G6: a changeset that was ALREADY breaking at base is inherited -------
+  battery('G6: a changeset that was ALREADY breaking at base is inherited');
   {
     const r = mk({ files: {} });
     // modify the stock breaking changeset -- it was breaking at base, so it is not
@@ -4166,6 +4286,7 @@ function selfTest() {
   // The #7045 shape, and R1's own shape with a `git mv` bolted on: a declaration
   // this PR introduces, arriving at a path that did not exist at the branch point,
   // saying nothing about the ledger.
+  battery('R15: a changeset RENAMED AND turned breaking in the same commit');
   {
     const r = mk({
       baseFiles: { '.changeset/pending.md': CS({ bumps: [['@objectstack/spec', 'patch']], body: RENAMEABLE_BODY }) },
@@ -4191,6 +4312,7 @@ function selfTest() {
   // again. This case can only be green through the `R` path -- were the rename to
   // degrade to add-plus-delete the new path would arrive as `A`, and `A` never
   // reads the base side at all, so it would be RED.
+  battery('G10: a PURE rename of an ALREADY-breaking stock changeset');
   {
     const r = mk({ files: {} });
     git(['mv', '.changeset/stock-breaking.md', '.changeset/stock-breaking-moved.md'], r.dir);
@@ -4213,6 +4335,7 @@ function selfTest() {
   // documentation and declares nothing, so reading "already breaking at base" off
   // it would exempt a genuinely new breaking changeset. Delete the
   // `isChangesetFile(basePath)` guard in the scan and this case goes green.
+  battery('R16: an `R` row whose BASE side is README.md inherits NOTHING');
   {
     const BREAKING_README = `# Changesets\n\n**BREAKING** ${RENAMEABLE_BODY}`;
     const r = mk({
@@ -4233,6 +4356,7 @@ function selfTest() {
   }
 
   // ---- Input assertions (#4690) --------------------------------------------
+  battery('Input assertions (#4690)');
   {
     const r = mk({ files: {} });
     assert(assertInputs({ cwd: r.dir, head: 'HEAD' }).length === 0, 'I0: a well-formed repo must produce no input problems');
@@ -4307,6 +4431,7 @@ function selfTest() {
     // I2c: the #4690 posture SURVIVES the #8658 repair -- a rev with no
     // `.changeset/` at all (not even README/config) is unreadable input, and
     // unreadable input is a refusal, never a pass.
+    battery('I2c: the #4690 posture SURVIVES the #8658 repair -- a rev with no');
     const dir = mkdtempSync(join(tmpdir(), 'adr0087-nodir-'));
     cleanup.push(dir);
     const w = (rel, text) => { mkdirSync(dirname(join(dir, rel)), { recursive: true }); writeFileSync(join(dir, rel), text); };
@@ -4332,6 +4457,7 @@ function selfTest() {
     // controls refuse -- cannot be staged from here without mutating this
     // module; it is verified by ablation: see the reverse-verification record
     // on the PR that introduced the controls, #8658.)
+    battery('I2d: the synthetic convention-rot controls run on a repo whose stock DOES');
     const r = mk({ files: {} });
     const probs = assertInputs({ cwd: r.dir, head: 'HEAD' });
     assert(probs.length === 0, `I2d: the synthetic breaking-detector controls add no problems on a healthy detector -- got: ${probs.join('|')}`);
@@ -4373,6 +4499,7 @@ function selfTest() {
 
     // V3: the real repository is the case that matters -- this gate's own vocabulary
     // and the real ADR must agree at the tip being tested, not just in fixtures.
+    battery('V3: the real repository is the case that matters -- this gate\'s own vocabulary');
     const realAdr = readFileSync(join(REPO_ROOT, ADR_0087), 'utf8');
     const documented = documentedCategories(realAdr);
     for (const c of CATEGORIES) assert(documented.has(c), `V3: ${ADR_0087} must document the \`${c}\` category`);
@@ -4385,6 +4512,7 @@ function selfTest() {
   // must keep matching, or the #6048 shape stops being caught. P4-P5 are the
   // original false-positive floor. P9-P17 are #6419: the branch that reads real
   // prescriptions, and the prose shapes it must still refuse.
+  battery('Unit pins on the two pattern-shaped judgements');
   assert(hasMigrationPrescription('### 迁移:FROM → TO\n'), 'P1: the Chinese prescription heading must match');
   assert(hasMigrationPrescription('**FROM → TO**\n'), 'P2: the inline FROM -> TO heading must match');
   assert(hasMigrationPrescription('| FROM (legacy) | TO (primitives) |\n'), 'P3: a FROM/TO table header must match');
@@ -4462,6 +4590,7 @@ function selfTest() {
     'P32: a THREE-column table still frames, as long as the new column follows the old one',
   );
   // --- the floors: what the new vocabulary must refuse -----------------------
+  battery('the floors: what the new vocabulary must refuse');
   assert(
     !hasMigrationPrescription('| route | was | now |\n|---|---|---|\n| `POST /share-links` | `{ link }` | `{ success: true, data: link }` |\n'),
     'P33: `| was | now |` is this repo\'s BEHAVIOUR-comparison header, not a rewrite -- `was` is deliberately not an OLD word',
@@ -4506,6 +4635,7 @@ function selfTest() {
     'P41: `their FROM → TO migration` -- a governing word beats the framing word that follows',
   );
   // --- the floors: labels that are NOT mentions, and mentions that ARE evidenced --
+  battery('the floors: labels that are NOT mentions, and mentions that ARE evidenced');
   assert(
     findMigrationPrescription('**Removed keys and their prescriptions (FROM → TO):**\n\n- `App.version` → an app is versioned by its package\n')?.branch === 'from-to-label',
     'P42: a parenthesised label is opened by `(`, not governed by `prescriptions` -- `app-dead-authoring-keys.md`',
@@ -4554,6 +4684,7 @@ function selfTest() {
   // and every other way of opening a line keeps what it had. P52 is the positive
   // control the specimen assertions are worthless without -- if it ever goes red
   // with P51 green, the arm has stopped seeing rather than started discriminating.
+  battery('P51-P60: the HARD-WRAPPED mention, and the floors that keep the cure from');
   assert(
     !hasMigrationPrescription(
       'The AGENTS.md post-task checklist requires breaking changesets to carry their\nFROM → TO migration because "this text ships to consumers as `CHANGELOG.md`\ninside the npm package and is what an upgrading agent greps after the tombstone\nerror."\n',
@@ -4610,6 +4741,7 @@ function selfTest() {
   // P65-P66 are false-positive floors -- green with the fix and green without it,
   // which is said out loud rather than counted as coverage, because they pin where
   // a framed region STOPS and a region that never stops frames the whole document.
+  battery('P62-P68: the framed region closes at the same or a SHALLOWER heading, not');
   const NESTED_TABLE = '## Migration\n\n### Method namespace\n\n| before | after |\n| --- | --- |\n| `client.projects.list()` | `client.environments.list()` |\n';
   assert(
     findMigrationPrescription(NESTED_TABLE)?.branch === 'framed-table',
@@ -4645,6 +4777,7 @@ function selfTest() {
   // The path classifier is the half that decides what the reference scan even
   // reads, so a silent narrowing of it would make the exemption easier to hold
   // while every RIO case above stayed green.
+  battery('U1-U12 (#8299): unit pins on the runtime-interface-only primitives');
   assert(metadataSurfaceKind('packages/spec/src/ai/agent.zod.ts') === 'a Zod schema', 'U1: a *.zod.ts is a metadata surface');
   assert(metadataSurfaceKind('packages/spec/src/contracts/data-driver.ts') === 'a spec contracts/** entry', 'U2: a spec contract is a metadata surface');
   assert(metadataSurfaceKind('examples/app-crm/src/objects/account.object.ts') === 'an object definition', 'U3: an object definition is a metadata surface');
@@ -4678,6 +4811,7 @@ function selfTest() {
   // the one precedence rule between them. They live in the self-test (which CI
   // runs) even though the audit itself is operator-invoked, because the classifier
   // reuses the gate's judging functions and would rot with them.
+  battery('S1-S5: the `--audit-stock` classifier (#6350)');
   {
     const PKGS = new Map([
       ['@objectstack/spec', { private: false, file: 'packages/spec/package.json' }],
@@ -4730,6 +4864,7 @@ function selfTest() {
   // by a PR is judged like any other. Filter the verdict instead of the audit and
   // `.changeset/pre/` becomes the place to put a breaking change you do not want
   // read.
+  battery('PRE1-PRE3: `.changeset/pre/` is CONSUMED stock, not pending stock');
   {
     const { dir } = mk({
       files: {
@@ -4754,6 +4889,7 @@ function selfTest() {
     // into `.changeset/pre/` is the ordinary state of main mid-window; narrowing
     // the readability probe as well would turn it into a #4690 refusal and undo
     // #8658 by a different route. Pending stock is legitimately zero there.
+    battery('PRE3: `entries` stays UNFILTERED. A tree whose changesets have all moved');
     const { dir } = mk({
       files: {
         '.changeset/stock-breaking.md': null,
@@ -4786,6 +4922,7 @@ function selfTest() {
   // Predicted direction on reverse verification: restoring the old anchor
   // (`([A-Za-z]+)\s*$`) turns P9-P13 red (breaking goes false, signals loses
   // `major`) and P14 red in the other direction (a phantom `# note` bump).
+  battery('P9-P14 (#7004): the shapes the old entry anchor hid from signal (1)');
   const PLAIN = 'a summary line\n\nsome prose that is quite long indeed and explains the change.\n';
   const bumpsOf = (text) => parseChangeset(text).bumps.map((b) => `${b.pkg}=${b.bump}`);
   assert(
@@ -4824,6 +4961,7 @@ function selfTest() {
   // fixture repo, prints its verdict, `process.exit(1)`s, and the importer's
   // own line never runs -- the behaviour measured in #6566, which forced
   // PR #6556 into a subprocess fixture instead of an import.
+  battery('I1 (#6566): a bare `import` of this module must NOT run the gate');
   {
     const { dir, base } = mk({
       files: { '.changeset/unanswered-breaking.md': CS({ body: '**BREAKING** x\n\nno marker here\n' }) },
@@ -4877,6 +5015,7 @@ function selfTest() {
     // `--list` exiting 0, stayed green under that second ablation -- a script
     // with no CLI at all also exits 0. An exit code cannot distinguish "the
     // branch ran and succeeded" from "nothing ran"; only the printed table can.
+    battery('I2 (#6566): the SAME file, run as the entry point, still dispatches');
     const cli = (...args) => spawnSync(process.execPath, [join(dir, copy), ...args], { cwd: dir, encoding: 'utf8' });
 
     const gate = cli();
@@ -4897,6 +5036,52 @@ function selfTest() {
   }
 
   for (const d of cleanup) rmSync(d, { recursive: true, force: true });
+
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    failures.push(message);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
+  }
 
   if (failures.length) {
     console.error(`✗ check-adr-0087-registration --self-test -- ${failures.length} failure(s)\n`);

@@ -56,6 +56,29 @@ describe('SchemaRegistry — namespace install gate (ADR-0048 Phase 1)', () => {
     expect(registry.getNamespaceOwners('crm')).toEqual(['com.acme.crm']);
   });
 
+  it('carries the ADR-0112 envelope: code NAMESPACE_CONFLICT + status 422', () => {
+    // [#14474] The assertion the instance checks above cannot make, and the
+    // reason this defect survived: `toThrowError(NamespaceConflictError)` and
+    // `toBeInstanceOf(NamespaceConflictError)` are TRUE of a class carrying no
+    // `code` and no `status`, so both stayed green while `POST /api/v1/packages`
+    // answered this refusal as `500 INTERNAL_ERROR`. Measured on a booted stack
+    // before the envelope landed; `422` with `declaredCode: NAMESPACE_CONFLICT`
+    // after it. `resolveThrownHttpError` reads exactly these two fields off the
+    // throw, so they are what the door's answer is MADE of — asserting the
+    // class instead asserts something the wire never sees.
+    registry.installPackage(manifest('com.acme.crm', 'crm') as any);
+    let caught: (Error & { code?: string; status?: number }) | undefined;
+    try {
+      registry.installPackage(manifest('com.beta.crm', 'crm') as any);
+    } catch (e) { caught = e as Error & { code?: string; status?: number }; }
+
+    expect(caught?.code).toBe('NAMESPACE_CONFLICT');
+    expect(caught?.status).toBe(422);
+    // The prose is unchanged by the envelope — this card added fields, it did
+    // not rewrite a sentence. Its first clause is what an operator reads.
+    expect(caught?.message).toContain('Namespace conflict: namespace "crm"');
+  });
+
   it('allows the same package to reinstall/reload its own namespace', () => {
     registry.installPackage(manifest('com.acme.crm', 'crm') as any);
     expect(() =>
