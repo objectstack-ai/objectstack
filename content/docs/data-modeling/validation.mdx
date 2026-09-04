@@ -83,8 +83,10 @@ All validation types share these base properties:
 | Severity | Behavior |
 | :--- | :--- |
 | `error` | Prevents the record from being saved |
-| `warning` | Shows a warning but allows save |
+| `warning` | Allows the save; advisory only — logged server-side, not returned to the caller |
 | `info` | Informational message, no blocking |
+
+Advisory rules (`warning` / `info`) are reported, never enforced: on an ordinary write each hit is logged as it happens; on a seed/boot load a run's hits are folded into **one summary line per rule**; and an `update` touching only platform-injected system columns does not re-evaluate them at all, so a row is reported once rather than once per write (#13889).
 
 ## Validation Types
 
@@ -112,7 +114,8 @@ fix it. Until protocol 17 such a rule was logged at WARN and *skipped*, so the w
 went through while the rule stayed declared and enforced nothing; a validation exists
 to reject a write, and "the rule could not be checked" must never resolve to
 "allowed" (#4649). `severity` still governs blocking — an unevaluable `warning` /
-`info` rule is logged and does not throw.
+`info` rule is logged and does not throw, on the writes where advisory rules are
+evaluated at all (see above).
 
 The record a predicate reads is the stored row overlaid with this write's payload,
 **total over the object's declared fields** (`null` for a declared field present in

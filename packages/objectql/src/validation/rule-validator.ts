@@ -194,7 +194,8 @@
 
 import { ExpressionEngine, collectCelRootIdentifiers } from '@objectstack/formula';
 import type { Expression } from '@objectstack/spec';
-import { AUDIT_PROVENANCE_FIELDS, RUNTIME_OWNED_FIELD_TYPES } from '@objectstack/spec/data';
+import { AUDIT_PROVENANCE_FIELDS, RUNTIME_OWNED_FIELD_TYPES, resolveInjectedSystemColumns } from '@objectstack/spec/data';
+import { recordAdvisoryHit } from '@objectstack/core';
 // [#8215] The canonical spelling of the primary-key column — the sanctioned use
 // of this registry ("what is the canonical spelling of the column that plays
 // role X"). The role is structural, not per-object: the driver provisions `id`
@@ -1963,6 +1964,93 @@ function evaluateOptionVisibility(
 }
 
 /**
+ * The object's name, for an advisory group's key. Read off the schema rather
+ * than taken as a parameter: every caller already passes the registry's own
+ * object definition, and widening this module's signature for a diagnostic
+ * would put a reporting concern on a published surface.
+ */
+function advisoryObjectName(objectSchema: unknown): string {
+  const name = (objectSchema as { name?: unknown } | null | undefined)?.name;
+  return typeof name === 'string' && name.length > 0 ? name : '(unknown)';
+}
+
+/**
+ * One example row reference for an advisory group, when the write carries one.
+ *
+ * The `name` fallback is not a nicety. On the path this exists for — a seed
+ * INSERT — the driver has not issued an id yet when rules are evaluated, so an
+ * id-only reference is `undefined` for exactly the rows the summary is about,
+ * and the 「详见…」 half of the ruling's shape would always be empty. `name` is
+ * this framework's canonical row handle (and the seed loader's own errors
+ * already name a row that way: `Failed to write sd_acct record #1
+ * (name=bad_row)`), so the spelling is the loader's, not a new convention.
+ */
+function advisoryRecordRef(
+  merged: Record<string, unknown>,
+  data: Record<string, unknown>,
+): string | undefined {
+  const id = merged.id ?? data.id;
+  if (typeof id === 'string' || typeof id === 'number') return String(id);
+  const name = merged.name ?? data.name;
+  if (typeof name === 'string' && name.length > 0) return `name=${name}`;
+  return undefined;
+}
+
+/**
+ * [#13889] Whether this UPDATE writes nothing but platform-injected columns —
+ * i.e. no business field moved, so the row's advisory rules have nothing new to
+ * say about it.
+ *
+ * The membership question is NOT answered by a list kept here. It is answered
+ * by `resolveInjectedSystemColumns` (`@objectstack/spec/data`), the declared
+ * per-object authority for *"which columns does the platform provision on THIS
+ * object without the author declaring them?"* — the same derivation
+ * `applySystemFields` injects from. That matters for correctness, not just for
+ * tidiness: the answer is per-object (`ownership: 'org'` carries no `owner_id`;
+ * `systemFields: false` carries nothing at all), so a hand-kept literal would be
+ * wrong on exactly the objects that differ, and would drift the moment a tier
+ * like ADR-0117's `owning_business_unit_id` is added.
+ *
+ * INSERT is deliberately excluded: a row being born is precisely when its
+ * advisory rules SHOULD speak, and that is the one ring 「按行不按写入」
+ * preserves.
+ *
+ * ### What this does not see — stated, because a skip nobody expects is worse
+ * than a warning nobody wanted
+ *
+ *  - **Soft delete.** `is_deleted` / `deleted_at` are not injected columns in
+ *    this plan, so a soft-delete write still re-evaluates advisories. Left that
+ *    way on purpose: retiring a row is a business event, not a stamp.
+ *  - **A business field rewritten to the value it already held.** The payload
+ *    names a business column, so this returns false and the advisory reports
+ *    as it does today. Detecting "written but unchanged" would need a
+ *    value-equality pass over `previous`, which is absent on the bulk-update
+ *    seam (`previous: null`) and would change what an ordinary interactive
+ *    re-PUT reports — a behaviour change the ruling did not ask for.
+ *  - **An author who declares their own field named `owner_id`** on an
+ *    ownership-eligible object. The plan reports the column either way (the
+ *    registry lets the author's definition win, but the name is addressable
+ *    regardless), so a write moving only that field skips its advisories. The
+ *    row's advisories already rang when its content was written, so this
+ *    under-reports by at most the second ring — the defect's own direction,
+ *    not a new one.
+ */
+function writesOnlyInjectedSystemColumns(
+  objectSchema: unknown,
+  data: Record<string, unknown>,
+  mode: Mode,
+): boolean {
+  if (mode !== 'update') return false;
+  const keys = Object.keys(data);
+  // An empty payload is not a system write-back — it is a write that names
+  // nothing. Fail toward today's behaviour rather than widening the skip to a
+  // shape this was not reasoned about.
+  if (keys.length === 0) return false;
+  const injected = resolveInjectedSystemColumns(objectSchema).names;
+  return keys.every((key) => injected.has(key));
+}
+
+/**
  * Evaluate an object's declared validation rules against an incoming write.
  *
  * Throws `ValidationError` (the same envelope `validateRecord` uses, so REST
@@ -2082,9 +2170,38 @@ export function evaluateValidationRules(
   // not a security boundary.
   evaluateOptionVisibility(fields, data, merged, previous, opts.currentUser, errors, opts.logger, opts.messages);
 
+  // [#13889] Does this write move any BUSINESS field? A system write-back that
+  // touches only platform-injected columns does not, so re-running the object's
+  // ADVISORY rules over it would report the same row a second time for a change
+  // its author never made. Maintainer ruling (2026-09-01):
+  // 「同一行清库首启只响一次,按行不按写入」 — one row rings once per clean
+  // first boot, counted BY ROW, not by write.
+  //
+  // The worked case is `claimSeedOwnership` (`@objectstack/plugin-security`),
+  // the first-admin handoff that re-owns seeded rows:
+  //
+  //     ql.update(name, { owner_id: adminUserId },
+  //               { where: predicate, multi: true, context: { isSystem: true } })
+  //
+  // Seeding inserts the row (advisory rings — correctly, once), then the claim
+  // scan rewrites `owner_id` and every rule ran again: the same row rang twice
+  // on a clean first boot, and anyone counting startup warnings over-estimated
+  // by the number of claimed objects.
+  //
+  // ERROR-severity rules are deliberately NOT gated by this. An invariant is an
+  // invariant on every write, whoever issued it and however little it moved;
+  // only the ADVISORY half is a report about an authoring decision, and a
+  // report about a decision nobody made is the defect.
+  const advisoryAlreadyReported = writesOnlyInjectedSystemColumns(objectSchema, data, mode);
+
   const ordered = (hasRules ? rules! : [])
     .filter((r): r is BaseRule => r != null && typeof r === 'object')
     .filter((r) => r.active !== false)
+    // [#13889] `按行不按写入` — see `advisoryAlreadyReported` above. The rule is
+    // dropped from the run rather than having its OUTPUT suppressed: the ruling
+    // asks for no re-EVALUATION, and a suppressed log would leave the wasted
+    // predicate evaluation in place on every system write-back.
+    .filter((r) => !(advisoryAlreadyReported && (r.severity ?? 'error') !== 'error'))
     // Seed writes (#3433) skip `state_machine` entirely: curated seed data is a
     // snapshot of established facts, not a record flowing through its lifecycle,
     // so neither the `initialStates` entry-point (insert) nor the transition
@@ -2111,7 +2228,22 @@ export function evaluateValidationRules(
     const severity = rule.severity ?? 'error';
     if (severity === 'error') {
       errors.push(violation);
-    } else {
+    } else if (
+      // [#13889] On a machine load path (seed / bootstrap) the advisory is
+      // FOLDED into that run's one summary line instead of being logged per
+      // row — 「⛔ 不改规则语义,只改日志形状」: the rule evaluated exactly as
+      // it always did, and the hit is still reported, once per rule with its
+      // row count and example rows. Off that path no scope is active,
+      // `recordAdvisoryHit` returns false, and the per-write line below is
+      // emitted verbatim — an ordinary interactive write is untouched.
+      !recordAdvisoryHit({
+        object: advisoryObjectName(objectSchema),
+        rule: String(rule.name ?? '(unnamed)'),
+        severity,
+        message: violation.message,
+        recordRef: advisoryRecordRef(merged, data),
+      })
+    ) {
       opts.logger?.warn?.(
         `Validation rule '${rule.name}' (${severity}): ${violation.message}`,
       );
