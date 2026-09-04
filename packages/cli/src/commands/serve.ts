@@ -4063,9 +4063,9 @@ export default class Serve extends Command {
         //   • `requires: ['ai-studio']` ⇒ required → fail-fast if the private package
         //     is absent (an app that advertises Studio must ship it).
         //   • package declared but not required ⇒ auto (best-effort).
-        //   • otherwise ⇒ skip — this is the control-plane host path (apps/cloud ships
-        //     no Studio and MUST boot clean, cloud#107): not declared + not required
-        //     ⇒ no import, no error.
+        //   • otherwise ⇒ skip — this is the control-plane host path (such a host
+        //     ships no Studio and MUST boot clean, cloud#107): not declared + not
+        //     required ⇒ no import, no error.
         if (aiLoaded) {
           const hasAIStudio = plugins.some(
             (p: any) => p.name === 'com.objectstack.service-ai-studio'
@@ -4397,9 +4397,9 @@ export default class Serve extends Command {
 
       if (enableUI) {
         // Pre-detect Console availability. The `--no-console` flag (or
-        // OS_DISABLE_CONSOLE=1 env var) lets a host (e.g. apps/cloud)
-        // opt out of the Console entirely — useful for control-plane
-        // deployments where the runtime Console is meaningless.
+        // OS_DISABLE_CONSOLE=1 env var) lets a host opt out of the Console
+        // entirely — useful for control-plane deployments where the
+        // runtime Console is meaningless.
         const consoleEnabled = flags.console && process.env.OS_DISABLE_CONSOLE !== '1';
         // Resolution reports objectui-SHA drift instead of warning about it
         // itself, so the decision below owns the single message about it.
@@ -4546,12 +4546,13 @@ export default class Serve extends Command {
 
       // ── Migrate-and-exit short-circuit ─────────────────────────────
       // Out-of-band migration mode: the caller (e.g.
-      // `apps/cloud/scripts/migrate.ts`) just wants the kernel
-      // bootstrap (ObjectQLPlugin → schema sync → metadata hydration)
-      // to run once against the configured database, then exit. The
-      // HTTP server has already bound `port` at this point but we
-      // never accept a request — shutdown immediately so the deploy
-      // pipeline can move on.
+      // `apps/cloud/scripts/migrate.ts`, which lives in the separate
+      // `objectstack-ai/cloud` repo and is NOT a path in this one) just
+      // wants the kernel bootstrap (ObjectQLPlugin → schema sync →
+      // metadata hydration) to run once against the configured database,
+      // then exit. The HTTP server has already bound `port` at this point
+      // but we never accept a request — shutdown immediately so the
+      // deploy pipeline can move on.
       if (process.env.OS_MIGRATE_AND_EXIT === '1') {
         // This path exits before the banner, so it has to replay the boot
         // diagnostics itself — a deploy pipeline is precisely where a
