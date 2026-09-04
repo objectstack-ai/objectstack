@@ -55,7 +55,8 @@
  *             over one fixture that authors a member of every group. The
  *             walker's own output, not a transcription of its header.
  *   ledger    the groups that legitimately have no extractor face at all, each
- *             carrying the REASON. Starts EMPTY and only shrinks (below).
+ *             carrying the REASON. Holds three entries by the 2026-09-04
+ *             ruling, and only shrinks from there (below).
  *
  * and the assertion is two set differences:
  *
@@ -171,14 +172,43 @@ const DECLARED_WATCH_HINTS = [
 // ── The exemption ledger ────────────────────────────────────────────────────
 
 /**
- * ⛔ SHRINK-ONLY, and it starts EMPTY. Groups that legitimately have no
- * extractor face, keyed by group name, valued by the REASON.
+ * ⛔ SHRINK-ONLY, and every line in it was RULED IN — never added to reach
+ * green. Groups that legitimately have no extractor face, keyed by group name,
+ * valued by the REASON.
+ *
+ * It no longer starts empty. On this gate's own first red the maintainer ruled
+ * (#14653, 2026-09-04, comment 5535827386) that all three unwalked groups enter
+ * here with their reasons, and `LEDGER_CEILING` moved 0 → 3 in that same diff.
+ * Each entry below is that decision written down, with the reason that carries
+ * it — the ⛔ MAINTAINER-ONLY act the unwalked-group message names, performed
+ * by the owner it names rather than by a landing author getting past a check.
+ *
+ * `settings` is the one DEFERRAL among the three, and it says so out loud so
+ * that nobody reads the exemption as the answer: its terminal state — a
+ * registry-driven emitter on the `metadataForms` precedent, or removal from the
+ * per-app schema — is held on #15178.
  *
  * Read the class-level note above before adding anything here. The one-line
- * version: a red belongs to whoever owns the walker, and an entry here is a
- * decision, not a way past one.
+ * version: a red belongs to whoever owns the walker, an entry here is a
+ * decision and not a way past one, and growth stays MAINTAINER-ONLY — from here
+ * the ledger only ever shrinks.
  */
-const KNOWN_NO_EXTRACTOR_FACE = Object.freeze({});
+const KNOWN_NO_EXTRACTOR_FACE = Object.freeze({
+  messages:
+    'Keyed by arbitrary ids composed at the `i18n.t()` call sites (plugin-audit\'s activity-feed and '
+    + 'mention strings); no registry and no stack config enumerates that id set, so there is no face for '
+    + 'an extractor to walk.',
+  settingsCommon:
+    'The Settings UI\'s own five source-badge labels (env / global / tenant / user / default) — the '
+    + 'console\'s words in every app rather than any app\'s own, ruled out of the per-app bundles on '
+    + '#7646.',
+  settings:
+    'Keyed by `SettingsManifest.namespace`, and manifests are platform code '
+    + '(`packages/services/service-settings/src/manifests/*.manifest.ts`), not authored metadata: no stack '
+    + 'config carries them, and no consumer asks for per-app settings translations today. A DEFERRAL, not '
+    + 'a fact — the terminal state (a registry-driven emitter on the `metadataForms` precedent, or removal '
+    + 'from the per-app schema) is held on #15178.',
+});
 
 /**
  * The ledger's size ceiling. Growth requires editing this number in the same
@@ -186,7 +216,7 @@ const KNOWN_NO_EXTRACTOR_FACE = Object.freeze({});
  * act rather than a line nobody re-reads. Shrink-only in both directions — a
  * ceiling above the real size fails as slack, so it can only be walked down.
  */
-const LEDGER_CEILING = 0;
+const LEDGER_CEILING = 3;
 
 /**
  * A reason must be a real sentence. The floor is 24 characters and a
@@ -418,7 +448,7 @@ function list(declared, walked, ledger) {
   if (extra.length) console.log(`    ⚠️  emitted but NOT declared: ${extra.join(', ')}`);
   console.log(`\n  ledger (${ledgerKeys.size}/${LEDGER_CEILING})`);
   for (const [g, reason] of Object.entries(ledger)) console.log(`    ${g}: ${reason}`);
-  if (!ledgerKeys.size) console.log('    (empty — as it shipped)');
+  if (!ledgerKeys.size) console.log('    (empty — fully paid down)');
   return 0;
 }
 
@@ -485,7 +515,10 @@ const RECORDED_DECLARED = [
 const RECORDED_WALKED = [
   'apps', 'dashboards', 'datasets', 'flows', 'globalActions', 'metadataForms', 'objects', 'pages',
 ];
-/** …and the verdict those two produce against an EMPTY ledger. */
+/**
+ * …and the verdict those two produce against an EMPTY ledger — which, since the
+ * 2026-09-04 ruling, is also exactly the shipped ledger's key set.
+ */
 const RECORDED_UNWALKED = ['messages', 'settings', 'settingsCommon'];
 
 let selfTestReachedVerdict = false;
@@ -548,7 +581,18 @@ function selfTest() {
 
   // 13 — the recorded sample: the classifier's verdict over today's REAL names.
   eq('recorded sample', parityVerdict({ declared: RECORDED_DECLARED, walked: RECORDED_WALKED, ledger: {} }).unwalked, RECORDED_UNWALKED);
-  eq('recorded sample: ledger is empty', Object.keys(KNOWN_NO_EXTRACTOR_FACE).length, 0);
+  // 14 — the SHIPPED ledger, pinned three ways so the ruling that filled it
+  //      cannot erode into an allowlist: it names exactly the recorded unwalked
+  //      set (nothing more, nothing less), every reason survives the gate's own
+  //      reason checks, and its size is the ceiling — the ratchet classifier, so
+  //      an entry added without the ceiling, or a ceiling raised without the
+  //      entry, reddens here as well as in production.
+  eq('shipped ledger: keys are exactly the recorded unwalked set',
+    Object.keys(KNOWN_NO_EXTRACTOR_FACE).sort(), RECORDED_UNWALKED);
+  eq('shipped ledger: every reason passes the reason checks',
+    ledgerShapeProblems(KNOWN_NO_EXTRACTOR_FACE).length, 0);
+  eq('shipped ledger: size is exactly LEDGER_CEILING',
+    ledgerRatchetProblems(KNOWN_NO_EXTRACTOR_FACE, LEDGER_CEILING).length, 0);
   eq('recorded sample: hints are live', DECLARED_WATCH_HINTS.length > 0, true);
 
   if (failures.length) {
@@ -563,7 +607,9 @@ function selfTest() {
     `✓ check-i18n-walk-parity self-test: ${cases} cases pass — an added declared group and a deleted `
     + 'emitter are both named, a ledgered group is not, a blank/placeholder/short reason is refused, '
     + 'a stale entry (undeclared, or now walked) fails, the size ratchet refuses growth AND slack, '
-    + 'an empty side is refused, and the recorded sample of today\'s real group names reproduces its verdict.',
+    + 'an empty side is refused, the recorded sample of today\'s real group names reproduces its verdict, '
+    + 'and the SHIPPED ledger is pinned to exactly that recorded unwalked set — every reason passing the '
+    + 'reason checks, its size exactly at the ceiling.',
   );
   selfTestReachedVerdict = true;
   return 0;
