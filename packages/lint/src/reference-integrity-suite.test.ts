@@ -434,10 +434,14 @@ describe('reference-integrity — a non-record entry in `stack.objects` (#15494)
    *   THROW validateWidgetBindings { objects: [null] }
    *     TypeError: Cannot read properties of null (reading 'name')
    *       at validateWidgetBindings (src/validate-widget-bindings.ts:465:18)
-   * That file is held by another in-flight change, so the repair is filed
-   * rather than ridden here — together with the wider inventory the same
-   * measurement turned up (13 of 42 `AUTHORING_RULES` entries throw on this
-   * input, through four more unguarded seams).
+   * That file is held by another in-flight change, so the repair is filed as
+   * #15552 rather than ridden here — together with the wider inventory the same
+   * measurement turned up: 13 of 42 `AUTHORING_RULES` entries throw on this
+   * input through five more unguarded readers of `stack.objects`, three of them
+   * inside this very suite (`validate-object-references.ts`,
+   * `indexObjectSearchTargets`, `indexObjectFields`). So the suite ENTRY POINT
+   * still throws on `{ objects: [null] }` after this change; what this file
+   * pins is the seam, per member, and no more than that.
    *
    * Each case asserts BOTH halves: the junk entry is not a crash, and the
    * valid object beside it is still judged — a guard that returned early would
