@@ -15,7 +15,8 @@ vocabulary and one membership predicate shared by settings specifiers and
 object fields**. The spec half declared them in `@objectstack/spec/shared`;
 this package had been carrying a second copy of all three definitions since
 `Specifier.valueDomain` shipped. The copies are deleted and the door now asks
-`isValueDomainMember` — the same call the record write path makes.
+`isValueDomainMember` — the call the record write path will make when the
+engine half of the same ruling lands (PR #15316, still open).
 
 **The wire change**, measured on `PUT /api/settings/localization` with
 `{"timezone": "Mars/Olympus"}`, base `a56baa2bd` vs this branch:
@@ -38,9 +39,9 @@ name**, the way `max_length` names the bound it breached. This branch took
 member names" — only while no member named a standard-domain breach. The
 field-level card's spec half added one, so the slot no longer applies. The
 message now renders the published catalog template
-`value_domain_<domain>` in `en`, which is the same catalog the record write
-path renders, so the two doors under one ruling describe one domain in one set
-of words. For an `encrypted` specifier the offending value is still never
+`value_domain_<domain>` in `en` — the catalog the record write path will render
+from once PR #15316 lands, so the two doors under one ruling will describe one
+domain in one set of words instead of each composing its own sentence. For an `encrypted` specifier the offending value is still never
 echoed: the template's value placeholder takes the same mask the REST boundary
 uses (`fields[0].value` stays absent, as before).
 

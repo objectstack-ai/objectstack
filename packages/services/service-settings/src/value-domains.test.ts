@@ -30,7 +30,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { ISO_3166_ALPHA2_CODES, ValueDomainSchema } from '@objectstack/spec/shared';
+import { ISO_3166_ALPHA2_CODES, isValueDomainMember, ValueDomainSchema } from '@objectstack/spec/shared';
 import { BUILTIN_VALIDATION_MESSAGES, VALIDATION_MESSAGE_FALLBACK_LOCALE } from '@objectstack/spec/system';
 import {
   firstRejectedDomainMember,
@@ -140,20 +140,57 @@ describe('iso_4217_currency — the checked-in CLDR snapshot', () => {
     expect(ok('usd')).toEqual({ value: 'usd' });
   });
 
-  it('still answers exactly what the run-time probe answered, on this runtime', () => {
-    // The one definition that MOVED with the re-point: a run-time
-    // `Intl.supportedValuesOf('currency')` probe became the key set of the
-    // checked-in CLDR snapshot. Measured equivalence was the bar the card set,
-    // so it is measured here rather than asserted — and measured through the
-    // DOOR, which is the thing that has to keep answering the same way. The
-    // spec's own test pins snapshot-vs-probe directly; this one pins that no
-    // settings value changed verdict.
-    const intl = Intl as typeof Intl & { supportedValuesOf(k: 'currency'): string[] };
-    const probed = intl.supportedValuesOf('currency');
-    expect(probed.length).toBeGreaterThan(100); // the probe is real, not an empty list
-    for (const code of probed) {
-      expect(ok(code), `${code} was admitted by the run-time probe and must still be`).toBeNull();
+});
+
+describe('the door is a walker over the shared predicate, not a second judge', () => {
+  /**
+   * The invariant this package actually owns, and the one that survives the
+   * re-point: `firstRejectedDomainMember` adds no membership opinion of its
+   * own — it walks a carrier and asks `isValueDomainMember`. Asserted as
+   * AGREEMENT over a corpus carrying each domain's traps, so a local filter
+   * creeping back in (an extra case fold, a length or shape check, a curated
+   * allow-list) reddens here even though every representative case above would
+   * still pass.
+   *
+   * ⚠️ Deliberately NOT a probe of `Intl.supportedValuesOf('currency')`. An
+   * earlier draft asserted that everything the RUN-TIME probe enumerates is
+   * admitted by the door. That was a time bomb and a duplicate at once: the
+   * door now answers from the checked-in CLDR snapshot, CI pins only the Node
+   * MAJOR, and the ICU build moves underneath it — so a host enumerating one
+   * currency the snapshot lacks would redden a CORRECT implementation, in a
+   * package with nothing to fix. Probe-versus-snapshot belongs beside the
+   * snapshot and is already pinned there, in both directions and with a size,
+   * by `packages/spec/src/shared/value-domain.test.ts`.
+   */
+  const CORPUS = [
+    // members, one or more per domain
+    'UTC', 'Asia/Kolkata', 'Europe/Kyiv', 'GMT', 'US/Eastern', 'Europe/Zurich',
+    'CHF', 'USD', 'EUR', 'JPY',
+    'US', 'GB', 'CH', 'UA',
+    // non-members, including every trap the shared module names
+    'Mars/Olympus', 'Europe/Munich', 'Not A Zone',
+    'XYZ', 'VED', 'XAU', 'usd', 'chf',
+    'ZZ', 'UK', 'XX', 'us', 'AAA', '', ' CH', 'CH ',
+  ];
+
+  it('agrees with isValueDomainMember on every domain, value by value', () => {
+    for (const domain of ValueDomainSchema.options) {
+      for (const value of CORPUS) {
+        expect(
+          firstRejectedDomainMember(domain, value) === null,
+          `${domain} / ${JSON.stringify(value)}: the door and the shared predicate must agree`,
+        ).toBe(isValueDomainMember(domain, value));
+      }
     }
+  });
+
+  it('agrees element-wise across a multi-value carrier too', () => {
+    // The walk is the door's own contract, so it is pinned against the
+    // predicate rather than against a hard-coded expectation.
+    const carrier = ['USD', 'CHF', 'XYZ', 'EUR'];
+    const firstBad = carrier.find((c) => !isValueDomainMember('iso_4217_currency', c));
+    expect(firstRejectedDomainMember('iso_4217_currency', carrier))
+      .toEqual(firstBad === undefined ? null : { value: firstBad });
   });
 });
 
@@ -162,10 +199,12 @@ describe('iso_3166_alpha2 — the explicit code list, now carried by the spec', 
 
   it('admits the whole officially assigned set the shared module publishes', () => {
     // Was a structural pin on this package's own table (`size === 249`). The
-    // table moved to `@objectstack/spec/shared`, where its structure is pinned;
-    // what is worth pinning HERE is stronger and not a duplicate — that the
-    // door actually admits every one of the published codes, end to end
-    // through `firstRejectedDomainMember`.
+    // table moved to `@objectstack/spec/shared`, where its structure and its
+    // spelling are pinned. What is left here is a PLUMBING pin, and is worth
+    // saying as exactly that rather than as something stronger: it loops the
+    // published set through a door that answers from the published set, so it
+    // cannot detect a wrong table — it detects the door failing to reach the
+    // right one, over the whole population rather than a sample.
     expect(ISO_3166_ALPHA2_CODES.size).toBe(249);
     for (const code of ISO_3166_ALPHA2_CODES) {
       expect(code).toMatch(/^[A-Z]{2}$/);

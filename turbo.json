@@ -24,7 +24,7 @@
       "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/content/**"]
     },
     "@objectstack/service-settings#test": {
-      "dependsOn": ["build"],
+      "dependsOn": ["^build"],
       "outputs": [],
       "inputs": [
         "$TURBO_DEFAULT$",

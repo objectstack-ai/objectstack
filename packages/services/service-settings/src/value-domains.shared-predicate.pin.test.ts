@@ -25,19 +25,40 @@
  * one of the two is edited. What has to be pinned is therefore the absence of
  * the second definition, which is a fact about the source text.
  *
- * The scan covers the package's whole non-test source, not just
- * `value-domains.ts`: "delete the table from this file" and "move the table to
- * a new file" are the same defect, and only the second one survives a
- * single-file check. Test sources are deliberately exempt — the currency
- * equivalence measurement in `value-domains.test.ts` probes
- * `Intl.supportedValuesOf('currency')` on purpose, and that probe is evidence,
- * not an enforcement path.
+ * The scan covers the package's whole non-test source **recursively**, not just
+ * `value-domains.ts` and not just `src/*`: "delete the table from this file",
+ * "move the table to a new file" and "move it into `src/manifests/`" are one
+ * defect, and a single-file or single-directory check survives all but the
+ * first. Both table SHAPES are detected — the space-separated string this file
+ * replaced and the array literal a re-typing would more likely produce.
+ *
+ * ## What each check does and does not cover — measured, not claimed
+ *
+ * The absence checks are a source scan, so they see shapes. Two mutations were
+ * run against an earlier draft of this file and passed it GREEN, which is why
+ * the checks below are shaped as they are: a probe table placed one directory
+ * down (`src/manifests/`), and a 249-code ARRAY literal in a new sibling module
+ * that `value-domains.ts` imported and consulted for `iso_3166_alpha2` while
+ * the shared predicate still served the other two. Both now red.
+ *
+ * The check that closes that second route at its ROOT is the import-surface pin
+ * below: `value-domains.ts` may import from `@objectstack/spec/shared` and
+ * nothing else. A table can exist anywhere in the tree without harm as long as
+ * the door cannot reach it, and a relative import is how it would.
+ *
+ * NOT covered, stated so the claim stays the size of the evidence: a 3-letter
+ * currency array is not shape-detected (the two alpha-2 shapes are), and a
+ * membership table reached through a BARE package specifier rather than a
+ * relative one would pass the import pin. The import surface being one line
+ * long is what makes both remote.
+ *
+ * Test sources are exempt from the scan: they are evidence, not enforcement.
  */
 
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 // The repo's ONE answer to "is this span a comment, or code?" — a private
 // stripper here would be the drift its header records (and
 // `check:comment-mask-adoption` refuses one). `stripComments` is the right
@@ -54,11 +75,25 @@ import { stripComments } from '../../../../scripts/js-comment-mask.mjs';
 const SRC = fileURLToPath(new URL('.', import.meta.url));
 const DOOR = join(SRC, 'value-domains.ts');
 
-/** Every non-test `.ts` in this package's `src/`, as `[name, source]`. */
-function runtimeSources(): Array<[string, string]> {
-  return readdirSync(SRC)
-    .filter((f) => f.endsWith('.ts') && !f.endsWith('.test.ts'))
-    .map((f) => [f, readFileSync(join(SRC, f), 'utf8')] as [string, string]);
+/**
+ * Every non-test `.ts` under this package's `src/`, RECURSIVELY, as
+ * `[path-relative-to-src, source]`.
+ *
+ * Recursive because `readdirSync` is not: `src/manifests/` and
+ * `src/translations/` exist today, and a table placed in either passed an
+ * earlier draft of this pin green.
+ */
+function runtimeSources(dir: string = SRC): Array<[string, string]> {
+  const out: Array<[string, string]> = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      out.push(...runtimeSources(full));
+    } else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts')) {
+      out.push([relative(SRC, full), readFileSync(full, 'utf8')]);
+    }
+  }
+  return out;
 }
 
 describe('value-domains.ts answers from the shared predicate', () => {
@@ -67,6 +102,18 @@ describe('value-domains.ts answers from the shared predicate', () => {
     expect(src).toContain("from '@objectstack/spec/shared'");
     expect(src).toContain('isValueDomainMember');
     expect(src).toContain('ValueDomainSchema');
+  });
+
+  it('imports from NOTHING ELSE — the door cannot reach a table wherever one is put', () => {
+    // The root close. Every absence check in this file is a shape scan and so
+    // is defeatable by a shape it does not know; this one is not a scan for a
+    // table at all, it is the statement that the door has exactly one source of
+    // membership. A 249-code array literal in a sibling module is harmless
+    // while nothing here can import it, and a relative specifier is how it
+    // would be reached.
+    const code = stripComments(readFileSync(DOOR, 'utf8'));
+    const specifiers = [...code.matchAll(/\bfrom\s+'([^']+)'/g)].map((m) => m[1]);
+    expect(specifiers).toEqual(['@objectstack/spec/shared']);
   });
 
   it('declares no membership machinery of its own', () => {
@@ -82,14 +129,19 @@ describe('value-domains.ts answers from the shared predicate', () => {
 });
 
 describe('no membership table anywhere in this package', () => {
-  it('carries no ISO 3166-1 alpha-2 code list', () => {
-    // The alpha-2 list has no standard-library oracle, so it is the one
-    // domain a well-meaning editor is most likely to re-type locally. Detected
-    // by shape rather than by file: a string literal holding a run of
-    // space-separated uppercase pairs.
-    const RUN = /'(?:[A-Z]{2} ){7}/;
+  it('carries no ISO 3166-1 alpha-2 code list, in either shape', () => {
+    // The alpha-2 list has no standard-library oracle, so it is the one domain
+    // a well-meaning editor is most likely to re-type locally. Detected by
+    // shape rather than by file, and BOTH shapes are needed: the
+    // space-separated string this package used to carry, and the array literal
+    // a fresh re-typing produces — an earlier draft checked only the first and
+    // a 249-element array passed it green.
+    const SPACED = /'(?:[A-Z]{2} ){7}/;
+    const ARRAY = /(?:'[A-Z]{2}',\s*){7}/;
     for (const [name, src] of runtimeSources()) {
-      expect(RUN.test(stripComments(src)), `${name} looks like it carries an alpha-2 code list`).toBe(false);
+      const code = stripComments(src);
+      expect(SPACED.test(code), `${name} carries a space-separated alpha-2 code list`).toBe(false);
+      expect(ARRAY.test(code), `${name} carries an array-literal alpha-2 code list`).toBe(false);
     }
   });
 
