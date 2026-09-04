@@ -264,8 +264,18 @@ nothing left to copy per organization.
 **The catalog has one home.** Positions, permission sets and capabilities are **definitions**, and a
 definition lives only in the environment registry — code-declared (managed, sealed) or
 environment-authored (Studio, template package; editable by metadata-authoring capability holders).
-The position → permission-set binding is part of the position's definition, declared in code or
-authored in Studio. There is **no organization-level catalog**: the objects `sys_position`,
+**The position → permission-set binding is part of the position's definition** — and today it is not
+declared anywhere: `PositionSchema` and `PermissionSetSchema` carry no binding key (verified 2026-09-04;
+the only declared relation is `isDefault`, which ADR-0090 D5 binds to the `everyone` position), packages
+may only *suggest* a binding (ADR-0090 D9), and the binding exists solely as `sys_position_permission_set`
+rows an admin accepted or created in Setup. Which sets a position carries is what the position **means**,
+so under this record it is a definition, not an assignment: the spec gains `PositionSchema.permissionSets`
+(the one new authoring key this record adds — a contract change, `needs:contract-review`), a code-declared
+position names its sets there, a Studio-authored position names them in its definition, the `everyone`
+baseline stays derived from `isDefault`, and an ADR-0090 D9 suggestion, when accepted, edits the position's
+definition instead of inserting a row. Under `single` an admin binding a set to a position in Setup is an
+environment metadata write; under a wall a plant admin cannot rebind a position (§6 Q2 records the
+alternative reading). There is **no organization-level catalog**: the objects `sys_position`,
 `sys_permission_set`, `sys_position_permission_set` and `sys_capability` retire (D13), completing
 [ADR-0094](./0094-sys-permission-set-pure-projection.md) D1 — the metadata layer was already the sole
 authoritative store; the projected row no longer exists either. Consequences by posture, verbatim from
@@ -314,7 +324,7 @@ environment-authored items share it, and Studio refuses a name a managed package
 Resolution reads the **registry** — one source, both provenances. `resolve-authz-context.ts` already
 looks positions up by name (`grants.positions`); the change is that the lookup is a registry read
 instead of a table read, and the position → permission-set binding is read from the position's
-definition instead of a junction table. A name that resolves nowhere — a declaration removed or renamed
+definition (`permissionSets`, D3) instead of a junction table. A name that resolves nowhere — a declaration removed or renamed
 in code — **fails closed** for that reference and is **reported at boot** per organization, by name.
 This is loud where today's behaviour is a zombie: a seeded mirror of a removed declaration stays in the
 table and keeps granting.
@@ -635,6 +645,9 @@ compatibility shims for a shape nobody has used yet.
 - **Reference columns move from id to name** (D4): `sys_user_position`, `sys_user_permission_set`,
   sharing recipients, grants — a schema migration with an id→name rewrite over existing rows, and the
   verified rewrite is the precondition of D10 fate 2.
+- **One new authoring key** (D3): `PositionSchema.permissionSets` — the binding had no declared vocabulary;
+  every existing `sys_position_permission_set` row is migrated into the position definitions it binds
+  (environment metadata under `single`; under a wall the residue is reported per organization, D10).
 - **Four catalog objects retire** (D3/D13): `sys_position`, `sys_permission_set`,
   `sys_position_permission_set`, `sys_capability`. Every reader of those tables — authorization
   resolution, hierarchy security, delegated admin, sharing recipients, the Setup pages — moves to the
@@ -703,6 +716,12 @@ overlay axis is retired (D6). One remains:
    (builds the read half of a copy-on-write door now), or accept the loss under the startup posture
    with a release note? Depends on whether any deployment relies on the feature — this record cannot
    see that; the maintainer rules it when the C4 card is cut.
+2. **Position → permission-set binding: definition or assignment?** (D3) This record reads "which sets
+   a position carries" as part of the position's definition — environment-level, `PositionSchema.permissionSets`,
+   plants cannot rebind — because the maintainer's rule is 「单库多租户禁止创建，但要支持绑定到人员」 and
+   rebinding changes what a role grants. The alternative reading keeps `sys_position_permission_set` as an
+   org-owned assignment table (position name, set name, organization NOT NULL): a plant composes its roles
+   from the environment's sets. That is per-plant role composition by another door; proposed: definition.
 
 ## 7. Verification notes
 
@@ -755,7 +774,7 @@ One epic tracks the family. C0 lands before 17.3; every other card is on the **v
 | C0 | Revert the unreleased ADR-0126 flow machinery (#12296, #12419, #12156) so 17.3 does not publish it | D6, D14 | ADR merge; **before 17.3** |
 | C1 | Default Organization load-bearing under `single` and created before application seed datasets load; the seed loader stamps every seed (the `sys_` exemption withdrawn); `resolveSystemInsertOrganization` derives it, refuses elsewhere | D3, D9, D11 | ADR merge |
 | C2 | Catalog resolution reads the registry; assignment tables reference by name (id→name columns + rewrite); dangling-name boot report; every reader of the four catalog tables enumerated and converted | D2, D3, D4 | ADR merge |
-| C3 | Retire the seeders, the per-organization catalog machinery and the four catalog objects; built-ins and audience anchors as declared metadata; Setup catalog creation = environment metadata write under `single`, refused under a wall; platform-admin grant row owned by the Default Organization | D2, D3, D5, D13 | C1, C2 |
+| C3 | Retire the seeders, the per-organization catalog machinery and the four catalog objects; `PositionSchema.permissionSets` added and `sys_position_permission_set` rows migrated into definitions; built-ins and audience anchors as declared metadata; Setup catalog creation = environment metadata write under `single`, refused under a wall; platform-admin grant row owned by the Default Organization | D2, D3, D5, D13 | C1, C2 |
 | C4 | Templates: `sendTemplate` resolves the registry; seed and provenance stamp retired; door closed; customized-rows ruling applied | D6, D10 | ADR merge (+ §6 Q1) |
 | C5 | `sys_metadata` family tenant-less (environment definitions, UI-editable by metadata authors); per-organization overlay axis retired (org-scoped writes of the five tier-A types refused); managed content sealed; `sys_view_definition` and its two runtime index migrations retired as inert (ADR-0087 entry; ADR-0017 amended); ADR-0005 amended | D6, D7, D13 | C1 |
 | C12 | Template install mode: manifest `installModes`, one-time import into the environment ledger with provenance, refusal on `group` / `isolated`, CLI + marketplace surfaces | D6 | C5 |
