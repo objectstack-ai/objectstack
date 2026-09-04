@@ -1189,6 +1189,16 @@ export interface RunRecord {
     durationMs?: number;
     /** Failure reason for a `failed` run — what a designer needs to fix it. */
     error?: string;
+    /**
+     * The node this record is ABOUT. On an ordinary terminal record: the run's
+     * last step. On a stranded run's record — `consumedSuspension` present, or
+     * `consumedSuspensionDropped` — the PAUSE node, the node the consumed
+     * snapshot re-arms, because the object store rebuilds the snapshot's node
+     * from this one column and there is no other (#13937: written as the last
+     * step, a restore from the row re-armed the run at the node that threw and
+     * the next resume skipped it). The node that threw is still where the Runs
+     * surface reads it: the last entry of `steps`, and `error`.
+     */
     nodeId?: string;
     /**
      * [#10101] The ACTING context's tenant (`AutomationContext.tenantId`),
@@ -1269,6 +1279,34 @@ export interface RunRecord {
      * ⛔ Not a run state. See {@link ConsumedSuspension}.
      */
     consumedSuspension?: SuspendedRun;
+    /**
+     * [#13937] The store could not persist the snapshot this run had — the
+     * object store DROPS one over its row byte budget rather than truncating
+     * it — and says so, with the pause it belonged to. Present exactly when a
+     * snapshot existed and `consumedSuspension` is absent for THAT reason, so
+     * a reader can tell "dropped" from "the run moved on": a terminal record
+     * with neither field is a run that reached a terminal state which was not
+     * a strand (completed, cancelled, cascade-failed), or never paused at all.
+     * {@link AutomationEngine.restoreConsumedSuspension} honours a hot copy of
+     * the same pause on this reading, and without one refuses naming the
+     * budget. A store that cannot persist a snapshot MUST record it this way:
+     * writing nothing reads as the run having moved on.
+     */
+    consumedSuspensionDropped?: ConsumedSuspensionDropNotice;
+}
+
+/**
+ * [#13937] What a store records in place of a consumed-suspension snapshot it
+ * could not persist — see {@link RunRecord.consumedSuspensionDropped}.
+ */
+export interface ConsumedSuspensionDropNotice {
+    /** Size of the snapshot's JSON columns together, in bytes. */
+    bytes: number;
+    /** The store's budget the snapshot was over, in bytes. */
+    budget: number;
+    /** The pause the dropped snapshot belonged to — its identity, not its state. */
+    nodeId?: string;
+    correlation?: string;
 }
 
 /**
@@ -1282,12 +1320,14 @@ export interface RunRecord {
  * durable paused row is deleted at consumption and the terminal history row
  * carries no `variables` / `context` / `screen` at all.
  *
- * ⛔ **This is not a run state and not a status.** The run is `failed`,
- * {@link AutomationResult.status} is unchanged, and nothing here names the
- * condition — naming it is an explicit same-batch sub-item of #13937, because
- * what it should be called depends on which resume-ordering shape is ruled.
- * This is a SNAPSHOT of a deleted row, kept so a deliberate operator action can
- * restore it.
+ * ⛔ **This is not a run state.** The run's RECORDED status is `failed`
+ * (`ExecutionStatus`, the run-row vocabulary, is unchanged) and this is a
+ * SNAPSHOT of a deleted row, kept so a deliberate operator action can restore
+ * it. What the condition is CALLED was settled by the #13937 shape-4 ruling
+ * (maintainer 2026-09-01): `'stranded'`, on {@link AutomationResult.status}
+ * (#14384) — and the catch arm that writes this journal is the one exit that
+ * stamps it, so "a snapshot exists" and "the result said stranded" are one
+ * fact stated twice.
  */
 export interface ConsumedSuspension {
     /**
@@ -1302,6 +1342,18 @@ export interface ConsumedSuspension {
     consumedAt: string;
     /** The downstream failure that left the run terminal and unresumable. */
     error: string;
+    /**
+     * [#13937] Whether THIS process's own history write for the strand reached
+     * the store: `'pending'` while the fire-and-forget write is in flight,
+     * `'landed'` once the store accepted it (the row now describes this strand
+     * — as a snapshot, or as a drop notice), `'failed'` when it threw, absent
+     * when no store writes history at all. The engine's own memory of what the
+     * store was handed — the #13617 exception, for this journal: a row the
+     * store never received says nothing about this copy, so
+     * {@link AutomationEngine.restoreConsumedSuspension} reads a snapshot-less
+     * row as "the run moved on" only when this is `'landed'`.
+     */
+    persisted?: 'pending' | 'landed' | 'failed';
 }
 
 /**
@@ -1355,9 +1407,10 @@ export type SuspensionRestoreRefusal =
  *
  * Deliberately NOT an {@link AutomationResult}: this verb does not execute a
  * flow, and its refusal vocabulary is its own. Folding it into the platform
- * result type would put eight new codes into a contract every transport reads
- * — and would mint platform vocabulary for a condition #13937 has not yet
- * ruled the shape of.
+ * result type would put eight new codes into a contract every transport reads.
+ * The condition this verb exits from IS platform vocabulary since the #13937
+ * shape-4 ruling — `AutomationResult.status: 'stranded'`, stamped by the
+ * resume that stranded the run — but the repair's own outcome stays here.
  */
 export interface SuspensionRestoreResult {
     /** `true` only when a suspension was actually put back by THIS call. */
@@ -4919,8 +4972,9 @@ export class AutomationEngine implements IAutomationService {
      *
      *  ⛔ NOT a re-ordering of the resume path. The suspension is still consumed
      *  before `traverseNext` and {@link forgetSuspendedRun} is untouched —
-     *  which ordering is right is #13937's question, and unruled. This changes
-     *  only WHICH suspension is read, never when it is consumed. */
+     *  the #13937 shape-4 ruling (maintainer 2026-09-01) keeps that order, for
+     *  exactly-once across a crash. This changes only WHICH suspension is
+     *  read, never when it is consumed. */
     private async loadSuspendedRunStrict(runId: string): Promise<SuspendedRun | null> {
         if (!this.store) return this.suspendedRuns.get(runId) ?? null;
         const stored = await this.store.load(runId);
@@ -5269,8 +5323,13 @@ export class AutomationEngine implements IAutomationService {
             // below still precedes the traversal, `forgetSuspendedRun` is
             // untouched, and `hasSuspendedRun` still answers false for the
             // whole traversal window (pinned in
-            // `consumed-suspension-restore.test.ts`). Which ordering is right
-            // is #13937's, and unruled.
+            // `consumed-suspension-restore.test.ts`). That order is RULED,
+            // not inherited: #13937 shape 4 (maintainer 2026-09-01) keeps it
+            // for exactly-once across a crash, excludes the flip (shape 2)
+            // unless a durable claim/lease lands with it, and excludes
+            // consume-then-re-arm (shape 3) outright. The exit from the state
+            // it leaves behind is `restoreConsumedSuspension`, and the state
+            // itself is named on the result (`status: 'stranded'`, below).
             const stepCountAtPause = run.steps.length;
 
             // Consume the suspension *before* running downstream work — a run
@@ -5285,7 +5344,7 @@ export class AutomationEngine implements IAutomationService {
             // this answers "did any process get here first", against the shared
             // store, atomically. Placed exactly where the unconditional consume
             // was: every refusal above it still refuses without consuming, and
-            // the ordering #13937 has not ruled on is untouched.
+            // the ordering #13937 ruled to keep is untouched.
             const claim = await this.claimAdvance(run);
             if (claim.kind === 'lost') {
                 // An ORDINARY outcome, not a degradation: this is the guard
@@ -5437,15 +5496,15 @@ export class AutomationEngine implements IAutomationService {
                 // above, this node merely threw, and the record below makes the
                 // run terminal — so from here on nothing in the engine can move
                 // it: `resume` answers RUN_NOT_FOUND, `cancelRun` is a no-op on
-                // it, and none of the other public methods takes it anywhere.
-                // Journal the suspension that was consumed so a DELIBERATE
-                // operator action can put it back
-                // ({@link restoreConsumedSuspension}).
+                // it, and no other public method takes it anywhere EXCEPT the
+                // deliberate operator exit, {@link restoreConsumedSuspension}.
+                // Journal the suspension that was consumed so that exit has
+                // something to put back.
                 //
                 // ⛔ Not a repair, and nothing here re-arms anything: the run
-                // stays `failed`, no suspension exists after this line, and no
-                // caller's result changes. It is the evidence a repair needs,
-                // written at the only moment it still exists.
+                // stays `failed`, no suspension exists after this line, and the
+                // ordering above is untouched. It is the evidence a repair
+                // needs, written at the only moment it still exists.
                 const consumed = this.journalConsumedSuspension(run, stepCountAtPause, errorMessage);
                 const logged = this.recordLog({
                     id: runId,
@@ -5471,6 +5530,35 @@ export class AutomationEngine implements IAutomationService {
                     success: false,
                     error: errorMessage,
                     durationMs,
+                    // [#13937] STRANDED, said by the producer that knows — the
+                    // services half of the shape-4 ruling (maintainer
+                    // 2026-09-01): the ordering stays, and the condition it
+                    // leaves behind carries the platform-level name #14384 put
+                    // on the contract. Stamped HERE and on no other exit,
+                    // because this is the one exit that journalled a snapshot
+                    // two statements up: the pause a durable decision was
+                    // waiting on is gone, the run is recorded `failed`, and it
+                    // can be re-armed only by {@link restoreConsumedSuspension}
+                    // — never by `resume` (which now answers RUN_NOT_FOUND),
+                    // never automatically. Terminal exactly like `'failed'`
+                    // and distinct from it on purpose: `'failed'` says the run
+                    // ran and was rejected; this says a recorded continuation
+                    // stopped mid-flight and an operator has something to
+                    // repair. The verdict and the journal are one fact stated
+                    // twice — `stranded-run-status.test.ts` holds them equal.
+                    //
+                    // ⚠️ The run's RECORDED status — the log entry above and
+                    // the durable history row — stays `'failed'`: that is
+                    // `ExecutionStatus` (`@objectstack/spec`,
+                    // `automation/execution.zod.ts`), a vocabulary the ruling
+                    // did not widen; the durable discriminator for this
+                    // condition is the snapshot the terminal row carries.
+                    //
+                    // ⛔ The cascade-failed ancestors above are NOT stranded:
+                    // `failSuspendedRun` consumes their pauses and journals
+                    // nothing, so no verb can re-arm them. A different (and
+                    // worse) condition, which this stamp must not claim.
+                    status: 'stranded',
                     errorMessage: flow.errorMessage,
                     summary: logged.summary,
                 };
@@ -5820,6 +5908,8 @@ export class AutomationEngine implements IAutomationService {
             run: { ...run, steps: run.steps.slice(0, stepCountAtPause) },
             consumedAt: new Date().toISOString(),
             error,
+            // [#13937] `recordLog` settles this when its write settles.
+            ...(this.store?.recordTerminal ? { persisted: 'pending' as const } : {}),
         };
         this.consumedSuspensions.set(run.runId, consumed);
         // Oldest first — `Map` iterates in insertion order, and re-`set`ting an
@@ -5832,6 +5922,28 @@ export class AutomationEngine implements IAutomationService {
             this.consumedSuspensions.delete(oldest);
         }
         return consumed;
+    }
+
+    /**
+     * [#13937] Does the durable row describe a LATER strand than this
+     * process's hot copy? True only when the two name different pauses AND the
+     * hot copy's own history write landed — then the row can only be a later
+     * strand another replica recorded. Same pause: never (the hot copy is the
+     * more faithful witness of it). Different pause but the hot copy's write
+     * never reached the store (`persisted` not `'landed'`): never — the row
+     * predates this strand and says nothing about it (the #13617 exception).
+     * The pause identity is the pair {@link SuspendedRunStore.claimSuspension}
+     * compares: the node, and the correlation when one was minted.
+     */
+    private rowSupersedesJournal(
+        hot: ConsumedSuspension,
+        rowPause: { nodeId?: string; correlation?: string },
+    ): boolean {
+        const samePause =
+            hot.run.nodeId === rowPause.nodeId &&
+            (hot.run.correlation ?? undefined) === (rowPause.correlation ?? undefined);
+        if (samePause) return false;
+        return hot.persisted === 'landed';
     }
 
     /** Build a refusal from {@link restoreConsumedSuspension}. */
@@ -5858,13 +5970,14 @@ export class AutomationEngine implements IAutomationService {
      * deployment could enter that state and never leave it. This verb is the
      * leaving.
      *
-     * ⚠️ It is a REPAIR, not a prevention: whether the pause should survive a
-     * downstream throw at all is #13937, unruled and in the maintainer's hands.
-     * This method changes no resume semantics for any pausing node type — the
-     * ordering, {@link forgetSuspendedRun} and `traverseNext` are all exactly
-     * as they were — and it stays useful whichever way that card is ruled,
-     * because the runs already stuck today are not released by changing what
-     * FUTURE resumes do.
+     * ⚠️ It is a REPAIR, not a prevention — and that is the ruled shape.
+     * #13937 (maintainer 2026-09-01, shape 4) keeps the consumption order for
+     * exactly-once across a crash and makes THIS verb the way out: the state
+     * it exits from is `AutomationResult.status: 'stranded'`, stamped by the
+     * resume that consumed the pause and then failed downstream. This method
+     * changes no resume semantics for any pausing node type — the ordering,
+     * {@link forgetSuspendedRun} and `traverseNext` are all exactly as they
+     * were.
      *
      * ## Deliberate — never automatic
      *
@@ -5892,9 +6005,10 @@ export class AutomationEngine implements IAutomationService {
      *    roll a transaction back. That is why re-deciding is the right default
      *    and why this is an operator's call rather than the engine's.
      *
-     * Restoring the pause exactly as it stood is also the shape that does not
-     * pre-empt #13937: it is precisely the state a resume-ordering change would
-     * have left behind, so this composes with that ruling instead of racing it.
+     * Restoring the pause exactly as it stood is also the shape that composes
+     * with a later resume-ordering change (#13937 point 3 reopens shape 2 only
+     * with a durable claim/lease): it is precisely the state such a change
+     * would leave behind, so nothing here would need to move.
      *
      * ## Idempotence — carried by the paused row, not by a flag
      *
@@ -5905,6 +6019,15 @@ export class AutomationEngine implements IAutomationService {
      * in-process half — two callers racing in one process get one
      * `restored: true` and one `RESTORE_IN_PROGRESS`, rather than two calls
      * both claiming the restore.
+     *
+     * [#13937] The third half, across replicas and across TIME: this
+     * process's journal and the durable terminal row are read as two
+     * witnesses of one strand (see the read itself, below). A hot copy left
+     * behind on the replica that stranded the run cannot re-arm it after
+     * another replica restored and finished it, or restranded it at a later
+     * pause; a snapshot the store could not persist is still restorable from
+     * the copy the stranding process holds; and a row the store was never
+     * handed says nothing about that copy.
      *
      * And it cannot produce two traversals, by construction: **this verb does
      * not resume.** It re-arms the pause and stops. The continuation is an
@@ -5991,12 +6114,43 @@ export class AutomationEngine implements IAutomationService {
                 );
             }
 
-            // The journal: this process's hot copy first, then the durable
-            // copy on the run's own terminal history row. One reader, two
-            // sources — the same pairing `resume` itself uses for suspensions.
-            let consumed = this.consumedSuspensions.get(runId);
-            if (!consumed && this.store?.loadTerminal) {
-                let terminal: RunRecord | null;
+            // [#13937] Two witnesses of one strand, and neither is trusted
+            // alone — the contract review of this ruling's services half
+            // measured both single-witness readings wrong, one store class
+            // apart:
+            //
+            //  - This process's HOT copy is the verbatim object the failure
+            //    was journalled from: the pause's own node, variables, step
+            //    log as of the pause. It is a per-process cache. The replica
+            //    that stranded a run keeps it after another replica restored,
+            //    resumed and FINISHED the run, and re-arming it then re-runs
+            //    every node after the pause — shape 2's silent double-run,
+            //    through this verb's side door (pinned in
+            //    `stranded-run-status.test.ts`, red on the hot-only tree).
+            //  - The DURABLE row is the record every replica can read, and a
+            //    flattened, column-bounded copy of the same snapshot: the
+            //    object store rebuilds it from columns, DROPS it over a byte
+            //    budget — and says so in the row, `consumedSuspensionDropped`
+            //    — and receives it fire-and-forget. Read alone, a snapshot-less
+            //    row sent a run the store could not persist into
+            //    NO_CONSUMED_SUSPENSION on the very replica holding its copy
+            //    (pinned in `stranded-run-object-store.test.ts`, red on the
+            //    durable-first tree).
+            //
+            // So: the hot copy is preferred whenever both describe the SAME
+            // pause (`rowSupersedesJournal`). When they describe different
+            // pauses, the newest strand wins — a hot copy whose own write never
+            // landed (`persisted` is not `'landed'`: the #13617 exception, a
+            // row the store was never handed says nothing) beats the older
+            // row, and a landed hot copy yields to the later strand another
+            // replica recorded. A row with neither a snapshot nor a drop notice
+            // is "the run moved on" only for a hot copy whose write did land —
+            // that copy is then DROPPED rather than honoured. A hot copy
+            // answers alone where there is no row to ask: no store, no run
+            // history, a write that never landed or is still in flight.
+            const hot = this.consumedSuspensions.get(runId);
+            let terminal: RunRecord | null = null;
+            if (this.store?.loadTerminal) {
                 try {
                     terminal = await this.store.loadTerminal(runId);
                 } catch (err) {
@@ -6014,19 +6168,65 @@ export class AutomationEngine implements IAutomationService {
                         `Durable run-history unreachable for run '${runId}' — whether a consumed suspension survives is unknown`,
                     );
                 }
-                if (terminal?.consumedSuspension) {
-                    consumed = {
-                        run: terminal.consumedSuspension,
-                        consumedAt: terminal.finishedAt ?? terminal.startedAt,
-                        error: terminal.error ?? '',
-                    };
+            }
+
+            let consumed: ConsumedSuspension | undefined;
+            let dropped: ConsumedSuspensionDropNotice | undefined;
+            if (!terminal) {
+                consumed = hot;
+            } else if (terminal.consumedSuspension) {
+                const durable: ConsumedSuspension = {
+                    run: terminal.consumedSuspension,
+                    consumedAt: terminal.finishedAt ?? terminal.startedAt,
+                    error: terminal.error ?? '',
+                };
+                consumed = hot && !this.rowSupersedesJournal(hot, durable.run) ? hot : durable;
+                // A hot copy of a pause the run has since LEFT — re-arming it
+                // would send the run back through work it already did.
+                if (hot && consumed !== hot) this.consumedSuspensions.delete(runId);
+            } else if (terminal.consumedSuspensionDropped) {
+                dropped = terminal.consumedSuspensionDropped;
+                if (hot && !this.rowSupersedesJournal(hot, dropped)) {
+                    consumed = hot;
+                } else if (hot) {
+                    this.consumedSuspensions.delete(runId);
                 }
+            } else if (hot && hot.persisted !== 'landed') {
+                // The row predates this strand — this process's own write for
+                // it never reached the store (in flight, or failed and
+                // reported at `error`). The store's silence says nothing.
+                consumed = hot;
+            } else if (hot) {
+                // A later terminal record with no snapshot and no drop notice:
+                // completed, cancelled or cascade-failed after this copy was
+                // taken. Stale by definition.
+                this.consumedSuspensions.delete(runId);
             }
 
             if (!consumed) {
                 // Nothing to restore — say WHICH nothing. The remedy differs for
                 // every one of these and a single "bad run" refusal would send an
                 // operator looking for the wrong thing.
+                if (dropped) {
+                    return this.refuseRestore(
+                        runId,
+                        'NO_CONSUMED_SUSPENSION',
+                        `Run '${runId}' is recorded 'failed' and its consumed suspension (${dropped.bytes} bytes) was over ` +
+                            `the store's ${dropped.budget}-byte row budget, so it was not persisted — it can be restored ` +
+                            `only by the process that stranded it, while that process is still running`,
+                    );
+                }
+                //
+                // The durable row, when there is one, is the later word on how
+                // the run ended than this process's own log — which may still
+                // say `failed` for a run another replica finished.
+                if (terminal?.status === 'completed') {
+                    return this.refuseRestore(
+                        runId,
+                        'RUN_COMPLETED',
+                        `Run '${runId}' completed — there is no unresumable state to exit`,
+                    );
+                }
                 const logged = await this.getRun(runId);
                 if (!logged) {
                     return this.refuseRestore(runId, 'RUN_NOT_FOUND', `No run '${runId}' is known`);
@@ -6078,9 +6278,12 @@ export class AutomationEngine implements IAutomationService {
             // restart the DURABLE surfaces still read this run `failed`, because
             // `getRun` / `listRuns` deliberately let a terminal row win over a
             // paused one (a paused row can outlive the run it describes). The
-            // in-process log entry and the `warn` above are the trace this slice
-            // ships; a durable status that survives the restart is naming work,
-            // and naming is #13937's same-batch sub-item.
+            // in-process log entry and the `warn` above are the trace this
+            // ships. The #13937 ruling named the condition on the RESULT
+            // (`status: 'stranded'`, the resume's catch arm), not on the run
+            // row: `ExecutionStatus` carries no such member, so a durable
+            // status that survives the restart is a spec-vocabulary decision
+            // nobody has taken — the row's discriminator stays the snapshot.
             this.recordLog({
                 id: runId,
                 flowName: consumed.run.flowName,
@@ -6397,7 +6600,13 @@ export class AutomationEngine implements IAutomationService {
                 triggerType: entry.trigger?.type || undefined,
                 triggerObject: entry.trigger?.object,
                 triggerRecordId: entry.trigger?.recordId,
-                nodeId: lastStep?.nodeId,
+                // [#13937] On a stranded run's record the PAUSE node, not the
+                // node that threw: the object store rebuilds the snapshot's
+                // node from this one column, and a restore from the row used
+                // to re-arm the run at the failed node — whose next resume
+                // then SKIPPED it and reported the run completed. The throwing
+                // node is the last entry of `steps` below, and `error`.
+                nodeId: consumedSuspension?.nodeId ?? lastStep?.nodeId,
                 steps: this.compactStepsForHistory(entry.steps),
                 summary: entry.summary,
                 // [#13909] Present only on the resume-consumed-then-failed
@@ -6407,7 +6616,21 @@ export class AutomationEngine implements IAutomationService {
                 // leaving a stale one an operator could restore a second time.
                 consumedSuspension,
             };
-            void this.store.recordTerminal(record).catch((err) => {
+            // [#13937] The journal entry this record describes, when it is a
+            // strand's: `journalConsumedSuspension` ran just above in the
+            // same arm, so the entry under this run id is the one built from
+            // `consumedSuspension` — checked by identity, because a later
+            // strand of the same run replaces the entry and must not inherit
+            // this write's outcome.
+            const journal = consumedSuspension ? this.consumedSuspensions.get(entry.id) : undefined;
+            const write = this.store.recordTerminal(record);
+            if (journal && journal.run === consumedSuspension) {
+                void write.then(
+                    () => { journal.persisted = 'landed'; },
+                    () => { journal.persisted = 'failed'; },
+                );
+            }
+            void write.catch((err) => {
                 // #6499 — driver text to the structured slot; see
                 // `forgetSuspendedRun`'s catch above for the full mechanism
                 // (#6299).

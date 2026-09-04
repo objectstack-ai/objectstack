@@ -155,6 +155,156 @@ const CHAIN_CASES = [
   { label: 'a cycle terminates instead of recursing', scripts: { typecheck: 'pnpm a', a: 'pnpm typecheck' }, expect: 2 },
 ];
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition,
+// so "every case held" and "the cases never ran" printed the same line — and
+// the `SELF_TEST_CASE_COUNT` the verdict prints is DERIVED from the two tables,
+// so a deleted row shrinks the printed number with it and the gate stays green.
+// Closed the way PR #13487 validated on check-doc-authoring: what is pinned is
+// the registered NAMES, not a number.
+//
+// This self-test is TABLE-DRIVEN — two literal tables, one driving loop each,
+// and a failure-only sink. Routing THAT sink through `registerCase()` would
+// register a case only when it fails: a fully green run would register 0 and
+// every battery would read DID NOT RUN, the floor inverted rather than
+// installed. So the roster is the tables' own rows. Each row's `label` is a
+// declared battery, verbatim, with a floor of 1, and `registerCase(label)` is
+// the FIRST statement of each driving loop body — so the case is attributed to
+// the row actually being run, whatever that row asserts afterwards. There is no
+// `battery()` opener: for a table-driven self-test the ROW is the battery, so
+// attribution is the loop variable rather than a most-recently-opened section.
+//
+// ONE roster spans BOTH tables. The two loops are two halves of one battery of
+// cases, and a row that moved between the tables would otherwise leave and
+// re-enter a roster without either half noticing.
+//
+// ⛔ A pinned TOTAL is not the repair, and neither is a roster DERIVED from the
+// tables — that is exactly what `SELF_TEST_CASE_COUNT` already is. The roster
+// below is a LITERAL the tables are checked against, which is what lets a
+// deleted or renamed row name ITSELF in the refusal.
+//
+// The counts are a FLOOR, not an equality — a row that grows into several
+// registrations must not red. 1 is the honest floor for a table row: the loop
+// reaches it exactly once per run.
+//
+// ── Why the LEDGER is module-level and the CHECK sits at the verdict site ──
+//
+// `selfTest()` REGISTERS and returns its failures; the dispatch block below
+// DECIDES — it prints the red line or the green one. There is no verdict site
+// inside the registering body, so the floor is evaluated where the green line
+// already is. The ledger it reads therefore has to outlive `selfTest()`'s frame
+// — hence module scope rather than the local map the single-body recipe closes
+// over. Only the CHECK's location moves; attribution and scope are untouched.
+// This is the class-3 placement PR #15309 settled.
+//
+// ⚠️ This module is a LIBRARY: `check-type-check-coverage.mjs` folds this
+// `selfTest()` into its own, and `check-type-source-resolution.mjs` imports the
+// predicates. Those importers call `selfTest()`, which registers into the
+// ledger below — harmlessly, because the FLOOR is evaluated only in this file's
+// own `--self-test` dispatch, which an importer never reaches. Scoping the check
+// to the dispatch is what keeps a fold-in from inheriting a refusal it cannot
+// act on.
+//
+// ⛔ The floor is NOT placed at the end of `selfTest()` before its `return`: an
+// early return anywhere above that line would skip the check entirely — the
+// exact defect the #13798 verdict handshake exists to catch — coupling hole 1
+// to hole 2 after the card ruled them orthogonal. It would also fire inside
+// every importer's run. Evaluated at the verdict site, the same early return
+// lands as a count BELOW the floor and reds, here and nowhere else.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'a bare tsc credits the default config only': 1,
+  'an explicitly named sibling config counts': 1,
+  'one level of `pnpm <script>` indirection is followed': 1,
+  'a config no script names is not coverage, however present the file is': 1,
+  'no typecheck script names nothing': 1,
+  'the prescribed sibling route names TWO programs': 1,
+  'a directory-prefixed reference comes back as a BASENAME': 1,
+  'no typecheck script is an empty chain': 1,
+  'a lone typecheck script is one body': 1,
+  'delegation adds the delegate body': 1,
+  'a cycle terminates instead of recursing': 1,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too. This pin is also half of
+// the duplicate-label refusal: two rows sharing a label collapse to ONE key in
+// the literal above, so the roster falls below this number; the table
+// cross-check in `batteryFloorFailures()` is the other half, and names WHICH
+// label collided.
+const SELF_TEST_BATTERY_FLOOR = 11;
+
+// The ledger `batteryFloorFailures()` reads from the OTHER body.
+//
+// ⚠️ Named for the roster's role, deliberately NOT with a self-test spelling:
+// `check:pm-dispatch-gates` anchors on a top-level declaration whose NAME spells
+// self-test and every such name owes a row in its COMPOUND_ANCHOR_LEDGER. This
+// machinery holds no fixtures to mask and reads no path literal, so the accurate
+// name is the one that says `battery`.
+const batterySeen = new Map();
+
+/** Called by each driving loop in `selfTest()`, once per row, before the row runs. */
+function registerCase(label) {
+  batterySeen.set(label, (batterySeen.get(label) ?? 0) + 1);
+}
+
+/**
+ * The floor: every declared row RAN, and ran its case (#13489).
+ *
+ * Guards the registrations made by **`selfTest()`** — the body whose two
+ * driving loops call `registerCase()`. It is called from the `--self-test`
+ * dispatch block immediately before the success line, so that line can only be
+ * printed by a run in which the set of rows that registered EQUALS the set
+ * declared, each at or above its own count. A set difference says WHICH row
+ * stopped; a count says only that something did.
+ *
+ * @returns {string[]} floor breaches; empty means the floor held
+ */
+function batteryFloorFailures() {
+  const declared = Object.keys(SELF_TEST_BATTERIES);
+  const problems = [];
+  if (declared.length < SELF_TEST_BATTERY_FLOOR) {
+    problems.push(
+      `SELF_TEST_BATTERIES declares ${declared.length} batteries, below the pinned `
+        + `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  const rowLabels = [...NAMED_CASES, ...CHAIN_CASES].map((c) => c.label);
+  const duplicated = [...new Set(rowLabels.filter((label, i) => rowLabels.indexOf(label) !== i))];
+  if (duplicated.length > 0) {
+    problems.push(
+      `the cases tables use ${duplicated.map((n) => JSON.stringify(n)).join(', ')} as a row label more than once — `
+        + 'two rows sharing a label are ONE battery, so the second can stop running while the first keeps the floor met.',
+    );
+  }
+  for (const [label, count] of batterySeen) {
+    if (declared.includes(label)) continue;
+    problems.push(
+      `self-test battery "${label}" registered ${count} case(s) but is not declared in `
+        + 'SELF_TEST_BATTERIES — a case attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const label of declared) {
+    const count = batterySeen.get(label) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[label]) continue;
+    problems.push(
+      count === 0
+        ? `self-test battery "${label}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[label]} pinned. `
+          + 'The verdict below would have claimed that case holds.'
+        : `self-test battery "${label}" registered ${count} case(s), below its pinned floor of `
+          + `${SELF_TEST_BATTERIES[label]} — cases that used to run no longer do.`,
+    );
+  }
+  if (problems.length) {
+    problems.push(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the '
+        + 'number. Find what stopped registering (a deleted row, a renamed label, a loop that no longer '
+        + 'reaches it) and restore it.',
+    );
+  }
+  return problems;
+}
+
 /** How many cases `selfTest` holds -- for a folding gate's printed tally. */
 export const SELF_TEST_CASE_COUNT = NAMED_CASES.length + CHAIN_CASES.length;
 
@@ -172,6 +322,7 @@ export function selfTest() {
   const failures = [];
 
   for (const c of NAMED_CASES) {
+    registerCase(c.label);
     const got = [...configsNamedByTypecheck(c.scripts)].sort();
     if (JSON.stringify(got) !== JSON.stringify([...c.expect].sort())) {
       failures.push(
@@ -181,6 +332,7 @@ export function selfTest() {
   }
 
   for (const c of CHAIN_CASES) {
+    registerCase(c.label);
     const got = typecheckScriptChain(c.scripts).length;
     if (got !== c.expect) {
       failures.push(`typecheckScriptChain -- ${c.label}: expected ${c.expect} body/bodies, got ${got}`);
@@ -205,6 +357,22 @@ if (isEntrypoint(import.meta.url)) {
     for (const failure of failures) console.error(`  - ${failure}`);
     if (failures.length > 0) {
       console.error(`typecheck-configs --self-test FAILED: ${failures.length} of ${SELF_TEST_CASE_COUNT} case(s)`);
+      process.exit(1);
+    }
+    // ── The assertion floor, at the verdict site (#13489) ─────────────────
+    // `selfTest()` registers but does not decide, so the floor over ITS
+    // registrations is evaluated here, after both loops have had their chance
+    // and immediately before the success line — the only place a run that
+    // registered nothing can still be stopped from reporting that every case
+    // held. It sits in the DISPATCH, not in `selfTest()`, so the importers that
+    // fold this self-test in never reach it.
+    const floorProblems = batteryFloorFailures();
+    if (floorProblems.length > 0) {
+      console.error(
+        `typecheck-configs --self-test FAILED: the assertion floor over selfTest()'s registrations `
+          + `was breached (${floorProblems.length} problem(s)); every case that DID run passed.`,
+      );
+      for (const problem of floorProblems) console.error(`  - ${problem}`);
       process.exit(1);
     }
     console.log(`typecheck-configs --self-test OK -- ${SELF_TEST_CASE_COUNT} cases hold.`);

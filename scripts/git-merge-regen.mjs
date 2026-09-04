@@ -278,6 +278,175 @@ function drive(argv) {
 
 /* ------------------------------------------------------------------ self-test */
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `results.every(Boolean)` was this self-test's ONLY success condition, so
+// "every sub-check held" and "the sub-checks never ran" printed the same line.
+// Closed the PR #13487 way: what is pinned is the registered NAMES, not a
+// number.
+//
+// ── Why the CALLEE NAME is the battery ──
+//
+// This file has no `selfTest()` entry function and no named section banners:
+// the `--self-test` dispatch at the bottom invokes ELEVEN named callees, each
+// printing its own line and returning a boolean. So the roster's unit is the
+// CALLEE, and its label is the one the SOURCE ALREADY CARRIES — the function's
+// own name. Nothing is invented and nothing is judged per comment, and a set
+// difference names WHICH sub-check stopped rather than saying only that
+// something did. `registerCase('<calleeName>')` is the FIRST statement of every
+// callee, above any early return, so what the ledger records is that the callee
+// RAN — which is why each floor is 1 rather than the number of assertions the
+// callee happens to contain.
+//
+// ⛔ The rows of the literal `[name, ok]` table inside `reconcileOwnership()`
+// are NOT batteries, and the boundary is worth stating because recipe A
+// (PR #15271, `check-sdui-manifest`) makes a table row a battery. It does so
+// for a file whose SELF-TEST *is* the table: one literal table, one driving
+// loop over it, and a sink that writes only when a row fails. Here the table is
+// a local of ONE callee among eleven, its rows are evaluated eagerly into
+// booleans before anything loops, and the callee already reduces them to a
+// single printed verdict of its own. Flooring those rows would floor one
+// callee's internals while the other ten stayed at callee granularity — a
+// roster whose unit changes per entry. The rule: the battery is the unit the
+// DISPATCH names.
+//
+// ⛔ A pinned TOTAL is not the repair: one callee dropping all its work keeps a
+// total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — a callee that grows a second
+// registration must not red. 1 is the honest floor for a callee: the dispatch
+// reaches it exactly once per run.
+const SELF_TEST_BATTERIES = Object.freeze({
+  reconcileAttributes: 1,
+  reconcileAttributeSemantics: 1,
+  reconcileScripts: 1,
+  reconcileGenerators: 1,
+  reconcileUntrackedDispositions: 1,
+  reconcileOwnership: 1,
+  hookIsExecutable: 1,
+  registeredDriverResolves: 1,
+  reconcileMixedComparators: 1,
+  endToEnd: 1,
+  endToEndMixed: 1,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too. This pin is also half of
+// the duplicate refusal: two dispatch entries naming ONE callee collapse to one
+// key in the literal above, so the roster falls below this number; the
+// roster ↔ dispatch cross-check in the floor block is the other half, and it
+// names WHICH callee was listed twice.
+const SELF_TEST_BATTERY_FLOOR = 11;
+
+// The key a registration is filed under when a callee registers no name at all.
+// It is not a declared battery, so it reds by the same set difference rather
+// than silently inflating whichever battery registered last.
+const UNATTRIBUTED_BATTERY = '(no callee named)';
+
+// The battery ledger, read by `batteryFloorFailures()` from the dispatch block
+// at the very bottom of this file. It is MODULE-level rather than local to a
+// self-test body because this file HAS no self-test body: the registrations
+// happen inside eleven separate callees and the floor is read at the dispatch's
+// verdict site, so the ledger has to outlive every one of those frames.
+//
+// ⚠️ Named for the roster's role, deliberately NOT with a self-test spelling:
+// `check:pm-dispatch-gates` anchors on a top-level declaration whose NAME
+// spells self-test, and every such name owes a row in its
+// COMPOUND_ANCHOR_LEDGER. `battery` is also the accurate word.
+const batterySeen = new Map();
+
+/**
+ * Record that a self-test callee RAN.
+ *
+ * Called as the FIRST statement of each of the eleven callees the `--self-test`
+ * dispatch invokes — above any early return, so a callee that bails out early
+ * still reports that it ran, and the floor is never met by a frame that
+ * returned before doing anything.
+ */
+function registerCase(name) {
+  const key = name ?? UNATTRIBUTED_BATTERY;
+  batterySeen.set(key, (batterySeen.get(key) ?? 0) + 1);
+}
+
+/**
+ * The floor: every declared callee RAN (#13489).
+ *
+ * Evaluated at the dispatch's verdict site — after all eleven callees have had
+ * their chance and immediately before the success line — and reached only from
+ * the `--self-test` branch, so a production merge-driver run never reads the
+ * ledger at all.
+ *
+ * @param {string[]} invoked the callee names the dispatch block actually invokes
+ * @returns {string[]} floor breaches; empty means the floor held
+ */
+function batteryFloorFailures(invoked) {
+  const declared = Object.keys(SELF_TEST_BATTERIES);
+  const problems = [];
+  if (declared.length < SELF_TEST_BATTERY_FLOOR) {
+    problems.push(
+      `SELF_TEST_BATTERIES declares ${declared.length} batteries, below the pinned `
+        + `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+
+  // ── Roster ↔ dispatch, both directions ──
+  // `invoked` is read off the dispatch's own list of callees, so this pair says
+  // WHICH name lost its counterpart. A declared name nothing invokes would also
+  // read DID NOT RUN below; naming it here reports the cause (nothing calls it)
+  // rather than only the symptom (nothing registered).
+  const duplicated = [...new Set(invoked.filter((name, i) => invoked.indexOf(name) !== i))];
+  if (duplicated.length) {
+    problems.push(
+      `the dispatch invokes ${duplicated.map((n) => JSON.stringify(n)).join(', ')} more than once — `
+        + 'two entries naming one callee are ONE battery, so the second can stop running while the '
+        + 'first keeps the floor met.',
+    );
+  }
+  for (const name of invoked) {
+    if (declared.includes(name)) continue;
+    problems.push(
+      `the dispatch invokes "${name}", which is not declared in SELF_TEST_BATTERIES — a callee `
+        + 'nothing declares is a sub-check nothing floors.',
+    );
+  }
+  for (const name of declared) {
+    if (invoked.includes(name)) continue;
+    problems.push(
+      `SELF_TEST_BATTERIES declares "${name}", which the dispatch block does not invoke — a floor `
+        + 'over a battery nothing can reach.',
+    );
+  }
+
+  // ── Roster ↔ ledger, both directions ──
+  for (const [name, count] of batterySeen) {
+    if (declared.includes(name)) continue;
+    problems.push(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in `
+        + 'SELF_TEST_BATTERIES — a case attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declared) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    problems.push(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. `
+          + 'The verdict below would have claimed that sub-check holds.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of `
+          + `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+
+  if (problems.length) {
+    problems.push(
+      'A battery at or below its floor means a sub-check STOPPED RUNNING — the battery is the bug, '
+        + 'not the number. Find what stopped registering (a deleted invocation, a renamed callee, a '
+        + '`registerCase()` moved below an early return) and restore it.',
+    );
+  }
+  return problems;
+}
+
 function fail(msg) {
   console.error(`✗ ${msg}`);
   process.exitCode = 1;
@@ -286,6 +455,7 @@ function fail(msg) {
 
 /** `.gitattributes` and the table must name the same paths — in both directions. */
 function reconcileAttributes() {
+  registerCase('reconcileAttributes');
   const file = join(REPO_ROOT, '.gitattributes');
   if (!existsSync(file)) return fail('.gitattributes is missing — the driver is mapped to nothing.');
   const mapped = readFileSync(file, 'utf8')
@@ -338,6 +508,7 @@ function manifestFor(dir) {
  * command the driver prints for it is the command the `pre-commit` gate spawns.
  */
 function reconcileScripts() {
+  registerCase('reconcileScripts');
   const workspace = workspacePackages(REPO_ROOT);
   const byOwner = new Map();
   for (const e of REGEN_ARTIFACTS) {
@@ -444,6 +615,7 @@ function reconcileScripts() {
  * been born unable to see its own motivating case.
  */
 function reconcileGenerators() {
+  registerCase('reconcileGenerators');
   const workspace = workspacePackages(REPO_ROOT);
   const manifests = [
     { dir: '.', manifest: JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8')) },
@@ -516,6 +688,7 @@ function reconcileGenerators() {
  * later, as the merge conflict this whole file exists to pre-empt.
  */
 function reconcileUntrackedDispositions() {
+  registerCase('reconcileUntrackedDispositions');
   const claims = NOT_DRIVER_MANAGED.filter((e) => e.untracked);
   const wrong = [];
   for (const e of claims) {
@@ -551,6 +724,7 @@ function reconcileUntrackedDispositions() {
  * as "covered" until someone looks.
  */
 function reconcileAttributeSemantics() {
+  registerCase('reconcileAttributeSemantics');
   const tracked = execFileSync('git', ['ls-files', '-z'], {
     cwd: REPO_ROOT,
     encoding: 'utf8',
@@ -602,6 +776,7 @@ function reconcileAttributeSemantics() {
 }
 
 function reconcileOwnership() {
+  registerCase('reconcileOwnership');
   const workspace = workspacePackages(REPO_ROOT);
   const rootScripts = JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8'));
   const specDir = ownerDir(DEFAULT_OWNER, workspace);
@@ -645,6 +820,7 @@ function reconcileOwnership() {
  * commits went through with the hook installed and inert.
  */
 function hookIsExecutable() {
+  registerCase('hookIsExecutable');
   try {
     const mode = execFileSync('git', ['ls-files', '-s', '.githooks/pre-commit'], {
       cwd: REPO_ROOT,
@@ -681,6 +857,7 @@ function hookIsExecutable() {
  *   - the value has drifted from what `setup-git-hooks.mjs` registers.
  */
 function registeredDriverResolves() {
+  registerCase('registeredDriverResolves');
   const { key, value: expected } = GIT_SETTINGS.find((s) => s.key === `merge.${DRIVER_NAME}.driver`);
 
   let actual = '';
@@ -780,6 +957,7 @@ function realpath(p) {
  * (`%P` order, git-dir resolution in a worktree) is exactly what silently rots.
  */
 function endToEnd() {
+  registerCase('endToEnd');
   const dir = mkdtempSync(join(tmpdir(), 'os-regen-selftest-'));
   const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   try {
@@ -840,6 +1018,7 @@ function endToEnd() {
  * call different, which is the firing control the "safe" verdict rests on.
  */
 function reconcileMixedComparators() {
+  registerCase('reconcileMixedComparators');
   const rows = REGEN_ARTIFACTS.filter((e) => e.mixed);
   const unknown = rows.filter((e) => !MIXED_COMPARATORS[e.mixed]);
   if (unknown.length) {
@@ -889,6 +1068,7 @@ function reconcileMixedComparators() {
  * success unless something reads the resulting bytes.
  */
 function endToEndMixed() {
+  registerCase('endToEndMixed');
   const entry = REGEN_ARTIFACTS.find((e) => e.mixed);
   if (!entry) {
     console.log('✓ end-to-end (mixed): no mixed rows declared — nothing to prove');
@@ -960,23 +1140,42 @@ function endToEndMixed() {
 
 if (process.argv.includes('--self-test')) {
   console.log('git-merge-regen --self-test\n');
-  const results = [
-    reconcileAttributes(),
-    reconcileAttributeSemantics(),
-    reconcileScripts(),
-    reconcileGenerators(),
-    reconcileUntrackedDispositions(),
-    reconcileOwnership(),
-    hookIsExecutable(),
-    registeredDriverResolves(),
-    reconcileMixedComparators(),
-    endToEnd(),
-    endToEndMixed(),
+  // The eleven callees as a literal LIST rather than eleven bare calls, so the
+  // names this block invokes are data the floor below can cross-check the
+  // roster against, in both directions. The names are read off the function
+  // declarations themselves (`fn.name`), so a renamed callee moves this list
+  // with it and cannot drift from the roster in silence.
+  const callees = [
+    reconcileAttributes,
+    reconcileAttributeSemantics,
+    reconcileScripts,
+    reconcileGenerators,
+    reconcileUntrackedDispositions,
+    reconcileOwnership,
+    hookIsExecutable,
+    registeredDriverResolves,
+    reconcileMixedComparators,
+    endToEnd,
+    endToEndMixed,
   ];
+  const results = callees.map((run) => run());
+
+  // ── The assertion floor, at the verdict site ─────────────────────
+  // There is no verdict site inside a self-test body here, because there is no
+  // self-test body: this dispatch IS the verdict site, and the AND below is the
+  // verdict. So the floor is evaluated here, after every callee has had its
+  // chance and immediately before the success line — the only place a run in
+  // which a callee never ran can still be stopped from reporting that the
+  // wiring is consistent. It sits inside the `--self-test` branch, so the
+  // production merge-driver path (the `else` arm) never reads the ledger.
+  const floorBreaches = batteryFloorFailures(callees.map((run) => run.name));
+  for (const breach of floorBreaches) fail(`self-test floor: ${breach}`);
+
+  const failures = results.filter((ok) => !ok).length + floorBreaches.length;
   console.log(
-    results.every(Boolean)
+    failures === 0
       ? `\n✓ merge driver wiring is consistent (${NOT_DRIVER_MANAGED.length} path(s) deliberately excluded).`
-      : '\n✗ merge driver wiring is inconsistent — see above.',
+      : `\n✗ merge driver wiring is inconsistent — ${failures} failure(s) (cases and floor); see above.`,
   );
 } else {
   try {
