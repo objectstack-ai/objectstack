@@ -1,5 +1,11 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 import { describe, it, expect } from 'vitest';
+import {
+  AssembledPackageBodySchema,
+  ObjectStackDefinitionSchema,
+  composeStacks,
+  defineStack,
+} from '@objectstack/spec';
 import { appDefaultPermissionSetName, appSecurityPluginOptions } from './app-default-permission-set';
 import { SecurityPlugin } from './security-plugin';
 
@@ -98,5 +104,260 @@ describe('the resolved options reach the constructed plugin (#7001)', () => {
   it('and no declaration leaves the built-in member_default standing', async () => {
     await expect(initAndReadBaseline(new SecurityPlugin(appSecurityPluginOptions({}))))
       .resolves.toBe('member_default');
+  });
+});
+
+/**
+ * [ADR-0130 D4, #15007] The reader resolves `packages[]`.
+ *
+ * Reader card 4/4 of the option-B program ruled on #14512. A multi-package
+ * artifact carries each definition twice today — flattened at the top level and
+ * again under `packages[]` — and option B removes the flattened copy. Every
+ * assertion below is about the SAME declaration read out of both shapes, which
+ * is what "the artifact stays additive while the readers learn" means.
+ *
+ * The two shapes are built by the REAL composer (`composeStacks`, the one
+ * `examples/app-multi-package` uses) rather than hand-written, so a package
+ * entry that stopped looking the way this file assumes fails here instead of
+ * passing against a shape the platform never emits. The option-B shape is
+ * derived from it by stripping the package-owned keys — and that key set is
+ * read off the two schemas, never transcribed, so a collection family added to
+ * the stack schema next month is stripped too.
+ */
+describe('appSecurityPluginOptions over `packages[]` (ADR-0130 D4, #15007)', () => {
+  const CORE_ID = 'com.example.security.core';
+  const ADDON_ID = 'com.example.security.addon';
+  const CORE_PROFILE = 'core_member_default';
+  const ADDON_PROFILE = 'addon_member_default';
+
+  const shapeKeys = (schema: unknown): string[] =>
+    Object.keys((schema as { shape: Record<string, unknown> }).shape);
+
+  /** Exactly the keys an option-B artifact no longer carries at the top level. */
+  const PACKAGE_OWNED_KEYS: readonly string[] = (() => {
+    const body = new Set(shapeKeys(AssembledPackageBodySchema));
+    return shapeKeys(ObjectStackDefinitionSchema).filter((k) => body.has(k));
+  })();
+
+  const permissionSet = (name: string) => ({
+    name,
+    label: name,
+    isDefault: true,
+    objects: {},
+  });
+
+  const coreStack = () =>
+    defineStack({
+      manifest: {
+        id: CORE_ID, name: 'Security Probe Core', namespace: 'secprobe',
+        version: '1.0.0', type: 'app',
+      },
+      permissions: [permissionSet(CORE_PROFILE)],
+    });
+
+  /** Declared SECOND in composition order, and depends on the app package. */
+  const addonStack = () =>
+    defineStack({
+      manifest: {
+        id: ADDON_ID, name: 'Security Probe Addon', namespace: 'secprobe',
+        version: '1.0.0', type: 'module',
+        dependencies: { [CORE_ID]: '^1.0.0' },
+      },
+    });
+
+  /** Today's emitted shape: flattened top level PLUS `packages[]`. */
+  const additive = () => composeStacks([addonStack(), coreStack()], { manifest: 'preserve' });
+
+  /** The ruled shape: `packages[]` only. */
+  const optionB = () => {
+    const composed = additive() as unknown as Record<string, unknown>;
+    const owned = new Set(PACKAGE_OWNED_KEYS);
+    const out: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(composed)) if (!owned.has(key)) out[key] = value;
+    return out;
+  };
+
+  it('CONTROL — the additive shape really does carry the flattened copy', () => {
+    // Without this, the option-B case below could pass because the fixture
+    // never had a flattened level to lose.
+    const composed = additive() as unknown as Record<string, unknown>;
+    expect(Array.isArray(composed.permissions)).toBe(true);
+    expect((composed.permissions as unknown[]).length).toBeGreaterThan(0);
+    expect((composed.packages as unknown[]).length).toBe(2);
+    expect(PACKAGE_OWNED_KEYS).toContain('permissions');
+  });
+
+  it('the additive shape answers exactly what it answered before this card', () => {
+    expect(appSecurityPluginOptions(additive())).toEqual({ fallbackPermissionSet: CORE_PROFILE });
+  });
+
+  it('OPTION B — the flattened level is gone and the packaged declaration is still resolved', () => {
+    const stripped = optionB();
+    expect(stripped.permissions).toBeUndefined();
+    expect((stripped.packages as unknown[]).length).toBe(2);
+
+    // The pre-#15007 reader returned `undefined` here — no throw, no log, and
+    // every member of the app silently down to the platform floor alone.
+    expect(appSecurityPluginOptions(stripped)).toEqual({ fallbackPermissionSet: CORE_PROFILE });
+  });
+
+  it('the flattened level still answers FIRST when both shapes carry a set', () => {
+    // The reader half lands while the artifact is still additive, so this
+    // function must be a superset of the old read and never a replacement:
+    // whatever the top level said, it still says.
+    expect(
+      appSecurityPluginOptions({
+        permissions: [permissionSet('flattened_wins')],
+        packages: [{ manifest: { id: CORE_ID, name: 'Core', version: '1.0.0', type: 'app', permissions: [permissionSet(CORE_PROFILE)] } }],
+      }),
+    ).toEqual({ fallbackPermissionSet: 'flattened_wins' });
+  });
+
+  it('package order is `resolveArtifactPackageOrder`\'s, not the array\'s', () => {
+    // Both packages declare an `isDefault` set and the DEPENDENT one is listed
+    // first. "The first isDefault set" has to mean the same thing here as at
+    // every other artifact reader, so the depended-upon package answers —
+    // dependency-topological order (ADR-0130 D5), not authoring accident.
+    expect(
+      appSecurityPluginOptions({
+        packages: [
+          { manifest: { id: ADDON_ID, name: 'Addon', version: '1.0.0', type: 'module', dependencies: { [CORE_ID]: '^1.0.0' }, permissions: [permissionSet(ADDON_PROFILE)] } },
+          { manifest: { id: CORE_ID, name: 'Core', version: '1.0.0', type: 'app', permissions: [permissionSet(CORE_PROFILE)] } },
+        ],
+      }),
+    ).toEqual({ fallbackPermissionSet: CORE_PROFILE });
+
+    // …and with the dependency edge removed, declared order is what is left.
+    expect(
+      appSecurityPluginOptions({
+        packages: [
+          { manifest: { id: ADDON_ID, name: 'Addon', version: '1.0.0', type: 'module', permissions: [permissionSet(ADDON_PROFILE)] } },
+          { manifest: { id: CORE_ID, name: 'Core', version: '1.0.0', type: 'app', permissions: [permissionSet(CORE_PROFILE)] } },
+        ],
+      }),
+    ).toEqual({ fallbackPermissionSet: ADDON_PROFILE });
+  });
+
+  it('a package that declares no default does not shadow one that does', () => {
+    expect(
+      appSecurityPluginOptions({
+        packages: [
+          { manifest: { id: ADDON_ID, name: 'Addon', version: '1.0.0', type: 'module', permissions: [{ name: 'addon_read_only', label: 'RO', objects: {} }] } },
+          { manifest: { id: CORE_ID, name: 'Core', version: '1.0.0', type: 'app', permissions: [permissionSet(CORE_PROFILE)] } },
+        ],
+      }),
+    ).toEqual({ fallbackPermissionSet: CORE_PROFILE });
+  });
+
+  it('an artifact with no `packages` key still reads the top level and NOTHING else', () => {
+    // D4's second branch hands `resolveArtifactPackageOrder` the caller's own
+    // object back as the single package body, so this path is the pre-#15007
+    // read exactly — including its refusal to look inside the singular
+    // `manifest` (#7001, pinned above).
+    expect(appSecurityPluginOptions({ manifest: { permissions: [permissionSet('buried')] } })).toBeUndefined();
+    expect(appSecurityPluginOptions({ packages: [] })).toBeUndefined();
+    expect(appSecurityPluginOptions({ permissions: [permissionSet('top')] })).toEqual({ fallbackPermissionSet: 'top' });
+  });
+
+  /**
+   * [#15007 follow-up] "The top level had none" is the resolved NAME coming
+   * back `undefined` — never the `permissions` CONTAINER being absent or empty.
+   *
+   * Branching on the container re-creates the silent loss this card removed,
+   * one shape further along. A flattened level that carries permission sets but
+   * marks none of them `isDefault` is legal today and hand-authorable in any
+   * `objectstack.config.ts`; a container-shaped condition shorts it past the
+   * whole `packages[]` pass and answers `undefined` — nothing thrown, nothing
+   * logged, every member of the app back down to the platform floor alone.
+   */
+  describe('the `packages[]` pass runs wherever the top level named no default', () => {
+    const corePackage = {
+      manifest: {
+        id: CORE_ID, name: 'Core', version: '1.0.0', type: 'app',
+        permissions: [permissionSet(CORE_PROFILE)],
+      },
+    };
+
+    it('an EMPTY flattened array does not short-circuit it', () => {
+      expect(appSecurityPluginOptions({ permissions: [], packages: [corePackage] }))
+        .toEqual({ fallbackPermissionSet: CORE_PROFILE });
+    });
+
+    it('a NON-EMPTY flattened array that marks no default does not either', () => {
+      // A `permissions.length > 0` guard passes the case above and fails this
+      // one — which is the whole reason the condition is the resolved name.
+      expect(
+        appSecurityPluginOptions({
+          permissions: [{ name: 'core_read_only', label: 'Read only', objects: {} }],
+          packages: [corePackage],
+        }),
+      ).toEqual({ fallbackPermissionSet: CORE_PROFILE });
+    });
+
+    it('a `permissions` key that is not an array at all does not either', () => {
+      expect(appSecurityPluginOptions({ permissions: null, packages: [corePackage] }))
+        .toEqual({ fallbackPermissionSet: CORE_PROFILE });
+    });
+
+    it('and once the top level DOES name one, the packages pass cannot change the answer', () => {
+      expect(
+        appSecurityPluginOptions({
+          permissions: [permissionSet('flattened_wins')],
+          packages: [corePackage],
+        }),
+      ).toEqual({ fallbackPermissionSet: 'flattened_wins' });
+    });
+  });
+
+  /**
+   * The gate travels with the read: `resolveArtifactPackageOrder` refuses a
+   * malformed `packages` with an ADR-0112 envelope, and this reader does not
+   * catch it. Swallowing it would resolve a permission surface out of an
+   * artifact the loader refuses to load.
+   */
+  describe('a malformed `packages` is refused, not silently skipped', () => {
+    const refusalOf = (config: unknown): { code?: string; status?: number; message?: string } => {
+      try {
+        appSecurityPluginOptions(config);
+        return {};
+      } catch (e) {
+        return e as { code?: string; status?: number; message?: string };
+      }
+    };
+
+    it('`packages` that is not an array', () => {
+      const err = refusalOf({ packages: 'nope' });
+      expect(err.code).toBe('INVALID_ARTIFACT_PACKAGES');
+      expect(err.status).toBe(422);
+    });
+
+    it('an entry inlined instead of wrapped under `manifest:`', () => {
+      const err = refusalOf({ packages: [{ id: CORE_ID, name: 'Core', version: '1.0.0', type: 'app', permissions: [permissionSet(CORE_PROFILE)] }] });
+      expect(err.code).toBe('INVALID_ARTIFACT_PACKAGE_ENTRY');
+      expect(err.status).toBe(422);
+    });
+
+    it('the same package id twice', () => {
+      const entry = { manifest: { id: CORE_ID, name: 'Core', version: '1.0.0', type: 'app', permissions: [permissionSet(CORE_PROFILE)] } };
+      const err = refusalOf({ packages: [entry, entry] });
+      expect(err.code).toBe('DUPLICATE_ARTIFACT_PACKAGE');
+      expect(err.status).toBe(422);
+    });
+
+    it('…and refused just the same when the flattened top level already named a default', () => {
+      // The package order is resolved BEFORE the top level is consulted, so an
+      // artifact is either loadable or refused independently of which level
+      // happens to answer. Move that resolution below the early return and this
+      // pair turns into a silent accept: a permission surface resolved out of an
+      // artifact the manifest service refuses moments later.
+      const notAnArray = refusalOf({ permissions: [permissionSet('flattened_wins')], packages: 'nope' });
+      expect(notAnArray.code).toBe('INVALID_ARTIFACT_PACKAGES');
+      expect(notAnArray.status).toBe(422);
+
+      const entry = { manifest: { id: CORE_ID, name: 'Core', version: '1.0.0', type: 'app', permissions: [permissionSet(CORE_PROFILE)] } };
+      const duplicate = refusalOf({ permissions: [permissionSet('flattened_wins')], packages: [entry, entry] });
+      expect(duplicate.code).toBe('DUPLICATE_ARTIFACT_PACKAGE');
+      expect(duplicate.status).toBe(422);
+    });
   });
 });

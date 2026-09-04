@@ -14,10 +14,13 @@
  * the REST run surface has no cancel or retry route, and none of the engine's
  * public methods moved such a run out.
  *
- * ⛔ **This file changes nothing about that ordering.** Which ordering is right
- * is #13937, unruled and in the maintainer's hands. What is pinned here is the
- * EXIT: `restoreConsumedSuspension` puts the consumed suspension back so the
- * run is resumable again, under the ordering exactly as it is.
+ * ⛔ **This file changes nothing about that ordering.** #13937 ruled it (shape
+ * 4, maintainer 2026-09-01): the order stays, for exactly-once across a crash,
+ * and this verb is the operator exit. What is pinned here is that EXIT:
+ * `restoreConsumedSuspension` puts the consumed suspension back so the run is
+ * resumable again, under the ordering exactly as it is. The NAME the ruling
+ * gave the state (`AutomationResult.status: 'stranded'`) is pinned beside it
+ * in `stranded-run-status.test.ts`.
  *
  * ## What is pinned, and why each one is here
  *
@@ -554,17 +557,19 @@ describe('#13909 — across a restart: the deployment shape this exists for', ()
     });
 });
 
-describe('#13909 — what this slice deliberately does NOT do', () => {
-    it('leaves AutomationResult.status and the run\'s recorded status alone', async () => {
+describe('#13909 — what this verb deliberately does NOT do', () => {
+    it('names the condition on the RESULT only — the run\'s recorded status stays failed', async () => {
         const { engine } = newEngine(new InMemorySuspendedRunStore());
         const started = await engine.execute('strand_flow', ctx);
         const runId = started.runId as string;
         const failed = await engine.resume(runId);
 
-        // ⛔ No new platform status is minted for the condition — naming it is
-        // an explicit same-batch sub-item of #13937, because what it should be
-        // called depends on which resume-ordering shape is ruled.
-        expect(failed.status).toBeUndefined();
+        // The #13937 shape-4 ruling put the name on `AutomationResult.status`
+        // (#14384) and the catch arm now stamps it (the producer half, pinned
+        // in full in `stranded-run-status.test.ts`). It did NOT widen
+        // `ExecutionStatus`: the run's recorded lifecycle stays `failed`, in
+        // the log and in the durable history row.
+        expect(failed.status).toBe('stranded');
         expect((await engine.getRun(runId))?.status).toBe('failed');
     });
 
@@ -574,10 +579,11 @@ describe('#13909 — what this slice deliberately does NOT do', () => {
         const runId = started.runId as string;
 
         // The consumption still precedes the traversal: measured from inside
-        // the downstream node, the suspension is already gone. If a future
-        // change made the pause survive a downstream throw (#13937 shape 2),
-        // THIS is the assertion that should be reconsidered — deliberately, not
-        // by accident.
+        // the downstream node, the suspension is already gone. #13937 ruled
+        // this order KEPT (shape 4); shape 2 — the pause surviving a downstream
+        // throw — reopens only together with a durable claim/lease that keeps
+        // exactly-once, and THIS is the assertion such a change must flip
+        // deliberately, in the same batch, not by accident.
         let suspendedDuringTraversal: boolean | undefined;
         registerDownstream(engine, {
             throws: true,

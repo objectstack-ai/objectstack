@@ -39,3 +39,12 @@
 
 export { DevPlugin } from './dev-plugin.js';
 export type { DevPluginOptions } from './dev-plugin.js';
+
+/**
+ * [#15232] The i18n auto-detect's decision, exported so it can be MEASURED
+ * rather than re-implemented — the #15004 option-B acceptance pin calls it.
+ * `stackDeclaresTranslations` stays module-private on purpose: the published
+ * surface is the decision, not its limbs.
+ */
+export { devI18nPluginOptions } from './dev-i18n.js';
+export type { DevI18nPluginOptions } from './dev-i18n.js';

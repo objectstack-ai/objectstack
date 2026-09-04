@@ -1,5 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { resolveArtifactPackageOrder } from '@objectstack/core';
+
 /**
  * [ADR-0090 D5, #7555] The PLATFORM's own human baseline permission set.
  *
@@ -84,6 +86,115 @@ export function appDefaultPermissionSetName(permissions: unknown): string | unde
 }
 
 /**
+ * [ADR-0130 D4, #15007] The app-declared default permission-set NAME, resolved
+ * from wherever the artifact carries the declaration — the flattened top
+ * level, or `packages[]`.
+ *
+ * ## What this exists to stop
+ *
+ * A multi-package artifact carries each definition twice today: flattened onto
+ * the top level, and again inside `packages[i]`. Option B (the ADR-0130 D4
+ * ruling on #14512) removes the flattened copy, so `packages[]` carries it
+ * once. A reader that only ever looked at the top level does not fail when that
+ * happens — it reads `undefined`, finds no `isDefault` set, and answers "the app
+ * declared no default profile".
+ *
+ * For THIS reader that silence has a security posture attached. The name it
+ * resolves becomes the `SecurityPlugin`'s `fallbackPermissionSet`, i.e. the
+ * app's half of every authenticated human's additive baseline
+ * ({@link composeHumanBaselinePermissionSets}). Losing it does not deny the
+ * boot and does not log: the deployment simply runs on the platform floor
+ * alone, and every member of a multi-package app quietly holds less than the
+ * app declared they should. #7555 measured what that looks like from the
+ * outside — nav entries served, 403 behind them — and could only measure it
+ * because someone went looking.
+ *
+ * ## Top level FIRST, `packages[]` second — and why that order is the contract
+ *
+ * The reader half of the program lands while the artifact is still ADDITIVE, so
+ * this function has to be a superset of the old read rather than a replacement
+ * for it: for every artifact the platform emits today the flattened level
+ * answers first and this returns exactly what it returned before. The
+ * `packages[]` pass is consulted ONLY where the top level named no default —
+ * which is precisely the option-B artifact. That is what makes this card
+ * revertible on its own and safe to land before the emitter half (#14512).
+ *
+ * ## The condition is the ANSWER, never the container
+ *
+ * "The top level had none" is spelled as `appDefaultPermissionSetName` coming
+ * back `undefined`, and deliberately NOT as the `permissions` array being
+ * absent or empty. Branching on the container re-creates the silent loss this
+ * card exists to remove, one shape further along: a config whose flattened
+ * level carries permission sets but marks none of them `isDefault` — legal
+ * today, and expressible by hand in any `objectstack.config.ts` — would
+ * short-circuit the whole `packages[]` pass and resolve `undefined`, with
+ * nothing thrown and nothing logged. Reading the container also hands back the
+ * `[]`-is-truthy trap for free. The answer is the only condition that cannot
+ * be wrong in either direction, so the answer is what this branches on.
+ *
+ * ⚠️ That is deliberately NOT the shape of the sibling reader's condition, and
+ * the difference is a property of the readers, not an inconsistency to
+ * converge away. `resolveStackCollection` (`packages/cli/src/utils/
+ * stack-collections.ts`, #15006) branches on the CONTAINER — `if
+ * (Array.isArray(top)) return top;` — and is right to: it returns a whole
+ * collection, so a top level that carries the key has, by construction,
+ * already answered, and `composeStacks` flattened that array into the union.
+ * This reader extracts a DISTINGUISHED ELEMENT out of the collection instead,
+ * so "the key is present" and "the key answers" are two different facts here
+ * and one of them is the wrong one to branch on. Same discipline — start from
+ * the expression this program replaced, consult `packages[]` only where it came
+ * back empty — read against what each reader's expression actually returns.
+ *
+ * ## The order is `resolveArtifactPackageOrder`'s, not the array's
+ *
+ * The first package body that names a default wins, so with more than one
+ * package declaring one, "first" has to mean the same thing here as it does
+ * everywhere else the artifact is read. `resolveArtifactPackageOrder`
+ * (`@objectstack/core`, ADR-0130 D4+D5, #14643) is the ONE place that turns an
+ * artifact into its ordered package list — dependency-topological, so a package
+ * that extends another is read after it regardless of which array slot it
+ * occupies. ⛔ Do not iterate `config.packages` directly here; a second
+ * traversal is a second ordering, and the depended-upon package would win or
+ * lose by authoring accident.
+ *
+ * ## The package order is resolved BEFORE the top level is consulted
+ *
+ * Reading that line as a misplaced statement is the expected mistake, so: it is
+ * placed there on purpose, and moving it below the early return is a behaviour
+ * change. `resolveArtifactPackageOrder` REFUSES a malformed `packages` (not an
+ * array, an unwrapped entry, a duplicate package id) with an ADR-0112 envelope,
+ * and this reader does not catch it — swallowing it would resolve a permission
+ * surface out of an artifact the loader refuses to load. Resolving the order
+ * first is what keeps that refusal unconditional: an artifact is either
+ * loadable or refused, and which answer this reader gives about it must not
+ * depend on whether its flattened level happened to name a default first.
+ *
+ * ## One thing it deliberately does NOT do
+ *
+ * It does not look inside the SINGULAR `manifest`. That constraint is #7001's
+ * and it still holds — the harness must not honour a declaration `serve.ts`
+ * ignores. Note this is not a special case bolted on: an artifact carrying no
+ * `packages` key never reaches the package pass at all, so that branch reads
+ * `permissions` from exactly where the old code read it and nowhere else.
+ */
+function declaredDefaultPermissionSetName(config: unknown): string | undefined {
+  const packages = (config as { packages?: unknown } | null | undefined)?.packages;
+  const bodies =
+    packages === undefined || packages === null ? [] : resolveArtifactPackageOrder(config);
+
+  const flattened = (config as { permissions?: unknown } | null | undefined)?.permissions;
+  const fromFlattened = appDefaultPermissionSetName(flattened);
+  if (fromFlattened !== undefined) return fromFlattened;
+
+  for (const body of bodies) {
+    const declared = (body as { permissions?: unknown } | null | undefined)?.permissions;
+    const fromPackage = appDefaultPermissionSetName(declared);
+    if (fromPackage !== undefined) return fromPackage;
+  }
+  return undefined;
+}
+
+/**
  * [#7001] The `SecurityPlugin` options a stack config implies — ONE resolution
  * for EVERY boot path.
  *
@@ -112,14 +223,14 @@ export function appDefaultPermissionSetName(permissions: unknown): string | unde
  * the result straight through — `new SecurityPlugin(appSecurityPluginOptions(config))`
  * — and a caller cannot get the undefined case subtly wrong.
  *
- * Reads `config.permissions`, top-level, exactly as `serve.ts` always has.
- * Being cleverer here (also looking inside `manifest`) would re-open the gap it
- * closes, in the other direction.
+ * Resolves the name through {@link declaredDefaultPermissionSetName} — the
+ * flattened top level `serve.ts` has always read, and, for a multi-package
+ * artifact, the `packages[]` bodies that carry the same declaration under
+ * ADR-0130 D4.
  */
 export function appSecurityPluginOptions(
   config: unknown,
 ): { fallbackPermissionSet: string } | undefined {
-  const permissions = (config as { permissions?: unknown } | null | undefined)?.permissions;
-  const name = appDefaultPermissionSetName(permissions);
+  const name = declaredDefaultPermissionSetName(config);
   return name ? { fallbackPermissionSet: name } : undefined;
 }

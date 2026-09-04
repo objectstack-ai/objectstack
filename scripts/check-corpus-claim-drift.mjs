@@ -115,8 +115,11 @@
 // ## Roots
 //
 // `content/docs` and `skills` — the corpus an AI author reads the contract from.
-// Generated `references/` is skipped: the spec source is the fix site there, so
-// a finding in a generated file names the wrong file. ⚠️ One of these roots is
+// The GENERATED `content/docs/references/` tree is skipped BY PATH: the spec
+// source is the fix site there, so a finding in one of those files names the
+// wrong file. `skills` is walked whole, its `references/` pages included — that
+// tree is published catalog content, not a generated one, and the distinction is
+// the SKIP_SUBTREES docblock below. ⚠️ One of these roots is
 // `skills/**`, a `domain:skills` surface; ownership of THIS gate stays
 // `domain:devx` per the #13582 triage ruling, because its subject is the factual
 // correctness of teaching text, not the governance of an agent instruction face.
@@ -131,7 +134,71 @@ import { join, relative, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOTS = ['content/docs', 'skills'];
-const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'references']);
+
+// ── What the walk refuses to descend into, and in which of two shapes (#15061) ─
+//
+// SKIP_DIRS matches a directory NAME anywhere under ROOTS. That shape is only
+// sound for trees whose exclusion is a property of the name itself, true at
+// every depth and under every root: an INSTALLED or GENERATED tree where nothing
+// hand-written lives. `node_modules` is the same thing wherever it appears; so
+// are `.git` and `dist`.
+//
+// `references` was in this set and is not one of those. The sentence this gate
+// gave for it above — "the spec source is the fix site there, so a finding in a
+// generated file names the wrong file" — is true of exactly ONE of the two roots:
+//
+//   content/docs/references/       214 pages, generated from spec by
+//                                  packages/spec/scripts/build-docs.ts, and
+//                                  marked AUTO-GEN in AGENTS.md
+//   skills/<name>/references/       12 pages of published catalog: two
+//                                  hand-authored companions plus ten
+//                                  generator-owned index pages
+//
+// A name-keyed skip cannot tell those apart, so it took a correct exclusion for
+// the first root and applied it to the second, hiding 12 of the 46 markdown
+// files under `skills/` — 26% of the published catalog, both hand-authored
+// companions included (skills/objectstack-data/references/data-hooks.md and
+// skills/objectstack-platform/references/plugin-hooks.md). Those two ship
+// verbatim to third-party projects via `npx skills add`, so a stale claim there
+// is read by an AI author in a codebase this repo cannot see — the exact reason
+// `skills` is in ROOTS. A scan that cannot see a quarter of its population runs,
+// passes, and reports nothing about the files it never opened.
+//
+// Two sibling gates over this same catalog already carry the corrected verdict,
+// so this is not a fresh judgement being made here.
+// `check-skill-identifier-liveness.mjs` keeps `references` OUT of its skip set
+// and pins the difference in its self-test ("under `skills/**` those files are
+// hand-authored published content, unlike content/docs/references which is
+// generated"). `check-doc-authoring.mjs` gave its published-catalog rule a
+// SECOND walk rather than reuse its own skipping one, because reusing it "would
+// have produced a gate that runs, passes, and cannot see a ninth of the
+// population it exists to guard".
+const SKIP_DIRS = new Set(['node_modules', '.git', 'dist']);
+
+// Generated subtrees, excluded by PATH under ROOTS rather than by name.
+//
+// A path states WHICH tree it excludes; a name states a property of every
+// directory that happens to be called that. This gate needs the first, because
+// its two roots disagree about `references/`.
+//
+// ⚠️ No carve-out follows for the ten generator-owned pages under `skills/`
+// (`references/_index.md`, `references/react-blocks.md`). That is the same
+// refusal `check-doc-authoring.mjs` records beside those very files — "an
+// exemption over a surface that no longer needs one is where the next
+// regeneration would smuggle one back in. A red here is fixed AT THE SPEC
+// SOURCE, never by hand-editing the artifact" — and the fix-site argument that
+// justifies the entry above is what decides it rather than weighing against it:
+// a contradicted claim emitted into a page by its generator is a REAL finding
+// whose remedy is that generator. Naming the generated tree is how the gate is
+// told where to send such a finding, and `content/docs/references/` is the only
+// tree under these roots whose fix site this gate cannot otherwise reach.
+//
+// The self-test pins both directions from the WALK's own output rather than as a
+// file count. A count has to be re-typed whenever a page is added, and neither
+// failure it must catch is a statement a count can make: "the scan reaches no
+// published reference page at all", and "the scan descended into the generated
+// tree".
+const SKIP_SUBTREES = new Set(['content/docs/references']);
 const EXTENSIONS = new Set(['.mdx', '.md']);
 const BASELINE_PATH = 'scripts/corpus-claim-drift-baseline.json';
 
@@ -289,6 +356,9 @@ function walk(dir, out) {
   for (const e of readdirSync(dir)) {
     if (SKIP_DIRS.has(e)) continue;
     const p = join(dir, e);
+    // Normalised before the lookup so the set is spelled once, in the POSIX
+    // form the roots themselves are written in.
+    if (SKIP_SUBTREES.has(p.replace(/\\/g, '/'))) continue;
     if (statSync(p).isDirectory()) walk(p, out);
     else if ([...EXTENSIONS].some((x) => e.endsWith(x))) out.push(p);
   }
@@ -570,6 +640,7 @@ let selfTestReachedVerdict = false;
 // must not red. A battery BELOW its floor means cases stopped running; the
 // remedy is to find what stopped registering.
 const SELF_TEST_BATTERIES = Object.freeze({
+  'The scan population: which `references/` the skip means (#15061)': 5,
   'The table is a table, and it ships exactly one row (#13582 ruling)': 3,
   'Table hygiene: a claim that matches the empty string': 2,
   'THE genericity proof, without shipping a second word': 3,
@@ -590,7 +661,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 16;
+const SELF_TEST_BATTERY_FLOOR = 17;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -621,6 +692,56 @@ function selfTest() {
     const { hits } = analyzeFile(text, rules);
     return Object.values(hits).reduce((n, c) => n + c, 0);
   };
+
+  // ── The scan population: which `references/` the skip means (#15061) ───────
+  //
+  // What the skip sets leave out IS this gate's reach, and an exclusion is
+  // invisible in the pass line: "224 file(s) read across 2 root(s)" reads
+  // exactly like 236 to anyone not counting. `references` sat in SKIP_DIRS for a
+  // reason true of one ROOT and hid 26% of the other — see the SKIP_DIRS
+  // docblock above.
+  //
+  // Pinned from the WALK, on the real tree, by the same function the scan below
+  // calls — never as a hand-typed file count. A count has to be re-typed
+  // whenever a page is added, and it cannot state either thing that actually
+  // goes wrong. Both directions are asserted, because this gate walks a
+  // generated root AND a published one: a walk that reaches neither `references`
+  // tree is the defect being repaired here, and a walk that reaches both is the
+  // opposite mistake — findings in `content/docs/references/` name the wrong
+  // file.
+  battery('The scan population: which `references/` the skip means (#15061)');
+  const INSTALLED_OR_GENERATED = new Set(['node_modules', '.git', 'dist']);
+  const walked = [];
+  for (const r of ROOTS) walk(r, walked);
+  const walkedRel = walked.map((f) => relative('.', f).replace(/\\/g, '/'));
+  const publishedRefs = walkedRel.filter(
+    (f) => f.startsWith('skills/') && f.includes('/references/'),
+  );
+  const generatedRefs = walkedRel.filter((f) => f.startsWith('content/docs/references/'));
+  expect('#15061 — the walk REACHES the published catalog\'s reference pages under skills/: '
+    + 'hand-authored companions that ship verbatim to third parties via `npx skills add`, plus '
+    + 'generator-owned index pages whose fix site is their generator. Restoring the name-keyed '
+    + 'skip empties this while the gate itself stays green, which is the dormancy this case '
+    + 'exists for',
+    publishedRefs.length > 0);
+  expect('#15061 — and DOES NOT reach content/docs/references/, the generated tree the exclusion '
+    + 'was always about: a claim site there names the wrong file, because the fix site is the '
+    + 'spec source. This half is why the exclusion is a PATH — dropping it entirely would pass '
+    + 'the case above',
+    generatedRefs.length === 0);
+  expect('#15061 — the walk reaches more than those reference pages, so the two cases above are '
+    + 'judging a real population rather than passing on a coincidence',
+    walkedRel.length > publishedRefs.length);
+  expect('#15061 — every SKIP_DIRS entry is DECLARED installed-or-generated here: the criterion '
+    + 'the three surviving entries meet at every depth and under every root, and `references` '
+    + 'never did. A fourth entry has to be stated rather than appended',
+    [...SKIP_DIRS].every((d) => INSTALLED_OR_GENERATED.has(d)));
+  expect('#15061 — every SKIP_SUBTREES entry lies under a configured ROOT and EXISTS: a path '
+    + 'excluding a tree no root reaches, or one that has since moved, is dead configuration that '
+    + 'reads as coverage',
+    [...SKIP_SUBTREES].every(
+      (p) => ROOTS.some((r) => p === r || p.startsWith(`${r}/`)) && existsSync(p),
+    ));
 
   // ── The table is a table, and it ships exactly one row (#13582 ruling) ─────
   //
@@ -1303,7 +1424,12 @@ function selfTest() {
     process.exit(1);
   }
   console.log(
-    'OK  self-test: the vocabulary is a TABLE — a synthetic row is driven through the real '
+    `OK  self-test: the walk reaches ${walkedRel.length} markdown file(s) across the roots, `
+    + `${publishedRefs.length} of them published reference pages under skills/, and `
+    + `${generatedRefs.length} under the generated content/docs/references/ tree — both `
+    + 'directions pinned from the WALK, never from a typed count, so a skip that empties the '
+    + 'published half and one that swallows the generated half each name themselves. '
+    + 'The vocabulary is a TABLE — a synthetic row is driven through the real '
     + 'engine, keyed separately in the ledger and honouring its own window — while the shipped '
     + 'table is pinned as an EXACT ENUMERATION of its four row ids in order, so the next word is '
     + 'a card rather than a drive-by. #13745\'s three rows each carry their own survey: the '

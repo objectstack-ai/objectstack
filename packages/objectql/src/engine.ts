@@ -5295,6 +5295,83 @@ export class ObjectQL implements IObjectQLEngine {
                   this.logger.warn(`Skipping ${pluralToSingular(key)} without a derivable name`, { id: ownerId });
                   continue;
               }
+              // [#14666] The DIVERGENT-container refusal (maintainer ruling
+              // 2026-09-03, direction 2). This seam used to reconcile a
+              // container's own `name` to the derived key silently, one line
+              // below: the author's field discarded with no diagnostic, while
+              // the OTHER source registrar
+              // (`MetadataPlugin._parseAndRegisterArtifact` ->
+              // `assertMetadataRegisterContract`, #7378 row 1) hard-failed the
+              // whole artifact load on that very same document. One document,
+              // two SOURCE registrars, opposite outcomes, and which one an
+              // author got depended on how their package was loaded. #7378
+              // row 1 already rules that resolving a name/key disagreement
+              // silently "in either direction" files the item under a key the
+              // caller never wrote, so the boot loop converges onto the
+              // refusal; the artifact door was not moved onto the rewrite.
+              //
+              // MEASURED, and it is why only this site changed: the second
+              // `toRegister` ternary in this method (the assembled
+              // `viewItems:` channel below) cannot carry a container at all —
+              // `AssembledViewArtifactSchema` is the view vocabulary MINUS the
+              // container branch, and every body it admits is
+              // `isAggregatedViewContainer === false`. Its ternary can only
+              // MINT a `name` onto an overlay that has none; it can never
+              // discard an authored one, because `resolveMetadataItemName`
+              // reads a non-container's own `name` FIRST.
+              //
+              // Scope is the ruling's named main risk, so the gate is three
+              // independent narrowings and each one is load-bearing:
+              //   * `key === 'views'` — this is the GENERIC metadata loop; no
+              //     other kind changes behaviour and they all keep the
+              //     reconcile below;
+              //   * `isAggregatedViewContainer(item)` — the CONTAINER branch
+              //     only. A standalone ViewItem's `name` is its identity, not
+              //     a binding, and it has no disagreement to make;
+              //   * `name` present AND different. A container carrying no
+              //     `name` is untouched (the reconcile below still mints the
+              //     derived key onto it); so is one whose `name` already
+              //     equals the derived key; and so is one that declares no
+              //     binding anywhere else, because `deriveViewContainerObject`
+              //     then derives the key FROM that same `name` and it cannot
+              //     disagree with itself.
+              //
+              // The runtime string deliberately carries NO tracker id: it is read by
+              // authors and operators who cannot resolve `#NNNN`
+              // (`check:doc-authoring`, maintainer ruling 2026-08-12). The rule it
+              // enforces is #7378 row 1, named in this comment instead, where the
+              // reader who can resolve it is already looking.
+              //
+              // The ADR-0112 envelope is the artifact door's exactly —
+              // `VALIDATION_ERROR` / 400 — because a document refused at one
+              // SOURCE registrar must be refused the same way at the other,
+              // and that equality is asserted in
+              // `view-container-divergent-name-registrars.test.ts`. The prose
+              // is this seam's own on purpose: `assertMetadataRegisterContract`
+              // opens its message with `IMetadataService.register(...)`, an API
+              // this seam does not call, and a refusal that misnames its own
+              // door is the opposite of "locate the mismatch".
+              if (
+                  key === 'views'
+                  && isAggregatedViewContainer(item)
+                  && typeof item.name === 'string'
+                  && item.name
+                  && item.name !== itemName
+              ) {
+                  const err: Error & { code?: string; status?: number } = new Error(
+                      `Invalid \`views:\` container from ${sourceLabel} '${ownerId}': the container's own `
+                      + `\`name\` is '${item.name}', which disagrees with the object key it binds to, `
+                      + `'${itemName}' (derived from its own \`object\`, else \`list.data.object\` / `
+                      + '`form.data.object`). A disagreement is almost always an authoring bug, and resolving '
+                      + 'it silently in either direction can file the item under a key the caller never wrote '
+                      + '(refuse loudly, locate the mismatch) — the artifact/HMR loader refuses '
+                      + 'this same document. Register under one name: drop `name`, or set it to '
+                      + `'${itemName}'.`,
+                  );
+                  err.code = 'VALIDATION_ERROR';
+                  err.status = 400;
+                  throw err;
+              }
               const toRegister = item.name === itemName ? item : { ...item, name: itemName };
               // [#5320] The `views:` tighten — containers ONLY, the contract the
               // stack schema has always declared (`stack.zod.ts`,

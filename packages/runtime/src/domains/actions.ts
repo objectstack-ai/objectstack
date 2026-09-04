@@ -684,7 +684,12 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
             try {
                 result = await actionExec.dispatchFlowAction(deps, _context, actionDef, {
                     objectName,
-                    record,
+                    // [#15168] `subject`, not `record` — the shared door derives
+                    // the flow context's `record` AND its `recordLoadDenied`
+                    // sibling from the same load outcome, so this door and the
+                    // MCP one cannot diverge on the signal the way the two
+                    // doors diverged before #14143.
+                    subject,
                     params: reqParams,
                     recordId,
                     ec,

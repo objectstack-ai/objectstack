@@ -51,6 +51,23 @@
  *   generator's output recomputed on the tree under test — every other reading
  *   of those paths, and every other path, is unchanged.
  *
+ * `--self-test` mode answers on the sweep's 0 and 1, and adds the repo-wide third:
+ *   0  every declared battery ran, and every case held.
+ *   1  a FINDING about this file — a case failed, or a battery fell below its
+ *      pinned floor because cases really did stop registering.
+ *   3  PREREQUISITE NOT MET — the toolchain the live #11705 battery EXECS is not
+ *      installed in this checkout, so that battery could not load its cases and
+ *      NOTHING was measured. ⛔ NOT a finding. Same number, same words and the
+ *      same frame as `scripts/import-prerequisite.mjs`, whose
+ *      `reportPrerequisiteNotMet` prints it; that module's header carries the
+ *      argument for a code of its own, and is not restated here.
+ *      It shares the digit with `--test`'s GOVERNED and cannot be confused with
+ *      it: the two are answers to different questions asked by different flags,
+ *      and no invocation passes both. Reading this condition as a shrunken
+ *      battery was the defect: a fresh worktree before `pnpm install` reported
+ *      5 of that battery's 7 cases and prescribed a hunt through the generator
+ *      for deleted code that was never deleted.
+ *
  * ## The regime this audit belongs to (maintainer ruling, 2026-08-18)
  *
  * A human merge IS the review record for a governed PR. The seat put it as
@@ -637,11 +654,12 @@
  */
 
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { historyHorizon } from './git-history.mjs';
+import { EXIT_PREREQUISITE_NOT_MET, INSTALL_FIX, reportPrerequisiteNotMet } from '../import-prerequisite.mjs';
 import { isEntrypoint } from '../invoked-as.mjs';
 
 // ── The self-test's own battery roster and floor (#13489) ──────────────────
@@ -683,16 +701,75 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the generator co-edit fence (#11084), pinned in BOTH directions': 10,
   'the #11705 generator-owned rows inside `skills/**`': 23,
   '#11705 end to end, against the REAL generator': 7,
+  "the live battery's prerequisite, and the floor it was misread as": 17,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 22;
+const SELF_TEST_BATTERY_FLOOR = 23;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
 // inflating whichever battery happened to run last.
 const UNATTRIBUTED_BATTERY = '(no battery open)';
+
+/**
+ * The floor, as a FUNCTION OF A LEDGER (#13489's rule, unchanged in every word
+ * it prints) — every declared battery ran, and ran its cases.
+ *
+ * Lifted out of `selfTest`'s body and given its ledger as an argument for one
+ * reason: the floor is what renders a battery's silence, and until it took its
+ * inputs it could not be handed a ledger to render. It had no pin of its own,
+ * so the direction that matters most — a genuinely deleted case still reds, and
+ * still names WHICH battery — was asserted nowhere. It is now, on fixture
+ * ledgers built from this roster, next to the prerequisite that must be judged
+ * BEFORE it. ⛔ Behaviour is unchanged: same order, same messages, same trailing
+ * line. Rewording any string here rewords a verdict a reader acts on.
+ *
+ * ⚠️ The counts are a FLOOR, not an equality — adding cases is ordinary work and
+ * must not red.
+ *
+ * @param {Map<string, number>} ledger  cases registered, per battery
+ * @param {Record<string, number>} declared  the roster to judge against
+ * @param {number} rosterFloor  the pinned size of that roster
+ * @returns {string[]} the failures, empty when every floor holds
+ */
+function batteryFloorFailures(ledger, declared = SELF_TEST_BATTERIES, rosterFloor = SELF_TEST_BATTERY_FLOOR) {
+  const declaredBatteries = Object.keys(declared);
+  const problems = [];
+  if (declaredBatteries.length < rosterFloor) {
+    problems.push(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${rosterFloor} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of ledger) {
+    if (declaredBatteries.includes(name)) continue;
+    problems.push(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = ledger.get(name) ?? 0;
+    if (count >= declared[name]) continue;
+    problems.push(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${declared[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${declared[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (problems.length > 0) {
+    problems.push(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
+  }
+  return problems;
+}
 
 const scriptPath = fileURLToPath(import.meta.url);
 const scriptDir = dirname(scriptPath);
@@ -789,7 +866,7 @@ export const GENERATED_SURFACE_EXCEPTIONS = Object.freeze([
   Object.freeze({
     id: 'spec-react-blocks',
     ruling: '#11705',
-    candidate: /^skills\/[^/]+\/(references\/react-blocks\.md|contracts\/react-blocks\.contract\.json)$/,
+    candidate: /^skills\/[^/]+\/references\/react-blocks\.md$/,
     surfaceId: 'skills-catalog',
     generator: 'pnpm --filter @objectstack/spec gen:react-blocks',
     verify: Object.freeze({ pkg: '@objectstack/spec', script: 'scripts/build-react-blocks-contract.ts', gate: 'check:react-blocks' }),
@@ -1228,6 +1305,99 @@ export function runSinkGenerator(root, entry) {
       /* a leftover temp dir is not a provenance answer */
     }
   }
+}
+
+/**
+ * The runner `runSinkGenerator` hands the generator to. Named, because the
+ * prerequisite probe below has to look for the same binary the recompute execs,
+ * and two spellings of it would be two answers to one question.
+ */
+export const GENERATOR_TOOLCHAIN_RUNNER = 'tsx';
+
+/**
+ * Can the row's recompute run on this tree AT ALL? `null` when it can, a stated
+ * refusal when it cannot.
+ *
+ * ## Why this exists, and why it must be asked BEFORE the floors
+ *
+ * `runSinkGenerator` is fail-closed by design, and right to be: for the AUDIT, a
+ * generator that cannot run means the path stays governed. But every one of its
+ * failures wears the same shape — `outputs: null` with a reason string — and the
+ * self-test's live #11705 battery branches on that shape, registering fewer
+ * cases when there is no output set to assert against. In a freshly created
+ * worktree, before `pnpm install`, that is what happens: measured, `pnpm
+ * --filter @objectstack/spec exec tsx …` exits 254 with
+ * `ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command "tsx" not found`, the battery
+ * registers 5 of its pinned 7, and the FLOOR renders that as
+ * "cases that used to run no longer do — the battery is the bug", prescribing a
+ * hunt for an early return or a deleted block. Nothing was deleted. The
+ * toolchain was absent, and the run measured nothing.
+ *
+ * ⛔ The reason string cannot carry this distinction: an uninstalled checkout and
+ * a generator that genuinely reports drift BOTH arrive as a non-zero `--check`
+ * exit, and classifying by that text would fold a real finding into a refusal —
+ * the expensive direction. So the question is asked of the ENVIRONMENT instead,
+ * before anything runs, and it is answered by looking for the same binary
+ * `pnpm exec` would.
+ *
+ * ## What this can and cannot change
+ *
+ * It is strictly a NARROWING of one exit code into another: a tree whose
+ * toolchain resolves takes the identical path it took before this existed, and
+ * a tree whose toolchain does not resolve exits 3 instead of 1. There is no
+ * branch here that turns a red into a green — nothing it answers can lift a
+ * governed path, silence a case, or lower a floor, and the audit
+ * (`--test`, the sweep) never consults it.
+ *
+ * Two remedies, kept apart because they are different acts: nothing installed at
+ * all, and an install that does not carry the runner. Anything this probe cannot
+ * see still falls through to the fail-closed reading exactly as before — it
+ * removes the measured cause of the misdiagnosis, and claims nothing wider.
+ *
+ * @param {string} root  the tree the recompute would run in
+ * @param {object} entry  the register row whose generator would be run
+ * @returns {{ headline: string, detail: string[], fix: string } | null}
+ */
+export function generatorToolchainPrerequisite(root, entry) {
+  const modules = join(root, 'node_modules');
+  const runner = join(modules, '.bin', GENERATOR_TOOLCHAIN_RUNNER);
+  const generator = entry?.generator ?? "the register row's generator";
+  if (!existsSync(modules)) {
+    return {
+      headline: `this checkout has no \`node_modules\`, so \`${generator}\` cannot be run here.`,
+      detail: [
+        `Looked for:  ${modules}`,
+        '',
+        'The live #11705 case runs that generator on THIS tree and reads the output set the',
+        'generator itself declares — the one case a fixture cannot stand in for. With nothing',
+        `installed, the recompute cannot exec \`${GENERATOR_TOOLCHAIN_RUNNER}\`; the run comes back with no output`,
+        'set, and the battery registers fewer cases than it pins. That is a battery that could',
+        'not LOAD, not one that shrank.',
+        '',
+        'Re-run:  pnpm check:pm-governed-merges — the advisory below names this file by PATH,',
+        'and without `--self-test` that command runs the network SWEEP, not these cases.',
+      ],
+      fix: INSTALL_FIX,
+    };
+  }
+  if (!existsSync(runner)) {
+    return {
+      headline: `\`${GENERATOR_TOOLCHAIN_RUNNER}\` is not installed in this checkout, so \`${generator}\` cannot be run here.`,
+      detail: [
+        `Looked for:  ${runner}`,
+        '',
+        '`node_modules` is present, so this checkout was installed at least once — but the',
+        `runner \`${generator}\` execs is not on it, which a partial, pruned or interrupted`,
+        'install produces. The live #11705 case reaches the generator exactly as it does in a',
+        'checkout with nothing installed at all, and measures nothing either way.',
+        '',
+        'Re-run:  pnpm check:pm-governed-merges — the advisory below names this file by PATH,',
+        'and without `--self-test` that command runs the network SWEEP, not these cases.',
+      ],
+      fix: INSTALL_FIX,
+    };
+  }
+  return null;
 }
 
 /**
@@ -2369,7 +2539,7 @@ const REPLAYS = [
  */
 const REGISTER_SAMPLES = {
   'spec-skill-refs': 'skills/objectstack-ui/references/_index.md',
-  'spec-react-blocks': 'skills/objectstack-ui/contracts/react-blocks.contract.json',
+  'spec-react-blocks': 'skills/objectstack-ui/references/react-blocks.md',
 };
 
 // Returned by `selfTest()` only after its verdict is printed. The dispatch
@@ -2379,6 +2549,26 @@ const REGISTER_SAMPLES = {
 const SELF_TEST_VERDICT = 'check-governed-merges self-test reached its verdict';
 
 async function selfTest() {
+  // ── The prerequisite, asked BEFORE a single case runs ────────────────────
+  //
+  // Placed here rather than beside the live battery it guards, so the frame's
+  // load-bearing clause — "this gate exited before running a single check" — is
+  // literally true when it prints. A run that refuses here has measured
+  // NOTHING, and says so; a run that gets past this line is in a checkout where
+  // the live battery's generator can be executed, and every floor below judges
+  // exactly as it did before this guard existed.
+  const repoRoot = resolve(scriptDir, '..', '..');
+  const liveGeneratorRow = GENERATED_SURFACE_EXCEPTIONS.find((e) => e.id === 'spec-skill-refs');
+  const unmetPrerequisite = generatorToolchainPrerequisite(repoRoot, liveGeneratorRow);
+  if (unmetPrerequisite) {
+    // Prints the shared frame and exits `EXIT_PREREQUISITE_NOT_MET`; never returns.
+    reportPrerequisiteNotMet(
+      import.meta.url,
+      unmetPrerequisite,
+      'the governed predicate, the exception register or the battery floors hold',
+    );
+  }
+
   // The battery ledger this self-test's floor is evaluated against (#13489).
   // `battery()` opens a battery; every assertion below is attributed to the one
   // most recently opened, so a section that stops running stops registering and
@@ -3425,9 +3615,14 @@ async function selfTest() {
   assert('every-sample-is-matched-by-the-row-it-illustrates',
     Object.entries(REGISTER_SAMPLES).every(([id, p]) => generatedExceptionFor(p)?.id === id), JSON.stringify(REGISTER_SAMPLES));
   assert('a-generated-index-routes-to-the-skill-refs-generator', generatedExceptionFor(genIndex) === skillRefs);
-  assert('both-react-blocks-outputs-route-to-their-own-generator',
-    generatedExceptionFor('skills/objectstack-ui/references/react-blocks.md') === reactBlocks &&
-      generatedExceptionFor('skills/objectstack-ui/contracts/react-blocks.contract.json') === reactBlocks);
+  assert('the-react-blocks-output-routes-to-its-own-generator',
+    generatedExceptionFor('skills/objectstack-ui/references/react-blocks.md') === reactBlocks);
+  // The retirement, asserted rather than remembered (#14296 item 3 = A): the
+  // generator emits ONE rendering, so the JSON path it used to write is not a
+  // register member any more. A candidate that still matched it would hand a
+  // deleted path a recompute nothing can satisfy.
+  assert('the-retired-json-rendering-is-no-longer-a-register-member',
+    generatedExceptionFor('skills/objectstack-ui/contracts/react-blocks.contract.json') === null);
   // ⭐ The ruled limit, stated as a membership question: hand-authored skill
   // content is not on the register at all, so it never reaches a generator.
   assert('a-hand-authored-skills-file-is-not-registered-and-is-never-consulted-against-a-generator',
@@ -3515,7 +3710,7 @@ async function selfTest() {
   // guard job's real environment, where fail-closed is the correct answer, so
   // it is pinned rather than skipped.
   battery('#11705 end to end, against the REAL generator');
-  const liveRun = runSinkGenerator(resolve(scriptDir, '..', '..'), skillRefs);
+  const liveRun = runSinkGenerator(repoRoot, skillRefs);
   let liveNote;
   if (Array.isArray(liveRun.outputs) && liveRun.outputs.length > 0) {
     assert('the-live-generator-declares-the-output-set-itself-never-a-hand-copied-list',
@@ -3544,56 +3739,137 @@ async function selfTest() {
     rejectedRender.includes('GOVERNED') && rejectedRender.includes('did NOT lift') && rejectedRender.includes('differs (fixture)'), rejectedRender);
   assert('a-verdict-without-exceptions-renders-exactly-as-before', renderExceptionLines(testVerdict(['AGENTS.md'])) === '' && !renderTestVerdict(testVerdict(['AGENTS.md'])).includes('#9866'));
 
+  // ── the live battery's prerequisite, and the floor it was misread as ─────
+  //
+  // Two conditions that used to print the same verdict, pinned apart. An absent
+  // toolchain is NOT MEASURED — exit 3, the prerequisite named. A case that
+  // genuinely stopped registering is a FINDING — exit 1, the battery named. The
+  // floor is not one case weaker for it; what changed is that the unmeasurable
+  // condition no longer reaches it wearing a finding's clothes.
+  battery("the live battery's prerequisite, and the floor it was misread as");
+  const emptyCheckout = mkdtempSync(join(tmpdir(), 'os-governed-prereq-empty-'));
+  const prunedCheckout = mkdtempSync(join(tmpdir(), 'os-governed-prereq-pruned-'));
+  const copiedCheckout = mkdtempSync(join(tmpdir(), 'os-governed-prereq-copy-'));
+  try {
+    // An install that produced a tree but not the runner — a pruned, partial or
+    // interrupted one. It reaches the live battery exactly as an empty checkout
+    // does, and its remedy is the same, but the two are not the same reading.
+    mkdirSync(join(prunedCheckout, 'node_modules', '.bin'), { recursive: true });
+    const noInstall = generatorToolchainPrerequisite(emptyCheckout, liveGeneratorRow);
+    const noRunner = generatorToolchainPrerequisite(prunedCheckout, liveGeneratorRow);
+    assert('an-uninstalled-checkout-is-a-prerequisite-miss-not-a-shrunken-battery',
+      noInstall !== null && noInstall.headline.includes('node_modules'), JSON.stringify(noInstall));
+    assert('and-it-prescribes-the-install-never-a-hunt-for-code-nobody-deleted',
+      noInstall?.fix === INSTALL_FIX && noInstall.detail.some((l) => l.includes('not one that shrank')), JSON.stringify(noInstall));
+    assert('an-install-that-lacks-the-runner-names-the-RUNNER-not-a-missing-tree',
+      noRunner !== null && noRunner.headline.includes(GENERATOR_TOOLCHAIN_RUNNER) && !noRunner.headline.includes('has no'), JSON.stringify(noRunner));
+    assert('the-checkout-this-run-loaded-from-MEETS-it-so-every-floor-below-judges-as-before',
+      generatorToolchainPrerequisite(repoRoot, liveGeneratorRow) === null, repoRoot);
+    assert('the-refusal-code-is-the-repo-wide-3-and-never-a-findings-1',
+      EXIT_PREREQUISITE_NOT_MET === 3 && EXIT_PREREQUISITE_NOT_MET !== EXIT_CANNOT_SWEEP, String(EXIT_PREREQUISITE_NOT_MET));
+
+    // End to end, on the card's own repro: THIS file, in a checkout with no
+    // `node_modules`, read back through the exit code a shell actually sees.
+    // The copied set is self-verifying — an import added here and not added
+    // there fails to load, and the exit-3 assertion below reds rather than
+    // passing on a process that died for an unrelated reason.
+    const moduleGraph = [
+      'scripts/pm/check-governed-merges.mjs',
+      'scripts/pm/git-history.mjs',
+      'scripts/import-prerequisite.mjs',
+      'scripts/cli-build-prerequisite.mjs',
+      'scripts/invoked-as.mjs',
+    ];
+    // ⛔ And the child must never spawn a child of its own. It reaches this
+    // battery only when the probe did NOT refuse — and there its fixture tree
+    // is a perfect seed for the next copy. Measured, with the probe ablated:
+    // an unbounded chain of self-tests, one per second, each waiting on the
+    // next, 67 processes before it was cut off by hand. A HANG is the worst
+    // reading a gate can return — neither green nor red, and nothing in CI
+    // distinguishes it from slow — so a marked run refuses to spawn and FAILS
+    // these cases with the reason, in the same number of them.
+    const childArgv = [join(copiedCheckout, 'scripts/pm/check-governed-merges.mjs'), '--self-test', '--fixture-child'];
+    const nestedFixture = process.argv.includes('--fixture-child');
+    let refused;
+    if (nestedFixture) {
+      refused = {
+        status: null,
+        stdout: '',
+        stderr: 'this run was spawned BY the prerequisite battery and then reached that battery itself, '
+          + 'which can only happen when the probe did not refuse. Refusing to spawn a grandchild.',
+      };
+    } else {
+      for (const rel of moduleGraph) {
+        mkdirSync(join(copiedCheckout, dirname(rel)), { recursive: true });
+        cpSync(join(repoRoot, rel), join(copiedCheckout, rel));
+      }
+      refused = spawnSync(process.execPath, childArgv, {
+        encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 120_000,
+      });
+    }
+    const said = `${refused.stderr ?? ''}${refused.stdout ?? ''}`;
+    assert('the-fixture-child-is-marked-so-it-can-never-spawn-one-of-its-own',
+      childArgv.includes('--fixture-child') && nestedFixture === false, JSON.stringify(childArgv.slice(1)));
+    assert('an-uninstalled-checkout-refuses-end-to-end-with-that-very-code',
+      refused.status === EXIT_PREREQUISITE_NOT_MET, `status=${refused.status} ${said.slice(0, 400)}`);
+    assert('and-the-refusal-names-the-class-the-prerequisite-and-the-remedy',
+      said.includes('PREREQUISITE NOT MET') && said.includes('node_modules') && said.includes(INSTALL_FIX), said.slice(0, 400));
+    assert('and-states-in-words-that-NOTHING-was-measured',
+      said.includes('Nothing was measured') && said.includes('It is NOT a finding'), said.slice(0, 400));
+    assert('and-hands-the-reader-the-command-that-actually-re-runs-these-cases',
+      said.includes('pnpm check:pm-governed-merges'), said.slice(0, 400));
+    assert('and-the-confidently-wrong-diagnosis-is-GONE-from-what-it-prints',
+      !said.includes('below its pinned floor') && !said.includes('cases that used to run no longer do'), said.slice(0, 400));
+
+    // The other direction — the floor is still the floor. Ledger fixtures are
+    // built FROM this roster, so each message quotes the real pinned number and
+    // a floor moved without a case cannot leave these green.
+    const fullLedger = () => new Map(Object.entries(SELF_TEST_BATTERIES));
+    const liveBattery = '#11705 end to end, against the REAL generator';
+    const oneShort = fullLedger();
+    oneShort.set(liveBattery, SELF_TEST_BATTERIES[liveBattery] - 1);
+    const shortMessages = batteryFloorFailures(oneShort);
+    const neverRan = fullLedger();
+    neverRan.delete(liveBattery);
+    const stray = fullLedger();
+    stray.set(UNATTRIBUTED_BATTERY, 2);
+    const trimmedRoster = Object.fromEntries(Object.entries(SELF_TEST_BATTERIES).slice(0, SELF_TEST_BATTERY_FLOOR - 1));
+    assert('a-battery-one-case-short-still-reds-and-still-names-ITSELF',
+      shortMessages.some((m) => m.includes(liveBattery) && m.includes(`below its pinned floor of ${SELF_TEST_BATTERIES[liveBattery]}`)), JSON.stringify(shortMessages));
+    assert('a-battery-that-registered-nothing-at-all-is-named-as-DID-NOT-RUN',
+      batteryFloorFailures(neverRan).some((m) => m.includes(liveBattery) && m.includes('DID NOT RUN')), JSON.stringify(batteryFloorFailures(neverRan)));
+    assert('an-assertion-attributed-to-no-declared-battery-is-named-too',
+      batteryFloorFailures(stray).some((m) => m.includes(UNATTRIBUTED_BATTERY) && m.includes('nothing floors')), JSON.stringify(batteryFloorFailures(stray)));
+    assert('a-roster-that-lost-an-entry-is-caught-by-the-rosters-own-size-floor',
+      batteryFloorFailures(fullLedger(), trimmedRoster).some((m) => m.includes('takes its own floor with it')), JSON.stringify(batteryFloorFailures(fullLedger(), trimmedRoster).slice(0, 2)));
+    assert('and-a-ledger-that-meets-every-floor-produces-no-failure-at-all',
+      batteryFloorFailures(fullLedger()).length === 0, JSON.stringify(batteryFloorFailures(fullLedger())));
+    assert('every-breach-still-closes-with-the-restore-it-line-exactly-once',
+      shortMessages.filter((m) => m.includes('the battery is the bug, not the number')).length === 1 && shortMessages.at(-1).includes('restore it'), JSON.stringify(shortMessages.at(-1)));
+  } finally {
+    for (const dir of [emptyCheckout, prunedCheckout, copiedCheckout]) {
+      try {
+        rmSync(dir, { recursive: true, force: true });
+      } catch {
+        /* a leftover temp dir is not a verdict */
+      }
+    }
+  }
+
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so
   // the success line below can only be printed by a run in which the set of
   // batteries that registered assertions EQUALS the set declared. A set
   // difference names WHICH battery stopped; a count says only that something did.
-  const floorFailure = (message) => { failures.push(message); };
-  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
-  let floorBreached = false;
-  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
-    floorBreached = true;
-    floorFailure(
-      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
-        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
-    );
-  }
-  for (const [name, count] of batterySeen) {
-    if (declaredBatteries.includes(name)) continue;
-    floorBreached = true;
-    floorFailure(
-      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
-        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
-    );
-  }
-  for (const name of declaredBatteries) {
-    const count = batterySeen.get(name) ?? 0;
-    if (count >= SELF_TEST_BATTERIES[name]) continue;
-    floorBreached = true;
-    floorFailure(
-      count === 0
-        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
-          'The verdict below would have claimed those cases hold.'
-        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
-          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
-    );
-  }
-  if (floorBreached) {
-    floorFailure(
-      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
-        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
-        'skips) and restore it.',
-    );
-  }
+  failures.push(...batteryFloorFailures(batterySeen));
 
   if (failures.length > 0) {
     console.error(`✗ check-governed-merges --self-test — ${failures.length} failure(s)\n`);
     for (const failure of failures) console.error(`  • ${failure}`);
     process.exit(1);
   }
-  console.log(`✓ check-governed-merges --self-test: ${checked} assertions (the unified governed predicate + near misses, subject→PR spellings, window parsing, the #12633 landing window — the QS-7 regression pin in both directions, the topological close beyond the budget, the unproven-boundary EDGE, the listed-or-INCOMPLETE invariant over every fixture, the escalating floors, per-repo --since-ref resolution and its named fallback, and the window words — the replay fixtures, the five-repo resolution incl. absent/wrong-origin/relocated checkouts, the attribution channel chain + its proxy-transport re-arm plan and its one named fallback line, the three-way attribution column (resolved · every-channel-failed · NOT LOOKED UP, and the note pointer that belongs to the middle one alone), the --test pre-arm predicate, the generated-artifact provenance exception — the register's invariants incl. the RETIRED #9866 row staying retired (no row lifts anything under .claude/**, and the audit workflow is plainly governed again), a row with no recompute failing closed, lift/reject/absent-provenance semantics, the untouched mixed-diff rule, named-rows-not-a-class, the #11084 generator co-edit fence in both directions incl. a row with no instrument tree, and its render words — the #11705 generator-owned rows inside skills/** (a genuine generated file passes, the same path hand-edited does not, a path no generator declares is hand-authored content, per-row fences, and the enumeration read from the real generator), the exit table, the report wording pins, and the #13307 remote-reachability leg — the pure freshness verdicts in every branch (unreachable · a remote naming no commit · an unreadable local tip · a mirror behind its remote · the two-unreadable-shas degenerate case that must never read as a match), the report words in both directions (an unreachable repo never renders the tick, a reachable one still says a MEASURED zero, and a row with no remote reading never claims one), and the REAL prober on local bare-repo fixtures over the file transport — a live remote, a deleted one, the --exit-code branch, and a mirror the remote moved past — the #13423 identity leg (an origin no slug parses from refuses, pure and end-to-end, with audited reachable only through a parsed matching slug), the #13424 per-repo window resolution (a sibling-only pin resolves in its own repo, the self-only control still errors, and the end-to-end sibling-pin sweep reports instead of exiting 1), the #13307 sweep-code provenance line in all three branches, and the #13836 attribution set — every refusal carries its precondition category on the row, in the footer, and in --json; the shallow-clone path in both directions; and the run-1-vs-run-2 flip reproduced on real fixtures with zero local writes).\n  ${liveNote}`);
+  console.log(`✓ check-governed-merges --self-test: ${checked} assertions (the unified governed predicate + near misses, subject→PR spellings, window parsing, the #12633 landing window — the QS-7 regression pin in both directions, the topological close beyond the budget, the unproven-boundary EDGE, the listed-or-INCOMPLETE invariant over every fixture, the escalating floors, per-repo --since-ref resolution and its named fallback, and the window words — the replay fixtures, the five-repo resolution incl. absent/wrong-origin/relocated checkouts, the attribution channel chain + its proxy-transport re-arm plan and its one named fallback line, the three-way attribution column (resolved · every-channel-failed · NOT LOOKED UP, and the note pointer that belongs to the middle one alone), the --test pre-arm predicate, the generated-artifact provenance exception — the register's invariants incl. the RETIRED #9866 row staying retired (no row lifts anything under .claude/**, and the audit workflow is plainly governed again), a row with no recompute failing closed, lift/reject/absent-provenance semantics, the untouched mixed-diff rule, named-rows-not-a-class, the #11084 generator co-edit fence in both directions incl. a row with no instrument tree, and its render words — the #11705 generator-owned rows inside skills/** (a genuine generated file passes, the same path hand-edited does not, a path no generator declares is hand-authored content, per-row fences, and the enumeration read from the real generator), the exit table, the report wording pins, and the #13307 remote-reachability leg — the pure freshness verdicts in every branch (unreachable · a remote naming no commit · an unreadable local tip · a mirror behind its remote · the two-unreadable-shas degenerate case that must never read as a match), the report words in both directions (an unreachable repo never renders the tick, a reachable one still says a MEASURED zero, and a row with no remote reading never claims one), and the REAL prober on local bare-repo fixtures over the file transport — a live remote, a deleted one, the --exit-code branch, and a mirror the remote moved past — the #13423 identity leg (an origin no slug parses from refuses, pure and end-to-end, with audited reachable only through a parsed matching slug), the #13424 per-repo window resolution (a sibling-only pin resolves in its own repo, the self-only control still errors, and the end-to-end sibling-pin sweep reports instead of exiting 1), the #13307 sweep-code provenance line in all three branches, and the #13836 attribution set — every refusal carries its precondition category on the row, in the footer, and in --json; the shallow-clone path in both directions; and the run-1-vs-run-2 flip reproduced on real fixtures with zero local writes — and the live battery's own PREREQUISITE, asked before a single case runs: an uninstalled checkout refuses with the repo-wide NOT-MEASURED code end to end instead of reporting a shrunken battery, while the floor still names the battery, by itself, for a case that genuinely stopped registering).\n  ${liveNote}`);
 
   return SELF_TEST_VERDICT;
 }

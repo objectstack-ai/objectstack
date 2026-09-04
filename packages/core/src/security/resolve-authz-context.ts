@@ -59,6 +59,7 @@ import {
 } from '@objectstack/spec';
 import type { AuthzPosture, TenancyPosture } from '@objectstack/spec/security';
 import { postureEnforcesWall } from '@objectstack/spec/security';
+import { isValueDomainMember } from '@objectstack/spec/shared';
 
 import { resolveApiKeyAdmission } from './api-key.js';
 import type { ApiKeyRefusalReason } from './api-key.js';
@@ -1007,12 +1008,15 @@ export async function hasPlatformAdminStanding(
 
 // ── Localization (ADR-0053 Phase 2) ─────────────────────────────────────────
 
-function isValidTimeZone(tz: string): boolean {
-  try { new Intl.DateTimeFormat('en-US', { timeZone: tz }); return true; } catch { return false; }
-}
+// Time-zone membership is `@objectstack/spec/shared`'s ONE definition — the
+// `Intl.DateTimeFormat` probe, NOT `Intl.supportedValuesOf('timeZone')` (which
+// omits `UTC`, `Asia/Kolkata` and `Europe/Kyiv`; that module's header carries
+// the measurement). This file used to re-state the probe as a module-private
+// `isValidTimeZone`; the copy is gone and the acceptance it defined is pinned
+// in `resolve-authz-context.time-zone-domain.pin.test.ts`.
 function coerceTimeZone(value: unknown): string | undefined {
   const s = typeof value === 'string' ? value.trim() : value != null ? String(value).trim() : '';
-  return s && isValidTimeZone(s) ? s : undefined;
+  return s && isValueDomainMember('iana_time_zone', s) ? s : undefined;
 }
 function coerceLocale(value: unknown): string | undefined {
   const s = typeof value === 'string' ? value.trim() : value != null ? String(value).trim() : '';

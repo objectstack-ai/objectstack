@@ -1,5 +1,1049 @@
 # @objectstack/service-external-datasource
 
+## 17.3.0
+
+### Minor Changes
+
+- 3d79144: feat(service-datasource): `DatasourceDriverHandle.introspectSchema` declares the spec introspection contract, so a mis-shaped custom driver fails to compile naming the wrong field (#11381, option C of the #11123 ruling)
+  
+  **BREAKING** for TypeScript hosts that build custom external-datasource
+  drivers, shipped as `minor` under the repo's launch-window convention for
+  breaking changes.
+  
+  `DatasourceDriverHandle.introspectSchema` — the seam every host-built driver
+  crosses, since the framework deliberately ships no driver-by-id registry —
+  was typed `Promise<unknown>`. The `isPrimary` → `primaryKey` retirement
+  (#11124, shipped in 17.2.0) named the compiler as the channel that reaches
+  every affected consumer, but against an `unknown` return that channel
+  provably never fired: a host driver spelling the per-column primary-key flag
+  `isPrimary`, or returning `{ tables }` with no `dialect`/`introspectedAt`,
+  compiled clean, and the mis-shape surfaced only as a federated table whose
+  records silently could not be located or updated.
+  
+  The member now declares `Promise<IntrospectedSchema>` — the one introspection
+  contract in `packages/spec` (`contracts/schema-diff-service.ts`). A
+  mis-shaped driver is refused at compile time, at the offending field:
+  `Property 'primaryKey' is missing in type '…' but required in type
+  'IntrospectedColumn'`, and on a fresh literal additionally `'isPrimary' does
+  not exist in type 'IntrospectedColumn'`. A driver that already returns the
+  spec shape — or a richer declared type extending it, the driver-sql /
+  objectql pattern (table-level `primaryKeys`, per-column `maxLength`) —
+  compiles unchanged.
+  
+  Runtime behaviour does not change. The `primaryKeyReader` compatibility belt
+  in `ExternalDatasourceService` keeps absorbing the retired spelling from
+  producers no compiler reaches (drivers already built against older versions,
+  plain-JS drivers, casts). Removing that belt is #11123 option B — a later,
+  separate step gated on this tightening being released and the retirement
+  being published — and is not part of this change.
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/services/service-datasource/src/contracts/datasource-driver-factory.ts#DatasourceDriverHandle) the tightened member is a published runtime TypeScript interface describing a driver handle's capability surface — not a metadata surface. There is no Zod schema, no `packages/spec` declaration of the old `Promise<unknown>` signature, and no stored representation of a driver handle, so `objectstack migrate meta` has nothing to rewrite; the channel that reaches every affected consumer is the compiler, precisely and at every site. -->
+- ef8a4b9: feat(service-datasource,service-cluster): fan datasource record writes out to peer replicas — a deleted datasource no longer keeps draining `/api/v1/ready` on every replica that did not serve the DELETE (#13805)
+  
+  Measured on a live 3-replica EE deployment: the ObjectQL DRIVER registry had
+  no cluster propagation in either direction. Each replica filled it at boot
+  from the shared datasource records and mutated it only for the writes IT
+  served, so after `DELETE /api/v1/datasources/:name` only the replica that
+  served the DELETE evicted the stuck driver (#13578's door) — the other N-1
+  kept it, and `/api/v1/ready` kept answering 503 there, until restart. A
+  datasource created through one replica likewise had no pool on any other
+  until restart.
+  
+  Maintainer-ruled design (2026-09-01): the driver registry adopts the same
+  cluster-invalidation family `metadata.mutated` (#13331) established — no
+  second propagation mechanism, no bespoke poll loop, and no delete-only
+  broadcast (that would have made delete more cluster-aware than create, a new
+  asymmetry rather than a repair).
+  
+  - **Symmetric publisher at the three write doors.** `DatasourceAdminService`
+    now publishes the record's ADDRESS on a new cluster channel
+    `datasource.mutated` (`DATASOURCE_MUTATION_CLUSTER_CHANNEL`, payload
+    `ClusterDatasourceMutationPayload` — `{ originNode?, name }`) after
+    `createDatasource`, `updateDatasource` and `removeDatasource`. Fire-and-
+    forget: a publish failure never fails the write it announces.
+    `migrateCredential` does not publish — it leaves the live pool alone by
+    design, on every replica alike.
+  - **Peers converge from their own read of the SHARED record.** On receipt a
+    replica re-reads the durable `sys_metadata` row for that name — the same
+    store its boot rehydration reads, not its per-replica metadata registry —
+    and converges its live pool through the seams it already owns: builds what
+    is missing, rebuilds in place what changed (`reregisterPool`, keeping the
+    old pool on failure exactly as the serving replica's update path does),
+    evicts what is gone (`unregisterPool` → the #13578 eviction door), and
+    leaves a matching pool untouched. The payload is a signal, never trusted
+    content, so a duplicate or re-ordered delivery converges to the same pool
+    state by construction — which is what makes a replayed create safe without
+    any new idempotency machinery. A name the replica never pooled is left
+    alone, so a stray signal cannot reach a code-defined pool.
+  - **New attach seam, mirrored from the shipped bridges.**
+    `DatasourceAdminService.attachDatasourceMutationPubSub(pubsub, nodeId)` —
+    idempotent on the `(pubsub, nodeId)` pair, loopback suppression via
+    `originNode`, shaped after the protocol's `attachMetadataMutationPubSub()`.
+    Only `IPubSub` from `@objectstack/spec/contracts` crosses it:
+    `@objectstack/service-datasource` takes no dependency on the cluster
+    service, and `@objectstack/objectql` — the registry's owner — is handed no
+    bus. The host wires the receive half through a new optional
+    `DatasourceAdminServiceConfig.convergePool` seam; `DatasourceAdminServicePlugin`
+    supplies it.
+  - **`MetadataClusterBridgePlugin` gains a third, independent lane** that
+    late-binds the seam at `kernel:ready` beside the metadata-service and
+    protocol lanes, duck-typed on the `datasource-admin` service. It skips the
+    in-process memory driver (nothing to fan out to), the guard the other lanes
+    carry, so a single-replica boot behaves byte-identically to before.
+  
+  No shipped driver exceeds at-most-once delivery, so a lost message still
+  degrades to the pre-existing bound (the next boot's full rehydration); this
+  channel narrows the window from "until every replica restarts" to one network
+  hop. The `/api/v1/meta/datasource` metadata registry's own cross-replica
+  coherence (#13609) is a different sink and is not touched here.
+- a35fb43: Updating a datasource now rebuilds its live pool when the change actually bears on connectivity — and `active: false` actually takes it out of service
+  
+  `updateDatasource` persisted the merged record and called `registerPool`, whose
+  connect-path idempotency guard answered `already-registered` while the OLD
+  driver held the name and returned before building anything. Nothing on the
+  update path called `disconnect` first. So reconfiguring a datasource — new
+  host, new credentials, new pool settings, `active: false` — changed the stored
+  record and left the running connection untouched until process restart, while
+  `toSummary` kept reporting the ORIGINAL connect's retained `connected`: a
+  successful save describing a pool the record no longer declared. The
+  `active: false` corner is security-adjacent — an explicitly disabled data
+  plane kept serving.
+  
+  What "Save" now means for the live pool, decided by what actually changed:
+  
+  - **A connectivity-bearing field changed** (`driver`, `config`, `external`
+    including `credentialsRef`, `pool`, `schemaMode`, `active` — the set verified
+    against what `attemptConnect` reads into driver construction; a supplied
+    secret counts too, since a rewrap-in-place changes the credential without
+    changing the ref) → the pool is rebuilt in place via the new
+    `DatasourceConnectionService.reconnect`: the old registration is evicted
+    (the #13578 door), a new driver is built FROM THE NEW RECORD through the one
+    shared connect path, and the replaced pool's connection is closed.
+  - **The rebuild fails** → the OLD driver instance is restored (with the
+    datasource def eviction removed alongside it), so the datasource is never
+    left pool-less: the previous configuration keeps serving while the retained
+    verdict is loudly degraded and says exactly that. Runtime-admin writes still
+    never brick a running server over a UI action.
+  - **`active: false`** → the pool is torn down and the registry stops answering
+    the name — matching every other lifecycle door (`connectDeclared` and boot
+    rehydration never build a pool for a disabled record). `createDatasource`
+    gets the same guard: a datasource born disabled no longer comes up serving.
+  - **Nothing connectivity-bearing changed** (a label edit) → the idempotent
+    no-op path, exactly as before: same driver instance, no eviction, no
+    connection churn.
+  
+  Hosts wiring `DatasourceAdminServiceConfig` directly get the rebuild by
+  supplying the new optional `reregisterPool` seam; without it the behaviour is
+  unchanged (the idempotent register). The comparison itself is exported as
+  `datasourceConnectivityChanged` so a custom seam can ask the same question the
+  shipped update path asks.
+- c4e8bbc: feat(datasource): size the SQL connection pool from `OS_DATABASE_POOL_MAX`
+  
+  A multi-replica deployment had no supported way to raise the number of database
+  connections each replica opens. The reporter measured a live 3-replica cluster
+  whose authed data API plateaued at ~25 rps while Postgres held only ~9-21 of its
+  200 connections: the ceiling was the client pool, and the operator had no knob
+  for it. Adding replicas raised the ceiling; sizing the pool — the cheap half —
+  was not expressible at all.
+  
+  The pool for a `postgres` / `mysql` datasource is built by `buildSqlPool`, which
+  gives every datasource that declares no `pool` block an explicit `{min: 0,
+  max: 5}`. That includes the primary datasource: the one behind
+  `OS_DATABASE_URL` is composed as a url and nothing else, so `max: 5` per replica
+  was the effective ceiling on every self-hosted deployment, and it was reachable
+  only by hand-authoring a `pool` block onto a datasource the operator does not
+  write.
+  
+  `buildSqlPool` now reads `OS_DATABASE_POOL_MAX`. Precedence is a declared
+  `pool.max` first, then the env, then today's `5` — an operator knob does not
+  override what an author wrote about their own datasource, and it is the only
+  site that decides the unspecified case, so the ordering is expressed once.
+  
+  **Nothing changes when the variable is unset**, which is the upgrade path for
+  every existing deployment: the pool stays exactly `{min: 0, max: 5}`, pinned by
+  a test whose job is to stay red if that ever drifts. A blank value is read as
+  unset, so a declared-but-unfilled compose variable keeps today's behaviour too.
+  
+  A value that is not a positive integer refuses the boot, naming the variable,
+  the value it rejected and the sizing rule — rather than the lenient
+  `Number(process.env.X ?? default)` shape, where a typo becomes `NaN` and the
+  operator who was trying to raise the ceiling silently keeps the one they meant
+  to leave. A pool ceiling is only ever measured in production.
+  
+  Size it with `replicas × OS_DATABASE_POOL_MAX` below the database's
+  `max_connections`, leaving headroom for migrations and admin connections.
+  
+  Only `postgres` / `mysql` are affected — they are the two arms that build a
+  pool. `memory` / `sqlite` / `sqlite-wasm` / `turso` receive no pool parameter
+  and reject a declared one outright; the env is read inside a function those arms
+  never call, so it cannot reach them. `OS_DATABASE_POOL_MIN` is deliberately not
+  exposed: this path already runs `min: 0`.
+
+### Patch Changes
+
+- 6a180e4: fix(core,rest,services)!: a permission-store read failure now fails LOUD instead of resolving as an authenticated caller holding zero capabilities (#13279)
+  
+  **BREAKING** runtime behaviour change on the shared authorization resolver,
+  shipped as `minor` under the repo's launch-window convention.
+  
+  `resolveAuthzContext`'s per-read helper `tryFind` answered a THROWN read exactly
+  the way it answered an EMPTY one: `[]`. So an outage of the permission store
+  resolved as a well-formed context for an authenticated principal holding no
+  capabilities, and the package-management door answered
+  `403 FORBIDDEN` — "Reading packages requires the `studio.access` or
+  `setup.access` capability." That answer was measured byte-identical
+  (`JSON.stringify` equal, against a control that separates two answers which do
+  differ) to what a caller who genuinely holds nothing receives. An administrator
+  was told they lack a capability, during an outage of the store that holds the
+  capability.
+  
+  Maintainer ruling 2026-08-30, verbatim 「第一批其余同意」: `tryFind` 区分「无行」
+  与「读失败」,读失败 fail-loud —— 权限库不可达时不再解析为「已认证零能力」,而是
+  响亮拒绝(与真实能力拒绝的 403 可区分)。
+  
+  Second maintainer ruling the same day (第 5 场总监席决裁批 #9, verbatim 「同意」),
+  after implementing the first one showed that "the read failed" is two facts:
+  采**选项 A** —— 把 `isMissingTableError` 从 `@objectstack/metadata` 迁至
+  `@objectstack/types`(core 已依赖),metadata 保留 re-export 兼容;`tryFind` 仅对
+  **未被判定为「表未 provision」**的读失败抛 `AuthzStoreUnavailableError`。
+  
+  **What changed.** A permission-store read that is issued and throws now raises
+  `AuthzStoreUnavailableError`, which carries the EXISTING ADR-0112 wire code
+  `SERVICE_UNAVAILABLE` and status `503`. No code is added to the closed wire
+  vocabulary and no response envelope gains or loses a key — only which declared
+  code an outage selects. Doors that map thrown errors through
+  `resolveThrownHttpError` answer 503 with no per-door change.
+  
+  **What did NOT change**, and is pinned:
+  
+  - A reachable, genuinely EMPTY store (reads return no rows) still resolves to
+    zero capabilities.
+  - A genuine capability denial still answers `403 FORBIDDEN` with its message.
+  - An ABSENT engine (`ql` unwired, so no read is ever issued) still resolves to
+    an empty-but-valid envelope.
+  - Anonymous requests never reach the store, so an outage cannot make them loud.
+  - A REAL engine whose `sys_*` tables were never provisioned resolves to zero
+    capabilities, quietly — pinned to be byte-identical to the empty-store
+    envelope, in every dialect spelling and in the production wrapper shape where
+    the driver's phrase is on `cause` rather than the outer message.
+  
+  **The boundary between the two kinds of read failure.** An earlier revision of
+  this changeset claimed "embedders without a data plane are unaffected". That
+  claim was too broad; it is retracted here, and the gap it named is now closed
+  rather than merely disclosed. A read also throws when the table was never
+  PROVISIONED — a real engine, wired and reachable, whose `sys_*` tables were
+  never created — and that is a supported deployment shape, not an outage. There
+  "zero capabilities" is the TRUE answer rather than a fabrication: nothing is
+  provisioned, so nothing was withheld. Only an UNREACHABLE store — the ruling's
+  own word 不可达 — leaves the capability set unknown, and only an unknown answer
+  may not be reported as a denial.
+  
+  Treating the two alike was measured, not theorised: it turned four CI suites
+  red, all from `no such table` on `sys_user` / `sys_member` /
+  `sys_user_position` / `sys_user_permission_set`. Ordinary CRUD in
+  `@objectstack/client` answered `503`; batch validation errors that owe `400`
+  answered `503`, because authorization refused before validation ran; runtime
+  notifications answered `401` where authenticated callers must be served `200`;
+  and two `.integration.test.ts` noise guards reported that the driver and engine
+  diagnostics for `sys_position` stopped being emitted — the eager throw aborted
+  the resolution before that later read was ever issued, so a change made to stop
+  a failed read being silent had made two other channels silent.
+  
+  `tryFind` therefore raises `AuthzStoreUnavailableError` only for a read failure
+  that is NOT positively identified as an unprovisioned table.
+  
+  **`isMissingTableError` moved to `@objectstack/types`.** The classifier that
+  draws that boundary already existed and was already right — driver-code based
+  rather than prose-sniffing, documented so that "cannot say" never means "be
+  loud". It lived in `@objectstack/metadata`, which DEPENDS ON `@objectstack/core`,
+  so the resolver could not import it. Rather than keep a second copy of a
+  security-relevant predicate, the ruling relocated the one classifier to
+  `@objectstack/types` — the package core already depends on, and the repo's own
+  stated Home rule for a cross-package error predicate ("every consumer of the
+  question already depends on it, so adopting the predicate never adds an edge",
+  `packages/types/src/unique-violation.ts`). `@objectstack/metadata/errors` still
+  exports `isMissingTableError`, re-exported from the new home, so no consumer of
+  that published subpath changes.
+  
+  Its sibling `isSchemaAlreadyExistsError` moved with it — the two are not two
+  modules but two signatures over one matcher, and separating them would have
+  meant re-rolling the matcher, which is the duplication the module exists to
+  prevent. Both are now exported from `@objectstack/types`; the metadata subpath
+  deliberately still publishes only `isMissingTableError`, which is the only one
+  anything imports through it.
+  
+  ⚠️ **Signed-off risk, recorded because it is load-bearing.** Gating loudness on
+  a driver-error predicate was approved with its false-positive direction stated:
+  mis-reading a genuine outage as "table not provisioned" silently restores the
+  quiet 403 this change removes, with no thrown error and no other failing test.
+  That direction is accepted, not overlooked — the predicate keys on driver codes,
+  SQLSTATEs and errnos first, excludes the known superstring traps up front, and
+  returns `false` for anything it does not positively recognise, so an
+  unrecognised outage stays loud by default. The risk is written beside the
+  predicate in `resolve-authz-context.ts` and both directions are pinned by name
+  in `authz-store-unavailable.test.ts`. ⛔ Do not widen `isMissingTableError` to
+  make a first boot quieter: every widening moves outages into the quiet branch.
+  
+  **All-transport, not just REST.** Every transport authorizing through
+  `resolveAuthzContext` inherits this. Six of the eight production transports
+  wrapped the call in a fail-closed `catch` that would have re-silenced the
+  outage — measured, not assumed: with the resolver loud but the nets untouched,
+  the package door answered `401`, i.e. the outage merely changed disguises. Those
+  `catch` blocks now re-raise via `isAuthzStoreUnavailableError` and keep their
+  previous behaviour for every other fault. The transport set is rebuilt from
+  source and audited for set equality on every test run, so a transport added
+  later cannot inherit the old silence unnoticed.
+  
+  Callers that treat any throw from `resolveAuthzContext` as "anonymous" should
+  re-raise `isAuthzStoreUnavailableError(err)` instead: degrading it restores the
+  disguise this removes.
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/core/src/security/resolve-authz-context.ts#ResolvedAuthzContext, packages/core/src/security/authz-store-unavailable.ts#AuthzStoreUnavailableError) The breaking surface is runtime TypeScript in `@objectstack/core`'s security module and nothing else: `resolveAuthzContext` stops always-resolving and raises `AuthzStoreUnavailableError` when a permission-store read is issued and throws. NO metadata surface is touched in either direction. No Zod schema changes, no `packages/spec` declaration is added or removed, no authorable key moves, no stored row shape changes, and no object definition is edited — a customer's metadata app is byte-for-byte unaffected, so `objectstack migrate meta` has nothing to visit and there is no tombstone to mint. The wire vocabulary is likewise untouched: `SERVICE_UNAVAILABLE` is an EXISTING `StandardErrorCode` member that `HttpStatusErrorCodeMap` already maps to 503, so this change only selects a different DECLARED code for an outage rather than adding one. Both named symbols resolve at HEAD as exported declarations whose files are not `*.zod.ts`, are not under `packages/spec/src/contracts/`, are not object definitions and are not `z.input` projections; neither is referenced in code by any metadata surface (the `packages/spec` hits for `resolveAuthzContext` are comment prose describing the envelope, which this gate masks). The channel that reaches an affected consumer is therefore code review and this changeset, never the upgrade guide: a ledger entry could not express "your fail-closed catch should re-raise this error", because there is no metadata for a migration to rewrite. -->
+- 77b91bd: fix(service-datasource): derive `ConnectionEngineLike` from the engine contract instead of re-declaring it, and stop promising `registerDriver` accepts any value (#12010)
+  
+  `ConnectionEngineLike` — the exported view `DatasourceConnectionService` drives
+  the ObjectQL `'data'` engine through — hand-declared seven engine members. The
+  #12010 inventory measured what that cost, and one half of it was unsafe rather
+  than merely duplicated.
+  
+  **The unsafe half.** The seam declared
+  `registerDriver?: (driver: unknown, isDefault?: boolean) => void`,
+  while the engine contract declares `registerDriver(driver: IDataDriver,
+  isDefault?: boolean): void`. Under `strictFunctionTypes` that made the real
+  engine **not assignable** to this view, and it told every consumer of the
+  exported type that the engine accepts *any* value as a driver — which it does
+  not, so a mis-shaped driver reaching `registerDriver` was a runtime problem the
+  type was structured not to see. The parameter is now the contract's
+  `IDataDriver`, which repairs both halves at once: the seam stops over-promising
+  AND the engine becomes assignable to it.
+  
+  **The duplicated half.** Three members (`registerDatasourceDef`,
+  `markDatasourceUnavailable`, `clearDatasourceUnavailable`) were declared by no
+  contract at all when the card was filed — real `ObjectQL` methods, called
+  across a package boundary, meeting no compiler on the producer side. #12248
+  adjudicated all three onto `IDataEngine`, and #12482 followed with
+  `syncObjectSchema`. All seven members are now **derived**
+  (`Partial<Pick<IObjectQLEngine, …>>`) rather than re-written, the same #4251 B3
+  move `datasource-admin-plugin.ts` already made for its sibling `DataEngineLike`
+  one file over. Drift now lands as a build error here instead of a silent
+  disagreement.
+  
+  `Partial` is preserved deliberately: `registerDriver` is required on the
+  contract, while this service treats its absence as graceful degradation (the
+  datasource is left metadata-only, `'skipped-no-infra'`). Making it required
+  would change what a lightweight kernel does at boot.
+  
+  No runtime behaviour changes. The one cast the factory escape hatch still needs
+  (`DatasourceDriverHandle.driver` is declared `unknown`, open to any host-built
+  driver) moved to the single call site that constructs the value, and the
+  `disconnect()` path dropped its cast entirely now that `getDriverByName` answers
+  the contract's `IDataDriver | undefined`.
+  
+  **For hosts:** if you implement `ConnectionEngineLike` directly, its members are
+  now the engine contract's members. An implementation whose `registerDriver`
+  takes a wider parameter (`unknown`, `any`) is still accepted; one that returns a
+  narrower value from `getDriverByName` than `IDataDriver | undefined` is not, and
+  should answer the contract type.
+- 776a098: docs(spec,service-datasource): `CryptoContext` documents the three producer vocabularies, and the AAD sentence narrows to the guarantee that holds (#12599)
+  
+  Documentation-only correction to the `ICryptoProvider` contract. No behavior
+  changes and no schema shape changes: `gen:schema`, `gen:openapi` and `gen:docs`
+  all regenerate byte-identically over this diff. It ships because the corrected
+  TSDoc is emitted into the published `.d.ts`, so it is what every consumer of
+  `@objectstack/spec` reads at the call site.
+  
+  `CryptoContext.namespace` / `.key` documented themselves as a settings
+  coordinate ("Settings namespace the value belongs to" / "Specifier key within
+  the namespace"), one layer below the three producers that actually construct
+  the type:
+  
+  | producer | `ctx.namespace` | `ctx.key` | where `handle.id` is recorded |
+  |---|---|---|---|
+  | `SettingsService` | settings namespace | specifier key | `sys_setting.value_enc` |
+  | the ObjectQL engine's secret-field path | **object name** | **field name** | a `secret:` ref on the business row |
+  | the datasource secret binder | caller-supplied, default `datasource` | datasource name | a `sys_secret:` credentialsRef |
+  
+  The prose now names all three, and `CryptoHandle.id`, `encrypt()` and
+  `rotateKey()` no longer describe `sys_setting.value_enc` as the general
+  destination of a handle.
+  
+  The load-bearing half is the AAD sentence. It read "Helps reject ciphertexts
+  that were copied across namespaces", which overstates what a binding over this
+  pair can provide: `(namespace, key)` is **one flat space shared by all three
+  vocabularies**, `sys_secret` declares the pair non-unique by design, and nothing
+  reserves a name in one vocabulary against another. The sentence is replaced by
+  the guarantee that actually holds — such a binding rejects a ciphertext swapped
+  between two coordinates *within one producer's vocabulary*, and does **not**
+  exclude a cross-vocabulary pair. The docblock records this as the contract's
+  present state and names the intended end state (a producer-discriminated AAD)
+  so the weak guard is not read as the designed one.
+  
+  The same settings-only prose on `DatasourceSecretBinderDeps.namespace`
+  ("Settings namespace recorded on the secret row") is corrected in the same
+  change.
+  
+  Recorded under the maintainer ruling of 2026-08-27 on #12599 (Option A now,
+  with the producer-discriminated AAD recorded as direction in its own ADR).
+- fa5d137: feat(devx,datasource,automation): published `src/**` may only import workspace packages it declares (#10062)
+  
+  A package's non-test `src/**` was free to import any workspace package,
+  declared or not, and nothing checked it. The class was filed with one member
+  and a mitigation — the import was type-only, so nothing reached the emitted
+  JavaScript and rollup-plugin-dts inlined the declaration rather than naming an
+  unresolvable module. It grew to four members with no signal, and one of them
+  killed the mitigation: `service-automation/src/flow-precedence.ts` **value**
+  imports from `@objectstack/objectql`, which it does not declare, and because
+  the shared tsup config externalises only `dependencies`/`peerDependencies`, the
+  bundler answered by inlining objectql's implementation into
+  `service-automation/dist/index.js` — a second copy of another package's code,
+  kept correct by build configuration alone.
+  
+  `pnpm check:undeclared-dep-imports` is the gate, and the per-member fixes here
+  are decided one at a time rather than by a uniform policy — declaring makes a
+  coupling real and installable, routing it away removes it, and the two are not
+  interchangeable:
+  
+  * **`@objectstack/service-datasource`** now declares `@objectstack/driver-sql`
+    and `@objectstack/driver-memory` as **dependencies**. Both are loaded through
+    an *unguarded* `await import(...)` on the postgres, mysql, sqlite and memory
+    arms, so a consumer reaching one of those paths needed a package it was never
+    told to install, and would have met `ERR_MODULE_NOT_FOUND` rather than a
+    diagnosis. The three *guarded* driver arms — `@objectstack/driver-sqlite-wasm`,
+    `@objectstack/driver-mongodb`, `@objectstack/driver-turso` — are deliberately
+    left undeclared: each load sits in a `try`/`catch` that answers an absent
+    package with the fault, the consequence and the install command, and each
+    rides as an optional install. Declaring them would install them (turso drags
+    `@libsql/client`'s native bindings) and, measured on this branch, takes a live
+    assertion out of the tree: `default-datasource-driver-factory.test.ts` reaches
+    the missing-package arm with no stub precisely because the package does not
+    resolve from here.
+  * **`@objectstack/metadata-core`** now owns the ADR-0029 D9.6 provenance pair,
+    `isCodeArtifactBody` and `isTenantAuthored`, sunk out of
+    `@objectstack/objectql`'s registry by the same criterion as the write-verb
+    dispatch predicates and the audit governance table beside them: a second layer
+    needs the answer and the reverse import would either close a cycle or make the
+    consumer depend on the whole data engine for one predicate. `objectql`
+    re-exports `isCodeArtifactBody` from its original path, so its public API is
+    unchanged; `service-automation` imports it from `metadata-core`, which it
+    already declared, and its bundle no longer carries a copy of objectql's code.
+  
+  Two members stay recorded rather than remediated, because the tree already
+  carries the decision not to declare them together with its reason
+  (`@objectstack/runtime` → `@objectstack/driver-turso`, whose bare `import()` is
+  a host-replaceable default thunk under #6268; `@objectstack/rest` →
+  `@objectstack/objectql`, whose absence must degrade to `501 NOT_IMPLEMENTED`
+  rather than fail module load). Their ledger rows carry mechanical evidence and
+  go red the moment that evidence stops holding — in particular, a `type-only`
+  row reds on the day its import becomes a value import, which is exactly the
+  transition nothing caught the first time.
+- ba64877: Deleting a datasource now evicts its driver from the data-engine registry, so `/api/v1/ready` recovers without a process restart
+  
+  **BREAKING** `IObjectQLEngine` gains a REQUIRED member, shipped as `minor`
+  under the repo's launch-window convention for breaking changes.
+  
+  `unregisterDriver(name: string): boolean` is additive for CONSUMERS — nothing
+  they already call changes — but it breaks any third-party *implementer* of
+  `IObjectQLEngine` at compile time, and the interface is on the published
+  surface (`packages/spec/src/contracts/index.ts` re-exports it and `./contracts`
+  is a published export path). Graded `minor` to match this contract's own
+  precedent: the three prior changes to it all took `minor`, including one that
+  added five members that were **all optional** and therefore broke nobody by
+  construction. A required member grading below that would be inconsistent.
+  
+  The ObjectQL driver registry had a `registerDriver` door and no counterpart, so
+  nothing could ever leave it. Deleting a datasource emptied the admin door while
+  `GET /api/v1/ready` kept naming the deleted datasource's driver — the readiness
+  probe reports whatever `checkDriversHealth()` finds in that registry — and on a
+  multi-replica deployment the only recovery was restarting every process.
+  
+  `IObjectQLEngine` gains `unregisterDriver(name)`, the removal counterpart of
+  `registerDriver`. The registry owns the invariant rather than each caller: an
+  eviction has to drop the driver entry, clear the `defaultDriver` NAME when it
+  pointed at the evicted driver (otherwise `getDefaultDriverName()` answers with a
+  name nothing backs), and drop the datasource definition that has no removal door
+  of its own. Evicting does not disconnect the pool — teardown belongs to whoever
+  owns it.
+  
+  Three lifecycle paths now use it:
+  
+  - **Datasource delete / pool teardown** — `DatasourceConnectionService.disconnect()`
+    evicts after closing the pool, which is the path `DELETE /api/v1/datasources/:name`
+    reaches. The default driver is evicted under its natural registered name.
+  - **Failed-start rollback** — a connect that throws after registering now rolls
+    that registration back, instead of leaving a driver the admin list reports as
+    failed and the readiness probe still pings.
+  - **Engine teardown** — `destroy()` disconnects and then evicts, so a destroyed
+    engine no longer reports drivers whose pools it has already closed.
+  
+  Eviction is per-replica, matching how driver registration already works
+  (each replica registers pools from the shared datasource records at boot);
+  propagating it cluster-wide would need a broadcast channel the driver registry
+  does not have today.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) this change is purely ADDITIVE: `IObjectQLEngine` gains a member and nothing is renamed, retired or converted, so there is no authored metadata for `objectstack migrate meta` to rewrite and no migration to prescribe. The breaking half is compile-time only, against third-party IMPLEMENTERS of the interface; consumers are unaffected. Deliberately NOT claimed as runtime-interface-only: this gate classifies packages/spec/src/contracts/** as a metadata surface, so that category is false here even though the symbol is a TypeScript interface with no Zod schema behind it. -->
+- e7191ce: fix(build): give each `exports` condition its own `types` target in the 28 dual-build packages (#13112)
+  
+  **Published-surface change, zero runtime change.** No emitted byte moves; what
+  moves is which declaration file a resolver READS. Maintainer ruling 2026-08-29
+  (decision batch #3, verbatim 「同意」) chose declaring the files over deleting
+  them.
+  
+  ## What was wrong
+  
+  These 28 packages are `"type": "module"` and dual-built, and each spelled one
+  `types` condition as a **sibling** of `import`/`require`:
+  
+  ```json
+  "exports": { ".": {
+    "types": "./dist/index.d.ts", "import": "./dist/index.js", "require": "./dist/index.cjs"
+  } }
+  ```
+  
+  A sibling `types` answers for **both** conditions, so a CommonJS consumer was
+  handed `dist/index.d.ts` — an ES-module declaration, because the package is
+  `"type": "module"` — for an entry point it reaches with `require`. Measured with
+  `tsc --traceResolution` on a `"type": "commonjs"` fixture at `moduleResolution:
+  node16`:
+  
+  ```
+  error TS1479: The current file is a CommonJS module whose imports will produce
+  'require' calls; however, the referenced file is an ECMAScript module and cannot
+  be imported with 'require'.
+  ```
+  
+  The JavaScript at `dist/index.cjs` loads perfectly (`check:dual-build-cjs-loads`
+  has asserted that for months). It is the **types** that told the consumer the
+  supported `require` entry point could not be required. The `dist/index.d.cts`
+  twin tsup emits beside it — 36 files, 5,517,701 B on this build — was named by
+  no condition at all and shipped in every tarball unreachable.
+  
+  ## What changed
+  
+  Each condition now names its own declaration, the shape TypeScript documents:
+  
+  ```json
+  "exports": { ".": {
+    "import":  { "types": "./dist/index.d.ts",  "default": "./dist/index.js" },
+    "require": { "types": "./dist/index.d.cts", "default": "./dist/index.cjs" }
+  } }
+  ```
+  
+  33 entry points across 27 packages, subpaths included. The root `types` field is
+  untouched, so `node10` resolvers are unaffected; the `import` condition resolves
+  exactly what it resolved before, measured as an unchanged control in the same
+  run.
+  
+  ## `@objectstack/core` is deliberately NOT changed
+  
+  Splitting a declaration in two makes TypeScript compare it nominally, and
+  `ObjectKernel` carries a `private plugins` member that reaches every plugin
+  through `PluginContext.getKernel()`. With core split, whole-repo `pnpm build`
+  fails in `@objectstack/verify` with 5 × TS2345 ("Types have separate
+  declarations of a private property 'plugins'"); with core held back and the
+  other 27 split, 71/71 tasks pass. So core keeps the sibling-`types` shape and
+  its two `.d.cts` files (220,854 B) stay unreachable, declared as such in
+  `check:dual-build-cjs-loads`. Splitting it needs a decision about core's public
+  types, not about an exports map.
+  
+  ## For consumers
+  
+  - **ESM consumers: nothing changes.** Same declaration file, byte for byte.
+  - **CJS consumers under `node16`/`nodenext`: TS1479 goes away** and the
+    declarations they get are the ones built for CommonJS.
+  - **`node10` / `moduleResolution: node` consumers: nothing changes** — they never
+    read `exports`.
+  - Nothing is removed: every path that resolved before still resolves.
+  
+  Packages that are CJS-first (`require` → `./dist/index.js`, no `"type": "module"`)
+  were already correct and are untouched — their `dist/index.d.ts` really is the
+  CommonJS declaration. Their ESM mirror (an unreachable `.d.mts` under the
+  `import` condition) is a separate, larger population and is filed separately per
+  the ruling, not fixed here.
+  
+  `check:dual-build-cjs-loads` grew a fourth invariant (TYPED) that reds on the old
+  shape, so the drift cannot return silently.
+- 30d96ab: `ExternalDatasourceServicePlugin` types the `'data'` service with the real engine contract (`IDataEngine`, `@objectstack/spec/contracts`) and deletes its private structural `DataEngineLike` re-declaration — the workaround the untyped `IDataEngine.introspectDatasource()` forced (#11493). The introspection fallback branch now probes `getDriverByName?` (the registry member the contract declares) instead of `getDatasourceDriver?`, a spelling no engine in either repository ever had, so the degradation path is reachable for the first time.
+- bbf1167: `importObject` now refuses an explicit `opts.name` that violates the ADR-0028
+  namespace-prefix rule (#11061). The override used to be taken verbatim
+  (`opts.name ?? draft.name`) and persisted through `metadata.register('object',
+  …)` — the one runtime write path no namespace gate looks at — so
+  `POST /api/v1/datasources/:name/external/tables/:remote/import` with
+  `{"name": "customers"}` minted an unprefixed federated object that
+  `defineStack()` and the publish pre-flight would both have refused.
+  
+  The refusal answers `400 EXTERNAL_IMPORT_ERROR` (the family's registered
+  ADR-0112 code, in the #8016 thrown-refusal shape) carrying
+  `validateObjectNamespacePrefix`'s own actionable message — the same text the
+  publish gate serves for the identical violation, e.g. `Object 'customers' is
+  missing the package namespace prefix. Rename it to 'wh_customers' (namespace =
+  'wh').` A compliant override (`wh_customers`), a `sys_*` platform-reserved
+  name, and any override on a datasource whose package resolves no namespace are
+  accepted exactly as before; the derived-name path (no `name` in the body) is
+  unchanged.
+- 51ecb2f: feat(spec): treat a nested datasource-config credential position identically to the top-level key it mirrors — derived at every depth, on both doors (#13405)
+  
+  **BREAKING** accept-set narrowing, the nested closure of the #9040 family. A
+  credential under the very spelling the top level refuses and redacts — one
+  object level down (`options.auth.token`, `options.pool.password`, a
+  `tunnel.password` on a contract-less driver) — was accepted at publish and
+  served back by every datasource read door in cleartext with
+  `redactedConfigKeys: []`, because the read side's nested judgment was only the
+  hand-enumerated `passthroughSecretPaths` table and the write side had no nested
+  name judgment at all.
+  
+  Both sides are now derived from ONE source instead of hand-maintained:
+  
+  - The canonical credential spellings and former aliases moved to
+    `driver/common.zod.ts` (`CREDENTIAL_KEY_SPELLINGS`) — the bottom of the
+    driver-schema import graph — so the write door's passthrough walk and the
+    read redactor consume the same list (#8300's no-second-copy posture applied
+    to the list itself).
+  - **Read door** (`redactDatasourceConfig`, behind both consumers — the
+    datasource-admin routes and the kernel per-type redaction hook): the
+    credential-name judgment and the URL composite (userinfo + query params) now
+    run at EVERY object depth, for every driver, contract-less included. Nested
+    removals are reported as dotted paths in `redactedKeys`, plus a new
+    `redactedPaths` field carrying exact segments. `passthroughSecretPaths`
+    remains only as the residue it always should have been: CLIENT-MEASURED
+    secret spellings (`proxyPassword`, `key`, `passphrase`, …) that mirror no
+    top-level key.
+  - **Write door** (`credentialFreeMongoOptions`): a non-empty string under a
+    credential-spelled key is refused at any object depth of the mongodb
+    `options` passthrough, with a prescription that does not inherit the
+    `auth.password`-only "wins over" reassurance. The measured `auth.password`
+    refusal keeps its own message; nothing is double-reported.
+  - **Schema derivation walked at depth**: `refusedCredentialPaths` /
+    `refusedCredentialPathsOfSchema` extend the `z.never()` derivation below the
+    top level, so a driver contract that refuses a key inside a nested object
+    shape is covered the day it lands (none exists today — pinned per driver).
+  - **Arrays are off the walk** on both doors — the same structural line
+    `valueAtPath`/`withoutPath` already drew — so row-shaped data (memory's
+    `initialData` seeds) keeps its own fields without a per-driver exclusion
+    list.
+  - `restoreRedactedConfig` (service-datasource) is now DERIVED from the
+    redactor instead of mirroring it rule by rule: it grafts stored material
+    back wherever the patch is indistinguishable from what the read path served,
+    so an untouched "Save" on an affected legacy row keeps its stored material
+    for every current and future redaction source, and an author's edit always
+    wins. The metadata write door's generic `carryForwardRedactedValues` already
+    walks the dotted paths and needs no change.
+  
+  Semantic migration entry
+  `datasource-config-options-nested-credential-spelling-refused` (protocol major
+  18) carries the authored-artifact upgrade: remove the nested key, or bind the
+  real secret through `external.credentialsRef` / the connection form.
+  
+  <!-- adr-0087: registered datasource-config-options-nested-credential-spelling-refused -->
+- 090f230: fix(datasource,runtime): declare the guarded optional-driver loads as optional peers, so a consumer is told at install time (#12943)
+  
+  Five guarded `await import(...)` loads of workspace driver packages sat in
+  published `src/**` with no manifest declaration a consumer could see:
+  `@objectstack/service-datasource` reaches `driver-turso`, `driver-sqlite-wasm`
+  (twice) and `driver-mongodb`, and `@objectstack/runtime` reaches `driver-turso`.
+  `driver-mongodb` and `driver-sqlite-wasm` were `devDependencies` of
+  `service-datasource`, which tells an installing consumer nothing at all;
+  `driver-turso` was in no section of either manifest.
+  
+  Each is now an optional `peerDependencies` entry with
+  `peerDependenciesMeta: { optional: true }` — the form `@objectstack/cli` already
+  uses for `driver-turso`. **Nothing is installed and no code path changes**: an
+  optional peer declares a relationship that already existed at runtime, so
+  `npm ls`, a lockfile, an audit tool and a reader of the manifest can all see the
+  driver a datasource may ask for, instead of learning about it only by hitting
+  the failure arm. The runtime errors were already good — each carries its install
+  command as data — but they arrive at the moment of failure rather than at
+  install time.
+  
+  The `rest` to `objectql` occurrence of the same shape is deliberately left
+  alone: `@objectstack/rest`'s non-coupling to the data engine is a stated
+  architectural position, not a hygiene gap.
+  
+  Three test pins had reached their missing-package arm with no stub, because the
+  undeclared package genuinely did not resolve from the importing package. pnpm
+  links an optional workspace peer, so that is no longer true, and each pin's own
+  comment had said in advance what to do about it. All three now stage the absence
+  (`vi.doMock` with the resolver's own `ERR_MODULE_NOT_FOUND`) and keep every
+  assertion, including the typed-identity ones that make `serve.ts`'s
+  `e instanceof MissingDriverPackageError` boot-fatality branch meaningful.
+- 735f5c7: **Federation:** `SchemaDiffEntry` gains a distinct `unreachable` kind — "the remote could not be read" is no longer reported as `missing_table`, and a transient outage no longer aborts boot under the default `onMismatch: 'fail'` (#11166, maintainer ruling 2026-08-23).
+  
+  `ExternalDatasourceService.validateEach` used to convert **any** per-object validation throw — including `connect ECONNREFUSED` from remote introspection — into a `{ kind: 'missing_table', severity: 'error' }` row, indistinguishable from a genuinely dropped table. Downstream, that shape meant: the boot gate (`ExternalValidationPlugin.runValidation`) aborted startup for a 30-second network blip, and the background drift checker raised `external.schema.drift` events claiming the schema changed on every tick the remote stayed down.
+  
+  Now:
+  
+  - **`@objectstack/spec`** (minor): `SchemaDiffEntryKind` adds `'unreachable'` — the one kind that asserts *nothing about the remote schema*; it states that validation was indeterminate because the remote (or the object definition) could not be read. The throwing error's text is carried in `actual`. Every other kind remains a measured fact about a schema that was successfully read. Additive: existing entries and their meanings are unchanged. Consumers that exhaustively switch on the kind union (e.g. a `Record<SchemaDiffEntryKind, …>`) will get a compile-time prompt to label the new member; non-exhaustive consumers see a new string value at runtime and should render it as-is.
+  - **`@objectstack/service-datasource`** (patch): the per-object catch in `validateEach` classifies every throw as `unreachable` (rows stay `ok: false`, `severity: 'error'`). `missing_table` is still reported — but only from its measured branch: a table absent from an introspection that returned.
+  - **`@objectstack/runtime`** (patch): the boot gate no longer feeds `unreachable` rows to the `onMismatch` policy — no abort under `fail`; instead it logs a loud `warn` naming the datasource, the object, the underlying error, and that the object's schema is unverified for this boot, under every `onMismatch` value. Measured mismatches keep the existing policy behavior, including sitting beside an unreachable row in the same report. The drift checker still emits `external.schema.drift` for unreachable rows (consumers discriminate on `kind`), but its operator-facing summary now says "could not read the remote", never "drift detected", for them.
+- 29d0676: `validateAll`/`validateDatasource` now read each datasource's live schema once per sweep instead of once per federated object: the sweep threads a per-call introspection memo through the validation body, so M objects on one datasource cost one remote introspection round-trip (a rejected read is shared the same way — one connection attempt, M failure rows). The memo lives and dies inside a single call, so a long-lived service never serves a stale schema to a later sweep, and direct `validateObject` calls still read live every time. The `IExternalDatasourceService.validateAll` docstring, which promised "parallelised per datasource" while the implementation parallelised per object, now states the actual behaviour.
+- Updated dependencies [809d417]
+- Updated dependencies [387e231]
+- Updated dependencies [f794e4e]
+- Updated dependencies [cae2169]
+- Updated dependencies [b812a54]
+- Updated dependencies [2d4fa75]
+- Updated dependencies [0e4e51b]
+- Updated dependencies [e84bbf6]
+- Updated dependencies [effae80]
+- Updated dependencies [efb3513]
+- Updated dependencies [d62f990]
+- Updated dependencies [c45d8e6]
+- Updated dependencies [2e3e8c7]
+- Updated dependencies [e621291]
+- Updated dependencies [655b106]
+- Updated dependencies [40a93b5]
+- Updated dependencies [ef52884]
+- Updated dependencies [101ad2c]
+- Updated dependencies [d5b330d]
+- Updated dependencies [9e1b2de]
+- Updated dependencies [dda969c]
+- Updated dependencies [1f45690]
+- Updated dependencies [277948f]
+- Updated dependencies [8bdd955]
+- Updated dependencies [f3bbbef]
+- Updated dependencies [4f24e9d]
+- Updated dependencies [e27583e]
+- Updated dependencies [4bd6faa]
+- Updated dependencies [86cbe37]
+- Updated dependencies [6a180e4]
+- Updated dependencies [474242f]
+- Updated dependencies [63cd487]
+- Updated dependencies [bd4aa4e]
+- Updated dependencies [803eaab]
+- Updated dependencies [f8e8f03]
+- Updated dependencies [983edf1]
+- Updated dependencies [eae824e]
+- Updated dependencies [178f90c]
+- Updated dependencies [f6fa22c]
+- Updated dependencies [8a483b3]
+- Updated dependencies [84de7e3]
+- Updated dependencies [3bc2e38]
+- Updated dependencies [34e8099]
+- Updated dependencies [97bcd99]
+- Updated dependencies [df59de0]
+- Updated dependencies [96e25a8]
+- Updated dependencies [f75a38a]
+- Updated dependencies [7a25e7d]
+- Updated dependencies [1fa05a6]
+- Updated dependencies [c85a265]
+- Updated dependencies [dcb10a5]
+- Updated dependencies [773a999]
+- Updated dependencies [35dffea]
+- Updated dependencies [d8024f0]
+- Updated dependencies [8120808]
+- Updated dependencies [0010797]
+- Updated dependencies [776a098]
+- Updated dependencies [5060877]
+- Updated dependencies [4f6325d]
+- Updated dependencies [52954c0]
+- Updated dependencies [2aa8456]
+- Updated dependencies [93809a3]
+- Updated dependencies [7c0d0c3]
+- Updated dependencies [daae7aa]
+- Updated dependencies [8dc22d6]
+- Updated dependencies [279431e]
+- Updated dependencies [948dd6b]
+- Updated dependencies [3b4c56c]
+- Updated dependencies [ae8edd2]
+- Updated dependencies [e25403c]
+- Updated dependencies [a81aa9d]
+- Updated dependencies [f9ffd01]
+- Updated dependencies [64baa68]
+- Updated dependencies [9fa70d7]
+- Updated dependencies [09db64a]
+- Updated dependencies [92916e7]
+- Updated dependencies [a84f3ea]
+- Updated dependencies [f2eaae8]
+- Updated dependencies [09f9361]
+- Updated dependencies [c804f0c]
+- Updated dependencies [34d3011]
+- Updated dependencies [4642f4c]
+- Updated dependencies [de96cf4]
+- Updated dependencies [b7f645a]
+- Updated dependencies [56c093c]
+- Updated dependencies [c09451b]
+- Updated dependencies [93940d4]
+- Updated dependencies [aa3f9ba]
+- Updated dependencies [ba64877]
+- Updated dependencies [9d3c04d]
+- Updated dependencies [d29e42f]
+- Updated dependencies [87ad30c]
+- Updated dependencies [fcd0efc]
+- Updated dependencies [d0e3a88]
+- Updated dependencies [3f42920]
+- Updated dependencies [dd4113e]
+- Updated dependencies [992161b]
+- Updated dependencies [ebcc34e]
+- Updated dependencies [64505a5]
+- Updated dependencies [ca3fd4b]
+- Updated dependencies [7345308]
+- Updated dependencies [79b6a22]
+- Updated dependencies [30d96ab]
+- Updated dependencies [f658793]
+- Updated dependencies [c95ad19]
+- Updated dependencies [e58ea8b]
+- Updated dependencies [4a17645]
+- Updated dependencies [3795c5f]
+- Updated dependencies [8ab926b]
+- Updated dependencies [9dac1ae]
+- Updated dependencies [7317cf2]
+- Updated dependencies [e25e839]
+- Updated dependencies [5997207]
+- Updated dependencies [8b13cc8]
+- Updated dependencies [4a4a35d]
+- Updated dependencies [4a4a35d]
+- Updated dependencies [86e765a]
+- Updated dependencies [1d7e76a]
+- Updated dependencies [53dc739]
+- Updated dependencies [fd289be]
+- Updated dependencies [03bf7b1]
+- Updated dependencies [f90e820]
+- Updated dependencies [18d816a]
+- Updated dependencies [e8bd715]
+- Updated dependencies [b91c351]
+- Updated dependencies [a28a3c0]
+- Updated dependencies [daeaaf9]
+- Updated dependencies [c459da6]
+- Updated dependencies [e914733]
+- Updated dependencies [f887e52]
+- Updated dependencies [881f8d8]
+- Updated dependencies [3bfa1e6]
+- Updated dependencies [0a8ebf3]
+- Updated dependencies [901355c]
+- Updated dependencies [107bb4b]
+- Updated dependencies [34ce8e7]
+- Updated dependencies [33681ea]
+- Updated dependencies [bfe13c8]
+- Updated dependencies [0fb3044]
+- Updated dependencies [4635f3e]
+- Updated dependencies [fd289be]
+- Updated dependencies [ee3595c]
+- Updated dependencies [b2eab95]
+- Updated dependencies [93940d4]
+- Updated dependencies [3a04b01]
+- Updated dependencies [45b9051]
+- Updated dependencies [b9e9227]
+- Updated dependencies [d395692]
+- Updated dependencies [5894d30]
+- Updated dependencies [a3765f6]
+- Updated dependencies [2d5cee3]
+- Updated dependencies [e22158f]
+- Updated dependencies [7404925]
+- Updated dependencies [0c2334f]
+- Updated dependencies [e062370]
+- Updated dependencies [778c59f]
+- Updated dependencies [d2619fd]
+- Updated dependencies [af56546]
+- Updated dependencies [6acb11a]
+- Updated dependencies [33c5fd3]
+- Updated dependencies [20b0fdb]
+- Updated dependencies [905019b]
+- Updated dependencies [a286411]
+- Updated dependencies [98c0d33]
+- Updated dependencies [368a82e]
+- Updated dependencies [a3d5724]
+- Updated dependencies [93ea19b]
+- Updated dependencies [9ee2dcf]
+- Updated dependencies [8cb96ec]
+- Updated dependencies [8f10a79]
+- Updated dependencies [6269a55]
+- Updated dependencies [a17da05]
+- Updated dependencies [a8c00e2]
+- Updated dependencies [22e5236]
+- Updated dependencies [0fb8760]
+- Updated dependencies [df18120]
+- Updated dependencies [e5ce2ed]
+- Updated dependencies [be21955]
+- Updated dependencies [bc56e18]
+- Updated dependencies [be21955]
+- Updated dependencies [a9ee989]
+- Updated dependencies [4d0d944]
+- Updated dependencies [15d58db]
+- Updated dependencies [d63b014]
+- Updated dependencies [ff37576]
+- Updated dependencies [9abe4e4]
+- Updated dependencies [2cc7122]
+- Updated dependencies [178325b]
+- Updated dependencies [50d6c92]
+- Updated dependencies [9e0ba21]
+- Updated dependencies [311433f]
+- Updated dependencies [0e5bea6]
+- Updated dependencies [3e5ad08]
+- Updated dependencies [9abe4e4]
+- Updated dependencies [b7131f3]
+- Updated dependencies [e5812fa]
+- Updated dependencies [c4ecf0c]
+- Updated dependencies [eaba72e]
+- Updated dependencies [2cf35d4]
+- Updated dependencies [602d4a0]
+- Updated dependencies [795d14e]
+- Updated dependencies [7085f90]
+- Updated dependencies [dee4dd4]
+- Updated dependencies [e40a28c]
+- Updated dependencies [7e83932]
+- Updated dependencies [ce7e497]
+- Updated dependencies [51ecb2f]
+- Updated dependencies [9086761]
+- Updated dependencies [42a117b]
+- Updated dependencies [1401ae7]
+- Updated dependencies [4297fe7]
+- Updated dependencies [e398863]
+- Updated dependencies [d16df74]
+- Updated dependencies [f11fc61]
+- Updated dependencies [e808890]
+- Updated dependencies [8f79379]
+- Updated dependencies [e6ca40e]
+- Updated dependencies [0c77ea4]
+- Updated dependencies [52954c0]
+- Updated dependencies [89eb997]
+- Updated dependencies [7131f12]
+- Updated dependencies [aa5994e]
+- Updated dependencies [be93457]
+- Updated dependencies [a65db76]
+- Updated dependencies [56cc64d]
+- Updated dependencies [2cf5a96]
+- Updated dependencies [15eb2c9]
+- Updated dependencies [5691b07]
+- Updated dependencies [431d2fb]
+- Updated dependencies [2a6122b]
+- Updated dependencies [225e769]
+- Updated dependencies [8af88dd]
+- Updated dependencies [fb5fbb8]
+- Updated dependencies [c05b40b]
+- Updated dependencies [80f1dcd]
+- Updated dependencies [6c6157a]
+- Updated dependencies [d7b3963]
+- Updated dependencies [33184fd]
+- Updated dependencies [7c41693]
+- Updated dependencies [b72db01]
+- Updated dependencies [dce5cd4]
+- Updated dependencies [9688f58]
+- Updated dependencies [556ebc1]
+- Updated dependencies [177ebdc]
+- Updated dependencies [8d237b4]
+- Updated dependencies [2d2e6f0]
+- Updated dependencies [2d8dd8d]
+- Updated dependencies [22d573e]
+- Updated dependencies [b5a2398]
+- Updated dependencies [348860c]
+- Updated dependencies [5383fa6]
+- Updated dependencies [5b3ff63]
+- Updated dependencies [1a6a19c]
+- Updated dependencies [527e050]
+- Updated dependencies [dd33bf9]
+- Updated dependencies [4cb2a90]
+- Updated dependencies [6757eb2]
+- Updated dependencies [74a7804]
+- Updated dependencies [53d3689]
+- Updated dependencies [b3a63d3]
+- Updated dependencies [1c66fe4]
+- Updated dependencies [49f0dcf]
+- Updated dependencies [033a34c]
+- Updated dependencies [4d25d22]
+- Updated dependencies [1ffee51]
+- Updated dependencies [b826390]
+- Updated dependencies [5ae4303]
+- Updated dependencies [ece4dad]
+- Updated dependencies [e9b377e]
+- Updated dependencies [146f448]
+- Updated dependencies [735f5c7]
+- Updated dependencies [a7e18de]
+- Updated dependencies [366f895]
+- Updated dependencies [dc75ba8]
+- Updated dependencies [cce0aa9]
+- Updated dependencies [e764507]
+- Updated dependencies [cff17af]
+- Updated dependencies [39404f3]
+- Updated dependencies [ca1965f]
+- Updated dependencies [8619f95]
+- Updated dependencies [b706af9]
+- Updated dependencies [db8c288]
+- Updated dependencies [0e5fe7f]
+- Updated dependencies [add4360]
+- Updated dependencies [cd13488]
+- Updated dependencies [df1c75c]
+- Updated dependencies [fc9ba76]
+- Updated dependencies [0f94cc7]
+- Updated dependencies [a11c1a5]
+- Updated dependencies [71f9cd1]
+- Updated dependencies [ee17d86]
+- Updated dependencies [cdbd920]
+- Updated dependencies [18c432e]
+- Updated dependencies [3c418c4]
+- Updated dependencies [fa8715a]
+- Updated dependencies [a933ed7]
+- Updated dependencies [b3ca463]
+- Updated dependencies [a933ed7]
+- Updated dependencies [0d4a6a8]
+- Updated dependencies [518d5e5]
+- Updated dependencies [6643ba1]
+- Updated dependencies [eeba2ef]
+- Updated dependencies [ec4c4d2]
+- Updated dependencies [424f73c]
+- Updated dependencies [cccbe51]
+- Updated dependencies [a8d6b1d]
+- Updated dependencies [e4a7695]
+- Updated dependencies [87075b1]
+- Updated dependencies [fc58a99]
+- Updated dependencies [14cfc00]
+- Updated dependencies [1c6f7b4]
+- Updated dependencies [e854a53]
+- Updated dependencies [07cced5]
+- Updated dependencies [3956069]
+- Updated dependencies [dfebfc8]
+- Updated dependencies [5dd3bc9]
+- Updated dependencies [9f4a6d5]
+- Updated dependencies [4045b95]
+- Updated dependencies [7adcd07]
+- Updated dependencies [f5a7f9c]
+- Updated dependencies [d028b37]
+- Updated dependencies [c49afd0]
+- Updated dependencies [f7b25c5]
+- Updated dependencies [122ef38]
+- Updated dependencies [4a37870]
+- Updated dependencies [428f9b2]
+- Updated dependencies [aa7ff56]
+- Updated dependencies [c41b42e]
+- Updated dependencies [c4db311]
+- Updated dependencies [750fff5]
+- Updated dependencies [c19035e]
+- Updated dependencies [ececf7a]
+- Updated dependencies [d173125]
+- Updated dependencies [ed44512]
+- Updated dependencies [242eb0a]
+- Updated dependencies [443f0d3]
+- Updated dependencies [8eeca27]
+- Updated dependencies [8425c17]
+- Updated dependencies [a5ef1d8]
+- Updated dependencies [87ad30c]
+- Updated dependencies [772d5de]
+- Updated dependencies [ce80ec2]
+- Updated dependencies [f24c90d]
+- Updated dependencies [b372318]
+- Updated dependencies [97a2263]
+- Updated dependencies [29d0676]
+- Updated dependencies [0169d49]
+- Updated dependencies [6bd3231]
+- Updated dependencies [1246b4c]
+- Updated dependencies [d2b5ba8]
+- Updated dependencies [b799ac5]
+- Updated dependencies [8f74307]
+- Updated dependencies [d23dc08]
+- Updated dependencies [644ad50]
+- Updated dependencies [9735662]
+- Updated dependencies [4d5b4f8]
+- Updated dependencies [0da7cd2]
+- Updated dependencies [28a5c3e]
+- Updated dependencies [4bc18e5]
+- Updated dependencies [faed589]
+  - @objectstack/spec@17.3.0
+  - @objectstack/core@17.3.0
+  - @objectstack/driver-sql@17.3.0
+  - @objectstack/types@17.3.0
+  - @objectstack/driver-memory@17.3.0
+  - @objectstack/driver-mongodb@17.3.0
+  - @objectstack/driver-turso@17.3.0
+  - @objectstack/driver-sqlite-wasm@17.3.0
+
 ## 17.2.0
 
 ### Patch Changes

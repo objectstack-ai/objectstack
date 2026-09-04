@@ -61,6 +61,13 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from '../invoked-as.mjs';
+// The idiom's own parser, reused rather than re-implemented: a DECLARED-NARROWER
+// row's whole claim is about the hint array a gate SPELLS, so the pin below has
+// to read that array from the gate's source. `auditSource` already knows every
+// rostered declaration name and the literal-array shape the extractor can read,
+// and a second copy of either here would be a roster this file has to keep in
+// step by hand -- the failure mode it exists to catch, one level up. #15201.
+import { auditSource } from '../check-watch-hint-literal.mjs';
 import {
   collapseHint,
   discoverFamilies,
@@ -117,6 +124,28 @@ const POPULATION_CONSTANT = /^(?:[A-Z0-9_]*_ROOTS?|[A-Z0-9_]*_DIRS?|POPULATION|[
  *                      than the bare word. The row stays in the sweep because
  *                      the bare root is still not covered — which is correct,
  *                      not outstanding debt.
+ *                      ⛔ Every record MUST carry a `spelling` naming a
+ *                      `SPELLINGS` entry, for the reason this verdict is the
+ *                      one where the requirement bites hardest: its whole
+ *                      content is a claim about a DECLARATION, and a record
+ *                      naming no set records nothing for the declaration pin
+ *                      to compare — it sits outside that pin by construction,
+ *                      not by oversight, keeping its verdict while the gate
+ *                      moves under it. Measured, at the one row that did:
+ *                      #15270. The requirement is held by `--self-test`, the
+ *                      same way it is held for SPELLABLE-UNDECLARED below.
+ *                      ⛔ That record is then pinned against the DECLARATION
+ *                      as well as the tree: `--self-test` reads the
+ *                      gate's own hint array out of its source and holds the
+ *                      recorded spelling SET-EQUAL to it at this row's root,
+ *                      with any deliberate omission NAMED in `omits` and
+ *                      re-measured. Every other pin in this file asks the TREE,
+ *                      and the tree cannot answer "did the gate widen what it
+ *                      declares" — #15201 is that gap measured: a gate grew a
+ *                      third hint, this row kept describing two, and every
+ *                      LIVE/PRECISE/COMPLETE pin stayed green because the
+ *                      recorded spelling was still true OF THE TREE. No pin, no
+ *                      verdict, the same way as below.
  *   REFUSE-WIDE        the population really IS the whole top-level root. A
  *                      declaration would be TRUE, and is refused anyway: it
  *                      names the gate for every card under a root the fleet
@@ -236,6 +265,38 @@ const POPULATION_CONSTANT = /^(?:[A-Z0-9_]*_ROOTS?|[A-Z0-9_]*_DIRS?|POPULATION|[
  * gate. ⛔ Its numbers are re-measured on the 2026-09-01 tree in BOTH terms and
  * NOT carried from the row they replace, which this docblock forbids by name.
  *
+ * ⭐ That NINETEENTH row was RE-MEASURED on 2026-09-04 (#15201) — both terms
+ * together on one tree, never refreshed apart, at commit a23603ea. Not a
+ * re-decision: the verdict is the one it already carried, and no authorisation
+ * sentence is claimed for it. What moved is the GATE. #15179 widened
+ * `check-ratchet-remedy-authority`'s walk to a second directory read one level
+ * (`scripts/` and `scripts/pm/`), so the row's shape claim — "no nested script
+ * at any depth" — became false of the tree, its numbers described a smaller
+ * walk, and its recorded spelling named two of the three hints the gate now
+ * declares. ⚠️ Nothing reddened, and the reason is the point of this entry:
+ * every pin in this file asks the TREE, the recorded two-hint spelling stayed
+ * LIVE, PRECISE and COMPLETE over its own claim, and the term that had actually
+ * moved — what the gate DECLARES — was not a term any pin read. The repair is
+ * therefore two things and not one: the row re-measured, and the missing
+ * direction pinned for every DECLARED-NARROWER record that carries a spelling
+ * (see that verdict's definition above). ⛔ The gate itself is NOT edited from
+ * here: it is correct, and the map is what went stale.
+ *
+ * ⭐ The TENTH DECLARED-NARROWER row was brought INSIDE that pin on 2026-09-04
+ * (#15270), and it is a repair rather than a re-decision: the verdict is the one
+ * it has carried since it was written and no authorisation sentence is claimed
+ * for it. `check-driver-conformance DRIVERS_DIR packages` carried no `spelling`,
+ * so the declaration pin skipped it by its own scoping rule — while its gate DID
+ * declare a hint at that root, which the row named in PROSE and nothing held to
+ * the array. Both terms are re-measured together on one tree in the row itself,
+ * against the gate's own walk driven under an fs recorder rather than reproduced
+ * by hand. What changes here is the FLOOR: the requirement to carry a spelling
+ * now extends from SPELLABLE-UNDECLARED to DECLARED-NARROWER, so a record whose
+ * whole content is a claim about a declaration may no longer decline to record
+ * the set that claim is about, and the class cannot grow back one unspelled row
+ * at a time. ⛔ The gate is not edited from here either: it is correct, and what
+ * went stale is the MAP, which recorded less than it judged.
+ *
  * ⚠️ One row of that seventeen was re-measured into a DIFFERENT population, not
  * merely fresher digits: #12392 (PR #12423, `69d0e18`) made
  * `check-skills-token-ratchet`'s walk RECURSIVE over whole skill directories, so
@@ -335,6 +396,17 @@ const SPELLINGS = new Map([
     claim: "every file inside a skill's references folder, at any depth",
     holds: (s) => s[0] === 'skills' && s.length >= 4 && s[2] === 'references',
   }],
+  ['driver package files', {
+    // The WHOLE subtree, which is what the gate declares -- and the widest of
+    // the entries here for that reason. Its row's `why` records the direction
+    // that declaration errs in, measured against the gate's own walk: it names
+    // 30 files the gate neither opens nor stats. Recording anything narrower
+    // here would be a claim about a declaration nobody made, which the pin
+    // below refuses in both directions.
+    segments: ['packages', 'drivers', '**'],
+    claim: 'every file at any depth under the drivers directory of the packages root',
+    holds: (s) => s[0] === 'packages' && s[1] === 'drivers' && s.length >= 3,
+  }],
   // ── Multi-hint entries (#14233) — a gate whose declared population is more
   // than one glob at the same root. `holds` accepts whatever any member hint
   // covers; see `hintsOf` and the pin loop below for how the union is asked.
@@ -371,14 +443,23 @@ const SPELLINGS = new Map([
     holds: (s) => s[0] === 'packages' && s.length >= 2
       && (s[s.length - 1] === 'package.json' || s[s.length - 1] === 'tsup.config.ts'),
   }],
-  ['scripts top-level script files', {
+  ['scripts walked-directory script files', {
+    // One hint per (walked directory, extension) pair the gate's walk really
+    // admits -- the shape its own docblock argues for, and the reason this entry
+    // is NOT `scripts/**`: neither directory is descended, so the recursive
+    // spelling would name this gate for every nested script it never opens.
+    // `scripts/pm/*.mts` is deliberately absent because that directory carries
+    // no `.mts` file, and a hint reaching nothing is a dead declaration.
     segments: [
       ['scripts', '*.mjs'],
       ['scripts', '*.mts'],
+      ['scripts', 'pm', '*.mjs'],
     ],
-    claim: 'every `.mjs` or `.mts` file directly under the scripts root (non-recursive)',
-    holds: (s) => s.length === 2 && s[0] === 'scripts'
-      && (s[1].endsWith('.mjs') || s[1].endsWith('.mts')),
+    claim: 'every `.mjs` or `.mts` file directly under the scripts root, or `.mjs` directly under '
+      + 'its pm directory (non-recursive in both)',
+    holds: (s) => s[0] === 'scripts'
+      && ((s.length === 2 && (s[1].endsWith('.mjs') || s[1].endsWith('.mts')))
+        || (s.length === 3 && s[1] === 'pm' && s[2].endsWith('.mjs'))),
   }],
 ]);
 
@@ -401,8 +482,37 @@ const TRIAGE = new Map([
   // ── Taken: a strictly narrower subtree ────────────────────────────────────
   ['scripts/check-driver-conformance.mjs DRIVERS_DIR packages', {
     verdict: 'DECLARED-NARROWER',
-    why: 'the literal is a join() component; the real population is the driver subtree, declared '
-      + 'there at 259 of 291 files (89%) instead of 259 of 4903 (5.3%) at the bare root',
+    spelling: 'driver package files',
+    why: 'the literal is a join() component: the gate assembles its scan root from bare '
+      + 'single-segment words, so the extractor sees the top-level word and nothing else, and the '
+      + 'real population is the driver subtree, declared there beside the constant under the '
+      + 'ROOT_DIR_WATCH_HINTS idiom. RE-MEASURED 2026-09-04 (#15270) at commit 2200f8ec, tree '
+      + 'b8ebad25 — both terms together on one tree, never refreshed apart — and the previous '
+      + 'reading (259 of 291, against 4903 at the bare root) is superseded WHOLE, neither term '
+      + 'carried forward. The walk was driven under an fs recorder rather than reproduced by hand, '
+      + 'this gate exporting none of it: discovery takes the immediate children of the drivers '
+      + 'root that carry a manifest and the driver- prefix (five packages today), and every `.ts` '
+      + "file at any depth under each package's src directory is OPENED, node_modules and dist "
+      + 'skipped — 344 of the 379 tracked files under the declared subtree, 90.8%, against 5979 '
+      + 'tracked under the bare root, 5.8%. The five per-package manifests are STATTED rather than '
+      + 'opened, as the existence test that admits a package to the matrix, so 349 of 379 are '
+      + 'reached one way or the other. ⚠️ The DIRECTION the declaration errs is stated rather than '
+      + 'left to the ratio: it errs WIDE, naming 30 files the gate neither opens nor stats — 11 '
+      + 'markdown, 6 tsconfig JSON, 6 config `.ts` sitting beside the manifests rather than under '
+      + 'src, 5 LICENSE, one `.mjs` and one dotfile — and it is nevertheless the only spellable '
+      + 'claim, since collapseHint can express a SUBTREE and not "the src trees inside it". ⛔ The '
+      + 'record is what the gate SPELLS and is not narrowed to the walk: the pin holds it against '
+      + 'the DECLARATION, so a spelling narrower than the array would be a claim about a '
+      + 'declaration nobody made. Until 2026-09-04 this row named that subtree in PROSE only and '
+      + 'was the one DECLARED-NARROWER record with no spelling, so it sat outside the declaration '
+      + 'pin #15201 landed — the gate could widen or drop the hint with every pin in this file '
+      + 'green — which is why the spelling requirement now extends to this verdict. The other '
+      + 'root this gate reads, the case-set directory under the spec package (8 files), stays '
+      + 'deliberately undeclared on its own docblock reasoning: that is a population absent from '
+      + 'the array, not a declared hint the record passes over, so this row carries no `omits`. '
+      + '⛔ The gate is NOT edited from here. The row STAYS in the sweep because the bare root is '
+      + 'still not covered — no arbitrary file at the top of packages/ is reached — which is what '
+      + 'this verdict says and is correct, not outstanding debt',
   }],
   ['scripts/check-logger-receiver-detach.mjs SCAN_ROOTS packages', {
     verdict: 'DECLARED-NARROWER',
@@ -513,7 +623,7 @@ const TRIAGE = new Map([
   }],
   ['scripts/check-ratchet-remedy-authority.mjs SCRIPTS_DIR scripts', {
     verdict: 'DECLARED-NARROWER',
-    spelling: 'scripts top-level script files',
+    spelling: 'scripts walked-directory script files',
     why: 'RE-DECIDED 2026-09-01 (#13813) from REFUSE-UNSPELLABLE, whose stated reason — "the idiom '
       + 'has no non-recursive spelling" — was TRUE when written and is FALSE of this tree. It '
       + 'rested on the deletion-collapse: a glob carrying a literal SUFFIX in the final segment '
@@ -521,28 +631,39 @@ const TRIAGE = new Map([
       + 'tree can hold and reached nothing. #13448 retired that collapse for exactly this shape — '
       + 'judgedAsPattern routes it to triggerCovers now — which is the same retired collapse the '
       + 'seventeen rows of 2026-08-26 and the eighteenth of 2026-08-29 were re-decided under, one '
-      + 'refinement finer, and this row is re-decided under that authorisation sentence and no '
-      + 'wider one. Both terms re-measured together on this tree, never refreshed apart: the gate '
-      + 'own corpusFiles() walk admits 183 files, against 310 tracked under the bare root (59%). '
-      + 'The gate now declares ONE hint per admitted extension beside SCRIPTS_DIR under the '
-      + 'ROOT_DIR_WATCH_HINTS idiom, and the pair is SET-EQUAL to that walk in both directions — '
-      + '183 of 183, nothing read left uncovered, nothing covered left unread — so 100% precise '
-      + 'and complete. The coupling described above was, at the time this row was decided, held '
-      + "only in the gate's own --self-test (which pins the hints against SCRIPTS_DIR and "
-      + 'CORPUS_EXTENSIONS and refuses both the subtree spelling and the brace form its own '
-      + 'messages print), because SPELLINGS held ONE hint per entry and this population needs one '
-      + 'per extension — the same shape as the check:logger-receiver-detach and '
-      + 'check:dual-build-cjs-loads rows above, and the gap #14233 measured and closed: SPELLINGS '
-      + 'now holds a LIST of segment arrays, so the pair is pinned HERE too, LIVE, PRECISE and '
-      + 'COMPLETE (183 of 310 tracked files under the bare root, matching the gate own walk exactly, '
-      + "re-measured 2026-09-01) — the gate's own pin and this one now independently corroborate "
-      + 'the same declaration rather than only one of them re-measuring it. The consumer is '
+      + 'refinement finer, and this row was re-decided under that authorisation sentence and no '
+      + 'wider one. RE-MEASURED 2026-09-04 (#15201) at commit a23603ea — both terms together on '
+      + 'one tree and never refreshed apart — because #15179 widened the WALK under the row: '
+      + 'corpusFiles() reads the scripts root AND its pm directory, one level each, and admits '
+      + '202 files (188 at the top level, 14 in pm) against 324 tracked under the bare root, 62%. '
+      + '⛔ The previous reading, 183 of 310, described the one-directory walk that preceded it '
+      + 'and is superseded WHOLE — neither term is carried forward, which this docblock forbids '
+      + 'by name. The gate declares ONE hint per (walked directory, extension) pair the walk '
+      + 'admits, beside SCRIPTS_DIR under the ROOT_DIR_WATCH_HINTS idiom — three today, the pm '
+      + 'mts pair deliberately absent because that directory holds no such file and a hint '
+      + 'reaching nothing is a dead declaration — and the set is SET-EQUAL to that walk in both '
+      + 'directions: 202 of 202, nothing read left uncovered, nothing covered left unread, so '
+      + '100% precise and complete. SPELLINGS holds a LIST of segment arrays since #14233, so '
+      + 'that set is pinned HERE too, LIVE, PRECISE and COMPLETE (202 of 324 tracked files under '
+      + 'the bare root, matching the gate own walk exactly) — the same multi-hint shape as the '
+      + 'check:logger-receiver-detach and check:dual-build-cjs-loads rows above. ⚠️ Those pins '
+      + 'ask the TREE, and #15201 is the measurement that they are not sufficient alone: the walk '
+      + 'widened, this row went on describing two hints, and every one of them stayed GREEN '
+      + 'because the two-hint spelling was still true of the tree it was asked about. So the '
+      + 'declaration is now pinned from both sides — the gate own --self-test derives its '
+      + 'expected hints from corpusFiles() and holds its array to them (refusing the subtree '
+      + 'spelling and the brace form its own messages print), while this file reads that same '
+      + 'array out of the gate SOURCE and holds the recorded spelling set-equal to it, so the '
+      + 'next widening of that walk reds in both places instead of neither. The consumer is '
       + 'MEASURED, not argued: before this, the derivation placed this family in the residue '
       + 'undetermined bucket, absent from the matched list a brief prints, and a PR that ran its '
       + 'whole derived family green locally lost a CI round to this gate. The row STAYS in the '
       + 'sweep because the bare root is still not covered — no arbitrary file at the top of the '
-      + 'root is reached, and no nested script at any depth — which is what this verdict says and '
-      + 'is correct, not outstanding debt',
+      + 'root is reached, no nested directory other than pm is walked, and no level below either '
+      + 'walked directory is descended — which is what this verdict says and is correct, not '
+      + 'outstanding debt. ⚠️ The scripts one level down in pm ARE reached now: the flat "no '
+      + 'nested script at any depth" this row carried until 2026-09-04 was true of the walk it '
+      + 'was written about and false of this one',
   }],
   // ── Refused: the population is the whole root, and the root is saturated ──
   ['scripts/check-skill-identifier-liveness.mjs IMPL_ROOTS packages', {
@@ -793,6 +914,18 @@ const TRIAGE = new Map([
   ['packages/spec/scripts/build-skill-docs.ts SKILLS_DIR skills', {
     verdict: 'DECLARED-NARROWER',
     spelling: 'skill entrypoints',
+    // The one hint this gate declares at this root that the recorded spelling
+    // does NOT name, restated where the declaration pin can read it (#15201).
+    // Its reason is the `why` below, unchanged and not re-decided: no single
+    // spelling of the idiom reaches both a per-skill SKILL.md and a file at the
+    // root beside those directories. Naming it here is what keeps the pin
+    // two-sided for this row — a hint the gate ADDS later is not covered by
+    // this omission and reds, which is the whole point.
+    // ⚠️ SEGMENTS, joined at runtime — the rule SPELLINGS states above, and it
+    // is not decoration: spelled as a path literal this entry enters THIS
+    // file's own hint set and hands a reporting tool a population it never
+    // reads. The self-test that forbids it caught this exact line.
+    omits: [['skills', 'README.md']],
     why: 'RE-POINTED 2026-09-01 (#13519) from SPELLABLE-UNDECLARED, and the deferral it replaces '
       + 'is not merely overruled — its own premise stopped holding. That record read: the '
       + 'population is 12 of 50 (24%), the recorded spelling is 100% PRECISE and deliberately '
@@ -1580,9 +1713,31 @@ function selfTest() {
   // describing the tree. ⛔ The remedy is to re-measure the ROW, never to relax
   // `holds` until it agrees again.
   const spellingRows = [...TRIAGE.entries()].filter(([, v]) => v.spelling);
-  t('every SPELLABLE-UNDECLARED record names a spelling — the verdict is DEFINED only with one, '
-    + 'and the ruling that created it rejects the whole option on an unpinned value',
-    [...TRIAGE.values()].every((v) => v.verdict !== 'SPELLABLE-UNDECLARED' || Boolean(v.spelling)));
+  // The two verdicts whose whole content is a claim only a spelling records, so
+  // a record without one records nothing for the pins to hold. SPELLABLE-
+  // UNDECLARED says a precise live spelling EXISTS, unpinnable while unspoken;
+  // DECLARED-NARROWER says the GATE DECLARES one, which the declaration pin
+  // below can compare only against a recorded set. #15270 measured what the
+  // second gap costs: the tenth DECLARED-NARROWER record named its subtree in
+  // PROSE only, so it sat outside that pin by construction while its gate did
+  // declare a hint at that very root — and nothing in this file reddened.
+  const SPELLING_REQUIRED = new Set(['SPELLABLE-UNDECLARED', 'DECLARED-NARROWER']);
+  const spellingHeld = (v) => !SPELLING_REQUIRED.has(v.verdict) || Boolean(v.spelling);
+  const unspelled = [...TRIAGE.entries()].filter(([, v]) => !spellingHeld(v)).map(([k]) => k);
+  t('every SPELLABLE-UNDECLARED and every DECLARED-NARROWER record names a spelling — both '
+    + 'verdicts are DEFINED only with one, and the ruling that created the first rejects the '
+    + `whole option on an unpinned value${unspelled.length
+      ? ` — UNSPELLED: ${unspelled.join(' · ')}. Record the population as a SPELLINGS entry and `
+        + 'point the row at it, re-measuring BOTH terms on one tree; a row that cannot be spelled '
+        + 'is a row whose verdict is one of the two refusals.' : ''}`,
+    unspelled.length === 0);
+  t('…and that rule can FAIL, asked of FIXTURE records rather than of the map it judges: a '
+    + 'record carrying either verdict and no spelling is REFUSED, while the two refusals — which '
+    + 'have no spelling to record — are not',
+    !spellingHeld({ verdict: 'DECLARED-NARROWER' })
+      && !spellingHeld({ verdict: 'SPELLABLE-UNDECLARED' })
+      && spellingHeld({ verdict: 'REFUSE-WIDE' })
+      && spellingHeld({ verdict: 'REFUSE-UNSPELLABLE' }));
   t('every recorded spelling names a SPELLINGS entry',
     spellingRows.every(([, v]) => SPELLINGS.has(v.spelling)));
   t('the pins below judge something — at least one record carries a spelling',
@@ -1616,6 +1771,87 @@ function selfTest() {
       + `${covered.length} of the ${rootFiles.length} tracked file(s) under its own root`,
       rootFiles.length > 0 && covered.length < rootFiles.length);
   }
+
+  // ── The DECLARATION a row describes, read from the gate's own SOURCE ──────
+  //
+  // The one direction every pin above is blind to. They all ask the TREE: is
+  // the recorded spelling live, does it over-name, does it under-name. A gate
+  // that WIDENS what it declares moves none of those answers -- the old
+  // spelling goes on covering exactly what it always covered -- so a
+  // DECLARED-NARROWER record can stop describing its own gate with this whole
+  // battery green. #15201 is that measured, not argued:
+  // check-ratchet-remedy-authority grew a third hint, the row here went on
+  // naming two, and nothing reddened anywhere.
+  //
+  // So the gate's array is read back out of its SOURCE -- through the idiom's
+  // own parser, never a roster retyped here -- and held SET-EQUAL to the
+  // recorded spelling at THIS row's bare root. Two directions, plus one field
+  // for the single honest asymmetry:
+  //
+  //   recorded in declared   the record cannot claim a hint the gate never
+  //                          spelled; that is a declaration nobody made.
+  //   declared in recorded   the record cannot pass over a hint the gate DID
+  //                          spell -- unless the row NAMES it in `omits`, which
+  //                          is a measured claim of its own and is re-checked
+  //                          every run: an omission the gate stopped declaring
+  //                          reds exactly as loudly as one it started.
+  //
+  // ⛔ Only DECLARED-NARROWER rows are asked, and that is a definition rather
+  // than an exemption: a SPELLABLE-UNDECLARED row IS the row whose gate
+  // declares nothing for that population, so the comparison there has its
+  // answer built into the verdict. The `spelling` test in the loop is belt to
+  // the braces above, which now REFUSE such a record rather than let it pass
+  // over this pin unjudged (#15270) — reaching it would mean that rule had
+  // been removed. ⛔ When this reds the remedy is to re-measure
+  // the ROW -- never to extend `omits` until it agrees again, which is the same
+  // move as relaxing `holds`, refused above in as many words.
+  const declaredHintsAt = (file, root) => {
+    const abs = join(ROOT, file);
+    if (!existsSync(abs)) return null;
+    return auditSource(file, readFileSync(abs, 'utf8'))
+      .filter((d) => d.ok)
+      .flatMap((d) => d.hints)
+      .filter((h) => h.split('/')[0] === root);
+  };
+  const sameSet = (a, b) => a.length === b.length
+    && [...a].sort().join('\n') === [...b].sort().join('\n');
+  t('an `omits` field appears only on a DECLARED-NARROWER record that names a spelling, and is a '
+    + 'non-empty list of SEGMENT ARRAYS — it records what a DECLARATION says, so there is nothing '
+    + "for it to be about on any other row, and a path literal there would enter this file's own "
+    + 'hint set the way a spelling literal would',
+    [...TRIAGE.values()].every((v) => !v.omits
+      || (v.verdict === 'DECLARED-NARROWER' && Boolean(v.spelling)
+        && Array.isArray(v.omits) && v.omits.length > 0
+        && v.omits.every((parts) => Array.isArray(parts) && parts.length > 0
+          && parts.every((p) => typeof p === 'string' && p.length > 0)))));
+  let declPinned = 0;
+  for (const [key, v] of TRIAGE) {
+    if (v.verdict !== 'DECLARED-NARROWER' || !v.spelling) continue;
+    const [file, , root] = key.split(' ');
+    const recorded = hintsOf(SPELLINGS.get(v.spelling).segments).map((parts) => parts.join('/'));
+    const declared = declaredHintsAt(file, root);
+    t(`the gate source the row "${key}" judges is readable from here — a row whose file moved `
+      + 'cannot have its declaration read, and reporting that as agreement would be the silence '
+      + 'this pin exists to break', declared !== null);
+    if (declared === null) continue;
+    t(`the spelling recorded for "${key}" is rooted at that row's own bare root (${root}) — a `
+      + 'spelling paired with the wrong row would otherwise be compared against a declaration it '
+      + 'was never about', recorded.length > 0 && recorded.every((h) => h.split('/')[0] === root));
+    const unspelled = recorded.filter((h) => !declared.includes(h));
+    t(`every hint the row "${key}" records is one its gate DECLARES at ${root}${unspelled.length
+      ? ` — NOT DECLARED: ${unspelled.join(' · ')}. The record claims a declaration the gate does `
+        + 'not make; re-measure the row.' : ''}`, unspelled.length === 0);
+    const unrecorded = declared.filter((h) => !recorded.includes(h));
+    const named = (v.omits ?? []).map((parts) => parts.join('/'));
+    t(`…and every hint that gate declares at ${root} is either recorded by "${v.spelling}" or `
+      + `named in the row's \`omits\`${sameSet(unrecorded, named) ? '' : ` — DRIFT: declared and `
+        + `not recorded [${unrecorded.join(' · ') || 'none'}], named as omitted `
+        + `[${named.join(' · ') || 'none'}]. The gate moved under the record: re-measure BOTH `
+        + 'terms of the row and re-decide it.'}`, sameSet(unrecorded, named));
+    declPinned += 1;
+  }
+  t('the declaration pin judges something — at least one DECLARED-NARROWER record carries a '
+    + 'spelling to hold against its gate', declPinned > 0);
 
   // Every verdict must be one of the four the docblock defines, and every one
   // must carry its measured reason — a bare verdict is the allowlist row this
@@ -1681,7 +1917,10 @@ function selfTest() {
       + "and no folded row's invocations disagree about reachability. "
       + `${spellingRows.length} record(s) carry a spelling and every one of ${usedSpellings.size} `
       + 'distinct spelling(s) is pinned LIVE, PRECISE and COMPLETE against the tracked corpus in '
-      + "hintCovers' own terms. The recogniser is proven to speak and to discriminate (a "
+      + `hintCovers' own terms. ${declPinned} DECLARED-NARROWER record(s) are held SET-EQUAL, in `
+      + "both directions, to their gate's own declared hint array read from its source, with "
+      + 'every deliberate omission named and re-measured. The recogniser is proven to speak and '
+      + 'to discriminate (a '
       + 'separator-carrying and a dotted root are both refused as already visible), the '
       + 'constant-name restriction is proven to restrict, and neither the triage keys nor this '
       + `file declare any population of their own. ${CENSUS_REFUSE_WIDE.size} CENSUS row(s) `

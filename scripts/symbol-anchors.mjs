@@ -576,6 +576,41 @@ export function formatFindings(findings) {
 
 function assert(cond, msg) { if (!cond) { console.error(`❌ symbol-anchors --self-test: ${msg}`); process.exit(1); } }
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// A module-level `assert()` that exits on the first failure used to be this
+// self-test's ONLY success condition, so "every case held" and "the cases
+// never ran" printed the same line. Closed the way PR #13487 validated on
+// check-doc-authoring: what is pinned is the registered NAMES, not a
+// number. The floor requires the OPENED set to equal the DECLARED set with
+// each battery at or above its own count.
+//
+// This file declares ONE battery, opened at the top of the self-test body. It
+// carries fewer than the two named section banners the sectioning criterion
+// needs, and ⛔ a comment is NOT promoted to a section head — that is a
+// judgement per comment this transplant does not make. The hoisted single
+// battery is the shape PR #14896, PR #15003 and PR #15217 landed for exactly
+// this case.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The count is a FLOOR, not an equality — adding cases is ordinary work and must
+// not red. A battery BELOW its floor means cases stopped running; the remedy is
+// to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'symbol-anchors self-test': 51,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 1;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 // Returned by `selfTest()` only after its verdict is printed. The dispatch
 // refuses anything else: a `return` that leaves the function above that line
 // prints nothing and still exits 0 — a self-test that never finished, reported
@@ -583,6 +618,27 @@ function assert(cond, msg) { if (!cond) { console.error(`❌ symbol-anchors --se
 const SELF_TEST_VERDICT = 'symbol-anchors self-test reached its verdict';
 
 export function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const batterySeen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+  };
+  battery('symbol-anchors self-test');
+  // A thin in-body wrapper over the module-level `assert`: it attributes the
+  // case to the open battery and then defers to the existing assertion, whose
+  // semantics (print and exit 1 on the first failure) are unchanged.
+  const check = (cond, message) => {
+    registerCase();
+    assert(cond, message);
+  };
   // 1. Declaration sites, one per supported spelling. Each is provoked in BOTH
   //    directions -- a rule that only ever says "found" is not a rule.
   const ts = [
@@ -604,32 +660,32 @@ export function selfTest() {
   ].join('\n');
   for (const name of ['registerApp', 'SqlDriver', 'Shape', 'Verdict', 'Posture', 'RESERVED_NAMESPACES',
     'helperName', 'destructured', 'stateMachines', 'quoted_key', 'methodShorthand', 'accessorName']) {
-    assert(symbolResolutionClass(ts, 'x.ts', name) === 'declaration', `"${name}" should resolve as a declaration`);
+    check(symbolResolutionClass(ts, 'x.ts', name) === 'declaration', `"${name}" should resolve as a declaration`);
   }
-  assert(symbolResolutionClass(ts, 'x.ts', 'sys_metadata') === 'literal', 'a quoted data identifier resolves as `literal`, not `declaration`');
-  assert(symbolResolutionClass(ts, 'x.ts', 'notPresentAnywhere') === null, 'an absent symbol must NOT resolve');
+  check(symbolResolutionClass(ts, 'x.ts', 'sys_metadata') === 'literal', 'a quoted data identifier resolves as `literal`, not `declaration`');
+  check(symbolResolutionClass(ts, 'x.ts', 'notPresentAnywhere') === null, 'an absent symbol must NOT resolve');
 
   // 2. ⭐ The census caveat, enforced: prose is not resolution. A symbol named
   //    only in a comment is exactly the false green that made 72.1% a LOWER
   //    bound, so it is provoked directly.
   const commented = '// registerApp is described here but not defined\nconst other = 1;\n';
-  assert(symbolResolutionClass(commented, 'x.ts', 'registerApp') === null, 'a symbol named only in a comment must NOT resolve');
+  check(symbolResolutionClass(commented, 'x.ts', 'registerApp') === null, 'a symbol named only in a comment must NOT resolve');
   const blockCommented = '/* interface Shape { } */\nconst other = 1;\n';
-  assert(symbolResolutionClass(blockCommented, 'x.ts', 'Shape') === null, 'a declaration inside a block comment must NOT resolve');
+  check(symbolResolutionClass(blockCommented, 'x.ts', 'Shape') === null, 'a declaration inside a block comment must NOT resolve');
   // ...and the stripper must not be fooled by a `//` living inside a string.
   const slashInString = 'const url = "https://example.com";\nexport function afterTheString() {}\n';
-  assert(symbolResolutionClass(slashInString, 'x.ts', 'afterTheString') === 'declaration', '`//` inside a string must not eat the rest of the file');
+  check(symbolResolutionClass(slashInString, 'x.ts', 'afterTheString') === 'declaration', '`//` inside a string must not eat the rest of the file');
 
   // 3. Substring is not resolution -- the other half of the same caveat.
-  assert(symbolResolutionClass('const registerApplication = 1;', 'x.ts', 'registerApp') === null, 'a symbol must not resolve as a substring of a longer identifier');
-  assert(symbolResolutionClass('const names = ["sys_metadata_extra"];', 'x.ts', 'sys_metadata') === null, 'the `literal` class is a WHOLE-token match');
+  check(symbolResolutionClass('const registerApplication = 1;', 'x.ts', 'registerApp') === null, 'a symbol must not resolve as a substring of a longer identifier');
+  check(symbolResolutionClass('const names = ["sys_metadata_extra"];', 'x.ts', 'sys_metadata') === null, 'the `literal` class is a WHOLE-token match');
 
   // 4. Markdown headings and keyed formats.
-  assert(symbolResolutionClass('## Overlay whitelist\n', 'a.md', 'Overlay whitelist') === 'declaration', 'a markdown heading resolves by text');
-  assert(symbolResolutionClass('## Overlay whitelist\n', 'a.md', 'overlay-whitelist') === 'declaration', 'a markdown heading resolves by slug');
-  assert(symbolResolutionClass('## Something else\n', 'a.md', 'overlay-whitelist') === null, 'an absent heading must NOT resolve');
-  assert(symbolResolutionClass('{ "compilerOptions": { } }', 'a.json', 'compilerOptions') === 'declaration', 'a JSON key resolves');
-  assert(symbolResolutionClass('{ "other": 1 }', 'a.json', 'compilerOptions') === null, 'an absent JSON key must NOT resolve');
+  check(symbolResolutionClass('## Overlay whitelist\n', 'a.md', 'Overlay whitelist') === 'declaration', 'a markdown heading resolves by text');
+  check(symbolResolutionClass('## Overlay whitelist\n', 'a.md', 'overlay-whitelist') === 'declaration', 'a markdown heading resolves by slug');
+  check(symbolResolutionClass('## Something else\n', 'a.md', 'overlay-whitelist') === null, 'an absent heading must NOT resolve');
+  check(symbolResolutionClass('{ "compilerOptions": { } }', 'a.json', 'compilerOptions') === 'declaration', 'a JSON key resolves');
+  check(symbolResolutionClass('{ "other": 1 }', 'a.json', 'compilerOptions') === null, 'an absent JSON key must NOT resolve');
 
   // 5. Extraction: every grammar form, and every ⛔ line-number spelling the
   //    census found in the corpus (plain, hyphen range, EN DASH range, and a
@@ -654,52 +710,101 @@ export function selfTest() {
   ].join('\n');
   const { anchors, lineAnchors } = extractAnchors(doc);
   const sym = anchors.filter((a) => a.symbol);
-  assert(sym.length === 3, `expected 3 symbol anchors, got ${sym.length}`);
-  assert(anchors.some((a) => a.continuation && a.symbol === 'installPackage' && a.path.endsWith('engine.ts')), 'a continuation must inherit the preceding path');
-  assert(anchors.some((a) => a.repo === 'objectui' && a.symbol === 'BaseSchema'), 'a cross-repo anchor keeps its repo');
-  assert(anchors.some((a) => !a.symbol && a.path.endsWith('object.zod.ts')), 'a file-level anchor is an anchor');
+  check(sym.length === 3, `expected 3 symbol anchors, got ${sym.length}`);
+  check(anchors.some((a) => a.continuation && a.symbol === 'installPackage' && a.path.endsWith('engine.ts')), 'a continuation must inherit the preceding path');
+  check(anchors.some((a) => a.repo === 'objectui' && a.symbol === 'BaseSchema'), 'a cross-repo anchor keeps its repo');
+  check(anchors.some((a) => !a.symbol && a.path.endsWith('object.zod.ts')), 'a file-level anchor is an anchor');
   const live = lineAnchors.filter((l) => !l.exempt);
   /* ⭐ EVERY spelling in the corpus, by name. The comma and `+` forms are here
    * because the #13556 census's own extractor missed them, and a gate that
    * inherits that blind spot reports a rotted corpus as clean. */
   const rawOf = (needle) => live.filter((l) => l.raw.includes(needle));
-  assert(rawOf(':4901').length === 1, 'a plain line anchor must be found');
-  assert(rawOf(':28-76').length === 1, 'a hyphen range must be found');
-  assert(rawOf('459–463').length === 1, 'an EN DASH range must be found');
-  assert(rawOf(':2920').length === 1, 'a continuation parent must be found');
-  assert(rawOf(':2933').length === 1, 'a bare continuation must be found');
-  assert(rawOf(':13,346-389').length === 1, 'a COMMA list must be found');
-  assert(rawOf(':29-39,147-152').length === 1, 'a comma list of RANGES must be found');
-  assert(rawOf(':2214+').length === 1, 'an open-ended `+` anchor must be found');
-  assert(rawOf(':595+').length === 1, 'an open-ended `+` continuation must be found');
-  assert(rawOf('audit-plugin.ts:40').length === 1, 'a BARE, un-spanned line anchor in prose must be found');
-  assert(rawOf(':2956/2991').length === 1, 'a SLASH list must be found');
-  assert(rawOf('builder-block.ts:42').length === 1, 'an anchor SHARING a code span with other text must be found');
-  assert(rawOf('~`326`').length === 1, 'the TILDE bare-number form must be found');
-  assert(extractAnchors('a status `403` and a size `4096` on a `packages/x/y.ts#sym` line').lineAnchors.length === 0,
+  check(rawOf(':4901').length === 1, 'a plain line anchor must be found');
+  check(rawOf(':28-76').length === 1, 'a hyphen range must be found');
+  check(rawOf('459–463').length === 1, 'an EN DASH range must be found');
+  check(rawOf(':2920').length === 1, 'a continuation parent must be found');
+  check(rawOf(':2933').length === 1, 'a bare continuation must be found');
+  check(rawOf(':13,346-389').length === 1, 'a COMMA list must be found');
+  check(rawOf(':29-39,147-152').length === 1, 'a comma list of RANGES must be found');
+  check(rawOf(':2214+').length === 1, 'an open-ended `+` anchor must be found');
+  check(rawOf(':595+').length === 1, 'an open-ended `+` continuation must be found');
+  check(rawOf('audit-plugin.ts:40').length === 1, 'a BARE, un-spanned line anchor in prose must be found');
+  check(rawOf(':2956/2991').length === 1, 'a SLASH list must be found');
+  check(rawOf('builder-block.ts:42').length === 1, 'an anchor SHARING a code span with other text must be found');
+  check(rawOf('~`326`').length === 1, 'the TILDE bare-number form must be found');
+  check(extractAnchors('a status `403` and a size `4096` on a `packages/x/y.ts#sym` line').lineAnchors.length === 0,
     'an UNTILDED bare number must NOT be read as a line anchor — it is an HTTP status or a byte count far more often than a line');
-  assert(live.length === 14, `expected 14 live line anchors across every spelling, got ${live.length}: ${live.map((l) => l.raw).join(' ')}`);
-  assert(lineAnchors.some((l) => l.exempt === 'HISTORICAL'), 'the exemption marker must be read');
-  assert(!lineAnchors.some((l) => l.raw.includes('file.ts:12')), 'ordinary fenced content must stay invisible to the extractor');
-  assert(rawOf('rule-validator.ts:378').length === 1, 'a fenced COMMENT HEADER naming a path IS an anchor and must be found');
+  check(live.length === 14, `expected 14 live line anchors across every spelling, got ${live.length}: ${live.map((l) => l.raw).join(' ')}`);
+  check(lineAnchors.some((l) => l.exempt === 'HISTORICAL'), 'the exemption marker must be read');
+  check(!lineAnchors.some((l) => l.raw.includes('file.ts:12')), 'ordinary fenced content must stay invisible to the extractor');
+  check(rawOf('rule-validator.ts:378').length === 1, 'a fenced COMMENT HEADER naming a path IS an anchor and must be found');
 
   // 6. An exemption governs the anchor it FOLLOWS and does not spill leftwards
   //    onto an earlier, unexcused one.
   const spill = 'First `a/b.ts:10` then `c/d.ts:20` <!-- anchor-exempt: HISTORICAL -->';
   const spilled = extractAnchors(spill).lineAnchors;
-  assert(spilled.find((l) => l.raw.includes('a/b.ts'))?.exempt === null, 'an exemption must not cover an earlier anchor');
-  assert(spilled.find((l) => l.raw.includes('c/d.ts'))?.exempt === 'HISTORICAL', 'an exemption must cover the anchor it follows');
+  check(spilled.find((l) => l.raw.includes('a/b.ts'))?.exempt === null, 'an exemption must not cover an earlier anchor');
+  check(spilled.find((l) => l.raw.includes('c/d.ts'))?.exempt === 'HISTORICAL', 'an exemption must cover the anchor it follows');
 
   // 7. An invalid exemption class is a finding, not a silent pass -- otherwise
   //    a typo is a way to switch the gate off.
   const bogus = extractAnchors('`a/b.ts:10` <!-- anchor-exempt: BECAUSE-I-SAID-SO -->').lineAnchors;
-  assert(bogus[0].exempt === null, 'an unrecognised exemption class must not be honoured');
-  assert(bogus[0].exemptRaw !== null, 'an unrecognised exemption must still be CARRIED, so it reports as a bad exemption rather than as a plain line anchor');
+  check(bogus[0].exempt === null, 'an unrecognised exemption class must not be honoured');
+  check(bogus[0].exemptRaw !== null, 'an unrecognised exemption must still be CARRIED, so it reports as a bad exemption rather than as a plain line anchor');
 
   // 8. defineCorpus refuses a corpus that would sweep nothing.
   let threw = false;
   try { defineCorpus({ id: 'x', label: 'x', docRoots: [] }); } catch { threw = true; }
-  assert(threw, 'defineCorpus must refuse an empty docRoots');
+  check(threw, 'defineCorpus must refuse an empty docRoots');
+
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  // The floor's refusal joins the SAME sink the cases use — the module-level
+  // `assert`, which prints and exits 1 — so a breached floor cannot be printed
+  // over by the verdict below.
+  const floorMessages = [];
+  const floorFailure = (message) => { floorMessages.push(message); };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned `
+        + `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in `
+        + 'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. `
+          + 'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of `
+          + `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the '
+        + 'number. Find what stopped registering (an early return, a deleted block, a guard that now '
+        + 'skips) and restore it.',
+    );
+  }
+  assert(!floorBreached, floorMessages.join('\n     '));
 
   console.log('✅ symbol-anchors --self-test: grammar, both resolution classes, comment/substring rejection, every ⛔ line-number spelling, exemption scoping and corpus registration verified');
 

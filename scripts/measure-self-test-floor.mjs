@@ -302,6 +302,10 @@ export const ENTRY_BY_HAND = Object.freeze({
   'scripts/check-self-test-wired.mjs': 'selfTest',
   'scripts/check-self-test-workflow-commands.mjs': 'selfTest',
   'scripts/check-turbo-task-graph.mjs': 'runSelfTest',
+  // Two self-test-shaped functions: `selfTest()` returns a failure list and
+  // `runSelfTest()` is what the dispatch calls. Probing the inner one records a
+  // TypeError as a handshake; probing `runSelfTest` reads the real one (#14842).
+  'scripts/check-workspace-manifest-cycles.mjs': 'runSelfTest',
   // The dispatch calls FOUR self-test functions and combines their statuses;
   // there is no single entry an early return leaves, so a one-function probe
   // measures a sub-battery and reads a downstream crash as a handshake.

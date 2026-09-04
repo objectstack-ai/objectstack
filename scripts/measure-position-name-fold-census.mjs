@@ -693,75 +693,167 @@ const AUDIT_CONTROLS = [
 // handshake is a flag rather than a returned sentinel.
 let selfTestReachedVerdict = false;
 
+// -- The self-test's own battery roster and floor (#13489) ------------------
+//
+// Reaching the verdict used to be this self-test's ONLY success condition, so
+// "every control held" and "the controls never ran" printed the same line.
+// Closed the way PR #13487 validated on check-doc-authoring: what is pinned is
+// the registered NAMES, not a number.
+//
+// This file's assertion sites are `if (...) problems.push(...)` -- a
+// FAILURE-ONLY sink. Routing `problems.push` itself through `registerCase()`
+// would register a case only when a control FAILS: a fully green run would
+// register 0 and the battery would read DID NOT RUN, the floor inverted rather
+// than installed. So the sites are counted by the `check(() => { ... })` THUNK
+// PR #15198 measured: the existing `if (...) problems.push(...)` is carried in
+// VERBATIM, no condition is touched, and registration happens whether or not
+// the site fires.
+//
+// This file declares ONE battery, opened at the top of the self-test body: it
+// carries ZERO named section banners, fewer than the two the sectioning
+// criterion needs, and a comment is NOT promoted to a section head. The hoisted
+// single battery is the shape PR #14896, PR #15003 and PR #15217 landed.
+//
+// ⭐ ONE site stays OUTSIDE the roster, deliberately: the `catch` arm of the
+// AUDIT_CONTROLS loop (`audit control threw: ...`) ends in `continue`, which is
+// illegal inside the thunk's arrow function. Wrapping it would mean rewriting
+// that control flow -- exactly what the verbatim rule forbids. Its sibling in
+// the same loop body, `if (!ac.expect(result))`, IS floored, so a loop that
+// stops running still reds. This is the residue recipe A's non-table
+// assertions carry too (PR #15286's `extra` call).
+//
+// The count is a FLOOR, not an equality -- adding controls is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering, never to lower the number. Four
+// of the thirteen floored sites sit inside `for` loops, so the count is the
+// number of times a site is REACHED on a run, measured on a run.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'measure-position-name-fold-census self-test': 24,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 1;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 function selfTest({ quiet = false } = {}) {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every site below is attributed to the one most
+  // recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const batterySeen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+  };
+  battery('measure-position-name-fold-census self-test');
+  // The thunk: it registers the case and then runs the existing site VERBATIM,
+  // so no control's condition is inverted or rewritten and the `problems` sink
+  // keeps its own semantics.
+  const check = (fn) => {
+    registerCase();
+    fn();
+  };
   const problems = [];
   const c = census();
 
   for (const name of CONTROLS.builtinPositions) {
-    if (!c.positions.has(name)) {
-      problems.push(`parse-integrity: built-in POSITION \`${name}\` was not found. The scanner has drifted`
-        + ' off the declaration shape; every number below it would be an under-count.');
-    }
+    check(() => {
+      if (!c.positions.has(name)) {
+        problems.push(`parse-integrity: built-in POSITION \`${name}\` was not found. The scanner has drifted`
+          + ' off the declaration shape; every number below it would be an under-count.');
+      }
+    });
   }
   for (const name of CONTROLS.builtinPermissionSets) {
-    if (!c.permissionSets.has(name)) {
-      problems.push(`parse-integrity: built-in PERMISSION SET \`${name}\` was not found. Same failure, other axis.`);
-    }
+    check(() => {
+      if (!c.permissionSets.has(name)) {
+        problems.push(`parse-integrity: built-in PERMISSION SET \`${name}\` was not found. Same failure, other axis.`);
+      }
+    });
   }
 
   const a = CONTROLS.junctionAnchor;
-  if (!c.bindings.some((b) => b.position === a.position && b.set === a.set)) {
-    problems.push(`positive control (junction) NOT classified as a junction binding: `
-      + `${a.position} -> ${a.set}\n    ${a.why}`);
-  }
-  if (c.nameFolds.some((f) => f.name === a.position)) {
-    problems.push(`positive control (junction) was reported as a NAME-DEPENDENCY: ${a.position}\n    ${a.why}`);
-  }
+  check(() => {
+    if (!c.bindings.some((b) => b.position === a.position && b.set === a.set)) {
+      problems.push(`positive control (junction) NOT classified as a junction binding: `
+        + `${a.position} -> ${a.set}\n    ${a.why}`);
+    }
+  });
+  check(() => {
+    if (c.nameFolds.some((f) => f.name === a.position)) {
+      problems.push(`positive control (junction) was reported as a NAME-DEPENDENCY: ${a.position}\n    ${a.why}`);
+    }
+  });
 
   const b = CONTROLS.nameFoldAnchor;
   const fold = c.nameFolds.find((f) => f.name === b.name);
-  if (!fold) {
-    problems.push(`positive control (name-fold) NOT detected: ${b.name}\n    ${b.why}`);
-  } else if (!fold.permissionSets.some((s) => s.kind === 'artifact')) {
-    problems.push(`positive control (name-fold) ${b.name} was detected, but its permission-set half is not`
-      + ' the composed artifact -- the control is passing for the wrong reason.');
-  }
+  check(() => {
+    if (!fold) {
+      problems.push(`positive control (name-fold) NOT detected: ${b.name}\n    ${b.why}`);
+    } else if (!fold.permissionSets.some((s) => s.kind === 'artifact')) {
+      problems.push(`positive control (name-fold) ${b.name} was detected, but its permission-set half is not`
+        + ' the composed artifact -- the control is passing for the wrong reason.');
+    }
+  });
 
   const n = CONTROLS.negative;
-  if (c.nameFolds.some((f) => f.name === n.position)) {
-    problems.push(`negative control reported as a name-fold: ${n.position}\n    ${n.why}`);
-  }
-  if (!c.bindings.some((x) => x.position === n.position && x.set === n.set)) {
-    problems.push(`negative control ${n.position} -> ${n.set} was not seen as a junction binding at all;`
-      + ' the binder scan is blind, so every junction-bound pair would be misfiled as unbound.');
-  }
+  check(() => {
+    if (c.nameFolds.some((f) => f.name === n.position)) {
+      problems.push(`negative control reported as a name-fold: ${n.position}\n    ${n.why}`);
+    }
+  });
+  check(() => {
+    if (!c.bindings.some((x) => x.position === n.position && x.set === n.set)) {
+      problems.push(`negative control ${n.position} -> ${n.set} was not seen as a junction binding at all;`
+        + ' the binder scan is blind, so every junction-bound pair would be misfiled as unbound.');
+    }
+  });
 
   const sb = CONTROLS.secondBinder;
-  if (!c.bindings.some((x) => x.position === sb.position && x.set === sb.set)) {
-    problems.push(`second-binder control missed: \`${sb.position} -> ${sb.set}\` is a junction binding declared by`
-      + ' a binder whose list is NOT named POSITION_PERMISSION_SET_BINDINGS. The scan is recognising one app\'s'
-      + ' spelling again, so other apps\' junction rows are invisible and their positions read as inert.');
-  }
-  if (c.inert.some((i) => i.name === sb.position)) {
-    problems.push(`second-binder control: \`${sb.position}\` was reported INERT while a binder binds it.`);
-  }
-  if (!c.nameFolds.some((f) => f.name === 'sales_manager')) {
-    problems.push('a position junction-bound to a DIFFERENT set must still count as a name-fold on its own name'
-      + ' (sales_manager is bound to crm_sales_user and still folds onto the HotCRM `sales_manager` set).'
-      + ' Losing this would tell 要点 2 the pair is already governed.');
-  }
+  check(() => {
+    if (!c.bindings.some((x) => x.position === sb.position && x.set === sb.set)) {
+      problems.push(`second-binder control missed: \`${sb.position} -> ${sb.set}\` is a junction binding declared by`
+        + ' a binder whose list is NOT named POSITION_PERMISSION_SET_BINDINGS. The scan is recognising one app\'s'
+        + ' spelling again, so other apps\' junction rows are invisible and their positions read as inert.');
+    }
+  });
+  check(() => {
+    if (c.inert.some((i) => i.name === sb.position)) {
+      problems.push(`second-binder control: \`${sb.position}\` was reported INERT while a binder binds it.`);
+    }
+  });
+  check(() => {
+    if (!c.nameFolds.some((f) => f.name === 'sales_manager')) {
+      problems.push('a position junction-bound to a DIFFERENT set must still count as a name-fold on its own name'
+        + ' (sales_manager is bound to crm_sales_user and still folds onto the HotCRM `sales_manager` set).'
+        + ' Losing this would tell 要点 2 the pair is already governed.');
+    }
+  });
 
   const bleed = CONTROLS.isDefaultBleed;
-  if (!c.bindings.some((x) => x.position === 'everyone' && x.set === bleed.bound)) {
-    problems.push(`regression control: \`${bleed.bound}\` declares \`isDefault: true\` and must appear as an`
-      + ' `everyone` auto-bind. It does not, so the isDefault scan has stopped seeing declarations it owns.');
-  }
-  for (const set of bleed.unbound) {
-    if (c.bindings.some((x) => x.position === 'everyone' && x.set === set)) {
-      problems.push(`regression control fired again: \`everyone -> ${set}\` was reported as a junction binding,`
-        + ` but ${set} declares no \`isDefault\`. The isDefault look-ahead is reading past the declaration's own`
-        + ' object literal again -- see CONTROLS.isDefaultBleed.');
+  check(() => {
+    if (!c.bindings.some((x) => x.position === 'everyone' && x.set === bleed.bound)) {
+      problems.push(`regression control: \`${bleed.bound}\` declares \`isDefault: true\` and must appear as an`
+        + ' `everyone` auto-bind. It does not, so the isDefault scan has stopped seeing declarations it owns.');
     }
+  });
+  for (const set of bleed.unbound) {
+    check(() => {
+      if (c.bindings.some((x) => x.position === 'everyone' && x.set === set)) {
+        problems.push(`regression control fired again: \`everyone -> ${set}\` was reported as a junction binding,`
+          + ` but ${set} declares no \`isDefault\`. The isDefault look-ahead is reading past the declaration's own`
+          + ' object literal again -- see CONTROLS.isDefaultBleed.');
+      }
+    });
   }
 
   for (const ac of AUDIT_CONTROLS) {
@@ -772,9 +864,11 @@ function selfTest({ quiet = false } = {}) {
       problems.push(`audit control threw: ${ac.label} -- ${e?.message}`);
       continue;
     }
-    if (!ac.expect(result)) {
-      problems.push(`audit control FAILED: ${ac.label}\n    got: ${JSON.stringify(result)}`);
-    }
+    check(() => {
+      if (!ac.expect(result)) {
+        problems.push(`audit control FAILED: ${ac.label}\n    got: ${JSON.stringify(result)}`);
+      }
+    });
   }
 
   if (problems.length > 0) {
@@ -783,6 +877,53 @@ function selfTest({ quiet = false } = {}) {
     return 1;
   }
   if (!quiet) {
+    // -- The floor: the declared battery RAN, and ran its cases (#13489) ----
+    //
+    // Evaluated after every site has had its chance and BEFORE the verdict, so
+    // the success line below can only be printed by a run in which the set of
+    // batteries that registered cases EQUALS the set declared.
+    //
+    // ⭐ It lives INSIDE the `!quiet` branch on purpose. `main()` gates the
+    // PRODUCTION path on `selfTest({ quiet: true })`, which prints no verdict
+    // and therefore makes no claim for a floor to guard; evaluating the floor
+    // there would let a roster edit change what a census run outputs. The floor
+    // belongs to the `--self-test` verdict, which is the line that would
+    // otherwise claim controls hold that never ran.
+    //
+    // It reports in this file's own idiom -- a stderr block and a non-zero
+    // return -- and returns BEFORE `selfTestReachedVerdict` is set, so a breach
+    // reds through the #13798 handshake as well as through the exit code.
+    const floorFailures = [];
+    const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+    if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+      floorFailures.push(
+        `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned `
+          + `${SELF_TEST_BATTERY_FLOOR} -- a battery deleted from the roster takes its own floor with it.`,
+      );
+    }
+    for (const [name, count] of batterySeen) {
+      if (declaredBatteries.includes(name)) continue;
+      floorFailures.push(
+        `self-test battery "${name}" registered ${count} case(s) but is not declared in `
+          + 'SELF_TEST_BATTERIES -- a case attributed to no declared battery is one nothing floors.',
+      );
+    }
+    for (const name of declaredBatteries) {
+      const count = batterySeen.get(name) ?? 0;
+      if (count >= SELF_TEST_BATTERIES[name]) continue;
+      floorFailures.push(
+        count === 0
+          ? `self-test battery "${name}" DID NOT RUN -- 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. `
+            + 'The verdict below would have claimed those controls hold.'
+          : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of `
+            + `${SELF_TEST_BATTERIES[name]} -- cases that used to run no longer do.`,
+      );
+    }
+    if (floorFailures.length > 0) {
+      process.stderr.write(`x  measure-position-name-fold-census self-test floor (${floorFailures.length} breach(es))\n\n${
+        floorFailures.map((f) => `  - ${f}`).join('\n\n')}\n\n  A battery at or below its floor means cases STOPPED RUNNING -- the battery is the bug, not the number. Find what stopped registering (an early return, a deleted block, a guard that now skips) and restore it.\n\n`);
+      return 1;
+    }
     process.stdout.write(
       `✓ measure-position-name-fold-census self-test: junction anchor (${a.position} -> ${a.set}) classified as`
       + ` a junction binding and absent from the name-dependency list; name-fold anchor (${b.name}) detected`

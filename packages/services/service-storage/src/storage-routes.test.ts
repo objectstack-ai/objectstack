@@ -2,9 +2,9 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { IHttpRequest, IHttpResponse, RouteHandler } from '@objectstack/spec/contracts';
-import { LocalStorageAdapter } from './local-storage-adapter';
-import { StorageMetadataStore } from './metadata-store';
-import { registerStorageRoutes } from './storage-routes';
+import { LocalStorageAdapter } from './local-storage-adapter.js';
+import { StorageMetadataStore } from './metadata-store.js';
+import { registerStorageRoutes } from './storage-routes.js';
 import { promises as fs } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -409,7 +409,7 @@ describe('Storage REST Routes', () => {
   });
 
   describe('attachments download gate (#2970 item 2)', () => {
-    const commit = async (s: StorageMetadataStore, rec: Partial<import('./metadata-store').FileRecord>) =>
+    const commit = async (s: StorageMetadataStore, rec: Partial<import('./metadata-store.js').FileRecord>) =>
       s.createFile({
         id: rec.id ?? 'f-dl',
         key: rec.key ?? `attachments/${rec.id ?? 'f-dl'}.bin`,
@@ -421,7 +421,7 @@ describe('Storage REST Routes', () => {
         ...rec,
       } as any);
 
-    function serverWith(verdict: import('./storage-routes').FileReadVerdict | 'skip', extra: any = {}) {
+    function serverWith(verdict: import('./storage-routes.js').FileReadVerdict | 'skip', extra: any = {}) {
       const server = createMockHttpServer();
       const s = new StorageMetadataStore(null);
       const authorizeFileRead =

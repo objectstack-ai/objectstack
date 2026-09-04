@@ -65,6 +65,15 @@ export * from './utils/internal-write-response.js';
 // that `@objectstack/metadata-protocol`'s atomic `batchData` also uses.
 export * from './utils/migration-journal.js';
 
+// Export the advisory-hit aggregation scope (#13889) — the seam between the
+// evaluator that PRODUCES an advisory hit (`@objectstack/objectql`) and the
+// machine load path that REPORTS a run's worth of them as one summary
+// (`@objectstack/metadata-protocol`'s seed loader). It lives here, on the floor
+// both of those already stand on, because neither can import the other's
+// package for it: objectql depends on metadata-protocol, so the dependency only
+// runs one way.
+export * from './utils/advisory-aggregation.js';
+
 // Export the runtime filter-placeholder resolver (framework#3582)
 export * from './utils/filter-tokens.js';
 

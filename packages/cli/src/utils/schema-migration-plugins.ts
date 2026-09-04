@@ -3,6 +3,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { isAppPluginLike } from './graft-runtime-hooks.js';
+import { stackDeclaresMetadata } from './stack-collections.js';
 
 /**
  * The object set a SCHEMA migration is planned against (#12938).
@@ -1091,9 +1092,11 @@ export async function buildSchemaMigrationPlugins(opts: {
       // top-level metadata needs the wrap, or its `objects` never reach the
       // registry and this composition would report a set smaller than the one
       // the deployment serves.
-      const configHasMetadata = !!(
-        config?.objects || config?.manifest || config?.apps || config?.flows || config?.apis
-      );
+      // [#15006] `stackDeclaresMetadata` — the SAME seam `serve.ts` step 3 now
+      // calls, which is what the comment above already asserted about these two
+      // copies. B4 is this command's OWN second `loadConfig`, not behind B2, so
+      // it had to be reached separately.
+      const configHasMetadata = stackDeclaresMetadata(config);
       const appAlready = hasArtifactApp || hostPlugins.some(isAppPluginLike);
       if (configHasMetadata && !appAlready) {
         const { AppPlugin } = await import('@objectstack/runtime');

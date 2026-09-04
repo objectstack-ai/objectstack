@@ -216,7 +216,7 @@ describe('verifyFileReferences (ADR-0104 D3 wave 2 — R4 gate)', () => {
     const many = Array.from({ length: 1200 }, (_, i) => ({ id: `p${i}`, image: `file_${i}` }));
     const engine = fakeEngine({
       product: many,
-      sys_file: many.map((r, i) => file(`file_${i}`, { object: 'product', recordId: `p${i}`, field: 'image' })),
+      sys_file: many.map((_r, i) => file(`file_${i}`, { object: 'product', recordId: `p${i}`, field: 'image' })),
     });
 
     const report = await verifyFileReferences(engine);

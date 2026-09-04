@@ -1,5 +1,1174 @@
 # @objectstack/client
 
+## 17.3.0
+
+### Minor Changes
+
+- 87042b5: feat(client,cli)!: `client.projects.*` becomes `client.environments.*`, the scoped sub-client becomes `ScopedEnvironmentClient`, and the unwrap keys follow the wire (#12866, #12882, ADR-0006 D2)
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/client/src/index.ts#ObjectStackClient) The renamed surface is a member of a published runtime TypeScript class and the response-key shapes it declares inline. There is no Zod schema, no `packages/spec` declaration, no authorable key and no stored representation behind either half — measured 2026-08-28: zero `projects` envelope contracts anywhere in `packages/spec/src`, positive control being that `environments` hits do exist there. So `objectstack migrate meta` has nothing to visit and there is no tombstone to mint. The channel that reaches every affected consumer is the COMPILER, at the call site, which is strictly more precise than a ledger line; the wire half is carried by the paired control-plane release in the same coordinated window. MEASURED CAVEAT, recorded here rather than worked around: this claim is REFUSED by check-adr-0087-registration at step 4, because `packages/spec/src/api/contract.zod.ts` names `ObjectStackClient` in a JSDoc PROSE comment (line 164, describing what `unwrapResponse` keys on) while neither declaring nor importing it, and the predicate does not strip comments before scanning a metadata surface for references. Steps 1-3 pass. The disposition is left stated rather than swapped for `no-migration-prescription`, which would mechanically pass only through a detector blind spot while contradicting the migration table below it — the exact anti-pattern this gate's own header records as #8299. -->
+  
+  
+  **BREAKING** public-API rename on `@objectstack/client`, and a breaking change to
+  the `--format json` payload of the `os environments` command family. It lands
+  after the v17.0.0 cut, so the lockstep launch-window convention ships it as
+  `minor` (`scripts/check-changeset-no-major.mjs`); the version number is not the
+  migration signal here, this entry is.
+  
+  This is the **SDK half** of one coordinated cross-repo rename. The **producer
+  half** is the cloud control plane, which renames the same field keys on the same
+  endpoints. Neither half ships alone: shipping the SDK half by itself is
+  ADR-0006 D3, permanently declined, as is any mapping layer between the two
+  spellings.
+  
+  ## Migration
+  
+  **No aliases exist.** The old namespace is gone, not deprecated — there is no
+  `client.projects` getter, no `res.project ?? res.environment` hedge, and none is
+  coming (ADR-0006 D3 declined a mapping layer with reasons; the v5.0 rename rule
+  「no aliases」 is the standing one). Every call site moves in one edit.
+  
+  ### Method namespace
+  
+  | before | after |
+  | --- | --- |
+  | `client.projects.list(…)` | `client.environments.list(…)` |
+  | `client.projects.get(id)` | `client.environments.get(id)` |
+  | `client.projects.create(req)` | `client.environments.create(req)` |
+  | `client.projects.update(id, patch)` | `client.environments.update(id, patch)` |
+  | `client.projects.delete(id, opts)` | `client.environments.delete(id, opts)` |
+  | `client.projects.activate(id)` | `client.environments.activate(id)` |
+  | `client.projects.rotateCredential(…)` | `client.environments.rotateCredential(…)` |
+  | `client.projects.updateHostname(…)` | `client.environments.updateHostname(…)` |
+  | `client.projects.updateVisibility(…)` | `client.environments.updateVisibility(…)` |
+  | `client.projects.listRevisions(…)` | `client.environments.listRevisions(…)` |
+  | `client.projects.listBranches(id)` | `client.environments.listBranches(id)` |
+  | `client.projects.renameBranch(…)` | `client.environments.renameBranch(…)` |
+  | `client.projects.deleteBranch(…)` | `client.environments.deleteBranch(…)` |
+  | `client.projects.retryProvisioning(id)` | `client.environments.retryProvisioning(id)` |
+  | `client.projects.listDrivers()` | `client.environments.listDrivers()` |
+  | `client.projects.packages.*` | `client.environments.packages.*` |
+  
+  The URL paths are unchanged — they were already on the `environments` spelling
+  (`/api/v1/cloud/environments/…`). Only the method namespace and the response
+  field keys move.
+  
+  ### Response keys
+  
+  | before | after | where |
+  | --- | --- | --- |
+  | `res.projects` | `res.environments` | `list` (the `total` key is unchanged) |
+  | `res.project` | `res.environment` | `get`, `update`, `activate`, `updateHostname`, `updateVisibility`, `retryProvisioning` |
+  
+  The joined blocks on `get` (`database`, `credential`, `membership`,
+  `organization`) keep their names, as do every `packages.*` key, the
+  `delete`/`listBranches`/`renameBranch`/`deleteBranch` payloads (already
+  `environmentId`-keyed), and `listRevisions`.
+  
+  ### Two declarations that were false before this change
+  
+  Measured 2026-08-28 against the cloud repo's `main`, and corrected here rather
+  than carried forward under a new spelling:
+  
+  - **`create` never answered a `project` key at all.** `POST /api/v1/cloud/environments`
+    has always answered `{ environment, warnings, durationMs, hostnameAssignment? }`.
+    The old `{ project: any; database: any }` declaration was not merely
+    pre-rename, it was wrong against the running control plane — and
+    `os environments create` read `res.project.id` through it, so the default
+    `--activate` silently never activated and the table output printed
+    `undefined`. Both are fixed by this rename.
+  - **`create` declares no `database` key.** That route does not send one; the key
+    was declared NON-optional, so `res.database.driver` typechecked and threw. The
+    method that really answers a `database` block is `get`, which keeps it.
+  
+  The keys `create` does send beside `environment` (`warnings`, `durationMs`,
+  `hostnameAssignment`) are deliberately still undeclared — adding them is new
+  published surface and a separate decision.
+  
+  ### The environment-scoped sub-client (#12882)
+  
+  The fourth `project`-spelled surface on the same class, folded in by the same
+  maintainer ruling. ADR-0006's D1 census named three surfaces and missed this one;
+  it was an oversight, not a deliberate retention.
+  
+  | before | after |
+  | --- | --- |
+  | `client.project(id)` | `client.environment(id)` |
+  | `ScopedProjectClient` (exported class) | `ScopedEnvironmentClient` |
+  
+  Same no-alias rule: neither old spelling survives. `client.project(id)` is not a
+  deprecated method, it is gone, and the exported class is gone under its old name
+  — a `import { ScopedProjectClient }` fails at the import line, which is the
+  loudest and most precise channel this change has.
+  
+  Nothing about the behaviour moves: the scoped client still prefixes
+  `/api/v1/environments/:environmentId/...`, still exposes the same `data` / `meta`
+  / `batch` / `packages` shape, and the thrown guard message becomes
+  `[ObjectStack] environment(id): environmentId is required`.
+  
+  **Deliberately NOT renamed, because each is a different surface needing its own
+  decision:** `setProjectId` / `getProjectId` on the client — `getProjectId` is a
+  cross-package protocol contract that `packages/runtime` and
+  `packages/metadata-protocol` both speak, so it is a coordinated rename, not a
+  local one — and the REST API config keys `enableProjectScoping` /
+  `projectResolution`, which are live keys read by `packages/cli/src/commands/serve.ts`.
+  The docblocks that name them are worded so they stay true.
+  
+  Note for whoever compiles the release notes: four other pending changesets in
+  this release describe methods on `ScopedProjectClient` under its old name
+  (`client-unannotated-return-erasure`, `client-saveitem-ifmatch-header`,
+  `client-meta-saveitem-query-options`, `client-precise-sdk-return-types`). They
+  were accurate when written and are deliberately left alone; this entry is the one
+  that renames the class.
+  
+  ### JSDoc
+  
+  The `create` docblock claimed the server delegates to
+  `ProjectProvisioningService.provisionProject`. That spelling has zero hits in the
+  control plane (measured 2026-08-28). Both this SDK's docblock and
+  `os environments create`'s now name the **endpoint** instead, which is the one
+  identifier an in-repo reader can verify — the class lives in a repo this one
+  never compiles against, so no gate here could ever have caught the rot.
+  
+  ## CLI
+  
+  `os environments list | show | create | switch | bind` follow the same rename.
+  No flag, argument, exit code or command id changes. `--format json` / `--format yaml`
+  payloads are `formatOutput(res, …)` straight from the control-plane response, so
+  their top-level keys change with the wire: a script reading `.projects` or
+  `.project` from those payloads reads `.environments` / `.environment` instead.
+- 803eaab: Automation write doors answer the canonicalized (parsed) flow (#12206, Option A — maintainer ruling 2026-08-26).
+  
+  `POST /api/v1/automation` and `PUT /api/v1/automation/:name` now answer the canonicalized, parsed flow the engine stored — the same shape `GET /api/v1/automation/:name` already answers — instead of echoing the caller's own pre-parse request bytes. `IAutomationService.registerFlow` returns that `FlowParsed` (previously `void`), and the SDK's `client.automation.create` / `client.automation.update` bind `Promise<FlowParsed>` (previously deliberate `Promise<any>`). `CreateFlowResponseSchema` / `UpdateFlowResponseSchema` are now conformant with the real wire body, and `UpdateFlowRequestSchema.definition` requires the complete flow definition the engine actually requires (its former `.partial()` declared a partial-update capability nothing implements; a real partial update would be its own feature).
+  
+  **Migration note (behaviour change on a published SDK surface).** A caller that read the write response back gets the canonicalized flow rather than its own bytes: schema defaults are materialized (`version`, `status`, `runAs`, per-edge `type` / `isDefault`), keys re-emit in schema order, and the PUT answer always carries `name`. The #12206 consumer survey measured zero non-test consumers of the old echo across objectstack and objectui. The one residual risk, named verbatim from that survey: "One real TYPE change — the only shape-breaking difference in the whole measurement": a string `edge.condition` becomes the lowered CEL envelope — the `edge.condition` string → `{dialect, source}` type change, zero measured consumers. A consumer doing `typeof edge.condition === 'string'` on the write response would break; per the survey no such consumer exists in either repo (the cloud repo was not measurable and is the declared gap). Implementers of `IAutomationService.registerFlow` must now return the stored parsed flow.
+- d3bee87: **SDK:** `auth.setInitialPassword` binds the already-mounted `POST /api/v1/auth/set-initial-password` route, which had no client method.
+  
+  `AuthPlugin` has mounted this route on the raw Hono app for as long as the SSO-onboarding flow has existed, but `packages/client/src` built the URL nowhere — measured zero for both `setInitialPassword` and `set-initial-password`, against four sibling auth members returning non-zero on the same corpus, so the absence was an absence and not a broken search. Its only caller was `@object-ui/auth`'s `createAuthClient`, whose three other auth URLs (`/config`, `/get-session`, `/list-accounts`) are all expressed on `ObjectStackClient`, and whose sibling branch in the very same Console password card — `changePassword` — has been ledgered `sdk` throughout.
+  
+  The method is shaped exactly like its namespace siblings (`this.getRoute('auth')` + `this.fetch`, `POST` with a JSON body, returning the parsed envelope), because the difference between it and `changePassword` is a **server-side** one and belongs there: better-auth registers `setPassword` with no HTTP path of its own (server-only `auth.api.setPassword`), so ObjectStack wraps it in an authenticated mount that requires a session and refuses with 409 `PASSWORD_ALREADY_SET` when a credential already exists. Callers that already have a password use `changePassword`, which verifies the current one.
+  
+  **Nothing about the route's behaviour moves.** Its accept/reject logic, its admit set and its server-side guards are untouched — this is a client binding to an existing mount, not a widening of what the mount allows.
+  
+  **Its `AUTH_ROUTE_LEDGER` row lands with it**, because the two halves are one statement and neither is true alone. `plugin-auth` gains `{ route: 'POST /api/v1/auth/set-initial-password', family: 'objectstack-mount', source: 'objectstack', disposition: 'sdk', client: 'auth.setInitialPassword' }` — the ninth mount of the #10534 census, whose disposition was escalated rather than guessed and which the maintainer ruled `sdk` (option C, 2026-08-22) and then ruled should land in one PR (2026-08-23). Without the row, the method's URL matched only the dispatcher's `* /auth/**` prefix family, and `client-url-conformance.test.ts` bounds wildcard-only matches at zero on purpose; with it, the same URL resolves to an enumerated route. The row also brings the `check:auth-mount-ledger` pending-disposition entry down — the exemption that carried this route while the question was open is deleted, which is that ratchet working rather than being relaxed.
+- db16b94: feat(client)!: `analytics.query` / `analytics.meta` / `analytics.explain` and `automation.trigger` resolve to the payload — the dispatcher envelope is unwrapped, as on every other SDK method (#13079)
+  
+  <!-- adr-0087: registered client-envelope-convergence-analytics-automation -->
+  
+  **BREAKING** — a runtime change to what four published SDK methods resolve to. It ships as `minor` under the lockstep launch-window convention (`scripts/check-changeset-no-major.mjs`): the version number is not the migration signal here, this entry is.
+  
+  Maintainer ruling on #13079 (2026-08-31, verbatim): 「裁决:A,cloud 未测量照裁」 — 「四方法(`analytics.query` / `analytics.meta` / `analytics.explain` / `automation.trigger`)收敛 `unwrapResponse`,SDK 一套读法。」
+  
+  ## What changed
+  
+  `ObjectStackClient` had two response readers. `unwrapResponse` strips the runtime dispatcher's `{ success, data }` envelope and hands back `data` — every other dispatcher-served method uses it, and every return type bound since #8140 is that post-unwrap payload. These four ended `return res.json()`, which strips nothing, so their callers alone had to read `.data`; the sharpest case was `automation.trigger` and `automation.execute` answering two shapes for one handler. All four now end `return this.unwrapResponse(res)`, and their return declarations are the payload types, derived from the route's declared `data` member where the spec already transcribes it.
+  
+  ## Migration
+  
+  | method | resolved to (before) | resolves to (now) | rewrite |
+  |:--|:--|:--|:--|
+  | `client.analytics.query(q)` | `{ success, data: AnalyticsResult, meta? }` | `AnalyticsResult` | `r.data.rows` → `r.rows` |
+  | `client.analytics.meta(cube?)` | `AnalyticsMetadataResponse` — `{ success, data: CubeMeta[], meta? }` | `AnalyticsMetadataResponse['data']` — the bare cube list | `r.data[0].name` → `r[0].name` |
+  | `client.analytics.explain(q)` | `AnalyticsSqlResponse` — `{ success, data: { sql, params }, meta? }` | `AnalyticsSqlResponse['data']` — `{ sql, params }` | `r.data.sql` → `r.sql` |
+  | `client.automation.trigger(name, payload)` | `{ success, data: AutomationResult, meta? }` | `AutomationResult` — the same value `client.automation.execute` resolves to | `r.data.status` → `r.status`, `r.data.runId` → `r.runId` |
+  
+  Before / after, per method:
+  
+  ```ts
+  const r1 = await client.analytics.query({ cube: 'crm_account', measures: ['account_count'] });
+  r1.data.rows;        // before
+  r1.rows;             // now
+  
+  const r2 = await client.analytics.meta();
+  r2.data[0].name;     // before
+  r2[0].name;          // now
+  
+  const r3 = await client.analytics.explain({ cube: 'crm_account', measures: ['account_count'] });
+  r3.data.sql;         // before
+  r3.sql;              // now
+  
+  const r4 = await client.automation.trigger('approve_account', {});
+  r4.data.status;      // before  ('paused' | 'completed' | 'failed')
+  r4.status;           // now — exactly what `client.automation.execute` already answered
+  ```
+  
+  For the three analytics methods every old read is a compile error under the new declarations (`Property 'data' does not exist on type …`, TS2339), so a TypeScript consumer finds each site at build time. `client.automation.trigger` is the exception: `r.data.…` is a compile error there too, but `r.success` and `r.error` compile before AND after, because `AutomationResult` itself declares `success: boolean` and `error?: string` (`packages/spec/src/contracts/automation-service.ts`). Their MEANING moves: before, `r.success` was the envelope's flag — always `true` on a resolved call — and `r.error` was never set on a 2xx; now they are the run's own — `success: false` / `error: string` on a refusal the door does not classify as 400/409/422 and answers 200. A consumer branching on `r.success` or `r.error` off `trigger` must re-read that branch by hand; the compiler will not point at it. A JavaScript consumer reads `undefined` from `.data` and has to search for the four spellings.
+  
+  ### The failure path — read this before touching a `catch`
+  
+  Nothing changes there, and it is stated per door because a convergence on `unwrapResponse` could be misread as "errors now throw":
+  
+  - **Non-2xx answers threw before and throw now.** `ObjectStackClient.fetch` rejects on every non-2xx status BEFORE either reader runs, carrying the ADR-0112 envelope on the error (`err.code`, `err.httpStatus`, `err.message`, `err.details`). A failed `trigger` run has been a thrown `400 FLOW_FAILED` since #9378 (`409 FLOW_DISABLED` / `422 FLOW_NO_START_NODE` since #9415); a query the analytics service refuses is a thrown 4xx. Your `catch` blocks are unchanged.
+  - **`unwrapResponse` never throws.** A 2xx body with a boolean `success` and a `data` key resolves to `data`. A 2xx body with no `data` key resolves unchanged (pass-through) — and no dispatcher door behind these four routes sends a 2xx without `data`, so at the ENVELOPE level a resolved `{ success: false, error }` is not a value you will receive from them. ⚠️ The PAYLOAD level differs on one door: `client.automation.trigger` can resolve to an `AutomationResult` whose own `success` is `false` (with `error` set) — a run the door does not classify as 400 `FLOW_FAILED` / 409 `FLOW_DISABLED` / 422 `FLOW_NO_START_NODE` is answered 200 through `deps.success(result)` (`respondToFlowTrigger` in `packages/runtime/src/domains/automation.ts`; the classification table is `classifyFlowRefusal` in `packages/runtime/src/flow-dispatch-status.ts`), exactly as `client.automation.execute` already does for the same handler. Before this change that run reached you as `{ success: true, data: { success: false, error } }`; now it reaches you as the inner object.
+  - **What you lose.** The envelope's `success` flag — always `true` on a resolved call — is no longer on the resolved value. Its `meta` slot is gone too, but these four doors never populated it: each answers `deps.success(result)` with no meta argument and JSON serialisation drops the `undefined`, so there was never a `meta.requestId` to read here. Neither key was ever on any other SDK method's value.
+  
+  ### Not changed
+  
+  - `client.analytics.queryDataset(...)` — served by `@objectstack/rest` with no envelope at all; it resolved to the bare `AnalyticsResult` before and still does (ruling item 1: protected, not converted).
+  - The wire. Every route answers exactly the body it answered before; a raw-HTTP caller is unaffected.
+  - `client.automation.execute`, `client.automation.resume` and every other method that already used `unwrapResponse`.
+  
+  ### Populations measured, and the one ruled NOT MEASURED
+  
+  `packages/client/src/envelope-caller-census.test.ts` (PR #13647) measured the callers: in this repo, zero production call sites and 13 loud test pins — this change's own diff — and in objectui one production site whose row-extraction chain accepts both spellings today (objectui#7028 tightens it to the post-unwrap spelling after this lands). `objectstack-ai/cloud` was not measured (ruling item 4); the census file carries `CLOUD_CENSUS_COMMAND`, and a `.data` read on any of these four there is a runtime break after this change.
+- b15d260: fix(client): bind the five in-repo `return res.json()` methods, whose published type was `Promise< any >` (part of #12104)
+  
+  **Return-type narrowing on a published SDK (clause-②).** No runtime change: the
+  value each method resolves to is byte-identical before and after. Only the
+  DECLARED type moved, off `any` — which is exactly why a runtime test cannot
+  observe it and the pins for it are type-level.
+  
+  > ⓘ Angle brackets are spaced throughout (`Promise< any >`) on purpose —
+  > GitHub's body sanitizer strips tag-shaped spans, backticks and fenced code
+  > included.
+  
+  Each of the five carried no return annotation and ended `return res.json()`, so
+  its published type was `Promise< any >`, inherited from `lib.dom`'s
+  `Response.json(): Promise< any >`. The method text names neither `any` nor
+  `Promise` nor `unwrapResponse`, which is why the class was invisible to the
+  greps two earlier censuses used.
+  
+  ## What each method declares now
+  
+  | method | declared before | declares now | why |
+  |---|---|---|---|
+  | `client.analytics.query` | `any` | `BaseResponse & { data: AnalyticsResult }` | dispatcher-served; `deps.success(v)` wraps and `res.json()` strips nothing |
+  | `client.analytics.meta` | `any` | `AnalyticsMetadataResponse` | same envelope; `data` is the bare `CubeMeta[]` projection |
+  | `client.analytics.explain` | `any` | `AnalyticsSqlResponse` | same envelope; `data` is `{ sql, params }` |
+  | `client.automation.trigger` | `any` | `BaseResponse & { data: AutomationResult }` | same envelope, over the payload its sibling `automation.execute` unwraps |
+  | `client.analytics.queryDataset` | `any` | `AnalyticsResult` | served by `@objectstack/rest`, which ends `res.json(result)` — no envelope |
+  
+  `any` is assignable to everything and admits every property read, so a
+  consumer's code can stop compiling where it previously did not. Concretely:
+  
+  - **Reading a payload key off one of the four ENVELOPED results.**
+    `(await client.analytics.query(q)).rows` compiled and was `undefined` at
+    runtime; the read the wire always required is `.data.rows`. Same for
+    `.data` on `meta` / `explain`, and `.data.runId` / `.data.screen` on
+    `automation.trigger`.
+  - **Reading `.data` off `queryDataset`**, which is served bare — likewise
+    `undefined` today, likewise refused now.
+  - Assigning any of the five results to an unrelated annotation, or forwarding
+    one to a differently-typed parameter.
+  
+  That break is the point: those call sites are already wrong at runtime and the
+  `any` is what hid it. The compiler is the channel that reaches every affected
+  consumer, and it is strictly more precise than a release note.
+  
+  ## How the shapes were established
+  
+  By DRIVING the real producers — a real `AnalyticsService`, a real
+  `AutomationEngine`, the real `HttpDispatcher` and the real `RestServer`, with
+  only the socket stood in for — not by reading source and not by asserting
+  against a mock. Two spec response types that look like the right binding are
+  NARROWER than the contract their route relays
+  (`AnalyticsResultResponseSchema.data.fields` and
+  `TriggerFlowResponseSchema.data`), so those two annotations bind the producer's
+  contract instead; the near-miss is pinned so a later sweep cannot retarget them.
+  
+  ## Scope
+  
+  The five families whose producers live in this repo. The 38 better-auth-backed
+  `auth.*` / `organizations.*` / `oauth.*` methods of the same class are untouched
+  and keep their erased `any` — they are exactly as permissive as before, and no
+  consumer loses anything by that.
+  
+  No ADR-0087 ledger entry: nothing here is a metadata surface. No Zod schema, no
+  `packages/spec` declaration and no stored representation changed — the erasure
+  lived only in a TypeScript return annotation — so `objectstack migrate meta` has
+  nothing to rewrite and an entry would have no artifact to project into. This is
+  the disposition #8140, #11925 and #12034 recorded for the same class of SDK
+  return-type narrowing.
+- 887b97d: `meta.saveItem` accepts the query-string options bag its route already reads —
+  `force`, `packageId`, `mode` — on both clients
+  
+  The Phase 3a-destructive gate refuses a metadata save with
+  `409 DESTRUCTIVE_CHANGE` and ends the message `— re-submit with ?force=true to
+  proceed.` Both REST `PUT` doors read `?force` off the query string and thread
+  it, so that sentence is true of an HTTP caller. It was **false of a
+  first-party SDK caller**: `meta.saveItem(type, name, item)` built a bare path
+  and a body and sent no query string at all, on either declaration. A caller
+  who did literally what the refusal prescribed got the identical refusal back,
+  and the only way to act on it was to abandon `@objectstack/client` for raw
+  `fetch`.
+  
+  Three parameters are newly reachable, and they are exactly the three
+  `PUT /api/v1/meta/:type/:name` reads:
+  
+  - **`force?: boolean`** — `?force=true`, the destructive-change opt-in the 409
+    message names. Only the opt-IN is spelled on the wire: `false` and
+    `undefined` both omit the parameter rather than sending `?force=false`.
+    That is a hazard avoided, not tidiness — the door refuses a *repeated*
+    `force` because a repeated value arrives as an array and a non-empty array
+    is truthy, so an opt-OUT that reached the wire twice would switch the guard
+    ON.
+  - **`packageId?: string`** — `?package=<id>`, binding the saved row to a
+    software package (`sys_metadata.package_id`). Named `packageId` to match the
+    sibling `getItem` / `getItems` options on the same object.
+  - **`mode?: 'draft' | 'publish'`** — `?mode=draft`, staging the write as a
+    pending draft. `'publish'` is the default said out loud and deliberately
+    sends nothing, since the door acts on `mode=draft` alone.
+  
+  **Backward compatible.** The bag is optional and an options-less call builds a
+  byte-identical URL to before — `''`, not a trailing `?`. Existing
+  three-argument callers are unaffected, and pins measure that rather than
+  assuming it.
+  
+  Both declarations move together — the unscoped `ObjectStackClient.meta` and
+  the environment-scoped `ScopedProjectClient.meta` — sharing ONE exported
+  `SaveMetaItemOptions` type and ONE query builder rather than a literal copied
+  into each. They are the same method on two clients reaching one pair of routes
+  (the scoped mount is the same route registration replayed under
+  `/environments/:environmentId`, so it reads the same three parameters), and
+  every divergence measured between these twins so far has been closed as a
+  defect. A bag spelled twice is the next one waiting to be introduced.
+  
+  The branch was selected by measurement, not preference: the SDK is the real
+  metadata-write path for both surfaces the ruling named. The CLI's `os meta
+  register` goes through `client.meta.saveItem` and the CLI has no raw-HTTP
+  metadata-save path at all; Studio reaches it from 21 production call sites
+  across `@object-ui/app-shell`, `plugin-designer`, `data-objectstack` and the
+  console app — including the object and field designers, where dropping a field
+  and saving is precisely what raises the destructive 409.
+- d9aa041: fix(client): `packages.install` / `enable` / `disable` declare the bare `InstalledPackage` row the only serving surface actually sends (#12034)
+  
+  **Accept-set narrowing on a published SDK (clause-②), and a false declaration
+  deleted.** No runtime change: the value each method resolves to is
+  byte-identical before and after. What moved is the DECLARED type — and unlike
+  its #11925 siblings this one was not merely erased, it was **wrong**.
+  
+  FROM → TO, all three methods:
+  
+  | method | declared before | declares now |
+  |---|---|---|
+  | `client.packages.install(manifest, opts?)` | `{ package: any; message?: string }` | `InstalledPackage` |
+  | `client.packages.enable(id)` | `{ package: any; message?: string }` | `InstalledPackage` |
+  | `client.packages.disable(id)` | `{ package: any; message?: string }` | `InstalledPackage` |
+  
+  No surface has ever emitted `{ package, message }` for these three. Each is
+  served by exactly one implementation — `runtime`'s `/packages` dispatcher domain
+  — and it answers `success(pkg)`, i.e. `{ success: true, data: <row> }`, which
+  `unwrapResponse` strips to the bare row. `@objectstack/rest`'s registrar mounts
+  no twin for any of them (it mounts only `POST /packages/publish`,
+  `GET /packages`, `GET /packages/:id`, `DELETE /packages/:id`), so there was
+  never a question of which surface to match.
+  
+  **Migration — read the row, not `.package`.** Because the member was `any`,
+  the false read compiled and silently produced `undefined` at runtime:
+  
+  ```ts
+  // BEFORE — compiled, and `pkg` was `undefined` at runtime
+  const pkg = (await client.packages.enable(id)).package;
+  const note = (await client.packages.install(manifest)).message;
+  
+  // AFTER — the response IS the row
+  const pkg = await client.packages.enable(id);
+  pkg.enabled;          // the state the verb just changed
+  pkg.manifest.version;
+  ```
+  
+  A consumer stops compiling where it reads `.package` or `.message` off these
+  three results, or assigns the result somewhere `InstalledPackage` does not fit.
+  That break is the point: those call sites are already broken at runtime today
+  and the `any` is what hid it. The compiler is the channel that reaches every
+  affected consumer, and it is strictly more precise than a release note.
+  
+  **What deliberately did NOT change: `client.packages.get`.** It keeps
+  `{ package: any }`. That route is a real fork — the dispatcher answers the bare
+  row while the REST registrar answers `{ package: { ...row, source } }`, both
+  measured by driving each registrar — so no declaration is true on both surfaces.
+  Binding either member would harden a falsehood, which is the defect this change
+  removes for its neighbours. Making `get` bindable requires converging the two
+  PRODUCERS, a wire-behaviour change to two mounted surfaces; the measured
+  convergence cost is recorded on #12034 for that ruling.
+  
+  No ADR-0087 ledger entry: nothing here is a metadata surface. No Zod schema, no
+  `packages/spec` declaration and no stored representation changed — the phantom
+  members existed only in a TypeScript return annotation — so `objectstack migrate
+  meta` has nothing to rewrite. This is the disposition #11925 and #8140 recorded
+  for the same class of SDK return-type narrowing.
+- 7899f57: Bind the SDK's erased return types to the `@objectstack/spec` contracts the package already depends on
+  
+  **This is a NARROWING of published return types.** 41 methods that resolved to `any` (or to an
+  envelope carrying an `any[]`) now resolve to the contract type the route actually answers, and 12
+  fixed-shape `automation.*` methods gain a constrained generic in place of `<T = any>`. Nothing
+  changes at runtime — no request, response, unwrapping or error path is touched — but code that
+  compiles today against these methods can stop compiling. `any` is assignable to everything and
+  admits every property read, so the previous declaration accepted assignments, property reads and
+  parameter forwarding that a precise type refuses.
+  
+  What a consumer could stop compiling against, per family:
+  
+  - **`automation`** — `get`/`getFlow` are `FlowParsed`; `runs.get`/`getRun` are `ExecutionLog`;
+    `runs.list`/`listRuns` are `{ runs: ExecutionLog[]; hasMore: boolean }`; `execute` and `resume`
+    are `AutomationResult`; `getScreen` is `{ runId: string; screen: ScreenSpec }`; `listActions` and
+    `listConnectors` carry `ActionDescriptor[]` / `ConnectorDescriptor[]` instead of `any[]`. ⚠️ The
+    biggest practical break is `AutomationResult.screen`, `.runId`, `.status` and `.summary` being
+    **optional**: a completed run carries no screen, so `result.screen.nodeId` must become
+    `result.screen?.nodeId`. The six flat aliases and their `ScopedProjectClient` mirrors move
+    together. ⚠️ `<T = any>` became `<T extends X = X>` on those twelve: an explicit type argument
+    still works when it narrows the platform shape (`getFlow<FlowParsed & { name: 'onboarding' }>`),
+    but one naming an unrelated type is now refused — including where TypeScript used to infer it
+    from the assignment's own annotation.
+  - **`approvals`** — `recall` / `revise` / `resubmit` are `ApprovalRecallResult` /
+    `ApprovalSendBackResult` / `ApprovalResubmitResult`; `remind` is
+    `{ request: ApprovalRequestRow; notified: number }`; `requestInfo` and `comment` are
+    `{ request: ApprovalRequestRow }`. These join `reassign` and `listActions`, which were already
+    typed this way beside them.
+  - **`shares` / `shareLinks`** — `shares.list` is `RecordShare[]`, `shares.grant` is `RecordShare`;
+    `shares.rules.list` / `save` / `get` are `SharingRuleRow`(`[]`) and `rules.evaluate` is
+    `SharingRuleEvaluationResult`; `shareLinks.create` / `list` are `ShareLink`(`[]`).
+  - **`reports`** — `list` / `save` / `get` are `SavedReport`(`[]`), `run` is `ReportRunResult`,
+    `schedule` / `listSchedules` are `ReportSchedule`(`[]`).
+  - **`security`** — `describeDelegableScope` is `DelegableScope`; `explain` is `ExplainDecision` (the
+    `z.input` form `ISecurityService.explain` declares and the route relays verbatim — **not** the
+    post-parse `ExplainDecisionParsed`, since no parse runs on that path); the three
+    `suggestedBindings` methods carry their `{ suggestion, … }` / `{ suggestions, synced }` envelopes.
+    The suggestion ROW stays `Record<string, unknown>` by contract, but `bindingCreated` and
+    `synced.{created,confirmedObserved,pruned}` stop being erased.
+  - **`email` / `datasources.external`** — `email.send` is `SendEmailResult` (branch on `status`).
+    ⚠️ The four federation methods are **envelope-wrapped** and the obvious binding is the wrong one:
+    `listTables` answers `{ tables: RemoteTable[] }`, not `RemoteTable[]`; likewise
+    `{ draft: ObjectDraft }`, `{ object: ImportObjectResult }`, `{ catalog: ExternalCatalog }`.
+    `validate` is a bare `SchemaValidationReport`.
+  - **`ScopedProjectClient.packages.list`** — `{ packages: InstalledPackage[]; total: number }`.
+  
+  Four methods deliberately keep `Promise<any>` and say so in their docblocks: `automation.create` /
+  `automation.update` echo an unvalidated request body, and `search` / `data.clone` answer shapes
+  declared inline in the implementation rather than in `@objectstack/spec`. Those are missing
+  *contracts*, not missing annotations, and authoring them belongs to the spec package. The
+  caller-supplied generics on `data.*` and `actions.*` are unchanged — there the payload really is
+  the caller's.
+- 6274a1a: feat(client): `meta.saveItem` can send the `If-Match` OCC header it already told callers to send (#11713)
+  
+  `saveItem`'s own docstring has always named the ADR-0008 optimistic-concurrency
+  protocol: the resolved `version` is the token, echo it back as the `If-Match`
+  request header on the next write to the same item, and a concurrent edit is
+  reported as `409 METADATA_CONFLICT` instead of silently overwriting. Both REST
+  `PUT` doors read `if-match` and thread it as `parentVersion`, so that sentence
+  was true of a raw-HTTP caller. It was **false** of a first-party SDK caller:
+  neither `saveItem` declaration accepted a header, an `ifMatch`, or anything
+  that became one — so an SDK caller who did exactly what the docstring said had
+  nowhere to put the token and their concurrent edit overwrote anyway, answered
+  `200`. Declared, not enforced, with no signal at the call site.
+  
+  **What is new:** `ifMatch?: string` joins the `SaveMetaItemOptions` bag that
+  `#11391` landed, on **both** `saveItem` declarations — the unscoped
+  `ObjectStackClient.meta` and the environment-scoped
+  `ScopedProjectClient.meta` — wired to the `If-Match` request header through a
+  single shared builder, the same way the three query parameters go through one
+  shared query builder. The twins cannot drift.
+  
+  ```ts
+  const saved = await client.meta.saveItem('object', 'customer', doc);
+  // …later, guarded against a concurrent edit:
+  await client.meta.saveItem('object', 'customer', next, { ifMatch: saved.version });
+  // a stale token now answers 409 METADATA_CONFLICT instead of overwriting
+  ```
+  
+  Purely additive and opt-in. Only a non-empty token reaches the wire:
+  `undefined` and `''` both omit the header entirely — the `init` handed to
+  `fetch` carries no `headers` key at all — so every existing call is
+  byte-identical and last-write-wins remains the default, on the wire and on the
+  door. Unlike the bag's `mode`, `ifMatch` reaches **both** save doors: the
+  compound-name twin `PUT /meta/:type/:section/:name` reads `if-match` and strips
+  ETag-style quotes exactly as the single-segment door does.
+  
+  Aligned deliberately with the other first-party client: the same member name,
+  the same header, and the same truthy guard as `MetadataClient.save` in
+  `@object-ui/data-objectstack` — two first-party clients, one behaviour.
+- 22c42c9: fix(client): bind the three verifiable methods of the unannotated return-type erasure population to their spec contracts (#11925)
+  
+  **Return-type narrowing on a published SDK.** No runtime change — the value each
+  method resolves to is byte-identical before and after. Only the DECLARED type
+  moved, off `any`, which is precisely why a runtime test cannot observe it and
+  the pins for it are type-level.
+  
+  `any` is assignable to everything and admits every property read, so for each
+  method below a consumer's code could stop compiling where it previously did
+  not: assigning the result to an unrelated annotation, reading a property the
+  bound type does not declare, or forwarding the value to a differently-typed
+  parameter.
+  
+  ## What changed, per family
+  
+  **`client.packages.list` → `{ packages: InstalledPackage[]; total: number }`**
+  (was `{ packages: any[]; total: number }`). A consumer stops compiling if it
+  reads any key off a row that `InstalledPackage` does not declare. Note in
+  particular `source` (`'database' | 'registry' | 'both'`): the REST surface
+  spreads it onto each row, the dispatcher surface does not, and it is therefore
+  deliberately NOT declared — code reading `pkg.source` off this result compiles
+  today and will not after. `total` and the array envelope are unchanged.
+  
+  **`client.packages.update` → `InstalledPackage`** (was `any`). This method
+  declared no envelope before, so nothing about the shape claim changed; a
+  consumer stops compiling if it reads an undeclared key off the returned row, or
+  assigns the result somewhere `InstalledPackage` does not fit.
+  
+  **`ScopedProjectClient.packages.get` → `{ package: InstalledPackage }`** (was
+  `{ package: any }`). The `{ package }` envelope is unchanged; only the member
+  narrowed. A consumer stops compiling if it reads a key off `.package` that
+  `InstalledPackage` does not declare — again including `source`, which this
+  route does send and which stays undeclared for consistency with its already
+  bound `list` sibling.
+  
+  ## What deliberately did NOT change
+  
+  The other 36 methods in the measured population keep their erased `any`, each
+  with a docblock stating why and pointing at the issue that carries it:
+  `meta.*` history/diagnostics (9) and eight `packages.*` routes have no published
+  response contract to bind to (#12038); `client.packages.get` has two mounted
+  surfaces that emit different envelopes and `install`/`enable`/`disable` declare
+  an envelope no surface emits (#12034); the 15 cloud `projects.*` methods call a
+  control plane that speaks snake_case while the `@objectstack/spec/cloud` rows are
+  camelCase, so binding to them would compile and be false (#12036).
+  
+  No consumer loses anything by those staying `any` — they are exactly as
+  permissive as before.
+- daae7aa: Declare the `search` and `data.clone` route response contracts, and bind the SDK to them (#11924)
+  
+  Two of the four SDK routes #8140 had to leave as deliberate `Promise<any>` holes now have real
+  contracts. Their shapes were always stable and server-produced — they were declared inline on the
+  implementation (`@objectstack/metadata-protocol`'s `searchAll` / `cloneData`), reachable from no
+  spec export — and per the maintainer ruling on #11924 they are now declared in `@objectstack/spec`
+  exactly as produced, with conformance coverage on both the producer and the mounted route (#3877:
+  no route-ledger `responseSchema` row is filled without conformance coverage; both rows are filled
+  as part of this change).
+  
+  **`@objectstack/spec` (additive):**
+  
+  - `SearchAllResponseSchema` / `SearchAllHitSchema` (+ `SearchAllResponse` / `SearchAllHit` types,
+    `@objectstack/spec/api`) — the WHOLE body of `GET /api/v1/search`, answered bare:
+    `{ query, hits, totalObjects, totalHits, truncated }` with hits of
+    `{ object, id, title, snippet?, record }`. ⚠️ Deliberately distinct from `SearchResult` /
+    `SearchHit` in `@objectstack/spec/contracts`, which type the per-object `ISearchService.search`
+    (hits of `score` / `document`) — reaching for that same-named neighbour was the near-miss trap
+    #8140 left a compile-time guard against, and the guard stands unchanged.
+  - `CloneDataResponseSchema` (+ `CloneDataResponse`, `@objectstack/spec/api`) — the whole 201 body
+    of `POST /data/:object/:id/clone`: `{ object, id, sourceId, record }`, `CreateDataResponse`'s
+    structural sibling plus `sourceId` (`id` is the NEW record's, `sourceId` the copied record's).
+    No `droppedFields` member — unlike `createData`, the clone producer emits none.
+  
+  **`@objectstack/client` (return-type narrowing, same nature as the #8140 batch):** `search` is
+  now `Promise<SearchAllResponse>` and `data.clone` is `clone<T = any>(…): Promise<CloneDataResult<T>>`
+  (a new exported interface mirroring `CloneDataResponseSchema`, beside `CreateDataResult`). Nothing
+  changes at runtime — no request, response, unwrapping or error path is touched — but code that
+  compiled against the previous `any` returns (arbitrary property reads, assignments to unrelated
+  types) can stop compiling; in particular a result assigned to the per-object `SearchResult` is now
+  refused at compile time, which is the trap the erasure used to hide.
+  
+  The `automation.create` / `automation.update` pair is explicitly NOT declared here — it returns to
+  the decision inbox with a consumer-survey reading per the same ruling.
+- 247933f: feat(client): `environments.create()` declares the three response keys the control plane really sends — `warnings`, `durationMs`, and a conditional `hostnameAssignment` (#12883)
+  
+  `client.environments.create()` declared its unwrap shape as the single key
+  `environment`, while `POST /api/v1/cloud/environments` answers `201` with three
+  more. `warnings` in particular is the channel a partially-degraded provision
+  uses to report what it could not do, and no SDK caller could reach it without
+  an `as any`.
+  
+  This is **additive**: `environment` keeps its shape and every existing call site
+  keeps compiling. What changes is that three previously-erased keys are now
+  declared and reachable.
+  
+  ```ts
+  const res = await client.environments.create({ organization_id, display_name });
+  
+  res.warnings;             // string[]  — partial-degradation channel, no cast needed
+  res.durationMs;           // number
+  res.hostnameAssignment;   // optional — present ONLY when the control plane
+                            // renamed a colliding hostname; absence stays absence
+  ```
+  
+  Per the 2026-08-29 maintainer ruling (verbatim 「同意」, option 甲) the three keys
+  are typed as the **inline wire shape** and are deliberately **not** bound to
+  `@objectstack/spec/cloud`'s `ProvisionEnvironmentResponseSchema`: those are
+  camelCase row contracts, and the `/api/v1/cloud/*` control plane this namespace
+  calls speaks snake_case — the constraint already recorded on the namespace
+  docblock. Binding them would typecheck and be false.
+  
+  The request side of the same method is untouched and remains a separate card.
+- cf71d73: feat(client): `meta.deleteItem` can pin a reset (`If-Match`) and discard only the pending draft (`?state=draft`) (#12181)
+  
+  Accept-set widening on a published SDK surface: both `deleteItem` declarations
+  — the unscoped `ObjectStackClient.meta` and the environment-scoped
+  `ScopedEnvironmentClient.meta` twin — take a third, optional
+  `DeleteMetaItemOptions` argument. Existing calls are unchanged: with the bag
+  omitted, the request is byte-identical to what this method has always sent
+  (no header key, no query string).
+  
+  FROM → TO:
+  
+  ```ts
+  // FROM — the only reset a first-party SDK caller could express
+  await client.meta.deleteItem('view', 'shared_grid');
+  
+  // TO — pin the reset against the version you read (ADR-0008 OCC)
+  const saved = await client.meta.saveItem('view', 'shared_grid', spec);
+  await client.meta.deleteItem('view', 'shared_grid', { ifMatch: saved.version });
+  //   concurrent edit  →  409 metadata_conflict, instead of silently resetting it
+  
+  // TO — discard ONLY the pending draft; the published overlay keeps serving
+  await client.meta.deleteItem('view', 'shared_grid', { state: 'draft' });
+  ```
+  
+  Why it matters: `DELETE /meta/:type/:name` has always read the `If-Match`
+  header and threaded it as `parentVersion` (the spec's own
+  `DeleteMetaItemRequest.parentVersion` describes the pin), and the sibling
+  first-party client `@object-ui/data-objectstack` `MetadataClient.reset`
+  already sent it — but this client had no argument for it, so every SDK reset
+  was last-write-wins on the one verb whose whole job is destroying an overlay
+  row. `state: 'draft'` reaches the NARROWER reset; without it the only
+  reachable reset was the full one, which drops the published overlay too.
+  
+  ⛔ `?dropStorage=true` is deliberately NOT part of this bag. It is the one
+  carrier the reset door reads that ADDS destructive reach — it drops the
+  object's physical table — no caller was measured needing it from this client,
+  and the door's repeated-parameter refusal exists because of that
+  destructiveness. A caller that needs it is a separate, separately reviewable
+  widening.
+  
+  `state: 'active'` is the explicit spelling of the default and deliberately
+  sends nothing; an empty `ifMatch` (`''`) omits the header rather than pinning
+  against the empty string.
+- 426ad58: fix(client)!: `meta.deleteItem` declares the response the reset door actually sends (#13023)
+  
+  **BREAKING** for a typed caller, and it breaks nothing that ever worked. Both
+  `deleteItem` declarations — the unscoped `ObjectStackClient.meta` and the
+  environment-scoped `ScopedEnvironmentClient.meta` twin — declared
+  `Promise<{ type: string; name: string; deleted: boolean }>`. That shape is not
+  merely imprecise, it is **uninhabited**: `DELETE /meta/:type/:name` ends in
+  `res.json(result)` with `deleteMetaItem`'s return, and not one of that method's
+  four return branches carries `type`, `name` or `deleted`. Both twins now declare
+  `DeleteMetaItemResponse` — the type `@objectstack/spec` already exported.
+  
+  ### Migration: FROM → TO
+  
+  ```ts
+  const r = await client.meta.deleteItem('view', 'shared_grid');
+  
+  // FROM — compiled, and read `undefined` on EVERY reset, including the ones
+  //        that really deleted an overlay row. The branch was never taken.
+  if (r.deleted) { invalidateCache(); }
+  
+  // TO — the truthful flag, and it tells the two successes apart
+  if (r.reset) { invalidateCache(); }   // an overlay row was deleted
+  else { /* none existed — already at the artifact default */ }
+  ```
+  
+  `r.type` / `r.name` have no replacement: the door never echoed them, and the
+  caller already holds both — it passed them in.
+  
+  ⛔ Do not write `r.reset ?? r.deleted`. There is one producer shape, and a
+  consumer accepting two spellings is what contract-first exists to prevent. No
+  deprecated `deleted?: boolean` transition key ships either: a transition period
+  is for keys that *worked*, and this one never did.
+  
+  ⚠️ The real work is behavioural, not textual. Every `if (r.deleted)` has been
+  false since it was written, so re-read what each of those branches was supposed
+  to do — cache invalidation, registry refreshes and UI reloads guarded that way
+  have **never run**, and moving to `r.reset` turns them on for the first time.
+  Note also that `r.reset` and `r.success` are different questions: `success` asks
+  whether the call was accepted, `reset` whether a row actually went away.
+  
+  The type name is reachable without a new export from this package —
+  `import type { DeleteMetaItemResponse } from '@objectstack/spec/api'` — which is
+  also why no member list is transcribed here. A hand-written local copy of the
+  schema's members is the very defect this change removes.
+  
+  ### `os meta delete`
+  
+  The CLI read the phantom key too: its `--format json` / `--format yaml` payload
+  carried `deleted: result.deleted`, which evaluated to `undefined`, and both
+  `JSON.stringify` and `yaml.stringify` drop undefined values — so the `deleted`
+  key this command has always declared **never appeared in a single run**. It now
+  carries `result.reset`, the door's own verdict. Observable change: `os meta
+  delete --format json` gains `deleted: true` (YAML likewise) when an overlay row
+  was removed, and `deleted: false` when the item was already at its artifact
+  default. The key name stays `deleted` deliberately — it is the CLI's output key,
+  not the protocol's, and the payload's top-level `success` already means
+  something different (the CLI envelope's "the command completed"). Same treatment
+  `os data delete` received one door over.
+  
+  ⛔ The wire is untouched: neither `deleteMetaItem` nor
+  `DeleteMetaItemResponseSchema` changes. Reality is the contract.
+  
+  <!-- adr-0087: registered client-meta-reset-result-reset -->
+- 3519f8d: fix(client,rest): state `SaveReportInput`'s requirements at the `reports.save` door (#11926)
+  
+  **BREAKING** accept-set narrowing on `POST /api/v1/reports` and on the
+  `client.reports.save` parameter type, shipped as `minor` under the repo's
+  launch-window convention for breaking changes.
+  
+  `IReportService.saveReport` takes a `SaveReportInput`, on which `name`, `object`
+  and `query` are all required. Nothing on the path said so. The SDK method
+  declared its parameter `any`, and the route forwarded `req.body ?? {}` straight
+  through, so the requirement held only as far as each reports implementation
+  chose to re-derive it privately — the bundled `@objectstack/plugin-reports` does
+  re-derive all three, but a third-party implementation need not, and a caller
+  could not tell which one it was talking to. This is the ADR-0078
+  declared-but-unenforced shape arriving at an authoring surface: the producer
+  accepted off-spec input and handed it to a service that requires more.
+  
+  Both halves now state the contract:
+  
+  - **`client.reports.save(report)`** takes `SaveReportInput` instead of `any`.
+    Omitting `query` (or `name`, or `object`) is now a compile error at the call
+    site rather than a surprise from whichever implementation is mounted. The SDK
+    remains a transport and adds no runtime validation — it is not a second
+    validator.
+  - **`POST /api/v1/reports`** refuses a body missing any of the three required
+    keys, and a `query` that is not a `ReportQuery` envelope (a scalar or an
+    array), with `400` / `VALIDATION_FAILED` — the same envelope the route
+    already produced for a service-raised validation error (ADR-0112). A
+    JavaScript or `curl` caller that never sees the TypeScript type is refused
+    too. The refusal is ordered **after** the existing `501` for an unmounted
+    reports service: "no reports service on this deployment" is a deployment fact
+    and outranks anything about the body. An empty `query: {}` stays legal —
+    every field on `ReportQuery` is optional — and is pinned as such.
+  
+  **Migration.** A caller that omitted `query` was already relying on
+  implementation-specific behaviour; supply the `ReportQuery` envelope the report
+  should run (`{}` for "no filters"). Callers already sending a complete
+  definition are unaffected, and the bundled reports implementation already
+  refused all three omissions, so no deployment running it changes behaviour —
+  only the layer that produces the refusal moves, from the service to the door.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A validity narrowing over keys that already exist and are already required by the service contract: no key is removed, renamed or re-shaped, so there is no tombstone and nothing mechanical for `objectstack migrate meta` to rewrite. `SaveReportInput` is a cross-package TS contract with no spec schema and no stored-metadata form, so no authored artifact at rest carries the affected shape. What a query-less report definition was *meant* to query is authoring intent no migration entry can supply on an upgrader's behalf; the 400 at the door is the channel that reaches the author, naming the missing keys. Mirrors the disposition of the #11519 and #11842 accept-set narrowings. -->
+- 7986d97: Retire compound-name metadata addressing (`/meta/:type/:section/:name`)
+  
+  Stage 3 of the maintainer-ruled retirement of slash-bearing metadata item names.
+  Stage 1 declared the item-name grammar and refuses every slash-bearing name at
+  the publish door, so the routes removed here addressed only names that can no
+  longer be created.
+  
+  **BREAKING — three public REST routes stop answering:**
+  
+  | stops answering | use instead |
+  | :-- | :-- |
+  | `GET /api/v1/meta/:type/:section/:name` | `GET /api/v1/meta/:type/:name` |
+  | `PUT /api/v1/meta/:type/:section/:name` | `PUT /api/v1/meta/:type/:name` |
+  | `GET /api/v1/meta/:type/:section/:name/published` | `GET /api/v1/meta/:type/:name/published` |
+  
+  Each retired route folded its `:section` and `:name` segments back into one
+  slash-bearing key (`views/all_leads`) that the protocol layer then treated as a
+  single opaque string — the section half was never stored, filtered or
+  enumerated. A request to a retired path now answers `404 ROUTE_NOT_FOUND`.
+  
+  The `@objectstack/runtime` dispatcher stops folding in the same way: its
+  `/meta` handler requires exactly two path segments for an item and three for
+  `…/published`, instead of re-joining every trailing segment. A `/meta` path
+  that matches no route now answers a located `404 ROUTE_NOT_FOUND` rather than
+  falling through to the adapter's anonymous 404.
+  
+  **FROM → TO for callers.** Address every item through the single-segment route
+  and percent-encode the name:
+  
+  ```
+  GET /api/v1/meta/lead/views/all_leads     →  GET /api/v1/meta/lead/views%2Fall_leads
+  ```
+  
+  `@objectstack/client` now calls `encodeURIComponent` on every `/meta` item
+  address, so SDK callers need no change: the SDK already sends the new spelling.
+  Encoding is a **no-op** for every name the item-name grammar admits (lowercase
+  snake_case segments, optionally dot-qualified), so the bytes on the wire are
+  unchanged for every name that can be written today.
+  
+  A pre-grammar **residue** row whose stored name contains a slash remains
+  readable, writable and deletable: `%2F` matches the single-segment pattern and
+  the parameter is decoded back to the stored spelling before the handler runs.
+  Nothing that could be stored has become unaddressable.
+  
+  Two SDK doc comments that promised "compound names pass through unencoded"
+  (`meta.getPublished`, `meta.publishItem`) are corrected, and the
+  `SaveMetaItemOptions.mode` carve-out — `{ mode: 'draft' }` was silently ignored
+  at the compound door and published live — is closed at the source: there is one
+  door, and it reads every member of the options bag.
+  
+  <!-- adr-0087: not-required (already-registered metadata-item-name-grammar-enforced) the stage-1 semantic entry already names this exact surface — "the compound `:type/:section/:name` fold" — and carries the re-authoring prescription (dot-qualified, or flattened with an underscore). This stage removes the routes that fold; it adds no new authorable shape and no second migration prescription. -->
+- dc75ba8: feat(spec,client): bind published response contracts for the 17 unbound client-SDK methods; retire the false `PackageRollbackResponseSchema` (#12038, ruling 1C · 2C · 3A · 4A · 5A)
+  
+  <!-- adr-0087: registered package-rollback-response-retired -->
+  
+  **BREAKING** export removal, landing after the v17.0.0 cut (the lockstep
+  launch-window convention ships it as `minor`; the prescription is registered
+  under protocol major 18 — `RETIRED_DEFS_BY_MAJOR[18]` `api/PackageRollbackResponse`
+  plus the D3 semantic entry `package-rollback-response-retired` — where
+  `os migrate meta` users will look).
+  
+  FROM → TO:
+  
+  - `PackageRollbackResponseSchema` / `PackageRollbackResponse` /
+    `PackageRollbackResponseParsed` → `RollbackToPackageCommitResponseSchema` /
+    `RollbackToPackageCommitResponse` (`@objectstack/spec/api`). The retired
+    schema declared a VERSION rollback (`{ success, restoredVersion?,
+    message? }`) while the live `POST /packages/:id/rollback` route posts
+    `{ commitId }` and answers the ADR-0067 COMMIT rollback —
+    `{ success, revertedCommits: string[], failed: [{ commitId, error }] }`.
+    Read `revertedCommits` / `failed`; there is no `restoredVersion`.
+  - `PackageApiContracts.rollbackPackage` → *(removed)* — it bound the
+    wrong-operation schema to the exact live path. No route registration or
+    SDK generation ever consumed it (zero consumers measured across
+    objectstack, objectui and cloud; only its own unit test and the #11925
+    compile-time guard, both updated in this PR).
+  
+  One-line fix: replace any import of `PackageRollbackResponse(Schema)` with
+  `RollbackToPackageCommitResponse(Schema)` and read `revertedCommits` /
+  `failed` instead of `restoredVersion`. `PackageRollbackRequestSchema` stays
+  published (ruled out of the retirement), bound to no route.
+  
+  The rest of the change is additive — the recorded five-part maintainer
+  ruling (2026-08-27) for the 17 client-SDK methods that had no published
+  response contract:
+  
+  - **12 describe-only transcriptions** into `@objectstack/spec/api`, each
+    from the return type its producer already declares inline (no wire byte
+    changes): `ListDraftsResponseSchema`, `GetMetaDiagnosticsResponseSchema`,
+    `FindReferencesToMetaResponseSchema`, `RollbackMetaItemResponseSchema`,
+    `DiffMetaItemResponseSchema`, `ResolvedBookSchema` (authored beside its
+    interfaces in `system/book.zod.ts`), `DiscardPackageDraftsResponseSchema`,
+    `ListPackageCommitsResponseSchema` (the `{ commits }` wrapper declared as
+    the handler's own), `RevertPackageCommitResponseSchema`,
+    `RollbackToPackageCommitResponseSchema`,
+    `ReassignOrphanedMetadataResponseSchema`, `DuplicatePackageResponseSchema`.
+  - **Ruling 1C**: `GetPublishedMetaItemResponseSchema` is deliberately opaque
+    (`z.unknown()`) — the route answers an arbitrary metadata item body, never
+    a union frozen against the type registry.
+  - **Ruling 2C**: `meta.migrateStored` stays UNBOUND, documented at its two
+    ledger rows and in the SDK — `StoredMigrationReport` lives in
+    `@objectstack/metadata-protocol`, and a second declaration would drift.
+  - **Ruling 4A**: `PackageExportManifestSchema` pins the four fixed keys
+    (`id`, `name`, `version`, `label?`) and stays honestly open for the
+    registry-derived plural keys.
+  - **Ruling 5A**: `PackagePublishResultSchema` and the `ResolvedBook` family
+    are re-exported into `@objectstack/spec/api` (the namespace the
+    route-ledger resolver searches) — never a second copy.
+  - The 18 boundable route-ledger rows in `@objectstack/runtime` and
+    `@objectstack/rest` now name their `responseSchema`, each stating which
+    surface's envelope it describes; every named schema carries conformance
+    coverage (the #3877 rule).
+  - The client SDK binds 16 of the 17 methods to the published payload types,
+    replaces four invented test mocks with producer-true shapes, and pins the
+    `unwrapResponse` mis-unwrap hazard so no bound payload can declare both a
+    boolean `success` and a `data` key.
+
+### Patch Changes
+
+- 1fa05a6: fix(client-react): correct two broken TSDoc `@example` blocks the SDK docs shipped verbatim (#10969)
+  
+  TSDoc `@example` blocks are preserved into the published `dist/*.d.ts` (confirmed by
+  building and reading the emitted declarations), so they reach consumers directly in their
+  editor's hover tooltip — copying one is the intended usage. Two were actively wrong:
+  
+  - `useAutoRefresh`'s example read `data.map(...)`. `data` is a `PaginatedResult` (or
+    `null`), which has no `.map` — copied verbatim, this throws once the query resolves.
+    Fixed to `data?.records.map(...)`.
+  - `useMetadata`'s example called `client.meta.getObject(...)`, a method that does not
+    exist on the client (only `getItem`/`getItems`/`getView` do). Fixed to the real
+    `client.meta.getItem('object', ...)`, matching `useObject`'s own implementation.
+  
+  While in there: every other `@example` on this surface (18 more, across
+  `client-react`'s `data-hooks.tsx`/`metadata-hooks.tsx`/`realtime-hooks.tsx`/`context.tsx`
+  and `client`'s `index.ts`) is now genuinely self-contained and copy-paste-able — each
+  previously omitted the `import` for the hook or type it demonstrated, and three
+  `realtime-hooks.tsx` examples wrote a literal `useQuery(...)` (three dots) as a prose
+  placeholder, a syntax error once copied.
+  
+  **`@objectstack/spec`: dev tooling only, nothing published changes.** The gate that now
+  type-checks the surface above (`check:skill-examples`, `packages/spec/scripts/`) lives in
+  this package but is not part of it — `scripts/` is outside `@objectstack/spec`'s publish
+  `files` allowlist (confirmed via `check:published-files`), so no consumer-visible surface
+  moves. Named here only because the fixed-version group requires every package with a
+  source diff to be covered by a changeset; the actual version bump is a byproduct of the
+  group moving together, not a claim that spec shipped something new.
+  
+  No exported type, function signature, or runtime behaviour changed on any of the three — patch.
+- e22158f: Widen two route response schemas to parity with the producer contracts their routes relay. `AnalyticsResultResponseSchema.data` now declares everything `AnalyticsResult` declares — `fields[].label` / `format` / `currency` / `percentScale` (the renderer chains) and `totals` (the marginal-aggregate channel) — and `TriggerFlowResponseSchema.data` now declares everything `AutomationResult` declares, including the paused screen-flow state (`status` / `runId` / `screen`), the closed `code` classification, the friendly terminal messages and the run `summary`. Both parities are pinned schema ≡ contract at compile time, so the two sources can no longer drift apart silently. `AnalyticsResultResponse` / `AnalyticsResultResponseParsed` are now exported: the schema previously had no nameable response type at all. This is an accept-set widening with zero wire change — every payload that parsed before still parses, and the served keys the schemas used to silently strip (a paused run's `runId` and `screen`, a measure's `label`) now survive a parse. The client SDK's `analytics.query` / `automation.trigger` docblocks are refreshed to record the new state; their bindings still target the producer contracts and are unchanged.
+- Updated dependencies [809d417]
+- Updated dependencies [387e231]
+- Updated dependencies [f794e4e]
+- Updated dependencies [cae2169]
+- Updated dependencies [b812a54]
+- Updated dependencies [2d4fa75]
+- Updated dependencies [0e4e51b]
+- Updated dependencies [e84bbf6]
+- Updated dependencies [effae80]
+- Updated dependencies [efb3513]
+- Updated dependencies [d62f990]
+- Updated dependencies [c45d8e6]
+- Updated dependencies [2e3e8c7]
+- Updated dependencies [e621291]
+- Updated dependencies [655b106]
+- Updated dependencies [40a93b5]
+- Updated dependencies [d5b330d]
+- Updated dependencies [dda969c]
+- Updated dependencies [1f45690]
+- Updated dependencies [277948f]
+- Updated dependencies [8bdd955]
+- Updated dependencies [f3bbbef]
+- Updated dependencies [4f24e9d]
+- Updated dependencies [e27583e]
+- Updated dependencies [4bd6faa]
+- Updated dependencies [86cbe37]
+- Updated dependencies [6a180e4]
+- Updated dependencies [474242f]
+- Updated dependencies [63cd487]
+- Updated dependencies [bd4aa4e]
+- Updated dependencies [803eaab]
+- Updated dependencies [f8e8f03]
+- Updated dependencies [983edf1]
+- Updated dependencies [eae824e]
+- Updated dependencies [f6fa22c]
+- Updated dependencies [8a483b3]
+- Updated dependencies [97bcd99]
+- Updated dependencies [df59de0]
+- Updated dependencies [96e25a8]
+- Updated dependencies [f75a38a]
+- Updated dependencies [7a25e7d]
+- Updated dependencies [1fa05a6]
+- Updated dependencies [c85a265]
+- Updated dependencies [dcb10a5]
+- Updated dependencies [773a999]
+- Updated dependencies [35dffea]
+- Updated dependencies [d8024f0]
+- Updated dependencies [8120808]
+- Updated dependencies [776a098]
+- Updated dependencies [5060877]
+- Updated dependencies [4f6325d]
+- Updated dependencies [52954c0]
+- Updated dependencies [2aa8456]
+- Updated dependencies [93809a3]
+- Updated dependencies [7c0d0c3]
+- Updated dependencies [daae7aa]
+- Updated dependencies [8dc22d6]
+- Updated dependencies [279431e]
+- Updated dependencies [948dd6b]
+- Updated dependencies [3b4c56c]
+- Updated dependencies [ae8edd2]
+- Updated dependencies [e25403c]
+- Updated dependencies [64baa68]
+- Updated dependencies [9fa70d7]
+- Updated dependencies [09db64a]
+- Updated dependencies [92916e7]
+- Updated dependencies [a84f3ea]
+- Updated dependencies [f2eaae8]
+- Updated dependencies [c09451b]
+- Updated dependencies [ba64877]
+- Updated dependencies [7345308]
+- Updated dependencies [79b6a22]
+- Updated dependencies [30d96ab]
+- Updated dependencies [f658793]
+- Updated dependencies [c95ad19]
+- Updated dependencies [e58ea8b]
+- Updated dependencies [4a17645]
+- Updated dependencies [3795c5f]
+- Updated dependencies [8ab926b]
+- Updated dependencies [7317cf2]
+- Updated dependencies [e25e839]
+- Updated dependencies [5997207]
+- Updated dependencies [8b13cc8]
+- Updated dependencies [4a4a35d]
+- Updated dependencies [86e765a]
+- Updated dependencies [1d7e76a]
+- Updated dependencies [53dc739]
+- Updated dependencies [fd289be]
+- Updated dependencies [03bf7b1]
+- Updated dependencies [f90e820]
+- Updated dependencies [18d816a]
+- Updated dependencies [e8bd715]
+- Updated dependencies [b91c351]
+- Updated dependencies [a28a3c0]
+- Updated dependencies [daeaaf9]
+- Updated dependencies [c459da6]
+- Updated dependencies [e914733]
+- Updated dependencies [f887e52]
+- Updated dependencies [881f8d8]
+- Updated dependencies [3bfa1e6]
+- Updated dependencies [0a8ebf3]
+- Updated dependencies [901355c]
+- Updated dependencies [34ce8e7]
+- Updated dependencies [33681ea]
+- Updated dependencies [4635f3e]
+- Updated dependencies [fd289be]
+- Updated dependencies [ee3595c]
+- Updated dependencies [b2eab95]
+- Updated dependencies [93940d4]
+- Updated dependencies [3a04b01]
+- Updated dependencies [45b9051]
+- Updated dependencies [b9e9227]
+- Updated dependencies [d395692]
+- Updated dependencies [5894d30]
+- Updated dependencies [a3765f6]
+- Updated dependencies [2d5cee3]
+- Updated dependencies [e22158f]
+- Updated dependencies [7404925]
+- Updated dependencies [0c2334f]
+- Updated dependencies [778c59f]
+- Updated dependencies [d2619fd]
+- Updated dependencies [af56546]
+- Updated dependencies [6acb11a]
+- Updated dependencies [33c5fd3]
+- Updated dependencies [20b0fdb]
+- Updated dependencies [905019b]
+- Updated dependencies [a286411]
+- Updated dependencies [98c0d33]
+- Updated dependencies [368a82e]
+- Updated dependencies [a3d5724]
+- Updated dependencies [93ea19b]
+- Updated dependencies [9ee2dcf]
+- Updated dependencies [8cb96ec]
+- Updated dependencies [8f10a79]
+- Updated dependencies [6269a55]
+- Updated dependencies [a17da05]
+- Updated dependencies [a8c00e2]
+- Updated dependencies [0fb8760]
+- Updated dependencies [e5ce2ed]
+- Updated dependencies [be21955]
+- Updated dependencies [bc56e18]
+- Updated dependencies [be21955]
+- Updated dependencies [a9ee989]
+- Updated dependencies [4d0d944]
+- Updated dependencies [15d58db]
+- Updated dependencies [d63b014]
+- Updated dependencies [9abe4e4]
+- Updated dependencies [2cc7122]
+- Updated dependencies [50d6c92]
+- Updated dependencies [9e0ba21]
+- Updated dependencies [311433f]
+- Updated dependencies [3e5ad08]
+- Updated dependencies [9abe4e4]
+- Updated dependencies [b7131f3]
+- Updated dependencies [e5812fa]
+- Updated dependencies [7085f90]
+- Updated dependencies [dee4dd4]
+- Updated dependencies [ce7e497]
+- Updated dependencies [51ecb2f]
+- Updated dependencies [9086761]
+- Updated dependencies [42a117b]
+- Updated dependencies [1401ae7]
+- Updated dependencies [4297fe7]
+- Updated dependencies [e398863]
+- Updated dependencies [d16df74]
+- Updated dependencies [f11fc61]
+- Updated dependencies [e808890]
+- Updated dependencies [8f79379]
+- Updated dependencies [e6ca40e]
+- Updated dependencies [0c77ea4]
+- Updated dependencies [52954c0]
+- Updated dependencies [89eb997]
+- Updated dependencies [7131f12]
+- Updated dependencies [aa5994e]
+- Updated dependencies [be93457]
+- Updated dependencies [a65db76]
+- Updated dependencies [15eb2c9]
+- Updated dependencies [5691b07]
+- Updated dependencies [2a6122b]
+- Updated dependencies [225e769]
+- Updated dependencies [8af88dd]
+- Updated dependencies [fb5fbb8]
+- Updated dependencies [d7b3963]
+- Updated dependencies [33184fd]
+- Updated dependencies [7c41693]
+- Updated dependencies [b72db01]
+- Updated dependencies [dce5cd4]
+- Updated dependencies [9688f58]
+- Updated dependencies [556ebc1]
+- Updated dependencies [177ebdc]
+- Updated dependencies [8d237b4]
+- Updated dependencies [2d2e6f0]
+- Updated dependencies [2d8dd8d]
+- Updated dependencies [22d573e]
+- Updated dependencies [b5a2398]
+- Updated dependencies [348860c]
+- Updated dependencies [5383fa6]
+- Updated dependencies [5b3ff63]
+- Updated dependencies [1a6a19c]
+- Updated dependencies [527e050]
+- Updated dependencies [dd33bf9]
+- Updated dependencies [4cb2a90]
+- Updated dependencies [74a7804]
+- Updated dependencies [53d3689]
+- Updated dependencies [b3a63d3]
+- Updated dependencies [49f0dcf]
+- Updated dependencies [033a34c]
+- Updated dependencies [4d25d22]
+- Updated dependencies [1ffee51]
+- Updated dependencies [5ae4303]
+- Updated dependencies [ece4dad]
+- Updated dependencies [e9b377e]
+- Updated dependencies [146f448]
+- Updated dependencies [735f5c7]
+- Updated dependencies [a7e18de]
+- Updated dependencies [366f895]
+- Updated dependencies [dc75ba8]
+- Updated dependencies [cce0aa9]
+- Updated dependencies [e764507]
+- Updated dependencies [cff17af]
+- Updated dependencies [39404f3]
+- Updated dependencies [ca1965f]
+- Updated dependencies [8619f95]
+- Updated dependencies [b706af9]
+- Updated dependencies [add4360]
+- Updated dependencies [fc9ba76]
+- Updated dependencies [0f94cc7]
+- Updated dependencies [a11c1a5]
+- Updated dependencies [71f9cd1]
+- Updated dependencies [ee17d86]
+- Updated dependencies [cdbd920]
+- Updated dependencies [18c432e]
+- Updated dependencies [3c418c4]
+- Updated dependencies [fa8715a]
+- Updated dependencies [a933ed7]
+- Updated dependencies [b3ca463]
+- Updated dependencies [a933ed7]
+- Updated dependencies [0d4a6a8]
+- Updated dependencies [518d5e5]
+- Updated dependencies [6643ba1]
+- Updated dependencies [eeba2ef]
+- Updated dependencies [ec4c4d2]
+- Updated dependencies [424f73c]
+- Updated dependencies [cccbe51]
+- Updated dependencies [a8d6b1d]
+- Updated dependencies [e4a7695]
+- Updated dependencies [87075b1]
+- Updated dependencies [fc58a99]
+- Updated dependencies [14cfc00]
+- Updated dependencies [1c6f7b4]
+- Updated dependencies [e854a53]
+- Updated dependencies [dfebfc8]
+- Updated dependencies [d028b37]
+- Updated dependencies [f7b25c5]
+- Updated dependencies [122ef38]
+- Updated dependencies [4a37870]
+- Updated dependencies [428f9b2]
+- Updated dependencies [aa7ff56]
+- Updated dependencies [c41b42e]
+- Updated dependencies [c4db311]
+- Updated dependencies [750fff5]
+- Updated dependencies [c19035e]
+- Updated dependencies [ececf7a]
+- Updated dependencies [d173125]
+- Updated dependencies [8eeca27]
+- Updated dependencies [8425c17]
+- Updated dependencies [a5ef1d8]
+- Updated dependencies [772d5de]
+- Updated dependencies [ce80ec2]
+- Updated dependencies [b372318]
+- Updated dependencies [97a2263]
+- Updated dependencies [29d0676]
+- Updated dependencies [0169d49]
+- Updated dependencies [6bd3231]
+- Updated dependencies [d2b5ba8]
+- Updated dependencies [b799ac5]
+- Updated dependencies [8f74307]
+- Updated dependencies [d23dc08]
+- Updated dependencies [644ad50]
+- Updated dependencies [0da7cd2]
+- Updated dependencies [28a5c3e]
+- Updated dependencies [4bc18e5]
+  - @objectstack/spec@17.3.0
+  - @objectstack/core@17.3.0
+
 ## 17.2.0
 
 ### Minor Changes
