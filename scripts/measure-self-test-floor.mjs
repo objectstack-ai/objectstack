@@ -41,10 +41,35 @@
  * `undefined`, and `process.exit(undefined)` is exit 0), through
  * `selfTest(); main();`, or through a top-level block with no callee at all.
  * So hole 2 is decided by BEHAVIOUR: inject `return;` as the first statement of
- * the function the dispatch calls, run it, read the exit code. Exit 0 is the
- * defect. Hole 1 has no equally generic mutation -- a battery is not a
- * mechanically identifiable unit across 158 differently shaped self-tests -- so
- * it is decided by a published static criterion instead, stated below.
+ * the function the dispatch calls, run it, and read what it SAYS as well as what
+ * it exits. Exit 0 is the defect. Hole 1 has no equally generic mutation --
+ * a battery is not a mechanically identifiable unit across 158 differently shaped
+ * self-tests -- so it is decided by a published static criterion instead, stated
+ * below.
+ *
+ * ## A non-zero exit is NOT a handshake: DEFEATED / HELD / ACCIDENT
+ *
+ * A handshake is a gate NOTICING that its self-test left early and SAYING so. An
+ * exit code alone cannot tell that apart from an accident: a dispatch spelled
+ * `process.exit(runSelfTest() === 0 ? 0 : 1)` turns the early return's `undefined`
+ * into `undefined === 0` -> false -> exit 1, having printed ZERO BYTES. Nothing
+ * detected anything; the arithmetic of a comparison against a missing return value
+ * did it. Scoring that HELD is the same accident-versus-handshake mistake this
+ * instrument exists to expose, made by the instrument itself -- and it inflates
+ * exactly the completion picture a green `--probe` sweep is quoted for.
+ *
+ * So the mutated run must also SPEAK, and the verdict is three-valued:
+ *
+ *   DEFEATED  exit 0            -- the early return went unnoticed.
+ *   HELD      exit != 0 AND the mutated run printed a non-blank line.
+ *   ACCIDENT  exit != 0 AND it printed nothing -- a non-zero exit with no
+ *             refusal behind it. NOT counted among HELD, ever.
+ *
+ * The `mutatedBytes` / `mutatedHead` fields the row already carried are what this
+ * reads; `mutatedSpoke` publishes the reading. Deliberately the verdict does NOT
+ * match the refusal WORDING: the repair landed in three spellings and teaching
+ * this verdict any of them is the coupling #14968 is filed to remove. Reporting
+ * WHICH handshake a file carries is that card's column, not this verdict's job.
  *
  * ## The controls, which run on EVERY invocation
  *
@@ -188,13 +213,20 @@ export function probeEarlyReturn(absFile, entry, { timeout = 120000 } = {}) {
     if (baseOut === mutOut && base.status === mut.status) {
       return { verdict: 'NOT MEASURED', why: 'mutation had no observable effect' };
     }
+    // Did the mutated run SAY anything? Read as "printed a non-blank line", the
+    // same reading `mutatedHead` already publishes and quotes -- a run whose whole
+    // output is a newline has non-zero bytes and still refused nothing.
+    const mutatedHead = mutOut.split('\n').find((l) => l.trim()) ?? '';
+    const mutatedSpoke = mutatedHead !== '';
     return {
-      verdict: mut.status === 0 ? 'DEFEATED' : 'HELD',
+      // Exit code alone cannot tell a refusal from an accident -- see the header.
+      verdict: mut.status === 0 ? 'DEFEATED' : mutatedSpoke ? 'HELD' : 'ACCIDENT',
       entry,
       baselineExit: base.status,
       mutatedExit: mut.status,
       mutatedBytes: mutOut.length,
-      mutatedHead: mutOut.split('\n').find((l) => l.trim()) ?? '',
+      mutatedHead,
+      mutatedSpoke,
     };
   } finally {
     rmSync(probePath, { force: true });
@@ -247,6 +279,27 @@ const SOUND_GATE = [
 ].join('\n');
 
 /**
+ * The measured ACCIDENT shape, reduced: a dispatch that compares the self-test's
+ * return value against a number. An early return makes that comparison false and
+ * the process exits 1 having printed NOTHING -- a non-zero exit with no refusal
+ * behind it. This is the shape `scripts/audits/14744-before-update-per-row-value-
+ * census.mjs` carries and that an exit-code-only verdict scored HELD (#15324).
+ */
+const ACCIDENT_GATE = [
+  '#!/usr/bin/env node',
+  'function runSelfTest() {',
+  '  const failures = [];',
+  "  if (1 !== 1) failures.push('x');",
+  "  console.log('fixture self-test: 1 case passes');",
+  '  return failures.length;',
+  '}',
+  "if (process.argv.includes('--self-test')) {",
+  '  process.exit(runSelfTest() === 0 ? 0 : 1);',
+  '}',
+  '',
+].join('\n');
+
+/**
  * Both instruments, against both directions. Returns the failures; the caller
  * refuses on any. Nothing here reads the repo, so a control failure is always
  * the instrument and never the tree.
@@ -266,16 +319,28 @@ export function runControls() {
   try {
     const holed = join(dir, 'holed-gate.mjs');
     const sound = join(dir, 'sound-gate.mjs');
+    const accident = join(dir, 'accident-gate.mjs');
     writeFileSync(holed, HOLED_GATE);
     writeFileSync(sound, SOUND_GATE);
+    writeFileSync(accident, ACCIDENT_GATE);
     const h = probeEarlyReturn(holed, 'selfTest');
     const s = probeEarlyReturn(sound, 'selfTest');
+    const a = probeEarlyReturn(accident, 'runSelfTest');
     say(h.verdict === 'DEFEATED',
       `POSITIVE CONTROL FAILED: the probe read a known-holed gate as ${h.verdict} (${h.why ?? ''})`);
     say(h.mutatedBytes === 0,
       'POSITIVE CONTROL FAILED: the known-holed gate printed something; the measured shape prints NOTHING');
     say(s.verdict === 'HELD',
       `NEGATIVE CONTROL FAILED: the probe read a handshake-protected gate as ${s.verdict} (${s.why ?? ''})`);
+    // The discriminator, in both directions. A gate that HOLDS must be one that
+    // SPOKE; a non-zero exit that printed nothing is an ACCIDENT and must never
+    // be counted among the holds (#15324).
+    say(s.mutatedSpoke === true && s.mutatedBytes > 0,
+      'NEGATIVE CONTROL FAILED: the handshake-protected gate printed nothing when defeated; HELD is supposed to mean it REFUSED out loud');
+    say(a.verdict === 'ACCIDENT',
+      `POSITIVE CONTROL FAILED: the probe read a silent non-zero exit as ${a.verdict} (${a.why ?? ''}) -- an exit code is not a handshake`);
+    say(a.mutatedExit !== 0 && a.mutatedBytes === 0 && a.mutatedSpoke === false,
+      `POSITIVE CONTROL FAILED: the accident fixture no longer produces the measured shape (exit ${a.mutatedExit}, ${a.mutatedBytes} byte(s)); the ACCIDENT verdict above would then be passing for the wrong reason`);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -399,12 +464,18 @@ function main() {
   }
   const defeated = rows.filter((r) => r.probe.verdict === 'DEFEATED');
   const held = rows.filter((r) => r.probe.verdict === 'HELD');
+  const accidents = rows.filter((r) => r.probe.verdict === 'ACCIDENT');
   const unmeasured = rows.filter((r) => r.probe.verdict === 'NOT MEASURED');
   console.log('\nHole 2 -- silently defeated by an early `return` in the self-test (MEASURED):');
-  console.log(`  ${defeated.length} DEFEATED, ${held.length} HELD, ${unmeasured.length} NOT MEASURED.`);
+  console.log(`  ${defeated.length} DEFEATED, ${held.length} HELD, ${accidents.length} ACCIDENT, ${unmeasured.length} NOT MEASURED.`);
   console.log(`  of the defeated, ${defeated.filter((r) => r.probe.mutatedBytes === 0).length} printed NOTHING at all and still exited 0.`);
   for (const r of held) console.log(`    HELD  ${r.file} -- ${r.probe.mutatedHead.slice(0, 96)}`);
+  for (const r of accidents) console.log(`    ACC   ${r.file} -- exited ${r.probe.mutatedExit} printing ${r.probe.mutatedBytes} byte(s); no refusal, so NOT a hold`);
   for (const r of unmeasured) console.log(`    n/m   ${r.file} -- ${r.probe.why}`);
+  if (accidents.length) {
+    console.log(`\n⚠ ACCIDENT is not a hold. Those ${accidents.length} file(s) exit non-zero because a comparison`);
+    console.log('   against a missing return value happened to be false, not because anything noticed.');
+  }
   console.log('\n⛔ The two numbers are ORTHOGONAL and are never summed: a gate with a perfect');
   console.log('   floor is still defeated by hole 2, because the floor never runs either.');
 }
