@@ -204,11 +204,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#11395 — the same rule, pinned over EVERY failure branch instead of one.': 23,
   'Root anchoring and the population classifier (#10907). These are the only': 4,
   'The build-prerequisite CLOSURE (#12564). What makes the remedy worth naming': 15,
+  'The prerequisite refusal CLASS, and the advisory that names it (#14857).': 23,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 4;
+const SELF_TEST_BATTERY_FLOOR = 5;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1155,6 +1156,109 @@ function selfTest() {
     `the real tree resolved to ${onRoot.length} config(s) and must be judged, not refused`,
   );
 
+  // ── The refusal CLASS, and the advisory that must move with it (#14857) ──
+  //
+  // The three printers below `reportPrerequisiteNotMet` are the only sites that
+  // answer this gate's "nothing was measured" words, and until they were split
+  // into pure text functions there was no VALUE to assert on: each string was
+  // built inline inside `console.error(...)` and the code was typed into the
+  // `process.exit` on the next line. So the number PR #14856 moved from 1 to 3
+  // was pinned here by nothing, while four sibling gates pin exactly this.
+  //
+  // ⛔ The classifier batteries above are NOT this coverage and never were —
+  // they decide WHICH verdict fires and stay green whatever number the printer
+  // beside them returns, which is precisely why the success line used to read
+  // like the refusal was covered.
+  //
+  // ⭐ Two of the three paths — COULD NOT MEASURE and POPULATION EMPTY — sit
+  // behind the CLI-build probe, so no local run and no other test observes them
+  // at all. For those two these cases are the ONLY observer.
+  battery('The prerequisite refusal CLASS, and the advisory that names it (#14857).');
+
+  // Rendered from the same functions the refusals print, so the assertions
+  // below read the shipped text rather than a copy of it.
+  const REFUSAL_SITES = [
+    ['PREREQUISITE NOT MET', reportPrerequisiteNotMet, prerequisiteNotMetText,
+      prerequisiteNotMetText('the CLI is not built', ['probe detail'])],
+    ['COULD NOT MEASURE', reportUnmeasuredConfigs, unmeasuredConfigsText,
+      unmeasuredConfigsText(
+        [{ configPath: 'examples/app-crm/objectstack.config.ts', reason: 'lint blew up', fix: 'build first', evidence: 'saw this' }],
+        2,
+      )],
+    ['POPULATION EMPTY', reportEmptyPopulation, emptyPopulationText,
+      emptyPopulationText({ headline: 'no config resolved', detail: ['population detail'] })],
+  ];
+
+  expect(
+    'the refusal class is 3 — the code the four sibling gates answer these words with',
+    EXIT_PREREQUISITE_NOT_MET === 3,
+    String(EXIT_PREREQUISITE_NOT_MET),
+  );
+  expect(
+    'the refusal class is distinct from a finding and from a pass',
+    EXIT_PREREQUISITE_NOT_MET !== EXIT_FINDINGS && EXIT_PREREQUISITE_NOT_MET !== 0,
+    `prerequisite ${EXIT_PREREQUISITE_NOT_MET}, finding ${EXIT_FINDINGS}`,
+  );
+
+  // Pinned over the FUNCTION BODIES, not over the constant alone. The
+  // regression that costs something is not a mistyped constant: it is a
+  // `process.exit(1)` written back into a refusal by an author who never
+  // thought about exit codes, or a number typed into the advisory instead of
+  // interpolated. Either leaves the constant reading 3, every consumer green
+  // (they all treat any non-zero as failure), and a message that still reads
+  // perfectly right.
+  const hardcodesExitCall = (fn) => /process\.exit\(\s*\d/.test(fn.toString());
+  const spellsALiteralCode = (fn) => /Exit code \d/.test(fn.toString());
+  for (const [label, report, text, advisory] of REFUSAL_SITES) {
+    expect(
+      `${label}: the refusal exits through the named constant, never a literal`,
+      !hardcodesExitCall(report),
+      report.toString(),
+    );
+    // The seam the two cases either side of it depend on: an advisory pinned
+    // here is worthless if the printer stops printing THIS text.
+    expect(
+      `${label}: the printer prints the pinned text function`,
+      new RegExp(`console\\.error\\(\\s*${text.name}\\(`).test(report.toString()),
+      report.toString(),
+    );
+    expect(
+      `${label}: the advisory INTERPOLATES the code rather than spelling one`,
+      !spellsALiteralCode(text),
+      text.toString(),
+    );
+    expect(
+      `${label}: the advisory names its own code AND the finding code it is distinct from`,
+      advisory.includes(`Exit code ${EXIT_PREREQUISITE_NOT_MET}`) && advisory.includes(`a finding's ${EXIT_FINDINGS}`),
+      advisory,
+    );
+    expect(
+      `${label}: the advisory carries NO stale spelling of the old code`,
+      !/Exit code 1\b/.test(advisory),
+      advisory,
+    );
+    expect(
+      `${label}: the advisory still states that nothing was measured`,
+      /Nothing was (measured|compared)/.test(advisory),
+      advisory,
+    );
+  }
+
+  // The NEGATIVE CONTROLS, and the reason the two predicates above are
+  // measurements rather than tautologies: each is run against a function that
+  // does the forbidden thing and must SEE it. Without these, one typo in either
+  // regex passes forever — a pin that cannot fail is not a pin. ⛔ Neither
+  // control is ever CALLED; they exist to be read by `toString()`.
+  const controlHardcodedExit = () => { process.exit(1); };
+  const controlLiteralAdvisory = () => `  (Exit code 1, distinct from a finding's 1 — capture it BEFORE any pipe:`;
+  expect('NEGATIVE CONTROL: the literal-exit pin can still fail', hardcodesExitCall(controlHardcodedExit), 'the predicate no longer sees a hard-coded exit');
+  expect('NEGATIVE CONTROL: the literal-advisory pin can still fail', spellsALiteralCode(controlLiteralAdvisory), 'the predicate no longer sees a spelled-out code');
+  expect(
+    'NEGATIVE CONTROL: the stale-code pin can still fail',
+    /Exit code 1\b/.test(controlLiteralAdvisory()),
+    'the stale-spelling predicate no longer sees `Exit code 1`',
+  );
+
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so
@@ -1210,7 +1314,8 @@ function selfTest() {
       `one shared cause ONCE, with no config path in the key; the population resolves to ${onRoot.length} config(s) ` +
       `from outside the repo root as well as inside it, and an empty one is refused rather than reported OK; ` +
       `the build-prerequisite closure names all ${onRoot.length} of them plus the CLI, and refuses whole rather ` +
-      `than naming some.`,
+      `than naming some; and all three refusal paths exit ${EXIT_PREREQUISITE_NOT_MET} — distinct from a finding's ` +
+      `${EXIT_FINDINGS} — with an advisory that names the number it claims (#14857).`,
   );
 
   return SELF_TEST_VERDICT;
