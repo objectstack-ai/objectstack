@@ -427,6 +427,7 @@
     "defineReport (function)",
     "defineView (function)",
     "defineViewItem (function)",
+    "deriveColumnSummary (function)",
     "diagnoseViewMetadata (function)",
     "expandViewContainer (function)",
     "expandViewContainerWithDiagnostics (function)",
