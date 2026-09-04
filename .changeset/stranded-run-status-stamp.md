@@ -29,12 +29,30 @@ durable discriminator for the condition remains the snapshot the terminal row
 carries. No resume semantics move for any pausing node type; shapes 2 and 3
 of the decision stay excluded.
 
-Also in this change, under the same ruling's exactly-once guarantee:
-`restoreConsumedSuspension` now reads the run's durable terminal row BEFORE its
-own per-process journal. Read the other way round, the replica that stranded a
-run kept a hot copy after another replica restored, resumed and finished it,
-and a repeated restore on the first replica re-armed the COMPLETED run — whose
-next resume re-ran every node after the pause. Such a restore is now refused
-(`RUN_COMPLETED`, or `NO_CONSUMED_SUSPENSION` when the durable row holds no
-snapshot for any other reason). Single-process and store-less deployments
-observe no difference.
+Also in this change, under the same ruling's exactly-once guarantee, two
+repairs to how `restoreConsumedSuspension` finds a stranded run's snapshot:
+
+- The durable run-history row of a stranded run now records the PAUSE node in
+  `node_id`. It recorded the node that threw — the run's last step — and the
+  object store read that column back as the snapshot's node, so a restore
+  from the row (after a restart, or on another replica) re-armed the run at
+  the failed node and the next resume skipped it while reporting the run
+  completed. The throwing node stays where the Runs surface reads it: the
+  row's step log and `error`.
+- The verb reads the durable row and its own per-process journal as two
+  witnesses of one strand instead of trusting either alone. The hot copy is
+  preferred when both describe the same pause (it is the verbatim object the
+  failure was journalled from). A row that carries no snapshot is read as
+  "the run moved on" only when this process's own history write landed —
+  the replica that stranded a run used to keep a hot copy that could re-arm
+  the run after another replica had restored, resumed and finished it, and
+  the next resume re-ran every node after the pause. A snapshot the object
+  store could not persist (over its 256 KiB row budget) is now recorded in
+  the row as dropped, with the pause it belonged to, so the replica holding
+  the hot copy still restores and any other replica is refused with a reason
+  that names the budget and the remedy.
+
+In-memory and store-less deployments observe no behaviour difference. On the
+object store, same-replica restores re-arm the pause node on every path, and
+restores from the row alone do too; restores across replicas of a run that
+finished elsewhere are refused.
