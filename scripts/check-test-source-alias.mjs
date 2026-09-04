@@ -318,6 +318,7 @@ import {
   isExclusionGlob,
   readWorkspaceGlobs,
   selfTest as workspaceEnumeratorSelfTest,
+  workspaceEnumeratorFloorFailures,
 } from './workspace-enumerator.mjs';
 import { tmpdir } from 'node:os';
 import process from 'node:process';
@@ -2959,6 +2960,7 @@ function selfTest() {
     // (#11510 — being a gate is exactly what it must not be); every script that
     // consolidated onto it folds in its checks.
     for (const failure of workspaceEnumeratorSelfTest({ root: REPO_ROOT })) expect(false, failure);
+    for (const failure of workspaceEnumeratorFloorFailures()) expect(false, failure);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
