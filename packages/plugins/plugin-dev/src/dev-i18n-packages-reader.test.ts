@@ -23,6 +23,16 @@
 //   - the option-B artifact, whose ONLY copy is under `packages[]`, is now
 //     detected — the row this card added to the #15004 ledger and then deleted.
 //
+// Two more, added after an adversarial contract review measured the first draft
+// of this file claiming more than it pinned:
+//
+//   - a composed multi-package stack with NO i18n anywhere DOES reach
+//     `resolveArtifactPackageOrder` (counted, not argued). The short-circuit is
+//     real only for a stack whose flattened `translations` is non-empty.
+//   - therefore the gate's refusals are reachable on the ORDINARY path, so a
+//     project the gate refuses — one whose package manifest still carries
+//     authoring globs — must keep booting. It does, loudly.
+//
 // The last case boots the real `DevPlugin` rather than only calling the
 // decision, because what a developer experiences is the SERVICE: the plugin has
 // to reach `new I18nServicePlugin(...)` with the locales the detection derived.
@@ -128,6 +138,24 @@ const modulePackage = (): ObjectStackDefinition =>
 const additiveProject = (): Record<string, unknown> =>
   composeStacks([modulePackage(), corePackage()], { manifest: 'preserve' }) as unknown as Record<string, unknown>;
 
+/**
+ * The SAME composition with no i18n anywhere — no `translations` at any level,
+ * no `i18n` config, no `manifest.translations`. This is the ordinary
+ * multi-package app that simply does not translate, and it is the shape the
+ * reachability claim turns on.
+ */
+const additiveNoI18nProject = (): Record<string, unknown> => {
+  const composed = composeStacks(
+    [modulePackage(), { ...corePackage(), translations: undefined } as ObjectStackDefinition],
+    { manifest: 'preserve' },
+  ) as unknown as Record<string, unknown>;
+  delete composed.translations;
+  for (const entry of composed.packages as Array<{ manifest?: Record<string, unknown> }>) {
+    delete entry.manifest?.translations;
+  }
+  return composed;
+};
+
 /** The ruled option-B shape, for the one collection this reader reads. */
 const optionBProject = (): Record<string, unknown> => {
   const composed = additiveProject();
@@ -138,12 +166,13 @@ const optionBProject = (): Record<string, unknown> => {
 const mockCtx = () => {
   const registered = new Map<string, unknown>();
   const info: string[] = [];
+  const errors: string[] = [];
   const ctx = {
     logger: {
       info: (line: unknown) => { if (typeof line === 'string') info.push(line); },
       debug: () => undefined,
       warn: () => undefined,
-      error: () => undefined,
+      error: (line: unknown) => { if (typeof line === 'string') errors.push(line); },
     },
     getService: (name: string) => {
       if (registered.has(name)) return registered.get(name);
@@ -155,7 +184,7 @@ const mockCtx = () => {
     trigger: () => undefined,
     getKernel: () => undefined,
   };
-  return { ctx, info };
+  return { ctx, info, errors };
 };
 
 describe('#15232 — DevPlugin i18n auto-detect over a multi-package stack', () => {
@@ -179,10 +208,11 @@ describe('#15232 — DevPlugin i18n auto-detect over a multi-package stack', () 
     expect(devI18nPluginOptions(optionBProject())).toEqual({ defaultLocale: undefined, fallbackLocale: 'en' });
   });
 
-  it('the flattened level answers FIRST — `packages[]` is not even traversed', () => {
-    // Two things at once, and the malformed `packages` is what proves the
-    // first: the original expression short-circuits, so today's additive
-    // artifact cannot start refusing anything it accepted before.
+  it('the flattened level answers FIRST **when it has something to say** — `packages[]` is not traversed then', () => {
+    // ⚠️ Scope, stated because an earlier draft of this file read this case as
+    // proof of something wider: it pins the short-circuit for a stack whose top
+    // level ALREADY declares translations. It says nothing about a stack that
+    // declares none — that case is the one below, and it reaches the gate.
     let reads = 0;
     const stack = {
       manifest: { id: CORE_ID, name: 'x', version: '1.0.0', type: 'app' },
@@ -204,6 +234,69 @@ describe('#15232 — DevPlugin i18n auto-detect over a multi-package stack', () 
     };
     expect(devI18nPluginOptions(stack)).toBeUndefined();
     expect(reads).toBe(1);
+  });
+
+  it('a composed multi-package stack with NO i18n DOES reach the artifact gate — and answers undefined without throwing', () => {
+    // The measurement that falsified this PR's first draft ("for every artifact
+    // the platform produces today the packages[] pass is not even reached").
+    // It is reached, on the ordinary path, for every multi-package app that
+    // does not translate — so the walk is real work and its refusals are
+    // reachable in ordinary use, which is why `DevPlugin` degrades on them.
+    //
+    // `packages` is read TWICE when the gate is reached and ZERO times when the
+    // flattened level short-circuits: once by this reader's own absent-key
+    // guard, once inside `resolveArtifactPackageOrder`. That second read is the
+    // discriminator, so the assertion is on it and not on "at least one".
+    let packagesReads = 0;
+    const project = additiveNoI18nProject();
+    const counted = new Proxy(project, {
+      get(target, key, recv) {
+        if (key === 'packages') packagesReads += 1;
+        return Reflect.get(target, key, recv);
+      },
+    });
+
+    expect(project.translations).toBeUndefined();
+    expect((project.packages as unknown[]).length).toBe(2);
+    expect(() => devI18nPluginOptions(counted)).not.toThrow();
+    expect(devI18nPluginOptions(counted)).toBeUndefined();
+    expect(packagesReads).toBeGreaterThanOrEqual(2);
+  });
+
+  it('a stack that already declares its locales is answered WITHOUT walking `packages[]`', () => {
+    // The limbs are asked cheapest-first: an `i18n` config answers the question
+    // on its own, so a `packages` list that answer never needed cannot refuse
+    // it. Before the reorder this threw INVALID_ARTIFACT_PACKAGES.
+    const stack = {
+      ...additiveNoI18nProject(),
+      i18n: { defaultLocale: 'zh-CN' },
+      packages: 'not an array — would be refused if this limb were reached',
+    };
+    expect(devI18nPluginOptions(stack)).toEqual({ defaultLocale: 'zh-CN', fallbackLocale: 'zh-CN' });
+  });
+
+  it('a dependency CYCLE between two packages throws a BARE Error — no `code`, no `status`', () => {
+    // Documented under @throws because it is the one refusal here that does not
+    // carry the ADR-0112 envelope: it comes from `resolvePluginOrder`, the
+    // platform's one topological sorter, not from the artifact gate. A caller
+    // matching on `code` alone would miss it — `DevPlugin`'s catch does not.
+    const cyclic = {
+      manifest: { id: 'a', name: 'A', version: '1.0.0', type: 'app' },
+      packages: [
+        { manifest: { id: 'a', name: 'A', version: '1.0.0', type: 'app', dependencies: { b: '^1.0.0' } } },
+        { manifest: { id: 'b', name: 'B', version: '1.0.0', type: 'module', dependencies: { a: '^1.0.0' } } },
+      ],
+    };
+    let caught: (Error & { code?: unknown; status?: unknown }) | undefined;
+    try {
+      devI18nPluginOptions(cyclic);
+    } catch (err) {
+      caught = err as Error & { code?: unknown; status?: unknown };
+    }
+    expect(caught).toBeInstanceOf(Error);
+    expect(caught?.message).toContain('Circular dependency detected');
+    expect(caught?.code).toBeUndefined();
+    expect(caught?.status).toBeUndefined();
   });
 
   it('an EMPTY top-level `translations` is not an answer — `packages[]` supplies it', () => {
@@ -244,7 +337,7 @@ describe('#15232 — DevPlugin i18n auto-detect over a multi-package stack', () 
 
   const bootWith = async (stack: Record<string, unknown> | undefined) => {
     i18nConstructions.length = 0;
-    const { ctx, info } = mockCtx();
+    const { ctx, info, errors } = mockCtx();
     await new DevPlugin({
       seedAdminUser: false,
       stack,
@@ -254,13 +347,46 @@ describe('#15232 — DevPlugin i18n auto-detect over a multi-package stack', () 
         'file-storage': false, realtime: false,
       },
     }).init(ctx as never);
-    return { constructions: [...i18nConstructions], info };
+    return { constructions: [...i18nConstructions], info, errors };
   };
 
   it('BOOT — a multi-package app under option B gets the file-based I18nServicePlugin', async () => {
     const { constructions, info } = await bootWith(optionBProject());
     expect(constructions).toEqual([{ defaultLocale: undefined, fallbackLocale: 'en' }]);
     expect(info.some((l) => l.includes('I18nServicePlugin auto-registered'))).toBe(true);
+  });
+
+  it('BOOT — a project the ADR-0130 D4 gate REFUSES still boots, loudly, on the fallback', async () => {
+    // The regression this posture exists to prevent, reproduced: one package's
+    // authoring manifest still declares glob `objects` (`ManifestSchema`'s
+    // written form, and the repo's own CONFIG_GLOBS fixture in
+    // packages/cli/test/build-multi-package-artifact.e2e.test.ts). Such a body
+    // is refused by `ArtifactPackageSchema` BY DESIGN
+    // (packages/spec/src/assembled-package-body.test.ts). That project boots
+    // today; a reader that threw here would have stopped it booting — and from
+    // the block whose only job is deciding whether to register a translation
+    // service, while `new AppPlugin(...)` twenty lines above degrades the very
+    // same refusal to a log line.
+    const refused = additiveNoI18nProject();
+    (refused.packages as Array<{ manifest: Record<string, unknown> }>)[0]
+      .manifest.objects = ['./src/objects/*.object.ts'];
+
+    // The reader itself still refuses — the gate travels with the read.
+    expect(() => devI18nPluginOptions(refused)).toThrow();
+
+    // The PLUGIN does not. It boots, says exactly what is wrong, and registers
+    // nothing.
+    const { constructions, info, errors } = await bootWith(refused);
+    expect(constructions).toEqual([]);
+    expect(info.some((l) => l.includes('I18nServicePlugin auto-registered'))).toBe(false);
+    const line = errors.find((l) => l.includes('i18n auto-detect could not read'));
+    expect(line, `no diagnosis line; errors were:\n${errors.join('\n')}`).toBeDefined();
+    // ⛔ Never silent, and never mis-attributed to a missing package (#7926):
+    // the line names the metadata defect and carries the refusal verbatim.
+    expect(line).toContain('PACKAGE LIST is malformed');
+    expect(line).toContain('INVALID_ARTIFACT_PACKAGE_ENTRY');
+    expect(line).toContain('packages[0]');
+    expect(line).not.toContain('not installed');
   });
 
   it('BOOT — a stack declaring no copy at all still gets no I18nServicePlugin', async () => {

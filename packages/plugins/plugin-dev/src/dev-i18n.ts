@@ -47,14 +47,31 @@ const declaresTranslationArray = (body: unknown): boolean => {
  *
  * The reader half of the program lands while the artifact is still ADDITIVE, so
  * this has to be a superset of the old read rather than a replacement for it:
- * every artifact the platform emits today still answers on the flattened level,
- * bit-identically, and the `packages[]` pass can only supply a declaration the
+ * the ANSWER for every artifact the platform emits today is bit-identical,
+ * because `composeStacks` merges `translations` with `'concat'`
+ * (`stack.zod.ts`), so a package that declares copy always leaves a non-empty
+ * flattened array too. The `packages[]` pass can only supply a declaration the
  * top level did not have — which is precisely the option-B shape. Keeping the
  * caller's original expression as the first answer is also what stops the
  * measured trap #15006 recorded: re-expressing a gate as a resolved-and-counted
  * traversal silently changes the verdict for a stack that declares the key
  * empty. Here the original expression is `Array.isArray(t) && t.length > 0` and
  * it is preserved verbatim, both at the top level and per package body.
+ *
+ * ⚠️ **The same answer is NOT the same work, and an earlier draft of this file
+ * said it was.** The flattened read returns early only when `translations` is
+ * present and NON-EMPTY. So every stack that carries `packages[]` and declares
+ * no i18n at all — no `i18n` config, no `manifest.translations`, no non-empty
+ * top-level `translations`, i.e. the ordinary multi-package app that simply
+ * does not translate — DOES reach `resolveArtifactPackageOrder`, on every
+ * `DevPlugin.init`, and pays a full ADR-0130 D4 parse of every package body.
+ * Measured with a counting proxy on a real `composeStacks(…, 'preserve')`
+ * output, not reasoned about; the case is pinned below. Two things follow, and
+ * both are load-bearing: {@link devI18nPluginOptions} asks the cheap limbs
+ * FIRST so a stack that already declares its locales never pays this, and the
+ * refusals documented under `@throws` are reachable in ORDINARY use rather than
+ * only for exotic input — which is why `DevPlugin` degrades on them instead of
+ * dying.
  *
  * ## The order is `resolveArtifactPackageOrder`'s, not the array's
  *
@@ -85,10 +102,35 @@ const declaresTranslationArray = (body: unknown): boolean => {
  * `status: 422`) out of this call, and it is deliberately not caught. It is the
  * same refusal `ObjectQL.registerApp` raises for the same object later in the
  * same boot (the registration path IS reached from `AppPlugin.start`, measured
- * on both shapes in #14512 comment 5523603341), so catching it here would
- * resolve an i18n posture out of a package list nothing else will accept — the
- * gate travels with the read. ⚠️ It can only be reached at all when the top
- * level declares no translations, because the flattened answer returns first.
+ * on both shapes in #14512 comment 5523603341), so answering out of a package
+ * list nothing else will accept is not something this function does — the gate
+ * travels with the read.
+ *
+ * ⚠️ What that means for a CALLER is a separate question, and `DevPlugin`
+ * answers it the other way: it catches, says so loudly and boots anyway. The
+ * reason is not comfort — it is consistency with what already ships. Twenty
+ * lines above the i18n block, `new AppPlugin(this.options.stack)` parses the
+ * same object and its refusal is degraded to one log line, so a detector for
+ * "should I register a translation service" must not refuse harder than the
+ * gate for "should I register this app's metadata at all". The measured
+ * regression that made this concrete: a project whose package manifest still
+ * carries authoring-time glob `objects` is refused by `ArtifactPackageSchema`
+ * BY DESIGN, boots today, and would have stopped booting on this reader alone.
+ * ⛔ Whether `DevPlugin` should refuse malformed metadata outright is a
+ * maintainer question filed separately; it is not decided here, and this
+ * function's own semantics are unchanged by it.
+ *
+ * ## The guard divergence with `@objectstack/core`, recorded rather than fixed
+ *
+ * This reader treats only an ABSENT `packages` key (`undefined` / `null`) as
+ * "single package"; anything else goes to the gate, so `packages: {}` is
+ * REFUSED. `resolveArtifactPackageOrder`'s own second branch is spelled
+ * `declared === undefined || declared === null` too, but the sibling reader in
+ * `@objectstack/metadata` guards with `Array.isArray`, which silently accepts a
+ * non-array. Two readers in one program answering the same input differently is
+ * a program-level split, not this file's to settle (#15226 spells it as this
+ * file does). Recorded here so the next author does not "fix" one side into
+ * agreement without ruling the other.
  *
  * ## `i18n` is NOT read from `packages[]`, and that is not an omission
  *
@@ -99,6 +141,24 @@ const declaresTranslationArray = (body: unknown): boolean => {
  * still carries `stack.i18n` and `stack.manifest` exactly where they are today,
  * so those two limbs of the detection lose nothing and are left untouched.
  * `translations` is the one limb the strip moves.
+ *
+ * @param stack - Any value. A non-object (`null`, a primitive, a function) and
+ *   an object with no `translations` and no `packages` both answer `false`
+ *   without reaching the gate.
+ * @returns Whether any level of this stack declares a non-empty `translations`
+ *   array.
+ * @throws An ADR-0112 envelope (`Error & { code, status: 422 }`) from
+ *   `resolveArtifactPackageOrder` when `packages` is present but not loadable:
+ *   `INVALID_ARTIFACT_PACKAGES` (not an array), `INVALID_ARTIFACT_PACKAGE_ENTRY`
+ *   (an entry that is not `{ manifest: … }`, a body carrying authoring-time
+ *   globs where definitions belong, or a manifest with no usable id) or
+ *   `DUPLICATE_ARTIFACT_PACKAGE`.
+ * @throws A **bare** `Error` — no `code`, no `status` — from `resolvePluginOrder`
+ *   when two packages in `packages[]` depend on each other
+ *   (`[Kernel] Circular dependency detected: …`). Documented because it is the
+ *   one failure here that does NOT carry the envelope every other refusal in
+ *   this repo does, so a caller matching on `code` alone will miss it. Measured,
+ *   not inferred from the sorter's prose.
  */
 export function stackDeclaresTranslations(stack: unknown): boolean {
   // The caller's ORIGINAL expression, first and unchanged.
@@ -130,23 +190,50 @@ export function stackDeclaresTranslations(stack: unknown): boolean {
  * manifest's glob patterns, which are a declaration of intent even before a
  * bundle is assembled.
  *
+ * ## The three limbs are asked CHEAPEST FIRST, and that ordering is a fix
+ *
+ * `||` is commutative, so the ANSWER does not depend on the order — but which
+ * inputs can make this call throw does. The `translations` limb is the only one
+ * that can reach `resolveArtifactPackageOrder`, so asking it first meant a
+ * stack that had already stated its locales in `i18n` could still be refused
+ * over a `packages` list that answer never needed. The envelope limbs are pure
+ * property reads on the stack and its manifest; they are asked first, and only
+ * a stack that answers neither of them pays the package walk.
+ *
  * Exported because the #15004 option-B acceptance probe measures this decision
  * by CALLING it. A probe that re-implemented the read would be a second copy of
  * the code the reader program changes, and would stay red after the reader
  * beside it was fixed.
+ *
+ * @param stack - The caller-supplied stack (`new DevPlugin({ stack })`).
+ * @returns The options to construct `I18nServicePlugin` with, or `undefined`
+ *   when this stack declares no i18n content at all.
+ * @throws Everything {@link stackDeclaresTranslations} throws, and only from
+ *   that limb: the ADR-0112 envelopes (`code` + `status: 422`) for a `packages`
+ *   list that is not loadable, and the **bare** `Error` (no `code`, no
+ *   `status`) for a dependency cycle between two packages. ⚠️ A stack whose
+ *   `i18n` / `manifest.i18n` / `manifest.translations` answers the question
+ *   never reaches that limb and therefore never throws. `DevPlugin` catches
+ *   both classes, reports the metadata defect and boots on the in-memory
+ *   fallback — see `dev-plugin.ts`'s 3b block for why degrading is the
+ *   consistent posture there.
  */
 export function devI18nPluginOptions(stack: unknown): DevI18nPluginOptions | undefined {
   const bag = asBag(stack);
   if (!bag) return undefined;
 
   const manifest = asBag(bag.manifest);
-  const hasTranslations = stackDeclaresTranslations(stack);
+  // Cheapest first — see the docblock. These two are property reads that cannot
+  // throw; `stackDeclaresTranslations` is the limb that can reach the artifact
+  // gate, so it is asked LAST and only when the others answered no.
   const hasI18nConfig = !!(bag.i18n || manifest?.i18n);
   const hasManifestTranslations = !!(
     manifest && Array.isArray(manifest.translations) && manifest.translations.length > 0
   );
 
-  if (!hasTranslations && !hasI18nConfig && !hasManifestTranslations) return undefined;
+  if (!hasI18nConfig && !hasManifestTranslations && !stackDeclaresTranslations(stack)) {
+    return undefined;
+  }
 
   // `stack.i18n || stack.manifest.i18n || {}`, the original expression: the
   // stack's own config wins, the manifest's is the fallback, and neither being

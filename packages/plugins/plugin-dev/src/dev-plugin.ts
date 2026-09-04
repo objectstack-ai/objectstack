@@ -4,7 +4,7 @@ import { Plugin, PluginContext } from '@objectstack/core';
 import { resolveAllowDegradedTenancy, resolveAllowDevPlugin, resolveTenancyPosture } from '@objectstack/types';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 
-import { devI18nPluginOptions } from './dev-i18n.js';
+import { devI18nPluginOptions, type DevI18nPluginOptions } from './dev-i18n.js';
 
 /**
  * Dev Plugin Options
@@ -531,7 +531,43 @@ export class DevPlugin implements Plugin {
       // instead of silently falling back to the in-memory i18n. The dynamic
       // import and its degradation stay HERE, because they are about the
       // optional PACKAGE being installed, not about what the stack declares.
-      const i18nOptions = devI18nPluginOptions(this.options.stack);
+      let i18nOptions: DevI18nPluginOptions | undefined;
+      try {
+        i18nOptions = devI18nPluginOptions(this.options.stack);
+      } catch (err) {
+        // [#15232] A metadata-SHAPE defect, degraded — deliberately, and NOT
+        // through `reportOptionalLoadFailure`.
+        //
+        // Two things are wrong with refusing here, and both were measured. The
+        // reach: this is not exotic input. A stack carrying `packages[]` that
+        // declares no i18n at all walks the whole package list on every boot,
+        // so an artifact the ADR-0130 D4 gate refuses — a package body still
+        // carrying authoring-time glob `objects`, for instance, which
+        // `ArtifactPackageSchema` rejects by design — arrives here on the
+        // ordinary path. The inversion: twenty lines above, `new AppPlugin(...)`
+        // parses the SAME object and its refusal is degraded to a log line, so
+        // refusing here would make "should I register a translation service?"
+        // a harder gate than "should I register this app's metadata at all?".
+        // A project like that boots today; it must keep booting.
+        //
+        // ⛔ Not `reportOptionalLoadFailure`: its text says the PACKAGE is
+        // installed but failed to initialize, and naming a package for a
+        // metadata-shape defect is exactly the mis-attribution #7926 removed
+        // from this file. ⛔ And not a silent skip either — silence is the
+        // failure class this whole change exists to remove. Its own line, its
+        // own diagnosis, carrying the refusal verbatim.
+        const code = (err as { code?: unknown })?.code;
+        ctx.logger.error(
+          '  ✘ the i18n auto-detect could not read this stack\'s `packages[]` — skipping '
+          + 'I18nServicePlugin and continuing on the core in-memory i18n fallback. This is NOT '
+          + 'a missing-package problem and installing anything will not help: the stack\'s '
+          + 'PACKAGE LIST is malformed (ADR-0130 D4), and `os build` refuses the same project '
+          + 'with its own compile diagnostic. Translations this app declares will not be '
+          + 'served until it is fixed. The artifact reader reported (verbatim — the framework '
+          + `does not interpret it): ${typeof code === 'string' ? `${code}: ` : ''}`
+          + `${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
 
       if (i18nOptions) {
         try {
