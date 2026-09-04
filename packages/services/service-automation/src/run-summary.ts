@@ -46,6 +46,19 @@ import type { StepLogEntry } from './engine.js';
  * its own metrics. The parent therefore answers "what did this run cause",
  * including through its subflows — otherwise a sweep that delegates its writes
  * would report `acted: 0` and trip the very detector this exists to feed.
+ *
+ * #14456 adds the run-level `failed` counter — `Σ nodes[].failures` — which is
+ * the count a GREEN run hides. `loop { body: [ try_catch { try, catch } ] }` is
+ * the containment spelling for a per-iteration failure that must not end the
+ * sweep (maintainer ruling 2026-08-31, branch B): the failure is caught, the
+ * loop goes on and the run completes. Until this counter existed the run row
+ * said nothing about it — the caught failure was in the step log and in
+ * `nodes[].failures`, but no run-level number carried it, so a run that lost
+ * two rows out of five was indistinguishable from one that lost none.
+ *
+ * It is folded from the per-node array rather than accumulated alongside it,
+ * so the run-level count can never disagree with the breakdown it summarizes;
+ * `unmeasured` above is a genuinely independent tally and stays one.
  */
 export function summarizeRun(steps: readonly StepLogEntry[]): FlowRunSummary {
     // Mutable accumulators; `status` is decided once the counts are final.
@@ -119,11 +132,16 @@ export function summarizeRun(steps: readonly StepLogEntry[]): FlowRunSummary {
         }
     }
 
+    // #14456 — `failed = Σ nodes[].failures`, stated as a fold over the SAME
+    // array the summary publishes rather than as a second accumulator in the
+    // step loop above. Two counters over one fact drift; one addition cannot.
+    let failed = 0;
     for (const node of nodes.values()) {
         // Worst outcome wins: one failed iteration makes the node's run-level
         // status `failure`, and `runs`/`failures` carry the nuance. A node that
         // only ever got skipped never ran at all.
         node.status = node.failures > 0 ? 'failure' : node.runs > 0 ? 'success' : 'skipped';
+        failed += node.failures;
     }
 
     return {
@@ -131,6 +149,11 @@ export function summarizeRun(steps: readonly StepLogEntry[]): FlowRunSummary {
         acted,
         skipped,
         unmeasured,
+        // Every node execution that failed, contained or fatal. A summary this
+        // function produced ALWAYS carries it, `0` included; the declared
+        // `undefined` case belongs to rows persisted before the counter
+        // existed, and means "not tracked", never "nothing failed".
+        failed,
         nodes: [...nodes.values()],
         gates: [...gates.values()].sort((a, b) => b.skipped - a.skipped),
     };
@@ -171,6 +194,16 @@ export function formatRunSummaryLine(
     // Only when non-zero, like `gate=`: its absence is the common case and its
     // PRESENCE is the thing a reader must not miss — `acted=0` on a line that
     // also says `unmeasured=3` means "cannot tell", not "did nothing".
+    // #14456 — printed whenever PRESENT, `failed=0` included, which is the
+    // opposite of the `unmeasured` rule directly above and deliberately so.
+    // `unmeasured` is a qualifier on `acted`: absent, the zero beside it is
+    // trustworthy. `failed` answers a question the line otherwise cannot be
+    // asked at all — a completed run says nothing about the rows it lost — so
+    // the token has to be there to be read, and `failed=0` is the reading
+    // "nothing failed" as against a line with no token at all, which is the
+    // older "not tracked". A run summarized by `summarizeRun` always carries
+    // it; only a summary persisted before this existed prints nothing here.
+    if (summary.failed !== undefined) parts.push(`failed=${summary.failed}`);
     if (summary.unmeasured) parts.push(`unmeasured=${summary.unmeasured}`);
     const topGate = summary.gates[0];
     if (topGate) {
