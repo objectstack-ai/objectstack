@@ -40,10 +40,17 @@ import { OBJECT_SCHEMA_READ_ONLY_EXEMPT_CAPABILITIES } from '@objectstack/metada
 import { isWritablePackage } from '@objectstack/metadata-protocol';
 // [#9960] The uninstall seam's DECLARED shapes, from the same producer and for
 // the same reason as the predicate above: this door reached `deletePackage`
-// through `(protocol as any)` and routinely sent two keys — `organizationId`
+// through `protocol` and routinely sent two keys — `organizationId`
 // and `keepData` — that the sibling REST door's own option type could not even
 // express. One statement of the contract, imported by both doors.
 import type { DeletePackageRequest, DeletePackageResponse } from '@objectstack/metadata-protocol';
+// [#13598] The DECLARED protocol contracts this domain's request literals are
+// compiled against. Imported, never restated: a second hand-written
+// `saveMetaItem(…)` signature here would silently drift from the one the spec
+// declares and `ObjectStackProtocolImplementation` states it `implements` —
+// which is the whole reason `PackagesDomainProtocol` below is `Pick`ed rather
+// than written out. Same move `domains/mcp.ts` makes for its merged-read seam.
+import type { MetadataProtocol, PackageProtocol } from '@objectstack/spec/api';
 // [#8443] ADR-0112's disclosure rule (#8086 / #8136 / #8333), and the DECLARED
 // 422 that keeps the one quotable population quotable. Both imported from the
 // producer for the reason the line above is: this door's seed-apply fallback is
@@ -57,6 +64,95 @@ import { organizationIdForMetaWrite } from '@objectstack/metadata-core';
 import { setPackageDisabled } from '../package-state-store.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
+
+/**
+ * [#13598] The `protocol` service slot **as this domain reaches it** — one
+ * statement of the handle, `Pick`ed from the DECLARED contracts, replacing
+ * twelve independent `protocol` seams in this file.
+ *
+ * ## What was wrong with the seam
+ *
+ * `deps.resolveService(context, 'protocol')` answers `any`. That is not an
+ * oversight — {@link DomainHandlerDeps.resolveService} types its return from
+ * `ServiceSlotContracts`, and `protocol` is deliberately left unmapped there
+ * ("real services with no written contract, so they keep today's `any` rather
+ * than being given a shape here that nothing verifies"). The `any` is honest
+ * about the SLOT. What it also did, silently, was hand every request literal
+ * downstream of it an unchecked call target: the #11006 series' end state —
+ * "an undeclared key in a request literal is a compile error" — stopped one
+ * seam short here, so a misspelt or undeclared key in these literals compiled.
+ *
+ * ## Why the type is here and not on the slot
+ *
+ * Mapping `'protocol'` in `ServiceSlotContracts` would type every consumer at
+ * once, but it is a `packages/spec` change that would have to answer for the
+ * whole slot — including the seven verbs below that no contract declares at
+ * all — and it would state that a filled slot IS a `MetadataProtocol`, whose
+ * members are mostly REQUIRED. That is the shape the guards exist to deny (see
+ * next paragraph). So the narrowing happens at the consumer, once, exactly as
+ * `domains/mcp.ts` narrows the same slot to `Pick<MetadataProtocol,
+ * 'getMetaItems'>` for its merged read.
+ *
+ * ## ⛔ Every member is OPTIONAL, and the runtime guards STAY
+ *
+ * A host may occupy this slot with a partial object — that is the documented
+ * reason the `typeof protocol.<verb> === 'function'` probes exist, and every
+ * one of them survives this change unchanged in meaning. `Partial<…>` is what
+ * makes the type agree with them instead of contradicting them: tightening the
+ * type and then deleting a probe would trade a compile-time improvement for a
+ * runtime crash. The type answers "is this key declared?"; the probe answers
+ * "did THIS host bring the verb?". Two different questions, both still asked.
+ *
+ * ## Where the ledger honestly ends
+ *
+ * The first two groups name shapes someone DECLARES: the spec's
+ * `MetadataProtocol` / `PackageProtocol`, and — for `deletePackage` — the
+ * producer's own exported request type, already imported here since #9960 for
+ * exactly this reason. The last group has no declared request shape anywhere:
+ * `@objectstack/metadata-protocol` types those seven verbs inline on the
+ * implementation class and exports nothing for them. Writing a structural type
+ * for them HERE would be a private restatement that nothing verifies — the
+ * thing #9846 retired one file over. So their request keeps `any` and the gap
+ * stays visible and greppable: declaring them is producer-side work, not this
+ * consumer's to invent. What the entries still buy is the verb name itself —
+ * `protocol.rollbackToPackageCommmit` is now a compile error where the `any`
+ * handle took any spelling at all.
+ */
+export type PackagesDomainProtocol =
+    Partial<Pick<MetadataProtocol, 'getMetaItem' | 'getMetaItems' | 'saveMetaItem'>>
+    & Partial<Pick<PackageProtocol, 'installPackage'>>
+    & {
+        /** Declared by the producer (`@objectstack/metadata-protocol`), #9960. */
+        deletePackage?(request: DeletePackageRequest): Promise<DeletePackageResponse>;
+        /** ⚠️ Undeclared request shapes — see "Where the ledger honestly ends". */
+        publishPackageDrafts?(request: any): Promise<any>;
+        discardPackageDrafts?(request: any): Promise<any>;
+        listCommits?(request: any): Promise<any>;
+        revertCommit?(request: any): Promise<any>;
+        rollbackToPackageCommit?(request: any): Promise<any>;
+        reassignOrphanedMetadata?(request: any): Promise<any>;
+        duplicatePackage?(request: any): Promise<any>;
+        updatePackage?(request: any): Promise<any>;
+    };
+
+/**
+ * [#13598] Resolve the `protocol` slot as {@link PackagesDomainProtocol}.
+ *
+ * THE one narrowing point for this file. `resolveService` answers `any` for
+ * this name, so the widening happens here and nowhere else — every call site
+ * downstream holds a typed handle, and a thirteenth call site added next month
+ * gets the type by construction rather than by remembering to write one.
+ *
+ * ⛔ Not a guard and not a replacement for one: it neither probes for verbs nor
+ * rejects a partial host. `undefined` still means "no protocol service", and
+ * each caller still asks its own `typeof …=== 'function'` capability question.
+ */
+async function resolveProtocol(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+): Promise<PackagesDomainProtocol | undefined> {
+    return await deps.resolveService(context, 'protocol');
+}
 
 export function createPackagesDomain(deps: DomainHandlerDeps): DomainRoute {
     return {
@@ -401,7 +497,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                 };
             }
             let pkg: any;
-            const protocolSvc: any = await deps.resolveService(_context, 'protocol').catch(() => null);
+            const protocolSvc = await resolveProtocol(deps, _context).catch(() => null);
             if (protocolSvc && typeof protocolSvc.installPackage === 'function') {
                 const out = await protocolSvc.installPackage({ manifest, settings: body.settings });
                 pkg = out?.package ?? out;
@@ -466,11 +562,11 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         if (parts.length === 2 && parts[1] === 'publish-drafts' && m === 'POST') {
             const denied = requireManageMetadata(deps, _context); if (denied) return denied;
             const id = decodeURIComponent(parts[0]);
-            const protocol = await deps.resolveService(_context, 'protocol');
-            if (protocol && typeof (protocol as any).publishPackageDrafts === 'function') {
+            const protocol = await resolveProtocol(deps, _context);
+            if (protocol && typeof protocol.publishPackageDrafts === 'function') {
                 try {
                     const organizationId = await deps.resolveActiveOrganizationId(_context);
-                    const result = await (protocol as any).publishPackageDrafts({
+                    const result = await protocol.publishPackageDrafts({
                         packageId: id,
                         ...(organizationId ? { organizationId } : {}),
                         ...(body?.actor ? { actor: body.actor } : {}),
@@ -613,10 +709,10 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     const flipOrganizationId = organizationIdForMetaWrite('app', organizationId);
                     try {
                         if (
-                            typeof (protocol as any).getMetaItems === 'function' &&
-                            typeof (protocol as any).saveMetaItem === 'function'
+                            typeof protocol.getMetaItems === 'function' &&
+                            typeof protocol.saveMetaItem === 'function'
                         ) {
-                            const appsRes = await (protocol as any).getMetaItems({
+                            const appsRes = await protocol.getMetaItems({
                                 type: 'app',
                                 packageId: id,
                                 ...(organizationId ? { organizationId } : {}),
@@ -626,7 +722,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                                 : Array.isArray((appsRes as any)?.items) ? (appsRes as any).items : [];
                             for (const app of apps) {
                                 if (app && typeof app === 'object' && app._unpublished === true && typeof app.name === 'string') {
-                                    await (protocol as any).saveMetaItem({
+                                    await protocol.saveMetaItem({
                                         type: 'app',
                                         name: app.name,
                                         // `false`, not a delete: ADR-0045 §3 makes
@@ -792,11 +888,11 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         if (parts.length === 2 && parts[1] === 'discard-drafts' && m === 'POST') {
             const denied = requireManageMetadata(deps, _context); if (denied) return denied;
             const id = decodeURIComponent(parts[0]);
-            const protocol = await deps.resolveService(_context, 'protocol');
-            if (protocol && typeof (protocol as any).discardPackageDrafts === 'function') {
+            const protocol = await resolveProtocol(deps, _context);
+            if (protocol && typeof protocol.discardPackageDrafts === 'function') {
                 try {
                     const organizationId = await deps.resolveActiveOrganizationId(_context);
-                    const result = await (protocol as any).discardPackageDrafts({
+                    const result = await protocol.discardPackageDrafts({
                         packageId: id,
                         ...(organizationId ? { organizationId } : {}),
                         ...(body?.actor ? { actor: body.actor } : {}),
@@ -815,11 +911,11 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         if (parts.length === 2 && parts[1] === 'commits' && m === 'GET') {
             const denied = requireReadCapability(deps, _context); if (denied) return denied;
             const id = decodeURIComponent(parts[0]);
-            const protocol = await deps.resolveService(_context, 'protocol');
-            if (protocol && typeof (protocol as any).listCommits === 'function') {
+            const protocol = await resolveProtocol(deps, _context);
+            if (protocol && typeof protocol.listCommits === 'function') {
                 try {
                     const organizationId = await deps.resolveActiveOrganizationId(_context);
-                    const commits = await (protocol as any).listCommits({
+                    const commits = await protocol.listCommits({
                         packageId: id,
                         ...(organizationId ? { organizationId } : {}),
                     });
@@ -837,11 +933,11 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         if (parts.length === 4 && parts[1] === 'commits' && parts[3] === 'revert' && m === 'POST') {
             const denied = requireManageMetadata(deps, _context); if (denied) return denied;
             const commitId = decodeURIComponent(parts[2]);
-            const protocol = await deps.resolveService(_context, 'protocol');
-            if (protocol && typeof (protocol as any).revertCommit === 'function') {
+            const protocol = await resolveProtocol(deps, _context);
+            if (protocol && typeof protocol.revertCommit === 'function') {
                 try {
                     const organizationId = await deps.resolveActiveOrganizationId(_context);
-                    const result = await (protocol as any).revertCommit({
+                    const result = await protocol.revertCommit({
                         commitId,
                         ...(organizationId ? { organizationId } : {}),
                         ...(body?.actor ? { actor: body.actor } : {}),
@@ -858,14 +954,14 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         // back THROUGH every commit newer than `commitId` (ADR-0067).
         if (parts.length === 2 && parts[1] === 'rollback' && m === 'POST') {
             const denied = requireManageMetadata(deps, _context); if (denied) return denied;
-            const protocol = await deps.resolveService(_context, 'protocol');
-            if (protocol && typeof (protocol as any).rollbackToPackageCommit === 'function') {
+            const protocol = await resolveProtocol(deps, _context);
+            if (protocol && typeof protocol.rollbackToPackageCommit === 'function') {
                 if (!body?.commitId) {
                     return { handled: true, response: deps.error('Body { commitId } is required', 400) };
                 }
                 try {
                     const organizationId = await deps.resolveActiveOrganizationId(_context);
-                    const result = await (protocol as any).rollbackToPackageCommit({
+                    const result = await protocol.rollbackToPackageCommit({
                         commitId: String(body.commitId),
                         ...(organizationId ? { organizationId } : {}),
                         ...(body?.actor ? { actor: body.actor } : {}),
@@ -908,13 +1004,13 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         if (parts.length === 2 && parts[1] === 'adopt-orphans' && m === 'POST') {
             const denied = requireManageMetadata(deps, _context); if (denied) return denied;
             const id = decodeURIComponent(parts[0]);
-            const protocol = await deps.resolveService(_context, 'protocol');
-            if (!protocol || typeof (protocol as any).reassignOrphanedMetadata !== 'function') {
+            const protocol = await resolveProtocol(deps, _context);
+            if (!protocol || typeof protocol.reassignOrphanedMetadata !== 'function') {
                 return { handled: true, response: deps.error('Orphan adoption not supported', 501) };
             }
             try {
                 const organizationId = await deps.resolveActiveOrganizationId(_context);
-                const result = await (protocol as any).reassignOrphanedMetadata({
+                const result = await protocol.reassignOrphanedMetadata({
                     targetPackageId: id,
                     ...(organizationId ? { organizationId } : {}),
                     ...(body?.actor ? { actor: body.actor } : {}),
@@ -931,8 +1027,8 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         if (parts.length === 2 && parts[1] === 'duplicate' && m === 'POST') {
             const denied = requireManageMetadata(deps, _context); if (denied) return denied;
             const id = decodeURIComponent(parts[0]);
-            const protocol = await deps.resolveService(_context, 'protocol');
-            if (!protocol || typeof (protocol as any).duplicatePackage !== 'function') {
+            const protocol = await resolveProtocol(deps, _context);
+            if (!protocol || typeof protocol.duplicatePackage !== 'function') {
                 return { handled: true, response: deps.error('Package duplication not supported', 501) };
             }
             const targetPackageId = typeof body?.targetPackageId === 'string' ? body.targetPackageId.trim() : '';
@@ -941,7 +1037,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             }
             try {
                 const organizationId = await deps.resolveActiveOrganizationId(_context);
-                const result = await (protocol as any).duplicatePackage({
+                const result = await protocol.duplicatePackage({
                     sourcePackageId: id,
                     targetPackageId,
                     ...(typeof body?.targetName === 'string' ? { targetName: body.targetName } : {}),
@@ -993,10 +1089,10 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                 return { handled: true, response: deps.error('Body { name?, description?, version? } — nothing to update', 400) };
             }
 
-            const protocol = await deps.resolveService(_context, 'protocol');
-            if (protocol && typeof (protocol as any).updatePackage === 'function') {
+            const protocol = await resolveProtocol(deps, _context);
+            if (protocol && typeof protocol.updatePackage === 'function') {
                 try {
-                    const updated = await (protocol as any).updatePackage({ packageId: id, patch });
+                    const updated = await protocol.updatePackage({ packageId: id, patch });
                     return { handled: true, response: deps.success((updated as any)?.package ?? updated) };
                 } catch (e: any) {
                     return { handled: true, response: deps.errorFromThrown(e, 500) };
@@ -1034,16 +1130,23 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // named: `organizationId` (the key that decides an uninstall's blast radius)
             // and `keepData` are exactly the two the sibling REST door's option type
             // could not express, and nothing compared the two doors' requests. Narrowed
-            // HERE to the producer's declared verb, so what this door sends is checked
+            // to the producer's declared verb, so what this door sends is checked
             // against the contract the implementation states.
+            //
+            // [#13598] That narrowing used to be written INLINE right here, as this
+            // door's own one-off `{ deletePackage?(…) }` annotation, because it was the
+            // only typed seam in a file of eleven untyped ones. It is now the
+            // `deletePackage` member of {@link PackagesDomainProtocol} — the same
+            // producer-declared request type, stated once for the whole file instead of
+            // once at the one door that happened to need it first. The rule is
+            // unchanged; only its address is.
             //
             // The `typeof … === 'function'` probe STAYS and the member stays optional:
             // the verb is absent from the spec's `PackageProtocol` (every member of
             // which is optional anyway), the slot takes whatever a host registers under
             // the name, and registrants carrying no `deletePackage` are real in-tree.
             // A capability question, asked as a capability probe — not a cast.
-            const protocol: { deletePackage?(request: DeletePackageRequest): Promise<DeletePackageResponse> } | undefined =
-                await deps.resolveService(_context, 'protocol');
+            const protocol = await resolveProtocol(deps, _context);
             if (protocol && typeof protocol.deletePackage === 'function') {
                 try {
                     const organizationId = await deps.resolveActiveOrganizationId(_context);
@@ -1136,7 +1239,7 @@ packageId: string,
 registry: any,
 context: HttpProtocolContext,
 ): Promise<Record<string, any> | null> {
-    const protocol = await deps.resolveService(context, 'protocol');
+    const protocol = await resolveProtocol(deps, context);
     if (!protocol || typeof protocol.getMetaItems !== 'function') return null;
 
     const organizationId = await deps.resolveActiveOrganizationId(context);
@@ -1233,7 +1336,7 @@ _context: HttpProtocolContext,
     // [#4127] `protocol` keeps its `any` — no written contract, so this is where
     // the ledger honestly ends. `metadata` and `ql` are both evidenced now,
     // `objectql` as of batch 3: it is the same instance the `data` slot holds.
-    const protocol: any = await deps.resolveService(_context, 'protocol');
+    const protocol = await resolveProtocol(deps, _context);
     const metadata = await deps.getService(_context, CoreServiceName.enum.metadata);
     const ql = await deps.resolveService(_context, 'objectql');
     if (!protocol || typeof protocol.getMetaItem !== 'function' || !ql || !metadata) {

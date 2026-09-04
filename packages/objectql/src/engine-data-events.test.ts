@@ -398,3 +398,238 @@ describe('#4639 — predicate writes publish aggregate BulkDataEvents', () => {
     expect(warn).toHaveBeenCalled();
   });
 });
+
+/**
+ * #14970 — the producer half of `DataEvent.organizationId`.
+ *
+ * `packages/spec/src/api/events.zod.ts` declared the member (PR #14635) and
+ * states the obligation on the producer: *"a producer that omits the key on an
+ * organization-stamped row publishes a cross-tenant event, which is fixed at
+ * the publish site — never by a consumer-side lookup."* The engine published
+ * it on no event at all, which left the landed spec term and the ready
+ * consumer piece (#13566's fan-out filter) both inert.
+ *
+ * ⚠️ **A green suite proves nothing here unless the pins discriminate.** The
+ * failure mode is "the key is absent on EVERY event", and a pin that only
+ * asserts *absent when there is no organization* passes happily against it.
+ * Two properties make these pins real:
+ *
+ *  1. **Caller organization ≠ record organization.** `execCtx.tenantId` is the
+ *     CALLER's active org; the contract asks for the RECORD's. They coincide on
+ *     an ordinary tenant write and diverge on a system/unscoped one, so every
+ *     positive pin below writes a row into an organization the caller is not
+ *     standing in — an administrator's write into another organization, the
+ *     exact case the spec names. Substituting `execCtx.tenantId` fails them.
+ *  2. **The two spellings differ.** The row's COLUMN is snake_case
+ *     (`organization_id`); the published KEY is camelCase (`organizationId`).
+ *     Reading the wrong one publishes the key absent on every event while
+ *     every absence pin still passes — so the positive pins assert BOTH
+ *     spellings on the same event.
+ *
+ * And absence is asserted as OMISSION, not as `=== undefined`: the schema is
+ * `z.string().min(1).optional()`, so `''` is refused outright (which would
+ * throw inside the publish site and drop the event entirely) while a key set
+ * to an explicit `undefined` survives `parse` as a PRESENT key.
+ */
+describe('#14970 — a published DataEvent names the RECORD\'s organization', () => {
+  /** Tenant-scoped: the kernel-injected `organization_id` is declared. */
+  const invoice = {
+    name: 'invoice',
+    label: 'Invoice',
+    fields: {
+      id: { name: 'id', type: 'text' as const, primaryKey: true },
+      amount: { name: 'amount', type: 'text' as const },
+      organization_id: { name: 'organization_id', type: 'text' as const },
+    },
+  };
+
+  // A SYSTEM context: `isSystem` is what lets a caller file a row under an
+  // organization that is not its own active one (the tenant write wall, #2946,
+  // rejects a foreign `organization_id` for everyone else). `tenantId` is the
+  // caller's org and is deliberately NOT the row's on every positive pin.
+  const CALLER_ORG = 'org_platform';
+  const RECORD_ORG = 'org_acme';
+  const sysCtx = { isSystem: true, tenantId: CALLER_ORG, userId: 'usr_admin' };
+
+  let engine: ObjectQL;
+  let published: RealtimeEventPayload[];
+  let realtime: IRealtimeService;
+
+  const payloadOf = (i = 0) => published[i].payload as Record<string, unknown>;
+  const hasOrgKey = (i = 0) =>
+    Object.prototype.hasOwnProperty.call(payloadOf(i), 'organizationId');
+
+  beforeEach(async () => {
+    published = [];
+    realtime = {
+      publish: vi.fn(async (event: RealtimeEventPayload) => { published.push(event); }),
+      subscribe: vi.fn(async () => 'sub-1'),
+      unsubscribe: vi.fn(async () => undefined),
+    };
+    engine = new ObjectQL();
+    const { driver } = makeStubDriver();
+    engine.registerDriver(driver, true);
+    await engine.init();
+    engine.registry.registerObject(invoice);
+    engine.registry.registerObject(task);
+    engine.setRealtimeService(realtime);
+    vi.spyOn((engine as any).logger, 'warn').mockImplementation(() => undefined);
+  });
+
+  it('created: names the ROW\'s organization, not the caller\'s active one', async () => {
+    const record = await engine.insert(
+      'invoice',
+      { amount: '100', organization_id: RECORD_ORG },
+      { context: sysCtx } as any,
+    );
+
+    expect(published).toHaveLength(1);
+    const event = DataEventSchema.parse(published[0].payload);
+    expect(event.type).toBe('data.record.created');
+    expect(event.recordId).toBe(record.id);
+
+    // The discriminating assertion: the RECORD's org, and provably not the
+    // caller's — `execCtx.tenantId` was a different, non-empty organization
+    // throughout this write.
+    expect(event.organizationId).toBe(RECORD_ORG);
+    expect(event.organizationId).not.toBe(CALLER_ORG);
+
+    // The spelling control (see the block header): the row body carries the
+    // snake_case COLUMN, the event carries the camelCase KEY, and both are
+    // populated on this one event. Reading `row.organizationId` instead would
+    // leave the second one absent while the first still passed.
+    expect((event.after as Record<string, unknown>).organization_id).toBe(RECORD_ORG);
+  });
+
+  it('updated: names the POST-state\'s organization, not the caller\'s', async () => {
+    const record = await engine.insert(
+      'invoice',
+      { amount: '100', organization_id: RECORD_ORG },
+      { context: sysCtx } as any,
+    );
+    published.length = 0;
+
+    await engine.update('invoice', { id: record.id, amount: '250' }, { context: sysCtx } as any);
+
+    expect(published).toHaveLength(1);
+    const event = DataEventSchema.parse(published[0].payload);
+    expect(event.type).toBe('data.record.updated');
+    expect(event.organizationId).toBe(RECORD_ORG);
+    expect(event.organizationId).not.toBe(CALLER_ORG);
+    expect((event.after as Record<string, unknown>).organization_id).toBe(RECORD_ORG);
+  });
+
+  it('updated: a row MOVED between organizations is labelled with where it is NOW', async () => {
+    const record = await engine.insert(
+      'invoice',
+      { amount: '100', organization_id: RECORD_ORG },
+      { context: sysCtx } as any,
+    );
+    published.length = 0;
+
+    await engine.update(
+      'invoice',
+      { id: record.id, organization_id: 'org_moved' },
+      { context: sysCtx } as any,
+    );
+
+    const event = DataEventSchema.parse(published[0].payload);
+    // The post-state, not the pre-image — a consumer filtering on the event's
+    // organization must see the row where it now lives.
+    expect(event.organizationId).toBe('org_moved');
+    expect(event.organizationId).not.toBe(RECORD_ORG);
+  });
+
+  it('deleted: names the organization off the PRE-IMAGE — the path with no `after`', async () => {
+    const record = await engine.insert(
+      'invoice',
+      { amount: '100', organization_id: RECORD_ORG },
+      { context: sysCtx } as any,
+    );
+    published.length = 0;
+
+    await engine.delete('invoice', { where: { id: record.id }, context: sysCtx } as any);
+
+    expect(published).toHaveLength(1);
+    const event = DataEventSchema.parse(published[0].payload);
+    expect(event.type).toBe('data.record.deleted');
+    expect(event.recordId).toBe(record.id);
+    // The delete path is the one most likely to regress silently: there is no
+    // post-state to read, so this value can only have come from the pre-image
+    // the by-id branch already holds.
+    expect(event.after).toBeUndefined();
+    expect(event.organizationId).toBe(RECORD_ORG);
+    expect(event.organizationId).not.toBe(CALLER_ORG);
+  });
+
+  it('an object that is not tenant-scoped OMITS the key on all three actions', async () => {
+    // `task` declares no `organization_id`, so `resolveTenantFieldName` finds
+    // no column and nothing is published — rather than the caller's org being
+    // used as a stand-in, which is what makes this pin more than a tautology:
+    // the caller carries `tenantId: CALLER_ORG` on every one of these writes.
+    const record = await engine.insert('task', { title: 'no wall' }, { context: sysCtx } as any);
+    await engine.update('task', { id: record.id, title: 'edited' }, { context: sysCtx } as any);
+    await engine.delete('task', { where: { id: record.id }, context: sysCtx } as any);
+
+    expect(published.map((e) => e.type)).toEqual([
+      'data.record.created', 'data.record.updated', 'data.record.deleted',
+    ]);
+    for (let i = 0; i < 3; i += 1) {
+      // OMITTED, asserted as omission: an explicitly-`undefined` key would
+      // survive `parse` and reach a consumer as a present key.
+      expect(hasOrgKey(i)).toBe(false);
+      expect(DataEventSchema.parse(published[i].payload).organizationId).toBeUndefined();
+    }
+  });
+
+  it('a tenant-scoped object whose ROW carries no organization OMITS the key', async () => {
+    // Distinct from the case above: the column EXISTS, it is simply empty —
+    // "not behind any organization wall" for this row. The caller still has an
+    // active organization, and it still must not be substituted.
+    const record = await engine.insert(
+      'invoice',
+      { amount: '7', organization_id: null },
+      { context: sysCtx } as any,
+    );
+
+    expect(published).toHaveLength(1);
+    expect(hasOrgKey()).toBe(false);
+    expect(DataEventSchema.parse(published[0].payload).organizationId).toBeUndefined();
+    expect(DataEventSchema.parse(published[0].payload).recordId).toBe(record.id);
+  });
+
+  it('an empty-string organization column OMITS the key AND still publishes the event', async () => {
+    // `''` is refused by `z.string().min(1)`, so handing it to the publish
+    // site's `parse` would throw and the event would be dropped altogether —
+    // a silence far worse than an absent key. The gate is in the resolver, not
+    // in the error handler.
+    await engine.insert(
+      'invoice',
+      { amount: '9', organization_id: '' },
+      { context: sysCtx } as any,
+    );
+
+    expect(published).toHaveLength(1);
+    expect(hasOrgKey()).toBe(false);
+    expect(() => DataEventSchema.parse(published[0].payload)).not.toThrow();
+  });
+
+  it('a batch insert stamps each row with its OWN organization', async () => {
+    await engine.insert(
+      'invoice',
+      [
+        { amount: '1', organization_id: RECORD_ORG },
+        { amount: '2', organization_id: 'org_globex' },
+        { amount: '3' },
+      ],
+      { context: sysCtx } as any,
+    );
+
+    expect(published).toHaveLength(3);
+    const events = published.map((e) => DataEventSchema.parse(e.payload));
+    expect(events.map((e) => e.organizationId)).toEqual([RECORD_ORG, 'org_globex', undefined]);
+    // The org-less row omits rather than inheriting a sibling's or the
+    // caller's — one event per record means one organization per record.
+    expect(hasOrgKey(2)).toBe(false);
+  });
+});
