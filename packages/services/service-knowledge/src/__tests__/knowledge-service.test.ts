@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi } from 'vitest';
-import { KnowledgeService, documentIdFor, recordToDocument } from '../knowledge-service';
+import { KnowledgeService, documentIdFor, recordToDocument } from '../knowledge-service.js';
 import type {
   IDataEngine,
   IKnowledgeAdapter,
@@ -87,7 +87,10 @@ describe('KnowledgeService — adapter & source registry', () => {
 describe('KnowledgeService — permission-aware search', () => {
   function buildSetup(hits: KnowledgeHit[]) {
     const adapter = makeAdapter('memory', hits);
-    const findSpy = vi.fn(async (_obj: string, opts: { context: { isSystem?: boolean } }) => {
+    const findSpy = vi.fn(async (
+      _obj: string,
+      opts: { where?: Record<string, unknown>; fields?: string[]; context: { isSystem?: boolean } },
+    ) => {
       if (opts.context?.isSystem) return [{ id: 'rec_1' }, { id: 'rec_2' }];
       return [{ id: 'rec_1' }];
     });
@@ -140,7 +143,7 @@ describe('KnowledgeService — permission-aware search', () => {
     ];
     const { svc, findSpy } = buildSetup(hits);
     const out = await svc.search('q', {
-      executionContext: { userId: 'u1', roles: ['member'], permissions: [], isSystem: false },
+      executionContext: { userId: 'u1', positions: ['member'], permissions: [], isSystem: false },
     });
     expect(out.map((h) => h.documentId)).toEqual(['d1']);
     expect(findSpy).toHaveBeenCalledOnce();
@@ -256,7 +259,10 @@ describe('KnowledgeService — event sync', () => {
 
 describe('KnowledgeService — reindex', () => {
   it('object source: walks IDataEngine with isSystem context and pushes docs', async () => {
-    const find = vi.fn(async () => [
+    const find = vi.fn(async (
+      _obj: string,
+      _opts: { where?: unknown; limit?: number; context: { isSystem?: boolean } },
+    ) => [
       { id: 'r1', title: 'T1', notes: 'N1', status: 'open' },
       { id: 'r2', title: 'T2', notes: 'N2', status: 'done' },
     ]);
@@ -268,7 +274,7 @@ describe('KnowledgeService — reindex', () => {
     expect(res.ok).toBe(true);
     expect(res.indexed).toBe(2);
     expect(res.discovered).toBe(2);
-    expect((find.mock.calls[0][1] as { context: { isSystem?: boolean } }).context.isSystem).toBe(true);
+    expect(find.mock.calls[0][1].context.isSystem).toBe(true);
     expect(adapter.upsertSpy).toHaveBeenCalledOnce();
   });
 
