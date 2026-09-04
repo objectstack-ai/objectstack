@@ -119,26 +119,6 @@ const REPO_ROOT = resolve(HERE, '..');
 const SCRIPTS_DIR = join(REPO_ROOT, 'scripts');
 
 /**
- * The population this gate walks, declared for `scripts/pm/dispatch-gates.mjs`.
- *
- * `mirrorFiles()` walks `SCRIPTS_DIR` for every `*.d.mts` and opens the `.mjs`
- * beside each one — one subtree, `scripts/`. The walk root is assembled with
- * `join()`, so the derivation, which reads SOURCE TEXT, saw a bare word and no
- * path at all: both of this gate's CI invocations (the scan and its
- * `--self-test`) were scored `undetermined` for EVERY card, absent from every
- * dispatch brief and every `--commands` harvest, while CI ran them on each pull
- * request. `hintCovers` refuses a bare single-segment literal by design, so the
- * subtree spelling is the escape the idiom exists to be.
- *
- * ⛔ Not a whole-tree marker: `scripts/**` is a subtree, and this gate reads
- * nothing outside it.
- *
- * The self-test holds the declaration against the live walk rather than against
- * a second spelling of the root, so a moved corpus reds here.
- */
-const ROOT_DIR_WATCH_HINTS = ['scripts/**'];
-
-/**
  * The export spellings this parser recognises, in the words a declaration
  * author would write them. Published for the same reason the cross-package
  * gate publishes its path spellings: an unrecognised spelling must be a red
@@ -621,24 +601,6 @@ async function selfTest() {
   ok(
     'and it finds them under scripts/ by extension, not by a hand-kept list',
     mirrorFiles().every((f) => f.endsWith('.d.mts')),
-  );
-
-  // ── the dispatch-gates population declaration ──
-  ok(
-    'the declared population is the subtree spelling of the walked root — a bare `scripts` literal is '
-      + 'refused by hintCovers as too generic, which is how this gate came to declare nothing at all',
-    ROOT_DIR_WATCH_HINTS.length === 1 && ROOT_DIR_WATCH_HINTS[0] === 'scripts/**',
-  );
-  ok(
-    'and the live walk agrees with it — every discovered mirror sits under the declared root, so a '
-      + 'moved corpus reds here instead of quietly re-emptying the declaration',
-    mirrorFiles().every((f) => relative(REPO_ROOT, f).split(sep).join('/')
-      .startsWith(`${ROOT_DIR_WATCH_HINTS[0].replace(/\/\*+$/, '')}/`)),
-  );
-  ok(
-    'the declared form is NOT the bare walk root — the glob form would send the walk at a directory '
-      + 'the tree does not have',
-    !ROOT_DIR_WATCH_HINTS.includes(relative(REPO_ROOT, SCRIPTS_DIR).split(sep).join('/')),
   );
 
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ────

@@ -81,27 +81,6 @@ const { VERIFY_STAND_IN_CHECKS } = await requireDependency('../eslint.config.mjs
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const VERIFY_SRC = join(REPO_ROOT, 'packages', 'verify', 'src');
 const SCAN_ROOTS = ['packages', 'examples'];
-
-/**
- * The population this gate walks, declared for `scripts/pm/dispatch-gates.mjs`.
- *
- * `SCAN_ROOTS` is a runtime constant and the derivation reads SOURCE TEXT, so
- * two bare top-level words contribute NOTHING — `hintCovers` refuses a
- * single-segment literal by design, because `packages` and `examples` are path
- * COMPONENTS in dozens of gates that never read those roots. This gate declared
- * no path at all and was scored `undetermined` for EVERY card: absent from every
- * dispatch brief and every `--commands` harvest, while CI ran it on each pull
- * request. The subtree spelling is the escape the idiom exists to be.
- *
- * ⛔ Not a whole-tree marker: two subtrees are not the tree.
- *
- * `VERIFY_SRC` is inside `packages/**` and needs no second hint — declaring it
- * separately would name the same population twice and say nothing new.
- *
- * The self-test derives the coupling from `SCAN_ROOTS` on both sides rather
- * than re-spelling it.
- */
-const ROOT_DIR_WATCH_HINTS = ['packages/**', 'examples/**'];
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', '.next', '.turbo', 'coverage']);
 const SOURCE_RE = /\.(ts|tsx|mts|cts)$/;
 
@@ -435,12 +414,11 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'CLEAN: the scan separates an asserted driver argument from a clean one.': 9,
   'DISCOVERED: the shape test, on synthetic sources.': 2,
   'Wiring: discovery must reach the REAL tree, and reach the two helpers': 13,
-  'The dispatch-gates population declaration.': 4,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 4;
+const SELF_TEST_BATTERY_FLOOR = 3;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -616,21 +594,6 @@ function selfTest() {
     `the census reaches the ten known call sites (found ${realSites.length})`,
     realSites.length >= 10,
   );
-
-  // --- The dispatch-gates population declaration.
-  battery('The dispatch-gates population declaration.');
-  expect('every separator-less scan root is declared in the subtree spelling (a bare root is refused '
-    + 'as too generic, so the extractor reads nothing without the glob)',
-    SCAN_ROOTS.filter((r) => !r.includes('/')).every((r) => ROOT_DIR_WATCH_HINTS.includes(`${r}/**`)));
-  expect('and it declares no root this gate does not walk — a declaration that drifts from the scan '
-    + 'replaces a silent gate with a lying one',
-    ROOT_DIR_WATCH_HINTS.every((h) => SCAN_ROOTS.includes(h.replace(/\/\*+$/, ''))));
-  expect('the declared form is NOT a SCAN_ROOTS entry — the glob form would send the walk at a '
-    + 'directory the tree does not have',
-    !SCAN_ROOTS.some((r) => ROOT_DIR_WATCH_HINTS.includes(r)));
-  expect('one hint per walked root — a short list reads exactly like the undetermined verdict it '
-    + 'exists to leave',
-    ROOT_DIR_WATCH_HINTS.length === SCAN_ROOTS.length);
 
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
   //

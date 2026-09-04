@@ -121,12 +121,11 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '17. Every exemption is decided by WHEN the call runs, not by which accessor': 1,
   '18. `--list` and the problem text must quote the accessor actually called.': 1,
   '19. Nothing outside the vocabulary is invented: a lookup-shaped call on a': 1,
-  '20. The dispatch-gates population declaration.': 4,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 20;
+const SELF_TEST_BATTERY_FLOOR = 19;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -134,27 +133,6 @@ const SELF_TEST_BATTERY_FLOOR = 20;
 const UNATTRIBUTED_BATTERY = '(no battery open)';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
-
-/** The trees this gate walks. Plugin units live under `packages/`. */
-const SCAN_ROOTS = ['packages'];
-
-/**
- * The population this gate walks, declared for `scripts/pm/dispatch-gates.mjs`.
- *
- * The walk root used to be an inline `'packages'` argument. The derivation reads
- * SOURCE TEXT and `hintCovers` refuses a bare single-segment literal by design
- * (admitting them was priced at +139084 fabricated (gate, file) pairs, because
- * `packages` is a path COMPONENT in dozens of gates that never read that root),
- * so this gate declared no path at all: scored `undetermined` for EVERY card,
- * absent from every dispatch brief and every `--commands` harvest, while CI ran
- * it on each pull request. The subtree spelling is the escape the idiom exists
- * to be, and `SCAN_ROOTS` is the constant it is held against — the walk now
- * reads the same constant, so a moved read reds in this file's own self-test.
- *
- * ⛔ Not a whole-tree marker: `packages/**` is a subtree, and a whole-tree row
- * appears on every card in the repo whether or not the gate reads the file.
- */
-const ROOT_DIR_WATCH_HINTS = ['packages/**'];
 
 const DECLARATION_FIELDS = ['dependencies', 'optionalDependencies', 'requiresServices', 'providesServices'];
 
@@ -174,7 +152,7 @@ function discoverFiles() {
       out.push(relative(ROOT, full).split(sep).join('/'));
     }
   };
-  for (const root of SCAN_ROOTS) walk(join(ROOT, root));
+  walk(join(ROOT, 'packages'));
   return out.sort();
 }
 
@@ -945,30 +923,6 @@ function selfTest() {
     `);
     assert(problems.length === 0, 'hasService is not in the vocabulary (not plugin-reachable in packages/core)');
   }
-
-  // 20. The dispatch-gates population declaration.
-  battery('20. The dispatch-gates population declaration.');
-  assert(
-    SCAN_ROOTS.filter((r) => !r.includes('/')).every((r) => ROOT_DIR_WATCH_HINTS.includes(`${r}/**`)),
-    'every separator-less SCAN_ROOT is declared in the subtree spelling — a bare root is refused as '
-      + 'too generic, so without the glob the hint extractor reads nothing and this gate goes back to '
-      + 'scoring `undetermined` for every card',
-  );
-  assert(
-    ROOT_DIR_WATCH_HINTS.every((h) => SCAN_ROOTS.includes(h.replace(/\/\*+$/, ''))),
-    'no root is declared that this gate does not walk — a declaration that has drifted from the scan '
-      + 'replaces a silent gate with a lying one',
-  );
-  assert(
-    !SCAN_ROOTS.some((r) => ROOT_DIR_WATCH_HINTS.includes(r)),
-    'the declared form is NOT a SCAN_ROOTS entry — the glob form would send the walk at a directory '
-      + 'the tree does not have',
-  );
-  assert(
-    discoverFiles().every((f) => ROOT_DIR_WATCH_HINTS.some((h) => f.startsWith(`${h.replace(/\/\*+$/, '')}/`))),
-    'and the WALK agrees with the declaration on the live tree — this is the half the two assertions '
-      + 'above cannot hold, since both read the constant rather than what discoverFiles() returns',
-  );
 
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
   //

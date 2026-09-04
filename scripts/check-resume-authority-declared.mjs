@@ -112,29 +112,6 @@ import { parseSourceFile } from './ts-parse.mjs';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_SCAN_ROOTS = ['packages', 'examples'];
 
-/**
- * The population this gate walks, declared for `scripts/pm/dispatch-gates.mjs`.
- *
- * `DEFAULT_SCAN_ROOTS` is a runtime constant and the derivation reads SOURCE
- * TEXT, so two bare top-level words contribute NOTHING — `hintCovers` refuses a
- * single-segment literal by design, because `packages` and `examples` are path
- * COMPONENTS in dozens of gates that never read those roots. This gate declared
- * no path at all, so it was scored `undetermined` for EVERY card and reached no
- * dispatch brief and no `--commands` harvest while CI ran it on every pull
- * request. The subtree spelling is the escape the idiom exists to be.
- *
- * ⛔ Not a whole-tree marker: these are two subtrees, and a whole-tree row
- * appears on every card in the repo — a fabricated lead unless the gate really
- * reads every file.
- *
- * The self-test derives the coupling from `DEFAULT_SCAN_ROOTS` on both sides
- * rather than re-spelling it, so widening or renaming a root cannot leave this
- * declaration describing the old population. `--dir` narrows the scan for a
- * single manual run; the DEFAULT is what CI schedules and what a card can
- * implicate, which is why the declaration is held against that constant.
- */
-const ROOT_DIR_WATCH_HINTS = ['packages/**', 'examples/**'];
-
 /** The factory whose argument IS an action descriptor (packages/spec). */
 const FACTORY = 'defineActionDescriptor';
 
@@ -387,12 +364,11 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'A dynamically assembled argument is recorded, never judged.': 2,
   'A same-named local factory is not the spec\'s. Deliberately still counted:': 2,
   'Wiring: discovery must reach the real tree, and specifically the four': 5,
-  'The dispatch-gates population declaration': 4,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 8;
+const SELF_TEST_BATTERY_FLOOR = 7;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -520,22 +496,6 @@ const b = defineActionDescriptor({ type: 'b', version: '1.0.0', name: 'B', suppo
   for (const t of ['screen', 'wait', 'subflow', 'map']) {
     expect(`discovery reaches the '${t}' pausing built-in`, pausingTypes.has(t));
   }
-
-  // ── The dispatch-gates population declaration
-  battery('The dispatch-gates population declaration');
-  const separatorless = DEFAULT_SCAN_ROOTS.filter((r) => !r.includes('/'));
-  expect('every separator-less scan root is declared in the subtree spelling (a bare root is refused '
-    + 'as too generic, so the extractor reads nothing without the glob)',
-    separatorless.every((r) => ROOT_DIR_WATCH_HINTS.includes(`${r}/**`)));
-  expect('and it declares no root this gate does not walk — a declaration that drifts from the scan '
-    + 'replaces a silent gate with a lying one',
-    ROOT_DIR_WATCH_HINTS.every((h) => DEFAULT_SCAN_ROOTS.includes(h.replace(/\/\*+$/, ''))));
-  expect('the declared form is NOT a DEFAULT_SCAN_ROOTS entry — the glob form would send the walk at '
-    + 'a directory the tree does not have',
-    !DEFAULT_SCAN_ROOTS.some((r) => ROOT_DIR_WATCH_HINTS.includes(r)));
-  expect('one hint per walked root — a short list reads exactly like the undetermined verdict it '
-    + 'exists to leave',
-    ROOT_DIR_WATCH_HINTS.length === DEFAULT_SCAN_ROOTS.length);
 
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
   //
