@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import type { IJobService, JobHandler, JobRunOutcome, JobExecution } from './job-service';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import type { IJobService, JobHandler, JobRunOutcome, JobExecution, JobReplayOptions } from './job-service';
 
 describe('Job Service Contract', () => {
   it('should allow a minimal IJobService implementation with required methods', () => {
@@ -242,5 +244,105 @@ describe('[#6617] JobHandler degraded-outcome channel', () => {
     await expect(runWithRetry(async () => { thrownAttempts++; throw new Error('boom'); }, 3))
       .rejects.toThrow('boom');
     expect(thrownAttempts).toBe(4); // ← a throw still retries, unchanged
+  });
+});
+
+/**
+ * [#14766] `IJobService.replay` gains an optional third argument carrying
+ * `force: true` — the contract half of the maintainer's A + a2 ruling on
+ * #14501 (whose behaviour half lands in `DbJobAdapter.replay`).
+ *
+ * COMPILE-TIME pins first (`tsconfig.test.json` type-checks this file under
+ * `check:test-typecheck`, so an assignability pin here is a real check), and
+ * one source-reading pin for the prose the services implementer codes
+ * against: the refusal is declared on the contract, and prose is unassertable
+ * except by reading it. Reverse verification for the block: narrow the
+ * signature back to `(name, data?)` — (b), (c) and the identity pin go red,
+ * (a) stays green. That asymmetry IS additivity.
+ */
+describe('[#14766] IJobService.replay force option — contract half of the #14501 A+a2 ruling', () => {
+  type Eq<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
+  type ReplayParams = Parameters<NonNullable<IJobService['replay']>>;
+
+  /**
+   * The replay signature EXACTLY as it stood before #14766, pinned standalone
+   * so the additivity claim is falsifiable: if the third parameter ever stops
+   * being optional, this implementation stops being assignable.
+   */
+  type PreIssue14766Replay = (name: string, data?: unknown) => Promise<void>;
+
+  const base = {
+    schedule: async () => {},
+    cancel: async () => {},
+    trigger: async () => {},
+  } satisfies Pick<IJobService, 'schedule' | 'cancel' | 'trigger'>;
+
+  it('(a) an existing two-argument replay implementation is unchanged — additivity, implementer side', async () => {
+    // `DbJobAdapter.replay(name, data?)` as it stands on main: it declares no
+    // third parameter, and must keep compiling untouched (#14501 widens it).
+    const legacy: PreIssue14766Replay = async (_name, _data) => {};
+    const service: IJobService = { ...base, replay: legacy };
+
+    await expect(service.replay!('digest')).resolves.toBeUndefined();
+    await expect(service.replay!('digest', { since: 'yesterday' })).resolves.toBeUndefined();
+  });
+
+  it('(b) the options type is exported, and a call site passes { force: true } through it', async () => {
+    const seen: Array<JobReplayOptions | undefined> = [];
+    const service: IJobService = {
+      ...base,
+      replay: async (_name, _data, options) => {
+        seen.push(options);
+      },
+    };
+
+    // THE pin that goes red when the third parameter is removed.
+    const force: JobReplayOptions = { force: true };
+    await service.replay!('digest', undefined, force);
+    await service.replay!('digest', undefined, { force: false });
+    await service.replay!('digest');
+
+    expect(seen).toEqual([{ force: true }, { force: false }, undefined]);
+  });
+
+  it('(c) the third parameter IS JobReplayOptions, optional, and force is its only member', () => {
+    // Identity, not assignability: a widening or a narrowing on either side
+    // turns this alias red under check:test-typecheck.
+    const identity: Eq<ReplayParams[2], JobReplayOptions | undefined> = true;
+    expect(identity).toBe(true);
+
+    const bare: JobReplayOptions = {};
+    expect(bare.force).toBeUndefined();
+
+    // @ts-expect-error force is a boolean — a truthy string is not the door.
+    const stringly: JobReplayOptions = { force: 'yes' };
+    expect(stringly.force).toBe('yes');
+
+    // @ts-expect-error force is the ONLY knob; a second one is a spec decision
+    // (a new key on this interface), not a free-text field.
+    const extra: JobReplayOptions = { force: true, skipClaim: true };
+    expect(extra.force).toBe(true);
+  });
+
+  it('(d) the contract text declares the refusal the services half codes against', () => {
+    const source = readFileSync(fileURLToPath(new URL('./job-service.ts', import.meta.url)), 'utf8');
+    const start = source.indexOf('replay?(name: string, data?: unknown, options?: JobReplayOptions)');
+    expect(start).toBeGreaterThan(0);
+    // The doc block immediately above the declaration.
+    const docBlock = source.slice(source.lastIndexOf('/**', start), start);
+
+    // The three outcomes, by the claim state that selects them…
+    expect(docBlock).toContain('(flow, tick-window)');
+    expect(docBlock).toContain('**absent**');
+    expect(docBlock).toContain('**failed**');
+    expect(docBlock).toContain('**succeeded**');
+    // …the refusal as an ADR-0112 envelope on code AND status, naming what it refuses…
+    expect(docBlock).toContain('ADR-0112');
+    expect(docBlock).toContain("code: 'RESOURCE_CONFLICT'");
+    expect(docBlock).toContain('status: 409');
+    expect(docBlock).toContain('**the window**');
+    expect(docBlock).toContain('**the claim**');
+    // …and the one door past it.
+    expect(docBlock).toContain('options.force: true');
   });
 });
