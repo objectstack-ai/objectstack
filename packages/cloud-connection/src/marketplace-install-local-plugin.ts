@@ -46,7 +46,20 @@
  */
 
 import type { Plugin, PluginContext } from '@objectstack/core';
-import { resolveAuthzContext, isAuthzStoreUnavailableError } from '@objectstack/core';
+import {
+    resolveAuthzContext,
+    isAuthzStoreUnavailableError,
+    // [#15353] The three symbols the ADMISSION seam's posture derivation needs
+    // — the same set `packages/rest`'s repaired seam imports, for the same
+    // reason. `effectiveTenancyPosture` reads the posture IN FORCE off the
+    // kernel's `tenancy` service; the other two are decision-1-option-A's
+    // classification (#13906): never-registered is branded and quiet, every
+    // other rejection is the outage it is.
+    effectiveTenancyPosture,
+    isServiceNotRegisteredError,
+    AuthzStoreUnavailableError,
+    type TenancyPostureSource,
+} from '@objectstack/core';
 import {
     resolveTenancyPosture,
     collectGlobalUniques,
@@ -1620,6 +1633,88 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * embedding could not have held a permission set to be judged on anyway, and
      * could not have run `syncSchemas()` either.
      */
+    /**
+     * [#15353] The ADMISSION seam's EFFECTIVE tenancy posture — derived here,
+     * and ⛔ never borrowed from this file's install-time posture.
+     *
+     * ## What was open
+     *
+     * `resolveAuthzContext` gates BOTH posture-conditional API-key refusals on a
+     * posture its CALLER supplies — `organization_required` inside
+     * `resolveApiKeyAdmission`, and `organization_membership_ended` after the
+     * grants are aggregated. This door supplied none, so neither guard ran, and
+     * an API key's `tenantId` is `sys_api_key.active_organization_id` copied
+     * verbatim: the caller's own stored claim, never vetted against current
+     * membership. Under a wall-enforcing posture a key stamped with an
+     * organization its owner has LEFT was admitted carrying that organization as
+     * its tenant — through all five install-local doors, since they share
+     * {@link resolveInstallPrincipal}.
+     *
+     * ## ⛔ Why the two postures already in this file are the WRONG value
+     *
+     * They are install-time seeding decisions, and both differ from what an
+     * admission decision needs — measured, not assumed:
+     *
+     * - {@link organizationWallActive} answers a BOOLEAN ("will the per-org
+     *   replay own this seeding?"), which cannot express the distinction the
+     *   resolver keys on: `undefined` means "run no posture-conditional refusal
+     *   at all", while `'single'` is a posture that is present and simply
+     *   enforces no wall. It also ends in `postureEnforcesWall(resolveTenancyPosture())`
+     *   — the REQUESTED posture, read from `OS_TENANCY_POSTURE`. Under ADR-0093
+     *   D4/D5 a deployment that requests `isolated` without the enterprise
+     *   organizations runtime is `single` in force, so the requested value would
+     *   refuse legitimate automation over a wall that is not there.
+     * - `evaluateGlobalUniqueGate` reads `resolveTenancyPosture()` outright, the
+     *   same requested value.
+     *
+     * And its `catch` swallows EVERY failure into that requested fallback — the
+     * permissive-on-failure shape #13906 exists to refuse, where a `tenancy`
+     * service that was wired and BROKE reads as "this check does not apply".
+     * ⛔ Do not wire either of them into this seam, and ⛔ do not add a
+     * `catch { undefined }` here.
+     *
+     * ## The classification, decision 1 option A (#13906)
+     *
+     * - **Never registered** ⇒ branded (`isServiceNotRegisteredError`), quiet
+     *   `undefined`. A lean embedding with no `plugin-auth` is a SUPPORTED
+     *   composition, and behaviour there is exactly what it was.
+     * - **Registered and unable to answer** ⇒ `AuthzStoreUnavailableError`
+     *   (ADR-0112 `SERVICE_UNAVAILABLE` / 503). Admission was never DECIDED, so
+     *   it must not be answered. {@link resolveInstallPrincipal}'s `catch`
+     *   already re-raises this brand rather than collapsing it to `null` (401).
+     *
+     * ⚠️ The brand exists only on the ASYNC resolution path: `PluginContext.getService`
+     * throws two UNBRANDED plain `Error`s (`… not found` and `… is async - use
+     * await`), so a synchronous read cannot tell the two facts apart and would
+     * have to guess. Hence `getServiceAsync`, reached through `getKernel()`.
+     *
+     * ⚠️ The ASYNC ACCESSOR's presence is part of the wiring fact, exactly as
+     * on the REST seam: a `KernelBase`-shaped host (`LiteKernel`) exposes
+     * `getKernel()` but has no `getServiceAsync` at all, so dereferencing it
+     * would raise an unbranded — therefore LOUD — `TypeError`, turning "this
+     * host shape has no async registry" into an outage. Such a host has no
+     * service factories either, so absence is the only fault it could report.
+     * It keeps the quiet answer.
+     */
+    private resolveAdmissionTenancyPosture = async (
+        ctx: PluginContext,
+    ): Promise<TenancyPosture | undefined> => {
+        const kernel = ctx.getKernel?.() as
+            | { getServiceAsync?: <T>(name: string, scopeId?: string) => Promise<T> }
+            | undefined;
+        if (!kernel || typeof kernel.getServiceAsync !== 'function') return undefined;
+        try {
+            return effectiveTenancyPosture(
+                await kernel.getServiceAsync<TenancyPostureSource>('tenancy'),
+            );
+        } catch (err) {
+            if (!isServiceNotRegisteredError(err)) {
+                throw new AuthzStoreUnavailableError('tenancy', err);
+            }
+            return undefined;
+        }
+    };
+
     private resolveInstallPrincipal = async (
         c: any,
         ctx: PluginContext,
@@ -1653,7 +1748,11 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 }
             };
 
-            const authz = await resolveAuthzContext({ ql, headers, getSession });
+            // [#15353] The posture is an authorization INPUT, resolved for
+            // THIS door before the resolver runs. Omitting it is what left
+            // both posture-conditional API-key refusals unreachable here.
+            const tenancyPosture = await this.resolveAdmissionTenancyPosture(ctx);
+            const authz = await resolveAuthzContext({ ql, headers, getSession, tenancyPosture });
             if (!authz.userId) return null;
             return {
                 userId: String(authz.userId),
