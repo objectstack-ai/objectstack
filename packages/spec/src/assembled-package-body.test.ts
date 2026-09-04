@@ -37,6 +37,12 @@
  *    per-package attribution exists: the composed stack flattens every
  *    collection to the top level, and a flattened array cannot say which
  *    package each item came from.
+ * 4. **`plugins` / `devPlugins` are envelope keys** (#15219, maintainer ruling
+ *    A for both keys, 2026-09-04): runtime assembly instructions, not metadata.
+ *    They stay `concat` for in-memory composition and stay at the top level,
+ *    and a body that carries one is REFUSED at the manifest's strict close —
+ *    a plugin inside `packages[i].manifest` is inert JSON no loader could
+ *    construct, so the alternative to refusal was a reader registering garbage.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -69,6 +75,8 @@ const ARTIFACT_ENVELOPE_KEYS = [
   'i18n',          // one artifact, one supported-locale declaration
   'runtimeModule', // written by the compiler, per ARTIFACT
   'onEnable',      // one bundle, one lifecycle hook (AppPlugin invokes a single one)
+  'plugins',       // runtime assembly instructions a host hands to `kernel.use()` — not metadata (#15219 ruling A)
+  'devPlugins',    // the `os dev` load list — the same class as `plugins` (#15219 ruling A)
 ].sort();
 
 const shapeKeys = (schema: unknown): string[] =>
@@ -258,5 +266,97 @@ describe("ADR-0130 D4 — `manifest: 'preserve'` assembles each input stack", ()
       (objects as Array<{ name: string }> | undefined)?.map((o) => o.name);
     expect(objectNames(parsed[1].manifest.objects)).toEqual(['crm_account']);
     expect(objectNames(parsed[0].manifest.objects)).toEqual(['crm_order']);
+  });
+});
+
+// ─── 4. `plugins` / `devPlugins` are envelope keys (#15219) ──────────
+
+describe('#15219 A — `plugins` / `devPlugins` are envelope keys: top level only, never inside `packages[]`', () => {
+  /** What a host hands to `kernel.use()` — a live instance, not metadata. */
+  const livePlugin = { name: 'plugin.example', init: () => undefined };
+
+  /** The unrecognized-keys issue a strict close raises, or undefined. */
+  const unrecognizedKeys = (verdict: ReturnType<typeof AssembledPackageBodySchema.safeParse>) => {
+    if (verdict.success) return undefined;
+    const issue = verdict.error.issues.find((i) => i.code === 'unrecognized_keys');
+    return issue
+      ? { path: issue.path.map(String), keys: (issue as unknown as { keys: string[] }).keys }
+      : undefined;
+  };
+
+  it('both keys are absent from the body key set while the stack schema still declares both', () => {
+    const stackKeys = shapeKeys(ObjectStackDefinitionSchema);
+    const bodyKeys = shapeKeys(AssembledPackageBodySchema);
+
+    // The stack half first: an exclusion is only an exclusion if the key is
+    // still there to be excluded — a key that vanished from the stack schema
+    // would satisfy the body assertions below for the wrong reason.
+    expect(stackKeys).toContain('plugins');
+    expect(stackKeys).toContain('devPlugins');
+
+    expect(bodyKeys).not.toContain('plugins');
+    expect(bodyKeys).not.toContain('devPlugins');
+  });
+
+  it('a body carrying `plugins` is refused at the strict close, naming the key', () => {
+    // Issue code + path + the key, never "it threw": the door is
+    // `ManifestSchema`'s strict close carried through `.extend()`, and this is
+    // the same instrument the `somethingUndeclared` pin above reads.
+    const verdict = AssembledPackageBodySchema.safeParse({ ...coreManifest, plugins: [livePlugin] });
+    expect(verdict.success).toBe(false);
+    expect(unrecognizedKeys(verdict)).toEqual({ path: [], keys: ['plugins'] });
+  });
+
+  it('a body carrying `devPlugins` is refused the same way — serialisable or not, it is a load instruction', () => {
+    const verdict = AssembledPackageBodySchema.safeParse({ ...coreManifest, devPlugins: ['@example/dev-tools'] });
+    expect(verdict.success).toBe(false);
+    expect(unrecognizedKeys(verdict)).toEqual({ path: [], keys: ['devPlugins'] });
+  });
+
+  it("through the artifact wrapper the refusal is located at `manifest` — the load gate's seam", () => {
+    // `artifact-packages.ts` parses every `packages[]` entry with
+    // `ArtifactPackageSchema`; this is the path its refusal message quotes.
+    const verdict = ArtifactPackageSchema.safeParse({ manifest: { ...coreManifest, plugins: [livePlugin] } });
+    expect(verdict.success).toBe(false);
+    expect(unrecognizedKeys(verdict)).toEqual({ path: ['manifest'], keys: ['plugins'] });
+  });
+
+  it('composition keeps both at the top level (concat, in stack order) and out of every package body', () => {
+    const core = defineStack({
+      manifest: coreManifest,
+      objects: [accountObject],
+      plugins: [livePlugin],
+      devPlugins: ['@example/dev-core'],
+    });
+    const orders = defineStack({
+      manifest: ordersManifest,
+      objects: [orderObject],
+      plugins: [{ name: 'plugin.orders' }],
+      devPlugins: ['@example/dev-orders'],
+    });
+
+    const composed = composeStacks([core, orders], { manifest: 'preserve' });
+
+    // Live stacks still concatenate their plugins to the top level — the
+    // `concat` disposition is untouched by the envelope exclusion.
+    expect((composed.plugins as { name: string }[]).map((p) => p.name)).toEqual(['plugin.example', 'plugin.orders']);
+    expect(composed.devPlugins).toEqual(['@example/dev-core', '@example/dev-orders']);
+
+    // …and no package body carries either: the assembler reads the derived
+    // body shape, so the exclusion reaches composition without a second list.
+    const entries = (composed as { packages?: { manifest: Record<string, unknown> }[] }).packages ?? [];
+    expect(entries).toHaveLength(2);
+    for (const entry of entries) {
+      expect(entry.manifest, `${entry.manifest.id} carries plugins`).not.toHaveProperty('plugins');
+      expect(entry.manifest, `${entry.manifest.id} carries devPlugins`).not.toHaveProperty('devPlugins');
+    }
+
+    // SEAM 2/3 for a plugin-carrying host: the composed artifact parses, and
+    // the top-level plugins survive the parse.
+    const parsed = ObjectStackDefinitionSchema.safeParse(composed);
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+    expect(parsed.data.plugins).toHaveLength(2);
+    expect(parsed.data.devPlugins).toEqual(['@example/dev-core', '@example/dev-orders']);
   });
 });
