@@ -89,9 +89,9 @@
       ],
       "traps": ["stale-dist", "stale-console-bundle", "shared-browser-tab"],
       "source": [
-        "packages/cli/src/commands/dev.ts (resolveDevDatabase — dev's ONE resolution seam onto the shared matrix, carrying no fallback filename of its own; the persistent-default rationale; --fresh coverage note #5594; seed-admin idempotency contract; IPC bound-port report; #5148 staleness warning + rebuild-restart coordinator)",
-        "packages/runtime/src/resolve-project-database.ts (#6469 resolveProjectDatabaseUrl — the shared priority matrix explicit → env → memory driver → config-declared default datasource → unified <state dir>/data/objectstack.db, the state-dir order homeDir/OS_HOME/<projectRoot>/.objectstack/~/.objectstack, and the legacy dev.db/standalone.db compat-read with its loud notice)",
-        "packages/cli/src/commands/unified-db-resolution.pin.test.ts (pins dev/start/migrate all resolving through that one seam)",
+        "packages/cli/src/commands/dev.ts#resolveDevDatabase (resolveDevDatabase — dev's ONE resolution seam onto the shared matrix, carrying no fallback filename of its own; the persistent-default rationale; --fresh coverage note #5594; seed-admin idempotency contract; IPC bound-port report; #5148 staleness warning + rebuild-restart coordinator)",
+        "packages/runtime/src/resolve-project-database.ts#resolveProjectDatabaseUrl (#6469 resolveProjectDatabaseUrl — the shared priority matrix explicit → env → memory driver → config-declared default datasource → unified <state dir>/data/objectstack.db, the state-dir order homeDir/OS_HOME/<projectRoot>/.objectstack/~/.objectstack, and the legacy dev.db/standalone.db compat-read with its loud notice)",
+        "packages/cli/src/commands/unified-db-resolution.pin.test.ts#start (pins dev/start/migrate all resolving through that one seam)",
         ".claude/skills/dogfood-verification/SKILL.md §0–§1 (port isolation, health probe, fixed admin creds, /_console layout)"
       ],
       "history": [
@@ -170,9 +170,9 @@
       ],
       "traps": ["stale-dist"],
       "source": [
-        "packages/cli/src/commands/compile.ts (the full gate pipeline: Zod parse, #4409 author-time rule registry, #3786 unknown-key advisory, --json shapes, #3782 conversion-notice parity; the human-path catches ending in this.error() — oclif's ExitError 2 — while the --json branch answers through emitJson + this.exit(1)) + build.ts (alias)",
-        "packages/cli/src/utils/format.ts (CliExitCode = 0 | 1 — the narrowed emitJson/emitText exit slot, NOT a bound on oclif's own error exit)",
-        "packages/cli/src/utils/format.exit-code.test.ts (the #4873 pin: the defect was an argument in the wrong slot — timer.elapsed() landing in emitJson's positional exit code — and a number can no longer reach it at all)",
+        "packages/cli/src/commands/compile.ts#emitJson (the full gate pipeline: Zod parse, #4409 author-time rule registry, #3786 unknown-key advisory, --json shapes, #3782 conversion-notice parity; the human-path catches ending in this.error() — oclif's ExitError 2 — while the --json branch answers through emitJson + this.exit(1)) + build.ts (alias)",
+        "packages/cli/src/utils/format.ts#CliExitCode (CliExitCode = 0 | 1 — the narrowed emitJson/emitText exit slot, NOT a bound on oclif's own error exit)",
+        "packages/cli/src/utils/format.exit-code.test.ts#emitJson (the #4873 pin: the defect was an argument in the wrong slot — timer.elapsed() landing in emitJson's positional exit code — and a number can no longer reach it at all)",
         "cli.flag-command-error-ux (the sibling item that owns oclif's exit 2 — cross-referenced so the two never re-collide)",
         "api-backend.formula-gates, api-backend.enforce-or-remove-authoring-gates (gate content — cross-referenced, not duplicated)"
       ],
@@ -270,7 +270,7 @@
       "automated": { "kind": "unit", "ref": "packages/cli/src/utils/format.exit-code.test.ts" },
       "source": [
         "packages/cli/src/commands/migrate/index.ts + plan.ts (#2186 bare-command-is-plan; #3917 enforced never-mutates; occupancy warning) + apply.ts (--allow-destructive / --force / --yes / in_sync)",
-        "packages/cli/src/utils/format.ts (CliExitCode narrows the emitJson exit slot — the #4873 fix, commit 83df2fd)",
+        "packages/cli/src/utils/format.ts#CliExitCode (CliExitCode narrows the emitJson exit slot — the #4873 fix, commit 83df2fd)",
         "packages/cli/src/commands/migrate/ (the nine registered subcommands enumerated as variants)",
         "sibling item cli.migrate-duplicates-inventory (the duplicates subcommand's own contract — cross-referenced, not duplicated)"
       ],
@@ -351,8 +351,8 @@
       "traps": ["stale-dist", "wrong-persona"],
       "automated": { "kind": "unit", "ref": "packages/cli/src/commands/verify-tenancy-posture.test.ts" },
       "source": [
-        "packages/cli/src/commands/verify.ts (hardFailures sum, exit contract, resolveVerifyMultiTenant / #5262 / ADR-0105 D1, separate RLS stack rationale)",
-        "packages/verify/src/verify.ts (the six-member status union; 400-VALIDATION_FAILED→needs-fixture vs 5xx→create-failed classification)",
+        "packages/cli/src/commands/verify.ts#hardFailures (hardFailures sum, exit contract, resolveVerifyMultiTenant / #5262 / ADR-0105 D1, separate RLS stack rationale)",
+        "packages/verify/src/verify.ts#VALIDATION_FAILED (the six-member status union; 400-VALIDATION_FAILED→needs-fixture vs 5xx→create-failed classification)",
         "packages/verify/src/rls.ts (#1994 class: you can't write what you can't read)"
       ],
       "history": [
@@ -543,11 +543,11 @@
       },
       "traps": ["dispatcher-vs-hono-route", "stale-dist", "wrong-persona"],
       "source": [
-        "packages/cli/src/commands/test.ts (the shipped `os test`: the #7363 lazy segment-directed glob with its prune list, `loadTestSuite`'s #6247 boundary parse, the per-scenario report, and the exit 0/1 summary)",
-        "packages/core/src/qa/runner.ts (scenario sequencing, `capture` + `{{var}}` interpolation, the assertion operators, setup/teardown semantics, the #7256 unevaluable-`contains` fix)",
-        "packages/core/src/qa/http-adapter.ts (the action-type switch — its case labels ARE the enum values; the record routes take their prefix from the one memoised `/discovery` probe per run, falling back to the RestApiConfigSchema + CrudEndpointsConfigSchema convention with a diagnostic that names the mount, #7848 / #7983)",
-        "packages/spec/src/qa/testing.zod.ts (TestSuiteSchema — the shape enforced at load; TestActionTypeSchema pinned above)",
-        "packages/spec/liveness/qa.json (the ADR-0049 ledger whose existence this item is coverage.json's mapping for — its dead `tags`/`requires` rows are why no scenario selection exists)",
+        "packages/cli/src/commands/test.ts#loadTestSuite (the shipped `os test`: the #7363 lazy segment-directed glob with its prune list, `loadTestSuite`'s #6247 boundary parse, the per-scenario report, and the exit 0/1 summary)",
+        "packages/core/src/qa/runner.ts#scenario (scenario sequencing, `capture` + `{{var}}` interpolation, the assertion operators, setup/teardown semantics, the #7256 unevaluable-`contains` fix)",
+        "packages/core/src/qa/http-adapter.ts#mount (the action-type switch — its case labels ARE the enum values; the record routes take their prefix from the one memoised `/discovery` probe per run, falling back to the RestApiConfigSchema + CrudEndpointsConfigSchema convention with a diagnostic that names the mount, #7848 / #7983)",
+        "packages/spec/src/qa/testing.zod.ts#TestSuiteSchema (TestSuiteSchema — the shape enforced at load; TestActionTypeSchema pinned above)",
+        "packages/spec/liveness/qa.json#tags (the ADR-0049 ledger whose existence this item is coverage.json's mapping for — its dead `tags`/`requires` rows are why no scenario selection exists)",
         "packages/cli/test/qa-suite-schema-load.test.ts, packages/cli/test/resolve-glob-lazy-walk.test.ts, packages/core/src/qa/runner.test.ts (the three unit pins — cited so a run knows what is already covered, NOT a substitute for driving a booted app)",
         "content/docs/deployment/cli.mdx §os test (the documented command contract)",
         "examples/app-showcase/qa/platform-smoke.test.json (the fixture suite this item drives)"
@@ -747,9 +747,9 @@
       ],
       "traps": ["destructive-in-place", "absence-inference"],
       "source": [
-        "packages/cli/src/commands/migrate/meta.ts (applyMetaMigrations, composeSpecChanges, normalizeStackInput, MigrationFloorError, PROTOCOL_MAJOR; the declared flag surface and the two --out-guarded writeFileSync calls)",
+        "packages/cli/src/commands/migrate/meta.ts#writeFileSync (applyMetaMigrations, composeSpecChanges, normalizeStackInput, MigrationFloorError, PROTOCOL_MAJOR; the declared flag surface and the two --out-guarded writeFileSync calls)",
         "packages/spec/src/migrations/entries/retired-defs/ · retired-keys/ · semantic/ (the registries it replays)",
-        "the retirement messages across packages/spec that prescribe this command by name — the shared sentence in packages/spec/src/shared/retired-key.ts and its per-key sites (e.g. the BOOK_TRANSLATIONS_RETIRED text in packages/spec/src/system/book.zod.ts), pinned class-wide by packages/spec/src/shared/retired-key-migrate-sentence.test.ts",
+        "the retirement messages across packages/spec that prescribe this command by name — the shared sentence in packages/spec/src/shared/retired-key.ts and its per-key sites (e.g. the BOOK_TRANSLATIONS_RETIRED text in packages/spec/src/system/book.zod.ts#pinned), pinned class-wide by packages/spec/src/shared/retired-key-migrate-sentence.test.ts",
         "ADR-0087 (retirement registries and conversion routes)",
         "#4873 (--json exit-code honesty across migrate subcommands)",
         "#9529 (the 2026-08-18 reword: the messages promise a LIST of mechanical edits applied by hand, not an automatic rewrite)",
@@ -841,11 +841,11 @@
       "traps": ["hydration-race", "first-boot-cold-start"],
       "source": [
         "content/docs/getting-started/quick-start.mdx ('How you verify' — `npx os validate` and `npx os dev --ui`, then open http://localhost:3000/_console/)",
-        "packages/create-objectstack/src/templates/blank/package.json (scripts.dev = `objectstack dev`, with no --ui — correct, see the chain below)",
+        "packages/create-objectstack/src/templates/blank/package.json#objectstack (scripts.dev = `objectstack dev`, with no --ui — correct, see the chain below)",
         "packages/cli/src/commands/serve.ts (`ui: Flags.boolean({..., default: true, allowNo: true })` — the console is default-ON here; `--no-ui` is the off switch)",
         "packages/cli/src/commands/dev.ts + (dev declares `ui` with NO default and forwards `...(flags.ui ? ['--ui'] : [])` — it only ever ADDS the flag, never forwards --no-ui, so an unflagged dev inherits serve's default-on)",
         "content/docs/deployment/cli.mdx ('--ui | Force Console UI on (already on by default in dev)') and ('--ui / --no-ui — Toggle Console UI at /_console/ (default on)')",
-        "packages/create-objectstack/src/template-registry.ts (TEMPLATES = { blank } only; RETIRED_TEMPLATES named for a named refusal)",
+        "packages/create-objectstack/src/template-registry.ts#TEMPLATES (TEMPLATES = { blank } only; RETIRED_TEMPLATES named for a named refusal)",
         "sibling item cli.scaffold-first-run (scaffold→install→validate→build→`os start --artifact`→health/ready; automated by .github/workflows/scaffold-e2e.yml)",
         "sibling item cli.dev-boot-contract (os dev --ui + /_console/ sign-in, driven against examples/app-showcase)",
         "sibling item studio-authoring.first-run-loop (the in-console authoring loop, once the console is reachable)"
@@ -950,7 +950,7 @@
       ],
       "traps": ["absence-inference", "stale-dist"],
       "source": [
-        "packages/cli/src/commands/doctor.ts (class, flags -v/--scan-deprecations, run body; posture resolve + row; env sources row; NODE_ENV row; spec-workspace probe; ledger read; unique-scope withhold; MonorepoTreeScan, monorepoTreeSkipNotice, printMonorepoTreeSkip, findMissingTests, findDeprecatedUsages, their print sites; summary exit)",
+        "packages/cli/src/commands/doctor.ts#MonorepoTreeScan (class, flags -v/--scan-deprecations, run body; posture resolve + row; env sources row; NODE_ENV row; spec-workspace probe; ledger read; unique-scope withhold; MonorepoTreeScan, monorepoTreeSkipNotice, printMonorepoTreeSkip, findMissingTests, findDeprecatedUsages, their print sites; summary exit)",
         "packages/cli/src/commands/doctor-env-provenance.test.ts, doctor-tenancy-posture-report.test.ts, doctor-ledger-dir-authority.test.ts, doctor-ledger-posture-independence.test.ts, doctor-ledger-read-failure.test.ts, doctor-config-load-cause.test.ts, doctor-node-env-default.test.ts, doctor-unexamined-spec-tree.test.ts (the unit pins — they cover the row-building seams, none drives the CLI end-to-end, which is why this item carries no automated entry)",
         "sibling item cli.flag-command-error-ux (owns only `os doctor --help`; this item is the command's first functional coverage)",
         "sibling item cli.doctor-deprecation-scan (the --scan-deprecations flag's own item — cross-referenced, not duplicated)"
@@ -1037,8 +1037,8 @@
       ],
       "traps": ["absence-inference", "stale-dist"],
       "source": [
-        "packages/cli/src/commands/doctor.ts (flag; scan block with the scanDir = <cwd>/src, the per-hit warning row, the --verbose `→ replacement`, the #10680 reasoning comment, the two-branch hint and the clean-run success line; DEPRECATED_PATTERNS — retired-lookup pair; scanDeprecatedPatterns — absent-dir [],.ts-only walk +.test.ts filter; walkDir node_modules prune)",
-        "packages/cli/src/commands/doctor-deprecation-hint-commands.test.ts (#10680's pin — the class-closing sweep that every `os …` hint doctor can PRINT resolves under src/commands/, plus six end-to-end cases over Doctor.run. Added to source at revision 3 because revision 2's knownGaps asserted this surface had no automated coverage of any kind)",
+        "packages/cli/src/commands/doctor.ts#scanDir (flag; scan block with the scanDir = <cwd>/src, the per-hit warning row, the --verbose `→ replacement`, the #10680 reasoning comment, the two-branch hint and the clean-run success line; DEPRECATED_PATTERNS — retired-lookup pair; scanDeprecatedPatterns — absent-dir [],.ts-only walk +.test.ts filter; walkDir node_modules prune)",
+        "packages/cli/src/commands/doctor-deprecation-hint-commands.test.ts#Doctor (#10680's pin — the class-closing sweep that every `os …` hint doctor can PRINT resolves under src/commands/, plus six end-to-end cases over Doctor.run. Added to source at revision 3 because revision 2's knownGaps asserted this surface had no automated coverage of any kind)",
         "content/docs/protocol/backward-compatibility.mdx (the documented workflow, including the admission that the codemod command is not yet available)",
         "packages/cli/README.md §os doctor (documents -v and --scan-deprecations)",
         "packages/create-objectstack/src/templates/blank/ (the scaffold whose src/ the seeds land in)",
@@ -1140,7 +1140,7 @@
       ],
       "traps": ["stale-dist", "absence-inference"],
       "source": [
-        "packages/cli/src/commands/migrate/duplicates.ts (the contract header encoding the 2026-08-16 maintainer ruling's five points; report interfaces; the cross-partition HAVING; the seam-answer guards; flags; read-only boot; no_sql_seam refusal)",
+        "packages/cli/src/commands/migrate/duplicates.ts#report (the contract header encoding the 2026-08-16 maintainer ruling's five points; report interfaces; the cross-partition HAVING; the seam-answer guards; flags; read-only boot; no_sql_seam refusal)",
         "packages/cli/src/commands/migrate/duplicates.contract.test.ts (the full JSON shape against a real sqlite), duplicates.pre-repair.test.ts (byte-identical DB + the #8686 repair measured destroying the evidence), duplicates.integration.test.ts, duplicates.probe-sql.test.ts — seam pins; none drives the oclif command end-to-end, hence no automated entry",
         "#8928 (the card and ruling), #8686 / #8844 (the closed producers whose damage this inventories)",
         "sibling item cli.migrate-plan-apply-json (lists duplicates as a variant; the scratch-DB boot recipe is shared)"
@@ -1229,8 +1229,8 @@
       "traps": ["dispatcher-vs-hono-route", "seed-data-thin", "wrong-persona"],
       "source": [
         "packages/cli/src/commands/datasource/list-tables.ts (route doc, listing), introspect.ts (route doc, flags, the cwd jail, REVIEW passthrough), validate.ts (route doc, diff rendering + exit)",
-        "packages/rest/src/external-datasource-routes.ts + rest-route-ledger.ts (the served federation routes incl. POST …/external/validate) and external-datasource-routes-auth-guard.test.ts (the auth wall the token satisfies)",
-        "examples/app-showcase/src/system/datasources/showcase-external.datasource.ts + external-fixture.ts (the fixture datasource 'showcase_external')",
+        "packages/rest/src/external-datasource-routes.ts#routes + rest-route-ledger.ts (the served federation routes incl. POST …/external/validate) and external-datasource-routes-auth-guard.test.ts (the auth wall the token satisfies)",
+        "examples/app-showcase/src/system/datasources/showcase-external.datasource.ts#showcase_external + external-fixture.ts (the fixture datasource 'showcase_external')",
         "ADR-0015 (external datasource federation)",
         "sibling item cli.flag-command-error-ux (owned only the topic's --help until now)"
       ],
@@ -1320,9 +1320,9 @@
       ],
       "traps": ["stale-dist", "absence-inference"],
       "source": [
-        "packages/cli/src/utils/extract-hook-body.ts (contract header, carrying the #10917 retirement note; FORBIDDEN_PATTERNS; CAPABILITY_PATTERNS with the #4391 removal note; #1876 free-identifier throw — the @capabilities override branch this item used to cite is retired and gone)",
-        "packages/cli/src/utils/lower-callables.ts (the warnings field, tryExtractBody's catch-all fallback-to-bundle — the seam the default path's silence flows from)",
-        "packages/cli/src/commands/compile.ts (the --strict-body gate, the needsBundle decision + skip line, the --json warnings key that excludes extraction warnings)",
+        "packages/cli/src/utils/extract-hook-body.ts#FORBIDDEN_PATTERNS (contract header, carrying the #10917 retirement note; FORBIDDEN_PATTERNS; CAPABILITY_PATTERNS with the #4391 removal note; #1876 free-identifier throw — the @capabilities override branch this item used to cite is retired and gone)",
+        "packages/cli/src/utils/lower-callables.ts#tryExtractBody (the warnings field, tryExtractBody's catch-all fallback-to-bundle — the seam the default path's silence flows from)",
+        "packages/cli/src/commands/compile.ts#needsBundle (the --strict-body gate, the needsBundle decision + skip line, the --json warnings key that excludes extraction warnings)",
         "content/docs/automation/hook-bodies.mdx (the documented default + --strict-body posture; the Capability inference section — the inference table, the body.capabilities route, and the callout recording the retired directive)",
         "packages/cli/src/utils/lower-callables.test.ts (the existing unit seam pin — cited, not a substitute for driving os build)",
         "sibling items records-forms (runtime sandbox side, body-runner.ts) and cli.build-own-contract (the build's own exit/output contract)"
@@ -1415,9 +1415,9 @@
       ],
       "traps": ["stale-dist", "seed-data-thin"],
       "source": [
-        "packages/cli/src/commands/lint.ts (Severity; foldCoverageIssues; lintConfig's own rubric + the #4409 registry call with info→suggestion; flags; --json emit; disclosure; human exit; load-failure catch; --fix dry-run)",
-        "packages/cli/src/utils/collect-docs.ts (the ADR-0046 docs lint folded into the same issues stream)",
-        "packages/cli/src/utils/format.ts (CliExitCode and the #4873 doc note naming os lint as the duration-inside-the-payload exemplar)",
+        "packages/cli/src/commands/lint.ts#Severity (Severity; foldCoverageIssues; lintConfig's own rubric + the #4409 registry call with info→suggestion; flags; --json emit; disclosure; human exit; load-failure catch; --fix dry-run)",
+        "packages/cli/src/utils/collect-docs.ts#docs (the ADR-0046 docs lint folded into the same issues stream)",
+        "packages/cli/src/utils/format.ts#CliExitCode (CliExitCode and the #4873 doc note naming os lint as the duration-inside-the-payload exemplar)",
         "sibling item cli.build-own-contract (clause 3 is the build side of the registry-parity pair; its #3782 --json parity clause binds build↔validate, NOT lint)"
       ],
       "history": [
@@ -1502,12 +1502,12 @@
         "destructive-in-place"
       ],
       "source": [
-        "packages/cli/src/commands/plugin/build.ts — manifest read + named refusal; ManifestSchema.safeParse + formatZodErrors; the explicit id/version guard; packaging default and the Loaded line; entry resolution; the manifest-deps externalization; the manifest-deps package.json / pnpm-lock.yaml packing; computeIntegrity + the compiled manifest; the artifact write and its printed block",
-        "packages/cli/src/utils/osplugin.ts — MANIFEST_FILENAME = 'objectstack.plugin.json'; OSPLUGIN_EXT; computeIntegrity (manifest and SIGNATURE excluded, keys sorted); the ustar writer with mtime pinned to 0; readOspluginManifest",
-        "packages/cli/src/commands/plugin/publish.ts — artifact discovery; readOspluginManifest before any network call; the id/version refusal; the unsigned-artifact notice; the auth refusal",
-        "packages/spec/src/kernel/manifest.zod.ts — ManifestSchema id and version (both required, version regex-pinned); PluginPackagingSchema ('bundled' | 'manifest-deps', ADR-0025 §3.3); PluginRuntimeSchema (the trust tier, ADR-0025 §3.6)",
-        "packages/cli/src/commands/lint.ts — the protocol/missing-engines-range rule, its manifest scoping and its fix string",
-        "packages/rest/src/package-routes.ts — the server mirror (400 PACKAGE_MANIFEST_INVALID), recorded in knownGaps rather than scored here",
+        "packages/cli/src/commands/plugin/build.ts#formatZodErrors — manifest read + named refusal; ManifestSchema.safeParse + formatZodErrors; the explicit id/version guard; packaging default and the Loaded line; entry resolution; the manifest-deps externalization; the manifest-deps package.json / pnpm-lock.yaml packing; computeIntegrity + the compiled manifest; the artifact write and its printed block",
+        "packages/cli/src/utils/osplugin.ts#MANIFEST_FILENAME — MANIFEST_FILENAME = 'objectstack.plugin.json'; OSPLUGIN_EXT; computeIntegrity (manifest and SIGNATURE excluded, keys sorted); the ustar writer with mtime pinned to 0; readOspluginManifest",
+        "packages/cli/src/commands/plugin/publish.ts#version — artifact discovery; readOspluginManifest before any network call; the id/version refusal; the unsigned-artifact notice; the auth refusal",
+        "packages/spec/src/kernel/manifest.zod.ts#ManifestSchema — ManifestSchema id and version (both required, version regex-pinned); PluginPackagingSchema ('bundled' | 'manifest-deps', ADR-0025 §3.3); PluginRuntimeSchema (the trust tier, ADR-0025 §3.6)",
+        "packages/cli/src/commands/lint.ts#manifest — the protocol/missing-engines-range rule, its manifest scoping and its fix string",
+        "packages/rest/src/package-routes.ts#PACKAGE_MANIFEST_INVALID — the server mirror (400 PACKAGE_MANIFEST_INVALID), recorded in knownGaps rather than scored here",
         "content/docs/releases/v15.mdx (the release that dated objectstack lint's protocol/missing-engines-range) · ADR-0025 §3.3 / §3.6",
         "sibling items: platform-core.manifest-install-contract (the same manifest at the install boundary) · cli.build-own-contract and cli.lint-severity-exit-contract (the os build / os lint exit-code contracts this item leans on but does not re-prove)"
       ],
@@ -1606,11 +1606,11 @@
       "traps": ["stale-dist", "destructive-in-place"],
       "automated": { "kind": "unit", "ref": "packages/drivers/driver-sql/src/sql-driver-schema-drift.test.ts" },
       "source": [
-        "packages/spec/src/data/driver/common.zod.ts (SqlAutoMigrateSchema z.enum(['off','safe']) — 'Dev-only, loosen-only schema self-heal (#2186) … force-disabled under NODE_ENV=production') + sqlite.zod.ts (the authored key; the wasm not-honoured guidance)",
-        "packages/drivers/driver-sql/src/sql-driver.ts (SqlDriverConfig.autoMigrate docblock: non-destructive alters only), (default 'off'), (reconcileAndWarnDrift — the managed+safe gate, the production ignore warning verbatim, safe-only applyMigrationEntries allowDestructive:false, per-op auto-reconciled info line, post-reconcile re-detect, warn-once loop)",
-        "packages/drivers/driver-sql/src/schema-drift.ts (tightenNullSafeOnly: clean probe → safe, duplicates → blocked with a row report, old index left in place; ADR-0120 D4)",
-        "packages/cli/src/utils/storage-driver.ts (the ONE dev injection point for the fallback default datasource: isDev ? { autoMigrate: 'safe' } : {}) + packages/cli/src/commands/serve.ts (telemetry datasource: isDev ? 'safe' : undefined)",
-        "packages/drivers/driver-sql/src/sql-driver-schema-drift.test.ts + sql-driver-unique-tenancy.test.ts + sql-driver-index-drift.test.ts,322-342 (the pins: off-warns / safe-applies / clean-probe tighten / duplicates block)",
+        "packages/spec/src/data/driver/common.zod.ts#SqlAutoMigrateSchema (SqlAutoMigrateSchema z.enum(['off','safe']) — 'Dev-only, loosen-only schema self-heal (#2186) … force-disabled under NODE_ENV=production') + sqlite.zod.ts (the authored key; the wasm not-honoured guidance)",
+        "packages/drivers/driver-sql/src/sql-driver.ts#SqlDriverConfig (SqlDriverConfig.autoMigrate docblock: non-destructive alters only), (default 'off'), (reconcileAndWarnDrift — the managed+safe gate, the production ignore warning verbatim, safe-only applyMigrationEntries allowDestructive:false, per-op auto-reconciled info line, post-reconcile re-detect, warn-once loop)",
+        "packages/drivers/driver-sql/src/schema-drift.ts#tightenNullSafeOnly (tightenNullSafeOnly: clean probe → safe, duplicates → blocked with a row report, old index left in place; ADR-0120 D4)",
+        "packages/cli/src/utils/storage-driver.ts#isDev (the ONE dev injection point for the fallback default datasource: isDev ? { autoMigrate: 'safe' } : {}) + packages/cli/src/commands/serve.ts#isDev (telemetry datasource: isDev ? 'safe' : undefined)",
+        "packages/drivers/driver-sql/src/sql-driver-schema-drift.test.ts#driver + sql-driver-unique-tenancy.test.ts + sql-driver-index-drift.test.ts,322-342 (the pins: off-warns / safe-applies / clean-probe tighten / duplicates block)",
         "sibling items: cli.dev-boot-contract (the boot this rides), cli.migrate-plan-apply-json (the deliberate apply path — the ONLY door for destructive diffs; cross-referenced, not re-proven)"
       ],
       "history": [
