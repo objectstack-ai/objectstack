@@ -108,8 +108,10 @@
  * derivation every row here uses, and `serve.ts` / `schema-migration-plugins.ts`
  * read them off the top level only. The zoo declares none, so no row measures
  * them, and the fix is NOT mechanical: a JSON artifact's `packages[i].plugins`
- * would be inert data where the call site expects a live plugin instance. Filed
- * rather than folded in — see #15006's report.
+ * would be inert data where the call site expects a live plugin instance, and
+ * whether a live-object collection belongs in the package-owned key set at all is
+ * a `packages/spec` question upstream of every reader here. Filed as #15219
+ * rather than folded in.
  */
 
 import { mkdtempSync, rmSync } from 'node:fs';
