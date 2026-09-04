@@ -490,26 +490,31 @@ export function approvalVerdict(reviews) {
  * DISMISSED or superseded approval is not an approval — with one way left to
  * not count: `unauthorizedApprovers` (APPROVED, not in the set).
  *
- * `staleApprovers` SURVIVES THE RULING AS A PRINTED READING and nothing more:
- * authorized approvals given on a commit that is no longer the head. They are
- * in `approvers` too — they COUNT — and the bucket exists so a queue log can
- * name the commit an approval was given on, which is where the accepted cost of
- * this ruling becomes visible at the moment it is paid. ⛔ Never branch a
- * verdict on it. When the head could not be read the bucket is empty: "we did
- * not look" is not "the same commit", and neither one is a refusal any more.
+ * `approvalsOnEarlierCommits` is A PRINTED READING and nothing more: authorized
+ * approvals given on a commit that is no longer the head. They are in
+ * `approvers` too — they COUNT — and the bucket exists so a queue log can name
+ * the commit an approval was given on, which is where the accepted cost of this
+ * ruling becomes visible at the moment it is paid. ⛔ Never branch a verdict on
+ * it. When the head could not be read the bucket is empty: "we did not look" is
+ * not "the same commit", and neither one is a refusal any more.
  *
- * ⚠️ THE NAME IS RETAINED DELIBERATELY and is the one thing here the ruling
- * leaves inaccurate. `.claude/hooks/guard-governed-enqueue.sh` IMPORTS this
- * symbol and reads `staleApprovers` off its result — that is the "⛔ no second
- * mechanism" design paying off, because the seat-side hook's verdict flips with
- * this ruling for free and its own text needs no predicate of its own. The hook
- * is a GOVERNED file, so renaming here would either break a seat-side guard
- * into silent fail-open or drag a governed path into an ungoverned PR; the
- * rename travels with that hook's own edit instead.
+ * ⚠️ It was `staleApprovers` under the sha pin, and is deliberately NOT called
+ * that any more. A bucket still named for a refusal is one a later reader
+ * re-derives a refusal from — the same reason this function is no longer called
+ * `pinnedApprovalVerdict`. Renaming a predicate is cheap; leaving a retired
+ * rule's vocabulary lying around next to a live one is not.
+ *
+ * ⭐ BOTH RENAMES LANDED WITH THEIR IMPORTER, in one commit.
+ * `.claude/hooks/guard-governed-enqueue.sh` imports this function and reads that
+ * bucket off its result — the "⛔ no second mechanism" design paying off, since
+ * the seat-side hook's verdict flipped with this ruling for free and it needs no
+ * predicate of its own. ⛔ Never rename either name without that hook in the
+ * same diff: it catches the resulting failure and ALLOWS, with one warning line
+ * on stderr, so every governed enqueue would sail through it silently.
  *
  * Pure; the array is expected in GitHub's chronological order, so last wins.
  */
-export function pinnedApprovalVerdict(reviews, headSha) {
+export function authorizedApprovalVerdict(reviews, headSha) {
   const decisive = new Set(['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED']);
   const latest = new Map();
   for (const review of Array.isArray(reviews) ? reviews : []) {
@@ -520,7 +525,7 @@ export function pinnedApprovalVerdict(reviews, headSha) {
   }
   const head = /^[0-9a-f]{7,40}$/.test(String(headSha ?? '').toLowerCase()) ? String(headSha).toLowerCase() : null;
   const approvers = [];
-  const staleApprovers = [];
+  const approvalsOnEarlierCommits = [];
   const unauthorizedApprovers = [];
   for (const [login, review] of latest) {
     if (review.state !== 'APPROVED') continue;
@@ -532,12 +537,12 @@ export function pinnedApprovalVerdict(reviews, headSha) {
     // the verdict, and `commit_id` is not consulted to reach it.
     approvers.push(login);
     // ...and then, separately, the reading the log prints. It changes nothing.
-    if (head !== null && review.commitId !== head) staleApprovers.push({ login, commitId: review.commitId });
+    if (head !== null && review.commitId !== head) approvalsOnEarlierCommits.push({ login, commitId: review.commitId });
   }
   return {
     state: approvers.length > 0 ? 'approved' : 'unapproved',
     approvers,
-    staleApprovers,
+    approvalsOnEarlierCommits,
     unauthorizedApprovers,
     changesRequestedBy: [...latest].filter(([, r]) => r.state === 'CHANGES_REQUESTED').map(([login]) => login),
     reviewsRead: Array.isArray(reviews) ? reviews.length : 0,
@@ -636,7 +641,7 @@ export function renderGuardVerdict(verdict) {
       );
       // The accepted cost of the 2026-09-04 ruling, named where it is paid: the
       // commit this approval was given on, and the head that is no longer it.
-      for (const older of queueLeg(entry.approval) ? (entry.approval.staleApprovers ?? []) : []) {
+      for (const older of queueLeg(entry.approval) ? (entry.approval.approvalsOnEarlierCommits ?? []) : []) {
         lines.push(
           `        ⚠️  ${older.login} approved at ${(older.commitId || '(no commit_id)').slice(0, 12)}, not at the head ` +
             `${String(entry.approval.headSha).slice(0, 12)} — it COUNTS ANYWAY`,
@@ -796,7 +801,7 @@ export async function runGuard({ event, rows, fetchReviews, fetchPullHead }) {
           );
         }
         apiCalls += 1;
-        approvals.set(entry.pr, pinnedApprovalVerdict(await fetchReviews(entry.pr), headSha));
+        approvals.set(entry.pr, authorizedApprovalVerdict(await fetchReviews(entry.pr), headSha));
       } else {
         // The early-warning leg keeps the pre-pinning reading (and byte-
         // identical output): it never reddens, so it never needs the head.
@@ -1148,10 +1153,10 @@ export async function selfTest() {
   const HEAD = 'f'.repeat(40);
   const OLD = '0'.repeat(40);
   const approvedAt = (login, sha) => ({ state: 'APPROVED', user: { login }, commit_id: sha });
-  const authorizedPass = (login = GOVERNED_APPROVERS[0]) => pinnedApprovalVerdict([approvedAt(login, HEAD)], HEAD);
+  const authorizedPass = (login = GOVERNED_APPROVERS[0]) => authorizedApprovalVerdict([approvedAt(login, HEAD)], HEAD);
   // The same authorized approval, on a commit that is no longer the head. Under
   // the retired sha pin this exact fixture was the REFUSAL case.
-  const authorizedPassOnOlder = (login = GOVERNED_APPROVERS[0]) => pinnedApprovalVerdict([approvedAt(login, OLD)], HEAD);
+  const authorizedPassOnOlder = (login = GOVERNED_APPROVERS[0]) => authorizedApprovalVerdict([approvedAt(login, OLD)], HEAD);
   const run = (event, rows, approvals = new Map()) => {
     const { governed, unattributed } = decomposeGovernedWork(rows);
     return guardVerdict({ event, governed, unattributed, approvals, apiCalls: governed.length });
@@ -1250,60 +1255,60 @@ export async function selfTest() {
   battery('the 2026-09-04 unpinned predicate (the queue leg\'s)');
   assert('the-authorized-set-is-exactly-the-ruled-two-accounts', GOVERNED_APPROVERS.join() === 'os-zhuang,hotlong');
   for (const login of GOVERNED_APPROVERS) {
-    assert(`an-authorized-approval-on-the-current-head-passes: ${login}`, pinnedApprovalVerdict([approvedAt(login, HEAD)], HEAD).state === 'approved');
+    assert(`an-authorized-approval-on-the-current-head-passes: ${login}`, authorizedApprovalVerdict([approvedAt(login, HEAD)], HEAD).state === 'approved');
   }
   // ⭐ THE RULING ITSELF: the identical approval, on a commit that is no longer
   // the head. This is the case that REFUSED before 2026-09-04.
   for (const login of GOVERNED_APPROVERS) {
-    const older = pinnedApprovalVerdict([approvedAt(login, OLD)], HEAD);
+    const older = authorizedApprovalVerdict([approvedAt(login, OLD)], HEAD);
     assert(
       `⭐ an-authorized-approval-on-an-OLDER-commit-still-passes-2026-09-04: ${login}`,
       older.state === 'approved' && older.approvers.join() === login,
       JSON.stringify(older),
     );
   }
-  assert('an-approval-carrying-no-commit_id-at-all-passes-too', pinnedApprovalVerdict(approved(GOVERNED_APPROVERS[0]), HEAD).state === 'approved');
-  const outsider = pinnedApprovalVerdict([approvedAt('not-authorized', HEAD)], HEAD);
+  assert('an-approval-carrying-no-commit_id-at-all-passes-too', authorizedApprovalVerdict(approved(GOVERNED_APPROVERS[0]), HEAD).state === 'approved');
+  const outsider = authorizedApprovalVerdict([approvedAt('not-authorized', HEAD)], HEAD);
   assert('an-unauthorized-approval-never-counts', outsider.state === 'unapproved' && outsider.unauthorizedApprovers.join() === 'not-authorized');
   assert(
     'an-authorized-approval-later-superseded-by-CHANGES_REQUESTED-never-counts',
-    pinnedApprovalVerdict([approvedAt(GOVERNED_APPROVERS[0], HEAD), { state: 'CHANGES_REQUESTED', user: { login: GOVERNED_APPROVERS[0] }, commit_id: HEAD }], HEAD)
+    authorizedApprovalVerdict([approvedAt(GOVERNED_APPROVERS[0], HEAD), { state: 'CHANGES_REQUESTED', user: { login: GOVERNED_APPROVERS[0] }, commit_id: HEAD }], HEAD)
       .state === 'unapproved',
   );
   assert(
     'a-DISMISSED-authorized-approval-never-counts',
-    pinnedApprovalVerdict([approvedAt(GOVERNED_APPROVERS[1], HEAD), { state: 'DISMISSED', user: { login: GOVERNED_APPROVERS[1] }, commit_id: HEAD }], HEAD)
+    authorizedApprovalVerdict([approvedAt(GOVERNED_APPROVERS[1], HEAD), { state: 'DISMISSED', user: { login: GOVERNED_APPROVERS[1] }, commit_id: HEAD }], HEAD)
       .state === 'unapproved',
   );
-  assert('no-reviews-at-all-is-unapproved-under-this-predicate-too', pinnedApprovalVerdict([], HEAD).state === 'unapproved');
+  assert('no-reviews-at-all-is-unapproved-under-this-predicate-too', authorizedApprovalVerdict([], HEAD).state === 'unapproved');
   assert(
     'an-unauthorized-approval-does-not-mask-an-authorized-one-on-an-older-commit',
-    pinnedApprovalVerdict([approvedAt('not-authorized', HEAD), approvedAt(GOVERNED_APPROVERS[1], OLD)], HEAD).approvers.join() === GOVERNED_APPROVERS[1],
+    authorizedApprovalVerdict([approvedAt('not-authorized', HEAD), approvedAt(GOVERNED_APPROVERS[1], OLD)], HEAD).approvers.join() === GOVERNED_APPROVERS[1],
   );
   assert(
     'a-COMMENTED-review-by-an-authorized-account-is-not-an-approval',
-    pinnedApprovalVerdict([{ state: 'COMMENTED', user: { login: GOVERNED_APPROVERS[0] }, commit_id: HEAD }], HEAD).state === 'unapproved',
+    authorizedApprovalVerdict([{ state: 'COMMENTED', user: { login: GOVERNED_APPROVERS[0] }, commit_id: HEAD }], HEAD).state === 'unapproved',
   );
   assert(
     'the-state-comparison-is-case-insensitive-the-API-has-shipped-both',
-    pinnedApprovalVerdict([{ state: 'approved', user: { login: GOVERNED_APPROVERS[0] }, commit_id: OLD }], HEAD).state === 'approved',
+    authorizedApprovalVerdict([{ state: 'approved', user: { login: GOVERNED_APPROVERS[0] }, commit_id: OLD }], HEAD).state === 'approved',
   );
   // The head is a printed READING now, never a gate: an approval on an earlier
   // commit is reported AND counted at the same time, and a head that could not
   // be read reports nothing instead of failing closed.
-  const olderReading = pinnedApprovalVerdict([approvedAt(GOVERNED_APPROVERS[0], OLD)], HEAD);
+  const olderReading = authorizedApprovalVerdict([approvedAt(GOVERNED_APPROVERS[0], OLD)], HEAD);
   assert(
     'an-older-commit-is-REPORTED-as-a-reading-and-COUNTED-at-the-same-time',
-    olderReading.staleApprovers[0]?.login === GOVERNED_APPROVERS[0] &&
-      olderReading.staleApprovers[0]?.commitId === OLD &&
+    olderReading.approvalsOnEarlierCommits[0]?.login === GOVERNED_APPROVERS[0] &&
+      olderReading.approvalsOnEarlierCommits[0]?.commitId === OLD &&
       olderReading.approvers.join() === GOVERNED_APPROVERS[0],
     JSON.stringify(olderReading),
   );
   assert(
     'an-unreadable-head-no-longer-fails-closed-it-simply-reports-no-reading',
-    pinnedApprovalVerdict([approvedAt(GOVERNED_APPROVERS[0], HEAD)], undefined).state === 'approved' &&
-      pinnedApprovalVerdict([approvedAt(GOVERNED_APPROVERS[0], HEAD)], undefined).staleApprovers.length === 0 &&
-      pinnedApprovalVerdict([approvedAt(GOVERNED_APPROVERS[0], '')], '').state === 'approved',
+    authorizedApprovalVerdict([approvedAt(GOVERNED_APPROVERS[0], HEAD)], undefined).state === 'approved' &&
+      authorizedApprovalVerdict([approvedAt(GOVERNED_APPROVERS[0], HEAD)], undefined).approvalsOnEarlierCommits.length === 0 &&
+      authorizedApprovalVerdict([approvedAt(GOVERNED_APPROVERS[0], '')], '').state === 'approved',
   );
 
   // ── decomposition, and the multi-PR group trap ────────────────────────────
@@ -1325,7 +1330,7 @@ export async function selfTest() {
   const clearV = run('merge_group', clearRows);
   assert('a-clear-merge-group-is-CLEAR-and-exits-0', clearV.conclusion === 'clear' && clearV.exitCode === EXIT_CLEAR);
   assert('and-it-made-zero-review-lookups', clearV.apiCalls === 0);
-  const refusedV = run('merge_group', [row(9527, ['AGENTS.md'])], new Map([[9527, pinnedApprovalVerdict([], HEAD)]]));
+  const refusedV = run('merge_group', [row(9527, ['AGENTS.md'])], new Map([[9527, authorizedApprovalVerdict([], HEAD)]]));
   assert('an-unapproved-governed-merge-group-is-REFUSED-with-code-3', refusedV.conclusion === 'refused' && refusedV.exitCode === EXIT_REFUSED_UNAPPROVED);
   const clearedV = run('merge_group', [row(9527, ['AGENTS.md'])], new Map([[9527, authorizedPass()]]));
   assert('an-authorized-approval-CLEARS-the-merge-group-and-exits-0', clearedV.conclusion === 'cleared' && clearedV.exitCode === EXIT_CLEAR);
@@ -1335,7 +1340,7 @@ export async function selfTest() {
     olderShaV.conclusion === 'cleared' && olderShaV.exitCode === EXIT_CLEAR,
     JSON.stringify(olderShaV.conclusion),
   );
-  const outsiderV = run('merge_group', [row(9527, ['AGENTS.md'])], new Map([[9527, pinnedApprovalVerdict([approvedAt('not-authorized', HEAD)], HEAD)]]));
+  const outsiderV = run('merge_group', [row(9527, ['AGENTS.md'])], new Map([[9527, authorizedApprovalVerdict([approvedAt('not-authorized', HEAD)], HEAD)]]));
   assert('an-unauthorized-account-approval-REFUSES-the-merge-group-with-code-3', outsiderV.conclusion === 'refused' && outsiderV.exitCode === EXIT_REFUSED_UNAPPROVED);
   const unreadableV = run('merge_group', [row(9527, ['AGENTS.md'])], new Map([[9527, unreadableApproval('HTTP 502')]]));
   assert('an-unreadable-review-list-is-a-REFUSAL-not-a-pass', unreadableV.conclusion === 'refused' && unreadableV.exitCode === EXIT_REFUSED_UNREADABLE);
@@ -1346,7 +1351,7 @@ export async function selfTest() {
   const partial = run(
     'merge_group',
     [row(11, ['AGENTS.md']), row(12, ['skills/x/SKILL.md'], 'b'.repeat(40))],
-    new Map([[11, authorizedPass()], [12, pinnedApprovalVerdict([], HEAD)]]),
+    new Map([[11, authorizedPass()], [12, authorizedApprovalVerdict([], HEAD)]]),
   );
   assert('one-approved-pr-does-NOT-carry-an-unapproved-sibling-through-the-same-group', partial.exitCode === EXIT_REFUSED_UNAPPROVED);
 
@@ -1366,7 +1371,7 @@ export async function selfTest() {
   battery('the replay fixtures: the three incidents this guard descends from');
   for (const replay of REPLAYS) {
     const rows = [row(replay.pr, replay.files, 'e'.repeat(40), replay.subject)];
-    const queued = run('merge_group', rows, new Map([[replay.pr, pinnedApprovalVerdict([], HEAD)]]));
+    const queued = run('merge_group', rows, new Map([[replay.pr, authorizedApprovalVerdict([], HEAD)]]));
     assert(`replay-REFUSES-at-the-queue: ${replay.name}`, queued.exitCode === EXIT_REFUSED_UNAPPROVED, JSON.stringify(queued.conclusion));
     const early = run('pull_request', rows, new Map([[replay.pr, approvalVerdict([])]]));
     assert(`replay-only-WARNS-on-the-pr: ${replay.name}`, early.conclusion === 'warned' && early.exitCode === EXIT_CLEAR);
