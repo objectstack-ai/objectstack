@@ -33,7 +33,7 @@
 // both production dispatch paths build it that way: REST `/actions` in
 // `domains/actions.ts` and MCP `run_action` in `action-execution.ts`. The
 // engine's static strip runs under `if (!opCtx.context?.isSystem)`, so it is
-// SKIPPED for an action body - on the create path as well, since #14147 put a
+// SKIPPED for an action body - on the create path as well, since the 2026-09-03 ruling put a
 // static strip there under the SAME gate. The conditional strip is not: it runs
 // before that guard, over the caller-supplied keys, and `isSystem` is explicitly
 // NOT an exemption there (#9107's LOCK 2, pinned in
@@ -55,7 +55,7 @@
 //
 // --- SCOPE - deliberately narrow, so a finding is worth reporting ----------
 //
-//   - Only `update` / `updateById`, and since #14147 for ONE reason rather than
+//   - Only `update` / `updateById`, and since the 2026-09-03 ruling for ONE reason rather than
 //     two. The premise this bullet used to carry - "INSERT is exempt from BOTH
 //     strips" - is SUPERSEDED: the maintainer ruling of 2026-09-03 (option C,
 //     overturning their own 2026-07-24 "INSERT (all callers) exempt" row) put
@@ -168,7 +168,7 @@ export const READONLY_ACTION_WRITE_EXCLUSIONS: readonly BodyWritePatternExclusio
 const APPLICABLE_PATTERN_IDS: ReadonlySet<string> = new Set(READONLY_ACTION_WRITE_PATTERN_IDS);
 
 /**
- * The REFUSAL this rule owes a reason for, declared as data (#14147).
+ * The REFUSAL this rule owes a reason for, declared as data (the 2026-09-03 ruling).
  *
  * `insert` / `create` are absent from {@link STRIP_SUBJECT_METHODS}, and until
  * the 2026-09-03 ruling the reason was a one-liner - "INSERT is exempt from both
@@ -177,7 +177,7 @@ const APPLICABLE_PATTERN_IDS: ReadonlySet<string> = new Set(READONLY_ACTION_WRIT
  * surviving reasons are written down here and pinned, the same way
  * {@link READONLY_ACTION_WRITE_EXCLUSIONS} pins the shapes this rule leaves
  * alone. ⛔ Neither reason may be restated as "INSERT is exempt": that sentence
- * is false about the engine as of #14147.
+ * is false about the engine as of the 2026-09-03 ruling.
  */
 export const READONLY_ACTION_INSERT_SILENCE = {
   methods: ['insert', 'create'] as readonly string[],
@@ -193,7 +193,7 @@ export const READONLY_ACTION_INSERT_SILENCE = {
     {
       id: 'action-body-is-system-elevated',
       reason:
-        'the STATIC strip now runs inside `engine.insert` for a non-system caller (#14147), but an ' +
+        'the STATIC strip now runs inside `engine.insert` for a non-system caller (the 2026-09-03 ruling), but an ' +
         "action body's `ctx.api` is `ql.createContext(buildActionExecutionContext(ec))` and that is " +
         '`{ ...ec, isSystem: true }` - so it is skipped on THIS surface for exactly the reason it is ' +
         'skipped on `update` here, and a finding would state something false about a write that lands. ' +

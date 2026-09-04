@@ -1224,7 +1224,7 @@ export function stripReadonlyFields(
      */
     hookWrittenKeys?: ReadonlySet<string>;
     /**
-     * [#14147] Which write path is calling. Omitted means `'update'`, so every
+     * Which write path is calling. Omitted means `'update'`, so every
      * pre-existing call site logs byte-identical text; `engine.insert` passes
      * `'insert'` so the line describes a create and drops the `preserveAudit`
      * remedy, which is UPDATE-only.
@@ -1312,13 +1312,13 @@ export function stripReadonlyFields(
  *
  * Why a separate, narrower function rather than reusing the one above. It was
  * originally because INSERT was exempt from the author-declared static-`readonly`
- * strip inside the engine (#3413) — that exemption is GONE (#14147: ruling C,
- * 2026-09-03), and `engine.insert` now runs {@link stripReadonlyFields} over
+ * strip inside the engine — that exemption is GONE (ruling C, 2026-09-03), and
+ * `engine.insert` now runs {@link stripReadonlyFields} over
  * {@link staticReadonlyInsertSubject} for a non-system caller. What keeps this
  * function separate is what it always also did: it owns the runtime-owned types
  * under a WIDER `preserveAudit` exemption than the create side grants an
  * author-declared column, and its message states the runtime-owned reason
- * rather than an author-declared lock — #5628 injects `readonly: true` onto
+ * rather than an author-declared lock — the spec injects `readonly: true` onto
  * every `autonumber`, so the two would otherwise be indistinguishable to the
  * reader of a log line.
  * Runtime-owned fields carry none of that ambiguity: nobody may seed a record
@@ -1469,13 +1469,13 @@ export function stripRuntimeOwnedFields(
 }
 
 /**
- * [#14147] The INSERT-side subject of {@link stripReadonlyFields}: the schema
+ * The INSERT-side subject of {@link stripReadonlyFields}: the schema
  * VIEW an `engine.insert` static-`readonly` pass may judge, or `null` when the
  * object has nothing for it to judge (the common case, and the cheap exit).
  *
  * ## Why the insert side needs a view at all
  *
- * Maintainer ruling of 2026-09-03 (option C) made a static `readonly` field
+ * The maintainer ruling of 2026-09-03 (option C) made a static `readonly` field
  * enforced IN THE ENGINE on INSERT for non-system callers, exactly as on UPDATE,
  * and superseded the 2026-07-24 row "INSERT (all callers) exempt". The
  * enforcement is {@link stripReadonlyFields} itself — one implementation, one
@@ -1489,22 +1489,22 @@ export function stripRuntimeOwnedFields(
  *  - **Runtime-owned types** ({@link isRuntimeOwnedField}) are already stripped
  *    on this path by {@link stripRuntimeOwnedFields}, under the WIDER
  *    `preserveAudit` exemption a historical import needs to reinstate its legacy
- *    record numbers (#3493/#5503). Re-judging them here — without that flag, see
+ *    record numbers. Re-judging them here — without that flag, see
  *    below — would delete exactly what the pass before it legitimately kept. The
- *    warning would also be wrong: #5628 injects `readonly: true` onto every
+ *    warning would also be wrong: the spec injects `readonly: true` onto every
  *    `autonumber`, so `stripReadonlyFields` would report an author-declared lock
  *    where `runtimeOwnedStripWarning` states the true, actionable reason.
  *
  *  - **Platform objects** (`managedBy` set, or the reserved `sys_` namespace)
  *    carry their OWN field-write governance that a silent strip must not
- *    pre-empt (ADR-0086 / #3004): a forged `managed_by: 'package'` or
+ *    pre-empt (ADR-0086): a forged `managed_by: 'package'` or
  *    `package_id` on `sys_permission_set` is REFUSED with a 403, and several of
  *    those columns are `readonly`, so stripping them would silently swallow the
  *    payload the guard exists to reject. That boundary is the deleted copy's
  *    (`applySystemFields` draws the same platform-vs-authored line) and it was
  *    ruled on its own merits, NOT on the "INSERT is exempt" row that ruling C
  *    superseded — so it is carried over rather than dropped in passing. The
- *    #3043/#14147 threat is an app's approval/status/verdict column, never
+ *    threat this strip answers is an app's approval/status/verdict column, never
  *    `sys_`.
  *
  * ⚠️ The UPDATE path applies NEITHER exclusion, deliberately: it has no
@@ -1532,14 +1532,14 @@ export function staticReadonlyInsertSubject(
 }
 
 /**
- * [#6640, moved by #14147] THE loud half of the `preserveAudit` ruling — a
+ * THE loud half of the `preserveAudit` ruling — a
  * non-system INSERT that asks for the historical-import exemption is TOLD it
  * does not exist on this path.
  *
  * ## Why the create side refuses an exemption the update side grants
  *
  * `FieldSchema.readonly`'s `.describe()` promised the `preserveAudit` exemption
- * (#3493) on BOTH write paths, and `docs/protocol/objectql/security.mdx` agreed.
+ * on BOTH write paths, and `docs/protocol/objectql/security.mdx` agreed.
  * Only UPDATE ever implemented it: {@link stripReadonlyFields} consults
  * {@link isPreservableUnderAudit} when the caller passes the flag, while the
  * create-side strip has never read `preserveAudit` at all — `isSystem` is its
@@ -1554,7 +1554,7 @@ export function staticReadonlyInsertSubject(
  * side keeps honouring `isSystem` alone. Honouring `preserveAudit` here instead
  * would hand a NON-system caller (`treatAsHistorical` arrives on an ordinary
  * REST import request) the ability to seed the approval/status columns the strip
- * exists to protect, in one POST — the #3043 threat model reversed, for a
+ * exists to protect, in one POST — the create-side threat model reversed, for a
  * capability with no measured consumer. Replaying archival readonly facts on
  * INSERT is available today from a system context.
  *
@@ -1580,7 +1580,7 @@ export function staticReadonlyInsertSubject(
  * `{created: 2, errors: 0}` to `{created: 0, errors: 2}`.
  *
  * The silence this replaces was specific: the drop itself already surfaces
- * through `droppedFields` (#3431), but a caller who EXPLICITLY asked for the
+ * through the dropped-field channel, but a caller who EXPLICITLY asked for the
  * exemption could not tell "your fields were stripped by the ordinary rule" from
  * "the exemption you requested does not exist on this path". This says the
  * second one, by name. It fires ONLY when `preserveAudit` was requested AND
@@ -1592,11 +1592,11 @@ export function staticReadonlyInsertSubject(
 export function preserveAuditIgnoredOnInsertWarning(object: string, fields: readonly string[]): string {
   return (
     `preserveAudit is UPDATE-only and was IGNORED on this INSERT` +
-    `${object ? ` (object '${object}')` : ''}: the historical-import exemption (#3493) applies when a ` +
+    `${object ? ` (object '${object}')` : ''}: the historical-import exemption applies when a ` +
     `record is UPDATED, never when it is created, so the readonly field(s) ${fields.join(', ')} were ` +
     `STRIPPED from this create rather than preserved. To replay archival readonly facts on INSERT, ` +
     `write from a system context (\`context.isSystem\`) — a non-system create may not seed a readonly ` +
-    `column (#3043/#6640).`
+    `column.`
   );
 }
 
@@ -1641,7 +1641,7 @@ export interface StripWarningOptions {
    */
   readonly strict?: boolean;
   /**
-   * [#14147] Which write this line is about. Default `'update'`, which is what
+   * Which write this line is about. Default `'update'`, which is what
    * every pre-existing caller means and what keeps their bytes identical.
    *
    * It exists because ruling C put the static strip on the CREATE path too, and
@@ -1649,7 +1649,7 @@ export interface StripWarningOptions {
    * COMMITTED WITHOUT IT", "a beforeUpdate hook does NOT need this", and the
    * `preserveAudit` remedy — which on a create is not merely mis-worded but
    * FALSE, the exemption being UPDATE-only by the 2026-08-08 ruling. Offering a
-   * remedy that would not have worked is the defect #8141 removed from this very
+   * remedy that would not have worked is the defect already removed once from this very
    * message (it told a caller to pass `isSystem: true`, a strictly worse posture,
    * to silence a line that should never have printed). Rather than repeat it, the
    * create path says `verb: 'insert'` and this message drops the sentence.
@@ -1681,7 +1681,7 @@ export interface StripWarningOptions {
  * have kept the field this line names. See {@link StripWarningOptions}.
  */
 function preserveAuditRemedySentence(options?: StripWarningOptions): string {
-  // [#14147] ⛔ Never on a create: `preserveAudit` is an UPDATE-path exemption
+  // ⛔ Never on a create: `preserveAudit` is an UPDATE-path exemption
   // (maintainer, 2026-08-08), so on the insert path this whole sentence would
   // advertise a remedy that cannot work. The create side's own line —
   // `preserveAuditIgnoredOnInsertWarning` — says the opposite, by name, and
@@ -1810,7 +1810,7 @@ export function readonlyStripWarning(
       : insert
         ? `the caller-supplied value was DROPPED and the create ` +
           `is being COMMITTED WITHOUT IT — the call returns success while this column takes its ` +
-          `declared defaultValue instead of the value you sent (#14147).`
+          `declared defaultValue instead of the value you sent.`
         : `the caller-supplied value was DROPPED and the update ` +
           `is being COMMITTED WITHOUT IT — the call returns success while this column keeps its stored ` +
           `value (#2948).`;

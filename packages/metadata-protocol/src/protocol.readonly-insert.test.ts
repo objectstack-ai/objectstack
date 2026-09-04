@@ -27,6 +27,7 @@
 // hole survived four rulings.
 
 import { describe, it, expect, vi } from 'vitest';
+import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import type { DroppedFieldsEvent } from '@objectstack/spec/data';
 
@@ -83,7 +84,13 @@ function makeProtocol(schema: any = SCHEMA) {
     }),
     insertMany: vi.fn(async (object: string, rows: any[], options?: any) =>
       run(object, rows, options).map((record) => ({ ok: true, record }))),
-    findOne: vi.fn(async () => ({ id: 'src-1', title: 'Source', approval_status: 'approved' })),
+    // `cloneData` reads the source through the engine's find path — opened with
+    // the shared predicate so this double cannot be looser than `ObjectQL.findOne`
+    // (`check:engine-double-contract`).
+    findOne: vi.fn(async (object: string, query?: EngineFindOneQueryInput) => {
+      assertEngineFindOnePredicate(object, query);
+      return { id: 'src-1', title: 'Source', approval_status: 'approved' };
+    }),
   };
   const p = new ObjectStackProtocolImplementation(engine as any);
   return { p, engine, inserts };
