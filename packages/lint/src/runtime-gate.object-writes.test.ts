@@ -113,6 +113,13 @@ describe('the object write door dispatches at the adjudicated scope (#4716)', ()
       'validateFunctionalCompleteness',
       'validateManagedApiMethods',
       'validatePresetComparands', // #8793 — at this door before #4716
+      // [#15254] The reference-integrity suite, dispatched here so its ONE
+      // object-judging member runs (`validateObjectFieldRefs`). The entry
+      // arrives; the suite's per-member `runtimeTypes` decides who judges the
+      // snapshot, and every other member keeps `['flow','view']` or the frozen
+      // `['flow']` default. Before this, the only door a Studio tenant has ran
+      // no reference-integrity rule at all on an object write.
+      'validateReferenceIntegrity',
       'lintAutonumberFormats',
       'validateSecurityPosture', // #8310 — at this door before #4716
       'validateRuleCompilability',
@@ -240,6 +247,7 @@ describe('the object write door dispatches at the adjudicated scope (#4716)', ()
       'validateFunctionalCompleteness',
       'validateManagedApiMethods',
       'validatePresetComparands',
+      'validateReferenceIntegrity', // [#15254]
       'lintAutonumberFormats',
       'validateSecurityPosture',
       'validateRuleCompilability',
