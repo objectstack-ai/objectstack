@@ -46,6 +46,10 @@ to build, no dependencies to resolve, and no trust boundary to cross.
   `packages/runtime/src/cloud/marketplace-install-local-plugin.ts` and
   ADR-0016 §9.
 
+> **Path note (2026-09):** every `packages/runtime/src/cloud/…` path in this record is historical and
+> deliberately unlinked — `packages/runtime/src/cloud/` was removed by ADR-0006 Phase 4 (`15fcd360d`, 2026-06-11), which took the cloud plugins out of the framework runtime.
+> They are kept as written because they record where this decision landed at the time.
+
 The next step is **plugins**: distributable units that contain **executable
 code and npm dependencies**, not just metadata. The repository already has the
 *authoring* half of this story:

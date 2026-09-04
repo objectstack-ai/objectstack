@@ -454,6 +454,7 @@ enabled), so disable state would otherwise be lost. Persistence is local-first:
 - `../objectui/.../layout/UnifiedSidebar.tsx` — `active_package` selector (authoring target)
 - `packages/runtime/src/http-dispatcher.ts` — `assemblePackageManifest` + `GET /packages/:id/export` (§9.2)
 - `packages/runtime/src/cloud/marketplace-install-local-plugin.ts` — inline-manifest import + register-before-persist (§9.2–9.3)
+  *(Path note, 2026-09: historical and deliberately unlinked — `packages/runtime/src/cloud/` was removed by ADR-0006 Phase 4 (`15fcd360d`, 2026-06-11), which took the cloud plugins out of the framework runtime.)*
 - `packages/objectql/src/registry.ts` — `isPackageDisabled` + `listItems` disabled-package filter (§9.5); `setInitialDisabledPackageIds` + `installPackage` disable seeding (§9.7)
 - `packages/metadata-protocol/src/protocol.ts` — `getMetaItems` final-merge disabled-package filter (§9.5)
 - `packages/objectql/src/engine.ts` — `registerApp` consumes `tools` / `skills` (§9.6)

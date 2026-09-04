@@ -194,7 +194,9 @@ Five files in `packages/platform-objects/src/metadata/` duplicate a Zod schema t
 
 `sys-metadata.object.ts` and `sys-metadata-history.object.ts` are retained — they are the storage substrate, not duplicates of any metadata type.
 
-`MetadataProjector` (`packages/metadata/src/projection/metadata-projector.ts`) becomes dead code under this ADR. It is left in place for one release as a no-op safety net, and removed in the next major along with the deprecated objects.
+`MetadataProjector` (`packages/metadata/src/projection/metadata-projector.ts` — *Path note, 2026-09:
+the module was deleted in `516f48ca9`, the same change that implemented this ADR; the name survives
+only in `packages/metadata/src/migrations/drop-projection-tables.ts`*) becomes dead code under this ADR. It is left in place for one release as a no-op safety net, and removed in the next major along with the deprecated objects.
 
 ## Consequences
 
@@ -652,7 +654,7 @@ coverage:
 
 ### Admin UX: field-level Code-vs-Effective diff
 
-The Layers tab in the metadata editor (`packages/app-shell/.../LayeredDiff.tsx`
+The Layers tab in the metadata editor (`objectui:packages/app-shell/src/views/metadata-admin/LayeredDiff.tsx`
 in `objectui`) now defaults to a **Diff** view that compares
 `layered.code` (artifact baseline) against `layered.effective` (merged)
 field-by-field. Each top-level key renders as a row with a colour-coded
@@ -680,7 +682,7 @@ the present), so this section is where the present tense lives.
 
 | Addendum (d) says | Today | Superseded by |
 |:---|:---|:---|
-| "`addSysMetadataOverlayIndex(driver)` — exported from `@objectstack/metadata/migrations`" | **Deleted.** The export and its module are gone; `packages/metadata/src/migrations/index.ts` carries a tombstone in their place that records the measurement and forbids re-introducing a producer for `idx_sys_metadata_overlay_active` in that package. | #6771 (PR #6824, merged 2026-08-08); `.changeset/overlay-index-single-producer.md` |
+| "`addSysMetadataOverlayIndex(driver)` — exported from `@objectstack/metadata/migrations`" | **Deleted.** The export and its module are gone; `packages/metadata/src/migrations/index.ts` carries a tombstone in their place that records the measurement and forbids re-introducing a producer for `idx_sys_metadata_overlay_active` in that package. | #6771 (PR #6824, merged 2026-08-08); `.changeset/overlay-index-single-producer.md` (since consumed by the release, `24c1b91e4`) |
 | "a new idempotent migration is provided and run automatically by `DatabaseLoader.ensureSchema()`" | **No overlay-index DDL is issued from that method at all**, on either of its two paths — both call sites went with the export. What `ensureSchema()` still runs is the `project_id` → `environment_id` forward migration, which is a different concern. | #6771 (PR #6824) |
 | "Drivers ignore `indexes` declarations on synced tables today" | **False** — and this one is *not* a consequence of #6771. `SqlDriver.syncDeclaredIndexes` materializes every declared index, through knex's `table.unique(fields, { indexName })` / `table.index(fields, name)`, skipping by name for idempotence. | The driver itself. The spec records the same fact where the `IDataDriver` capability bit `indexes` was retired for having no reader: "Declared indexes are materialised by the driver itself during schema sync (`SqlDriver.syncDeclaredIndexes`)". |
 

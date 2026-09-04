@@ -97,7 +97,9 @@ Three real mechanisms operate across those tiers, each invented separately:
   object, or nav items to another package's app, merged at boot. Package-grain, additive,
   upgrade-safe.
 
-And one **paper** mechanism: `packages/spec/src/kernel/metadata-customization.zod.ts` declares a
+And one **paper** mechanism: `packages/spec/src/kernel/metadata-customization.zod.ts` (*Path note,
+2026-09: the module was retired and deleted whole on 2026-08-29, `9e0ba21a1` — the disposition §6.4
+records; the path is kept as the record of what this section measured*) declares a
 three-layer (system/platform/user) overlay protocol with field-level change tracking — exported,
 published in the reference docs, and consumed by **zero** runtime packages
 ([#12057](https://github.com/objectstack-ai/objectstack/issues/12057)). §6.4 records its
