@@ -142,7 +142,13 @@ describe('validateWidgetBindings (reference integrity, issue #1721)', () => {
     expect(findings[0].hint).toContain('Did you mean "sum_amount"?');
   });
 
-  it('(d) errors on the issue repro: yAxis.field naming the stale base column', () => {
+  // [#15463] The three positions below are the WHOLE of what `chart-field-unknown`
+  // covers, and all three are WARNING tier: the pinned `@object-ui` revision
+  // (`.objectui-sha`) refuses every one of them as a binding, so the authored key
+  // is ignored rather than mis-queried. The `error`-tier assertions these four
+  // cases used to carry are inverted below — the tier itself is the finding this
+  // card changed, so a silent flip back must red here rather than anywhere else.
+  it('(d) warns on the issue repro: yAxis.field naming the stale base column', () => {
     const findings = validateWidgetBindings(chartStack({
       chartConfig: {
         type: 'bar',
@@ -151,15 +157,21 @@ describe('validateWidgetBindings (reference integrity, issue #1721)', () => {
       },
     }));
     expect(findings).toHaveLength(1);
-    expect(findings[0].severity).toBe('error');
+    expect(findings[0].severity).toBe('warning');
+    expect(findings[0].severity).not.toBe('error');
     expect(findings[0].rule).toBe(CHART_FIELD_UNKNOWN);
     expect(findings[0].where).toContain('spend_by_category');
     expect(findings[0].message).toContain('chartConfig.yAxis[0].field "amount"');
     expect(findings[0].message).toContain('declared measures: sum_amount, ticket_count');
+    // The TRUE consequence: the axis `field` is stripped, not queried and missed.
+    expect(findings[0].message).toContain('ignores an authored axis `field`');
+    expect(findings[0].message).toContain('silent no-op');
+    expect(findings[0].message).not.toContain('will not contain');
     expect(findings[0].hint).toContain('Did you mean "sum_amount"?');
+    expect(findings[0].hint).toContain(`suppressWarnings: ['${CHART_FIELD_UNKNOWN}']`);
   });
 
-  it('(d) errors on xAxis.field that is not a dataset dimension', () => {
+  it('(d) warns on xAxis.field that is not a dataset dimension', () => {
     const findings = validateWidgetBindings(chartStack({
       chartConfig: {
         type: 'bar',
@@ -168,12 +180,19 @@ describe('validateWidgetBindings (reference integrity, issue #1721)', () => {
       },
     }));
     expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe('warning');
+    expect(findings[0].severity).not.toBe('error');
     expect(findings[0].rule).toBe(CHART_FIELD_UNKNOWN);
     expect(findings[0].message).toContain('chartConfig.xAxis.field "categories"');
+    // The derived binding the renderer keeps is NAMED, so the author can see
+    // what the chart is actually plotting.
+    expect(findings[0].message).toContain('x-axis stays bound to this widget\'s first dimension (category)');
+    expect(findings[0].message).not.toContain('will not contain');
     expect(findings[0].hint).toContain('Did you mean "category"?');
+    expect(findings[0].hint).toContain(`suppressWarnings: ['${CHART_FIELD_UNKNOWN}']`);
   });
 
-  it('(d) errors on series[].name that resolves to no selected measure', () => {
+  it('(d) warns on series[].name that resolves to no selected measure', () => {
     const findings = validateWidgetBindings(chartStack({
       chartConfig: {
         type: 'bar',
@@ -181,8 +200,17 @@ describe('validateWidgetBindings (reference integrity, issue #1721)', () => {
       },
     }));
     expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe('warning');
+    expect(findings[0].severity).not.toBe('error');
     expect(findings[0].rule).toBe(CHART_FIELD_UNKNOWN);
     expect(findings[0].message).toContain('chartConfig.series[0].name "value"');
+    // A series entry is matched BY NAME, so an unmatched entry is dropped
+    // WHOLE — its presentation lands on nothing. That is a different sentence
+    // from the axis positions, and the difference is the point.
+    expect(findings[0].message).toContain('matches an authored entry BY NAME');
+    expect(findings[0].message).toContain('lands on nothing');
+    expect(findings[0].message).not.toContain('will not contain');
+    expect(findings[0].hint).toContain('`series[].name` selects WHICH derived series');
   });
 
   it('(d) a declared-but-unselected measure gets the targeted message', () => {
@@ -194,9 +222,33 @@ describe('validateWidgetBindings (reference integrity, issue #1721)', () => {
       },
     }));
     expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe('warning');
     expect(findings[0].rule).toBe(CHART_FIELD_UNKNOWN);
     expect(findings[0].message).toContain('not selected in the widget\'s values');
+    expect(findings[0].message).not.toContain('will not contain');
     expect(findings[0].hint).toContain('Add "ticket_count" to the widget\'s values');
+  });
+
+  it('(d) all three refused keys are suppressible per widget (#15463)', () => {
+    // Suppressibility is what the tier BUYS, and it is per widget rather than
+    // global — pinned on one widget carrying all three positions at once so a
+    // half-applied suppression (one position still shouting) reds here.
+    const allThree = {
+      type: 'bar',
+      xAxis: { field: 'categories' },
+      yAxis: [{ field: 'amount' }],
+      series: [{ name: 'value' }],
+    };
+    const loud = validateWidgetBindings(chartStack({ chartConfig: allThree }));
+    expect(loud.map((f) => f.rule)).toEqual([
+      CHART_FIELD_UNKNOWN, CHART_FIELD_UNKNOWN, CHART_FIELD_UNKNOWN,
+    ]);
+    expect(loud.every((f) => f.severity === 'warning')).toBe(true);
+    const quiet = validateWidgetBindings(chartStack({
+      chartConfig: allThree,
+      suppressWarnings: [CHART_FIELD_UNKNOWN],
+    }));
+    expect(quiet).toEqual([]);
   });
 
   it('(d) warns when a `combo` widget has no chartConfig at all', () => {
@@ -1670,6 +1722,27 @@ describe('#15462 acceptance — both ids are advisory on `validate` and `build`'
       const { errors, advisories } = splitBySeverity(runAuthoringRules(command, { normalized: noDims }));
       expect(errors.map((f) => f.rule)).not.toContain(CHART_DIMENSIONS_MISSING);
       expect(advisories.map((f) => f.rule)).toContain(CHART_DIMENSIONS_MISSING);
+    });
+  }
+});
+
+/**
+ * [#15463] The same end-to-end tier pin for `chart-field-unknown`, which USED to
+ * gate. It is the sharper of the two: this id did not arrive as a warning, it
+ * was demoted, and the demotion is visible on the publish door as well as on the
+ * CLI (`runtime-gate.test.ts` re-pins the door's accept-set). Nothing else in
+ * this file would notice a later flip back.
+ */
+describe('#15463 acceptance — the refused chartConfig binding keys advise, never gate', () => {
+  const refusedKey = chartStack({
+    chartConfig: { type: 'bar', xAxis: { field: 'categories' }, yAxis: [{ field: 'sum_amount' }] },
+  });
+
+  for (const command of ['validate', 'build'] as const) {
+    it(`chart-field-unknown advises (never gates) \`${command}\``, () => {
+      const { errors, advisories } = splitBySeverity(runAuthoringRules(command, { normalized: refusedKey }));
+      expect(errors.map((f) => f.rule)).not.toContain(CHART_FIELD_UNKNOWN);
+      expect(advisories.map((f) => f.rule)).toContain(CHART_FIELD_UNKNOWN);
     });
   }
 });

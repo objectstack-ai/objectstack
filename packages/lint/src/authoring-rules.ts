@@ -547,8 +547,8 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // hold a forward reference; publishing refuses it with the key path named.
   // The snapshot carries `datasets` for exactly this rule (`RuntimeStackContext`
   // — without it every legitimate board reads as dangling, the 3-phantom
-  // measurement). `surfaces` is per-RULE, so this flip puts all SIX of the
-  // rule's error ids on the publish gate, not just `widget-dataset-unknown` —
+  // measurement). `surfaces` is per-RULE, so this flip puts the rule's error
+  // ids on the publish gate, not just `widget-dataset-unknown` —
   // ruled 2026-08-15: they are one coherent "this board cannot render"
   // reference-integrity class, and the ~6× wider accept-set narrowing was
   // accepted knowingly rather than splitting the dataset limb into its own
@@ -556,6 +556,13 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // filter (registry machinery that weakens "delete a rule from the table and
   // enforcement stops in the same commit"). Warning-tier ids ride along on the
   // advisory channel and never block (#4463 P1).
+  //
+  // [#15463] That accepted class was SIX ids and is now FIVE:
+  // `chart-field-unknown` dropped to `warning`, because the pinned `@object-ui`
+  // renderer refuses its three `chartConfig` binding keys outright — the board
+  // renders identically with or without them, so the id describes an ignored
+  // key rather than a binding the analytics service cannot satisfy. It still
+  // runs at the door and still reaches the author, on the advisory channel.
   {
     name: 'validateWidgetBindings',
     tier: 'gating',
