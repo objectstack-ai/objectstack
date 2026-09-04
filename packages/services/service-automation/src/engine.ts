@@ -5946,6 +5946,14 @@ export class AutomationEngine implements IAutomationService {
      * `restored: true` and one `RESTORE_IN_PROGRESS`, rather than two calls
      * both claiming the restore.
      *
+     * [#13937] The third half, across replicas and across TIME: the snapshot
+     * is read from the durable terminal row before this process's own
+     * journal, so a hot copy left behind on the replica that stranded the run
+     * cannot re-arm it after another replica restored and finished it — the
+     * row that no longer carries a snapshot is the record, and the copy is
+     * dropped. (The journal still answers alone where there is no row to
+     * ask: no store, no run history, or a history write that never landed.)
+     *
      * And it cannot produce two traversals, by construction: **this verb does
      * not resume.** It re-arms the pause and stops. The continuation is an
      * ordinary {@link resume} afterwards, through the same authority gate, the
@@ -6031,12 +6039,27 @@ export class AutomationEngine implements IAutomationService {
                 );
             }
 
-            // The journal: this process's hot copy first, then the durable
-            // copy on the run's own terminal history row. One reader, two
-            // sources — the same pairing `resume` itself uses for suspensions.
-            let consumed = this.consumedSuspensions.get(runId);
-            if (!consumed && this.store?.loadTerminal) {
-                let terminal: RunRecord | null;
+            // The journal: the DURABLE copy on the run's own terminal history
+            // row FIRST, then this process's hot copy. [#13937] The order is
+            // the point, and it is the order `loadSuspendedRunStrict` reads
+            // suspensions in (#13617): the hot journal is a per-process cache,
+            // the terminal row is the record. Read hot-first, the replica that
+            // stranded a run keeps a copy that outlives the run — another
+            // replica restores, resumes and finishes it, and a repeated restore
+            // here would re-arm a COMPLETED run, whose next resume re-runs
+            // every node after the pause: shape 2's silent double-run, through
+            // this verb's side door (pinned in `stranded-run-status.test.ts`,
+            // measured red on the hot-first tree). So a terminal row that
+            // exists and carries NO snapshot is the last word — a later
+            // terminal record wrote it (`recordLog` writes explicit NULLs) —
+            // and the hot copy is DROPPED rather than honoured. The hot copy
+            // answers only when there is no row to ask: no store, a store
+            // without run history, or a history write that never landed
+            // (reported at `error` where it failed).
+            let consumed: ConsumedSuspension | undefined;
+            let terminal: RunRecord | null = null;
+            let durableSaysNoSnapshot = false;
+            if (this.store?.loadTerminal) {
                 try {
                     terminal = await this.store.loadTerminal(runId);
                 } catch (err) {
@@ -6060,13 +6083,32 @@ export class AutomationEngine implements IAutomationService {
                         consumedAt: terminal.finishedAt ?? terminal.startedAt,
                         error: terminal.error ?? '',
                     };
+                } else if (terminal) {
+                    durableSaysNoSnapshot = true;
                 }
+            }
+            if (durableSaysNoSnapshot) {
+                // Stale by definition — the record moved on without it.
+                this.consumedSuspensions.delete(runId);
+            } else if (!consumed) {
+                consumed = this.consumedSuspensions.get(runId);
             }
 
             if (!consumed) {
                 // Nothing to restore — say WHICH nothing. The remedy differs for
                 // every one of these and a single "bad run" refusal would send an
                 // operator looking for the wrong thing.
+                //
+                // The durable row, when there is one, is the later word on how
+                // the run ended than this process's own log — which may still
+                // say `failed` for a run another replica finished.
+                if (terminal?.status === 'completed') {
+                    return this.refuseRestore(
+                        runId,
+                        'RUN_COMPLETED',
+                        `Run '${runId}' completed — there is no unresumable state to exit`,
+                    );
+                }
                 const logged = await this.getRun(runId);
                 if (!logged) {
                     return this.refuseRestore(runId, 'RUN_NOT_FOUND', `No run '${runId}' is known`);
