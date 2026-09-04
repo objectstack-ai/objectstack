@@ -126,18 +126,21 @@ describe('SessionUser.language retirement (#14788, ADR-0049 — maintainer rulin
     // input type is the enforcement: writing the key anywhere in the monorepo
     // fails `tsc`; objectui was measured at zero readers at dispatch.
     // Excluded, with the reason: the tombstone itself names the key in its
-    // prescription, and this pin names it in its own assertions.
+    // prescription; this pin names it in its own assertions; and the ADR-0087
+    // ledger (`migrations/entries/**` + the generated `migrations/registry.ts`)
+    // is the retirement's own RECORD of the key, not a reader of it.
     const fs = await import('node:fs');
     const path = await import('node:path');
     const { fileURLToPath } = await import('node:url');
     const srcRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
     const self = fileURLToPath(import.meta.url);
     const tombstone = path.join(srcRoot, 'api', 'auth.zod.ts');
+    const ledger = path.join(srcRoot, 'migrations');
     const readers: string[] = [];
     const walk = (dir: string) => {
       for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
         const full = path.join(dir, entry.name);
-        if (entry.isDirectory()) walk(full);
+        if (entry.isDirectory()) { if (full !== ledger) walk(full); }
         else if (entry.name.endsWith('.ts') && full !== self && full !== tombstone) {
           const src = fs.readFileSync(full, 'utf-8');
           if (/SessionUser/.test(src) && /\.language\b/.test(src)) readers.push(path.relative(srcRoot, full));
@@ -145,8 +148,10 @@ describe('SessionUser.language retirement (#14788, ADR-0049 — maintainer rulin
       }
     };
     walk(srcRoot);
-    // Anti-vacuity: the walk must have seen the tombstone's own neighbours.
+    // Anti-vacuity: the walk must have seen the tombstone's own neighbours,
+    // and the excluded ledger really is where the key's record lives.
     expect(fs.existsSync(tombstone)).toBe(true);
+    expect(fs.existsSync(path.join(ledger, 'entries', 'retired-keys', '18.api__SessionUser__language.ts'))).toBe(true);
     expect(readers, 'a reader of SessionUser.language reappeared — the key is retired (#14788)').toEqual([]);
   });
 });
