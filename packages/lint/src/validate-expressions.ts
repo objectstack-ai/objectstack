@@ -80,6 +80,13 @@
 
 import { validateExpression, collectCelRootIdentifiers, parseCelToAst, SCOPE_ROOTS } from '@objectstack/formula';
 import { collectFlowGraphs, resolveFlowNodeExpressions } from '@objectstack/spec/automation';
+// [#15137] The `value`-role half. Same two published primitives the engine
+// composes at `registerFlow` (`AutomationEngine.valueEnvelopeRefusals`), in the
+// same order: the SHAPE rule lives in the spec's `AssignmentValueSchema` (it
+// refuses a non-`cel` dialect and the source-less `{ dialect: 'cel' }` that
+// `validateExpression` reads as "not authored"), the CEL rule in
+// `validateExpression('value', …)`. Neither refusal string is spelled here.
+import { AssignmentValueSchema, ASSIGNMENT_VALUE_ENVELOPE_REFUSAL } from '@objectstack/spec/automation';
 import type { FlowNodeParsed } from '@objectstack/spec/automation';
 
 import { collectFlowVariableNames, shadowedFieldReads, shadowedFieldMessage } from './flow-variable-scope.js';
@@ -1065,6 +1072,37 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
     for (const w of res.warnings) issues.push({ where, message: w.message, source: w.source, severity: 'warning' });
   };
 
+  /**
+   * A declared `value` slot (#15137) — today the `assignment` node's
+   * `assignments.*`, the one slot whose job is to compute a value into a
+   * variable.
+   *
+   * The resolver emits ONLY envelope-shaped objects for this role, so anything
+   * that arrives is an author declaring an expression. `error`, matching the
+   * engine's `registerFlow` throw: build and run time must agree about what
+   * registers, and a malformed envelope used to be stored verbatim and rendered
+   * by `notify` as JSON with nothing said at any layer.
+   */
+  const checkDeclaredValue = (where: string, raw: unknown): void => {
+    if (raw == null) return;
+    // `celSourceOf` — not a second read of `.source`: the same helper every
+    // other slot in this file locates its finding with.
+    const source = celSourceOf(raw) ?? '';
+    const shape = AssignmentValueSchema.safeParse(raw);
+    if (!shape.success) {
+      // Already prefixed by the spec's own refinement — do not say it twice.
+      for (const issue of shape.error.issues) issues.push({ where, message: issue.message, source, severity: 'error' });
+      return;
+    }
+    const res = validateExpression('value', raw as { dialect?: string; source?: string });
+    for (const e of res.errors) {
+      issues.push({ where, message: `${ASSIGNMENT_VALUE_ENVELOPE_REFUSAL} ${e.message}`, source: e.source, severity: 'error' });
+    }
+    for (const w of res.warnings) {
+      issues.push({ where, message: w.message, source: w.source, severity: 'warning' });
+    }
+  };
+
   // ── Flows ──────────────────────────────────────────────────────────
   for (const flow of asArray(stack.flows)) {
     const flowName = typeof flow.name === 'string' ? flow.name : '(unnamed flow)';
@@ -1135,8 +1173,17 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
         // reconciliation ratchet still sees the marker.
         const nodeType = typeof node.type === 'string' ? node.type : '';
         for (const found of resolveFlowNodeExpressions(nodeType, cfg)) {
-          if (found.entry.role !== 'predicate') continue;
           const slotWhere = `${at} · node '${node.id}' (${nodeType}) ${found.entry.label} at config.${found.path}`;
+          // [#15137] `value` slots are checkable too, by their own rule — see
+          // `checkDeclaredValue`. Not shadowing-checked: the shadow diagnostic is
+          // about a bare identifier resolving to a variable instead of a field,
+          // and a value envelope is evaluated in the flow-variable scope by
+          // design — there is no field reading to displace.
+          if (found.entry.role === 'value') {
+            checkDeclaredValue(slotWhere, found.value);
+            continue;
+          }
+          if (found.entry.role !== 'predicate') continue;
           checkDeclaredPredicate(slotWhere, found.value);
           // [#14288] The shadowing warning is about the SCOPE an expression is
           // evaluated in, not about which key it was authored under — so it
