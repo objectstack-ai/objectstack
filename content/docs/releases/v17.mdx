@@ -4832,12 +4832,25 @@ are retired in this range — `MobileComponentConfig` (objectui `90665e07a`),
 ## Upgrade checklist
 
 One checklist per release, for the release you are landing on **and** every
-release you cross to get there. 17.2.0 and 17.3.0 do not have a consolidated
-checklist here yet; until they do, their migration steps are the per-change
-**Migration** notes in [Breaking changes & migration in
-17.2.0](#breaking-changes--migration-in-1720) and [Breaking changes & migration
-in 17.3.0](#breaking-changes--migration-in-1730), which is where
-[Upgrading](/docs/upgrading#per-release-specifics) points for those two releases.
+release you cross to get there.
+
+<Callout type="warn">
+**How far each list below has actually been walked.** The 17.3.0 list is the only
+one on this page written against a **measured upgrade**: an application
+repository was moved 17.2.0 → 17.3.0 by a reader holding nothing but the
+published documentation, the `CHANGELOG.md` files inside the published npm
+tarballs, and the `os` CLI's own output. Every line it produced is marked
+**measured**, and several of them are changes whose own changelog entries are not
+marked breaking — which is exactly why a checklist is not a restatement of
+[Breaking changes & migration in 17.3.0](#breaking-changes--migration-in-1730).
+
+⛔ **That run covered one hop, 17.2.0 → 17.3.0. Nobody has walked 17.1.0 →
+17.2.0.** Every line in the 17.2.0 list is derived from a change's own
+**Migration** note and is marked **not exercised**: accurate about what changed,
+unproven about what it costs to cross. The two are kept apart on purpose — a step
+nobody has run, presented beside steps that were, is how a reader finishes a
+checklist and believes they are done.
+</Callout>
 
 ### 17.0.0
 
@@ -5267,6 +5280,221 @@ data or on a published wire contract. Work through them before upgrading.
   `successMessage` / `errorMessage`, and a flow ACTION that ran and failed carries
   `errorMessage` and the run `summary` in `error.details` — review anything that
   parsed the previous generic text.
+
+### 17.2.0
+
+⚠️ **Not exercised.** No upgrade across 17.1.0 → 17.2.0 has been walked
+end-to-end. Every line here is derived from the change's own **Migration** note
+in [Breaking changes & migration in
+17.2.0](#breaking-changes--migration-in-1720); none of it carries a measurement,
+and the effort each one costs on a real deployment is unknown. Treat this list as
+a reading order for that section, not as a walked path.
+
+- **Audit every by-id write whose `where` names `id` plus other keys (#11009,
+  #11142).** This is the one that used to fail silently: a compare-and-set like
+  `{ where: { id, status: { $in: [...] } } }` dropped every key but `id` and
+  landed unconditionally. Declare `multi: true` to have the full `where` honoured
+  (the result becomes a matched count), or drop the extra keys to keep an
+  unconditional single-row write. **Flow authors reach this through
+  `update_record` / `delete_record` nodes** whose `filter` names `id` alongside
+  other keys — those configs were unconditional before and refuse loudly now.
+- **Make `data.id` and `where.id` agree**, or drop one of them. A by-id update
+  naming two different rows answers `UPDATE_ID_MISMATCH` / `400`, including ids
+  that differ only in type (`42` beside `'42'`).
+- **⛔ Rewrite any dashboard, alert rule or recording rule keyed on
+  `http_request_errors_total` (#9834).** It is retired, and nothing throws or
+  warns: the series simply stops receiving samples, so the panel reads a **flat
+  zero** that looks like a healthy server. Move to
+  `http_requests_total{status=~"5.."}`, which the transport emits and which
+  therefore covers every inbound surface rather than the dispatcher's routes only.
+  Delete any host-code read of `SEMCONV.httpRequestErrorsTotal` /
+  `RUNTIME_METRICS.httpRequestErrorsTotal`; `tsc` will point at the site.
+- **Delete four retired authorable keys, then re-run `os validate`**:
+  `sys_position.permissions`, `MetricSchema.filters`, the `record:highlights`
+  highlight-field `icon`, and the `themes` carrier key. Each is now refused **by
+  name at parse** rather than silently dropped, so a stack carrying one fails to
+  build. Deployed database columns are untouched.
+- **Grant the federation capabilities to any credential calling
+  `datasources.external.*`** (or the CLI's `datasource` commands). These routes
+  admitted any authenticated caller before and now require
+  `manage_platform_settings` or `manage_metadata` per route, answering `403
+  PERMISSION_DENIED` by name. `admin_full_access` already carries both; a
+  purpose-built operator set is the case to check.
+- **Remove `os g agent` from any script, Makefile or CI step** — it is retired and
+  exits 1. Author skills instead.
+- **Re-check analytics filters nested inside `$or` / `$not` / a nested `$and`.** A
+  cross-object filter in that position used to reach `aggregate` unchecked and
+  answer the wrong number; both analytics doors and a dataset's definition-level
+  `filter` now refuse it the way a top-level one already did.
+- **A publish naming `?package=` no longer finds a package-less draft** — it
+  answers `404 [no_draft]`. If the draft you mean carries no package binding,
+  retry the publish without the query parameter.
+- **Hosts injecting their own logger sink** must supply `warn`; it is
+  non-optional on thirteen sink types now. Compile-time only.
+- **Callers of `IHttpOutbox.redeliver` / `MessagingService.redeliverHttp`** move to
+  the new signature (the caller's tenant is threaded rather than swept globally),
+  and a delivery row claimed between read and write now reports
+  `DELIVERY_NOT_ELIGIBLE` instead of success.
+- **`meta.getLegalNextStates` is singular** — the plural route registration is
+  retired.
+
+### 17.3.0
+
+This is the largest release of the v17 line — 862 changelog entries, 100 of them
+self-marked breaking — and the only one on this page whose checklist was written
+from a **measured upgrade**. Lines marked **measured** were walked on a real
+application moving 17.2.0 → 17.3.0 using published artifacts only; lines marked
+**not exercised** are derived from a change's own **Migration** note in [Breaking
+changes & migration in 17.3.0](#breaking-changes--migration-in-1730) and were not
+reached by that run.
+
+**Getting onto the release**
+
+- **Move all twelve-or-so `@objectstack/*` pins as one set, regenerate the
+  lockfile, and leave `specVersion` / `engines.protocol` alone** — this is a move
+  inside one major, so the protocol declarations do not change. *Measured:* this
+  step is not a tag swap for an npm-consuming app, and until now no page described
+  it; the full three-step procedure is now [Moving the dependency
+  pins](/docs/upgrading#moving-the-dependency-pins).
+- **Expect `os migrate meta --from 17` to report `Nothing to migrate`, and do not
+  read that as completion.** *Measured:* it exited 0 with exactly that line while
+  **nine** of the items on this page were live and unaddressed on that stack. Its
+  scope is the protocol chain; everything else on this list is outside it. (It
+  also prints `runtime 17.0.0` on a 17.3.0 install.)
+
+**Metadata and build — run `os validate` before you ship**
+
+- **The author-time rule count moves 41 → 42, and the new rule can refuse a stack
+  that built clean on 17.2.0 (#14747).** *Measured:*
+  `security-controlled-by-parent-ambiguous-relation` refuses an object that
+  declares `sharingModel: 'controlled_by_parent'` when two or more of its fields
+  tie for the master relation — because the resolver picks the master with
+  `Array.prototype.find`, which makes the security boundary depend on **field
+  declaration order**, silently. The remedy the diagnostic names first is to
+  promote the intended master into the required `master_detail` tier so only one
+  candidate remains; demoting the other candidate works equally. The CLI
+  diagnostic names the rule, the ADR, both candidates and which one currently
+  wins — read it rather than guessing.
+- **Re-run `os validate` for the rest of the author-time refusals**, which are
+  parse-time and name the key: strict plugin manifests, retired
+  `page.components[].responsive`, `allowRestore` / `allowPurge`, `lookup` /
+  `master_detail` requiring a non-empty `reference`, `null` refused in `$in` /
+  `$nin` / `$between` / ordering comparands, undeclared keys on `address` and
+  `location` values, `radio` with `multiple: true`, and the ADR-0049 retirements
+  whose whole migration is "delete the key". Full list under [Author-time
+  refusals that can fail a stack which built clean on
+  17.2.0](#breaking-changes--migration-in-1730). *Not exercised* beyond the rule
+  above.
+- **Re-run your i18n gate — the lint family widened onto surfaces it did not read
+  before.** *Measured:* zero findings to **429** on one app, across dataset
+  labels / descriptions / dimensions / measures, object validation messages, view
+  bulk actions and page component labels. `os lint` itself still exits 0 (these
+  are warnings); a deployment enforcing its own zero-tolerance gate is what turns
+  red. ⚠️ **This is a one-way door for the translation files:** 17.3.0 both
+  demands these keys and accepts them, while 17.2.0 refuses them
+  (`Unrecognized key(s) on this locale of the translation bundle: 'datasets'`, and
+  likewise for `_validations` and `bulkActions`). Translations authored to clear
+  this gate cannot ride back to 17.2.0.
+
+**Data and database**
+
+- **⛔ On an existing database, deduplicate your autonumber columns before the new
+  unique indexes can build.** *Measured.* An `autonumber` field that omits
+  `unique` now parses to `unique: 'organization'` (`f8e8f03`, #13894) and the
+  drivers enforce it (#13197, #13239), so a table already holding duplicate
+  auto-numbers **cannot take the index**. The driver neither fails the boot nor
+  skips silently: it logs on the `error` channel, and the drift pass names the
+  conflicting key groups with row counts. Run `os migrate duplicates`,
+  deduplicate, then re-run `os migrate plan` — **until you do, that constraint is
+  not enforced**, so a boot that came up cleanly is not evidence the index exists.
+  A database created fresh took all ten indexes with zero errors.
+- **Back-fill `sys_record_share` (#14484).** The object is tenant-scoped now, so
+  pre-existing grant rows need attention. *Not exercised.*
+
+**Deployment and configuration**
+
+- **⛔ A walled deployment (`OS_TENANCY_POSTURE=group` or `isolated`) must declare
+  `OS_PLATFORM_OWNER_EMAIL`, or it will not boot.** *Measured:* `AuthPlugin.init()`
+  refuses to start without it. Walled postures now elevate only the env-declared
+  platform owner and never the first registrant (`9735662`, #11184), and the
+  bootstrap no longer mints the org-less grant row at all — `hasPlatformAdminGrant`
+  is read off the resolver's posture verdict rather than recomputed from grant
+  rows. If a test or a fixture leaned on implicit first-user promotion, give that
+  actor an authored grant instead.
+- **Decide your audience posture explicitly (`4f24e9d`).** It collapses to
+  `invite_only | email_domain | open` and **defaults to `invite_only`**, so a
+  deployment that relied on open self-registration must declare it. *Not
+  exercised.*
+- **A permission-store read failure now fails LOUD (#13279).** A deployment that
+  had been quietly running degraded starts erroring. *Not exercised.*
+- **`POST /api/v1/automation/:name/toggle` requires `manage_metadata`
+  (`266436a`).** *Not exercised.*
+
+**Application code, hooks and flows**
+
+- **Search your hooks for `delete ctx.input.<field>` — it was a no-op and now
+  actually deletes (#12277).** *Measured.* This shipped graded `minor`
+  deliberately, and its own changelog says it: any hook already containing that
+  statement has been inert until now and starts taking effect on upgrade. Both
+  mechanisms closed together — the in-process flat-record Proxy grew a
+  `deleteProperty` trap, and the sandbox path diffs deletions against the entry
+  snapshot instead of using `Object.assign`, which cannot represent a removal. If
+  a hook needs a column to arrive `null` rather than absent, it must **assign**,
+  not delete.
+- **An undeclared key written by a hook is now refused by every driver
+  (`b003cf2`).** *Measured.* Through 17.2.0 `driver-memory` accepted and stored a
+  key the object never declared — outside field-level security by construction,
+  since an undeclared field can carry no `fieldPermissions` entry — while the
+  SQLite drivers refused it as a raw error carrying neither an ADR-0112 `code` nor
+  a `status`. All three now answer `INVALID_FIELD` / `400`. Real behaviour change
+  for any app whose hook quietly wrote an undeclared key on `driver-memory`.
+- **A flow value expression naming an unknown function now refuses the run
+  (#11060).** *Measured.* The evaluator knows its own closed vocabulary
+  (`round` / `floor` / `ceil` / `abs` / `min` / `max`, plus `NOW()` / `TODAY()`),
+  and anything else is a loud refusal. This deletes a genuinely dangerous silent
+  branch: `TOMORROW()` used to be rewritten to null and the field written
+  `undefined`, and the unwrapped form `LOWER({x})` interpolated to the **literal
+  text** `LOWER(ACME  Corp)` and landed in the database looking as though it had
+  worked.
+- **Tests that pin the record-level `FORBIDDEN` message text will fail.**
+  *Measured.* The message is user-facing prose now
+  (`insufficient privileges to update crm_contract` became `You do not have access
+  to change or delete this record. …`). `code` and `status` are unchanged, which is
+  the switchable contract — pin those tightly and the message loosely.
+- **Hook bodies can now see they are on a per-row dispatch (#11552).** *Measured.*
+  `ctx.dispatch` (`{ mode, index }`) and a frozen `ctx.input.options`
+  (`{ multi, where }`) projection cross the sandbox boundary; `ctx.input.id` still
+  does not, and `scope` does not cross with `dispatch`. This is a capability
+  rather than a break — but a test pinning their **absence** goes red, and that
+  red is the blocker lifting.
+- **Deep imports into `@objectstack/cli` subpaths stop resolving
+  ([#15325](https://github.com/objectstack-ai/objectstack/issues/15325)).**
+  *Measured.* 17.2.0 published no `exports` field; 17.3.0 adds one admitting only
+  `.` and `./console`, so an import of anything else fails `tsc` with TS2307 and
+  Node with `ERR_PACKAGE_PATH_NOT_EXPORTED`. `@objectstack/cli/package.json` is
+  sealed too. If you depend on an unratified subpath, resolve the package root
+  (which the map does admit) and load the file relative to it while the subpath is
+  considered for ratification.
+- **Move `client.projects.*` to `client.environments.*` (#12866, #12882,
+  ADR-0006 D2).** *Not exercised* — the measured app calls no control plane. **No
+  aliases exist and none are coming**; response keys move with the methods, and
+  `os environments --format json` changes shape. The full method and key table is
+  in [the detail section](#breaking-changes--migration-in-1730) — use it rather
+  than paraphrasing it.
+- **Four SDK methods stop handing you the dispatcher envelope (#13079)**, and a
+  third `UPDATE_ID_MISMATCH` shape refuses — a truthy scalar `data.id` beside a
+  declared but non-scalar `options.where.id` (`5d16379`, #11230), the shape
+  17.2.0 deliberately left standing. *Not exercised.*
+
+**Measured and found clean**
+
+These were checked on the same run and needed no action. They are recorded
+because "we checked X and it was fine" is a checklist input too: seed data loaded
+unchanged on a fresh database (the predicted "our seed data stopped loading" from
+newly-enforced uniqueness did **not** materialise); a fresh boot produced zero
+`ERROR` lines with all ten unique indexes present; `os migrate meta` was correct
+as far as its scope goes; and the growth in non-gating `os validate` advisories
+(54 → 95) was pre-existing shapes newly reported, not new defects.
 
 ## References
 
