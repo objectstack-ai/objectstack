@@ -55,15 +55,24 @@
  *
  * ## Sections, and which are evidence vs. which are the bound
  *
- * §0 · positive control — the ladder is REACHED and the path WORKS. Without
- *      it "nothing reddened" is indistinguishable from "nothing ran".
- * §1 · the identity — every partition this read touches is env-wide, with a
- *      control proving the harness CAN see an org partition. GREEN before and
- *      after the collapse: this is the ablation's instrument, not its result.
- * §2 · the collapse — the active organization no longer changes how many
- *      reads the publish path issues. RED before the fix.
+ * §0 · positive control — the ladder is REACHED and the read resolves the row
+ *      the publish just wrote. Without it "nothing reddened" is
+ *      indistinguishable from "nothing ran".
+ * §1 · the identity — both rungs, run against one store, ask the engine the
+ *      same predicates and serve the same answer, with a control proving the
+ *      comparison CAN separate them (`view`). GREEN before and after the
+ *      collapse: this section is the ablation's instrument, not its result.
+ * §2 · the collapse — the read verb is no longer handed an organization the
+ *      gate drops, and one failing read is one read. RED before the fix.
  * §3 · the payload — a failed read-back is reported ONCE, not twice. RED
- *      before the fix, and the one thing the deletion demonstrably changes.
+ *      before the fix, and the one observable the deletion changes.
+ *
+ * ⭐ Measured here and NOT claimed by the card: `getMetaItem` answers a
+ * wrapper with no `item` rather than a falsy value for a name it cannot
+ * resolve, so `if (item) break` fires on the first attempt even on a MISS
+ * (§1 [MECHANISM]). The second rung therefore only ever executed on the THROW
+ * branch — where it repeated the identical failing read and appended the same
+ * sentence to a client-facing payload twice (§3).
  */
 
 import { describe, expect, it, vi } from 'vitest';
@@ -216,8 +225,6 @@ const PKG_ADMIN = (): any => ({
 interface DriveOptions {
     /** Session's active organization; `undefined` drives the one-rung branch. */
     activeOrganizationId?: string;
-    /** Read back a name no publish ever stored — the MISS path, where rung 2 runs. */
-    seedName?: string;
     /** Injection: the read-back throws this instead of answering. */
     readBackError?: () => Error;
 }
@@ -269,7 +276,7 @@ async function publishThenRead(opts: DriveOptions = {}) {
                 outcome: 'published',
                 publishedCount: 1,
                 failedCount: 0,
-                published: [{ type: 'seed', name: opts.seedName ?? SEED, version: 'h' }],
+                published: [{ type: 'seed', name: SEED, version: 'h' }],
                 failed: [],
             };
         },
@@ -315,6 +322,33 @@ async function publishThenRead(opts: DriveOptions = {}) {
     };
 }
 
+/**
+ * A self-correcting refusal of the shape `SysMetadataRepository` raises. It
+ * DECLARED itself 4xx (ADR-0112), which is what makes its sentence quotable to
+ * the author at all — the bound `packages-seed-apply-disclosure.test.ts` owns.
+ */
+const DECLARED_REFUSAL = () => {
+    const e: any = new Error(`[item_locked] seed "${SEED}" is locked by another publish`);
+    e.code = 'ITEM_LOCKED';
+    e.status = 403;
+    return e;
+};
+
+/** A store holding the published seed row, env-wide, exactly as publish leaves it. */
+function seededStore() {
+    const engine = makeEngine();
+    engine.rowsOf('sys_metadata').push({
+        id: 'row_seed_active',
+        type: 'seed',
+        name: SEED,
+        organization_id: null,
+        package_id: PKG,
+        state: 'active',
+        metadata: JSON.stringify(SEED_BODY),
+    });
+    return engine;
+}
+
 /** The `sys_metadata` predicates issued for `type:'seed'`, in order. */
 const seedReads = (engine: any): Array<Record<string, unknown>> =>
     engine.metaReads.filter((w: any) => w.type === 'seed');
@@ -324,8 +358,8 @@ const seedReads = (engine: any): Array<Record<string, unknown>> =>
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('#15068 · 0 · the publish-then-read path really runs', () => {
-    it('promotes the draft, reads the body back and loads the rows', async () => {
-        const { published, seedApplied, engine, getMetaItem } = await publishThenRead({
+    it('promotes the draft and reads the just-published body back out of the store', async () => {
+        const { published, engine, getMetaItem } = await publishThenRead({
             activeOrganizationId: ORG,
         });
 
@@ -341,12 +375,12 @@ describe('#15068 · 0 · the publish-then-read path really runs', () => {
         expect(getMetaItem).toHaveBeenCalled();
         expect(seedReads(engine).length).toBeGreaterThan(0);
 
-        // And the rows landed. `0 rows loaded` is the outage this ladder was
-        // written for; this assertion is what would catch it coming back.
-        expect(seedApplied?.success).toBe(true);
-        expect(seedApplied?.inserted).toBe(2);
-        expect(engine.rowsOf('project').map((r: any) => r.name).sort())
-            .toEqual(['Apollo', 'Gemini']);
+        // And it resolved the row the publish just wrote. `0 rows loaded` is
+        // the outage the ladder was written for, and THIS is the layer that
+        // outage lives at: the body coming back, from the right partition.
+        const served: any = await getMetaItem.mock.results[0]?.value;
+        expect(served?.item?.object).toBe('project');
+        expect(served?.item?.records).toHaveLength(2);
     });
 
     it('the session organization really reaches this request', async () => {
@@ -355,20 +389,21 @@ describe('#15068 · 0 · the publish-then-read path really runs', () => {
         // `applyPublishedSeeds` receives the SAME binding this route handed
         // `publishPackageDrafts` — one `resolveActiveOrganizationId` call
         // serves both. So an org here is what put the ladder on its two-rung
-        // branch: without this control, every measurement below could be of
-        // the one-rung branch and would prove nothing.
+        // branch: without this control every measurement below could be of the
+        // one-rung branch and would prove nothing.
         expect(publishRequest()?.organizationId).toBe(ORG);
     });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// §1 — the identity: the two rungs cannot choose. GREEN before AND after.
+// §1 — the identity. GREEN before AND after the collapse: this section is the
+//      ablation's instrument, not its result.
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe('#15068 · 1 · the org-first rung resolves to the env-wide read', () => {
+describe('#15068 · 1 · the two rungs resolve to one read', () => {
     it('`seed` is non-overridable, so the read gate drops the organization', () => {
-        // The registry fact the whole card rests on, read from the registry
-        // rather than restated.
+        // The registry fact the card rests on, read from the registry rather
+        // than restated.
         expect(DEFAULT_METADATA_TYPE_REGISTRY.find((e) => e.type === 'seed')?.allowOrgOverride)
             .toBe(false);
         expect(organizationIdForMetaRead('seed', ORG)).toBeUndefined();
@@ -377,65 +412,93 @@ describe('#15068 · 1 · the org-first rung resolves to the env-wide read', () =
         expect(organizationIdForMetaRead('view', ORG)).toBe(ORG);
     });
 
-    it('every partition the seed read-back touches is env-wide', async () => {
+    it('the two rungs issue the same predicates and serve the same answer', async () => {
+        // The measurement the deletion rests on, taken at the verb itself:
+        // run BOTH rungs against one store and compare what the engine was
+        // asked and what came back. Done for the HIT and the MISS, the only
+        // two branches the loop distinguishes.
+        for (const name of [SEED, 'no_such_seed']) {
+            const engine = seededStore();
+            const protocol = new ObjectStackProtocolImplementation(engine, () => new Map()) as any;
+
+            const orgFirst = await protocol.getMetaItem({ type: 'seed', name, organizationId: ORG });
+            const orgFirstReads = engine.metaReads.splice(0);
+            const envWide = await protocol.getMetaItem({ type: 'seed', name });
+            const envWideReads = engine.metaReads.splice(0);
+
+            expect(orgFirstReads.length, name).toBeGreaterThan(0);
+            expect(JSON.stringify(orgFirstReads), name).toBe(JSON.stringify(envWideReads));
+            expect(JSON.stringify(orgFirst), name).toBe(JSON.stringify(envWide));
+        }
+    });
+
+    it('[CONTROL] the same comparison DOES separate the two rungs for an overridable type', async () => {
+        // Anti-vacuity, and the reason the assertion above is a reading rather
+        // than a tautology: on `view` — `allowOrgOverride: true` — the org-first
+        // rung reads a partition the env-wide rung never touches.
+        const engine = seededStore();
+        const protocol = new ObjectStackProtocolImplementation(engine, () => new Map()) as any;
+
+        await protocol.getMetaItem({ type: 'view', name: 'anything', organizationId: ORG });
+        const orgFirstReads = engine.metaReads.splice(0);
+        await protocol.getMetaItem({ type: 'view', name: 'anything' });
+        const envWideReads = engine.metaReads.splice(0);
+
+        expect(JSON.stringify(orgFirstReads)).not.toBe(JSON.stringify(envWideReads));
+        expect(orgFirstReads.map((w: any) => w.organization_id)).toContain(ORG);
+    });
+
+    it('every partition the publish path touches for a seed is env-wide', async () => {
         const { engine } = await publishThenRead({ activeOrganizationId: ORG });
 
-        const partitions = [...new Set(seedReads(engine).map((w) => w.organization_id ?? null))];
-        expect(partitions).toEqual([null]);
+        expect([...new Set(seedReads(engine).map((w) => w.organization_id ?? null))])
+            .toEqual([null]);
     });
 
-    it('[CONTROL] the same harness DOES see an org partition for an overridable type', async () => {
-        // Anti-vacuity. If the engine could not observe an org-scoped read at
-        // all, the assertion above would be green for the wrong reason.
-        const engine = makeEngine();
+    it('[MECHANISM] a read that resolves nothing still answers a wrapper, so rung 2 is not even reached', async () => {
+        // Measured, and it is why the ladder is deader than the card claims:
+        // `getMetaItem` answers an envelope (`{ type, name, lock, editable, … }`)
+        // with no `item` rather than a falsy value, so `if (item) break` fires
+        // on the FIRST attempt even for a name nothing resolves. The only
+        // branch on which the second attempt ever executed is the THROW branch
+        // — where it repeats the identical failing read (§3).
+        //
+        // GREEN before and after the collapse. It is a bound on what the
+        // deletion can possibly have changed, not evidence that it changed it.
+        const engine = seededStore();
         const protocol = new ObjectStackProtocolImplementation(engine, () => new Map()) as any;
-        await protocol.getMetaItem({ type: 'view', name: 'anything', organizationId: ORG });
+        const miss = await protocol.getMetaItem({ type: 'seed', name: 'no_such_seed' });
 
-        const partitions = [...new Set(
-            engine.metaReads.filter((w: any) => w.type === 'view').map((w: any) => w.organization_id ?? null),
-        )];
-        expect(partitions).toContain(ORG);
-    });
-
-    it('a read that finds nothing issues byte-identical predicates', async () => {
-        // The MISS path — the only branch on which more than one attempt ever
-        // ran. Whatever number of predicates the publish path issues for a
-        // seed it cannot find, they are all the SAME predicate: nothing here
-        // can resolve a different row than anything else here.
-        const { engine } = await publishThenRead({
-            activeOrganizationId: ORG,
-            seedName: 'no_such_seed',
-        });
-
-        const reads = seedReads(engine).map((w) => JSON.stringify(w));
-        expect(reads.length).toBeGreaterThan(0);
-        expect([...new Set(reads)]).toHaveLength(1);
+        expect(miss).toBeTruthy();
+        expect(miss.item).toBeUndefined();
     });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// §2 — the collapse. RED before the fix (2 reads vs 1), GREEN after.
+// §2 — the collapse. RED before the fix, GREEN after.
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe('#15068 · 2 · the active organization no longer costs a round-trip', () => {
-    it('issues exactly one read-back per published seed, org or no org', async () => {
-        const withOrg = await publishThenRead({
-            activeOrganizationId: ORG, seedName: 'no_such_seed',
-        });
-        const withoutOrg = await publishThenRead({ seedName: 'no_such_seed' });
-
-        expect(withOrg.readBackArgs).toHaveLength(1);
-        expect(withOrg.readBackArgs).toHaveLength(withoutOrg.readBackArgs.length);
-    });
-
-    it('does not hand the read verb an organization it is contractually going to drop', async () => {
-        const { readBackArgs } = await publishThenRead({
-            activeOrganizationId: ORG, seedName: 'no_such_seed',
-        });
+describe('#15068 · 2 · the publish path stops spending an organization the gate drops', () => {
+    it('hands the read verb exactly the request the gate will act on', async () => {
+        const { readBackArgs } = await publishThenRead({ activeOrganizationId: ORG });
 
         // Not cosmetic: an `organizationId` on a non-overridable read is the
-        // shape #15063 and #14908 exist to stop reading as meaningful.
-        expect(readBackArgs[0]).toEqual({ type: 'seed', name: 'no_such_seed' });
+        // shape #14908 and #15063 exist to stop anyone reading as meaningful.
+        expect(readBackArgs).toEqual([{ type: 'seed', name: SEED }]);
+    });
+
+    it('issues one read-back per seed even when the read fails', async () => {
+        const withOrg = await publishThenRead({
+            activeOrganizationId: ORG, readBackError: DECLARED_REFUSAL,
+        });
+        const withoutOrg = await publishThenRead({ readBackError: DECLARED_REFUSAL });
+
+        // The throw branch is the one place the second rung ever ran. One
+        // failing read, reported once — and the same count with or without an
+        // active organization, which is the whole content of "the rung was
+        // dead".
+        expect(withOrg.readBackArgs).toHaveLength(1);
+        expect(withOrg.readBackArgs.length).toBe(withoutOrg.readBackArgs.length);
     });
 });
 
@@ -443,39 +506,27 @@ describe('#15068 · 2 · the active organization no longer costs a round-trip', 
 // §3 — the payload. The one observable the deletion changes.
 // ═══════════════════════════════════════════════════════════════════════════
 
-/**
- * A self-correcting refusal of the shape `SysMetadataRepository` raises. It
- * DECLARED itself 4xx (ADR-0112), which is what makes its sentence quotable
- * to the author at all — the bound `packages-seed-apply-disclosure.test.ts`
- * owns. Asserted here on `code` AND `status`, never a bare `toThrow()`: this
- * door does not throw, it REPORTS.
- */
-const DECLARED_REFUSAL = () => {
-    const e: any = new Error(`[item_locked] seed "${SEED}" is locked by another publish`);
-    e.code = 'ITEM_LOCKED';
-    e.status = 403;
-    return e;
-};
-
 describe('#15068 · 3 · a failed read-back is reported once, not twice', () => {
     it('quotes a declared 4xx refusal exactly once with an org active', async () => {
         const refusal = DECLARED_REFUSAL();
+        // ADR-0112 — the declaration that makes the sentence quotable to the
+        // author at all, asserted on `code` AND `status`. ⛔ Never a bare
+        // `toThrow()`: this door does not throw, it REPORTS, and the whole
+        // assertion is about what the report says.
         expect(refusal.code).toBe('ITEM_LOCKED');
         expect(refusal.status).toBe(403);
 
         const { seedApplied } = await publishThenRead({
-            activeOrganizationId: ORG,
-            readBackError: DECLARED_REFUSAL,
+            activeOrganizationId: ORG, readBackError: DECLARED_REFUSAL,
         });
 
         // `seedApplied.errors[]` rides on a 200 as DATA. Running the same
-        // failed read twice put the same sentence on it twice — an author
+        // failed read twice put the same sentence on it twice, and an author
         // reading two identical lines has no way to tell that from two
         // distinct failures.
-        const quoted = (seedApplied?.errors ?? []).filter(
+        expect(seedApplied?.errors?.filter(
             (e: unknown) => String(e) === `read ${SEED}: ${refusal.message}`,
-        );
-        expect(quoted).toHaveLength(1);
+        )).toHaveLength(1);
         expect(seedApplied?.success).toBe(false);
         expect(seedApplied?.error).toBe('seed apply: no readable seed bodies');
     });
