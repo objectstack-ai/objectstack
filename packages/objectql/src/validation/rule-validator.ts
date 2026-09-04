@@ -1222,6 +1222,13 @@ export function stripReadonlyFields(
      * proof, because a key in this set is a key this strip stops defending.
      */
     hookWrittenKeys?: ReadonlySet<string>;
+    /**
+     * [#14147] Which write path is calling. Omitted means `'update'`, so every
+     * pre-existing call site logs byte-identical text; `engine.insert` passes
+     * `'insert'` so the line describes a create and drops the `preserveAudit`
+     * remedy, which is UPDATE-only.
+     */
+    verb?: 'update' | 'insert';
   },
 ): Record<string, unknown> | undefined | null {
   const fields = objectSchema?.fields;
@@ -1286,6 +1293,7 @@ export function stripReadonlyFields(
     const warnOptions: StripWarningOptions = {
       strict,
       preserveAuditApplies: isPreservableUnderAudit(name, def),
+      ...(options?.verb !== undefined ? { verb: options.verb } : {}),
     };
     logger?.warn?.(
       def?.readonly
@@ -1632,6 +1640,21 @@ export interface StripWarningOptions {
    */
   readonly strict?: boolean;
   /**
+   * [#14147] Which write this line is about. Default `'update'`, which is what
+   * every pre-existing caller means and what keeps their bytes identical.
+   *
+   * It exists because ruling C put the static strip on the CREATE path too, and
+   * three of this message's sentences were update-shaped: "the update is being
+   * COMMITTED WITHOUT IT", "a beforeUpdate hook does NOT need this", and the
+   * `preserveAudit` remedy — which on a create is not merely mis-worded but
+   * FALSE, the exemption being UPDATE-only by the 2026-08-08 ruling. Offering a
+   * remedy that would not have worked is the defect #8141 removed from this very
+   * message (it told a caller to pass `isSystem: true`, a strictly worse posture,
+   * to silence a line that should never have printed). Rather than repeat it, the
+   * create path says `verb: 'insert'` and this message drops the sentence.
+   */
+  readonly verb?: 'update' | 'insert';
+  /**
    * `{ context: { preserveAudit: true } }` (#3493) would have KEPT this exact
    * field — so naming it is a remedy the reader can act on.
    *
@@ -1657,6 +1680,12 @@ export interface StripWarningOptions {
  * have kept the field this line names. See {@link StripWarningOptions}.
  */
 function preserveAuditRemedySentence(options?: StripWarningOptions): string {
+  // [#14147] ⛔ Never on a create: `preserveAudit` is an UPDATE-path exemption
+  // (maintainer, 2026-08-08), so on the insert path this whole sentence would
+  // advertise a remedy that cannot work. The create side's own line —
+  // `preserveAuditIgnoredOnInsertWarning` — says the opposite, by name, and
+  // only to the caller who actually asked for the exemption.
+  if (options?.verb === 'insert') return '';
   if (options?.preserveAuditApplies !== true) return '';
   return (
     ` A historical import restoring this record's own earlier values does NOT need that blanket ` +
@@ -1769,22 +1798,28 @@ export function readonlyStripWarning(
   options?: StripWarningOptions,
 ): string {
   const on = object ? ` on '${object}'` : '';
+  const insert = options?.verb === 'insert';
+  const noun = insert ? 'create' : 'update';
   const consequence =
     options?.strict === true
-      ? `the caller-supplied value was DROPPED and the update is being REFUSED ENTIRELY — this ` +
+      ? `the caller-supplied value was DROPPED and the ${noun} is being REFUSED ENTIRELY — this ` +
         `write passed options.strictReadonlyWrites, so NOTHING is written: not this column, and ` +
         `not the fields that would have survived the strip. The call throws ` +
         `ERR_READONLY_FIELD_REJECTED rather than returning success (#5126).`
-      : `the caller-supplied value was DROPPED and the update ` +
-        `is being COMMITTED WITHOUT IT — the call returns success while this column keeps its stored ` +
-        `value (#2948).`;
+      : insert
+        ? `the caller-supplied value was DROPPED and the create ` +
+          `is being COMMITTED WITHOUT IT — the call returns success while this column takes its ` +
+          `declared defaultValue instead of the value you sent (#14147).`
+        : `the caller-supplied value was DROPPED and the update ` +
+          `is being COMMITTED WITHOUT IT — the call returns success while this column keeps its stored ` +
+          `value (#2948).`;
   return (
     `Field '${field}'${on} is read-only: ` +
     consequence +
     ` Server-side code that legitimately writes read-only columns (a plugin, a cron / ` +
     `background job persisting a system-computed value) must declare itself trusted by passing ` +
-    `{ context: { isSystem: true } } on the write; a beforeUpdate hook does NOT need this because ` +
-    `hook-written keys are not caller-supplied.` +
+    `{ context: { isSystem: true } } on the write; a ${insert ? 'beforeInsert' : 'beforeUpdate'} ` +
+    `hook does NOT need this because hook-written keys are not caller-supplied.` +
     preserveAuditRemedySentence(options) +
     observeInsteadSentence(options) +
     ` Forged read-only keys from untrusted client ` +

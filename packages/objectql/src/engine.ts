@@ -10182,6 +10182,7 @@ export class ObjectQL implements IObjectQLEngine {
                 {
                   strictReadonlyWrites: options?.strictReadonlyWrites === true,
                   hookWrittenKeys: rowHookWrittenKeys[i],
+                  verb: 'insert',
                 },
               ) as Record<string, unknown>;
               if (stripped === rows[i]) continue;

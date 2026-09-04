@@ -178,11 +178,19 @@ describe('#14147 — THE REPRO, inverted: engine.insert enforces static readonly
     expect([...o.dropped[0].fields].sort()).toEqual(['approval_status', 'completed_at']);
   });
 
-  it('WARNs at `warn`, naming the field and a remedy that is true here', async () => {
+  it('WARNs at `warn`, naming the field — and every claim the line makes is true of a CREATE', async () => {
     const o = await observeInsert({ title: 'T', completed_at: 'x' });
     const line = o.warns.find((m) => m.includes('completed_at'));
     expect(line, 'a silent drop is the #4632 second-class shape this ruling closes').toBeDefined();
     expect(line).toContain('duly_task');
+    // The update-path message would have said three things that are false here.
+    // #8141/#8214's rule: a strip line may state only what is true of the call
+    // in front of it, and a remedy it names must be one that would have worked.
+    expect(line, 'this is a create, and the column takes its default rather than keeping a stored value')
+      .toContain('the create is being COMMITTED WITHOUT IT');
+    expect(line).toContain('beforeInsert');
+    expect(line, '⛔ preserveAudit is UPDATE-only — offering it here is the #8141 defect')
+      .not.toContain('preserveAudit: true');
   });
 
   it('a stripped forgery falls back to the field’s defaultValue, not to NULL', async () => {
