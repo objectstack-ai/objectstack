@@ -46,12 +46,40 @@
  *     `data.name` is still `'lead_views'`. `VALIDATION_ERROR` / 400.
  *
  * The boot loop reconciles that field (`toRegister = { …item, name: itemName }`)
- * and the artifact door does not, so the same document is silently mis-keyed by
- * one registrar and a hard boot failure through the other. That residual
- * asymmetry is a SEPARATE defect at a separate site and is filed as its own
- * card; what belongs here is the derivation, and both sites are pinned on it
- * below — the artifact door's refusal message names the key it derived, which
- * is direct evidence of its answer.
+ * and the artifact door does not, so the same document was silently mis-keyed
+ * by one registrar and a hard boot failure through the other.
+ *
+ * ---------------------------------------------------------------------------
+ * ⭐ [#14666] That residual asymmetry is CLOSED, and this file inverted with it
+ * ---------------------------------------------------------------------------
+ * The asymmetry above was filed as its own card and ruled on 2026-09-03
+ * (direction 2, maintainer, via the director seat): the boot loop's SOURCE
+ * registrar REFUSES a container whose `name` is set and differs from the key
+ * derived from `object` (or `type`) — the same refusal the artifact/HMR door
+ * already raised, naming both values — and stops rewriting `name` silently.
+ * Directions 1 (make the artifact door rewrite too, reversing #7378 row 1) and
+ * 3 (forbid `ViewSchema.name` on object-scoped containers in spec) were
+ * refused.
+ *
+ * ⚠️ So the pins below changed MEANING, not just expectations, and a reader
+ * arriving from #14399 should know which is which. What this file pinned
+ * before was *what each door did*; nothing in it asserted which was right, and
+ * the card warned that "an implementer who reads a green suite as agreement
+ * will be misled". Two boot-loop assertions inverted — they are marked ⭐ in
+ * place, each carrying what it used to read. The artifact door's pins did NOT
+ * move; the ruling says they stay, and they are now also the reference the
+ * boot loop's refusal envelope is asserted EQUAL to.
+ *
+ * The derivation #14399 owns is not lost by that inversion: at both SOURCE
+ * registrars it is now read the same way — the refusal names the key it
+ * derived, which is direct evidence of its answer.
+ *
+ * Scope was the ruling's named main risk ("keeping that scope tight is the
+ * implementation's main risk"), so the CONTROLS carry the weight here: a
+ * container with no `name`, one whose `name` already agrees, one that declares
+ * no binding at all, a standalone ViewItem, a non-`views` metadata kind, and
+ * the assembled `viewItems:` channel must all be untouched, and each has a
+ * case below.
  *
  * ---------------------------------------------------------------------------
  * Why this file drives BOTH registrars rather than pinning one
@@ -70,7 +98,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { ObjectQL } from './engine';
-import { isAggregatedViewContainer } from '@objectstack/spec';
+import { isAggregatedViewContainer, AssembledViewArtifactSchema } from '@objectstack/spec';
 import { MetadataPlugin, deriveViewContainerObject } from '@objectstack/metadata';
 
 const PKG = 'com.acme.crm';
@@ -116,10 +144,36 @@ const AGREED_KEYS = ['crm_lead', 'crm_lead.default', 'crm_lead.hot'];
 // Registrar A — the ObjectQL boot loop (`registerMetadataCollections`).
 // ---------------------------------------------------------------------------
 
-function bootRegistrarKeys(container: unknown): string[] {
+/**
+ * Drive the boot loop once and report BOTH outcomes — the keys it minted and
+ * the refusal it raised, if any.
+ *
+ * [#14666] Split out of `bootRegistrarKeys` because the divergent container is
+ * now REFUSED here, and "what did it register before it threw?" became a
+ * question worth asking: a refusal that has already filed half the document is
+ * not a refusal. Every caller that expects registration keeps using
+ * `bootRegistrarKeys`, which re-throws — so a control that starts refusing
+ * fails loudly, carrying the refusal's own message, instead of silently
+ * reading an empty registry.
+ */
+function bootRegistrar(container: unknown): { keys: string[]; error: any } {
     const engine = new ObjectQL();
-    engine.registerApp({ id: PKG, name: 'crm', views: [container] } as any);
-    return CANDIDATE_KEYS.filter((k) => engine.registry.getItem('view', k) !== undefined);
+    let error: any = null;
+    try {
+        engine.registerApp({ id: PKG, name: 'crm', views: [container] } as any);
+    } catch (e) {
+        error = e;
+    }
+    return {
+        keys: CANDIDATE_KEYS.filter((k) => engine.registry.getItem('view', k) !== undefined),
+        error,
+    };
+}
+
+function bootRegistrarKeys(container: unknown): string[] {
+    const { keys, error } = bootRegistrar(container);
+    if (error) throw error;
+    return keys;
 }
 
 // ---------------------------------------------------------------------------
@@ -165,12 +219,37 @@ describe('#14399 — the row\'s own `name` is the LAST term of the container der
         expect(deriveViewContainerObject(divergentContainer)).toBe('crm_lead');
     });
 
-    it('THE PIN: the boot loop keys the container by its declared `object`, not by its own `name`', () => {
-        // Pre-fix this was exactly ['lead_views', 'lead_views.default',
-        // 'lead_views.hot'] — the container and its whole expansion filed under
-        // the row identity, so `getViewsByObject('crm_lead')` and
-        // `GET /meta/view?object=crm_lead` had nothing for this document.
-        expect(bootRegistrarKeys(divergentContainer)).toEqual(AGREED_KEYS);
+    it('THE PIN (#14666): the boot loop REFUSES the divergent container, and its refusal names the key it derived', () => {
+        // ⭐ THIS ASSERTION IS THE INVERSION. Its two earlier lives, in order:
+        //   * before #14399 the boot loop minted ['lead_views',
+        //     'lead_views.default', 'lead_views.hot'] — the container and its
+        //     whole expansion filed under the row identity, so
+        //     `getViewsByObject('crm_lead')` had nothing for this document;
+        //   * #14399 moved `name` to LAST in the derivation, so it minted
+        //     AGREED_KEYS instead — the right key, but with the author's
+        //     `name` silently overwritten on the way past.
+        // The #14666 ruling (direction 2, 2026-09-03) ends the second: a
+        // container whose `name` disagrees with its derived binding is
+        // REFUSED, exactly as the artifact/HMR door has always refused it.
+        //
+        // #14399's derivation answer is NOT lost by inverting this — it moves
+        // to where the artifact door's answer was already read in this file:
+        // the refusal names the key it derived. Both SOURCE registrars are now
+        // read the same way, which is the convergence the card asked for.
+        const { keys, error } = bootRegistrar(divergentContainer);
+        expect(error).toBeInstanceOf(Error);
+        // Both values named — the ruling's requirement, and what makes the
+        // diagnostic locate the mismatch instead of merely reporting one.
+        expect(error.message).toContain("`name` is 'lead_views'");
+        expect(error.message).toContain("'crm_lead'");
+        // The derivation itself, still pinned: `crm_lead` is what it derived,
+        // NOT the row's own `lead_views`. A refusal naming `lead_views` as the
+        // derived key would mean #14399 had regressed.
+        expect(error.message).toContain("binds to, 'crm_lead'");
+        // Nothing filed: a refusal that has already registered half the
+        // document would leave the registry in the state the card calls the
+        // real defect.
+        expect(keys).toEqual([]);
     });
 
     it('and the artifact/HMR registrar derives the SAME binding for the same document', async () => {
@@ -193,17 +272,36 @@ describe('#14399 — the row\'s own `name` is the LAST term of the container der
         const err = await loadThroughArtifactDoor(divergentContainer).catch((e) => e as any);
         expect(err.code).toBe('VALIDATION_ERROR');
         expect(err.status).toBe(400);
-        // The residual asymmetry, stated as an assertion so it cannot drift
-        // unnoticed: the boot loop reconciles `data.name` to the derived key and
-        // this door does not. Filed separately; #14399 owns the derivation only.
-        const engine = new ObjectQL();
-        engine.registerApp({ id: PKG, name: 'crm', views: [divergentContainer] } as any);
-        expect((engine.registry.getItem('view', 'crm_lead') as any).name).toBe('crm_lead');
+        // ⭐ [#14666] THE SECOND INVERSION, and the card's actual subject. This
+        // used to read
+        //
+        //     expect((engine.registry.getItem('view', 'crm_lead') as any).name)
+        //         .toBe('crm_lead');
+        //
+        // i.e. it pinned the boot loop SILENTLY rewriting the author's
+        // `lead_views` to the derived key while this door hard-failed — one
+        // document, two SOURCE registrars, opposite outcomes. Ruled
+        // (2026-09-03, direction 2): the boot loop converges onto the refusal.
+        // So the assertion is now CONVERGENCE, envelope included — if either
+        // door ever moves again, this fails.
+        const boot = bootRegistrar(divergentContainer);
+        expect(boot.error).toBeInstanceOf(Error);
+        expect(boot.error.code).toBe(err.code);
+        expect(boot.error.status).toBe(err.status);
+        expect(boot.error.code).toBe('VALIDATION_ERROR');
+        expect(boot.error.status).toBe(400);
     });
 
     it('so the boot loop\'s expanded items are addressable under the object', () => {
+        // [#14666] Driven on the ANONYMOUS container now. The expansion
+        // property this pins — expanded items bind to the derived object, not
+        // to the container's row identity — is unchanged, but the divergent
+        // shape no longer reaches expansion at all: it is refused before
+        // anything registers, which is what the two tests above assert. The
+        // shape that still travels this path is the one carrying no `name`,
+        // and it is the shape the ruling explicitly leaves unaffected.
         const engine = new ObjectQL();
-        engine.registerApp({ id: PKG, name: 'crm', views: [divergentContainer] } as any);
+        engine.registerApp({ id: PKG, name: 'crm', views: [anonymousContainer] } as any);
         const bound = (engine.registry.listItems<any>('view') ?? [])
             .filter((v: any) => v?.viewKind)
             .map((v: any) => v.object);
@@ -262,5 +360,70 @@ describe('#14399 — the row\'s own `name` is the LAST term of the container der
         } as any);
         expect(engine.registry.getItem('view', 'crm_lead.hot')).toBeDefined();
         expect(engine.registry.getItem('view', 'crm_lead')).toBeUndefined();
+    });
+
+    // ------------------------------------------------------------------
+    // [#14666] Scope controls. The ruling names keeping the refusal's scope
+    // tight as the implementation's MAIN RISK, and `registerMetadataCollections`
+    // is the GENERIC loop every metadata kind runs — so the three narrowings in
+    // the gate get a control each, plus the measurement that decided which of
+    // the method's two `toRegister` ternaries had to move.
+    // ------------------------------------------------------------------
+
+    it('SCOPE: a NON-`views` metadata kind is untouched, even carrying a container-shaped body', () => {
+        // Guards the gate's `key === 'views'` term. This loop serves objects,
+        // apps, roles, agents, … — a refusal leaking out of the `views` branch
+        // would turn a divergent `name` into a boot failure for every one of
+        // them, which is exactly what the ruling forbids.
+        const engine = new ObjectQL();
+        engine.registerApp({
+            id: PKG,
+            name: 'crm',
+            objects: [{ name: 'crm_lead', object: 'something_else', label: 'Lead' }],
+        } as any);
+        expect(engine.registry.getItem('object', 'crm_lead')).toBeDefined();
+    });
+
+    it('SCOPE: a non-container `views:` entry keyed by its own `name` is untouched, `object` notwithstanding', () => {
+        // Guards the gate's `isAggregatedViewContainer(item)` term. This entry
+        // carries BOTH a `name` and an `object` that disagree textually, and it
+        // must still register under its own `name`: it is not a container, so
+        // its `name` is its identity and `resolveMetadataItemName` reads it
+        // FIRST — there is no binding for it to disagree with.
+        const engine = new ObjectQL();
+        engine.registerApp({
+            id: PKG,
+            name: 'crm',
+            views: [{ name: 'solo', object: 'crm_lead' }],
+        } as any);
+        expect(engine.registry.getItem('view', 'solo')).toBeDefined();
+        expect(engine.registry.getItem('view', 'crm_lead')).toBeUndefined();
+    });
+
+    it('SCOPE: the assembled `viewItems:` channel cannot carry a container, so its own `toRegister` was left alone', () => {
+        // ⭐ The measurement that scoped this change to ONE of the two
+        // identical-looking `toRegister` ternaries in
+        // `registerMetadataCollections`. The second one (the `viewItems:`
+        // channel) rewrites `body.name` the same way and was NOT touched,
+        // because a view CONTAINER cannot reach it: `AssembledViewArtifactSchema`
+        // is the view vocabulary MINUS the container branch, and every body it
+        // admits carries a `viewKind`, which makes `isAggregatedViewContainer`
+        // false by definition. Its ternary can therefore only MINT a name onto
+        // an overlay that has none — never discard an authored one, which is
+        // the thing #7378 row 1 refuses.
+        //
+        // Pinned here so that a later hand cannot make either mistake the
+        // ruling's scope constraint warns about: copying the refusal onto a
+        // site that has nothing to refuse, or widening this channel to accept
+        // containers and quietly restoring the silent rewrite.
+        expect(AssembledViewArtifactSchema.safeParse(divergentContainer).success).toBe(false);
+        expect(isAggregatedViewContainer(divergentContainer)).toBe(true);
+        const overlay = {
+            name: 'crm_lead.all', object: 'crm_lead', viewKind: 'list',
+            type: 'grid', columns: [{ field: 'name' }],
+        };
+        const parsed = AssembledViewArtifactSchema.safeParse(overlay);
+        expect(parsed.success).toBe(true);
+        expect(isAggregatedViewContainer(parsed.success ? parsed.data : undefined)).toBe(false);
     });
 });
