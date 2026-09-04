@@ -54,6 +54,16 @@ import {
   AUTHZ_STORE_UNAVAILABLE_STATUS,
 } from '@objectstack/core';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
+// The producer-side dispatch predicates every engine double in this repo is
+// pinned to (`check:engine-double-contract`). The three verbs below are not
+// exercised by this matrix — it reads and creates — but a double looser than
+// the real engine is exactly what the ratchet exists to keep out of the tree.
+import {
+  assertEngineDeleteDispatch,
+  assertEngineUpdateDispatch,
+  assertEngineFindOnePredicate,
+  type EngineFindOneQueryInput,
+} from '@objectstack/metadata-core';
 import { MCPServerPlugin } from './plugin.js';
 import { MCPServerRuntime } from './mcp-server-runtime.js';
 import type { McpDataBridge } from './mcp-http-tools.js';
@@ -111,9 +121,9 @@ function matchesWhere(row: Record<string, unknown>, where: unknown): boolean {
 interface Engine {
   find: (object: string, query?: unknown, opts?: unknown) => Promise<unknown>;
   insert: (object: string, data: unknown, opts?: unknown) => Promise<unknown>;
-  update: (object: string, data: unknown, opts?: unknown) => Promise<unknown>;
-  delete: (object: string, opts?: unknown) => Promise<unknown>;
-  findOne: (object: string, query?: unknown, opts?: unknown) => Promise<unknown>;
+  update: (object: string, data: any, opts?: any) => Promise<unknown>;
+  delete: (object: string, opts?: any) => Promise<unknown>;
+  findOne: (object: string, query?: EngineFindOneQueryInput) => Promise<unknown>;
   count: () => Promise<number>;
 }
 
@@ -196,9 +206,15 @@ function makeFixture(): Fixture {
       rows.push(row);
       return { ...row };
     },
-    async update() { throw new Error('fixture: update not exercised'); },
-    async delete() { throw new Error('fixture: delete not exercised'); },
-    async findOne() { return null; },
+    async update(_object, data, opts) {
+      assertEngineUpdateDispatch(data, opts);
+      throw new Error('fixture: update not exercised by this matrix');
+    },
+    async delete(_object, opts) {
+      assertEngineDeleteDispatch(opts);
+      throw new Error('fixture: delete not exercised by this matrix');
+    },
+    async findOne(object, query) { assertEngineFindOnePredicate(object, query); return null; },
     async count() { return 0; },
   };
 
