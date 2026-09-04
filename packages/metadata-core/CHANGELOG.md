@@ -1,5 +1,796 @@
 # @objectstack/metadata-core
 
+## 17.3.0
+
+### Minor Changes
+
+- fa5d137: feat(devx,datasource,automation): published `src/**` may only import workspace packages it declares (#10062)
+  
+  A package's non-test `src/**` was free to import any workspace package,
+  declared or not, and nothing checked it. The class was filed with one member
+  and a mitigation — the import was type-only, so nothing reached the emitted
+  JavaScript and rollup-plugin-dts inlined the declaration rather than naming an
+  unresolvable module. It grew to four members with no signal, and one of them
+  killed the mitigation: `service-automation/src/flow-precedence.ts` **value**
+  imports from `@objectstack/objectql`, which it does not declare, and because
+  the shared tsup config externalises only `dependencies`/`peerDependencies`, the
+  bundler answered by inlining objectql's implementation into
+  `service-automation/dist/index.js` — a second copy of another package's code,
+  kept correct by build configuration alone.
+  
+  `pnpm check:undeclared-dep-imports` is the gate, and the per-member fixes here
+  are decided one at a time rather than by a uniform policy — declaring makes a
+  coupling real and installable, routing it away removes it, and the two are not
+  interchangeable:
+  
+  * **`@objectstack/service-datasource`** now declares `@objectstack/driver-sql`
+    and `@objectstack/driver-memory` as **dependencies**. Both are loaded through
+    an *unguarded* `await import(...)` on the postgres, mysql, sqlite and memory
+    arms, so a consumer reaching one of those paths needed a package it was never
+    told to install, and would have met `ERR_MODULE_NOT_FOUND` rather than a
+    diagnosis. The three *guarded* driver arms — `@objectstack/driver-sqlite-wasm`,
+    `@objectstack/driver-mongodb`, `@objectstack/driver-turso` — are deliberately
+    left undeclared: each load sits in a `try`/`catch` that answers an absent
+    package with the fault, the consequence and the install command, and each
+    rides as an optional install. Declaring them would install them (turso drags
+    `@libsql/client`'s native bindings) and, measured on this branch, takes a live
+    assertion out of the tree: `default-datasource-driver-factory.test.ts` reaches
+    the missing-package arm with no stub precisely because the package does not
+    resolve from here.
+  * **`@objectstack/metadata-core`** now owns the ADR-0029 D9.6 provenance pair,
+    `isCodeArtifactBody` and `isTenantAuthored`, sunk out of
+    `@objectstack/objectql`'s registry by the same criterion as the write-verb
+    dispatch predicates and the audit governance table beside them: a second layer
+    needs the answer and the reverse import would either close a cycle or make the
+    consumer depend on the whole data engine for one predicate. `objectql`
+    re-exports `isCodeArtifactBody` from its original path, so its public API is
+    unchanged; `service-automation` imports it from `metadata-core`, which it
+    already declared, and its bundle no longer carries a copy of objectql's code.
+  
+  Two members stay recorded rather than remediated, because the tree already
+  carries the decision not to declare them together with its reason
+  (`@objectstack/runtime` → `@objectstack/driver-turso`, whose bare `import()` is
+  a host-replaceable default thunk under #6268; `@objectstack/rest` →
+  `@objectstack/objectql`, whose absence must degrade to `501 NOT_IMPLEMENTED`
+  rather than fail module load). Their ledger rows carry mechanical evidence and
+  go red the moment that evidence stops holding — in particular, a `type-only`
+  row reds on the day its import becomes a value import, which is exactly the
+  transition nothing caught the first time.
+- 0fd4899: feat(metadata-core,objectql): publish `assertEngineFindOnePredicate` — the read-side member of the engine-double contract family (#11957)
+  
+  `ObjectQL.findOne` applies `limit: 1`, so a query naming no particular record
+  would return an ARBITRARY row. `requireFindOnePredicate` (#4419) REFUSES that
+  call. Every in-memory test double in the repo instead read an absent filter as
+  "match everything" and answered happily, so a production call site that violates
+  #4419 read as *working* under every unit suite and only failed on a real engine.
+  
+  That is measured, not hypothetical. `AuthManager.isBootstrapCreation` probed the
+  bootstrap population with `findOne({ where: [] })` inside a `try/catch`; on a
+  real engine that throws, the `catch` read the refusal as "users exist", and the
+  declared first-run bypass became permanently inert on real deployments — while a
+  641-line unit matrix over the double stayed green, including a case named
+  "bootstrap: the very first signup is admitted" (#11767).
+  
+  New public API, mirroring the two write-side dispatch predicates
+  (`assertEngineDeleteDispatch`, `assertEngineUpdateDispatch`) exactly — the
+  implementation lives in `@objectstack/metadata-core` so that packages
+  `@objectstack/objectql` itself depends on can reach it, and `@objectstack/objectql`
+  re-exports every symbol:
+  
+  - `assertEngineFindOnePredicate(object, query)` — the line a fake engine's
+    `findOne` opens with; throws the engine's own message, object name included.
+  - `resolveEngineFindOnePredicate(object, query)` — the same decision without the
+    throw, for a double that wants to classify.
+  - `engineFindOnePredicateRefusalMessage(object)` — the refusal text, so an
+    assertion pins the producer's wording rather than a paraphrase.
+  - `ENGINE_FINDONE_PREDICATE_CASES` — the shared conformance case-set, driven
+    against the REAL engine by
+    `packages/objectql/src/engine-findone-predicate.test.ts`, so the predicate
+    cannot drift from `engine.ts` unnoticed.
+  
+  Nothing is removed and no existing behaviour changes: the engine's own guard is
+  untouched, and this publishes the decision it already makes so a double can
+  import it instead of re-deriving it.
+- 15eb2c9: feat(security,meta): org-scoped presentation authoring capability `manage_org_presentation` (#12702)
+  
+  A tenant org admin in a walled posture can now be granted org-scoped authoring
+  of exactly the org-overridable presentation types (ADR-0005 tier A: view /
+  dashboard / report / translation / email_template today — the registry is the
+  authority) without holding platform-wide `manage_metadata` (maintainer
+  direction 2026-08-27, quoted in #12701).
+  
+  - **spec**: new curated `PLATFORM_CAPABILITIES` entry `manage_org_presentation`
+    (`scope: 'org'`), seeded into `sys_capability` at boot like its siblings.
+    Granted by NO shipped permission set — the SaaS operator grants it per
+    deployment, so existing postures (`single` included) are byte-unchanged by
+    its existence.
+  - **metadata-core**: new `metaWriteCapabilityVerdict` — the capability half of
+    the `/meta` write decision, beside the existing org-scope half
+    (`organizationIdForMetaWrite`). It admits `isSystem` and `manage_metadata`
+    exactly as before, and `manage_org_presentation` ONLY when the target type's
+    registry entry declares `allowOrgOverride: true` (registry-derived via
+    `declaresOrgOverride`, never a hand-written list) AND the session has an
+    active organization — the very organization the doors thread, so an admitted
+    write can only land org-scoped in the caller's own partition: never tier-B,
+    never env-wide, never another org's.
+  - **rest**: the four `/meta` item write doors (`PUT` save, `DELETE` reset,
+    `POST /publish`, `POST /rollback`) run the shared verdict.
+    `POST /meta/_migrate-stored` stays `manage_metadata`-only — an install-wide
+    rewrite is env-wide by definition.
+  - **runtime**: the dispatcher `/meta` `PUT` door runs the same shared verdict
+    (its `_migrate-stored` twin likewise stays `manage_metadata`-only).
+  
+  Refusals keep their transports' existing envelopes (REST `403 FORBIDDEN`,
+  dispatcher `403 PERMISSION_DENIED`); the tier-B refusal sentence is
+  byte-identical to before, and the tier-A sentences name the sanctioned path
+  without disclosing the caller's own grants (#7450). Platform `manage_metadata`
+  behaviour is unchanged on every door.
+- 1272f0a: Promote `resolveRecordOrganizationField` to the shared platform-row organization resolver (the cloud#1395 Option A ruling): a platform row's organization is the SUBJECT record's organization; actor context is the fallback, never the primary.
+  
+  - `@objectstack/metadata-core` now owns the resolver (`resolveRecordOrganizationField`, `createFieldPresenceProbe`, and the new memoized `createRecordOrganizationResolver` factory) so all three sanctioned writers share one precedence.
+  - `@objectstack/plugin-approvals`: `openNodeRequest` stamps `sys_approval_request`, `sys_approval_action` and the `sys_approval_approver` index from the subject record's organization (acting context as fallback). Fixes the measured defect where every schedule / time-relative / api triggered approval persisted `organization_id = NULL` — locking the record it was about while being invisible in every inbox, its owner's included.
+  - `@objectstack/service-automation`: `sys_automation_run` rows (paused and terminal) resolve their organization from the trigger-record snapshot, with the acting tenant as fallback. Terminal rows previously never carried an organization at all.
+  - `@objectstack/plugin-audit`: the resolver moved out; the package re-exports it from the original paths, behavior unchanged.
+  
+  The `sys_api_key` divergence is preserved and pinned: `tenancy.organizationField` (who a row is ABOUT) still wins over the tenant wall answer, and the credential table stays unwalled.
+- d41d166: fix: the `./testing` subpaths are ESM-only — they no longer advertise a `require` condition vitest refuses to serve (#12985)
+  
+  Both packages published their test-harness subpath as a dual entry point:
+  
+  ```jsonc
+  // FROM — @objectstack/metadata-core and @objectstack/service-cluster
+  "./testing": {
+    "types": "./dist/testing.d.ts",
+    "import": "./dist/testing.js",
+    "require": "./dist/testing.cjs"
+  }
+  
+  // TO
+  "./testing": {
+    "types": "./dist/testing.d.ts",
+    "import": "./dist/testing.js"
+  }
+  ```
+  
+  The `require` half was a promise neither package could keep. Both subpaths
+  re-export `vitest`, and vitest **refuses** to be loaded from CommonJS by
+  design — its CJS entry is a single `throw`:
+  
+  ```
+  node -e "require('@objectstack/metadata-core/testing')"
+  Error: Vitest cannot be imported in a CommonJS module using require(). Please use "import" instead.
+  ```
+  
+  The emitted bytes parse; the load fails inside vitest's own entry, for every
+  consumer and every code path. So the condition could never resolve to working
+  code, on any release, since it was first declared. It is removed rather than
+  repaired because the failure is not ours to fix: a test harness has no business
+  advertising a `require` condition when the test runner it re-exports does not
+  serve one.
+  
+  **Nothing that worked stops working**, and that is why this is not filed as a
+  breaking removal. A CJS consumer that resolved through the old condition got a
+  hard `Error` at load; it now gets a resolution error from node instead — a
+  different message for the same non-working call, and an earlier and clearer
+  one. The `import` condition, the types and the runtime API are untouched, and
+  every in-repo consumer already reaches these subpaths through `import`
+  (`@objectstack/metadata-fs`, `@objectstack/metadata-protocol`,
+  `@objectstack/rest`, `@objectstack/runtime`, `@objectstack/service-cluster-redis`).
+  
+  **If you did spell it as `require`** — `require('@objectstack/metadata-core/testing')`
+  or `require('@objectstack/service-cluster/testing')` — switch the call to
+  `await import('@objectstack/metadata-core/testing')`, or move the calling
+  module to ESM. That is the same change the old condition already forced on
+  you, one error message earlier.
+  
+  `dist/testing.cjs` is still emitted (both packages build every entry in both
+  formats) and still parsed by `pnpm check:dual-build-cjs-loads`; it is simply no
+  longer reachable through the manifest. Removing it from the build is a
+  tsup-config change with its own risks and is not folded in here.
+- 5d16379: **BREAKING (accept-set tightening)**: a by-id `update` whose bound truthy scalar payload `data.id` stands beside a DECLARED but non-scalar `options.where.id` — `{ $in: [...] }`, an array, `null` — is now refused loudly (`UPDATE_ID_MISMATCH`, HTTP 400) instead of silently binding the payload row and discarding both the id predicate and any declared `multi: true` (#11230).
+  
+  `update(obj, { id: 'rec_1', title: 'x' }, { where: { id: { $in: ['a', 'b'] } }, multi: true })` used to write exactly one row — `rec_1` — with no diagnostic: the payload id outranked `where` and `multi` alike (#5748), so the declared row SET and the declared bulk intent were both dropped, and `rec_1` need not even have been a member of the set. This was the LAST silent member of the dropped-declaration family (#5748 payload operator-objects, #11009 extra `where` keys, #11142 unequal scalar `where.id`); closing it reverses the remaining half of the #5748-pinned verdict `a SCALAR data.id still outranks where and multi`, which the maintainer ruling on #11230 (2026-08-23) authorizes.
+  
+  What changes, per call shape (`resolveEngineUpdateDispatch`, so every pinned test double inherits the same verdict):
+  
+  - A truthy scalar `data.id` beside a **non-scalar** `where.id` — an operator object, an array, `null`, or an explicitly-`undefined` `id` key — now **throws** `UPDATE_ID_MISMATCH` with `status: 400`, naming the payload id and the KIND of predicate the caller wrote. `multi: true` does not rescue the call (the payload id outranks `multi` per #5748, so the contradiction stands). Previously the write landed on the payload row with both declarations silently ignored.
+  - Boundaries that do **not** move: a **falsy** scalar `where.id` (`0`, `''`) is a scalar and keeps its #11142 verdict (by-id); a `where` that declares **no** `id` key at all (`{}`, or no `where`) is untouched; and with **no** scalar payload id the ladder is exactly as #5748 left it (`multi` when declared, otherwise `reject`) — the refusal lives only on the payload-sourced by-id arm.
+  - The refusal shares the #11142 error code deliberately — one ADR-0112 ledger member for one defect class, two messages. No new code is registered.
+  
+  A caller hitting the new refusal declared a row address and a row-set predicate in one call and meant one of them; each fix is a one-line edit at the call site: drop `id` from the payload to write EVERY row the predicate selects (`update(object, fields, { where: { id: { $in: [...] } }, multi: true })`), or drop `where.id` to write the single row the payload names (`update(object, { id, ...fields })`). The refusal text names both. Measured before shipping: **no in-repo call site constructs the pair** — every production `where.id` predicate (the outbox sweeps) carries a payload with no `id` — so the in-repo blast radius is nil; an external SDK caller can still write it, and today that silently drops both declarations.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No authorable surface is removed or renamed — no spec key, no export, no config field changes spelling, so `objectstack migrate meta` has nothing to rewrite and no ledger entry could serve an upgrader. The newly-refused call shape is a self-contradictory input whose declared condition was never evaluated; deciding whether the caller meant the payload row or the predicate's row set is a per-site intent decision a mechanical rewrite must not make, and the refusal text itself names both call-site fixes. -->
+
+### Patch Changes
+
+- 54e2d36: Artifacts built by released 17.x tooling boot again on ≥17.2 runtimes: the artifact-ingestion door now runs a versioned ADR-0087 forward conversion before the strict parse (#12772).
+  
+  A compiled artifact whose declared `engines.protocol` floor predates the running `@objectstack/spec` version replays the full conversion chain — retired entries included — before validation, exactly the policy the stored-row read path already applies to `sys_metadata` rows. Measured incident: `dist/objectstack.json` built by `@objectstack/cli` 17.1.0 carries the then-legal `allowRestore`/`allowPurge` permission bits (75 of each, injected by the released builder), and spec 17.2.0's `retiredKey` tombstone refused the boot with no operator remedy (`os migrate meta` targets sources, not built artifacts).
+  
+  The conversion is versioned, not a blanket amnesty: an artifact authored at the current (or a newer) spec version converts nothing and still refuses at the tombstone — the retired keys return with the M2 lifecycle initiative (#1883), and artifacts authored against that surface are never stripped by history. Conversion notices surface operator-visibly and deduped, one summary line per conversion per artifact. New exports from `@objectstack/metadata-core`: `applyArtifactForwardConversions`, `resolveInstalledSpecVersion`, `parseRangeFloor`, `resolveDeclaredRange`.
+- b745157: feat(metadata-core,metadata): warn the operator when a pre-current-era artifact carries form-view predicates that fault open (#12915)
+  
+  A form-view predicate binds `record` (+ `previous`, `parent`) in runtime record
+  forms, or `data` in metadata-editing forms. The contract states the failure mode
+  beside the vocabulary: **a bare identifier is unbound, the predicate faults, and
+  `visibleWhen`'s fault fallback is `true`** — so a field the predicate was
+  authored to hide renders for everyone.
+  
+  That is quiet alone and lethal in combination with the authoring pattern it
+  serves. Measured on a real deployment: an artifact built by released
+  `@objectstack/cli` 17.1.0 authors
+  `{ field: 'disqualification_reason', required: true, visibleWhen: 'status == "unqualified"' }`
+  — the era's working spelling. On a 17.2 runtime the predicate faults open, the
+  conditionally hidden field renders, and its unconditional `required: true`
+  blocks **every** record creation through the console, while the same payload
+  POSTs 201 through REST. Nothing refused and nothing logged, so the operator —
+  the only person who can rebuild the artifact — had no signal at all.
+  
+  The framework artifact door now emits **one deduped `warn` line per artifact**
+  naming the authored `engines.protocol` floor and the runtime spec version, how
+  many predicates on which views (with the first path as an anchor), the
+  fault-open consequence, and the remedy (`os build`). It rides the same funnel
+  that already carries the forward-conversion summaries, so both SaaS shapes are
+  covered: a single-DB multi-org runtime warns once at boot, and per-tenant-DB
+  kernels each warn at their own.
+  
+  **No behaviour change.** No refusal, no rewrite, no schema or contract edit —
+  the predicate keeps faulting open exactly as before, and the artifact bytes are
+  untouched. Rewriting a bare root to `record.` is a separate, deferred ADR-0087
+  conversion.
+  
+  **Scoped to legacy artifacts by construction.** The notice fires only inside the
+  versioned window the forward conversion already opens (declared floor below the
+  running spec, or undeclared), read off that pass's own verdict rather than
+  recomputed. An artifact declaring the current or a newer floor gets zero notices
+  from this feature even when it carries bare roots — the boundary that keeps a
+  notice about legacy artifacts out of contract territory.
+  
+  Detection is exported from `@objectstack/metadata-core` as
+  `detectUnboundFormViewPredicateRoots` (with `BOUND_FORM_VIEW_PREDICATE_ROOTS`)
+  so other composed artifact doors can reuse one policy rather than fork it. It is
+  pure, read-only, and tuned to prefer silence over a false accusation: string
+  literals are stripped before the scan, only root position counts, call targets
+  are not roots, comprehension macros (whose iteration variable is locally bound)
+  are skipped whole, and AST-only envelopes pass.
+- d23ebb9: fix(metadata-core,service-cluster): stop emitting and publishing the CJS half of `./testing` (#13013)
+  
+  #13001 made both `./testing` subpaths ESM-only, dropping the `require` condition
+  that pointed at `dist/testing.cjs`. The build kept emitting those files and
+  `files: ["dist"]` kept packing them, so every release shipped bytes no exports
+  condition could reach. Measured with `npm pack --dry-run`, before → after:
+  
+  | package | files | unpacked | dropped |
+  |---|---|---|---|
+  | `@objectstack/metadata-core` | 22 → 16 | 3.3 MB → 3.2 MB | `testing.cjs` (28.0 kB), `testing.cjs.map` (48.4 kB), `testing.d.cts` (9.4 kB), `chunk-H2D6OJ76.cjs` (4.2 kB) + map (10.6 kB), `repository-*.d.cts` |
+  | `@objectstack/service-cluster` | 15 → 12 | 364.1 kB → 336.9 kB | `testing.cjs` (11.9 kB), `testing.cjs.map` (14.5 kB), `testing.d.cts` (794 B) |
+  
+  Nothing reachable changed. The whole ESM surface of both packages — `index.js`,
+  `testing.js`, their maps, the shared chunk, and every declaration the manifest
+  names — is **byte-for-byte identical** to the previous build (sha256, before vs
+  after). `index.cjs` changes only because what was a shared CJS chunk is now
+  inlined into the sole remaining CJS entry.
+  
+  Each `tsup.config.ts` becomes an array of two configs split **by format** —
+  ESM keeps both entries, CJS takes `src/index.ts` alone. The split is by format
+  and never by entry: `index` and `testing` share a chunk carrying the error
+  classes, and one config per entry would give `testing.js` its own copies, so
+  `ConflictError` reached through `@objectstack/metadata-core/testing` would stop
+  being the class thrown by `@objectstack/metadata-core` — which the published
+  contract suite asserts (`.rejects.toBeInstanceOf(ConflictError)`).
+  
+  `clean` moves out of tsup and into the `build` script (`rm -rf dist && tsup`).
+  tsup runs an array config through `Promise.all`, so the halves build
+  concurrently and a `clean` in either races the other's writes; the script-level
+  clean is also stronger than tsup's own, which preserves `*.d.{ts,cts,mts}` and
+  would therefore have left a stale `dist/testing.d.cts` behind on every rebuild
+  of an existing worktree.
+- e7191ce: fix(build): give each `exports` condition its own `types` target in the 28 dual-build packages (#13112)
+  
+  **Published-surface change, zero runtime change.** No emitted byte moves; what
+  moves is which declaration file a resolver READS. Maintainer ruling 2026-08-29
+  (decision batch #3, verbatim 「同意」) chose declaring the files over deleting
+  them.
+  
+  ## What was wrong
+  
+  These 28 packages are `"type": "module"` and dual-built, and each spelled one
+  `types` condition as a **sibling** of `import`/`require`:
+  
+  ```json
+  "exports": { ".": {
+    "types": "./dist/index.d.ts", "import": "./dist/index.js", "require": "./dist/index.cjs"
+  } }
+  ```
+  
+  A sibling `types` answers for **both** conditions, so a CommonJS consumer was
+  handed `dist/index.d.ts` — an ES-module declaration, because the package is
+  `"type": "module"` — for an entry point it reaches with `require`. Measured with
+  `tsc --traceResolution` on a `"type": "commonjs"` fixture at `moduleResolution:
+  node16`:
+  
+  ```
+  error TS1479: The current file is a CommonJS module whose imports will produce
+  'require' calls; however, the referenced file is an ECMAScript module and cannot
+  be imported with 'require'.
+  ```
+  
+  The JavaScript at `dist/index.cjs` loads perfectly (`check:dual-build-cjs-loads`
+  has asserted that for months). It is the **types** that told the consumer the
+  supported `require` entry point could not be required. The `dist/index.d.cts`
+  twin tsup emits beside it — 36 files, 5,517,701 B on this build — was named by
+  no condition at all and shipped in every tarball unreachable.
+  
+  ## What changed
+  
+  Each condition now names its own declaration, the shape TypeScript documents:
+  
+  ```json
+  "exports": { ".": {
+    "import":  { "types": "./dist/index.d.ts",  "default": "./dist/index.js" },
+    "require": { "types": "./dist/index.d.cts", "default": "./dist/index.cjs" }
+  } }
+  ```
+  
+  33 entry points across 27 packages, subpaths included. The root `types` field is
+  untouched, so `node10` resolvers are unaffected; the `import` condition resolves
+  exactly what it resolved before, measured as an unchanged control in the same
+  run.
+  
+  ## `@objectstack/core` is deliberately NOT changed
+  
+  Splitting a declaration in two makes TypeScript compare it nominally, and
+  `ObjectKernel` carries a `private plugins` member that reaches every plugin
+  through `PluginContext.getKernel()`. With core split, whole-repo `pnpm build`
+  fails in `@objectstack/verify` with 5 × TS2345 ("Types have separate
+  declarations of a private property 'plugins'"); with core held back and the
+  other 27 split, 71/71 tasks pass. So core keeps the sibling-`types` shape and
+  its two `.d.cts` files (220,854 B) stay unreachable, declared as such in
+  `check:dual-build-cjs-loads`. Splitting it needs a decision about core's public
+  types, not about an exports map.
+  
+  ## For consumers
+  
+  - **ESM consumers: nothing changes.** Same declaration file, byte for byte.
+  - **CJS consumers under `node16`/`nodenext`: TS1479 goes away** and the
+    declarations they get are the ones built for CommonJS.
+  - **`node10` / `moduleResolution: node` consumers: nothing changes** — they never
+    read `exports`.
+  - Nothing is removed: every path that resolved before still resolves.
+  
+  Packages that are CJS-first (`require` → `./dist/index.js`, no `"type": "module"`)
+  were already correct and are untouched — their `dist/index.d.ts` really is the
+  CommonJS declaration. Their ESM mirror (an unreachable `.d.mts` under the
+  `import` condition) is a separate, larger population and is filed separately per
+  the ruling, not fixed here.
+  
+  `check:dual-build-cjs-loads` grew a fourth invariant (TYPED) that reds on the old
+  shape, so the drift cannot return silently.
+- 00d8f65: docs(metadata-core): correct `createFieldPresenceProbe`'s stated reason — the `organization_id` column is provisioned unconditionally (#13416)
+  
+  `createFieldPresenceProbe` is a published export, and its docstring is emitted
+  verbatim into the built declarations (`dist/index.d.ts` and `dist/index.d.cts`),
+  so it is what a consumer's editor shows on hover. That docstring recorded a
+  falsified fact as the probe's reason for existing: *"the SchemaRegistry
+  auto-injects `organization_id` only in multi-tenant mode … so on single-tenant
+  stacks the `sys_audit_log` / `sys_activity` tables have no such column."*
+  
+  The column has since been decoupled from the posture flag. It is provisioned
+  **unconditionally**, subject only to the explicit opt-outs (`systemFields:
+  false`, `systemFields.tenant: false`, `managedBy: 'better-auth'`,
+  `tenancy.enabled: false`); the multi-tenant flag now governs only whether the
+  column is **INDEXED**, never whether it EXISTS. Three sources in the tree agree:
+  `applySystemFields` says so at the injection site (`objectql/src/registry.ts`),
+  the derivation it consumes (`resolveInjectedSystemColumns`,
+  `spec/src/data/injected-system-columns.ts`) accepts no `multiTenant` input to
+  decide with, and `objectql/src/registry-tenancy-posture.test.ts` pins it
+  executably. Both tables the old sentence named resolve the column on every
+  posture.
+  
+  Read literally, the stale sentence invited two wrong moves — deleting the probe
+  as dead once someone checked that the column is always provisioned, or
+  hand-rolling a fresh posture-conditional probe elsewhere on the same false
+  premise. The sentence is therefore corrected and its history kept, rather than
+  dropped: the probe never read the posture flag, and what it still answers is
+  provenance, not posture (an ADR-0015 `external` object, the explicit opt-outs,
+  and an engine with no `getSchema`).
+  
+  Prose only. No runtime behaviour, no exported signature and no accept/reject
+  decision moves; the probe's implementation is byte-identical.
+- 200d255: fix(metadata-core,metadata): a form SECTION binds `current_user` too, so the unbound-root notice stops flagging one (#13072)
+  
+  Second correction to the unbound-root boot notice, and the same defect as the
+  first one a surface later. The notice judged a SECTION-level predicate against
+  `record` / `previous` / `parent` / `data`, sourced faithfully from the section
+  contract prose — which was stale.
+  
+  `current_user` and its ADR-0068 alias roots (`user`, `ctx.user`, `os.user`)
+  **resolve on a section-level `visibleWhen`**: objectui#6110 threads the host
+  shell's predicate scope into `isSectionVisible` where it used to pass
+  `undefined`, and objectui#6111 copies the authored `visibleWhen` onto the
+  `section-divider` pseudo-field whose predicate the SDUI form renderer evaluates
+  with that scope bound. #12914 re-measured the contract text accordingly. Until
+  this change, a legacy artifact carrying a legitimate section-level
+  `current_user.role == "admin"` predicate was reported at boot as an unbound root
+  that faults open — a notice about a predicate that resolves, which is the
+  cry-wolf failure the module's own doc forbids and the one that trains operators
+  to ignore the channel.
+  
+  **What changes:** one vocabulary now serves both form-view predicate surfaces —
+  `record`, `previous`, `parent`, `data`, `current_user`, `user`, `ctx`, `os`. A
+  section predicate rooted at the `current_user` family is silent; a section
+  predicate rooted at a bare field identifier is still reported, and the operator
+  line still prints the rule per surface for the surfaces the findings implicate.
+  
+  **Blast radius, stated without inflation:** this is a **notice**, not a refusal
+  — no parse change, no gate, no behaviour change, and it only runs inside the
+  versioned window `applyArtifactForwardConversions` opens. The cost it removes is
+  a false operator signal on legacy artifacts, not a broken runtime.
+  
+  **Removed export, with its migration:** `FIELD_ONLY_BOUND_PREDICATE_ROOTS` is
+  gone from `@objectstack/metadata-core`. The section binding empties it, and an
+  exported constant named `FIELD_ONLY_…` holding `[]` asserts a per-surface
+  difference that no renderer makes. FROM → TO: read
+  `BOUND_FORM_VIEW_PREDICATE_ROOTS` (every root bound on any form-view predicate)
+  or `BOUND_FORM_FIELD_PREDICATE_ROOTS` (the field question, the same list today).
+  No consumer can be carrying it: the notice has never shipped — the two
+  changesets that introduce it are still pending in `.changeset/`, the newest
+  published `@objectstack/metadata-core` is 17.2.0, and the commit that added
+  `form-predicate-root-policy.ts` is in no release tag. This was the last moment
+  at which the removal cost nothing.
+  
+  **Why the vocabulary is no longer justified by quoting the contract.** Both
+  times this list has been wrong, it was wrong by transcribing a correct-looking
+  sentence that the renderer had already moved past. The prose is a transcription
+  of a renderer and can only lag one, so membership is now stated as the mechanism
+  — *a root is bound on a surface iff some renderer threads a scope carrying it
+  into that surface's evaluator* — with the threading site named per entry, and
+  the module's test reads the LIVE `.describe()` text of
+  `FormFieldSchema.visibleWhen` / `FormSectionSchema.visibleWhen` out of
+  `@objectstack/spec` instead of copying it into a comment. A comment quoting that
+  sentence goes stale in silence, twice now; an assertion that fetches it cannot.
+  
+  <!-- adr-0087: not-required (unpublished) the removed export FIELD_ONLY_BOUND_PREDICATE_ROOTS was added after 17.2.0 and is in no release tag, so no upgrader can be holding it and there is nothing to migrate from. -->
+- 2852acc: fix(metadata-core,metadata): split the form-view predicate root vocabulary per surface, so a field-level `current_user` test is not false-flagged (#12915)
+  
+  Same-day correction to the unbound-root boot notice. The notice judged **every**
+  form-view predicate against one vocabulary (`record` / `previous` / `parent` /
+  `data`), sourced faithfully from the contract prose — which, for the field-level
+  slot, was stale.
+  
+  `current_user` and its ADR-0068 alias roots (`user`, `ctx.user`, `os.user`)
+  **resolve on a field-level `visibleWhen`** since objectui#6010; three spec text
+  sites still said otherwise until #12930 re-measured them, and one of those sites
+  was the sentence this policy was written against. A legacy artifact carrying a
+  legitimate `current_user.role == "admin"` field predicate was therefore reported
+  as faulting open — the cry-wolf failure the notice is explicitly built to avoid,
+  and the one that trains operators to ignore the channel.
+  
+  The vocabulary is now per surface, which is what the contract actually says:
+  
+  - **Field-level** (`BOUND_FORM_FIELD_PREDICATE_ROOTS`): the shared base plus
+    `current_user`, `user`, `ctx`, `os`. Silent on all of them.
+  - **Section-level** (`BOUND_FORM_VIEW_PREDICATE_ROOTS`, unchanged in name and
+    value): the base alone. `current_user` is still flagged there — the section
+    docblock states it is unbound at that level and faults open.
+  
+  Two limits of the field binding deliberately do **not** change the answer: it is
+  a rendering rule rather than authorization (an authoring hazard, not a
+  version-drift one), and the scope is empty on the console's public `/f/:slug`
+  route (equally true of a freshly built current artifact, so it says nothing
+  about the artifact's era — the only thing this notice claims to detect).
+  
+  The emitted warn line now prints the bound roots **per surface, and only for the
+  surfaces the findings implicate**, so an operator is never shown a rule their
+  artifact has no instance of. Findings carry a `surface` field.
+  
+  `unboundRootsInCelSource` takes the vocabulary as an optional second argument;
+  its default is unchanged (the stricter base), so existing callers behave exactly
+  as before.
+- 15d55fb: fix(metadata-core): the CJS entry point loads again — `import.meta` is no longer emitted into `dist/index.cjs` (#12971)
+  
+  `@objectstack/metadata-core` declares `"type": "module"` with a dual `exports`
+  map, so `require('@objectstack/metadata-core')` is a published, supported entry
+  point. Since 17.2.0 it was **unloadable**: `resolveInstalledSpecVersion()`
+  anchors its `@objectstack/spec` lookup with `createRequire(import.meta.url)` —
+  correct for the ESM output — and tsup emitted that identifier **verbatim** into
+  `dist/index.cjs`. `import.meta` outside an ES module is a **parse-time** error,
+  so the module never began executing:
+  
+  ```
+  node -e "require('@objectstack/metadata-core')"
+  SyntaxError: Cannot use 'import.meta' outside a module
+  ```
+  
+  The failure was total, not partial. Neither the `typeof require === 'function'`
+  fast path above the line nor the `try`/`catch` around it ever ran, so **every**
+  CJS consumer and **every** code path in the package was affected, not just
+  callers of `resolveInstalledSpecVersion()`. Measured downstream: a walled
+  enterprise runtime refused to boot because `@objectstack/organizations`
+  resolves through this condition and the fail-closed tenancy wall correctly
+  refuses to serve when the organization wall cannot load.
+  
+  **The fix** is `shims: true` in this package's `tsup.config.ts` — the same one
+  line, for the same measured reason, already carried by `@objectstack/runtime`
+  and `@objectstack/metadata-protocol`. tsup rewrites `import.meta.url` in the
+  CJS output to a real `__filename`-derived URL, so both formats anchor on the
+  module's own file and resolve the same `@objectstack/spec/package.json`. Both
+  conditions now load and `resolveInstalledSpecVersion()` returns the identical
+  value in each.
+  
+  No API, type or behaviour change, and the ESM half is untouched — measured
+  rather than assumed: rebuilding with and without the shim, the emitted ESM code
+  bytes are identical in every file, and the whole difference is the shared
+  chunk's content-hashed **filename** (`chunk-DDDKWTSW.js` → `chunk-46MG4YHS.js`)
+  and the `sourceMappingURL` line naming it. Chunk names are internal to the
+  package; no `exports` target moves. Nothing an author writes moves either.
+  
+  **The class is now gated.** `pnpm check:dual-build-cjs-loads` (a step in the
+  required **Build Core** job) parses every emitted CommonJS file and `require()`s
+  every published `require` entry point in the workspace — 105 entries across 67
+  packages — so the next package to leak ESM-only syntax into its CJS output
+  fails at the commit that introduces it rather than in a consumer's release.
+- Updated dependencies [809d417]
+- Updated dependencies [387e231]
+- Updated dependencies [f794e4e]
+- Updated dependencies [cae2169]
+- Updated dependencies [b812a54]
+- Updated dependencies [2d4fa75]
+- Updated dependencies [0e4e51b]
+- Updated dependencies [e84bbf6]
+- Updated dependencies [effae80]
+- Updated dependencies [d62f990]
+- Updated dependencies [c45d8e6]
+- Updated dependencies [2e3e8c7]
+- Updated dependencies [e621291]
+- Updated dependencies [40a93b5]
+- Updated dependencies [d5b330d]
+- Updated dependencies [dda969c]
+- Updated dependencies [1f45690]
+- Updated dependencies [277948f]
+- Updated dependencies [8bdd955]
+- Updated dependencies [f3bbbef]
+- Updated dependencies [4f24e9d]
+- Updated dependencies [474242f]
+- Updated dependencies [63cd487]
+- Updated dependencies [bd4aa4e]
+- Updated dependencies [803eaab]
+- Updated dependencies [f8e8f03]
+- Updated dependencies [eae824e]
+- Updated dependencies [f6fa22c]
+- Updated dependencies [8a483b3]
+- Updated dependencies [97bcd99]
+- Updated dependencies [df59de0]
+- Updated dependencies [96e25a8]
+- Updated dependencies [f75a38a]
+- Updated dependencies [7a25e7d]
+- Updated dependencies [1fa05a6]
+- Updated dependencies [c85a265]
+- Updated dependencies [dcb10a5]
+- Updated dependencies [773a999]
+- Updated dependencies [35dffea]
+- Updated dependencies [776a098]
+- Updated dependencies [5060877]
+- Updated dependencies [4f6325d]
+- Updated dependencies [52954c0]
+- Updated dependencies [2aa8456]
+- Updated dependencies [93809a3]
+- Updated dependencies [7c0d0c3]
+- Updated dependencies [daae7aa]
+- Updated dependencies [8dc22d6]
+- Updated dependencies [279431e]
+- Updated dependencies [948dd6b]
+- Updated dependencies [3b4c56c]
+- Updated dependencies [ae8edd2]
+- Updated dependencies [e25403c]
+- Updated dependencies [64baa68]
+- Updated dependencies [9fa70d7]
+- Updated dependencies [09db64a]
+- Updated dependencies [92916e7]
+- Updated dependencies [a84f3ea]
+- Updated dependencies [f2eaae8]
+- Updated dependencies [c09451b]
+- Updated dependencies [ba64877]
+- Updated dependencies [7345308]
+- Updated dependencies [79b6a22]
+- Updated dependencies [30d96ab]
+- Updated dependencies [f658793]
+- Updated dependencies [c95ad19]
+- Updated dependencies [e58ea8b]
+- Updated dependencies [4a17645]
+- Updated dependencies [3795c5f]
+- Updated dependencies [8ab926b]
+- Updated dependencies [7317cf2]
+- Updated dependencies [e25e839]
+- Updated dependencies [5997207]
+- Updated dependencies [8b13cc8]
+- Updated dependencies [4a4a35d]
+- Updated dependencies [86e765a]
+- Updated dependencies [1d7e76a]
+- Updated dependencies [53dc739]
+- Updated dependencies [fd289be]
+- Updated dependencies [03bf7b1]
+- Updated dependencies [f90e820]
+- Updated dependencies [18d816a]
+- Updated dependencies [e8bd715]
+- Updated dependencies [b91c351]
+- Updated dependencies [a28a3c0]
+- Updated dependencies [daeaaf9]
+- Updated dependencies [c459da6]
+- Updated dependencies [e914733]
+- Updated dependencies [f887e52]
+- Updated dependencies [881f8d8]
+- Updated dependencies [3bfa1e6]
+- Updated dependencies [901355c]
+- Updated dependencies [34ce8e7]
+- Updated dependencies [33681ea]
+- Updated dependencies [4635f3e]
+- Updated dependencies [ee3595c]
+- Updated dependencies [b2eab95]
+- Updated dependencies [93940d4]
+- Updated dependencies [3a04b01]
+- Updated dependencies [45b9051]
+- Updated dependencies [b9e9227]
+- Updated dependencies [d395692]
+- Updated dependencies [5894d30]
+- Updated dependencies [a3765f6]
+- Updated dependencies [e22158f]
+- Updated dependencies [7404925]
+- Updated dependencies [0c2334f]
+- Updated dependencies [778c59f]
+- Updated dependencies [d2619fd]
+- Updated dependencies [6acb11a]
+- Updated dependencies [33c5fd3]
+- Updated dependencies [20b0fdb]
+- Updated dependencies [905019b]
+- Updated dependencies [a286411]
+- Updated dependencies [98c0d33]
+- Updated dependencies [368a82e]
+- Updated dependencies [a3d5724]
+- Updated dependencies [93ea19b]
+- Updated dependencies [9ee2dcf]
+- Updated dependencies [8cb96ec]
+- Updated dependencies [8f10a79]
+- Updated dependencies [6269a55]
+- Updated dependencies [0fb8760]
+- Updated dependencies [e5ce2ed]
+- Updated dependencies [be21955]
+- Updated dependencies [bc56e18]
+- Updated dependencies [be21955]
+- Updated dependencies [a9ee989]
+- Updated dependencies [4d0d944]
+- Updated dependencies [15d58db]
+- Updated dependencies [d63b014]
+- Updated dependencies [9abe4e4]
+- Updated dependencies [2cc7122]
+- Updated dependencies [50d6c92]
+- Updated dependencies [9e0ba21]
+- Updated dependencies [311433f]
+- Updated dependencies [3e5ad08]
+- Updated dependencies [9abe4e4]
+- Updated dependencies [b7131f3]
+- Updated dependencies [e5812fa]
+- Updated dependencies [7085f90]
+- Updated dependencies [dee4dd4]
+- Updated dependencies [ce7e497]
+- Updated dependencies [51ecb2f]
+- Updated dependencies [9086761]
+- Updated dependencies [42a117b]
+- Updated dependencies [1401ae7]
+- Updated dependencies [4297fe7]
+- Updated dependencies [e398863]
+- Updated dependencies [d16df74]
+- Updated dependencies [f11fc61]
+- Updated dependencies [e808890]
+- Updated dependencies [8f79379]
+- Updated dependencies [e6ca40e]
+- Updated dependencies [0c77ea4]
+- Updated dependencies [52954c0]
+- Updated dependencies [89eb997]
+- Updated dependencies [aa5994e]
+- Updated dependencies [be93457]
+- Updated dependencies [a65db76]
+- Updated dependencies [15eb2c9]
+- Updated dependencies [5691b07]
+- Updated dependencies [2a6122b]
+- Updated dependencies [225e769]
+- Updated dependencies [8af88dd]
+- Updated dependencies [fb5fbb8]
+- Updated dependencies [d7b3963]
+- Updated dependencies [b72db01]
+- Updated dependencies [dce5cd4]
+- Updated dependencies [177ebdc]
+- Updated dependencies [8d237b4]
+- Updated dependencies [2d2e6f0]
+- Updated dependencies [2d8dd8d]
+- Updated dependencies [22d573e]
+- Updated dependencies [b5a2398]
+- Updated dependencies [348860c]
+- Updated dependencies [5383fa6]
+- Updated dependencies [5b3ff63]
+- Updated dependencies [1a6a19c]
+- Updated dependencies [527e050]
+- Updated dependencies [dd33bf9]
+- Updated dependencies [4cb2a90]
+- Updated dependencies [74a7804]
+- Updated dependencies [53d3689]
+- Updated dependencies [b3a63d3]
+- Updated dependencies [033a34c]
+- Updated dependencies [4d25d22]
+- Updated dependencies [1ffee51]
+- Updated dependencies [5ae4303]
+- Updated dependencies [ece4dad]
+- Updated dependencies [e9b377e]
+- Updated dependencies [146f448]
+- Updated dependencies [735f5c7]
+- Updated dependencies [a7e18de]
+- Updated dependencies [366f895]
+- Updated dependencies [dc75ba8]
+- Updated dependencies [cce0aa9]
+- Updated dependencies [e764507]
+- Updated dependencies [cff17af]
+- Updated dependencies [39404f3]
+- Updated dependencies [ca1965f]
+- Updated dependencies [8619f95]
+- Updated dependencies [b706af9]
+- Updated dependencies [fc9ba76]
+- Updated dependencies [0f94cc7]
+- Updated dependencies [a11c1a5]
+- Updated dependencies [71f9cd1]
+- Updated dependencies [ee17d86]
+- Updated dependencies [cdbd920]
+- Updated dependencies [18c432e]
+- Updated dependencies [3c418c4]
+- Updated dependencies [fa8715a]
+- Updated dependencies [a933ed7]
+- Updated dependencies [b3ca463]
+- Updated dependencies [a933ed7]
+- Updated dependencies [0d4a6a8]
+- Updated dependencies [518d5e5]
+- Updated dependencies [6643ba1]
+- Updated dependencies [eeba2ef]
+- Updated dependencies [ec4c4d2]
+- Updated dependencies [424f73c]
+- Updated dependencies [cccbe51]
+- Updated dependencies [a8d6b1d]
+- Updated dependencies [e4a7695]
+- Updated dependencies [87075b1]
+- Updated dependencies [fc58a99]
+- Updated dependencies [14cfc00]
+- Updated dependencies [1c6f7b4]
+- Updated dependencies [e854a53]
+- Updated dependencies [dfebfc8]
+- Updated dependencies [d028b37]
+- Updated dependencies [122ef38]
+- Updated dependencies [4a37870]
+- Updated dependencies [428f9b2]
+- Updated dependencies [aa7ff56]
+- Updated dependencies [c41b42e]
+- Updated dependencies [c4db311]
+- Updated dependencies [750fff5]
+- Updated dependencies [c19035e]
+- Updated dependencies [ececf7a]
+- Updated dependencies [d173125]
+- Updated dependencies [8eeca27]
+- Updated dependencies [8425c17]
+- Updated dependencies [a5ef1d8]
+- Updated dependencies [772d5de]
+- Updated dependencies [ce80ec2]
+- Updated dependencies [b372318]
+- Updated dependencies [97a2263]
+- Updated dependencies [29d0676]
+- Updated dependencies [0169d49]
+- Updated dependencies [6bd3231]
+- Updated dependencies [d2b5ba8]
+- Updated dependencies [b799ac5]
+- Updated dependencies [8f74307]
+- Updated dependencies [d23dc08]
+- Updated dependencies [644ad50]
+- Updated dependencies [0da7cd2]
+- Updated dependencies [28a5c3e]
+- Updated dependencies [4bc18e5]
+  - @objectstack/spec@17.3.0
+
 ## 17.2.0
 
 ### Minor Changes

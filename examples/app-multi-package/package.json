@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/example-multi-package",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "One release artifact carrying TWO packages that share a namespace (ADR-0130 D4) — the producer-side fixture for `packages[]`",
   "license": "Apache-2.0",
   "private": true,

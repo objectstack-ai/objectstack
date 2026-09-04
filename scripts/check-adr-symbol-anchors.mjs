@@ -153,6 +153,41 @@ function list(root = process.cwd()) {
 
 function assert(cond, msg) { if (!cond) { console.error(`❌ check-adr-symbol-anchors --self-test: ${msg}`); process.exit(1); } }
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// A module-level `assert()` that exits on the first failure used to be this
+// self-test's ONLY success condition, so "every case held" and "the cases
+// never ran" printed the same line. Closed the way PR #13487 validated on
+// check-doc-authoring: what is pinned is the registered NAMES, not a
+// number. The floor requires the OPENED set to equal the DECLARED set with
+// each battery at or above its own count.
+//
+// This file declares ONE battery, opened at the top of the self-test body. It
+// carries fewer than the two named section banners the sectioning criterion
+// needs, and ⛔ a comment is NOT promoted to a section head — that is a
+// judgement per comment this transplant does not make. The hoisted single
+// battery is the shape PR #14896, PR #15003 and PR #15217 landed for exactly
+// this case.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The count is a FLOOR, not an equality — adding cases is ordinary work and must
+// not red. A battery BELOW its floor means cases stopped running; the remedy is
+// to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'check-adr-symbol-anchors self-test': 17,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 1;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 // Returned by `selfTest()` only after its verdict is printed. The dispatch
 // refuses anything else: a `return` that leaves the function above that line
 // prints nothing and still exits 0 — a self-test that never finished, reported
@@ -160,6 +195,27 @@ function assert(cond, msg) { if (!cond) { console.error(`❌ check-adr-symbol-an
 const SELF_TEST_VERDICT = 'check-adr-symbol-anchors self-test reached its verdict';
 
 export function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const batterySeen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+  };
+  battery('check-adr-symbol-anchors self-test');
+  // A thin in-body wrapper over the module-level `assert`: it attributes the
+  // case to the open battery and then defers to the existing assertion, whose
+  // semantics (print and exit 1 on the first failure) are unchanged.
+  const check = (cond, message) => {
+    registerCase();
+    assert(cond, message);
+  };
   // 1. ⭐ The instrument this gate cannot hold about itself on a clean tree: a
   //    synthetic corpus carrying one of EVERY finding class, plus the healthy
   //    forms, so "no findings" is told apart from "the rule stopped matching".
@@ -191,18 +247,18 @@ export function selfTest() {
     const kinds = findings.map((f) => f.kind);
     const count = (k) => kinds.filter((x) => x === k).length;
 
-    assert(count('line-anchor') === 3, `3 line anchors (plain, hyphen range, EN DASH range) must be found, got ${count('line-anchor')}`);
+    check(count('line-anchor') === 3, `3 line anchors (plain, hyphen range, EN DASH range) must be found, got ${count('line-anchor')}`);
     // `noSuchSymbol` (absent) and `commentOnlySymbol` (named only in a
     // comment — the census's permissiveness, refused here). The vanished FILE
     // is a different class and is asserted separately below.
-    assert(count('unresolved-symbol') === 2, `2 unresolved symbols must be found, got ${count('unresolved-symbol')}`);
-    assert(count('bad-exemption') === 1, `an invalid exemption class must be a finding, got ${count('bad-exemption')}`);
-    assert(count('unresolved-path') === 1, `a vanished target must be a finding, got ${count('unresolved-path')}`);
-    assert(counts.exempt === 1, 'a valid exemption must be honoured exactly once');
+    check(count('unresolved-symbol') === 2, `2 unresolved symbols must be found, got ${count('unresolved-symbol')}`);
+    check(count('bad-exemption') === 1, `an invalid exemption class must be a finding, got ${count('bad-exemption')}`);
+    check(count('unresolved-path') === 1, `a vanished target must be a finding, got ${count('unresolved-path')}`);
+    check(counts.exempt === 1, 'a valid exemption must be honoured exactly once');
     // ...and the healthy record must contribute NOTHING. A rule that fires on
     // good anchors is as broken as one that misses bad ones.
-    assert(!findings.some((f) => f.doc.includes('0001-good')), 'the healthy record must produce no findings');
-    assert(counts.declaration >= 1 && counts.literal >= 1, 'both resolution classes must be exercised by the fixture');
+    check(!findings.some((f) => f.doc.includes('0001-good')), 'the healthy record must produce no findings');
+    check(counts.declaration >= 1 && counts.literal >= 1, 'both resolution classes must be exercised by the fixture');
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
@@ -211,10 +267,10 @@ export function selfTest() {
   //    (dispatch-gates / check-declared-population-live), so a wrong entry runs
   //    perfectly green here and shows up only as a dev who was never told this
   //    gate reads their surface.
-  assert(ROOT_DIR_WATCH_HINTS.every((h) => h.startsWith(ADR_DIR)), 'every watch hint must be under the declared ADR dir');
-  assert(existsSync(ADR_DIR), `the declared population must reach the tree: ${ADR_DIR}`);
-  assert(CORPUS.docRoots.includes(ADR_DIR), 'the corpus must sweep the population this gate declares');
-  assert(
+  check(ROOT_DIR_WATCH_HINTS.every((h) => h.startsWith(ADR_DIR)), 'every watch hint must be under the declared ADR dir');
+  check(existsSync(ADR_DIR), `the declared population must reach the tree: ${ADR_DIR}`);
+  check(CORPUS.docRoots.includes(ADR_DIR), 'the corpus must sweep the population this gate declares');
+  check(
     ROOT_DIR_WATCH_HINTS.every((h) => CORPUS.docRoots.includes(h.replace(/\/\*+$/, ''))),
     `the declared hints must name the roots the corpus sweeps: ${ROOT_DIR_WATCH_HINTS.join(', ')} vs ${CORPUS.docRoots.join(', ')}`,
   );
@@ -223,19 +279,68 @@ export function selfTest() {
   //    clean tree from an extractor that silently matches nothing — the exact
   //    failure mode that let 243 rotted anchors sit unnoticed.
   const live = sweepCorpus(CORPUS);
-  assert(live.counts.anchors > 300, `the live ADR corpus must yield its anchors, got ${live.counts.anchors}`);
-  assert(live.counts.symbol > 0, 'the live corpus must contain resolved SYMBOL anchors');
+  check(live.counts.anchors > 300, `the live ADR corpus must yield its anchors, got ${live.counts.anchors}`);
+  check(live.counts.symbol > 0, 'the live corpus must contain resolved SYMBOL anchors');
 
   // 4. The gate is wired to run. A gate nothing invokes is this repo's most
   //    carded defect class, and renaming a step silently detaches it.
   const workflow = readFileSync('.github/workflows/lint.yml', 'utf8');
-  assert(workflow.includes('node scripts/check-adr-symbol-anchors.mjs'), 'lint.yml must invoke this gate');
-  assert(workflow.includes('node scripts/check-adr-symbol-anchors.mjs --self-test'), 'lint.yml must invoke this gate\'s --self-test');
+  check(workflow.includes('node scripts/check-adr-symbol-anchors.mjs'), 'lint.yml must invoke this gate');
+  check(workflow.includes('node scripts/check-adr-symbol-anchors.mjs --self-test'), 'lint.yml must invoke this gate\'s --self-test');
 
   // 5. The census declaration is intact, INCLUDING the one-way error direction
   //    the ruling ordered recorded (point 5).
-  assert(CENSUS_13556.rotRateIsLowerBound === true, 'the 72.1% figure is a LOWER bound and must be declared as one');
-  assert(CENSUS_13556.totalSurface === CENSUS_13556.distinctLineAnchors + CENSUS_13556.continuationAnchors, 'the declared surface must be the sum of its parts');
+  check(CENSUS_13556.rotRateIsLowerBound === true, 'the 72.1% figure is a LOWER bound and must be declared as one');
+  check(CENSUS_13556.totalSurface === CENSUS_13556.distinctLineAnchors + CENSUS_13556.continuationAnchors, 'the declared surface must be the sum of its parts');
+
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  // The floor's refusal joins the SAME sink the cases use — the module-level
+  // `assert`, which prints and exits 1 — so a breached floor cannot be printed
+  // over by the verdict below.
+  const floorMessages = [];
+  const floorFailure = (message) => { floorMessages.push(message); };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned `
+        + `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in `
+        + 'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. `
+          + 'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of `
+          + `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the '
+        + 'number. Find what stopped registering (an early return, a deleted block, a guard that now '
+        + 'skips) and restore it.',
+    );
+  }
+  assert(!floorBreached, floorMessages.join('\n     '));
 
   console.log(`✅ check-adr-symbol-anchors --self-test: every finding class provoked, healthy anchors silent, population live, wiring pinned (${live.counts.anchors} live anchors)`);
 

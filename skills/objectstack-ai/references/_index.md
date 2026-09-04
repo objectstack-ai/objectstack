@@ -10,18 +10,15 @@ from `node_modules` — there is no local copy in the skill bundle.
 ## Core schemas
 
 - `node_modules/@objectstack/spec/src/ai/agent.zod.ts` — Exports: AIModelConfigSchema, StructuredOutputFormatSchema, TransformPipelineStepSchema, StructuredOutputConfigSchema, AgentSchema
-- `node_modules/@objectstack/spec/src/ai/conversation.zod.ts` — AI Conversation Memory Protocol
-- `node_modules/@objectstack/spec/src/ai/embedding.zod.ts` — Embedding & Vector Store Primitives
-- `node_modules/@objectstack/spec/src/ai/knowledge-document.zod.ts` — Knowledge Document / Chunk / Hit — canonical shapes shared by every
 - `node_modules/@objectstack/spec/src/ai/knowledge-source.zod.ts` — Knowledge Source — declarative metadata describing what to index and
-- `node_modules/@objectstack/spec/src/ai/mcp.zod.ts` — Model Context Protocol (MCP) — Reference & Binding Primitives
 - `node_modules/@objectstack/spec/src/ai/model-registry.zod.ts` — AI Model Registry Protocol
 - `node_modules/@objectstack/spec/src/ai/skill.zod.ts` — Skill Trigger Condition Schema
+- `node_modules/@objectstack/spec/src/ai/solution-blueprint.zod.ts` — Exports: BlueprintConditionSchema, BlueprintSummaryOperationsSchema, BlueprintFieldSchema, BlueprintObjectSchema, BlueprintViewSchema
 - `node_modules/@objectstack/spec/src/ai/tool.zod.ts` — Exports: ToolSchema
-- `node_modules/@objectstack/spec/src/ai/usage.zod.ts` — AI Usage Primitives
 
 ## Transitive dependencies
 
+- `node_modules/@objectstack/spec/src/ai/embedding.zod.ts` — Embedding & Vector Store Primitives
 - `node_modules/@objectstack/spec/src/automation/state-machine.zod.ts` — XState-inspired State Machine Protocol — hierarchical states, guarded
 - `node_modules/@objectstack/spec/src/data/field-value.zod.ts` — Field runtime VALUE-shape contract (ADR-0104 D1).
 - `node_modules/@objectstack/spec/src/data/field.zod.ts` — Exports: FieldType, SelectOptionSchema, LocationCoordinatesSchema, CurrencyConfigSchema, CurrencyValueSchema

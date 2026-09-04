@@ -62,4 +62,5 @@ for both corollaries.
 | `metadata_endpoints` | 6 | 0 | 0 | 2 | 0 | 8 |
 | `batch_endpoints` | 5 | 0 | 0 | 2 | 0 | 7 |
 | `route_generation` | 0 | 0 | 0 | 4 | 0 | 4 |
-| **total** | **844** | **5** | **1** | **84** | **13** | **947** |
+| `realtime_subscription` | 0 | 0 | 0 | 6 | 0 | 6 |
+| **total** | **844** | **5** | **1** | **90** | **13** | **953** |

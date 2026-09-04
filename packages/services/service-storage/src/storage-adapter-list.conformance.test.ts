@@ -155,8 +155,8 @@ vi.mock('@aws-sdk/client-s3', () => {
 // `vi.mock` is hoisted above every import in this file, so the lazy
 // `await import('@aws-sdk/client-s3')` inside `S3StorageAdapter` resolves to the
 // fake above no matter where these two sit.
-import { LocalStorageAdapter } from './local-storage-adapter';
-import { S3StorageAdapter } from './s3-storage-adapter';
+import { LocalStorageAdapter } from './local-storage-adapter.js';
+import { S3StorageAdapter } from './s3-storage-adapter.js';
 
 // ---------------------------------------------------------------------------
 // Backend harness
@@ -365,8 +365,8 @@ describe.each(BACKENDS)('$name adapter — list() conformance', ({ make }) => {
       expect(page.keys).toHaveLength(400);
       expect(page.nextCursor).toBeDefined();
     }
-    expect(pages.at(-1)!.keys).toHaveLength(BULK_SET.length % 400);
-    expect(pages.at(-1)!.nextCursor).toBeUndefined();
+    expect(pages[pages.length - 1]!.keys).toHaveLength(BULK_SET.length % 400);
+    expect(pages[pages.length - 1]!.nextCursor).toBeUndefined();
   }, 60_000);
 
   it('fills one page past the backend\'s own page size (>1000 in a single call)', async () => {
@@ -434,7 +434,7 @@ describe.each(BACKENDS)('$name adapter — list() conformance', ({ make }) => {
   it('issues a cursor the contract codec can read back', async () => {
     const page = await backend.adapter.list!('bulk/', { limit: 10 });
 
-    expect(page.nextCursor).toBe(encodeStorageListCursor(page.items.at(-1)!.key));
+    expect(page.nextCursor).toBe(encodeStorageListCursor(page.items[page.items.length - 1]!.key));
   });
 });
 

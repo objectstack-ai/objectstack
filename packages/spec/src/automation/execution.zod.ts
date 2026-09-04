@@ -128,14 +128,28 @@ export const ExecutionStepLogSchema = lazySchema(() => z.object({
   // so run observability can nest per-iteration / per-branch body steps under
   // the container instead of showing it as a single opaque step.
   parentNodeId: z.string().optional().describe('Enclosing structured-region container node ID (loop/parallel/try_catch)'),
+  // `iteration` is SINGLE-VALUED: the zero-based iteration of the enclosing
+  // `loop`, carried through any nesting. It used to double as the parallel
+  // branch index — one field, two meanings, told apart only by reading
+  // `regionKind` first — so for `loop { body: [ parallel { branches } ] }`
+  // every branch step recorded the branch index and no step of that branch
+  // recorded the loop iteration: a per-row failure inside a branch was
+  // attributable to a branch, never to the row. The branch index now has its
+  // own key, `branch`, below (maintainer ruling 2026-09-03, option A: one
+  // meaning per key; the overload-plus-second-index alternative was not taken).
+  //
   // A `try` / `catch` region has no index of its own, so a step it ran for a
   // loop body — `loop { body: [ try_catch { try, catch } ] }`, the containment
   // spelling for a per-iteration failure that must not end the sweep — carries
   // the ENCLOSING LOOP's iteration while `regionKind` keeps naming the
   // try/catch region: the step says which region ran it AND which row it ran
   // for. Without that, a caught per-row failure is attributable to no row.
-  iteration: z.number().int().min(0).optional().describe('Zero-based loop iteration or parallel branch index of the enclosing region. A step inside a `try` / `catch` region that is itself inside a loop body carries the enclosing loop\'s iteration — a try/catch region has no index of its own — while `regionKind` stays `try` / `catch`.'),
-  regionKind: z.string().optional().describe('Region kind the step ran in: loop-body | parallel-branch | try | catch. Stays `try` / `catch` for a step inside a try/catch region nested in a loop body; the loop is reported through `iteration`.'),
+  iteration: z.number().int().min(0).optional().describe('Zero-based iteration of the enclosing `loop`, carried through any nesting — a step inside a `parallel` branch that is itself inside a loop body carries the loop\'s iteration here and its branch index on `branch`. A step inside a `try` / `catch` region that is itself inside a loop body carries the enclosing loop\'s iteration — a try/catch region has no index of its own — while `regionKind` stays `try` / `catch`.'),
+  // A `parallel` region DOES have an index of its own, which is exactly why it
+  // cannot share `iteration`: a branch step of a parallel node inside a loop
+  // body carries BOTH — `iteration` for the row, `branch` for the branch.
+  branch: z.number().int().min(0).optional().describe('Zero-based index of the enclosing `parallel` branch. Present only on a step inside a parallel branch; absent everywhere else. When the parallel node is itself inside a loop body, the loop iteration is reported through `iteration`, never here.'),
+  regionKind: z.string().optional().describe('Region kind the step ran in: loop-body | parallel-branch | try | catch. Stays `try` / `catch` for a step inside a try/catch region nested in a loop body; the loop is reported through `iteration`. For `parallel-branch` the branch index is reported through `branch`, and the enclosing loop iteration — when the parallel node sits inside a loop body — through `iteration`.'),
   // #4354: what the step did to the data, and — for a `skipped` step — which
   // gate stopped it. Both feed the run summary aggregated on ExecutionLog.
   metrics: ExecutionStepMetricsSchema.optional()

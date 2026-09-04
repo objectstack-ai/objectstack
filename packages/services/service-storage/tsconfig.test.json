@@ -1,0 +1,83 @@
+// The TEST-layer type-check program (#15050 — the `packages/services/**`
+// instance of the class #14062 settled for `packages/plugins/**`, itself
+// adopting the mechanism #5286 set for `packages/spec`, #5449 generalised,
+// #12542 carried to `packages/rest`, #13176 to `packages/plugins/
+// plugin-security`, and #14181 to `packages/services/service-cluster`.
+// `tsconfig.json` beside this one stays exactly as it is: it is the BUILD
+// config. This sibling puts the test layer in front of tsc under the module
+// semantics vitest really executes it with, and `package.json`'s `typecheck`
+// script NAMES it (via `check:test-typecheck --project`), because a config no
+// script invokes is exactly the phantom this whole change is about.
+//
+// STRUCTURAL MATCH, checked before copying (the card's own warning): this
+// package's `tsconfig.json` does NOT exclude tests — `include: ["src"]` with
+// no test exclusion — so the program that would have read them already
+// existed and was simply never invoked, the same shape as `plugin-webhooks`
+// and `service-cluster`. It is therefore not one of the packages
+// (`plugin-auth`, `plugin-sharing`, `core`) whose BUILD config excludes tests
+// and needs its own compensation; AGENTS.md forbids adding such an exclusion.
+//
+// What differs from the build config, and what deliberately does NOT:
+//   - MODULE SEMANTICS ONLY, plus `lib`. The tests are written and executed as
+//     ESM by vitest (esbuild/vite). Matching that is FIDELITY, not laxity: it is
+//     the same subtraction `packages/spec`, `packages/rest` and the
+//     `packages/plugins/**` / `service-cluster` family each made.
+//   - ⛔ STRICTNESS IS UNTOUCHED. `strict`, `noUnusedLocals`,
+//     `noUnusedParameters`, `noImplicitReturns`, `noFallthroughCasesInSwitch`,
+//     `rootDir`, `paths` and `types` are all INHERITED from `tsconfig.json`
+//     (and through it the root config), and none of them is re-declared here.
+//     ⚠️ A child that declared its own `paths` would REPLACE the parent map
+//     rather than merge into it, silently sending a source-resolved specifier
+//     back to `dist/` — a BUILD ARTIFACT — so this file declares none.
+//     Nothing here may loosen a type rule; if a test does not compile, that is
+//     the finding.
+//   - `lib: ["ES2022"]`, for the same reason `packages/rest` states: the root
+//     config's `lib` is ES2020 and vitest runs on a Node that has es2022
+//     builtins, so the gap is reported as TS2550 about the CHECK. No `DOM`:
+//     nothing in this layer touches a browser global.
+//
+// MEASURED with the dependency closure built first
+// (`pnpm --filter '@objectstack/service-storage^...' build`, and
+// `pnpm --filter '@objectstack/objectql' build` re-run after its DTS worker
+// was truncated by an unrelated 10-minute foreground kill — see the PR body
+// for that finding), `tsc --noEmit --pretty false --listFiles -p <config>`
+// and the same command without `--listFiles`:
+//
+//   files in this program          1102 (BUILD) / 1068 (THIS config)
+//   own `src/**/*.test.ts` in it   35
+//   errors under BUILD semantics   51 raw -> 0 after repair (matches the
+//                                  DEBT ledger's 51 exactly, before repair)
+//   errors under THIS config       10 raw -> 0 after repair
+//
+// The two readings AGREE at 0/0 after repair — same result `service-cluster`
+// reported, reached by a longer road: unlike that package, this one's BUILD
+// program was NOT already clean. 51 raw split as code-tier 8 (TS2339 x4,
+// TS2347 x4) / config-tier 26 (TS2835 x23, TS2550 x3) / noise 17 (TS7006 x15,
+// TS6196, TS6133) — matching the ledger's own composition note exactly.
+// config-tier and noise were REPAIRED, not routed around: the 23 TS2835
+// (missing `.js` on relative imports, required under BUILD's NodeNext
+// resolution but optional under THIS config's bundler resolution) are fixed
+// by ADDING the extension, which resolves correctly under BOTH module modes
+// -- and doing so also cleared all 15 TS7006 "implicitly any" as a
+// downstream cascade (the same shape `@objectstack/core` reported at 98 -> 4,
+// here 41 -> 3 after the extensions alone). The remaining 3 TS2550
+// (`Array.prototype.at`, needs `lib` es2022) are rewritten to indexed access
+// (`arr[arr.length - 1]`) rather than widening the shared BUILD config's
+// `lib` -- the narrower fix, and it leaves `tsconfig.json` untouched. The 8
+// code-tier (TS2339 x4 `driveInsert`'s spread dropped its index signature;
+// TS2347 x4 a fake `ctx: any`'s `getService<T>()` calls, the identical shape
+// this file's OWN prior fix at line ~92 already documented for one call site
+// but left three siblings unconverted) are fixed in the test files -- see the
+// PR body for the full per-file breakdown. No `test-typecheck-debt.json`:
+// residue is 0, so none is owed (#5286 route, maintainer-only to open one).
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"]
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}

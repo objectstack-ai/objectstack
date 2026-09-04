@@ -174,6 +174,46 @@ export function buildDataset({ perSummary, fileCounts, provenance }) {
   };
 }
 
+// -- The self-test's own battery roster and floor (#13489) ------------------
+//
+// `--self-test` reaching its verdict used to be this self-test's ONLY success
+// condition, so "every case held" and "the cases never ran" printed the same
+// line. Closed the way PR #13487 validated on check-doc-authoring: what is
+// pinned is the registered NAMES, not a number.
+//
+// This file's assertions are bare `throw`s rather than calls to an assertion
+// helper, so they are counted by the `check(() => { ... })` THUNK PR #15198
+// measured: the existing `if (...) throw ...` is carried into the thunk
+// VERBATIM and the condition is never touched. Routing these through a boolean
+// helper instead would mean inverting 22 failure conditions by hand, and a
+// dropped `!` yields an assertion that still registers its case and still
+// passes -- invisible to the very floor being installed here. The throw still
+// propagates: this file fails fast on the FIRST broken assertion, as it always
+// has.
+//
+// This file declares ONE battery, opened at the top of the self-test body. Its
+// blocks are headed by unmarked prose comments -- it carries ZERO named section
+// banners, fewer than the two the sectioning criterion needs, and a comment is
+// NOT promoted to a section head (that is a judgement per comment this
+// transplant does not make). The hoisted single battery is the shape PR #14896,
+// PR #15003 and PR #15217 landed for exactly this case.
+//
+// The count is a FLOOR, not an equality -- adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering, never to lower the number.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'measure-test-shard-timings self-test': 22,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 1;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 // Returned by `selfTest()` only after its verdict is printed. The dispatch
 // refuses anything else: a `return` that leaves the function above that line
 // prints nothing and still exits 0 — a self-test that never finished, reported
@@ -181,6 +221,28 @@ export function buildDataset({ perSummary, fileCounts, provenance }) {
 const SELF_TEST_VERDICT = 'measure-test-shard-timings self-test reached its verdict';
 
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const batterySeen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+  };
+  battery('measure-test-shard-timings self-test');
+  // The thunk: it registers the case and then runs the existing site VERBATIM,
+  // so no assertion condition is inverted or rewritten and the sink keeps its
+  // own semantics. Registration happens whether or not the site fires, which is
+  // what makes the count a floor on cases RUN rather than a count of failures.
+  const check = (fn) => {
+    registerCase();
+    fn();
+  };
   const summary = (tasks) => ({ tasks });
   const testTask = (pkg, start, end, status = 'MISS', exitCode = 0) => ({
     taskId: `${pkg}#test`,
@@ -190,9 +252,15 @@ function selfTest() {
     execution: { startTime: start, endTime: end, exitCode },
   });
 
-  if (median([3]) !== 3) throw new Error('median: single value');
-  if (median([5, 1, 3]) !== 3) throw new Error('median: odd length is not order-dependent');
-  if (median([1, 2, 3, 4]) !== 2.5) throw new Error('median: even length averages the middle pair');
+  check(() => {
+    if (median([3]) !== 3) throw new Error('median: single value');
+  });
+  check(() => {
+    if (median([5, 1, 3]) !== 3) throw new Error('median: odd length is not order-dependent');
+  });
+  check(() => {
+    if (median([1, 2, 3, 4]) !== 2.5) throw new Error('median: even length averages the middle pair');
+  });
 
   // A build task in the same summary must not be read as a test duration.
   const mixed = samplesFromSummary(
@@ -202,23 +270,37 @@ function selfTest() {
     ]),
     'f'
   );
-  if (mixed.samples.get('a') !== 2) throw new Error(`task filter: got ${mixed.samples.get('a')}`);
-  if (mixed.samples.size !== 1) throw new Error('task filter: a non-test task was sampled');
+  check(() => {
+    if (mixed.samples.get('a') !== 2) throw new Error(`task filter: got ${mixed.samples.get('a')}`);
+  });
+  check(() => {
+    if (mixed.samples.size !== 1) throw new Error('task filter: a non-test task was sampled');
+  });
 
   // THE ONE THAT MATTERS: a cache HIT is skipped, never recorded as ~0s.
   // The control leg first -- a genuine 40ms MISS is a legitimate measurement,
   // so only the HIT/MISS pair below proves the skip is about the cache status
   // and not about the window being short.
   const shortMiss = samplesFromSummary(summary([testTask('a', 0, 40)]), 'f');
-  if (shortMiss.samples.get('a') !== 0.04) throw new Error('cache: a short MISS was not recorded');
+  check(() => {
+    if (shortMiss.samples.get('a') !== 0.04) throw new Error('cache: a short MISS was not recorded');
+  });
   const withHit = samplesFromSummary(summary([testTask('a', 0, 40, 'HIT'), testTask('b', 0, 60_000)]), 'f');
-  if (withHit.samples.has('a')) throw new Error('cache: a HIT was recorded as a measurement');
-  if (!withHit.skippedCached.includes('a')) throw new Error('cache: a HIT was not reported as skipped');
-  if (withHit.samples.get('b') !== 60) throw new Error('cache: the MISS beside it was lost');
+  check(() => {
+    if (withHit.samples.has('a')) throw new Error('cache: a HIT was recorded as a measurement');
+  });
+  check(() => {
+    if (!withHit.skippedCached.includes('a')) throw new Error('cache: a HIT was not reported as skipped');
+  });
+  check(() => {
+    if (withHit.samples.get('b') !== 60) throw new Error('cache: the MISS beside it was lost');
+  });
 
   // A failed suite stopped early; its window is not the package's cost.
   const failed = samplesFromSummary(summary([testTask('a', 0, 500, 'MISS', 1)]), 'f');
-  if (failed.samples.has('a')) throw new Error('exit: a failed suite was recorded as a duration');
+  check(() => {
+    if (failed.samples.has('a')) throw new Error('exit: a failed suite was recorded as a duration');
+  });
 
   const threw = (fn) => {
     try {
@@ -228,13 +310,19 @@ function selfTest() {
       return true;
     }
   };
-  if (!threw(() => samplesFromSummary({}, 'f'))) throw new Error('shape: a non-summary was accepted');
-  if (!threw(() => samplesFromSummary(summary([{ task: 'test', package: '', cache: { status: 'MISS' } }]), 'f'))) {
-    throw new Error('shape: a nameless test task was accepted');
-  }
-  if (!threw(() => samplesFromSummary(summary([{ task: 'test', package: 'a', cache: { status: 'MISS' } }]), 'f'))) {
-    throw new Error('shape: a test task with no execution window was accepted');
-  }
+  check(() => {
+    if (!threw(() => samplesFromSummary({}, 'f'))) throw new Error('shape: a non-summary was accepted');
+  });
+  check(() => {
+    if (!threw(() => samplesFromSummary(summary([{ task: 'test', package: '', cache: { status: 'MISS' } }]), 'f'))) {
+      throw new Error('shape: a nameless test task was accepted');
+    }
+  });
+  check(() => {
+    if (!threw(() => samplesFromSummary(summary([{ task: 'test', package: 'a', cache: { status: 'MISS' } }]), 'f'))) {
+      throw new Error('shape: a test task with no execution window was accepted');
+    }
+  });
 
   // Merging: the same package sampled by several shards collapses to its median.
   const merged = buildDataset({
@@ -246,29 +334,39 @@ function selfTest() {
     fileCounts: new Map([['a', 10], ['big', 50]]),
     provenance: { measuredAt: 'test' },
   });
-  if (merged.packages.a !== 20) throw new Error(`merge: expected the median 20, got ${merged.packages.a}`);
+  check(() => {
+    if (merged.packages.a !== 20) throw new Error(`merge: expected the median 20, got ${merged.packages.a}`);
+  });
   // rates: a -> 20/10 = 2, big -> 100/50 = 2  => 2
-  if (merged.secondsPerTestFileFallback !== 2) {
-    throw new Error(`fallback rate: got ${merged.secondsPerTestFileFallback}`);
-  }
+  check(() => {
+    if (merged.secondsPerTestFileFallback !== 2) {
+      throw new Error(`fallback rate: got ${merged.secondsPerTestFileFallback}`);
+    }
+  });
   // Packages too small to vote on the rate are excluded from it but still kept.
   const tiny = buildDataset({
     perSummary: [samplesFromSummary(summary([testTask('a', 0, 10_000), testTask('t', 0, 300)]), 'f')],
     fileCounts: new Map([['a', 5], ['t', 1]]),
     provenance: {},
   });
-  if (tiny.secondsPerTestFileFallback !== 2) throw new Error(`rate: a 0.3s/1-file package voted (${tiny.secondsPerTestFileFallback})`);
-  if (tiny.packages.t !== 0.3) throw new Error('rate: the small package was dropped from the dataset');
+  check(() => {
+    if (tiny.secondsPerTestFileFallback !== 2) throw new Error(`rate: a 0.3s/1-file package voted (${tiny.secondsPerTestFileFallback})`);
+  });
+  check(() => {
+    if (tiny.packages.t !== 0.3) throw new Error('rate: the small package was dropped from the dataset');
+  });
 
-  if (!threw(() =>
-    buildDataset({
-      perSummary: [samplesFromSummary(summary([testTask('a', 0, 40, 'HIT')]), 'f')],
-      fileCounts: new Map(),
-      provenance: {},
-    })
-  )) {
-    throw new Error('an all-cached run produced a dataset instead of refusing');
-  }
+  check(() => {
+    if (!threw(() =>
+      buildDataset({
+        perSummary: [samplesFromSummary(summary([testTask('a', 0, 40, 'HIT')]), 'f')],
+        fileCounts: new Map(),
+        provenance: {},
+      })
+    )) {
+      throw new Error('an all-cached run produced a dataset instead of refusing');
+    }
+  });
 
   // Workspace resolution, at the depth that actually caught a defect. A
   // one-level scan resolves `packages/*` and returns null for the ~60% of the
@@ -276,13 +374,68 @@ function selfTest() {
   // seven more roots -- silently, as "this package has no test files", which
   // then skews the fallback rate toward whichever half sits at depth 1.
   const nested = packageDirForName('@objectstack/driver-turso');
-  if (nested === null) throw new Error('workspace: a package nested under packages/drivers/ did not resolve');
-  if (path.relative(REPO_ROOT, nested).split(path.sep).length < 3) {
-    throw new Error(`workspace: expected a nested path, got ${nested}`);
-  }
-  if (countTestFiles(nested) === 0) throw new Error('workspace: the resolved nested package reports no test files');
+  check(() => {
+    if (nested === null) throw new Error('workspace: a package nested under packages/drivers/ did not resolve');
+  });
+  check(() => {
+    if (path.relative(REPO_ROOT, nested).split(path.sep).length < 3) {
+      throw new Error(`workspace: expected a nested path, got ${nested}`);
+    }
+  });
+  check(() => {
+    if (countTestFiles(nested) === 0) throw new Error('workspace: the resolved nested package reports no test files');
+  });
   const flat = packageDirForName('@objectstack/spec');
-  if (flat === null || path.basename(flat) !== 'spec') throw new Error('workspace: a depth-1 package stopped resolving');
+  check(() => {
+    if (flat === null || path.basename(flat) !== 'spec') throw new Error('workspace: a depth-1 package stopped resolving');
+  });
+
+  // -- The floor: every declared battery RAN, and ran its cases (#13489) ----
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered cases EQUALS the set declared. A set difference
+  // names WHICH battery stopped; a count says only that something did.
+  //
+  // It THROWS rather than collecting into a `failures` array because that is
+  // how every other assertion in this file reports: the dispatch below turns an
+  // unfinished self-test into a non-zero exit, and a floor breach is exactly
+  // that -- a self-test that did not run what it claims to run.
+  const floorFailures = [];
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorFailures.push(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} -- a battery deleted from the roster takes its own floor with it.`
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorFailures.push(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES -- a case attributed to no declared battery is one nothing floors.'
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorFailures.push(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN -- 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} -- cases that used to run no longer do.`
+    );
+  }
+  if (floorFailures.length > 0) {
+    throw new Error(
+      `measure-test-shard-timings self-test floor (${floorFailures.length} breach(es)):\n` +
+        floorFailures.map((f) => `  - ${f}`).join('\n') +
+        '\n  A battery at or below its floor means cases STOPPED RUNNING -- the battery is the bug, ' +
+        'not the number. Find what stopped registering (an early return, a deleted block, a guard ' +
+        'that now skips) and restore it.'
+    );
+  }
 
   console.log('measure-test-shard-timings: self-test OK');
 

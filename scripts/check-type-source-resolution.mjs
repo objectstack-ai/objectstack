@@ -625,6 +625,60 @@ const KNOWN_DIST_RESOLVED_TYPE_IMPORTS = {
     '@objectstack/lint', '@objectstack/mcp', '@objectstack/platform-objects',
     '@objectstack/plugin-auth', '@objectstack/spec', '@objectstack/types',
   ],
+  // #15048 re-baseline (the onboarding limb above): a NEW entry, reached ONLY
+  // through `tsconfig.test.json` -- a program this card ADDED. Same shape as
+  // the `service-cluster` re-baseline below (#14181): `service-automation` had
+  // NO `typecheck` script AT ALL before (its scripts were `build` and `test`),
+  // and its build `tsconfig.json` -- which is ALWAYS a counted program per this
+  // gate's own design (see `programConfigsFor`'s doc-block) -- measured clean
+  // on its own, so there is no pre-existing program a dep could be laundered
+  // through. All 9 deps here are annotated `via tsconfig.test.json` by this
+  // gate's own failure text.
+  //
+  // Provenance measured four ways on one checkout, by varying only what the
+  // `typecheck` script NAMES (`--list`, totals as printed). RE-MEASURED on the
+  // merge of `origin/main` @ 919beca43b, which had landed the `service-knowledge`
+  // onboarding below (#15049) since this card's first reading: that merge moved
+  // every ABSOLUTE here (+1 program, +3 pairs, +1 package before this entry
+  // exists) and moved none of the DELTAS, which are what this block claims.
+  //
+  //   no `typecheck` script (origin/main)  absent   120 programs / 293 pairs
+  //   names `tsconfig.json` only           absent   120 programs / 293 pairs
+  //   names `tsconfig.test.json` only      PRESENT  121 programs / 302 pairs
+  //   names both (this card)               PRESENT  121 programs / 302 pairs
+  //
+  // Row 2 is the load-bearing one: the BUILD program (which already includes
+  // every test file -- `tsconfig.json`'s `include` has never excluded them)
+  // carries no dist-resolved workspace type import at all, so the exposure is
+  // not merely first SEEN through the onboarded program, it is only REACHABLE
+  // through it. Numbers, before/after on the same checkout:
+  //
+  //   before   59 of 78 packages, 120 programs, 293 pairs, 19 clean
+  //   after    60 of 78 packages, 121 programs, 302 pairs, 18 clean
+  //
+  // so +1 package, +1 program, +9 pairs (one per dep below) -- this entry and
+  // nothing else.
+  //
+  // Why the entry and not `paths`: MEASURED, not argued. Redirecting these 9
+  // deps to source takes this package's test layer from 0 errors to 648 (647
+  // TS6059 `not under rootDir` + 1 TS6133), ALL 647 of the TS6059 in ANOTHER
+  // package's source -- zero name a file under this package's own `src/`:
+  // `packages/spec/src/**` 379, `packages/core/src/**` 62,
+  // `packages/plugins/plugin-security/src/**` 60, `packages/objectql/src/**`
+  // 49, `packages/services/service-messaging/src/**` 41, `packages/
+  // metadata-core/src/**` 29, `packages/formula/src/**` 15, `packages/
+  // services/service-job/src/**` 6, `packages/drivers/driver-sql/src/**` 6 --
+  // billed to packages that cannot pay them down. Same finding as the
+  // `service-cluster` re-baseline below (#14181: 0 -> 435) and PR #12570's
+  // before it, reproduced again at a larger scale because this package pulls
+  // more workspace deps. The #5286 route this entry backs makes this
+  // package's OWN test files compile clean; `paths` would immediately re-bury
+  // that result under other packages' diagnostics.
+  '@objectstack/service-automation': [
+    '@objectstack/core', '@objectstack/driver-sql', '@objectstack/formula',
+    '@objectstack/metadata-core', '@objectstack/objectql', '@objectstack/plugin-security',
+    '@objectstack/service-job', '@objectstack/service-messaging', '@objectstack/spec',
+  ],
   // #14181 re-baseline (the onboarding limb above): a NEW entry, reached ONLY
   // through `tsconfig.test.json` -- a program this card ADDED. This is the
   // limb's cleanest case rather than a borderline one: `service-cluster` had NO
@@ -742,6 +796,56 @@ const KNOWN_DIST_RESOLVED_TYPE_IMPORTS = {
   '@objectstack/service-messaging': ['@objectstack/spec'],
   '@objectstack/service-realtime': ['@objectstack/spec'],
   '@objectstack/service-sms': ['@objectstack/core', '@objectstack/plugin-auth', '@objectstack/spec'],
+  // #15050 re-baseline (the onboarding limb above): a NEW entry, reached ONLY
+  // through `tsconfig.test.json` (all 7 deps) and `tsconfig.scripts.json`
+  // (`@objectstack/spec` again, no new pairs). Same shape as `service-cluster`
+  // (#14181, above): this package had NO `typecheck` script AT ALL before (its
+  // scripts were `build` and `test`), so it ran ZERO counted programs and
+  // there is no pre-existing program a dep could be laundered through.
+  //
+  // Provenance measured four ways on one checkout, by varying only what the
+  // `typecheck` script NAMES (`--list`, totals as printed). RE-MEASURED on the
+  // merge of `origin/main` @ 460134af8, which had landed BOTH sibling
+  // onboardings of this family since this card's first reading
+  // (`service-knowledge` #15049 and `service-automation` #15048, above): that
+  // merge moved every ABSOLUTE here (+2 programs, +12 pairs, +2 packages
+  // before this entry exists) and moved none of the DELTAS, which are what
+  // this block claims.
+  //
+  //   no `typecheck` script (origin/main)  absent   121 programs / 302 pairs
+  //   names `tsconfig.json` only           absent   121 programs / 302 pairs
+  //   names `tsconfig.test.json` only      PRESENT  122 programs / 309 pairs
+  //   names all three (this card)          PRESENT  123 programs / 309 pairs
+  //
+  // Row 2 is the load-bearing one, exactly as it was for `service-cluster`:
+  // the BUILD program carries no dist-resolved workspace type import at all,
+  // so the exposure is only REACHABLE through the onboarded programs, not
+  // merely first seen there. (`tsconfig.json` has never excluded tests, so
+  // module semantics — NodeNext vs bundler — is the axis that differs for the
+  // test program; `tsconfig.scripts.json` reads a directory BUILD's `include`
+  // never reached at all.)
+  //
+  // Numbers: +1 package (60 -> 61 of 78), +2 programs (121 -> 123, one per
+  // onboarded config), +7 pairs (302 -> 309) -- this entry and nothing else.
+  //
+  // Why the entry and not `paths`, which is what this gate's failure text
+  // asks for: MEASURED on this checkout (temporary `paths` added to
+  // `tsconfig.test.json`, `tsc --noEmit -p` run, then removed — never
+  // committed), and `paths` is decisively the wrong tool here, same as
+  // `service-cluster` found. Redirecting all 7 deps to source takes this
+  // package's test layer from 0 errors to 306 (305 x TS6059 "not under
+  // rootDir" + 1 x TS6133), every TS6059 in ANOTHER package's source
+  // (`packages/types/src/**`, `packages/spec/src/**`, `packages/objectql/
+  // src/**`, `packages/observability/src/**`, `packages/drivers/
+  // driver-sql/src/**`) -- billed to a package that cannot pay them down. The
+  // #5286 route this card took makes its OWN test files compile clean (0/0,
+  // both readings agree), and `paths` would immediately re-bury that result
+  // under other packages' diagnostics.
+  '@objectstack/service-storage': [
+    '@objectstack/core', '@objectstack/driver-sql', '@objectstack/objectql',
+    '@objectstack/observability', '@objectstack/platform-objects', '@objectstack/spec',
+    '@objectstack/types',
+  ],
   '@objectstack/setup': ['@objectstack/platform-objects', '@objectstack/spec'],
   '@objectstack/studio': ['@objectstack/platform-objects', '@objectstack/spec'],
   '@objectstack/trigger-api': ['@objectstack/core', '@objectstack/spec'],

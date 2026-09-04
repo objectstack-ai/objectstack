@@ -1,5 +1,2175 @@
 # @objectstack/plugin-security
 
+## 17.3.0
+
+### Minor Changes
+
+- 6171331: fix(plugin-security): `controlled_by_parent` composes across a chain — a child whose master is itself derived is no longer readable and writable org-wide (#11082)
+  
+  **BREAKING** access tightening, shipped as `minor` under the repo's
+  launch-window convention. It denies reads and writes that previously
+  succeeded — which is the whole point: they were never authorized by any
+  declaration, and the app author could not tell.
+  
+  `controlled_by_parent` (ADR-0055) resolves a detail's access from its master.
+  #5386 made that resolution fold in the master's ownership and its
+  `sys_record_share` grants, not just the master's RLS policies. It did not
+  recurse, and both halves it composes answer "no restriction" for a master that
+  is **itself** `controlled_by_parent`:
+  
+  - the RLS half is `null`, because a derived object authors no policy —
+    declaring `controlled_by_parent` *is* its policy;
+  - the sharing half is `null` too: `plugin-sharing`'s `buildReadFilter` opts out
+    of every model that is not `private`, and `effectiveSharingModel` maps
+    `controlled_by_parent` to `public`.
+  
+  Composed: `null`. The derivation's master query then ran as **system** with an
+  empty predicate and returned **every master row**, so a two-level chain was
+  enforced at level one and org-wide at level two. The write half failed through
+  a separate mechanism with the same result: the master gate asks `canEdit` on
+  the master row, `checkEdit` returns `abstain` for a `public`-mapped model, and
+  `abstain` is not `deny` — so it answered `true` for every master row.
+  
+  Both halves now walk the chain. The read derivation composes the master's own
+  `controlled_by_parent` filter as a third layer, and the write gate runs its
+  three master-edit legs on each hop until it reaches a master that governs its
+  own rows. The master set is therefore point-for-point equal to what a direct
+  read of the master returns, at every level, which is the equality #5386
+  established for one level.
+  
+  This is **not** a blanket refusal for chained declarations: a detail whose
+  whole chain is reachable stays readable and writable, and the single-level case
+  is unchanged. Two guards bound the walk and both fail **closed**, never to "no
+  restriction": a metadata cycle is refused, and so is a chain deeper than 8
+  links (a cost ceiling, not a supported-length statement — termination is
+  already guaranteed by the cycle guard).
+  
+  What an app may observe: a detail under a `controlled_by_parent` master that
+  was reachable before is now reachable only if the caller can reach the whole
+  chain above it. Apps whose masters are `private`, `public_read` or
+  `public_read_write` — every `controlled_by_parent` object authored in this
+  repo — are unaffected.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) An access-derivation fix inside plugin-security. No spec surface is renamed, retired or re-shaped, no authorable metadata key changes meaning, and there is nothing for `objectstack migrate meta` to rewrite — a chained declaration that was silently unenforced is now enforced as it always read. -->
+- 25b1b81: Surface "declared ≠ enforced" on package-declared permission sets, and give
+  operators a sanctioned, audited way to discard a stale environment overlay.
+  
+  Field report: an rc→GA upgraded environment can freeze a package's
+  permission set at a stale snapshot while the shipped artifact keeps
+  shipping grant changes — silently, with only a boot log counter as a
+  signal. Two independent mechanisms can cause this, and either (or both
+  together) can be live on one row:
+  
+  - **overlay shadow** — a Studio permission-matrix save on a package-declared
+    set materializes a `sys_metadata` overlay that shadows every later package
+    edit to that set, forever, surviving redeploys and restarts;
+  - **provenance skip** — a `sys_permission_set` row whose `managed_by` column
+    predates package provenance tracking is treated as environment-authored
+    and never reconciled with the package.
+  
+  `sys_permission_set` now carries `drift_status` / `drift_detail`, recomputed
+  every boot, naming the set and the cause — a new "Needs Attention" Setup
+  list view surfaces only sets that actually differ from their shipped
+  artifact (an in-sync set is never flagged; `drift_status` stays `null`).
+  
+  A new "Discard Overlay" Setup action (`POST
+  /api/v1/security/permission-sets/:id/discard-overlay`) removes a stale
+  overlay and resyncs the record to the current artifact synchronously — the
+  supported, audited counterpart to the raw-SQL remediation the field report
+  had to use. It targets package-declared sets only: a set with no current
+  package declaration is refused, so a genuinely environment-authored set can
+  never be discarded by name collision.
+  
+  Boot-time auto-adoption of legacy rows and a bulk `os meta
+  adopt-permission-sets` command remain out of scope (2026-08-20 maintainer
+  ruling) — the manual SQL adoption recipe stays documented for the rc→GA
+  provenance-skip case; see the ops runbook.
+- e170b0a: Lock package-declared permission sets at the save door; clone to customize (#11513)
+  
+  Maintainer ruling of 2026-08-24, recorded verbatim and untranslated:
+  「同意 第一步(创业阶段,Salesforce 式)」 — step 1 of the mainstream-platform
+  comparison: lock the base, clone to customize.
+  
+  A Studio/API save that targets a **package-declared** permission set is now
+  **refused at the server**, with a message that names the sanctioned path — clone
+  it and edit the clone. Previously the data door translated the write into a
+  metadata write and left the refusal entirely to the metadata protocol's ADR-0005
+  tier gate. That gate is exactly what the documented
+  `OS_METADATA_WRITABLE=permission` operator hatch switches off, so on a
+  deployment running with the hatch there was no refusal at all: the save minted a
+  `sys_metadata` overlay of a packaged set, and boot reconciliation re-projected
+  that overlay onto the record on every boot, unconditionally, forever — the set
+  froze at the fork and every future package upgrade of it was ignored, silently.
+  
+  **Clone-to-customize** is the sanctioned path and is unchanged: the clone is an
+  ordinary org-owned set (`managed_by: 'admin'`, no `package_id`, so no upgrade
+  linkage), and upgrades keep flowing to the package-declared base untouched.
+  
+  **Existing forks** get a **detection reading** at boot — count *and names*,
+  warned loudly, saying outright that nothing was reaped. It reads `sys_metadata`
+  directly rather than the `customized` column, which is forced `false` on the
+  exact confounded shape the field report measured (a genuinely package-declared
+  set whose row's `managed_by` predates provenance tracking). Nothing is reaped,
+  merged or migrated: disposition of an existing fork is a follow-up reading for
+  the maintainer, and the per-set remedy remains the explicit, audited
+  "Discard Overlay" action a human invokes.
+  
+  Behaviour deliberately NOT narrowed:
+  
+  - an **ordinary org-owned** set is still fully editable (pinned as a control —
+    a lock that refuses everything would satisfy the refusal pin perfectly);
+  - the **activate / deactivate** actions still write their column: a bare
+    `{ active }` patch is row state, not a customization of the definition;
+  - a `managed_by: 'package'` row with **no artifact behind it** — published
+    through the metadata door (ADR-0070) and materialized by the ADR-0086 P2
+    path — keeps editing in place. That is ADR-0094 D5-R's surviving
+    `allowRuntimeCreate` neighbour, and `managed_by` is measurably not the
+    artifact-provenance fact. Provenance is read from the engine SchemaRegistry,
+    the one source this plugin already calls "package-declared".
+  
+  Provenance is **fail-closed**: a read that cannot answer refuses the save rather
+  than accepting it, and the read is not a name-keyed page over
+  `sys_permission_set`, so it cannot be truncated into a false "not packaged".
+- a65db76: `OrgScopingEntitlement` grows two per-deployment wall-shaping keys, both declared by the mounted `org-scoping` runtime and consumed by plugin-security when arming the Layer 0 organization wall, both fail-closed (absent ⇒ byte-identical behaviour):
+  
+  - `platformGlobalObjects?: readonly string[]` — objects THIS deployment declares platform-global; Layer 0 does not wall them here (read filtering, the ADR-0123 D2 no-active-org write refusal, the forge guard, and the Layer 1 wildcard-`organization_id` policy drop all follow, because they read the same per-object security meta). Exact machine names only; a junk shape is refused loudly and exempts nothing.
+  - `suppressUnboundedOrgAdminGrant?: boolean` — the walled-posture `organization_admin` auto-grant hands out `organization_admin_no_bypass` (no unbounded `viewAllRecords`/`modifyAllRecords`) instead; the superseded-variant reconcile converges standing grants in both directions.
+  
+  New spec exports: `PlatformGlobalObjectsSchema`, `PlatformGlobalObjects`, `OrgScopingEntitlementSchema`.
+- 5619aac: The packaged-permission-set lock now guards the metadata door as well as the data door. The pre-persistence authoring-gate seam gains a `permission` registration (`registerPackagedPermissionSetLockGate`, new export) that consults the same `classifyPackagedPermissionSet` classifier and throws the same `PackagedPermissionSetLockedError` the `sys_permission_set` write door already uses — one spelling of "package-declared", two doors, one refusal.
+  
+  What stops working, and for whom: an operator using the `OS_METADATA_WRITABLE=permission` escape hatch to save a permission set that an installed package declares now gets `403 NOT_OVERRIDABLE` (the refusal names the sanctioned clone path) instead of silently minting a `sys_metadata` overlay whose grants win at read over the package's declaration. This applies hatch open or closed, draft and publish saves alike, and also means stored-overlay maintenance passes (e.g. stored-item migration) report a per-row refusal for such grandfathered forks rather than rewriting them.
+  
+  What keeps working unchanged: hatch writes to any name no installed package declares — the hatch's documented per-org/env override capability — land exactly as before, and package-door authoring of workspace-owned sets (definitions living in `sys_metadata`; ADR-0070, ADR-0094 D5-R) stays editable. Package publishes travel the `package-author` channel, which this seam exempts by contract.
+- db39dfc: feat(plugin-security): the verified platform OWNER bypasses the Layer 0 org wall (#12974)
+  
+  Maintainer ruling 2026-08-29, verbatim and untranslated: 「能不能简单点，对于超级管理员，
+  配置了环境变量邮箱的，在执行墙的时候不要强制加上 org_id 的过滤」
+  
+  When plugin-security arms the Layer 0 organization wall on a READ, the
+  `org_id` tenant filter is no longer appended for a session whose account is
+  the **verified platform owner** — the `OS_PLATFORM_OWNER_EMAIL` identity,
+  matched under the existing #11343 verified-email predicate (the SAME
+  comparison the platform-admin elevation gate makes, now shared through
+  `platform-owner-wall-bypass.ts`; server-side `sys_user` row facts only, never
+  a client-supplied claim). This unblocks the one account meant to be
+  all-seeing: metadata-driven operator screens over PUBLIC tenant objects no
+  longer read EMPTY for the deployment's declared owner (the cloud#1676 shape).
+  
+  The door is READ-only. WRITES keep today's behaviour for everyone INCLUDING
+  the owner: an org-less tenant-scoped write is still refused 403 naming the
+  missing active organization (ADR-0123 D2 — an org-less write would mint
+  exactly the NULL-organization rows the platform is eliminating), and the
+  by-id write pre-image read stays walled with it.
+  
+  Fail-closed in every direction, pinned: env unset ⇒ nobody bypasses (the wall
+  arms exactly as before, with no row I/O); email mismatch ⇒ walled; email
+  matches but the account is NOT verified ⇒ walled; only a verified match lifts
+  the read filter. The bypass lifts ONLY Layer 0 — object/field permissions,
+  business RLS (Layer 1) and the write `check` path are untouched — and the
+  door serves the single env-declared owner (no lists, no patterns). Every
+  wall-bypassing read computation emits a structured warn-level audit event
+  with the stable name `platform_owner_wall_bypass` (object, operation, userId,
+  suppressed filter).
+- 7286dd5: Fix: the platform-admin promotion targets the oldest human that can SIGN IN, not the oldest `sys_user` row
+  
+  Under the `single` posture the first-boot promotion ranked candidates by age
+  alone, and "human" was its only filter. On an app that declares people in
+  `defineStack({ data })` that picked the wrong row every time: a declared person
+  is a credential-less directory row, the declarative seed is awaited inside
+  `AppPlugin.start()` (kernel Phase 2), so those rows are always older than any
+  account created at `kernel:ready` or later.
+  
+  Measured on a driven composed boot, not inferred: `admin_full_access` was
+  granted to `person0@demo.example` — a row with no `sys_account`, on a database
+  whose `sys_account` table was entirely empty — and `claimSeedOwnership` handed
+  that same unusable row both seeded business records. A real sign-up arriving
+  afterwards was never promoted, because the promotion had already short-circuited
+  on "an admin exists". The grant was written, unexercisable, and permanent.
+  
+  The target is now the oldest human holding a `sys_account`. Any provider counts:
+  a federated or SSO account is a login, and narrowing to `credential` would
+  recreate this defect for SSO-only deployments. When human rows exist but none can
+  authenticate, nobody is promoted and no grant row is written — an `info` line
+  says so, and the bootstrap replay now also fires on `sys_account` inserts, so the
+  first real login is promoted the moment it exists. That second half is
+  load-bearing rather than incidental: a sign-up writes its `sys_user` row before
+  its `sys_account` row, so the pre-existing `sys_user` trigger fires while the
+  registrant still has no login.
+  
+  Deployments that already carry a platform-admin grant are untouched. The
+  "an admin already exists" short-circuit runs before any target selection, so this
+  changes which row a FRESH bootstrap promotes and nothing else — moving an
+  already-granted platform admin is not this change's to make.
+- f4e741b: feat(security): the referential FK-clear write is exempt from the object-level CRUD check (#12597)
+  
+  **This changes which deletes succeed** — an observable behavioural contract
+  change on the delete path, which is why it ships `minor` rather than as a
+  patch-grade defect repair.
+  
+  Deleting a record makes the engine clear every optional lookup that points at it
+  (`deleteBehavior: 'set_null'`). That cleanup `UPDATE` is engine-owned referential
+  integrity, and it has carried the server-derived `__referentialFieldClear` marker
+  since #3023 — but the marker reached only the ownership-anchor guard, so the
+  write still had to pass the **object-level CRUD check** on the referencing
+  object. Consequence, measured on a real deployment across 17 role×object pairs: a
+  role with full delete rights on A and no grant at all on B could delete an A only
+  while B was **empty**. The moment a real row referenced it, the delete failed with
+  one generic "you do not have permission", and nothing on any permission screen
+  showed that deleting A also required write authority on B.
+  
+  **What is exempt: the object-level CRUD grant check, and nothing else.** A marked
+  `update` skips that one gate (both the caller's grant and the ADR-0090 D10
+  delegator half of the same question). Everything else in the security middleware
+  runs unchanged and is pinned test-by-test:
+  
+  - field-level security on the FK column still refuses;
+  - the RLS `using` row scope on the referencing object still refuses;
+  - the RLS post-image `check` still refuses — so a deployment declaring
+    `product != null` keeps getting a truthful refusal instead of a silent clear;
+  - declared validation rules keep firing (they were never in this path);
+  - a caller without delete rights on the target is still refused;
+  - an ordinary, unmarked update on the referencing object is untouched.
+  
+  ⛔ Deliberately **not** `isSystem`: that bypass is total (see
+  `content/docs/permissions/system-context.mdx` — "Elevation is total, and it is not
+  granular"), and it would have switched off all three guards above. ⛔ The
+  `cascade` arm — deleting whole referencing rows — is **unchanged** and still
+  requires the caller's own delete authority on those rows.
+  
+  The write is not elevated at all, so audit attribution is unchanged: the cleanup
+  `UPDATE` still runs under the operator's identity and lands in the ledger as that
+  operator (`user_id` / `actor`, and the `updated_by` stamp).
+  
+  No authorable surface changes, and no metadata needs migrating: a deployment that
+  was working around this by granting write access on referencing tables can narrow
+  those grants, but nothing forces it to.
+- 4d25d22: **BREAKING (platform object removed):** the `sys_scim_provider` platform object is retired (#11757, ruled on #11693 — leg 1a of the #11632 SCIM epic).
+  
+  FROM → TO, per surface:
+  
+  - `SysScimProvider` (export of `@objectstack/platform-objects` / `.../identity`) → removed, no replacement export. Fix: delete the import. Stable SCIM state lives on the seven `sys_scim_*` stable-model objects (#3653), and connection credentials on `sys_scim_connection_credential`.
+  - `sys_scim_provider` in `PLATFORM_PROVIDED_OBJECT_NAMES` (`@objectstack/spec/system`) → removed. `isPlatformProvidedObjectName('sys_scim_provider')` is now `false`, so a stack referencing the name is flagged as a probable typo instead of resolving.
+  - plugin-auth: the object is no longer provisioned, and `AUTH_MODEL_TO_PROTOCOL` carries no `scimProvider` entry — the installed stable `@better-auth/scim@1.7.1` derives no such model, so the entry bridged nothing.
+  - plugin-security: the `BETTER_AUTH_MANAGED_OBJECTS` write-deny entry for it is gone with the object (the list is pinned bidirectionally against `managedBy: 'better-auth'` declarations).
+  
+  The rc.1-era row was written only by the retired `/scim/generate-token` endpoint; after the stable-1.7.1 migration (PR #12726) nothing could write to it. Per the maintainer's ruling (2026-08-24, 「不需要考虑历史数据」; reaffirmed 2026-08-25 — SCIM has no real customers), **no data migration ships**: existing `sys_scim_provider` tables in deployed databases are left untouched — no backfill, no reaper, no migrate command. SCIM-enabled deployments re-register connections on the stable surface; the IdP token reissue is a migration-day operator action regardless of this change.
+  
+  The ADR-0066 D3 capability-gate pin moves from the retired object to its surviving sibling `sys_sso_provider`, so the gate posture stays test-pinned.
+  
+  Breaking ships as `minor` per the launch-window convention (`scripts/check-changeset-no-major.mjs`) and the #12726 precedent on the same ruling.
+  
+  <!-- adr-0087: registered scim-provider-object-retired -->
+- 366f895: feat(auth): migrate `@better-auth/scim` from `1.7.0-rc.1` to stable `1.7.1` — the whole-model SCIM migration (#3653, epic #11632)
+  
+  The stable line is the rc.2-lineage rewrite: the rc.1 `scimProvider` model,
+  `/scim/generate-token` endpoint and `storeSCIMToken` option no longer exist,
+  replaced by seven new models and a three-way connection contract. This lands
+  the migration atomically:
+  
+  - **Seven new platform objects** back the stable models —
+    `sys_scim_connection_binding`, `sys_scim_group`, `sys_scim_group_member`,
+    `sys_scim_identity_tombstone`, `sys_scim_projection_grant`,
+    `sys_scim_subject`, `sys_scim_user` — bridged via `AUTH_MODEL_TO_PROTOCOL`,
+    registered in the platform-object-names registry, listed in
+    `BETTER_AUTH_MANAGED_OBJECTS`, and column-pinned by the parity gate (whose
+    `KNOWN_UNMAPPED_MODELS` shrinks to the empty set: the rc.1-era group
+    provisioning gap — IdP `/Groups` pushes hitting tables that did not exist —
+    is closed).
+  - **SCIM connections stay runtime data.** The stable constructor is satisfied
+    with an application-owned `authentication.verifyBearerToken` that resolves
+    the connection from a row at request time — not static boot config, and not
+    the upstream `managedConnections` catalog (deliberately not adopted).
+  - **ObjectStack owns SCIM credentials outright** (stable upstream stores no
+    credential at all): `sys_scim_connection_credential` plus
+    `scim-connection-service.ts` mint/digest/verify. At rest only an
+    HMAC-SHA-256 keyed by the deployment auth secret (base64url,
+    domain-separated) is stored — at parity or better than the rc.1 unsalted
+    SHA-256 — pinned by `credential-at-rest-posture.test.ts` including live
+    401 paths for forged, revoked and expired bearers.
+  - **The ObjectQL better-auth adapter gains native transactions**
+    (`engine.transaction`, fail-closed on drivers without `beginTransaction`),
+    which stable scim requires by assertion for atomic provisioning writes.
+  - **Scaffold suppression retired**: the `@better-auth/scim>better-call`
+    `allowedVersions` entry (CLI renderer + blank template) is gone — stable
+    1.7.1 peers `better-call@1.4.0` exactly — and its presence ratchets flipped
+    to absence pins. The `better-auth>better-sqlite3` and four
+    `@better-auth/utils` entries stay; their retirement conditions are separate
+    and unmet.
+  - The pin resolves **1.7.1 exactly** (not `^1.7.1`): 1.7.2 peers
+    `better-auth`/`@better-auth/core` at `^1.7.2`, which only the workspace
+    overrides' silencing would "satisfy" while the family is 1.7.1. Floating is
+    its own follow-up.
+  
+  **Semver: minor, argued.** The rc.1 SCIM surface this replaces (generate-token
+  endpoint, rc.1 bearer tokens, `sys_scim_provider` rows) changes incompatibly —
+  but that surface is default-off (`OS_SCIM_ENABLED`), was shipped with a
+  documented "do not let the IdP push groups" boundary, and the maintainer ruled
+  (2026-08-25) that SCIM has no real customers and old data need not carry: the
+  one binding constraint is that an existing system upgrades smoothly, which it
+  does — every table the installed library can write exists at this version, and
+  SCIM-disabled deployments see no behavior change. A major would move the whole
+  fixed version group for a feature surface with zero consumers. Deployments
+  that had SCIM enabled must mint new connection credentials (digests are not
+  portable from rc.1 on any path — IdP token reissue is a migration-day
+  operator action regardless of semver level). `sys_scim_provider` itself is
+  NOT removed here; its retirement is tracked separately (#11757).
+- 18b53ac: `SecurityPlugin`'s own report sink is now **console-backed by default** — loud until a host
+  injects one — instead of being initialised to an empty object. Its fail-closed refusals
+  (`getReadFilter … denying (fail-closed, #2852)` and `#4467`, `checkAuthoredRowWrite …
+  abstaining`, the ADR-0123 tenant-wall refusal) previously went nowhere at all on any instance
+  whose lifecycle had not yet reached the sink binding; they now reach `console.warn` /
+  `console.error`. A host that injects a logger is unaffected: `start()` assigns `ctx.logger`
+  over the default, above both of its early bail-outs (#10706), so a degraded boot still reports
+  through the host.
+  
+  **Operator-visible:** a deployment that never injects a sink will begin seeing these refusals
+  on the console. That is the intended change — the refusal itself is not moving, only whether
+  anyone can see it.
+  
+  Why `minor` and not `patch`: the observable output of a running deployment changes. The
+  declared shape changes with it — the field's `warn` channel is now non-optional, which is what
+  #9754 requires of a sink declaring an optional `error`, and what a default of `{}` made
+  impossible to state honestly. `error` deliberately stays optional (#9754 option C, falsified:
+  hosts do inject reduced sinks). The maintainer ruled on 2026-08-24 (#10556) that the default
+  becomes console-backed and that silent-by-declaration is rejected.
+- ebb0822: feat(plugin-security): a rank-and-file member may edit their OWN `sys_user` row (#14959)
+  
+  Maintainer ruling 2026-09-03, decision batch #22, quoted verbatim and
+  untranslated as adopted:
+  
+  > 「同意」
+  
+  The ruling that admitted `locale` to the ADR-0092 D2 column whitelist (#14787 /
+  PR #14958) opened **which columns** a permitted actor may touch. It did not open
+  **who**, and ADR-0092 D5 kept that with the permission layer, where
+  `member_default` still denied `allowEdit` on `sys_user`. The measured
+  consequence: a member's `PATCH /api/v1/data/sys_user/<self>` was refused by the
+  object gate *before* the column guard was ever consulted, so `sys_user.locale`
+  shipped as a user-stated preference only a platform administrator could set —
+  with objectui#7501's "my language" form item waiting on a route that did not
+  exist, and #14788 having already ruled the stored value outranks
+  `Accept-Language` *because it is the user's own choice*.
+  
+  This opens the route, on the two axes that already existed and in the shape
+  `sys_api_key` has shipped since #8053:
+  
+  - **Which rows** — `member_default` gains an explicit `sys_user` entry
+    (`allowRead`/`allowEdit` true, create/delete **false**), and its
+    `sys_user_self` RLS carve-out (`id == current_user.id`) widens from `select`
+    to `all` so it reaches the by-id write pre-image check. `sys_user_org_members`
+    — the org-peer *visibility* policy — deliberately stays `select`-only:
+    policies OR-combine, so widening it would have composed
+    `id == me OR id IN <every user in my org>` and handed every member their
+    colleagues' profile rows.
+  - **Which columns** — unchanged. ADR-0092 D2's identity write guard still bounds
+    a user-context update to `SYS_USER_PROFILE_EDIT_FIELDS`
+    (`name`, `image`, `locale`); `email`, `role`, the ban columns and every system
+    stamp stay unwritable on this path.
+  
+  `allowCreate` / `allowDelete` stay false: accounts are minted and retired
+  through better-auth's own endpoints, and this set is bound to the `everyone`
+  anchor, which must remain anchor-safe (ADR-0090 D5).
+  
+  **ADR-0092 D5 is amended** by the same ruling — self-service edits of the
+  whitelisted columns route through the generic data path, with the D6
+  `afterUpdate` hook as the session-cache refresh. `name` / `image` therefore
+  become editable there too, not only through better-auth `/update-user`. The
+  amendment ships as its own PR (`docs/adr/**` is governed and merged by hand).
+  
+  Rejected in the same ruling, recorded so they are not re-proposed: a dedicated
+  endpoint writing under system context (the "second stamping route" #14787's own
+  ruling rejected, one level up); leaving the column admin-only (a user-facing
+  setting only an administrator can set — ADR-0049's declared-not-reachable shape,
+  one step removed); and making `locale` a better-auth `additionalFields` entry
+  (#13881 measured that it breaks `getSession` on any environment that has not run
+  schema-sync).
+  
+  The pins are layer-attributed on purpose. Each of the four cases the ruling names
+  records *which* of the three layers produced its answer — object gate, row scope,
+  or identity guard — because before this change all four were refused by the
+  object gate, so "another member's row is refused" and "a non-whitelisted column
+  is refused by the guard" were both green while neither mechanism had run. A
+  two-leg ablation confirms it: reverting the permission-set entry drops the
+  non-whitelisted-column refusal from `identity-guard` to `object-gate`, and
+  reverting only the RLS widening drops it to `row-scope`.
+- b997272: feat(plugin-security): walled bootstrap stops minting the platform-admin grant row; read-only `platformAdmin` audit service; legacy-grant deprecation pointer (#11974, #11663 L4)
+  
+  Under **walled postures** (`group` / `isolated`), `bootstrapPlatformAdmin` no
+  longer writes the org-less `sys_user_permission_set` row pointing at
+  `admin_full_access`. Platform-admin standing on those deployments is
+  **config-derived** at the one derivation site (`resolve-authz-context.ts`
+  §6b-config, landed with #11663 L2): every account whose stored `sys_user` row
+  holds a declared `OS_PLATFORM_OWNER_EMAIL` address and reads VERIFIED resolves
+  `PLATFORM_ADMIN` at request time — nothing to mint, nothing to revoke, no
+  window in which a row grants standing that policy would refuse. The `single`
+  posture keeps first-user promotion and its grant row byte-for-byte (#11663
+  Choice 4A; 4B is the sequenced follow-up).
+  
+  What the walled bootstrap still does:
+  
+  - **Reports standing** — one info line per boot listing, per declared
+    address: registered? verified? which account holds standing. The same
+    implementation serves the new read-only **`platformAdmin` service**
+    (`configuredEmails()` + `standing()`, registered by SecurityPlugin), so the
+    log and the audit surface can never disagree. The service is frozen and has
+    no writable member — there is deliberately no runtime path that changes who
+    a platform administrator is (#11663 Choice 3A).
+  - **Points legacy grants at the config path** — a detected legacy org-less
+    human grant logs exactly one deprecation line per process (shared latch
+    with the derivation-site reporter) naming `OS_PLATFORM_OWNER_EMAIL`, the
+    holder and the config line that re-anchors them. Nothing is revoked: the
+    legacy row still confers during the loud, time-boxed migration window
+    (#11663 P5).
+  
+  The bootstrap-replay trigger (`shouldReplayBootstrapFor`) narrows with the
+  retired elevation: it now fires only for `sys_user` insert/create under
+  non-walled postures (the `single` first-user promotion). The #11343 update arm
+  (`email_verified` / `email`) existed solely to re-attempt the walled elevation
+  after the owner's verifying write; with standing derived at request time there
+  is nothing to re-attempt, and under walled postures no `sys_user` write can
+  change the bootstrap's answer at all.
+  
+  Walled bootstrap outcomes: a declared usable config now answers
+  `reason: 'walled_config_derived'` (replacing `walled_owner_not_registered` /
+  `walled_owner_not_verified`, whose distinctions moved into the standing
+  report); `walled_owner_email_undeclared` stays for the unset/blank/refused
+  backstop (Choice 2B: one unparseable entry fails the whole variable closed).
+- 9735662: fix(security): walled postures elevate only the env-declared platform owner, never the first registrant (#11184, the framework leg of cloud#1509)
+  
+  **BREAKING** for walled deployments (`OS_TENANCY_POSTURE=group` or
+  `isolated`), shipped as `minor` under the repo's launch-window convention for
+  breaking changes. Single-org deployments are byte-for-byte unchanged.
+  
+  Measured defect (cloud#1509): on a walled multi-tenant SaaS with
+  `OS_TENANCY_POSTURE=isolated` and `OS_AUTH_MEMBERSHIP_POLICY=invite-only`, the
+  FIRST self-registrant received the cross-tenant `admin_full_access` grant
+  (`platform_admin`, `isPlatformAdmin: true`) and — because the default-org
+  bootstrap binds "the platform admin" — was merged into the deployment's
+  Default Organization as its owner. Whoever curls the public sign-up endpoint
+  first owned the platform.
+  
+  Per the maintainer ruling of 2026-08-23 (verbatim:
+  「1509 选择 env 指定 owner 邮箱」):
+  
+  - **Walled postures: platform admin comes ONLY from the env-declared owner.**
+    `bootstrapPlatformAdmin` (plugin-security) no longer promotes the oldest
+    human user when the requested posture is walled; it promotes exactly the
+    account whose email matches the new `OS_PLATFORM_OWNER_EMAIL` variable
+    (case-insensitive, matched whenever that account registers — arrival order
+    is irrelevant). Self-registrants are never promoted and, since the shared
+    `ensureDefaultOrganization` helper binds only the platform admin, are never
+    auto-merged into the Default Organization either.
+  - **Fail-closed startup refusal.** A walled posture with no
+    `OS_PLATFORM_OWNER_EMAIL` declared refuses to boot from `AuthPlugin.init()`
+    with a message naming the variable — never a silent fallback to
+    first-registrant elevation. The elevation site itself also refuses
+    (`reason: 'walled_owner_email_undeclared'`, logged at `error`) as
+    defense-in-depth for compositions that reach the bootstrap without
+    plugin-auth (`os meta resync`, bare embeddings).
+  - **Single-org posture unchanged.** "First user is owner" stays as ruled
+    reasonable there; the new variable is never consulted under `single`.
+  - The requested posture (`resolveTenancyPosture()`) is deliberately the input,
+    so a walled-requested deployment running degraded
+    (`OS_ALLOW_DEGRADED_TENANCY=1`) still refuses first-registrant elevation.
+  
+  Operator action for walled deployments: set `OS_PLATFORM_OWNER_EMAIL` to the
+  operator account's email address before upgrading. Deployments that already
+  hold a human platform admin are untouched (the bootstrap remains a no-op once
+  any human holds the cross-tenant grant); the variable governs installs that
+  have not yet minted their admin. `@objectstack/types` gains the
+  `resolvePlatformOwnerEmail()` resolver and the `PLATFORM_OWNER_EMAIL_ENV`
+  constant; the verify harness declares the owner email (defaulting to its dev
+  admin) for walled fixtures.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) nothing authorable is removed, renamed or narrowed: no spec key, no metadata spelling and no stored row changes shape, so there is nothing for `os migrate meta` to rewrite and no ledger entry to make. The prescription above is a deployment-environment requirement (declare an env var before boot), which the ADR-0087 ledger does not carry — the refusal itself names the variable at startup. -->
+
+### Patch Changes
+
+- 0e4e51b: feat(spec): `ActionParamSchema.carryOver` — the declared carry-over param: seeded from the row, rendered as a non-editable summary, submitted verbatim (#11753 ruling, spec half; #11992)
+  
+  <!-- adr-0087: not-required (accept-set expansion) One new CLOSED optional key
+  on an existing shape; nothing authorable is renamed, retired or tombstoned, so
+  there is no conversion to register. Previously-refused spellings stay refused —
+  `readonly` and `disabled` now carry alias guidance pointing at the new key. -->
+  
+  The maintainer's 2026-08-25 ruling on #11753 (recommendation A) declares ONE
+  carry-over contract instead of a rendering convention: a param may state, in
+  metadata, that its value is carried through the action dialog rather than
+  collected from the user.
+  
+  - `carryOver: true` — seed from the current row (`defaultFromRow: true` is
+    required alongside, enforced at parse time), render as a NON-EDITABLE
+    summary, submit VERBATIM. Unlike `visible: false` — the measured non-answer,
+    which omits the param from the submission entirely — a carry-over param is
+    always sent.
+  - Aliases: `readonly` / `disabled` are refused with guidance naming
+    `carryOver` (a field's `readonly` means write-path strip, which is exactly
+    the wrong half here).
+  - Exemplar (`@objectstack/plugin-security`): the five `clone_permission_set`
+    JSON facet params (`object_permissions`, `field_permissions`,
+    `system_permissions`, `row_level_security`, `tab_permissions`) declare it,
+    so the sanctioned clone path stops offering five prefilled raw-JSON
+    textareas an admin could hand-mangle into a clone that grants MORE than its
+    base. `description` stays an ordinary editable param. The send-side contract
+    is unchanged (#11703 pin 6 stays green).
+  
+  The objectui renderer leg (honouring the declaration in `ActionParamDialog`)
+  is the downstream card tracked on #11753.
+- 4bd6faa: feat(engine,core,cluster): the authorization-cache invalidation substrate — an engine-seam write epoch, the `authz.invalidated` channel, and a non-optional boot-time posture statement (#11968)
+  
+  The substrate step (§10.3) of the accepted #11633 cross-request caching design
+  (maintainer acceptance 2026-08-25, Fork 2 → B). It ships the invalidation
+  machinery once, before the grants cache (#11967) that will consume it, so that
+  leg does not carry it. **Nothing here caches anything.**
+  
+  - **`ObjectQL.writeEpoch`** — a monotonic counter advanced by the engine
+    middleware seam on every `insert` / `update` / `delete`, ahead of the whole
+    chain (and so ahead of any `isSystem` bypass a middleware applies). It
+    generalises the private counter `@objectstack/plugin-security` has carried
+    since #10757: the mechanism was always the engine's, and hoisting it lets a
+    second consumer share **one** signal instead of minting a parallel one that
+    watches a different set of writes. A seam rather than a list of call sites,
+    because a forgotten call site fails as silent over-permission and writing
+    through the engine is the only way to write at all — including better-auth's
+    own adapter.
+  - **`authz.invalidated`** — one new channel on the existing `IPubSub`, bridged
+    in the shape `MetadataClusterBridgePlugin` already uses. ⭐ **The TTL a
+    consuming cache carries is the correctness contract; this channel is not.** No
+    shipped driver delivers better than at-most-once (`cluster.mdx` §4.2), so a
+    missed message is *expected*, the bridge stays out of the write path (a
+    publish failure is logged and swallowed, never awaited by the writer), and the
+    channel only moves the *typical* convergence from one TTL to one network hop.
+    That statement lives in the code at the channel, where a consumer reads it.
+  - **The boot-time posture statement** — non-optional by the ruling. Whenever a
+    grants cache is enabled (`OS_AUTHZ_GRANTS_CACHE_TTL_MS` > 0) and there is no
+    cross-node invalidation bus, the deployment is told so at `warn`, every boot,
+    naming the window it accepted and the remedy. It is a statement, not a
+    refusal: a TTL-bounded per-process cache is a legitimate configuration. It is
+    said out loud because a silently-absent invalidation bridge is how a security
+    control gets disabled with nobody noticing (#4785). The in-process `memory`
+    driver counts as **no** bus — a cluster service exists on the shipped default
+    while fanning out to nobody, which is the case a "is a cluster service
+    registered?" check answers `yes` to and is wrong about.
+  
+  **Runtime behaviour is unchanged.** With no cache consumer the epoch has zero
+  subscribers, so nothing is published and nothing is invalidated; with the
+  shipped default TTL of `0` the bridge attaches nothing and logs nothing above
+  `debug`. The one composition change worth naming: `Runtime` now registers
+  `AuthzClusterBridgePlugin` **unconditionally**, including under `cluster: false`
+  — that is not an oversight, it is the loudest case the posture check has, and
+  skipping it there would put the statement's absence exactly where the missing
+  bus is.
+  
+  `@objectstack/plugin-security` is a `patch`: its permission-set memo now reads
+  the engine's epoch when the wired engine exposes one and keeps its private
+  counter otherwise (test doubles, embeddings). The covered set of writes is
+  identical — the plugin's own middleware was already global — and it is now
+  identical *by construction* rather than by two files agreeing on which
+  operations count.
+- 86cbe37: feat(core): cross-request authorization grants cache — leg B of #11633 (#11971)
+  
+  `resolveUserAuthzGrants` can now cache its resolved envelope across requests,
+  governed by `OS_AUTHZ_GRANTS_CACHE_TTL_MS`. **The default is `0` — the cache is
+  OFF and the shipped behaviour is unchanged** (Fork 4 of the accepted #11633
+  design): a deployment that enables it accepts the configured staleness window
+  explicitly, and the boot-time posture statement says so out loud when no
+  cross-node invalidation bus is attached.
+  
+  With the cache on:
+  
+  - **Coarse write-invalidation (Fork 1A).** Any engine write to a watched
+    authorization object (`sys_member`, `sys_user_position`,
+    `sys_user_permission_set`, `sys_position`, `sys_position_permission_set`,
+    `sys_permission_set`, `sys_user`) retires every entry on the writing node —
+    a grant/revoke/role change is observed by the very next request there, by
+    invalidation and not by TTL. `metadata.changed` and peer-node
+    `authz.invalidated` hints retire wholesale via the engine write epoch.
+    `sys_session` is deliberately not watched (its once-a-minute
+    `last_activity_at` cadence would turn the cache into a non-cache).
+  - **Expiry-boundary rule.** Entries expire at `min(ttl, nextBoundary)`, where
+    `nextBoundary` is the earliest upcoming ADR-0091 `valid_from`/`valid_until`
+    among the rows consulted — a validity window flipping is a permission change
+    with no write anywhere, so the timer is the only mechanism for that class.
+  - **Ruled bypass list.** The permission explainer
+    (`plugin-security` `buildContextForUser`) and `runAs:'user'` automation runs
+    (`service-automation`) always resolve fresh, and never populate the cache.
+  - The TTL remains the correctness contract; the `authz.invalidated` bus only
+    narrows the typical cross-node window (no shipped driver exceeds
+    at-most-once delivery).
+- c6c895c: **Perf:** the declared-capability boot seed and the environment permission-set overlay reconciler each pay ONE batched existence read instead of one per item, and stop re-writing rows that already match (#11096, #11097).
+  
+  Both were read-then-write reconcilers over a set known in full before their loop started, and both had the shape #10946 removed from the permission-set and position seeders next door:
+  
+  - `bootstrapDeclaredCapabilities` issued a `SELECT … WHERE name = ? LIMIT 1` per declared capability, then an `UPDATE` on its own row whether or not anything had changed;
+  - `reconcilePermissionSetProjection` projected every environment-scope `permission` overlay in a per-name loop, each iteration issuing its own existence `SELECT` inside `upsertEnvPermissionSet` plus an unconditional `UPDATE`.
+  
+  On a local file database these loops are invisible. On the remote libsql/Turso database every hosted environment runs, each leg is its own sequential HTTP request, and the capability set is typically the largest of the identity axes — it is the union of every capability every declared package contributes, not a count bounded by the number of permission sets.
+  
+  Both now hoist one chunked `{ name: { $in: [...] } }` read out of the loop through `buildExistingByName`, which keeps the tri-state judgement that makes hoisting safe: **a read that could not ANSWER is not the answer "none of them exist"**. A batched read fails for the whole set at once, so collapsing those two would make a boot during a brief outage try to re-create everything; the seeders now decline the names they could not read, and say so.
+  
+  **The write-skip is an equality test, and the reconciliation leg is pinned.** A row whose stored value genuinely differs still gets its `UPDATE` — a reconciler that skipped writes outright would show a perfect round-trip count while silently reconciling nothing, so every counting test added here is paired one-for-one with a drift test over the same fixture, and both pairs were ablated to confirm the drift half fails when the write is removed.
+  
+  Two behaviour repairs the write-skip REQUIRED, both on the environment door — not optional polish, but corrections the equality test itself demands, verified by ablation (each one made a specific test fail when reverted):
+  
+  - **`customized` is now compared, not just written.** The flag is provenance rather than definition, so `recordDiffersFromBody` deliberately does not compare it; skipping on the facets alone would have stopped maintaining a flag the Setup list badges on and the reset action reads. It gets its own comparison term, against the same `managed_by:'package'` condition the write uses.
+  - **A newly created environment-authored record is no longer born badged "customized".** The INSERT used to stamp the caller's raw overlay opinion (`!!customized`) while the UPDATE branch's rule stamps `false` for a non-package row — those two disagree for any fresh `managed_by:'admin'` row created while its overlay is still active. Before this changeset, that disagreement was invisible: every boot re-wrote every record unconditionally, so the very next reconciliation pass silently overwrote the wrong value back to `false`. Once writes are equality-gated, that disagreement stops being invisible and becomes a REAL, PERMANENT one-boot-late corrective `UPDATE` after every such creation — the "steady state" round-trip count is not actually flat without this fix. Confirmed on this branch: reverting it to `!!customized` fails `#11097 — env overlay reconciliation: round trips > does not grow the steady-state round-trip count` and `#11097 — drift STILL reconciles > only the DRIFTED overlay is written` (both start seeing a real `UPDATE` on the boot immediately after any overlay-backed admin row is created).
+  
+  `projectPermissionMutation` also syncs the in-memory evaluator registry on an unchanged record, not only on a write. That sync is not a database round trip, and the evaluator resolves permission sets registry-first — gating it on "a write happened" would have left a steady-state boot enforcing the stale declared body while the record and Setup showed the overlay.
+  
+  ⚠️ **This is a behaviour change beyond the write COUNT**, flagged explicitly: today, a brand-new environment-authored permission set with no package baseline can be observed `customized: true` for the one boot between its creation and the next reconciliation pass (or, on the live write-through door, self-heals within the same request). After this changeset it is never observed `true`. The change is required for the round-trip fix's own steady-state claim to hold on this path — the two are not separable — but it is a resulting-STATE change, not merely a write-count change, and is called out here for that reason.
+  
+  ⚠️ **No curve number is claimed for either axis.** The hosted `bootstrap-curve.mjs` rig lives in `objectstack-ai/cloud` and neither of these axes has ever been measured on it. What is established is that the code shape is the one measured at slope 4.0000 / R² = 1.000000 on the two sibling loops in #10946, and that the round-trip COUNT is now flat in the number of declared items — which is what the new tests assert, in counts, never in wall time.
+- c33f185: Seed the curated platform capabilities with ONE batched existence read, and stop
+  rewriting rows that already match
+  
+  `bootstrapSystemCapabilities` built its whole definition set in memory and then
+  issued a separate `SELECT … WHERE name = ? LIMIT 1` per definition, followed by
+  an `UPDATE` that fired whether or not `label`/`description` had changed. On a
+  local file database that loop is invisible; on the remote libsql/Turso database
+  every hosted environment runs, each leg is its own sequential HTTP request,
+  competing for the same boot request budget as everything else. On a stock
+  installation that is 8 reads plus 8 writes, every `kernel:ready`, to store bytes
+  already there.
+  
+  The curated half's existence read is now one batched `$in`, and the reconcile is
+  equality-gated. On a steady-state rebuild the curated half costs **1 round trip**
+  instead of 16, and the write gate sits after the derived-ownership guard, so it
+  removes the redundant `UPDATE` from **both** halves.
+  
+  **The #8470 predicate travels inside the batched query, not applied to its
+  answer.** The curated half does not ask "is there a row with this name" — it asks
+  for the platform's own organization-less row (`managed_by: 'platform'` +
+  `organization_id: null`), and since `sys_capability.name` became unique per
+  ORGANIZATION those are different questions. Batching the wide question and
+  filtering afterwards reads every organization's row for every curated name — a
+  set bounded only by the number of organizations — against a page capped at one
+  row per name, so the page truncates, and a truncated page reads as "absent",
+  which inserts. Both harms are pinned as tests rather than argued: without the
+  predicate the shared name resolves to an organization's row, and two curated
+  names whose platform rows demonstrably exist come back absent.
+  
+  **An unreadable database now declines instead of guessing.** Hoisting a read out
+  of a loop changes what a failure means: per item a failed read fell through to an
+  insert the unique index refused, for that one name; batched, one failure speaks
+  for the whole set. `unknown` is therefore never read as "absent" — the affected
+  definitions are left entirely alone, counted in the new `unreadable`, and warned
+  once. This also retires a misdiagnosis: an unreadable database used to make this
+  half attempt an insert per curated name and then report a `blockedCurated`
+  collision for each, describing a blocking row nobody ever saw.
+  
+  `CapabilitySeedResult` gains `unchanged` and `unreadable`. Reporting "wrote
+  nothing because nothing differed" separately from "wrote nothing because the
+  writes stopped working" is what keeps the round-trip count from being satisfiable
+  by an implementation that simply stopped reconciling.
+  
+  **The derived half keeps its per-item read**, and not because it is the smaller
+  one — it is the half that grows. Its lookup is cross-organization by
+  construction, and `skippedAuthored` and the `platformStampedInOrg` anomaly signal
+  are computed from the lowest-id row installation-wide; narrowing it to the
+  platform bucket answers a different question and would silently reverse part of a
+  maintainer ruling, while batching it unnarrowed needs an unbounded read. Filed
+  rather than taken.
+  
+  No speedup is claimed. The hosted boot-curve rig lives in another repository and
+  its axes are permission sets / positions / objects, not this one. What is
+  established here is the round-trip count and the identity of the row each leg
+  reads and writes, both pinned in-repo.
+- a7a7390: perf(plugin-security): claim seed ownership with a predicate write per object, paged only when the engine refuses it (#14530)
+  
+  `claimSeedOwnership` — the pass that hands seeded business records to the first
+  platform admin — scanned every `owner_id`-declaring object twice at
+  `limit: 10_000` and then issued **one single-id `update` per matched id**: up to
+  20 000 full engine writes for one object, each paying the whole middleware,
+  validation and hook chain. The unit of work is now the **set**, not the row: one
+  predicate write per unowned shape (`owner_id IS NULL`, then
+  `owner_id = usr_system`), so the matched set is the same set the old two-scan
+  rule resolved — row for row — while the write count stops scaling with N. The
+  count reported per object is the sum of the affected-row counts those writes
+  resolve, never a length this pass counted for itself.
+  
+  Measured on a real ObjectQL engine (in-memory driver, one sharing-rule-covered
+  object, shared box): 2 000 rows 2 122 ms to 208 ms; 5 000 rows 10 658 ms to
+  528 ms, with engine `update` calls falling from N to two per object.
+  
+  The second half is what the batch buys downstream. plugin-sharing's `rule-hooks`
+  already routes a write whose row set exceeds `RULE_RECOMPUTE_ROW_CAP` (1 000)
+  into one set-based revoke plus one queued `evaluateAllRulesForObject`, but that
+  branch reads **one write's** row set, and every write in the old loop
+  legitimately carried a single row — so the batch existed only in the caller,
+  where nothing downstream could see it. Batching here is what lets machinery
+  already built for this shape do its job; `plugin-sharing` is unchanged.
+  
+  **And a paged fallback, because one write cannot always carry the set.** A
+  predicate write carries no `limit`, so the bound becomes the engine's own
+  `MAX_BULK_PER_ROW_HOOK_ROWS` (10 000): `beforeUpdate` / `afterUpdate` hooks are
+  contracted to fire per matched row on a predicate write (ADR-0058 D6), and every
+  object carries such hooks in practice, so the engine refuses an over-sized write
+  **whole** — nothing written. Measured: 21 000 unowned rows re-owned **nothing**,
+  where the old loop re-owned 10 000 of them. This pass decides `owner_id`, a
+  record-access field, so an unclaimed object is a permission outcome and not an
+  observability detail. The refusal is now answered by taking one page of ids off
+  the top (half the ceiling) and re-attempting the whole set, until one write can
+  carry what is left. Re-measured after paging: the same 21 000-row object claims
+  **all 21 000**, in 8 engine writes and 3 reads.
+  
+  The order is not cosmetic. Paging unconditionally measured 13x slower on the
+  sizes every real install has — an `id IN (…)` page is a linear scan of the id
+  list per row in `InMemoryDriver`, so an always-paged claim is quadratic there
+  where the natural predicate is linear (5 000 rows: 528 ms whole-set versus
+  5 865 ms always-paged). The page is what the engine's refusal buys, not the
+  default.
+  
+  `patch`: no declared surface moves, no export changes, and the reachable
+  population strictly grows.
+- 5cb62d8: Make `clone_permission_set` carry the system permissions, row-level security
+  and tab permissions it was silently dropping
+  
+  The Clone action POSTs its `params` values to `/api/v1/data/sys_permission_set`,
+  so the params list *is* the payload. It named two of the six definition facets a
+  `sys_permission_set` row carries — `object_permissions` and `field_permissions`
+  — leaving `system_permissions`, `row_level_security` and `tab_permissions`
+  absent from the body. `permissionSetBodyFromRow()` then read each one through
+  `parseMaybeJson(undefined, …)` and filled the empty default, so cloning a set
+  that grants `setup.access`, or one carrying row-level security policies,
+  produced a clone with none of them: record created, success toast fired, and the
+  missing half discoverable only by diffing the two records.
+  
+  The three now travel, in the same JSON-string shape the two listed columns
+  already used. Nothing about what the door ACCEPTS changed — `permissionSetBodyFromRow()`
+  already read all six columns; what changed is what the action SENDS.
+  
+  This became urgent one commit ago. The save door now refuses an in-place edit of
+  a package-declared permission set **and its refusal message tells the admin to
+  clone**, which made this action the platform's own recommended remedy while it
+  was still dropping three facets — an admin following that instruction lost
+  grants quietly. The failure direction was fail-closed (fewer grants), which is
+  why it was quiet.
+  
+  `admin_scope` is **deliberately not copied** (maintainer ruling 2026-08-24).
+  Putting an ADR-0090 D12 delegated-admin authority onto a brand-new
+  organization-owned set on the admin's behalf is a privilege decision, not a
+  field copy. The Clone dialog now says so in its description, so the omission
+  reads to the admin as a decision rather than as the same silent drop — grant a
+  scope deliberately on the new set if it needs one.
+  
+  Pinned by `packaged-permission-set-lock.test.ts` pin 6, which assembles the
+  clone payload by READING the action's params list rather than restating it, and
+  asserts each facet by identity against a non-empty value — the empty default
+  (`[]` / `{}`) is exactly what a "present" assertion would have accepted. Its
+  control proves the exclusion is live: the base fixture carries a real
+  `admin_scope`, and the clone still has none.
+- 1a68552: perf(security): batch the derived half of `bootstrapSystemCapabilities`, unnarrowed (#11520)
+  
+  `bootstrapSystemCapabilities` reconciles two halves. #11451 batched the CURATED
+  half into one `$in` read carrying the #8470 predicate and left the DERIVED
+  half — the union of every `systemPermissions` string that nothing declares —
+  reading one row at a time, so a rebuild cost `1 + derived` round trips.
+  
+  That residue was filed rather than fixed for a reason that has since expired.
+  Two objections stood: narrowing the derived read to the platform bucket answers
+  a different question and reverses ruled ground, and batching it *unnarrowed*
+  needed an unbounded read. #11518 removed the second one — `readNamePage` now
+  asks for one row more than its page budget and reports the overflow as
+  `truncated` = "could not answer", degrading loudly to the per-item read — so
+  the wide batched read became bounded without becoming a different question.
+  
+  The derived half now consults its own `buildExistingByName` index, built with
+  **no predicate**: the read emits `{ name: { $in: … } }` under `seedCtx()`
+  (`{ isSystem: true }`, the same context the per-item read used), and unscoped
+  `resolveOwnOrganizationRow` returns the FIRST row with no bucket filter — so
+  the index resolves to the same lowest-`id` row installation-wide that
+  `tryFind(…, 1)[0]` returned under #4363's `ORDER BY id ASC`. A steady-state
+  rebuild costs 2 reads at every derived size instead of `1 + derived`.
+  
+  ⛔ The first objection still stands and is now pinned rather than only
+  documented: the derived read is **not** narrowed to `organization_id: null`.
+  Doing so would silence #8751's `platformStampedInOrg` anomaly signal in exactly
+  the case its doc says it is counted for, and would seed the platform bucket in
+  the case #8552 ruled must be left alone. A new test asserts the derived read's
+  key set is `name` and nothing else.
+  
+  One behaviour change, in the direction #10946 chose deliberately for the
+  curated half: a derived name whose existence read **cannot answer** is now
+  DECLINED (counted in `unreadable`) instead of being read as absent. The old
+  `tryFind` swallowed a failed read into `[]`, which routed the name to its
+  insert branch — a duplicate placeholder wherever the read failed but the write
+  did not, refused only where the unique index happens to exist, and silent
+  either way because the `blockedCurated` diagnostic is curated-only. The
+  `unreadable` counter and its summary warning now cover both halves; the warning
+  reports the whole definition set as its total rather than the curated count.
+- 01da105: fix(plugin-security): `explain` now reports a fail-closed RLS denial as `denies` with `allowed: false` (#13639)
+  
+  **A wrong answer is corrected — read this if you consume `explain`.** For one
+  class of request, `explain` previously answered `decision.allowed: true` about a
+  request that is guaranteed to return zero rows. It now answers `false`.
+  
+  **The class.** When applicable RLS policies exist but none can be compiled
+  against the current execution context — typically a required `current_user.*`
+  variable resolving to nothing, e.g. a caller with no active organization — the
+  compiler fails **closed** and composes plugin-security's `RLS_DENY_FILTER`
+  (`{ id: '__rls_deny__:…' }`), a predicate no record can satisfy. Enforcement
+  was always correct: the caller saw zero rows.
+  
+  `explain`, however, recognised only its own `__deny_all__` sentinel, so it
+  reported that composition with layer verdict **`narrows`** and
+  `decision.allowed: **true**`. That is the diagnostic tool giving an
+  affirmatively wrong answer to the operator asking why a user sees nothing —
+  every available signal pointing away from the cause.
+  
+  **What changed.** Deny recognition is now value-agnostic and routed through one
+  named predicate, so both the object-level `rls` verdict and the record-grained
+  layer attribution recognise either sentinel:
+  
+  - the `rls` layer verdict flips `narrows` → `denies`, with the matching detail;
+  - `decision.allowed` flips `true` → `false` for this class;
+  - the record-grained `tenant_isolation` and `rls` layers report the fail-closed
+    prose instead of "record does not match" prose.
+  
+  ⭐ **Deliberately NOT changed — no payload moves.** `readFilter` (and a layer's
+  `rowFilter`) keeps reporting the predicate that was **actually composed**: a
+  deployment that receives `{ id: '__rls_deny__:…' }` today keeps receiving it
+  byte-for-byte. The documented `__deny_all__` collapse still fires for
+  `__deny_all__` alone, and the two sentinels are **not** merged. Rewriting the
+  published payload, and unifying the sentinel vocabulary, are recorded on #13639
+  as separate deployment-facing decisions.
+  
+  **Record-level correctness did not move**, only its prose: the record-grained
+  `outcome`, `matchesRecord` and rule `effect` were already right, because the
+  sentinel excludes every real record on its own.
+  
+  **If you assert on `explain` output**, expectations that encoded the old answer
+  for a fail-closed RLS denial — verdict `narrows`, or `allowed: true` — now fail,
+  and they were asserting the defect. Enforcement behaviour is unchanged in every
+  respect; `explain` is a diagnostic surface and no enforcement path reads its
+  verdict.
+- c61ad20: fix(plugin-security): fail CLOSED on a non-object row in the platform-admin promotion predicate (#12515)
+  
+  `bootstrapPlatformAdmin`'s local `isHumanUser` decided "is this `sys_user` row a
+  HUMAN?" with a bare truthiness check followed by two property comparisons:
+  
+  ```ts
+  const isHumanUser = (u: any) => u && u.id !== SystemUserId.SYSTEM && u.role !== 'system';
+  ```
+  
+  On a truthy NON-object input (`'usr_alice'`, a number, `true`) both comparisons
+  read `undefined` and therefore both pass, so the input scored **human**. The
+  same question's consolidated owner — `isHumanUserRow` in `@objectstack/plugin-auth`
+  — requires `typeof row === 'object'` and answers **non-human** for those inputs.
+  Two owners of one question, disagreeing, and the disagreement fell the wrong way
+  on the security-critical side: this is the copy that performs the
+  **platform-admin promotion**, so it failed OPEN. Its worst shape is the system
+  account's own id arriving as a bare string, which the old spelling would have
+  promoted.
+  
+  The predicate now mirrors `isHumanUserRow` — the same `typeof` guard, and a real
+  boolean return instead of echoing a falsy input back:
+  
+  ```ts
+  const isHumanUser = (u: any) =>
+    !!u && typeof u === 'object' && u.id !== SystemUserId.SYSTEM && u.role !== 'system';
+  ```
+  
+  **Why mirroring rather than a stricter rule of its own.** Over-tightening this
+  predicate has a worse failure mode than the bug: an install that cannot promote
+  its first admin is locked out of itself. The guard was therefore measured before
+  it was chosen, not after. Against a real `SqlDriver` over the shipped `SysUser`
+  declaration, every row a real `sys_user` read yields is a plain object — zero
+  truthy non-objects, and zero rows whose verdict moves when the guard is added.
+  The mirrored guard is also already the incumbent on this exact population:
+  `plugin-auth`'s dev-admin seed filters the byte-identical read (`sys_user`,
+  `where: {}`, `limit: 50`, system context) through `isHumanUserRow` today.
+  
+  **No reachable behaviour changes.** The divergence is unreachable through any
+  live call site, so this ships as a hardening of malformed-input handling rather
+  than a behavioural fix. The 14 existing agreement cases in the cross-package
+  pin are byte-for-byte unmoved; the pin gains the non-object class it previously
+  had to exclude (it would have failed), which is what now stops the asymmetry
+  returning — consolidating the two copies into a shared package stays declined,
+  so nothing else was going to retire it.
+- 30928a6: fix(i18n): read the provenance companion at serving time, not only record it (#12642)
+  
+  Maintainer ruling #12069 Option A (#11671) landed translation provenance as
+  **two** halves: `os i18n extract --source-hashes` RECORDS which source revision
+  a generated leaf is still a byte copy of, and `withSourceFallback` READS those
+  records at serving time and substitutes the current source for a leaf whose
+  source has moved underneath it. The recording half was then rolled out to every
+  bundle set. The reading half was not — measured on `main`: provenance
+  **recorded in 9 of 9** bundle sets and **read at serving time in 1**.
+  
+  The other eight assembled their `TranslationBundle` straight from the raw
+  generated modules and never consulted the companion sitting beside them, so
+  they recorded the drift and went on serving the superseded draft. Nothing said
+  so: `check:i18n` compares key sets and they still matched, `check:i18n-coverage`
+  counts a present leaf as translated, and `check:i18n-stale-fill`'s cross-locale
+  rule needs a SECOND locale holding the same stale bytes before it can testify.
+  The measured case had one locale and no second witness.
+  
+  All eight are wired here, in the shape `@objectstack/platform-objects`'s own
+  `metadata-translations/index.ts` uses — the committed
+  `<locale>.source-hashes.generated.ts` passed as the fourth argument, the third
+  left `undefined` because these sets have no hand-authored sections. Provenance
+  is now recorded in 9 of 9 sets and served in 9 of 9.
+  
+  `@objectstack/plugin-webhooks` was the last of them and is the only one whose
+  manifest changed: `withSourceFallback` lives in `@objectstack/platform-objects`,
+  which that package did not declare. It was **already in that package's install
+  closure** through `@objectstack/service-messaging`, so the edge declares a
+  resolution that already resolved rather than adding a package to the graph —
+  and relying on it undeclared would have been a phantom dependency under this
+  repo's strict package manager.
+  
+  `check:i18n-stale-fill` gains a second verdict, **UNSERVED PROVENANCE**, so this
+  cannot silently come apart again: a bundle set that commits a companion and
+  does not consult it at serving time now fails the build, including a tenth set
+  that lands tomorrow.
+  
+  **Graded `patch`, and the grade is the interesting part.** No API changes, no
+  new exported surface, and no key set moves — substitution was chosen over
+  deletion precisely so key-set claims stay put (ruling #8765 Option B). What
+  changes is which STRING a stale leaf serves. On this tree that is **zero
+  leaves**: a record is only ever written for a leaf that IS a byte copy of the
+  current source, so the companions arrive 0-stale by construction. The change is
+  in what happens the next time a source string moves — the reader sees the
+  English source rather than a superseded draft of it, which is the same
+  degradation an untranslated key already produces and not a new state.
+- de47336: chore(i18n): roll the generated-leaf provenance companion out to the remaining bundle sets (#12559)
+  
+  `os i18n extract --source-hashes` (#11671, maintainer ruling #12069 Option A)
+  records, per generated translation leaf, the digest of the source revision that
+  leaf is **still a byte copy of** — the one signal that tells a stale fill from a
+  real translation once the source has moved and the two stopped being
+  distinguishable by value. It shipped opt-in, and exactly one of the nine i18n
+  bundle sets opted in. A landed detector, a changeset announcing it and a green
+  gate read together as *"generated translation staleness is now caught"*; for
+  eight of nine sets it was not, and the thing making it not caught was a single
+  absent flag in an extract config — invisible from all three of those surfaces.
+  
+  **All eight remaining sets now opt in** — `plugin-approvals`, `plugin-audit`,
+  `plugin-security`, `plugin-sharing`, `plugin-webhooks`, `service-messaging`,
+  `service-realtime`, `service-storage`. Each documents `source-hashes` in its
+  extract config and commits three `<locale>.source-hashes.generated.ts`
+  companions, produced by the same extract run as the bundles they sit beside
+  (`check:i18n` compares them byte-for-byte, so they cannot be written by hand).
+  `check:i18n` now reports 7 bundles per set where it reported 4, and 11 for
+  `platform-objects` where it reported 8.
+  
+  **Records count what is currently RECORDABLE, never what is covered.** A record
+  is written only for a leaf that *is* right now a byte copy of the current
+  source, so a fully translated locale starts with an empty table — which is the
+  instrument armed, not an instrument that measures nothing: the entry appears by
+  itself on the first extract after a leaf becomes a fill. Measured at this
+  commit, per set over its three translated locales: `service-messaging` 289,
+  `plugin-approvals` 61, `plugin-security` 33, `plugin-webhooks` 20,
+  `plugin-audit` 8, `service-storage` 7, `plugin-sharing` 1 (es-ES only; zh-CN and
+  ja-JP are fully translated and start empty), `service-realtime` 0 (all three
+  locales fully translated). **419 records written across the eight sets, 0
+  stale.**
+  
+  **One extractor fix the rollout forced.** `--source-hashes` had one user, and
+  that user commits both generated sections, so the interaction with
+  `--no-metadata-forms` had never been exercised. The provenance table is computed
+  over every generated section the extractor builds; the eight sets here commit no
+  metadata-forms bundle, and their `metadataForms` subtree — absent from their
+  merge baseline — arrives as a fresh `--fill=default` copy of `en`, so every leaf
+  of it was recordable. First measured on `plugin-audit`: **763 records, of which
+  2 were its own objects and 761 were digests of the Studio metadata-form baseline
+  `@objectstack/platform-objects` owns.** Those records are unreadable in the
+  package holding them and would have rewritten all 24 companions on any unrelated
+  `*.form.ts` change in `packages/spec` — the cross-package coupling ADR-0029 D8
+  and every `bundle-ownership.test.ts` keep out of committed bundles. The
+  companion now covers exactly the sections a run commits, decided by the same two
+  predicates that decide the bundle files. `platform-objects` commits both, so its
+  three committed companions are byte-for-byte unchanged.
+  
+  **Grade: `patch`, and behaviour on the day it lands is unchanged for every
+  leaf.** A record is written only where a leaf is currently a byte copy of the
+  **current** source, so every record written equals the current digest and none
+  of them can be stale; the mechanism cannot arrive red. No committed translation
+  bundle changed a byte, no public API moved, and no leaf's rendered text changed.
+  `narrowToCommittedSections` is new but internal to `@objectstack/cli` — the
+  package's entrypoint does not re-export the extractor utils.
+  
+  **What this does not do**, stated so the boundary is not inferred wrongly a
+  second time: these eight sets now *record* provenance. Reading it at serving
+  time is `withSourceFallback`, and that is still wired in
+  `@objectstack/platform-objects` alone — so a stale fill in one of the eight is
+  now recorded and reportable, but not yet substituted at runtime. Tracked
+  separately.
+- 3e9c0d8: test(plugin-security): the managed-deny floor now sees the evaluator's first grant route — `allowTransfer` (#14137)
+  
+  The independent-property floor that derives which seeded default permission
+  sets MUST be managed-deny targets ("a default set whose `'*'` wildcard grants
+  a write", pinned in `default-permission-sets.test.ts` and diffed against
+  `MANAGED_DENY_TARGET_SETS`, #14029) read only the three CRUD write flags plus
+  `modifyAllRecords`. That missed the evaluator's FIRST grant route — the
+  direct bit read off `OPERATION_TO_PERMISSION` (`transfer: 'allowTransfer'`),
+  a real grant ENFORCED today through the insert/update `owner_id` door (#3004).
+  A future default set shaped `'*': { allowRead: true, allowTransfer: true }`
+  would have held ownership reassignment on every `managedBy: 'better-auth'`
+  identity table while tripping neither floor clause, so it was never required
+  to become a managed-deny target and would have kept its wildcard silently.
+  
+  The floor now also checks `wc.allowTransfer === true` (a value test, never
+  key-existence — Zod materialises these bits with `.default(false)`, so they
+  are present-as-false; #14129 first review), and both exhaustive docblocks
+  name the first route. Zero behaviour delta today: no existing seeded set
+  carries a transfer-granting wildcard, every existing set keeps its exact
+  verdict (pinned), and the runtime deny application is byte-identical — this
+  hardens a CI-time pin, not the shipped permission surface.
+- 20b79be: fix(plugin-security): registry-driven managed-object write denies now reach `organization_admin_no_bypass` (#14029)
+  
+  `MANAGED_DENY_TARGET_SETS` named four default sets, and `applyManagedWriteDenies`
+  matches on it exactly — so at `kernel:ready` the injection walked the derived
+  `organization_admin_no_bypass` variant and skipped it. The variant is a shallow
+  copy of `organization_admin` taken at module load (`deriveWallLessOrgAdmin`
+  strips only the `viewAllRecords`/`modifyAllRecords` superuser bits), which means
+  its `'*'` wildcard still grants create/edit/delete AND entries injected into the
+  parent's `objects` can never propagate to it. Its own docblock declares
+  "managed-write denies … carried over verbatim"; the behaviour violated that
+  declared contract.
+  
+  No gap opens on today's tree — the static `BETTER_AUTH_MANAGED_OBJECTS`
+  baseline covers the 28 declared managed tables and is copied into the variant at
+  derivation. The gap was the next `managedBy: 'better-auth'` schema that lands
+  without a hand edit to that list: `organization_admin` would receive the
+  injected deny while the wall-less variant's wildcard kept granting raw CRUD on
+  an identity table — precisely the drift the registry-driven module exists to
+  close (ADR-0092), on the posture (`auto-org-admin-grant` under a wall-less
+  deployment) where the bits are least bounded.
+  
+  - `ORGANIZATION_ADMIN_NO_BYPASS` is now a member of `MANAGED_DENY_TARGET_SETS`.
+    The variant's pre-existing explicit entries (static baseline, RBAC read-only
+    block) survive unchanged — the injection skips any object a set already
+    names.
+  - The membership pin no longer checks the list against itself: the required
+    floor ("default sets holding a write-granting `'*'` wildcard") is derived
+    from the real seeded sets and diffed against the list; a non-empty
+    difference is red. `admin_full_access` stays deliberately excluded (admin
+    rescue path) and that exclusion is pinned exactly.
+- 52954c0: `IObjectQLEngine.getSchema` now returns `ServiceObject | undefined` instead of `unknown` (#12481) — the #11833 ruling's fork 3 as executed by #12248, applied one member over by inheritance: `ObjectQL.getObject` is literally `getSchema`'s alias (`return this.getSchema(name)`), the class has always answered `ServiceObject | undefined`, and `ServiceObject` lives in spec (`data/object.zod.ts`), so the contract's "engine-local type" rationale for `unknown` no longer applied here either. FROM `getSchema(objectName: string): unknown` TO `getSchema(objectName: string): ServiceObject | undefined` (authored state, ADR-0122, matching `getObject`). Consumers reading `managedBy` / `fields` / `userActions` off the answer no longer need a cast or a private structural re-declaration; `plugin-security`'s engine-owned write guard drops its now-redundant `as EngineOwnedSchemaLike | undefined` narrowing (behaviour unchanged). Implementations conforming to the class's actual behaviour are unaffected; a fake answering a non-conforming shape now fails compile at the member instead of drifting silently.
+- 9cfc1f7: Extend the packaged-permission-set lock ("lock the base, clone to customize", 2026-08-24 ruling) to the `restore` leg of the permission-set write-through — the one write point that did not consult it. The leg now checks provenance before re-authoring a restored record's definition into metadata: a package-declared name (or one whose provenance cannot be resolved — fail-closed) has its re-author refused and the refusal reported loudly on the durability channel, while the engine's un-trash stands (this leg runs after it and deliberately never throws). With the mint refused, boot reconciliation re-projects the declared body, so the environment converges to the package truth instead of a silent fork. Org-owned sets restore exactly as before.
+- 8af88dd: feat(spec): retire the `allowRestore` / `allowPurge` object-permission bits — declared gates on operations that do not exist (#12497, ADR-0049)
+  
+  **BREAKING** accept-set narrowing, landing after the v17.0.0 cut (the lockstep
+  launch-window convention ships it as `minor`; the migration prescription is
+  registered under protocol major 18, where `os migrate meta` users will look).
+  Maintainer ruling 2026-08-26 (decision-inbox batch 5) accepting #1883's
+  recommendation B; **the keys return with the M2 lifecycle initiative** (feature
+  + RBAC in one batch) — anchor card #1883 stays open.
+  
+  `allowRestore` and `allowPurge` claimed to gate `restore` (undelete) and
+  `purge` (hard-delete / GDPR erase) ObjectQL operations that have never
+  existed: no destructive lifecycle verb is in the engine's dispatch vocabulary
+  (pinned by objectql's `engine-middleware-operation-vocabulary.test.ts`, #8106).
+  Authoring the bits granted nothing — and in the `allowPurge: false` direction
+  the failure was ADR-0049's worst false-compliance shape: an admin believed a
+  lock on permanent deletion existed when the operation itself did not. The
+  sibling `allowTransfer` is **enforced** (#3004, the insert/update `owner_id`
+  door) and is untouched.
+  
+  **What is refused:** authoring either key, with any value — both are
+  `retiredKey()` tombstones (`ObjectPermissionSchema` is reachable from the
+  `permission` metadata root, so the tombstone route keeps the removal audible:
+  a tsc `never` on the input type plus a parse-time prescription). The former
+  `restore` / `purge` bare-verb aliases now answer with the same prescription
+  instead of a rename onto a tombstone. The tombstone rides the `.extend()`
+  clone into `EffectiveObjectPermissionSchema`, so the response-side def carries
+  the same `[RETIRED]` rows.
+  
+  **What stays accepted:** every other object-permission bit parses
+  byte-identically (`allow*` CRUD, `allowExport`, `allowTransfer`,
+  `viewAllRecords`, `modifyAllRecords`, `readScope` / `writeScope`).
+  
+  **Runtime (plugin-security):** the evaluator's pre-mapping rows
+  (`OPERATION_TO_PERMISSION` restore→allowRestore / purge→allowPurge) retired in
+  the same batch — with the bits unwritable, a mapping onto them was a claim
+  about a surface that rejects authoring. Behaviour is deny-before and
+  deny-after: a dispatched `restore` / `purge` is refused fail-closed by the
+  `DESTRUCTIVE_OPERATIONS` backstop, now unconditionally (not even
+  `modifyAllRecords` reaches an unmapped destructive op — the bypass re-covers
+  them only when the M2 batch re-adds the rows). `transfer` keeps its row and
+  its bypass. `describeHighPrivilegeBits` stopped reading `allowPurge` (a legacy
+  stored value grants nothing, so flagging it guarded nothing real); the
+  delete/purge/transfer class message is unchanged.
+  
+  The retirement kit:
+  
+  - `retiredKey()` tombstones + former-alias `guidance` prescriptions at the
+    schema (`packages/spec/src/security/permission.zod.ts`)
+  - ADR-0087 registration: retired-key entries
+    `security/ObjectPermission:allowRestore` / `:allowPurge` (and the
+    `security/EffectiveObjectPermission` pair for the cloned rows) and the D2
+    conversion `permission-allow-restore-purge-removed` (protocol 18), wired
+    into the step-18 chain — `os migrate meta --from 17` strips the keys from
+    every object grant in `permissions[].objects` (pure lossless delete; they
+    never had an effect to lose)
+  - liveness ledger: both entries flipped to `dead` with the retiredKey evidence
+    (entries stay — the tombstone keeps the keys in the walked shape, the
+    `rls.priority` precedent)
+  - pin tests (`permission.test.ts` — refusal pins asserting the prescription;
+    `security-plugin.test.ts` — fail-closed pins incl. the legacy-stored-grant
+    and modifyAllRecords directions; `audience-anchors.test.ts` — the predicate
+    no longer reads the retired bit)
+  - generated baselines/docs follow the schema (`authorable-surface/`,
+    `authorable-defaults/`, spec-changes, upgrade guide, reference docs)
+  
+  ## FROM → TO
+  
+  ```ts
+  // before — parsed green; nothing ever read the bits, no operation existed
+  definePermissionSet({
+    name: 'support_agent',
+    objects: {
+      crm_ticket: {
+        allowRead: true, allowEdit: true,
+        allowRestore: true,   // claimed: can undelete — nothing enforced it
+        allowPurge: false,    // claimed: GDPR erase locked — no lock existed
+      },
+    },
+  });
+  
+  // after — delete the keys; restore/purge dispatches are denied fail-closed
+  // until the M2 lifecycle batch ships the operations WITH their RBAC bits
+  definePermissionSet({
+    name: 'support_agent',
+    objects: {
+      crm_ticket: { allowRead: true, allowEdit: true },
+    },
+  });
+  ```
+  
+  <!-- adr-0087: registered permission-allow-restore-purge-removed -->
+- 31bb2e7: fix(plugin-security): report the two swallowed `tryUpdate` refusals outside the catalog seed (#12970)
+  
+  Both sites call the shared `tryUpdate` in `permission-set-projection.ts`, which
+  answers `false` on refusal. That answer is byte-identical to "nothing to do",
+  and neither caller passed the optional refusal log the helper already accepts —
+  so a refused write was indistinguishable from a clean pass.
+  
+  **`permission-set-drift.ts` — a refused diagnostic write silenced its own
+  report.** `persistPermissionSetDriftDiagnostics` counted only the writes that
+  landed, and `runPermissionSetDriftDiagnostics` reported only when that count was
+  non-zero. A boot on which every drift write was refused computed the drift
+  correctly, persisted none of it, and printed nothing at all — indistinguishable
+  from a deployment with no drift, while the sets kept enforcing grants that
+  differ from the shipped artifact. The pass now records refusals, answers a
+  `refused` count beside `updated`, reports them once per pass on the durability
+  channel, and emits the drifted-set line when writes were refused as well as when
+  they landed. A steady-state boot (nothing to write, nothing refused) stays
+  exactly as quiet as before.
+  
+  **`permission-set-overlay-discard.ts` — the audit line could describe a discard
+  that did not happen.** On the degraded-kernel branch the resync write's result
+  was discarded entirely. On refusal the row was re-read unchanged, so
+  `objectGrantsAfter` equalled `objectGrantsBefore` while the `info` entry still
+  announced a completed "sanctioned operator action": every field individually
+  true, the entry as a whole false. The result is now read, and a refused resync
+  emits one entry stating what did and did not land — the overlay row deletion
+  (which had already succeeded) and the refused resync, with the un-healed grant
+  count named as such — **instead of** the success line, never alongside it.
+  
+  Both new lines go through the shared durability channel with its mandatory
+  `warn` fallback, so they still print against a host sink that has no `error`.
+  They reuse the shared refusal *accumulator* (`createSeedWriteRefusals`, with its
+  cross-dialect classification and value-free driver-code channel) but not
+  `reportSeedWriteRefusals`, whose prose is specific to seeding the RBAC catalog
+  and would misdiagnose either of these paths.
+  
+  No API is removed or narrowed. `persistPermissionSetDriftDiagnostics` and
+  `runPermissionSetDriftDiagnostics` answer one additional field (`refused`), and
+  what `discardPermissionSetOverlay` returns to its caller is deliberately
+  unchanged.
+- 502ff8b: An organization-less `sys_permission_set` row grants again — #11121 revoked standing access silently
+  
+  #11121 made the request-time permission-set loader tenant-scoped so two
+  organizations holding a row for the same name stop answering each other's
+  requests. It shipped the second half as a COMMENT — "an organization-less
+  leftover only where it does not [have its own]" — and the code read `.own`
+  alone, which by `resolveOwnOrganizationRow`'s own documented contract is never
+  a residue once an organization is supplied.
+  
+  That helper is written for SEEDERS, where refusing to read a residue as
+  "already seeded" is the entire point. Enforcement wants the opposite reading: an
+  organization-less row is still a row the principal was granted, and dropping it
+  revokes standing access with no signal at the moment of loss — the failure this
+  catalog's own header, and `resolve-authz-context`'s `sys_position` read, both
+  name as the thing not to do.
+  
+  The asymmetry was observable on a single row: its `system_permissions` and
+  `tab_permissions` kept applying, because that read is unscoped and by id, while
+  its `object_permissions` and `admin_scope` stopped. One row, two enforcement
+  planes, opposite verdicts. Every walled deployment carrying pre-#11121 rows —
+  or any row authored without a tenant, which includes admin-UI-authored sets —
+  lost those grants on upgrade, reported only as a boot WARN about "leftovers"
+  that states the catalog is complete.
+  
+  Found by cloud's `apps/ee-group-showcase` dogfood suites, which had been failing
+  four ADR-0111 / ADR-0105 assertions on cloud main while turbo replayed them from
+  cache.
+  
+  Preference order is unchanged, so the cross-tenant bleed #11121 closed stays
+  closed: this organization's own row still WINS wherever it exists, and a
+  leftover is consulted only in its absence. #11121's suite covers seeding and the
+  `sys_position` sweep; the three cases added here cover the loader path it did
+  not — residue resolves, own beats residue, and the single-posture carve-out is
+  untouched. Reverting the one-line fix reddens exactly the first of them.
+- d7b3963: Export the kernel platform-admin capability declaration from `@objectstack/spec` (`ADMIN_FULL_ACCESS_CAPABILITIES`) and import it in plugin-security's `admin_full_access` permission-set declaration, so exactly one copy of the capability list exists (#11663 Choice 6A, leg L1). Behaviour-neutral: the declared capability set is byte-for-byte unchanged, pinned by test.
+- 7c41693: fix(core,plugin-auth,plugin-security): every `OS_PLATFORM_OWNER_EMAIL` reader asks the ONE list-aware parser (#13147)
+  
+  `OS_PLATFORM_OWNER_EMAIL` accepts one address **or a comma-separated list** of
+  them (#11663 Choice 2B). The list parse landed in a single home
+  (`@objectstack/core`'s `platform-admin.ts`) and the authorization derivation
+  consumed it — but every other reader kept calling `resolvePlatformOwnerEmail()`,
+  which returns the operator's value trimmed and otherwise verbatim, and kept
+  treating that whole string as ONE address.
+  
+  An operator who configured a list therefore entered a self-contradictory state:
+  authorization recognised them as a platform administrator, while four separate
+  capabilities silently did nothing. Every direction failed **closed** — no
+  privilege escalation existed at any point — but a declared capability vanished
+  with no error anywhere:
+  
+  - `bootstrap-platform-admin` promoted **nobody**, logging "will be promoted when
+    that account registers" on every boot forever;
+  - the walled operator stamp (`plugin-auth`) stamped **no** list member verified,
+    so the account it should have provisioned was then refused elevation as
+    `walled_owner_not_verified`;
+  - `isVerifiedPlatformOwnerSession` / `platform-owner-wall-bypass` let **nobody**
+    across the Layer 0 organization wall — the largest of the affected surfaces;
+  - the walled boot diagnostic printed the raw list in the slot where an operator
+    reads one address, and its dev-seed silence clause never matched.
+  
+  All six readers now ask the same parser. `@objectstack/core` gains
+  `isConfiguredPlatformAdminEmail(email, config)` — the membership half of
+  `matchesConfiguredPlatformAdmin`, spelled once and shared, for the readers that
+  hold a bare address rather than a `sys_user` row (the elevation gate keeps its
+  two halves apart so `walled_owner_not_registered` and `walled_owner_not_verified`
+  stay distinct answers; the stamp is handed an email before any row exists; the
+  wall takes a fast negative before spending a row read). `PlatformAdminEmailConfig`
+  gains `declaredSpellings`, the entries as the operator typed them, so the by-email
+  `sys_user` lookup and the boot diagnostic get the as-typed form **from the one
+  parse** instead of splitting the raw value a second time.
+  
+  Behaviour for a single declared address is unchanged, including the
+  case-insensitive match and the verbatim-spelling store lookup. A **refused**
+  list (Choice 2B fails the whole variable closed on one unparseable entry) now
+  reaches these readers as "zero administrators", which is the same answer they
+  already gave for an unset variable — never a silently narrower set.
+  
+  Two readers deliberately keep reading the raw value: the walled-boot refusal and
+  the verification-path probe guard in `auth-plugin.ts` both use it as a pure
+  truthiness test ("did the operator declare anything at all?"), which is
+  grammar-independent. A census pin now enumerates the raw readers across both
+  plugin packages and fails on a seventh.
+- f64668d: fix(plugin-audit,plugin-security): declare sourced bounds on the four keyed text columns that break MySQL schema-sync (#12059)
+  
+  Four text columns that a declared index keys on carried no `maxLength`, so
+  `driver-sql` emitted them `TEXT`. MySQL refuses a TEXT/BLOB column in a key
+  without a key length (`ER_BLOB_KEY_WITHOUT_LENGTH`): `CREATE TABLE` succeeds,
+  `ALTER TABLE … ADD INDEX` fails, and the object lands registered-but-broken
+  with its declared index silently absent.
+  
+  | Object | Column | Bound | Producer the bound is derived from |
+  |---|---|---|---|
+  | `sys_activity` | `record_id` | 255 | the physical `id` column — `driver-sql` creates every primary key as `table.string('id').primary()`, knex's `varchar(255)` |
+  | `sys_audit_log` | `record_id` | 255 | same |
+  | `sys_audience_binding_suggestion` | `package_id` | 255 | `sys_permission_set.package_id` (255), which the same boot pass writes the same value into |
+  | `sys_audience_binding_suggestion` | `permission_set_name` | 100 | `sys_permission_set.name` (100), the column this value resolves against at confirm time |
+  
+  Each bound is derived from a **named producer** and stated in the declaration
+  so it is vetoable in review (#11374 route A; PR #12058 is the worked
+  precedent). None of them narrows anything storable:
+  
+  - a record id cannot exceed the `varchar(255)` column the id itself lives in,
+    and the `referenceVia` seed path refuses an unresolvable pointer rather than
+    storing a natural key verbatim;
+  - a permission set name longer than 100 is already refused at the write seam
+    today — measured on a real engine, `ValidationError: API Name must be ≤ 100
+    characters (got 101)` — so no set with such a name can exist, and a
+    suggestion naming one could never be confirmed.
+  
+  Measured at the driver level, shipped declaration vs. the same declaration with
+  the bounds stripped: `record_id`, `package_id` and `permission_set_name` move
+  `TEXT` → `varchar(255)` / `varchar(100)`, while `id` reads `varchar(255)` in
+  both — the transitivity premise, read off a real table rather than assumed.
+  
+  Existing deployments are not rewritten: a physical `TEXT` column is deliberately
+  not diffed against `maxLength` (#11431), so no `ALTER` is planned and no value
+  at rest is truncated. The repair takes effect where the decision is makeable at
+  all — at `CREATE TABLE` — because no dialect turns a TEXT column into a keyable
+  one afterwards.
+  
+  Each plugin also gains a keyed-text-bounds pin driven through its **own
+  registration path** (`init()` → the manifest `register({ objects })` call),
+  rather than a hand-written object list: the platform-objects pin enumerates only
+  that package's exports, which is exactly why these four columns escaped route
+  A's sweep after ADR-0029 K2 moved the objects out.
+- 9690d11: fix(plugin-security): the app default permission set resolves from `packages[]`, not only the flattened top level (#15007)
+  
+  `appSecurityPluginOptions(config)` read `config.permissions` and nothing else.
+  For a multi-package artifact under the ADR-0130 D4 option-B shape — where
+  `packages[]` carries each definition exactly once and the flattened top-level
+  copy is gone — that read returns `undefined`, the reader concludes "this app
+  declared no default profile", and the boot continues. Nothing throws and
+  nothing logs.
+  
+  That silence has a security posture attached. The name this resolves becomes
+  the `SecurityPlugin`'s `fallbackPermissionSet`, i.e. the app's half of every
+  authenticated human principal's additive baseline
+  (`composeHumanBaselinePermissionSets`, ADR-0090 D5). Losing it does not deny
+  anyone the boot — the deployment simply runs on the platform floor alone, and
+  every member of a multi-package app quietly holds less access than the app
+  declared for them. #7555 measured what that looks like from the outside: nav
+  entries served, 403 behind them.
+  
+  The resolution now reads the flattened top level FIRST and then each package
+  body, in the order `resolveArtifactPackageOrder` (`@objectstack/core`,
+  ADR-0130 D4+D5) registers them:
+  
+  - **Every artifact the platform emits today answers bit-identically.** The
+    flattened level still answers first, so the `packages[]` pass can only supply
+    a set where the top level had none. This is the reader half of the ruled
+    order (readers first, emitter last, artifact stays additive throughout), so
+    it lands with no change to what any command emits.
+  - **Order is the platform's one package order, not the array's.**
+    `appDefaultPermissionSetName` resolves the FIRST `isDefault` set, so with two
+    packages declaring one, "first" has to mean here what it means at every other
+    artifact reader: dependency-topological, so a package that extends another is
+    read after it whichever array slot it occupies.
+  - **The singular `manifest` is still not consulted** (#7001 — the harness must
+    not honour a declaration `serve.ts` ignores). That is not a special case: an
+    artifact carrying no `packages` key makes `resolveArtifactPackageOrder`
+    return the caller's own object as the single package body, so that branch
+    reads `permissions` from exactly where the old code read it.
+  - **A malformed `packages` is refused, not skipped.** A non-array `packages`,
+    an entry inlined instead of wrapped under `manifest:`, or a duplicate package
+    id raises the same ADR-0112 envelope (`code` + `status: 422`) the manifest
+    service raises when it registers that artifact. Catching it would resolve a
+    permission surface out of an artifact the loader refuses to load.
+  
+  Every boot path that already funnelled through this one function picks the fix
+  up unchanged: `objectstack serve`'s artifact and from-source paths, and
+  `@objectstack/verify`'s `bootStack` / RLS harness.
+- ad54eb3: feat(tooling): onboard all 14 `packages/plugins/**` packages into `check:test-typecheck` (#14062)
+  
+  Every plugin package now has a `tsconfig.test.json` compiled by the shared
+  `check:test-typecheck` gate, and its `typecheck` script names it. Before this,
+  the shrink-only `test-typecheck-debt.json` ratchet said **nothing** about a
+  third of the repo's runtime surface: 14 packages, 1 `tsconfig.test.json`
+  (`plugin-security`, wired directly to `tsc` rather than to the instrument), and
+  0 `check:test-typecheck` scripts.
+  
+  Onboarded as a family by the director ruling of 2026-09-01 on #14062
+  (maintainer verbatim: 「同意」), which also carries the #5286 maintainer
+  authority the starting ledgers need. The smaller branch triage recommended —
+  declare the instrument's scope and re-site the two compile-time pins — was
+  recorded as considered and not taken: an instrument silent over a third of the
+  runtime surface is a hole readers generalise across, and that costs more than
+  fourteen tsconfigs.
+  
+  **Measured, not assumed** (at `e80889095`, workspace closure built first). Four
+  packages carry residue and therefore a starting ledger — plugin-approvals 324
+  over 8 files, plugin-auth 94 over 10, plugin-sharing 3 over 2,
+  knowledge-ragflow 3 over 1. The other ten measure **zero** and deliberately get
+  no ledger file at all: the gate reads a missing ledger as `{ entries: {} }`, so
+  any error there is red immediately with no entry to be added to — strictly
+  stronger than a ledger holding nothing, and the call `plugin-security` had
+  already recorded for itself.
+  
+  ⛔ **This does not repair 345 type errors.** Per ruling item 3 it makes the
+  ratchet able to *see* them; paydown follows the ratchet's own shrink-only
+  discipline on its own cards. No test file is edited here.
+  
+  Two corrections to the finding's own prose, both measured: the exclusion is
+  narrower than "no plugin package compiles its tests" — 9 of the 14 already
+  compiled their tests inside the `typecheck`-invoked build config, at zero
+  errors — and `exec-context-annotation.pin.ts` is a `.pin.ts`, which
+  `**/*.test.ts` never excluded, so its directives were already live. The pin
+  this change genuinely makes real is
+  `plugin-approvals/src/manager-org-screen-parity.contract.test.ts`, which no tsc
+  program had ever read.
+- 936aa2d: Say the position-name fold out loud: a permission set granted only because a POSITION of the same name resolved by name, with no `sys_position_permission_set` row behind it, now emits a `position_name_fold_grant` warning (#13419 执行要点 3, warning half).
+  
+  Permission-set resolution requests `[...positions, ...explicitPermissionSets]`, so a position called `sales_rep` resolves a permission set called `sales_rep` — no junction row, no audit line, and nothing declaring that it happens. An operator inspecting `sys_position_permission_set` sees "no bindings" while bindings are in force. The maintainer ruling (2026-08-31) makes the junction table the one governed channel; this reports the ungoverned grants until the fold itself is retired.
+  
+  The warning names the pair `(position N, set N)` **specifically**. A position bound to some *other* set is still folded onto its own name, so a report keyed on "is this position bound to anything?" would miss real folds while looking complete. It stays silent for a position already carrying that set through the governed channel (a junction row or a direct assignment), for baseline sets, and for any position with no same-named set — which is every built-in identity (`platform_admin`, `org_owner`, `org_admin`, `org_member`, `guest`). It is emitted once per position name per process, so it stays loud instead of becoming per-request volume operators filter away.
+  
+  ⛔ Resolution results are unchanged. Nothing is granted, revoked, accepted or rejected differently — the warning is purely additive, per the ruling's 「任何行为差异只能表现为拒绝/告警,永不静默改变解析结果」.
+- d48929e: fix(security): a refused RBAC catalog write is now boot-visible instead of reporting a seed of zero (#12923)
+  
+  The five RBAC catalog seeders answered a refused write with `null`/`false`,
+  which is byte-for-byte the answer for "nothing to do": the `seeded` counter
+  never incremented and the pass returned normally. On a deployment still
+  enforcing a **platform-wide** unique index on the name column — the shape that
+  predates per-organization materialization — every per-organization INSERT is
+  refused that way, so the boot log read as a successful seed of zero rows.
+  Measured on a deployed plane, undetected for weeks: an empty Setup (no
+  positions, no permission sets, no capabilities) under a clean log.
+  
+  The outer handler was not missing, it was **disarmed**. `security-plugin.ts`
+  already wrapped the organization-creation seed in a `try`/`catch` that warns,
+  and it was unreachable for this failure class: the refusal was converted to
+  `null` three call layers below, so the `await` resolved normally and the hook
+  logged "RBAC catalog seeded" at `info` over a seed of nothing. Another outer
+  `try`/`catch` would fix nothing — the signal has to survive the inner helper,
+  which is where the change is.
+  
+  Each seeder now accumulates the writes the database refused and reports them
+  **once per object per class per pass**, beside its counts:
+  
+  - a **unique violation** is named as a deployment-schema defect, with the
+    migrate remedy (`os migrate plan` → `os migrate apply`, where the legacy
+    index surfaces as a `replace_unique_index` operation) and a pointer to the
+    query engine's own redacted `Insert operation failed` entries, which keep the
+    colliding index identifier;
+  - anything **else** gets its own line and is never relabelled as the above,
+    because no migration repairs it.
+  
+  Classification uses the shipped cross-dialect predicates in
+  `@objectstack/types` (`isUniqueViolationError` / `uniqueViolationColumn`), not
+  a local `23505` / `ER_DUP_ENTRY` regex. The warning prints only the value-free
+  `code`/`errno` channel — never the driver's message, which a SQL driver
+  prefixes with the fully bound statement.
+  
+  Diagnosis only: the seeders still **warn and continue**, never throw. A rethrow
+  would turn a silent degradation into a boot failure on every deployment
+  carrying the legacy index. Counts, accept/reject behaviour and the healthy-path
+  logs are unchanged, and a pass that refuses nothing stays silent.
+- 192b2ba: **An RLS denial caused by an unresolved variable now leaves a trace — and the trace carries the reason.**
+  
+  When `compileCelToFilter` refuses a policy predicate, it produces a precise `detail`: which
+  `current_user.*` variable did not resolve, or which member of a pre-resolved membership array
+  came back `null`, and at what index. `RLSCompiler.compileExpression` consumed only `!ok` and
+  threw that `detail` away one line before the only place that could surface it, and the warn
+  sitting beside the drop was gated on `isSupportedRlsExpression` — a SHAPE-only test that
+  answers "supported" for exactly these shapes, so nothing logged.
+  
+  The result was the worst-shaped failure an operator can be handed: the caller sees zero rows,
+  no error is raised, nothing appears in the log — and the denial is *deliberate*, the
+  fail-closed path working as designed, so a correct refusal is indistinguishable from "the data
+  genuinely doesn't match".
+  
+  The drop site now keeps the compiler's reason and, when every applicable policy has dropped and
+  the clause actually fails closed, logs one line naming the policy, the object, the clause, the
+  predicate, the variable path, the member index and the consequence (`__rls_deny__`, zero rows,
+  a refusal rather than an empty result set). The same line covers the emptied-membership drop,
+  which the compiler reports as a success and this file then refuses — silent for the same reason.
+  
+  Nothing about the decision moves. `RLS_DENY_FILTER` still lands in the read filter, record
+  attribution still excludes, zero rows still means zero rows, and `compileExpression` keeps its
+  published `Record | null` signature. A predicate that never compiles for any input keeps its
+  existing "DROPPED (no enforcement)" line (now also carrying the compiler's reason) rather than
+  gaining a second one; a dropped policy whose sibling still grants stays silent, because that
+  caller sees rows; and because this seam runs on read paths the denial line is emitted once per
+  distinct cause rather than once per request.
+- 09b0d7b: Security fix (fail-closed tightening, #13552): the RLS emptied-membership deny guard is now polarity-aware. A policy whose pre-resolved membership set resolves EMPTY under a negated membership test (`not in` — e.g. `using: '!(owner in current_user.org_user_ids)'`) now compiles to the deny sentinel (zero rows) instead of flowing through. Before this fix `$in: []` under `$not` inverted to a constant-TRUE clause (`NOT (1 = 0)` on the SQL read-scope lowering), so the policy the guard exists to turn into a DENY compiled to ALLOW-ALL on reads. The guard now fires at any composition depth: `$not` wrapping the membership directly, `$not` arms nested inside `$or`/`$and`, `$not` over a composite containing the membership, and multi-level `$not` (odd polarity anywhere; the bare positive case is unchanged).
+  
+  Blast radius, in plain terms: callers that were relying on that allow-all stop seeing rows. If a negated-membership policy was the only applicable policy and its membership set resolves empty (no active organization; an empty team/territory/blocked set), reads that previously returned EVERY row now return ZERO rows. The prior behaviour was a defect — an over-permissive read on a row-level-security scope — not a contract. If own-rows access must survive an emptied membership set, author it as a separate OR'd policy (e.g. `owner == current_user.id`): each policy's grant is compiled independently, and a sibling policy dropping does not take it down. A deliberate allow-all remains authorable as a literal `true` predicate. Unchanged: a NON-empty membership set under `not in` compiles and enforces exactly as before, and an emptied POSITIVE membership nested in `$or` (e.g. `owner in current_user.team_ids || owner == current_user.id`) still preserves the other arm's grant.
+- 73c8466: fix(plugin-security): resolve the org-admin permission set per organization, and keep the revoke reach wide (#11670)
+  
+  `auto-org-admin-grant.ts` resolved the `sys_permission_set` row that every
+  auto-provisioned org-admin grant points at by NAME alone: no `organization_id`
+  predicate, `limit: 1`, and cached per ObjectQL instance on the name alone. Each
+  property reads as deliberate; together they answer with a row nobody chose.
+  
+  Post-#10103 the RBAC catalog is materialized per organization and
+  `sys_permission_set.name` is unique per organization (ADR-0120 D3), so one name
+  carries a row per organization PLUS the organization-less platform-bucket row
+  `bootstrapPlatformAdmin` mints on every boot — and that bucket row is the
+  OLDEST bearing the name (measured on a fresh walled rig at 1.3 s ahead of the
+  first `sys_organization`, #11532). An unscoped `limit: 1` read has no reason to
+  prefer any other, and a per-instance cache keyed on the name made the first
+  organization reconciled in a process pick the row every later organization got.
+  The grant target is a foreign key, so on a walled deployment
+  `sys_user_permission_set` rows granting `organization_admin` could point at a
+  row belonging to no organization.
+  
+  **Walled postures only.** The read is now threaded with the granting
+  organization — through `SqlDriver.applyTenantScope`, resolved by
+  `resolveOwnOrganizationRow`, the catalog's own spelling of "which row is this
+  organization's" — and the cache is keyed on `(organization, name)`. `single`
+  keeps the unscoped answer and the unscoped `limit: 1` grant-target read
+  unchanged; no read on a `single` path carries a `tenantId`.
+  
+  **When the organization has no own row**, the resolver returns `null` (the
+  module's existing `skipped` / `permission_set_missing` no-op) and warns loudly,
+  rather than falling back to the organization-less row: a fallback would keep
+  minting grants at the platform bucket, and the second one would never be
+  repaired — once the organization's own row appeared the reconciler would insert
+  a duplicate beside it.
+  
+  **The revoke reach widened in the same change, deliberately.** Narrowing the
+  grant target without it would be a permission loosening: a demoted admin whose
+  grant predates this fix names the organization-less row, and the ADR-0105 D4 F2
+  close-out (a deployment that drops its wall must not leave the unbounded
+  `organization_admin` grant standing) converges across copies written under the
+  other posture. Revocation therefore matches EVERY copy of the set name, in every
+  posture — the per-pair superseded and demotion legs and the backfill's orphan
+  sweep alike. The grant target is posture-scoped; the revoke reach never is.
+  
+  ⛔ No repair of existing rows is claimed or performed. This makes new
+  resolutions correct; grants already pointing at the organization-less row are
+  left exactly as they are, including the duplicate that appears beside one when
+  its holder still qualifies. Accept/reject is unchanged today — `resolve-authz-context`
+  resolves permission sets by id without tenant scoping, which is why the defect
+  was invisible — and no published surface changes.
+- 71627f7: fix(plugin-security): count and report the refused writes seven `catch {}` sites swallowed (#12981)
+  
+  Batch 2 of the ruled `catch { return null; }` worklist. The census instrument
+  that landed with batch 1 (`scripts/measure-durability-swallow-family.mjs`)
+  named seven tier-1 DARK sites in this package; all seven are repaired here, and
+  a re-run moves tier 1 from **28 sites in 14 files to 21 in 11** while
+  `channelled` rises **19 → 26** — the seven, moved, nothing else touched.
+  
+  Each site swallowed a refused write into a bare `catch`, so a pass in which the
+  store refused **everything** returned counts identical to a pass with nothing to
+  do — and in two of the three files the summary log is suppressed on exactly
+  those counts, so the one boot that needed a line printed none. The refusals are
+  now recorded through the in-package accumulator, reported **once** per pass with
+  the consequence and the remedy, and the `> 0` summary suppressors are widened.
+  
+  - **`bootstrap-system-capabilities.ts`** — a refused `sys_capability` insert on
+    the *derived* half reached no counter and no log at all, and a refused
+    *update* was silent on both halves, while the boot went on logging "system
+    capabilities seeded" at `info` over zero landed rows. Reported on the
+    durability channel (`error`, falling back to `warn`), stating what is actually
+    lost: registry state, not authorization — grants resolve capabilities by name,
+    not by row.
+  - **`cleanup-package-permissions.ts`** — ADR-0090 D5 promises that uninstalling
+    a package "revokes it everywhere at once. No ghost grants." A refused deletion
+    left the grant live while the package door answered `success`, and the
+    all-zero outcome was the same one an uninstall of a package that granted
+    nothing returns.
+  - **`suggested-audience-bindings.ts`** ×4 — refused create / confirm / prune /
+    reap. The insert site previously filed **every** failure under its documented
+    "unique-index race — benign" rationale; the shared accumulator classifies with
+    the shipped `isUniqueViolationError` predicate, so the genuine race is still
+    treated as benign and excluded, while store outages are counted and reported.
+  
+  `PackagePermissionCleanupOutcome`, `SuggestionSyncOutcome` and
+  `CapabilitySeedResult` gain a `refused` count (additive; they are returned, not
+  constructed by callers).
+  
+  ⚠️ Two of the three files keep their report at `warn` rather than `error`. Their
+  sinks ride on types exported from this package's `index.ts` that declare `warn`
+  optional, and adding `error?` would enrol them into
+  `check:optional-error-sink-contract`'s population, which requires a
+  non-optional `warn` — a published-shape break, and a contract call above this
+  repair. The **silence** is what is fixed here and it needed no contract; the
+  **level** is recorded on #12981.
+  
+  ⛔ No entry was added to `scripts/durability-degradation.baseline.json` and the
+  gate vocabulary is untouched in either direction, as the 2026-08-29 ruling
+  requires until the family is repaired.
+  
+  ⭐ One file outside the package changed, declared on #12981 before editing:
+  `scripts/measure-durability-swallow-family.mjs` (the census instrument, wired
+  into no workflow) pinned its `dark` positive control to
+  `bootstrap-system-capabilities.ts` — one of the seven — so repairing it turned
+  the instrument's own `--self-test` red. The control now names
+  `plugin-sharing`'s `share-link-service.ts`, which batch 1 judged permanently
+  OUT of the programme (a `use_count` telemetry stamp), because any tier-1 DARK
+  member still ON the worklist is a control the programme is designed to destroy.
+  No predicate, tier or vocabulary change; `--self-test` is green.
+- e1d773e: fix(security): stop reading a truncated existence page as "absent" — the unscoped page cap is now measured, not trusted (#11518)
+  
+  `buildExistingByName` (`seed-name-lookup.ts`) is the batched existence oracle the
+  identity seeders consult in place of a per-item read. Its UNSCOPED page was
+  capped at `limit: names.length`, which is exact only while one row can exist per
+  name. Since #8461 / ADR-0120 D1 `sys_capability.name` and
+  `sys_permission_set.name` are unique **per organization**, and ADR-0066 D1
+  explicitly encourages admins to EXTEND the registry inside their own
+  organization — so one name legitimately carries a row per organization plus the
+  platform's, and an unscoped page of N names can match far more than N rows.
+  
+  The rows that fall off a full page are the highest `id`s under #4363's
+  `ORDER BY id ASC` tie-breaker, so **whole names vanish from the page** — and a
+  name missing from the page reads as `absent`, which routes its caller to the
+  **INSERT** branch. #10103 had already found and repaired exactly this on the
+  SCOPED arm; the unscoped arm never got the repair, and two seeders on `main`
+  read unscoped (`bootstrapDeclaredCapabilities`, `permission-set-projection`'s
+  env-overlay pass).
+  
+  ⛔ `names.length * 2` would have been the same defect with a larger constant:
+  rows-per-name is bounded only by the number of organizations, so no constant
+  multiplier is correct. Instead the cap stopped being a promise and became a
+  **measurement** — the read asks for one row MORE than it is willing to hold, and
+  a page that comes back carrying that extra row is a PREFIX of the answer rather
+  than the answer. It then joins the module's existing "could not answer" causes
+  and degrades to the per-item read, the fallback already there for a driver
+  without `$in`. Both directions are exact: no complete page is ever mistaken for
+  a truncated one, and no truncated page for a complete one.
+  
+  **Behaviour change, stated rather than slipped in.** In the truncating case the
+  two unscoped seeders go from a **silent wrong answer to a loud slow one**: names
+  that used to be reported `absent` (and re-inserted, or refused by the unique key
+  as a collision naming a row nobody ever saw) are now answered correctly, at the
+  cost of one read per name plus a warning naming the object and the budget it
+  could not fit inside. An install that does not overflow the budget — every stock
+  one, where a name carries a single row — issues exactly the same single read it
+  issued before and says nothing.
+  
+  The SCOPED arm keeps #10103's cap exactly (`names.length * 2`), because there the
+  number is a proven bound rather than a budget: `applyTenantScope` returns this
+  organization's rows plus organization-less ones, and the declared name index is
+  unique per organization. It gains the same probe, which turns a scoped page that
+  overflows that bound — reachable only where the unique index is absent or not yet
+  created — into the same loud degradation instead of a silent truncation.
+- 50cf294: fix(security,verify): the last two tolerant `reference_to` readers — one made loud, one narrowed with a named reason (#13250)
+  
+  `@objectstack/spec` declares `reference` as the only relationship spelling and
+  `FieldSchema` rejects `reference_to` / `referenceTo` (#11567, "one key, one
+  answer"). Three live consumers still read the rejected alias as an accepted
+  fallback. The lint reader was narrowed in #13322; the two remaining ones get
+  **different** dispositions, because their failure modes are different in kind
+  (maintainer ruling, 2026-08-30).
+  
+  **`@objectstack/plugin-security` — the tolerance STAYS, and is now LOUD.**
+  `resolveCbpRelation` reads `ql.getSchema()`, i.e. the `SchemaRegistry`, and a
+  raw `registerObject` skips Zod by design, so the alias genuinely reaches it
+  (re-measured: a raw round-trip serves the field back as
+  `["name","type","required","reference_to"]`, canonical absent). A miss there is
+  not a quiet wrong answer, it is a **denial** — `resolveCbpRelation` returning
+  null is fail-closed, giving `RLS_DENY_FILTER` (zero rows for every non-admin
+  caller) on read and throwing `MasterDetailRelationMissingError` on write. So
+  narrowing it would take a raw-registered, alias-spelled `controlled_by_parent`
+  object from "access derived from its master" to "everything denied, and writes
+  throw": an availability outage on a population that provably exists. The alias
+  therefore still resolves, unchanged, and the plugin now reports it **once per
+  object** through its own report sink — the same `warn` channel and console
+  backed default as every other report site there. The message names the object,
+  the field, the alias key and the rename, and states that access is unaffected
+  so nobody goes hunting for an outage that did not happen. Nothing is reported
+  for the canonical spelling, or when a canonical `reference` won over a stale
+  alias on the same field.
+  
+  The report's granularity is the cache's: it sits inside `resolveCbpRelation`'s
+  resolution body, which runs only on a `cbpRelCache` miss, so 25 reads of one
+  object produce one report — and it re-arms when `metadata.watch('*')` clears
+  that cache, which is exactly when a Studio / AI-authoring author is listening.
+  
+  **`@objectstack/verify` — narrowed, and the finding says WHY.** `deriveCrudCases`
+  reads its config from `loadConfig()`, which does not validate ("the gate lives
+  in the loaded module"), so the alias reaches it through two unparsed doors —
+  a plain-object config, and the documented `defineStack(cfg, { strict: false })`
+  (re-measured: the same fixture is refused by the default strict parse with
+  *"Unrecognized key(s) on this field: `reference_to`"*, and survives both doors
+  verbatim). Unlike the security reader, verify's failure mode is a **report
+  line** rather than a refusal, so narrowing costs coverage, not availability —
+  and it is safe. But a verifier that silently under-verifies is the defect
+  #5262 was about, so the narrowing ships **with** its reason: an alias-spelled
+  required relation now reports
+  
+  > required lookup field "company_id" spells the rejected alias `reference_to`
+  > instead of `reference` — `reference` is the only relationship spelling
+  > @objectstack/spec declares, so this app's target "company" was not derived;
+  > rename the key
+  
+  rather than degrading to the generic "has no `reference` target", and an
+  optional one is skipped under `relation-rejected-reference-alias:<key>` rather
+  than the generic `relation-missing-reference`. Both land in the existing
+  free-form `CrudCase.blocked` / `skippedFields[].reason` strings — no new
+  exported type, no new status, no widened published surface.
+  
+  No shipped metadata spells either alias: the repo-wide sweep finds the spelling
+  only in tests, the spec's own alias tables and other readers' documentation —
+  no example app or platform object uses it.
+  
+  ⛔ Narrowing the security reader for real remains out of scope here, and is
+  only honest behind a migration that sweeps stored / raw-registered metadata
+  first.
+- 7cbe705: fix(tooling): put three more package-root plugin manifests inside a tsc program (#14386)
+  
+  `check:type-check-coverage`'s `isUncheckedSourceCandidate` skipped `depth === 0`
+  (the package root) unconditionally, so a package-root `.ts` file was invisible
+  to SOURCES_COVERED no matter what it contained — not reported, and not
+  tracked either. That is exactly why #13284's `driver-memory` /
+  `plugin-hono-server` manifests went unchecked for as long as they did:
+  `pnpm --filter <pkg> typecheck` exited 0 with a file no tsc program read, and
+  the coverage gate called the package COVERED at the same time.
+  
+  This finds three more package-root manifest authoring sites the same hole
+  hid, all `objectstack.config.ts`: `plugin-auth`, `plugin-security` and
+  `service-i18n`. The gate now admits `depth === 0` only for a declared,
+  exact-name allowlist (`ROOT_SOURCE_FILES`, `objectstack.config.ts` its only
+  member) — not every root-level file, which stays the unresolved "104-file"
+  scope question this card explicitly declines to settle (comment
+  5504408509 on #14386) — and each of the three manifests now sits inside a
+  program its package's own `typecheck` script invokes: a widened `include` on
+  the existing sibling `noEmit` program for `plugin-auth`
+  (`tsconfig.examples.json`) and `plugin-security` (`tsconfig.scripts.json`),
+  and a new sibling `tsconfig.typecheck.json` for `service-i18n` (which had no
+  sibling to widen), following the `driver-memory` shape #13284 established.
+  
+  All three type-check clean at zero recorded debt — no ledger entry is added.
+- c0714eb: Walled platform-admin elevation now requires the owner-email match to be
+  VERIFIED, and the bootstrap re-runs on the verifying update (#11343)
+  
+  Under walled postures (`group`/`isolated`), `bootstrapPlatformAdmin` matched
+  the env-declared `OS_PLATFORM_OWNER_EMAIL` against the raw email string on
+  `sys_user` — with no `email_verified` condition, while email verification is
+  off by default. #11211 narrowed elevation from "whoever registers first" to
+  "the declared owner's address" (a real and large narrowing); this closes the
+  remainder that card #11343 records: in the window before the owner registers,
+  an account created with the owner's address would still be elevated.
+  
+  Two halves, deliberately in one change:
+  
+  1. **The elevation match requires `email_verified`** (fail-closed allow-list
+     over driver representations; an absent field on an imported/legacy row
+     reads as unverified). An unverified holder of the owner's address is
+     refused like any stranger — new reason `walled_owner_not_verified`, logged
+     loudly with the unblock in the line. Never falls back, same direction as
+     the undeclared-owner refusal.
+  2. **The bootstrap-replay middleware now also fires on `sys_user` updates
+     touching `email_verified` / `email`** (trigger set extracted as
+     `shouldReplayBootstrapFor`, consumed by the middleware and its pins alike).
+     Verification is an UPDATE — with the old insert-only replay, requiring
+     verification would have refused the genuine owner at sign-up and then
+     never looked again, leaving the platform without any administrator.
+  
+  `single` posture is untouched both ways: first-user promotion (ruled
+  reasonable in #11184) does not gain a verification requirement, and the
+  owner-email variable is still never consulted there. Both directions are
+  pinned: the unverified holder is refused AND the verified owner is elevated —
+  including across the refuse-then-verify-then-re-run sequence.
+  
+  The seeded dev admin (`maybeSeedDevAdmin`, dev-only) is now provisioned with
+  `email_verified` stamped: it is created by the deployment's own boot command
+  with operator-known credentials — the same trust shape as a trusted-SSO
+  insert, not an unknown self-registrant — so walled dev/harness boots keep a
+  promotable declared owner. The generic sign-up path is unchanged.
+- 4d5b4f8: feat(auth): walled deployment's declared owner is email-verified at operator-provisioned creation (#12751)
+  
+  On a **walled** deployment (`OS_TENANCY_POSTURE` in the wall-enforcing
+  family), the account whose email equals the declared platform owner
+  (`OS_PLATFORM_OWNER_EMAIL`) is stamped `emailVerified` **at creation** when
+  it comes into existence through an **operator provisioning path** — extending
+  the #11343 dev-boot seeded-admin precedent to production walled boots
+  (maintainer ruling 2026-08-28, cloud#1677: 「运营方创建即视为已验证」; the
+  trust anchor is the operator's env-var declaration plus the
+  operator-executed creation, not a mailbox round-trip; SMTP stays required
+  only for inviting others).
+  
+  **Which creation paths qualify** (the [#11739] audience taxonomy, not a
+  second classification):
+  
+  - the **bootstrap carve-out** — the very first account on a fresh install
+    (zero human users), the one self-serve creation a walled boot admits;
+  - **admin create-user / bulk import** (`method: 'admin'`) — an act only an
+    authenticated admin session can perform;
+  - **SCIM** (`method: 'scim'`) — provisioning executed by the
+    operator-registered directory.
+  
+  **Never**: non-bootstrap self-registration (including an
+  invitation-admitted registration typing the owner address), provider-class
+  JIT (the IdP asserts its own `emailVerified` at insert), any non-owner
+  address, any unwalled posture, and a later email **update** to the owner
+  address (the stamp is staged at the admission gate and consumed once by the
+  `user.create` before-hook — a seam an update cannot traverse). Dev-boot
+  behaviour (#11343) is unchanged.
+  
+  The `WALLED_OWNER_NO_VERIFICATION_PATH` boot warning now probes the owner
+  account's state: a fresh walled boot with no transport and no federated
+  sign-in is **silent** (the operator's own first-account creation arrives
+  verified — the case this closes), while an owner account that already
+  exists **unverified**, a populated store whose bootstrap window is spent,
+  and an unanswerable probe keep warning. A settled deployment whose owner is
+  verified stops re-warning on every boot.
+  
+  `@objectstack/types` gains `isEmailVerifiedUserRow` — the [#11343]
+  fail-closed verified-representation allow-list, moved from
+  `plugin-security`'s private copy so the elevation gate and the boot
+  diagnostic read ONE resolution (`plugin-security` now consumes it; no
+  behaviour change there).
+- e3f056f: Stop the per-organization catalog pass from reporting the platform's own
+  permission sets as "pre-fix" leftovers with a remedy that recreates them
+  
+  On a fresh walled deployment (`OS_TENANCY_POSTURE=isolated`, three
+  organizations) the boot log warned, once per organization, that *"pre-fix
+  organization-less `sys_permission_set` rows are still present"* and offered
+  *"re-initialize the deployment, or adopt each row by hand"*. Both halves were
+  wrong there:
+  
+  - **Nothing was pre-fix.** The eight rows it named (`admin_full_access`,
+    `organization_admin`, `organization_admin_no_bypass`, `member_default`,
+    `viewer_readonly`, `mcp_agent_data_read`, `mcp_agent_data_write`,
+    `mcp_agent_restricted`) were minted 1.3 s earlier — before the deployment's
+    first organization existed — by `bootstrapPlatformAdmin`, the fifth seeder,
+    which the #10103 ruling deliberately left outside the per-organization
+    conversion. An operator on a deployment hours old was told they were carrying
+    legacy state they never had.
+  - **Its first remedy did not terminate.** Re-initializing a fresh walled
+    deployment mints exactly those eight rows again on the next boot, so only the
+    hand-adoption branch ends — and that one hands a platform-wide bucket to a
+    single tenant.
+  
+  The pass now separates the two classes it was conflating and reports each with
+  the remedy that fits, carrying a machine-readable `origin`
+  (`'platform-bucket'` / `'pre-fix-residue'`) beside the named rows:
+  
+  - the **platform bucket** — names an organization-less writer still seeds on
+    every boot — is reported as what it is, states that this organization's own
+    copies were created and no action is required, and says plainly that
+    re-initializing does *not* clear it;
+  - a **genuine pre-fix leftover** keeps the original wording and the original
+    remedy, unchanged.
+  
+  Membership is decided by name rather than by `managed_by`, because the question
+  the remedy turns on is "will a re-initialized deployment have this row again?"
+  — true for these names whatever provenance the current row carries (a
+  pre-#8692 install stores `'admin'` on the very same names). It falls back to the
+  shipped `defaultPermissionSets`, so a host that never threads the new
+  `platformBucketNames` option still classifies correctly; the option exists for
+  a host that overrode `SecurityPluginOptions.defaultPermissionSets`.
+  
+  `bootstrapPlatformAdmin` also declares what it wrote: under a walled posture it
+  now logs that the platform defaults were seeded *without* an organization and
+  that each organization's copies come from the catalog pass. The rig's boot line
+  read `{"seeded":8}` with nothing to indicate the rows carried no organization
+  at all, so the operator's first sight of them was the warning above.
+  
+  **No behaviour change to the seeding itself.** The eight rows are still minted,
+  still organization-less, still unreaped — that is the ruled outcome of #10103
+  (2026-08-20), and `PLATFORM_ADMIN` is derived from an unscoped grant pointing at
+  the `admin_full_access` row *by row id*, so removing them would silently demote
+  every platform admin. Whether the platform bucket should be materialized per
+  organization remains the maintainer's open call, not this change.
+- Updated dependencies [809d417]
+- Updated dependencies [387e231]
+- Updated dependencies [f794e4e]
+- Updated dependencies [cae2169]
+- Updated dependencies [b812a54]
+- Updated dependencies [2d4fa75]
+- Updated dependencies [0e4e51b]
+- Updated dependencies [e84bbf6]
+- Updated dependencies [effae80]
+- Updated dependencies [efb3513]
+- Updated dependencies [d62f990]
+- Updated dependencies [c45d8e6]
+- Updated dependencies [2e3e8c7]
+- Updated dependencies [e621291]
+- Updated dependencies [655b106]
+- Updated dependencies [40a93b5]
+- Updated dependencies [101ad2c]
+- Updated dependencies [d5b330d]
+- Updated dependencies [dda969c]
+- Updated dependencies [1f45690]
+- Updated dependencies [277948f]
+- Updated dependencies [8bdd955]
+- Updated dependencies [54e2d36]
+- Updated dependencies [b745157]
+- Updated dependencies [f3bbbef]
+- Updated dependencies [4f24e9d]
+- Updated dependencies [e27583e]
+- Updated dependencies [4bd6faa]
+- Updated dependencies [86cbe37]
+- Updated dependencies [6a180e4]
+- Updated dependencies [474242f]
+- Updated dependencies [63cd487]
+- Updated dependencies [bd4aa4e]
+- Updated dependencies [803eaab]
+- Updated dependencies [f8e8f03]
+- Updated dependencies [983edf1]
+- Updated dependencies [eae824e]
+- Updated dependencies [f6fa22c]
+- Updated dependencies [8a483b3]
+- Updated dependencies [3bc2e38]
+- Updated dependencies [97bcd99]
+- Updated dependencies [df59de0]
+- Updated dependencies [96e25a8]
+- Updated dependencies [713f83f]
+- Updated dependencies [77d4b3c]
+- Updated dependencies [f75a38a]
+- Updated dependencies [7a25e7d]
+- Updated dependencies [1fa05a6]
+- Updated dependencies [c85a265]
+- Updated dependencies [dcb10a5]
+- Updated dependencies [773a999]
+- Updated dependencies [35dffea]
+- Updated dependencies [d8024f0]
+- Updated dependencies [8120808]
+- Updated dependencies [776a098]
+- Updated dependencies [5060877]
+- Updated dependencies [4f6325d]
+- Updated dependencies [52954c0]
+- Updated dependencies [2aa8456]
+- Updated dependencies [d23ebb9]
+- Updated dependencies [93809a3]
+- Updated dependencies [7c0d0c3]
+- Updated dependencies [daae7aa]
+- Updated dependencies [8dc22d6]
+- Updated dependencies [fa5d137]
+- Updated dependencies [a392dbf]
+- Updated dependencies [279431e]
+- Updated dependencies [948dd6b]
+- Updated dependencies [3b4c56c]
+- Updated dependencies [ae8edd2]
+- Updated dependencies [e25403c]
+- Updated dependencies [a81aa9d]
+- Updated dependencies [64baa68]
+- Updated dependencies [9fa70d7]
+- Updated dependencies [09db64a]
+- Updated dependencies [92916e7]
+- Updated dependencies [a84f3ea]
+- Updated dependencies [f2eaae8]
+- Updated dependencies [56c093c]
+- Updated dependencies [c09451b]
+- Updated dependencies [ba64877]
+- Updated dependencies [e7191ce]
+- Updated dependencies [7345308]
+- Updated dependencies [79b6a22]
+- Updated dependencies [30d96ab]
+- Updated dependencies [f658793]
+- Updated dependencies [0fd4899]
+- Updated dependencies [c95ad19]
+- Updated dependencies [e58ea8b]
+- Updated dependencies [4a17645]
+- Updated dependencies [3795c5f]
+- Updated dependencies [8ab926b]
+- Updated dependencies [7317cf2]
+- Updated dependencies [e25e839]
+- Updated dependencies [5997207]
+- Updated dependencies [8b13cc8]
+- Updated dependencies [00d8f65]
+- Updated dependencies [4a4a35d]
+- Updated dependencies [4a4a35d]
+- Updated dependencies [86e765a]
+- Updated dependencies [1d7e76a]
+- Updated dependencies [53dc739]
+- Updated dependencies [fd289be]
+- Updated dependencies [03bf7b1]
+- Updated dependencies [f90e820]
+- Updated dependencies [18d816a]
+- Updated dependencies [e8bd715]
+- Updated dependencies [b91c351]
+- Updated dependencies [a28a3c0]
+- Updated dependencies [200d255]
+- Updated dependencies [2852acc]
+- Updated dependencies [daeaaf9]
+- Updated dependencies [c459da6]
+- Updated dependencies [e914733]
+- Updated dependencies [1d8ad0f]
+- Updated dependencies [9738c35]
+- Updated dependencies [f887e52]
+- Updated dependencies [881f8d8]
+- Updated dependencies [3bfa1e6]
+- Updated dependencies [0a8ebf3]
+- Updated dependencies [901355c]
+- Updated dependencies [34ce8e7]
+- Updated dependencies [33681ea]
+- Updated dependencies [bfe13c8]
+- Updated dependencies [0fb3044]
+- Updated dependencies [4635f3e]
+- Updated dependencies [fd289be]
+- Updated dependencies [ee3595c]
+- Updated dependencies [09b4f4e]
+- Updated dependencies [b2eab95]
+- Updated dependencies [93940d4]
+- Updated dependencies [3a04b01]
+- Updated dependencies [45b9051]
+- Updated dependencies [3954fb7]
+- Updated dependencies [4805b56]
+- Updated dependencies [b9e9227]
+- Updated dependencies [d395692]
+- Updated dependencies [5894d30]
+- Updated dependencies [a3765f6]
+- Updated dependencies [2d5cee3]
+- Updated dependencies [e22158f]
+- Updated dependencies [7404925]
+- Updated dependencies [0c2334f]
+- Updated dependencies [778c59f]
+- Updated dependencies [d2619fd]
+- Updated dependencies [af56546]
+- Updated dependencies [6acb11a]
+- Updated dependencies [33c5fd3]
+- Updated dependencies [20b0fdb]
+- Updated dependencies [905019b]
+- Updated dependencies [a286411]
+- Updated dependencies [98c0d33]
+- Updated dependencies [368a82e]
+- Updated dependencies [a3d5724]
+- Updated dependencies [93ea19b]
+- Updated dependencies [9ee2dcf]
+- Updated dependencies [8cb96ec]
+- Updated dependencies [8f10a79]
+- Updated dependencies [6269a55]
+- Updated dependencies [a17da05]
+- Updated dependencies [a8c00e2]
+- Updated dependencies [22e5236]
+- Updated dependencies [0fb8760]
+- Updated dependencies [e5ce2ed]
+- Updated dependencies [be21955]
+- Updated dependencies [bc56e18]
+- Updated dependencies [be21955]
+- Updated dependencies [a9ee989]
+- Updated dependencies [4d0d944]
+- Updated dependencies [15d58db]
+- Updated dependencies [d63b014]
+- Updated dependencies [9abe4e4]
+- Updated dependencies [2cc7122]
+- Updated dependencies [50d6c92]
+- Updated dependencies [15d55fb]
+- Updated dependencies [9e0ba21]
+- Updated dependencies [311433f]
+- Updated dependencies [3e5ad08]
+- Updated dependencies [9abe4e4]
+- Updated dependencies [b7131f3]
+- Updated dependencies [e5812fa]
+- Updated dependencies [7085f90]
+- Updated dependencies [dee4dd4]
+- Updated dependencies [ce7e497]
+- Updated dependencies [51ecb2f]
+- Updated dependencies [9086761]
+- Updated dependencies [f6344e7]
+- Updated dependencies [42a117b]
+- Updated dependencies [1401ae7]
+- Updated dependencies [4297fe7]
+- Updated dependencies [e398863]
+- Updated dependencies [d16df74]
+- Updated dependencies [d79c602]
+- Updated dependencies [f11fc61]
+- Updated dependencies [e808890]
+- Updated dependencies [8f79379]
+- Updated dependencies [e6ca40e]
+- Updated dependencies [0c77ea4]
+- Updated dependencies [52954c0]
+- Updated dependencies [89eb997]
+- Updated dependencies [7131f12]
+- Updated dependencies [aa5994e]
+- Updated dependencies [be93457]
+- Updated dependencies [a65db76]
+- Updated dependencies [2cf5a96]
+- Updated dependencies [15eb2c9]
+- Updated dependencies [5691b07]
+- Updated dependencies [2a6122b]
+- Updated dependencies [225e769]
+- Updated dependencies [8af88dd]
+- Updated dependencies [fb5fbb8]
+- Updated dependencies [d7b3963]
+- Updated dependencies [33184fd]
+- Updated dependencies [7c41693]
+- Updated dependencies [b72db01]
+- Updated dependencies [dce5cd4]
+- Updated dependencies [9688f58]
+- Updated dependencies [556ebc1]
+- Updated dependencies [177ebdc]
+- Updated dependencies [8d237b4]
+- Updated dependencies [2d2e6f0]
+- Updated dependencies [2d8dd8d]
+- Updated dependencies [22d573e]
+- Updated dependencies [b5a2398]
+- Updated dependencies [348860c]
+- Updated dependencies [5383fa6]
+- Updated dependencies [5b3ff63]
+- Updated dependencies [1a6a19c]
+- Updated dependencies [064d484]
+- Updated dependencies [527e050]
+- Updated dependencies [dd33bf9]
+- Updated dependencies [4cb2a90]
+- Updated dependencies [74a7804]
+- Updated dependencies [53d3689]
+- Updated dependencies [b3a63d3]
+- Updated dependencies [49f0dcf]
+- Updated dependencies [033a34c]
+- Updated dependencies [4d25d22]
+- Updated dependencies [1ffee51]
+- Updated dependencies [5ae4303]
+- Updated dependencies [ece4dad]
+- Updated dependencies [e9b377e]
+- Updated dependencies [146f448]
+- Updated dependencies [735f5c7]
+- Updated dependencies [a7e18de]
+- Updated dependencies [366f895]
+- Updated dependencies [dc75ba8]
+- Updated dependencies [cce0aa9]
+- Updated dependencies [e764507]
+- Updated dependencies [cff17af]
+- Updated dependencies [39404f3]
+- Updated dependencies [ca1965f]
+- Updated dependencies [8619f95]
+- Updated dependencies [b706af9]
+- Updated dependencies [db8c288]
+- Updated dependencies [0e5fe7f]
+- Updated dependencies [add4360]
+- Updated dependencies [e0abc38]
+- Updated dependencies [fc9ba76]
+- Updated dependencies [1272f0a]
+- Updated dependencies [0f94cc7]
+- Updated dependencies [a11c1a5]
+- Updated dependencies [71f9cd1]
+- Updated dependencies [ee17d86]
+- Updated dependencies [cdbd920]
+- Updated dependencies [18c432e]
+- Updated dependencies [3c418c4]
+- Updated dependencies [fa8715a]
+- Updated dependencies [a933ed7]
+- Updated dependencies [b3ca463]
+- Updated dependencies [a933ed7]
+- Updated dependencies [0d4a6a8]
+- Updated dependencies [518d5e5]
+- Updated dependencies [6643ba1]
+- Updated dependencies [eeba2ef]
+- Updated dependencies [ec4c4d2]
+- Updated dependencies [424f73c]
+- Updated dependencies [cccbe51]
+- Updated dependencies [a8d6b1d]
+- Updated dependencies [e4a7695]
+- Updated dependencies [87075b1]
+- Updated dependencies [fc58a99]
+- Updated dependencies [14cfc00]
+- Updated dependencies [1c6f7b4]
+- Updated dependencies [e854a53]
+- Updated dependencies [dfebfc8]
+- Updated dependencies [598b7ec]
+- Updated dependencies [d028b37]
+- Updated dependencies [f7b25c5]
+- Updated dependencies [122ef38]
+- Updated dependencies [4a37870]
+- Updated dependencies [428f9b2]
+- Updated dependencies [aa7ff56]
+- Updated dependencies [811a3c2]
+- Updated dependencies [1401ae7]
+- Updated dependencies [2fd3f1c]
+- Updated dependencies [c41b42e]
+- Updated dependencies [d41d166]
+- Updated dependencies [c4db311]
+- Updated dependencies [750fff5]
+- Updated dependencies [c19035e]
+- Updated dependencies [ececf7a]
+- Updated dependencies [d173125]
+- Updated dependencies [8eeca27]
+- Updated dependencies [8425c17]
+- Updated dependencies [a5ef1d8]
+- Updated dependencies [87ad30c]
+- Updated dependencies [772d5de]
+- Updated dependencies [ce80ec2]
+- Updated dependencies [b372318]
+- Updated dependencies [97a2263]
+- Updated dependencies [29d0676]
+- Updated dependencies [0169d49]
+- Updated dependencies [6bd3231]
+- Updated dependencies [d2b5ba8]
+- Updated dependencies [b799ac5]
+- Updated dependencies [8f74307]
+- Updated dependencies [d23dc08]
+- Updated dependencies [038f333]
+- Updated dependencies [644ad50]
+- Updated dependencies [9735662]
+- Updated dependencies [4d5b4f8]
+- Updated dependencies [5d16379]
+- Updated dependencies [0da7cd2]
+- Updated dependencies [28a5c3e]
+- Updated dependencies [4bc18e5]
+- Updated dependencies [9f57f1e]
+  - @objectstack/spec@17.3.0
+  - @objectstack/platform-objects@17.3.0
+  - @objectstack/core@17.3.0
+  - @objectstack/types@17.3.0
+  - @objectstack/metadata-core@17.3.0
+  - @objectstack/formula@17.3.0
+
 ## 17.2.0
 
 ### Minor Changes

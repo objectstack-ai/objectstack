@@ -1,5 +1,505 @@
 # @objectstack/plugin-email
 
+## 17.3.0
+
+### Minor Changes
+
+- b706af9: Widen `SendEmailInput` / `SendTemplateInput` with an optional `organizationId`, threaded from producers that already hold an organization, so `plugin-email`'s writer stamps `sys_email.organization_id` at the source (#11741, Decision 2 of #11303).
+  
+  - `@objectstack/spec`: `SendEmailInput.organizationId?` and `SendTemplateInput.organizationId?` — optional, pass-through only; absent stays legal (auth verification / password-reset mail carries none).
+  - `@objectstack/plugin-email`: `EmailService.send()` stamps the value verbatim onto the persisted `sys_email` row; `sendTemplate()` forwards it to `send()`. No in-adapter resolution or fabrication — the writer runs under a constant system context and only passes through what the input carries.
+  - `@objectstack/service-messaging`: the email channel threads `delivery.notification.organizationId` on both of its arms (plain `send` and the `sendTemplate` template path).
+  - `@objectstack/plugin-auth`: `sendInvitationEmail` threads the invitation's own `organizationId`; org-less auth mail (reset / verification / magic link / email-change notice) is unchanged.
+  
+  Forward-stamping only: existing org-less `sys_email` rows are not backfilled.
+
+### Patch Changes
+
+- 8e9e630: fix(plugin-email): judge the default sender where it is configured, and record a send rejected before delivery (#14318)
+  
+  Measured on a local rig with `OS_EMAIL_FROM="ObjectOS Local <noreply@localhost>"`,
+  `OS_EMAIL_PROVIDER=log` and `OS_AUTH_REQUIRE_EMAIL_VERIFICATION=true`: the server
+  booted clean, the first sign-up answered `200`, the UI said a verification email
+  had been sent, and nothing had been. `EMAIL_REGEX` requires a dotted domain and
+  correctly refuses `noreply@localhost` — but it refused it inside
+  `normalizeMessage`, on the **first send**, which for a fresh deployment is the
+  first user's sign-up. better-auth runs `sendVerificationEmail` through
+  `runInBackgroundOrAwait`, which logs `Failed to run background task` and returns
+  normally, so the account was created and the user was parked on a verify screen
+  whose Resend repeated the whole sequence. `sys_email` held no row for any of it:
+  the throw happened *before* the row insert, and every other failure shape in the
+  service is a row at `status:'failed'`.
+  
+  Two changes, one per half.
+  
+  **The address is judged where it is configured.** `EmailServicePlugin.init()`
+  now refuses a declared `defaultFrom` that no message could ever be sent from, so
+  a deployment that names an unsendable sender fails its boot instead of failing
+  every send — the same trade `resolveTransport` already makes for an SMTP
+  provider with no host, and the error names the consequence and the fix
+  (`OS_EMAIL_FROM` / `config.email.defaultFrom`). An **absent** sender is still
+  accepted: callers that always pass `input.from` are a complete configuration,
+  and `normalizeMessage` already refuses a send that has neither.
+  
+  The `mail` settings channel takes that method's opposite, stated trade — a save
+  must not kill a running server — so an unsendable saved From address is
+  **refused, the previous sender kept**, and the consequence stated at `error`.
+  `error` and not `warn` because nothing looks broken afterwards: the save
+  succeeds and the settings page shows the address the operator typed.
+  
+  **A send rejected before delivery now leaves a `sys_email` row.** The
+  `normalizeMessage` window was the one path on which a send produced no record at
+  all. It now writes `status:'failed'` with the reason, prefixed
+  `rejected before delivery:` so the column distinguishes a message that never
+  reached a transport from one an SMTP host refused. The envelope columns carry
+  what the caller actually passed (never re-canonicalised — canonicalisation is
+  what threw), `(none)` where the input named nothing, since `from_address` /
+  `to_addresses` / `subject` are required. The row is safe by construction: both
+  re-delivery paths — the `afterInsert` outbox drain hook and the boot outbox
+  sweep — gate on `status === 'queued'`, so a rejection record can never be
+  mistaken for an outbox entry. Persisting it is best-effort and never replaces
+  the caller's error.
+  
+  Unchanged: `formatAddress`, `EMAIL_REGEX` and `normalizeMessage` keep their
+  exact verdicts (the new `isSendableAddress` predicate shares the one regex, so a
+  boot cannot pass a check the send path then fails), `send()` still throws on
+  validation failure rather than answering `failed`, and the auth layer's
+  propagation is as it was — `sendVerificationEmail` already rejects on both a
+  throw and a returned `status:'failed'`, which is now pinned by a test.
+- ad54eb3: feat(tooling): onboard all 14 `packages/plugins/**` packages into `check:test-typecheck` (#14062)
+  
+  Every plugin package now has a `tsconfig.test.json` compiled by the shared
+  `check:test-typecheck` gate, and its `typecheck` script names it. Before this,
+  the shrink-only `test-typecheck-debt.json` ratchet said **nothing** about a
+  third of the repo's runtime surface: 14 packages, 1 `tsconfig.test.json`
+  (`plugin-security`, wired directly to `tsc` rather than to the instrument), and
+  0 `check:test-typecheck` scripts.
+  
+  Onboarded as a family by the director ruling of 2026-09-01 on #14062
+  (maintainer verbatim: 「同意」), which also carries the #5286 maintainer
+  authority the starting ledgers need. The smaller branch triage recommended —
+  declare the instrument's scope and re-site the two compile-time pins — was
+  recorded as considered and not taken: an instrument silent over a third of the
+  runtime surface is a hole readers generalise across, and that costs more than
+  fourteen tsconfigs.
+  
+  **Measured, not assumed** (at `e80889095`, workspace closure built first). Four
+  packages carry residue and therefore a starting ledger — plugin-approvals 324
+  over 8 files, plugin-auth 94 over 10, plugin-sharing 3 over 2,
+  knowledge-ragflow 3 over 1. The other ten measure **zero** and deliberately get
+  no ledger file at all: the gate reads a missing ledger as `{ entries: {} }`, so
+  any error there is red immediately with no entry to be added to — strictly
+  stronger than a ledger holding nothing, and the call `plugin-security` had
+  already recorded for itself.
+  
+  ⛔ **This does not repair 345 type errors.** Per ruling item 3 it makes the
+  ratchet able to *see* them; paydown follows the ratchet's own shrink-only
+  discipline on its own cards. No test file is edited here.
+  
+  Two corrections to the finding's own prose, both measured: the exclusion is
+  narrower than "no plugin package compiles its tests" — 9 of the 14 already
+  compiled their tests inside the `typecheck`-invoked build config, at zero
+  errors — and `exec-context-annotation.pin.ts` is a `.pin.ts`, which
+  `**/*.test.ts` never excluded, so its directives were already live. The pin
+  this change genuinely makes real is
+  `plugin-approvals/src/manager-org-screen-parity.contract.test.ts`, which no tsc
+  program had ever read.
+- 47d9b77: The SMTP port range `1-65535` is now declared once and the refusal is generated from it (#12993). It had been hand-written three times across two packages: the enforcement in `SmtpTransport`, the `(expected 1-65535)` literal in the very next line's message, and `min: 1, max: 65535` on the mail settings form's `smtp_port` field — which `@objectstack/service-settings` really does enforce (`declaredBounds` / `validatePatch`), so it is a second door rather than decoration. The first two were adjacent lines, the cheapest possible drift: changing the check without changing the sentence yields a refusal that misstates its own rule, and nothing fails.
+  
+  `transports/smtp-port-contract.ts` now owns `SMTP_PORT_MIN` / `SMTP_PORT_MAX`, the predicate that applies them and the sentence that states them. The message text is **generated** rather than re-spelled, so the second spelling no longer exists to drift — the stronger of the two repairs the card named, since it deletes the drift instead of checking for it.
+  
+  Nothing is accepted or refused that was not before. The move is pinned as behaviour-preserving against the previous inline expression, kept verbatim as the oracle, over a table that includes both edges, the non-finite values and the non-integers.
+  
+  The settings manifest keeps its own numbers deliberately. `@objectstack/service-settings` does not depend on `@objectstack/plugin-email`, and the plugin depends on the service only as a test-only devDependency; making the manifest import the constant would add a runtime edge from a service to a plugin, invert the layering and pull `nodemailer` into the settings service's install closure. So the two are held equal by a cross-package assertion over that existing devDependency instead — the same mechanism that already holds the provider dropdown equal to `EMAIL_TRANSPORT_PROVIDERS` — and no new dependency edge is created in either direction.
+  
+  This range is **not** the CLI's listen range and must never be merged with it: `os serve` floors at `0` because port 0 asks the OS to choose one to listen on, while an SMTP port is a destination and floors at `1`. Collapsing them onto one constant would silently make `0` a legal SMTP port, so the floor is pinned explicitly.
+- 33fbd35: fix(plugin-email): refuse a fractional SMTP port at construction, in the sentence that promised to (#13189)
+  
+  `SmtpTransport`'s port guard was `Number.isFinite && >= 1 && <= 65535` — no
+  integrality test — so `port: 587.5` was ACCEPTED at construction and
+  `describe()` read it straight back. It could never connect. `net.connect`
+  refuses a fractional port with `ERR_SOCKET_BAD_PORT`, and by the time
+  nodemailer has re-coded it the operator sees, at SEND time, a bare
+  `RangeError` (`code: 'ECONNECTION'`) reading `Port should be >= 0 and < 65536.
+  Received type number (587.5).` — a TCP rule naming no part of the
+  Settings → Mail → Port field they typed it into.
+  
+  ⭐ And the refusal this door *did* emit stated the integer rule without
+  enforcing it: `587.5` **is** inside `1-65535`, so `(expected 1-65535)`
+  described a door that had just let it through. The check and its own sentence
+  disagreed, and only one of them could be satisfied.
+  
+  Both move together, or the lie moves instead of leaving:
+  
+  | `port` | before | after |
+  |:---|:---|:---|
+  | `587.5` | accepted; `RangeError` at send time | refused at construction: `SmtpTransport: invalid port '587.5' (expected an integer 1-65535)` |
+  | `1` / `465` / `587` / `65535` | accepted | accepted — unchanged |
+  | `0` / `-1` / `99999` | refused | refused — unchanged |
+  | `NaN` / `±Infinity` | refused | refused — unchanged |
+  | absent, or `smtp_port: ''` | 587 | 587 — unchanged; an empty field spells "not set" |
+  
+  The sentence stays GENERATED from `SMTP_PORT_MIN` / `SMTP_PORT_MAX` (#12993) —
+  "an integer" is prose about the predicate, and neither bound was re-spelled.
+  ⚠️ It therefore reads `(expected an integer 1-65535)` from this release on,
+  including in the refusal quoted by the #13190 entry above, which was written
+  before this change landed.
+  
+  This narrows the accept set, deliberately and in exactly one dimension. The
+  values affected are the fractions strictly inside the range: they were
+  unbindable addresses, and a deployment carrying one has never delivered mail on
+  it — it was failing at send time, under a name that pointed nowhere near the
+  setting. It now fails at boot, saying which value and which rule.
+  
+  ⚠️ This is not a divergence from the CLI's port contract but a convergence with
+  it. `packages/cli/src/utils/port-contract.ts` is emphatic that a door may not
+  narrow what boots, and it is read as a precedent the other way — but its width
+  is about how a port may be *spelled* (`3e3`, `0x0BB8`, `3000.0`, `+3000`,
+  `08080`), every one of which `parseInt` reduces to an integer before any range
+  check. Both of its readers then test `Number.isInteger` outright. On
+  integrality that contract has been strict all along.
+- 56c5b1d: fix(plugin-email): refuse a present-but-unreadable `smtp_port` instead of silently sending on 587 (#13190)
+  
+  `smtpOptionsFromMailSettings` coerced `smtp_port` with `Number(...)` and then
+  OMITTED the key whenever the result was not finite. `SmtpTransport` then applied
+  its built-in 587, so a stored `smtp_port: 'abc'` became a working-looking
+  connection to a port nobody chose — and `describe()`, the diagnostic surface,
+  reported 587 as though it had been selected. Nothing threw, nothing warned.
+  
+  The refusal already existed one layer down: `SmtpTransport`'s constructor rejects
+  a port outside `SMTP_PORT_MIN`–`SMTP_PORT_MAX` with the generated sentence from
+  `smtp-port-contract.ts`. The omission is what converted that loud refusal into a
+  silent default, one layer above the guard that exists to be loud. This fix stops
+  hiding the value from the guard; ⛔ no second, parallel refusal was added.
+  
+  `absent` and `present but unreadable` are now distinct, and all of it is pinned:
+  
+  | stored `smtp_port` | before | after |
+  |:---|:---|:---|
+  | absent | 587 | 587 — unchanged; a legitimate default |
+  | `''` | 587 | 587 — unchanged, deliberately: an empty field spells "not set" |
+  | `'abc'` / `'Infinity'` / `{}` | **587, in silence** | refused: `SmtpTransport: invalid port 'NaN' (expected 1-65535)` |
+  | `'99999'` | refused | refused — unchanged |
+  | `'465'` | 465 | 465 — unchanged |
+  
+  Behaviour change for a deployment that currently carries an unreadable port: it
+  was delivering mail on 587, and will now refuse to build the SMTP transport —
+  reporting the reason at boot and under **Send test email** — instead of sending.
+  That is the point: the setting was being ignored without a word, which is the
+  declared-but-not-delivered shape this package has closed twice before.
+  
+  Reachability is measured rather than argued. `OS_MAIL_SMTP_PORT=abc` resolves as
+  the string `'abc'` with `source: 'env'` and `locked: true` — a non-numeric value
+  is not *outside* a numeric window, so the mail manifest's declared
+  `min: 1, max: 65535` does not reject it — and the ordinary settings save path
+  stores the same value for the same reason.
+- Updated dependencies [809d417]
+- Updated dependencies [387e231]
+- Updated dependencies [f794e4e]
+- Updated dependencies [cae2169]
+- Updated dependencies [b812a54]
+- Updated dependencies [2d4fa75]
+- Updated dependencies [0e4e51b]
+- Updated dependencies [e84bbf6]
+- Updated dependencies [effae80]
+- Updated dependencies [efb3513]
+- Updated dependencies [d62f990]
+- Updated dependencies [c45d8e6]
+- Updated dependencies [2e3e8c7]
+- Updated dependencies [e621291]
+- Updated dependencies [655b106]
+- Updated dependencies [40a93b5]
+- Updated dependencies [d5b330d]
+- Updated dependencies [dda969c]
+- Updated dependencies [1f45690]
+- Updated dependencies [277948f]
+- Updated dependencies [8bdd955]
+- Updated dependencies [f3bbbef]
+- Updated dependencies [4f24e9d]
+- Updated dependencies [e27583e]
+- Updated dependencies [4bd6faa]
+- Updated dependencies [86cbe37]
+- Updated dependencies [6a180e4]
+- Updated dependencies [474242f]
+- Updated dependencies [63cd487]
+- Updated dependencies [bd4aa4e]
+- Updated dependencies [803eaab]
+- Updated dependencies [f8e8f03]
+- Updated dependencies [983edf1]
+- Updated dependencies [eae824e]
+- Updated dependencies [f6fa22c]
+- Updated dependencies [8a483b3]
+- Updated dependencies [3bc2e38]
+- Updated dependencies [97bcd99]
+- Updated dependencies [df59de0]
+- Updated dependencies [96e25a8]
+- Updated dependencies [713f83f]
+- Updated dependencies [77d4b3c]
+- Updated dependencies [f75a38a]
+- Updated dependencies [7a25e7d]
+- Updated dependencies [1fa05a6]
+- Updated dependencies [c85a265]
+- Updated dependencies [dcb10a5]
+- Updated dependencies [773a999]
+- Updated dependencies [35dffea]
+- Updated dependencies [d8024f0]
+- Updated dependencies [8120808]
+- Updated dependencies [776a098]
+- Updated dependencies [5060877]
+- Updated dependencies [4f6325d]
+- Updated dependencies [52954c0]
+- Updated dependencies [2aa8456]
+- Updated dependencies [93809a3]
+- Updated dependencies [7c0d0c3]
+- Updated dependencies [daae7aa]
+- Updated dependencies [8dc22d6]
+- Updated dependencies [a392dbf]
+- Updated dependencies [279431e]
+- Updated dependencies [948dd6b]
+- Updated dependencies [3b4c56c]
+- Updated dependencies [ae8edd2]
+- Updated dependencies [e25403c]
+- Updated dependencies [64baa68]
+- Updated dependencies [9fa70d7]
+- Updated dependencies [09db64a]
+- Updated dependencies [92916e7]
+- Updated dependencies [a84f3ea]
+- Updated dependencies [f2eaae8]
+- Updated dependencies [c09451b]
+- Updated dependencies [ba64877]
+- Updated dependencies [7345308]
+- Updated dependencies [79b6a22]
+- Updated dependencies [30d96ab]
+- Updated dependencies [f658793]
+- Updated dependencies [c95ad19]
+- Updated dependencies [e58ea8b]
+- Updated dependencies [4a17645]
+- Updated dependencies [3795c5f]
+- Updated dependencies [8ab926b]
+- Updated dependencies [7317cf2]
+- Updated dependencies [e25e839]
+- Updated dependencies [5997207]
+- Updated dependencies [8b13cc8]
+- Updated dependencies [4a4a35d]
+- Updated dependencies [4a4a35d]
+- Updated dependencies [86e765a]
+- Updated dependencies [1d7e76a]
+- Updated dependencies [53dc739]
+- Updated dependencies [fd289be]
+- Updated dependencies [03bf7b1]
+- Updated dependencies [f90e820]
+- Updated dependencies [18d816a]
+- Updated dependencies [e8bd715]
+- Updated dependencies [b91c351]
+- Updated dependencies [a28a3c0]
+- Updated dependencies [daeaaf9]
+- Updated dependencies [c459da6]
+- Updated dependencies [e914733]
+- Updated dependencies [1d8ad0f]
+- Updated dependencies [9738c35]
+- Updated dependencies [f887e52]
+- Updated dependencies [881f8d8]
+- Updated dependencies [3bfa1e6]
+- Updated dependencies [0a8ebf3]
+- Updated dependencies [901355c]
+- Updated dependencies [34ce8e7]
+- Updated dependencies [33681ea]
+- Updated dependencies [4635f3e]
+- Updated dependencies [fd289be]
+- Updated dependencies [ee3595c]
+- Updated dependencies [09b4f4e]
+- Updated dependencies [b2eab95]
+- Updated dependencies [93940d4]
+- Updated dependencies [3a04b01]
+- Updated dependencies [45b9051]
+- Updated dependencies [3954fb7]
+- Updated dependencies [4805b56]
+- Updated dependencies [b9e9227]
+- Updated dependencies [d395692]
+- Updated dependencies [5894d30]
+- Updated dependencies [a3765f6]
+- Updated dependencies [2d5cee3]
+- Updated dependencies [e22158f]
+- Updated dependencies [7404925]
+- Updated dependencies [0c2334f]
+- Updated dependencies [778c59f]
+- Updated dependencies [d2619fd]
+- Updated dependencies [af56546]
+- Updated dependencies [6acb11a]
+- Updated dependencies [33c5fd3]
+- Updated dependencies [20b0fdb]
+- Updated dependencies [905019b]
+- Updated dependencies [a286411]
+- Updated dependencies [98c0d33]
+- Updated dependencies [368a82e]
+- Updated dependencies [a3d5724]
+- Updated dependencies [93ea19b]
+- Updated dependencies [9ee2dcf]
+- Updated dependencies [8cb96ec]
+- Updated dependencies [8f10a79]
+- Updated dependencies [6269a55]
+- Updated dependencies [a17da05]
+- Updated dependencies [a8c00e2]
+- Updated dependencies [0fb8760]
+- Updated dependencies [e5ce2ed]
+- Updated dependencies [be21955]
+- Updated dependencies [bc56e18]
+- Updated dependencies [be21955]
+- Updated dependencies [a9ee989]
+- Updated dependencies [4d0d944]
+- Updated dependencies [15d58db]
+- Updated dependencies [d63b014]
+- Updated dependencies [9abe4e4]
+- Updated dependencies [2cc7122]
+- Updated dependencies [50d6c92]
+- Updated dependencies [9e0ba21]
+- Updated dependencies [311433f]
+- Updated dependencies [3e5ad08]
+- Updated dependencies [9abe4e4]
+- Updated dependencies [b7131f3]
+- Updated dependencies [e5812fa]
+- Updated dependencies [7085f90]
+- Updated dependencies [dee4dd4]
+- Updated dependencies [ce7e497]
+- Updated dependencies [51ecb2f]
+- Updated dependencies [9086761]
+- Updated dependencies [f6344e7]
+- Updated dependencies [42a117b]
+- Updated dependencies [1401ae7]
+- Updated dependencies [4297fe7]
+- Updated dependencies [e398863]
+- Updated dependencies [d16df74]
+- Updated dependencies [d79c602]
+- Updated dependencies [f11fc61]
+- Updated dependencies [e808890]
+- Updated dependencies [8f79379]
+- Updated dependencies [e6ca40e]
+- Updated dependencies [0c77ea4]
+- Updated dependencies [52954c0]
+- Updated dependencies [89eb997]
+- Updated dependencies [7131f12]
+- Updated dependencies [aa5994e]
+- Updated dependencies [be93457]
+- Updated dependencies [a65db76]
+- Updated dependencies [15eb2c9]
+- Updated dependencies [5691b07]
+- Updated dependencies [2a6122b]
+- Updated dependencies [225e769]
+- Updated dependencies [8af88dd]
+- Updated dependencies [fb5fbb8]
+- Updated dependencies [d7b3963]
+- Updated dependencies [33184fd]
+- Updated dependencies [7c41693]
+- Updated dependencies [b72db01]
+- Updated dependencies [dce5cd4]
+- Updated dependencies [9688f58]
+- Updated dependencies [556ebc1]
+- Updated dependencies [177ebdc]
+- Updated dependencies [8d237b4]
+- Updated dependencies [2d2e6f0]
+- Updated dependencies [2d8dd8d]
+- Updated dependencies [22d573e]
+- Updated dependencies [b5a2398]
+- Updated dependencies [348860c]
+- Updated dependencies [5383fa6]
+- Updated dependencies [5b3ff63]
+- Updated dependencies [1a6a19c]
+- Updated dependencies [064d484]
+- Updated dependencies [527e050]
+- Updated dependencies [dd33bf9]
+- Updated dependencies [4cb2a90]
+- Updated dependencies [74a7804]
+- Updated dependencies [53d3689]
+- Updated dependencies [b3a63d3]
+- Updated dependencies [49f0dcf]
+- Updated dependencies [033a34c]
+- Updated dependencies [4d25d22]
+- Updated dependencies [1ffee51]
+- Updated dependencies [5ae4303]
+- Updated dependencies [ece4dad]
+- Updated dependencies [e9b377e]
+- Updated dependencies [146f448]
+- Updated dependencies [735f5c7]
+- Updated dependencies [a7e18de]
+- Updated dependencies [366f895]
+- Updated dependencies [dc75ba8]
+- Updated dependencies [cce0aa9]
+- Updated dependencies [e764507]
+- Updated dependencies [cff17af]
+- Updated dependencies [39404f3]
+- Updated dependencies [ca1965f]
+- Updated dependencies [8619f95]
+- Updated dependencies [b706af9]
+- Updated dependencies [add4360]
+- Updated dependencies [e0abc38]
+- Updated dependencies [fc9ba76]
+- Updated dependencies [0f94cc7]
+- Updated dependencies [a11c1a5]
+- Updated dependencies [71f9cd1]
+- Updated dependencies [ee17d86]
+- Updated dependencies [cdbd920]
+- Updated dependencies [18c432e]
+- Updated dependencies [3c418c4]
+- Updated dependencies [fa8715a]
+- Updated dependencies [a933ed7]
+- Updated dependencies [b3ca463]
+- Updated dependencies [a933ed7]
+- Updated dependencies [0d4a6a8]
+- Updated dependencies [518d5e5]
+- Updated dependencies [6643ba1]
+- Updated dependencies [eeba2ef]
+- Updated dependencies [ec4c4d2]
+- Updated dependencies [424f73c]
+- Updated dependencies [cccbe51]
+- Updated dependencies [a8d6b1d]
+- Updated dependencies [e4a7695]
+- Updated dependencies [87075b1]
+- Updated dependencies [fc58a99]
+- Updated dependencies [14cfc00]
+- Updated dependencies [1c6f7b4]
+- Updated dependencies [e854a53]
+- Updated dependencies [dfebfc8]
+- Updated dependencies [598b7ec]
+- Updated dependencies [d028b37]
+- Updated dependencies [f7b25c5]
+- Updated dependencies [122ef38]
+- Updated dependencies [4a37870]
+- Updated dependencies [428f9b2]
+- Updated dependencies [aa7ff56]
+- Updated dependencies [811a3c2]
+- Updated dependencies [1401ae7]
+- Updated dependencies [2fd3f1c]
+- Updated dependencies [c41b42e]
+- Updated dependencies [c4db311]
+- Updated dependencies [750fff5]
+- Updated dependencies [c19035e]
+- Updated dependencies [ececf7a]
+- Updated dependencies [d173125]
+- Updated dependencies [8eeca27]
+- Updated dependencies [8425c17]
+- Updated dependencies [a5ef1d8]
+- Updated dependencies [772d5de]
+- Updated dependencies [ce80ec2]
+- Updated dependencies [b372318]
+- Updated dependencies [97a2263]
+- Updated dependencies [29d0676]
+- Updated dependencies [0169d49]
+- Updated dependencies [6bd3231]
+- Updated dependencies [d2b5ba8]
+- Updated dependencies [b799ac5]
+- Updated dependencies [8f74307]
+- Updated dependencies [d23dc08]
+- Updated dependencies [038f333]
+- Updated dependencies [644ad50]
+- Updated dependencies [0da7cd2]
+- Updated dependencies [28a5c3e]
+- Updated dependencies [4bc18e5]
+- Updated dependencies [9f57f1e]
+  - @objectstack/spec@17.3.0
+  - @objectstack/platform-objects@17.3.0
+  - @objectstack/core@17.3.0
+  - @objectstack/formula@17.3.0
+
 ## 17.2.0
 
 ### Minor Changes
