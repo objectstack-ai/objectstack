@@ -307,10 +307,7 @@ function selfTest() {
     console.error(`✗ check-sdui-manifest self-test: ${failures} failure(s) (cases and floor).`);
     process.exit(1);
   }
-  console.log(
-    `✓ check-sdui-manifest self-test: ${cases.length} cases behave (green passes; absence, tamper, moved pin, ` +
-      `emptiness are RED), each registered under its own declared row battery (${declaredBatteries.length} at floor 1).`,
-  );
+  console.log(`✓ check-sdui-manifest self-test: ${cases.length} cases behave (green passes; absence, tamper, moved pin, emptiness are RED).`);
 
   return SELF_TEST_VERDICT;
 }
