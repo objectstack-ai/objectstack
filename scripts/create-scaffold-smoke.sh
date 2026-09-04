@@ -106,9 +106,15 @@ for KEY in $TEMPLATE_KEYS; do
   log "os create $KEY $NAME  (from $WORK, default location)"
   (cd "$WORK" && node "$CLI_BIN" create "$KEY" "$NAME")
 
-  mapfile -t ENTRIES < <(cd "$WORK" && ls -A)
-  [ "${#ENTRIES[@]}" -eq 1 ] || fail "os create $KEY wrote ${#ENTRIES[@]} top-level entries (${ENTRIES[*]}), expected exactly one project directory"
-  APP_DIR="$WORK/${ENTRIES[0]}"
+  # Counted with `wc -l` and read back as one string rather than into an array:
+  # the shell floor here is bash 3.2 (what macOS ships), where the array
+  # builtins this would otherwise reach for do not exist and an empty array
+  # under `set -u` is itself an error. `pnpm check:bash32-floor` holds the floor.
+  ENTRY_COUNT="$(cd "$WORK" && ls -A | wc -l | tr -d ' ')"
+  if [ "$ENTRY_COUNT" -ne 1 ]; then
+    fail "os create $KEY wrote $ENTRY_COUNT top-level entries ($(cd "$WORK" && ls -A | tr '\n' ' ')), expected exactly one project directory"
+  fi
+  APP_DIR="$WORK/$(cd "$WORK" && ls -A)"
   [ -d "$APP_DIR" ] || fail "os create $KEY did not create a directory (${ENTRIES[0]})"
   [ -f "$APP_DIR/package.json" ] || fail "os create $KEY wrote no package.json into $APP_DIR — the default location is still not the developer's directory"
   echo "  scaffolded → $APP_DIR"

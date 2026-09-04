@@ -17,6 +17,13 @@ project `pnpm install` refuses. The default emission is now standalone:
 - a `pnpm-workspace.yaml` carries the build approvals a fresh `pnpm install`
   needs on pnpm 11.
 
+The `plugin` template also emits `init` where it used to emit `initialize`.
+`initialize` is not part of the `Plugin` contract, so the scaffold did not
+type-check under its own `strict` config (TS7006 on the untyped `context`
+parameter) and `kernel.use()` refused the plugin at load with
+`Plugin init function is required` — a defect the kernel protocol docs
+previously carried a warning about instead of a fix.
+
 The previous monorepo-internal placement is still available for ObjectStack
 platform work as the explicit `--in-repo` flag, which keeps the `workspace:*`
 specs and writes into `packages/plugins/` or `examples/`.
