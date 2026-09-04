@@ -28,7 +28,11 @@ import path from 'path';
 import { exportListDescription } from './lib/export-list';
 import { findModuleDocBlock } from './lib/file-description';
 import { createSink, type Owns } from './lib/generated-output';
-import { checkCoreEntryShape } from './lib/skill-map-guards';
+import {
+  SHARED_CORE_SCHEMAS,
+  checkCoreEntryShape,
+  checkSingleOwner,
+} from './lib/skill-map-guards';
 
 // ── Paths ────────────────────────────────────────────────────────────────────
 
@@ -182,7 +186,11 @@ const SKILL_MAP: Record<string, string[]> = {
   ],
   'objectstack-formula': [
     'shared/expression.zod.ts',
-    'data/date-macros.zod.ts',
+    // `data/date-macros.zod.ts` left this list: it is objectstack-query's, and
+    // both bodies say so — view list filters are not a CEL surface, and the
+    // token list lives in objectstack-query's `rules/filters.md`. One schema
+    // file, one owning package; see SHARED_CORE_SCHEMAS for the three the map
+    // deliberately shares and why.
   ],
 };
 
@@ -382,7 +390,10 @@ function main() {
   // Map-level guards run before any file is read: they ask questions of the
   // authored config that the artifact-vs-generator comparison structurally
   // cannot (see lib/skill-map-guards.ts).
-  const problems: string[] = [...checkCoreEntryShape(SKILL_MAP)];
+  const problems: string[] = [
+    ...checkCoreEntryShape(SKILL_MAP),
+    ...checkSingleOwner(SKILL_MAP, SHARED_CORE_SCHEMAS),
+  ];
   let totalSkills = 0;
 
   for (const [skillName, coreFiles] of Object.entries(SKILL_MAP)) {

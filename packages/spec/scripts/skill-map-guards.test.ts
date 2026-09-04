@@ -32,7 +32,12 @@ import url from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import { checkCoreEntryShape, type SkillCoreMap } from './lib/skill-map-guards';
+import {
+  SHARED_CORE_SCHEMAS,
+  checkCoreEntryShape,
+  checkSingleOwner,
+  type SkillCoreMap,
+} from './lib/skill-map-guards';
 
 const HERE = path.dirname(url.fileURLToPath(import.meta.url));
 const GENERATOR = path.resolve(HERE, 'build-skill-references.ts');
@@ -63,6 +68,53 @@ describe('checkCoreEntryShape — a core entry that emits no row is refused', ()
   });
 });
 
+describe('checkSingleOwner — one schema file, one owning package', () => {
+  const twoOwners: SkillCoreMap = {
+    'objectstack-query': ['data/query.zod.ts', 'data/date-macros.zod.ts'],
+    'objectstack-formula': ['shared/expression.zod.ts', 'data/date-macros.zod.ts'],
+  };
+
+  it('refuses an undeclared duplicate and names both packages', () => {
+    const problems = checkSingleOwner(twoOwners, {});
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain('data/date-macros.zod.ts');
+    expect(problems[0]).toContain('objectstack-query');
+    expect(problems[0]).toContain('objectstack-formula');
+  });
+
+  it('accepts the same duplicate once it is declared with a reason', () => {
+    expect(checkSingleOwner(twoOwners, { 'data/date-macros.zod.ts': 'because …' })).toEqual([]);
+  });
+
+  it('refuses a declaration with no reason — that is an allowlist, not a ledger', () => {
+    const problems = checkSingleOwner(twoOwners, { 'data/date-macros.zod.ts': '   ' });
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain('empty reason');
+  });
+
+  it('refuses a declaration whose sharing is gone, so the ledger cannot rot', () => {
+    const oneOwner: SkillCoreMap = { 'objectstack-query': ['data/date-macros.zod.ts'] };
+    const problems = checkSingleOwner(oneOwner, { 'data/date-macros.zod.ts': 'because …' });
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain('Delete the declaration');
+  });
+
+  it('passes a map with no duplicates and no declarations', () => {
+    // The always-red twin of the always-green failure the refusal tests catch.
+    expect(
+      checkSingleOwner({ a: ['data/field.zod.ts'], b: ['data/object.zod.ts'] }, {}),
+    ).toEqual([]);
+  });
+
+  it('every shipped declaration carries a real reason', () => {
+    // The ledger is read by a human deciding whether a second owner is right.
+    // A row that said only "allowed" would pass the guard and teach nothing.
+    for (const [file, reason] of Object.entries(SHARED_CORE_SCHEMAS)) {
+      expect(reason.trim().length, `${file} has no reason`).toBeGreaterThan(40);
+    }
+  });
+});
+
 describe('the generator wires the guards in', () => {
   const source = (): string => fs.readFileSync(GENERATOR, 'utf-8');
 
@@ -74,5 +126,9 @@ describe('the generator wires the guards in', () => {
 
   it('calls checkCoreEntryShape on SKILL_MAP', () => {
     expect(source()).toContain('checkCoreEntryShape(SKILL_MAP)');
+  });
+
+  it('calls checkSingleOwner on SKILL_MAP and the declared ledger', () => {
+    expect(source()).toContain('checkSingleOwner(SKILL_MAP, SHARED_CORE_SCHEMAS)');
   });
 });

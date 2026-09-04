@@ -41,6 +41,100 @@
 export type SkillCoreMap = Record<string, readonly string[]>;
 
 /**
+ * Schema files a second package's core list may claim, and why.
+ *
+ * ## Why this ledger exists at all, against the instruction that it should not
+ *
+ * The seat ruling that ordered this guard asked for the flat rule -- a schema
+ * file appears in at most ONE package's core list -- and refused a
+ * "legitimate duplicate ownership" rule on the stated ground that there would
+ * be "zero legitimate instances" once `data/date-macros.zod.ts` left the
+ * formula entry. MEASURED AT THE BASE OF THIS CHANGE, that ground does not
+ * hold: `date-macros` was one of FOUR duplicates, and the other three are
+ * deliberate, two of them already carrying their reason as a comment in the
+ * map itself. The flat rule would therefore refuse `origin/main`'s own map on
+ * its first run, and the only ways to satisfy it are to delete three pointers
+ * no card has adjudicated, or to keep the gate red.
+ *
+ * So the guard ships in the shape that is enforceable and keeps the ruling's
+ * operational demand -- the NEXT duplicate refuses at generation time --
+ * while the three measured instances are declared here rather than deleted.
+ * This is a deviation from the letter of that ruling, recorded here and in the
+ * PR body so a reviewer can object to the reasoning rather than discover the
+ * outcome. Two guards keep the ledger from becoming the spread the ruling
+ * feared: a row whose file is no longer duplicated is REFUSED, so it cannot
+ * rot unread, and a row with no reason is refused, so it cannot become a
+ * silent allowlist.
+ */
+export const SHARED_CORE_SCHEMAS: Record<string, string> = {
+  'data/validation.zod.ts':
+    'objectstack-data owns validation rules as a data surface; objectstack-automation ' +
+    "teaches the same file because a record's legal transitions are authored there as a " +
+    '`state_machine` rule (ADR-0020) -- the destination that replaced the retired ' +
+    'state-machine shape.',
+  'data/datasource.zod.ts':
+    'objectstack-data owns datasources as a data surface; objectstack-platform teaches the ' +
+    'same file under project setup (`defineStack` + drivers), the surface absorbed from the ' +
+    'retired objectstack-quickstart skill.',
+  'data/seed.zod.ts':
+    'objectstack-data owns seeds as a data surface; objectstack-platform teaches the same ' +
+    'file under project setup, the surface absorbed from the retired objectstack-quickstart ' +
+    'skill.',
+};
+
+/**
+ * One schema file, one owning package -- unless the sharing is declared above.
+ *
+ * `references/_index.md` is generator-owned and shipped, and the catalog's
+ * whole contract is "this package owns this surface". A file in two core lists
+ * puts one pointer in an index whose SKILL.md routes that surface elsewhere,
+ * and the reader has no way to tell which of the two indexes meant it:
+ * `data/date-macros.zod.ts` sat in both `objectstack-query` and
+ * `objectstack-formula` while both bodies routed date macros to query alone.
+ */
+export function checkSingleOwner(map: SkillCoreMap, shared: Record<string, string>): string[] {
+  const owners = new Map<string, string[]>();
+  for (const [skillName, coreFiles] of Object.entries(map)) {
+    for (const rel of coreFiles) {
+      const list = owners.get(rel) ?? [];
+      list.push(skillName);
+      owners.set(rel, list);
+    }
+  }
+
+  const problems: string[] = [];
+  for (const [rel, packages] of owners) {
+    if (packages.length < 2) continue;
+    const reason = shared[rel];
+    if (reason === undefined) {
+      problems.push(
+        `${rel} is in the core list of ${packages.length} packages (${packages.join(', ')}) — ` +
+          `one schema file, one owning package. Drop it from all but the package whose SKILL.md ` +
+          `teaches that surface, or declare the sharing in SHARED_CORE_SCHEMAS with the reason.`,
+      );
+    } else if (reason.trim() === '') {
+      problems.push(
+        `${rel} is declared in SHARED_CORE_SCHEMAS with an empty reason — the reason is the ` +
+          `whole point of the declaration; an unexplained row is an allowlist.`,
+      );
+    }
+  }
+
+  // A declaration for a file that is no longer shared outlives the fact it
+  // records, and a ledger nobody has to keep true is one nobody reads.
+  for (const rel of Object.keys(shared)) {
+    const packages = owners.get(rel) ?? [];
+    if (packages.length >= 2) continue;
+    problems.push(
+      `${rel} is declared in SHARED_CORE_SCHEMAS but is in ${packages.length} core list(s) — ` +
+        `the sharing it explains is gone. Delete the declaration.`,
+    );
+  }
+
+  return problems;
+}
+
+/**
  * Every core entry must be a path this generator can actually publish.
  *
  * `resolveAll()` keeps only `*.zod.ts` from the closure, because the published
