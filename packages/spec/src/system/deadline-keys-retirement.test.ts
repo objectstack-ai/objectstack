@@ -548,6 +548,27 @@ describe('[#14477] ADR-0087 registration', () => {
   });
 });
 
+// What this leg guarantees, and what it does not. The walk below reads the
+// whole repo tree from REPO_ROOT, but the inputs it reaches outside
+// `@objectstack/spec`'s declared cross-package globs in `turbo.json` are not
+// hashed by turbo. So a resurrection authored in `examples/**`, `apps/**`,
+// hand-written `content/docs/**` or most `packages/*/src/**` does not put this
+// suite into `turbo ls --affected`, and the PR that authors it can replay a
+// cached green. Read this leg as a FULL-RUN guarantee — the merge queue and a
+// plain `pnpm test` — rather than an affected-path one.
+//
+// `check:cross-package-test-inputs` is green here as designed: every literal
+// path this file names is declared, and the gate's declaration file states the
+// trade for a walk that descends on a loop variable (the escape verdict
+// resolves and the name does not). Widening spec's declared inputs to the
+// walk's real radius would put this suite on every docs PR, so nothing is
+// widened here; the playbook-vs-gate question is filed as #15528 and is not
+// this PR's to answer.
+//
+// Independently of turbo, every *typed* TypeScript resurrection is caught at
+// author time by the `never` channel pinned above, which needs no tree walk.
+// The residue this leg covers is the untyped rest: JSON, YAML, MDX and
+// unannotated literals.
 describe('[#14477] tree-scoped absence: nothing in the repo authors a retired key any more', () => {
   const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
   const THIS_DIR = path.dirname(fileURLToPath(import.meta.url));

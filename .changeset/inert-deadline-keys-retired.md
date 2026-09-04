@@ -13,8 +13,9 @@ Maintainer ruling 2026-09-02 on the census card (ruled A: retire per family):
 ADR-0049 enforce-or-remove decides it — declared-but-unenforced deadline
 surface with zero measured readers comes off.
 
-Fourteen hour/minute/day-shaped deadline, SLA and duration keys (thirteen
-distinct names) sat on the exported incident-response, training and
+Fourteen hour/minute/day-shaped deadline, SLA and duration key sites — twelve
+distinct names, because `durationMinutes` and `estimatedMinutes` each occur at
+two sites — sat on the exported incident-response, training and
 change-management schemas and in the generated reference docs, and **nothing
 read them**: the schemas are exported from `@objectstack/spec/system`, mounted
 by no stack key, registered as no metadata type, absent from the 2026-06
@@ -125,10 +126,15 @@ The retirement kit:
   through the nesting carriers; the tsc `never` channel; no-materialize pins
   for the six former defaults; the ADR-0087 registration; and a tree-scoped
   absence pin over every authored source in the repo
-- generated baselines/docs follow the schema (`authorable-surface/` gains
-  eleven `[RETIRED]` rows, `authorable-defaults/` loses six rows,
-  `json-schema/`, `json-schema.manifest/`, spec-changes, upgrade guide,
-  reference docs)
+- generated baselines and docs follow the schema: `authorable-surface/` gains
+  eleven `[RETIRED]` rows, `authorable-defaults/` loses six rows, the three
+  system reference pages are regenerated, and the gitignored `json-schema/`
+  output is re-emitted on the next build
+- `json-schema.manifest/` is unchanged, and correctly so: it ratchets def
+  *names*, and retiring keys removes no def from the published surface
+- `spec-changes.json` and the protocol upgrade guide are unchanged too: both
+  project the migration chain at the current protocol major (17), so these
+  protocol-18 registrations reach them at the 18 cut
 - zero authored occurrences in this repo's examples, skills and hand-written
   docs, and zero hits in objectui at the pinned sha, so no in-repo source
   changes ride along beyond the three families' own unit tests
