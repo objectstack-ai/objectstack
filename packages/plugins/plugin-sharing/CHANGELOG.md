@@ -1,5 +1,1284 @@
 # @objectstack/plugin-sharing
 
+## 17.3.0
+
+### Minor Changes
+
+- 599515d: Four more system objects declare their polymorphic pointer pair (#11386, ADR-0052 §5, adopting the carrier #11339 landed): `sys_audit_log.record_id`, `sys_approval_request.record_id`, `sys_record_share.record_id` and `sys_share_link.record_id` now carry `referenceVia: 'object_name'`. A seed row addressing one of these by the target's natural key resolves against the object its sibling column names, per row — so a packaged app can ship audit history, pending approvals, record grants and share links that actually attach to the records they are about, and the queries that give each row its meaning (the `{object_name, record_id}` index, the pending-request lock, the sharing middleware's grant lookup, the share link's fail-closed record-existence gate) match on the target's real id.
+  
+  The accept/reject contract changes with it on those four objects, deliberately and in the already-ruled direction: an unresolvable pointer on a DECLARED pair is a loud, counted failure instead of the old silent verbatim store. On a grant table that is the sharper win — a share whose `record_id` stayed a natural key enforced nothing while displaying as a grant, and was then deleted by the orphan sweep for describing a record that does not exist. Internal-id-shaped values still pass through verbatim, so a demo row about an already-deleted record (an `action: 'delete'` audit row) stays authorable. Undeclared text columns are untouched.
+  
+  The fifth object surveyed, `sys_automation_run` (`trigger_object` / `trigger_record_id`), deliberately STAYS UNDECLARED. Its pair has the same shape but its rows are not content about a record: a `paused` row is a live continuation the engine rehydrates on boot, terminal rows are telemetry under a 30-day sweep, and the object has no natural key to address rows by. The verdict, its reasons, and what would have to change to flip it are recorded on the field itself and pinned by a test.
+- 3f64fe6: `sys_record_share` is tenant-scoped: every grant row now carries `organization_id`, and the rows written before it can be backfilled from the record they grant access to (#14484).
+  
+  Every `sys_record_share` row on every deployment was written with `organization_id = NULL`: `SharingService.grant` wrote under a bare system context and the row literal never carried the column, so neither the driver's `injectTenantOnInsert` nor the engine's system-write organization rule had anything to stamp from. Reads agreed with writes — the service's own reads are bare-context too — so nothing was visibly broken; what the NULL cost was the cliff: the first tenant-facing read of the table inherits `plugin-security`'s Layer 0, whose strict `organization_id = :tenant` AND-composes over the driver's NULL-tolerant arm and wins, and every existing grant silently disappears — not refused, simply "this person was never granted access". Maintainer ruling 2026-09-02 (decision batch #11 item 3, A adopted — 「#13564 转维护者处理；其他同意」): tenant-scoped, writer-repaired, existing rows backfilled from the record they reference. The per-table order the `sys_file` precedent requires; it covers `sys_record_share` and no other table.
+  
+  **Writer.** `SharingService.grant` stamps `organization_id` on both halves of its upsert. A rule-materialised grant carries the granting RULE's organization — `SharingRuleService.reconcile` / `reconcileForRecord` now hand `grant` the rule's own `criteriaContext` (`{ isSystem, tenantId: rule.organization_id }`), the same context the rule's criteria sweep ran under, so the grant lands in the organization whose records the rule was allowed to sweep. A direct grant carries the shared RECORD's organization, read off the column its object is walled by (`resolveTenantFieldName`: ADR-0066 opt-out → declared `tenancy.tenantField` → injected `organization_id`), with the acting session's organization as the fallback for a record that carries none — and only for one that carries none: a record whose organization could not be READ is unknown, not organization-less, so that grant carries `null` for the engine's rule below rather than the session's organization (which may not be the record's). The organization rides the write context as `tenantId` as well as the row — the `{ isSystem, tenantId }` shape the #8844 refusal prescribes — so the driver's tenant audit is satisfied and the update half lands through the driver's scope (`organization_id = ? OR IS NULL`, which keeps a pre-repair NULL row in reach). Nothing resolvable ⇒ an explicit `null` on the row, for the engine's ruled rule to decide (below). The service's eleven bare-context READS are unchanged by this change; whether they become tenant-scoped is #13564's question.
+  
+  **Ledger (`@objectstack/objectql`).** `sys_record_share` leaves `unclassified` in the #13491 per-object tenancy ledger as `tenant-scoped`, with the ruling as the cited fact. Consequence, per the ledger's own admission semantics: an organization-less SYSTEM insert on `sys_record_share` is now derived on a `single` install with exactly one organization and REFUSED loudly on a walled one (`ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED`, status 500) — and the engine no longer auto-mutes the driver's tenant-audit warning for elevated writes on it. The only writer in this repository is repaired in the same change and carries the organization on every path that can resolve one — but two shipped paths still resolve none, and on a walled install they now meet that refusal instead of writing a NULL row. **(a)** A platform-global sharing rule (`organization_id = null`; its sweep runs unscoped) matching an organization-less record: the grant resolves `null`, the engine refuses it, and because `reconcile` has no per-grant catch that rule's reconcile aborts mid-loop — grants already written in the pass stay, the remaining grants and the stale-row revocations of that pass do not happen (the boot backfill logs the rule and continues; the write hooks catch). **(b)** A direct grant whose read of the shared record's organization failed: the acting session's organization is deliberately not substituted, so the grant is refused with the same error rather than written into an organization that may not be the record's. On a `single` install with exactly one organization both derive it; with several, the same `null` is refused as `ambiguous-organization`. A third-party writer that inserts `sys_record_share` under a bare system context on a walled install meets the refusal too, and the refusal message says how to carry the organization.
+  
+  **Ops: the backfill — dry run first, and by default.** `packages/plugins/plugin-sharing/src/backfill-sys-record-share-organizations.ts` scans only rows whose organization column is unset, re-reads each row's record (`object_name` + `record_id`) at repair time, and stamps the row with the record's own organization off the column that object is walled by. `planSysRecordShareOrganizationBackfill(engine)` reads only and returns a report naming every row it would touch; `runSysRecordShareOrganizationBackfill(engine, { dryRun: false })` writes. Nothing runs at boot and nothing is scheduled: this is an operator-invoked module, run once against an affected install, the posture of both precedents. **Orphans — grant rows whose record no longer exists — are left NULL, counted (`totals.orphans`) and logged, never deleted here:** the "record gone ⇒ the row cannot describe any access" invariant is already owned by the `kernel:bootstrapped` orphan sweep (`sweepOrphanedRecordShares`, #5103), which reclaims exactly that population on the next boot; a second deleter would be the fork `record-orphan-cleanup.ts` exists to prevent. Every other row that cannot be derived — an object with no organization column, a record that carries none, a record whose read failed — stays NULL and is reported by reason, for a dry run too. Idempotent by construction: every scan is `WHERE <organization column> IS NULL` and every write fills that column, so the test suite runs the sweep twice and pins the second run at zero writes.
+  
+  Publishes no runtime code for the backfill: the module is not exported from the package index and not bundled into `dist` (`tsup` builds `src/index.ts`). It is graded rather than skipped because the release notes are where an operator of an affected install learns the repair exists, what it will and will not touch, and that the dry run comes first.
+- fc9ba76: fix(plugin-sharing,spec): hold `publicSharing.eligibility` at redemption, not only at mint (#13608)
+  
+  **BREAKING** runtime behaviour change on a published package: share links that
+  were legitimately minted can now stop resolving without anyone revoking them.
+  Shipped as `minor` under the repo's launch-window convention.
+  
+  `ShareLinkService.createLink()` evaluated the object's declared
+  `publicSharing.eligibility` predicate before writing a `sys_share_link` row, and
+  nothing evaluated it again. `resolveToken()` checked `revoked_at`, `expires_at`,
+  the audience gates, the password and record EXISTENCE — then served whatever
+  survived, under the system context, to a caller with no principal at all. So the
+  declaration read as a standing policy about which records may be reached
+  anonymously, while the platform held it at exactly one instant in a link's life.
+  
+  The state the predicate reads is the state an editor changes. Publish an article
+  `published` + `public`, mint a link, then flip `audience` to `internal` or
+  `status` back to `draft`: the object's own policy now says the record is not
+  eligible for link sharing, and the old token kept resolving and kept serving the
+  record in full. The remedy was to revoke every link on the record by hand, which
+  first requires knowing they exist.
+  
+  It also sat oddly beside its neighbour. In that same `resolveToken()`, the
+  record-existence probe is deliberately fail-CLOSED (an unanswered probe denies),
+  so a **deleted** record stopped being served immediately while a
+  **reclassified** one did not — two failure directions in one door.
+  
+  **What changed.** `resolveToken()` re-evaluates the predicate against the record
+  it is about to serve, through the same `assertEligible` the mint path calls, so
+  the two points cannot drift on strictness, on the declared-field binding, or on
+  which faults refuse. It is one read either way: when a predicate is declared the
+  existence probe's projection widens from `['id']` to the whole row instead of a
+  second query being issued, so an object with no `eligibility` key keeps the
+  exact probe it always had. Fail-closed, matching mint: a predicate that will not
+  compile, faults on the record, or answers anything other than `true` refuses.
+  
+  **The refusal is deliberately indistinguishable.** For a caller who may hold
+  nothing but a token, telling "does not exist" apart from "revoked" apart from
+  "no longer eligible" is an existence oracle, so the redemption refusal is the
+  same undifferentiated `null` a revoked, expired or unknown token already gets —
+  no new error code, no new response branch, and no usage stamp. Over HTTP an
+  ineligible link is answered with the generic `404 INVALID_OR_EXPIRED`, byte-for-
+  byte what a token that never existed receives. The readable reason a link died
+  is written to the server-side log instead.
+  
+  **Operator impact.** Deployments upgrading across this change can feel it
+  immediately: any live link whose record has since moved out of its object's
+  `eligibility` predicate stops resolving, with no revocation event and no grace
+  period. That is the intent — the alternative is a declared policy the platform
+  does not hold — but it is worth measuring before rollout: an object's
+  `eligibility` predicate is the thing to read, and the links at risk are those on
+  records that no longer satisfy it. An operator who needs such links to keep
+  working must widen the predicate; there is no per-link opt-out, deliberately.
+  `redactFields` behaviour, the audience/password gates and objects that declare
+  no `eligibility` key are all untouched and pinned.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable is removed, renamed or re-shaped: `publicSharing.eligibility` keeps its name, its type and its accept-set, and the change is WHEN the platform evaluates it. There is therefore no tombstone for `objectstack migrate meta` to carry and no mechanical rewrite it could perform — a deployment whose links stop resolving must decide whether its own predicate is still the policy it wants, which is an authoring decision no ledger entry can make on its behalf. -->
+- 13bf05d: fix(plugin-sharing): hold `publicSharing.enabled` at redemption, not only at mint (#14033)
+  
+  **BREAKING** runtime behaviour change on a published package: share links that
+  were legitimately minted can now stop resolving without anyone revoking them —
+  every link on an object whose `publicSharing.enabled` is not `true`. Shipped as
+  `minor` under the repo's launch-window convention (a breaking change does not
+  burn a major while the stack is in lockstep). No export is added, removed or
+  re-shaped; the level carries the breaking banner, not a surface change.
+  
+  `ShareLinkService.createLink()` refused to mint on an object whose
+  `publicSharing` block was absent or had `enabled !== true` (422
+  `SHARING_NOT_ENABLED`), and nothing checked the switch again. `resolveToken()`
+  checked `revoked_at`, `expires_at`, the audience gates, the password, record
+  existence and — since #13608 — the block's `eligibility` predicate, then served
+  whatever survived, under the system context, to a caller with no principal at
+  all. So the platform held the block's CHILD predicate as a standing policy while
+  its PARENT switch governed minting only: an author who turned the whole feature
+  off stopped new links and not one existing link, and would have had to narrow
+  the predicate to stop anonymous serving — the opposite of what the surface
+  reads like. Measured before it was changed: a token minted while the block was
+  on kept serving the record in full after the block was turned off.
+  
+  **What changed.** `resolveToken()` reads the object's CURRENT `publicSharing`
+  block on every redemption and refuses when `enabled` is not `true` — before the
+  record is read, before the usage stamp, before any sibling key inside the block
+  is evaluated. Re-enabling the block restores the same tokens: this is a standing
+  policy, not a revocation, and no `sys_share_link` row is touched. How a link was
+  minted buys it nothing at redemption — a link minted under a system context or
+  the service's `permissive` bypass (the system-context ledger's row 37 path) on a
+  switched-off object refuses exactly like one orphaned by an author turning the
+  block off, and an object with no `publicSharing` block at all is the same switch
+  at its default and refuses too. With the block on, `eligibility` (#13608) and
+  the declared `redactFields` (#13856) keep their existing redemption-time
+  behaviour; nothing new is evaluated. An object the engine cannot return a
+  schema for — no `getSchema` on the engine, or an object not registered at the
+  moment of redemption — is `enabled: false` by `getPolicy`'s definition and is
+  refused at redemption: fail-closed, the same definition `createLink` uses. The
+  #13856 entry's "an opted-out object's links keep resolving with the declared
+  redactions" state is superseded: with the block off they do not resolve at all.
+  
+  **The refusal is deliberately indistinguishable.** It is the same answer a
+  revoked, expired, unknown or no-longer-eligible token already gets: the
+  undifferentiated `null` — no new error code, no new response branch, and no
+  usage stamp. Over HTTP a switched-off link is answered with the generic
+  `404 INVALID_OR_EXPIRED`, byte-for-byte what a token that never existed
+  receives. The readable reason (`SHARING_NOT_ENABLED`, with the link, object and
+  record ids) is written to the server-side log at `warn`, where the eligibility
+  refusal already writes its own.
+  
+  **Operator impact — retroactive, on deploy.** Every live link on an object whose
+  `publicSharing` block is currently switched off — or that never declared one —
+  stops resolving the moment this version is deployed, with no revocation event
+  and no grace period. That is the intent: the alternative is a declared switch
+  the platform does not hold. Measure before rollout: the objects to read are
+  those whose `publicSharing.enabled` is not `true`, and the links at risk are the
+  `sys_share_link` rows naming them (`object_name`). To keep such links working,
+  enable the block — and narrow it with `eligibility` / `redactFields` if the
+  feature was off for a reason; there is no per-link opt-out, deliberately.
+  Minting is unchanged: `createLink` still refuses `SHARING_NOT_ENABLED` for an
+  ordinary caller, and the system / `permissive` bypass still mints — what it
+  mints simply does not serve until the block is on. The refusal logs one `warn`
+  line per refused hit and is not latched, so a retroactive deploy with many live
+  links on switched-off objects does not burst the log once and subside: the
+  volume tracks traffic, one line per refused hit, for as long as requests keep
+  reaching those links — until the block is re-enabled or the links are revoked.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable is removed, renamed or re-shaped: `publicSharing.enabled` keeps its name, its type, its default and its accept-set, and the change is WHEN the platform holds it. There is therefore no tombstone for `objectstack migrate meta` to carry and no mechanical rewrite it could perform — a deployment whose links stop resolving must decide whether the block should be on at all, which is an authoring decision no ledger entry can make on its behalf. -->
+- 20293d6: fix(sharing): gate the share-link route probe on `publicSharing.enabled`, at both probe sites (#14637)
+  
+  **BREAKING** runtime behaviour change on a published HTTP path:
+  `GET /api/v1/share-links/:token/resolve` answers `404 INVALID_OR_EXPIRED` where
+  it used to answer `401 NEEDS_PASSWORD` / `401 WRONG_PASSWORD` /
+  `401 SIGN_IN_REQUIRED` / `410 EXPIRED_OR_REVOKED`, for every link whose object
+  has `publicSharing.enabled` switched off. Shipped as `minor` under the repo's
+  launch-window convention (a breaking change does not burn a major while the
+  stack is in lockstep). No published export is added, removed or re-shaped; the
+  level carries the breaking banner, not a surface change.
+  
+  #14033 made `publicSharing.enabled` a standing policy: `resolveToken()` re-reads
+  the object's current block on every redemption and refuses a switched-off link
+  with the same undifferentiated `null` a revoked, expired, unknown or ineligible
+  token gets — because, in that gate's own words, for a caller who may hold
+  nothing but a token a distinguishable "sharing is off for this object" is an
+  **existence oracle**.
+  
+  The HTTP layer above it then re-opened exactly that oracle. Both share-link
+  surfaces run a row probe after `resolveToken()` returns null, to answer with a
+  more useful status, and both answered from the `sys_share_link` row with no
+  knowledge of the object's block. So an anonymous caller could still tell a
+  real-but-switched-off token from an unknown one three ways: a row carrying
+  `password_hash` drew `401 NEEDS_PASSWORD`, the same row with any password drew
+  `401 WRONG_PASSWORD` — including a **correct** password, which is both an oracle
+  and a lie, since that link can serve nothing — and a row with
+  `audience: 'signed_in'` drew `401 SIGN_IN_REQUIRED`. A security property stated
+  in one layer and defeated in the layer above it is worse than one never claimed,
+  because the next reader believes the comment.
+  
+  **What changed.** Both probes read the object's standing policy before they
+  answer from the row, and when the block is off every arm falls through to the
+  generic `404 INVALID_OR_EXPIRED` that unknown, revoked, expired and ineligible
+  tokens already give — byte-for-byte the answer a token that never existed
+  receives. The `410 EXPIRED_OR_REVOKED` arm is included: gating only the two 401
+  arms would leave a third class of link answer and a rule about which arms are
+  gated. An object whose schema the engine cannot answer for is `enabled: false`
+  by `getPolicy`'s definition and is refused the same way — fail-closed, the same
+  definition `createLink` and `resolveToken` already use.
+  
+  The fix lands at **both** sites in one change, because the probe exists twice:
+  `plugin-sharing`'s REST routes, and the `/share-links` dispatcher domain in
+  `@objectstack/runtime` that is the designed primary surface for cloud's
+  per-environment kernels (`registerShareLinkRoutes: false`). Fixing one would
+  have moved the oracle to whichever embedding uses the other.
+  
+  **Nothing else moves.** With the block ON, every refusal is exactly what it was:
+  `NEEDS_PASSWORD`, `WRONG_PASSWORD`, `SIGN_IN_REQUIRED` and `EXPIRED_OR_REVOKED`
+  are unchanged in status, code and message, and a correct password or a signed-in
+  viewer still resolves the record. Mint-time behaviour is untouched, no
+  `sys_share_link` row is written or read differently, and no error code is added
+  or retired.
+  
+  **Consumer impact.** A viewer that branches on the refusal STATUS sees TWO
+  changes, for links on a switched-off object only — and the measured consumer
+  branches on status alone. On the objectui console at `67dadd6`,
+  `apps/console/src/pages/SharedRecordPage.tsx` lines 70-85 dispatch on
+  `res.status` and never on the body's error code, so:
+  
+  - all three 401 arms (`NEEDS_PASSWORD`, `WRONG_PASSWORD`, `SIGN_IN_REQUIRED`)
+    rendered the password prompt and now render the 404 copy, "This link is
+    invalid or no longer available.";
+  - the 410 arm rendered "This link has expired or was revoked." and now renders
+    that same 404 copy.
+  
+  Both shifts are the intended outcome and were accepted with the ruling: a
+  correct password on such a link yields nothing, so prompting for one teaches the
+  holder to open a door that is bricked up, and "expired or revoked" is a claim
+  about a token whose existence the caller must not be able to confirm. Links on
+  objects whose block is on are unaffected — prompt, 410 copy and 200 render
+  included.
+  
+  Maintainer ruling 2026-09-03 (decision batch #17, item 1), verbatim 「同意」,
+  adopting option A over option B (keep the 401 and document the accepted oracle)
+  and option C (gate only the two 401 arms, rejected as proliferation).
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable is removed, renamed or re-shaped: `publicSharing.enabled` keeps its name, type, default and accept-set, and this change is only WHICH HTTP STATUS the route layer answers with while that switch is off. There is no tombstone for `objectstack migrate meta` to carry and no mechanical rewrite it could perform on any consumer — a deployment that wants the 401 affordance back enables the object's block, which is an authoring decision, not a migration. -->
+- 18b53ac: ⚠️ **Published-contract break for external hosts.** The `logger` option on the three
+  PUBLICLY EXPORTED options types — `SharingServiceOptions`, `ShareLinkServiceOptions` and
+  `SharingRuleServiceOptions` — now **requires** a `warn` channel, and its members carry real
+  signatures (`(msg: any, ...rest: any[]) => void`) instead of bare `Function`. A host that
+  constructs any of these services with `{ logger: { info, error } }` compiles today and stops
+  compiling after this release; add `warn` (or drop the `logger` option) to migrate. Nothing
+  about the services' runtime behaviour changes, and no call site inside this package moved:
+  the tightening was measured at ZERO compile errors within `plugin-sharing`, so the whole cost
+  falls on hosts, which is why it is declared here rather than shipped as a patch.
+  
+  Why: #9754 rules that a sink declaring an optional `error` must declare a NON-optional
+  `warn`, so a durability report always has somewhere to land — an optional `error` beside an
+  optional `warn` is a contract that permits silence. These three sinks were red against that
+  rule from the day it was written and were only invisible to its checker until #11069 taught it
+  to read bare `Function` as a channel. The maintainer ruled on 2026-08-24 (#10556) that they
+  tighten rather than stay baselined, shipped `minor` with the break named here.
+  
+  The bare-`Function` spelling was also its own defect: `Function` is not assignable to a
+  concrete signature, so `record-orphan-cleanup.ts` could not tighten its own `MinimalLogger`
+  while these producers stayed loose (#10692). That producer-side blocker is now clear.
+- b70a55d: fix(plugin-sharing): one refused grant no longer aborts a sharing rule's reconcile pass — its stale-row revocations still run (#14754)
+  
+  After #14484 `sys_record_share` is `tenant-scoped` in the #13491 ledger, so on a
+  walled install an organization-less system insert on it is refused loudly with
+  `ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED` (#8844). `SharingService.grant`
+  resolves the organization on every path that can; a platform-global sharing
+  rule (`organization_id = null`, its sweep unscoped) materialising a grant onto
+  an organization-LESS record resolves none, and meets that refusal.
+  
+  `SharingRuleService.reconcile` / `reconcileForRecord` had no per-grant catch, so
+  the refusal propagated and **that rule's pass aborted mid-loop**. Two things
+  were lost, and they are not equally serious:
+  
+  - the remaining grants — recoverable, the next pass writes them;
+  - **the stale-row revocations of that pass** — not recoverable by waiting,
+    because every subsequent pass meets the same organization-less record and
+    dies in the same place. A stale over-grant of that rule therefore persisted
+    indefinitely, and the record kept aborting the pass until it was repaired by
+    hand. That is the security-relevant half.
+  
+  Measured while pinning this, and it sharpens the point: the engine returns
+  organization-less rows **last** in a rule's criteria sweep (the driver's
+  NULL-org compatibility arm is appended to the scoped arm). So a refused grant
+  is nearly always one of the final attempts of a pass, and what an abort
+  destroyed was hardly ever "the remaining grants" — it was almost entirely the
+  revoke loop that runs after the whole upsert loop.
+  
+  Both loops now attempt each grant individually. A refusal is logged with the
+  rule, object, record, recipient and the engine's own code, counted, and the
+  pass **continues** — the remaining grants and, above all, the stale-row
+  revocations still run.
+  
+  **The catch is deliberately narrow.** Only
+  `ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED` is absorbed; every other error
+  rethrows unchanged. A catch-all would swallow real defects and report a pass
+  that "completed" having written nothing. It would also silently retire a
+  reviewed decision: `record-share-organization-stamp.test.ts` deliberately pins
+  the abort on the OTHER error a reconcile pass can meet here — the scoped update
+  half answering `RECORD_NOT_FOUND` for a row stamped with a different
+  organization — which the 2026-09-02 contract review left standing on "loud
+  beats a wrong count". Those three pins are unchanged and still green.
+  
+  **Why `minor` rather than `patch`.** The repair is a bug fix, but it reports
+  through a new key. `reconcile` / `reconcileForRecord` / `evaluateRule` /
+  `evaluateAllForRecord` now return `SharingRuleReconcilePassResult` — the spec's
+  `SharingRuleEvaluationResult` plus `grantsRefused: number` — and that type is
+  newly exported from the package index. Purely additive: the contract in
+  `@objectstack/spec` is untouched, its six declared fields are unchanged, and a
+  consumer typed against `ISharingRuleService` keeps compiling as it did. Same
+  shape as `fix(runtime): tell an action handler when its caller-scope record load
+  was refused` (#14143), which shipped `minor` for the same reason.
+  
+  `grantsRefused > 0` does **not** mean the pass failed. It means the pass met a
+  record it cannot grant on and carried on — which is the whole point.
+  
+  **Wire surface — declared, not lifted.** `grantsRefused` reaches the wire.
+  `POST /api/v1/sharing/rules/:idOrName/evaluate` is a ledgered **SDK** route —
+  `packages/rest/src/rest-route-ledger.ts:390`, the row carrying
+  `disposition: 'sdk'` and `client: 'shares.rules.evaluate'` — and its REST handler
+  passes the service return value through **unfiltered**
+  (`packages/rest/src/rest-server.ts:11108`–`:11109`:
+  `const result = await svc.evaluateRule(req.params.idOrName, context ?? {})`
+  followed by `res.json(result)`). So the seventh key is on the response body every
+  caller of that route already receives. The SDK method declares
+  `SharingRuleEvaluationResult` as its resolved type
+  (`packages/client/src/index.ts:4766`, unwrapped at `:4771` through
+  `unwrapResponse` parameterised on that same type), and that type is the spec's
+  six-field contract — so the **declared client type cannot name the seventh key**.
+  That is a client-type **lag**, not a contract break: the key is additive on the
+  wire, every declared field is unchanged, and a consumer typed against
+  `SharingRuleEvaluationResult` keeps compiling exactly as before. Lifting the type
+  is not this PR's to do — `SharingRuleEvaluationResult` lives in
+  `@objectstack/spec`, a `domain:spec` single-owner file — so the lag is declared
+  here and tracked as the follow-up #14969, which lifts `grantsRefused?: number`
+  (optional) into `SharingRuleEvaluationResult`.
+- 3194c91: ⚠️ **BREAKING (published parameter tightened):** `sweepOrphanedRowsByRecordExistence` —
+  publicly exported from `@objectstack/plugin-sharing` — now types its optional `logger`
+  parameter as `{ info?, warn }` with real signatures (`(msg: any, ...rest: any[]) => void`)
+  and a **required** `warn`, replacing the old `{ info?: Function, warn?: Function }`. A host
+  that passed this function a logger without a `warn` member (for example an
+  `{ info, error }`-only literal) compiles today and stops compiling after this release. The
+  one-line fix: add a `warn` callback to that logger object — or omit the `logger` argument
+  entirely, since the parameter itself stays optional. Nothing about the sweep's runtime
+  behaviour changes, and no call site in this repo moved: both in-package callers forward the
+  owning services' `logger` options, whose `warn` is already required since the producer
+  tightening (`SharingServiceOptions` / `ShareLinkServiceOptions` /
+  `SharingRuleServiceOptions`) shipped in the previous release.
+  
+  Why: every report this sweep emits lands on `warn` — the "could not check whether records
+  still exist", "stopped early" and "revoked N rows" lines — so a logger without a
+  guaranteed `warn` is one the sweep can lose its ONLY output into. That is #9754's
+  permit-silence shape, one module downstream of the producers #10556 tightened, and the
+  maintainer ruled (#10692, 2026-08-25) that this package's logger contracts refuse it
+  loudly at compile time rather than keep it. The bare `Function` members were also their
+  own defect: they documented no call shape and caught no arity mistake. The refusal is
+  pinned at compile time in `logger-required-warn.pin.ts`, which also pins the three
+  publicly exported options types above.
+  
+  Breaking ships as `minor` per the launch-window convention
+  (`scripts/check-changeset-no-major.mjs`).
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A TypeScript parameter type on one published function tightens; no metadata surface is involved — no Zod schema, no `packages/spec` declaration, no authorable key, no stored representation — so `objectstack migrate meta` has nothing to visit and no conversion-layer entry could replay anything. The affected caller is host CODE, and the compiler names the exact argument at the exact call line on upgrade, which is more precise than a ledger entry; the repair is adding a `warn` callback to that logger object. The sibling host repo objectui was grepped at claim time (ref 194fae18): zero imports of this package and zero warn-less logger literals, so no known caller has code to rewrite. -->
+- 65759ba: fix(plugin-sharing): the by-id write denial renders through the Operation
+  Message Catalog instead of a hardcoded English sentence (#12260, the consumer
+  half of the key #12493 landed)
+  
+  A user holding object-level allowRead + allowEdit — and no `modifyAllRecords` —
+  PATCHed a record they do not own on an object declaring
+  `sharingModel: 'public_read'` with `access: { default: 'private' }`. The sharing
+  middleware refused, correctly, and the client showed the server's reason
+  verbatim to the end user: one hardcoded English sentence naming the object's API
+  name and the row's opaque id. In a fully Chinese deployment that was the only
+  thing the user was told about why their save failed.
+  
+  The refusal now renders through the shared Operation Message Catalog in
+  `@objectstack/spec/system` under the key `record_write_denied` that #12493
+  landed for it — the same mechanism `plugin-security`'s record-level denial
+  already uses, which is exactly the comparison the report drew: the same "I can
+  see this record but cannot change it" situation showed human language or raw
+  English depending on which layer refused. Same resolution ladder (deployment
+  override → the caller's locale → `en` → the key), same guarantee that a
+  misbehaving i18n service cannot turn a 403 into a 500. All four platform
+  locales (`en`, `zh-CN`, `ja-JP`, `es-ES`) ship copy that sends the reader to the
+  record's owner or an administrator instead of dead-ending them.
+  
+  `record_write_denied` is deliberately not `record_access_denied`: this gate
+  fires on a row the READ path already admitted, so "You do not have access to
+  this record" would be false the moment it rendered. It is one key for BOTH write
+  verbs — the user's situation and remedy are identical for `update` and `delete`.
+  
+  `buildSharingMiddleware` gains an optional third argument, a lazily resolved
+  `II18nService.t`-compatible lookup wired by `SharingServicePlugin`, because the
+  i18n service is contributed by another plugin and may start later. It is what
+  makes the override address the catalog documents,
+  `errors.record_write_denied`, take effect for this emitter. The argument is
+  additive: every existing caller passes two and is unchanged, and a stack with no
+  i18n service still renders the built-in catalog in the caller's locale.
+  
+  **Not changed: who may write.** The gate is byte-identical — ownership, write
+  depth, an edit-level share for `update`, Modify All Data — and the app-authored
+  RLS deferral ahead of it is untouched. The `FORBIDDEN:` prefix the REST layer
+  classifies 403 on is untouched, and so is the ADR-0111 D10 `delete`-verb
+  diagnostic breadcrumb. The verb, object and row id the old sentence carried are
+  now developer facts on the error's `developerMessage` and `details` and in the
+  log, where a developer reads them and a user never does.
+
+### Patch Changes
+
+- 6a180e4: fix(core,rest,services)!: a permission-store read failure now fails LOUD instead of resolving as an authenticated caller holding zero capabilities (#13279)
+  
+  **BREAKING** runtime behaviour change on the shared authorization resolver,
+  shipped as `minor` under the repo's launch-window convention.
+  
+  `resolveAuthzContext`'s per-read helper `tryFind` answered a THROWN read exactly
+  the way it answered an EMPTY one: `[]`. So an outage of the permission store
+  resolved as a well-formed context for an authenticated principal holding no
+  capabilities, and the package-management door answered
+  `403 FORBIDDEN` — "Reading packages requires the `studio.access` or
+  `setup.access` capability." That answer was measured byte-identical
+  (`JSON.stringify` equal, against a control that separates two answers which do
+  differ) to what a caller who genuinely holds nothing receives. An administrator
+  was told they lack a capability, during an outage of the store that holds the
+  capability.
+  
+  Maintainer ruling 2026-08-30, verbatim 「第一批其余同意」: `tryFind` 区分「无行」
+  与「读失败」,读失败 fail-loud —— 权限库不可达时不再解析为「已认证零能力」,而是
+  响亮拒绝(与真实能力拒绝的 403 可区分)。
+  
+  Second maintainer ruling the same day (第 5 场总监席决裁批 #9, verbatim 「同意」),
+  after implementing the first one showed that "the read failed" is two facts:
+  采**选项 A** —— 把 `isMissingTableError` 从 `@objectstack/metadata` 迁至
+  `@objectstack/types`(core 已依赖),metadata 保留 re-export 兼容;`tryFind` 仅对
+  **未被判定为「表未 provision」**的读失败抛 `AuthzStoreUnavailableError`。
+  
+  **What changed.** A permission-store read that is issued and throws now raises
+  `AuthzStoreUnavailableError`, which carries the EXISTING ADR-0112 wire code
+  `SERVICE_UNAVAILABLE` and status `503`. No code is added to the closed wire
+  vocabulary and no response envelope gains or loses a key — only which declared
+  code an outage selects. Doors that map thrown errors through
+  `resolveThrownHttpError` answer 503 with no per-door change.
+  
+  **What did NOT change**, and is pinned:
+  
+  - A reachable, genuinely EMPTY store (reads return no rows) still resolves to
+    zero capabilities.
+  - A genuine capability denial still answers `403 FORBIDDEN` with its message.
+  - An ABSENT engine (`ql` unwired, so no read is ever issued) still resolves to
+    an empty-but-valid envelope.
+  - Anonymous requests never reach the store, so an outage cannot make them loud.
+  - A REAL engine whose `sys_*` tables were never provisioned resolves to zero
+    capabilities, quietly — pinned to be byte-identical to the empty-store
+    envelope, in every dialect spelling and in the production wrapper shape where
+    the driver's phrase is on `cause` rather than the outer message.
+  
+  **The boundary between the two kinds of read failure.** An earlier revision of
+  this changeset claimed "embedders without a data plane are unaffected". That
+  claim was too broad; it is retracted here, and the gap it named is now closed
+  rather than merely disclosed. A read also throws when the table was never
+  PROVISIONED — a real engine, wired and reachable, whose `sys_*` tables were
+  never created — and that is a supported deployment shape, not an outage. There
+  "zero capabilities" is the TRUE answer rather than a fabrication: nothing is
+  provisioned, so nothing was withheld. Only an UNREACHABLE store — the ruling's
+  own word 不可达 — leaves the capability set unknown, and only an unknown answer
+  may not be reported as a denial.
+  
+  Treating the two alike was measured, not theorised: it turned four CI suites
+  red, all from `no such table` on `sys_user` / `sys_member` /
+  `sys_user_position` / `sys_user_permission_set`. Ordinary CRUD in
+  `@objectstack/client` answered `503`; batch validation errors that owe `400`
+  answered `503`, because authorization refused before validation ran; runtime
+  notifications answered `401` where authenticated callers must be served `200`;
+  and two `.integration.test.ts` noise guards reported that the driver and engine
+  diagnostics for `sys_position` stopped being emitted — the eager throw aborted
+  the resolution before that later read was ever issued, so a change made to stop
+  a failed read being silent had made two other channels silent.
+  
+  `tryFind` therefore raises `AuthzStoreUnavailableError` only for a read failure
+  that is NOT positively identified as an unprovisioned table.
+  
+  **`isMissingTableError` moved to `@objectstack/types`.** The classifier that
+  draws that boundary already existed and was already right — driver-code based
+  rather than prose-sniffing, documented so that "cannot say" never means "be
+  loud". It lived in `@objectstack/metadata`, which DEPENDS ON `@objectstack/core`,
+  so the resolver could not import it. Rather than keep a second copy of a
+  security-relevant predicate, the ruling relocated the one classifier to
+  `@objectstack/types` — the package core already depends on, and the repo's own
+  stated Home rule for a cross-package error predicate ("every consumer of the
+  question already depends on it, so adopting the predicate never adds an edge",
+  `packages/types/src/unique-violation.ts`). `@objectstack/metadata/errors` still
+  exports `isMissingTableError`, re-exported from the new home, so no consumer of
+  that published subpath changes.
+  
+  Its sibling `isSchemaAlreadyExistsError` moved with it — the two are not two
+  modules but two signatures over one matcher, and separating them would have
+  meant re-rolling the matcher, which is the duplication the module exists to
+  prevent. Both are now exported from `@objectstack/types`; the metadata subpath
+  deliberately still publishes only `isMissingTableError`, which is the only one
+  anything imports through it.
+  
+  ⚠️ **Signed-off risk, recorded because it is load-bearing.** Gating loudness on
+  a driver-error predicate was approved with its false-positive direction stated:
+  mis-reading a genuine outage as "table not provisioned" silently restores the
+  quiet 403 this change removes, with no thrown error and no other failing test.
+  That direction is accepted, not overlooked — the predicate keys on driver codes,
+  SQLSTATEs and errnos first, excludes the known superstring traps up front, and
+  returns `false` for anything it does not positively recognise, so an
+  unrecognised outage stays loud by default. The risk is written beside the
+  predicate in `resolve-authz-context.ts` and both directions are pinned by name
+  in `authz-store-unavailable.test.ts`. ⛔ Do not widen `isMissingTableError` to
+  make a first boot quieter: every widening moves outages into the quiet branch.
+  
+  **All-transport, not just REST.** Every transport authorizing through
+  `resolveAuthzContext` inherits this. Six of the eight production transports
+  wrapped the call in a fail-closed `catch` that would have re-silenced the
+  outage — measured, not assumed: with the resolver loud but the nets untouched,
+  the package door answered `401`, i.e. the outage merely changed disguises. Those
+  `catch` blocks now re-raise via `isAuthzStoreUnavailableError` and keep their
+  previous behaviour for every other fault. The transport set is rebuilt from
+  source and audited for set equality on every test run, so a transport added
+  later cannot inherit the old silence unnoticed.
+  
+  Callers that treat any throw from `resolveAuthzContext` as "anonymous" should
+  re-raise `isAuthzStoreUnavailableError(err)` instead: degrading it restores the
+  disguise this removes.
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/core/src/security/resolve-authz-context.ts#ResolvedAuthzContext, packages/core/src/security/authz-store-unavailable.ts#AuthzStoreUnavailableError) The breaking surface is runtime TypeScript in `@objectstack/core`'s security module and nothing else: `resolveAuthzContext` stops always-resolving and raises `AuthzStoreUnavailableError` when a permission-store read is issued and throws. NO metadata surface is touched in either direction. No Zod schema changes, no `packages/spec` declaration is added or removed, no authorable key moves, no stored row shape changes, and no object definition is edited — a customer's metadata app is byte-for-byte unaffected, so `objectstack migrate meta` has nothing to visit and there is no tombstone to mint. The wire vocabulary is likewise untouched: `SERVICE_UNAVAILABLE` is an EXISTING `StandardErrorCode` member that `HttpStatusErrorCodeMap` already maps to 503, so this change only selects a different DECLARED code for an outage rather than adding one. Both named symbols resolve at HEAD as exported declarations whose files are not `*.zod.ts`, are not under `packages/spec/src/contracts/`, are not object definitions and are not `z.input` projections; neither is referenced in code by any metadata surface (the `packages/spec` hits for `resolveAuthzContext` are comment prose describing the envelope, which this gate masks). The channel that reaches an affected consumer is therefore code review and this changeset, never the upgrade guide: a ledger entry could not express "your fail-closed catch should re-raise this error", because there is no metadata for a migration to rewrite. -->
+- e560b4d: Tenant-screen the `sys_business_unit_member` reads, and warn when an active business-unit rule grants nobody.
+  
+  ⚠️ This entry originally also announced that `BusinessUnitGraphService.orgScope` had been widened to the platform's null-inclusive `(organization_id = ? OR organization_id IS NULL)` screen, fixing the case where a sharing rule naming a **seed-written** business unit granted nobody. That half was **reverted before 17.3 was cut** and does not ship: it re-implemented, a second time and in a second place, the predicate `SqlDriver.applyTenantScope` already owns — the duplication the v18 org-ownership decision (PR #14976) exists to retire — and it had not been released. `orgScope` keeps the strict `organization_id` equality 17.2.0 ships, so a rule naming a seeded unit still expands to nobody. That defect is fixed structurally on the v18 line by the v18 org-ownership decision (PR #14976), C1 (the Default Organization exists before application seed datasets load, and the seed loader stamps `sys_business_unit` seeds). What follows is the part of this change that DOES ship.
+  
+  The member reads are now tenant-screened, which they were not before. Both `expandUnitMembers` and `expandUsers` queried `sys_business_unit_member` with no organization predicate at all, under a system context that carries no tenant either, so the strict unit screen was the only thing keeping an org-stamped rule away from that unscoped query. This matters independently of the unit screen: other organizations' member rows sit on org-stamped — visible — units too, so a strict unit screen narrows which units are reachable but does not close the unscoped member read. The member screen is strict rather than null-inclusive on purpose: seed replay and elevated system writes both leave `sys_business_unit_member.organization_id` NULL, so a NULL there means unknown tenancy rather than platform-global, and an org-scoped rule does not grant to it. The sibling recipient widths already read their membership rows this way.
+  
+  An active business-unit rule that expands to no recipients now warns once per rule per process, naming the rule, the object, the recipient kind, the unit and the organization. That is what keeps the remaining seed-data symptom observable at the moment it happens, rather than surfacing only as "the right people cannot see the record".
+- 35202f1: fix(plugin-auth,plugin-sharing): a refused bootstrap write stops reading as a clean one (#12981)
+  
+  Two boot-time seams answered a REFUSED write exactly the way they answer a
+  write there was no need to make. Nothing else failed on either path, so the
+  deployment kept looking healthy — the durability class AGENTS.md separates
+  from the functional one, and the class `check-durability-degradation-log-level`
+  exists for and, at these two sites, structurally cannot see (it matches callee
+  NAMES from an 18-entry vocabulary, and a seeder reaching storage through
+  `ql.insert` is not in it; a green there means NOT MEASURED for the site, never
+  "level approved").
+  
+  **`plugin-auth` — `ensureDefaultOrganization` reported at `warn`.** A refused
+  `sys_organization` or `sys_member` insert leaves the platform admin with no
+  organization: under multi-org the default `tenant_isolation` RLS policy filters
+  their console to zero rows, and under single-org better-auth has no active org
+  to resolve, so there is no way to add a user at all (ADR-0081 D1). Both lines
+  now report at `error` and each names the consequence AND the remedy, per
+  "Degradation log levels". `BootstrapLogger` gains an OPTIONAL `error`
+  (`message, error?, meta?` — the spec `Logger` arity, so the kernel logger
+  satisfies it as-is) beside its already-required `warn`; the fallback to `warn`
+  is mandatory and lives in one helper so no site can forget it. Additive: a host
+  passing `{ info, warn }` compiles and behaves exactly as before, and gets the
+  same line on the `warn` channel.
+  
+  **`plugin-sharing` — `backfillPrimaryBu` printed NOTHING when every row was
+  refused.** Its per-row `catch { }` counted nothing and its report was gated on
+  `updated > 0`, so a pass in which every `sys_user` write was refused emitted
+  byte-identical output to a pass with nothing to do, while every affected user
+  kept a stale or absent `primary_business_unit_id` and every sharing rule keyed
+  on the primary business unit evaluated against the wrong value. Refusals are
+  now counted, reported once with the consequence and the remedy, and the summary
+  branch is `updated > 0 || refused > 0` — the same suppressor, repaired the same
+  way, as `permission-set-drift.ts` in #12970. `backfillPrimaryBu` now answers
+  `{ updated, refused }`; the added field is additive and its only in-tree caller
+  ignores the result.
+  
+  `patch` rather than `minor` for both: no entry-barrel surface is added, no
+  command or flag, and neither change can turn a previously accepted call into a
+  rejected one. The `plugin-sharing` report deliberately stays on `warn` even
+  though the consequence is durability-shaped — `OptionalSharingLogger`'s own
+  header forbids growing an `error`, and giving that function a stricter sink
+  means requiring `warn` on a publicly exported shape, which
+  `scripts/optional-error-sink-contract.baseline.json` records in as many words
+  as #10556's contract call. What is fixed here is the SILENCE, which needed no
+  contract at all; the LEVEL belongs to that card.
+- 30928a6: fix(i18n): read the provenance companion at serving time, not only record it (#12642)
+  
+  Maintainer ruling #12069 Option A (#11671) landed translation provenance as
+  **two** halves: `os i18n extract --source-hashes` RECORDS which source revision
+  a generated leaf is still a byte copy of, and `withSourceFallback` READS those
+  records at serving time and substitutes the current source for a leaf whose
+  source has moved underneath it. The recording half was then rolled out to every
+  bundle set. The reading half was not — measured on `main`: provenance
+  **recorded in 9 of 9** bundle sets and **read at serving time in 1**.
+  
+  The other eight assembled their `TranslationBundle` straight from the raw
+  generated modules and never consulted the companion sitting beside them, so
+  they recorded the drift and went on serving the superseded draft. Nothing said
+  so: `check:i18n` compares key sets and they still matched, `check:i18n-coverage`
+  counts a present leaf as translated, and `check:i18n-stale-fill`'s cross-locale
+  rule needs a SECOND locale holding the same stale bytes before it can testify.
+  The measured case had one locale and no second witness.
+  
+  All eight are wired here, in the shape `@objectstack/platform-objects`'s own
+  `metadata-translations/index.ts` uses — the committed
+  `<locale>.source-hashes.generated.ts` passed as the fourth argument, the third
+  left `undefined` because these sets have no hand-authored sections. Provenance
+  is now recorded in 9 of 9 sets and served in 9 of 9.
+  
+  `@objectstack/plugin-webhooks` was the last of them and is the only one whose
+  manifest changed: `withSourceFallback` lives in `@objectstack/platform-objects`,
+  which that package did not declare. It was **already in that package's install
+  closure** through `@objectstack/service-messaging`, so the edge declares a
+  resolution that already resolved rather than adding a package to the graph —
+  and relying on it undeclared would have been a phantom dependency under this
+  repo's strict package manager.
+  
+  `check:i18n-stale-fill` gains a second verdict, **UNSERVED PROVENANCE**, so this
+  cannot silently come apart again: a bundle set that commits a companion and
+  does not consult it at serving time now fails the build, including a tenth set
+  that lands tomorrow.
+  
+  **Graded `patch`, and the grade is the interesting part.** No API changes, no
+  new exported surface, and no key set moves — substitution was chosen over
+  deletion precisely so key-set claims stay put (ruling #8765 Option B). What
+  changes is which STRING a stale leaf serves. On this tree that is **zero
+  leaves**: a record is only ever written for a leaf that IS a byte copy of the
+  current source, so the companions arrive 0-stale by construction. The change is
+  in what happens the next time a source string moves — the reader sees the
+  English source rather than a superseded draft of it, which is the same
+  degradation an untranslated key already produces and not a new state.
+- de47336: chore(i18n): roll the generated-leaf provenance companion out to the remaining bundle sets (#12559)
+  
+  `os i18n extract --source-hashes` (#11671, maintainer ruling #12069 Option A)
+  records, per generated translation leaf, the digest of the source revision that
+  leaf is **still a byte copy of** — the one signal that tells a stale fill from a
+  real translation once the source has moved and the two stopped being
+  distinguishable by value. It shipped opt-in, and exactly one of the nine i18n
+  bundle sets opted in. A landed detector, a changeset announcing it and a green
+  gate read together as *"generated translation staleness is now caught"*; for
+  eight of nine sets it was not, and the thing making it not caught was a single
+  absent flag in an extract config — invisible from all three of those surfaces.
+  
+  **All eight remaining sets now opt in** — `plugin-approvals`, `plugin-audit`,
+  `plugin-security`, `plugin-sharing`, `plugin-webhooks`, `service-messaging`,
+  `service-realtime`, `service-storage`. Each documents `source-hashes` in its
+  extract config and commits three `<locale>.source-hashes.generated.ts`
+  companions, produced by the same extract run as the bundles they sit beside
+  (`check:i18n` compares them byte-for-byte, so they cannot be written by hand).
+  `check:i18n` now reports 7 bundles per set where it reported 4, and 11 for
+  `platform-objects` where it reported 8.
+  
+  **Records count what is currently RECORDABLE, never what is covered.** A record
+  is written only for a leaf that *is* right now a byte copy of the current
+  source, so a fully translated locale starts with an empty table — which is the
+  instrument armed, not an instrument that measures nothing: the entry appears by
+  itself on the first extract after a leaf becomes a fill. Measured at this
+  commit, per set over its three translated locales: `service-messaging` 289,
+  `plugin-approvals` 61, `plugin-security` 33, `plugin-webhooks` 20,
+  `plugin-audit` 8, `service-storage` 7, `plugin-sharing` 1 (es-ES only; zh-CN and
+  ja-JP are fully translated and start empty), `service-realtime` 0 (all three
+  locales fully translated). **419 records written across the eight sets, 0
+  stale.**
+  
+  **One extractor fix the rollout forced.** `--source-hashes` had one user, and
+  that user commits both generated sections, so the interaction with
+  `--no-metadata-forms` had never been exercised. The provenance table is computed
+  over every generated section the extractor builds; the eight sets here commit no
+  metadata-forms bundle, and their `metadataForms` subtree — absent from their
+  merge baseline — arrives as a fresh `--fill=default` copy of `en`, so every leaf
+  of it was recordable. First measured on `plugin-audit`: **763 records, of which
+  2 were its own objects and 761 were digests of the Studio metadata-form baseline
+  `@objectstack/platform-objects` owns.** Those records are unreadable in the
+  package holding them and would have rewritten all 24 companions on any unrelated
+  `*.form.ts` change in `packages/spec` — the cross-package coupling ADR-0029 D8
+  and every `bundle-ownership.test.ts` keep out of committed bundles. The
+  companion now covers exactly the sections a run commits, decided by the same two
+  predicates that decide the bundle files. `platform-objects` commits both, so its
+  three committed companions are byte-for-byte unchanged.
+  
+  **Grade: `patch`, and behaviour on the day it lands is unchanged for every
+  leaf.** A record is written only where a leaf is currently a byte copy of the
+  **current** source, so every record written equals the current digest and none
+  of them can be stale; the mechanism cannot arrive red. No committed translation
+  bundle changed a byte, no public API moved, and no leaf's rendered text changed.
+  `narrowToCommittedSections` is new but internal to `@objectstack/cli` — the
+  package's entrypoint does not re-export the extractor utils.
+  
+  **What this does not do**, stated so the boundary is not inferred wrongly a
+  second time: these eight sets now *record* provenance. Reading it at serving
+  time is `withSourceFallback`, and that is still wired in
+  `@objectstack/platform-objects` alone — so a stale fill in one of the eight is
+  now recorded and reportable, but not yet substituted at runtime. Tracked
+  separately.
+- 9e72090: fix(sharing): honour the declared `organizationId` in `managerOf` (#10231)
+  
+  `ITeamGraphService.managerOf(userId, organizationId?)` declares an organization
+  parameter. `TeamGraphService.managerOf` spelled it `_organizationId` and
+  discarded it, and the `BusinessUnitGraphService` standalone fallback read
+  `sys_user` the same unscreened way — a declared-but-unenforced parameter on a
+  security seam, while `expandRoleUsers` on the same class applied
+  `organization_id` to its own read.
+  
+  Both now apply the screen #10153 landed for the identical column
+  (`sys_user.manager_id`) on the approvals side: a manager who is **provably**
+  outside the caller's organization — membership rows exist for him, none of
+  them in that organization — is dropped. The read is `sys_member`, because
+  `sys_user` is the global better-auth identity table and carries no
+  `organization_id` at all; filtering the `sys_user` read on a column that does
+  not exist would match nothing and silently return `null` for every lookup.
+  
+  The screen is fail-open on an ABSENT tenancy fact (no membership rows, or the
+  membership read failed) and issues no query at all when no organization is in
+  play, so callers that pass nothing — which is how the parameter is used today —
+  are byte-identical to before. The manager cache key is now organization-
+  qualified; a user-keyed cache would have served one screened `null` to every
+  unscoped reader behind it.
+- ad54eb3: feat(tooling): onboard all 14 `packages/plugins/**` packages into `check:test-typecheck` (#14062)
+  
+  Every plugin package now has a `tsconfig.test.json` compiled by the shared
+  `check:test-typecheck` gate, and its `typecheck` script names it. Before this,
+  the shrink-only `test-typecheck-debt.json` ratchet said **nothing** about a
+  third of the repo's runtime surface: 14 packages, 1 `tsconfig.test.json`
+  (`plugin-security`, wired directly to `tsc` rather than to the instrument), and
+  0 `check:test-typecheck` scripts.
+  
+  Onboarded as a family by the director ruling of 2026-09-01 on #14062
+  (maintainer verbatim: 「同意」), which also carries the #5286 maintainer
+  authority the starting ledgers need. The smaller branch triage recommended —
+  declare the instrument's scope and re-site the two compile-time pins — was
+  recorded as considered and not taken: an instrument silent over a third of the
+  runtime surface is a hole readers generalise across, and that costs more than
+  fourteen tsconfigs.
+  
+  **Measured, not assumed** (at `e80889095`, workspace closure built first). Four
+  packages carry residue and therefore a starting ledger — plugin-approvals 324
+  over 8 files, plugin-auth 94 over 10, plugin-sharing 3 over 2,
+  knowledge-ragflow 3 over 1. The other ten measure **zero** and deliberately get
+  no ledger file at all: the gate reads a missing ledger as `{ entries: {} }`, so
+  any error there is red immediately with no entry to be added to — strictly
+  stronger than a ledger holding nothing, and the call `plugin-security` had
+  already recorded for itself.
+  
+  ⛔ **This does not repair 345 type errors.** Per ruling item 3 it makes the
+  ratchet able to *see* them; paydown follows the ratchet's own shrink-only
+  discipline on its own cards. No test file is edited here.
+  
+  Two corrections to the finding's own prose, both measured: the exclusion is
+  narrower than "no plugin package compiles its tests" — 9 of the 14 already
+  compiled their tests inside the `typecheck`-invoked build config, at zero
+  errors — and `exec-context-annotation.pin.ts` is a `.pin.ts`, which
+  `**/*.test.ts` never excluded, so its directives were already live. The pin
+  this change genuinely makes real is
+  `plugin-approvals/src/manager-org-screen-parity.contract.test.ts`, which no tsc
+  program had ever read.
+- ab47816: revert(plugin-sharing): drop the NULL-inclusive business-unit screen added after 17.2.0
+  
+  17.3 does not ship the NULL-inclusive business-unit screen added after 17.2.0;
+  #14547 remains as in 17.2.0 and is fixed structurally in v18 (the v18 org-ownership decision (PR #14976), C1: the
+  Default Organization exists before application seed datasets load, and the seed
+  loader stamps `sys_business_unit` seeds).
+  
+  `BusinessUnitGraphService.orgScope` briefly read
+  `$or: [{ organization_id: <rule org> }, { organization_id: null }]` so that an
+  org-stamped sharing rule could name a seeded (org-less) `sys_business_unit`
+  row. It is restored to the strict `organization_id = <rule org>` equality
+  17.2.0 ships. That shape re-implemented, a second time and in a second place,
+  the predicate `SqlDriver.applyTenantScope` already owns — the duplication
+  the v18 org-ownership decision (PR #14976) exists to retire (#10103 cause 1) — and it had not been released, so
+  reverting costs nothing while shipping it would have owed v18 a breaking change
+  and a migration.
+  
+  The other half of the same change is KEPT and is not touched:
+  `BusinessUnitGraphService.memberScope` still screens both
+  `sys_business_unit_member` reads with a strict equality. Those reads previously
+  carried no organization predicate at all, so an org-stamped rule reaching any
+  visible unit collected every tenant's membership rows hanging off it; a strict
+  unit screen narrows which units are reachable but does not close that, because
+  other organizations' member rows sit on org-stamped units too.
+  `SharingRuleService.warnOnEmptyUnitExpansion` is also kept: it is what keeps the
+  remaining #14547 symptom loud instead of silent.
+- 67192ce: fix(plugin-sharing): an object's declared `publicSharing.redactFields` keep applying to share-link redemption after the object opts out (#13856)
+  
+  `ShareLinkService.getPolicy()` collapsed to an EMPTY policy whenever the
+  object's `publicSharing` block had `enabled !== true` — `redactFields: []`
+  included. A link minted while the object was opted IN and redeemed after it
+  was opted OUT therefore kept resolving and started serving the very fields the
+  object declares redacted: turning the feature OFF made the anonymous endpoint
+  serve MORE data than it did while the feature was ON. Fail-open in the wrong
+  direction, and wrong under either answer to the standing-policy question.
+  
+  The declared redaction set is now read from the object's declared
+  `publicSharing` block regardless of `enabled`, so opting out can never widen
+  what an existing token serves. Anonymous redemptions on opted-out objects that
+  previously received the declared-redacted fields stop receiving them — that
+  narrowing is this fix's intent, declared here rather than smoothed over.
+  
+  Unchanged, deliberately:
+  
+  - the `enabled: true` path (declared ∪ per-link union, byte-identical);
+  - an object with no `publicSharing` block at all (no redaction set sprouts);
+  - the per-link `redact_fields` half of the union;
+  - the mint-time opt-in gate (`SHARING_NOT_ENABLED`, 422) and the #13608
+    redemption-time eligibility gate;
+  - whether an already-minted link should still RESOLVE at all once
+    `enabled` is false — that ruling is pending in #14033 and is not
+    implemented here in either direction.
+- 953a81f: fix(plugin-sharing): a refused `use_count` / `last_used_at` stamp in `resolveToken` is reported as a durability degradation, once, instead of being swallowed (#12981, batch 9)
+  
+  `ShareLinkService.resolveToken` stamps `use_count` and `last_used_at` on
+  `sys_share_link` after every successful resolution. The stamp's `catch` was
+  empty ("usage telemetry is a nice-to-have"), so a storage refusal — a
+  read-only database, a missing table, a broken system-context write path —
+  left the link resolving normally while both counters silently froze.
+  
+  Those counters are a persistence CLAIM, not telemetry: `sys_share_link`
+  declares `use_count` as "Incremented by resolveToken on every successful
+  resolution" and `last_used_at` as "Stamped by resolveToken; used by the
+  dashboard to highlight active links", and the shipped `active_links` grid
+  lists both. After a swallowed refusal an administrator read a count the
+  system's own declaration defines, wrong, with no signal anywhere — the
+  AGENTS.md "Degradation log levels" shape (persisted state and runtime state
+  disagree while nothing looks broken).
+  
+  **What changed.** The refusal is now reported through the service's existing
+  `logger` option — the published `{ info?, warn, error? }` shape — at `error`,
+  falling back to the guaranteed `warn` channel when the host sink declares no
+  `error`. The line names the consequence (both counters are not being
+  persisted; links keep resolving; the `active_links` grid under-counts), the
+  fix (resolve the storage refusal named as the cause; refused stamps are not
+  replayed), and the cause. It is emitted **once per service instance**, at the
+  first refusal, never per request — `resolveToken` runs on every public
+  share-link request, and a line per refused stamp would be the flood the rule
+  forbids.
+  
+  **What did NOT change**, and is pinned: the resolution itself (the holder is
+  still served, `redactFields` is unchanged, `resolveToken` never throws for a
+  refused stamp); the success path (`use_count` still increments and
+  `last_used_at` is still stamped on every successful resolution); the public
+  HTTP projection; and `ShareLinkServiceOptions` — no member is added or
+  widened, so hosts compile exactly as before.
+- 6c3f9f5: fix(plugin-sharing): the record-share `$in` guard now tests `record_id` before `String()` coerces it (#13551)
+  
+  `buildReadFilter` and the bulk-write half of `buildWriteFilter` each turned the
+  `sys_record_share` rows granted to the caller into the members of a security
+  predicate, `{ id: { $in: [...] } }`, with the same expression:
+  
+  ```ts
+  grants.map((g: any) => String(g.record_id)).filter(Boolean)
+  ```
+  
+  `.filter(Boolean)` reads as "drop rows whose `record_id` is nullish". It cannot:
+  `String(null)` is `'null'` and `String(undefined)` is `'undefined'`, and both are
+  truthy. The only value that spelling could drop was the empty string, so the
+  guard was dead for exactly the case its spelling advertised, and a
+  `sys_record_share` row with a nullish `record_id` put the literal string
+  `'null'` into the emitted `$in`.
+  
+  **Direction — this was not an open bypass, and the repair is not a bypass fix.**
+  The emitted member is a bogus id that matches no row on any backend, and both
+  sites are positive polarity (an OR-ed branch beside the owner match, never
+  negated), so a corrupt row lost its grant rather than widening anyone's scope.
+  It also took an already-corrupt row to reach at all. What was actually broken is
+  the guard's honesty: a reader — or an audit asking which security paths already
+  handle nullish ids — would have counted these two sites as covered when they
+  provably were not.
+  
+  Both sites now share one module-private helper that tests the raw column value
+  first and coerces after, the shape the sibling id-list guards already use
+  (`plugin-sharing`'s own `sharing-rule-service.ts` and `primary-bu-projection.ts`,
+  `core`'s `resolve-authz-context.ts`, `plugin-security`'s controlled-by-parent
+  `masterIds`, `objectql`'s master-detail parent resolution). Factoring it into one
+  helper is deliberate: the expression stood in two places, and repairing one would
+  have left the other advertising a guarantee it does not keep.
+  
+  The non-null path is unchanged. Every non-nullish value still stringifies exactly
+  as it did — a driver-numeric primary key still becomes its decimal string — and
+  the empty string, the one value the old spelling really did drop, is still
+  dropped. The only behavioural difference is that rows with a nullish `record_id`
+  now contribute no member at all; when they were the *only* grants, the filter
+  collapses to the plain owner match instead of OR-ing in a branch that matched
+  nothing.
+- 8d06347: The sharing-rule seeder's skip WARN now names WHY a declared rule's CEL `condition` did not translate: `compileCelToFilter`'s `reason` (the aggregatable category) and `detail` (the concrete refused shape, variable path, or parse bound) are carried into the log meta instead of being collapsed to `null` one line before the log that needed them. `celToFilter` keeps its published `Record | null` signature and delegates to the new `celToFilterOutcome` sibling (the `plugin-security` rls-compiler shape from #13942, one seam over). Skip semantics are unchanged — an unlowerable or match-all condition is still never seeded as a permissive match-all rule (ADR-0049).
+- aae0cb3: fix(plugin-sharing): let system writes materialize sharing rules — drop the `isSystem` skips in `bindRuleHooks` (#13533)
+  
+  A criteria sharing rule declares a promise: `status == "approved"` means the
+  named recipients can see the record. `bindRuleHooks` did not keep that promise
+  when the platform was the writer. Its `afterInsert` and `afterUpdate` hooks
+  returned early on `ctx.session.isSystem`, so a system-context write that moved a
+  record INTO a rule's criteria materialized no `sys_record_share` row at all.
+  
+  The path that made this a real outage rather than a boot-time curiosity is
+  approval write-back. An approval node with `lockRecord: true` mirrors the
+  decision onto the subject record under a system context — that is the only write
+  that can land while the record is locked — so a manager approving a leave
+  request produced exactly the skip above. A teammate who relied on the rule could
+  not see the record, and nothing repaired it until somebody ran
+  `POST /api/v1/sharing/rules/:id/evaluate` or restarted the server. The failure
+  was invisible from a manager or admin view, which reads through the profile's
+  `viewAllRecords` grant and never consults a sharing rule at all.
+  
+  **What changes.** A system write now materializes exactly as a user write does —
+  grants on the way into a rule's criteria, revokes on the way out, per record,
+  synchronously with the write. Three early returns are gone: the two on
+  `afterInsert` / `afterUpdate`, and the one on the `beforeUpdate` / `beforeDelete`
+  row-set stash they depended on (without that stash an `after` hook reads the row
+  set as *unbounded*, which would have turned every single-row system update into
+  an object-wide revoke plus an asynchronous re-grant). The INFO line that
+  announced the skip — `[sharing-rule] sharing materialisation skipped for isSystem
+  writes; re-evaluate rules or restart to backfill` — is retired with it, along
+  with the `SYSTEM_WRITE_SKIP_NOTICE` constant, which was not exported from the
+  package entry point. Operationally this means seed- and import-time system writes
+  on rule-covered objects now pay per-record sharing evaluation at write time — the
+  cost a user write of the same shape has always paid, with the
+  `kernel:bootstrapped` backfill still reconciling behind it.
+  
+  **What does not change.** `afterDelete` still skips system writes, on separate
+  grounds: what it skips is revocation, and `record-share-cascade.ts` delivers that
+  on every sharing-capable object, stashing for system writes on its own account.
+  The `kernel:bootstrapped` boot backfill still runs and is still needed — it
+  reaches rows no hook saw, and it is the only pass that purges a deactivated
+  rule's grants. No new option, flag or declarative switch: the fix is the removal.
+  
+  No published export moves; `SYSTEM_WRITE_SKIP_NOTICE` was never re-exported from
+  the package entry point.
+- Updated dependencies [809d417]
+- Updated dependencies [387e231]
+- Updated dependencies [f794e4e]
+- Updated dependencies [cae2169]
+- Updated dependencies [bd8795e]
+- Updated dependencies [b812a54]
+- Updated dependencies [2d4fa75]
+- Updated dependencies [0e4e51b]
+- Updated dependencies [e84bbf6]
+- Updated dependencies [effae80]
+- Updated dependencies [efb3513]
+- Updated dependencies [d62f990]
+- Updated dependencies [c45d8e6]
+- Updated dependencies [1dcb995]
+- Updated dependencies [2e3e8c7]
+- Updated dependencies [e621291]
+- Updated dependencies [655b106]
+- Updated dependencies [40a93b5]
+- Updated dependencies [101ad2c]
+- Updated dependencies [d5b330d]
+- Updated dependencies [dda969c]
+- Updated dependencies [1f45690]
+- Updated dependencies [277948f]
+- Updated dependencies [8bdd955]
+- Updated dependencies [54e2d36]
+- Updated dependencies [c5a9a43]
+- Updated dependencies [b745157]
+- Updated dependencies [f3bbbef]
+- Updated dependencies [4f24e9d]
+- Updated dependencies [e27583e]
+- Updated dependencies [4bd6faa]
+- Updated dependencies [86cbe37]
+- Updated dependencies [6a180e4]
+- Updated dependencies [474242f]
+- Updated dependencies [63cd487]
+- Updated dependencies [bd4aa4e]
+- Updated dependencies [803eaab]
+- Updated dependencies [f8e8f03]
+- Updated dependencies [983edf1]
+- Updated dependencies [eae824e]
+- Updated dependencies [f6fa22c]
+- Updated dependencies [8a483b3]
+- Updated dependencies [3bc2e38]
+- Updated dependencies [97bcd99]
+- Updated dependencies [df59de0]
+- Updated dependencies [96e25a8]
+- Updated dependencies [713f83f]
+- Updated dependencies [77d4b3c]
+- Updated dependencies [f75a38a]
+- Updated dependencies [bbbac0f]
+- Updated dependencies [7a25e7d]
+- Updated dependencies [1fa05a6]
+- Updated dependencies [c85a265]
+- Updated dependencies [dcb10a5]
+- Updated dependencies [773a999]
+- Updated dependencies [35dffea]
+- Updated dependencies [dc7c226]
+- Updated dependencies [d8024f0]
+- Updated dependencies [8120808]
+- Updated dependencies [0010797]
+- Updated dependencies [776a098]
+- Updated dependencies [5060877]
+- Updated dependencies [4f6325d]
+- Updated dependencies [52954c0]
+- Updated dependencies [2aa8456]
+- Updated dependencies [c393b56]
+- Updated dependencies [0db5520]
+- Updated dependencies [d23ebb9]
+- Updated dependencies [93809a3]
+- Updated dependencies [7c0d0c3]
+- Updated dependencies [daae7aa]
+- Updated dependencies [8dc22d6]
+- Updated dependencies [fa5d137]
+- Updated dependencies [a392dbf]
+- Updated dependencies [279431e]
+- Updated dependencies [948dd6b]
+- Updated dependencies [3b4c56c]
+- Updated dependencies [ae8edd2]
+- Updated dependencies [e25403c]
+- Updated dependencies [a81aa9d]
+- Updated dependencies [64baa68]
+- Updated dependencies [9fa70d7]
+- Updated dependencies [09db64a]
+- Updated dependencies [92916e7]
+- Updated dependencies [a84f3ea]
+- Updated dependencies [f2eaae8]
+- Updated dependencies [56c093c]
+- Updated dependencies [c09451b]
+- Updated dependencies [ba64877]
+- Updated dependencies [e7191ce]
+- Updated dependencies [7345308]
+- Updated dependencies [79b6a22]
+- Updated dependencies [30d96ab]
+- Updated dependencies [30d96ab]
+- Updated dependencies [f658793]
+- Updated dependencies [b1b7d60]
+- Updated dependencies [0fd4899]
+- Updated dependencies [c95ad19]
+- Updated dependencies [e58ea8b]
+- Updated dependencies [9a71af3]
+- Updated dependencies [4a17645]
+- Updated dependencies [3795c5f]
+- Updated dependencies [8ab926b]
+- Updated dependencies [7317cf2]
+- Updated dependencies [e25e839]
+- Updated dependencies [5997207]
+- Updated dependencies [8b13cc8]
+- Updated dependencies [00d8f65]
+- Updated dependencies [4a4a35d]
+- Updated dependencies [4a4a35d]
+- Updated dependencies [86e765a]
+- Updated dependencies [1d7e76a]
+- Updated dependencies [53dc739]
+- Updated dependencies [fd289be]
+- Updated dependencies [c3c72a4]
+- Updated dependencies [03bf7b1]
+- Updated dependencies [7bd6447]
+- Updated dependencies [86df0c9]
+- Updated dependencies [5a22dd7]
+- Updated dependencies [f90e820]
+- Updated dependencies [18d816a]
+- Updated dependencies [e8bd715]
+- Updated dependencies [b91c351]
+- Updated dependencies [a28a3c0]
+- Updated dependencies [200d255]
+- Updated dependencies [2852acc]
+- Updated dependencies [daeaaf9]
+- Updated dependencies [c459da6]
+- Updated dependencies [e914733]
+- Updated dependencies [1d8ad0f]
+- Updated dependencies [9738c35]
+- Updated dependencies [f887e52]
+- Updated dependencies [881f8d8]
+- Updated dependencies [3bfa1e6]
+- Updated dependencies [0a8ebf3]
+- Updated dependencies [901355c]
+- Updated dependencies [34ce8e7]
+- Updated dependencies [8542bd4]
+- Updated dependencies [2af5eac]
+- Updated dependencies [c34f693]
+- Updated dependencies [00ff228]
+- Updated dependencies [33681ea]
+- Updated dependencies [bfe13c8]
+- Updated dependencies [0fb3044]
+- Updated dependencies [4635f3e]
+- Updated dependencies [fd289be]
+- Updated dependencies [ee3595c]
+- Updated dependencies [09b4f4e]
+- Updated dependencies [b2eab95]
+- Updated dependencies [93940d4]
+- Updated dependencies [3a04b01]
+- Updated dependencies [45b9051]
+- Updated dependencies [3954fb7]
+- Updated dependencies [4805b56]
+- Updated dependencies [b9e9227]
+- Updated dependencies [6aea1f5]
+- Updated dependencies [d395692]
+- Updated dependencies [5894d30]
+- Updated dependencies [a3765f6]
+- Updated dependencies [2d5cee3]
+- Updated dependencies [e22158f]
+- Updated dependencies [7404925]
+- Updated dependencies [0c2334f]
+- Updated dependencies [778c59f]
+- Updated dependencies [d2619fd]
+- Updated dependencies [af56546]
+- Updated dependencies [bd0c5cc]
+- Updated dependencies [6acb11a]
+- Updated dependencies [33c5fd3]
+- Updated dependencies [20b0fdb]
+- Updated dependencies [905019b]
+- Updated dependencies [a286411]
+- Updated dependencies [98c0d33]
+- Updated dependencies [368a82e]
+- Updated dependencies [a3d5724]
+- Updated dependencies [93ea19b]
+- Updated dependencies [9ee2dcf]
+- Updated dependencies [8cb96ec]
+- Updated dependencies [8f10a79]
+- Updated dependencies [6269a55]
+- Updated dependencies [a17da05]
+- Updated dependencies [a8c00e2]
+- Updated dependencies [a8fac3a]
+- Updated dependencies [22e5236]
+- Updated dependencies [0fb8760]
+- Updated dependencies [e5ce2ed]
+- Updated dependencies [be21955]
+- Updated dependencies [bc56e18]
+- Updated dependencies [be21955]
+- Updated dependencies [a9ee989]
+- Updated dependencies [4d0d944]
+- Updated dependencies [15d58db]
+- Updated dependencies [aaa4e65]
+- Updated dependencies [d63b014]
+- Updated dependencies [9abe4e4]
+- Updated dependencies [2cc7122]
+- Updated dependencies [50d6c92]
+- Updated dependencies [15d55fb]
+- Updated dependencies [9e0ba21]
+- Updated dependencies [b8562ff]
+- Updated dependencies [311433f]
+- Updated dependencies [3a86a65]
+- Updated dependencies [3e5ad08]
+- Updated dependencies [9abe4e4]
+- Updated dependencies [4cda78c]
+- Updated dependencies [b7131f3]
+- Updated dependencies [e5812fa]
+- Updated dependencies [7085f90]
+- Updated dependencies [dee4dd4]
+- Updated dependencies [ce7e497]
+- Updated dependencies [c351a84]
+- Updated dependencies [51ecb2f]
+- Updated dependencies [9086761]
+- Updated dependencies [f6344e7]
+- Updated dependencies [42a117b]
+- Updated dependencies [1401ae7]
+- Updated dependencies [4297fe7]
+- Updated dependencies [e398863]
+- Updated dependencies [d16df74]
+- Updated dependencies [d79c602]
+- Updated dependencies [f11fc61]
+- Updated dependencies [e808890]
+- Updated dependencies [8f79379]
+- Updated dependencies [e6ca40e]
+- Updated dependencies [0c77ea4]
+- Updated dependencies [52954c0]
+- Updated dependencies [c5b9ccc]
+- Updated dependencies [89eb997]
+- Updated dependencies [7131f12]
+- Updated dependencies [aa5994e]
+- Updated dependencies [be93457]
+- Updated dependencies [159e05e]
+- Updated dependencies [a65db76]
+- Updated dependencies [2cf5a96]
+- Updated dependencies [15eb2c9]
+- Updated dependencies [5691b07]
+- Updated dependencies [8ce628a]
+- Updated dependencies [2a6122b]
+- Updated dependencies [225e769]
+- Updated dependencies [8af88dd]
+- Updated dependencies [fb5fbb8]
+- Updated dependencies [d7b3963]
+- Updated dependencies [33184fd]
+- Updated dependencies [7c41693]
+- Updated dependencies [b72db01]
+- Updated dependencies [dce5cd4]
+- Updated dependencies [9688f58]
+- Updated dependencies [556ebc1]
+- Updated dependencies [177ebdc]
+- Updated dependencies [8d237b4]
+- Updated dependencies [b003cf2]
+- Updated dependencies [2d2e6f0]
+- Updated dependencies [2d8dd8d]
+- Updated dependencies [22d573e]
+- Updated dependencies [b5a2398]
+- Updated dependencies [348860c]
+- Updated dependencies [5383fa6]
+- Updated dependencies [5b3ff63]
+- Updated dependencies [356bd71]
+- Updated dependencies [878aa2e]
+- Updated dependencies [1a6a19c]
+- Updated dependencies [064d484]
+- Updated dependencies [527e050]
+- Updated dependencies [dd33bf9]
+- Updated dependencies [4cb2a90]
+- Updated dependencies [3f64fe6]
+- Updated dependencies [fe72aa5]
+- Updated dependencies [bc5156f]
+- Updated dependencies [5700d83]
+- Updated dependencies [df657d9]
+- Updated dependencies [9c7d9d4]
+- Updated dependencies [21196cf]
+- Updated dependencies [74a7804]
+- Updated dependencies [a548550]
+- Updated dependencies [53d3689]
+- Updated dependencies [b3a63d3]
+- Updated dependencies [49f0dcf]
+- Updated dependencies [033a34c]
+- Updated dependencies [4d25d22]
+- Updated dependencies [1ffee51]
+- Updated dependencies [5ae4303]
+- Updated dependencies [ece4dad]
+- Updated dependencies [e9b377e]
+- Updated dependencies [146f448]
+- Updated dependencies [735f5c7]
+- Updated dependencies [a7e18de]
+- Updated dependencies [366f895]
+- Updated dependencies [dc75ba8]
+- Updated dependencies [90ff957]
+- Updated dependencies [cce0aa9]
+- Updated dependencies [e764507]
+- Updated dependencies [cff17af]
+- Updated dependencies [39404f3]
+- Updated dependencies [ca1965f]
+- Updated dependencies [8619f95]
+- Updated dependencies [b706af9]
+- Updated dependencies [db8c288]
+- Updated dependencies [0e5fe7f]
+- Updated dependencies [add4360]
+- Updated dependencies [e0abc38]
+- Updated dependencies [fc9ba76]
+- Updated dependencies [1272f0a]
+- Updated dependencies [0f94cc7]
+- Updated dependencies [a11c1a5]
+- Updated dependencies [71f9cd1]
+- Updated dependencies [ee17d86]
+- Updated dependencies [cdbd920]
+- Updated dependencies [18c432e]
+- Updated dependencies [3c418c4]
+- Updated dependencies [fa8715a]
+- Updated dependencies [a933ed7]
+- Updated dependencies [b3ca463]
+- Updated dependencies [a933ed7]
+- Updated dependencies [0d4a6a8]
+- Updated dependencies [518d5e5]
+- Updated dependencies [6643ba1]
+- Updated dependencies [eeba2ef]
+- Updated dependencies [ec4c4d2]
+- Updated dependencies [424f73c]
+- Updated dependencies [cccbe51]
+- Updated dependencies [a8d6b1d]
+- Updated dependencies [e4a7695]
+- Updated dependencies [87075b1]
+- Updated dependencies [fc58a99]
+- Updated dependencies [14cfc00]
+- Updated dependencies [1c6f7b4]
+- Updated dependencies [e854a53]
+- Updated dependencies [dfebfc8]
+- Updated dependencies [598b7ec]
+- Updated dependencies [d028b37]
+- Updated dependencies [f7b25c5]
+- Updated dependencies [122ef38]
+- Updated dependencies [4a37870]
+- Updated dependencies [428f9b2]
+- Updated dependencies [aa7ff56]
+- Updated dependencies [811a3c2]
+- Updated dependencies [1401ae7]
+- Updated dependencies [2fd3f1c]
+- Updated dependencies [c41b42e]
+- Updated dependencies [e49d988]
+- Updated dependencies [d41d166]
+- Updated dependencies [c4db311]
+- Updated dependencies [750fff5]
+- Updated dependencies [c19035e]
+- Updated dependencies [ececf7a]
+- Updated dependencies [d173125]
+- Updated dependencies [8eeca27]
+- Updated dependencies [8425c17]
+- Updated dependencies [a5ef1d8]
+- Updated dependencies [87ad30c]
+- Updated dependencies [772d5de]
+- Updated dependencies [ce80ec2]
+- Updated dependencies [9d7f725]
+- Updated dependencies [b372318]
+- Updated dependencies [97a2263]
+- Updated dependencies [29d0676]
+- Updated dependencies [0169d49]
+- Updated dependencies [6bd3231]
+- Updated dependencies [d2b5ba8]
+- Updated dependencies [3c1bbd2]
+- Updated dependencies [b799ac5]
+- Updated dependencies [8f74307]
+- Updated dependencies [d23dc08]
+- Updated dependencies [038f333]
+- Updated dependencies [644ad50]
+- Updated dependencies [9735662]
+- Updated dependencies [4d5b4f8]
+- Updated dependencies [5d16379]
+- Updated dependencies [aa0688a]
+- Updated dependencies [0da7cd2]
+- Updated dependencies [28a5c3e]
+- Updated dependencies [4bc18e5]
+- Updated dependencies [9f57f1e]
+  - @objectstack/spec@17.3.0
+  - @objectstack/objectql@17.3.0
+  - @objectstack/platform-objects@17.3.0
+  - @objectstack/core@17.3.0
+  - @objectstack/types@17.3.0
+  - @objectstack/metadata-core@17.3.0
+  - @objectstack/formula@17.3.0
+
 ## 17.2.0
 
 ### Minor Changes

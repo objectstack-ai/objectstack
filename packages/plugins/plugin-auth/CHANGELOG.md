@@ -1,5 +1,1740 @@
 # Changelog
 
+## 17.3.0
+
+### Minor Changes
+
+- 4f24e9d: feat(spec,plugin-auth)!: one declared audience posture — `invite_only | email_domain | open`, default `invite_only`
+  
+  **BREAKING CHANGE (ships as `minor` under the launch-window rule; every publishable package rides the fixed group).** "Who may become a user of an environment's apps" is now ONE declaration instead of an emergent property of five switches — and its default flips to the safe end.
+  
+  - New authorable surface `auth.audience` on `AuthConfig` (`@objectstack/spec/system`): `posture` (`invite_only` | `email_domain` | `open`), `allowedEmailDomains` (required non-empty for `email_domain`), `selfRegistrationPermissionSet` (required whenever the posture permits self-registration; `admin_full_access` refused). Off-vocabulary postures and inert declarations (domains outside `email_domain`, a permission set under `invite_only`) are refused at parse AND at plugin-auth's config entry — never coerced.
+  - **FROM:** an undeclared audience meant open email/password self-registration with no email verification, and self-registrants implicitly fell back to the `member_default` permission set. **TO:** an undeclared audience IS `invite_only` — self-serve sign-up (email/password, social-provider OAuth JIT, magic-link/OTP/phone/anonymous, and any unclassified creation method) is refused `403 SELF_REGISTRATION_CLOSED` unless the address holds a pending `sys_invitation` (the first account on a fresh install is exempt — the bootstrap bypass). One-line fix for deployments that mean to stay open: declare `auth: { audience: { posture: 'open', selfRegistrationPermissionSet: 'member_default' } }`.
+  - `email_domain` admits only allowlisted domains (`403 EMAIL_DOMAIN_NOT_ALLOWED` otherwise; exact case-insensitive match, subdomains not implied, `+tag` local parts irrelevant). Any self-registration-permitting posture FORCES `requireEmailVerification` on (an explicit `false` beside it is refused at boot) and grants each self-registrant the DECLARED permission set (`sys_user_permission_set`); a declaration that cannot be resolved refuses admission (`403 AUTH_CONFIG_ERROR`) rather than admitting ungranted.
+  - Operator-driven creation is never posture-gated: admin create-user / bulk import, SCIM provisioning, and JIT through operator-registered identity providers (`oidcProviders`, `@better-auth/sso`) keep working under every posture.
+  - `/api/v1/auth/config` now serves `features.audiencePosture` and mirrors the forced verification flag; `SELF_REGISTRATION_CLOSED` and `EMAIL_DOMAIN_NOT_ALLOWED` are registered in the ADR-0112 ledger.
+  - The BOOTSTRAP bypass counts non-system HUMANS, not `sys_user` rows, so a database still carrying the legacy `usr_system` service row is still a fresh install; the same predicate now backs the dev-admin seed's own precondition. The `emailAndPassword.disableSignUp` bootstrap bypass reads it too.
+  - `@objectstack/verify`: `stack.signUp(...)` seeds a pending `sys_invitation` for the address before signing up, so harness fixtures that mint a second/third identity enter through the invitation carve-out under the new default. Fixtures asserting on their environment's pending invitations should filter by their own `organization_id` (the harness rows carry `org_verify_audience_gate`).
+  
+  <!-- adr-0087: registered audience-posture-default-invite-only -->
+- e238c79: Report the refused admin-audit writes two `catch { }` sites swallowed (#12981 batch 6)
+  
+  The two tier-1 DARK durability swallows on `plugin-auth`'s admin surface: an
+  administrative action landed, its audit row was refused, and the endpoint
+  answered `200` with nothing written anywhere. Control flow is unchanged at both
+  sites — an admin operation must never fail over its own audit — but the refusal
+  is no longer silent.
+  
+  Both `catch` blocks were doing two jobs and were only right about one of them:
+  
+  - **plugin-audit UNINSTALLED** — there is no `sys_audit_log` object at all, so
+    nothing ever claimed the action would be audited. Silence is correct, and
+    reporting here would put a line on every admin action in every deployment that
+    does not run plugin-audit.
+  - **plugin-audit INSTALLED, the write REFUSED** — the action happened, the audit
+    record did not, and nothing retries or reconstructs it.
+  
+  Both spelled `catch { }`. Each site now asks `getSchema('sys_audit_log')` — the
+  registry that owns the answer — instead of reading the driver's error text,
+  which would decide the same question by guessing. `getSchema` is declared
+  **optional** on `AdminUserDataEngine` and `IdentityImportEngine`, so it is
+  additive and no host that type-checks today stops doing so; where it is absent
+  the site cannot measure the difference and therefore reports, because an
+  unmeasurable write must not be a silent one.
+  
+  What was hiding in the silence:
+  
+  - `admin-user-endpoints.ts :: writeAdminAudit` — `sys_account` is in
+    plugin-audit's `SKIP_OBJECTS`, so for `/admin/set-user-password` its generic
+    writer emits **zero** rows and the row refused here was the only record that a
+    password was ever administratively reset.
+  - `admin-import-users.ts` run-level row — `action: 'import'` with a null
+    `record_id` is a shape plugin-audit's `actionFor` structurally cannot emit. The
+    per-row `create` rows still land, which is what made this dangerous: the trail
+    looked complete while who ran the import, under which password policy, and what
+    it did in aggregate was gone.
+  
+  Both sinks (`AdminUserEndpointDeps.logger`, `IdentityImportDeps.logger`) are
+  `{ warn(msg: string): void }` and both are re-exported from the package
+  `index.ts`. Neither declares `error`, so the LEVEL stays `warn` and remains
+  #13398's question; only the SILENCE is repaired here. Each seam is pinned by a
+  test that fails if it goes quiet again, plus absence-asserting cases so a seam
+  that warns unconditionally cannot pass.
+- 8e31083: feat(settings,auth): expose the audience posture in the `auth` settings namespace (#11768)
+  
+  The audience posture shipped by #11739 (`invite_only | email_domain | open`,
+  default `invite_only`) was switchable only from stack config at boot; a
+  self-host admin had no console channel. The `auth` settings namespace now
+  carries an `audience` group — three new authorable keys, which is what a host
+  sees and why this is `minor`:
+  
+  - `audience_posture` — a select over the closed vocabulary (the option table
+    is enforced on `setMany` and on the `OS_AUTH_AUDIENCE_POSTURE` env-override
+    door);
+  - `audience_allowed_email_domains` — newline- or comma-separated bare domains
+    (exact, case-insensitive matching; subdomains need their own entries);
+  - `audience_self_registration_permission_set` — the `sys_permission_set` name
+    each self-registrant receives.
+  
+  `bindAuthSettings` maps the three keys — one atomic declaration — to one
+  `AuthManager.applyConfigPatch({ audience })`, which replaces the whole
+  audience object and validates the MERGED result. Every #11739 invariant holds
+  through the new channel: a self-registration posture with verification
+  explicitly off, an empty domain list under `email_domain`, and a missing or
+  `admin_full_access` permission set are all refused loudly (the standing
+  config keeps ruling — fail closed), and off-vocabulary postures are refused,
+  never coerced, per the `membership_policy` precedent (#5152). Only EXPLICIT
+  settings values apply: the manifest defaults never mask a deployment's
+  boot-config declaration. Switching back to `invite_only` always applies —
+  leftover text in the posture-hidden sibling fields cannot make closing the
+  wall refusable.
+- 4bb412b: feat(plugin-auth): auth mail follows the caller's `Accept-Language`, deployment default second (#14319)
+  
+  Request-triggered auth email — signup verification, password reset, magic link,
+  and the change-email notice — now picks its `sys_email_template` row from the
+  requesting caller's `Accept-Language`, falling back to the deployment default
+  (`localization.locale`, then `i18n.defaultLocale`) and finally to
+  `EmailService`'s documented `en-US`.
+  
+  The motivating case is the one no deployment default can answer: at cloud
+  self-service signup there is no workspace yet, so nothing on the server
+  represents that person's language — a Chinese browser reached a Chinese signup
+  screen and received an English verification email.
+  
+  The header is parsed by the platform's existing `preferredLocaleFromHeader`,
+  the same function REST uses for metadata translation and the runtime dispatcher
+  uses for `ExecutionContext.requestLocale`, so the mail cannot disagree with the
+  screen that triggered it. A requested locale takes effect only when it names one
+  of `AUTH_EMAIL_TEMPLATE_LOCALES` (`en-US`, `zh-CN`, `ja-JP`, `es-ES`); anything
+  else falls through rather than naming a row that does not exist.
+  
+  Two deliberate exclusions. **Invitations keep the deployment default**:
+  better-auth hands that callback a request too, but it is the *inviter's*, and
+  stamping their browser language onto the invitee's mail would reproduce this
+  same defect one seat over. **Per-user language stays deferred** — `sys_user`
+  grows no locale column here.
+  
+  This ships as `minor` because it changes which template row an existing
+  deployment sends: a workspace whose users' browsers ask for a different language
+  than the workspace declares will now send in the browser's language.
+  
+  **Ruling:** maintainer, 2026-09-02, superseding the 2026-08-13 ruling that had
+  rejected `Accept-Language` outright. Both are recorded, with the older one
+  marked superseded, on `AuthManager.setDefaultEmailLocale`.
+- 8dc22d6: feat(spec,plugin-auth): declare `plugins.scim` / `plugins.sso` / `plugins.ssoDomainVerification`, and let an explicit config value win over the env var (#13439)
+  
+  **Behavior change** (maintainer ruling 2026-08-31 on #13439).
+  
+  Two halves of one contract gap:
+  
+  - **Declaration.** `AuthPluginConfigSchema` now declares `scim`, `sso` and
+    `ssoDomainVerification` as tri-state `z.boolean().optional()`, following the
+    `dynamicClientRegistration` template. Previously the keys were read by
+    `plugin-auth` through an `as any` cast while no schema declared them — a key
+    an author could write, that typechecked only via the cast, that no
+    publish-time validation would ever reject or confirm.
+  - **Precedence flip.** For these three keys an EXPLICIT config value now wins
+    over the corresponding env var (`OS_SCIM_ENABLED` / `OS_SSO_ENABLED` /
+    `OS_SSO_DOMAIN_VERIFICATION`); the env var decides only where the config
+    leaves the key UNSET (absent env ⇒ off). Previously the env var always won,
+    so `plugins: { scim: false }` had no effect at all whenever
+    `OS_SCIM_ENABLED` was set — a line that read as a security control, passed
+    review and typecheck, and did nothing. The operator per-environment override
+    is preserved for every deployment that leaves the keys unset. The other
+    env-paired keys (`oidcProvider`, `dynamicClientRegistration`, `twoFactor`,
+    `passwordRejectBreached`) deliberately keep their documented env-wins order.
+  
+  The ADR-0071 forced-admin coupling is unchanged in shape
+  (`admin: pluginConfig.admin ?? scimEffective`): effective SCIM still forces
+  the better-auth `admin` plugin on when `admin` is unset — but the flipped
+  resolution flows through it, so an explicit `plugins.scim: false` now also
+  declines the admin plugin it would have dragged in. The admin coupling itself
+  is out of this change's scope (#13816 tracks it).
+  
+  **Known risk, named:** a deployment that writes BOTH an explicit value and the
+  env var and depends on the env winning will flip. The only known explicit
+  writer is the cloud control plane, which requires the new order (its
+  plan-derived `plugins.scim` must be authoritative; cloud#1265's refuse-to-build
+  workaround can retire once this lands).
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Additive declaration of three previously-undeclared optional keys plus a documented precedence flip: no key is removed, renamed or re-shaped, no tombstone exists, and nothing mechanical for `objectstack migrate meta` to rewrite. The affected quadrant (explicit value AND env var set, relying on env winning) has a measured population of one writer — the cloud control plane — which requires the new order. -->
+- 5c9e40a: Fix: `objectstack dev` now seeds its dev admin on a database that has PEOPLE but no LOGIN
+  
+  An app that declares `sys_user` rows in `defineStack({ data })` used to lose the
+  `objectstack dev` login permanently. The declarative seed is awaited inside
+  `AppPlugin.start()`, so it always landed before the dev-admin seed's own
+  `kernel:ready` hook; the seed's gate asked "does any human `sys_user` row
+  exist?" and skipped — on that boot and on every later one, because the rows
+  survive. The deployment ended up with no loginable account at all: people rows
+  present, `sys_account` empty, `POST /auth/sign-in/email` returning 401.
+  
+  A seeded person is a directory row with no credential. It is not a login, and
+  the gate now says so: the seed acts while no account holds the configured seed
+  address and no local password login (`sys_account.provider_id = 'credential'`)
+  exists anywhere. "Never overwrites an existing account" is unchanged and now
+  covers federated accounts on that address too. A credential store that cannot be
+  read is its own verdict — the seed declines and says so, rather than minting a
+  known-credential admin into an environment it could not see.
+  
+  The seed's own provisioning call is now admitted as what it is — the
+  deployment's own boot command provisioning its admin — instead of riding on the
+  audience gate's zero-human bootstrap bypass, which the app's people seed also
+  answers "populated". The public self-registration door is unchanged: nothing
+  outside the process can stage that declaration, it names one address, and it is
+  cleared as soon as the call returns.
+  
+  `GET /api/v1/auth/bootstrap-status` now answers with the same bootstrap-window
+  question the admission gate asks, instead of counting `sys_user` rows with no
+  filter. On a database still carrying the legacy `usr_system` service row it used
+  to report `hasOwner: true` while the admission gate and plugin-security's
+  first-user detection both stood ready to admit and promote the first human — so
+  the console withheld a first-run setup flow the platform would have accepted.
+- 7c342f4: fix(plugin-auth): bind the dev-admin seed's operator-provisioning ticket to more than the seed address, so a concurrent stranger posting that address cannot ride the window (#14373)
+  
+  `AuthManager.stageOperatorProvisioning` staged its ticket keyed on
+  `email.trim().toLowerCase()` alone. The address is **not a secret** —
+  `admin@objectos.ai` is the documented default and the boot banner prints it
+  (with the password) once the seed completes — so "the address is the
+  operator's own" did not narrow the attacker set the way it would for an
+  unguessable value. A stranger's own concurrent `POST /sign-up/email` for that
+  same address, arriving while the ticket was staged, would satisfy an
+  email-only peek at both admission seams (the `disableSignUp` before-hook and
+  `validateAudienceAdmission`'s `creationClass` computation) and be admitted as
+  the `operator` class too — and since a unique-email constraint lets only one
+  of the two concurrent `signUpEmail` calls actually land, a stranger who won
+  that race would not merely read as the operator, their row would BECOME the
+  account at that address. The safety this rested on — "milliseconds, and
+  `NODE_ENV==='development'` only" — was true today, but both are properties of
+  the *caller*, not of what the ticket asserted.
+  
+  `stageOperatorProvisioning(email)` now also generates a random, unguessable
+  ticket value (128 bits from WebCrypto's `getRandomValues`, matching the
+  existing `resolvePasswordHasher` salt convention) and returns it.
+  `AuthPlugin.maybeSeedDevAdmin` threads that value into the SAME `signUpEmail`
+  call's body, under the new `AuthManager.OPERATOR_PROVISIONING_TICKET_FIELD`
+  key — an unrecognized key that better-auth's `signUpEmailBodySchema` (`.and(
+  z.record(z.string(), z.any()))`) lets ride through untouched, so it never
+  becomes a declared `sys_user` field. `isOperatorProvisioning(email, ticket)`
+  now requires an exact match on both; a missing, wrong-typed, or mismatched
+  ticket reads as "not provisioning" — the same as no ticket staged at all,
+  with no email-only fallback. This converts what was a timing argument
+  ("the window is short and dev-only") into a structural one: admission now
+  asks "did THIS process's own boot command make THIS exact call", and a
+  stranger's request carries no value that was ever transmitted anywhere for
+  them to replay, however precisely they time the window.
+  
+  **Public surface**: `stageOperatorProvisioning`'s return type widens from
+  `void` to `string` (additive — any existing caller ignoring the return value
+  is unaffected), `isOperatorProvisioning` gains an optional second parameter
+  (omitting it now always reads as "not provisioning", which is the safe
+  default), and the class gains one new static member,
+  `AuthManager.OPERATOR_PROVISIONING_TICKET_FIELD`. `AuthManager` is
+  barrel-public (`@objectstack/plugin-auth`'s `index.ts` re-exports it in
+  full), so this is graded `minor` rather than `patch`.
+  
+  **Not touched**: the JSDoc documenting the in-process trust assumption on
+  `stageOperatorProvisioning` (already accurate on landed `main`), and the
+  method's barrel-public location (a published-surface removal is a decision
+  card, not a dev-agent edit) — both dispositions triage already closed out on
+  this card. Whether the bootstrap window should count humans or logins is
+  `#14349`'s question, not touched here.
+- 33184fd: `PLATFORM_ADMIN` can now be anchored on deployment CONFIGURATION instead of a stored grant row: an account whose `sys_user.email` is on `OS_PLATFORM_OWNER_EMAIL` **and** whose `email_verified` reads verified resolves `PLATFORM_ADMIN` with the declared `admin_full_access` capability set, derived live on each authorization resolution (#11663 leg L2, design accepted 2026-08-25 as bundle 1A/2B/3A/4A/5A/6A/7A).
+  
+  **Additive — nothing is revoked.** The legacy unscoped `admin_full_access` grant still confers exactly as it did; a holder whose standing rests on the row alone now gets a once-per-process pointer at the configuration line that re-anchors them. A deployment that has declared no administrators resolves byte-identically to before: the config list is empty, the derivation answers "not an admin" before it reads any row, and the pinned batch-equivalence query multiset is unchanged.
+  
+  **The variable takes a list.** `OS_PLATFORM_OWNER_EMAIL` accepts one address or a comma-separated list of them — one normalization (`trim().toLowerCase()`), duplicates collapsed, blank entries dropped. ⛔ Any entry that is not an address **fails the whole variable closed** with a loud refusal naming it, rather than being skipped: silently dropping a typo would leave a narrower administrator set than the operator declared, with nothing anywhere to notice. Unset, blank or refused all mean **zero** config-derived administrators.
+  
+  **Verified-email match only.** An unverified account holding a configured address confers nothing, and an ABSENT `email_verified` column reads unverified. The match reads the caller's own **stored** `sys_user` row, never the caller-supplied session email.
+  
+  New exports from `@objectstack/core`: `resolvePlatformAdminEmails`, `parsePlatformAdminEmails`, `matchesConfiguredPlatformAdmin`, `normalizePlatformAdminEmail`, `PLATFORM_ADMIN_EMAIL_SEPARATOR`, `ADMIN_STANDING_NON_TABLE_INPUTS` and the test hooks beside them. `@objectstack/core` now depends on `@objectstack/types` (measured acyclic: `types` depends only on `spec`).
+  
+  `@objectstack/plugin-auth`'s break-glass guard follows the derivation, as it must: `ADMIN_STANDING_SURFACE.sys_user` is reclassified `derives`, the last-administrator enumeration counts config-derived administrators through the resolver's own predicate, and a fifth write shape is judged — a change of address or an `email_verified` reset that would leave the environment with no administrator is refused, naming the configuration as the remedy. An ordinary profile write still costs the guard no reads.
+- 4f65837: Re-point the default-organization bootstrap at the platform-admin config anchor (#11973, #11663 leg L3). `ensureDefaultOrganization` now resolves "which user is the platform admin" from `OS_PLATFORM_OWNER_EMAIL` first — the first declared entry with a stored, email-verified `sys_user` account, matched through `@objectstack/core`'s own `matchesConfiguredPlatformAdmin`, the same oracle the authorization derivation reads — and falls back to the legacy unscoped `admin_full_access` grant row (which still anchors `single`-posture deployments and the honoured migration window). Its re-run trigger widens from `sys_user_permission_set` inserts to the new exported predicate `isDefaultOrganizationBootstrapTrigger`: `sys_user` inserts and `email`/`email_verified` updates (how a config-anchored administrator comes into standing — on fresh walled rigs no grant insert ever fires any more), plus the legacy grant-insert arm unchanged. `single`-posture behaviour is unchanged: with the variable unset, the config half costs no read and the grant anchor decides exactly as before.
+- 911da5f: **BREAKING (public export removed):** `AUTH_SCIM_PROVIDER_SCHEMA` no longer exists. It was a `scimProvider` column mapping exported from `@objectstack/plugin-auth` (via `export * from './auth-schema-config.js'`) that nothing ever read — one repo-wide hit, its own declaration — and that nothing ever could: `@better-auth/scim` hardcodes its model and exposes no `schema` option, still true of the installed `@better-auth/scim@1.7.0-rc.1`, whose `SCIMOptions` declares no `schema`, `modelName` or `fields` member at all. Its sibling constants in the same file are genuinely passed to their plugins; this one had nowhere to go, by construction and by its own doc comment.
+  
+  Removed under ADR-0049 enforce-or-remove, because it was a **second source of truth** for the same four column names. The load-bearing one is the adapter layer — `AUTH_MODEL_TO_PROTOCOL` plus the mechanical camelCase-to-snake_case field resolution in `objectql-adapter.ts`, over the `sys_scim_provider` platform object that declares the columns — and it is pinned by the dedicated sso/scim block in `better-auth-schema-parity.test.ts`. A dead copy is worse than none: nothing fails when it drifts from the live names, and the next reader cannot tell which of the two is authoritative. A comment in its place records why no such mapping exists and what owns the names instead, so it is not re-added.
+  
+  Behaviour is unchanged. No SCIM column name, platform object, adapter mapping or wire shape moves.
+  
+  Breaking ships as `minor` per the launch-window convention (`scripts/check-changeset-no-major.mjs`).
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A dead public constant is deleted; nothing consumed it in this repo, in the sibling repos or in the org (measured on origin/main and by org-wide code search, with a positive control on a live symbol in the same file), so no caller has code to rewrite. It is not a metadata surface: no Zod schema, no `packages/spec` declaration, no authorable key and no stored representation, so `objectstack migrate meta` has nothing to visit and there is no tombstone to mint. The column names it duplicated are unchanged and keep their real declaration on the `sys_scim_provider` platform object; an external importer, if one exists, is told by the compiler at the import line, which is more precise than a ledger entry. Nothing to migrate, so no migration is prescribed. -->
+- 89448a5: **BREAKING (public export removed):** `AUTH_SSO_PROVIDER_SCHEMA` no longer exists. It was an `ssoProvider` column mapping exported from `@objectstack/plugin-auth` (via `export * from './auth-schema-config.js'`) that nothing ever read — four repo-wide hits: its own declaration, two frozen CHANGELOG lines and one comment, measured against a positive control on a live sibling symbol in the same file, and corroborated by an org-wide code search that returned only this repo's own two files.
+  
+  Unlike its scim sibling (removed the same way), this one was not inert by construction: `@better-auth/sso@1.7.1` genuinely accepts a schema option (`SSOOptions.schema.ssoProvider.{modelName,fields,additionalFields}`, honoured at runtime), and the mapping was still never handed to it — unused by choice (#10074, ruling A: the bridge stays at the adapter layer). Removed under ADR-0049 enforce-or-remove because it was a **second source of truth** for the same column names. The load-bearing one is the adapter layer — `AUTH_MODEL_TO_PROTOCOL` plus the mechanical camelCase-to-snake_case field resolution in `objectql-adapter.ts`, over the `sys_sso_provider` platform object that declares the columns — pinned by the dedicated sso/scim block in `better-auth-schema-parity.test.ts`. A dead copy is worse than none: nothing fails when it drifts from the live names, and the next reader cannot tell which of the two is authoritative.
+  
+  A NOTE in its place keeps what outlives the constant: the `domainVerified` / ADR-0024 ② knowledge (the eighth field domain verification adds, its `domain_verified` column, and that the one-time `domainVerificationToken` is not a provider column), and the fact that the `sso()` schema option exists and is deliberately unused — so the absence reads as a choice, not as "sso accepts no schema option" (the stale claim #8224 swept).
+  
+  Behaviour is unchanged. No SSO column name, platform object, adapter mapping or wire shape moves.
+  
+  Breaking ships as `minor` per the launch-window convention (`scripts/check-changeset-no-major.mjs`).
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A dead public constant is deleted; nothing consumed it in this repo (measured on origin/main at 090f2302e with a positive control on a live symbol in the same file) or anywhere in the org (code search returned only this repo's own declaration and a comment), so no caller has code to rewrite. It is not a metadata surface: no Zod schema, no packages/spec declaration, no authorable key and no stored representation, so objectstack migrate meta has nothing to visit and there is no tombstone to mint. The column names it duplicated are unchanged and keep their real declaration on the sys_sso_provider platform object under the adapter's mechanical field rule; an external importer, if one exists, is told by the compiler at the import line, which is more precise than a ledger entry. Nothing to migrate, so no migration is prescribed. -->
+- 4d25d22: **BREAKING (platform object removed):** the `sys_scim_provider` platform object is retired (#11757, ruled on #11693 — leg 1a of the #11632 SCIM epic).
+  
+  FROM → TO, per surface:
+  
+  - `SysScimProvider` (export of `@objectstack/platform-objects` / `.../identity`) → removed, no replacement export. Fix: delete the import. Stable SCIM state lives on the seven `sys_scim_*` stable-model objects (#3653), and connection credentials on `sys_scim_connection_credential`.
+  - `sys_scim_provider` in `PLATFORM_PROVIDED_OBJECT_NAMES` (`@objectstack/spec/system`) → removed. `isPlatformProvidedObjectName('sys_scim_provider')` is now `false`, so a stack referencing the name is flagged as a probable typo instead of resolving.
+  - plugin-auth: the object is no longer provisioned, and `AUTH_MODEL_TO_PROTOCOL` carries no `scimProvider` entry — the installed stable `@better-auth/scim@1.7.1` derives no such model, so the entry bridged nothing.
+  - plugin-security: the `BETTER_AUTH_MANAGED_OBJECTS` write-deny entry for it is gone with the object (the list is pinned bidirectionally against `managedBy: 'better-auth'` declarations).
+  
+  The rc.1-era row was written only by the retired `/scim/generate-token` endpoint; after the stable-1.7.1 migration (PR #12726) nothing could write to it. Per the maintainer's ruling (2026-08-24, 「不需要考虑历史数据」; reaffirmed 2026-08-25 — SCIM has no real customers), **no data migration ships**: existing `sys_scim_provider` tables in deployed databases are left untouched — no backfill, no reaper, no migrate command. SCIM-enabled deployments re-register connections on the stable surface; the IdP token reissue is a migration-day operator action regardless of this change.
+  
+  The ADR-0066 D3 capability-gate pin moves from the retired object to its surviving sibling `sys_sso_provider`, so the gate posture stays test-pinned.
+  
+  Breaking ships as `minor` per the launch-window convention (`scripts/check-changeset-no-major.mjs`) and the #12726 precedent on the same ruling.
+  
+  <!-- adr-0087: registered scim-provider-object-retired -->
+- a7e18de: feat(spec,plugin-auth): declare `plugins.admin` tri-state, and refuse an explicit `admin: false` beside effective SCIM at construction time (#13816)
+  
+  **Behavior change** (maintainer ruling 2026-09-01, director batch #21 on #13816 — the
+  admin-amplification half split out of #13439 by the 2026-08-31 ruling).
+  
+  Two halves of one coupling made honest:
+  
+  - **Declaration.** `AuthPluginConfigSchema.admin` moves from
+    `z.boolean().default(false)` to tri-state `z.boolean().optional()`, the same
+    shape #13439 gave `scim` / `sso` / `ssoDomainVerification`. The materialized
+    `false` could not distinguish "the author said nothing" from "the author
+    declined the admin surface", and the runtime needs that distinction: absence
+    means "effective SCIM decides" (SCIM provisioning forces the better-auth
+    `admin` plugin on because SCIM's `active:false` deprovisioning path runs
+    through admin ban/unban — ADR-0071), while an explicit value is the author's
+    own answer. A parse path that materialized `admin: false` onto a silent
+    document said the opposite of what the runtime does under SCIM.
+  - **Conflict refusal.** Effective SCIM (explicit `plugins.scim`, or
+    `OS_SCIM_ENABLED` where the config leaves it unset) beside an explicit
+    `plugins.admin: false` is now REFUSED loudly — at `AuthManager`
+    construction, on `applyConfigPatch` (merged result), and at the lazy
+    better-auth build for env vars that appear after boot. The error names both
+    keys, the ADR-0071 coupling, and the two ways out: accept the admin plugin,
+    or disable SCIM. Previously the explicit decline was honoured silently and
+    SCIM was mounted with its deprovisioning path broken (every `active:false`
+    ban attempt failing at runtime).
+  
+  Unchanged, deliberately: an UNSET `admin` under effective SCIM still gets the
+  admin plugin forced on (the ADR-0071-backed coupling), and without SCIM unset
+  still means off — the `?? scimEffective` resolution keeps absent semantics
+  byte-identical. `resolveScimEnabled()` is now the single decision point shared
+  by the plugin mount, the advertised `/auth/config` features flag and the
+  conflict refusal, so the three can never disagree.
+  
+  **Known risk, named:** a deployment already running the contradiction
+  (`plugins: { scim: true/env-on, admin: false }`) boots today with silently
+  broken SCIM deprovisioning; after this change it refuses to construct the auth
+  manager, with the remedy in the message. That loud stop is the ruled behavior.
+  Whether SCIM's admin dependency can instead be narrowed to the actions it
+  actually needs (Shape 1) is #14150's measurement; this refusal is the honest
+  floor pending that reading.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) The key is neither removed nor renamed — `admin` stays authorable with the same type; only its materialized default is dropped (declared in DEFAULT_CHANGES_BY_MAJOR under major 17) and one incoherent corner (explicit false beside effective SCIM) becomes a loud construction-time refusal whose message carries the remedy. Nothing mechanical for `objectstack migrate meta` to rewrite: a conflicted config needs a human decision between accepting the admin surface and disabling SCIM. -->
+- 366f895: feat(auth): migrate `@better-auth/scim` from `1.7.0-rc.1` to stable `1.7.1` — the whole-model SCIM migration (#3653, epic #11632)
+  
+  The stable line is the rc.2-lineage rewrite: the rc.1 `scimProvider` model,
+  `/scim/generate-token` endpoint and `storeSCIMToken` option no longer exist,
+  replaced by seven new models and a three-way connection contract. This lands
+  the migration atomically:
+  
+  - **Seven new platform objects** back the stable models —
+    `sys_scim_connection_binding`, `sys_scim_group`, `sys_scim_group_member`,
+    `sys_scim_identity_tombstone`, `sys_scim_projection_grant`,
+    `sys_scim_subject`, `sys_scim_user` — bridged via `AUTH_MODEL_TO_PROTOCOL`,
+    registered in the platform-object-names registry, listed in
+    `BETTER_AUTH_MANAGED_OBJECTS`, and column-pinned by the parity gate (whose
+    `KNOWN_UNMAPPED_MODELS` shrinks to the empty set: the rc.1-era group
+    provisioning gap — IdP `/Groups` pushes hitting tables that did not exist —
+    is closed).
+  - **SCIM connections stay runtime data.** The stable constructor is satisfied
+    with an application-owned `authentication.verifyBearerToken` that resolves
+    the connection from a row at request time — not static boot config, and not
+    the upstream `managedConnections` catalog (deliberately not adopted).
+  - **ObjectStack owns SCIM credentials outright** (stable upstream stores no
+    credential at all): `sys_scim_connection_credential` plus
+    `scim-connection-service.ts` mint/digest/verify. At rest only an
+    HMAC-SHA-256 keyed by the deployment auth secret (base64url,
+    domain-separated) is stored — at parity or better than the rc.1 unsalted
+    SHA-256 — pinned by `credential-at-rest-posture.test.ts` including live
+    401 paths for forged, revoked and expired bearers.
+  - **The ObjectQL better-auth adapter gains native transactions**
+    (`engine.transaction`, fail-closed on drivers without `beginTransaction`),
+    which stable scim requires by assertion for atomic provisioning writes.
+  - **Scaffold suppression retired**: the `@better-auth/scim>better-call`
+    `allowedVersions` entry (CLI renderer + blank template) is gone — stable
+    1.7.1 peers `better-call@1.4.0` exactly — and its presence ratchets flipped
+    to absence pins. The `better-auth>better-sqlite3` and four
+    `@better-auth/utils` entries stay; their retirement conditions are separate
+    and unmet.
+  - The pin resolves **1.7.1 exactly** (not `^1.7.1`): 1.7.2 peers
+    `better-auth`/`@better-auth/core` at `^1.7.2`, which only the workspace
+    overrides' silencing would "satisfy" while the family is 1.7.1. Floating is
+    its own follow-up.
+  
+  **Semver: minor, argued.** The rc.1 SCIM surface this replaces (generate-token
+  endpoint, rc.1 bearer tokens, `sys_scim_provider` rows) changes incompatibly —
+  but that surface is default-off (`OS_SCIM_ENABLED`), was shipped with a
+  documented "do not let the IdP push groups" boundary, and the maintainer ruled
+  (2026-08-25) that SCIM has no real customers and old data need not carry: the
+  one binding constraint is that an existing system upgrades smoothly, which it
+  does — every table the installed library can write exists at this version, and
+  SCIM-disabled deployments see no behavior change. A major would move the whole
+  fixed version group for a feature surface with zero consumers. Deployments
+  that had SCIM enabled must mint new connection credentials (digests are not
+  portable from rc.1 on any path — IdP token reissue is a migration-day
+  operator action regardless of semver level). `sys_scim_provider` itself is
+  NOT removed here; its retirement is tracked separately (#11757).
+- b706af9: Widen `SendEmailInput` / `SendTemplateInput` with an optional `organizationId`, threaded from producers that already hold an organization, so `plugin-email`'s writer stamps `sys_email.organization_id` at the source (#11741, Decision 2 of #11303).
+  
+  - `@objectstack/spec`: `SendEmailInput.organizationId?` and `SendTemplateInput.organizationId?` — optional, pass-through only; absent stays legal (auth verification / password-reset mail carries none).
+  - `@objectstack/plugin-email`: `EmailService.send()` stamps the value verbatim onto the persisted `sys_email` row; `sendTemplate()` forwards it to `send()`. No in-adapter resolution or fabrication — the writer runs under a constant system context and only passes through what the input carries.
+  - `@objectstack/service-messaging`: the email channel threads `delivery.notification.organizationId` on both of its arms (plain `send` and the `sendTemplate` template path).
+  - `@objectstack/plugin-auth`: `sendInvitationEmail` threads the invitation's own `organizationId`; org-less auth mail (reset / verification / magic link / email-change notice) is unchanged.
+  
+  Forward-stamping only: existing org-less `sys_email` rows are not backfilled.
+- 2fd3f1c: feat(platform-objects,plugin-auth): a user may set their own `sys_user.locale` (#14787)
+  
+  Maintainer ruling 2026-09-03, option B, quoted verbatim and untranslated as
+  adopted:
+  
+  > 「同意」
+  
+  The identity table's user-writable set grows from two fields to three. This is a
+  security-boundary act, taken by the maintainer and recorded as one — it is the
+  first widening of the ADR-0092 D2 self-service whitelist since that ADR shipped
+  `{name, image}` as its first and only entry. `sys_user.locale` landed
+  `readonly` and off the whitelist three weeks earlier (#13881 / #14775), which
+  recorded a decision nobody had made yet; the ruling made it.
+  
+  Three edits move together, and each one is inert without the other two:
+  
+  - `SYS_USER_PROFILE_EDIT_FIELDS` becomes `{name, image, locale}`, so the
+    identity write guard admits the column instead of stripping it (and, on a
+    locale-only PATCH, throwing). `SYS_USER_IMPORT_UPDATE_FIELDS` inherits the
+    widening by construction — it is a spread of the profile set, not a second
+    list.
+  - `MANAGED_EXTENSION_EDITABLE_FIELDS` gains a `sys_user` entry holding
+    `locale` and nothing else.
+  - `sys_user.locale` drops `readonly`. Without this the engine's readonly strip
+    removes a caller-supplied value before the guard or the validator ever sees
+    it, so the whitelist entry alone would have been a silent no-op.
+  
+  **A malformed value is refused, not stored.** The column now declares a
+  `locale_bcp47_shape` `format` validation rule carrying the same BCP-47 pattern
+  the delivery-time reader uses, so objectql's rule validator rejects a malformed
+  tag on insert, by-id update and bulk update with the standard
+  `VALIDATION_FAILED` / `invalid_format` envelope (HTTP 400). The check is of
+  SHAPE, not of membership: an unknown-but-well-formed tag is accepted and falls
+  to the delivery ladder's floor rather than dead-lettering a notification, which
+  is the property #13881's per-recipient chain was built to hold. An absent, null
+  or empty column stays legal — clearing it is how a user returns to the
+  deployment default, which remains the fallback.
+  
+  **What did NOT widen.** The ADR-0092 D6 session-snapshot mirror keeps
+  `{name, image}`: better-auth has no `locale` on its user model and it is
+  deliberately not an `additionalFields` entry, so there is no cached copy to keep
+  coherent, and merging one in would manufacture a `user.locale` key present only
+  on sessions that happen to be cached and only after a profile edit. The mirror
+  set is now named separately from the update whitelist rather than derived from
+  it.
+  
+  **Who may perform the write is unchanged, and is a separate question.** ADR-0092
+  D5 leaves that with the permission layer: `member_default` still denies
+  `allowEdit` on `sys_user`, so a rank-and-file member reaches this column through
+  no shipped surface yet — the widening opens the COLUMN, not a self-service
+  route. Granting one (the `sys_api_key` shape: an explicit `member_default` entry
+  plus a `_self` row-scope for writes) is a further security-boundary decision
+  that this ruling did not take.
+  
+  The `identity-write-guard` and `managed-extension-fields` pins that recorded the
+  old posture are FLIPPED, not deleted, each naming the ruling that reversed it —
+  a pin that recorded a real decision is evidence, and evidence of a superseded
+  decision is what tells the next reader the reversal was deliberate.
+  
+  `@objectstack/service-messaging` is a docs-and-export change only: its
+  `LOCALE_TAG_SHAPE` is unchanged in behaviour and now exported so a parity pin
+  can hold it byte-identical to the write-side pattern. Read-side normalization
+  stays — it is strictly the stricter of the two (`"null"` is shape-legal and only
+  the read side refuses it) and it guards values that arrive below the data API,
+  where no write rule runs.
+- 9735662: fix(security): walled postures elevate only the env-declared platform owner, never the first registrant (#11184, the framework leg of cloud#1509)
+  
+  **BREAKING** for walled deployments (`OS_TENANCY_POSTURE=group` or
+  `isolated`), shipped as `minor` under the repo's launch-window convention for
+  breaking changes. Single-org deployments are byte-for-byte unchanged.
+  
+  Measured defect (cloud#1509): on a walled multi-tenant SaaS with
+  `OS_TENANCY_POSTURE=isolated` and `OS_AUTH_MEMBERSHIP_POLICY=invite-only`, the
+  FIRST self-registrant received the cross-tenant `admin_full_access` grant
+  (`platform_admin`, `isPlatformAdmin: true`) and — because the default-org
+  bootstrap binds "the platform admin" — was merged into the deployment's
+  Default Organization as its owner. Whoever curls the public sign-up endpoint
+  first owned the platform.
+  
+  Per the maintainer ruling of 2026-08-23 (verbatim:
+  「1509 选择 env 指定 owner 邮箱」):
+  
+  - **Walled postures: platform admin comes ONLY from the env-declared owner.**
+    `bootstrapPlatformAdmin` (plugin-security) no longer promotes the oldest
+    human user when the requested posture is walled; it promotes exactly the
+    account whose email matches the new `OS_PLATFORM_OWNER_EMAIL` variable
+    (case-insensitive, matched whenever that account registers — arrival order
+    is irrelevant). Self-registrants are never promoted and, since the shared
+    `ensureDefaultOrganization` helper binds only the platform admin, are never
+    auto-merged into the Default Organization either.
+  - **Fail-closed startup refusal.** A walled posture with no
+    `OS_PLATFORM_OWNER_EMAIL` declared refuses to boot from `AuthPlugin.init()`
+    with a message naming the variable — never a silent fallback to
+    first-registrant elevation. The elevation site itself also refuses
+    (`reason: 'walled_owner_email_undeclared'`, logged at `error`) as
+    defense-in-depth for compositions that reach the bootstrap without
+    plugin-auth (`os meta resync`, bare embeddings).
+  - **Single-org posture unchanged.** "First user is owner" stays as ruled
+    reasonable there; the new variable is never consulted under `single`.
+  - The requested posture (`resolveTenancyPosture()`) is deliberately the input,
+    so a walled-requested deployment running degraded
+    (`OS_ALLOW_DEGRADED_TENANCY=1`) still refuses first-registrant elevation.
+  
+  Operator action for walled deployments: set `OS_PLATFORM_OWNER_EMAIL` to the
+  operator account's email address before upgrading. Deployments that already
+  hold a human platform admin are untouched (the bootstrap remains a no-op once
+  any human holds the cross-tenant grant); the variable governs installs that
+  have not yet minted their admin. `@objectstack/types` gains the
+  `resolvePlatformOwnerEmail()` resolver and the `PLATFORM_OWNER_EMAIL_ENV`
+  constant; the verify harness declares the owner email (defaulting to its dev
+  admin) for walled fixtures.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) nothing authorable is removed, renamed or narrowed: no spec key, no metadata spelling and no stored row changes shape, so there is nothing for `os migrate meta` to rewrite and no ledger entry to make. The prescription above is a deployment-environment requirement (declare an env var before boot), which the ADR-0087 ledger does not carry — the refusal itself names the variable at startup. -->
+- 4d5b4f8: feat(auth): walled deployment's declared owner is email-verified at operator-provisioned creation (#12751)
+  
+  On a **walled** deployment (`OS_TENANCY_POSTURE` in the wall-enforcing
+  family), the account whose email equals the declared platform owner
+  (`OS_PLATFORM_OWNER_EMAIL`) is stamped `emailVerified` **at creation** when
+  it comes into existence through an **operator provisioning path** — extending
+  the #11343 dev-boot seeded-admin precedent to production walled boots
+  (maintainer ruling 2026-08-28, cloud#1677: 「运营方创建即视为已验证」; the
+  trust anchor is the operator's env-var declaration plus the
+  operator-executed creation, not a mailbox round-trip; SMTP stays required
+  only for inviting others).
+  
+  **Which creation paths qualify** (the [#11739] audience taxonomy, not a
+  second classification):
+  
+  - the **bootstrap carve-out** — the very first account on a fresh install
+    (zero human users), the one self-serve creation a walled boot admits;
+  - **admin create-user / bulk import** (`method: 'admin'`) — an act only an
+    authenticated admin session can perform;
+  - **SCIM** (`method: 'scim'`) — provisioning executed by the
+    operator-registered directory.
+  
+  **Never**: non-bootstrap self-registration (including an
+  invitation-admitted registration typing the owner address), provider-class
+  JIT (the IdP asserts its own `emailVerified` at insert), any non-owner
+  address, any unwalled posture, and a later email **update** to the owner
+  address (the stamp is staged at the admission gate and consumed once by the
+  `user.create` before-hook — a seam an update cannot traverse). Dev-boot
+  behaviour (#11343) is unchanged.
+  
+  The `WALLED_OWNER_NO_VERIFICATION_PATH` boot warning now probes the owner
+  account's state: a fresh walled boot with no transport and no federated
+  sign-in is **silent** (the operator's own first-account creation arrives
+  verified — the case this closes), while an owner account that already
+  exists **unverified**, a populated store whose bootstrap window is spent,
+  and an unanswerable probe keep warning. A settled deployment whose owner is
+  verified stops re-warning on every boot.
+  
+  `@objectstack/types` gains `isEmailVerifiedUserRow` — the [#11343]
+  fail-closed verified-representation allow-list, moved from
+  `plugin-security`'s private copy so the elevation gate and the boot
+  diagnostic read ONE resolution (`plugin-security` now consumes it; no
+  behaviour change there).
+
+### Patch Changes
+
+- 8064e6d: `POST /api/v1/auth/admin/has-permission` now answers an ObjectStack platform admin from the ADR-0068 platform-authz predicate. The vendor evaluated this permission query on the legacy `user.role === 'admin'` scalar that ADR-0068 D2 stopped synthesizing, so a genuine platform admin was answered `success: false` — indistinguishable from a plain member. The route is now shaded by an ObjectStack raw mount: a platform admin's query is evaluated against the vendor's own admin access-control statements with only the identity signal replaced (an ungranted or unknown permission still answers `false`), while anonymous callers, plain members, and every request body the vendor refuses to evaluate are delegated to the vendor unchanged, byte for byte.
+- 6dd3e69: fix(auth): authorize before the break-glass guard on `POST /api/v1/auth/admin/remove-user` (#11477)
+  
+  The break-glass last-local-credential guard is registered as a global better-auth
+  `hooks.before`, which runs ahead of an endpoint's own middleware. On
+  `/admin/remove-user` — served directly by better-auth's router, whose
+  `adminMiddleware` establishes only a session, with the role decision landing
+  later inside the vendor's handler — that ordering let the guard's lookup and its
+  distinctive refusal be reached by any **authenticated** caller before either
+  authorization layer had run. Because that refusal is target-dependent, the
+  refusal itself carried a per-record fact about a user the caller was not
+  entitled to ask about.
+  
+  `/admin/ban-user` already ran the same guard **after** authorization: #9652
+  shades that path with an ObjectStack raw mount whose platform-admin gate fires
+  first. One guard, two routes, opposite orders, and nothing asserting either.
+  
+  `/admin/remove-user` now carries the same shading, converging the whole
+  `/admin/*` family on **authorization before the guard**. The mount reuses the
+  landed #9652 / #9653 pattern and introduces no new mechanism.
+  
+  What changes is **when** the guard decides, never **what** it decides:
+  
+  - an anonymous caller still gets `401 UNAUTHENTICATED`;
+  - an authenticated non-admin now gets `403 PERMISSION_DENIED` for every target,
+    so the guard is unreachable before authorization and its answer no longer
+    varies with the named user;
+  - a platform admin is unaffected in every respect — the mount **delegates** into
+    better-auth rather than re-implementing removal, so the path-keyed hook still
+    fires and the guard still refuses the removal of the last local password
+    login, and admission remains the vendor's own decision (#9969).
+  
+  An ordering pin ships with the fix so the sequence is mechanically checkable
+  rather than re-argued: it asserts that one authenticated non-admin naming two
+  different targets receives **indistinguishable** responses, and — so the pin
+  cannot be satisfied by deleting the guard — that an admitted platform admin
+  still hits the guard's refusal, and still succeeds on an ordinary user.
+- cd288b4: fix(plugin-auth): the mail transport, brand and locale bindings no longer depend on `registerRoutes`
+  
+  `AuthPlugin` bound five things to the live kernel on `kernel:ready` — the
+  outbound mail transport (`setEmailService`), the SMS transport
+  (`setSmsService`), the deployment email locale (`setDefaultEmailLocale`), the
+  brand name (`setAppName`) and the SMS locale (`setDefaultSmsLocale`) — from
+  inside the same hook that mounts `/api/v1/auth/*`, and that hook was gated on
+  `registerRoutes`.
+  
+  `registerRoutes` answers a transport-mounting question: should this plugin put
+  its own routes on the kernel's `http-server`. The bindings are service
+  composition, and they are true of an embedding regardless of who serves the
+  routes. So an embedding that serves auth routes itself — the whole point of
+  `registerRoutes: false` — came up with no mail transport, no locale on either
+  channel and no brand binding. Silently: the `logger.info` lines that report the
+  wiring were inside the same skipped block, and the `localization` settings
+  namespace was not even read. One visible consequence was that the workspace
+  language could not reach auth mail on such a host at all, and
+  `/api/v1/auth/config` answered `requireEmailVerification: false` because
+  `resolveRequireEmailVerification()` saw no transport.
+  
+  The composition block now registers as its own unconditional
+  `ctx.hook('kernel:ready', …)` — the shape the sibling diagnosis and dev-seed
+  hooks in this plugin already use — placed before the route hook so a routing
+  host keeps the ordering the single combined hook gave it.
+  
+  Route registration itself stays gated: a `registerRoutes: false` kernel still
+  mounts no auth routes.
+  
+  **Behaviour change for `registerRoutes: false` embeddings.** They now resolve
+  the `email`, `sms`, `i18n` and `settings` services at `kernel:ready`, apply
+  `branding.workspace_name` and `localization.locale` (subscribing to both), seed
+  the built-in auth SMS templates when phone sign-in is enabled, and emit the
+  four wiring `info` lines. Hosts that had compensated by wiring these by hand
+  should expect the plugin's own binding to run as well; both paths are
+  idempotent setters, and an explicit workspace setting keeps outranking a
+  manifest default exactly as it does on a routing host. Nothing changes for a
+  host that leaves `registerRoutes` at its default.
+- a5b95ee: fix(plugin-auth): bind the auth email locale to the workspace language, not the build-time default (#14319)
+  
+  Auth mail (verification, password reset, invitation, magic link, email-change
+  notice) picked its `sys_email_template` row from
+  `II18nService.getDefaultLocale()` alone — the app artifact's **build-time**
+  `i18n.defaultLocale`, which is the bare `en` unless the app declares otherwise.
+  The workspace's **runtime** language, `localization.locale` (ADR-0053, Setup ▸
+  Localization), was never consulted, even though the very same `kernel:ready`
+  pass already reads it a dozen lines earlier to localize auth SMS, and the four
+  options that setting offers are exactly the four locales the auth templates
+  ship rows for.
+  
+  A workspace that switched itself to Chinese therefore received Chinese OTP
+  texts and English verification mail from one plugin, on one boot.
+  
+  `AuthPlugin` now prefers `localization.locale` whenever the operator has
+  **explicitly** set it (`ResolvedSettingValue.source !== 'default'`) — the same
+  precedence the sibling `branding.workspace_name` binding uses — and keeps the
+  build-time `i18n.defaultLocale` standing underneath it, so a deployment that
+  declared one is not demoted to the manifest default `en-US`. Neither producer
+  answering leaves the locale unnamed, which is `EmailService`'s documented
+  `en-US` fallback. The binding live-rebinds on `localization` settings changes,
+  exactly as the SMS one does.
+  
+  The 2026-08-13 ruling is unchanged: the recipient locale is the deployment
+  default, resolved at the plugin layer; `Accept-Language` stays rejected and
+  there is still no per-user locale.
+- 450e73b: Report the zero-account boot dead end at `kernel:ready` (#14353)
+  
+  A deployment holding human `sys_user` rows and zero `sys_account` rows cannot
+  be recovered from inside, and until now it booted silently. Nobody can sign in;
+  the first-account bootstrap carve-out counts humans, and humans exist, so it
+  does not open; the default `invite_only` audience posture refuses
+  self-registration; and no administrator exists who could send an invitation.
+  The only symptom was a 401 on credentials nobody holds.
+  
+  That state is now reported at `kernel:ready` at `error` level, under the name
+  `no_sign_in_account_at_boot`, naming both the consequence (the deployment will
+  keep looking healthy and cannot be recovered from inside) and the remedy
+  (provision an account out of band, or open the audience posture).
+  
+  ⛔ No admission semantics change. Whether the carve-out should count humans or
+  logins was ruled on 2026-09-02 (option A — the door does not move); this only
+  reports.
+  
+  The check extends the existing `kernel:ready` walled-owner reporter rather than
+  opening a parallel one: it shares that hook, and the bounded human-population
+  page is read ONCE per boot and handed to `probeWalledOwnerAccountState`, so no
+  deployment pages `sys_user` twice. At most one report is emitted per boot — a
+  deployment matching both shapes gets this error, and the walled-owner warning
+  is suppressed rather than stacked on top of it.
+- 2efa1e1: Apply the workspace's SAVED auth settings at boot — `AuthPlugin` now declares
+  the settings ordering edge instead of reading in the pre-bind window
+  
+  `SettingsServicePlugin` registers the `settings` service in `init()` but binds
+  its DATA ENGINE from a `kernel:ready` hook it registers in `start()`. Between
+  those two moments the service is resolvable and answers reads — from an empty
+  in-memory fallback and the manifest defaults, with `source: 'default'` — while
+  the deployment's real `sys_setting` rows sit unread. Nothing distinguishes that
+  from "no row exists".
+  
+  `AuthPlugin` was reading inside that window. Its `start()`-registered
+  `kernel:ready` hooks reach `getService('settings')` at depth 3 (`runBackfill` →
+  `ensureAuthSettingsBound` → `bindAuthSettings`) and call
+  `getNamespace('auth')` in the same tick. Handlers fire in registration order,
+  registration order is `start()` order, and `AuthPlugin` declared
+  `dependencies: ['com.objectstack.engine.objectql']` and nothing about settings
+  — so nothing ordered it after the settings plugin.
+  
+  On the shipped composition that order was not merely unconstrained, it was
+  **wrong**: `os serve` does `kernel.use(new AuthPlugin(...))` before the
+  capability loop registers `SettingsServicePlugin`, and `resolvePluginOrder`
+  preserves insertion order for plugins with no edge between them. So everything
+  `applySettings()` derives was computed from DEFAULTS at boot — the ADR-0093
+  membership policy the D6 backfill runs under, and the `google_*` social-provider
+  config. `settings.subscribe('auth', …)` only re-applies on a *later* change, so
+  a workspace that configured auth in Setup and never touched it again kept
+  booting with the wrong values: authored, stored, and silently not applied.
+  
+  The repair is one declaration, the same shape the three other shipped readers
+  (`plugin-email`, `service-sms`, `service-storage`) already carry:
+  
+  ```ts
+  optionalDependencies = ['com.objectstack.service.settings'];
+  ```
+  
+  SOFT, not hard — a kernel with no settings service must still boot auth, and
+  `bindAuthSettings` already returns early when the service is absent.
+  `requiresServices` would not have done it: that asserts the service is
+  REGISTERED before `init()`, which it always is, and carries no `start()`
+  ordering.
+  
+  Enforced in both directions. `check:settings-bind-window` goes green with the
+  `com.objectstack.auth` entry **deleted** from its shrink-only ledger — deleting
+  it while the defect stood reproduces the finding, so the green is a measurement
+  rather than a suppression. And `auth-settings-ordering.pin.test.ts` resolves a
+  hostile registry that composes auth BEFORE settings, then removes the
+  declaration from a live instance and watches the order revert (ADR-0049:
+  a declaration nothing acts on is the defect, not the fix).
+- 35e94c9: fix(auth): auth OTP texts and auth mail now read the recipient's own `sys_user.locale`
+  
+  `sys_user.locale` has been a first-class column since #13881, and user-writable
+  since the 2026-09-03 ruling, but plugin-auth's own sends never read it: a phone
+  OTP was rendered in the deployment's language and auth mail in whichever
+  language the triggering *request* asked for. So a Chinese-speaking user on an
+  English deployment got an English verification code, and a password reset an
+  admin initiated for them carried the **admin's** browser language.
+  
+  Both ladders now start one rung higher, in the order ruled for #14788
+  (option D, 2026-09-03): the recipient's own stored `sys_user.locale` → the
+  request's `Accept-Language` → the deployment default. The recorded reasoning is
+  that a value the user chose is stronger evidence of intent than the
+  `Accept-Language` the browser just sent — and the send that forces the order is
+  the one where the requester is not the recipient.
+  
+  - **Phone OTP SMS** (`/phone-number/send-otp` and
+    `/phone-number/request-password-reset`) resolves the recipient by the unique
+    `phone_number` and renders in their language. There is no request rung on this
+    surface — better-auth hands these callbacks a phone number and a code and
+    nothing else — so the chain is stored → deployment here.
+  - **Auth mail** — password reset, email verification and the change-email
+    notice — reads the column off the recipient row it already identifies.
+  
+  Everything underneath is unchanged. An account with no stored locale still gets
+  the deployment default, and with nothing configured at all the documented
+  `en-US` floor (and the built-in `en` SMS row) still applies. The read is
+  best-effort and never blocks a send: a missing column, an unavailable datasource
+  or a value that cannot name a language all resolve to "no stored preference",
+  never to a failed delivery. The value at rest is normalized by
+  `@objectstack/service-messaging`'s `normalizeRecipientLocale` — the platform's
+  one reader of that column, reused rather than copied, so its refusal of the
+  stringified-nothing literals holds here too.
+  
+  Invitations are deliberately not included: an invitee has no `sys_user` row
+  until they accept, so both the mail and SMS invite paths keep the deployment
+  rung.
+- 3798424: fix(plugin-auth): report the refused identity writes ten `catch {}` sites swallowed (#12981)
+  
+  Batch 5 of the ruled `catch { return null; }` worklist, scoped to `plugin-auth`.
+  A re-run of the census instrument
+  (`scripts/measure-durability-swallow-family.mjs`) moves tier-1 DARK from
+  **21 sites in 11 files to 11 in 10**, with `LOUD` rising **32 → 34** and the
+  adjacent `QUIET` bucket **85 → 93** — the ten, moved, nothing else touched.
+  
+  Every site swallowed a refused write into a bare `catch` whose comment said
+  "best-effort". That was true about **control flow** — a bookkeeping write must
+  never turn a valid sign-in into a 500 — and it was being read as permission to
+  say nothing, which is a different decision. The request answered 200, the
+  session was issued, and nothing downstream looked wrong; the write simply did
+  not happen. In `plugin-auth` that silence was hiding **security controls that
+  had quietly stopped enforcing**.
+  
+  **What an operator now sees that they did not before** — one line per seam,
+  each naming the object that did not land, the control that is consequently not
+  enforced, and the remedy:
+  
+  - **`recordSignInOutcome`** — a refused `failed_login_count` / `locked_until`
+    write means consecutive failures never accumulate and the account is never
+    locked: `lockoutThreshold` (ADR-0069 D2) is configured and not enforced, so a
+    brute-force run against that account meets no limit.
+  - **`recordPasswordHistory`** — a refused ring write means the password just
+    replaced was never recorded, so `passwordHistoryCount` (ADR-0069 D1) will not
+    refuse it next time. "You cannot reuse your last N passwords" is advertised
+    and, for that identity, not enforced.
+  - **`enforceSessionControls`** — a refused revocation leaves a session that IS
+    past its idle / absolute limit fully live (ADR-0069 D4). A refused activity
+    heartbeat is reported separately, because it fails the other way: the idle
+    clock keeps measuring from an older instant, so an active user is signed out
+    **earlier** than the configured window.
+  - **`enforceConcurrentCap`** — a refused revocation leaves the account holding
+    more simultaneous sessions than `maxConcurrentSessions` allows.
+  - **`stampIdentitySource`** (and its SCIM twin in `auth-plugin.ts`) — a refused
+    provenance stamp leaves a federated identity still reading `env_native`, so it
+    is offered the local-password actions that are supposed to hide for a managed
+    identity (cloud ADR-0024 D4) — the path by which a managed user self-mints a
+    password that bypasses enforced SSO. The SCIM hook is the sharper of the two:
+    it is the **only** stamp on the adapter-level path and nothing retries it.
+  - **`unlockUser`** — the password stage is cleared and the method still answers
+    `true`, so the admin is told the unlock worked while a user locked at the
+    second factor stays locked with no escape hatch at all. That `true` is
+    exactly why the silence had to go.
+  - **`stampPasswordChangedAt`** — a refused write leaves any admin-issued
+    force-change flag SET (so the user is told to change a password they just
+    changed) and leaves the password-age policy reading a timestamp for a password
+    that no longer exists.
+  - **`stampLastLogin`** — this write is what plugin-audit turns into the
+    change-trail row, so a refusal leaves the sign-in with **no** trace in the
+    compliance ledger at all.
+  
+  Three inline `.catch(() => undefined)` swallows inside the two session controls
+  are repaired in the same change. They are not optional to it: they sit between
+  the refused write and the enclosing `catch`, so repairing only the outer handler
+  would have produced a reporter that could never fire — a green-looking fix over
+  an unchanged silence.
+  
+  Level: the eight `AuthManager` seams report at `warn`, not `error`.
+  `AuthManagerOptions.logger` declares `{ info?; warn }` with no `error` and is
+  re-exported from the package `index.ts`, so adding one is a published-shape
+  change; #12981 routes that question to #13398 and scopes this batch to the
+  **silence**, exactly as batches 1 and 2 did for `plugin-security`. The two
+  `AuthPlugin` seams log through the kernel `Logger`, whose `error` is required,
+  and use it.
+  
+  No entry was added to `scripts/durability-degradation.baseline.json`, and the
+  gate vocabulary is untouched in either direction.
+- 9c4c431: deps(auth): move the whole better-auth family 1.7.1 → 1.7.2 in step, and return `@better-auth/scim` to the family's `^` range (#13715)
+  
+  `@objectstack/plugin-auth` declared `@better-auth/scim` at an EXACT `1.7.1`
+  while the rest of the family sat on `^1.7.1`, and `pnpm-workspace.yaml`
+  forced the same exact resolution. That hold was deliberate and dated (#3653
+  ruling, 2026-08-27): at the time `^1.7.1` resolved scim to 1.7.2, whose
+  `better-auth` / `@better-auth/core` peers are `^1.7.2`, while the installed
+  family was still 1.7.1 — and the workspace overrides would have rewritten
+  those peer ranges down and *silenced* the mismatch rather than satisfy it.
+  That ruling named the remedy: float to 1.7.2+ "with the family moved in
+  step, never a side effect of a lockfile refresh". This is that move.
+  
+  All eleven family members go to `^1.7.2` together — `better-auth`,
+  `@better-auth/core`, `@better-auth/scim`, `@better-auth/oauth-provider`,
+  `@better-auth/sso`, the five adapters and `@better-auth/telemetry` — in the
+  workspace overrides and in `@objectstack/plugin-auth`'s own declared
+  dependencies, which are what a downstream `npx create-objectstack` install
+  actually resolves (the overrides do not ship). Measured after the move: npm
+  `latest` is 1.7.2 for all eleven, the install resolves exactly one copy of
+  each at 1.7.2, and `@better-auth/scim@1.7.2` keeps its `^1.7.2` peers on
+  disk — satisfied by the installed pair rather than rewritten down.
+  
+  scim rejoins the family's `^` shape rather than taking a fresh exact pin: its
+  two sibling standalone plugins (`oauth-provider`, `sso`) peer the family
+  identically and carry `^`, and this entry is also the GHSA-j8v8-g9cx-5qf4
+  floor, which has to be able to take the next patch. The two shapes were
+  measured against each other and resolve identically today, so the choice is a
+  durability one, not a resolution one.
+  
+  No source change: `better-call@1.4.0` and `@better-auth/utils@0.4.2` are
+  still peered exactly as they were at 1.7.1, and `better-auth`'s stale
+  optional `better-sqlite3@^12.0.0` peer is unchanged, so the scaffold's
+  `peerDependencyRules` are untouched.
+- 56d3c7a: `/delete-user` no longer lets a body-supplied `userId` win over the resolved actor
+  
+  `/delete-user` is the vendor's self-service delete: its contract names no
+  target, the subject IS the authenticated caller. The break-glass
+  last-local-credential guard's target resolution on that route still preferred
+  a body-supplied `userId` whenever one was present, so any authenticated
+  caller could steer the guard's own refusal at a user other than themselves.
+  
+  The guard's target on `/delete-user` is now the resolved actor unconditionally
+  — `body.userId` is never consulted for that route, only as a prior fallback.
+  `/admin/remove-user` and `/admin/ban-user` are unaffected: target-naming is
+  their own contract and is untouched here. For every caller acting on
+  themselves, nothing changes — the same lookup runs and the same outcome
+  (refuse the last local credential, admit everything else) is returned.
+- d3bee87: **SDK:** `auth.setInitialPassword` binds the already-mounted `POST /api/v1/auth/set-initial-password` route, which had no client method.
+  
+  `AuthPlugin` has mounted this route on the raw Hono app for as long as the SSO-onboarding flow has existed, but `packages/client/src` built the URL nowhere — measured zero for both `setInitialPassword` and `set-initial-password`, against four sibling auth members returning non-zero on the same corpus, so the absence was an absence and not a broken search. Its only caller was `@object-ui/auth`'s `createAuthClient`, whose three other auth URLs (`/config`, `/get-session`, `/list-accounts`) are all expressed on `ObjectStackClient`, and whose sibling branch in the very same Console password card — `changePassword` — has been ledgered `sdk` throughout.
+  
+  The method is shaped exactly like its namespace siblings (`this.getRoute('auth')` + `this.fetch`, `POST` with a JSON body, returning the parsed envelope), because the difference between it and `changePassword` is a **server-side** one and belongs there: better-auth registers `setPassword` with no HTTP path of its own (server-only `auth.api.setPassword`), so ObjectStack wraps it in an authenticated mount that requires a session and refuses with 409 `PASSWORD_ALREADY_SET` when a credential already exists. Callers that already have a password use `changePassword`, which verifies the current one.
+  
+  **Nothing about the route's behaviour moves.** Its accept/reject logic, its admit set and its server-side guards are untouched — this is a client binding to an existing mount, not a widening of what the mount allows.
+  
+  **Its `AUTH_ROUTE_LEDGER` row lands with it**, because the two halves are one statement and neither is true alone. `plugin-auth` gains `{ route: 'POST /api/v1/auth/set-initial-password', family: 'objectstack-mount', source: 'objectstack', disposition: 'sdk', client: 'auth.setInitialPassword' }` — the ninth mount of the #10534 census, whose disposition was escalated rather than guessed and which the maintainer ruled `sdk` (option C, 2026-08-22) and then ruled should land in one PR (2026-08-23). Without the row, the method's URL matched only the dispatcher's `* /auth/**` prefix family, and `client-url-conformance.test.ts` bounds wildcard-only matches at zero on purpose; with it, the same URL resolves to an enumerated route. The row also brings the `check:auth-mount-ledger` pending-disposition entry down — the exemption that carried this route while the question was open is deleted, which is that ratchet working rather than being relaxed.
+- 35202f1: fix(plugin-auth,plugin-sharing): a refused bootstrap write stops reading as a clean one (#12981)
+  
+  Two boot-time seams answered a REFUSED write exactly the way they answer a
+  write there was no need to make. Nothing else failed on either path, so the
+  deployment kept looking healthy — the durability class AGENTS.md separates
+  from the functional one, and the class `check-durability-degradation-log-level`
+  exists for and, at these two sites, structurally cannot see (it matches callee
+  NAMES from an 18-entry vocabulary, and a seeder reaching storage through
+  `ql.insert` is not in it; a green there means NOT MEASURED for the site, never
+  "level approved").
+  
+  **`plugin-auth` — `ensureDefaultOrganization` reported at `warn`.** A refused
+  `sys_organization` or `sys_member` insert leaves the platform admin with no
+  organization: under multi-org the default `tenant_isolation` RLS policy filters
+  their console to zero rows, and under single-org better-auth has no active org
+  to resolve, so there is no way to add a user at all (ADR-0081 D1). Both lines
+  now report at `error` and each names the consequence AND the remedy, per
+  "Degradation log levels". `BootstrapLogger` gains an OPTIONAL `error`
+  (`message, error?, meta?` — the spec `Logger` arity, so the kernel logger
+  satisfies it as-is) beside its already-required `warn`; the fallback to `warn`
+  is mandatory and lives in one helper so no site can forget it. Additive: a host
+  passing `{ info, warn }` compiles and behaves exactly as before, and gets the
+  same line on the `warn` channel.
+  
+  **`plugin-sharing` — `backfillPrimaryBu` printed NOTHING when every row was
+  refused.** Its per-row `catch { }` counted nothing and its report was gated on
+  `updated > 0`, so a pass in which every `sys_user` write was refused emitted
+  byte-identical output to a pass with nothing to do, while every affected user
+  kept a stale or absent `primary_business_unit_id` and every sharing rule keyed
+  on the primary business unit evaluated against the wrong value. Refusals are
+  now counted, reported once with the consequence and the remedy, and the summary
+  branch is `updated > 0 || refused > 0` — the same suppressor, repaired the same
+  way, as `permission-set-drift.ts` in #12970. `backfillPrimaryBu` now answers
+  `{ updated, refused }`; the added field is additive and its only in-tree caller
+  ignores the result.
+  
+  `patch` rather than `minor` for both: no entry-barrel surface is added, no
+  command or flag, and neither change can turn a previously accepted call into a
+  rejected one. The `plugin-sharing` report deliberately stays on `warn` even
+  though the consequence is durability-shaped — `OptionalSharingLogger`'s own
+  header forbids growing an `error`, and giving that function a stricter sink
+  means requiring `warn` on a publicly exported shape, which
+  `scripts/optional-error-sink-contract.baseline.json` records in as many words
+  as #10556's contract call. What is fixed here is the SILENCE, which needed no
+  contract at all; the LEVEL belongs to that card.
+- f074616: fix(auth): an invitation is written in the invitee's own `sys_user.locale` when the address already holds a row, and keeps the deployment default when it does not (#14641)
+  
+  The four auth sends whose requester IS the recipient gained a per-recipient
+  language rung in #14762 (`sys_user.locale`, ruled on #13881). The two
+  **invitation** sends did not, and the recorded reason was structural rather
+  than an oversight: an invitee generally has no `sys_user` row until they accept,
+  so there is no stored language to read, and the *inviter's* `Accept-Language` is
+  the wrong authority — an English-speaking admin would silently send English
+  invitations to a Chinese-language workspace's new hires.
+  
+  That reason covers only one of the two populations an invitation reaches. This
+  change gives both invitation sends the same top rung the other four already
+  read, on a **two-branch** shape:
+  
+  1. the address (or phone number) **already carries** a `sys_user` row whose
+     `locale` is set — an existing platform user invited into a second
+     organization, or a re-invitation — that row's `locale` wins;
+  2. a genuinely **new** invitee with **no** row keeps the deployment default,
+     because their language is still truly unknown at invitation time. So does an
+     invitee whose row exists but names no language: an unset column is not a
+     choice.
+  
+  ⛔ The inviter direction stays rejected on both branches, and is now pinned
+  against a manager that has the top rung wired rather than against one with no
+  rung at all. #13881's ruling item 3 fixes the chain as **recipient** locale →
+  deployment default; what opened here is the invitee's own column, never the
+  inviter's header.
+  
+  **Both branches are reachable, measured rather than assumed.**
+  `sendInvitationEmail`: better-auth's `create-invitation` route rejects only an
+  address that is already a member of *this* organization
+  (`USER_IS_ALREADY_A_MEMBER_OF_THIS_ORGANIZATION`, `routes/crud-invites.mjs` in
+  the installed 1.7.2), so an existing account invited elsewhere — and the
+  `resend` branch — reach the callback normally. `sendPhoneInviteSms` reaches a row by
+  construction: its one in-repo caller, the identity import endpoint's `invite`
+  policy, **creates** the account and only then sends the SMS.
+  
+  ⚠️ **What the SMS path yields today, stated precisely, because a changeset
+  becomes release notes.** The rung is wired there and reads the row whenever the
+  row carries a locale — but `admin-import-users.ts` never writes `locale` (0
+  occurrences; positive control: `sendInviteSms` appears twice in the same file),
+  and `sys_user.locale` declares no column default. So on the only in-repo caller
+  the column is empty at send time and the invitation SMS still resolves to the
+  **deployment default** — the pre-change behaviour, unchanged for that flow. What
+  this buys on that surface is the rung itself: an out-of-repo caller, or a future
+  import that populates `locale`, is read rather than ignored. The behaviour users
+  see change today is on the invitation **email**.
+  
+  **Matching is exact, and that is safe rather than merely tolerable here.**
+  better-auth lowercases the invitee address on the invite route and the stored
+  `user.email` on sign-up, so both sides of the predicate are already in the same
+  case; `email` and `phone_number` are both `unique: true` in the `user` table
+  `sys_user` is backed by. An address that resolves no row lands on the deployment
+  default, which is the documented floor rather than a failure — and, as
+  everywhere else on this ladder, a failing recipient read never blocks a send.
+  
+  **Docs.** `permissions/authentication.mdx` said "The **invitation** SMS reads
+  the deployment default alone"; that sentence is now false and is corrected. No
+  shipped page states the invitation *email* locale rule (the auth email ladder is
+  undocumented as a whole), so nothing else moved.
+- 0e0bf80: fix(plugin-auth): the invitation carve-out stopped admitting past 200 pending invitations (#11770)
+  
+  Under the `invite_only` audience posture that #11739 made the default, an
+  administrator could send an invitation and the invitee's account creation would
+  still be refused with `SELF_REGISTRATION_CLOSED` — silently, with no signal to
+  either party — as soon as the environment held more than 200 concurrently
+  pending invitations. A 500-employee onboarding is an ordinary way to reach that.
+  
+  `AuthManager.hasPendingInvitationFor` answered "does this address hold a pending
+  invitation?" by reading at most 200 rows filtered only on `status = 'pending'`
+  and scanning them in memory for a case-insensitive email match. Past the first
+  page the invitee simply was not there, so the fail-closed `catch`-alike branch
+  applied the posture and refused a legitimate invitee.
+  
+  The address now goes into the query — `sys_invitation.email` carries a declared
+  index — and the page chain is exhausted, so no row count can hide a live
+  invitation. A page is "pending invitations addressed to this one person", which
+  better-auth bounds by refusing a second pending invitation per organization, so
+  this is not a read of the environment's pending population on the sign-up path;
+  in practice it is a single indexed lookup where the old code always read 200
+  rows.
+  
+  The in-memory scan existed on the stated belief that invitation addresses are
+  stored as the inviter typed them. Measured against the installed better-auth
+  1.7.1, that is wrong on both halves — `organization/invite-member` lowercases
+  the address before storing it, and `internalAdapter.createUser` lowercases the
+  registrant's before calling `validateUserInfo` — and the vendor's own
+  `findPendingInvitation` / `listUserInvitations` / `findMemberByEmail` all query
+  with `email.toLowerCase()`, so a mixed-case row was never redeemable through
+  `accept-invitation` anyway.
+  
+  The row-side comparison is kept rather than deleted: `=` folds case on some
+  collations and folds accents with it, so every returned row is re-checked
+  against the normalized address — a case-only difference still matches, an
+  accent-only difference does not. Expiry stays in JS so a row with no readable
+  `expires_at` keeps reading as live. The security properties are unchanged:
+  `status = 'pending'` only, expiry still enforced, and an unanswerable probe
+  still means no carve-out.
+- 7131f12: **Security:** the "is this user id a platform admin?" question is now asked in exactly one place, and the two copies that answered it differently are gone (#10348, #10949).
+  
+  ADR-0068 D2 defines platform standing as one thing — an unscoped `admin_full_access` grant, held now. `core/security/resolve-authz-context.ts` is the declared authority for authorization derivation and its header states that every entry point must resolve through it and never re-read the grant tables itself. `plugin-auth`'s `auth-manager.ts` did exactly that twice: once inside the `customSession` callback, and once in the predicate that authorizes `/sso/register` and, through the impersonation oracle, `/admin/impersonate-user`. Both copies are deleted. Both callers — and the session payload — now ask `hasPlatformAdminStanding(engine, userId)`, a projection of `resolveUserAuthzGrants` exported from `@objectstack/core`, so a platform-admin verdict is derived in one place for the whole platform.
+  
+  **What that changes, and it is a tightening on all three counts.** The deleted copies applied neither the ADR-0091 validity window nor the ADR-0049 `active` check, and resolved `admin_full_access` by matching a name over a page of the permission-set catalogue. The authority applies both checks before any derivation and resolves the set by id. So:
+  
+  - an **expired** platform-admin grant no longer authorizes `/sso/register` or `/admin/impersonate-user`, and no longer appears in the session payload;
+  - a **deactivated** `admin_full_access` permission set no longer confers platform standing anywhere — the deactivation dialog's promise now holds on these gates too;
+  - an environment holding **more permission sets than a single catalogue page** can no longer lose the `admin_full_access` row and demote every platform admin at once.
+  
+  **One behaviour widens, and it was ruled deliberately** (maintainer, 2026-08-24). The `customSession` copy read without a system identity while the other read with one. The single authority reads as system, so on a strictly org-scoped deployment the session payload stops under-reporting platform admin — the fail-closed drift between the payload and the gates ends. Open-core composition is unaffected: the two reads reached identical rows there already.
+  
+  **The org boundary is unchanged and now pinned at both gates.** An org owner, an org admin, a `TENANT_ADMIN`-posture principal and an org-scoped `admin_full_access` grant are all refused — the `PLATFORM_ADMIN` rung derives from the unscoped capability grant alone. The predicate takes an engine and a user id and nothing else: it deliberately does not accept the resolver's caller-supplied seeds, so no part of a request can supply part of its own verdict.
+  
+  Population queries are a different kind and are untouched: `ensure-default-organization.ts` asks *which* user is the platform admin, which a per-user predicate cannot express.
+- 2cf5a96: An organization no longer stops accepting members at 100 — membership is not a
+  limited axis, and the ceiling nobody chose is now stated explicitly
+  
+  A customer adding users was refused with `Organization membership limit
+  reached`. Nothing in this codebase set that ceiling: better-auth's organization
+  plugin substitutes a vendor default of **100** for an absent `membershipLimit`
+  (`count >= (membershipLimit || 100)` in `routes/crud-members`), and
+  `auth-manager` passed `organizationLimit` — how many organizations one user may
+  CREATE — while never passing `membershipLimit`, which is a different question.
+  
+  The two read almost identically in a config block and mean nothing alike, which
+  is why the gap survived: the option that WAS set looked like the option that
+  was not. In the field the refusal is worse than merely wrong — it arrives while
+  an operator is looking at licences and seat counts, and reads as an entitlement
+  problem on an axis that carries no entitlement at all. Seats are metered on AI
+  usage; plain membership has never been billed.
+  
+  - `membershipLimit` is now passed explicitly, defaulting to unbounded.
+  - `OS_ORG_MEMBERSHIP_LIMIT` is the opt-in for a deployment that DOES want a
+    ceiling (a pilot, a trial tenant). Unusable values (empty, non-numeric,
+    zero, negative) read as unset rather than as a cap — a typo must not be the
+    thing that locks an organization, which is exactly the failure mode being
+    fixed.
+  - The decision lives in `resolveMembershipLimitOption()` rather than inside the
+    plugin-construction expression, so it is testable: the unset case, the
+    explicit ceiling, the unusable-value direction, and — deliberately — that the
+    chosen value clears the vendor's 100 by a wide margin. If a future
+    better-auth changes that default, the test says so instead of leaving an
+    unexplained constant behind.
+  
+  The unbounded value is `Number.MAX_SAFE_INTEGER`, not `Infinity`: the option is
+  compared numerically but also travels through option plumbing that may assume a
+  finite value, and nine quadrillion members is unlimited by any measure that
+  reaches a real deployment.
+- 7c41693: fix(core,plugin-auth,plugin-security): every `OS_PLATFORM_OWNER_EMAIL` reader asks the ONE list-aware parser (#13147)
+  
+  `OS_PLATFORM_OWNER_EMAIL` accepts one address **or a comma-separated list** of
+  them (#11663 Choice 2B). The list parse landed in a single home
+  (`@objectstack/core`'s `platform-admin.ts`) and the authorization derivation
+  consumed it — but every other reader kept calling `resolvePlatformOwnerEmail()`,
+  which returns the operator's value trimmed and otherwise verbatim, and kept
+  treating that whole string as ONE address.
+  
+  An operator who configured a list therefore entered a self-contradictory state:
+  authorization recognised them as a platform administrator, while four separate
+  capabilities silently did nothing. Every direction failed **closed** — no
+  privilege escalation existed at any point — but a declared capability vanished
+  with no error anywhere:
+  
+  - `bootstrap-platform-admin` promoted **nobody**, logging "will be promoted when
+    that account registers" on every boot forever;
+  - the walled operator stamp (`plugin-auth`) stamped **no** list member verified,
+    so the account it should have provisioned was then refused elevation as
+    `walled_owner_not_verified`;
+  - `isVerifiedPlatformOwnerSession` / `platform-owner-wall-bypass` let **nobody**
+    across the Layer 0 organization wall — the largest of the affected surfaces;
+  - the walled boot diagnostic printed the raw list in the slot where an operator
+    reads one address, and its dev-seed silence clause never matched.
+  
+  All six readers now ask the same parser. `@objectstack/core` gains
+  `isConfiguredPlatformAdminEmail(email, config)` — the membership half of
+  `matchesConfiguredPlatformAdmin`, spelled once and shared, for the readers that
+  hold a bare address rather than a `sys_user` row (the elevation gate keeps its
+  two halves apart so `walled_owner_not_registered` and `walled_owner_not_verified`
+  stay distinct answers; the stamp is handed an email before any row exists; the
+  wall takes a fast negative before spending a row read). `PlatformAdminEmailConfig`
+  gains `declaredSpellings`, the entries as the operator typed them, so the by-email
+  `sys_user` lookup and the boot diagnostic get the as-typed form **from the one
+  parse** instead of splitting the raw value a second time.
+  
+  Behaviour for a single declared address is unchanged, including the
+  case-insensitive match and the verbatim-spelling store lookup. A **refused**
+  list (Choice 2B fails the whole variable closed on one unparseable entry) now
+  reaches these readers as "zero administrators", which is the same answer they
+  already gave for an unset variable — never a silently narrower set.
+  
+  Two readers deliberately keep reading the raw value: the walled-boot refusal and
+  the verification-path probe guard in `auth-plugin.ts` both use it as a pure
+  truthiness test ("did the operator declare anything at all?"), which is
+  grammar-independent. A census pin now enumerates the raw readers across both
+  plugin packages and fails on a seventh.
+- 3c0f3ea: docs(plugin-auth): state what the `session.cookieCache` door costs, measured against better-auth 1.7.1 (#12547)
+  
+  No behaviour change, no API change, and ⛔ **no boot refusal** — the #4785
+  posture stands on both doors: deliberate opt-in with the cost disclosed
+  (maintainer ruling 2026-08-27). `cacheSecondaryStorage()` stays exported and
+  `AuthManagerOptions` accepts exactly what it accepted before.
+  
+  This is shipped as a changeset rather than left in source comments because the
+  CHANGELOG is where the sibling door's posture already lives — *"remains
+  exported for anyone who wants better-auth's cached session store deliberately.
+  It now says plainly what it costs."* An operator weighing `cookieCache` reads
+  the changelog, not our TSDoc, and one door's cost being on the public record
+  while its sibling's is not is the asymmetry this closes.
+  
+  **What was measured**, against the installed better-auth `1.7.1` (read out of
+  `node_modules`, never off the `^1.7.1` range):
+  
+  - **The failure direction is the sibling's.** With `cookieCache` enabled,
+    `/get-session` answers from a signed payload in the client's own
+    `session_data` cookie and returns before any adapter read. ObjectStack
+    revokes by writing the `sys_session` row (ADR-0069 D4) and hides tombstoned
+    rows from better-auth's reads — all read-path enforcement, so while the
+    cookie answers, a revoked session keeps authenticating and nobody gets an
+    error.
+  - ⭐ **The reach is materially smaller, and the disclosure says so rather than
+    inheriting the sibling's wording.** The session of record does not move —
+    `createSession` still writes the row, so admin session lists, the
+    concurrent-cap count and D4's audit trail stay correct. The staleness window
+    is bounded and per-client (`cookieCache.maxAge`, default 300s) and cannot be
+    extended without a database read, because better-auth force-disables its
+    stateless `refreshCache` whenever a `database` is configured — which
+    ObjectStack always does. Sensitive operations already bypass it via
+    better-auth's own authoritative re-read. `secondaryStorage` has none of these
+    three bounds.
+  - **It is not reachable from ObjectStack config today, by construction rather
+    than by refusal.** The spec's `AuthConfigSchema.session` declares
+    `expiresIn` / `updateAge` only and `createAuthInstance` reads only those two,
+    so a `cookieCache` key is dropped rather than honoured. The one way in is the
+    `authInstance` escape hatch, where the host has replaced the whole config.
+  
+  The disclosure lands at `auth-manager.ts`'s `session:` block — the place a
+  future author would plumb the key — with a pointer from `secondary-storage.ts`
+  so the two doors are described together. An **observation** pin in
+  `session-of-record.test.ts` records the drop end-of-chain: a revoked session
+  still de-authenticates on the very next request. ⛔ It pins no refusal; it is
+  the tripwire a paragraph alone could not give, so the day someone plumbs
+  `cookieCache` through, a red test points at the cost note instead of D4
+  quietly acquiring a revocation window nobody chose.
+- 26deb31: fix(plugin-auth): keep the logger's receiver when selecting a log channel — class-based host loggers no longer crash, so audience refusals report their verdict instead of `500 null` (#12773)
+  
+  Three sites picked a log channel by **extracting** the method before calling it:
+  
+  - `auth-manager.ts` — `(logger?.error ?? logger?.warn)?.(message, meta)` in `audienceLogError`
+  - `reconcile-membership.ts` — `const log = deps.logger?.error ?? deps.logger?.warn` in `refuseInvalidPolicy`
+  - `adopt-membership.ts` — `const log = options.logger?.info ?? …` in `adoptExistingMembership`
+  
+  `a.b` in *call position* passes `a` as the receiver; `(a.b ?? c.d)(…)` evaluates to
+  the bare function first, so the call runs with `this === undefined`. A plain-closure
+  logger does not read `this` and survives it. `@objectstack/core`'s `ObjectLogger` is a
+  real class with prototype methods and no constructor binding — `error`/`fatal` reach for
+  `this.writeErrorLike`, `debug`/`info`/`warn` for `this.write` — so it threw:
+  
+  ```
+  TypeError: Cannot read properties of undefined (reading 'writeErrorLike')
+      at error (.../packages/core/dist/index.js:650:10)
+      at _AuthManager.audienceLogError (.../plugin-auth/dist/index.mjs:5460:38)
+  ```
+  
+  In `validateAudienceAdmission` the damage compounded: the throw from the `try` landed in
+  the `catch`, which called the same helper again, so the second throw escaped the gate.
+  An audience refusal — a decided, fail-closed 4xx naming exactly what the operator had
+  misconfigured — was delivered to the client as **`HTTP 500` with a null body**, and the
+  verdict reached neither the caller nor the log.
+  
+  Each site now calls through the **property** while keeping its fallback, so both halves
+  of the contract hold: the `error` → `warn` degradation (#9754) and the receiver.
+  
+  No behaviour changes for a host whose logger is a plain closure object — that shape
+  worked before and is pinned unchanged. The gate's decisions, codes and messages are
+  untouched; only their *delivery* is repaired.
+  
+  The regression pin (`logger-receiver-detach.test.ts`) uses a **class-based** logger
+  double whose methods dispatch through `this`, because a closure double passes against
+  the broken code and pins nothing; its case ⓪ asserts that receiver-sensitivity directly
+  so the file cannot quietly become vacuous.
+- ad54eb3: feat(tooling): onboard all 14 `packages/plugins/**` packages into `check:test-typecheck` (#14062)
+  
+  Every plugin package now has a `tsconfig.test.json` compiled by the shared
+  `check:test-typecheck` gate, and its `typecheck` script names it. Before this,
+  the shrink-only `test-typecheck-debt.json` ratchet said **nothing** about a
+  third of the repo's runtime surface: 14 packages, 1 `tsconfig.test.json`
+  (`plugin-security`, wired directly to `tsc` rather than to the instrument), and
+  0 `check:test-typecheck` scripts.
+  
+  Onboarded as a family by the director ruling of 2026-09-01 on #14062
+  (maintainer verbatim: 「同意」), which also carries the #5286 maintainer
+  authority the starting ledgers need. The smaller branch triage recommended —
+  declare the instrument's scope and re-site the two compile-time pins — was
+  recorded as considered and not taken: an instrument silent over a third of the
+  runtime surface is a hole readers generalise across, and that costs more than
+  fourteen tsconfigs.
+  
+  **Measured, not assumed** (at `e80889095`, workspace closure built first). Four
+  packages carry residue and therefore a starting ledger — plugin-approvals 324
+  over 8 files, plugin-auth 94 over 10, plugin-sharing 3 over 2,
+  knowledge-ragflow 3 over 1. The other ten measure **zero** and deliberately get
+  no ledger file at all: the gate reads a missing ledger as `{ entries: {} }`, so
+  any error there is red immediately with no entry to be added to — strictly
+  stronger than a ledger holding nothing, and the call `plugin-security` had
+  already recorded for itself.
+  
+  ⛔ **This does not repair 345 type errors.** Per ruling item 3 it makes the
+  ratchet able to *see* them; paydown follows the ratchet's own shrink-only
+  discipline on its own cards. No test file is edited here.
+  
+  Two corrections to the finding's own prose, both measured: the exclusion is
+  narrower than "no plugin package compiles its tests" — 9 of the 14 already
+  compiled their tests inside the `typecheck`-invoked build config, at zero
+  errors — and `exec-context-annotation.pin.ts` is a `.pin.ts`, which
+  `**/*.test.ts` never excluded, so its directives were already live. The pin
+  this change genuinely makes real is
+  `plugin-approvals/src/manager-org-screen-parity.contract.test.ts`, which no tsc
+  program had ever read.
+- 7303cbf: SCIM `active: false` disables the account again. Stable `@better-auth/scim` (1.7.0+) no longer writes the admin plugin's `banned` column itself — it hands the aggregate lifecycle state to an optional host callback, `identity.reconcileUser`, and only revokes sessions. `plugin-auth` passed no `identity` member, so an identity provider deactivating a user revoked sessions and wrote nothing: `sys_user.banned` stayed false and a user holding a local password signed straight back in. `AuthManager` now implements the callback and routes it to the platform's own ban write: `active: false` bans the user (reason `Deactivated via SCIM`, no expiry) — and makes an administrator's existing EXPIRING ban permanent (`banExpires` cleared, the administrator's reason kept), because the vendor's session hook auto-lifts an expired ban and would otherwise admit a principal the identity provider still holds deactivated — and the vendor's `BANNED_USER` sign-in refusal applies; `POST /Users` with `active: false` provisions the account disabled. `active: true` lifts a ban that carries that reason — an administrator's ban (any other reason) is not the identity provider's to lift, so an attribute sync never re-admits a user banned for cause; the one documented collision is an administrator who types the reason `Deactivated via SCIM` themselves, which produces a ban the identity provider can lift. The last-LOCAL-credential guard the `/admin/ban-user` mount re-runs is deliberately not applied on the SCIM path: an identity-provider deprovision can disable the last password-holding account while non-administrator SSO users remain. The break-glass last-administrator guard (ADR-0024 D5.2) judges the write at the engine, so deactivating the last administrator through SCIM is refused with a 403 SCIM error and the account stays active. A SCIM `DELETE /Users/{id}` — which on 1.7.2 tombstones the source rather than deleting the user — now leaves that account disabled too. No new public symbol: the shared write lives in a package-internal module.
+- 29ef1e1: SCIM provisioning multi-writes now run inside one engine transaction, as the adapter's `#3653` scoping note already declared. On `@better-auth/scim` 1.7.2 the SCIM request scope was stamped with `AsyncLocalStorage.enterWith` inside the `verifyBearerToken` callback and was not observed at write time (measured: zero `engine.transaction` calls across `POST /scim/v2/Users` and `PATCH /scim/v2/Users/{id}`), so `sys_user`, `sys_scim_subject` and `sys_scim_user` landed as separate autocommits, and a refused deactivation left the SCIM resource reporting `active: false` for an account that was still enabled. `AuthManager.handleRequest` now opens the scope with `run(...)` around every request under `/scim/v2` — exactly as narrow as before; non-SCIM better-auth flows keep their sequential posture. A refused last-administrator deactivation now rolls the vendor's own `scimUser.active = false` write back, so the SCIM resource keeps reading `active: true`. The pin the #14360 suite held on that residual (`scim-deactivation-reconcile-user.test.ts`, face (c)) is flipped from `false` to `true` deliberately with this change, and a new runtime pin (`scim-transaction-scope.test.ts`) observes each SCIM mutation calling `engine.transaction`.
+- 1401ae7: feat(platform-objects): `sys_user.locale` — the user's own notification language as a first-class column (#13881)
+  
+  Maintainer ruling 2026-09-01, quoted verbatim and untranslated:
+  
+  > **A**:`sys_user` 加 `locale` 一等列(用户语言是主流平台的一等用户属性;B 的 preference 袋会把一等概念藏进键值对并孕育第二种拼法,排除)
+  
+  `sys_user` gains `locale` — a BCP-47 tag (`zh-CN`, `ja-JP`), optional, in the
+  Profile group. The 2026-08-13 ruling had deferred it "until measured pull";
+  hotcrm measured the pull (4 published languages × 16 notify nodes × 0
+  localizable, two independent lanes agreeing), so the deferral lifted on its own
+  terms. The preference-bag alternative (`sys_user_preference`) was rejected by
+  the ruling and nothing reads it as a fallback.
+  
+  The column is owned by objectql exactly like `ai_access`: better-auth is
+  oblivious to it, and it is deliberately NOT declared as a better-auth
+  `additionalFields` entry — better-auth SELECTs explicit columns, so declaring
+  it there would make `getSession` query a column an environment that has not
+  yet run schema-sync does not have. Boot schema-sync (additive) provisions it.
+  plugin-auth registers it in `MANAGED_EXTENSION_FIELDS.sys_user`, whose ADR-0105
+  D7 collision guard proves better-auth's own user schema owns no `locale` at
+  the pinned version.
+  
+  Who may write it is unchanged: the column is `readonly` on the object (ADR-0092
+  D4, so the standard edit form does not advertise a write the runtime refuses)
+  and is NOT added to `MANAGED_EXTENSION_EDITABLE_FIELDS` or to the ADR-0092 D2
+  self-service whitelist (`{name, image}`). Widening that whitelist so a user can
+  set their own language is a security-boundary decision recorded on #13881, not
+  made here; until then the column is written only by system-context callers (no
+  admin surface writes it today).
+  
+  Who reads it: the messaging channels, per recipient, after fan-out — see the
+  `@objectstack/service-messaging` changeset in the same release.
+- 7cbe705: fix(tooling): put three more package-root plugin manifests inside a tsc program (#14386)
+  
+  `check:type-check-coverage`'s `isUncheckedSourceCandidate` skipped `depth === 0`
+  (the package root) unconditionally, so a package-root `.ts` file was invisible
+  to SOURCES_COVERED no matter what it contained — not reported, and not
+  tracked either. That is exactly why #13284's `driver-memory` /
+  `plugin-hono-server` manifests went unchecked for as long as they did:
+  `pnpm --filter <pkg> typecheck` exited 0 with a file no tsc program read, and
+  the coverage gate called the package COVERED at the same time.
+  
+  This finds three more package-root manifest authoring sites the same hole
+  hid, all `objectstack.config.ts`: `plugin-auth`, `plugin-security` and
+  `service-i18n`. The gate now admits `depth === 0` only for a declared,
+  exact-name allowlist (`ROOT_SOURCE_FILES`, `objectstack.config.ts` its only
+  member) — not every root-level file, which stays the unresolved "104-file"
+  scope question this card explicitly declines to settle (comment
+  5504408509 on #14386) — and each of the three manifests now sits inside a
+  program its package's own `typecheck` script invokes: a widened `include` on
+  the existing sibling `noEmit` program for `plugin-auth`
+  (`tsconfig.examples.json`) and `plugin-security` (`tsconfig.scripts.json`),
+  and a new sibling `tsconfig.typecheck.json` for `service-i18n` (which had no
+  sibling to widen), following the `driver-memory` shape #13284 established.
+  
+  All three type-check clean at zero recorded debt — no ledger entry is added.
+- c0714eb: Walled platform-admin elevation now requires the owner-email match to be
+  VERIFIED, and the bootstrap re-runs on the verifying update (#11343)
+  
+  Under walled postures (`group`/`isolated`), `bootstrapPlatformAdmin` matched
+  the env-declared `OS_PLATFORM_OWNER_EMAIL` against the raw email string on
+  `sys_user` — with no `email_verified` condition, while email verification is
+  off by default. #11211 narrowed elevation from "whoever registers first" to
+  "the declared owner's address" (a real and large narrowing); this closes the
+  remainder that card #11343 records: in the window before the owner registers,
+  an account created with the owner's address would still be elevated.
+  
+  Two halves, deliberately in one change:
+  
+  1. **The elevation match requires `email_verified`** (fail-closed allow-list
+     over driver representations; an absent field on an imported/legacy row
+     reads as unverified). An unverified holder of the owner's address is
+     refused like any stranger — new reason `walled_owner_not_verified`, logged
+     loudly with the unblock in the line. Never falls back, same direction as
+     the undeclared-owner refusal.
+  2. **The bootstrap-replay middleware now also fires on `sys_user` updates
+     touching `email_verified` / `email`** (trigger set extracted as
+     `shouldReplayBootstrapFor`, consumed by the middleware and its pins alike).
+     Verification is an UPDATE — with the old insert-only replay, requiring
+     verification would have refused the genuine owner at sign-up and then
+     never looked again, leaving the platform without any administrator.
+  
+  `single` posture is untouched both ways: first-user promotion (ruled
+  reasonable in #11184) does not gain a verification requirement, and the
+  owner-email variable is still never consulted there. Both directions are
+  pinned: the unverified holder is refused AND the verified owner is elevated —
+  including across the refuse-then-verify-then-re-run sequence.
+  
+  The seeded dev admin (`maybeSeedDevAdmin`, dev-only) is now provisioned with
+  `email_verified` stamped: it is created by the deployment's own boot command
+  with operator-known credentials — the same trust shape as a trusted-SSO
+  insert, not an unknown self-registrant — so walled dev/harness boots keep a
+  promotable declared owner. The generic sign-up path is unchanged.
+- bf8d129: feat(plugin-auth): warn at boot when a walled deployment declares an owner it can never verify (#11640)
+  
+  A walled deployment (`OS_TENANCY_POSTURE=group|isolated`) that declares
+  `OS_PLATFORM_OWNER_EMAIL` but wires **no verification path** — no email
+  transport and no trusted federated sign-in — now emits a loud, named boot
+  warning (`walled_owner_no_verification_path`) on `kernel:ready`.
+  
+  Since #11343, walled platform-admin elevation requires the declared owner's
+  address to be **verified**, and verification can only arrive by an emailed
+  link or by a federated sign-in that inserts the account already verified. With
+  neither wired, the declared owner registers, is refused
+  (`walled_owner_not_verified`), and has no in-product way to satisfy the
+  condition — a dead end that previously surfaced only weeks later, at the
+  owner's rejected registration. The warning names both missing inputs and the
+  concrete wiring for either remedy (an email service, or SSO / a social
+  provider), since either one alone clears it.
+  
+  ⛔ **Boot proceeds — this is not a refusal**, and no accept/reject behaviour
+  changes anywhere: the walled + undeclared-owner boot refusal (#11184) and the
+  fail-closed elevation refusal (#11343) are untouched. Deployments already
+  wiring either verification path see no new output, and neither does a
+  dev/harness boot whose declared owner is the dev-admin the seed provisions and
+  stamps verified.
+- Updated dependencies [809d417]
+- Updated dependencies [387e231]
+- Updated dependencies [f794e4e]
+- Updated dependencies [cae2169]
+- Updated dependencies [b812a54]
+- Updated dependencies [2d4fa75]
+- Updated dependencies [0e4e51b]
+- Updated dependencies [e84bbf6]
+- Updated dependencies [effae80]
+- Updated dependencies [efb3513]
+- Updated dependencies [d62f990]
+- Updated dependencies [c45d8e6]
+- Updated dependencies [2e3e8c7]
+- Updated dependencies [e621291]
+- Updated dependencies [655b106]
+- Updated dependencies [40a93b5]
+- Updated dependencies [101ad2c]
+- Updated dependencies [6747718]
+- Updated dependencies [340c5e5]
+- Updated dependencies [d5b330d]
+- Updated dependencies [dda969c]
+- Updated dependencies [1f45690]
+- Updated dependencies [277948f]
+- Updated dependencies [8bdd955]
+- Updated dependencies [f3bbbef]
+- Updated dependencies [4f24e9d]
+- Updated dependencies [e27583e]
+- Updated dependencies [4bd6faa]
+- Updated dependencies [86cbe37]
+- Updated dependencies [6a180e4]
+- Updated dependencies [474242f]
+- Updated dependencies [63cd487]
+- Updated dependencies [bd4aa4e]
+- Updated dependencies [803eaab]
+- Updated dependencies [f8e8f03]
+- Updated dependencies [983edf1]
+- Updated dependencies [eae824e]
+- Updated dependencies [f6fa22c]
+- Updated dependencies [8a483b3]
+- Updated dependencies [3bc2e38]
+- Updated dependencies [97bcd99]
+- Updated dependencies [7181101]
+- Updated dependencies [df59de0]
+- Updated dependencies [96e25a8]
+- Updated dependencies [f75a38a]
+- Updated dependencies [7a25e7d]
+- Updated dependencies [1fa05a6]
+- Updated dependencies [c85a265]
+- Updated dependencies [dcb10a5]
+- Updated dependencies [773a999]
+- Updated dependencies [35dffea]
+- Updated dependencies [ce744bc]
+- Updated dependencies [d8024f0]
+- Updated dependencies [8120808]
+- Updated dependencies [776a098]
+- Updated dependencies [5060877]
+- Updated dependencies [5a9b7a0]
+- Updated dependencies [4f6325d]
+- Updated dependencies [52954c0]
+- Updated dependencies [2aa8456]
+- Updated dependencies [93809a3]
+- Updated dependencies [7c0d0c3]
+- Updated dependencies [daae7aa]
+- Updated dependencies [8dc22d6]
+- Updated dependencies [25b1b81]
+- Updated dependencies [a392dbf]
+- Updated dependencies [279431e]
+- Updated dependencies [948dd6b]
+- Updated dependencies [3b4c56c]
+- Updated dependencies [ae8edd2]
+- Updated dependencies [e25403c]
+- Updated dependencies [a81aa9d]
+- Updated dependencies [d2b2381]
+- Updated dependencies [64baa68]
+- Updated dependencies [9fa70d7]
+- Updated dependencies [09db64a]
+- Updated dependencies [92916e7]
+- Updated dependencies [a84f3ea]
+- Updated dependencies [f2eaae8]
+- Updated dependencies [56c093c]
+- Updated dependencies [c09451b]
+- Updated dependencies [ba64877]
+- Updated dependencies [e7191ce]
+- Updated dependencies [7345308]
+- Updated dependencies [79b6a22]
+- Updated dependencies [30d96ab]
+- Updated dependencies [f658793]
+- Updated dependencies [836a29c]
+- Updated dependencies [c95ad19]
+- Updated dependencies [e58ea8b]
+- Updated dependencies [4a17645]
+- Updated dependencies [3795c5f]
+- Updated dependencies [919beca]
+- Updated dependencies [8ab926b]
+- Updated dependencies [7317cf2]
+- Updated dependencies [e25e839]
+- Updated dependencies [5997207]
+- Updated dependencies [8b13cc8]
+- Updated dependencies [4a4a35d]
+- Updated dependencies [86e765a]
+- Updated dependencies [1d7e76a]
+- Updated dependencies [53dc739]
+- Updated dependencies [fd289be]
+- Updated dependencies [03bf7b1]
+- Updated dependencies [f90e820]
+- Updated dependencies [18d816a]
+- Updated dependencies [e8bd715]
+- Updated dependencies [b91c351]
+- Updated dependencies [a28a3c0]
+- Updated dependencies [daeaaf9]
+- Updated dependencies [c459da6]
+- Updated dependencies [e914733]
+- Updated dependencies [f887e52]
+- Updated dependencies [881f8d8]
+- Updated dependencies [3bfa1e6]
+- Updated dependencies [0a8ebf3]
+- Updated dependencies [901355c]
+- Updated dependencies [34ce8e7]
+- Updated dependencies [33681ea]
+- Updated dependencies [bfe13c8]
+- Updated dependencies [0fb3044]
+- Updated dependencies [4635f3e]
+- Updated dependencies [fd289be]
+- Updated dependencies [ee3595c]
+- Updated dependencies [99d23b1]
+- Updated dependencies [09b4f4e]
+- Updated dependencies [30928a6]
+- Updated dependencies [de47336]
+- Updated dependencies [b2eab95]
+- Updated dependencies [93940d4]
+- Updated dependencies [3a04b01]
+- Updated dependencies [45b9051]
+- Updated dependencies [3954fb7]
+- Updated dependencies [4805b56]
+- Updated dependencies [ddea371]
+- Updated dependencies [b9e9227]
+- Updated dependencies [d395692]
+- Updated dependencies [5894d30]
+- Updated dependencies [a3765f6]
+- Updated dependencies [2d5cee3]
+- Updated dependencies [e22158f]
+- Updated dependencies [7404925]
+- Updated dependencies [0c2334f]
+- Updated dependencies [778c59f]
+- Updated dependencies [d2619fd]
+- Updated dependencies [af56546]
+- Updated dependencies [6acb11a]
+- Updated dependencies [33c5fd3]
+- Updated dependencies [20b0fdb]
+- Updated dependencies [905019b]
+- Updated dependencies [a286411]
+- Updated dependencies [98c0d33]
+- Updated dependencies [368a82e]
+- Updated dependencies [a3d5724]
+- Updated dependencies [93ea19b]
+- Updated dependencies [9ee2dcf]
+- Updated dependencies [8cb96ec]
+- Updated dependencies [8f10a79]
+- Updated dependencies [6269a55]
+- Updated dependencies [a17da05]
+- Updated dependencies [a8c00e2]
+- Updated dependencies [22e5236]
+- Updated dependencies [0fb8760]
+- Updated dependencies [e5ce2ed]
+- Updated dependencies [be21955]
+- Updated dependencies [bc56e18]
+- Updated dependencies [be21955]
+- Updated dependencies [a9ee989]
+- Updated dependencies [4d0d944]
+- Updated dependencies [15d58db]
+- Updated dependencies [d63b014]
+- Updated dependencies [9abe4e4]
+- Updated dependencies [2cc7122]
+- Updated dependencies [b6d9432]
+- Updated dependencies [3b5f036]
+- Updated dependencies [a4e4d2d]
+- Updated dependencies [48d8ff3]
+- Updated dependencies [50d6c92]
+- Updated dependencies [9e0ba21]
+- Updated dependencies [311433f]
+- Updated dependencies [3e5ad08]
+- Updated dependencies [9abe4e4]
+- Updated dependencies [b7131f3]
+- Updated dependencies [e5812fa]
+- Updated dependencies [7085f90]
+- Updated dependencies [dee4dd4]
+- Updated dependencies [ce7e497]
+- Updated dependencies [51ecb2f]
+- Updated dependencies [9086761]
+- Updated dependencies [f6344e7]
+- Updated dependencies [42a117b]
+- Updated dependencies [e4902d2]
+- Updated dependencies [1401ae7]
+- Updated dependencies [e577445]
+- Updated dependencies [4297fe7]
+- Updated dependencies [e398863]
+- Updated dependencies [d16df74]
+- Updated dependencies [d79c602]
+- Updated dependencies [f11fc61]
+- Updated dependencies [e808890]
+- Updated dependencies [8f79379]
+- Updated dependencies [e6ca40e]
+- Updated dependencies [0c77ea4]
+- Updated dependencies [52954c0]
+- Updated dependencies [9e5cd71]
+- Updated dependencies [1f6d047]
+- Updated dependencies [89eb997]
+- Updated dependencies [7131f12]
+- Updated dependencies [a02540f]
+- Updated dependencies [d81838c]
+- Updated dependencies [aa5994e]
+- Updated dependencies [be93457]
+- Updated dependencies [a65db76]
+- Updated dependencies [2cf5a96]
+- Updated dependencies [15eb2c9]
+- Updated dependencies [5691b07]
+- Updated dependencies [d9cf78e]
+- Updated dependencies [1a47a53]
+- Updated dependencies [14b1145]
+- Updated dependencies [092b9da]
+- Updated dependencies [8ce628a]
+- Updated dependencies [2a6122b]
+- Updated dependencies [225e769]
+- Updated dependencies [8af88dd]
+- Updated dependencies [fb5fbb8]
+- Updated dependencies [d7b3963]
+- Updated dependencies [33184fd]
+- Updated dependencies [7c41693]
+- Updated dependencies [b72db01]
+- Updated dependencies [dce5cd4]
+- Updated dependencies [9688f58]
+- Updated dependencies [556ebc1]
+- Updated dependencies [177ebdc]
+- Updated dependencies [8d237b4]
+- Updated dependencies [2d2e6f0]
+- Updated dependencies [2d8dd8d]
+- Updated dependencies [22d573e]
+- Updated dependencies [b5a2398]
+- Updated dependencies [348860c]
+- Updated dependencies [5383fa6]
+- Updated dependencies [5b3ff63]
+- Updated dependencies [1a6a19c]
+- Updated dependencies [064d484]
+- Updated dependencies [527e050]
+- Updated dependencies [dd33bf9]
+- Updated dependencies [4cb2a90]
+- Updated dependencies [74a7804]
+- Updated dependencies [3519f8d]
+- Updated dependencies [1394768]
+- Updated dependencies [53d3689]
+- Updated dependencies [da43fde]
+- Updated dependencies [10220a7]
+- Updated dependencies [a933ed7]
+- Updated dependencies [ec4c4d2]
+- Updated dependencies [87075b1]
+- Updated dependencies [6202043]
+- Updated dependencies [8519095]
+- Updated dependencies [bb4ea80]
+- Updated dependencies [d38ad7f]
+- Updated dependencies [8965398]
+- Updated dependencies [add6a1b]
+- Updated dependencies [6e33394]
+- Updated dependencies [b3a63d3]
+- Updated dependencies [1c7adc7]
+- Updated dependencies [6d178a4]
+- Updated dependencies [f60ab90]
+- Updated dependencies [7986d97]
+- Updated dependencies [49f0dcf]
+- Updated dependencies [033a34c]
+- Updated dependencies [4d25d22]
+- Updated dependencies [1ffee51]
+- Updated dependencies [5ae4303]
+- Updated dependencies [ece4dad]
+- Updated dependencies [469cbc9]
+- Updated dependencies [e9b377e]
+- Updated dependencies [146f448]
+- Updated dependencies [735f5c7]
+- Updated dependencies [a7e18de]
+- Updated dependencies [366f895]
+- Updated dependencies [dc75ba8]
+- Updated dependencies [cce0aa9]
+- Updated dependencies [e764507]
+- Updated dependencies [cff17af]
+- Updated dependencies [39404f3]
+- Updated dependencies [ca1965f]
+- Updated dependencies [8619f95]
+- Updated dependencies [b706af9]
+- Updated dependencies [db8c288]
+- Updated dependencies [0e5fe7f]
+- Updated dependencies [add4360]
+- Updated dependencies [e0abc38]
+- Updated dependencies [1e4d2eb]
+- Updated dependencies [b853cf3]
+- Updated dependencies [fc9ba76]
+- Updated dependencies [4af6c44]
+- Updated dependencies [0f94cc7]
+- Updated dependencies [a11c1a5]
+- Updated dependencies [71f9cd1]
+- Updated dependencies [ee17d86]
+- Updated dependencies [cdbd920]
+- Updated dependencies [18c432e]
+- Updated dependencies [3c418c4]
+- Updated dependencies [fa8715a]
+- Updated dependencies [a933ed7]
+- Updated dependencies [b3ca463]
+- Updated dependencies [a933ed7]
+- Updated dependencies [0d4a6a8]
+- Updated dependencies [518d5e5]
+- Updated dependencies [6643ba1]
+- Updated dependencies [eeba2ef]
+- Updated dependencies [ec4c4d2]
+- Updated dependencies [424f73c]
+- Updated dependencies [cccbe51]
+- Updated dependencies [a8d6b1d]
+- Updated dependencies [e4a7695]
+- Updated dependencies [87075b1]
+- Updated dependencies [fc58a99]
+- Updated dependencies [14cfc00]
+- Updated dependencies [1c6f7b4]
+- Updated dependencies [e854a53]
+- Updated dependencies [dfebfc8]
+- Updated dependencies [598b7ec]
+- Updated dependencies [ffbb7a1]
+- Updated dependencies [d028b37]
+- Updated dependencies [f7b25c5]
+- Updated dependencies [122ef38]
+- Updated dependencies [4a37870]
+- Updated dependencies [428f9b2]
+- Updated dependencies [aa7ff56]
+- Updated dependencies [811a3c2]
+- Updated dependencies [1401ae7]
+- Updated dependencies [2fd3f1c]
+- Updated dependencies [c41b42e]
+- Updated dependencies [c4db311]
+- Updated dependencies [750fff5]
+- Updated dependencies [c19035e]
+- Updated dependencies [ececf7a]
+- Updated dependencies [d173125]
+- Updated dependencies [8eeca27]
+- Updated dependencies [8425c17]
+- Updated dependencies [a5ef1d8]
+- Updated dependencies [87ad30c]
+- Updated dependencies [772d5de]
+- Updated dependencies [ce80ec2]
+- Updated dependencies [cc837db]
+- Updated dependencies [b372318]
+- Updated dependencies [97a2263]
+- Updated dependencies [29d0676]
+- Updated dependencies [0169d49]
+- Updated dependencies [6bd3231]
+- Updated dependencies [d2b5ba8]
+- Updated dependencies [b799ac5]
+- Updated dependencies [8f74307]
+- Updated dependencies [d23dc08]
+- Updated dependencies [644ad50]
+- Updated dependencies [9735662]
+- Updated dependencies [4d5b4f8]
+- Updated dependencies [0da7cd2]
+- Updated dependencies [28a5c3e]
+- Updated dependencies [4bc18e5]
+- Updated dependencies [cad8b42]
+- Updated dependencies [9f57f1e]
+  - @objectstack/spec@17.3.0
+  - @objectstack/platform-objects@17.3.0
+  - @objectstack/core@17.3.0
+  - @objectstack/types@17.3.0
+  - @objectstack/rest@17.3.0
+  - @objectstack/service-messaging@17.3.0
+
 ## 17.2.0
 
 ### Minor Changes

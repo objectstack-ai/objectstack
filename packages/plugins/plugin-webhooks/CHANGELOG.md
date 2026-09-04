@@ -1,5 +1,608 @@
 # @objectstack/plugin-webhooks
 
+## 17.3.0
+
+### Patch Changes
+
+- e7191ce: fix(build): give each `exports` condition its own `types` target in the 28 dual-build packages (#13112)
+  
+  **Published-surface change, zero runtime change.** No emitted byte moves; what
+  moves is which declaration file a resolver READS. Maintainer ruling 2026-08-29
+  (decision batch #3, verbatim 「同意」) chose declaring the files over deleting
+  them.
+  
+  ## What was wrong
+  
+  These 28 packages are `"type": "module"` and dual-built, and each spelled one
+  `types` condition as a **sibling** of `import`/`require`:
+  
+  ```json
+  "exports": { ".": {
+    "types": "./dist/index.d.ts", "import": "./dist/index.js", "require": "./dist/index.cjs"
+  } }
+  ```
+  
+  A sibling `types` answers for **both** conditions, so a CommonJS consumer was
+  handed `dist/index.d.ts` — an ES-module declaration, because the package is
+  `"type": "module"` — for an entry point it reaches with `require`. Measured with
+  `tsc --traceResolution` on a `"type": "commonjs"` fixture at `moduleResolution:
+  node16`:
+  
+  ```
+  error TS1479: The current file is a CommonJS module whose imports will produce
+  'require' calls; however, the referenced file is an ECMAScript module and cannot
+  be imported with 'require'.
+  ```
+  
+  The JavaScript at `dist/index.cjs` loads perfectly (`check:dual-build-cjs-loads`
+  has asserted that for months). It is the **types** that told the consumer the
+  supported `require` entry point could not be required. The `dist/index.d.cts`
+  twin tsup emits beside it — 36 files, 5,517,701 B on this build — was named by
+  no condition at all and shipped in every tarball unreachable.
+  
+  ## What changed
+  
+  Each condition now names its own declaration, the shape TypeScript documents:
+  
+  ```json
+  "exports": { ".": {
+    "import":  { "types": "./dist/index.d.ts",  "default": "./dist/index.js" },
+    "require": { "types": "./dist/index.d.cts", "default": "./dist/index.cjs" }
+  } }
+  ```
+  
+  33 entry points across 27 packages, subpaths included. The root `types` field is
+  untouched, so `node10` resolvers are unaffected; the `import` condition resolves
+  exactly what it resolved before, measured as an unchanged control in the same
+  run.
+  
+  ## `@objectstack/core` is deliberately NOT changed
+  
+  Splitting a declaration in two makes TypeScript compare it nominally, and
+  `ObjectKernel` carries a `private plugins` member that reaches every plugin
+  through `PluginContext.getKernel()`. With core split, whole-repo `pnpm build`
+  fails in `@objectstack/verify` with 5 × TS2345 ("Types have separate
+  declarations of a private property 'plugins'"); with core held back and the
+  other 27 split, 71/71 tasks pass. So core keeps the sibling-`types` shape and
+  its two `.d.cts` files (220,854 B) stay unreachable, declared as such in
+  `check:dual-build-cjs-loads`. Splitting it needs a decision about core's public
+  types, not about an exports map.
+  
+  ## For consumers
+  
+  - **ESM consumers: nothing changes.** Same declaration file, byte for byte.
+  - **CJS consumers under `node16`/`nodenext`: TS1479 goes away** and the
+    declarations they get are the ones built for CommonJS.
+  - **`node10` / `moduleResolution: node` consumers: nothing changes** — they never
+    read `exports`.
+  - Nothing is removed: every path that resolved before still resolves.
+  
+  Packages that are CJS-first (`require` → `./dist/index.js`, no `"type": "module"`)
+  were already correct and are untouched — their `dist/index.d.ts` really is the
+  CommonJS declaration. Their ESM mirror (an unreachable `.d.mts` under the
+  `import` condition) is a separate, larger population and is filed separately per
+  the ruling, not fixed here.
+  
+  `check:dual-build-cjs-loads` grew a fourth invariant (TYPED) that reds on the old
+  shape, so the drift cannot return silently.
+- 99d23b1: fix(service-messaging,service-automation,plugin-webhooks): stamp `organization_id` on `sys_http_delivery` rows so the cross-organization wall on `redeliver()` actually excludes other tenants' rows (#13546)
+  
+  `sys_http_delivery` is tenant-scoped and `redeliver()` — the one
+  request-reachable door on it — deliberately scopes by the caller's
+  organization (#10740). But the enqueue door never stamped the
+  `organization_id` column, and the SQL driver's tenant term is
+  `(organization_id = :tenantId OR organization_id IS NULL)` — a deliberate
+  global-row fail-open — so 100% of delivery rows landed in the NULL arm:
+  visible to, and replayable by, every organization on a walled deployment.
+  
+  The repair mirrors the notification outbox's existing convention
+  (`EnqueueDeliveryInput.organizationId`), end to end:
+  
+  - `EnqueueHttpInput` gains an **optional** `organizationId` member (inherited
+    by `UndeliverableHttpInput`, so parked rows are tenant-stamped too), and
+    `HttpDelivery` surfaces it on read-back. `SqlHttpOutbox.insert` writes
+    `organization_id: input.organizationId ?? null` exactly like
+    `SqlOutbox.enqueue`; `MemoryHttpOutbox` stores the same field and — now
+    that its rows carry a tenant — applies `RedeliverOptions.tenantId` in
+    `redeliver()` with the driver's exact semantics (another organization's row
+    is invisible/`RESOURCE_NOT_FOUND`; an org-less row stays a global row; a
+    tenant-less caller stays unscoped).
+  - The flow `http` node (durable mode) threads its run's acting organization
+    (`AutomationContext.tenantId` — the same source as the `notify` node's
+    #11303 repair) and warns loudly when a multi-org run has none to thread.
+  - The webhook auto-enqueuer stamps each delivery with its subscription's own
+    organization (`sys_webhook.organization_id`); org-less subscriptions
+    enqueue org-less, unchanged.
+  
+  Forward-stamping only: existing NULL rows are untouched (their disposition is
+  a separate decision). Producers with genuinely no organization — a
+  `single`-posture deployment, a stack before its first organization — keep
+  working unchanged; their rows land NULL, which is the honest global-row shape.
+- 30928a6: fix(i18n): read the provenance companion at serving time, not only record it (#12642)
+  
+  Maintainer ruling #12069 Option A (#11671) landed translation provenance as
+  **two** halves: `os i18n extract --source-hashes` RECORDS which source revision
+  a generated leaf is still a byte copy of, and `withSourceFallback` READS those
+  records at serving time and substitutes the current source for a leaf whose
+  source has moved underneath it. The recording half was then rolled out to every
+  bundle set. The reading half was not — measured on `main`: provenance
+  **recorded in 9 of 9** bundle sets and **read at serving time in 1**.
+  
+  The other eight assembled their `TranslationBundle` straight from the raw
+  generated modules and never consulted the companion sitting beside them, so
+  they recorded the drift and went on serving the superseded draft. Nothing said
+  so: `check:i18n` compares key sets and they still matched, `check:i18n-coverage`
+  counts a present leaf as translated, and `check:i18n-stale-fill`'s cross-locale
+  rule needs a SECOND locale holding the same stale bytes before it can testify.
+  The measured case had one locale and no second witness.
+  
+  All eight are wired here, in the shape `@objectstack/platform-objects`'s own
+  `metadata-translations/index.ts` uses — the committed
+  `<locale>.source-hashes.generated.ts` passed as the fourth argument, the third
+  left `undefined` because these sets have no hand-authored sections. Provenance
+  is now recorded in 9 of 9 sets and served in 9 of 9.
+  
+  `@objectstack/plugin-webhooks` was the last of them and is the only one whose
+  manifest changed: `withSourceFallback` lives in `@objectstack/platform-objects`,
+  which that package did not declare. It was **already in that package's install
+  closure** through `@objectstack/service-messaging`, so the edge declares a
+  resolution that already resolved rather than adding a package to the graph —
+  and relying on it undeclared would have been a phantom dependency under this
+  repo's strict package manager.
+  
+  `check:i18n-stale-fill` gains a second verdict, **UNSERVED PROVENANCE**, so this
+  cannot silently come apart again: a bundle set that commits a companion and
+  does not consult it at serving time now fails the build, including a tenth set
+  that lands tomorrow.
+  
+  **Graded `patch`, and the grade is the interesting part.** No API changes, no
+  new exported surface, and no key set moves — substitution was chosen over
+  deletion precisely so key-set claims stay put (ruling #8765 Option B). What
+  changes is which STRING a stale leaf serves. On this tree that is **zero
+  leaves**: a record is only ever written for a leaf that IS a byte copy of the
+  current source, so the companions arrive 0-stale by construction. The change is
+  in what happens the next time a source string moves — the reader sees the
+  English source rather than a superseded draft of it, which is the same
+  degradation an untranslated key already produces and not a new state.
+- de47336: chore(i18n): roll the generated-leaf provenance companion out to the remaining bundle sets (#12559)
+  
+  `os i18n extract --source-hashes` (#11671, maintainer ruling #12069 Option A)
+  records, per generated translation leaf, the digest of the source revision that
+  leaf is **still a byte copy of** — the one signal that tells a stale fill from a
+  real translation once the source has moved and the two stopped being
+  distinguishable by value. It shipped opt-in, and exactly one of the nine i18n
+  bundle sets opted in. A landed detector, a changeset announcing it and a green
+  gate read together as *"generated translation staleness is now caught"*; for
+  eight of nine sets it was not, and the thing making it not caught was a single
+  absent flag in an extract config — invisible from all three of those surfaces.
+  
+  **All eight remaining sets now opt in** — `plugin-approvals`, `plugin-audit`,
+  `plugin-security`, `plugin-sharing`, `plugin-webhooks`, `service-messaging`,
+  `service-realtime`, `service-storage`. Each documents `source-hashes` in its
+  extract config and commits three `<locale>.source-hashes.generated.ts`
+  companions, produced by the same extract run as the bundles they sit beside
+  (`check:i18n` compares them byte-for-byte, so they cannot be written by hand).
+  `check:i18n` now reports 7 bundles per set where it reported 4, and 11 for
+  `platform-objects` where it reported 8.
+  
+  **Records count what is currently RECORDABLE, never what is covered.** A record
+  is written only for a leaf that *is* right now a byte copy of the current
+  source, so a fully translated locale starts with an empty table — which is the
+  instrument armed, not an instrument that measures nothing: the entry appears by
+  itself on the first extract after a leaf becomes a fill. Measured at this
+  commit, per set over its three translated locales: `service-messaging` 289,
+  `plugin-approvals` 61, `plugin-security` 33, `plugin-webhooks` 20,
+  `plugin-audit` 8, `service-storage` 7, `plugin-sharing` 1 (es-ES only; zh-CN and
+  ja-JP are fully translated and start empty), `service-realtime` 0 (all three
+  locales fully translated). **419 records written across the eight sets, 0
+  stale.**
+  
+  **One extractor fix the rollout forced.** `--source-hashes` had one user, and
+  that user commits both generated sections, so the interaction with
+  `--no-metadata-forms` had never been exercised. The provenance table is computed
+  over every generated section the extractor builds; the eight sets here commit no
+  metadata-forms bundle, and their `metadataForms` subtree — absent from their
+  merge baseline — arrives as a fresh `--fill=default` copy of `en`, so every leaf
+  of it was recordable. First measured on `plugin-audit`: **763 records, of which
+  2 were its own objects and 761 were digests of the Studio metadata-form baseline
+  `@objectstack/platform-objects` owns.** Those records are unreadable in the
+  package holding them and would have rewritten all 24 companions on any unrelated
+  `*.form.ts` change in `packages/spec` — the cross-package coupling ADR-0029 D8
+  and every `bundle-ownership.test.ts` keep out of committed bundles. The
+  companion now covers exactly the sections a run commits, decided by the same two
+  predicates that decide the bundle files. `platform-objects` commits both, so its
+  three committed companions are byte-for-byte unchanged.
+  
+  **Grade: `patch`, and behaviour on the day it lands is unchanged for every
+  leaf.** A record is written only where a leaf is currently a byte copy of the
+  **current** source, so every record written equals the current digest and none
+  of them can be stale; the mechanism cannot arrive red. No committed translation
+  bundle changed a byte, no public API moved, and no leaf's rendered text changed.
+  `narrowToCommittedSections` is new but internal to `@objectstack/cli` — the
+  package's entrypoint does not re-export the extractor utils.
+  
+  **What this does not do**, stated so the boundary is not inferred wrongly a
+  second time: these eight sets now *record* provenance. Reading it at serving
+  time is `withSourceFallback`, and that is still wired in
+  `@objectstack/platform-objects` alone — so a stale fill in one of the eight is
+  now recorded and reportable, but not yet substituted at runtime. Tracked
+  separately.
+- 3dafd8c: Fixed the `sys_webhook` object's `ja-JP` display name (`label`) to ウェブフック, matching the already-Japanese `pluralLabel` and the bundle's own help prose (`object_name.help`, `triggers.help`), which both use the same term. Previously `label` was a stale `Webhook` fill left over from a prior source revision, so the object rendered its own name two different ways within the same locale in the Setup/admin UI. `description` (which uses "Webhook" inside a longer Japanese sentence) and the `Webhook ID` field label are unchanged — this only renames the object itself. `zh-CN` is deliberately untouched: it uses `Webhook` for both slots on purpose, as there is no established Chinese rendering of the term in this codebase.
+- ad54eb3: feat(tooling): onboard all 14 `packages/plugins/**` packages into `check:test-typecheck` (#14062)
+  
+  Every plugin package now has a `tsconfig.test.json` compiled by the shared
+  `check:test-typecheck` gate, and its `typecheck` script names it. Before this,
+  the shrink-only `test-typecheck-debt.json` ratchet said **nothing** about a
+  third of the repo's runtime surface: 14 packages, 1 `tsconfig.test.json`
+  (`plugin-security`, wired directly to `tsc` rather than to the instrument), and
+  0 `check:test-typecheck` scripts.
+  
+  Onboarded as a family by the director ruling of 2026-09-01 on #14062
+  (maintainer verbatim: 「同意」), which also carries the #5286 maintainer
+  authority the starting ledgers need. The smaller branch triage recommended —
+  declare the instrument's scope and re-site the two compile-time pins — was
+  recorded as considered and not taken: an instrument silent over a third of the
+  runtime surface is a hole readers generalise across, and that costs more than
+  fourteen tsconfigs.
+  
+  **Measured, not assumed** (at `e80889095`, workspace closure built first). Four
+  packages carry residue and therefore a starting ledger — plugin-approvals 324
+  over 8 files, plugin-auth 94 over 10, plugin-sharing 3 over 2,
+  knowledge-ragflow 3 over 1. The other ten measure **zero** and deliberately get
+  no ledger file at all: the gate reads a missing ledger as `{ entries: {} }`, so
+  any error there is red immediately with no entry to be added to — strictly
+  stronger than a ledger holding nothing, and the call `plugin-security` had
+  already recorded for itself.
+  
+  ⛔ **This does not repair 345 type errors.** Per ruling item 3 it makes the
+  ratchet able to *see* them; paydown follows the ratchet's own shrink-only
+  discipline on its own cards. No test file is edited here.
+  
+  Two corrections to the finding's own prose, both measured: the exclusion is
+  narrower than "no plugin package compiles its tests" — 9 of the 14 already
+  compiled their tests inside the `typecheck`-invoked build config, at zero
+  errors — and `exec-context-annotation.pin.ts` is a `.pin.ts`, which
+  `**/*.test.ts` never excluded, so its directives were already live. The pin
+  this change genuinely makes real is
+  `plugin-approvals/src/manager-org-screen-parity.contract.test.ts`, which no tsc
+  program had ever read.
+- 598b7ec: fix(i18n): re-translate the five leaves that served a superseded source revision (#12065)
+  
+  `os i18n extract` merges gaps only, so a revised source string leaves the previous
+  revision standing in every translated locale — in sync by key, green under
+  `check:i18n` and counted as translated by `check:i18n-coverage`. The five leaves
+  `check:i18n-stale-fill` froze in its baseline are re-translated here from the
+  **current** `en` source, and the baseline is ratcheted to empty in the same change.
+  
+  User-visible admin/Setup help text changes in `es-ES`, `ja-JP` and `zh-CN`:
+  
+  - `dataset.fields.measures.helpText` (metadata forms) — all three locales promised a
+    `"certified"` governance flag that was removed from the declaration in 16.0.
+  - `sys_webhook.fields.method.help` — all three locales served the pre-revision method
+    enumeration after the source became a prose description.
+  - `sys_webhook.pluralLabel` — `ja-JP` was an untranslated Latin fill and is now
+    Japanese; `zh-CN` keeps `Webhook`, which is the term this bundle's own Chinese prose
+    uses and which carries no plural inflection.
+  - `sys_http_delivery.fields.attempts.help` — `es-ES` / `ja-JP` held an English fill and
+    `zh-CN` a translation of the same superseded source; all three now carry the
+    PARKED / terminal-row clause the source documents.
+  - `sys_notification_subscription.fields.principal.help` — the selector list was missing
+    the `owner_of:object:id` and bare-email forms in all three locales.
+  
+  No schema, export or runtime behaviour changes: translated-locale leaf values only,
+  plus the shrink-only ratchet baseline.
+- Updated dependencies [809d417]
+- Updated dependencies [387e231]
+- Updated dependencies [f794e4e]
+- Updated dependencies [cae2169]
+- Updated dependencies [b812a54]
+- Updated dependencies [2d4fa75]
+- Updated dependencies [0e4e51b]
+- Updated dependencies [e84bbf6]
+- Updated dependencies [effae80]
+- Updated dependencies [efb3513]
+- Updated dependencies [d62f990]
+- Updated dependencies [c45d8e6]
+- Updated dependencies [2e3e8c7]
+- Updated dependencies [e621291]
+- Updated dependencies [655b106]
+- Updated dependencies [40a93b5]
+- Updated dependencies [d5b330d]
+- Updated dependencies [dda969c]
+- Updated dependencies [1f45690]
+- Updated dependencies [277948f]
+- Updated dependencies [8bdd955]
+- Updated dependencies [f3bbbef]
+- Updated dependencies [4f24e9d]
+- Updated dependencies [e27583e]
+- Updated dependencies [4bd6faa]
+- Updated dependencies [86cbe37]
+- Updated dependencies [6a180e4]
+- Updated dependencies [474242f]
+- Updated dependencies [63cd487]
+- Updated dependencies [bd4aa4e]
+- Updated dependencies [803eaab]
+- Updated dependencies [f8e8f03]
+- Updated dependencies [983edf1]
+- Updated dependencies [eae824e]
+- Updated dependencies [f6fa22c]
+- Updated dependencies [8a483b3]
+- Updated dependencies [3bc2e38]
+- Updated dependencies [97bcd99]
+- Updated dependencies [df59de0]
+- Updated dependencies [96e25a8]
+- Updated dependencies [f75a38a]
+- Updated dependencies [7a25e7d]
+- Updated dependencies [1fa05a6]
+- Updated dependencies [c85a265]
+- Updated dependencies [dcb10a5]
+- Updated dependencies [773a999]
+- Updated dependencies [35dffea]
+- Updated dependencies [d8024f0]
+- Updated dependencies [8120808]
+- Updated dependencies [776a098]
+- Updated dependencies [5060877]
+- Updated dependencies [4f6325d]
+- Updated dependencies [52954c0]
+- Updated dependencies [2aa8456]
+- Updated dependencies [93809a3]
+- Updated dependencies [7c0d0c3]
+- Updated dependencies [daae7aa]
+- Updated dependencies [8dc22d6]
+- Updated dependencies [a392dbf]
+- Updated dependencies [279431e]
+- Updated dependencies [948dd6b]
+- Updated dependencies [3b4c56c]
+- Updated dependencies [ae8edd2]
+- Updated dependencies [e25403c]
+- Updated dependencies [64baa68]
+- Updated dependencies [9fa70d7]
+- Updated dependencies [09db64a]
+- Updated dependencies [92916e7]
+- Updated dependencies [a84f3ea]
+- Updated dependencies [f2eaae8]
+- Updated dependencies [c09451b]
+- Updated dependencies [ba64877]
+- Updated dependencies [e7191ce]
+- Updated dependencies [7345308]
+- Updated dependencies [79b6a22]
+- Updated dependencies [30d96ab]
+- Updated dependencies [f658793]
+- Updated dependencies [c95ad19]
+- Updated dependencies [e58ea8b]
+- Updated dependencies [4a17645]
+- Updated dependencies [3795c5f]
+- Updated dependencies [8ab926b]
+- Updated dependencies [7317cf2]
+- Updated dependencies [e25e839]
+- Updated dependencies [5997207]
+- Updated dependencies [8b13cc8]
+- Updated dependencies [4a4a35d]
+- Updated dependencies [86e765a]
+- Updated dependencies [1d7e76a]
+- Updated dependencies [53dc739]
+- Updated dependencies [fd289be]
+- Updated dependencies [03bf7b1]
+- Updated dependencies [f90e820]
+- Updated dependencies [18d816a]
+- Updated dependencies [e8bd715]
+- Updated dependencies [b91c351]
+- Updated dependencies [a28a3c0]
+- Updated dependencies [daeaaf9]
+- Updated dependencies [c459da6]
+- Updated dependencies [e914733]
+- Updated dependencies [f887e52]
+- Updated dependencies [881f8d8]
+- Updated dependencies [3bfa1e6]
+- Updated dependencies [0a8ebf3]
+- Updated dependencies [901355c]
+- Updated dependencies [34ce8e7]
+- Updated dependencies [33681ea]
+- Updated dependencies [4635f3e]
+- Updated dependencies [fd289be]
+- Updated dependencies [ee3595c]
+- Updated dependencies [99d23b1]
+- Updated dependencies [09b4f4e]
+- Updated dependencies [30928a6]
+- Updated dependencies [de47336]
+- Updated dependencies [b2eab95]
+- Updated dependencies [93940d4]
+- Updated dependencies [3a04b01]
+- Updated dependencies [45b9051]
+- Updated dependencies [3954fb7]
+- Updated dependencies [4805b56]
+- Updated dependencies [b9e9227]
+- Updated dependencies [d395692]
+- Updated dependencies [5894d30]
+- Updated dependencies [a3765f6]
+- Updated dependencies [2d5cee3]
+- Updated dependencies [e22158f]
+- Updated dependencies [7404925]
+- Updated dependencies [0c2334f]
+- Updated dependencies [778c59f]
+- Updated dependencies [d2619fd]
+- Updated dependencies [af56546]
+- Updated dependencies [6acb11a]
+- Updated dependencies [33c5fd3]
+- Updated dependencies [20b0fdb]
+- Updated dependencies [905019b]
+- Updated dependencies [a286411]
+- Updated dependencies [98c0d33]
+- Updated dependencies [368a82e]
+- Updated dependencies [a3d5724]
+- Updated dependencies [93ea19b]
+- Updated dependencies [9ee2dcf]
+- Updated dependencies [8cb96ec]
+- Updated dependencies [8f10a79]
+- Updated dependencies [6269a55]
+- Updated dependencies [a17da05]
+- Updated dependencies [a8c00e2]
+- Updated dependencies [0fb8760]
+- Updated dependencies [e5ce2ed]
+- Updated dependencies [be21955]
+- Updated dependencies [bc56e18]
+- Updated dependencies [be21955]
+- Updated dependencies [a9ee989]
+- Updated dependencies [4d0d944]
+- Updated dependencies [15d58db]
+- Updated dependencies [d63b014]
+- Updated dependencies [9abe4e4]
+- Updated dependencies [2cc7122]
+- Updated dependencies [b6d9432]
+- Updated dependencies [3b5f036]
+- Updated dependencies [50d6c92]
+- Updated dependencies [9e0ba21]
+- Updated dependencies [311433f]
+- Updated dependencies [3e5ad08]
+- Updated dependencies [9abe4e4]
+- Updated dependencies [b7131f3]
+- Updated dependencies [e5812fa]
+- Updated dependencies [7085f90]
+- Updated dependencies [dee4dd4]
+- Updated dependencies [ce7e497]
+- Updated dependencies [51ecb2f]
+- Updated dependencies [9086761]
+- Updated dependencies [f6344e7]
+- Updated dependencies [42a117b]
+- Updated dependencies [e4902d2]
+- Updated dependencies [1401ae7]
+- Updated dependencies [e577445]
+- Updated dependencies [4297fe7]
+- Updated dependencies [e398863]
+- Updated dependencies [d16df74]
+- Updated dependencies [d79c602]
+- Updated dependencies [f11fc61]
+- Updated dependencies [e808890]
+- Updated dependencies [8f79379]
+- Updated dependencies [e6ca40e]
+- Updated dependencies [0c77ea4]
+- Updated dependencies [52954c0]
+- Updated dependencies [89eb997]
+- Updated dependencies [7131f12]
+- Updated dependencies [aa5994e]
+- Updated dependencies [be93457]
+- Updated dependencies [a65db76]
+- Updated dependencies [15eb2c9]
+- Updated dependencies [5691b07]
+- Updated dependencies [d9cf78e]
+- Updated dependencies [1a47a53]
+- Updated dependencies [2a6122b]
+- Updated dependencies [225e769]
+- Updated dependencies [8af88dd]
+- Updated dependencies [fb5fbb8]
+- Updated dependencies [d7b3963]
+- Updated dependencies [33184fd]
+- Updated dependencies [7c41693]
+- Updated dependencies [b72db01]
+- Updated dependencies [dce5cd4]
+- Updated dependencies [9688f58]
+- Updated dependencies [556ebc1]
+- Updated dependencies [177ebdc]
+- Updated dependencies [8d237b4]
+- Updated dependencies [2d2e6f0]
+- Updated dependencies [2d8dd8d]
+- Updated dependencies [22d573e]
+- Updated dependencies [b5a2398]
+- Updated dependencies [348860c]
+- Updated dependencies [5383fa6]
+- Updated dependencies [5b3ff63]
+- Updated dependencies [1a6a19c]
+- Updated dependencies [064d484]
+- Updated dependencies [527e050]
+- Updated dependencies [dd33bf9]
+- Updated dependencies [4cb2a90]
+- Updated dependencies [74a7804]
+- Updated dependencies [53d3689]
+- Updated dependencies [b3a63d3]
+- Updated dependencies [49f0dcf]
+- Updated dependencies [033a34c]
+- Updated dependencies [4d25d22]
+- Updated dependencies [1ffee51]
+- Updated dependencies [5ae4303]
+- Updated dependencies [ece4dad]
+- Updated dependencies [e9b377e]
+- Updated dependencies [146f448]
+- Updated dependencies [735f5c7]
+- Updated dependencies [a7e18de]
+- Updated dependencies [366f895]
+- Updated dependencies [dc75ba8]
+- Updated dependencies [cce0aa9]
+- Updated dependencies [e764507]
+- Updated dependencies [cff17af]
+- Updated dependencies [39404f3]
+- Updated dependencies [ca1965f]
+- Updated dependencies [8619f95]
+- Updated dependencies [b706af9]
+- Updated dependencies [add4360]
+- Updated dependencies [e0abc38]
+- Updated dependencies [fc9ba76]
+- Updated dependencies [0f94cc7]
+- Updated dependencies [a11c1a5]
+- Updated dependencies [71f9cd1]
+- Updated dependencies [ee17d86]
+- Updated dependencies [cdbd920]
+- Updated dependencies [18c432e]
+- Updated dependencies [3c418c4]
+- Updated dependencies [fa8715a]
+- Updated dependencies [a933ed7]
+- Updated dependencies [b3ca463]
+- Updated dependencies [a933ed7]
+- Updated dependencies [0d4a6a8]
+- Updated dependencies [518d5e5]
+- Updated dependencies [6643ba1]
+- Updated dependencies [eeba2ef]
+- Updated dependencies [ec4c4d2]
+- Updated dependencies [424f73c]
+- Updated dependencies [cccbe51]
+- Updated dependencies [a8d6b1d]
+- Updated dependencies [e4a7695]
+- Updated dependencies [87075b1]
+- Updated dependencies [fc58a99]
+- Updated dependencies [14cfc00]
+- Updated dependencies [1c6f7b4]
+- Updated dependencies [e854a53]
+- Updated dependencies [dfebfc8]
+- Updated dependencies [598b7ec]
+- Updated dependencies [ffbb7a1]
+- Updated dependencies [d028b37]
+- Updated dependencies [f7b25c5]
+- Updated dependencies [122ef38]
+- Updated dependencies [4a37870]
+- Updated dependencies [428f9b2]
+- Updated dependencies [aa7ff56]
+- Updated dependencies [811a3c2]
+- Updated dependencies [1401ae7]
+- Updated dependencies [2fd3f1c]
+- Updated dependencies [c41b42e]
+- Updated dependencies [c4db311]
+- Updated dependencies [750fff5]
+- Updated dependencies [c19035e]
+- Updated dependencies [ececf7a]
+- Updated dependencies [d173125]
+- Updated dependencies [8eeca27]
+- Updated dependencies [8425c17]
+- Updated dependencies [a5ef1d8]
+- Updated dependencies [772d5de]
+- Updated dependencies [ce80ec2]
+- Updated dependencies [b372318]
+- Updated dependencies [97a2263]
+- Updated dependencies [29d0676]
+- Updated dependencies [0169d49]
+- Updated dependencies [6bd3231]
+- Updated dependencies [d2b5ba8]
+- Updated dependencies [b799ac5]
+- Updated dependencies [8f74307]
+- Updated dependencies [d23dc08]
+- Updated dependencies [644ad50]
+- Updated dependencies [0da7cd2]
+- Updated dependencies [28a5c3e]
+- Updated dependencies [4bc18e5]
+- Updated dependencies [9f57f1e]
+  - @objectstack/spec@17.3.0
+  - @objectstack/platform-objects@17.3.0
+  - @objectstack/core@17.3.0
+  - @objectstack/service-messaging@17.3.0
+
 ## 17.2.0
 
 ### Minor Changes

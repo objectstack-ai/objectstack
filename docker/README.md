@@ -29,7 +29,7 @@ Multi-arch: `linux/amd64` + `linux/arm64`.
 [Self-Hosted Deployment](https://objectstack.ai/docs/deployment/self-hosting)):
 
 ```dockerfile
-FROM ghcr.io/objectstack-ai/objectstack:17.2.0
+FROM ghcr.io/objectstack-ai/objectstack:17.3.0
 COPY --chown=node:node dist/objectstack.json /srv/app/objectstack.json
 ```
 
@@ -40,7 +40,7 @@ docker run -p 8080:8080 \
   -v "$PWD/dist/objectstack.json:/srv/app/objectstack.json:ro" \
   -e OS_DATABASE_URL="postgres://user:pass@db-host:5432/myapp" \
   -e OS_AUTH_SECRET -e OS_SECRET_KEY \
-  ghcr.io/objectstack-ai/objectstack:17.2.0
+  ghcr.io/objectstack-ai/objectstack:17.3.0
 ```
 
 `OS_ARTIFACT_PATH` also accepts an `https://` URL, so the artifact can come
@@ -72,7 +72,7 @@ for a `file:…` path — one box only, wrong for multi-node) and MongoDB
 (`libsql://…` / Turso). Add one by extending the image:
 
 ```dockerfile
-FROM ghcr.io/objectstack-ai/objectstack:17.2.0
+FROM ghcr.io/objectstack-ai/objectstack:17.3.0
 USER root
 RUN npm install -g tedious
 USER node
@@ -100,5 +100,5 @@ reverse-proxy / multi-node guidance:
 ## Local build of this image
 
 ```bash
-docker build -t objectstack:dev --build-arg OS_CLI_VERSION=17.2.0 docker/
+docker build -t objectstack:dev --build-arg OS_CLI_VERSION=17.3.0 docker/
 ```

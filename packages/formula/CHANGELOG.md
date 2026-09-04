@@ -1,5 +1,507 @@
 # @objectstack/formula
 
+## 17.3.0
+
+### Minor Changes
+
+- 4a4a35d: feat(formula): `matchesFilter` resolves the `addDays` offset of a `{ $field }` reference
+  
+  A reference carrying `addDays` — an integer literal or a nested `{ $field }` reference to a
+  numeric column (dot-paths walked, as for `$field`) — resolves to the referenced value
+  shifted by that many whole days, in the shape it arrived in: a `YYYY-MM-DD` calendar day
+  stays a calendar day (so a `$lte` still covers the whole shifted day), an ISO instant keeps
+  its time of day, a `Date` stays a `Date`. A NULL offset contributes zero days; a NULL
+  referenced column — or a value that cannot be read as a date, or an offset that is not a
+  number — makes the comparison false for every operator, `$ne` included, so `$not` re-admits
+  the row. A fractional offset value is truncated toward zero, the same reading the SQL
+  dialects apply. Pinned against the same rows the SQL drivers' conformance corpus carries.
+- 038f333: feat(lint,formula): refuse a visibility predicate that calls a function the CEL environment does not register (#13594)
+  
+  An accept-set narrowing at `objectstack validate` and at the runtime publish
+  door, ruled by the maintainer on 2026-08-31 (director batch #21) on a censused
+  premise.
+  
+  **The hole.** `validate-visibility-predicates` — the gate that judges
+  `visibleWhen` on view form sections/fields and page components — was
+  deliberately parse-only. So a predicate that parses perfectly and calls a
+  function that does not exist passed CLEAN, measured side by side with two
+  controls that fired:
+  
+  ```text
+  source                       lint gate (before)   validateExpression
+  totallyBogusFn(1,2)          CLEAN                ok=false
+  record.x.nosuchmethod('a')   CLEAN                ok=false
+  country === "USA"            syntax               ok=false   <- control
+  status == 'active'           bare-identifier      ok=true    <- control
+  ```
+  
+  The runtime fault it hides is the worst-shaped one the platform has: on a view
+  or page surface it falls OPEN (the element renders unconditionally, identical
+  to carrying no predicate at all), and on an action surface — evaluated with
+  `throwOnError: true` — it falls CLOSED, so the action disappears for every
+  user *including one who holds the grant*, behind a single deduped
+  `console.warn` (objectui#4421). A plausible-looking function name that does not
+  exist is exactly what a generator invents.
+  
+  **What changed.**
+  
+  - `@objectstack/formula` publishes `firstUnknownFunctionCall(source)` — the
+    function-EXISTENCE verdict, isolated from everything else cel-js's `check()`
+    has an opinion about. The oracle is the evaluation environment's own
+    registration set, read through the same `buildEnv` seam `celEngine.compile`
+    and `celEngine.evaluate` build with — never the advertised
+    `CEL_STDLIB_FUNCTIONS` catalog, which lists 35 of the 72 registered names and
+    would have refused 37 functions that resolve and evaluate today (`type`,
+    `map`, `filter`, `split`, `getFullYear`, `json`, …).
+  - `@objectstack/lint` gains `visibility-predicate-unknown-function`
+    (**error**), covering both call forms — global (`totallyBogusFn(1,2)`) and
+    receiver/member (`record.x.nosuchmethod('a')`). The message quotes the
+    engine's own `found no matching overload for '…'` verbatim so publish time
+    and run time read as one system, and offers **no** "did you mean" suggestion:
+    nearest-name matching over the function namespace was measured to answer
+    `min` for `can`.
+  
+  **Scoped supersession, not a widening.** The module's parse-only ruling stands
+  for everything except function existence. A registered name called with wrong
+  arguments (`upper(1, 2)`), a registered name called in the wrong position
+  (bare `split('a,b')`), the CEL-type blind spot (`type == 'grid'`) and every
+  operator-overload fault (`1 + 'a'`) are all still unreported — `type(record.x)
+  == string` and every other legal `dyn` predicate is untouched. Refusing an
+  unregistered call cannot be a false positive: the validation and runtime
+  environments are the same builder (53 probes, 0 divergence), so the call this
+  refuses is a call that would have faulted.
+  
+  **Migration.** A refused predicate names a function that does not exist and
+  never evaluated — replace it with an advertised callable, or precompute the
+  value into a formula field on the object and test that field. The census found
+  **0** host-registered extra CEL functions across the reachable corpus
+  (objectstack `packages/`/`examples/`/`apps/`, objectui, one shipped host app),
+  with a firing positive control, and this repo's `examples/**` and `apps/**`
+  sweep produces **0** new refusals. `cloud`, `objectos` and published
+  third-party apps were NOT MEASURED — if a host in one of those registers extra
+  CEL functions, its predicates are refused; that gap was declared before the
+  ruling and accepted with it.
+
+### Patch Changes
+
+- 713f83f: fix(formula): fail closed on a null MEMBER of a resolved membership array in the CEL pushdown (#13496)
+  
+  `compileCelToFilter` already fails closed when a `current_user.*` variable
+  resolves to `undefined`/`null` — the module's docblock calls it "the no active
+  org fail-closed path" and it is pinned for the SCALAR case. `lowerMembership`
+  did not apply the same discipline one level in: it checked only
+  `Array.isArray(value)` and emitted the list verbatim, so a null MEMBER of a
+  resolved membership array went straight into a security `$in`. The one shape
+  that IS a permission predicate was the one shape that did not fail closed.
+  
+  `lowerMembership` now refuses a `null`/`undefined` member of a **variable-resolved**
+  membership array with the same `unresolved-variable` reason the scalar path
+  uses, which the RLS path already turns into the deny sentinel.
+  
+  Maintainer ruling, 2026-08-31 (quoted unchanged): 「membership 数组中的 null
+  **成员**触发与 null 标量同款处置——`unresolved-variable` / deny sentinel,⛔ 不
+  strip、不静默清洗。」
+  
+  **Why refuse rather than strip.** Stripping the unresolved member is safe in
+  POSITIVE polarity only. `not in` is a supported, pinned member of the pushdown
+  subset (`!(x in y)` lowers to `$not` wrapping `$in`), and `$in: []` matches
+  nothing on every backend — so `$not { $in: [] }` matches the WHOLE table.
+  Stripping therefore inverts into fail-OPEN exactly where the predicate is a
+  blocklist, and it silently deletes a blocklist entry in the mixed
+  `['u1', null]` case. Refusing needs no polarity awareness at all: it throws
+  before any `$not` wrapper is built. Both polarities are pinned.
+  
+  **No shipped behaviour changes.** No first-party provider puts a null into a
+  membership array — `resolve-authz-context.ts` filters non-strings out of
+  `org_user_ids`, and the kernel spec declares `org_user_ids: z.array(z.string())`
+  — so the refused shape was never a declared-valid input. This makes the
+  implementation match the declaration rather than narrowing it. A fully resolved
+  list, an empty list (`$in: []`, a legitimate declared predicate) and the
+  authoring-time `isPushdownableCel` shape gate are all unchanged and pinned so.
+  
+  Out of scope, deliberately: an AUTHORED literal null inside a list
+  (`record.status in ['lost', null]`) is a declared predicate, not an unresolved
+  variable, and what such a filter should select is a separate open question. It
+  is untouched, with a pin recording that.
+- 77d4b3c: Pin `CEL_STDLIB_FUNCTIONS` to the real CEL `Environment` as a declared subset
+  
+  The exported catalog advertises 35 function names while the evaluation
+  environment resolves 72, and nothing asserted the relationship between them. A
+  new drift pin (`cel-stdlib-drift.test.ts`) reads the authoritative environment
+  through `Environment.getDefinitions()` and holds three directions: every
+  advertised name is registered **and bare-callable**; every bare-callable
+  function `registerStdLib` adds is advertised; and the bare-callable built-ins
+  deliberately withheld (`bytes`, `dyn`, `type`, `uint`) are exactly a declared
+  list, so a cel-js upgrade cannot add one unnoticed.
+  
+  The catalog's contents are unchanged. Its docblock now records the measured
+  decomposition of the 72 and states the membership rule that makes the gap
+  deliberate rather than stale: 33 of the 72 are callable only on a receiver
+  (`s.split(',')`), and every consumer spends an entry as a bare call.
+- 1d8ad0f: fix(formula): a stdlib function written as a method gets the bare call shape, not the dialect (#14203)
+  
+  `validateExpression` refused `record.name.upper()` correctly and then handed the
+  author the generic dialect trailer — "`predicate`s are bare CEL (e.g.
+  `record.rating >= 4`)" — advice that cannot succeed on a source that already IS
+  bare CEL and parses fine. The third instance of the same defect family as the
+  `bounds` class (#7073) and the unknown-name class (#13821), and the one neither
+  of them could cover: #13821's arm fires only when the name is ABSENT from
+  `CEL_STDLIB_FUNCTIONS`, and `upper` is present, so this class had no
+  prescription at all. The name is right; the call SHAPE is wrong.
+  
+  It is a high-frequency AI-author mistake, not an exotic one: method-call syntax
+  is what almost every other language uses for string operations, so a generator
+  that knows `upper` exists reaches for `record.name.upper()` before
+  `upper(record.name)`. The remedy is one sentence and it is mechanical — the
+  correct spelling is derivable from the fault itself:
+  
+  ```
+  invalid CEL predicate: found no matching overload for 'dyn.upper()'
+  
+  >    1 | record.name.upper()
+           ^ — `upper` is callable bare, not as a method — a CALL-SHAPE fault, not
+  a dialect mistake, so re-spelling the expression will not fix it. Write
+  `upper(record.name)` instead. The callable names this platform advertises for
+  authoring (the `functions` list `introspectScope` returns,
+  `CEL_STDLIB_FUNCTIONS`) take their subject as an argument; only cel-js's own
+  receiver methods (`record.name.split(',')`) are written after a dot.
+  ```
+  
+  The spelling is assembled from the SOURCE, because cel-js's message names the
+  receiver's TYPE (`dyn.upper()`) and never the author's expression. When the
+  receiver is not a plain dotted chain (`record.tags[0].upper()`,
+  `(a + b).upper()`, `'lit'.upper()`) the message names the call shape —
+  `upper(…)` with the receiver as its first argument — rather than inventing a
+  spelling it cannot derive.
+  
+  The arm is keyed on membership of the bare-callable catalog plus the
+  environment's own record of the receiver form, never on the call shape alone.
+  Two classes therefore keep exactly the behaviour they had:
+  
+  - the 33 receiver-only names cel-js registers (`split`, `map`, `getFullYear`)
+    are correct ONLY after a dot — `record.name.split(',')` type-checks and never
+    reaches this arm;
+  - the seven advertised names registered BOTH ways (`contains`, `endsWith`,
+    `matches`, `size`, `startsWith`, `string`, `trim`) keep the existing trailer
+    when a receiver call of them faults, because the fault there is the arguments
+    (`record.name.contains()`), and a bare rewrite would fault just as hard.
+  
+  No change to `CEL_STDLIB_FUNCTIONS`, to the registered environment, or to what
+  `validateExpression` accepts: the receiver call was refused before this change
+  and is refused after it. Only the sentence the author is told to act on changes.
+- 9738c35: fix(formula): an unknown-function refusal names the function and points at the callable set (#13821)
+  
+  `validateExpression` refused an unknown CEL function correctly and then handed
+  the author a prescription that could not succeed: "`predicate`s are bare CEL
+  (e.g. `record.rating >= 4`)" — advice to write bare CEL, on a source that
+  already is bare CEL and parses fine. An unknown-function fault is graded `type`
+  by the engine's own `check()`, so it fell through `bracesHint` (null, no brace)
+  and out to that generic dialect trailer.
+  
+  This is the second leg of the repair #7073 / PR #7209 made for the `bounds`
+  class, for the same reason `boundsHint`'s doc-comment gives: an author who obeys
+  the last sentence they were given — an LLM author above all — rewrites the
+  dialect, learns nothing, and comes back with the same unresolvable name. The
+  last sentence pointed at the one thing that was already correct.
+  
+  The `type` class now gets its own prescription, which **names the function that
+  did not resolve** and points at the callable set `introspectScope` publishes:
+  
+  ```
+  invalid CEL predicate: found no matching overload for 'dyn.nosuchmethod(string)'
+  
+  >    1 | record.x.nosuchmethod('a')
+           ^ — `nosuchmethod` is not a callable name here — a NAME fault, not a
+  dialect mistake, so re-spelling the expression will not fix it. The callable
+  names this platform advertises for authoring are the `functions` list
+  `introspectScope` returns (`CEL_STDLIB_FUNCTIONS`) — pick one of those, or
+  precompute the value in a stored field and reference that field instead.
+  ```
+  
+  The front half is unchanged: it is cel-js's own vocabulary and matches the
+  runtime fault exactly. Only the trailer after the dash is new. `CEL_STDLIB_FUNCTIONS`
+  itself is untouched, and the message names no member count — what the catalog
+  contains is being adjudicated separately, and a sentence asserting a size would
+  be falsified by that ruling.
+  
+  **The did-you-mean suggestion is thresholded, and the threshold is the point.**
+  Against this catalog the shared `nearestName` budget answers
+  `nearestName('can', CEL_STDLIB_FUNCTIONS)` with `'min'` — two edits on a
+  three-character name, a jump from a permission verb to a numeric function. That
+  suggestion is worse than silence: an author who takes it writes
+  `min(object, verb)`. This class therefore narrows locally to at most one edit per
+  three characters of the longer name, keeping the case that makes suggesting
+  worthwhile (`isBlnk` → `isBlank`) and refusing the measured hazard (`can` → no
+  suggestion). Both cases are pinned. The shared `nearestName` budget is unchanged,
+  so field-name suggestions are unaffected.
+  
+  Message-only. The refusal fires on exactly the same inputs it did before — no
+  rule id, severity, match set or gate behaviour changed. Faults in the `type`
+  class that name no unresolvable call keep the existing trailer: an operator or
+  ternary mismatch (`1 + 'a'`), and a real function handed arguments no overload
+  accepts (`upper(1, 2)`, which produces the same cel-js message shape) — calling
+  `upper` "not a callable name" would replace a useless sentence with a false one.
+- Updated dependencies [809d417]
+- Updated dependencies [387e231]
+- Updated dependencies [f794e4e]
+- Updated dependencies [cae2169]
+- Updated dependencies [b812a54]
+- Updated dependencies [2d4fa75]
+- Updated dependencies [0e4e51b]
+- Updated dependencies [e84bbf6]
+- Updated dependencies [effae80]
+- Updated dependencies [d62f990]
+- Updated dependencies [c45d8e6]
+- Updated dependencies [2e3e8c7]
+- Updated dependencies [e621291]
+- Updated dependencies [40a93b5]
+- Updated dependencies [d5b330d]
+- Updated dependencies [dda969c]
+- Updated dependencies [1f45690]
+- Updated dependencies [277948f]
+- Updated dependencies [8bdd955]
+- Updated dependencies [f3bbbef]
+- Updated dependencies [4f24e9d]
+- Updated dependencies [474242f]
+- Updated dependencies [63cd487]
+- Updated dependencies [bd4aa4e]
+- Updated dependencies [803eaab]
+- Updated dependencies [f8e8f03]
+- Updated dependencies [eae824e]
+- Updated dependencies [f6fa22c]
+- Updated dependencies [8a483b3]
+- Updated dependencies [97bcd99]
+- Updated dependencies [df59de0]
+- Updated dependencies [96e25a8]
+- Updated dependencies [f75a38a]
+- Updated dependencies [7a25e7d]
+- Updated dependencies [1fa05a6]
+- Updated dependencies [c85a265]
+- Updated dependencies [dcb10a5]
+- Updated dependencies [773a999]
+- Updated dependencies [35dffea]
+- Updated dependencies [776a098]
+- Updated dependencies [5060877]
+- Updated dependencies [4f6325d]
+- Updated dependencies [52954c0]
+- Updated dependencies [2aa8456]
+- Updated dependencies [93809a3]
+- Updated dependencies [7c0d0c3]
+- Updated dependencies [daae7aa]
+- Updated dependencies [8dc22d6]
+- Updated dependencies [279431e]
+- Updated dependencies [948dd6b]
+- Updated dependencies [3b4c56c]
+- Updated dependencies [ae8edd2]
+- Updated dependencies [e25403c]
+- Updated dependencies [64baa68]
+- Updated dependencies [9fa70d7]
+- Updated dependencies [09db64a]
+- Updated dependencies [92916e7]
+- Updated dependencies [a84f3ea]
+- Updated dependencies [f2eaae8]
+- Updated dependencies [c09451b]
+- Updated dependencies [ba64877]
+- Updated dependencies [7345308]
+- Updated dependencies [79b6a22]
+- Updated dependencies [30d96ab]
+- Updated dependencies [f658793]
+- Updated dependencies [c95ad19]
+- Updated dependencies [e58ea8b]
+- Updated dependencies [4a17645]
+- Updated dependencies [3795c5f]
+- Updated dependencies [8ab926b]
+- Updated dependencies [7317cf2]
+- Updated dependencies [e25e839]
+- Updated dependencies [5997207]
+- Updated dependencies [8b13cc8]
+- Updated dependencies [4a4a35d]
+- Updated dependencies [86e765a]
+- Updated dependencies [1d7e76a]
+- Updated dependencies [53dc739]
+- Updated dependencies [fd289be]
+- Updated dependencies [03bf7b1]
+- Updated dependencies [f90e820]
+- Updated dependencies [18d816a]
+- Updated dependencies [e8bd715]
+- Updated dependencies [b91c351]
+- Updated dependencies [a28a3c0]
+- Updated dependencies [daeaaf9]
+- Updated dependencies [c459da6]
+- Updated dependencies [e914733]
+- Updated dependencies [f887e52]
+- Updated dependencies [881f8d8]
+- Updated dependencies [3bfa1e6]
+- Updated dependencies [901355c]
+- Updated dependencies [34ce8e7]
+- Updated dependencies [33681ea]
+- Updated dependencies [4635f3e]
+- Updated dependencies [ee3595c]
+- Updated dependencies [b2eab95]
+- Updated dependencies [93940d4]
+- Updated dependencies [3a04b01]
+- Updated dependencies [45b9051]
+- Updated dependencies [b9e9227]
+- Updated dependencies [d395692]
+- Updated dependencies [5894d30]
+- Updated dependencies [a3765f6]
+- Updated dependencies [e22158f]
+- Updated dependencies [7404925]
+- Updated dependencies [0c2334f]
+- Updated dependencies [778c59f]
+- Updated dependencies [d2619fd]
+- Updated dependencies [6acb11a]
+- Updated dependencies [33c5fd3]
+- Updated dependencies [20b0fdb]
+- Updated dependencies [905019b]
+- Updated dependencies [a286411]
+- Updated dependencies [98c0d33]
+- Updated dependencies [368a82e]
+- Updated dependencies [a3d5724]
+- Updated dependencies [93ea19b]
+- Updated dependencies [9ee2dcf]
+- Updated dependencies [8cb96ec]
+- Updated dependencies [8f10a79]
+- Updated dependencies [6269a55]
+- Updated dependencies [0fb8760]
+- Updated dependencies [e5ce2ed]
+- Updated dependencies [be21955]
+- Updated dependencies [bc56e18]
+- Updated dependencies [be21955]
+- Updated dependencies [a9ee989]
+- Updated dependencies [4d0d944]
+- Updated dependencies [15d58db]
+- Updated dependencies [d63b014]
+- Updated dependencies [9abe4e4]
+- Updated dependencies [2cc7122]
+- Updated dependencies [50d6c92]
+- Updated dependencies [9e0ba21]
+- Updated dependencies [311433f]
+- Updated dependencies [3e5ad08]
+- Updated dependencies [9abe4e4]
+- Updated dependencies [b7131f3]
+- Updated dependencies [e5812fa]
+- Updated dependencies [7085f90]
+- Updated dependencies [dee4dd4]
+- Updated dependencies [ce7e497]
+- Updated dependencies [51ecb2f]
+- Updated dependencies [9086761]
+- Updated dependencies [42a117b]
+- Updated dependencies [1401ae7]
+- Updated dependencies [4297fe7]
+- Updated dependencies [e398863]
+- Updated dependencies [d16df74]
+- Updated dependencies [f11fc61]
+- Updated dependencies [e808890]
+- Updated dependencies [8f79379]
+- Updated dependencies [e6ca40e]
+- Updated dependencies [0c77ea4]
+- Updated dependencies [52954c0]
+- Updated dependencies [89eb997]
+- Updated dependencies [aa5994e]
+- Updated dependencies [be93457]
+- Updated dependencies [a65db76]
+- Updated dependencies [15eb2c9]
+- Updated dependencies [5691b07]
+- Updated dependencies [2a6122b]
+- Updated dependencies [225e769]
+- Updated dependencies [8af88dd]
+- Updated dependencies [fb5fbb8]
+- Updated dependencies [d7b3963]
+- Updated dependencies [b72db01]
+- Updated dependencies [dce5cd4]
+- Updated dependencies [177ebdc]
+- Updated dependencies [8d237b4]
+- Updated dependencies [2d2e6f0]
+- Updated dependencies [2d8dd8d]
+- Updated dependencies [22d573e]
+- Updated dependencies [b5a2398]
+- Updated dependencies [348860c]
+- Updated dependencies [5383fa6]
+- Updated dependencies [5b3ff63]
+- Updated dependencies [1a6a19c]
+- Updated dependencies [527e050]
+- Updated dependencies [dd33bf9]
+- Updated dependencies [4cb2a90]
+- Updated dependencies [74a7804]
+- Updated dependencies [53d3689]
+- Updated dependencies [b3a63d3]
+- Updated dependencies [033a34c]
+- Updated dependencies [4d25d22]
+- Updated dependencies [1ffee51]
+- Updated dependencies [5ae4303]
+- Updated dependencies [ece4dad]
+- Updated dependencies [e9b377e]
+- Updated dependencies [146f448]
+- Updated dependencies [735f5c7]
+- Updated dependencies [a7e18de]
+- Updated dependencies [366f895]
+- Updated dependencies [dc75ba8]
+- Updated dependencies [cce0aa9]
+- Updated dependencies [e764507]
+- Updated dependencies [cff17af]
+- Updated dependencies [39404f3]
+- Updated dependencies [ca1965f]
+- Updated dependencies [8619f95]
+- Updated dependencies [b706af9]
+- Updated dependencies [fc9ba76]
+- Updated dependencies [0f94cc7]
+- Updated dependencies [a11c1a5]
+- Updated dependencies [71f9cd1]
+- Updated dependencies [ee17d86]
+- Updated dependencies [cdbd920]
+- Updated dependencies [18c432e]
+- Updated dependencies [3c418c4]
+- Updated dependencies [fa8715a]
+- Updated dependencies [a933ed7]
+- Updated dependencies [b3ca463]
+- Updated dependencies [a933ed7]
+- Updated dependencies [0d4a6a8]
+- Updated dependencies [518d5e5]
+- Updated dependencies [6643ba1]
+- Updated dependencies [eeba2ef]
+- Updated dependencies [ec4c4d2]
+- Updated dependencies [424f73c]
+- Updated dependencies [cccbe51]
+- Updated dependencies [a8d6b1d]
+- Updated dependencies [e4a7695]
+- Updated dependencies [87075b1]
+- Updated dependencies [fc58a99]
+- Updated dependencies [14cfc00]
+- Updated dependencies [1c6f7b4]
+- Updated dependencies [e854a53]
+- Updated dependencies [dfebfc8]
+- Updated dependencies [d028b37]
+- Updated dependencies [122ef38]
+- Updated dependencies [4a37870]
+- Updated dependencies [428f9b2]
+- Updated dependencies [aa7ff56]
+- Updated dependencies [c41b42e]
+- Updated dependencies [c4db311]
+- Updated dependencies [750fff5]
+- Updated dependencies [c19035e]
+- Updated dependencies [ececf7a]
+- Updated dependencies [d173125]
+- Updated dependencies [8eeca27]
+- Updated dependencies [8425c17]
+- Updated dependencies [a5ef1d8]
+- Updated dependencies [772d5de]
+- Updated dependencies [ce80ec2]
+- Updated dependencies [b372318]
+- Updated dependencies [97a2263]
+- Updated dependencies [29d0676]
+- Updated dependencies [0169d49]
+- Updated dependencies [6bd3231]
+- Updated dependencies [d2b5ba8]
+- Updated dependencies [b799ac5]
+- Updated dependencies [8f74307]
+- Updated dependencies [d23dc08]
+- Updated dependencies [644ad50]
+- Updated dependencies [0da7cd2]
+- Updated dependencies [28a5c3e]
+- Updated dependencies [4bc18e5]
+  - @objectstack/spec@17.3.0
+
 ## 17.2.0
 
 ### Patch Changes
