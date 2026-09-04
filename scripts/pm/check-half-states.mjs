@@ -5566,6 +5566,30 @@ export function h32NeedsSeatComments(issue) {
 }
 
 /**
+ * H44's seat leg — a SIBLING of the gate above, not a change to it (#14929).
+ *
+ * H32 needs a lane INVENTORY to say anything, and `seatLane`'s `foreign` flag is
+ * an honest statement that a `repo:*` or lane-less seat has no `domain:*` label
+ * on this board to count one against. That argument is H32's and it holds.
+ *
+ * ⚠️ It is not H44's. "Does this post state a reading with no time on it" needs
+ * no inventory at all — it needs the post's own comments. Inheriting H32's gate
+ * would leave the row blind to exactly the threads the filing card is about:
+ * measured on the live board while this row was written, H32's gate fetched 4 of
+ * 13 open seat posts, and the 9 it skipped included the TRIAGE seat — carrier of
+ * the round-open marker that is this card's worked example — and the SKILLS
+ * seat. So this gate keeps the `pm:seat` + HELD legs and drops the lane test.
+ *
+ * The cost is stated where it is paid: +6 comment pages per run at that board.
+ * ⛔ H32's population is untouched, and H38 — which inherited the same gate for
+ * the same reason — takes this widening under its own card, not here.
+ */
+export function h44NeedsSeatComments(issue) {
+  if (!labelNames(issue ?? {}).includes('pm:seat')) return false;
+  return seatIsHeld(issue);
+}
+
+/**
  * H32 — null when clean, else the finding sentence.
  *
  * @param {object} issue — the seat post.
@@ -8002,6 +8026,255 @@ export function h43GovernedReviewRequestGap(pr, governed, approvers, reviewed = 
 }
 
 // ---------------------------------------------------------------------------
+// H44 — a protocol artefact stating a board/tree/queue reading with NO time at
+// which the reading was taken (#14929, report-only).
+//
+// ## The rule, and the gap that is NOT in the rule
+//
+// `.claude/skills/pm-dispatch/SKILL.md:164` carries a maintainer ruling of
+// 2026-09-02 (「其他同意」): 「板面/树/队列读数自带取数时刻:写进认领、派发令、
+// 复核、轮次报告、座位贴段落的读数恒带 UTC 时间戳(形如 `2026-03T00:21Z`),树读
+// 数另带 ref 或 tip;无时间戳的读数是格式错误不是现值,读者按未取处理」.
+//
+// ⛔ This row adds no rule and does not touch that text. The filing card's
+// measurement is that NOTHING READ IT: a `git grep` for the rule across
+// `scripts/` and `.github/` returned ZERO files, and its first live test failed
+// 2h37m after it landed — the round-open marker that opened the very next round
+// stated a `finding`-box census as a table of counts with no time on it. Two
+// further recurrences were then measured in a SECOND session a day later. Beside
+// the rule the same skill ranks the remedies: (a) delete the construct that
+// permits the error → (b) make the correct form the protocol's only spelling →
+// (c) add one more thing to remember, and 「(c) 型屡复发、(a) 型守住」. A patrol
+// row that NAMES the malformed reading is the cheapest (a)-shaped hold there is:
+// it asks nobody to remember anything, it reads.
+//
+// ## The predicate is STRUCTURAL and carries NO roster — deliberately
+//
+// ⚠️ The obvious first draft is "a comment authored by a seat account", and it
+// was measured and abandoned before this row was written. Keep the reason: there
+// is no seat roster in this repo (the only frozen account list is
+// `GOVERNED_APPROVERS`, which is the APPROVER set); the seat-post sticker login
+// this file already parses does NOT match comment authorship (a card assigned
+// `os-steve` carries a claim authored by `claude[bot]`); and one account is
+// simultaneously a seat and the maintainer's own login — stated in H43's header
+// above — so an author test cannot separate a seat's reading from the
+// maintainer's prose. It is not merely unavailable, it is ill-posed.
+//
+// ⇒ So this row recognises the ARTEFACT, exactly as `CLAIM_COMMENT_MARKER`, H33,
+// H34 and H37 already do, and filters by nothing else. That is also what the
+// rule itself says: it is scoped to 「认领、派发令、复核、轮次报告、座位贴段落」
+// — five artefacts — and says nothing whatever about who typed them.
+//
+// ## The fragment grammar, written down because it IS the false-positive control
+//
+// A comment fires only if some paragraph carries a READING-SHAPED fragment and
+// no timestamp. Four shapes, each pinned in the self-test, each a regex with no
+// `g` flag (a sticky `lastIndex` across calls would make this row's answer
+// depend on how many comments preceded it):
+//
+//   count       a number bound to a card/PR noun — `92 open cards`, `4 PRs`.
+//   tally       a check-run score — `18/19 checks`, `all 21 gates green`.
+//   position    a queue or page position — `page 747`, `queue position 3`.
+//   tree        a TIP: a 7–40 char hex token carrying BOTH a letter and a
+//               digit. ⛔ A ref NAME is not a tree reading, and this was
+//               measured rather than assumed: a first flight of this row that
+//               also matched `origin/main` fired on 17 of 51 carriers, and
+//               every one of them was the claim protocol's own worktree recipe
+//               (`git worktree add --no-track … origin/main`) or a heading of
+//               the form 「Premise re-check on `origin/main`」. A ref name
+//               asserts NO tree state — the rule reads 「树读数另带 ref 或
+//               tip」, making ref-or-tip a supplement to a reading, not the
+//               thing that makes one — so only a tip is read here. `defaced`
+//               and `effaced` are hex-shaped English words and the DIGIT
+//               requirement is what excludes them.
+//   tableCount  a table row whose last cell is a bare, optionally bolded
+//               integer. This is the card's OWN worked example — a census
+//               rendered as a table is the shape that failed first — and in one
+//               of these five artefacts a table of bare numbers is a board
+//               reading essentially always.
+//
+// ## Three narrowings, each of which can only make the row QUIETER
+//
+// 1. A paragraph carrying a timestamp is clean, and the timestamp shape is
+//    `HH:MM[:SS]Z`. ⚠️ The optional SECONDS field is a deliberate widening of
+//    the `\d{2}:\d{2}Z` the card's remedy names: a full ISO stamp
+//    (`2026-09-03T10:37:51Z`) is that rule obeyed with more precision, and the
+//    narrow form would fire on the most careful readings on the board. It admits
+//    strictly MORE paragraphs as clean, so it cannot manufacture a finding.
+// 2. Fenced code blocks are removed before paths are read. A reading pasted as
+//    evidence inside a fence is a transcript, not an assertion of current state.
+//    Fenced lines are blanked rather than deleted, so they still SEPARATE
+//    paragraphs and cannot silently weld two of them together.
+// 3. ⛔ No comment-length floor. The fragment requirement is a stronger filter
+//    than a character count, and a length constant with no measurement behind it
+//    is a number nobody can defend later.
+//
+// ## Cost, and the residual this row DECLARES rather than hides
+//
+// The corpus is the comment threads `commentCache` already holds when this pass
+// runs — every open `pm:dispatched` card, every assigned pm-tracked card, the
+// hold/blocked/restart threads and H37's fold members — so the base cost is
+// ZERO requests, on H37's and H38's placement argument.
+//
+// One leg is bought. `h32NeedsSeatComments` fetches a seat post only when its
+// lane parses as a `domain:*` label on this board, which was 4 of 13 open seat
+// posts when this row was written — and the 9 it excludes include the TRIAGE
+// seat, whose thread carries the round-open markers this card was filed about,
+// and the SKILLS seat. So `h44NeedsSeatComments` beside it widens the fetch to
+// every HELD seat post regardless of lane shape: +6 requests per run at that
+// board, 4 runs a day. ⛔ H32's own population and lane gate are untouched — its
+// exclusion is argued from a lane INVENTORY it cannot count, which is a real
+// argument for H32 and not this row's to overturn. H38 takes the same widening
+// under its own card.
+//
+// ⚠️ DECLARED RESIDUAL: a verdict posted on a PULL REQUEST is not read here at
+// all. Every listing that feeds `commentCache` filters `!i.pull_request`, so PR
+// comment pages are not in hand — 0 of 30 open PRs when this row was written,
+// and covering them is +30 requests per run. That leg is deliberately NOT bought
+// in this row's first flight, and the summary clause says so on every run: the
+// count is a LOWER BOUND, never a clean board.
+// ---------------------------------------------------------------------------
+
+/**
+ * The timestamp that makes a paragraph clean. See narrowing 1 in the banner —
+ * the seconds field is optional so a full ISO stamp counts as the rule obeyed.
+ */
+export const H44_READING_TIMESTAMP = /\b\d{2}:\d{2}(?::\d{2})?Z\b/;
+
+/**
+ * The reading grammar, as data so the self-test can drive every shape by name
+ * and a reader can check the banner against the regexes. ⛔ No `g` flag on any
+ * of them: `exec` on a sticky regex carries `lastIndex` between calls, and this
+ * row runs the same regex over thousands of paragraphs.
+ */
+export const H44_READING_FRAGMENTS = Object.freeze([
+  Object.freeze({
+    kind: 'count',
+    what: 'a count of cards or PRs',
+    re: /\b\d+\s+(?:more\s+|further\s+|open\s+|closed\s+|merged\s+|governed\s+|remaining\s+)*(?:cards?|issues?|PRs?|pull[\s-]?requests?|findings?|entries|rows?|commits?)\b/i,
+  }),
+  Object.freeze({
+    kind: 'tally',
+    what: 'a check-run tally',
+    re: /\b(?:all\s+)?\d+\s*(?:\/|of)\s*\d+\s+(?:checks?|gates?|green|passing|runs?|jobs?)\b/i,
+  }),
+  Object.freeze({
+    kind: 'position',
+    what: 'a queue or page position',
+    re: /\b(?:queue\s+)?(?:page|position|slot|rank|place)\s+#?\d+\b/i,
+  }),
+  Object.freeze({
+    kind: 'tree',
+    what: 'a tree tip',
+    re: /\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b/,
+  }),
+  Object.freeze({
+    kind: 'tableCount',
+    what: 'a table row holding a bare count',
+    re: /^[ \t]*\|.*\|[ \t]*(?:\*\*)?\d+(?:\*\*)?[ \t]*(?:\([^)]*\))?[ \t]*\|[ \t]*$/m,
+  }),
+]);
+
+/**
+ * Fenced blocks blanked out, line for line. Blanking rather than deleting keeps
+ * the paragraph structure honest — a fence between two paragraphs must not weld
+ * them into one, which would let a timestamp on one side clean the other.
+ */
+export function h44StripFences(text) {
+  let open = false;
+  return String(text ?? '')
+    .split('\n')
+    .map((line) => {
+      if (/^[ \t]*(?:`{3,}|~{3,})/.test(line)) {
+        open = !open;
+        return '';
+      }
+      return open ? '' : line;
+    })
+    .join('\n');
+}
+
+/**
+ * Which of the protocol artefacts this comment is, or null for ordinary prose.
+ *
+ * `onSeatPost` is the CARRIER leg: the rule names 「座位贴段落」, and a section
+ * of a seat post is edited or posted as a comment on that post, so the carrier
+ * decides it rather than any marker in the body. The three body markers are
+ * ordered so the most specific spelling names the row.
+ *
+ * ⛔ Verdict words are matched UPPERCASE ONLY: the protocol writes ACCEPT /
+ * REJECT / REWORK in caps, and a case-insensitive match would read the ordinary
+ * English verb in any sentence that happens to open with it.
+ */
+export const H44_VERDICT_MARKER = /^[ \t>]*(?:#{1,6}[ \t]*)?(?:\*\*|__)?[ \t]*(?:ACCEPT|REJECT|REWORK)\b/m;
+
+/** A round-open marker: `R+118 open`, however it is decorated. */
+export const H44_ROUND_OPEN_MARKER = /^[ \t>]*(?:#{1,6}[ \t]*)?(?:\*\*|__)?[ \t]*R\+\d+[ \t]+open\b/im;
+
+export function h44ArtefactShape(body, onSeatPost = false) {
+  const text = String(body ?? '');
+  if (CLAIM_COMMENT_MARKER.test(text)) return 'a claim';
+  if (H44_ROUND_OPEN_MARKER.test(text)) return 'a round-open marker';
+  if (H44_VERDICT_MARKER.test(text)) return 'an ACCEPT/REJECT/REWORK verdict';
+  if (onSeatPost) return 'a seat-post section';
+  return null;
+}
+
+/**
+ * H44's predicate — null when the comment is clean or out of scope, else the
+ * first reading-shaped fragment that carries no time.
+ *
+ * @param {string} body — the comment body.
+ * @param {boolean} onSeatPost — is the carrier a `pm:seat` post?
+ * @returns {{ shape: string, kind: string, what: string, fragment: string }|null}
+ */
+export function h44UntimestampedReading(body, onSeatPost = false) {
+  const shape = h44ArtefactShape(body, onSeatPost);
+  if (!shape) return null;
+  for (const paragraph of h44StripFences(body).split(/\n[ \t]*\n/)) {
+    if (!paragraph.trim()) continue;
+    if (H44_READING_TIMESTAMP.test(paragraph)) continue;
+    for (const fragment of H44_READING_FRAGMENTS) {
+      const m = fragment.re.exec(paragraph);
+      if (m) {
+        return { shape, kind: fragment.kind, what: fragment.what, fragment: m[0].trim().slice(0, H44_FRAGMENT_ECHO_CAP) };
+      }
+    }
+  }
+  return null;
+}
+
+/** How much of the offending fragment is echoed into the row. */
+export const H44_FRAGMENT_ECHO_CAP = 120;
+
+/**
+ * The row. Report-only, and it names the comment so the remedy is an EDIT of a
+ * known artefact rather than a hunt.
+ *
+ * @param {object} hit — `h44UntimestampedReading`'s result.
+ * @param {object} comment — the REST comment row (id, html_url, created_at).
+ * @param {number} total — how many comments on this carrier carry the defect.
+ */
+export function h44UntimestampedReadingRow(hit, comment, total = 1) {
+  if (!hit) return null;
+  const id = String(comment?.id ?? 'an unread id');
+  const more = total > 1 ? ` ${total - 1} further comment(s) on this carrier carry the same defect; this is the OLDEST.` : '';
+  return (
+    `${hit.shape} (comment \`${id}\`) states ${hit.what} with NO time it was taken — the first such ` +
+    `fragment is \`${hit.fragment}\`, and no \`HH:MM[:SS]Z\` stamp appears anywhere in its paragraph. ` +
+    'Under the 2026-09-02 ruling at `.claude/skills/pm-dispatch/SKILL.md` a reading without its 取数时刻 ' +
+    'is MALFORMED rather than merely terse, and a reader is instructed to treat it as UNTAKEN — so the ' +
+    'cost is not tidiness: a decision made downstream on this line rests on a board state nobody can ' +
+    'date.' +
+    more +
+    ' Remedy is an EDIT of that comment adding the time the reading was taken (a tree reading also ' +
+    'carries its ref or tip) — ⛔ never a re-measurement written as if it were the original, which ' +
+    'would date the artefact to a board it never read. Report-only patrol INPUT, not a verdict and ' +
+    'not a gate: nothing is blocked by this row and no gate reads it.'
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Report rendering — pure over (findings, counts), so `--self-test` pins both
 // media offline. The live sweep below picks a renderer and prints it; nothing
 // about WHAT is swept or WHICH predicates fire depends on the format.
@@ -8133,6 +8406,14 @@ export const SWEEP_COUNT_KEYS = [
   'crossRepoUnreadable',
   'seatCandidates',
   'seatMarkersRead',
+  // H44's corpus pair and its widened seat leg (#14929). `readingComments` is
+  // what was READ, not what fired: a quiet H44 has to be separable from a pass
+  // that judged nothing, and the PR residual makes every count here a lower
+  // bound rather than a census.
+  'readingThreads',
+  'readingComments',
+  'readingSeatCandidates',
+  'readingSeatRead',
   'commits',
   'commitBindings',
   'commitBindingMessages',
@@ -8464,6 +8745,20 @@ export function summaryLine(counts, findingCount) {
     `${refDangling} do(es) not resolve and ${refUnjudged} could not be judged — ⛔ only HTTP 404 is ` +
     'read as unresolvable, a CLOSED card resolves normally and is never a finding, and no cause is ' +
     'asserted for any of them. Suppressed content is invisible, so every count here is a LOWER BOUND. ' +
+    // H44's disclosure (#14929). UNCONDITIONAL, like every other window's, and
+    // it carries a bound the other clauses do not: this row's corpus is whatever
+    // OTHER rows already fetched, so "no untimestamped reading" can mean the
+    // board is clean OR that the artefact was posted somewhere nothing reads.
+    // The PR leg is the named half of that — 0 comment pages are fetched for
+    // pull requests by any listing in this file.
+    `Untimestamped readings (H44): ${counts.readingComments ?? 0} comment(s) across ` +
+    `${counts.readingThreads ?? 0} thread(s) ALREADY in hand were read for the five artefact shapes, ` +
+    `and the seat leg widened the fetch to ${counts.readingSeatRead ?? 0} of ` +
+    `${counts.readingSeatCandidates ?? 0} HELD seat post(s) — every held seat, whatever its lane ` +
+    'spelling, which is wider than H32\'s own population and deliberately so. ⛔ A verdict posted on a ' +
+    'PULL REQUEST is NOT in this corpus: no listing here fetches a PR comment page, so this row\'s ' +
+    'silence about PRs is an unread surface and never a clean one, and every count above is a LOWER ' +
+    'BOUND. ' +
     `Report-only: findings are patrol input, not a gate verdict.`
   );
 }
@@ -8511,6 +8806,7 @@ export const SUMMARY_CLAUSE_ANCHORS = [
   ['h43GovernedReviews', 'Governed review requests (H43): '],
   ['h37Folds', 'Family folds (H37): '],
   ['h40References', 'Dangling references (H40): '],
+  ['h44Readings', 'Untimestamped readings (H44): '],
   ['reportOnly', 'Report-only: '],
 ];
 
@@ -8873,6 +9169,7 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   H30: 'state',
   H34: 'state',
   H37: 'state',
+  H44: 'state',
 
   H5: 'inventory',
   H6: 'inventory',
@@ -12035,6 +12332,49 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     );
     if (stale) findings.push([issue, 'H38', stale]);
   }
+
+  // H44 (#14929) — the untimestamped-reading patrol. Placed HERE, last of the
+  // comment readers, for H37's and H38's reason: `commentCache` is at its
+  // fullest, so the base corpus costs NO request. Only the seat leg is bought,
+  // and it is bought BEFORE the judging loop so the widened posts are in the
+  // cache the loop iterates.
+  //
+  // A seat post this leg cannot read is one post unexamined, never a report
+  // worth discarding (H32's posture); the coverage pair in the summary is what
+  // states the gap.
+  const h44Seats = [...seen.values()].filter((issue) => h44NeedsSeatComments(issue));
+  stats.readingSeatCandidates = h44Seats.length;
+  for (const issue of h44Seats) {
+    try {
+      await commentRowsFor(issue);
+      stats.readingSeatRead = (stats.readingSeatRead ?? 0) + 1;
+    } catch {
+      // Deliberately silent per-post; the pair above is the disclosure.
+    }
+  }
+  // One row per CARRIER, naming the OLDEST offending comment and counting the
+  // rest. A per-comment row would put a hundred lines on the anchor for a single
+  // seat post, and the remedy is the same edit either way.
+  let h44Read = 0;
+  for (const [number, rows] of commentCache) {
+    const carrier = seen.get(number) ?? seenUnscoped.get(number);
+    if (!carrier) continue;
+    const onSeatPost = labelNames(carrier).includes('pm:seat');
+    let first = null;
+    let total = 0;
+    for (const row of rows ?? []) {
+      h44Read += 1;
+      const hit = h44UntimestampedReading(row?.body ?? '', onSeatPost);
+      if (!hit) continue;
+      total += 1;
+      if (!first) first = { hit, row };
+    }
+    if (first) {
+      findings.push([carrier, 'H44', h44UntimestampedReadingRow(first.hit, first.row, total)]);
+    }
+  }
+  stats.readingThreads = commentCache.size;
+  stats.readingComments = h44Read;
 
   // H19 — blocker liveness. Last, because it is the only pass that reads a
   // card this sweep did not list: every other item answers from a listing
@@ -17451,6 +17791,155 @@ function selfTest() {
   t('H43 summary: …with the review leg named as a subset', saidBy('h43GovernedReviews', summaryLine({ governedPrs: 8, governedReviewCandidates: 5, governedReviewProbed: 5 }, 0)).includes('answered on 5 of 5'), true);
   t('H43 summary: an unloadable register reports NOT MEASURED, never 0 of 0', saidBy('h43GovernedReviews', summaryLine({ governedRegisterReason: 'the pair is not installed' }, 0)).includes('NOT MEASURED — the pair is not installed'), true);
   t('H43 summary: …and then claims no governed population at all', saidBy('h43GovernedReviews', summaryLine({ governedRegisterReason: 'the pair is not installed' }, 0)).includes('hit the governed register'), false);
+
+
+  // -- H44 — a reading with no 取数时刻 (#14929, report-only) -----------------
+  //
+  // The predicate takes a BODY and a carrier flag and nothing else: there is no
+  // author argument to inject, because the roster the first draft wanted does
+  // not exist and is ill-posed where it could be applied (see the row's banner).
+  // So the negative that would have been "a non-seat author is clean" is pinned
+  // here in the form the evidence supports — ordinary prose is clean no matter
+  // who wrote it, and being on a seat post is a CARRIER fact, not an identity.
+  const h44hit = (body, onSeat = false) => h44UntimestampedReading(body, onSeat);
+  const h44frag = (body, onSeat = false) => String(h44hit(body, onSeat)?.fragment ?? '');
+  const h44kind = (body, onSeat = false) => String(h44hit(body, onSeat)?.kind ?? '');
+
+  // ① The card's own worked example, quoted from the round-open marker that
+  // failed the rule 2h37m after it landed. ⚠️ The FIRST untimestamped reading in
+  // it is not the census table everyone quotes — it is the page position two
+  // paragraphs above, and the row reports what it finds first.
+  const ROUND_OPEN_14929 = `**R+118 open** — triage seat, dual-repo (objectstack + objectui). ⛔ Scan / classify / label / route only.
+
+Mutual exclusion: \`get_comments\` page 747 → \`[]\`, page 746 = my own R+117 close brief (\`5523649981\`). No competing round-open.
+
+| \`finding\` box, OPEN | count |
+|:--|--:|
+| objectstack | **2** (#14917, #13562) |
+| objectui | **92** |
+
+⇒ Governed audit from \`objectstack=a6d278ba263f\` / \`objectui=1f31d3af698e\`.`;
+  t('H44: the card\'s own round-open marker fires', typeof h44hit(ROUND_OPEN_14929), 'object');
+  t('H44: …named as a round-open marker', h44hit(ROUND_OPEN_14929).shape, 'a round-open marker');
+  t('H44: …and the FIRST fragment is the page position, not the famous table', h44kind(ROUND_OPEN_14929), 'position');
+  t('H44: …echoed verbatim so the remedy needs no hunt', h44frag(ROUND_OPEN_14929), 'page 747');
+
+  // The census table on its own — the shape the card quotes — reached once the
+  // paragraph above it is gone.
+  const TABLE_ONLY = `**R+118 open** — triage seat.
+
+| \`finding\` box, OPEN | count |
+|:--|--:|
+| objectstack | **2** (#14917, #13562) |
+| objectui | **92** |`;
+  t('H44: a round-open census table with no time fires', h44kind(TABLE_ONLY), 'tableCount');
+  // The FIRST table row holding a bare count wins, which is the objectstack row
+  // rather than the `**92**` everyone quotes — the row reports what it reaches
+  // first, and pinning the famous number here would pin a scan order that is
+  // not the one the code has.
+  t('H44: …on the FIRST row that holds a bare count', h44frag(TABLE_ONLY).includes('**2**'), true);
+  t('H44: …and the table header, whose last cell is a word, never matches', h44frag(TABLE_ONLY).includes('count |'), false);
+
+  // ② A claim stating a count. The dispatch's headline hit.
+  const CLAIM_COUNT = 'Claim: PM loop round 5 — the skills lane.\n\nQueue depth read at open: 12 open cards and 4 PRs on this lane.';
+  t('H44: a claim stating a count with no time fires', h44kind(CLAIM_COUNT), 'count');
+  t('H44: …named as a claim', h44hit(CLAIM_COUNT).shape, 'a claim');
+  // …and the SAME text with a stamp in that paragraph is clean. This is the
+  // control that proves the row reads the timestamp and not the artefact.
+  t('H44: the same claim with a stamp in the paragraph is clean', h44hit(CLAIM_COUNT.replace('read at open:', 'read at open 19:38Z:')), null);
+  t('H44: …and a FULL ISO stamp counts, which the narrow HH:MMZ shape would not', h44hit(CLAIM_COUNT.replace('read at open:', 'read at open 2026-09-03T19:38:12Z:')), null);
+  t('H44: a stamp in a DIFFERENT paragraph does not clean this one', typeof h44hit(`Claim: x\n\nTaken 19:38Z.\n\n12 open cards on this lane.`), 'object');
+
+  // ③ An ACCEPT verdict with a check-run tally.
+  const ACCEPT_TALLY = '**ACCEPT** — governed in-seat review of PR #15536.\n\nChecks: 18 of 19 checks green, the last still queued.';
+  t('H44: an ACCEPT verdict with a check tally and no time fires', h44kind(ACCEPT_TALLY), 'tally');
+  t('H44: …named as a verdict', h44hit(ACCEPT_TALLY).shape, 'an ACCEPT/REJECT/REWORK verdict');
+  t('H44: REJECT and REWORK are the same artefact', h44ArtefactShape('REWORK — see below'), 'an ACCEPT/REJECT/REWORK verdict');
+  // ⛔ Uppercase only: the ordinary English verb must never make a verdict.
+  t('H44: ⛔ lower-case prose is NOT a verdict', h44ArtefactShape('accept the 12 open cards as given'), null);
+
+  // ④ A tree reading: a ref or a tip, never a bare mention of the branch.
+  t('H44: a claim naming a sha with no time fires', h44kind('Claim: x\n\nBased on 5bc2f2727ae as of the merge.'), 'tree');
+  // ⛔ A ref NAME is not a reading, and this negative is measured rather than
+  // stipulated: with `origin/main` in the grammar, the row's first live flight
+  // fired on 17 of 51 carriers and every one was the claim protocol's own
+  // worktree recipe or a `Premise re-check on origin/main` heading.
+  t('H44: ⛔ `origin/main` alone is NOT a tree reading', h44hit('Claim: x\n\nRebased onto origin/main just now.'), null);
+  t('H44: ⛔ …not even in the worktree recipe every claim carries', h44hit('Claim: x\n\n`git worktree add --no-track ../w -b b origin/main`'), null);
+  t('H44: ⛔ a bare `main` in prose is NOT a tree reading either', h44hit('Claim: x\n\nThis PR targets main as every PR does.'), null);
+  t('H44: …but a TIP beside that ref still fires', h44kind('Claim: x\n\nRebased onto origin/main at 5bc2f2727ae.'), 'tree');
+  t('H44: ⛔ a hex-shaped English word is not a sha (no digit)', h44hit('Claim: x\n\nThe anchor was defaced and effaced.'), null);
+  t('H44: ⛔ a long bare number is not a sha (no letter)', h44hit('Claim: x\n\nComment 5524293471 refers.'), null);
+
+  // ⑤ THE DECLARED NEGATIVES — each one a shape a reader would expect to fire.
+  // A fenced reading is a transcript, not an assertion of current state.
+  t('H44: a reading inside a fenced block is clean', h44hit('Claim: x\n\n```\n92 open cards\n```'), null);
+  t('H44: …and a tilde fence is the same', h44hit('Claim: x\n\n~~~\n92 open cards\n~~~'), null);
+  t('H44: …while the same text unfenced fires, so the fence is what did it', h44kind('Claim: x\n\n92 open cards'), 'count');
+  // Fences BLANK rather than delete, so they cannot weld a stamped paragraph
+  // onto an unstamped one and clean it by accident.
+  t('H44: a fence between two paragraphs does not weld them', typeof h44hit('Claim: x\n\nTaken 19:38Z.\n```\ncode\n```\n12 open cards on the lane.'), 'object');
+  // Not one of the five artefacts: clean, whoever wrote it. This is the negative
+  // that replaces "a non-seat author is clean" — see the block header.
+  t('H44: ordinary prose stating a count is clean — no artefact, no row', h44hit('The board holds 92 open cards today.'), null);
+  t('H44: …and that is true however long it is', h44hit(`Notes.\n\n${'a'.repeat(4000)}\n\n92 open cards.`), null);
+  // ⛔ No length floor: a two-word artefact with no reading is clean because it
+  // states no reading, NOT because it is short.
+  t('H44: a short comment with no reading is clean', h44hit('Claim: taking this.'), null);
+  t('H44: …and a short comment WITH a reading fires, so length decides nothing', h44kind('Claim: 12 open cards.'), 'count');
+  // Inline code naming a file path is not a count, even though it holds digits.
+  t('H44: inline code naming a file path is not a reading', h44hit('Claim: x\n\nTouches `scripts/pm/check-half-states.mjs` and `docs/adr/0121-x.md`.'), null);
+  t('H44: …nor is a bare issue reference', h44hit('Claim: x\n\nSupersedes #14929 and #15536.'), null);
+
+  // ⑥ The CARRIER leg. A seat-post section is decided by the post, not by any
+  // marker in the body — the rule names 「座位贴段落」.
+  t('H44: a seat-post comment with a count fires on the carrier alone', h44kind('Lane inventory now 7 open cards.', true), 'count');
+  t('H44: …named as a seat-post section', h44hit('Lane inventory now 7 open cards.', true).shape, 'a seat-post section');
+  t('H44: …and the identical body OFF a seat post is clean', h44hit('Lane inventory now 7 open cards.', false), null);
+
+  // ⑦ The seat GATE — a sibling of H32's, wider by exactly the lane test, and
+  // H32's own gate is asserted UNCHANGED beside it.
+  const seat44 = (title, labels = ['pm:seat']) => ({ number: 6015, title, labels: labels.map((name) => ({ name })), assignees: [{ login: 'os-zhuang' }] });
+  const TRIAGE = seat44('[PM seat] triage (objectstack-wide) — 🟢 os-zhuang');
+  const LANE = seat44('[PM seat] domain:spec — 🟢 os-zhuang');
+  t('H44 gate: a held lane-less seat IS fetched', h44NeedsSeatComments(TRIAGE), true);
+  t('H44 gate: ⛔ …and H32 still does not fetch it — that gate is untouched', h32NeedsSeatComments(TRIAGE), false);
+  t('H44 gate: a held `domain:*` seat is fetched by BOTH', h44NeedsSeatComments(LANE) && h32NeedsSeatComments(LANE), true);
+  t('H44 gate: a `repo:*` seat is fetched by this one', h44NeedsSeatComments(seat44('[PM seat] repo:cloud — 🟢 os-zhuang')), true);
+  t('H44 gate: a VACANT seat is fetched by neither', h44NeedsSeatComments(seat44('[PM seat] domain:devx — ⏳ vacant')), false);
+  t('H44 gate: a non-seat card is out of scope', h44NeedsSeatComments(seat44('[PM seat] domain:spec — 🟢 os-zhuang', ['pm:queue'])), false);
+
+  // ⑧ Grammar hygiene. A `g` flag would carry `lastIndex` between calls and make
+  // this row's answer depend on how many comments preceded it.
+  t('H44 grammar: ⛔ no fragment regex is sticky', H44_READING_FRAGMENTS.every((f) => !f.re.global), true);
+  t('H44 grammar: every declared shape is reachable', H44_READING_FRAGMENTS.length, 5);
+  t('H44 grammar: the timestamp accepts the ruled HH:MMZ', H44_READING_TIMESTAMP.test('19:38Z'), true);
+  t('H44 grammar: …and the seconds field, which is the same rule obeyed harder', H44_READING_TIMESTAMP.test('2026-09-03T10:37:51Z'), true);
+  t('H44 grammar: …but not a bare clock with no zone', H44_READING_TIMESTAMP.test('19:38'), false);
+  t('H44 fences: an unterminated fence swallows to the end rather than reopening', h44StripFences('a\n```\n92 open cards').trim(), 'a');
+
+  // ⑨ The row sentence: it names the comment, the fragment, and its posture.
+  const row44 = h44UntimestampedReadingRow(h44hit(CLAIM_COUNT), { id: 5524293471 }, 3);
+  t('H44 row: names the comment id so the remedy is an edit, not a hunt', row44.includes('`5524293471`'), true);
+  t('H44 row: echoes the offending fragment', row44.includes('12 open cards'), true);
+  t('H44 row: counts the rest and says which one this is', row44.includes('2 further comment(s)') && row44.includes('OLDEST'), true);
+  t('H44 row: a lone offender gets no count clause', h44UntimestampedReadingRow(h44hit(CLAIM_COUNT), { id: 1 }, 1).includes('further comment'), false);
+  t('H44 row: states the ruling\'s consequence — untaken, not untidy', row44.includes('UNTAKEN'), true);
+  t('H44 row: ⛔ the remedy is an edit, never a re-measurement passed off as the original', row44.includes('never a re-measurement'), true);
+  t('H44 row: states its report-only posture', row44.includes('not a verdict and ' + 'not a gate'), true);
+  t('H44 row: a null hit renders nothing', h44UntimestampedReadingRow(null, { id: 1 }, 0), null);
+
+  // ⑩ Registration — the band, the registry scan, the forwarding contract, and
+  // the summary clause. H43's flight named the trap these four close.
+  t('H44 band: registered as a state row', familyBand('H44'), 'state');
+  t('H44 band: …and the sweep really pushes it, so the registry sees it', familyRegistryCoverage().emitted.includes('H44'), true);
+  t('H44: no code is left unregistered by this change', familyRegistryCoverage().missing.length, 0);
+  t('H44: every count key rides the enumerated forwarding contract', ['readingThreads', 'readingComments', 'readingSeatCandidates', 'readingSeatRead'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
+  t('H44 summary: the corpus pair is reported', saidBy('h44Readings', summaryLine({ readingComments: 411, readingThreads: 37 }, 0)).includes('411 comment(s) across 37 thread(s)'), true);
+  t('H44 summary: …and the widened seat leg with it', saidBy('h44Readings', summaryLine({ readingSeatRead: 10, readingSeatCandidates: 10 }, 0)).includes('10 of 10 HELD seat post(s)'), true);
+  t('H44 summary: the PR residual is declared on EVERY run, not just interesting ones', saidBy('h44Readings', summaryLine({}, 0)).includes('PULL REQUEST is NOT in this corpus'), true);
+  t('H44 summary: …and says the counts are a lower bound', saidBy('h44Readings', summaryLine({}, 0)).includes('LOWER BOUND'), true);
+  t('H44 summary: a bare line renders numbers, never `undefined`', saidBy('h44Readings', summaryLine({}, 0)).includes('undefined'), false);
 
   // -- The `[::]` collapse (#12090): behaviour-preserving, asserted as such ---
   // The class held U+003A TWICE, never the fullwidth U+FF1A its shape implied.
