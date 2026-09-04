@@ -238,8 +238,33 @@ describe('#15004 — option-B acceptance pin: every subsystem must see its colle
         `platform emits TODAY. This is never an option-B finding — it means the fixture stopped ` +
         `carrying a collection, or a reader regressed on the additive path.\n${render(additive.rows)}`,
     ).toEqual([]);
-    // Anti-vacuity: a probe that measured no rows would satisfy the line above.
-    expect(additive.rows.length).toBeGreaterThanOrEqual(OPTION_B_LOSSES.length);
+    // Anti-vacuity: the assertion above is satisfied by an EMPTY row set, so a
+    // probe that quietly stopped measuring has to be caught right here.
+    //
+    // ⚠️ RE-ANCHORED when the ledger reached zero. The floor used to be
+    // `OPTION_B_LOSSES.length`, which was a real bound only while the ledger
+    // was non-empty; at zero it reads `rows.length >= 0` — true of every
+    // array, including an empty one. It was dead code wearing a control's
+    // comment, and the fourth direction this file's header claims ("the probe
+    // itself quietly measuring less ⇒ RED") had silently stopped existing.
+    //
+    // 30 is MEASURED, not remembered: with this line temporarily written
+    // `expect(additive.rows.length).toBe(-1)`, the run reports
+    // `expected 30 to be -1`. Verified live at the boundary in the same
+    // session — a floor of 31 goes RED on the same fixture, so the assertion
+    // is not satisfied by construction.
+    //
+    // `>=` rather than `toBe` on purpose, and it is the same shrink-only
+    // direction the ledger uses: a row ADDED to the probe is welcome and stays
+    // green, a row that stops being measured is red. Raise the floor when the
+    // probe grows; ⛔ never lower it to make a red run green.
+    expect(
+      additive.rows.length,
+      `The probe measured ${additive.rows.length} rows, fewer than the 30 it measured when ` +
+        `this floor was set. A row that stops being measured stops being able to fail, which ` +
+        `is the one direction this pin cannot detect anywhere else — fix the probe rather ` +
+        `than the floor.`,
+    ).toBeGreaterThanOrEqual(30);
   });
 
   // ── The pin ──────────────────────────────────────────────────────────────
