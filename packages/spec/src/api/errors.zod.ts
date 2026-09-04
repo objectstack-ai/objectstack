@@ -259,6 +259,13 @@ export const FieldErrorCode = z.enum([
   'max_items',
   // closed sets and references
   'invalid_option',             // not a member of the field's declared options
+  // the WRITTEN value is not a member of the field's declared `valueDomain`
+  // (the closed standard-domain vocabulary shared with settings specifiers —
+  // `shared/value-domain.zod.ts`). Named for the property it mirrors, per D1,
+  // exactly as `max_length` is; a new constraint KIND adds a member here
+  // rather than borrowing `invalid_value` (maintainer ruling 2026-09-02, the
+  // field-level `valueDomain` card's spec half).
+  'value_domain',
   'invalid_value',              // rejected for a reason no other member names
   'reference_not_found',        // a lookup target that does not exist
   'reference_ambiguous',        // a lookup that matched more than one record

@@ -28,3 +28,8 @@ export * from './expression.zod';
 export * from './visibility';
 export * from './protection.zod';
 export * from './resilient-fetch';
+// The closed standard-domain vocabulary (`iana_time_zone` / `iso_4217_currency`
+// / `iso_3166_alpha2`) and its ONE membership predicate, shared by settings
+// specifiers and object fields (maintainer ruling 2026-09-02). Declared here so
+// `system/` and `data/` both reference one schema instead of carrying a copy.
+export * from './value-domain.zod';

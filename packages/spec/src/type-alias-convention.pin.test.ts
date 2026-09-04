@@ -267,6 +267,7 @@ import type * as M167 from './ui/view.zod.js';
 import type * as M170 from './ui/component.zod.js';
 // [#10235] The served sortability projection — new module, next free index.
 import type * as M183 from './api/sortability.zod.js';
+import type * as M184 from './shared/value-domain.zod.js';
 
 // ---------------------------------------------------------------------------
 // 829 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
@@ -1046,6 +1047,11 @@ export type Iso501 = Assert<Eq< z.input< typeof M114.BaseMetadataRecordSchema >,
 
 // shared/protection.zod.ts
 export type Iso502 = Assert<Eq< z.input< typeof M115.ProtectionSchema >, z.infer< typeof M115.ProtectionSchema > >>;
+
+// shared/value-domain.zod.ts — the ONE standard-domain vocabulary (#14168);
+// `SpecifierValueDomainSchema` (Iso758) is an alias of it, so both pins hold
+// or fall together. A `z.enum` has no default or transform, the (RISE) case.
+export type Iso867 = Assert<Eq< z.input< typeof M184.ValueDomainSchema >, z.infer< typeof M184.ValueDomainSchema > >>;
 
 // stack.zod.ts
 export type Iso503 = Assert<Eq< z.input< typeof M116.DatasourceMappingRuleSchema >, z.infer< typeof M116.DatasourceMappingRuleSchema > >>;

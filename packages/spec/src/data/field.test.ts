@@ -7,6 +7,8 @@ import {
   CurrencyConfigSchema,
   CurrencyValueSchema,
   Field,
+  BOUNDED_STRING_FIELD_TYPES,
+  VALUE_DOMAIN_FIELD_TYPES,
   type SelectOption,
   type CurrencyConfig,
   type CurrencyValue,
@@ -547,6 +549,109 @@ describe('FieldSchema', () => {
           const result = FieldSchema.parse(fixture) as Record<string, unknown>;
           expect('minLength' in result).toBe(false);
         }
+      });
+    });
+
+    /**
+     * #14168 (maintainer ruling 2026-09-02, option A) — a field-level
+     * `valueDomain` drawn from the settings specifier's closed vocabulary
+     * (`shared/value-domain.zod.ts`: `iana_time_zone` / `iso_4217_currency` /
+     * `iso_3166_alpha2`; the vocabulary does not widen). Applicability is the
+     * #11566 template: authorable on VALUE_DOMAIN_FIELD_TYPES (`text` only —
+     * measured NARROWER than the twelve-type `maxLength` family, see the
+     * set's docblock) and refused with a located issue elsewhere. Value: a
+     * stranger domain is refused by name at the slot's own path.
+     */
+    describe('valueDomain — the closed standard-domain vocabulary on a text field (#14168)', () => {
+      it('accepts each of the three ruled domains on a text field, and echoes it', () => {
+        for (const domain of ['iana_time_zone', 'iso_4217_currency', 'iso_3166_alpha2'] as const) {
+          const result = FieldSchema.safeParse({
+            name: 'timezone', label: 'Time zone', type: 'text', valueDomain: domain,
+          });
+          expect(result.success, domain).toBe(true);
+          if (result.success) expect(result.data.valueDomain).toBe(domain);
+        }
+      });
+
+      it('refuses a stranger domain (iso_8601_date) by name, at [valueDomain], with the members listed', () => {
+        const result = FieldSchema.safeParse({
+          name: 'due', label: 'Due', type: 'text', valueDomain: 'iso_8601_date',
+        });
+        expect(result.success).toBe(false);
+        if (!result.success) {
+          const issue = result.error.issues.find((i) => i.path[0] === 'valueDomain');
+          expect(issue?.code).toBe('invalid_value');
+          expect(issue?.path).toEqual(['valueDomain']);
+          // First sentence: zod's own enum refusal names the legal members and
+          // the stranger, so an AI author can fix it without leaving the message.
+          expect(issue?.message.split(/[.\n]/)[0]).toMatch(/Invalid option/);
+          for (const member of ['iana_time_zone', 'iso_4217_currency', 'iso_3166_alpha2']) {
+            expect(issue?.message).toContain(member);
+          }
+        }
+      });
+
+      // One representative per family the base-schema placement would wrongly
+      // admit — including the eleven OTHER bounded-string types, which the
+      // `maxLength` family accepts and this key deliberately does not (a
+      // currency code is never an email; a body is not one identifier).
+      const wrongTypes = [
+        'number', 'boolean', 'date', 'select', 'lookup', 'autonumber', 'formula', 'json',
+        'textarea', 'email', 'url', 'phone', 'password', 'markdown', 'html', 'richtext',
+        'code', 'signature', 'qrcode',
+      ] as const;
+      for (const type of wrongTypes) {
+        it(`refuses valueDomain on type: '${type}' with a custom issue at [valueDomain]`, () => {
+          const fixture = type === 'lookup'
+            ? { name: 'f', label: 'F', type, reference: 'company', valueDomain: 'iana_time_zone' }
+            : { name: 'f', label: 'F', type, valueDomain: 'iana_time_zone' };
+          const result = FieldSchema.safeParse(fixture);
+          expect(result.success).toBe(false);
+          if (!result.success) {
+            const issue = result.error.issues.find((i) => i.path[0] === 'valueDomain');
+            expect(issue?.code).toBe('custom');
+            // The refusal names the legal set and the offending type.
+            expect(issue?.message).toMatch(/single plain string/);
+            expect(issue?.message).toContain("'text'");
+            expect(issue?.message).toContain(`\`${type}\``);
+          }
+        });
+      }
+
+      it('composes with the bounded-string family — a text field may declare a domain AND a length', () => {
+        const result = FieldSchema.safeParse({
+          name: 'country', label: 'Country', type: 'text', valueDomain: 'iso_3166_alpha2', maxLength: 2, minLength: 2,
+        });
+        expect(result.success).toBe(true);
+        if (result.success) {
+          expect(result.data.valueDomain).toBe('iso_3166_alpha2');
+          expect(result.data.maxLength).toBe(2);
+        }
+      });
+
+      it('absent valueDomain stays absent — no default materializes, on any type (positive control)', () => {
+        for (const type of ['text', 'number', 'textarea', 'lookup'] as const) {
+          const fixture = type === 'lookup'
+            ? { name: 'f', label: 'F', type, reference: 'company' }
+            : { name: 'f', label: 'F', type };
+          const result = FieldSchema.safeParse(fixture);
+          expect(result.success, type).toBe(true);
+          if (result.success) expect('valueDomain' in result.data).toBe(false);
+        }
+      });
+
+      it('the exported applicability set is exactly { text } and is a subset of the bounded-string family', () => {
+        expect([...VALUE_DOMAIN_FIELD_TYPES]).toEqual(['text']);
+        for (const t of VALUE_DOMAIN_FIELD_TYPES) expect(BOUNDED_STRING_FIELD_TYPES.has(t)).toBe(true);
+      });
+
+      it('surfaces in the derived JSON schema as an enum of the three members (Studio / OpenAPI / form-layer path)', () => {
+        const json = z.toJSONSchema(FieldSchema, { io: 'input', unrepresentable: 'any' }) as {
+          properties?: Record<string, { enum?: string[] }>;
+        };
+        expect(json.properties?.valueDomain?.enum).toEqual([
+          'iana_time_zone', 'iso_4217_currency', 'iso_3166_alpha2',
+        ]);
       });
     });
   });
