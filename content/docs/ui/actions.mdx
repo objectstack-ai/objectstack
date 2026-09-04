@@ -374,6 +374,17 @@ Set `ctx.recordLoadDenied` aside only when your action is *meant* to run without
 a readable subject row (an "import this id from elsewhere" action, say). The
 default for a row-scoped action on a `private` object is to refuse.
 
+**Flow actions.** A `type: 'flow'` action hands its target flow the same
+`record` — `record.id` stamped the same way — and the flow run's context
+(`AutomationContext`, the `@objectstack/spec` contract) declares the same key
+in the same spelling, `recordLoadDenied?: true`, so a `runAs: 'system'` flow
+has something to guard on before it acts on a row its invoker could not read.
+On the flow face the key is **declared but not yet populated**: the flow
+dispatcher does not pass the signal into the run's context yet, so until that
+lands a flow run never sees it and a guard on it is inert (never `true`), never
+wrong. A `runAs: 'user'` flow needs no guard — it re-derives the caller's
+scope on its own reads, and the stub resolves to nothing.
+
 ## Call it over REST
 
 Every action is also an endpoint — the Console button and the API call run

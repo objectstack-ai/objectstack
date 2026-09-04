@@ -17,7 +17,7 @@
 //      that had quietly hard-coded the other one's.
 //   2. **Two bindings over one table do not see each other's rows** — in BOTH
 //      directions, from the same store class. That is the drift the two copies
-//      made possible (#12350's own argument: the org-row skip and the
+//      made possible (#12350's own argument: the discriminator scoping and the
 //      `0`-is-false read are what a copy loses quietly), and it can only be
 //      measured where both types are constructed side by side.
 //   3. **A type nobody has written yet behaves the same.** ADR-0126 §8
@@ -25,10 +25,10 @@
 //      the semantics rather than re-derive them, and the cheapest proof is an
 //      unknown discriminator asserted through the same battery.
 //
-// The four load-bearing row properties themselves (`organization_id` never
-// written, org-carrying rows skipped on read, absence means ACTIVE, a driver
-// `0` reads as false) are pinned here too — this is where they now live, so
-// this is where a change to them has to argue.
+// The load-bearing row properties themselves (the ledger is deployment-wide
+// and carries no tenant column, absence means ACTIVE, a driver `0` reads as
+// false) are pinned here too — this is where they now live, so this is where a
+// change to them has to argue.
 
 import { describe, it, expect, vi } from 'vitest';
 // The real engine's OWN update-dispatch predicate, so the double below cannot
@@ -151,9 +151,11 @@ describe('ObjectStoreMetadataActivationStore — the discriminator is a paramete
         expect(insert?.data).toEqual({
             metadata_type: 'action', name: 'mark_done', package_id: 'crm', active: false,
         });
-        // ⛔ §5: `organization_id` is not written — asserted as an ABSENT key,
-        // because writing it explicitly (even as null) would be a different row
-        // shape, and the one the reserved per-org dimension is not.
+        // No tenant column is written, because the table has none. Kept from
+        // the era when the column existed-but-was-reserved (where it guarded
+        // against writing it even as an explicit null): it is now what makes a
+        // re-introduced tenant write loud at the payload, which is the one
+        // place the column could come back without touching the declaration.
         expect(Object.keys(insert?.data ?? {})).not.toContain('organization_id');
     });
 
@@ -190,18 +192,30 @@ describe('ObjectStoreMetadataActivationStore — the discriminator is a paramete
 });
 
 describe('ObjectStoreMetadataActivationStore — the ADR-0126 §4 row semantics, one home', () => {
-    it('SKIPS a row carrying an organization rather than reading it install-level', async () => {
-        const { engine } = makeStoreEngine([
-            { id: 'r1', metadata_type: 'flow', name: 'install_level', package_id: 'crm', active: false },
-            { id: 'r2', metadata_type: 'flow', name: 'org_scoped', package_id: 'crm', active: false, organization_id: 'org_1' },
+    it('reads EVERY row of its type — the discriminator is the only scope', async () => {
+        const { engine, calls } = makeStoreEngine([
+            { id: 'r1', metadata_type: 'flow', name: 'first', package_id: 'crm', active: false },
+            { id: 'r2', metadata_type: 'flow', name: 'second', package_id: 'crm', active: false },
         ]);
 
-        const rows = await new ObjectStoreMetadataActivationStore(engine, 'flow').list();
+        const store = new ObjectStoreMetadataActivationStore(engine, 'flow');
+        const rows = await store.list();
 
-        // Skipped, not merged: reading it install-level would apply one
-        // organization's choice to the whole installation — #10243 from the
-        // read side.
-        expect(rows.map((r) => r.name)).toEqual(['install_level']);
+        // ⚠️ This replaces a pin that asserted a SKIP: the store used to drop
+        // any row carrying an organization, because the table declared a
+        // reserved-but-never-written tenant column. The column was dropped
+        // before it ever shipped, so there is no second axis left — every row
+        // of this type is an answer, and a filter here would now be dead code
+        // that reads as if it guarded something.
+        expect(rows.map((r) => r.name)).toEqual(['first', 'second']);
+
+        // The read names the discriminator and NOTHING else. Asserted on the
+        // query rather than on the result, because a store that had kept a
+        // tenant predicate would still return both of these rows — the fake's
+        // rows carry no such column — and the skip would be invisible from the
+        // result side alone.
+        expect(calls.find((c) => c.op === 'find')?.options?.where)
+            .toEqual({ metadata_type: 'flow' });
     });
 
     it('reads a driver `0` as FALSE, and a missing column as the packaged default (true)', async () => {
@@ -237,20 +251,25 @@ describe('ObjectStoreMetadataActivationStore — the ADR-0126 §4 row semantics,
             .toEqual({ id: 'r1', active: true, package_id: 'crm' });
     });
 
-    it('ignores an org-carrying row when deciding insert-vs-update', async () => {
+    it('UPDATES the one row the keyed lookup returns — no tenant tie-break left to make', async () => {
         const { engine, calls } = makeStoreEngine([
-            { id: 'r1', metadata_type: 'flow', name: 'nightly_sync', package_id: 'crm', active: false, organization_id: 'org_1' },
+            { id: 'r1', metadata_type: 'flow', name: 'nightly_sync', package_id: 'crm', active: false },
         ]);
 
         await new ObjectStoreMetadataActivationStore(engine, 'flow').setActive({
-            name: 'nightly_sync', packageId: 'crm', active: false,
+            name: 'nightly_sync', packageId: 'crm', active: true,
         });
 
-        // The write side of the same wall: overwriting one organization's row
-        // as if it were the install-level one is the #10243 leak with the
-        // arrow reversed.
-        expect(calls.some((c) => c.op === 'update')).toBe(false);
-        expect(calls.find((c) => c.op === 'insert')?.data?.name).toBe('nightly_sync');
+        // ⚠️ This replaces a pin that asserted the store IGNORED an
+        // org-carrying row and inserted a second one instead. That choice
+        // existed only because a reserved tenant column could put more than one
+        // row behind the same `(metadata_type, name)` key; with the column gone
+        // the declared `unique: 'global'` index over exactly those two columns
+        // makes the keyed read single-valued, so taking the first match is
+        // taking the only one — and inserting a duplicate would now be the bug.
+        expect(calls.filter((c) => c.op === 'insert')).toHaveLength(0);
+        expect(calls.find((c) => c.op === 'update')?.data)
+            .toEqual({ id: 'r1', active: true, package_id: 'crm' });
     });
 
     it('probes the TABLE unscoped — the question is composition, not type', async () => {

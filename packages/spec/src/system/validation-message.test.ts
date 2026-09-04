@@ -61,6 +61,13 @@ describe('validation message catalog — completeness', () => {
       invalid_option: ['{{allowed}}'],
       invalid_option_value: ['{{value}}', '{{allowed}}'],
       invalid_transition: ['{{from}}', '{{to}}'],
+      // `value_domain` (#14168): the code-named default names the domain by
+      // its machine word and echoes the offending value; each finer variant
+      // spells the standard out in prose and must still echo the value.
+      value_domain: ['{{valueDomain}}', '{{value}}'],
+      value_domain_iana_time_zone: ['{{value}}'],
+      value_domain_iso_4217_currency: ['{{value}}'],
+      value_domain_iso_3166_alpha2: ['{{value}}'],
     };
     for (const [locale, catalog] of Object.entries(BUILTIN_VALIDATION_MESSAGES)) {
       for (const [key, placeholders] of Object.entries(required)) {

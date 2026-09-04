@@ -720,7 +720,7 @@ dev**:先试 SendMessage 复活,不可用才走接手协议(四条增量见 runb
 **ACCEPT 之后的路径分叉(动手之前先分,不是事后对照)。** 翻 ready / 挂 auto-merge / 入队前,
 先取一次 PR 的路径面(`get_files`,⛔ 不看报告自述)。governed 面统一定义（2026-08-18 裁定）:
 `docs/adr/**` + `.claude/**`(全量,含 agents/hooks/settings)+ `skills/**` + `AGENTS.md` +
-`CLAUDE.md`;agent 指令文件按此跨仓同判 —— objectui、cloud、objectos 一并在内（2026-08-18 裁定）
+`CLAUDE.md`;agent 指令文件按此跨仓同判 —— 仓集读 `GOVERNED_REPOS`,此处不列（2026-08-18 裁定）
 (objectos 指令面 PR 照样 draft/人工合并)。路径面**一条命中** ⇒ ACCEPT 换终局四件套:
 ① 复核结论照常写在 issue
 上(不能合 ≠ 不复核;技能面 PR 的复核席须跑在契约复审档位,档位单源见条款②闸门);② PR

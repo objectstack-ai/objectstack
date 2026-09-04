@@ -40,10 +40,17 @@
  *    would invent a field only cached sessions carry (see
  *    `SESSION_SNAPSHOT_MIRRORED_FIELDS` in `identity-write-guard.ts`).
  *
- * ⚠️ What this set does NOT decide is WHO. ADR-0092 D5 keeps that with the
- * permission layer, and `member_default` still denies `allowEdit` on
- * `sys_user`, so a rank-and-file member reaches this column through no shipped
- * surface yet. That is a separate opening, deliberately not taken here.
+ * ⚠️ What this set does NOT decide is WHO — ADR-0092 D5 keeps that with the
+ * permission layer, and the two answers are independent. As of the 2026-09-03
+ * ruling recorded on the D5 AMENDMENT, `member_default` names `sys_user`
+ * explicitly with `allowEdit: true`, row-scoped to the caller by the
+ * `sys_user_self` RLS carve-out (`plugin-security`
+ * `objects/default-permission-sets.ts`), so a rank-and-file member reaches
+ * these columns on their OWN row through the generic data path. Every other
+ * row, and every column not listed here, is still refused — by the RLS
+ * pre-image check and by this whitelist respectively, and the two refusals
+ * come from different layers. Widening THIS set does not widen who; widening
+ * the permission set does not widen which columns.
  */
 
 /** Tier 1 — standard form / data-API editable (identity write guard whitelist). */

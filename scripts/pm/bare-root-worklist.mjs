@@ -84,9 +84,27 @@ const POPULATION_CONSTANT = /^(?:[A-Z0-9_]*_ROOTS?|[A-Z0-9_]*_DIRS?|POPULATION|[
 
 /**
  * The recorded triage — the half of this file that a human decided and the tree
- * cannot re-derive. Keys are `family constant word`; the row half of every key
- * is checked against the live sweep by the self-test, in BOTH directions, so a
- * verdict cannot outlive the row it judges and a new row cannot land unjudged.
+ * cannot re-derive. Keys are `source-file constant word`; the row half of every
+ * key is checked against the live sweep by the self-test, in BOTH directions, so
+ * a verdict cannot outlive the row it judges and a new row cannot land unjudged.
+ *
+ * ⚠️ The key names the gate's SOURCE FILE and never an INVOCATION of it
+ * (#15091). A verdict here is about a bare-root literal written in a file;
+ * which argv CI schedules is not a property of that literal, and a gate CI runs
+ * two ways is still one literal to judge. `dispatch-gates` keys a family on
+ * (script, args), so such a gate reached the identical literal under two family
+ * keys and owed two identical rows. Fifteen of them were carried here in two labelled
+ * sections, each row saying in its own `why` that it restated no measurement
+ * because it had none to take: nine self-test twins, and six more once the
+ * derivation began rendering the argv a workflow fills in rather than falling
+ * back to a bare path. Keying on the FILE folds every one of them into the row
+ * it was a twin of — that row's verdict, spelling and measured reason standing
+ * unchanged, which is why this fold is not a re-decision on a shrink-only map —
+ * and the class stops growing with the workflows: a gate CI starts invoking a
+ * third way now joins `checks` on the row that already exists instead of
+ * arriving as a FRESH row to be judged again. The self-test holds both halves —
+ * one row per literal however many invocations reach it, two rows for two files
+ * — and holds the shrink itself as a measured identity, never a typed number.
  *
  * ⚠️ The key format carries SPACES on purpose, the same spelling rule
  * `ESCAPABLE_LITERAL_LEDGER` follows: the extractor refuses a quoted span
@@ -381,12 +399,12 @@ export function spellingOf(name) {
 
 const TRIAGE = new Map([
   // ── Taken: a strictly narrower subtree ────────────────────────────────────
-  ['check:driver-conformance DRIVERS_DIR packages', {
+  ['scripts/check-driver-conformance.mjs DRIVERS_DIR packages', {
     verdict: 'DECLARED-NARROWER',
     why: 'the literal is a join() component; the real population is the driver subtree, declared '
       + 'there at 259 of 291 files (89%) instead of 259 of 4903 (5.3%) at the bare root',
   }],
-  ['check:logger-receiver-detach SCAN_ROOTS packages', {
+  ['scripts/check-logger-receiver-detach.mjs SCAN_ROOTS packages', {
     verdict: 'DECLARED-NARROWER',
     spelling: 'packages TypeScript source',
     why: 'the population is the non-test TypeScript source under the root, declared beside the '
@@ -400,7 +418,7 @@ const TRIAGE = new Map([
       + "gate's own non-test figure above, since the pin holds the raw hints' literal reach and "
       + "the gate's own test-file exclusion is not something a hint can spell)",
   }],
-  ['check:logger-receiver-detach SCAN_ROOTS examples', {
+  ['scripts/check-logger-receiver-detach.mjs SCAN_ROOTS examples', {
     verdict: 'DECLARED-NARROWER',
     spelling: 'examples TypeScript source',
     why: 'same declaration, same gate: the TypeScript source under the examples root, 204 of 241 '
@@ -409,7 +427,7 @@ const TRIAGE = new Map([
       + 'declares (`.ts`), now pinned LIVE, PRECISE and COMPLETE (206 of 243 tracked files under '
       + 'the bare root, re-measured 2026-09-01)',
   }],
-  ['check:logger-receiver-detach SCAN_ROOTS apps', {
+  ['scripts/check-logger-receiver-detach.mjs SCAN_ROOTS apps', {
     verdict: 'DECLARED-NARROWER',
     spelling: 'apps TypeScript source',
     why: 'same declaration, same gate: 28 of 40 tracked files (70.0%) under the apps root, at the '
@@ -419,7 +437,7 @@ const TRIAGE = new Map([
       + 'LIVE, PRECISE and COMPLETE (29 of 41 tracked files under the bare root, re-measured '
       + '2026-09-01)',
   }],
-  ['check:objectql-double-limit SCAN_ROOT packages', {
+  ['scripts/check-objectql-double-limit.mjs SCAN_ROOT packages', {
     verdict: 'DECLARED-NARROWER',
     spelling: 'package test files',
     why: 'REFUSED as unspellable until 2026-08-26, and the refusal was FALSE of this tree: it '
@@ -434,7 +452,7 @@ const TRIAGE = new Map([
       + 'bare root is still not covered — the spelling reaches no arbitrary file at the top of '
       + 'the root — which is what this verdict says and is correct, not outstanding debt',
   }],
-  ['check:where-matcher SCAN_ROOT packages', {
+  ['scripts/check-where-matcher-conformance.mjs SCAN_ROOT packages', {
     verdict: 'DECLARED-NARROWER',
     spelling: 'package test files',
     why: 'REFUSED as unspellable on the reading that every glob form of this population '
@@ -455,7 +473,7 @@ const TRIAGE = new Map([
       + 'the spelling reaches no arbitrary file at the top of the root — which is what this '
       + 'verdict says and is correct, not outstanding debt',
   }],
-  ['check:skill-refs SKILLS_DIR skills', {
+  ['packages/spec/scripts/build-skill-references.ts SKILLS_DIR skills', {
     verdict: 'DECLARED-NARROWER',
     spelling: 'skill reference folders',
     why: 'REFUSED as unspellable until 2026-08-26 on the grounds that collapseHint reduces the '
@@ -473,7 +491,7 @@ const TRIAGE = new Map([
       + 'can drift from the scan is worse than none. The row stays in the sweep: the bare root is '
       + 'still not covered',
   }],
-  ['check:dual-build-cjs-loads SCAN_ROOT packages', {
+  ['scripts/check-dual-build-cjs-loads.mjs SCAN_ROOT packages', {
     verdict: 'DECLARED-NARROWER',
     spelling: 'dual-build manifests and configs',
     why: 'the gate walks every publishable manifest under the root to find published `require` '
@@ -493,7 +511,7 @@ const TRIAGE = new Map([
       + 'entry; they are now one multi-hint spelling, LIVE, PRECISE and COMPLETE against the same '
       + '74/20 split, re-measured 2026-09-01 (94 of 5796 tracked files under the bare root)',
   }],
-  ['check:ratchet-remedy-authority SCRIPTS_DIR scripts', {
+  ['scripts/check-ratchet-remedy-authority.mjs SCRIPTS_DIR scripts', {
     verdict: 'DECLARED-NARROWER',
     spelling: 'scripts top-level script files',
     why: 'RE-DECIDED 2026-09-01 (#13813) from REFUSE-UNSPELLABLE, whose stated reason — "the idiom '
@@ -527,7 +545,7 @@ const TRIAGE = new Map([
       + 'is correct, not outstanding debt',
   }],
   // ── Refused: the population is the whole root, and the root is saturated ──
-  ['check:skill-identifier-liveness IMPL_ROOTS packages', {
+  ['scripts/check-skill-identifier-liveness.mjs IMPL_ROOTS packages', {
     verdict: 'REFUSE-WIDE',
     why: 'the gate builds a WORD INDEX of the implementation tree and asks whether each identifier '
       + 'cited by a published skill row appears anywhere in it, so every source file under the '
@@ -566,16 +584,16 @@ const TRIAGE = new Map([
       + '(DECLARED_INSTRUMENTS), so it is walked wholesale for the same reason as the others: a '
       + 'new reader is found, then classified, never assumed absent',
   }],
-  ['check:authz-resolver SCAN_ROOTS packages', {
+  ['scripts/check-single-authz-resolver.mjs SCAN_ROOTS packages', {
     verdict: 'REFUSE-WIDE',
     why: 'walks every non-test TS source under the root — 1898 of 4903 (39%). True, and it would '
       + 'name this gate for every card in the repo that touches a package',
   }],
-  ['check:dispatcher-error-vocabulary SCAN_ROOT packages', {
+  ['scripts/check-dispatcher-error-vocabulary.mjs SCAN_ROOT packages', {
     verdict: 'REFUSE-WIDE',
     why: 'non-test sources plus manifests, 1898 of 4903 (39%) — same trade',
   }],
-  ['check:swallow-census-controls SCAN_ROOT packages', {
+  ['scripts/measure-durability-swallow-family.mjs SCAN_ROOT packages', {
     verdict: 'REFUSE-WIDE',
     why: 'FRESH on 2026-09-02, when #13919 wired the #12981 census own controls into CI for the '
       + 'first time; the constant is as old as the instrument and only the family is new. The '
@@ -592,49 +610,49 @@ const TRIAGE = new Map([
       + 'entire. A declaration naming the ten would be a hint the sweep judges FALSE of the walk, '
       + 'which is the costlier error this file prices by name',
   }],
-  ['check:engine-double-contract SCAN_ROOTS packages', {
+  ['scripts/check-engine-double-contract.mjs SCAN_ROOTS packages', {
     verdict: 'REFUSE-WIDE',
     why: 'tests AND sources, 4408 of 4903 (90%): the most nearly-true declaration on this list, '
       + 'and the widest blast radius on it. Precision over the subtree is not the question — '
       + 'whether the matched column still tells a dev anything is',
   }],
-  ['check:engine-double-contract SCAN_ROOTS examples', {
+  ['scripts/check-engine-double-contract.mjs SCAN_ROOTS examples', {
     verdict: 'REFUSE-WIDE',
     why: '199 of 238 (84%) over a small subtree, so this is the nearest miss on the whole list. '
       + 'Refused with the packages half rather than split from it: declaring only the smaller '
       + 'root would name the gate on example cards and stay silent on the package cards where '
       + 'test doubles actually land, which reads as a claim about where this gate bites',
   }],
-  ['check:error-code-casing SCAN_ROOTS packages', {
+  ['scripts/check-error-code-casing.mjs SCAN_ROOTS packages', {
     verdict: 'REFUSE-WIDE',
     why: 'tests included, 4408 of 4903 (90%) — same trade as engine-double-contract',
   }],
-  ['check:error-status-conformance SCAN_ROOT packages', {
+  ['scripts/check-error-status-conformance.mjs SCAN_ROOT packages', {
     verdict: 'REFUSE-WIDE',
     why: 'walks every non-test TS source under the root — 1898 of 4903 (39%)',
   }],
-  ['check:optional-error-sink SCAN_ROOTS packages', {
+  ['scripts/check-optional-error-sink-contract.mjs SCAN_ROOTS packages', {
     verdict: 'REFUSE-WIDE',
     why: '1898 of 4903 (39%). Its own failure text already prints the subtree spelling, which is '
       + 'how close this shape sits to declaring itself by accident',
   }],
-  ['check:resume-authority-declared DEFAULT_SCAN_ROOTS packages', {
+  ['scripts/check-resume-authority-declared.mjs DEFAULT_SCAN_ROOTS packages', {
     verdict: 'REFUSE-WIDE',
     why: 'walks every non-test TS source under the root — 1898 of 4903 (39%)',
   }],
-  ['check:resume-authority-declared DEFAULT_SCAN_ROOTS examples', {
+  ['scripts/check-resume-authority-declared.mjs DEFAULT_SCAN_ROOTS examples', {
     verdict: 'REFUSE-WIDE',
     why: '162 of 238 (68%), refused with its packages half for the reason above',
   }],
-  ['check:runtime-services-index PACKAGES_DIR packages', {
+  ['scripts/check-runtime-services-index.mjs PACKAGES_DIR packages', {
     verdict: 'REFUSE-WIDE',
     why: 'walks every non-test TS source under the root — 1898 of 4903 (39%)',
   }],
-  ['check:verify-stand-in SCAN_ROOTS packages', {
+  ['scripts/check-verify-stand-in-erasure.mjs SCAN_ROOTS packages', {
     verdict: 'REFUSE-WIDE',
     why: 'walks every non-test TS source under the root — 1898 of 4903 (39%)',
   }],
-  ['check:verify-stand-in SCAN_ROOTS examples', {
+  ['scripts/check-verify-stand-in-erasure.mjs SCAN_ROOTS examples', {
     verdict: 'REFUSE-WIDE',
     why: '162 of 238 (68%), refused with its packages half for the reason above',
   }],
@@ -653,22 +671,22 @@ const TRIAGE = new Map([
       + 'longer the company it was cited as: #12392 made that walk recursive over whole skill '
       + 'directories, which is a subtree and not an extension filter',
   }],
-  ['check:driver-conformance CASE_SETS_DIR packages', {
+  ['scripts/check-driver-conformance.mjs CASE_SETS_DIR packages', {
     verdict: 'REFUSE-UNSPELLABLE',
     why: 'a filename pattern inside one directory — 7 of 143 files (4.9%). Its sibling constant '
       + 'took the escape; this one has nothing honest to declare',
   }],
-  ['check:meta-type-normalized SCAN_DIRS packages', {
+  ['scripts/check-meta-type-normalized.mjs SCAN_DIRS packages', {
     verdict: 'REFUSE-UNSPELLABLE',
     why: 'the join() component resolves to one package source dir, but that dir is 133 test files '
       + 'to 21 sources — 21 of 154 (14%). Narrow enough to name, false 6 times in 7',
   }],
-  ['check:examples-live-imports PACKAGES_ROOT packages', {
+  ['scripts/check-examples-live-imports.mjs PACKAGES_ROOT packages', {
     verdict: 'REFUSE-UNSPELLABLE',
     why: 'test files only, 2510 of 4903 (51%) — and already refused in that gate own docblock, '
       + 'measured there at 76 real couplings out of 4861 (1.6%)',
   }],
-  ['check:runner-env-posture SCANNED_ROOTS packages', {
+  ['scripts/check-runner-env-posture.mjs SCANNED_ROOTS packages', {
     verdict: 'REFUSE-UNSPELLABLE',
     why: 'non-test source beneath a `src` SEGMENT — 1812 of 5241 (35%), re-derived from the gate '
       + 'own collectFiles() walk together with every number below, so the row holds ONE tree. What '
@@ -688,13 +706,13 @@ const TRIAGE = new Map([
       + 'bare-root declaration there is TRUE and refused only for width; here the bare root is '
       + 'FALSE, and so is every narrower spelling the idiom offers',
   }],
-  ['check:runner-env-posture SCANNED_ROOTS examples', {
+  ['scripts/check-runner-env-posture.mjs SCANNED_ROOTS examples', {
     verdict: 'REFUSE-UNSPELLABLE',
     why: '150 of 241 (62%), the same `src`-segment filter, refused with its packages half rather '
       + 'than split: declaring the smaller root would name the gate on example cards and stay '
       + 'silent on the package cards where product source actually lives',
   }],
-  ['check:runner-env-posture SCANNED_ROOTS apps', {
+  ['scripts/check-runner-env-posture.mjs SCANNED_ROOTS apps', {
     verdict: 'REFUSE-UNSPELLABLE',
     why: 'MEASURED AT ZERO — 0 of 35. No `src` tree exists under this root today, so a subtree '
       + 'declaration here would not be imprecise but false: it would paste this gate into every '
@@ -709,7 +727,7 @@ const TRIAGE = new Map([
   // rested on. What is recorded now is the measured spelling and the reason the
   // declaration is deferred, which is a different claim from "no honest
   // declaration exists" and the only one these rows can still make.
-  ['check:i18n-coverage EXAMPLES_DIR examples', {
+  ['scripts/check-i18n-coverage.mjs EXAMPLES_DIR examples', {
     verdict: 'SPELLABLE-UNDECLARED',
     spelling: 'example app configs',
     why: 'one named config file per child directory — 3 of 241 tracked files under the root '
@@ -717,7 +735,7 @@ const TRIAGE = new Map([
       + 'precise and complete. Deferred: no consumer has asked for this gate to be nameable, and '
       + 'the i18n family it belongs to would want one declaration per gate rather than one here',
   }],
-  ['check:i18n-coverage PACKAGES_DIR packages', {
+  ['scripts/check-i18n-coverage.mjs PACKAGES_DIR packages', {
     verdict: 'SPELLABLE-UNDECLARED',
     spelling: 'i18n extract configs',
     why: 'files named i18n-extract.config.ts beneath a scripts segment — 9 of 5275 (0.17%), '
@@ -730,7 +748,7 @@ const TRIAGE = new Map([
       + 'the cards that can move a bundle already reach these gates through the convention trigger '
       + 'for a package owning an extract config',
   }],
-  ['check:i18n PACKAGES_DIR packages', {
+  ['scripts/check-i18n-bundles.mjs PACKAGES_DIR packages', {
     verdict: 'SPELLABLE-UNDECLARED',
     spelling: 'i18n extract configs',
     why: 'the same nine configs by the same filename-and-segment test as its check:i18n-coverage '
@@ -740,7 +758,7 @@ const TRIAGE = new Map([
       + 'reason recorded above, and this gate additionally already reaches the cards that can '
       + 'actually move a bundle through the convention triggers (#11671), both verified live',
   }],
-  ['check:i18n-stale-fill PACKAGES_DIR packages', {
+  ['scripts/check-i18n-stale-fill.mjs PACKAGES_DIR packages', {
     verdict: 'SPELLABLE-UNDECLARED',
     spelling: 'i18n extract configs',
     why: 'the THIRD gate to reach its population through the shared findExtractConfigs walk — 9 '
@@ -772,7 +790,7 @@ const TRIAGE = new Map([
       + 'skills card — the REFUSE-WIDE trade arriving at a row that is no longer unspellable. It '
       + 'also already reaches its own cards through the artifact roster it names file by file',
   }],
-  ['check:skill-docs SKILLS_DIR skills', {
+  ['packages/spec/scripts/build-skill-docs.ts SKILLS_DIR skills', {
     verdict: 'DECLARED-NARROWER',
     spelling: 'skill entrypoints',
     why: 'RE-POINTED 2026-09-01 (#13519) from SPELLABLE-UNDECLARED, and the deferral it replaces '
@@ -792,27 +810,32 @@ const TRIAGE = new Map([
       + 'above: that gate walks the same root RECURSIVELY at 49 of 50, where the precise '
       + 'spelling buys one file of discrimination and its deferral is untouched by this row',
   }],
-  ['check:changeset-gate-self-tests PACKAGE_ROOTS packages', {
+  ['scripts/check-adr-0087-registration.mjs PACKAGE_ROOTS packages', {
     verdict: 'SPELLABLE-UNDECLARED',
     spelling: 'packages manifests',
     why: 'workspace manifests only — 74 of 5275 (1.4%), re-measured 2026-08-26. The recorded '
-      + 'spelling is live and reaches 74 of 74, 100% precise and complete. Deferred: nine rows '
-      + 'across three gates share this one population shape and no consumer has asked for any of '
-      + 'them, so declaring here is a nine-edit expansion ahead of demand',
+      + 'spelling is live and reaches 74 of 74, 100% precise and complete. Deferred: six rows '
+      + 'across two source files share this one population shape and no consumer has asked for '
+      + 'any of them, so declaring here is a six-edit expansion ahead of demand — RE-COUNTED '
+      + '2026-09-04. The "nine rows across three gates" this replaces counted CI invocation '
+      + 'names, not source files: check:changeset-gate-self-tests runs THIS script --self-test, '
+      + 'so it never was a third gate, and #15127 keying this table on the gate source file is '
+      + 'what made that visible: the six are three roots each under this gate and its '
+      + 'check-skill-compatibility-version.mjs sibling',
   }],
-  ['check:changeset-gate-self-tests PACKAGE_ROOTS apps', {
+  ['scripts/check-adr-0087-registration.mjs PACKAGE_ROOTS apps', {
     verdict: 'SPELLABLE-UNDECLARED',
     spelling: 'apps manifests',
     why: 'workspace manifests only — 1 of 40 (2.5%), re-measured 2026-08-26; the spelling reaches '
       + '1 of 1, 100% precise and complete. Deferred with its packages half',
   }],
-  ['check:changeset-gate-self-tests PACKAGE_ROOTS examples', {
+  ['scripts/check-adr-0087-registration.mjs PACKAGE_ROOTS examples', {
     verdict: 'SPELLABLE-UNDECLARED',
     spelling: 'examples manifests',
     why: 'workspace manifests only — 4 of 241 (1.7%), re-measured 2026-08-26; the spelling reaches '
       + '4 of 4, 100% precise and complete. Deferred with its packages half',
   }],
-  ['check:skill-compatibility PACKAGE_ROOTS packages', {
+  ['scripts/check-skill-compatibility-version.mjs PACKAGE_ROOTS packages', {
     verdict: 'SPELLABLE-UNDECLARED',
     spelling: 'packages manifests',
     why: 'workspace manifests only — 74 of 5275 (1.4%), re-measured 2026-08-26; 74 of 74 covered. '
@@ -820,165 +843,15 @@ const TRIAGE = new Map([
       + 'this row records a deferral the gate itself already states, now with the spelling that '
       + 'deferral is about',
   }],
-  ['check:skill-compatibility PACKAGE_ROOTS apps', {
+  ['scripts/check-skill-compatibility-version.mjs PACKAGE_ROOTS apps', {
     verdict: 'SPELLABLE-UNDECLARED',
     spelling: 'apps manifests',
     why: 'workspace manifests only — 1 of 40 (2.5%), re-measured 2026-08-26; 1 of 1 covered',
   }],
-  ['check:skill-compatibility PACKAGE_ROOTS examples', {
+  ['scripts/check-skill-compatibility-version.mjs PACKAGE_ROOTS examples', {
     verdict: 'SPELLABLE-UNDECLARED',
     spelling: 'examples manifests',
     why: 'workspace manifests only — 4 of 241 (1.7%), re-measured 2026-08-26; 4 of 4 covered',
-  }],
-
-  // ── SECOND-KEY TWINS: one literal, two family keys (#14880) ──────────────
-  //
-  // Nine rows landed FRESH in one edit, and NOT because a gate changed. The
-  // dispatch-gates derivation key became (script, args) in #14880 — one entry
-  // per workflow INVOCATION rather than per script path — so CI's
-  // `--self-test` invocation of a gate it also runs plainly is now its own
-  // family. `sweep()` keys a row on `family constant word`, so the identical
-  // bare-root literal, in the identical file, under the identical constant, is
-  // reached a second time and produces a second row.
-  //
-  // ⛔ These are therefore NOT new populations, and each `why` below states
-  // that instead of a measurement. The docblock above forbids carrying a
-  // sibling's numbers into a new row, and the reason it gives is that two rows
-  // are two populations measured at two times; here the two rows are ONE
-  // population read through two keys, so restating a number would mint a
-  // reading this pass never took — the same defect the ban is written against,
-  // arriving by the one route the ban's wording does not cover. The verdict is
-  // the twin's verdict for the only honest reason there is: a different verdict
-  // on the same literal would have this map assert two decisions about one
-  // population.
-  //
-  // ⚠️ The class GROWS with the workflows, not with this file: any gate CI
-  // starts invoking a second way acquires a twin row here on the next run. The
-  // structural alternative — keying `sweep()`'s dedupe on the gate SOURCE FILE
-  // rather than on the family, since the verdict is about a literal in a file
-  // and never about an invocation — is real and is deliberately NOT taken here:
-  // it re-decides which family a surviving row is attributed to, which would
-  // strand the existing twin as STALE, and redesigning this file's keying is
-  // not what the FRESH remedy names. Recorded for whoever owns that call.
-  ['scripts/check-adr-0087-registration.mjs --self-test PACKAGE_ROOTS packages', {
-    verdict: 'SPELLABLE-UNDECLARED',
-    spelling: 'packages manifests',
-    why: 'second-key twin of the row keyed on this same script without the flag — same file, '
-      + 'same constant, same root, one population. It exists because CI invokes this gate both '
-      + 'plainly and with the self-test flag and the derivation now keys on the invocation. The '
-      + 'verdict and the spelling are that row decision, unchanged; ⛔ no count is restated here, '
-      + 'because this pass measured none and the twin numbers belong to the pass that took them',
-  }],
-  ['scripts/check-adr-0087-registration.mjs --self-test PACKAGE_ROOTS apps', {
-    verdict: 'SPELLABLE-UNDECLARED',
-    spelling: 'apps manifests',
-    why: 'second-key twin, apps half — same file, same constant, same root as the unflagged row. '
-      + 'Verdict and spelling carried as one decision about one population, counts deliberately '
-      + 'not restated',
-  }],
-  ['scripts/check-adr-0087-registration.mjs --self-test PACKAGE_ROOTS examples', {
-    verdict: 'SPELLABLE-UNDECLARED',
-    spelling: 'examples manifests',
-    why: 'second-key twin, examples half — same file, same constant, same root as the unflagged '
-      + 'row. Verdict and spelling carried as one decision about one population, counts '
-      + 'deliberately not restated',
-  }],
-  // ── The same twins, one turn further: an argv the workflow FILLS IN (#15083)
-  //
-  // The three rows these replace were keyed on `scripts/check-adr-0087-
-  // registration.mjs` with no argv, and they went STALE without the gate
-  // changing a byte. `dispatch-gates` now renders a value-bearing invocation
-  // instead of dropping back to a bare path key, and CI invokes this gate only
-  // as `--base "$MERGE_BASE"` (pr-automation.yml) and `--base "$SNAPSHOT_SHA"`
-  // (cut-rc.yml) — never bare — so the unflagged key stopped being derived at
-  // all and two keys arrived in its place. The `--self-test` twins above still
-  // say "the row keyed on this same script without the flag"; that row is
-  // these two, split by the workflow that runs it.
-  //
-  // ⛔ Still not new populations, and still no count restated: one literal, one
-  // constant, one file, read through more keys. The verdict and the spelling
-  // are the retired row's, carried whole, for the reason the block above gives
-  // — a different verdict on the same literal would have this map assert two
-  // decisions about one population.
-  ['scripts/check-adr-0087-registration.mjs --base "$MERGE_BASE" PACKAGE_ROOTS packages', {
-    verdict: 'SPELLABLE-UNDECLARED',
-    spelling: 'packages manifests',
-    why: 'the pr-automation.yml invocation of the row that used to be keyed on this script bare — '
-      + 'same file, same constant, same root, one population. It exists because the derivation '
-      + 'renders the argv CI actually passes, and this gate has no bare invocation to fall back '
-      + 'to. Verdict and spelling are that row decision, unchanged; ⛔ no count is restated here, '
-      + 'because this pass measured none',
-  }],
-  ['scripts/check-adr-0087-registration.mjs --base "$MERGE_BASE" PACKAGE_ROOTS apps', {
-    verdict: 'SPELLABLE-UNDECLARED',
-    spelling: 'apps manifests',
-    why: 'apps half of the pr-automation.yml invocation — same file, same constant, same root as '
-      + 'the retired bare row. Verdict and spelling carried as one decision about one population, '
-      + 'counts deliberately not restated',
-  }],
-  ['scripts/check-adr-0087-registration.mjs --base "$MERGE_BASE" PACKAGE_ROOTS examples', {
-    verdict: 'SPELLABLE-UNDECLARED',
-    spelling: 'examples manifests',
-    why: 'examples half of the pr-automation.yml invocation — same file, same constant, same root '
-      + 'as the retired bare row. Verdict and spelling carried as one decision about one '
-      + 'population, counts deliberately not restated',
-  }],
-  ['scripts/check-adr-0087-registration.mjs --base "$SNAPSHOT_SHA" PACKAGE_ROOTS packages', {
-    verdict: 'SPELLABLE-UNDECLARED',
-    spelling: 'packages manifests',
-    why: 'the cut-rc.yml invocation of the same literal — the release cut pins the base to its '
-      + 'snapshot instead of a merge base, which is a different ARGV and the same population. '
-      + 'Verdict and spelling carried whole, counts deliberately not restated',
-  }],
-  ['scripts/check-adr-0087-registration.mjs --base "$SNAPSHOT_SHA" PACKAGE_ROOTS apps', {
-    verdict: 'SPELLABLE-UNDECLARED',
-    spelling: 'apps manifests',
-    why: 'apps half of the cut-rc.yml invocation — same file, same constant, same root. Verdict '
-      + 'and spelling carried as one decision about one population, counts deliberately not '
-      + 'restated',
-  }],
-  ['scripts/check-adr-0087-registration.mjs --base "$SNAPSHOT_SHA" PACKAGE_ROOTS examples', {
-    verdict: 'SPELLABLE-UNDECLARED',
-    spelling: 'examples manifests',
-    why: 'examples half of the cut-rc.yml invocation — same file, same constant, same root. '
-      + 'Verdict and spelling carried as one decision about one population, counts deliberately '
-      + 'not restated',
-  }],
-  ['scripts/check-declaration-mirrors.mjs --self-test SCRIPTS_DIR scripts', {
-    verdict: 'REFUSE-UNSPELLABLE',
-    why: 'second-key twin of the unflagged row for this script. The refusal is about the walk the '
-      + 'gate own source performs — an extension filter no subtree idiom describes — and a walk '
-      + 'is a property of the file, not of which invocation CI happens to schedule, so the '
-      + 'refusal transfers whole and its measurement stays where it was taken',
-  }],
-  ['scripts/check-position-name-fold-loaders.mjs --self-test SCAN_ROOTS packages', {
-    verdict: 'REFUSE-WIDE',
-    why: 'second-key twin of the unflagged row for this script. The trade it refuses — a true '
-      + 'declaration naming this gate on every card under the root — is the same trade whichever '
-      + 'invocation CI schedules, so the verdict transfers and the numbers stay with the pass '
-      + 'that measured them',
-  }],
-  ['scripts/check-position-name-fold-loaders.mjs --self-test SCAN_ROOTS examples', {
-    verdict: 'REFUSE-WIDE',
-    why: 'second-key twin, examples half — refused with its packages half for the reason the '
-      + 'unflagged row states, and for the same one population',
-  }],
-  ['scripts/check-position-name-fold-loaders.mjs --self-test SCAN_ROOTS apps', {
-    verdict: 'REFUSE-WIDE',
-    why: 'second-key twin, apps half — same trade, same reason, same single population as the '
-      + 'unflagged row',
-  }],
-  ['scripts/check-position-name-fold-loaders.mjs --self-test SCAN_ROOTS scripts', {
-    verdict: 'REFUSE-WIDE',
-    why: 'second-key twin, scripts half — the root where this gate own allowed readers live, '
-      + 'walked wholesale for the reason the unflagged row records, and one population with it',
-  }],
-  ['scripts/check-skills-token-ratchet.mjs --self-test SKILLS_DIR skills', {
-    verdict: 'SPELLABLE-UNDECLARED',
-    spelling: 'published skill files',
-    why: 'second-key twin of the unflagged row for this script. The recorded spelling is that '
-      + 'row spelling and is already pinned LIVE, PRECISE and COMPLETE below on its own terms, so '
-      + 'this row adds a key and no new claim; the deferral reason is the one recorded there',
   }],
 ]);
 
@@ -1307,20 +1180,29 @@ export function populationSpans(maskedBody) {
   return spans;
 }
 
-/** `family constant word`, the key format the triage is written in. */
-export function rowKey({ check, constant, word }) {
-  return `${check} ${constant} ${word}`;
+/** `source-file constant word`, the key format the triage is written in. */
+export function rowKey({ file, constant, word }) {
+  return `${file} ${constant} ${word}`;
 }
 
 /**
  * The sweep. `restrict: false` is the wide contrast sweep — kept runnable, never
  * triaged, and reported only so the restriction can be justified by measurement
  * instead of by assertion.
+ *
+ * A row is one bare-root literal IN A SOURCE FILE, and the dedupe key says so:
+ * every family the derivation reaches that file through folds into the one row
+ * and is listed on it in `checks`. The TRIAGE docblock carries why.
+ *
+ * `covered` is ANDed over the folded invocations — a literal is reachable only
+ * when EVERY invocation that reads it can be named for an arbitrary card under
+ * the root, since one invocation the derivation cannot name leaves the debt
+ * open. The self-test pins that no folded row's invocations disagree today, so
+ * this rule decides nothing quietly.
  */
 export function sweep(families, files, { restrict = true } = {}) {
   const dirs = topLevelDirs(files);
-  const rows = [];
-  const seen = new Set();
+  const byKey = new Map();
   for (const [check, entry] of families) {
     // "Covered" asks the only question the tree can answer: can the derivation
     // name this gate for an arbitrary card under that root? A gate that declared
@@ -1339,15 +1221,18 @@ export function sweep(families, files, { restrict = true } = {}) {
           if (!span) continue;
           constant = span.name;
         }
-        const row = { check, constant, word, file, covered: covered(word) };
-        const key = restrict ? rowKey(row) : `${check} ${word}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        rows.push({ ...row, key });
+        const key = restrict ? rowKey({ file, constant, word }) : `${file} ${word}`;
+        if (!byKey.has(key)) byKey.set(key, { file, constant, word, checks: [], coveringChecks: 0, key });
+        const row = byKey.get(key);
+        if (row.checks.includes(check)) continue;
+        row.checks.push(check);
+        if (covered(word)) row.coveringChecks += 1;
       }
     }
   }
-  return rows.sort((a, b) => a.key.localeCompare(b.key));
+  return [...byKey.values()]
+    .map((r) => ({ ...r, checks: r.checks.sort(), covered: r.coveringChecks === r.checks.length }))
+    .sort((a, b) => a.key.localeCompare(b.key));
 }
 
 function report({ wide = false } = {}) {
@@ -1357,26 +1242,32 @@ function report({ wide = false } = {}) {
   const open = rows.filter((r) => !r.covered);
   if (wide) {
     console.log(
-      `bare-root sweep, UNRESTRICTED: ${rows.length} (family, word) pair(s) across `
-        + `${new Set(rows.map((r) => r.check)).size} of ${families.length} families; `
+      `bare-root sweep, UNRESTRICTED: ${rows.length} (source file, word) pair(s) across `
+        + `${new Set(rows.map((r) => r.file)).size} file(s), reached by `
+        + `${new Set(rows.flatMap((r) => r.checks)).size} of ${families.length} families; `
         + `${open.length} not covered by any declaration.\n`
         + '⛔ Contrast only. These are overwhelmingly join() path components in gates that never '
         + 'read those roots — demanding a declaration for them is the fabrication this sweep '
         + 'exists to avoid, and no verdict is recorded for any of them.\n',
     );
-    for (const r of rows) console.log(`  ${r.covered ? 'covered ' : 'OPEN    '} ${r.key}   (${r.file})`);
+    for (const r of rows) console.log(`  ${r.covered ? 'covered ' : 'OPEN    '} ${r.key}`);
     return;
   }
   console.log(
-    `bare-root worklist: ${rows.length} (family, constant, word) triple(s) across `
-      + `${new Set(rows.map((r) => r.check)).size} of ${families.length} families, `
+    `bare-root worklist: ${rows.length} (source file, constant, word) triple(s) across `
+      + `${new Set(rows.map((r) => r.file)).size} gate source file(s), reached by `
+      + `${new Set(rows.flatMap((r) => r.checks)).size} of ${families.length} families, `
       + `${files.length} tracked files. ${rows.length - open.length} now reachable by declaration; `
       + `${open.length} still unreachable as spelled.\n`,
   );
   for (const r of rows) {
     const t = TRIAGE.get(r.key);
     const state = r.covered ? 'REACHABLE' : (t ? t.verdict : '⛔ UNTRIAGED');
-    console.log(`  ${state.padEnd(19)} ${r.key}`);
+    // The invocation count, never the invocations: a row folds every family CI
+    // reaches this literal through, and the count is what says so without
+    // putting an argv back on a line the key deliberately keeps it off.
+    const folded = r.checks.length > 1 ? `   [${r.checks.length} invocations]` : '';
+    console.log(`  ${state.padEnd(19)} ${r.key}${folded}`);
     if (t) console.log(`  ${' '.repeat(19)}   ${t.why}`);
   }
   const untriaged = open.filter((r) => !TRIAGE.has(r.key));
@@ -1442,6 +1333,96 @@ function selfTest() {
     + 'constant yields no triple',
     populationSpans(`const somePath = ${JSON.stringify(someRoot)};`).length === 0);
   t('the live sweep is non-empty, so the cases below judge something', rows.length > 0);
+
+  // ── The FOLD: one row per literal, however many invocations reach it ──────
+  //
+  // The row key is the gate SOURCE FILE, so a gate CI invokes two ways owes ONE
+  // row and two different files still owe two. Both halves are asked of the LIVE
+  // corpus, against a baseline walked INDEPENDENTLY of `sweep`'s dedupe below:
+  // a fixture read against the sweep's own output could be satisfied by the very
+  // defect it exists to catch, which is measured — a control keyed off the live
+  // rows passed a mutation that dropped the file from the key, because the
+  // mutation had already collapsed the pair it was choosing its fixture from.
+  //
+  // Every (invocation, file, constant, word) the derivation reaches, walked
+  // through the same predicates the sweep uses and with no dedupe of its own.
+  const perInvocation = new Set();
+  for (const [check, entry] of families) {
+    for (const file of entry.files ?? []) {
+      const abs = join(ROOT, file);
+      if (!existsSync(abs)) continue;
+      const body = maskSelfTests(maskComments(readFileSync(abs, 'utf8')));
+      const spans = populationSpans(body);
+      for (const { word, index } of bareRootLiterals(body, dirs)) {
+        const span = spans.find((s) => index > s.start && index < s.end);
+        if (span) perInvocation.add(JSON.stringify([check, file, span.name, word]));
+      }
+    }
+  }
+  // The same tuples with the INVOCATION dropped: one entry per literal, which
+  // is what a row is meant to be, and what the fixtures below count against.
+  const literals = [...new Set([...perInvocation]
+    .map((tuple) => JSON.stringify(JSON.parse(tuple).slice(1))))]
+    .map((tuple) => JSON.parse(tuple)).sort((a, b) => `${a}`.localeCompare(`${b}`));
+  const litsOf = (f) => literals.filter((l) => l[0] === f).length;
+  const fileA = literals[0]?.[0];
+  // The control's second file SHARES a constant and a root with the first
+  // wherever the tree offers such a pair, since that pair is exactly what a key
+  // without the file collapses. Any other file keeps the control meaningful, at
+  // less discrimination, on a tree that offers none.
+  const shared = literals.find((l) => l[0] !== fileA
+    && literals.some((a) => a[0] === fileA && a[1] === l[1] && a[2] === l[2]));
+  const fileB = (shared ?? literals.find((l) => l[0] !== fileA))?.[0];
+  t('two different gate source files hold a bare-root literal, so the case and the control below '
+    + 'judge something', Boolean(fileA) && Boolean(fileB) && litsOf(fileA) > 0 && litsOf(fileB) > 0);
+  // Fixture families are spliced over files taken FROM the tree rather than
+  // spelled, the same discipline the probes above take their root with, so this
+  // file still declares no population of its own.
+  const famOf = (name, file) => [name, { files: [file], hints: [] }];
+  // The CASE — the three shapes the two retired twin sections carried between
+  // them: a plain invocation, its self-test leg, and an argv a workflow fills in.
+  const foldCase = sweep([
+    famOf('one gate invoked plainly', fileA),
+    famOf('the same gate, its self-test leg', fileA),
+    famOf('the same gate, with a base a workflow fills in', fileA),
+  ], files);
+  t(`a gate invoked three ways owes ONE row per literal, not three — ${foldCase.length} row(s) `
+    + `for the ${litsOf(fileA)} literal(s) that file holds`, foldCase.length === litsOf(fileA));
+  t('…and the surviving row NAMES all three invocations, so the fold strands none of them',
+    foldCase.every((r) => r.checks.length === 3));
+  // The CONTROL — two different files, swept together, still owe what they hold
+  // apart, which is what reds if the file ever leaves the key.
+  const control = sweep([famOf('gate one', fileA), famOf('gate two', fileB)], files);
+  t(`two different source files still owe their own rows — ${control.length} together against the `
+    + `${litsOf(fileA)} + ${litsOf(fileB)} literal(s) they hold apart, so the fold is keyed on the `
+    + 'FILE and does not collapse a shared constant or root across files',
+    control.length === litsOf(fileA) + litsOf(fileB) && control.every((r) => r.checks.length === 1));
+
+  // The SHRINK, as a measured difference rather than a typed number: the tuples
+  // above must equal the rows plus the twins folded onto them. It fails if the
+  // fold invents a row, loses one, or drops an invocation off the row it folded
+  // into — the three ways a re-keying can strand what it was meant to carry.
+  const twins = rows.reduce((n, r) => n + r.checks.length - 1, 0);
+  t(`the fold is exactly a fold: ${perInvocation.size} (invocation, file, constant, word) tuple(s) `
+    + `reach ${rows.length} row(s), and the ${twins} twin(s) folded onto them account for the `
+    + 'whole difference', perInvocation.size === rows.length + twins);
+  t('the fold judges something — at least one live row carries more than one invocation, so the '
+    + 'identity above is not holding over an empty fold', twins > 0);
+
+  // The fold's reachability rule, held where it could bite. `covered` is ANDed
+  // over the folded invocations; today none of them disagree, which is what
+  // makes this fold a re-keying and not a re-decision of any row's
+  // reachability. A future split must be looked at, not settled by whichever
+  // rule this file happens to state.
+  const split = rows
+    .filter((r) => r.coveringChecks > 0 && r.coveringChecks < r.checks.length)
+    .map((r) => r.key).sort();
+  t(`no folded row's invocations disagree about reachability${split.length ? ` — SPLIT: `
+    + `${split.join(' · ')}. One invocation of that gate can be named for an arbitrary card under `
+    + 'the root and another cannot, so the row reads REACHABLE under one and OPEN under the other. '
+    + 'Decide it on the row — withdraw the declaration or the verdict, as the CONTRADICTED remedy '
+    + 'below sets out — instead of leaving the AND in `sweep` to pick a side quietly.' : ''}`,
+    split.length === 0);
 
   // ── The triage coupling, both directions ──────────────────────────────────
   //
@@ -1515,7 +1496,7 @@ function selfTest() {
   // spelled as a bare path would enter this file's own declared population.
   const asHints = (s) => extractWatchHints(`const L = ${JSON.stringify(s)};`);
   t('no triage key enters this file\'s own hint set as a path',
-    [...TRIAGE.keys(), 'check:sample-gate SOME_ROOT someroot'].every((k) => asHints(k).length === 0));
+    [...TRIAGE.keys(), 'scripts/check-sample-gate.mjs SOME_ROOT someroot'].every((k) => asHints(k).length === 0));
   t('…and that rule can FAIL: the bare-path spelling it forbids does build a hint',
     asHints('scripts/check-x.mjs').length === 1);
 
@@ -1695,6 +1676,9 @@ function selfTest() {
   console.log(
     `OK  self-test: ${rows.length} live row(s), ${open.length} unreachable as spelled, `
       + `${TRIAGE.size} recorded verdict(s) — none stale, none missing, none contradicted. `
+      + `Each row is one literal in one gate source file: ${perInvocation.size} invocation(s) of `
+      + `those literals fold onto them, ${twins} of them as twins of a row that already existed, `
+      + "and no folded row's invocations disagree about reachability. "
       + `${spellingRows.length} record(s) carry a spelling and every one of ${usedSpellings.size} `
       + 'distinct spelling(s) is pinned LIVE, PRECISE and COMPLETE against the tracked corpus in '
       + "hintCovers' own terms. The recogniser is proven to speak and to discriminate (a "

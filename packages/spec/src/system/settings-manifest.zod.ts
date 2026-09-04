@@ -5,6 +5,7 @@ import { lazySchema } from '../shared/lazy-schema';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { ExpressionInputSchema } from '../shared/expression.zod';
 import { I18nLabelSchema } from '../ui/i18n.zod';
+import { ValueDomainSchema } from '../shared/value-domain.zod';
 
 /**
  * Settings Manifest Protocol
@@ -135,54 +136,24 @@ export const SpecifierScopeSchema = z.enum(['global', 'tenant', 'user']);
 export type SpecifierScope = z.input<typeof SpecifierScopeSchema>;
 
 /**
- * Closed vocabulary of **standard value domains** a specifier's value may be
- * drawn from (#5933, the spec half of #5712).
+ * The closed vocabulary of **standard value domains** a specifier's value may
+ * be drawn from — the settings-specifier NAME of the ONE vocabulary declared
+ * in `shared/value-domain.zod.ts` ({@link ValueDomainSchema}), which
+ * `Field.valueDomain` references too (maintainer ruling 2026-09-02: one closed
+ * vocabulary and one membership predicate shared by settings specifiers and
+ * object fields). Same three members, same shape; this is an alias, not a
+ * second declaration, so nothing that imports it under this name moved.
  *
  * A specifier that declares `valueDomain` says: *the legal values for this key
  * are the members of this published standard*, and that membership — not the
  * `options` table — is the enforcement boundary. See {@link Specifier} for the
- * authoring semantics; enforcement itself lives in `service-settings`
- * (Prime Directive #2 — the spec declares, it does not execute).
- *
- * The vocabulary is closed and deliberately small: a member earns its place by
- * a metadata key that actually needs it, not by being a standard that exists.
- * Each member below carries the **definition of membership** the enforcing side
- * must implement, because "the IANA time zone database" and "what this Node
- * happens to enumerate" are measurably different sets, and picking the wrong
- * one rejects legal values.
- *
- * - `iana_time_zone` — an IANA/tzdb zone identifier (`UTC`, `Asia/Kolkata`,
- *   `Europe/Kyiv`). **Membership is the `Intl.DateTimeFormat` probe**
- *   (construct with `{ timeZone: value }`, catch `RangeError`) — the definition
- *   already used by `isValidTimeZone` in
- *   `packages/core/src/security/resolve-authz-context.ts` and by
- *   `localization.manifest.test.ts`.
- *   NOT `Intl.supportedValuesOf('timeZone')`: measured on the repo's Node 22
- *   baseline it returns 418 CLDR *canonical* names and omits `UTC` (this
- *   platform's own declared default), `Asia/Kolkata` (a curated option in the
- *   shipped localization manifest), `Europe/Kyiv`, `Asia/Ho_Chi_Minh`,
- *   `US/Eastern` and `GMT`. Testing membership against that list rejects values
- *   every runtime accepts.
- * - `iso_4217_currency` — an ISO 4217 alphabetic currency code (`USD`, `CHF`).
- *   Here `Intl.supportedValuesOf('currency')` IS usable: measured 162 entries
- *   on the same baseline, admitting `CHF` and all nine curated localization
- *   options while rejecting `XYZ`. Known gaps are the recently assigned `VED`
- *   and the metal/fund codes (`XAU`, `XDR`, …) — widen the definition
- *   deliberately if a deployment needs one, but never fall back to a regex.
- * - `iso_3166_alpha2` — an ISO 3166-1 alpha-2 country code (`US`, `GB`, `CN`).
- *   There is no standard-library oracle for this one: measured,
- *   `Intl.DisplayNames(…, { type: 'region' }).of()` returns a distinct name for
- *   `ZZ` ("Unknown Region" — the exact value this domain exists to reject) and
- *   for `UK` (a CLDR alias that is not an ISO 3166-1 code), so "the name
- *   differs from the input" is not a membership test. The enforcing side must
- *   carry an explicit alpha-2 code list; that list does not live here, because
- *   `packages/spec` holds no data tables (Prime Directive #2).
+ * authoring semantics. Each member's **definition of membership** (and the
+ * measured traps — `Intl.supportedValuesOf('timeZone')` is NOT the time-zone
+ * definition; `Intl.DisplayNames` is NOT a country-code oracle) is documented
+ * on the shared schema, and the shared predicate `isValueDomainMember` is what
+ * the settings door enforces with on the write path (`service-settings`).
  */
-export const SpecifierValueDomainSchema = z.enum([
-  'iana_time_zone',
-  'iso_4217_currency',
-  'iso_3166_alpha2',
-]);
+export const SpecifierValueDomainSchema = ValueDomainSchema;
 export type SpecifierValueDomain = z.input<typeof SpecifierValueDomainSchema>;
 
 // ---------------------------------------------------------------------------

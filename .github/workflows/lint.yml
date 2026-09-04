@@ -106,6 +106,18 @@ concurrency:
 # about the #9465 fence against #9465's own body before you write it down.
 # ─────────────────────────────────────────────────────────────────────────────
 
+# ─────────────────────────────────────────────────────────────────────────────
+# ⭐ GATE ORDER IS DELIBERATE, not topical (#13690, maintainer ruling
+# 2026-09-03): the `Lint & Repo Gates` job below runs its gates sequentially
+# and aborts at the first non-zero exit, so the cheap, frequently-red gates run
+# FIRST — `Docs anchors resolve to real headings` and `ADR anchors + number
+# uniqueness` sit immediately after the six setup steps because they produced
+# 78% of this job's reds, and running them there shrinks the unmeasured tail on
+# the majority of red runs at no cost to a green one (whose wall clock is the
+# sum of its steps, and so is order-independent) — ⛔ so do not re-sort them
+# back among their topical neighbours as tidying.
+# ─────────────────────────────────────────────────────────────────────────────
+
 jobs:
 
   lint:
@@ -161,6 +173,71 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      # #7484 docs anchors: `lychee.toml` sets `include_fragments = "none"`, so
+      # the `Check Documentation Links` job resolves a link's FILE and never its
+      # `#anchor` — measured with the pinned lychee 0.24.2 under the CI argv, a
+      # link to a heading that does not exist is reported `[200] OK`. So a
+      # cross-file anchor was a two-sided invariant with no owner: rename the
+      # heading, leave the inbound link, ship green. This resolves every internal
+      # `#fragment` against the destination page's real heading ids, computed
+      # with `github-slugger` — the same package fumadocs-core renders the site
+      # with, so the gate and the renderer cannot disagree about a slug.
+      #
+      # It lives in this job rather than in check-links.yml for two reasons: it
+      # needs a workspace install (that job is deliberately a checkout plus two
+      # dependency-free `node` checks), and it is REQUIRED where that lane is
+      # advisory. The four anchors that were already dead were fixed in the same
+      # PR, so this ships with no baseline and no allowlist.
+      #
+      # ── FOLDED IN, deliberately: the `file:line` anchor half ──────────────
+      #
+      # `content/docs/permissions/system-context.mdx` calls itself "the
+      # authority" for every behaviour keyed off `ExecutionContext.isSystem`
+      # and says it is "built by census over the whole repo, not by recall".
+      # Nothing held it to either claim, and it rotted at a measured rate: 101
+      # of its 111 anchors pointed at a line that no longer held what the row
+      # named, 19 days after the census was written, with CI green throughout.
+      #
+      # ⭐ The load-bearing direction is CENSUS -> PAGE, not page -> code. At
+      # the commit that motivated the card, re-resolving EVERY anchor on the
+      # page would have passed while it was missing 32 sites and its headline
+      # was 29 too low: a gate that only checks what a page already says can
+      # never find what the page failed to say. Measured again here on the
+      # shipped gate -- with an unanchored read site injected, the resolution
+      # checks report 0 findings and the population check names the site.
+      #
+      # It is a second command in THIS step rather than a step of its own: this
+      # job has no paths filter, so the census runs on code-only PRs (the ones
+      # that ADD a read site), and folding costs no new check context, no new
+      # `check:*` manifest key, and no new required-status entry for one page.
+      # The `--self-test` invocation is what `check:self-test-wired` requires,
+      # and it is the only instrument on this gate's matching rules -- a clean
+      # tree cannot tell a working rule from a weakened one.
+      #
+      # Invoked as `node` rather than through a `pnpm check:*` alias: see the
+      # GATE INVOCATION IDIOM note at the top of this file.
+      - name: Docs anchors resolve to real headings
+        run: |
+          pnpm check:doc-anchors
+          node scripts/check-system-context-census.mjs --self-test
+          node scripts/check-system-context-census.mjs
+
+      # #3723 ADR anchors: code an accepted ADR governs must keep naming it.
+      # That incident reversed three accepted ADRs with a patch-level changeset,
+      # and the mechanism was simply that the edited file never mentioned them —
+      # so the author could not have known. Presence check only; the invariant
+      # travels in the failure message (scripts/adr-anchors/, one file per anchor since #6957).
+      #
+      # Since #5992 the same script also audits the premise the anchors rest on:
+      # an ADR number names exactly ONE decision. Three numbers were each claimed
+      # by two unrelated records (0010/0019/0057) — grandfathered on an explicit
+      # shrink-only allowlist in the script, so a FOURTH collision goes red here.
+      # The `--self-test` in the pnpm script provokes that red path on synthetic
+      # directories every run, because a collision is rare enough that nobody
+      # would otherwise see the gate fail before it mattered.
+      - name: ADR anchors + number uniqueness (governed code names its decision)
+        run: pnpm check:adr-anchors
 
       # Enforces the no-restricted-imports guard against @objectstack/spec root
       # namespace imports (the dormant rule was never run in CI). Syntactic
@@ -1464,55 +1541,6 @@ jobs:
           node scripts/check-docs-nav-label.mjs --self-test
           node scripts/check-docs-nav-label.mjs
 
-      # #7484 docs anchors: `lychee.toml` sets `include_fragments = "none"`, so
-      # the `Check Documentation Links` job resolves a link's FILE and never its
-      # `#anchor` — measured with the pinned lychee 0.24.2 under the CI argv, a
-      # link to a heading that does not exist is reported `[200] OK`. So a
-      # cross-file anchor was a two-sided invariant with no owner: rename the
-      # heading, leave the inbound link, ship green. This resolves every internal
-      # `#fragment` against the destination page's real heading ids, computed
-      # with `github-slugger` — the same package fumadocs-core renders the site
-      # with, so the gate and the renderer cannot disagree about a slug.
-      #
-      # It lives in this job rather than in check-links.yml for two reasons: it
-      # needs a workspace install (that job is deliberately a checkout plus two
-      # dependency-free `node` checks), and it is REQUIRED where that lane is
-      # advisory. The four anchors that were already dead were fixed in the same
-      # PR, so this ships with no baseline and no allowlist.
-      #
-      # ── FOLDED IN, deliberately: the `file:line` anchor half ──────────────
-      #
-      # `content/docs/permissions/system-context.mdx` calls itself "the
-      # authority" for every behaviour keyed off `ExecutionContext.isSystem`
-      # and says it is "built by census over the whole repo, not by recall".
-      # Nothing held it to either claim, and it rotted at a measured rate: 101
-      # of its 111 anchors pointed at a line that no longer held what the row
-      # named, 19 days after the census was written, with CI green throughout.
-      #
-      # ⭐ The load-bearing direction is CENSUS -> PAGE, not page -> code. At
-      # the commit that motivated the card, re-resolving EVERY anchor on the
-      # page would have passed while it was missing 32 sites and its headline
-      # was 29 too low: a gate that only checks what a page already says can
-      # never find what the page failed to say. Measured again here on the
-      # shipped gate -- with an unanchored read site injected, the resolution
-      # checks report 0 findings and the population check names the site.
-      #
-      # It is a second command in THIS step rather than a step of its own: this
-      # job has no paths filter, so the census runs on code-only PRs (the ones
-      # that ADD a read site), and folding costs no new check context, no new
-      # `check:*` manifest key, and no new required-status entry for one page.
-      # The `--self-test` invocation is what `check:self-test-wired` requires,
-      # and it is the only instrument on this gate's matching rules -- a clean
-      # tree cannot tell a working rule from a weakened one.
-      #
-      # Invoked as `node` rather than through a `pnpm check:*` alias: see the
-      # GATE INVOCATION IDIOM note at the top of this file.
-      - name: Docs anchors resolve to real headings
-        run: |
-          pnpm check:doc-anchors
-          node scripts/check-system-context-census.mjs --self-test
-          node scripts/check-system-context-census.mjs
-
       # #13548 tenant-audit census. `content/docs/permissions/tenant-audit-census.mdx`
       # carries the population `SqlDriver.auditMissingTenant` acts on: every
       # application-surface write call site against a tenancy-enabled object, and
@@ -2137,22 +2165,6 @@ jobs:
         run: |
           node scripts/check-section-landing-index.mjs --self-test
           node scripts/check-section-landing-index.mjs
-
-      # #3723 ADR anchors: code an accepted ADR governs must keep naming it.
-      # That incident reversed three accepted ADRs with a patch-level changeset,
-      # and the mechanism was simply that the edited file never mentioned them —
-      # so the author could not have known. Presence check only; the invariant
-      # travels in the failure message (scripts/adr-anchors/, one file per anchor since #6957).
-      #
-      # Since #5992 the same script also audits the premise the anchors rest on:
-      # an ADR number names exactly ONE decision. Three numbers were each claimed
-      # by two unrelated records (0010/0019/0057) — grandfathered on an explicit
-      # shrink-only allowlist in the script, so a FOURTH collision goes red here.
-      # The `--self-test` in the pnpm script provokes that red path on synthetic
-      # directories every run, because a collision is rare enough that nobody
-      # would otherwise see the gate fail before it mattered.
-      - name: ADR anchors + number uniqueness (governed code names its decision)
-        run: pnpm check:adr-anchors
 
       # #13556 ADR SYMBOL ANCHORS — the other direction of the same contract.
       # `check:adr-anchors` above asks whether governed CODE still names its
@@ -2971,6 +2983,42 @@ jobs:
         run: |
           node scripts/check-merge-queue-triage-outcome.mjs --self-test
           node scripts/check-merge-queue-triage-outcome.mjs
+
+      # Merged-branch reaper classifier contract (#13503). The third harness of
+      # this shape, and the one with the sharpest consequence: the classifier in
+      # merged-branch-reaper.yml decides which branches a deletion pass would
+      # take, and the maintainer's ruling of 2026-09-03 turns its dry-run list
+      # into an action a human releases. The workflow's own token grant
+      # (`contents: read`) stops it deleting anything; nothing stopped the LIST
+      # from being wrong.
+      #
+      # The ruling added a base-ref guard — `merged_at` says a PR landed, not
+      # WHERE, and 48 of the 575 merged `copilot/*` branches in the #13503
+      # census merged into another branch, one of them (based on a PR that
+      # closed unmerged) with no confirmed path to `main` at all. Read alone,
+      # the classifier's diff looks the same whether an edit narrows what gets
+      # reaped or widens it, and a dry run over a real repository prints a list,
+      # which is not a contract. So the contract is asserted: the shipped script
+      # is extracted from the YAML with a real parser (never retyped) and run
+      # under doubles the way actions/github-script runs it, as one
+      # AsyncFunction body, holding `reaped ⇒ that branch has a merged PR based
+      # on main` over every scenario.
+      #
+      # Its --self-test deletes the guard, inverts it, renames the base it
+      # compares against, flips its fail-closed direction, and unrecords and
+      # unrenders its bucket — and requires the battery to redden for each,
+      # naming the scenario that catches it. It also mutates the decisions the
+      # guard sits beside (open-PR precedence, the grace window, the defensive
+      # head-ref filter, the protected short-circuit), because a guard that cost
+      # something already there is not a narrowing.
+      #
+      # Invoked as `node` rather than through a `pnpm check:*` alias, same
+      # reason as the two steps above: see the GATE INVOCATION IDIOM note at the
+      # top of this file.
+      - name: Merged-branch reaper classifier contract
+        run: |
+          node scripts/check-merged-branch-reaper-outcome.mjs --self-test
+          node scripts/check-merged-branch-reaper-outcome.mjs
 
       # Shard positive-attestation gate (#6082). ci.yml's two aggregate gates
       # used to decide from one `needs.<matrix>.result` word, which cannot carry

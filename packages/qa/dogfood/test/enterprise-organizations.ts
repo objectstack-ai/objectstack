@@ -114,13 +114,23 @@ export async function probeOrganizations(
     const detail = (e as Error).message;
     // #4719 — name the remedy that actually applies. "Install it" is useless
     // advice for an app that installed it and never declared it, which is the
-    // shape a workspace makes easy and a hoisted store used to hide.
+    // shape a workspace makes easy and a hoisted store used to hide. #14270 —
+    // the branch reads "is the declaration the problem?", so #14041's third
+    // kind (declared, installed, and the package publishes nothing loadable)
+    // gets neither instruction: no install action can change what a package
+    // publishes, so this arm defers to the importer's own message, which
+    // `detail` interpolates at the end of both strings below.
+    const kind = hostImportFailureKind(e);
     const remedy =
-      hostImportFailureKind(e) === 'declared-unresolvable'
+      kind === 'declared-unresolvable'
         ? `${root} DECLARES ${ORGANIZATIONS_PKG}, so repair its INSTALL there (\`pnpm install\`, ` +
           'un-prune, rebuild its dist)'
-        : `declare ${ORGANIZATIONS_PKG} in ${root}'s own package.json and install it — being ` +
-          'reachable as somebody else\'s transitive dependency is not enough (#4719)';
+        : kind === 'declared-no-loadable-entry'
+          ? `${root} DECLARES ${ORGANIZATIONS_PKG} and it IS installed, so neither is the ` +
+            'problem — the package publishes no entry Node can load, and the importer\'s ' +
+            'message below is the authority on what it has to publish'
+          : `declare ${ORGANIZATIONS_PKG} in ${root}'s own package.json and install it — being ` +
+            'reachable as somebody else\'s transitive dependency is not enough (#4719)';
     if (declared) {
       throw new Error(
         `${MULTI_ORG_ENV}=1 declares that ${ORGANIZATIONS_PKG} (enterprise, ADR-0105 D12) is ` +

@@ -12,6 +12,7 @@ import {
   type SettingsManifest,
   type Specifier,
 } from './settings-manifest.zod';
+import { ValueDomainSchema, isValueDomainMember } from '../shared/value-domain.zod';
 
 describe('SpecifierType', () => {
   it('accepts the closed set of specifier kinds', () => {
@@ -392,11 +393,31 @@ describe('`visible` — the settings visibility grammar (#7327)', () => {
   });
 });
 
-describe('valueDomain membership definitions — the measurements service-settings must implement', () => {
-  // These pin the TSDoc on `SpecifierValueDomainSchema`. `packages/spec` does
-  // not enforce a domain (Prime Directive #2) — but the two halves have to agree
-  // on WHAT the domain is, and the obvious oracle is the wrong one for two of
-  // the three. A doc nobody re-measures rots; these go red when it does.
+describe('valueDomain membership definitions — the measurements the shared predicate implements', () => {
+  // These pin the definitions recorded on the shared vocabulary
+  // (`shared/value-domain.zod.ts`). Since #14168 (maintainer ruling
+  // 2026-09-02) the predicate itself ships in `packages/spec` as
+  // `isValueDomainMember`, ONE answer for the settings door and the record
+  // write path — but the definition still has to be re-measured, because the
+  // obvious oracle is the wrong one for two of the three domains. A doc nobody
+  // re-measures rots; these go red when it does. The predicate's own pins are
+  // in `shared/value-domain.test.ts`; this block keeps the settings-side
+  // reading and adds the identity: the specifier's schema IS the shared one.
+
+  it('SpecifierValueDomainSchema is the shared ValueDomainSchema — an alias, not a copy', () => {
+    expect(SpecifierValueDomainSchema).toBe(ValueDomainSchema);
+  });
+
+  it('the shared predicate agrees with each measured definition below', () => {
+    for (const tz of ['UTC', 'Asia/Kolkata', 'Europe/Kyiv']) {
+      expect(isValueDomainMember('iana_time_zone', tz), tz).toBe(true);
+    }
+    expect(isValueDomainMember('iana_time_zone', 'Europe/Munich')).toBe(false);
+    expect(isValueDomainMember('iso_4217_currency', 'CHF')).toBe(true);
+    expect(isValueDomainMember('iso_4217_currency', 'XYZ')).toBe(false);
+    expect(isValueDomainMember('iso_3166_alpha2', 'CH')).toBe(true);
+    expect(isValueDomainMember('iso_3166_alpha2', 'ZZ')).toBe(false);
+  });
 
   const probeTimeZone = (tz: string): boolean => {
     try { new Intl.DateTimeFormat('en-US', { timeZone: tz }); return true; } catch { return false; }
@@ -441,7 +462,8 @@ describe('valueDomain membership definitions — the measurements service-settin
     // The tempting test is "the display name differs from the input". It admits
     // `ZZ` — the exact value #5933 cites as slipping past `^[A-Za-z]{2}$` — and
     // `UK`, which is a CLDR alias and not an ISO 3166-1 code at all. The
-    // enforcing side needs an explicit code list; that list is not spec's.
+    // membership test needs an explicit code list — since #14168 that list
+    // is `ISO_3166_ALPHA2_CODES` in `shared/value-domain.zod.ts`.
     const regionNames = new Intl.DisplayNames(['en'], { type: 'region' });
     expect(regionNames.of('ZZ')).not.toBe('ZZ');
     expect(regionNames.of('UK')).not.toBe('UK');

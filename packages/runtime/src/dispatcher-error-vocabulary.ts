@@ -309,6 +309,30 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
     // (no source site — the producer is tenant code; see SANDBOX_AUTHORED_LIMB)
 
     // ── foreign vocabularies: spelled `code`, not an ADR-0112 error.code ────
+    // [#14553] The navigation-contribution relocation diagnostic.
+    {
+        code: 'nav_contribution_group_missing',
+        file: 'packages/objectql/src/nav-contribution-diagnostics.ts',
+        shape: 'objlitconst',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'ADR-0112 D6c by name, on all four of its tests: it ships as PAYLOAD of a success (carried on ' +
+            'the served app, and in the `warnings` list of `os build --json` AND `os validate --json`, ' +
+            'from runs that exit 0), it describes an ARTIFACT rather than a request (which app, which ' +
+            'package, which group id), its severity is `warning` and cannot be anything else, and no ' +
+            'path routes it to ' +
+            '`error.code` — the producer is a read-time FOLD (`applyNavContributions`) and a compile ' +
+            'step, neither of which throws. The card that added it added the diagnostic and ' +
+            'deliberately added NO refusal: the contribution is still relocated to the app\'s top ' +
+            'level and still installs, so there is no failing request for a catalog to govern. Hence ' +
+            'lowercase and out of the ledger, ' +
+            'exactly as D6c prescribes for `metadata-diagnostics.ts` and `build-probes.ts`, whose ' +
+            '`{ severity, artifact, ref, code, message, fix }` family this record is shaped after. ' +
+            'Reported here rather than delegated to `check:error-code-casing` because the constant is ' +
+            'REFERENCED (`objlitconst`), not quoted at the stamp — that gate\'s lowercase patterns all ' +
+            'need a literal beside the token, so this position is this gate\'s to classify.',
+    },
     {
         code: 'TEXT',
         file: 'packages/cli/src/commands/generate.ts',

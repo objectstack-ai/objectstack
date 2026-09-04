@@ -590,6 +590,12 @@ const PIN_ISSUE = 'https://github.com/objectstack-ai/objectstack/issues/5286';
 // finding later used ("the directory was never INCLUDED by anything"), which is
 // why the remedy names a file rather than describing a shape (#10756).
 const SPEC_SCRIPTS_PRECEDENT = 'packages/spec/tsconfig.scripts.json';
+// The in-tree precedents TESTS_COVERED's remedy points at for the `rootDir`
+// half of the sibling-config route. Both put a test tree that sits outside the
+// build config's `rootDir` into a program, and both had to widen `rootDir` to
+// the repo root to do it -- the step the remedy named no way to discover until
+// #14943, measured on #14835 at 116 x TS6059 inherited and 3 more at `"."`.
+const TEST_ROOTDIR_PRECEDENT = '`packages/client/tsconfig.test.json` and `packages/cli/tsconfig.test.json`';
 const GENERATED_INCLUDE_ISSUE = 'https://github.com/objectstack-ai/objectstack/issues/10880';
 
 // A path in the root program whose edits move the `@objectstack/spec-monorepo`
@@ -674,6 +680,27 @@ const ROOT_PROGRAM_COUPLED_SCRIPT = 'scripts/check-test-typecheck.mts';
 // route -- a `tsconfig.test.json` over the test layer, named by a new `typecheck`
 // script -- so the entry is deleted rather than lowered.
 //
+// `@objectstack/service-knowledge` GRADUATED from this ledger too (#15049,
+// PR #15032's sibling for `packages/services/**`; entry: 10 raw, repaired to
+// 0 under BOTH the build config and the new `tsconfig.test.json` split). This
+// one is worth a line because the split did NOT confirm this entry's own
+// 3-code-tier guess -- it found 4, the same "a tier split read off an
+// unrepaired config is a guess about what is UNDER it" lesson the paragraph
+// above states for `metadata` and `service-storage`. Fixing the 3 TS2835 (the
+// config-tier third, and the noise: the unresolved imports made
+// `KnowledgeService` `any`, which suppressed the TypeScript excess-property
+// check on an `ExecutionContext` literal) uncovered a 4th real error the
+// undivided reading had masked: `roles: ['member']`, a field the spec renamed
+// to `positions` (`execution-context.zod.ts`: "Formerly `roles`") that no
+// check had ever read with the renamed type. The other 3 code-tier errors
+// were exactly this entry's guess: two `vi.fn()` mocks stubbing
+// `IDataEngine.find` typed with fewer parameters than the call site they
+// stand in for, so `.mock.calls[N]` indexed past a TS-inferred EMPTY tuple
+// (TS2493/TS2352), and a third mock's parameter type omitted the `where`
+// field the real call passes (TS2339). All 4 are fixed in the test file,
+// matching each mock's type to the call site it stubs; `ExecutionContext`
+// itself was not touched (it was correct -- the test's field name was stale).
+//
 // `@objectstack/service-automation` GRADUATED from this ledger (#15048; entry:
 // 3 raw, repaired to 0), the `packages/services/**` sibling of the
 // `service-cluster` graduation above (#14181/PR #15032) -- same road in: no
@@ -705,12 +732,6 @@ const DEBT = {
   '@objectstack/observability': {
     errors: 11,
     note: 'all code-tier (TS2554 wrong arity x10, TS2552).',
-  },
-  '@objectstack/service-knowledge': {
-    errors: 10,
-    note: 'code-tier 3 (TS2339/TS2352/TS2493); config-tier 3 (TS2835); noise 4 (TS7006). Re-measured 10 at '
-      + '5ab08428, up from 8; code-tier is unchanged at 3, so the +2 is config-tier/noise. 8 of the 10 are '
-      + 'in __tests__/knowledge-service.test.ts.',
   },
   '@objectstack/service-storage': {
     errors: 51,
@@ -2010,7 +2031,13 @@ function evaluate(packages, root, state) {
             `the check reports green over source it never read (${TRACKING_ISSUE}). Drop the ` +
             `\`*.test.ts\`/\`*.spec.ts\` entry from \`exclude\`, widen \`include\` to reach the test tree, add a ` +
             `sibling \`tsconfig.test.json\` and name it in the \`typecheck\` script (the #5286 route, when the ` +
-            `build config must keep the exclusion), or measure what surfaces and add a TEST_DEBT entry in ${SELF}.`,
+            `build config must keep the exclusion), or measure what surfaces and add a TEST_DEBT entry in ${SELF}. ` +
+            `⚠️ The sibling route usually needs \`rootDir\` widened as well, and leaving it inherited is the ` +
+            `way that route fails: test files outside the build config's \`rootDir\` report one TS6059 each -- ` +
+            `116 of them in one measured onboarding of a sibling \`test/\` tree under \`rootDir: "src"\`, and ` +
+            `\`"."\` still left 3 where tests read fixtures from another package. ${TEST_ROOTDIR_PRECEDENT} ` +
+            `widen it to \`"../.."\` (the repo root) for exactly this reason; \`rootDir\` steers emit layout ` +
+            `only and these programs emit nothing, so it widens the ROOT and never the strictness.`,
         );
       } else {
         const entry = state.testDebt[pkg.name];
