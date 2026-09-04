@@ -188,7 +188,30 @@ function walk(dir, out = []) {
  * an ignore list of our own; the walk is a fallback for a checkout that is not a
  * git repository (a published tarball, an unpacked source archive) so the gate
  * degrades to "scans more" rather than to "scans nothing".
+ *
+ * ## Why this gate declares its population to the dispatch derivation (#15312)
+ *
+ * `scripts/pm/dispatch-gates.mjs` maps a card's file surface to the gate
+ * families that watch it, so a seat can run locally what CI will run. This gate
+ * names no path literal anywhere in its source, so that derivation scored it
+ * `undetermined` for every card in the tree and it appeared in no seat's
+ * runnable list. Measured cost: a PR added one `vi.mock('@objectstack/driver-memory')`
+ * to a new test file, the seat derived and ran 57 families with 53 green, and
+ * CI's Lint & Repo Gates then failed on THIS gate — a red the seat could not
+ * have been told about, one cycle late.
+ *
+ * The truthful population is the whole repository, which is exactly what the
+ * marker below says. `candidateFiles` enumerates every tracked `*.ts`,
+ * `*.tsx`, `*.mts`, `*.cts` and every `package.json` in the tree, with a
+ * repo-root walk as the non-git fallback; NO subtree narrows it, and a module
+ * binding on the frozen package is a red wherever in the tree it is written.
+ * ⛔ The remedy is the declaration and not a path literal: an "every file"
+ * literal is what that tool's header prices as a fabricated lead on every card.
+ *
+ * A card that edits this gate reaches it by identity anyway; the marker is for
+ * every OTHER card, which is all of them.
  */
+// dispatch-gates: whole-tree-population -- `candidateFiles` is a `git ls-files` enumeration of every tracked *.ts/*.tsx/*.mts/*.cts and every package.json in the repository (repo-root walk as the non-git fallback), so no card's file surface can narrow this gate: a module binding on the frozen package is a red wherever in the tree it is written.
 function candidateFiles() {
   let files;
   try {

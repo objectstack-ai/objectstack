@@ -2218,6 +2218,122 @@ export function wholeTreePopulationRefusal(entry) {
 }
 
 /**
+ * The WHOLE-TREE RESIDUE ledger (#15312) — the families whose own source sweeps
+ * the repository root, that this derivation can place on NO card, and that are
+ * deliberately not in the whole-tree bucket above.
+ *
+ * ## The defect
+ *
+ * `check:driver-memory-census` counts a `vi.mock` of a frozen driver package as
+ * a module binding wherever in the tree it is written, and names no path
+ * literal anywhere in its source — so this derivation scored it `undetermined`
+ * for every card and no `--commands` harvest could contain it. A seat derived
+ * its family, ran 57 of them with 53 green, and CI's lint job then failed on
+ * the one gate the derivation could not offer. The gate was right; what was
+ * missing was a way for a seat to be TOLD about it before the push, which is
+ * exactly what the whole-tree channel above exists to be. It now declares.
+ *
+ * ⚠️ Fixing that one gate is not the fix. The question worth answering is
+ * "which gates does CI run that no derivation can name", mechanically, so the
+ * NEXT one reds here rather than in CI a cycle later. This table and the live
+ * case in `--self-test` are that answer for the class the card names.
+ *
+ * ## The population, and why the closure subtraction is load-bearing
+ *
+ * A family is IN it when three things hold at once: its own source carries a
+ * recognised repo-root walk (`repoRootWalkSpelling` — the same predicate that
+ * vouches for a whole-tree declaration), it declares NEITHER marker, and no
+ * path in the tree OUTSIDE the gate's own file closure can place it. That last
+ * subtraction is not a detail: every family matches the card that edits the
+ * gate itself, through the identity key, so counting that as "the derivation
+ * can name it" would score this whole population green on a card nobody files.
+ *
+ * ## Why this class and not "every gate CI runs"
+ *
+ * The wider question was MEASURED for this card rather than guessed at: on
+ * cd1f8ee96, of the 186 gate scripts CI runs, 44 are named by no derivation at
+ * all. The bulk of them are SUBTREE walkers — seeded at `packages`, `apps`,
+ * `examples` through a runtime constant no source scan reads — whose remedy is
+ * the ordinary `ROOT_DIR_WATCH_HINTS` declaration, one per-gate judgement each.
+ * A table that swallowed all 44 would be forty rows nobody revisits, which is
+ * the shape `artifactRosterLines` refuses for its own members. So this holds
+ * the class the card named, the rest is a filed follow-up, and the boundary is
+ * STATED here rather than left to be inferred from what the table happens to
+ * contain.
+ *
+ * ## Maintaining this table
+ *
+ * A member this table does not list reds `check:pm-dispatch-gates`, and there
+ * are exactly two honest repairs. If the gate really does read the whole tree,
+ * give it the `whole-tree-population` marker: it then leaves this population by
+ * DECLARING, which is the outcome this table exists to push toward. If it does
+ * not, add a row saying what it reads INSTEAD, so a reader can check the claim
+ * against the gate. ⛔ Never a row that only says "not whole-tree" — that is
+ * the reason-less opt-out both markers refuse, and it reads exactly like a
+ * placeholder nobody will revisit. A listed family that stops being a member
+ * reds too: a stale exclusion is an exclusion nobody is measuring any more.
+ */
+export const ROOT_WALK_RESIDUE_LEDGER = [
+  [
+    'check:org-identifier',
+    'its enumeration is `git ls-files -- examples apps packages` (the ROOTS constant) — three SUBTREES, not the '
+      + 'tree. The liveness predicate selects it on limb A and is documented as too weak to tell that apart, so a '
+      + 'whole-tree marker here would be precisely the mis-declaration that predicate cannot catch. Its remedy is '
+      + 'the ordinary ROOT_DIR_WATCH_HINTS declaration naming those three roots, after which it is MATCHED here.',
+  ],
+  [
+    'scripts/check-console-intercept-disarm.mjs',
+    'its `scan(REPO_ROOT)` walks `workspacePackageDirs(root)` — every workspace PACKAGE ROOT\'s package.json and '
+      + 'vitest.config.*, read off pnpm-workspace.yaml. That is workspace-wide but it is not every file: a new test '
+      + 'file under an existing package does not move it, a new PACKAGE does. Declaring the whole tree would put it '
+      + 'on every card on a population it does not read.',
+  ],
+  [
+    'scripts/check-console-intercept-disarm.mjs --self-test',
+    'the same gate file, reached through its self-test invocation; the reading above is the whole of it.',
+  ],
+  [
+    'scripts/check-skill-frame-freshness.mjs --self-test',
+    'lint.yml runs the SELF-TEST HALF and never the scan — its step is named that, and the step comment states why '
+      + '(the pnpm script would drag the scan in with it). The repo-root default parameter belongs to the scan half '
+      + 'CI does not schedule, so a whole-tree row for this family would advertise work no workflow performs.',
+  ],
+  [
+    'scripts/symbol-anchors.mjs --self-test',
+    'a shared grammar-and-extractor LIBRARY, invoked by CI only as its own self-test; its `git ls-files` runs over a '
+      + 'corpus its caller passes in. The corpus walk it lends is exercised by check-adr-symbol-anchors.mjs, which '
+      + 'declares ROOT_DIR_WATCH_HINTS = [docs/adr/**] and is placed by that.',
+  ],
+];
+
+/** The ledger as a Map, keyed by the family key this derivation places. */
+export const ROOT_WALK_RESIDUE_REASONS = new Map(ROOT_WALK_RESIDUE_LEDGER);
+
+/**
+ * Why this family is an unnamed repo-root walker, or null when it is not one.
+ *
+ * Pure, and reading only what discovery already put on the entry plus the
+ * placement this derivation gave it — the same contract
+ * `wholeTreePopulationRefusal` above states, and for the same reason: the live
+ * sweep in `--self-test` and any future caller must not be able to disagree
+ * about what a member of this population IS.
+ *
+ * ⚠️ `placement` is the verdict from `placeFamily` over a probe card that
+ * EXCLUDES the gate's own file closure. Passing the raw whole-tree verdict
+ * instead returns `matched` for every family in the repo and empties this
+ * population silently — which is why the live case builds the probe rather than
+ * taking a convenient shortcut, and why this parameter is a verdict and not a
+ * path list (a caller cannot get the subtraction wrong in a way this function
+ * would then hide).
+ */
+export function unnamedRootWalk(entry, placement) {
+  if (!entry?.rootWalk) return null;
+  if (entry.wholeTreeReason || entry.noPopulationReason) return null;
+  if (placement === 'matched') return null;
+  return entry.rootWalk;
+}
+
+/**
  * A family whose verdict CANNOT EXIST outside a workflow run, read from the
  * gate's own source rather than from a roster of names (#14004).
  *
@@ -15988,6 +16104,92 @@ function selfTest() {
     ['packages/rest/src/server.ts', 'docs/adr/0112-x.md', 'scripts/check-nul-bytes.mjs'].every((p) =>
       declaredWholeTree.every(([, e]) => placeFamily(e, [p]).verdict === 'always-runs')),
   );
+
+  // ── The WHOLE-TREE RESIDUE (#15312) ───────────────────────────────────────
+  //
+  // The channel above says what a DECLARING family gets. This says what happens
+  // to a family that should have declared and did not — the case the card was
+  // filed on, where a gate CI runs appeared in no seat's runnable list and the
+  // seat learned about it from CI a cycle later. Every fixture case below names
+  // the limb it discriminates; the live case is the one that can go red on a
+  // gate added tomorrow, which is the whole point of the table it grades.
+  const rwEntry = (over = {}) => ({
+    rootWalk: REPO_ROOT_WALK_SPELLINGS[0].label,
+    wholeTreeReason: null,
+    noPopulationReason: null,
+    ...over,
+  });
+  t(
+    'an undeclared, unplaceable repo-root walker IS a member, and comes back as the walk that made it one',
+    unnamedRootWalk(rwEntry(), 'undetermined') === REPO_ROOT_WALK_SPELLINGS[0].label,
+  );
+  t(
+    'a `silent` one is a member too — silent and undetermined are both "no card names it"',
+    unnamedRootWalk(rwEntry(), 'silent') === REPO_ROOT_WALK_SPELLINGS[0].label,
+  );
+  t(
+    'declaring the whole tree LEAVES the population — the repair this table exists to push toward',
+    unnamedRootWalk(rwEntry({ wholeTreeReason: 'sweeps git ls-files' }), 'undetermined') === null,
+  );
+  t(
+    'and so does declaring no path population — the opposite answer, but an examined one either way',
+    unnamedRootWalk(rwEntry({ noPopulationReason: 'the self-test is the whole run' }), 'undetermined') === null,
+  );
+  t(
+    'a family the derivation can place BY PATH is not a member: a seat is already told about it',
+    unnamedRootWalk(rwEntry(), 'matched') === null,
+  );
+  t(
+    'and neither is a gate whose source carries no repo-root walk at all — this population is one CLASS, not the whole residue',
+    unnamedRootWalk(rwEntry({ rootWalk: null }), 'undetermined') === null,
+  );
+  // LIVE, against the real tree, and the case the next unnamed census gate reds
+  // on. The probe card is every tracked file MINUS the family's own file
+  // closure: without the subtraction every family matches the card that edits
+  // the gate itself, through the identity key, and this whole population would
+  // score empty while reading like a pass.
+  {
+    const liveAll = [...liveTree.files];
+    const members = [];
+    for (const [check, entry] of liveDiscovery.byCheck) {
+      if (!entry.rootWalk || entry.wholeTreeReason || entry.noPopulationReason) continue;
+      const own = new Set(entry.files ?? []);
+      const probe = own.size ? liveAll.filter((f) => !own.has(f)) : liveAll;
+      const walk = unnamedRootWalk(entry, placeFamily(entry, probe).verdict);
+      if (walk) members.push(check);
+    }
+    const unlisted = members.filter((c) => !ROOT_WALK_RESIDUE_REASONS.has(c)).sort();
+    const stale = [...ROOT_WALK_RESIDUE_REASONS.keys()].filter((c) => !members.includes(c)).sort();
+    t(
+      'every gate CI runs whose own source sweeps the repo root is DECLARED whole-tree, declared path-less, ' +
+        'derivable by path, or a justified row in ROOT_WALK_RESIDUE_LEDGER' +
+        (unlisted.length ? ` — unlisted: ${unlisted.join(', ')}` : '') +
+        (stale.length ? ` — listed but no longer a member: ${stale.join(', ')}` : ''),
+      unlisted.length === 0 && stale.length === 0,
+    );
+    // The control that makes the case above an instrument. A sweep that silently
+    // found NOTHING — a renamed field, a discovery that stopped reading gate
+    // sources — reports "nothing unlisted" and is indistinguishable from a pass,
+    // which is #4690 pointed at this file's own guard. So the population has to
+    // be seen to be non-empty, and the gate the card was filed on has to be seen
+    // to have LEFT it by declaring rather than by going unmeasured.
+    t(
+      `control: the residue population is non-empty (${members.length} member(s)), so the case above is measuring something`,
+      members.length > 0,
+    );
+    t(
+      'control: the card\'s own specimen has left this population through the BUCKET, not through the ledger — ' +
+        'check:driver-memory-census declares whole-tree, is backed by its walk, and is in no exclusion row',
+      Boolean(liveDiscovery.byCheck.get('check:driver-memory-census')?.wholeTreeReason)
+        && wholeTreePopulationRefusal(liveDiscovery.byCheck.get('check:driver-memory-census')) === null
+        && !ROOT_WALK_RESIDUE_REASONS.has('check:driver-memory-census'),
+    );
+    t(
+      'every ledger row carries a reason that says what the gate reads INSTEAD — a reason-less exclusion is the ' +
+        'placeholder shape both markers refuse',
+      ROOT_WALK_RESIDUE_LEDGER.every(([, why]) => typeof why === 'string' && why.trim().length > 40),
+    );
+  }
 
   // ── The CI-MEASURED-ONLY shape (#14004) ───────────────────────────────────
   //
