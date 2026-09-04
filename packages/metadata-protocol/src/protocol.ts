@@ -2031,17 +2031,67 @@ type BatchDataRowResult = BatchOperationResult;
  * `declaredStatus` would mint incoherent rows — `{ code: 'INTERNAL_ERROR',
  * httpStatus: 409 }` for a `statusCode`-spelled refusal whose own code the
  * ledger does not know.
+ *
+ * ## One wire spelling for a unique-constraint refusal (#14723)
+ *
+ * The engine answers a driver's unique-constraint refusal with its
+ * `DuplicateRecordError` envelope — `code: 'DUPLICATE_RECORD'`, `status: 409`,
+ * the driver's error whole on `cause`. `DUPLICATE_RECORD` is a registered
+ * member, so the verbatim limb above used to put it on the row as-is, while
+ * every WHOLE-REQUEST door in `@objectstack/rest` answers the same class as
+ * `UNIQUE_VIOLATION` — the standard-catalog member the published protocol
+ * docs give for the 409 constraint-violation body. After #14541 the two
+ * spellings sat side by side in one route's responses: a whole-request
+ * failure on `POST /data/:object/batch` said `UNIQUE_VIOLATION`, a row on the
+ * same route said `DUPLICATE_RECORD`.
+ *
+ * Maintainer ruling (2026-09-03, #14723): one wire spelling on every route,
+ * `UNIQUE_VIOLATION`; the row reports it too. So this limb maps the engine's
+ * envelope to the wire spelling BEFORE the verbatim registered-code rule —
+ * keyed exactly as the whole-request arm keys it (`error-response.ts`'s
+ * `structuredCodeAnswer`: the registered code AND the class name), never by
+ * message text. `httpStatus` still reads the declared 409 and `message` is
+ * still the envelope's platform sentence (a declared 4xx, so it is quoted); the
+ * driver's text stays on `cause`, which never reaches the row.
+ *
+ * ⛔ The engine's thrown identity is NOT renamed: `DuplicateRecordError.code`
+ * stays `DUPLICATE_RECORD` (an in-process caller — a hook, a flow node —
+ * branches on that). What moves is what a ROW REPORTS across the HTTP
+ * boundary. And a producer that merely SPEAKS `DUPLICATE_RECORD` — a hook
+ * throwing the registered code without being the engine's class — keeps its
+ * own code on the row, the same discrimination the whole-request arm makes.
  */
 function toRowApiError(err: any, fallback: string): ApiError {
-    const thrown = typeof err?.code === 'string' && ErrorCode.safeParse(err.code).success
-        ? (err.code as ApiError['code'])
-        : undefined;
+    const thrown = isEngineDuplicateRecordEnvelope(err)
+        ? 'UNIQUE_VIOLATION'
+        : typeof err?.code === 'string' && ErrorCode.safeParse(err.code).success
+            ? (err.code as ApiError['code'])
+            : undefined;
     const { declaredStatus } = resolveThrownHttpError(err);
     return {
         code: thrown ?? (declaredStatus !== undefined ? standardErrorCodeForHttpStatus(declaredStatus) : 'INTERNAL_ERROR'),
         message: clientFacingRowFailureText(err, fallback),
         ...(declaredStatus !== undefined ? { httpStatus: declaredStatus } : {}),
     };
+}
+
+/**
+ * [#14723] Is this thrown value the ENGINE's unique-violation envelope?
+ *
+ * The same two-part gate `@objectstack/rest`'s whole-request arm applies —
+ * the registered code AND the class name — so a batch row and a whole-request
+ * failure recognise the engine's envelope by one rule. Name alone would miss
+ * nothing today but would let a future class of the same name speak a
+ * different code; code alone would swallow a hook that deliberately throws
+ * the registered `DUPLICATE_RECORD` from its own body, which is a different
+ * producer speaking a member of the vocabulary and keeps its own spelling.
+ * The class itself is not imported: this package does not depend on
+ * `@objectstack/objectql`, and the envelope's contract is its declared
+ * `code` / `name` / `status`, not its prototype.
+ */
+function isEngineDuplicateRecordEnvelope(err: unknown): boolean {
+    const e = err as { code?: unknown; name?: unknown } | null | undefined;
+    return e?.code === 'DUPLICATE_RECORD' && e?.name === 'DuplicateRecordError';
 }
 
 /**
