@@ -186,8 +186,23 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     },
   },
   '@objectstack/core': {
-    // src/security/operation-private-keys.pin.test.ts walks `git ls-files` over
-    // the whole repo and reads every matching source file.
+    // src/security/operation-private-keys.pin.test.ts asks `git ls-files` for
+    // every authored source file under `packages/` -- tracked plus untracked --
+    // and reads the ones a fixed-string prefilter says mention its two symbols.
+    //
+    // ⛔ `.ts` and NOT `.tsx`, and this half of that boundary is load-bearing in
+    // the same way the `@objectstack/types` entry below is. That pin's scanner
+    // used to match `.ts` and `.tsx` while this glob covered only `.ts`, so it
+    // judged a population neither scoping layer re-runs it for -- the #7802
+    // shape, one extension wide. It was repaired by narrowing the SCANNER to
+    // this glob, never by widening this glob to the scanner: these globs are
+    // inherited as watch hints by `check:cross-package-test-inputs`, and the
+    // dispatch-gates self-test pins that no hint of that family reaches
+    // the `realtime-hooks.test.tsx` file in `packages/client-react`. Measured on
+    // b548e438d, by adding a `.tsx` glob here and re-deriving that family's
+    // hints: the case flipped from true to false with the added glob itself as
+    // the covering hint. ⇒ Extensions and glob widen together or not at all,
+    // and that pin's header carries the measurement of what the boundary costs.
     globs: ['packages/**/*.ts'],
   },
   '@objectstack/types': {
