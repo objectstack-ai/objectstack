@@ -170,6 +170,36 @@ export const FILE_REFERENCES_MIGRATION_ID = 'adr-0104-file-references';
 export const VALUE_SHAPES_MIGRATION_ID = 'adr-0104-value-shapes';
 
 /**
+ * Well-known migration id: ADR-0030 notification convergence — this
+ * deployment's legacy per-user `sys_notification` inbox rows split into
+ * `sys_inbox_message` + `sys_notification_receipt`, and the `sys_notification`
+ * row itself rewritten to the L2 event shape, by `migrateSysNotificationToEvent`
+ * (`@objectstack/metadata/migrations`).
+ *
+ * Registered so that "has this cut-over run here?" is ANSWERABLE at all. The
+ * cut-over is destructive and one-way, it is handed to operators as a call they
+ * make themselves (`docs/handoff/adr-0030-notification-convergence.md`, under
+ * "Data migration (not auto-run)"), and it shipped with no id — so a deployment
+ * that ran it recorded nothing, and one that did not is indistinguishable from
+ * one that did. A ledger row can only be keyed by an id; without one the
+ * question has no place to be answered even in principle. That absence, not the
+ * migration, is what this constant repairs.
+ *
+ * WARNING — what a row under this id MEANS is deliberately NOT settled here,
+ * and its silence is not an answer. The two ids above are written by an
+ * `os migrate` command that scans, self-checks, and only then records, which is
+ * what gives `last_run_at` / `applied_at` / `verified_at` / `blocking` their
+ * meaning for them. This migration has no such command and no self-check: it
+ * reports `migrated` / `already_done` / `not_applicable` / `error` to its
+ * caller and nothing else. Which of those columns a run of it may legitimately
+ * claim, whether anything may gate on the row, and whether a datastore created
+ * after the cut-over belongs in {@link CREATION_ATTESTED_MIGRATION_IDS}, are
+ * open contract questions on this surface (#14025) — not facts this constant
+ * asserts, and not ones to settle by copying the neighbours above.
+ */
+export const NOTIFICATION_EVENT_MIGRATION_ID = 'adr-0030-notification-event';
+
+/**
  * The migrations a datastore attests at CREATION rather than by scanning.
  *
  * Both facts these ids stand for — no legacy file value here, no malformed
