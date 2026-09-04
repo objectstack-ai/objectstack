@@ -1301,12 +1301,17 @@ export function stripReadonlyFields(
  * isRuntimeOwnedField}) only — the INSERT-side counterpart of
  * {@link stripReadonlyFields} (#5503).
  *
- * Why a separate, narrower function rather than reusing the one above: INSERT is
- * deliberately exempt from the author-declared static-`readonly` strip inside
- * the engine (#3413). A create may legitimately seed read-only columns, and the
- * trusted internal writers (identity provisioning, the metadata repository, the
- * event-log cursor) call `engine.insert` DIRECTLY — which is why that strip
- * lives at the DataProtocol ingress instead (`stripReadonlyForInsert`, #3043).
+ * Why a separate, narrower function rather than reusing the one above. It was
+ * originally because INSERT was exempt from the author-declared static-`readonly`
+ * strip inside the engine (#3413) — that exemption is GONE (#14147: ruling C,
+ * 2026-09-03), and `engine.insert` now runs {@link stripReadonlyFields} over
+ * {@link staticReadonlyInsertSubject} for a non-system caller. What keeps this
+ * function separate is what it always also did: it owns the runtime-owned types
+ * under a WIDER `preserveAudit` exemption than the create side grants an
+ * author-declared column, and its message states the runtime-owned reason
+ * rather than an author-declared lock — #5628 injects `readonly: true` onto
+ * every `autonumber`, so the two would otherwise be indistinguishable to the
+ * reader of a log line.
  * Runtime-owned fields carry none of that ambiguity: nobody may seed a record
  * number on create, because the engine (or the driver's persistent sequence)
  * issues it. So this one CAN live in the engine, and living there is the point —

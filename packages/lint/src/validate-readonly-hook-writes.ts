@@ -39,11 +39,17 @@
 //
 // --- SCOPE - deliberately narrow, so a finding is worth gating on ----------
 //
-//   - Only `update` / `updateById`. INSERT is engine-exempt from the
-//     author-declared static-`readonly` strip (`stripReadonlyForInsert`'s note
-//     in rule-validator.ts, #3043/#3413: "a create may legitimately seed
-//     read-only columns"), so `insert`/`create` are not no-ops and are never
-//     flagged. Exactly the reason the flow sibling skips `create_record`.
+//   - Only `update` / `updateById`, and ⚠️ this bullet's REASON is spent. It
+//     used to be that INSERT was engine-exempt from the author-declared
+//     static-`readonly` strip (#3043/#3413: "a create may legitimately seed
+//     read-only columns"). The maintainer ruling of 2026-09-03 (option C,
+//     #14147) SUPERSEDED that row: `engine.insert` runs the static strip for a
+//     non-system caller, and a hook body's `ctx.api` under a non-system trigger
+//     is exactly that. So a hook `insert` of a static-`readonly` column IS a
+//     silent no-op now, and this rule does not yet report it — a scan gap, not
+//     a decision, recorded here and filed rather than widened inside #14147's
+//     PR (a new error-severity finding class is its own change). The flow
+//     sibling's `create_record` gap rests on the same superseded premise.
 //
 //   - Only a NON-ELEVATED `ctx.api`. `ScopedContext.sudo()` returns a context
 //     with `isSystem: true`, which the strip skips entirely. A `.sudo()` chain

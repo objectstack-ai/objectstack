@@ -136,7 +136,7 @@
         {
           "clause": "clone (POST /data/:object/:id/clone, gated by enable.clone default-on) returns 201 with a NEW id and the source's field VALUES copied, but engine-owned columns (id, audit, autonumber, formula, summary) and readonly columns (e.g. approval_status) RE-DERIVED not carried, and the clone is owned by the CLONER — not the source's owner",
           "oracle": "api",
-          "verify": "the 201 result carries {id (new ≠ sourceId), sourceId, record}; field-by-field diff shows business values copied and system/readonly columns re-derived (#3043 CLONE_STRIP_FIELDS + stripReadonlyForInsert); owner_id resolves to the signed-in cloner (the clone is a create in the caller's context — packages/metadata-protocol/src/protocol.ts cloneData)",
+          "verify": "the 201 result carries {id (new ≠ sourceId), sourceId, record}; field-by-field diff shows business values copied and system/readonly columns re-derived (#3043 CLONE_STRIP_FIELDS + the engine's create-side static-readonly strip, #14147); owner_id resolves to the signed-in cloner (the clone is a create in the caller's context — packages/metadata-protocol/src/protocol.ts cloneData)",
           "evidence": "clone response + source-vs-clone field diff + owner_id read"
         },
         {
@@ -160,7 +160,7 @@
         "dogfood-verification skill §3",
         "examples/app-showcase/src/data/objects/account.object.ts (requiredness + format/conditional validations)",
         "packages/runtime/src/route-ledger.ts (/data CRUD routes)",
-        "packages/rest/src/rest-server.ts#registerDataActionEndpoints (POST /data/:object/:id/clone → registerDataActionEndpoints) + packages/metadata-protocol/src/protocol.ts#cloneData (cloneData: enable.clone gate, findOne-in-caller-context, CLONE_STRIP_FIELDS, stripReadonlyForInsert)",
+        "packages/rest/src/rest-server.ts#registerDataActionEndpoints (POST /data/:object/:id/clone → registerDataActionEndpoints) + packages/metadata-protocol/src/protocol.ts#cloneData (cloneData: enable.clone gate, findOne-in-caller-context, CLONE_STRIP_FIELDS; the static-readonly strip is engine.insert's since #14147)",
         "packages/rest/src/rest-route-ledger.ts (POST /api/v1/data/:object/:id/clone, client data.clone)",
         "objectui: e2e/live/record-history-display.spec.ts",
         "cross-ref: the inline-edit atomic two-surface behavior (ONE Save bar / ONE PATCH carrying exactly the changed keys + ifMatch) is folded into records-forms.concurrent-edit-conflict, not here"
@@ -3860,7 +3860,7 @@
           "evidence": "both responses + the unchanged count"
         },
         {
-          "clause": "overrides WIN over copied business values — the override name lands on the clone — but cannot FORGE protected columns: stripReadonlyForInsert runs AFTER Object.assign(data, overrides) (protocol.ts), so a readonly/engine-owned key smuggled through overrides is dropped and re-derived, same as #3043's carried-over case",
+          "clause": "overrides WIN over copied business values — the override name lands on the clone — but cannot FORGE protected columns: the create-side static-readonly strip runs AFTER Object.assign(data, overrides) — the overrides are applied in protocol.ts cloneData and judged in engine.insert (#14147) — so a readonly/engine-owned key smuggled through overrides is dropped and re-derived, same as #3043's carried-over case",
           "oracle": "api",
           "verify": "the clone's re-read shows the override name AND the forged key re-derived (defaultValue / fresh audit stamp), not the smuggled value",
           "evidence": "the overrides payload + the clone re-read diff"
@@ -3898,7 +3898,7 @@
         "ref": "packages/metadata-protocol — search-clone-schema-conformance.test.ts (parses the real cloneData producer); packages/rest — search-clone-route-schema-conformance.test.ts (drives the live mount); named on the ledger row rest-route-ledger.ts"
       },
       "source": [
-        "packages/metadata-protocol/src/protocol.ts#cloneData (cloneData: registration gate #3770, CLONE_DISABLED, findOne-in-context, CLONE_STRIP_FIELDS + system/autonumber/formula/summary strip, overrides, stripReadonlyForInsert #3043, omitInternalFieldsFromWriteResponse #7823)",
+        "packages/metadata-protocol/src/protocol.ts#cloneData (cloneData: registration gate #3770, CLONE_DISABLED, findOne-in-context, CLONE_STRIP_FIELDS + system/autonumber/formula/summary strip, overrides, omitInternalFieldsFromWriteResponse #7823; the static-readonly strip moved to engine.insert #14147)",
         "packages/rest/src/rest-route-ledger.ts (POST /api/v1/data/:object/:id/clone, client data.clone, bare-201 note #11924)",
         "objectui: packages/app-shell/src/views/studio-design/ObjectSettingsPanel.tsx (Studio authors the enable.clone opt-out switch)",
         "cross-ref: the clone HAPPY path + engine-column re-derivation + RLS-gated 404 are crud-roundtrip clauses 7-8 — this item drives only the contract edges that item does not, and deliberately re-states none of its oracles"
