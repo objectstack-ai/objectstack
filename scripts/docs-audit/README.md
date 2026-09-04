@@ -49,12 +49,12 @@ Three anchor kinds, each exact:
 | anchor | what it is | how it is derived |
 |:--|:--|:--|
 | `symbol` | a documentable declaration the diff touched | the top-level declaration, or a member of a top-level **container** (class / interface / type / enum / schema object), enclosing each changed line — on **both** sides of the diff, so a removed export still anchors the pages naming it. A member that is a **data property** is additionally qualified by its declaring container against the authorable surface (see below) |
-| `route` | a wire path the change touched | a path literal on a changed line, plus every route whose **registrar handler** references a changed symbol |
+| `route` | a wire path the change touched | a path literal on a changed line, plus every route whose **route-source handler** references a changed symbol |
 | `sdk` | the client method bound to an anchor route | the declared `route` ⟷ `client` rows in the repo's route ledgers |
 
 The `route` and `sdk` hops are what carry the derivation across the surface boundary the
 package graph cannot cross: `auditMetaItem` (changed) → `GET /api/v1/meta/:type/:name/audit`
-(`rest-server.ts` registrar) → `meta.getAudit` (`rest-route-ledger.ts`) → the token
+(`rest-server.ts`, a registration call site) → `meta.getAudit` (`rest-route-ledger.ts`) → the token
 `api/client-sdk.mdx` actually contains.
 
 **A local variable is not documentable surface.** That one rule is what drops the measured
@@ -87,7 +87,7 @@ Each anchor kind names its own origin, from the same field the JSON publishes as
 | kind | the clause |
 |:--|:--|
 | `symbol` | `a field of interface MetaOverlayCacheKey` · `a method of class RestServer` · `a top-level function` |
-| `route` | `a path literal in RestServer` · `bridged from symbol enforceEnvironmentOwnership — its registrar handler names it` |
+| `route` | `a path literal in RestServer` · `bridged from symbol enforceEnvironmentOwnership — its route-source handler names it` |
 | `sdk` | `the route ledger binds it to GET /api/v1/ui/view/:object/:type` |
 | `literal` | `a string literal in cacheKeyOf` |
 | `command` | `read off packages/cli/src/commands/environments/bind.ts` |
@@ -181,7 +181,7 @@ whole anchor set, in every kind, after it is derived.)
 The first build of this derivation was, on some PRs, *noisier* than the proxy it replaced
 (134 rows where the old tool gave 26). Two guards fixed that, and both run **before** the
 route bridge — a name left in the set does not merely add a noisy row, it mints noisy route
-and SDK anchors from every registrar handler that mentions it:
+and SDK anchors from every route-source handler that mentions it:
 
 1. **Shape** — an anchor must be code-shaped (camelCase / PascalCase / snake_case /
    dotted). `label`, `object`, `start`, `locale` and `sections` all arrived as real
@@ -200,7 +200,7 @@ entirely — a data table is consulted by handlers, it is not their implementati
 
 ### The `sdk` bridge reaches part of its own population, and says which part (#9572)
 
-The `sdk` hop needs a registrar `path:` tail to select a route-ledger row. Measured on
+The `sdk` hop needs a route source's `path:` tail to select a route-ledger row. Measured on
 `9ff11921a`: **45 of the 221 client-bound ledger rows are reachable, 176 are not.** An
 unreachable row is not "unlisted this time" — no symbol change bridges to it, ever.
 
@@ -210,7 +210,7 @@ drift — each move was measured row by row:
 
 | `--bridge-coverage` | `a6eca9223` | `8f10a79f7a` | why |
 | --- | ---: | ---: | --- |
-| registrar files | 12 | 12 | two ADR-0049 ledger entries were admitted in between and are excluded again here; they produced **0 tails and 0 reachable rows**, so they never moved the figures below |
+| route sources | 12 | 12 | two ADR-0049 ledger entries were admitted in between and are excluded again here; they produced **0 tails and 0 reachable rows**, so they never moved the figures below |
 | route tails | 43 | 44 | `rest-server.ts` unrolled `for (const publishedPath of […])` into a literal `path:` — a variable path yields no tail, a literal one does |
 | client-bound rows | 222 | 219 | three `:type/:section/:name` rows deleted from `rest-route-ledger.ts`, all three already unreachable |
 | **reachable** | **45** | **47** | the one new tail `/:type/:name/published` selects `meta.getPublished` on the rest ledger *and* on the runtime ledger |
@@ -218,7 +218,7 @@ drift — each move was measured row by row:
 ⭐ 45 → 47 is the bridge reaching **more** of its population, not losing track of it, so
 the figure stands at 47. ⛔ Do not "restore" 45: the only recognizer spelling that
 reproduces it drops ten of the fourteen matched files, including a tail-producing
-registrar — the control appears to recover exactly when the recognizer stops working.
+call site — the control appears to recover exactly when the recognizer stops working.
 
 That number now travels with the answer. `bridgeCoverage` is emitted on every run whose
 change carried a bridgeable symbol (`{ measured: false, reason }` when it did not — never a
@@ -246,33 +246,95 @@ among them), so the silence is not an empty region.
 
 `56 of 56` and `46 of 87` used to print in the same words, and they are not the same
 finding. Every unreachable row is now attributed against a **ceiling** — every `path:` any
-`packages/**` file declares, with `REGISTRAR_FILE_RE` ignored entirely, built by
-`maximalTailsFrom` from the same `parseRegistrarSource` over the same walk. Measured on
+`packages/**` file declares, with `CALL_SITE_FILE_RE` ignored entirely, built by
+`maximalTailsFrom` from the same `parseRouteSource` over the same walk. Measured on
 `589758d22`, the 177 unreachable rows partition as:
 
 | cause | rows | what it means |
 | --- | --- | --- |
 | `discovery-gap` | 14 | an in-repo file declares this exact path; the filename convention did not scan that file. The JSON **names the witness**. |
-| `no-in-repo-registrar` | 56 | on a ledger where **not one** row is declared in-repo — declared upstream and catch-all-mounted. No discovery change reaches it. |
-| `undecided` | 107 | no in-repo declaration for the row, on a ledger that *has* in-repo registrars. Absence and an unreadable spelling are not distinguishable here, so neither is claimed. |
+| `no-in-repo-declaration` | 56 | on a ledger where **not one** row is declared in-repo — declared upstream and catch-all-mounted. No discovery change reaches it. |
+| `undecided` | 107 | no in-repo declaration for the row, on a ledger that *has* in-repo route sources. Absence and an unreadable spelling are not distinguishable here, so neither is claimed. |
 
-Exactly **one** of the seven ledgers is `no-in-repo-registrar` today: `auth-route-ledger.ts`,
+Exactly **one** of the seven ledgers is `no-in-repo-declaration` today: `auth-route-ledger.ts`,
 whose own header has said so since #3656 — better-auth declares those routes inside
 `node_modules` and the plugin mounts them with a single ``rawApp.all(`${basePath}/*`)``,
 which `routeTailOf` cannot and should not turn into a tail. That is why widening
-`REGISTRAR_FILE_RE` to admit `auth-plugin.ts` was measured to move `registrar files
+`CALL_SITE_FILE_RE` to admit `auth-plugin.ts` was measured to move `route sources
 scanned` 12 → 13 and **nothing else**.
 
-⛔ **This changes no discovery and moves no reach.** `REGISTRAR_FILE_RE` is byte-identical,
-the bridge still rides on `registrarByTail` alone, and `reachable` is 45 before and after —
+⛔ **This changes no discovery and moves no reach.** `CALL_SITE_FILE_RE` is byte-identical,
+the bridge still rides on `routeSourceByTail` alone, and `reachable` is 45 before and after —
 pinned in `--self-test`. The ceiling only explains the number; it never participates in it,
 and because it is a superset by construction a ceiling that misses a *reachable* row is a
 `brokenScan` verdict rather than a quieter result.
 
 The classification is **derived, never listed**. Control on `589758d22`: adding one
 in-repo file that declares one auth route — under a filename the convention does not match
-— moves the auth ledger out of `no-in-repo-registrar` on its own (structural 56 → 0,
+— moves the auth ledger out of `no-in-repo-declaration` on its own (structural 56 → 0,
 `reachable` still 45), and removing it restores 56.
+
+### A route SOURCE is two kinds, and one of them is admitted by evidence (#11857)
+
+Maintainer ruling A, 2026-09-04 decision batch #31. Until this card the recognizer's name,
+docblock and `--self-test` all meant *the file that registers the route* — while the
+measured widening that motivated the card admits five `packages/spec` **Zod contract
+declarations**, which register nothing. The ruling made the **rename** a condition of
+admitting them: nothing here is called a "registrar" any more, because the word would
+otherwise denote two constructs.
+
+A **route source** is a file whose source declares a route. Two kinds:
+
+| kind | admitted by | today |
+| --- | --- | ---: |
+| registration **call site** | the `CALL_SITE_FILE_RE` filename convention (unchanged) | 12 |
+| spec contract **declaration** | **evidence**: a non-test `packages/**/*.ts` whose masked source declares a route beside the HTTP method it answers | 5 |
+
+Why a declaration counts: the drift check exists to say *"the contract changed, re-verify
+the manual"*, and a Zod API declaration in `packages/spec` **is** the contract. No widening
+of the filename convention would ever reach it — `storage.zod.ts` is not going to be
+renamed `storage-routes.ts`.
+
+**The guard is the HTTP method, not a file list.** A route declaration names the verb it
+serves; a data payload carrying a `path:` key does not. Measured on `460134af8`: of the 61
+literal `path:` sites in `packages/spec/src/conversions/registry.ts` — whose
+`/api/v1/health` is a connector-action **input** inside an automation fixture — **zero**
+carry an HTTP method, while the five contract declarations carry one at 61 of their 62
+sites. (The 62nd has its `method:` five *lines* but zero *properties* up, behind a JSDoc
+that `maskComments` blanks; the lookaround skips blank lines for exactly that reason.) The
+separation is total at every lookaround from 1 to 6, so the constant is a margin, not a
+threshold.
+
+⛔ **The fixture and the benchmark are not re-excluded here.** The card also named
+`test/fixtures/*.ts` and `*.bench.ts`; `isTestFile` grew those arms in #12965, so the walk
+never offers them to either kind. `--self-test` **pins** that over the two real repo paths
+rather than restating the exclusion — the day either arm is loosened, they come back as
+contract declarations and the self-test says so.
+
+Measured on `460134af8`, before → after:
+
+| `--bridge-coverage` | before | after |
+| --- | ---: | ---: |
+| route sources scanned | 12 | **17** (12 call sites + 5 contract declarations) |
+| route tails produced | 44 | **78** |
+| client-bound rows reachable | 47 | **61** |
+| `discovery-gap` rows | 14 | **0** |
+| `storage` ledger unreachable | 7 of 7 | **0 of 7** |
+| `i18n` ledger unreachable | 3 of 3 | **1 of 3** |
+| `rest` ledger unreachable | 42 of 84 | **40 of 84** |
+| `runtime` ledger unreachable | 64 of 69 | **61 of 69** |
+| `plugin-auth` unreachable | 56 of 56 | 56 of 56 (unchanged — declared upstream, see above) |
+
+No reach regression is possible **by construction**: `selectsFrom` is a `some()` over the
+tail list, so added tails can only add selections. `discovery-gap` reaching **0** is the
+strong reading — every row the ceiling said a widening *could* reach is now actually
+reached, and what remains unreachable is unreachable for a reason no discovery change
+touches.
+
+⚠️ **The published `45 → 59` figure from the card is not what landed.** The card measured
+on `a6eca9223`; both endpoints have since moved with the tree (see the #9572 table above),
+and the guard admits five files rather than the card's eight. The figure this PR
+establishes is **47 → 61 on `460134af8`**, re-measured rather than copied.
 
 ### A PARTIAL ledger read is a verdict too (#9896)
 
@@ -429,7 +491,7 @@ How often it renders, re-derived over the 40 first-parent commits ending at `e43
 is a rare notice rather than a per-PR banner, which is what keeps it readable.
 
 **Cost** (the card's open question): the anchor derivation reads the same 178-page corpus
-the old one did, plus the 18 route-registrar/ledger sources (~875 KB) and one `git show`
+the old one did, plus the 18 route-source/ledger files (~875 KB) and one `git show`
 per changed file per side. Measured end-to-end on the ten PRs above, `node affected-docs.mjs`
 went from 85-195 ms to 114-582 ms. The heaviest case is the widest diff; every case stays
 well under a second, against a job that already spends seconds checking out the repo and
