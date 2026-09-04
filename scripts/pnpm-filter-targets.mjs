@@ -92,6 +92,7 @@ import {
   WorkspaceEnumerationError,
   parseWorkspaceGlobs,
   selfTest as workspaceEnumeratorSelfTest,
+  workspaceEnumeratorFloorFailures,
   workspacePackageDirs,
 } from './workspace-enumerator.mjs';
 
@@ -675,6 +676,7 @@ export async function selfTest() {
   // The shared workspace enumerator is a plain module with no CI invocation of
   // its own (#11510); every script that consolidated onto it folds in its checks.
   failures.push(...workspaceEnumeratorSelfTest({ root: root ?? HERE }));
+  failures.push(...workspaceEnumeratorFloorFailures());
 
   if (failures.length === 0) {
     console.log(

@@ -152,6 +152,7 @@ import {
   isExclusionGlob,
   readWorkspaceGlobs,
   selfTest as workspaceEnumeratorSelfTest,
+  workspaceEnumeratorFloorFailures,
 } from './workspace-enumerator.mjs';
 // The `typecheck`-script -> tsconfig program set, shared with
 // `check-type-check-coverage.mjs` (#11490). Imported rather than re-derived:
@@ -2364,6 +2365,7 @@ function selfTest() {
     // (#11510 — being a gate is exactly what it must not be); every script that
     // consolidated onto it folds in its checks.
     for (const failure of workspaceEnumeratorSelfTest({ root: REPO_ROOT })) expect(false, failure);
+    for (const failure of workspaceEnumeratorFloorFailures()) expect(false, failure);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
