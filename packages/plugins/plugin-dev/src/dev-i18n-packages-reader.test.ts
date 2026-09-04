@@ -54,7 +54,17 @@ vi.mock('@objectstack/service-i18n', () => ({
 
 vi.mock('@objectstack/objectql', () => { throw absent('@objectstack/objectql'); });
 vi.mock('@objectstack/runtime', () => { throw absent('@objectstack/runtime'); });
-vi.mock('@objectstack/driver-memory', () => { throw absent('@objectstack/driver-memory'); });
+// ⛔ NO `@objectstack/driver-memory` mock here, deliberately — do not copy one in
+// from the sibling harnesses. `vi.mock` counts as a DECLARATION to
+// `scripts/check-driver-memory-census.mjs`, and that package's consumer set is
+// locked by maintainer ruling (#5499 froze investment, #5704 / #6664 ruled each
+// remaining consumer). A third test consumer is the #6664 defect itself, not a
+// bookkeeping chore. Nothing here needs it: every boot below passes
+// `services: { driver: false }`, and `dev-plugin.ts`'s ONE
+// `import('@objectstack/driver-memory')` sits inside `if (enabled('driver'))`,
+// so the specifier is never reached. Measured, not assumed: with the line gone
+// this suite is unchanged at 68 passed, both BOOT cases below green in 5ms and
+// 1ms — timings a real `import()` of that package would not fit in.
 vi.mock('@objectstack/service-storage', () => { throw absent('@objectstack/service-storage'); });
 vi.mock('@objectstack/service-realtime', () => { throw absent('@objectstack/service-realtime'); });
 vi.mock('@objectstack/plugin-auth', () => { throw absent('@objectstack/plugin-auth'); });
