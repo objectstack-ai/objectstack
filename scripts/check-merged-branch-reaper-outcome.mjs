@@ -127,10 +127,11 @@ const SELF_TEST_BATTERY_FLOOR = 5;
 const UNATTRIBUTED_BATTERY = '(no battery open)';
 const SELF_TEST_BATTERIES = Object.freeze({
   '1. The unmutated shipped script must be green -- otherwise every red below': 1,
-  '2. Every mutation must be REACHED and must turn the battery red, in the': 57,
+  '2. Every mutation must be REACHED and must turn the battery red, in the': 67,
   '3. A script that does not compile is caught before any scenario runs.': 1,
   '4. Missing input is a failure, never a pass (#4690).': 1,
   '5. Wiring. A check nobody runs is the #4449 shape this repo keeps paying': 3,
+  '6. The DELETE job is fenced structurally -- which events reach it, and': 19,
 });
 
 function repoRoot() {
@@ -179,6 +180,109 @@ export function extractScript(root) {
     return { source: null, problems };
   }
   return { source, problems };
+}
+
+// ── The delete job's fence (#12771, armed 2026-09-04) ──────────────────────
+//
+// The scenario battery in this file drives the `sweep` script and can say
+// NOTHING about the job that deletes. That job runs no classifier: it consumes
+// the list `sweep` publishes and calls `git.deleteRef`. Deletion is kept out of
+// the extracted script deliberately -- what this harness judges stays a
+// classification rather than an action -- and the price of that is that the
+// deleter's safety is entirely STRUCTURAL: which events reach it, and which
+// token it holds. So it is asserted structurally, on the shipped bytes, and
+// every assertion is driven to red by a mutation of those bytes (battery 6).
+//
+// ⛔ The clause that matters most is the `pull_request` exclusion. This
+// workflow triggers on `pull_request` so that edits to it exercise the sweep
+// before merging -- which means that without the exclusion, EDITING THIS FILE
+// BECOMES DELETING BRANCHES, on the head of the very PR that edits it. Nothing
+// in a YAML diff makes that visible; this does.
+
+const REAP_JOB = 'reap';
+
+/**
+ * Structural facts about the delete job, read out of the workflow TEXT rather
+ * than from a path, so the self-test can mutate the text and re-read it.
+ *
+ * @param {string} text the workflow file's contents
+ */
+export function inspectReapJob(text) {
+  const doc = parseDocument(text);
+  if (doc.errors.length > 0) return { parsed: false, reason: `YAML parse error -- ${doc.errors[0].message}` };
+  if (!isMap(doc.getIn(['jobs']))) return { parsed: false, reason: 'no `jobs:` map' };
+  const scalar = (path) => {
+    const v = doc.getIn(path);
+    return v == null ? null : String(v);
+  };
+  const jobIds = doc.getIn(['jobs']).items.map((item) => String(item.key));
+  return {
+    parsed: true,
+    present: isMap(doc.getIn(['jobs', REAP_JOB])),
+    if: scalar(['jobs', REAP_JOB, 'if']) ?? '',
+    needs: scalar(['jobs', REAP_JOB, 'needs']),
+    contents: scalar(['jobs', REAP_JOB, 'permissions', 'contents']),
+    topLevelContents: scalar(['permissions', 'contents']),
+    contentsWriteJobs: jobIds.filter((id) => scalar(['jobs', id, 'permissions', 'contents']) === 'write'),
+  };
+}
+
+/**
+ * The fence stated as what is BROKEN. An empty array means it holds.
+ *
+ * @param {string} text the workflow file's contents
+ * @returns {string[]}
+ */
+export function reapFenceFailures(text) {
+  const r = inspectReapJob(text);
+  if (!r.parsed) return [`${WORKFLOW} does not parse -- ${r.reason}`];
+  if (!r.present) {
+    return [
+      `${WORKFLOW}: job \`${REAP_JOB}\` is gone. This fence describes the job that DELETES; if deletion moved, `
+        + 'it moved somewhere nothing asserts, which is the state this fence exists to prevent.',
+    ];
+  }
+  const f = [];
+  if (!r.if.includes("github.event_name != 'pull_request'")) {
+    f.push(
+      `${WORKFLOW}: job \`${REAP_JOB}\` no longer excludes \`pull_request\` in its \`if:\` `
+        + `(got: ${r.if || 'no `if:` at all'}). This workflow triggers on \`pull_request\` so that edits exercise `
+        + 'the sweep -- without this exclusion, editing this file deletes branches, on the head of the PR that edits it.',
+    );
+  }
+  if (!r.if.includes('inputs.dry_run == false')) {
+    f.push(
+      `${WORKFLOW}: job \`${REAP_JOB}\` no longer gates \`workflow_dispatch\` on \`inputs.dry_run == false\`. `
+        + 'That input defaults to TRUE; dropping the check turns every manual run into a deleting run, which is the '
+        + 'opposite of the fail-closed reading the ruling asks for.',
+    );
+  }
+  if (r.contents !== 'write') {
+    f.push(
+      `${WORKFLOW}: job \`${REAP_JOB}\` does not declare \`permissions: contents: write\` (got `
+        + `${r.contents ?? 'nothing'}) -- it cannot delete a ref, so the reaper is armed in prose only.`,
+    );
+  }
+  if (r.topLevelContents !== 'read') {
+    f.push(
+      `${WORKFLOW}: the top-level \`permissions.contents\` is \`${r.topLevelContents ?? 'unset'}\`, not \`read\`. `
+        + 'The write grant must stay a local override on the one job that deletes, never the default every job inherits.',
+    );
+  }
+  if (r.contentsWriteJobs.join(',') !== REAP_JOB) {
+    f.push(
+      `${WORKFLOW}: the jobs holding \`contents: write\` are [${r.contentsWriteJobs.join(', ')}], expected exactly `
+        + `[${REAP_JOB}]. The classifier must keep the read-only token it was reviewed under -- a defect in `
+        + 'classification can then still not delete anything by itself.',
+    );
+  }
+  if (r.needs !== 'sweep') {
+    f.push(
+      `${WORKFLOW}: job \`${REAP_JOB}\` no longer declares \`needs: sweep\` (got ${r.needs ?? 'nothing'}) -- `
+        + 'it would run without the classification it exists to consume.',
+    );
+  }
+  return f;
 }
 
 // ── Doubles ─────────────────────────────────────────────────────────────────
@@ -408,6 +512,10 @@ const SCENARIOS = [
       t(bucket(r, 'mergedElsewhere').length === 0, 'G1 leaves the held bucket empty'),
       t((r.payload?.buckets?.reapable?.[0] ?? {}).base_pr === 101, 'G1 records WHICH pull request cleared the base-ref guard'),
       t(r.log.outputs.reapable === '1', `G1 reports one reapable branch on the step output, got ${r.log.outputs.reapable}`),
+      t(
+        r.log.outputs.reapable_branches === JSON.stringify(['claude/landed-on-main']),
+        `G1 publishes the machine-readable deletion list the \`reap\` job consumes, and it is exactly the reapable bucket, got ${r.log.outputs.reapable_branches}`,
+      ),
     ],
   },
   {
@@ -429,6 +537,10 @@ const SCENARIOS = [
       t(r.summary().includes('claude/stacked-on-a-sibling'), 'G2 is NAMED in the report -- a held branch nobody can see is a branch excluded in silence'),
       t(r.summary().includes('claude/the-base'), 'G2 names the base in the report, which is what a human needs to clear it'),
       t(r.log.outputs.merged_elsewhere === '1', `G2 reports the held count on the step output, got ${r.log.outputs.merged_elsewhere}`),
+      t(
+        r.log.outputs.reapable_branches === '[]',
+        `G2 publishes an EMPTY deletion list -- a branch held by the base-ref guard must never reach the job that DELETES, and the guard is worth nothing if the hand-off leaks past it. Got ${r.log.outputs.reapable_branches}`,
+      ),
       t((r.log.notice[0] ?? '').includes('base-ref guard'), 'G2 says on the run notice that a branch was held by the guard'),
     ],
   },
@@ -603,6 +715,14 @@ const SCENARIOS = [
       t(r.summary().includes('claude/r-held'), 'R1 names the held branch in the excluded section'),
       t(r.summaryWritten(), 'R1 writes the job summary'),
       t(r.log.failed.length === 0, `R1 does not fail the job over findings, got ${r.log.failed.join(' | ')}`),
+      t(
+        r.log.outputs.reapable_branches === JSON.stringify(['claude/r-reapable']),
+        `R1 publishes a deletion list of exactly the reapable bucket over a population with one branch in EVERY bucket, got ${r.log.outputs.reapable_branches}`,
+      ),
+      t(
+        JSON.parse(r.log.outputs.reapable_branches || 'null')?.join(',') === bucket(r, 'reapable').join(','),
+        'R1: the published deletion list EQUALS the reapable bucket -- same members, same order. This is the contract the `reap` job rests on: it classifies nothing, so what deletes is precisely what this list says.',
+      ),
     ],
   },
 ];
@@ -859,6 +979,20 @@ const MUTATIONS = [
     to: 'if (false) {',
     expect: ['P4'],
   },
+  {
+    id: 'M13',
+    what: 'the deletion list stops being the reapable bucket -- held branches leak into what `reap` deletes',
+    from: 'JSON.stringify(buckets.reapable.map((r) => r.branch))',
+    to: 'JSON.stringify(buckets.reapable.concat(buckets.mergedElsewhere).map((r) => r.branch))',
+    expect: ['G2', 'R1'],
+  },
+  {
+    id: 'M14',
+    what: 'the deletion list stops being published at all, so `reap` consumes an empty hand-off and silently reaps nothing',
+    from: "core.setOutput('reapable_branches',",
+    to: "void ('reapable_branches',",
+    expect: ['G1', 'R1'],
+  },
 ];
 
 // Returned by `selfTest()` only after its verdict is printed. The dispatch
@@ -931,6 +1065,58 @@ async function selfTest() {
     const body = readFileSync(lint, 'utf8');
     assert(body.includes(SELF), `wiring: ${LINT_WORKFLOW} still invokes ${SELF}`);
     assert(body.includes(`${SELF} --self-test`), `wiring: ${LINT_WORKFLOW} runs the --self-test half too`);
+  }
+
+  battery('6. The DELETE job is fenced structurally -- which events reach it, and');
+  const wfText = readFileSync(join(root, WORKFLOW), 'utf8');
+  const cleanFence = reapFenceFailures(wfText);
+  assert(cleanFence.length === 0, `the shipped delete job's fence holds, got: ${cleanFence.join(' | ')}`);
+  // Each mutation asserts its own anchor was PRESENT first: a substitution that
+  // matched nothing leaves the fence green and reads exactly like a pass.
+  const FENCE_MUTATIONS = [
+    {
+      id: 'F1',
+      what: 'the `pull_request` exclusion is dropped, so editing this workflow deletes branches on the PR head',
+      from: "\n      && github.event_name != 'pull_request'",
+      to: '',
+    },
+    {
+      id: 'F2',
+      what: 'the manual path stops honouring the `dry_run` default, so every workflow_dispatch deletes',
+      from: ' && inputs.dry_run == false',
+      to: '',
+    },
+    {
+      id: 'F3',
+      what: 'the delete job loses its write grant, so the reaper is armed in prose only',
+      from: '    permissions:\n      contents: write',
+      to: '    permissions:\n      contents: read',
+    },
+    {
+      id: 'F4',
+      what: 'the write grant is raised to the top level, where the classifier inherits it too',
+      from: '\npermissions:\n  contents: read\n',
+      to: '\npermissions:\n  contents: write\n',
+    },
+    {
+      id: 'F5',
+      what: 'the delete job is renamed, so this fence describes a job that no longer exists',
+      from: '\n  reap:\n',
+      to: '\n  reaper:\n',
+    },
+    {
+      id: 'F6',
+      what: 'the delete job stops depending on the classification it consumes',
+      from: '    needs: sweep\n',
+      to: '',
+    },
+  ];
+  for (const m of FENCE_MUTATIONS) {
+    assert(wfText.includes(m.from), `${m.id}: its anchor is present in the shipped workflow (a no-op mutation proves nothing)`);
+    if (!wfText.includes(m.from)) continue;
+    const mutated = wfText.split(m.from).join(m.to);
+    assert(mutated !== wfText, `${m.id}: the substitution changed the workflow text`);
+    assert(reapFenceFailures(mutated).length > 0, `${m.id}: ${m.what} -- the fence goes RED`);
   }
 
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
