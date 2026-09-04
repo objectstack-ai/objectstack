@@ -93,6 +93,25 @@ describe('resolveArtifactCollections', () => {
         expect(resolveArtifactCollections(odd)).toBe(odd);
     });
 
+    it('returns the ARGUMENT ITSELF for an EMPTY `packages: []` too', () => {
+        // The second of the three identity controls, and the one the branch
+        // above does NOT cover: `[]` IS an array, so this artifact walks the
+        // whole resolution — `resolveArtifactPackageOrder` over zero entries,
+        // then every package-owned key merged against no contributions — and
+        // still has to come back as the same object. If any key came back a
+        // fresh copy, `{ ...artifact }` would fire and every reader downstream
+        // would be handed a different object than the one it was given.
+        const objects = [obj('account')];
+        const empty = { manifest: { id: 'a', name: 'A' }, objects, packages: [] as unknown[] };
+        const resolved = resolveArtifactCollections(empty);
+        expect(resolved).toBe(empty);
+        expect(resolved.objects).toBe(objects);
+        // …and with no collections at all, so the identity is not an artifact of
+        // the one key that happened to be present.
+        const bare = { packages: [] as unknown[] };
+        expect(resolveArtifactCollections(bare)).toBe(bare);
+    });
+
     it('leaves TODAY\'s additive artifact untouched — same arrays, same order, same references', () => {
         const coreObject = obj('account');
         const ordersObject = obj('order');
