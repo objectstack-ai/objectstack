@@ -1022,7 +1022,14 @@ describe('uncountable effects (#4354 follow-up)', () => {
         expect(res.summary).toMatchObject({ acted: 0, unmeasured: 1 });
     });
 
-    it('persists as a queryable column, null when never tracked', async () => {
+    /**
+     * ONE engine double for the three `recordTerminal` pins in this describe,
+     * rather than one apiece. `check:engine-double-contract` counts unguarded
+     * doubles PER FILE against a shrink-only baseline, so three copies of the
+     * same four members would have been three new ledger rows for one fact —
+     * and the gate's own advice is to reuse the double the file already has.
+     */
+    function recordingRunStore(): { store: ObjectStoreSuspendedRunStore; rows: any[] } {
         const rows: any[] = [];
         const engine: any = {
             async find() { return []; },
@@ -1030,7 +1037,11 @@ describe('uncountable effects (#4354 follow-up)', () => {
             async update() { return 1; },
             async delete() { return 1; },
         };
-        const store = new ObjectStoreSuspendedRunStore(engine);
+        return { store: new ObjectStoreSuspendedRunStore(engine), rows };
+    }
+
+    it('persists as a queryable column, null when never tracked', async () => {
+        const { store, rows } = recordingRunStore();
         await store.recordTerminal({
             runId: 'r1', flowName: 'f', status: 'completed', startedAt: AT,
             summary: { selected: 9, acted: 0, skipped: 0, unmeasured: 3, nodes: [], gates: [] },
@@ -1047,14 +1058,7 @@ describe('uncountable effects (#4354 follow-up)', () => {
     // them, and a contained failure is read from the run row, not alerted on
     // by that filter.
     it('carries the #14456 failure count through the persisted summary, absent when never tracked', async () => {
-        const rows: any[] = [];
-        const engine: any = {
-            async find() { return []; },
-            async insert(_o: string, row: any) { rows.push(row); return row; },
-            async update() { return 1; },
-            async delete() { return 1; },
-        };
-        const store = new ObjectStoreSuspendedRunStore(engine);
+        const { store, rows } = recordingRunStore();
         await store.recordTerminal({
             runId: 'r1', flowName: 'f', status: 'completed', startedAt: AT,
             summary: summarizeRun([
@@ -1074,14 +1078,7 @@ describe('uncountable effects (#4354 follow-up)', () => {
     });
 
     it('keeps the failure count when the detail is dropped for size', async () => {
-        const rows: any[] = [];
-        const engine: any = {
-            async find() { return []; },
-            async insert(_o: string, row: any) { rows.push(row); return row; },
-            async update() { return 1; },
-            async delete() { return 1; },
-        };
-        const store = new ObjectStoreSuspendedRunStore(engine);
+        const { store, rows } = recordingRunStore();
         // A pathological flow: enough nodes to blow the 16 KiB summary cap, so
         // the per-node `failures` this count folds is exactly what gets
         // dropped. The total has to survive the drop or the compacted row goes
