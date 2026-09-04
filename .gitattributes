@@ -154,3 +154,4 @@ content/docs/references/**                                   merge=os-regen
 content/docs/permissions/system-context.mdx                  merge=os-regen
 skills/*/references/_index.md                                merge=os-regen
 skills/objectstack-ui/references/react-blocks.md             merge=os-regen
+scripts/platform-object-tenancy-census.json                  merge=os-regen

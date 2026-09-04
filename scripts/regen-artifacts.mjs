@@ -341,6 +341,36 @@ export const REGEN_ARTIFACTS = Object.freeze([
     gen: 'gen:react-blocks',
     check: 'check:react-blocks',
   },
+  // #14957. The platform-object tenancy census — which platform-namespace objects
+  // the tenancy machinery can reach, and the declaration on each excluded object's
+  // own schema that puts it outside. Generated WHOLE: `renderArtefact` renders the
+  // entire file in memory, its `$comment` preamble included, so nothing on disk
+  // survives into the output and there is no hand-written region for a deferral to
+  // launder — which is the question this table exists to ask. ⇒ `REGEN_ARTIFACTS`
+  // rather than `NOT_DRIVER_MANAGED`, and no `mixed`.
+  //
+  // Two PRs that each add an object land disjoint row sets; the merged tree's
+  // census equals NEITHER side, and its `totals` / `reasonTotals` equal neither
+  // either — the same "no text merge can reach the answer" property as its
+  // neighbours above, sharpened by the aggregates, which a union of rows would
+  // leave arithmetically wrong while looking merged.
+  //
+  // Same cheap-half caveat as its neighbours, same answer: the driver is LOCAL and
+  // is never the protection. `check:platform-object-tenancy-census` runs in
+  // `lint.yml` on `pull_request` and `merge_group` with no `paths:` filter, and it
+  // RE-DERIVES the census from the tree rather than reading the file back, so it
+  // catches the silent case too — two branches whose rows do not overlap merging to
+  // exit 0 over a file describing neither side.
+  //
+  // No `readsDist`/`readsSchemaTree`: the generator loads its predicate and every
+  // object declaration from SOURCE (no build), so a merged tree is the whole
+  // prerequisite.
+  {
+    path: 'scripts/platform-object-tenancy-census.json',
+    gen: 'gen:platform-object-tenancy-census',
+    check: 'check:platform-object-tenancy-census',
+    owner: ROOT_OWNER,
+  },
 ]);
 
 /**

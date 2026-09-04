@@ -18,6 +18,12 @@ export {
   WIDGET_MEASURE_UNKNOWN,
   CHART_FIELD_UNKNOWN,
   CHART_CONFIG_MISSING,
+  // [#15462] The two empty-selection shapes the pinned renderer degrades on
+  // before `chartConfig` is ever consulted: no measures (an authoring
+  // placeholder replaces the chart) and no dimensions (`isMetric` draws a KPI
+  // number instead of the declared family).
+  CHART_MEASURES_MISSING,
+  CHART_DIMENSIONS_MISSING,
   TABLE_COUNT_ONLY,
   MEASURE_AGGREGATE_INCOHERENT,
   WIDGET_LEGACY_ANALYTICS_SHAPE,
