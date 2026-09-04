@@ -78,7 +78,6 @@ import {
     SEARCHABLE_TEXTUAL_TYPES, SEARCHABLE_ENUM_TYPES, SEARCH_AUTO_EXCLUDED_FIELDS,
     isVirtualSearchField,
     classifyDottedFilterHead,
-    RUNTIME_OWNED_FIELD_TYPES,
     RPC_QUERY_ALIAS_SLOTS, foldQueryAliasSlots,
     type QueryAliasConflict, type QueryAliasSlot,
     type DroppedFieldsEvent, type QueryAST, type EngineQueryOptionsParsed,

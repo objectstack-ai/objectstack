@@ -10185,10 +10185,32 @@ export class ObjectQL implements IObjectQLEngine {
                 },
               ) as Record<string, unknown>;
               if (stripped === rows[i]) continue;
+              const takenFromRow: string[] = [];
               for (const k of Object.keys(rows[i])) {
                 if (k in stripped) continue;
+                takenFromRow.push(k);
                 if (!insertDropped.includes(k)) insertDropped.push(k);
                 if (preserveAudit && !preserveAuditIgnored.includes(k)) preserveAuditIgnored.push(k);
+              }
+              // The field's `defaultValue` is RE-DERIVED for every key this
+              // pass took, which is #3043's stated contract and a guarantee in
+              // its own right: a forged `approval_status` becomes `draft` — the
+              // enforced initial state — never NULL, so a stripped forgery
+              // cannot leave a row in a state the object's own rules
+              // (`requiredWhen`, the state machine) were written to exclude.
+              // The deleted ingress copy got this for free by running BEFORE
+              // `applyFieldDefaults`; a strip that runs after the hooks has to
+              // ask. Asked over the STRIPPED row, so a `defaultValue`
+              // expression reads the payload it will really be stored beside,
+              // and copied back key by key: `applyFieldDefaults` also fills
+              // every OTHER absent field, and a hook that deliberately wrote
+              // `null` must keep its null (the first defaults pass, ahead of
+              // the hooks, is the one that owns those keys).
+              if (takenFromRow.length > 0) {
+                const redefaulted = this.applyFieldDefaults(object, stripped, opCtx.context, nowSnap);
+                for (const k of takenFromRow) {
+                  if (redefaulted[k] !== undefined) stripped[k] = redefaulted[k];
+                }
               }
               rows[i] = stripped;
               rowHookContexts[i].input.data = stripped;
