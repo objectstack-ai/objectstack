@@ -9,6 +9,7 @@
  *   tsx scripts/check-duration-unit-keys.ts               # gate: exit 1 on any offender
  *   tsx scripts/check-duration-unit-keys.ts --self-test   # prove the detector still detects
  *   tsx scripts/check-duration-unit-keys.ts --list        # every duration-shaped number key it sees
+ *   tsx scripts/check-duration-unit-keys.ts --root <dir>  # judge another tree (ablation / demo), same rule
  *
  * ## The defect class
  *
@@ -98,7 +99,7 @@
  */
 
 import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { dirname, join, relative } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import ts from 'typescript';
@@ -445,7 +446,13 @@ function selfTest(): number {
 
 function main(argv: string[]): number {
   if (argv.includes('--self-test')) return selfTest();
-  const { sites, findings, files } = scanTree();
+  const rootIdx = argv.indexOf('--root');
+  const root = rootIdx >= 0 ? argv[rootIdx + 1] : undefined;
+  if (rootIdx >= 0 && !root) {
+    console.error('--root needs a directory');
+    return 2;
+  }
+  const { sites, findings, files } = scanTree(root ? resolve(root) : undefined);
   const durationSites = sites.filter((s) => s.proseUnits.length > 0 || s.durationShaped || s.keyUnits.length > 0);
 
   if (argv.includes('--list')) {

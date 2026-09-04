@@ -601,7 +601,7 @@ describe('Job Scheduling Integration', () => {
         backoffMs: 5000,
         backoffMultiplier: 2,
       },
-      timeout: 1800000, // 30 minutes
+      timeoutMs: 1800000, // 30 minutes
       enabled: true,
     };
 
@@ -616,7 +616,7 @@ describe('Job Scheduling Integration', () => {
         intervalMs: 3600000, // 1 hour
       },
       handler: 'jobs/cleanup.ts',
-      timeout: 60000, // 1 minute
+      timeoutMs: 60000, // 1 minute
     };
 
     expect(() => JobSchema.parse(job)).not.toThrow();
@@ -633,7 +633,7 @@ describe('Job Scheduling Integration', () => {
       retryPolicy: {
         maxRetries: 0, // No retries for migrations
       },
-      timeout: 7200000, // 2 hours
+      timeoutMs: 7200000, // 2 hours
     };
 
     expect(() => JobSchema.parse(job)).not.toThrow();

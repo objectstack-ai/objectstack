@@ -242,7 +242,7 @@ Metadata file format
 | **fallback** | `Enum<'filesystem' \| 'memory' \| 'none'>` | optional (default: `"none"`) | Fallback strategy when datasource is unavailable |
 | **rootDir** | `string` | optional | Root directory path |
 | **formats** | `Enum<'yaml' \| 'json' \| 'typescript' \| 'javascript'>[]` | optional (default: `["typescript","json","yaml"]`) | Enabled formats |
-| **cache** | `{ enabled: boolean; ttl: integer; maxSize?: integer; databaseLoader?: object }` | optional | Cache settings |
+| **cache** | `{ enabled: boolean; ttlSeconds: integer; maxSize?: integer; databaseLoader?: object }` | optional | Cache settings |
 | **watch** | `boolean` | optional (default: `false`) | Enable file watching |
 | **watchOptions** | `{ ignored?: string[]; persistent: boolean; ignoreInitial: boolean }` | optional | File watcher options |
 | **validation** | `{ strict: boolean; throwOnError: boolean }` | optional | Validation settings |
@@ -254,9 +254,10 @@ Metadata file format
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | optional (default: `true`) | Enable caching |
-| **ttl** | `integer` | optional (default: `3600`) | Cache TTL in seconds |
+| **ttlSeconds** | `integer` | optional (default: `3600`) | Cache TTL in seconds |
+| **ttl** | `never` | optional | [REMOVED] `cache.ttl` was removed from `MetadataManagerConfig` in @objectstack/spec 17 (#14478) — its unit (seconds) lived only in the description, while the nested `cache.databaseLoader.ttl` spelled the same word in milliseconds, so one key name meant two magnitudes 1000× apart. Rename the key to `ttlSeconds`; the value (seconds) is unchanged. |
 | **maxSize** | `integer` | optional | Max cache size in bytes |
-| **databaseLoader** | `{ enabled: boolean; maxSize: integer; ttl: integer }` | optional | DatabaseLoader read-through cache |
+| **databaseLoader** | `{ enabled: boolean; maxSize: integer; ttlMs: integer }` | optional | DatabaseLoader read-through cache |
 
 ### Nested Shape: `MetadataManagerConfig.watchOptions`
 

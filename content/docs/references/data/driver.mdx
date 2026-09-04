@@ -135,7 +135,8 @@ const result = DriverCapabilitiesSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **transaction** | `any` | optional | Transaction handle |
-| **timeout** | `number` | optional | Timeout in ms |
+| **timeoutMs** | `number` | optional | Operation timeout in milliseconds |
+| **timeout** | `never` | optional | [REMOVED] `DriverOptions.timeout` was removed in @objectstack/spec 17 (#14478) — its unit (milliseconds) lived only in the description. Rename the key to `timeoutMs`; the value (milliseconds) is unchanged. |
 | **skipCache** | `boolean` | optional | Bypass cache |
 | **traceContext** | `Record<string, string>` | optional | OpenTelemetry context or request ID |
 | **tenantId** | `string` | optional | Tenant Isolation identifier |

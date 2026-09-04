@@ -547,8 +547,8 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       onError: {
         label: "Al error"
       },
-      timeout: {
-        label: "Timeout",
+      timeoutMs: {
+        label: "Timeout Ms",
         helpText: "Abort the hook after N milliseconds"
       },
       runAs: {
