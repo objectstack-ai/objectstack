@@ -57,53 +57,83 @@
  *     `count` IS the group count (it counts every row of the group, filled or
  *     not — the footer's own reading), so it rides the `count` column rather
  *     than minting a second one.
+ *   * for `count_filled` / `count_empty` / `percent_filled` / `percent_empty`
+ *     ONE column per summarised field, `count_<field>` — `COUNT(field)`, the
+ *     non-null count — from which all four are DERIVED on the header row by
+ *     {@link deriveColumnSummary} (see the mapping table).
  *
  * A summary alias that would land on a grouped field's own column
  * (`sum_amount` while grouping by a field named `sum_amount`) is refused, not
- * silently overwritten — the two would be one column with two meanings.
+ * silently overwritten — the two would be one column with two meanings. So
+ * is a grouping field named `count`: it would share its column with the
+ * group count.
  *
- * ## The mapping table — `ColumnSummary` → `AggregationFunction` (fork i)
+ * ## The mapping table — `ColumnSummary` → the aggregation vocabulary (fork i, ruled)
  *
- * | `ListColumn.summary` | aggregation node | note |
+ * | `ListColumn.summary` | aggregation node | on the header row |
  * |---|---|---|
- * | `none` | (no node) | "no summary" is not a summary |
- * | `count` | `{ function: 'count' }` | fieldless — `COUNT(*)`, the group count itself |
- * | `count_unique` | `{ function: 'count_distinct', field }` | `COUNT(DISTINCT field)`, nulls excluded |
- * | `sum` / `avg` / `min` / `max` | the same name, `field` | |
- * | `count_empty` | **refused** | no counterpart — see below |
- * | `count_filled` | **refused** | no counterpart — see below |
- * | `percent_empty` | **refused** | no counterpart — see below |
- * | `percent_filled` | **refused** | no counterpart — see below |
+ * | `none` | (no node) | — "no summary" is not a summary |
+ * | `count` | `{ function: 'count' }` | `count` — fieldless, `COUNT(*)`, the group count itself |
+ * | `count_unique` | `{ function: 'count_distinct', field }` | `count_distinct_<field>` — `COUNT(DISTINCT field)`, nulls excluded |
+ * | `sum` / `avg` / `min` / `max` | the same name, `field` | `<function>_<field>` |
+ * | `count_filled` | `{ function: 'count', field }` | `count_<field>` — `COUNT(field)`, the non-null count |
+ * | `count_empty` | the same node | derived: `count − count_<field>` |
+ * | `percent_filled` | the same node | derived: `count_<field> / count` (0 when `count` is 0) |
+ * | `percent_empty` | the same node | derived: `1 − percent_filled` |
  *
- * The four refused members are a STOP-AND-REPORT fork on #14556: the seat
- * decides whether they map (`count_filled` reads as `COUNT(field)`, which the
- * platform defines as the non-null count, while the footer's client-side
- * reading also treats `''` and `[]` as empty; `count_empty` is spellable only
- * with a per-aggregation `filter: { [field]: { $null: true } }`, which routes
- * the whole header query through the engine's in-memory tier today; the two
- * `percent_*` members are ratios of those counts, not aggregation functions).
- * Until that ruling lands the refusal below IS the contract: a grouped view
- * declaring one of them fails to compile LOUDLY, with `code`, `status` and
- * the `path` of the offending summary — nothing is dropped and no third
- * vocabulary is invented. {@link COLUMN_SUMMARY_AGGREGATION} is typed
+ * The seat ruling on fork (i) (contract review on the card, 2026-09-04): the
+ * four `*_filled` / `*_empty` members map by DERIVATION from two exact
+ * counts the vocabulary already has — `COUNT(*)` and `COUNT(field)` — never
+ * by a per-aggregation `filter` (which would route the whole header query
+ * through the engine's in-memory tier) and never by a new
+ * `AggregationFunction` member (six lowering faces and the conformance
+ * ledger stay untouched). Several of the four over the same field are ONE
+ * `count_<field>` node. "Empty" is the SERVER's meaning on every face: the
+ * stored value is `null` (`aggregation-conformance.ts`, the `count(col)`
+ * rows); the footer's client-side reading, which also treats `''` and `[]`
+ * as empty, is objectui's to converge under "one vocabulary". The
+ * `summary_unmapped` refusal (`NOT_IMPLEMENTED` / 501) stays for any FUTURE
+ * member with no counterpart — {@link UNMAPPED_COLUMN_SUMMARIES} is empty
+ * today — and {@link COLUMN_SUMMARY_AGGREGATION} is typed
  * `Record<ColumnSummary, …>`, so adding a member to `ColumnSummarySchema`
- * without deciding its row here fails to type-check.
+ * without deciding its row here fails to type-check. A value that is not a
+ * member at all (a typo reaching the helper unparsed) is `INVALID_QUERY` /
+ * 400 (`summary_unknown`): a typo is not a capability gap.
  *
  * ## Multi-level grouping
  *
  * `groupBy` carries the grouping fields in nesting order, so the header query
  * answers one row per LEAF combination. An outer level's header is derived
- * from the leaf rows sharing its prefix: `count`, `sum`, `min` and `max` fold
- * exactly; `avg` does not (an average of averages weights the groups, not the
- * rows). When an outer level must carry an exact `avg`, compile that level's
- * own query with `depth` — the same query over the first `depth` grouping
- * fields — rather than folding. This is still one query shape.
+ * from the leaf rows sharing its prefix: `count`, `sum`, `min`, `max` and
+ * the `count_<field>` column (hence `count_filled` / `count_empty`, and the
+ * two percents recomputed from the folded counts) fold exactly; `avg` and
+ * `count_distinct` do NOT — an average of averages weights the groups, not
+ * the rows, and the same value can be distinct in several leaves at once, so
+ * per-leaf distinct counts over-count the union. When an outer level must
+ * carry an exact `avg` or `count_unique`, compile that level's own query
+ * with `depth` — the same query over the first `depth` grouping fields —
+ * rather than folding. This is still one query shape.
+ *
+ * ## The door — existing, not new
+ *
+ * Both compiled queries ride the data endpoint's EXISTING query door:
+ * `POST /data/:object/query` (`packages/rest/src/rest-server.ts`, the
+ * `${dataPath}/:object/query` route) validates the body as a
+ * `FindDataRequest` and hands it to `protocol.findData`, which routes a body
+ * carrying `groupBy` / `aggregations` to `engine.aggregate`
+ * (`packages/metadata-protocol/src/protocol.ts`, the `hasGroupBy ||
+ * hasAggregations` branch) and answers `{ object, records, total, hasMore }`
+ * with the header rows as `records`; `client.data.query()`
+ * (`packages/client/src/index.ts`) posts there, and the RPC face declares
+ * `method: 'aggregate'` with an `EngineAggregateOptions` body
+ * (`data/data-engine.zod.ts`, `DataEngineAggregateRequestSchema`). The row
+ * page is the same door with the compiled `EngineQueryOptions`. No new
+ * route, no new wire shape; the platform half of the card PINS that door on
+ * the compiled queries (the 186-row fixture through the route, on driver-sql
+ * and on the in-memory tier).
  *
  * ## Deliberately NOT here
  *
- *   * **The REST door.** No `aggregate` route exists on the data endpoint
- *     today; which route carries the header query to the grid is the platform
- *     half of #14556 (item 2 of the card), not the spec half.
  *   * **Lowering the view's `filter` rules to a `FilterCondition`.** Both
  *     inputs here take the view's COMPOSED filter — the same `where` the
  *     view's row query already carries. The rule dialect → AST lowering is
@@ -126,7 +156,7 @@
 import type { FilterCondition } from '../data/filter.zod';
 import type { AggregationFunction, AggregationNode } from '../data/query.zod';
 import type { EngineAggregateOptions, EngineQueryOptions } from '../data/data-engine.zod';
-import type { ColumnSummary, GroupingConfig, ListColumn, ListView } from './view.zod';
+import type { ColumnSummary, ColumnSummaryConfig, GroupingConfig, ListColumn, ListView } from './view.zod';
 
 /**
  * The alias of the per-group TOTAL row count on every header row — a
@@ -140,12 +170,16 @@ export const LIST_VIEW_GROUP_COUNT_ALIAS = 'count';
  *
  *   * `aggregate` — a node with this `function`; `fieldless` says whether the
  *     node names the summarised field (`COUNT(*)` does not).
+ *   * `derived` — a `count` node over the summarised field (`COUNT(field)`,
+ *     the non-null count, column `count_<field>`), from which the member is
+ *     computed on the header row by {@link deriveColumnSummary}.
  *   * `none` — the member means "no summary"; no node.
- *   * `unmapped` — no counterpart in `AggregationFunction`; the compiler
- *     refuses it loudly (fork i on #14556).
+ *   * `unmapped` — no counterpart in the vocabulary; the compiler refuses it
+ *     loudly (`NOT_IMPLEMENTED` / 501). No member is in this state today.
  */
 export type ColumnSummaryAggregation =
   | { readonly kind: 'aggregate'; readonly function: AggregationFunction; readonly fieldless: boolean }
+  | { readonly kind: 'derived'; readonly from: 'count'; readonly fieldless: false }
   | { readonly kind: 'none' }
   | { readonly kind: 'unmapped' };
 
@@ -162,10 +196,10 @@ export const COLUMN_SUMMARY_AGGREGATION: Readonly<Record<ColumnSummary, ColumnSu
   avg: { kind: 'aggregate', function: 'avg', fieldless: false },
   min: { kind: 'aggregate', function: 'min', fieldless: false },
   max: { kind: 'aggregate', function: 'max', fieldless: false },
-  count_empty: { kind: 'unmapped' },
-  count_filled: { kind: 'unmapped' },
-  percent_empty: { kind: 'unmapped' },
-  percent_filled: { kind: 'unmapped' },
+  count_filled: { kind: 'derived', from: 'count', fieldless: false },
+  count_empty: { kind: 'derived', from: 'count', fieldless: false },
+  percent_filled: { kind: 'derived', from: 'count', fieldless: false },
+  percent_empty: { kind: 'derived', from: 'count', fieldless: false },
 } as const);
 
 /**
@@ -241,11 +275,13 @@ export interface ListViewGroupHeaderRow {
  */
 export type ListViewGroupQueryRefusal =
   | 'summary_unmapped'
+  | 'summary_unknown'
   | 'alias_collision'
   | 'grouping_empty'
   | 'grouping_field_blank'
   | 'depth_out_of_range'
-  | 'group_key_not_a_prefix';
+  | 'group_key_not_a_prefix'
+  | 'group_key_not_scalar';
 
 /**
  * A refusal to compile a grouped list view into its queries.
@@ -255,8 +291,10 @@ export type ListViewGroupQueryRefusal =
  * the `path` of the offending declaration inside the list view (a zod-style
  * path: `['columns', 2, 'summary']`) and a closed `reason`. The two codes are
  * standard-catalog members (`api/errors.zod.ts`): `NOT_IMPLEMENTED` / 501 for
- * a summary the vocabulary has no counterpart for yet (the interim contract of
- * fork i), `INVALID_QUERY` / 400 for a declaration the contract cannot mean.
+ * a DECLARED summary member the vocabulary has no counterpart for
+ * (`summary_unmapped` — none today), `INVALID_QUERY` / 400 for a declaration
+ * the contract cannot mean, a value that is no member at all
+ * (`summary_unknown` — a typo is not a capability gap) included.
  * Spelled as literals here rather than imported from `../api/errors.zod` —
  * `api/` already imports `ui/`, and a value edge back would be a cycle for
  * two strings; `view-grouping-query.test.ts` pins them to
@@ -333,26 +371,16 @@ function summaryAggregationNodes(
     const member: ColumnSummary = typeof summary === 'string' ? summary : summary.type;
     const field = typeof summary === 'string' ? column.field : (summary.field ?? column.field);
 
-    const mapping = COLUMN_SUMMARY_AGGREGATION[member];
-    if (mapping === undefined || mapping.kind === 'unmapped') {
-      // The refusal is printed AT the author, so it carries the remedy and no
-      // issue id (the tracking card is in the module note — fork i).
-      throw new ListViewGroupQueryError(
-        'summary_unmapped',
-        path,
-        `Column summary "${member}" on columns[${index}] (field "${field}") has no counterpart in the `
-          + 'aggregation vocabulary (AggregationFunction: count / sum / avg / min / max / count_distinct), '
-          + 'so a grouped list view cannot carry it in its group headers yet. Whether '
-          + `${UNMAPPED_COLUMN_SUMMARIES.join(' / ')} map onto the vocabulary is an open contract question; `
-          + 'until it is ruled, remove the summary from this column or group the view without it. '
-          + 'Nothing is dropped silently.',
-      );
-    }
+    const mapping = columnSummaryMapping(member, path, `columns[${index}] (field "${field}")`);
     if (mapping.kind === 'none') return;
 
+    const fn: AggregationFunction = mapping.kind === 'derived' ? mapping.from : mapping.function;
     const aggregatedField = mapping.fieldless ? undefined : field;
-    const alias = columnSummaryAlias(mapping.function, aggregatedField);
-    if (alias === LIST_VIEW_GROUP_COUNT_ALIAS) return; // the group count column already carries it
+    const alias = columnSummaryAlias(fn, aggregatedField);
+    // The collision check comes FIRST: a grouped field named `count` would
+    // share its column with the group count, whether or not a summary is
+    // declared, and `compileListViewGroupQuery` refuses that up front — this
+    // ordering keeps the two answers identical for a `count` summary too.
     if (grouped.has(alias)) {
       throw new ListViewGroupQueryError(
         'alias_collision',
@@ -362,12 +390,98 @@ function summaryAggregationNodes(
           + 'and the summary. Rename the field or drop one of the two declarations.',
       );
     }
+    if (alias === LIST_VIEW_GROUP_COUNT_ALIAS) return; // the group count column already carries it
     if (!nodes.has(alias)) {
-      nodes.set(alias, { function: mapping.function, field: aggregatedField, alias });
+      nodes.set(alias, { function: fn, field: aggregatedField, alias });
     }
   });
 
   return [...nodes.values()];
+}
+
+/**
+ * The table row for one summary value, or the refusal the contract gives it:
+ * `summary_unknown` (`INVALID_QUERY` / 400) for a value that is no
+ * `ColumnSummary` member at all, `summary_unmapped` (`NOT_IMPLEMENTED` /
+ * 501) for a member whose row says the vocabulary has no counterpart.
+ */
+function columnSummaryMapping(
+  member: ColumnSummary,
+  path: ReadonlyArray<string | number>,
+  where: string,
+): Exclude<ColumnSummaryAggregation, { kind: 'unmapped' }> {
+  const mapping = (COLUMN_SUMMARY_AGGREGATION as Readonly<Record<string, ColumnSummaryAggregation | undefined>>)[member];
+  if (mapping === undefined) {
+    throw new ListViewGroupQueryError(
+      'summary_unknown',
+      path,
+      `Column summary "${String(member)}" on ${where} is not a column summary function. `
+        + `The members are ${Object.keys(COLUMN_SUMMARY_AGGREGATION).join(' / ')}; `
+        + 'a value outside that list is refused as malformed, not treated as a capability gap.',
+    );
+  }
+  if (mapping.kind === 'unmapped') {
+    // The refusal is printed AT the author, so it carries the remedy and no
+    // issue id (the tracking card is in the module note — fork i).
+    throw new ListViewGroupQueryError(
+      'summary_unmapped',
+      path,
+      `Column summary "${member}" on ${where} has no counterpart in the `
+        + 'aggregation vocabulary (AggregationFunction: count / sum / avg / min / max / count_distinct), '
+        + 'so a grouped list view cannot carry it in its group headers yet. Whether '
+        + `${UNMAPPED_COLUMN_SUMMARIES.join(' / ')} map onto the vocabulary is an open contract question; `
+        + 'until it is ruled, remove the summary from this column or group the view without it. '
+        + 'Nothing is dropped silently.',
+    );
+  }
+  return mapping;
+}
+
+/**
+ * Read ONE column summary's value off a header row — the aggregate members
+ * from their `<function>_<field>` column (`count` from `count`), and the four
+ * DERIVED members from the row's two exact counts:
+ *
+ *   * `count_filled`   = `count_<field>` (`COUNT(field)`, the non-null count)
+ *   * `count_empty`    = `count − count_<field>`
+ *   * `percent_filled` = `count_<field> / count` — a ratio in `0..1`, and `0`
+ *     when `count` is `0` (no division)
+ *   * `percent_empty`  = `1 − percent_filled` — so an empty group reads `1`
+ *
+ * `undefined` when the row carries no column for the summary (the header
+ * query was compiled without it) and for `none`; `null` is what the
+ * aggregate itself answered (`avg` / `min` / `max` over no values). Refuses
+ * an unknown member (`summary_unknown`) exactly as the compiler does.
+ *
+ * `summary` is the member, or the `{ type, field }` object form; `field` is
+ * the column's own field, which the object form's `field` overrides — the
+ * same resolution {@link compileListViewGroupQuery} applies.
+ */
+export function deriveColumnSummary(
+  row: ListViewGroupHeaderRow,
+  summary: ColumnSummary | ColumnSummaryConfig,
+  field: string,
+): number | null | undefined {
+  const member: ColumnSummary = typeof summary === 'string' ? summary : summary.type;
+  const aggregatedField = typeof summary === 'string' ? field : (summary.field ?? field);
+  const mapping = columnSummaryMapping(member, [], `field "${aggregatedField}"`);
+  if (mapping.kind === 'none') return undefined;
+  if (mapping.kind === 'aggregate') {
+    const value = row[columnSummaryAlias(mapping.function, mapping.fieldless ? undefined : aggregatedField)];
+    return value === undefined ? undefined : (value as number | null);
+  }
+  const raw = row[columnSummaryAlias(mapping.from, aggregatedField)];
+  if (raw === undefined || raw === null) return undefined;
+  const filled = Number(raw);
+  const total = Number(row[LIST_VIEW_GROUP_COUNT_ALIAS]);
+  const percentFilled = total === 0 ? 0 : filled / total;
+  switch (member) {
+    case 'count_filled': return filled;
+    case 'count_empty': return total - filled;
+    case 'percent_filled': return percentFilled;
+    case 'percent_empty': return 1 - percentFilled;
+    default: return undefined;
+  }
 }
 
 /**
@@ -403,6 +517,16 @@ export function compileListViewGroupQuery(
     );
   }
   const groupBy = names.slice(0, depth);
+  const countLevel = groupBy.indexOf(LIST_VIEW_GROUP_COUNT_ALIAS);
+  if (countLevel >= 0) {
+    throw new ListViewGroupQueryError(
+      'alias_collision',
+      ['grouping', 'fields', countLevel, 'field'],
+      `grouping.fields[${countLevel}].field is "${LIST_VIEW_GROUP_COUNT_ALIAS}", the column every header row `
+        + 'carries its group count under — one column cannot carry both the group key and the count. '
+        + 'Rename the field.',
+    );
+  }
   const aggregations: AggregationNode[] = [
     { function: 'count', alias: LIST_VIEW_GROUP_COUNT_ALIAS },
     ...summaryAggregationNodes(view.columns, groupBy),
@@ -425,7 +549,14 @@ export function compileListViewGroupQuery(
  * outermost down to the group being opened, and no level past it — so the
  * rows of an outer group (a `depth`-scoped header) are spellable too.
  *
- * @throws {ListViewGroupQueryError} `group_key_not_a_prefix` (`INVALID_QUERY`)
+ * Group keys are SCALAR-valued: what a header row carries under a grouped
+ * field is one stored value (string, number, boolean, bigint, a date instant,
+ * or `null`). An array or object where a key should be is refused
+ * (`group_key_not_scalar`) rather than compiled into a predicate that would
+ * compare a list or a record and select the wrong rows.
+ *
+ * @throws {ListViewGroupQueryError} `group_key_not_a_prefix` /
+ *   `group_key_not_scalar` (`INVALID_QUERY`)
  */
 export function listViewGroupKeyPredicate(
   grouping: GroupingConfig,
@@ -446,12 +577,28 @@ export function listViewGroupKeyPredicate(
         + 'Carry every outer level\'s key, and no field that is not a grouping field.',
     );
   }
-  return names.slice(0, levels).map((name) => {
+  return names.slice(0, levels).map((name, level) => {
     const value = groupKey[name];
+    if (!isScalarGroupKey(value)) {
+      throw new ListViewGroupQueryError(
+        'group_key_not_scalar',
+        ['grouping', 'fields', level, 'field'],
+        `The group key for "${name}" is ${Array.isArray(value) ? 'an array' : 'an object'}; a group key is `
+          + 'one stored scalar value (or null for the empty group), exactly what the header row carries '
+          + 'under the grouped field. Pass that value.',
+      );
+    }
     return value === null || value === undefined
       ? { [name]: { $null: true } }
       : { [name]: { $eq: value } };
   });
+}
+
+/** A value a header row can carry under a grouped field — one stored scalar, or absence. */
+function isScalarGroupKey(value: unknown): boolean {
+  if (value === null || value === undefined || value instanceof Date) return true;
+  const type = typeof value;
+  return type === 'string' || type === 'number' || type === 'boolean' || type === 'bigint';
 }
 
 /**

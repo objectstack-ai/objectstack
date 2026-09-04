@@ -696,17 +696,23 @@ export type ViewFilterRuleParsed = z.infer<typeof ViewFilterRuleSchema>;
  *   * `count` → a fieldless `count` (`COUNT(*)`, every row of the group — the
  *     group count itself), `count_unique` → `count_distinct`, and
  *     `sum` / `avg` / `min` / `max` → the same name; `none` declares nothing.
- *   * `count_empty` / `count_filled` / `percent_empty` / `percent_filled` have
- *     NO counterpart yet. Their mapping is an open contract question on #14556
- *     (fork i); until it is ruled, a grouped view declaring one of them is
- *     refused LOUDLY by `compileListViewGroupQuery` (`NOT_IMPLEMENTED` / 501,
- *     with the path of the summary) — never dropped, never given a third
- *     vocabulary. The footer keeps computing them client-side over the rows
- *     it holds, as it always has.
+ *   * `count_filled` / `count_empty` / `percent_filled` / `percent_empty` map
+ *     by DERIVATION (seat ruling on fork i, contract review of #14556): one
+ *     `{ function: 'count', field }` node — `COUNT(field)`, the non-null count
+ *     — rides the header row as `count_<field>`, and the four are computed
+ *     from it and the group count by `deriveColumnSummary`: `count_filled` =
+ *     `count_<field>`, `count_empty` = `count − count_<field>`,
+ *     `percent_filled` = `count_<field> / count` (0 when the count is 0),
+ *     `percent_empty` = `1 − percent_filled`. "Empty" is the SERVER's meaning
+ *     on every face — the stored value is `null` (`aggregation-conformance`);
+ *     the footer's client-side reading, which also treats `''` and `[]` as
+ *     empty, is objectui's to converge under "one vocabulary".
  *
  * ⛔ Adding a member here without deciding its row in
- * `COLUMN_SUMMARY_AGGREGATION` is a type error by construction, so the fork
- * cannot widen silently.
+ * `COLUMN_SUMMARY_AGGREGATION` is a type error by construction, so the table
+ * cannot widen silently; a member whose row says "no counterpart" is refused
+ * loudly by `compileListViewGroupQuery` (`NOT_IMPLEMENTED` / 501, with the
+ * path of the summary) — none is in that state today.
  */
 export const ColumnSummarySchema = lazySchema(() => z.enum([
   'none',
@@ -726,8 +732,11 @@ export const ColumnSummarySchema = lazySchema(() => z.enum([
   'Aggregation function for the column footer summary — and, on a grouped list view, the per-group '
   + 'header summary (server-side): count (COUNT(*), the group count), count_unique '
   + '(count_distinct), sum, avg, min, max map onto the query AST\'s AggregationFunction; '
-  + 'count_empty, count_filled, percent_empty, percent_filled have no counterpart yet and are refused '
-  + 'loudly by the group-header compiler (an open contract question) — never dropped silently',
+  + 'count_filled, count_empty, percent_filled, percent_empty derive from one COUNT(field) node (the '
+  + 'non-null count) and the group count — count_filled = COUNT(field), count_empty = count − COUNT(field), '
+  + 'percent_filled = COUNT(field) / count (0 when count is 0), percent_empty = 1 − percent_filled. '
+  + 'Server-side "empty" is null on every face; the footer\'s client-side reading of empty strings and '
+  + 'empty arrays as empty is the renderer\'s to converge',
 ));
 
 /**
@@ -886,9 +895,34 @@ export const GroupingFieldSchema = lazySchema(() => strictObject({
  * `compileListViewGroupQuery` (1) and `compileListViewGroupRowsQuery` (2),
  * pinned on the 186-row fixture: 86/61/31/7/1 regardless of row order.
  *
- * Follow-ons, in order: the platform half of #14556 (the route that carries
- * the header query on the REST/ObjectQL path — no `aggregate` route exists on
- * the data endpoint today), then objectui#7189 (`plugin-grid` consumes the
+ * ## Known limits of the shape, recorded
+ *
+ *   * **Group keys are scalar-valued.** A header row carries, under each
+ *     grouped field, one stored value — a lookup's referenced id, a select
+ *     value, a number, a boolean, `null` for the empty group. A date /
+ *     datetime grouping field groups per DISTINCT STORED INSTANT: there is
+ *     no `dateGranularity` on a grouping field (the query AST's bucketed
+ *     `groupBy` member form is not exposed here), so "by month" is not a
+ *     list-view grouping today.
+ *   * **Header cardinality is unbounded.** The header query answers one row
+ *     per group, and `EngineAggregateOptions` carries neither `orderBy` nor
+ *     `limit` — the existing door returns the whole grouped set and slices
+ *     `limit` after aggregation. A high-cardinality grouping field therefore
+ *     returns as many header rows as it has distinct values; bounding that is
+ *     `orderBy` + `limit` on the aggregate verb, an engine-contract card of
+ *     its own, never a change to `order`'s meaning.
+ *
+ * ## The door, and the follow-ons
+ *
+ * Both queries ride the data endpoint's EXISTING door: `POST
+ * /data/:object/query` (`packages/rest/src/rest-server.ts`) → `protocol.findData`
+ * (`packages/metadata-protocol/src/protocol.ts`), which routes a body carrying
+ * `groupBy` / `aggregations` to `engine.aggregate` and answers `{ object,
+ * records, total, hasMore }`; `client.data.query()` posts there and the RPC
+ * face declares `method: 'aggregate'`. No new route, no new wire shape.
+ * Follow-ons, in order: the platform half of #14556 pins that door on the
+ * compiled queries (the 186-row fixture through the route, on driver-sql and
+ * on the in-memory tier), then objectui#7189 (`plugin-grid` consumes the
  * header rows and stops grouping the page).
  */
 export const GroupingConfigSchema = lazySchema(() => strictObject({

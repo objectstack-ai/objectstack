@@ -15,6 +15,7 @@
 import { describe, it, expect } from 'vitest';
 import { StandardErrorCode } from '../api/errors.zod';
 import { ListViewSchema } from './view.zod';
+import type { ColumnSummary } from './view.zod';
 import type { FilterCondition } from '../data/filter.zod';
 import type { EngineAggregateOptions } from '../data/data-engine.zod';
 import {
@@ -25,8 +26,10 @@ import {
   columnSummaryAlias,
   compileListViewGroupQuery,
   compileListViewGroupRowsQuery,
+  deriveColumnSummary,
   listViewGroupKeyPredicate,
 } from './view-grouping-query';
+import type { ListViewGroupHeaderRow } from './view-grouping-query';
 
 // ─── The acceptance fixture ──────────────────────────────────────────────────
 
@@ -36,6 +39,8 @@ interface Row {
   status: 'open' | 'done';
   amount: number;
   owner: string;
+  /** Nullable on purpose — the field the derived `*_filled` / `*_empty` pins read. */
+  notes: string | null;
 }
 
 /** Five units, 186 rows, sized exactly as the card measured them. */
@@ -56,6 +61,8 @@ function makeRow(unit: string, ordinal: number): Row {
     status: ordinal % 3 === 0 ? 'done' : 'open',
     amount: ordinal,
     owner: `owner_${ordinal % 4}`,
+    // Every fifth row has no note — the server's "empty" (null), never ''.
+    notes: ordinal % 5 === 0 ? null : `note ${ordinal}`,
   };
 }
 
@@ -79,6 +86,8 @@ const INTERLEAVED: Row[] = (() => {
 
 const PAGE_SIZE = 100;
 const EXPECTED_COUNTS = { northgate_operations: 86, northgate_quality: 61, riverside_plant: 31, northgate_plant: 7, harbour_office: 1 };
+/** Rows whose `notes` is null per unit: floor(size / 5). */
+const EXPECTED_EMPTY_NOTES = { northgate_operations: 17, northgate_quality: 12, riverside_plant: 6, northgate_plant: 1, harbour_office: 0 };
 
 // ─── A minimal reduction of the compiled queries over rows ───────────────────
 //
@@ -106,7 +115,7 @@ function matches(row: Record<string, unknown>, where: FilterCondition | Record<s
   return true;
 }
 
-function reduceHeaderQuery(rows: Row[], query: EngineAggregateOptions): Record<string, unknown>[] {
+function reduceHeaderQuery(rows: Row[], query: EngineAggregateOptions): ListViewGroupHeaderRow[] {
   const groupBy = (query.groupBy ?? []).map((g) => (typeof g === 'string' ? g : g.field));
   const buckets = new Map<string, { key: Record<string, unknown>; rows: Row[] }>();
   for (const row of rows.filter((r) => matches(r as unknown as Record<string, unknown>, query.where))) {
@@ -123,6 +132,7 @@ function reduceHeaderQuery(rows: Row[], query: EngineAggregateOptions): Record<s
       const values = agg.field ? bucketRows.map((r) => (r as unknown as Record<string, unknown>)[agg.field as string]) : [];
       const nums = values.filter((v) => v != null).map(Number);
       switch (agg.function) {
+        // `count(field)` is the NON-NULL count on every face — the ruled semantics.
         case 'count': out[agg.alias] = agg.field ? values.filter((v) => v != null).length : bucketRows.length; break;
         case 'count_distinct': out[agg.alias] = new Set(values.filter((v) => v != null)).size; break;
         case 'sum': out[agg.alias] = nums.reduce((a, b) => a + b, 0); break;
@@ -131,13 +141,13 @@ function reduceHeaderQuery(rows: Row[], query: EngineAggregateOptions): Record<s
         case 'max': out[agg.alias] = nums.length ? Math.max(...nums) : null; break;
       }
     }
-    return out;
+    return out as ListViewGroupHeaderRow;
   });
 }
 
 /** Header rows → `{ unit: count }`, the shape a reader compares. */
-function countsByUnit(headers: Record<string, unknown>[]): Record<string, number> {
-  return Object.fromEntries(headers.map((h) => [String(h.business_unit), h[LIST_VIEW_GROUP_COUNT_ALIAS] as number]));
+function countsByUnit(headers: ListViewGroupHeaderRow[]): Record<string, number> {
+  return Object.fromEntries(headers.map((h) => [String(h.business_unit), h[LIST_VIEW_GROUP_COUNT_ALIAS]]));
 }
 
 /** What a page-scoped grouping (the interim, objectui `useGroupedData`) shows on the first window. */
@@ -146,6 +156,11 @@ function pageScopedCounts(rows: Row[]): Record<string, number> {
   for (const row of rows.slice(0, PAGE_SIZE)) counts[String(row.business_unit)] = (counts[String(row.business_unit)] ?? 0) + 1;
   return counts;
 }
+
+const refusal = (fn: () => unknown): ListViewGroupQueryError => {
+  try { fn(); } catch (e) { return e as ListViewGroupQueryError; }
+  throw new Error('expected a ListViewGroupQueryError');
+};
 
 const GROUPED_VIEW = {
   grouping: { fields: [{ field: 'business_unit' }] },
@@ -241,7 +256,7 @@ describe('compileListViewGroupQuery — the group set and every header number ar
     expect(opsOpen.count).toBe(58);
     expect(opsDone.count).toBe(28);
     // The outer level folds exactly for count.
-    expect((opsOpen.count as number) + (opsDone.count as number)).toBe(EXPECTED_COUNTS.northgate_operations);
+    expect(opsOpen.count + opsDone.count).toBe(EXPECTED_COUNTS.northgate_operations);
   });
 
   it('`depth` compiles an outer level\'s own query — the first N grouping fields', () => {
@@ -249,6 +264,21 @@ describe('compileListViewGroupQuery — the group set and every header number ar
     expect(compileListViewGroupQuery(view, { depth: 1 }).groupBy).toEqual(['business_unit']);
     expect(compileListViewGroupQuery(view, { depth: 2 }).groupBy).toEqual(['business_unit', 'status']);
     expect(countsByUnit(reduceHeaderQuery(INTERLEAVED, compileListViewGroupQuery(view, { depth: 1 })))).toEqual(EXPECTED_COUNTS);
+  });
+
+  it('count_distinct does NOT fold across leaves — an outer-level count_unique needs the depth query', () => {
+    const view = {
+      grouping: { fields: [{ field: 'business_unit' }, { field: 'status' }] },
+      columns: [{ field: 'owner', summary: 'count_unique' as const }],
+    };
+    const leaves = reduceHeaderQuery(CONTIGUOUS, compileListViewGroupQuery(view));
+    const opsLeaves = leaves.filter((h) => h.business_unit === 'northgate_operations');
+    // Both leaves of the unit see all four owners, so summing over-counts the union.
+    const folded = opsLeaves.reduce((a, h) => a + (h.count_distinct_owner as number), 0);
+    expect(folded).toBe(8);
+    const outer = reduceHeaderQuery(CONTIGUOUS, compileListViewGroupQuery(view, { depth: 1 }));
+    expect(outer.find((h) => h.business_unit === 'northgate_operations')!.count_distinct_owner).toBe(4);
+    expect(folded).not.toBe(4);
   });
 
   it('groups the empty key as its own group, keyed null', () => {
@@ -301,10 +331,83 @@ describe('compileListViewGroupQuery — the group set and every header number ar
   });
 });
 
-// ─── The mapping table (fork i) ──────────────────────────────────────────────
+// ─── The derived members (fork i, ruled) ─────────────────────────────────────
+
+describe('count_filled / count_empty / percent_filled / percent_empty — ONE COUNT(field) node, derived on the header row', () => {
+  const DERIVED_VIEW = {
+    grouping: { fields: [{ field: 'business_unit' }] },
+    columns: [
+      { field: 'notes', summary: 'count_filled' as const },
+      { field: 'id', summary: { type: 'count_empty' as const, field: 'notes' } },
+      { field: 'notes', summary: 'percent_filled' as const },
+      { field: 'amount', summary: 'percent_empty' as const },
+    ],
+  };
+
+  it('compile to one `count_<field>` node per summarised field, beside the fieldless count', () => {
+    expect(compileListViewGroupQuery(DERIVED_VIEW).aggregations).toEqual([
+      { function: 'count', alias: 'count' },
+      { function: 'count', field: 'notes', alias: 'count_notes' },
+      { function: 'count', field: 'amount', alias: 'count_amount' },
+    ]);
+  });
+
+  it.each([['contiguous', CONTIGUOUS], ['interleaved', INTERLEAVED]] as const)(
+    'derive per unit from the header row, in %s order: filled / empty / the two ratios',
+    (_order, rows) => {
+      const headers = reduceHeaderQuery(rows, compileListViewGroupQuery(DERIVED_VIEW));
+      for (const [unit, size] of UNITS) {
+        const row = headers.find((h) => h.business_unit === unit)!;
+        const empty = EXPECTED_EMPTY_NOTES[unit as keyof typeof EXPECTED_EMPTY_NOTES];
+        expect(row.count).toBe(size);
+        expect(deriveColumnSummary(row, 'count_filled', 'notes')).toBe(size - empty);
+        expect(deriveColumnSummary(row, { type: 'count_empty', field: 'notes' }, 'id')).toBe(empty);
+        expect(deriveColumnSummary(row, 'percent_filled', 'notes')).toBeCloseTo((size - empty) / size, 12);
+        expect(deriveColumnSummary(row, 'percent_empty', 'notes')).toBeCloseTo(empty / size, 12);
+      }
+      // `amount` is never null: percent_empty is 0 everywhere.
+      expect(headers.every((h) => deriveColumnSummary(h, 'percent_empty', 'amount') === 0)).toBe(true);
+    },
+  );
+
+  it('an all-empty group reads filled 0 / percent_filled 0 / percent_empty 1; a count of 0 reads 0 and 1 — no division', () => {
+    const allNull: Row[] = [5, 10, 15].map((n) => ({ ...makeRow('void_unit', n) }));
+    const [row] = reduceHeaderQuery(allNull, compileListViewGroupQuery(DERIVED_VIEW));
+    expect(row).toEqual({ business_unit: 'void_unit', count: 3, count_notes: 0, count_amount: 3 });
+    expect(deriveColumnSummary(row, 'count_filled', 'notes')).toBe(0);
+    expect(deriveColumnSummary(row, 'count_empty', 'notes')).toBe(3);
+    expect(deriveColumnSummary(row, 'percent_filled', 'notes')).toBe(0);
+    expect(deriveColumnSummary(row, 'percent_empty', 'notes')).toBe(1);
+    const emptyGroup: ListViewGroupHeaderRow = { business_unit: 'x', count: 0, count_notes: 0 };
+    expect(deriveColumnSummary(emptyGroup, 'percent_filled', 'notes')).toBe(0);
+    expect(deriveColumnSummary(emptyGroup, 'percent_empty', 'notes')).toBe(1);
+    expect(deriveColumnSummary(emptyGroup, 'count_empty', 'notes')).toBe(0);
+  });
+
+  it('reads the aggregate members off their own column, `none` and a missing column as undefined', () => {
+    const row: ListViewGroupHeaderRow = { business_unit: 'x', count: 86, sum_amount: 3741, avg_amount: null };
+    expect(deriveColumnSummary(row, 'count', 'anything')).toBe(86);
+    expect(deriveColumnSummary(row, 'sum', 'amount')).toBe(3741);
+    expect(deriveColumnSummary(row, 'avg', 'amount')).toBeNull();
+    expect(deriveColumnSummary(row, 'min', 'amount')).toBeUndefined();
+    expect(deriveColumnSummary(row, 'none', 'amount')).toBeUndefined();
+    expect(deriveColumnSummary(row, 'count_filled', 'notes')).toBeUndefined();
+  });
+
+  it('a summary on a field named like the derived column collides loudly', () => {
+    const err = refusal(() => compileListViewGroupQuery({
+      grouping: { fields: [{ field: 'count_notes' }] },
+      columns: [{ field: 'notes', summary: 'count_filled' }],
+    }));
+    expect(err.reason).toBe('alias_collision');
+    expect(err.path).toEqual(['columns', 0, 'summary']);
+  });
+});
+
+// ─── The mapping table ───────────────────────────────────────────────────────
 
 describe('COLUMN_SUMMARY_AGGREGATION — one vocabulary, not two', () => {
-  it('maps count / count_unique / sum / avg / min / max onto AggregationFunction and names the unmapped members', () => {
+  it('maps every member: six onto AggregationFunction, four by derivation from count, none as nothing', () => {
     expect(COLUMN_SUMMARY_AGGREGATION).toEqual({
       none: { kind: 'none' },
       count: { kind: 'aggregate', function: 'count', fieldless: true },
@@ -313,48 +416,48 @@ describe('COLUMN_SUMMARY_AGGREGATION — one vocabulary, not two', () => {
       avg: { kind: 'aggregate', function: 'avg', fieldless: false },
       min: { kind: 'aggregate', function: 'min', fieldless: false },
       max: { kind: 'aggregate', function: 'max', fieldless: false },
-      count_empty: { kind: 'unmapped' },
-      count_filled: { kind: 'unmapped' },
-      percent_empty: { kind: 'unmapped' },
-      percent_filled: { kind: 'unmapped' },
+      count_filled: { kind: 'derived', from: 'count', fieldless: false },
+      count_empty: { kind: 'derived', from: 'count', fieldless: false },
+      percent_filled: { kind: 'derived', from: 'count', fieldless: false },
+      percent_empty: { kind: 'derived', from: 'count', fieldless: false },
     });
-    expect(UNMAPPED_COLUMN_SUMMARIES).toEqual(['count_empty', 'count_filled', 'percent_empty', 'percent_filled']);
+    expect(UNMAPPED_COLUMN_SUMMARIES).toEqual([]);
+    expect(Object.values(COLUMN_SUMMARY_AGGREGATION).every((m) => m.kind !== 'unmapped')).toBe(true);
   });
 
   it('aliases a summary `<function>_<field>` and the fieldless count `count`', () => {
     expect(columnSummaryAlias('sum', 'amount')).toBe('sum_amount');
     expect(columnSummaryAlias('count_distinct', 'owner')).toBe('count_distinct_owner');
     expect(columnSummaryAlias('count', undefined)).toBe(LIST_VIEW_GROUP_COUNT_ALIAS);
-    expect(columnSummaryAlias('count', 'owner')).toBe('count_owner');
+    expect(columnSummaryAlias('count', 'notes')).toBe('count_notes');
   });
 
-  it.each(['count_empty', 'count_filled', 'percent_empty', 'percent_filled'] as const)(
-    'refuses a `%s` summary LOUDLY at compile time — code, status and the path of the summary',
-    (member) => {
-      const view = {
-        grouping: { fields: [{ field: 'business_unit' }] },
-        columns: [{ field: 'id' }, { field: 'notes', summary: member }],
-      };
-      let caught: unknown;
-      try { compileListViewGroupQuery(view); } catch (e) { caught = e; }
-      expect(caught).toBeInstanceOf(ListViewGroupQueryError);
-      const err = caught as ListViewGroupQueryError;
-      expect(err.code).toBe('NOT_IMPLEMENTED');
-      expect(err.status).toBe(501);
-      expect(err.reason).toBe('summary_unmapped');
-      expect(err.path).toEqual(['columns', 1, 'summary']);
-      expect(err.message).toMatch(new RegExp(`^Column summary "${member}" on columns\\[1\\] \\(field "notes"\\) has no counterpart in the aggregation vocabulary`));
-      expect(err.message).toContain('is an open contract question; until it is ruled, remove the summary from this column');
-      expect(err.message).toContain('Nothing is dropped silently.');
-      // The refusal is printed at the author: no issue-id token (maintainer ruling 2026-08-12).
-      expect(err.message).not.toMatch(/#\d+/);
-    },
-  );
+  it('an UNKNOWN summary value (no member at all) is INVALID_QUERY / 400 — a typo, not a capability gap', () => {
+    const view = {
+      grouping: { fields: [{ field: 'business_unit' }] },
+      columns: [{ field: 'id' }, { field: 'amount', summary: 'median' as unknown as ColumnSummary }],
+    };
+    const err = refusal(() => compileListViewGroupQuery(view));
+    expect(err).toBeInstanceOf(ListViewGroupQueryError);
+    expect(err.reason).toBe('summary_unknown');
+    expect(err.code).toBe('INVALID_QUERY');
+    expect(err.status).toBe(400);
+    expect(err.path).toEqual(['columns', 1, 'summary']);
+    expect(err.message).toMatch(/^Column summary "median" on columns\[1\] \(field "amount"\) is not a column summary function\./);
+    expect(err.message).not.toMatch(/#\d+/);
+    const read = refusal(() => deriveColumnSummary({ count: 1 }, 'median' as unknown as ColumnSummary, 'amount'));
+    expect(read.reason).toBe('summary_unknown');
+    expect(read.status).toBe(400);
+  });
 
-  it('the refusal codes are standard-catalog members (ADR-0112) — pinned so the literals cannot drift', () => {
-    const unmapped = new ListViewGroupQueryError('summary_unmapped', [], 'x');
+  it('a DECLARED member with no counterpart stays NOT_IMPLEMENTED / 501 (summary_unmapped) — the machinery, kept for a future member', () => {
+    const unmapped = new ListViewGroupQueryError('summary_unmapped', ['columns', 0, 'summary'], 'x');
     expect(unmapped.code).toBe(StandardErrorCode.enum.NOT_IMPLEMENTED);
     expect(unmapped.status).toBe(501);
+    expect(unmapped.path).toEqual(['columns', 0, 'summary']);
+    const unknown = new ListViewGroupQueryError('summary_unknown', [], 'x');
+    expect(unknown.code).toBe(StandardErrorCode.enum.INVALID_QUERY);
+    expect(unknown.status).toBe(400);
     const invalid = new ListViewGroupQueryError('alias_collision', [], 'x');
     expect(invalid.code).toBe(StandardErrorCode.enum.INVALID_QUERY);
     expect(invalid.status).toBe(400);
@@ -365,11 +468,6 @@ describe('COLUMN_SUMMARY_AGGREGATION — one vocabulary, not two', () => {
 // ─── Structural refusals ─────────────────────────────────────────────────────
 
 describe('compileListViewGroupQuery — refuses what the contract cannot mean', () => {
-  const refusal = (fn: () => unknown): ListViewGroupQueryError => {
-    try { fn(); } catch (e) { return e as ListViewGroupQueryError; }
-    throw new Error('expected a ListViewGroupQueryError');
-  };
-
   it('an alias landing on a grouped field\'s own column', () => {
     const err = refusal(() => compileListViewGroupQuery({
       grouping: { fields: [{ field: 'sum_amount' }] },
@@ -380,6 +478,22 @@ describe('compileListViewGroupQuery — refuses what the contract cannot mean', 
     expect(err.code).toBe('INVALID_QUERY');
     expect(err.status).toBe(400);
     expect(err.path).toEqual(['columns', 0, 'summary']);
+  });
+
+  it('a grouping field named `count` — it would share its column with the group count, summaries or not', () => {
+    const bare = refusal(() => compileListViewGroupQuery({ grouping: { fields: [{ field: 'status' }, { field: 'count' }] } }));
+    expect(bare.reason).toBe('alias_collision');
+    expect(bare.code).toBe('INVALID_QUERY');
+    expect(bare.path).toEqual(['grouping', 'fields', 1, 'field']);
+    const withSummary = refusal(() => compileListViewGroupQuery({
+      grouping: { fields: [{ field: 'count' }] },
+      columns: [{ field: 'id', summary: 'count' }],
+    }));
+    expect(withSummary.reason).toBe('alias_collision');
+    expect(withSummary.path).toEqual(['grouping', 'fields', 0, 'field']);
+    // Past the compiled depth, the name is not a groupBy column and does not collide.
+    expect(compileListViewGroupQuery({ grouping: { fields: [{ field: 'status' }, { field: 'count' }] } }, { depth: 1 }).groupBy)
+      .toEqual(['status']);
   });
 
   it('an empty grouping', () => {
@@ -475,11 +589,26 @@ describe('compileListViewGroupRowsQuery — rows inside a group are the EXISTING
   it('refuses a group key that is not a prefix of the nesting order', () => {
     const grouping = { fields: [{ field: 'business_unit' }, { field: 'status' }] };
     for (const key of [{ status: 'done' }, { business_unit: 'x', owner: 'y' }, {}]) {
-      let caught: unknown;
-      try { listViewGroupKeyPredicate(grouping, key); } catch (e) { caught = e; }
-      expect(caught).toBeInstanceOf(ListViewGroupQueryError);
-      expect((caught as ListViewGroupQueryError).reason).toBe('group_key_not_a_prefix');
-      expect((caught as ListViewGroupQueryError).code).toBe('INVALID_QUERY');
+      const err = refusal(() => listViewGroupKeyPredicate(grouping, key));
+      expect(err).toBeInstanceOf(ListViewGroupQueryError);
+      expect(err.reason).toBe('group_key_not_a_prefix');
+      expect(err.code).toBe('INVALID_QUERY');
     }
+  });
+
+  it('group keys are scalar-valued — an array or object where a key should be is refused', () => {
+    const grouping = { fields: [{ field: 'business_unit' }, { field: 'status' }] };
+    const array = refusal(() => listViewGroupKeyPredicate(grouping, { business_unit: ['a', 'b'] }));
+    expect(array.reason).toBe('group_key_not_scalar');
+    expect(array.code).toBe('INVALID_QUERY');
+    expect(array.status).toBe(400);
+    expect(array.path).toEqual(['grouping', 'fields', 0, 'field']);
+    const object = refusal(() => listViewGroupKeyPredicate(grouping, { business_unit: 'a', status: { id: 'done' } }));
+    expect(object.reason).toBe('group_key_not_scalar');
+    expect(object.path).toEqual(['grouping', 'fields', 1, 'field']);
+    // Scalars of every stored kind, and a date instant, pass.
+    const when = new Date('2026-09-04T00:00:00Z');
+    expect(listViewGroupKeyPredicate({ fields: [{ field: 'n' }, { field: 'b' }, { field: 'd' }] }, { n: 7, b: false, d: when }))
+      .toEqual([{ n: { $eq: 7 } }, { b: { $eq: false } }, { d: { $eq: when } }]);
   });
 });

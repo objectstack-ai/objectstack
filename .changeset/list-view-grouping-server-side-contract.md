@@ -33,22 +33,31 @@ New on the `ui` entry, `view-grouping-query.ts`:
   → the row page; `listViewGroupKeyPredicate` (the empty group is spelled with
   the `$null` predicate — the spelling the view filter dialect's `is_empty`
   lowers to).
-- `COLUMN_SUMMARY_AGGREGATION` — the `ColumnSummary` → `AggregationFunction`
-  table, exhaustive by type: `count` → a fieldless `count` (`COUNT(*)`),
+- `COLUMN_SUMMARY_AGGREGATION` — the `ColumnSummary` → aggregation table,
+  exhaustive by type: `count` → a fieldless `count` (`COUNT(*)`),
   `count_unique` → `count_distinct`, `sum` / `avg` / `min` / `max` → the same
-  name, `none` → nothing. `count_empty`, `count_filled`, `percent_empty` and
-  `percent_filled` have no counterpart yet (`UNMAPPED_COLUMN_SUMMARIES`); a
-  grouped view declaring one is refused loudly at compile time with
-  `ListViewGroupQueryError` (`NOT_IMPLEMENTED` / 501, the summary's path) —
-  their mapping is an open contract question on #14556, and nothing is dropped
-  silently in the meantime.
+  name, `none` → nothing; `count_filled` / `count_empty` / `percent_filled` /
+  `percent_empty` map by derivation — one `{ function: 'count', field }` node
+  (`COUNT(field)`, the non-null count, header column `count_<field>`), from
+  which `deriveColumnSummary(row, summary, field)` computes all four on the
+  header row (`count_filled` = `count_<field>`, `count_empty` = `count −
+  count_<field>`, `percent_filled` = `count_<field> / count`, 0 when the count
+  is 0, `percent_empty` = `1 − percent_filled`). Server-side "empty" is `null`
+  on every face; the footer's client-side reading of `''` / `[]` as empty is
+  the renderer's to converge. A future member with no counterpart is refused
+  loudly at compile time (`ListViewGroupQueryError`, `NOT_IMPLEMENTED` / 501,
+  the summary's path — `UNMAPPED_COLUMN_SUMMARIES`, empty today); a value that
+  is no member at all is `INVALID_QUERY` / 400.
 - Result-column naming on a header row: each grouped field under its own name
-  (raw stored value, `null` for the empty group), `count`, and each summary
-  under `<function>_<field>` (`columnSummaryAlias`).
+  (raw stored value, `null` for the empty group; group keys are scalar), `count`,
+  and each summary under `<function>_<field>` (`columnSummaryAlias`).
 
 `GroupingConfigSchema` / `GroupingFieldSchema` / `ColumnSummarySchema` now say
-this in their docs. Nothing changes in what parses: no key is added, removed
-or re-shaped. `minor` because a new exported helper and a declared contract
-semantics ship; not breaking — the page-scoped behaviour was never declared.
-The route that carries the header query to the grid is the platform half of
-#14556; the grid consuming it is objectui#7189.
+this in their docs, with the shape's recorded limits (a date grouping field
+groups per distinct stored instant; header cardinality is unbounded). Nothing
+changes in what parses: no key is added, removed or re-shaped. `minor` because
+a new exported helper and a declared contract semantics ship; not breaking —
+the page-scoped behaviour was never declared. Both queries ride the existing
+`POST /data/:object/query` door (`protocol.findData` → `engine.aggregate`,
+answering `{ object, records, total, hasMore }`); the grid consuming the header
+rows is objectui#7189.
