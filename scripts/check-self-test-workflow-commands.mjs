@@ -144,6 +144,47 @@ const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
  */
 const WORKFLOW_DIR = '.github/workflows';
 
+/**
+ * POPULATION DECLARATION — the `scripts/` corpus this gate's verdict is ABOUT,
+ * in the subtree spelling `scripts/pm/dispatch-gates.mjs` compares in.
+ *
+ * Nothing here reads it; `collectPopulation` does. It is declared anyway,
+ * because the derivation reads SOURCE TEXT and this gate's population arrives
+ * at runtime through a call. Neither end of that call spells a path:
+ * `collectPopulation` walks `join(ROOT, 'scripts')` over in
+ * `check-self-test-wired.mjs`, where the corpus root is the bare single-segment
+ * word `scripts` — no separator, so `extractWatchHints` recovers nothing from
+ * it. Nor does the import edge carry the sibling's own declaration over:
+ * the follow refuses a module that is ITSELF a discovered gate file, and the
+ * sibling is one. Measured on this tree before this constant existed: a
+ * one-file `scripts/` change set derived 24 gate commands with this gate absent
+ * from every one of them, and so did a change set naming the sibling gate whose
+ * population it imports.
+ *
+ * What this gate scans IS what those self-tests PRINT, so a card editing a
+ * script that carries a `--self-test` moves this gate's verdict — that is the
+ * population, and it is exactly the walk the sibling declares. The hints below
+ * are therefore SET-EQUAL to that declaration, pinned by `--self-test` against
+ * the sibling's own source text rather than against a copy typed here.
+ *
+ * `check-declared-population-live`'s doctrine — an inherited population belongs
+ * to the module it was declared in and is judged there — is satisfied rather
+ * than dodged: the population is still IMPORTED from the gate that owns it, and
+ * what is re-declared here is only the hints this gate CONSUMES, judged here.
+ *
+ * ⛔ NOT the bare subtree, for the reason the sibling gives at the same root:
+ * that spelling would name this gate for the JSON, Markdown and text files
+ * under it that no self-test walk ever opens. And spelled as a LITERAL array,
+ * never computed — the extractor reads source text, so a built spelling keeps
+ * this value identical at runtime, keeps every assertion about it green, and
+ * contributes ZERO hints.
+ *
+ * The `.github/workflows` derivation above is UNCHANGED and still pinned in
+ * `main()`: a workflow is what decides which self-tests are in the population
+ * at all, so both roots are declared and a card touching either gets this gate.
+ */
+const ROOT_DIR_WATCH_HINTS = ['scripts/**/*.mjs', 'scripts/**/*.mts', 'scripts/**/*.sh'];
+
 /** How long one self-test may take before the gate refuses rather than guesses. */
 const TIMEOUT_MS = 120_000;
 
@@ -373,12 +414,13 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'prefilter reads CODE, never prose': 5,
   'end to end on the real defect site': 5,
   'the population is imported, never re-walked': 8,
+  'the scripts/ population is declared here': 6,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the registry's own size is pinned too. Adding a battery raises
 // this number; removing one is the same ⛔ deliberate edit as lowering a count.
-const SELF_TEST_BATTERY_FLOOR = 7;
+const SELF_TEST_BATTERY_FLOOR = 8;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -555,6 +597,85 @@ function selfTest() {
     );
   }
 
+  // ── The scripts/ population is DECLARED here, not merely imported (#15509) ──
+  //
+  // Importing the population is a RUNTIME coupling; the dispatch derivation is
+  // a source-text one, and the two do not substitute for each other. The corpus
+  // root reaches this file only as the bare word `scripts` inside the sibling,
+  // so before the declaration above existed this gate was derived onto no card
+  // that edited any of the scripts whose self-test output it scans.
+  //
+  // Nothing in THIS file can ENFORCE the declaration — `extractWatchHints`
+  // lives in another tool entirely, so a wrong or missing one runs green here
+  // forever. What CAN be held here are the two properties a wrong one breaks:
+  // it is a live literal the extractor can read, and it still says the same
+  // thing as the walk it mirrors. The sibling's constant is not exported and
+  // ⛔ this change does not edit that file to export it, so the second half is
+  // read the way this gate reads every other source — `codeOf`, then the
+  // declaration STATEMENT. Statement-scoped on purpose: a whole-file search
+  // finds the copies the sibling's own docblock spells and passes on a
+  // computed declaration.
+  battery('the scripts/ population is declared here');
+  {
+    ok(
+      Array.isArray(ROOT_DIR_WATCH_HINTS) && ROOT_DIR_WATCH_HINTS.length > 0,
+      'this gate declares no scripts/ population, so it is derived onto no card that edits the scripts '
+        + 'whose self-test output it scans (#15509)',
+    );
+    ok(
+      ROOT_DIR_WATCH_HINTS.every((hint) => hint.split('/').filter(Boolean).length > 1),
+      'a declared literal is not a multi-segment path, so the consumer refuses it as too generic and it '
+        + 'reaches nothing',
+    );
+    ok(
+      !ROOT_DIR_WATCH_HINTS.some((hint) => hint === 'scripts' || hint.endsWith('/**') || hint === '.' || hint === '**'),
+      'the bare subtree or the repo root was declared — it would name this gate for every JSON, Markdown '
+        + 'and text file under that root that no self-test walk opens',
+    );
+
+    const declarationIn = (code) => {
+      const sites = [...code.matchAll(/\bconst\s+ROOT_DIR_WATCH_HINTS\s*=\s*([^;]*);/g)];
+      return sites.length === 1 ? sites[0][1] : null;
+    };
+    let siblingRhs = null;
+    try {
+      const rel = 'scripts/check-self-test-wired.mjs';
+      siblingRhs = declarationIn(codeOf(rel, readFileSync(join(ROOT, rel), 'utf8')));
+    } catch {
+      siblingRhs = null;
+    }
+    const siblingHints = siblingRhs === null ? [] : [...siblingRhs.matchAll(/'([^']+)'/g)].map((m) => m[1]);
+    ok(
+      siblingHints.length > 0,
+      "the sibling gate's ROOT_DIR_WATCH_HINTS could not be read as one literal declaration, so the "
+        + 'set-equality case below compares against nothing and proves nothing (#4690)',
+    );
+    ok(
+      siblingHints.length === ROOT_DIR_WATCH_HINTS.length
+        && ROOT_DIR_WATCH_HINTS.every((hint) => siblingHints.includes(hint)),
+      'this gate declares a different scripts/ population than the walk whose population it imports — '
+        + 'the two-answers-to-one-question split this file exists to keep closed (#15414), back as a '
+        + 'declaration instead of as a walk',
+    );
+
+    let ownRhs = null;
+    try {
+      ownRhs = declarationIn(
+        codeOf('scripts/check-self-test-workflow-commands.mjs', readFileSync(fileURLToPath(import.meta.url), 'utf8')),
+      );
+    } catch {
+      ownRhs = null;
+    }
+    ok(
+      ownRhs !== null
+        && ROOT_DIR_WATCH_HINTS.every((hint) => ownRhs.includes(`'${hint}'`))
+        && !/[A-Za-z_$][\w$]*\s*\./.test(ownRhs),
+      'the declaration is not a single literal array of quoted strings — the extractor reads SOURCE TEXT, '
+        + 'so a computed spelling keeps the runtime value identical, keeps every case above green, and '
+        + 'contributes ZERO hints',
+    );
+  }
+
   // ── The floor: every declared battery RAN, and ran its cases ─────────────
   //
   // Evaluated here, after every battery has had its chance and BEFORE the
@@ -609,7 +730,8 @@ function selfTest() {
     'check-self-test-workflow-commands --self-test: both measured parse rules pinned (legacy form ' +
       'anywhere in a line, current form only at line start), the innocent-output and Perl-namespace ' +
       'cases, the comment mask in both directions, one end-to-end run of the real defect site, and the ' +
-      'imported population held against the live tree with no second walk taken here' +
+      'imported population held against the live tree with no second walk taken here, and the '
+      + 'scripts/ population this gate declares to the dispatch derivation held set-equal to that walk' +
       ` — ${declaredBatteries.length} declared batteries, ${totalCases} cases registered, every battery` +
       ' at or above its pinned floor.',
   );

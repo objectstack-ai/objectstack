@@ -127,7 +127,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { dirname, join, resolve, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { blank, scanSource } from './js-comment-mask.mjs';
+import { blank, maskComments, scanSource } from './js-comment-mask.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 import { workspacePackageDirs } from './check-console-intercept-disarm.mjs';
 
@@ -178,19 +178,21 @@ const REMEDY = `    // #13517: quiet the registry's per-item registration chatte
     // default. Enforced by scripts/check-registry-log-declared.mjs.
     env: { OS_REGISTRY_LOG: 'warn' },`;
 
-/** Comments blanked, offsets kept. Import specifiers survive — S2/S3 need them. */
-function maskComments(source) {
-  return blank(source, scanSource(source).comment);
-}
-
 /**
  * Comments AND string/template/regex content blanked, offsets kept. Used where
  * the signal is a bare CODE position (`new SchemaRegistry(`, a property key), so
  * a spelling inside prose or a template literal can never satisfy it.
  *
- * Both masks preserve offsets, so a range brace-matched on the code mask indexes
- * the comment mask identically — which is how the level VALUE (a string, blanked
- * by this mask) is read out of a block located with it.
+ * It COMPOSES the shared scanner — `scanSource`'s `comment` and `literal` flags
+ * OR-ed through `blank` — and carries no scanning logic of its own; it stays
+ * local only because `js-comment-mask.mjs` publishes no comments+literals
+ * projection yet, and hoisting one waits on a follow-up card.
+ *
+ * The imported `maskComments` (comments blanked, string/template/regex content
+ * INTACT — S2/S3 read import specifiers out of it) and this mask both preserve
+ * offsets, so a range brace-matched on the code mask indexes the comment mask
+ * identically — which is how the level VALUE (a string, blanked by this mask)
+ * is read out of a block located with it.
  */
 function maskCode(source) {
   const { comment, literal } = scanSource(source);
@@ -563,6 +565,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'a package that never runs vitest is ignored entirely': 1,
   'prose naming the key does not satisfy the check': 1,
   'prose naming bootStack does not SELECT the package (the packages/cli shape)': 1,
+  'a code signal spelled only in a string or a comment does not SELECT': 1,
   'a level the engine does not recognise is RED': 1,
   'the key outside any env block does not count': 1,
   'S2: importing bootStack from @objectstack/verify selects': 1,
@@ -578,7 +581,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // zeroing it, so the roster's own size is pinned too. This pin is also half of
 // the duplicate-label refusal: two rows sharing a label collapse to ONE key in
 // the literal above, so the roster falls below this number.
-const SELF_TEST_BATTERY_FLOOR = 15;
+const SELF_TEST_BATTERY_FLOOR = 16;
 
 // The key an assertion is filed under when a row carries no label. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -656,6 +659,33 @@ function selfTest() {
       },
       expectFindings: 0,
       expectSelected: 0,
+    },
+    {
+      // The other direction of the row above, for the CODE mask: a signal
+      // spelled inside a string literal or a comment must not select, and the
+      // same spelling in real code still must. Package `a` carries both
+      // non-code spellings, package `b` the code one, so a mask that stopped
+      // blanking either span shows up as a SECOND selected package rather than
+      // as a silent widening of the population.
+      name: 'a code signal spelled only in a string or a comment does not SELECT',
+      packages: {
+        a: {
+          'package.json': TEST_MANIFEST,
+          'test/x.test.ts':
+            `// new SchemaRegistry() is what this file describes; bootStack too.\n`
+            + `/* const described = new SchemaRegistry(); */\n`
+            + `export const doc = 'new SchemaRegistry() quoted, and bootStack, never called';\n`,
+          'vitest.config.ts': `export default { test: { globals: true } };\n`,
+        },
+        b: {
+          'package.json': TEST_MANIFEST,
+          'test/x.test.ts': BOOTS,
+          'vitest.config.ts': `export default { test: { globals: true } };\n`,
+        },
+      },
+      expectFindings: 1,
+      expectSelected: 1,
+      expectText: 'S1 constructs a SchemaRegistry',
     },
     {
       name: 'a level the engine does not recognise is RED',
