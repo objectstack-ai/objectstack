@@ -667,7 +667,11 @@ function selfTest() {
     const healthyMs = Date.now() - startedAt;
     t('C2 full clone → exit 0 (fit)', healthyRun.status === 0, `exit=${healthyRun.status}\n${healthyRun.stdout}${healthyRun.stderr}`);
     t('C2 fit verdict is stated, not implied', /✓ FIT/.test(healthyRun.stdout), healthyRun.stdout);
-    t(`C2 a healthy tree is not slowed (${healthyMs} ms < 10000)`, healthyMs < 10_000);
+    // The measured figure prints in the FAILURE sink, never in the label: a green
+    // line carrying a wall-clock reading differs from run to run, so the
+    // `green lines are byte-identical` comparison this script is rehearsed with
+    // could never pass unnormalised. A red run still names the timing.
+    t('C2 a healthy tree is not slowed (< 10000 ms)', healthyMs < 10_000, `measured ${healthyMs} ms`);
 
     // ── C3: a SHALLOW clone whose changesets sit after the boundary is fit.
     // This is the no-crying-wolf half: `--is-shallow-repository` is true here.
