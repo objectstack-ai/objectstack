@@ -1,5 +1,622 @@
 # @objectstack/driver-turso
 
+## 17.3.0
+
+### Minor Changes
+
+- ca3fd4b: fix(drivers): `update()` on a missing id answers `null` on MongoDB and on Turso's remote face
+  
+  **BREAKING** for TypeScript consumers — a published TYPE-surface narrowing alongside a
+  runtime behaviour change, shipped as `minor` under the launch-window convention. Two
+  published declared returns move: `MongoDBDriver.update()` and `RemoteTransport.update()`
+  (both exported from their package index) now declare
+  `Promise<Record<string, unknown> | null>` where they declared
+  `Promise<Record<string, unknown>>`. A caller that reads fields off either result —
+  `result.id`, `result.title` — no longer compiles until it narrows the `null` arm first.
+  The narrowing is delivered by the compiler at every call site, and it is the honest
+  declaration: the value that arm carries has always been reachable, it was simply being
+  answered with a fabricated record instead.
+  
+  `IDataDriver.update()` declares `Promise<Record<string, unknown> | null>` — the
+  not-found arm landed with the ruling on the contract (`packages/spec` is untouched here),
+  and it is the answer `InMemoryDriver`, `SqlDriver`, `SqliteWasmDriver` and `TursoDriver`'s
+  local face have always given. Two implementations did not honour it. They **invented a
+  record** instead:
+  
+  - `MongoDBDriver.update()` ran `updateOne({ id })`, then `findOne({ id })`, and
+    when nothing came back returned
+    `withoutUndefinedOwnKeys({ id: String(id), ...updateData })` — a row assembled
+    from the caller's own payload plus the `updated_at` it had just stamped, under
+    an id that names no document.
+  - `RemoteTransport.update()` ran `UPDATE … WHERE "id" = ?`, then
+    `SELECT * … WHERE "id" = ?`, and when no row came back returned
+    `{ id, ...data }` — the caller's payload with the id stapled on.
+  
+  Both now return `null`. That is the runtime half of this change, and it is why this
+  release is not a pure type-surface move: the value a caller receives for a missing id is
+  different at run time, not only in the `.d.ts`.
+  
+  This is the expensive direction of wrong, not merely the wrong answer: the
+  fabricated row said **succeeded** where the truth was **not found**, and said it
+  in a shape carrying the caller's own fields back, so nothing about it looked
+  wrong. Through the engine's by-id door a REST / SDK / MCP `update` against a
+  deleted or mistyped id answered **200 with a record that does not exist** — on
+  these two implementations only. A caller, human or agent, read that as a landed
+  write and did not retry, alert or roll back.
+  
+  Two things downstream become correct rather than merely different:
+  
+  - **One `TursoDriver`, one answer.** Its remote branch passes the transport
+    result through `formatRemoteRow`, which already guards
+    `row && typeof row === 'object'`, so `null` reaches the engine untouched and
+    the two faces converge with no edit at that seam. Previously the same driver
+    answered the same missing id two ways, chosen by `isRemote`.
+  - **`RemoteTransport.bulkUpdate()`'s skip stops being dead code.**
+    `if (updated) results.push(updated)` is the cross-driver convention
+    `SqlDriver.bulkUpdate` follows; on this transport `updated` could never be
+    falsy, so a batch over N missing ids answered N invented rows. It now answers
+    the rows that exist.
+  
+  `upsert()` is untouched on both drivers: an upsert never answers "not found".
+  
+  No landed test pinned the fabricating posture on either driver, so the
+  regression pins added here are net-new coverage rather than a changed baseline.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata key is removed, renamed or re-shaped: the moving surfaces are two driver methods' declared return types and the value they answer for an id that names no row, so there is nothing for `objectstack migrate meta`, `spec-changes.json` or the upgrade guide to project, and this changeset prescribes no rewrite. The consumer obligation is a TypeScript narrowing at the call site, delivered by the compiler. `type-surface-only` is NOT claimable here: its predicate 4 (narrowed-from-erased) is false — neither declared return was `any` at the merge base, they were the non-null `Promise<Record<string, unknown>>` — and, independently, runtime behaviour moves in the same diff, which is more than a type surface. Same disposition and reasoning as `.changeset/driver-memory-update-upsert-honest-types.md` (PR #14434), one day earlier in this same series. -->
+- 9f4a6d5: feat(driver-sql,driver-turso,driver-sqlite-wasm): SQLite-family JSON columns declare `TEXT`; server dialects keep native JSON (#12738)
+  
+  A `Field.json` column — and any field with `multiple: true` — is now declared as
+  the JSON column type the **target dialect actually has**. Postgres and MySQL are
+  untouched: their native `json`/`jsonb` and `JSON` types are correct and stay.
+  The SQLite family (plain `SqlDriver` on `sqlite3`/`better-sqlite3`, `TursoDriver`
+  in all three transport modes, and `SqliteWasmDriver`) now declares `text`.
+  
+  **Why.** SQLite has no JSON type. It derives a column's *affinity* from
+  substrings of the declared type name, and `json` contains none of the markers
+  (`INT`, `CHAR`/`CLOB`/`TEXT`, `BLOB`, `REAL`/`FLOA`/`DOUB`), so it fell through
+  to **NUMERIC** and converted number-like input on the way in — measured through
+  raw SQL, a bare `'0123'` was stored as the integer `123`. `text` takes TEXT
+  affinity, converts nothing, and is what SQLite's own JSON1 functions operate on.
+  It is also what `RemoteTransport.mapFieldTypeToSQL` had spelled all along, so
+  turso's two transports now agree instead of diverging on one column.
+  
+  ## The migration shape
+  
+  - **New columns only.** The change is to the DDL emitter. Schema sync is
+    additive, so no existing column is altered, dropped or rewritten.
+  - **Existing columns keep their declared type.** A column created before this
+    release stays `json` and keeps NUMERIC affinity — including through an
+    unrelated SQLite drift rebuild, which re-declares an introspected `json`
+    column as `json` rather than converting it.
+  - **Platform write-path behaviour is unchanged.** The `Field.json` codec stays
+    injective and stays in force: what the platform writes and reads back is
+    identical before and after, on legacy and new columns alike. Nothing on the
+    read path consults the physical column type — `isJsonField` answers from
+    metadata — so decoding is the same on both spellings.
+  - **No new schema-drift findings.** The multi-value base-type finding is gated
+    on the dialect where the column type is load-bearing (Postgres and MySQL);
+    SQLite was already excluded, and the emitter now agrees with the differ
+    instead of merely being excused by it.
+  - **The visible difference is raw-SQL-only, and in the safe direction.** A value
+    written to a JSON column by raw SQL (bypassing the driver) is preserved as
+    text on a new column where it would previously have been coerced to a number.
+    Nothing that was preserved before is coerced now.
+
+### Patch Changes
+
+- ed44512: fix(driver-turso): escape the groupBy alias on the remote transport instead of gating it (#14235)
+  
+  `RemoteTransport.aggregate` emits a caller-supplied output NAME in exactly two
+  positions. #14113 moved the aggregation alias to escaping and deliberately left
+  the groupBy alias (`GroupByNodeSchema.alias`, reaching the driver as
+  `g.alias ?? g.field`) on `assertSafeIdentifier`, because that position carried a
+  landed pin asserting the refusal. So a groupBy alias that was not a bare
+  `[A-Za-z_][A-Za-z0-9_]*` — `'Region Name'`, `'deal.stage_bucket'` — was refused
+  on this face while the in-memory, MongoDB and (post-#13714) SQL faces all
+  project it verbatim: one query, two answers, decided by a connection string.
+  
+  The groupBy select site now emits `"<field>" AS <aliasIdentifierSql(outKey)>`,
+  the same quote-doubling escape the aggregation alias beside it already uses, so
+  both output-name positions of the method agree with `driver-sql`. The `field`
+  position keeps `assertSafeIdentifier` — a column REFERENCE is grammar and a
+  qualified one is legitimate, so it must be validated; an output NAME is one
+  name by definition and is quoted and escaped. `outKey === field` still emits the
+  alias-less `"<field>"`, byte-identical to before.
+  
+  The #6401 pin that asserted the refusal is rewritten in place, on the same
+  input, to assert what the transport now emits — the recorded, non-silent
+  reversal the card asked for rather than a rider on someone else's change. The
+  escaped alias is pinned against a real SQLite-backed libsql stub as well as on
+  the captured statement, because only executing it tells "escaped" apart from
+  "broke out".
+  
+  No accept set moves at the contract: `GroupByNodeSchema.alias` already declares
+  this key and the spec already admits these names. What moves is this driver's
+  accept set, toward the contract the other three faces already implement —
+  declared = enforced, restored. The refusal envelope for the positions that stay
+  gated (#14287, `INVALID_REQUEST` / 400) is untouched.
+- 242eb0a: chore(driver-turso): declare and pin the `Field.json` column-type asymmetry between the local and remote transports (#12586)
+  
+  `TursoDriver` is dual-transport, and one declared `Field.json` becomes a
+  different physical column on each. Local/replica mode extends `SqlDriver` and
+  lets knex spell it (`table.json(name)` — a `json` column); remote mode never
+  touches knex and spells its own SQLite types in
+  `RemoteTransport.mapFieldTypeToSQL` (`TEXT`). Nothing in the tree said whether
+  that was a design or an oversight — a grep found the two `mapFieldTypeToSQL`
+  lines and one passing comment — and no test would have gone red if either side
+  moved.
+  
+  ⛔ Nothing is broken and no behaviour changes here. Both transports round-trip
+  every `VALUE_ROUNDTRIP_CASES` value faithfully today and did before this PR.
+  
+  **Why it is still worth recording.** Every column type in this driver is
+  spelled differently by the two halves — `varchar(255)`/`TEXT`,
+  `float`/`REAL`, `boolean`/`INTEGER` — and for all of those the difference is
+  cosmetic, because SQLite derives affinity from substrings of the declared type
+  name and both spellings land in the same class. `json` is the one that does
+  not: it matches none of SQLite's affinity markers, so it carries **NUMERIC**
+  affinity and converts number-like input on the way in, while `TEXT` converts
+  nothing. Measured on the shared fixture, that is not theoretical — a declared
+  `Field.json` holding the native `123` is an **INTEGER cell locally and a TEXT
+  cell remotely**, with `find()` answering `123` on both. Equal answers, unequal
+  bytes: the #11535 class in its quiet phase, where the next codec change has no
+  reason to be kind to both. PR #12585's ablation is the same fact in its loud
+  phase — the pre-#12380 `json` branch broke the two transports by *different*
+  counts, diverging on `s_0123`, because only the local column had NUMERIC
+  affinity to destroy a bare `'0123'` with.
+  
+  **What lands:**
+  
+  - The declaration, at the site a reader lands on when they ask why this returns
+    `TEXT` — `RemoteTransport.mapFieldTypeToSQL`'s doc comment: the full
+    local/remote type table, which rows are cosmetic and which one is not, the
+    affinity mechanism as the "why it is safe today", and the instruction to
+    delete or invert the pin rather than patch it green.
+  - The pin, `turso-json-column-type-asymmetry.test.ts`, driven by the same
+    `VALUE_ROUNDTRIP_FIELDS` / `VALUE_ROUNDTRIP_CASES` table the round-trip
+    conformance suite uses. It asserts each transport's declared types from the
+    **catalog**, demonstrates the affinity mechanism with raw SQL that bypasses
+    the driver codec, and asserts that the set of cases whose on-disk storage
+    class differs is exactly `{n_int, n_real}` — so convergence (an empty set) is
+    as red as one side drifting (a longer one).
+  - A note in `turso-value-roundtrip-conformance.test.ts` saying it is
+    deliberately blind to this, since it is green either way.
+  
+  ⛔ Convergence (making both transports emit one type) is **not** done here.
+  It changes what new columns are physically declared as and needs the
+  un-measured "why did remote choose `TEXT`?" answered first; #12586 ruled it a
+  separate decision.
+  
+  Grade: `patch`, argued rather than defaulted. Not `minor` — no new public API,
+  no widened accept set, no behaviour change, and the emitted DDL is byte-for-byte
+  what it was. Not `skip-changeset` either, though the only executable code this
+  PR ships is a test: what becomes a checked invariant here is a property of the
+  published package (which physical column a declared field gets on each
+  transport), and the CHANGELOG line is the record a future reader needs when
+  this guard goes red on them.
+- 443f0d3: fix(driver-turso): escape the aggregation alias instead of gating it, so remote-mode analytics cube queries stop 500ing (#14113)
+  
+  `RemoteTransport.aggregate` (Turso **remote** mode) held the aggregation
+  `alias` to `SAFE_IDENTIFIER` (`/^[a-zA-Z_][a-zA-Z0-9_]*$/`). A dot fails that
+  regex. Every analytics measure is named `<cube>.<measure>` on the wire and
+  `ObjectQLStrategy` uses that name verbatim as the aggregation `alias`, so
+  **every** cube query that reached this face threw
+  `RemoteTransport: unsafe identifier rejected: "showcase_delivery.count"` — a
+  bare `Error` with no `code` and no `status`, which `mapDataError` then served
+  as an opaque 500 for a query that is spelled correctly.
+  
+  The alias is now **escaped rather than gated**: it may be any string, and the
+  quote character is doubled (`"` → `""`), the standard escape inside a quoted
+  SQL identifier. This is the ALIAS half of the distinction `driver-sql` drew at
+  **#13714**, where the same position routes through knex's `wrapIdentifier`
+  (`SqlDriver.aliasIdentifierSql`) — a qualified **reference** must be
+  validated, a single output **name** must be quoted and escaped.
+  `AggregationNodeSchema` declares `alias: z.string()`, an output-column key,
+  and the in-memory, MongoDB and (post-#13714) SQL faces all project it
+  verbatim; this face was the outlier.
+  
+  ⛔ **Not** "drop the check". The alias reaches the statement raw inside
+  `AS "…"`, so an alias containing a `"` would close the quoting and continue as
+  grammar. `bucket"; DROP TABLE deal; --` now compiles to the single inert
+  column name `"bucket""; DROP TABLE deal; --"` and is returned as a column
+  name, executed against a real SQLite-backed client rather than asserted as a
+  string — the only instrument that tells "escaped" apart from "broke out".
+  
+  The `field` and `object` positions keep `assertSafeIdentifier` unchanged: those
+  become column and table **references**, which are grammar. Default aliases are
+  byte-identical (`count_all` still spells itself the same way), and the
+  `groupBy` alias position is untouched by this change.
+- 8eeca27: drivers(turso): an unsafe identifier on the remote transport answers `400 INVALID_REQUEST`, not an opaque 500
+  
+  `RemoteTransport.assertSafeIdentifier` is the one gate for every position where
+  an identifier is inlined into SQL — the `object`, `field` and `groupBy`
+  field/output-key positions of `aggregate`, the table and column names in
+  `syncSchema` / `syncSchemasBatch`, and the index name and columns in unique-index
+  sync — plus the free function of the same name in the remote canonical backfill.
+  All of them threw a bare `Error` with no `code` and no `status`, so `mapDataError`
+  reached none of its classifying branches and served a sanitised **500**: a caller
+  whose own identifier was refused was told the server had faulted, and an SDK
+  reading a 5xx retries a request that can never succeed.
+  
+  Every one of those refusals now carries the ADR-0112 envelope `code:
+  'INVALID_REQUEST'`, `status: 400`, built by one constructor so the positions
+  cannot answer three ways. `@objectstack/spec` gains only the error-code ledger's
+  provenance row registering this driver as an emitter of a code seven packages
+  already register — the registered-code union is byte-identical (248 codes before
+  and after) and no new code is minted.
+  
+  **Nothing about which identifiers are refused changed.** `SAFE_IDENTIFIER` and
+  every refusal message are untouched; exactly the inputs refused before are
+  refused after, with byte-identical prose. Only `code` and `status` are new.
+- faed589: chore(driver-turso): drop the `@objectstack/verify` devDependency — the one edge that made this workspace's manifest graph cyclic (#13513)
+  
+  No runtime, API or type change: `dist` is byte-identical, and a consumer never
+  installs a devDependency. What changes is the workspace's own build graph.
+  
+  **The defect.** `@objectstack/driver-turso` carried `@objectstack/verify` as a
+  devDependency so that one test file — `src/date-bucket-parity.test.ts` — could
+  import `checkDateBucketParity`. That closed a heterogeneous cycle across three
+  different declaration classes:
+  
+  ```
+  @objectstack/runtime      --peerDependencies(optional)-->  @objectstack/driver-turso
+  @objectstack/driver-turso --devDependencies----------->    @objectstack/verify
+  @objectstack/verify       --dependencies-------------->    @objectstack/runtime
+  ```
+  
+  pnpm walks all four declaration classes when it computes a `PKG^...` / `PKG...`
+  selection, so the cycle left those selections with no topological order. pnpm
+  does not refuse a cyclic selection — it schedules the members **concurrently**,
+  so `@objectstack/verify`'s DTS leg reads a sibling's `dist` while that sibling
+  is still emitting it. The run then dies with `TS2307`/`TS7016` naming a module
+  the author never imported, in a package the author never touched, which reads
+  exactly like "your branch broke an import". Seven seats paid for that
+  misattribution on unmodified trees. `pnpm install` had been printing
+  `WARN There are cyclic workspace dependencies` on every install throughout.
+  
+  **Why this edge.** Measured over all 78 workspace manifests: this was the
+  **only single edge** whose removal makes the whole graph acyclic. Cutting the
+  `runtime → driver-turso` peer edge instead is not sufficient on its own — a
+  second optional-peer edge (`service-datasource → driver-turso`) closes the same
+  loop through `plugin-auth → rest → service-datasource`.
+  
+  **Where the test went.** `date-bucket-parity.test.ts` moved to
+  `packages/qa/dogfood/test/date-bucket-parity-turso.test.ts`, which is where this
+  repo already keeps `@objectstack/verify`-based cross-package conformance —
+  `date-bucket-parity-conformance.test.ts` next door runs the same
+  `checkDateBucketParity` over `driver-sql` and `driver-sqlite-wasm`, both of them
+  `@objectstack/dogfood` devDependencies for exactly this reason. All five cases
+  moved intact and all five still run by name, negative control included.
+- Updated dependencies [809d417]
+- Updated dependencies [387e231]
+- Updated dependencies [f794e4e]
+- Updated dependencies [cae2169]
+- Updated dependencies [b812a54]
+- Updated dependencies [2d4fa75]
+- Updated dependencies [0e4e51b]
+- Updated dependencies [e84bbf6]
+- Updated dependencies [effae80]
+- Updated dependencies [efb3513]
+- Updated dependencies [d62f990]
+- Updated dependencies [c45d8e6]
+- Updated dependencies [2e3e8c7]
+- Updated dependencies [e621291]
+- Updated dependencies [655b106]
+- Updated dependencies [40a93b5]
+- Updated dependencies [ef52884]
+- Updated dependencies [d5b330d]
+- Updated dependencies [9e1b2de]
+- Updated dependencies [dda969c]
+- Updated dependencies [1f45690]
+- Updated dependencies [277948f]
+- Updated dependencies [8bdd955]
+- Updated dependencies [f3bbbef]
+- Updated dependencies [4f24e9d]
+- Updated dependencies [e27583e]
+- Updated dependencies [4bd6faa]
+- Updated dependencies [86cbe37]
+- Updated dependencies [6a180e4]
+- Updated dependencies [474242f]
+- Updated dependencies [63cd487]
+- Updated dependencies [bd4aa4e]
+- Updated dependencies [803eaab]
+- Updated dependencies [f8e8f03]
+- Updated dependencies [983edf1]
+- Updated dependencies [eae824e]
+- Updated dependencies [178f90c]
+- Updated dependencies [f6fa22c]
+- Updated dependencies [8a483b3]
+- Updated dependencies [84de7e3]
+- Updated dependencies [3bc2e38]
+- Updated dependencies [97bcd99]
+- Updated dependencies [df59de0]
+- Updated dependencies [96e25a8]
+- Updated dependencies [f75a38a]
+- Updated dependencies [7a25e7d]
+- Updated dependencies [1fa05a6]
+- Updated dependencies [c85a265]
+- Updated dependencies [dcb10a5]
+- Updated dependencies [773a999]
+- Updated dependencies [35dffea]
+- Updated dependencies [d8024f0]
+- Updated dependencies [8120808]
+- Updated dependencies [0010797]
+- Updated dependencies [776a098]
+- Updated dependencies [5060877]
+- Updated dependencies [4f6325d]
+- Updated dependencies [52954c0]
+- Updated dependencies [2aa8456]
+- Updated dependencies [93809a3]
+- Updated dependencies [7c0d0c3]
+- Updated dependencies [daae7aa]
+- Updated dependencies [8dc22d6]
+- Updated dependencies [279431e]
+- Updated dependencies [948dd6b]
+- Updated dependencies [3b4c56c]
+- Updated dependencies [ae8edd2]
+- Updated dependencies [e25403c]
+- Updated dependencies [f9ffd01]
+- Updated dependencies [64baa68]
+- Updated dependencies [9fa70d7]
+- Updated dependencies [09db64a]
+- Updated dependencies [92916e7]
+- Updated dependencies [a84f3ea]
+- Updated dependencies [f2eaae8]
+- Updated dependencies [09f9361]
+- Updated dependencies [c804f0c]
+- Updated dependencies [34d3011]
+- Updated dependencies [c09451b]
+- Updated dependencies [ba64877]
+- Updated dependencies [9d3c04d]
+- Updated dependencies [d29e42f]
+- Updated dependencies [87ad30c]
+- Updated dependencies [fcd0efc]
+- Updated dependencies [d0e3a88]
+- Updated dependencies [3f42920]
+- Updated dependencies [dd4113e]
+- Updated dependencies [992161b]
+- Updated dependencies [ebcc34e]
+- Updated dependencies [64505a5]
+- Updated dependencies [7345308]
+- Updated dependencies [79b6a22]
+- Updated dependencies [30d96ab]
+- Updated dependencies [f658793]
+- Updated dependencies [c95ad19]
+- Updated dependencies [e58ea8b]
+- Updated dependencies [4a17645]
+- Updated dependencies [3795c5f]
+- Updated dependencies [8ab926b]
+- Updated dependencies [7317cf2]
+- Updated dependencies [e25e839]
+- Updated dependencies [5997207]
+- Updated dependencies [8b13cc8]
+- Updated dependencies [4a4a35d]
+- Updated dependencies [4a4a35d]
+- Updated dependencies [86e765a]
+- Updated dependencies [1d7e76a]
+- Updated dependencies [53dc739]
+- Updated dependencies [fd289be]
+- Updated dependencies [03bf7b1]
+- Updated dependencies [f90e820]
+- Updated dependencies [18d816a]
+- Updated dependencies [e8bd715]
+- Updated dependencies [b91c351]
+- Updated dependencies [a28a3c0]
+- Updated dependencies [daeaaf9]
+- Updated dependencies [c459da6]
+- Updated dependencies [e914733]
+- Updated dependencies [f887e52]
+- Updated dependencies [881f8d8]
+- Updated dependencies [3bfa1e6]
+- Updated dependencies [0a8ebf3]
+- Updated dependencies [901355c]
+- Updated dependencies [107bb4b]
+- Updated dependencies [34ce8e7]
+- Updated dependencies [33681ea]
+- Updated dependencies [4635f3e]
+- Updated dependencies [fd289be]
+- Updated dependencies [ee3595c]
+- Updated dependencies [b2eab95]
+- Updated dependencies [93940d4]
+- Updated dependencies [3a04b01]
+- Updated dependencies [45b9051]
+- Updated dependencies [b9e9227]
+- Updated dependencies [d395692]
+- Updated dependencies [5894d30]
+- Updated dependencies [a3765f6]
+- Updated dependencies [2d5cee3]
+- Updated dependencies [e22158f]
+- Updated dependencies [7404925]
+- Updated dependencies [0c2334f]
+- Updated dependencies [778c59f]
+- Updated dependencies [d2619fd]
+- Updated dependencies [af56546]
+- Updated dependencies [6acb11a]
+- Updated dependencies [33c5fd3]
+- Updated dependencies [20b0fdb]
+- Updated dependencies [905019b]
+- Updated dependencies [a286411]
+- Updated dependencies [98c0d33]
+- Updated dependencies [368a82e]
+- Updated dependencies [a3d5724]
+- Updated dependencies [93ea19b]
+- Updated dependencies [9ee2dcf]
+- Updated dependencies [8cb96ec]
+- Updated dependencies [8f10a79]
+- Updated dependencies [6269a55]
+- Updated dependencies [a17da05]
+- Updated dependencies [a8c00e2]
+- Updated dependencies [0fb8760]
+- Updated dependencies [e5ce2ed]
+- Updated dependencies [be21955]
+- Updated dependencies [bc56e18]
+- Updated dependencies [be21955]
+- Updated dependencies [a9ee989]
+- Updated dependencies [4d0d944]
+- Updated dependencies [15d58db]
+- Updated dependencies [d63b014]
+- Updated dependencies [9abe4e4]
+- Updated dependencies [2cc7122]
+- Updated dependencies [50d6c92]
+- Updated dependencies [9e0ba21]
+- Updated dependencies [311433f]
+- Updated dependencies [0e5bea6]
+- Updated dependencies [3e5ad08]
+- Updated dependencies [9abe4e4]
+- Updated dependencies [b7131f3]
+- Updated dependencies [e5812fa]
+- Updated dependencies [7085f90]
+- Updated dependencies [dee4dd4]
+- Updated dependencies [e40a28c]
+- Updated dependencies [7e83932]
+- Updated dependencies [ce7e497]
+- Updated dependencies [51ecb2f]
+- Updated dependencies [9086761]
+- Updated dependencies [42a117b]
+- Updated dependencies [1401ae7]
+- Updated dependencies [4297fe7]
+- Updated dependencies [e398863]
+- Updated dependencies [d16df74]
+- Updated dependencies [f11fc61]
+- Updated dependencies [e808890]
+- Updated dependencies [8f79379]
+- Updated dependencies [e6ca40e]
+- Updated dependencies [0c77ea4]
+- Updated dependencies [52954c0]
+- Updated dependencies [89eb997]
+- Updated dependencies [7131f12]
+- Updated dependencies [aa5994e]
+- Updated dependencies [be93457]
+- Updated dependencies [a65db76]
+- Updated dependencies [15eb2c9]
+- Updated dependencies [5691b07]
+- Updated dependencies [431d2fb]
+- Updated dependencies [2a6122b]
+- Updated dependencies [225e769]
+- Updated dependencies [8af88dd]
+- Updated dependencies [fb5fbb8]
+- Updated dependencies [c05b40b]
+- Updated dependencies [80f1dcd]
+- Updated dependencies [6c6157a]
+- Updated dependencies [d7b3963]
+- Updated dependencies [33184fd]
+- Updated dependencies [7c41693]
+- Updated dependencies [b72db01]
+- Updated dependencies [dce5cd4]
+- Updated dependencies [9688f58]
+- Updated dependencies [556ebc1]
+- Updated dependencies [177ebdc]
+- Updated dependencies [8d237b4]
+- Updated dependencies [2d2e6f0]
+- Updated dependencies [2d8dd8d]
+- Updated dependencies [22d573e]
+- Updated dependencies [b5a2398]
+- Updated dependencies [348860c]
+- Updated dependencies [5383fa6]
+- Updated dependencies [5b3ff63]
+- Updated dependencies [1a6a19c]
+- Updated dependencies [527e050]
+- Updated dependencies [dd33bf9]
+- Updated dependencies [4cb2a90]
+- Updated dependencies [6757eb2]
+- Updated dependencies [74a7804]
+- Updated dependencies [53d3689]
+- Updated dependencies [b3a63d3]
+- Updated dependencies [1c66fe4]
+- Updated dependencies [49f0dcf]
+- Updated dependencies [033a34c]
+- Updated dependencies [4d25d22]
+- Updated dependencies [1ffee51]
+- Updated dependencies [b826390]
+- Updated dependencies [5ae4303]
+- Updated dependencies [ece4dad]
+- Updated dependencies [e9b377e]
+- Updated dependencies [146f448]
+- Updated dependencies [735f5c7]
+- Updated dependencies [a7e18de]
+- Updated dependencies [366f895]
+- Updated dependencies [dc75ba8]
+- Updated dependencies [cce0aa9]
+- Updated dependencies [e764507]
+- Updated dependencies [cff17af]
+- Updated dependencies [39404f3]
+- Updated dependencies [ca1965f]
+- Updated dependencies [8619f95]
+- Updated dependencies [b706af9]
+- Updated dependencies [add4360]
+- Updated dependencies [cd13488]
+- Updated dependencies [df1c75c]
+- Updated dependencies [fc9ba76]
+- Updated dependencies [0f94cc7]
+- Updated dependencies [a11c1a5]
+- Updated dependencies [71f9cd1]
+- Updated dependencies [ee17d86]
+- Updated dependencies [cdbd920]
+- Updated dependencies [18c432e]
+- Updated dependencies [3c418c4]
+- Updated dependencies [fa8715a]
+- Updated dependencies [a933ed7]
+- Updated dependencies [b3ca463]
+- Updated dependencies [a933ed7]
+- Updated dependencies [0d4a6a8]
+- Updated dependencies [518d5e5]
+- Updated dependencies [6643ba1]
+- Updated dependencies [eeba2ef]
+- Updated dependencies [ec4c4d2]
+- Updated dependencies [424f73c]
+- Updated dependencies [cccbe51]
+- Updated dependencies [a8d6b1d]
+- Updated dependencies [e4a7695]
+- Updated dependencies [87075b1]
+- Updated dependencies [fc58a99]
+- Updated dependencies [14cfc00]
+- Updated dependencies [1c6f7b4]
+- Updated dependencies [e854a53]
+- Updated dependencies [07cced5]
+- Updated dependencies [3956069]
+- Updated dependencies [dfebfc8]
+- Updated dependencies [5dd3bc9]
+- Updated dependencies [9f4a6d5]
+- Updated dependencies [4045b95]
+- Updated dependencies [7adcd07]
+- Updated dependencies [f5a7f9c]
+- Updated dependencies [d028b37]
+- Updated dependencies [c49afd0]
+- Updated dependencies [f7b25c5]
+- Updated dependencies [122ef38]
+- Updated dependencies [4a37870]
+- Updated dependencies [428f9b2]
+- Updated dependencies [aa7ff56]
+- Updated dependencies [c41b42e]
+- Updated dependencies [c4db311]
+- Updated dependencies [750fff5]
+- Updated dependencies [c19035e]
+- Updated dependencies [ececf7a]
+- Updated dependencies [d173125]
+- Updated dependencies [8eeca27]
+- Updated dependencies [8425c17]
+- Updated dependencies [a5ef1d8]
+- Updated dependencies [772d5de]
+- Updated dependencies [ce80ec2]
+- Updated dependencies [f24c90d]
+- Updated dependencies [b372318]
+- Updated dependencies [97a2263]
+- Updated dependencies [29d0676]
+- Updated dependencies [0169d49]
+- Updated dependencies [6bd3231]
+- Updated dependencies [1246b4c]
+- Updated dependencies [d2b5ba8]
+- Updated dependencies [b799ac5]
+- Updated dependencies [8f74307]
+- Updated dependencies [d23dc08]
+- Updated dependencies [644ad50]
+- Updated dependencies [0da7cd2]
+- Updated dependencies [28a5c3e]
+- Updated dependencies [4bc18e5]
+  - @objectstack/spec@17.3.0
+  - @objectstack/core@17.3.0
+  - @objectstack/driver-sql@17.3.0
+
 ## 17.2.0
 
 ### Patch Changes

@@ -1,5 +1,896 @@
 # @objectstack/plugin-approvals
 
+## 17.3.0
+
+### Minor Changes
+
+- dda969c: fix(approvals): a deleted record's pending approvals auto-cancel instead of stranding in the inbox (#13568)
+  
+  Deleting a record left every `pending` approval it had opened sitting in the
+  approvers' inbox — counted in the pending total, openable, and pointing at a
+  `record_id` that resolves to nothing. Nothing about it was module-specific:
+  an approval node that declares `lockRecord` blocks the EDIT, so "delete and
+  recreate" is the only route left to an author who needs to fix a submitted
+  record, and every such delete added another orphan. Maintainer ruling
+  2026-08-31 (`总监席第 5 场决裁批 #5`, verbatim 「同意」): pending requests
+  auto-cancel on record delete — status `cancelled` plus a machine-readable
+  reason, rows KEPT for audit, out of the pending count and the inbox's default
+  view.
+  
+  **Graded `minor`, and deliberately not `patch`.** The repair itself is a
+  defect fix, but it lands by WIDENING two published vocabularies and adding a
+  declared column, and this repo's convention grades a shipped service's
+  accept-set/behaviour move as `minor`. **No `BREAKING` banner**: nothing is
+  narrowed and no metadata that used to be accepted is now refused — the one
+  consequence a consumer can feel is that `ApprovalStatus` and
+  `ApprovalActionKind` each gained a member, so an exhaustive `switch` with no
+  default, or a `satisfies Record<ApprovalStatus, …>` map outside this repo,
+  now has a case to add. That is the same shape `returned` had when ADR-0044
+  landed it.
+  
+  **Spec (`@objectstack/spec/contracts/approval-service`)**
+  
+  - `APPROVAL_STATUSES` gains `cancelled` (+ its `APPROVAL_STATUS_LABELS`
+    entry). Its own terminal state rather than a re-use of `recalled`: a recall
+    is an ACT by the submitter, and filing a platform-initiated void as one
+    attributes a withdrawal to a person who never performed it.
+  - New `APPROVAL_CANCEL_REASONS` / `ApprovalCancelReason` /
+    `APPROVAL_CANCEL_REASON_LABELS`, single entry `record_deleted`. A
+    VOCABULARY, not free text, because the reason has a non-human consumer (the
+    inbox and the tombstone presentation branch on it) — and a CLASS, per the
+    ruling's wording, so the next platform-initiated cancellation cause extends
+    this list instead of minting a second terminal status for itself.
+  - `APPROVAL_ACTION_KINDS` gains `cancel` — the only kind with no human actor,
+    by construction.
+  - `ApprovalRequestRow.cancel_reason` declared, optional-nullable.
+  
+  **Plugin (`@objectstack/plugin-approvals`)**
+  
+  - `sys_approval_request.cancel_reason`, a select derived from the contract
+    vocabulary and never re-typed (the #3786 rule the `status` column already
+    follows). On the row rather than on the audit entry, so a plain list view
+    can read WHY without joining the append-only action log.
+  - `bindRecordDeleteCancelHook` — a GLOBAL `afterDelete` registration beside
+    the existing global record-lock hook, so one platform-level linkage covers
+    every "approval + `lockRecord`" object at once. It needs no row-set
+    plumbing: the engine binds the deleted row's pre-image on the by-id path
+    and fans `afterDelete` out per matched row on a predicate delete, so a bulk
+    delete is covered by the same handler. The approvals tables are excluded at
+    registration, so they do not pay the delete-side pre-image read.
+  - `ApprovalService.cancelForDeletedRecord` writes the transition: one
+    append-only `sys_approval_action` row (`action: 'cancel'`, no actor),
+    `status: 'cancelled'` + `cancel_reason: 'record_deleted'` +
+    `completed_at`, and a `sys_approval_approver` index clear — that last one
+    is not optional garnish, it is what actually empties the inbox, because the
+    approver filter resolves through that index rather than through `status`.
+  - The `Completed` list view now includes `cancelled`, so a kept audit row is
+    visible in the one curated terminal view rather than only under `All`.
+  - ⛔ **No flow resume and no status mirror-back.** A cancellation is a status
+    write plus a reason, not a decision, so there is no branch to resume down.
+    The mirror-back is skipped by construction rather than by a swallowed
+    error: it is an `update_record` against the row that was just deleted — the
+    exact write this card's forensics caught failing elsewhere. The suspended
+    run the request gated is reported at `warn` with its id and otherwise left
+    alone; what becomes of it belongs to the automation service.
+  - ⛔ **The delete is never refused.** The "forbid delete while an approval is
+    pending" direction was vetoed in the same ruling — `lockRecord` already
+    blocks the edit, and blocking the delete too locks an author onto a record
+    they cannot fix. Nothing in the hook throws; a failure degrades to the
+    pre-existing state (the stale row) and is logged.
+  - Terminal rows are untouched. `approved` / `rejected` / `recalled` /
+    `returned` requests about the deleted record keep their recorded outcome —
+    history stays history, and rendering their now-dead record reference is a
+    separate console-side change.
+  
+  zh-CN / ja-JP / es-ES bundles carry authored translations for the new leaves
+  (已作废 / 無効化済み / Anulada), not source fills.
+- 277948f: feat(spec,plugin-approvals): `escalation.enabled` defaults to `true` and the SLA sweep finally reads it (#12278)
+  
+  **BREAKING** semantic default flip on a published authorable key, shipped as
+  `minor` under the repo's launch-window convention for breaking changes.
+  Maintainer ruling 2026-08-27 (Option C), explicitly reversing the 2026-08-26
+  "spec stays as declared" ruling with fresh analysis.
+  
+  `ApprovalEscalationSchema.enabled` declared `default(false)` while the
+  plugin-approvals escalation sweep never read the key: any escalation block
+  with a positive `timeoutHours` escalated, and with `action: 'auto_approve'`
+  that silently approved requests their author had declared off the clock —
+  the ADR-0049 declared-but-unenforced shape, failing open. Worse, the
+  approval-node executor parses node config through the schema before
+  snapshotting it onto the request row, so the old default **materialized**
+  `enabled: false` into storage for every author who omitted the key, making
+  "authored off" and "defaulted off" byte-identical at the sweep site.
+  
+  One change, both halves:
+  
+  - **spec**: `enabled` now defaults to `true` (stays `z.boolean()`; no
+    tri-state). The feature-level switch is whether an `escalation` block
+    exists at all; within a block carrying `timeoutHours`, escalation is on
+    unless explicitly turned off — which is what the runtime, its eleven
+    behaviour tests, and every teaching surface have always meant. Declared in
+    `DEFAULT_CHANGES_BY_MAJOR` (17) and registered as the
+    `approval-escalation-enabled-default-flip` semantic migration entry.
+  - **runtime**: `runEscalations` skips a request whose snapshot carries an
+    explicit `escalation.enabled === false` — the declared switch is enforced.
+    Request snapshots created **before** the flip cutoff
+    (`ESCALATION_ENABLED_FLIP_CUTOFF_MS`, 2026-08-28T00:00:00Z) ride a
+    read-side legacy window and keep escalating exactly as they do today: their
+    stored `false` is overwhelmingly the old schema default materialized onto an
+    author who never wrote the key, every such stored row is escalating today,
+    and the window retires itself as pending requests drain — zero tenant rows
+    rewritten.
+  
+  Deployed metadata that omits `enabled` does not change behaviour (it
+  escalated before, it escalates after). What changes is that writing
+  `enabled: false` finally binds for newly opened requests — the declared
+  intent being honoured. To keep an SLA off, write `enabled: false`; to
+  escalate on timeout, an `escalation` block with `timeoutHours` is enough.
+  
+  <!-- adr-0087: registered approval-escalation-enabled-default-flip -->
+- 3690922: fix(plugin-approvals): the non-submitter recall refusal renders through the
+  Operation Message Catalog instead of a hardcoded English sentence (#11993, the
+  services-side half of the shape-A ruling)
+  
+  A user who opened a record someone else had submitted for approval, clicked
+  Recall and was correctly refused read the reason in English regardless of their
+  own locale. `@objectstack/rest`'s `handleApprovalError` ships this service's
+  thrown reason as the 403 body's human-readable `error`, and Console splices it
+  under its own localized label — so an operator in a fully Chinese deployment
+  read a Chinese prefix glued onto an English sentence they could not act on
+  (`撤回审批失败: <English>`).
+  
+  The refusal now renders through the shared Operation Message Catalog in
+  `@objectstack/spec/system` under the key `approval_recall_not_submitter` that
+  #12493 landed for it — the same mechanism `plugin-security`'s denial gates
+  already use, with the same resolution ladder (deployment override → the
+  caller's locale → `en` → the key) and the same guarantee that a misbehaving
+  i18n service cannot turn a 403 into a 500. All four platform locales (`en`,
+  `zh-CN`, `ja-JP`, `es-ES`) ship copy that names who *can* recall, rather than
+  dead-ending the reader.
+  
+  `ApprovalServiceOptions` gains an optional `messageTranslator` — a lazily
+  resolved, `II18nService.t`-compatible lookup, wired by `ApprovalsServicePlugin`
+  the same way `tenancyPosture` and the field-visibility source are, because the
+  i18n service is contributed by another plugin and may start later. It is what
+  makes the override address the catalog documents,
+  `errors.approval_recall_not_submitter`, actually take effect for this emitter;
+  a stack without an i18n service still renders the built-in catalog in the
+  caller's locale.
+  
+  **Not changed: who may recall an approval.** The gate is byte-identical — the
+  submitter, or a privileged admin releasing a stuck record (#3424). Only the
+  sentence the refusal carries is different, and the `FORBIDDEN:` code prefix
+  that the REST layer maps to 403 is untouched.
+  
+  The button-visibility half of #11993 — a non-submitter seeing a live recall
+  button at all — is not addressed here; see the issue for the measurement.
+- 599515d: Four more system objects declare their polymorphic pointer pair (#11386, ADR-0052 §5, adopting the carrier #11339 landed): `sys_audit_log.record_id`, `sys_approval_request.record_id`, `sys_record_share.record_id` and `sys_share_link.record_id` now carry `referenceVia: 'object_name'`. A seed row addressing one of these by the target's natural key resolves against the object its sibling column names, per row — so a packaged app can ship audit history, pending approvals, record grants and share links that actually attach to the records they are about, and the queries that give each row its meaning (the `{object_name, record_id}` index, the pending-request lock, the sharing middleware's grant lookup, the share link's fail-closed record-existence gate) match on the target's real id.
+  
+  The accept/reject contract changes with it on those four objects, deliberately and in the already-ruled direction: an unresolvable pointer on a DECLARED pair is a loud, counted failure instead of the old silent verbatim store. On a grant table that is the sharper win — a share whose `record_id` stayed a natural key enforced nothing while displaying as a grant, and was then deleted by the orphan sweep for describing a record that does not exist. Internal-id-shaped values still pass through verbatim, so a demo row about an already-deleted record (an `action: 'delete'` audit row) stays authorable. Undeclared text columns are untouched.
+  
+  The fifth object surveyed, `sys_automation_run` (`trigger_object` / `trigger_record_id`), deliberately STAYS UNDECLARED. Its pair has the same shape but its rows are not content about a record: a `paused` row is a live continuation the engine rehydrates on boot, terminal rows are telemetry under a 30-day sweep, and the object has no natural key to address rows by. The verdict, its reasons, and what would have to change to flip it are recorded on the field itself and pinned by a test.
+
+### Patch Changes
+
+- 1007134: fix(approvals): the #3424 override reaches a `pending` request only — override-recall of a `returned` request is now refused (#12775)
+  
+  **Behaviour change, declared explicitly (maintainer ruling 2026-09-02) so that
+  one revert of this changeset's PR restores the previous behaviour.**
+  
+  `ApprovalService.recall` admits two callers: the submitter, and a platform or
+  tenant admin releasing a stuck request (the #3424 privileged override). Recall
+  is also valid on the LATEST `returned` request of a run — the ADR-0044 revise
+  window, where the submitter abandons the revision instead of resubmitting.
+  Those two rules met above the state check: the override short-circuit carried
+  no status test of its own, so an override actor could recall a `returned`
+  request too. Nothing else on the platform said so — `isOverrideActor`'s doc
+  block names a PENDING request, `attachViewers` computes
+  `viewer.can_override` as `status === 'pending' && isOverrideActor(...)`, and
+  the `approval_recall` action's override arm reads that flag — so the reach was
+  API-only, never offered by any UI, and pinned by nothing.
+  
+  What changes:
+  
+  - **Override-recall of a `returned` request is refused.** The override
+    short-circuit in `recall` now applies only while the request is `pending`,
+    spelled exactly as the viewer flag is computed. On `returned` an override
+    actor is judged exactly as any other non-submitter and receives the existing
+    refusal: `403 FORBIDDEN` over REST, with the operation catalog's
+    `approval_recall_not_submitter` sentence. No new error code, no new envelope.
+  - **Only `pending` requests are override-recallable** — the same scope as the
+    other three override levers (approve / reject / reassign are pending-only at
+    their endpoints), and the same scope the viewer flag has always declared.
+  
+  What does not change:
+  
+  - The submitter's own recall of a `returned` request (the ADR-0044 revise
+    window) is untouched; so is the submitter's recall of a `pending` one.
+  - The override actor's recall of a `pending` request — the #3424 rescue of a
+    request routed to an unstaffed position — is untouched, lock release and all.
+  - The refusal's message, wire code and developer log line keep their shape; the
+    log line now also names the request status it refused on.
+  
+  Why: the gate now agrees with the viewer flag and the documented contract at
+  one point instead of disagreeing with both. If a real operator workflow
+  depended on override-recalling a `returned` request, this is the change to
+  revert; the `returned` record lock is already released, so the stuck-record
+  rescue motive that justifies the override does not apply on that status.
+- b579b03: fix(approvals): refuse loudly when a successful mutation's read-back is org-filtered out (#12769)
+  
+  Ten ApprovalService result sites (decide/decideNode, recall, sendBack, resubmit,
+  reassign, remind, requestInfo, comment) read the row they just mutated back
+  through the caller's organization narrowing and asserted the result non-null
+  (`fresh!`). For an org-less request row — produced by construction on every
+  schedule / time-relative / api trigger run (#10131; pinned rather than repaired
+  by #9132) — an org-scoped caller's read-back matches nothing, so a call that
+  SUCCEEDED shipped a well-formed success envelope whose declared-non-null
+  `request` was `null` (HTTP 200 with `"request": null` through the REST
+  pass-through), and a client dereferencing `request.status` crashed.
+  
+  The read-back now throws `READ_BACK_FAILED: …` instead: the write is recorded
+  and NOT rolled back; only the result echo is refused, loudly. Over REST the
+  error surfaces through each route's existing 500 arm (`APPROVAL_RECALL_FAILED`
+  and siblings — already-registered codes) with the `READ_BACK_FAILED:` message
+  in the body. No declared result type changed — the declared-non-null `request`
+  is now always true because a result that cannot be built is never returned. The
+  caller-org narrowing in `loadRequest` (tenancy wall) is deliberately untouched.
+- 2a05851: fix(plugin-approvals): the `approval_recall` action shows for the #3424 admin override (#12716)
+  
+  `ApprovalService.recall` has admitted two callers since #3424 — the submitter,
+  and a platform/tenant admin releasing a stuck request — and `isOverrideActor`'s
+  own doc block names recall as one of the four override levers in so many words.
+  The declared action that reaches that endpoint did not agree: `approval_recall`'s
+  `visible` predicate was submitter-only, while its three siblings
+  (`approval_approve` / `approval_reject` / `approval_reassign`) each OR in
+  `record.viewer.can_override`.
+  
+  So recall was the one lever the override covers whose button never appeared. An
+  admin rescuing an approval routed to an unstaffed position could approve or
+  reject their way out — writing a decision nobody made — or reassign it, but
+  could not simply withdraw it. This is declared-vs-enforced drift in the less
+  usual direction: a capability the server grants that no UI entry exposed.
+  
+  `approval_recall`'s `visible` now ORs in `record.viewer.can_override`, spelled
+  byte-identically to the three siblings.
+  
+  Not a permission change: the service's authorisation set is untouched, and
+  `can_override` was already computed server-side for every viewer.
+  
+  **Pending-only, and enforced rather than asserted.** The new arm carries no
+  status test of its own — neither do the siblings — because the flag is already
+  status-scoped where it is computed: `attachViewers` sets
+  `can_override: row.status === 'pending' && isOverrideActor(...)`, ANDed, so the
+  flag can never be true off `pending` and the arm is pending-only in effect
+  however CEL groups the expression. The submitter's own `returned` (revise
+  window) arm is unchanged. Pinned in both directions, with the flag's own scoping
+  pinned against the real service on a genuinely `returned` row.
+- 9bc403e: Correct what `sys_approval_request.payload_json` is documented to be FOR — it is audit evidence served redacted per reader, not a notification source
+  
+  The object's module docstring — which ships to consumers in the package's type
+  declarations — justified the snapshot column with: *"used by notifications so
+  they can render before the record is locked or changed."* That consumer does
+  not exist. Measured against every `this.notify(...)` call site in
+  `approval-service.ts`, all **12** of them, each passes a payload of
+  `{ title, message, actionUrl }` (two also carry `actions`), built from
+  `object_name` / `record_id` and the caller's own comment. **None** reads
+  `payload_json` or the parsed `payload`.
+  
+  This is more than tidiness: that sentence was the only documented
+  justification for the column holding a *full* row, and it was cited as such
+  during the #10749 consumer inventory before anyone checked it. The docstring
+  now states the real reason — the snapshot is retained as **audit evidence of
+  what was actually submitted**, so the column stays whole at rest, and is served
+  **redacted per reader** by the subject object's field-level read controls via
+  `getReadableFields`, on the approvals-inbox door and the generic data door
+  alike (#11039).
+  
+  The field's own `description` is deliberately unchanged: `Record snapshot at
+  submission time` is accurate, and it — unlike the JSDoc — is the string
+  extracted into the four generated i18n bundles, so no translation leaf moves
+  and no locale is left holding an English seed.
+  
+  Also carried in the same pass, the residual documentation the #10749 closure
+  assigned to the next docs touch in this lane: `payload-redaction.ts` recorded
+  `hidden`-vs-serialization as an **open** `packages/spec` question, and it has
+  since been ruled (maintainer, 2026-08-24, applying the 2026-08-12 lineage).
+  That paragraph now states the ruling — **`hidden: true` stays UI-only;
+  `internal: true` is the serialization primitive** — so an author who needs a
+  field kept out of read results is pointed at `internal: true` (#7728,
+  ADR-0049) rather than at `hidden`, which never governed serialization.
+  
+  Documentation only: no runtime behaviour, no schema field, and no public type
+  signature changes.
+- 59c0891: fix(plugin-approvals): the stranded-request inspection now sees a run that FAILED mid-resume (#13909)
+  
+  `ApprovalService.inspectStrandedRequests` was structurally blind to the shape
+  #13909 owns, and reported `0` for it — the one shape an operator most needs to
+  see.
+  
+  **The mechanism.** `AutomationEngine.resumeInternal` consumes the suspension
+  *before* running the downstream nodes: `forgetSuspendedRun(run, 'resumed')`
+  precedes `traverseNext`. A downstream node that merely THREW therefore threw
+  with the pause already gone, the catch arm recorded the run `failed`, and
+  nothing can resume it again (`resume` answers `RUN_NOT_FOUND`, `cancelRun` is a
+  no-op). The decision is durable and the flow stopped half-way.
+  
+  **Why the inspection could not see it.** Its second oracle was
+  `if (terminal) continue` — the existence of ANY run-history row ended the check,
+  on the reading "the run ran to a terminal state, it is not dangling". But the
+  terminal row here is written BY the failure that stranded the request, so the
+  evidence of the defect was read as evidence of health. `releaseDeadRunRequests`
+  cannot see it either: it scans `status: 'pending'`, and the decision is what
+  took the row out of `pending`.
+  
+  **The widening, and its limits.** The second oracle now classifies the run
+  instead of merely detecting it. A `failed` run is reported; `completed`,
+  `cancelled` and `paused` are each still skipped, one named reason at a time, and
+  a status this code does not recognise is skipped too — the spec's
+  `ExecutionStatus` vocabulary is wider than the four statuses the engine writes,
+  and a future status must not become a silent false positive. `paused` in
+  particular stays skipped because "the suspension is gone but no terminal row is
+  written yet" is exactly what a resume IN FLIGHT looks like. The first oracle is
+  unchanged: a run the suspension store still holds is alive, and an unreadable
+  store is still counted `undetermined`, never condemned.
+  
+  Reported rows now carry `runState: 'missing' | 'failed'` (new exported type
+  `StrandedRunState`), because the two shapes need different remedies: a `missing`
+  run has no history to read, a `failed` one has a step log and an error naming
+  the node that threw. The sweep's own warning splits its counts the same way.
+  `StrandedApprovalRequest` is an output-only reporting shape the service
+  produces; the added field is not constructed by any caller in this repo.
+  
+  **Still read-only, and still not a census.** No status is changed and no run is
+  cancelled — the decision genuinely happened. This makes the condition *visible*
+  in a deployment; how many runs are already in it can only be answered against
+  that deployment's own tables. Nothing here changes the resume ordering, which
+  is #13909's own next slice.
+- 4bb09e8: feat(service-automation): an operator can put back a suspension a failed resume consumed (#13909)
+  
+  A run that was resumed and whose downstream node merely **threw** was
+  terminally unresumable, and nothing anywhere could move it. The engine consumes
+  the suspension *before* running downstream nodes, so such a node throws with
+  the pause already gone and the catch arm records the run `failed`: `resume`
+  then answers `RUN_NOT_FOUND`, `cancelRun` is a no-op, and none of the engine's
+  other public methods takes the run anywhere. A deployment could enter that
+  state and never leave it.
+  
+  `AutomationEngine.restoreConsumedSuspension(runId, { requestedBy, reason })`
+  is the exit. It puts the consumed suspension back — verbatim, as it stood at
+  the pause — so the run is resumable again through an ordinary `resume`, with
+  the same authority gate, the same screen validation and the same idempotency
+  guard as any other.
+  
+  - **Deliberate, never automatic.** Nothing calls it on its own: no retry, no
+    sweeper. An operator asks for one run, by id.
+  - **Safe to refuse, with the reason named.** A run that is still suspended, one
+    whose resume is *in flight*, one that completed, one that was cancelled, one
+    that never suspended, and an unknown id each get their own refusal — as does
+    an unreadable store, which is refused rather than guessed at.
+  - **Idempotent.** A suspension is keyed by run id, so however many operators
+    ask there is one resumable pause and no extra traversal — the verb re-arms
+    and stops. Two racing callers in one process get one restore and one refusal.
+  - **It leaves a trace.** The restore is logged with the run, flow, node, when
+    the suspension was consumed, who asked and why, and the run is recorded
+    `paused` again so the repair is not invisible. Across a restart the exit
+    still works: the consumed suspension rides the run's own terminal history row
+    (in `sys_automation_run` columns that already existed), and a run that is
+    restored and then finishes clears it.
+  
+  ⚠️ A repair, not a prevention. The failed attempt's side effects are **not**
+  undone and the original resume signal is **not** replayed — the continuation
+  must be re-issued. Whether the pause should survive a downstream throw at all
+  is a separate, unruled decision (#13937); this change leaves the resume
+  ordering, `forgetSuspendedRun` and `traverseNext` exactly as they are, mints no
+  new run status, and works whichever way that is ruled — the runs already stuck
+  today are not released by changing what future resumes do.
+  
+  `plugin-approvals` carries a comment correction only: its organization backfill
+  documented `context_json` as never written on terminal rows, which this change
+  makes false for that one class of row. No behaviour change there.
+- 5a916c4: **Ops:** a one-off, idempotent backfill for the platform rows the pre-#10101 writers stranded with no organization — dry run first (#11308).
+  
+  #10101 fixed the WRITERS: a `sys_approval_request` and a `sys_automation_run` are now stamped from the SUBJECT record's organization, with the acting context as the ruled fallback. It wrote nothing to existing rows, so the population produced before it persists — a **pending** org-less approval request LOCKS the record it is about while being invisible in every organization-scoped inbox, its own owner's included, and automation-run history stays unattributed. This is the repair for those rows, on the maintainer's 2026-08-23 ruling (direction 3).
+  
+  `packages/plugins/plugin-approvals/src/backfill-platform-row-organizations.ts` sweeps `sys_approval_request` (with its `sys_approval_action` / `sys_approval_approver` children, which move with their request) and `sys_automation_run`. It scans only rows whose organization column is unset, re-reads each row's subject at repair time — live record first, the write-time snapshot (`payload_json` / `context_json`'s `record`) second for a subject that has since been deleted — and stamps the platform row with the subject's own organization.
+  
+  **Dry run first, and by default.** `planPlatformRowOrganizationBackfill(engine)` reads only and returns a per-object report naming every row it would touch; `runPlatformRowOrganizationBackfill(engine, { dryRun: false })` writes. Nothing runs at boot and nothing is scheduled: this is an operator-invoked module, run once against an affected install.
+  
+  **Rows whose subject is equally org-less are counted and named, never written.** The acting-context fallback the writers apply is not available to a repair — the acting context is gone — and inventing one stays vetoed. Those ids are reported so the population is checkable and stays visible.
+  
+  **`sys_api_key`'s divergence is preserved, not flattened.** Both the column read on a subject and the column written on a platform row are resolved from the registered schema through the shared `createRecordOrganizationResolver` (`@objectstack/metadata-core`), so a platform row ABOUT an API key is repaired from that object's stamp-only `active_organization_id` (limb 0, #8778) and the credential table itself is never written to.
+  
+  **Idempotent, and asserted rather than claimed.** Every scan is `WHERE <organization column> IS NULL` and every write fills that column, so a repaired row cannot match again; the test suite runs the sweep twice and pins the second run at zero writes.
+  
+  Publishes no runtime code: the module is not exported from the package index and not bundled into `dist` (`tsup` builds `src/index.ts`). It is graded rather than skipped because the release notes are where an operator of an affected install learns the repair exists, what it will and will not touch, and that the dry run comes first.
+- 30928a6: fix(i18n): read the provenance companion at serving time, not only record it (#12642)
+  
+  Maintainer ruling #12069 Option A (#11671) landed translation provenance as
+  **two** halves: `os i18n extract --source-hashes` RECORDS which source revision
+  a generated leaf is still a byte copy of, and `withSourceFallback` READS those
+  records at serving time and substitutes the current source for a leaf whose
+  source has moved underneath it. The recording half was then rolled out to every
+  bundle set. The reading half was not — measured on `main`: provenance
+  **recorded in 9 of 9** bundle sets and **read at serving time in 1**.
+  
+  The other eight assembled their `TranslationBundle` straight from the raw
+  generated modules and never consulted the companion sitting beside them, so
+  they recorded the drift and went on serving the superseded draft. Nothing said
+  so: `check:i18n` compares key sets and they still matched, `check:i18n-coverage`
+  counts a present leaf as translated, and `check:i18n-stale-fill`'s cross-locale
+  rule needs a SECOND locale holding the same stale bytes before it can testify.
+  The measured case had one locale and no second witness.
+  
+  All eight are wired here, in the shape `@objectstack/platform-objects`'s own
+  `metadata-translations/index.ts` uses — the committed
+  `<locale>.source-hashes.generated.ts` passed as the fourth argument, the third
+  left `undefined` because these sets have no hand-authored sections. Provenance
+  is now recorded in 9 of 9 sets and served in 9 of 9.
+  
+  `@objectstack/plugin-webhooks` was the last of them and is the only one whose
+  manifest changed: `withSourceFallback` lives in `@objectstack/platform-objects`,
+  which that package did not declare. It was **already in that package's install
+  closure** through `@objectstack/service-messaging`, so the edge declares a
+  resolution that already resolved rather than adding a package to the graph —
+  and relying on it undeclared would have been a phantom dependency under this
+  repo's strict package manager.
+  
+  `check:i18n-stale-fill` gains a second verdict, **UNSERVED PROVENANCE**, so this
+  cannot silently come apart again: a bundle set that commits a companion and
+  does not consult it at serving time now fails the build, including a tenth set
+  that lands tomorrow.
+  
+  **Graded `patch`, and the grade is the interesting part.** No API changes, no
+  new exported surface, and no key set moves — substitution was chosen over
+  deletion precisely so key-set claims stay put (ruling #8765 Option B). What
+  changes is which STRING a stale leaf serves. On this tree that is **zero
+  leaves**: a record is only ever written for a leaf that IS a byte copy of the
+  current source, so the companions arrive 0-stale by construction. The change is
+  in what happens the next time a source string moves — the reader sees the
+  English source rather than a superseded draft of it, which is the same
+  degradation an untranslated key already produces and not a new state.
+- de47336: chore(i18n): roll the generated-leaf provenance companion out to the remaining bundle sets (#12559)
+  
+  `os i18n extract --source-hashes` (#11671, maintainer ruling #12069 Option A)
+  records, per generated translation leaf, the digest of the source revision that
+  leaf is **still a byte copy of** — the one signal that tells a stale fill from a
+  real translation once the source has moved and the two stopped being
+  distinguishable by value. It shipped opt-in, and exactly one of the nine i18n
+  bundle sets opted in. A landed detector, a changeset announcing it and a green
+  gate read together as *"generated translation staleness is now caught"*; for
+  eight of nine sets it was not, and the thing making it not caught was a single
+  absent flag in an extract config — invisible from all three of those surfaces.
+  
+  **All eight remaining sets now opt in** — `plugin-approvals`, `plugin-audit`,
+  `plugin-security`, `plugin-sharing`, `plugin-webhooks`, `service-messaging`,
+  `service-realtime`, `service-storage`. Each documents `source-hashes` in its
+  extract config and commits three `<locale>.source-hashes.generated.ts`
+  companions, produced by the same extract run as the bundles they sit beside
+  (`check:i18n` compares them byte-for-byte, so they cannot be written by hand).
+  `check:i18n` now reports 7 bundles per set where it reported 4, and 11 for
+  `platform-objects` where it reported 8.
+  
+  **Records count what is currently RECORDABLE, never what is covered.** A record
+  is written only for a leaf that *is* right now a byte copy of the current
+  source, so a fully translated locale starts with an empty table — which is the
+  instrument armed, not an instrument that measures nothing: the entry appears by
+  itself on the first extract after a leaf becomes a fill. Measured at this
+  commit, per set over its three translated locales: `service-messaging` 289,
+  `plugin-approvals` 61, `plugin-security` 33, `plugin-webhooks` 20,
+  `plugin-audit` 8, `service-storage` 7, `plugin-sharing` 1 (es-ES only; zh-CN and
+  ja-JP are fully translated and start empty), `service-realtime` 0 (all three
+  locales fully translated). **419 records written across the eight sets, 0
+  stale.**
+  
+  **One extractor fix the rollout forced.** `--source-hashes` had one user, and
+  that user commits both generated sections, so the interaction with
+  `--no-metadata-forms` had never been exercised. The provenance table is computed
+  over every generated section the extractor builds; the eight sets here commit no
+  metadata-forms bundle, and their `metadataForms` subtree — absent from their
+  merge baseline — arrives as a fresh `--fill=default` copy of `en`, so every leaf
+  of it was recordable. First measured on `plugin-audit`: **763 records, of which
+  2 were its own objects and 761 were digests of the Studio metadata-form baseline
+  `@objectstack/platform-objects` owns.** Those records are unreadable in the
+  package holding them and would have rewritten all 24 companions on any unrelated
+  `*.form.ts` change in `packages/spec` — the cross-package coupling ADR-0029 D8
+  and every `bundle-ownership.test.ts` keep out of committed bundles. The
+  companion now covers exactly the sections a run commits, decided by the same two
+  predicates that decide the bundle files. `platform-objects` commits both, so its
+  three committed companions are byte-for-byte unchanged.
+  
+  **Grade: `patch`, and behaviour on the day it lands is unchanged for every
+  leaf.** A record is written only where a leaf is currently a byte copy of the
+  **current** source, so every record written equals the current digest and none
+  of them can be stale; the mechanism cannot arrive red. No committed translation
+  bundle changed a byte, no public API moved, and no leaf's rendered text changed.
+  `narrowToCommittedSections` is new but internal to `@objectstack/cli` — the
+  package's entrypoint does not re-export the extractor utils.
+  
+  **What this does not do**, stated so the boundary is not inferred wrongly a
+  second time: these eight sets now *record* provenance. Reading it at serving
+  time is `withSourceFallback`, and that is still wired in
+  `@objectstack/platform-objects` alone — so a stale fill in one of the eight is
+  now recorded and reportable, but not yet substituted at runtime. Tracked
+  separately.
+- ad54eb3: feat(tooling): onboard all 14 `packages/plugins/**` packages into `check:test-typecheck` (#14062)
+  
+  Every plugin package now has a `tsconfig.test.json` compiled by the shared
+  `check:test-typecheck` gate, and its `typecheck` script names it. Before this,
+  the shrink-only `test-typecheck-debt.json` ratchet said **nothing** about a
+  third of the repo's runtime surface: 14 packages, 1 `tsconfig.test.json`
+  (`plugin-security`, wired directly to `tsc` rather than to the instrument), and
+  0 `check:test-typecheck` scripts.
+  
+  Onboarded as a family by the director ruling of 2026-09-01 on #14062
+  (maintainer verbatim: 「同意」), which also carries the #5286 maintainer
+  authority the starting ledgers need. The smaller branch triage recommended —
+  declare the instrument's scope and re-site the two compile-time pins — was
+  recorded as considered and not taken: an instrument silent over a third of the
+  runtime surface is a hole readers generalise across, and that costs more than
+  fourteen tsconfigs.
+  
+  **Measured, not assumed** (at `e80889095`, workspace closure built first). Four
+  packages carry residue and therefore a starting ledger — plugin-approvals 324
+  over 8 files, plugin-auth 94 over 10, plugin-sharing 3 over 2,
+  knowledge-ragflow 3 over 1. The other ten measure **zero** and deliberately get
+  no ledger file at all: the gate reads a missing ledger as `{ entries: {} }`, so
+  any error there is red immediately with no entry to be added to — strictly
+  stronger than a ledger holding nothing, and the call `plugin-security` had
+  already recorded for itself.
+  
+  ⛔ **This does not repair 345 type errors.** Per ruling item 3 it makes the
+  ratchet able to *see* them; paydown follows the ratchet's own shrink-only
+  discipline on its own cards. No test file is edited here.
+  
+  Two corrections to the finding's own prose, both measured: the exclusion is
+  narrower than "no plugin package compiles its tests" — 9 of the 14 already
+  compiled their tests inside the `typecheck`-invoked build config, at zero
+  errors — and `exec-context-annotation.pin.ts` is a `.pin.ts`, which
+  `**/*.test.ts` never excluded, so its directives were already live. The pin
+  this change genuinely makes real is
+  `plugin-approvals/src/manager-org-screen-parity.contract.test.ts`, which no tsc
+  program had ever read.
+- 1272f0a: Promote `resolveRecordOrganizationField` to the shared platform-row organization resolver (the cloud#1395 Option A ruling): a platform row's organization is the SUBJECT record's organization; actor context is the fallback, never the primary.
+  
+  - `@objectstack/metadata-core` now owns the resolver (`resolveRecordOrganizationField`, `createFieldPresenceProbe`, and the new memoized `createRecordOrganizationResolver` factory) so all three sanctioned writers share one precedence.
+  - `@objectstack/plugin-approvals`: `openNodeRequest` stamps `sys_approval_request`, `sys_approval_action` and the `sys_approval_approver` index from the subject record's organization (acting context as fallback). Fixes the measured defect where every schedule / time-relative / api triggered approval persisted `organization_id = NULL` — locking the record it was about while being invisible in every inbox, its owner's included.
+  - `@objectstack/service-automation`: `sys_automation_run` rows (paused and terminal) resolve their organization from the trigger-record snapshot, with the acting tenant as fallback. Terminal rows previously never carried an organization at all.
+  - `@objectstack/plugin-audit`: the resolver moved out; the package re-exports it from the original paths, behavior unchanged.
+  
+  The `sys_api_key` divergence is preserved and pinned: `tenancy.organizationField` (who a row is ABOUT) still wins over the tenant wall answer, and the credential table stays unwalled.
+- Updated dependencies [809d417]
+- Updated dependencies [387e231]
+- Updated dependencies [f794e4e]
+- Updated dependencies [cae2169]
+- Updated dependencies [b812a54]
+- Updated dependencies [2d4fa75]
+- Updated dependencies [0e4e51b]
+- Updated dependencies [e84bbf6]
+- Updated dependencies [effae80]
+- Updated dependencies [efb3513]
+- Updated dependencies [d62f990]
+- Updated dependencies [c45d8e6]
+- Updated dependencies [2e3e8c7]
+- Updated dependencies [e621291]
+- Updated dependencies [655b106]
+- Updated dependencies [40a93b5]
+- Updated dependencies [101ad2c]
+- Updated dependencies [d5b330d]
+- Updated dependencies [dda969c]
+- Updated dependencies [1f45690]
+- Updated dependencies [277948f]
+- Updated dependencies [8bdd955]
+- Updated dependencies [54e2d36]
+- Updated dependencies [b745157]
+- Updated dependencies [f3bbbef]
+- Updated dependencies [4f24e9d]
+- Updated dependencies [e27583e]
+- Updated dependencies [4bd6faa]
+- Updated dependencies [86cbe37]
+- Updated dependencies [6a180e4]
+- Updated dependencies [474242f]
+- Updated dependencies [63cd487]
+- Updated dependencies [bd4aa4e]
+- Updated dependencies [803eaab]
+- Updated dependencies [f8e8f03]
+- Updated dependencies [983edf1]
+- Updated dependencies [eae824e]
+- Updated dependencies [f6fa22c]
+- Updated dependencies [8a483b3]
+- Updated dependencies [3bc2e38]
+- Updated dependencies [97bcd99]
+- Updated dependencies [df59de0]
+- Updated dependencies [96e25a8]
+- Updated dependencies [713f83f]
+- Updated dependencies [77d4b3c]
+- Updated dependencies [f75a38a]
+- Updated dependencies [7a25e7d]
+- Updated dependencies [1fa05a6]
+- Updated dependencies [c85a265]
+- Updated dependencies [dcb10a5]
+- Updated dependencies [773a999]
+- Updated dependencies [35dffea]
+- Updated dependencies [d8024f0]
+- Updated dependencies [8120808]
+- Updated dependencies [776a098]
+- Updated dependencies [5060877]
+- Updated dependencies [4f6325d]
+- Updated dependencies [52954c0]
+- Updated dependencies [2aa8456]
+- Updated dependencies [d23ebb9]
+- Updated dependencies [93809a3]
+- Updated dependencies [7c0d0c3]
+- Updated dependencies [daae7aa]
+- Updated dependencies [8dc22d6]
+- Updated dependencies [fa5d137]
+- Updated dependencies [a392dbf]
+- Updated dependencies [279431e]
+- Updated dependencies [948dd6b]
+- Updated dependencies [3b4c56c]
+- Updated dependencies [ae8edd2]
+- Updated dependencies [e25403c]
+- Updated dependencies [a81aa9d]
+- Updated dependencies [64baa68]
+- Updated dependencies [9fa70d7]
+- Updated dependencies [09db64a]
+- Updated dependencies [92916e7]
+- Updated dependencies [a84f3ea]
+- Updated dependencies [f2eaae8]
+- Updated dependencies [56c093c]
+- Updated dependencies [c09451b]
+- Updated dependencies [ba64877]
+- Updated dependencies [e7191ce]
+- Updated dependencies [7345308]
+- Updated dependencies [79b6a22]
+- Updated dependencies [30d96ab]
+- Updated dependencies [f658793]
+- Updated dependencies [0fd4899]
+- Updated dependencies [c95ad19]
+- Updated dependencies [e58ea8b]
+- Updated dependencies [4a17645]
+- Updated dependencies [3795c5f]
+- Updated dependencies [8ab926b]
+- Updated dependencies [7317cf2]
+- Updated dependencies [e25e839]
+- Updated dependencies [5997207]
+- Updated dependencies [8b13cc8]
+- Updated dependencies [00d8f65]
+- Updated dependencies [4a4a35d]
+- Updated dependencies [4a4a35d]
+- Updated dependencies [86e765a]
+- Updated dependencies [1d7e76a]
+- Updated dependencies [53dc739]
+- Updated dependencies [fd289be]
+- Updated dependencies [03bf7b1]
+- Updated dependencies [f90e820]
+- Updated dependencies [18d816a]
+- Updated dependencies [e8bd715]
+- Updated dependencies [b91c351]
+- Updated dependencies [a28a3c0]
+- Updated dependencies [200d255]
+- Updated dependencies [2852acc]
+- Updated dependencies [daeaaf9]
+- Updated dependencies [c459da6]
+- Updated dependencies [e914733]
+- Updated dependencies [1d8ad0f]
+- Updated dependencies [9738c35]
+- Updated dependencies [f887e52]
+- Updated dependencies [881f8d8]
+- Updated dependencies [3bfa1e6]
+- Updated dependencies [0a8ebf3]
+- Updated dependencies [901355c]
+- Updated dependencies [34ce8e7]
+- Updated dependencies [33681ea]
+- Updated dependencies [bfe13c8]
+- Updated dependencies [0fb3044]
+- Updated dependencies [4635f3e]
+- Updated dependencies [fd289be]
+- Updated dependencies [ee3595c]
+- Updated dependencies [09b4f4e]
+- Updated dependencies [b2eab95]
+- Updated dependencies [93940d4]
+- Updated dependencies [3a04b01]
+- Updated dependencies [45b9051]
+- Updated dependencies [3954fb7]
+- Updated dependencies [4805b56]
+- Updated dependencies [b9e9227]
+- Updated dependencies [d395692]
+- Updated dependencies [5894d30]
+- Updated dependencies [a3765f6]
+- Updated dependencies [2d5cee3]
+- Updated dependencies [e22158f]
+- Updated dependencies [7404925]
+- Updated dependencies [0c2334f]
+- Updated dependencies [778c59f]
+- Updated dependencies [d2619fd]
+- Updated dependencies [af56546]
+- Updated dependencies [6acb11a]
+- Updated dependencies [33c5fd3]
+- Updated dependencies [20b0fdb]
+- Updated dependencies [905019b]
+- Updated dependencies [a286411]
+- Updated dependencies [98c0d33]
+- Updated dependencies [368a82e]
+- Updated dependencies [a3d5724]
+- Updated dependencies [93ea19b]
+- Updated dependencies [9ee2dcf]
+- Updated dependencies [8cb96ec]
+- Updated dependencies [8f10a79]
+- Updated dependencies [6269a55]
+- Updated dependencies [a17da05]
+- Updated dependencies [a8c00e2]
+- Updated dependencies [22e5236]
+- Updated dependencies [0fb8760]
+- Updated dependencies [e5ce2ed]
+- Updated dependencies [be21955]
+- Updated dependencies [bc56e18]
+- Updated dependencies [be21955]
+- Updated dependencies [a9ee989]
+- Updated dependencies [4d0d944]
+- Updated dependencies [15d58db]
+- Updated dependencies [d63b014]
+- Updated dependencies [9abe4e4]
+- Updated dependencies [2cc7122]
+- Updated dependencies [50d6c92]
+- Updated dependencies [15d55fb]
+- Updated dependencies [9e0ba21]
+- Updated dependencies [311433f]
+- Updated dependencies [3e5ad08]
+- Updated dependencies [9abe4e4]
+- Updated dependencies [b7131f3]
+- Updated dependencies [e5812fa]
+- Updated dependencies [7085f90]
+- Updated dependencies [dee4dd4]
+- Updated dependencies [ce7e497]
+- Updated dependencies [51ecb2f]
+- Updated dependencies [9086761]
+- Updated dependencies [f6344e7]
+- Updated dependencies [42a117b]
+- Updated dependencies [1401ae7]
+- Updated dependencies [4297fe7]
+- Updated dependencies [e398863]
+- Updated dependencies [d16df74]
+- Updated dependencies [d79c602]
+- Updated dependencies [f11fc61]
+- Updated dependencies [e808890]
+- Updated dependencies [8f79379]
+- Updated dependencies [e6ca40e]
+- Updated dependencies [0c77ea4]
+- Updated dependencies [52954c0]
+- Updated dependencies [89eb997]
+- Updated dependencies [7131f12]
+- Updated dependencies [aa5994e]
+- Updated dependencies [be93457]
+- Updated dependencies [a65db76]
+- Updated dependencies [2cf5a96]
+- Updated dependencies [15eb2c9]
+- Updated dependencies [5691b07]
+- Updated dependencies [2a6122b]
+- Updated dependencies [225e769]
+- Updated dependencies [8af88dd]
+- Updated dependencies [fb5fbb8]
+- Updated dependencies [d7b3963]
+- Updated dependencies [33184fd]
+- Updated dependencies [7c41693]
+- Updated dependencies [b72db01]
+- Updated dependencies [dce5cd4]
+- Updated dependencies [9688f58]
+- Updated dependencies [556ebc1]
+- Updated dependencies [177ebdc]
+- Updated dependencies [8d237b4]
+- Updated dependencies [2d2e6f0]
+- Updated dependencies [2d8dd8d]
+- Updated dependencies [22d573e]
+- Updated dependencies [b5a2398]
+- Updated dependencies [348860c]
+- Updated dependencies [5383fa6]
+- Updated dependencies [5b3ff63]
+- Updated dependencies [1a6a19c]
+- Updated dependencies [064d484]
+- Updated dependencies [527e050]
+- Updated dependencies [dd33bf9]
+- Updated dependencies [4cb2a90]
+- Updated dependencies [74a7804]
+- Updated dependencies [53d3689]
+- Updated dependencies [b3a63d3]
+- Updated dependencies [49f0dcf]
+- Updated dependencies [033a34c]
+- Updated dependencies [4d25d22]
+- Updated dependencies [1ffee51]
+- Updated dependencies [5ae4303]
+- Updated dependencies [ece4dad]
+- Updated dependencies [e9b377e]
+- Updated dependencies [146f448]
+- Updated dependencies [735f5c7]
+- Updated dependencies [a7e18de]
+- Updated dependencies [366f895]
+- Updated dependencies [dc75ba8]
+- Updated dependencies [cce0aa9]
+- Updated dependencies [e764507]
+- Updated dependencies [cff17af]
+- Updated dependencies [39404f3]
+- Updated dependencies [ca1965f]
+- Updated dependencies [8619f95]
+- Updated dependencies [b706af9]
+- Updated dependencies [db8c288]
+- Updated dependencies [0e5fe7f]
+- Updated dependencies [add4360]
+- Updated dependencies [e0abc38]
+- Updated dependencies [fc9ba76]
+- Updated dependencies [1272f0a]
+- Updated dependencies [0f94cc7]
+- Updated dependencies [a11c1a5]
+- Updated dependencies [71f9cd1]
+- Updated dependencies [ee17d86]
+- Updated dependencies [cdbd920]
+- Updated dependencies [18c432e]
+- Updated dependencies [3c418c4]
+- Updated dependencies [fa8715a]
+- Updated dependencies [a933ed7]
+- Updated dependencies [b3ca463]
+- Updated dependencies [a933ed7]
+- Updated dependencies [0d4a6a8]
+- Updated dependencies [518d5e5]
+- Updated dependencies [6643ba1]
+- Updated dependencies [eeba2ef]
+- Updated dependencies [ec4c4d2]
+- Updated dependencies [424f73c]
+- Updated dependencies [cccbe51]
+- Updated dependencies [a8d6b1d]
+- Updated dependencies [e4a7695]
+- Updated dependencies [87075b1]
+- Updated dependencies [fc58a99]
+- Updated dependencies [14cfc00]
+- Updated dependencies [1c6f7b4]
+- Updated dependencies [e854a53]
+- Updated dependencies [dfebfc8]
+- Updated dependencies [598b7ec]
+- Updated dependencies [d028b37]
+- Updated dependencies [f7b25c5]
+- Updated dependencies [122ef38]
+- Updated dependencies [4a37870]
+- Updated dependencies [428f9b2]
+- Updated dependencies [aa7ff56]
+- Updated dependencies [811a3c2]
+- Updated dependencies [1401ae7]
+- Updated dependencies [2fd3f1c]
+- Updated dependencies [c41b42e]
+- Updated dependencies [d41d166]
+- Updated dependencies [c4db311]
+- Updated dependencies [750fff5]
+- Updated dependencies [c19035e]
+- Updated dependencies [ececf7a]
+- Updated dependencies [d173125]
+- Updated dependencies [8eeca27]
+- Updated dependencies [8425c17]
+- Updated dependencies [a5ef1d8]
+- Updated dependencies [87ad30c]
+- Updated dependencies [772d5de]
+- Updated dependencies [ce80ec2]
+- Updated dependencies [b372318]
+- Updated dependencies [97a2263]
+- Updated dependencies [29d0676]
+- Updated dependencies [0169d49]
+- Updated dependencies [6bd3231]
+- Updated dependencies [d2b5ba8]
+- Updated dependencies [b799ac5]
+- Updated dependencies [8f74307]
+- Updated dependencies [d23dc08]
+- Updated dependencies [038f333]
+- Updated dependencies [644ad50]
+- Updated dependencies [9735662]
+- Updated dependencies [4d5b4f8]
+- Updated dependencies [5d16379]
+- Updated dependencies [0da7cd2]
+- Updated dependencies [28a5c3e]
+- Updated dependencies [4bc18e5]
+- Updated dependencies [9f57f1e]
+  - @objectstack/spec@17.3.0
+  - @objectstack/platform-objects@17.3.0
+  - @objectstack/core@17.3.0
+  - @objectstack/types@17.3.0
+  - @objectstack/metadata-core@17.3.0
+  - @objectstack/formula@17.3.0
+
 ## 17.2.0
 
 ### Minor Changes

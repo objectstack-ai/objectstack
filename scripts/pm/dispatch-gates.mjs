@@ -3101,6 +3101,7 @@ const BARE_ENTRY_POINT_NAME = 'selfTest';
 const COMPOUND_ANCHOR_LEDGER = [
   ['packages/lint/scripts/check-doc-formula-expressions.mjs', 'specSelfTest', false],
   ['packages/lint/scripts/check-doc-formula-expressions.mjs', 'fieldRuleSelfTest', false],
+  ['scripts/audits/14744-before-update-per-row-value-census.mjs', 'runSelfTest', false],
   ['scripts/check-comment-mask-corpus.mjs', 'runSelfTestCases', false],
   ['scripts/check-doc-authoring.mjs', 'selfTestRule3', false],
   ['scripts/check-doc-authoring.mjs', 'selfTestPackagesProse', false],
