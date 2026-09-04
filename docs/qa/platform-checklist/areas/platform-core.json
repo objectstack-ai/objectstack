@@ -1385,7 +1385,7 @@
       "title": "The activation ledger's registration home: sys_metadata_activation is registered by PlatformObjectsPlugin under its OWN manifest, so packaged disable works with or without the automation service — one owner, datasource binding carried across the move",
       "since": "v17",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -1401,7 +1401,7 @@
       },
       "steps": [
         "run the pinned suite: pnpm --filter @objectstack/dogfood exec vitest run test/packaged-activation-ledger-reach.dogfood.test.ts — BOTH describes: '#12359 — actions and NO automation service' (the 503-turnaround leg, bootStack with no automation) and '#12159 Part 1 — a composition WITH automation' (the move's second end); capture the full output",
-        "live with-automation boot (stock `objectstack dev`, isolated port/DB), as admin: POST /api/v1/actions/_activation/showcase_task/showcase_mark_done {\"enabled\":false} → 200; GET /api/v1/data/sys_metadata_activation and capture the row (metadata_type 'action', name showcase_mark_done, organization_id NULL, active false/0)",
+        "live with-automation boot (stock `objectstack dev`, isolated port/DB), as admin: POST /api/v1/actions/_activation/showcase_task/showcase_mark_done {\"enabled\":false} → 200; GET /api/v1/data/sys_metadata_activation and capture the row (metadata_type 'action', name showcase_mark_done, active false/0) together with its KEY SET — organization_id is ABSENT from it, the ledger having no tenant column at all (#15024 / ADR-0131 D7). ⛔ Never capture the tenant half as a value: `row.organization_id ?? null` answers `null` for a column that does not exist, so a value read passes while measuring nothing (the sibling item platform-core.activation-ledger-row-contract owns the schema-side probe)",
         "same boot, the flow half: POST /api/v1/automation/showcase_task_completed/toggle {\"enabled\":false} → 200; re-read the ledger — a metadata_type 'flow' row for showcase_task_completed appears BESIDE the action row, and the flow-name and action-name lists never cross (the discriminator is load-bearing, not decorative)",
         "restore both switches ({\"enabled\":true} / toggle on) — both rows persist with active true (updated, not deleted); leave the boot as found",
         "ownership is proven by the boot itself plus the registry read: the stock boot composes BOTH PlatformObjectsPlugin (serve auto-injects it) and the automation service, and it comes up green — a second registrant of sys_metadata_activation would be a boot FAILURE (`registerObject` throws 'already owned by package …', ADR-0029 D3), never a benign duplicate; the dogfood suite additionally reads registry.getObjectOwner('sys_metadata_activation').packageId === 'com.objectstack.platform-objects.activation-ledger'",
@@ -1409,7 +1409,7 @@
       ],
       "acceptance": [
         {
-          "clause": "the NO-automation composition serves the ledger: the flip that answered 503 SERVICE_UNAVAILABLE on the #12359 boot (actions composed, no automation service) answers 200, writes ONE install-level row (metadata_type 'action', organization_id NULL), dispatch consults it (409 ACTION_DISABLED ahead of the param contract and the record load), and re-enabling UPDATES the row rather than deleting it",
+          "clause": "the NO-automation composition serves the ledger: the flip that answered 503 SERVICE_UNAVAILABLE on the #12359 boot (actions composed, no automation service) answers 200, writes ONE deployment-level row (metadata_type 'action', and NO organization_id key on it — the table carries no tenant column, ADR-0131 D7), dispatch consults it (409 ACTION_DISABLED ahead of the param contract and the record load), and re-enabling UPDATES the row rather than deleting it",
           "oracle": "test",
           "verify": "the dogfood suite's first describe is green INCLUDING its anti-vacuity control ('the automation service really is absent from this composition') — a harness that quietly composed automation would re-measure the case that already worked; the 503 is asserted by name (not.toBe(503)) so a regression reads as 'the ledger went away again', never as 'some error'",
           "evidence": "the vitest output naming all five tests of the first describe"
@@ -1456,7 +1456,8 @@
         "packages/spec/src/system/constants/platform-object-names.ts#PLATFORM_OBJECTS_BY_PACKAGE (PLATFORM_OBJECTS_BY_PACKAGE receipt)",
         "packages/verify/src/harness.ts#bootStack (bootStack's automation option — how the no-automation composition is constructed)",
         "docs/adr/0126-packaged-metadata-customization-model.md §4 (one generic activation ledger)",
-        "#12438 (the scoped sweep this item lands from), #12419 (the registration-home PR), #12359 (the 503 measurement + the 2026-08-26 「同意」 ruling: registration follows the declaration)"
+        "docs/adr/0131-total-organization-ownership-no-null-organization-id.md D7 (deployment-level state has no organization column — sys_metadata_activation is named there as reverted before 17.3 and not returning, which is why the row reads here assert a key set rather than a NULL value)",
+        "#12438 (the scoped sweep this item lands from), #12419 (the registration-home PR), #12359 (the 503 measurement + the 2026-08-26 「同意」 ruling: registration follows the declaration), #15024 (the column drop these read-backs are re-grounded against)"
       ],
       "history": [
         {
@@ -1464,6 +1465,12 @@
           "date": "2026-08-26",
           "change": "new — authored in the #12438 scoped sweep (ADR-0126 disable+clone). Grounding fixed the item's shape twice: (1) the no-automation composition has NO stock CLI path (serve/dev compose automation from the app's own requires), so that leg rides the pinned dogfood suite's bootStack(showcaseStack) with the automation option omitted, recorded as a knownGap rather than pretended manual; (2) the single-owner clause is proven by the boot succeeding plus a registry read, because a double registration is a boot FAILURE (registerObject throws), never an observable duplicate",
           "ref": "#12438"
+        },
+        {
+          "revision": 2,
+          "date": "2026-09-04",
+          "change": "ledger read-back detail only — the registration-home contract is UNCHANGED (one owner, the MOVE, the datasource triple, the no-automation composition and its anti-vacuity control all stand). #15024 dropped sys_metadata_activation's reserved organization_id column before it ever shipped, so step 2 and the no-automation clause asked a runner to capture a column that is not there. Both now read the row's KEY SET, because the value spelling passes VACUOUSLY once the column is gone (`row.organization_id ?? null` is `null` either way) — green for exactly the reason it should be red, which is why #15024 inverted the dogfood pin into a key-set assertion rather than carrying the old spelling forward. 'install-level' is also re-said as DEPLOYMENT-level: with no tenant column there is no second scope for install-level to be distinguished from. The sibling item platform-core.activation-ledger-row-contract owns the schema-side probe (PRAGMA + a refused INSERT), so this item cites it instead of restating it",
+          "ref": "#15253"
         }
       ]
     },
