@@ -47,6 +47,11 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { ApiErrorSchema } from '@objectstack/spec/api';
+// [#13807] The PRODUCER half of the stranded-decision carrier, used here
+// exactly as `plugin-approvals` uses it. Building the thrown error through the
+// shared constructor is the point: it is what makes this a round-trip pin
+// rather than this file's private idea of what the service attaches.
+import { strandedDecisionFailure } from '@objectstack/types';
 import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
 // `.js` on purpose — NodeNext resolution requires the extension (#7248).
 import { RestServer } from './rest-server.js';
@@ -360,6 +365,65 @@ describe('approvals wire codes are registered vocabulary (#8885)', () => {
             ApiErrorSchema.safeParse({ code: answer.body?.code, message: answer.body?.error }).success,
             'RESUME_FAILED must be in StandardErrorCode ∪ ERROR_CODE_LEDGER',
         ).toBe(true);
+    });
+
+    it('a stranded rejection publishes finalized / decision / runId / repairable beside its 500 (#13807)', async () => {
+        // Maintainer ruling 2026-09-04, decision batch #37, option B. ⛔ The
+        // status code does NOT move: a decision that landed while its run
+        // stranded is still a failure, and answering 200 is named forbidden on
+        // the card. What the ruling added is the machine-readable half — the
+        // caller reading this 500 used to have exactly one honest inference
+        // available ("the rejection did not happen") and it was the WRONG one.
+        const rest = boot({
+            decide: vi.fn().mockRejectedValue(strandedDecisionFailure(
+                "RESUME_FAILED: the reject decision was recorded on request req_1, but its flow run "
+                + "'run_8380f743' could not be resumed and is now stranded: Node 'mark_rejected' failed",
+                { finalized: true, decision: 'reject', runId: 'run_8380f743', repairable: true },
+            )),
+        });
+        const answer = await drive(rest, 'POST', `${REQ}/reject`);
+
+        // Unchanged: status, code, and the [#13095] strip.
+        expect(answer.status).toBe(500);
+        expect(answer.body?.code).toBe('RESUME_FAILED');
+        expect(answer.body?.error).toMatch(/^the reject decision was recorded on request req_1/);
+        expect(
+            ApiErrorSchema.safeParse({ code: answer.body?.code, message: answer.body?.error }).success,
+            'RESUME_FAILED must be in StandardErrorCode ∪ ERROR_CODE_LEDGER',
+        ).toBe(true);
+
+        // Added: the four facts, on the wire, as fields. `finalized` is the
+        // load-bearing one — it is the only thing on this response that says
+        // the decision STANDS, and there was no way to learn it before.
+        expect(answer.body?.finalized).toBe(true);
+        expect(answer.body?.decision).toBe('reject');
+        expect(answer.body?.runId).toBe('run_8380f743');
+        // The engine's own `'stranded'` discriminator, carried the whole way
+        // instead of dying at `serviceResume` — its FIRST consumer.
+        expect(answer.body?.repairable).toBe(true);
+        // ⚠️ The run id is a FIELD, not something to regex out of the prose.
+        // Asserting it only inside `error` would leave this pin green on the
+        // exact defect the card reported.
+        expect(Object.keys(answer.body ?? {}).sort())
+            .toEqual(['code', 'decision', 'error', 'finalized', 'repairable', 'runId']);
+    });
+
+    it('REVERSE CONTROL — a RESUME_FAILED with no carrier answers exactly the body it always did', async () => {
+        // ⛔ The door never synthesises the envelope. A `RESUME_FAILED` raised
+        // by something that had no decision to report must not be dressed up
+        // as one, so absence of the carrier is absence of the fields — and
+        // this is what proves the case above is reading the producer rather
+        // than the route's own constant.
+        const rest = boot({
+            decide: vi.fn().mockRejectedValue(new Error(
+                "RESUME_FAILED: the rejection was recorded on request req_1, but its flow run 'run_1' "
+                + 'could not be resumed — an operator has to advance it',
+            )),
+        });
+        const answer = await drive(rest, 'POST', `${REQ}/reject`);
+        expect(answer.status).toBe(500);
+        expect(answer.body?.code).toBe('RESUME_FAILED');
+        expect(Object.keys(answer.body ?? {}).sort()).toEqual(['code', 'error']);
     });
 
     it('an unmapped service fault on approve answers 500 APPROVAL_APPROVE_FAILED — the template-generated arm, live', async () => {
