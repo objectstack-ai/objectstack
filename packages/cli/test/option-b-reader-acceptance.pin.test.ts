@@ -265,11 +265,18 @@ describe('#15004 — option-B acceptance pin: every subsystem must see its colle
     // comment, and the fourth direction this file's header claims ("the probe
     // itself quietly measuring less ⇒ RED") had silently stopped existing.
     //
-    // 30 is MEASURED, not remembered: with this line temporarily written
+    // 35 is MEASURED, not remembered: with this line temporarily written
     // `expect(additive.rows.length).toBe(-1)`, the run reports
-    // `expected 30 to be -1`. Verified live at the boundary in the same
-    // session — a floor of 31 goes RED on the same fixture, so the assertion
+    // `expected 35 to be -1`. Verified live at the boundary in the same
+    // session — a floor of 36 goes RED on the same fixture, so the assertion
     // is not satisfied by construction.
+    //
+    // ⚠️ RAISED by #15229, which added four `@objectstack/verify` rows, and the
+    // raise repaired an off-by-one while it was here: the floor read 30 against
+    // a probe that measured 31, so one row could stop being measured with
+    // nothing going red. It is now the measured count EXACTLY — no slack — and
+    // that is what makes the next card's raise a step it cannot skip without
+    // this line failing.
     //
     // `>=` rather than `toBe` on purpose, and it is the same shrink-only
     // direction the ledger uses: a row ADDED to the probe is welcome and stays
@@ -277,11 +284,11 @@ describe('#15004 — option-B acceptance pin: every subsystem must see its colle
     // probe grows; ⛔ never lower it to make a red run green.
     expect(
       additive.rows.length,
-      `The probe measured ${additive.rows.length} rows, fewer than the 30 it measured when ` +
+      `The probe measured ${additive.rows.length} rows, fewer than the 35 it measured when ` +
         `this floor was set. A row that stops being measured stops being able to fail, which ` +
         `is the one direction this pin cannot detect anywhere else — fix the probe rather ` +
         `than the floor.`,
-    ).toBeGreaterThanOrEqual(30);
+    ).toBeGreaterThanOrEqual(35);
   });
 
   // ── The pin ──────────────────────────────────────────────────────────────
