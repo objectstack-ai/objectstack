@@ -1188,8 +1188,69 @@ export function collectExpectedEntries(
   walkMetadataForms(out);
 
   const warnedGroups = opts.warnedGroups ?? authorWarnedTranslationGroups();
-  if (warnedGroups.size === 0) return out;
-  return out.filter((entry) => !warnedGroups.has(entry.path[0]));
+  const walked = warnedGroups.size === 0 ? out : out.filter((entry) => !warnedGroups.has(entry.path[0]));
+  return dedupeByPath(walked);
+}
+
+/**
+ * Collapse entries that address the same key to one.
+ *
+ * **One path is one demand.** A translation bundle has exactly one slot per
+ * path, so an author owes exactly one string for it no matter how many places
+ * in the walk arrived at that slot. The walk does not have that property on its
+ * own, because a translation key is derived from *where the string is
+ * addressed*, not from *which declaration was being read* when it was reached
+ * — and two declarations can address one slot:
+ *
+ *   - **Two carriers, one action.** The normalized config attaches an object's
+ *     actions to the object (`obj.actions`) *and* to the top-level `actions`
+ *     list — measured to be the SAME object reference, not a copy — so the two
+ *     action branches above both emit `objects.<o>._actions.<a>.*`.
+ *   - **Two declarations, one form field.** `field.form.ts` and
+ *     `object.form.ts` each declare `deleteBehavior` twice, gated on
+ *     `visibleWhen` (`lookup` vs `master_detail`). Both variants render into
+ *     the same key, because {@link walkFormField} keys on the field path.
+ *     Config-independent: it duplicates six entries on *every* config,
+ *     including an empty one.
+ *
+ * Neither is an authoring mistake and neither is fixable where it originates —
+ * they are two correct declarations of one displayed string. So the walker owns
+ * the collapse.
+ *
+ * **De-duplicating HERE rather than in the report** is what makes both
+ * consumers honest with one change. `computeI18nCoverage` counted the same
+ * missing key twice, so translating one string moved
+ * `pnpm check:i18n-coverage`'s ratchet by two while its report called the
+ * number "untranslated declared strings". `extractTranslations` counted them
+ * twice too, in `totalExpected` and in the per-locale `counts` it prints —
+ * over-reporting by 101 keys on app-showcase against the 1531 leaves it
+ * actually wrote, because `setDeep` had already collapsed them on the way into
+ * the bundle. A de-duplication at the reporting seam would have fixed the first
+ * and left the second, and would have left the registry-driven family
+ * duplicated in perpetuity — it never reaches `os lint`'s report, which hides
+ * the `metadataForms` bucket unless `--include-platform` is passed.
+ *
+ * **First emission wins.** Walk order is deterministic, so the rule is
+ * deterministic. It is also lossless on everything measured: all 372 duplicate
+ * paths across the three baselined example configs, and all 6 registry ones,
+ * carry byte-identical {@link ExpectedEntry} records — for the action family
+ * necessarily so, since both carriers hold one reference. Where two emissions
+ * ever *do* disagree, the disagreement is already unresolvable downstream: one
+ * bundle slot can serve only one string, so the choice is which of two
+ * colliding declarations to seed from, not whether to drop a demand.
+ */
+function dedupeByPath(entries: ExpectedEntry[]): ExpectedEntry[] {
+  const seen = new Set<string>();
+  const out: ExpectedEntry[] = [];
+  for (const entry of entries) {
+    // `\u0000` cannot occur in a path segment, so joining on it cannot make two
+    // different paths collide the way a `.` join would (`['a.b']` vs `['a','b']`).
+    const key = entry.path.join('\u0000');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(entry);
+  }
+  return out;
 }
 
 // ─── Analytics datasets (`datasets.<name>.…`) ──────────────────────────
