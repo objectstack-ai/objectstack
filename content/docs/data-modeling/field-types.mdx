@@ -22,6 +22,7 @@ Single-line plain text input.
 | `maxLength` | `number` | — | Maximum character length |
 | `minLength` | `number` | — | Minimum character length |
 | `format` | `string` | — | Validation format pattern |
+| `valueDomain` | `'iana_time_zone' \| 'iso_4217_currency' \| 'iso_3166_alpha2'` | — | Standard the written value must be a member of (IANA time zone, ISO 4217 currency code, ISO 3166-1 alpha-2 country code); `text` only |
 
 ```typescript
 { name: 'first_name', label: 'First Name', type: 'text', maxLength: 100 }
