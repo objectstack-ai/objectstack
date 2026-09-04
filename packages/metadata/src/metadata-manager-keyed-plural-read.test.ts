@@ -54,7 +54,7 @@ import { MetadataManager } from './metadata-manager.js';
 import { DatabaseLoader } from './loaders/database-loader.js';
 import { MemoryLoader } from './loaders/memory-loader.js';
 import type { MetadataLoader } from './loaders/loader-interface.js';
-import type { IDataDriver } from '@objectstack/spec/data';
+import type { IDataDriver } from '@objectstack/spec/contracts';
 
 const logger = {
     debug: vi.fn(),
@@ -71,6 +71,9 @@ vi.mock('@objectstack/core', async (orig) => ({
 
 const TYPE = 'action';
 
+/** The one-row fixture the outage cases share. */
+const rowsFromDb = () => [row('from_db', { name: 'from_db' })];
+
 /** A `sys_metadata` row: identity in the `name` COLUMN, body in `metadata`. */
 function row(name: string, body: Record<string, unknown>) {
     return {
@@ -85,6 +88,9 @@ function row(name: string, body: Record<string, unknown>) {
     };
 }
 
+const CONNECT_REFUSED = () =>
+    Object.assign(new Error('connect ECONNREFUSED 10.0.0.5:5432'), { code: 'ECONNREFUSED' });
+
 /**
  * A `sys_metadata`-shaped read-only driver over a fixed row array, counting
  * the verbs it served.
@@ -94,8 +100,16 @@ function row(name: string, body: Record<string, unknown>) {
  * shape: `{ $or: [...] }` must not silently match nothing. `find` applies the
  * caller's `limit` by PRESENCE, after the filter, per
  * `check:objectql-double-limit`.
+ *
+ * ⛔ It carries NO failure switch, and that is a gate's requirement rather
+ * than taste: an injected fail-here hook makes this double undrivable by
+ * `check:objectql-double-limit`'s control probe — the probe stubs the hook,
+ * the double throws, and the candidate files as UNJUDGED debt instead of being
+ * graded. Measured on this very file, on the first run of that gate. The
+ * outage lives in {@link findDownStore} instead, a separate double that
+ * overrides only `find`.
  */
-function countingStore(rows: Array<Record<string, unknown>>, opts: { findThrows?: boolean } = {}) {
+function countingStore(rows: Array<Record<string, unknown>>) {
     const calls = { find: 0, findOne: 0, count: 0 };
     const matches = (r: Record<string, unknown>, w: Record<string, unknown>) =>
         Object.entries(w ?? {}).every(([k, v]) => {
@@ -112,9 +126,6 @@ function countingStore(rows: Array<Record<string, unknown>>, opts: { findThrows?
         syncSchema: async (): Promise<void> => {},
         async find(_table: string, q: any) {
             calls.find += 1;
-            if (opts.findThrows) {
-                throw Object.assign(new Error('connect ECONNREFUSED 10.0.0.5:5432'), { code: 'ECONNREFUSED' });
-            }
             const hits = rows.filter((r) => matches(r, q?.where ?? {}));
             return typeof q?.limit === 'number' ? hits.slice(0, q.limit) : hits;
         },
@@ -130,9 +141,26 @@ function countingStore(rows: Array<Record<string, unknown>>, opts: { findThrows?
     return { driver, calls };
 }
 
+/**
+ * The same store with its LIST read down — a separate double rather than a
+ * flag on {@link countingStore}, for the reason stated there. Overriding
+ * `find` on the base leaves `findOne` reading the base's implementation, which
+ * is exactly what these cases need: the plural read out, the by-name read
+ * served.
+ */
+function findDownStore(rows: Array<Record<string, unknown>>) {
+    const base = countingStore(rows);
+    const driver = {
+        ...(base.driver as unknown as Record<string, unknown>),
+        async find() { throw CONNECT_REFUSED(); },
+    } as unknown as IDataDriver;
+    return { driver, calls: base.calls };
+}
+
+type Store = { driver: IDataDriver; calls: { find: number; findOne: number; count: number } };
+
 /** A real `MetadataManager` over a real `DatabaseLoader` over `rows`. */
-function planeOver(rows: Array<Record<string, unknown>>, opts: { findThrows?: boolean } = {}) {
-    const store = countingStore(rows, opts);
+function planeOver(rows: Array<Record<string, unknown>>, store: Store = countingStore(rows)) {
     const manager = new MetadataManager({ formats: ['json'], loaders: [] });
     manager.registerLoader(new DatabaseLoader({ driver: store.driver, cache: { enabled: false } }));
     return { manager, calls: store.calls };
@@ -184,7 +212,7 @@ describe("#14423 item 1 — `listNames`: one loader's fault is not the whole enu
     });
 
     it('the defect, as an assertion: a loader whose `list` throws no longer takes `listNames` down', async () => {
-        const { manager } = planeOver([row('from_db', { name: 'from_db' })], { findThrows: true });
+        const { manager } = planeOver(rowsFromDb(), findDownStore(rowsFromDb()));
         manager.registerInMemory(TYPE, 'from_code', { name: 'from_code' });
 
         // Before item 1 this REJECTED. The registry name was reachable the
@@ -193,7 +221,7 @@ describe("#14423 item 1 — `listNames`: one loader's fault is not the whole enu
     });
 
     it('PARITY — the same outage now reaches `listNames` and `loadMany` the same way', async () => {
-        const { manager } = planeOver([row('from_db', { name: 'from_db' })], { findThrows: true });
+        const { manager } = planeOver(rowsFromDb(), findDownStore(rowsFromDb()));
 
         // The asymmetry this card is about, stated as one assertion: both
         // plural reads answer, neither throws, and the outage is spoken ONCE
@@ -208,7 +236,7 @@ describe("#14423 item 1 — `listNames`: one loader's fault is not the whole enu
     });
 
     it('a healthy loader beside a broken one still contributes its names', async () => {
-        const { manager } = planeOver([row('from_db', { name: 'from_db' })], { findThrows: true });
+        const { manager } = planeOver(rowsFromDb(), findDownStore(rowsFromDb()));
         const memory = new MemoryLoader();
         await memory.save(TYPE, 'from_memory', { name: 'from_memory' });
         manager.registerLoader(memory);
@@ -217,23 +245,25 @@ describe("#14423 item 1 — `listNames`: one loader's fault is not the whole enu
     });
 
     it('recovery is un-said through the same helper `loadMany` uses', async () => {
-        const rows = [row('from_db', { name: 'from_db' })];
-        const store = countingStore(rows);
-        let broken = true;
-        const flaky = {
-            ...(store.driver as any),
-            async find(table: string, q: any) {
-                if (broken) throw Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' });
-                return (store.driver as any).find(table, q);
-            },
+        // Two conforming doubles, SWITCHED between — never one double with a
+        // failure flag, for the reason in `countingStore`'s docblock.
+        const rows = rowsFromDb();
+        const healthy = countingStore(rows);
+        const down = findDownStore(rows);
+        let current: IDataDriver = down.driver;
+        const switching = {
+            ...(healthy.driver as unknown as Record<string, unknown>),
+            find: (table: string, q: unknown) => (current as unknown as {
+                find: (t: string, q: unknown) => Promise<unknown>;
+            }).find(table, q),
         } as unknown as IDataDriver;
         const manager = new MetadataManager({ formats: ['json'], loaders: [] });
-        manager.registerLoader(new DatabaseLoader({ driver: flaky, cache: { enabled: false } }));
+        manager.registerLoader(new DatabaseLoader({ driver: switching, cache: { enabled: false } }));
 
         expect(await manager.listNames(TYPE)).toEqual([]);
         expect(logger.error).toHaveBeenCalled();
 
-        broken = false;
+        current = healthy.driver;
         expect(await manager.listNames(TYPE)).toEqual(['from_db']);
         expect(logger.info.mock.calls.some(([m]) =>
             typeof m === 'string' && m.includes('is readable again'))).toBe(true);
@@ -298,7 +328,7 @@ describe('#14423 item 2 — `MetadataManager.loadManyKeyed`: the plural read und
     });
 
     it('per-loader fault isolation — a broken loader does not take the keyed read down', async () => {
-        const { manager } = planeOver([row('from_db', { name: 'from_db' })], { findThrows: true });
+        const { manager } = planeOver(rowsFromDb(), findDownStore(rowsFromDb()));
         const memory = new MemoryLoader();
         await memory.save(TYPE, 'from_memory', { name: 'from_memory' });
         manager.registerLoader(memory);
