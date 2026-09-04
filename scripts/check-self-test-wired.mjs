@@ -152,14 +152,50 @@ const SCRIPT_EXT = /\.(mjs|mts|js|sh)$/;
 const ROOT_DIR_WATCH_HINTS = ['scripts/**/*.mjs', 'scripts/**/*.mts', 'scripts/**/*.sh'];
 
 /**
- * A `scripts/...` path, optionally followed by `--self-test`.
+ * A `scripts/...` path, optionally prefixed by the directories it lives under
+ * and optionally followed by `--self-test`.
  *
  * The trailing `(?![\w-])` is the right boundary: without it `--self-test-extra`
  * reads as an invocation of `--self-test`, which is #10534's defect wearing this
  * gate's hat.
+ *
+ * ## The LEFT boundary, and why the prefix is read rather than cut off (#15342)
+ *
+ * This repo has a package-local gate lane, and `lint.yml` really does run one
+ * of its gates by path: `node packages/lint/scripts/check-reference-carrier-
+ * shape.mjs --self-test`. The pattern used to open on the bare literal
+ * `scripts/` with nothing to its left, so it matched that path as a SUBSTRING
+ * and filed the gate under `scripts/check-reference-carrier-shape.mjs` — a key
+ * with no file behind it. Both directions of that were silent: the real file
+ * was never audited (it is not under the root walk, so it is in no population),
+ * and the phantom key could never be reconciled against a carrier either, so
+ * neither `auditPopulation` nor `auditLedger` had anything to say. A gate whose
+ * whole subject is "the self-test CI ships is the self-test CI runs" was
+ * answering about a different script than the one CI executes.
+ *
+ * So the directory prefix is CONSUMED into the key rather than cut away, and
+ * `(?<![\w.\-/])` is the left boundary that makes the key a whole path instead
+ * of a tail of one. Both halves are load-bearing and were measured on this
+ * tree's own corpus before landing:
+ *
+ *   - a leading `./` is stripped rather than kept, because it is the same file
+ *     under a different spelling and paths are compared by EXACT equality here.
+ *     `cut-rc.yml` and `release.yml` both import from `"./scripts/check-docs-
+ *     image-tag.mjs"`; keying those to `./scripts/…` would silently drop two
+ *     live invocations the old pattern did credit.
+ *   - a segment must START with an alphanumeric or `_`, so `..` is not a
+ *     prefix segment. A `../…` path cannot be resolved against this ROOT
+ *     without knowing what it is relative to, and inventing a key for it is how
+ *     the phantom above was minted in the first place. Zero occur in the
+ *     workflow corpus today; refusing to match is the safe direction, and the
+ *     population half below never admits a path it cannot read.
+ *
+ * Measured after this change over the live corpus: 186 named paths, ZERO of
+ * which lack a file on disk (before: exactly one, the phantom above). The
+ * `live corpus` battery holds both halves of that reading.
  */
 const INVOCATION_RE =
-  /(scripts\/[A-Za-z0-9_.\-/]+\.(?:mjs|mts|js|sh))(\s+--self-test(?![\w-]))?/g;
+  /(?<![\w.\-/])(?:\.\/)*((?:[A-Za-z0-9_][A-Za-z0-9_.\-]*\/)*scripts\/[A-Za-z0-9_.\-/]+\.(?:mjs|mts|js|sh))(\s+--self-test(?![\w-]))?/g;
 
 /**
  * ⛔ SHRINK-ONLY. Scripts CI runs whose self-test IS run by CI, but not through
@@ -424,6 +460,37 @@ function main() {
   const { named, selfTested } = collectInvocations(workflows, pkgScripts);
   if (named.size === 0) refuse('no workflow names any scripts/ file — the workflow reader is broken (#4690).');
 
+  // The population's SECOND source: the package-local gate lane (#15342).
+  //
+  // `walkScripts` is anchored at the repo-root `scripts/` dir, so a gate CI
+  // invokes by a package-local path is outside `carriers` no matter how the
+  // anchor above keys it — and a script that is in no population is audited by
+  // neither `auditPopulation` (it iterates carriers) nor `auditLedger`. Fixing
+  // the key alone would have left that half exactly as silent as before.
+  //
+  // ⛔ NOT a second walk. The subject of this gate is "a script CI RUNS whose
+  // self-test CI must run too", so what CI names is the honest population
+  // boundary out here; a walk over every `packages/*/scripts` dir would admit
+  // files CI never runs, which `auditPopulation` discards on the next line
+  // anyway, and would owe `ROOT_DIR_WATCH_HINTS` a declaration that is no
+  // longer set-equal to the root walk it is documented to mirror. The root walk
+  // stays the ROOT half — it is what the `#4690` floors above are written
+  // against ("this tree has dozens"), and a naming-derived population could not
+  // carry those.
+  //
+  // Admitted on exactly the terms the root walk uses, and no looser: the file
+  // must EXIST and its CODE (comments masked) must carry the literal. A named
+  // path with nothing behind it is left OUT rather than admitted — that is the
+  // phantom this card is about, and admitting one would re-create it one layer
+  // down. It is not a refusal either: this gate does not own what a workflow is
+  // allowed to name, and the anchor above already declines to invent keys.
+  for (const relPath of named.keys()) {
+    if (relPath.startsWith('scripts/')) continue;
+    const source = sourceOf(relPath);
+    if (source === null) continue;
+    if (carriesSelfTest(relPath, source)) carriers.add(relPath);
+  }
+
   const findings = [
     ...auditPopulation({ carriers, named, selfTested, ledger: SELF_TEST_RUN_OTHERWISE }),
     ...auditLedger({ ledger: SELF_TEST_RUN_OTHERWISE, carriers, named, selfTested, sourceOf }),
@@ -431,9 +498,11 @@ function main() {
 
   const members = [...carriers].filter((s) => named.has(s));
   const wired = members.filter((s) => selfTested.has(s));
+  const packageLocal = [...carriers].filter((s) => !s.startsWith('scripts/'));
   const scope =
     `  scope: ${files.length} file(s) under scripts/, ${carriers.size} carrying \`--self-test\` in code ` +
-    `(comments masked); ${members.length} of those are run by ${workflows.length} workflow(s); ` +
+    `(comments masked, ${packageLocal.length} of them package-local gate(s) CI names by path); ` +
+    `${members.length} of those are run by ${workflows.length} workflow(s); ` +
     `${wired.length} have their self-test run through the flag, ${SELF_TEST_RUN_OTHERWISE.length} through a recorded route.`;
 
   if (findings.length > 0) {
@@ -496,9 +565,11 @@ function main() {
 const SELF_TEST_BATTERIES = Object.freeze({
   'comment mask': 7,
   'right boundary': 4,
+  'left boundary': 6,
   'alias resolution': 4,
   'population verdict': 4,
   'population declaration': 7,
+  'live corpus': 3,
   'ledger hygiene': 9,
   'live ledger': 4,
 });
@@ -506,7 +577,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the registry's own size is pinned too. Adding a battery raises
 // this number; removing one is the same ⛔ deliberate edit as lowering a count.
-const SELF_TEST_BATTERY_FLOOR = 7;
+const SELF_TEST_BATTERY_FLOOR = 9;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -585,6 +656,60 @@ function selfTest() {
     ok(
       !got.selfTested.has('scripts/check-foo.mjs'),
       '`scripts/check-foo.mjs` was credited on the strength of its longer sibling (prefix match, not exact equality)',
+    );
+  }
+
+  // ── Left boundary: a path is keyed WHOLE, never as a tail of one (#15342) ─
+  //
+  // Every case here fails against the pre-#15342 anchor (`/(scripts\/…)/`, no
+  // left boundary, no prefix), which is what makes them an instrument rather
+  // than a restatement of the operators. Measured by applying this battery to
+  // the base tree's pattern in a scratch ablation: cases 1-4 red there, 5-6
+  // stay green — 5 and 6 are the controls that prove the widening did not buy
+  // its new answers by dropping the old ones.
+  battery('left boundary');
+  {
+    const PKG = 'packages/lint/scripts/check-reference-carrier-shape.mjs';
+    const got = collectInvocations(wf(`    - run: node ${PKG} --self-test\n`), {});
+    ok(
+      got.named.has(PKG),
+      'a gate CI invokes by a PACKAGE-LOCAL path was not keyed to its real path — it is then in no '
+        + 'population and its self-test wiring is audited for nobody (#15342)',
+    );
+    ok(
+      got.selfTested.has(PKG),
+      'the package-local path was named but its `--self-test` was not credited to it',
+    );
+    ok(
+      !got.named.has('scripts/check-reference-carrier-shape.mjs'),
+      'the package-local path was ALSO filed under a root path with no file behind it — the phantom key '
+        + 'a substring match mints, which no carrier can ever reconcile (#15342)',
+    );
+  }
+  {
+    // A path that is a tail of a longer one must not be minted on its own.
+    const got = collectInvocations(wf('    - run: node vendor/tools/scripts/g.mjs --self-test\n'), {});
+    ok(
+      !got.named.has('scripts/g.mjs'),
+      'a `scripts/…` SUBSTRING of a longer path was minted as a key in its own right',
+    );
+  }
+  {
+    // Control 1 — the plain root spelling is unchanged.
+    const got = collectInvocations(wf('    - run: node scripts/g.mjs --self-test\n'), {});
+    ok(got.selfTested.has('scripts/g.mjs'), 'the ordinary root spelling stopped being keyed to itself');
+  }
+  {
+    // Control 2 — `./scripts/…` still normalises onto the walk's key. Live
+    // spelling: `cut-rc.yml` and `release.yml` import from `"./scripts/…"`,
+    // and keying those anywhere else silently drops two real invocations.
+    const got = collectInvocations(
+      wf('    - run: node --input-type=module -e \'import { X } from "./scripts/g.mjs";\'\n'),
+      {},
+    );
+    ok(
+      got.named.has('scripts/g.mjs'),
+      'a leading `./` was kept in the key, so the same file under two spellings stopped comparing equal',
     );
   }
 
@@ -699,6 +824,41 @@ function selfTest() {
         && !/[A-Za-z_$][\w$]*\s*\./.test(declSites[0][1]),
       'the declaration is not a single literal array of quoted strings — the extractor reads SOURCE TEXT, '
         + 'so a computed spelling contributes nothing while every assertion above stays green',
+    );
+  }
+
+  // ── The live corpus: the anchor is measured on specimens, not on fixtures ─
+  //
+  // A widening measured on zero specimens is not measured. The fixtures above
+  // prove the pattern; these three read the tree CI actually runs, so the day
+  // the package-local lane moves, this reds here instead of going quiet.
+  battery('live corpus');
+  {
+    let corpus = null;
+    try {
+      const dir = join(ROOT, WORKFLOW_DIR);
+      const workflows = readdirSync(dir)
+        .filter((f) => /\.ya?ml$/.test(f))
+        .sort()
+        .map((name) => ({ name, text: readFileSync(join(dir, name), 'utf8') }));
+      const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).scripts ?? {};
+      corpus = collectInvocations(workflows, pkg);
+    } catch {
+      corpus = null;
+    }
+    ok(corpus !== null && corpus.named.size > 0, 'the live workflow corpus could not be read — the pins below would prove nothing (#4690)');
+    const keys = corpus === null ? [] : [...corpus.named.keys()];
+    ok(
+      keys.length > 0 && keys.every((p) => existsSync(join(ROOT, p))),
+      'a path this gate keys an invocation to has NO file behind it. Every audit downstream then runs '
+        + 'against a script that does not exist, and passes for the wrong reason, in both directions (#15342)',
+    );
+    // Named BY NAME on purpose: it is this tree's only package-local gate
+    // invocation, so it is the whole specimen set for the widening above.
+    ok(
+      keys.includes('packages/lint/scripts/check-reference-carrier-shape.mjs'),
+      "lint.yml's package-local gate is not in the live population. Either the lane moved — re-point this "
+        + 'pin at the new specimen — or the anchor regressed to a root-only one and the widening is untested',
     );
   }
 
