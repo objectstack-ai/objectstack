@@ -1189,6 +1189,16 @@ export interface RunRecord {
     durationMs?: number;
     /** Failure reason for a `failed` run — what a designer needs to fix it. */
     error?: string;
+    /**
+     * The node this record is ABOUT. On an ordinary terminal record: the run's
+     * last step. On a stranded run's record — `consumedSuspension` present, or
+     * `consumedSuspensionDropped` — the PAUSE node, the node the consumed
+     * snapshot re-arms, because the object store rebuilds the snapshot's node
+     * from this one column and there is no other (#13937: written as the last
+     * step, a restore from the row re-armed the run at the node that threw and
+     * the next resume skipped it). The node that threw is still where the Runs
+     * surface reads it: the last entry of `steps`, and `error`.
+     */
     nodeId?: string;
     /**
      * [#10101] The ACTING context's tenant (`AutomationContext.tenantId`),
@@ -1269,6 +1279,34 @@ export interface RunRecord {
      * ⛔ Not a run state. See {@link ConsumedSuspension}.
      */
     consumedSuspension?: SuspendedRun;
+    /**
+     * [#13937] The store could not persist the snapshot this run had — the
+     * object store DROPS one over its row byte budget rather than truncating
+     * it — and says so, with the pause it belonged to. Present exactly when a
+     * snapshot existed and `consumedSuspension` is absent for THAT reason, so
+     * a reader can tell "dropped" from "the run moved on": a terminal record
+     * with neither field is a run that reached a terminal state which was not
+     * a strand (completed, cancelled, cascade-failed), or never paused at all.
+     * {@link AutomationEngine.restoreConsumedSuspension} honours a hot copy of
+     * the same pause on this reading, and without one refuses naming the
+     * budget. A store that cannot persist a snapshot MUST record it this way:
+     * writing nothing reads as the run having moved on.
+     */
+    consumedSuspensionDropped?: ConsumedSuspensionDropNotice;
+}
+
+/**
+ * [#13937] What a store records in place of a consumed-suspension snapshot it
+ * could not persist — see {@link RunRecord.consumedSuspensionDropped}.
+ */
+export interface ConsumedSuspensionDropNotice {
+    /** Size of the snapshot's JSON columns together, in bytes. */
+    bytes: number;
+    /** The store's budget the snapshot was over, in bytes. */
+    budget: number;
+    /** The pause the dropped snapshot belonged to — its identity, not its state. */
+    nodeId?: string;
+    correlation?: string;
 }
 
 /**
@@ -1304,6 +1342,18 @@ export interface ConsumedSuspension {
     consumedAt: string;
     /** The downstream failure that left the run terminal and unresumable. */
     error: string;
+    /**
+     * [#13937] Whether THIS process's own history write for the strand reached
+     * the store: `'pending'` while the fire-and-forget write is in flight,
+     * `'landed'` once the store accepted it (the row now describes this strand
+     * — as a snapshot, or as a drop notice), `'failed'` when it threw, absent
+     * when no store writes history at all. The engine's own memory of what the
+     * store was handed — the #13617 exception, for this journal: a row the
+     * store never received says nothing about this copy, so
+     * {@link AutomationEngine.restoreConsumedSuspension} reads a snapshot-less
+     * row as "the run moved on" only when this is `'landed'`.
+     */
+    persisted?: 'pending' | 'landed' | 'failed';
 }
 
 /**
@@ -5858,6 +5908,8 @@ export class AutomationEngine implements IAutomationService {
             run: { ...run, steps: run.steps.slice(0, stepCountAtPause) },
             consumedAt: new Date().toISOString(),
             error,
+            // [#13937] `recordLog` settles this when its write settles.
+            ...(this.store?.recordTerminal ? { persisted: 'pending' as const } : {}),
         };
         this.consumedSuspensions.set(run.runId, consumed);
         // Oldest first — `Map` iterates in insertion order, and re-`set`ting an
@@ -5870,6 +5922,28 @@ export class AutomationEngine implements IAutomationService {
             this.consumedSuspensions.delete(oldest);
         }
         return consumed;
+    }
+
+    /**
+     * [#13937] Does the durable row describe a LATER strand than this
+     * process's hot copy? True only when the two name different pauses AND the
+     * hot copy's own history write landed — then the row can only be a later
+     * strand another replica recorded. Same pause: never (the hot copy is the
+     * more faithful witness of it). Different pause but the hot copy's write
+     * never reached the store (`persisted` not `'landed'`): never — the row
+     * predates this strand and says nothing about it (the #13617 exception).
+     * The pause identity is the pair {@link SuspendedRunStore.claimSuspension}
+     * compares: the node, and the correlation when one was minted.
+     */
+    private rowSupersedesJournal(
+        hot: ConsumedSuspension,
+        rowPause: { nodeId?: string; correlation?: string },
+    ): boolean {
+        const samePause =
+            hot.run.nodeId === rowPause.nodeId &&
+            (hot.run.correlation ?? undefined) === (rowPause.correlation ?? undefined);
+        if (samePause) return false;
+        return hot.persisted === 'landed';
     }
 
     /** Build a refusal from {@link restoreConsumedSuspension}. */
@@ -5946,13 +6020,14 @@ export class AutomationEngine implements IAutomationService {
      * `restored: true` and one `RESTORE_IN_PROGRESS`, rather than two calls
      * both claiming the restore.
      *
-     * [#13937] The third half, across replicas and across TIME: the snapshot
-     * is read from the durable terminal row before this process's own
-     * journal, so a hot copy left behind on the replica that stranded the run
-     * cannot re-arm it after another replica restored and finished it — the
-     * row that no longer carries a snapshot is the record, and the copy is
-     * dropped. (The journal still answers alone where there is no row to
-     * ask: no store, no run history, or a history write that never landed.)
+     * [#13937] The third half, across replicas and across TIME: this
+     * process's journal and the durable terminal row are read as two
+     * witnesses of one strand (see the read itself, below). A hot copy left
+     * behind on the replica that stranded the run cannot re-arm it after
+     * another replica restored and finished it, or restranded it at a later
+     * pause; a snapshot the store could not persist is still restorable from
+     * the copy the stranding process holds; and a row the store was never
+     * handed says nothing about that copy.
      *
      * And it cannot produce two traversals, by construction: **this verb does
      * not resume.** It re-arms the pause and stops. The continuation is an
@@ -6039,26 +6114,42 @@ export class AutomationEngine implements IAutomationService {
                 );
             }
 
-            // The journal: the DURABLE copy on the run's own terminal history
-            // row FIRST, then this process's hot copy. [#13937] The order is
-            // the point, and it is the order `loadSuspendedRunStrict` reads
-            // suspensions in (#13617): the hot journal is a per-process cache,
-            // the terminal row is the record. Read hot-first, the replica that
-            // stranded a run keeps a copy that outlives the run — another
-            // replica restores, resumes and finishes it, and a repeated restore
-            // here would re-arm a COMPLETED run, whose next resume re-runs
-            // every node after the pause: shape 2's silent double-run, through
-            // this verb's side door (pinned in `stranded-run-status.test.ts`,
-            // measured red on the hot-first tree). So a terminal row that
-            // exists and carries NO snapshot is the last word — a later
-            // terminal record wrote it (`recordLog` writes explicit NULLs) —
-            // and the hot copy is DROPPED rather than honoured. The hot copy
-            // answers only when there is no row to ask: no store, a store
-            // without run history, or a history write that never landed
-            // (reported at `error` where it failed).
-            let consumed: ConsumedSuspension | undefined;
+            // [#13937] Two witnesses of one strand, and neither is trusted
+            // alone — the contract review of this ruling's services half
+            // measured both single-witness readings wrong, one store class
+            // apart:
+            //
+            //  - This process's HOT copy is the verbatim object the failure
+            //    was journalled from: the pause's own node, variables, step
+            //    log as of the pause. It is a per-process cache. The replica
+            //    that stranded a run keeps it after another replica restored,
+            //    resumed and FINISHED the run, and re-arming it then re-runs
+            //    every node after the pause — shape 2's silent double-run,
+            //    through this verb's side door (pinned in
+            //    `stranded-run-status.test.ts`, red on the hot-only tree).
+            //  - The DURABLE row is the record every replica can read, and a
+            //    flattened, column-bounded copy of the same snapshot: the
+            //    object store rebuilds it from columns, DROPS it over a byte
+            //    budget — and says so in the row, `consumedSuspensionDropped`
+            //    — and receives it fire-and-forget. Read alone, a snapshot-less
+            //    row sent a run the store could not persist into
+            //    NO_CONSUMED_SUSPENSION on the very replica holding its copy
+            //    (pinned in `stranded-run-object-store.test.ts`, red on the
+            //    durable-first tree).
+            //
+            // So: the hot copy is preferred whenever both describe the SAME
+            // pause (`rowSupersedesJournal`). When they describe different
+            // pauses, the newest strand wins — a hot copy whose own write never
+            // landed (`persisted` is not `'landed'`: the #13617 exception, a
+            // row the store was never handed says nothing) beats the older
+            // row, and a landed hot copy yields to the later strand another
+            // replica recorded. A row with neither a snapshot nor a drop notice
+            // is "the run moved on" only for a hot copy whose write did land —
+            // that copy is then DROPPED rather than honoured. A hot copy
+            // answers alone where there is no row to ask: no store, no run
+            // history, a write that never landed or is still in flight.
+            const hot = this.consumedSuspensions.get(runId);
             let terminal: RunRecord | null = null;
-            let durableSaysNoSnapshot = false;
             if (this.store?.loadTerminal) {
                 try {
                     terminal = await this.store.loadTerminal(runId);
@@ -6077,27 +6168,54 @@ export class AutomationEngine implements IAutomationService {
                         `Durable run-history unreachable for run '${runId}' — whether a consumed suspension survives is unknown`,
                     );
                 }
-                if (terminal?.consumedSuspension) {
-                    consumed = {
-                        run: terminal.consumedSuspension,
-                        consumedAt: terminal.finishedAt ?? terminal.startedAt,
-                        error: terminal.error ?? '',
-                    };
-                } else if (terminal) {
-                    durableSaysNoSnapshot = true;
-                }
             }
-            if (durableSaysNoSnapshot) {
-                // Stale by definition — the record moved on without it.
+
+            let consumed: ConsumedSuspension | undefined;
+            let dropped: ConsumedSuspensionDropNotice | undefined;
+            if (!terminal) {
+                consumed = hot;
+            } else if (terminal.consumedSuspension) {
+                const durable: ConsumedSuspension = {
+                    run: terminal.consumedSuspension,
+                    consumedAt: terminal.finishedAt ?? terminal.startedAt,
+                    error: terminal.error ?? '',
+                };
+                consumed = hot && !this.rowSupersedesJournal(hot, durable.run) ? hot : durable;
+                // A hot copy of a pause the run has since LEFT — re-arming it
+                // would send the run back through work it already did.
+                if (hot && consumed !== hot) this.consumedSuspensions.delete(runId);
+            } else if (terminal.consumedSuspensionDropped) {
+                dropped = terminal.consumedSuspensionDropped;
+                if (hot && !this.rowSupersedesJournal(hot, dropped)) {
+                    consumed = hot;
+                } else if (hot) {
+                    this.consumedSuspensions.delete(runId);
+                }
+            } else if (hot && hot.persisted !== 'landed') {
+                // The row predates this strand — this process's own write for
+                // it never reached the store (in flight, or failed and
+                // reported at `error`). The store's silence says nothing.
+                consumed = hot;
+            } else if (hot) {
+                // A later terminal record with no snapshot and no drop notice:
+                // completed, cancelled or cascade-failed after this copy was
+                // taken. Stale by definition.
                 this.consumedSuspensions.delete(runId);
-            } else if (!consumed) {
-                consumed = this.consumedSuspensions.get(runId);
             }
 
             if (!consumed) {
                 // Nothing to restore — say WHICH nothing. The remedy differs for
                 // every one of these and a single "bad run" refusal would send an
                 // operator looking for the wrong thing.
+                if (dropped) {
+                    return this.refuseRestore(
+                        runId,
+                        'NO_CONSUMED_SUSPENSION',
+                        `Run '${runId}' is recorded 'failed' and its consumed suspension (${dropped.bytes} bytes) was over ` +
+                            `the store's ${dropped.budget}-byte row budget, so it was not persisted — it can be restored ` +
+                            `only by the process that stranded it, while that process is still running`,
+                    );
+                }
                 //
                 // The durable row, when there is one, is the later word on how
                 // the run ended than this process's own log — which may still
@@ -6482,7 +6600,13 @@ export class AutomationEngine implements IAutomationService {
                 triggerType: entry.trigger?.type || undefined,
                 triggerObject: entry.trigger?.object,
                 triggerRecordId: entry.trigger?.recordId,
-                nodeId: lastStep?.nodeId,
+                // [#13937] On a stranded run's record the PAUSE node, not the
+                // node that threw: the object store rebuilds the snapshot's
+                // node from this one column, and a restore from the row used
+                // to re-arm the run at the failed node — whose next resume
+                // then SKIPPED it and reported the run completed. The throwing
+                // node is the last entry of `steps` below, and `error`.
+                nodeId: consumedSuspension?.nodeId ?? lastStep?.nodeId,
                 steps: this.compactStepsForHistory(entry.steps),
                 summary: entry.summary,
                 // [#13909] Present only on the resume-consumed-then-failed
@@ -6492,7 +6616,21 @@ export class AutomationEngine implements IAutomationService {
                 // leaving a stale one an operator could restore a second time.
                 consumedSuspension,
             };
-            void this.store.recordTerminal(record).catch((err) => {
+            // [#13937] The journal entry this record describes, when it is a
+            // strand's: `journalConsumedSuspension` ran just above in the
+            // same arm, so the entry under this run id is the one built from
+            // `consumedSuspension` — checked by identity, because a later
+            // strand of the same run replaces the entry and must not inherit
+            // this write's outcome.
+            const journal = consumedSuspension ? this.consumedSuspensions.get(entry.id) : undefined;
+            const write = this.store.recordTerminal(record);
+            if (journal && journal.run === consumedSuspension) {
+                void write.then(
+                    () => { journal.persisted = 'landed'; },
+                    () => { journal.persisted = 'failed'; },
+                );
+            }
+            void write.catch((err) => {
                 // #6499 — driver text to the structured slot; see
                 // `forgetSuspendedRun`'s catch above for the full mechanism
                 // (#6299).
