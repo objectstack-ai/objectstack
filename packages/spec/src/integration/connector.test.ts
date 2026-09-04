@@ -25,11 +25,6 @@ import {
   ConnectorActionSchema,
   ConnectorActionEffectSchema,
 
-  // Error Mapping
-  ErrorMappingConfigSchema,
-  ErrorMappingRuleSchema,
-  ConnectorErrorCategorySchema,
-
   // Health & Circuit Breaker
   HealthCheckConfigSchema,
   CircuitBreakerConfigSchema,
@@ -48,6 +43,18 @@ import {
 } from './connector.zod';
 
 import { getMetadataTypeSchema } from '../kernel/metadata-type-schemas';
+// [#14676] the retirement pins at the bottom of this file
+import {
+  MIGRATIONS_BY_MAJOR,
+  RETIRED_DEFS_BY_MAJOR,
+  RETIRED_KEYS_BY_MAJOR,
+} from '../migrations/registry';
+import { collectConversionNotices } from '../conversions/apply';
+import {
+  EXPORT_ENTRY_POINTS,
+  exportNamesOf,
+  holdersOf,
+} from '../../scripts/lib/export-origins-testkit';
 
 // Import shared auth schemas from canonical source
 import {
@@ -494,83 +501,6 @@ describe('ConnectorSchema', () => {
 });
 
 // ============================================================================
-// Error Mapping Configuration Tests
-// ============================================================================
-
-describe('ErrorMappingConfigSchema', () => {
-  it('should accept valid error mapping config', () => {
-    const config = ErrorMappingConfigSchema.parse({
-      rules: [
-        {
-          sourceCode: 404,
-          targetCode: 'RESOURCE_NOT_FOUND',
-          targetCategory: 'not_found',
-          severity: 'low',
-          retryable: false,
-        },
-      ],
-      unmappedBehavior: 'generic_error',
-    });
-
-    expect(config.rules).toHaveLength(1);
-    expect(config.defaultCategory).toBe('integration_error');
-    expect(config.logUnmapped).toBe(true);
-  });
-
-  it('should accept rules with string source codes', () => {
-    const config = ErrorMappingConfigSchema.parse({
-      rules: [
-        {
-          sourceCode: 'INVALID_TOKEN',
-          sourceMessage: 'Token has expired',
-          targetCode: 'AUTH_EXPIRED',
-          targetCategory: 'authorization',
-          severity: 'high',
-          retryable: true,
-          userMessage: 'Your session has expired. Please log in again.',
-        },
-      ],
-      unmappedBehavior: 'passthrough',
-    });
-
-    expect(config.rules[0].sourceCode).toBe('INVALID_TOKEN');
-    expect(config.rules[0].userMessage).toBeDefined();
-  });
-
-  it('should accept all unmapped behaviors', () => {
-    const behaviors = ['passthrough', 'generic_error', 'throw'] as const;
-    behaviors.forEach(behavior => {
-      const config = ErrorMappingConfigSchema.parse({
-        rules: [],
-        unmappedBehavior: behavior,
-      });
-      expect(config.unmappedBehavior).toBe(behavior);
-    });
-  });
-
-  it('should accept all error categories', () => {
-    const categories = ['validation', 'authorization', 'not_found', 'conflict', 'rate_limit', 'timeout', 'server_error', 'integration_error'] as const;
-    categories.forEach(cat => {
-      expect(() => ConnectorErrorCategorySchema.parse(cat)).not.toThrow();
-    });
-  });
-
-  it('should accept all severity levels', () => {
-    const severities = ['low', 'medium', 'high', 'critical'] as const;
-    severities.forEach(severity => {
-      const rule = ErrorMappingRuleSchema.parse({
-        sourceCode: 500,
-        targetCode: 'ERROR',
-        targetCategory: 'server_error',
-        severity,
-        retryable: false,
-      });
-      expect(rule.severity).toBe(severity);
-    });
-  });
-});
-
-// ============================================================================
 // Health Check Configuration Tests
 // ============================================================================
 
@@ -701,29 +631,6 @@ describe('ConnectorHealthSchema', () => {
 
     expect(connector.health?.healthCheck?.enabled).toBe(true);
     expect(connector.health?.circuitBreaker?.failureThreshold).toBe(5);
-  });
-
-  it('should accept connector with error mapping', () => {
-    const connector = ConnectorSchema.parse({
-      name: 'mapped_connector',
-      label: 'Mapped Connector',
-      type: 'saas',
-      authentication: { type: 'api-key', key: 'test' },
-      errorMapping: {
-        rules: [
-          {
-            sourceCode: 429,
-            targetCode: 'RATE_LIMITED',
-            targetCategory: 'rate_limit',
-            severity: 'medium',
-            retryable: true,
-          },
-        ],
-        unmappedBehavior: 'generic_error',
-      },
-    });
-
-    expect(connector.errorMapping?.rules).toHaveLength(1);
   });
 });
 
@@ -1283,5 +1190,276 @@ describe('ADR-0010 protection envelope (#6362)', () => {
     });
     expect(parsed._packageId).toBe('com.acme.billing');
     expect(parsed._provenance).toBe('package');
+  });
+});
+
+// ─── [#14676] `connector.errorMapping` RETIRED, with the three defs it carried ──
+//
+// ADR-0049 enforce-or-remove; triage ruling 2026-09-02 (route: removal via the
+// `spec-property-retirement` playbook; the split condition — a downstream
+// consumer of the key — measured empty at objectui `0d8fd7c`).
+// `ErrorMappingConfig` (4 keys) and `ErrorMappingRule` (7 keys) were authorable
+// through this key on BOTH carriers and read by nothing: no provider,
+// dispatcher or materializer ever mapped an external error through the rules.
+// One nested key was spelled `userMessage` — the name of the LIVE API-error
+// channel — so writing a rule here validated, published and showed nobody
+// anything. Deletion resolves the collision.
+//
+// Bookkeeping shapes, pinned below:
+//   1. `errorMapping:` — `retiredKey()` tombstone on the non-strict
+//      `ConnectorSchema` (a bare deletion would be a SILENT STRIP, ADR-0104),
+//      inherited by `DeclarativeConnectorEntrySchema` (`superRefine`), so the
+//      refusal reaches `stack.connectors[]` and the `/meta/connector` door;
+//      `integration/Connector:errorMapping` and
+//      `integration/DeclarativeConnectorEntry:errorMapping` in
+//      `RETIRED_KEYS_BY_MAJOR[18]`.
+//   2. `ErrorMappingConfigSchema` / `ErrorMappingRuleSchema` and their three
+//      types — whole-def removal; `ConnectorErrorCategorySchema` /
+//      `ConnectorErrorCategory` — orphan value enum once both carriers are
+//      gone (#3950); the three defs in `RETIRED_DEFS_BY_MAJOR[18]`.
+//   3. D2 conversion `connector-error-mapping-removed` in the step-18 chain:
+//      unlike a plugin config, a connector IS a stack collection member
+//      (`stack.connectors[]`) and a `sys_metadata` row, so the chain has a
+//      seam to rewrite.
+//
+// On the assertion set (the #13823 precedent): a schema refusal raises a
+// `ZodError` whose issues carry `code` and `path` but no ADR-0112 `status` —
+// that envelope belongs to the API error surface. So these pins assert the
+// strongest set this surface really has: refusal, the issue `code`, the `path`
+// naming WHICH site refused, and the prescription text (#5240: where the
+// wording is the contract, pin the wording).
+
+/** A well-formed catalog descriptor — every required key, none of the retired one. */
+const ERROR_MAPPING_WELL_FORMED = {
+  name: 'payments_api',
+  label: 'Payments API',
+  type: 'api',
+} as const;
+
+/** The block an author used to be able to write — all eleven keys present. */
+const AUTHORED_ERROR_MAPPING = {
+  rules: [
+    {
+      sourceCode: 429,
+      sourceMessage: 'Too Many Requests',
+      targetCode: 'RATE_LIMITED',
+      targetCategory: 'rate_limit',
+      severity: 'medium',
+      retryable: true,
+      userMessage: 'The payment provider is busy; try again shortly.',
+    },
+  ],
+  defaultCategory: 'integration_error',
+  unmappedBehavior: 'generic_error',
+  logUnmapped: true,
+};
+
+const ERROR_MAPPING_PRESCRIPTION = /`connector\.errorMapping`.*was removed.*17/s;
+
+describe('[#14676] connector.errorMapping retirement', () => {
+  it('REJECTS an authored `errorMapping` at path `errorMapping`, carrying the prescription', () => {
+    const result = ConnectorSchema.safeParse({
+      ...ERROR_MAPPING_WELL_FORMED,
+      errorMapping: AUTHORED_ERROR_MAPPING,
+    });
+    expect(result.success).toBe(false);
+    if (result.success) return; // narrowing; the assertion above already failed
+
+    const issue = result.error.issues.find((i) => i.path[0] === 'errorMapping');
+    expect(issue, 'the refusal must name `errorMapping`').toBeDefined();
+    // The machine-readable half of the envelope this surface actually has:
+    // a `retiredKey()` tombstone raises `invalid_type` from its `z.never()`.
+    expect(issue!.code).toBe('invalid_type');
+    expect(issue!.path).toEqual(['errorMapping']);
+    // The prescription IS the migration doc for whoever hits it — contract,
+    // not commentary: it names the key, says it was removed, explains why it
+    // was inert, and tells the author what to do.
+    expect(issue!.message).toMatch(ERROR_MAPPING_PRESCRIPTION);
+    expect(issue!.message).toMatch(/nothing ever read it/s);
+    expect(issue!.message).toMatch(/Delete the key/s);
+    // The collision the card was filed about is named, so the reader is not
+    // sent looking for a connector-side replacement for a channel that lives
+    // on the API error envelope.
+    expect(issue!.message).toMatch(/`ApiError\.userMessage`/);
+    // What actually carries a connector failure, so nobody re-declares the
+    // block as a repair.
+    expect(issue!.message).toMatch(/no error-mapping engine exists/);
+    // The house `os migrate meta` sentence closes it — the class pin
+    // (`retired-key-migrate-sentence.test.ts`) holds the wording; this only
+    // pins that THIS prescription carries it, with the right `--from`.
+    expect(issue!.message).toMatch(
+      /Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand\.$/,
+    );
+    // Customer-facing text carries the ADR, never an issue id — a `#NNNN`
+    // token resolves to nothing for the reader who meets this refusal; the
+    // durable reference is ADR-0049.
+    expect(issue!.message).toMatch(/ADR-0049/);
+    expect(issue!.message).not.toMatch(/#\d{3,}/);
+  });
+
+  it('REJECTS it through DeclarativeConnectorEntrySchema — the `/meta` write door inherits the tombstone', () => {
+    const result = DeclarativeConnectorEntrySchema.safeParse({
+      ...ERROR_MAPPING_WELL_FORMED,
+      errorMapping: AUTHORED_ERROR_MAPPING,
+    });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+
+    const issue = result.error.issues.find((i) => i.path[0] === 'errorMapping');
+    expect(issue, 'the refusal must surface through the declarative entry').toBeDefined();
+    expect(issue!.code).toBe('invalid_type');
+    expect(issue!.path).toEqual(['errorMapping']);
+    expect(issue!.message).toMatch(ERROR_MAPPING_PRESCRIPTION);
+
+    // The registry lookup is the real `/meta` entry point — a future
+    // rebinding that pointed `connector` at some third shape would pass the
+    // pin above and still accept the block in production.
+    const schema = getMetadataTypeSchema('connector');
+    expect(schema, 'no schema bound for `connector`').toBeDefined();
+    expect(schema!.safeParse({ ...ERROR_MAPPING_WELL_FORMED, errorMapping: AUTHORED_ERROR_MAPPING }).success)
+      .toBe(false);
+  });
+
+  it('REJECTS it in `stack.connectors[]` — the real authoring path — at the nested path', async () => {
+    const { ObjectStackSchema } = await import('../stack.zod');
+
+    const rejected = ObjectStackSchema.safeParse({
+      connectors: [{ ...ERROR_MAPPING_WELL_FORMED, errorMapping: AUTHORED_ERROR_MAPPING }],
+    });
+    expect(rejected.success).toBe(false);
+    if (rejected.success) return;
+
+    const issue = rejected.error.issues.find((i) => i.path.join('.') === 'connectors.0.errorMapping');
+    expect(issue, 'the refusal must surface through `connectors[]`').toBeDefined();
+    expect(issue!.code).toBe('invalid_type');
+    expect(issue!.path).toEqual(['connectors', 0, 'errorMapping']);
+    expect(issue!.message).toMatch(ERROR_MAPPING_PRESCRIPTION);
+
+    // Positive control: the identical stack minus the retired key parses, so
+    // the failure above is attributable to `errorMapping` and nothing else.
+    expect(ObjectStackSchema.safeParse({ connectors: [ERROR_MAPPING_WELL_FORMED] }).success).toBe(true);
+  });
+
+  it('parses a well-formed connector without the key and grows no `errorMapping` property', () => {
+    const parsed = ConnectorSchema.parse({ ...ERROR_MAPPING_WELL_FORMED });
+    expect(parsed.name).toBe('payments_api');
+    expect(parsed.enabled).toBe(true); // control: the live defaults still apply
+    // The non-strict strip path: absence must stay absence. If the tombstone
+    // were ever replaced by a plain deletion, an authored `errorMapping` would
+    // be stripped here in silence — this pin plus the rejections above are
+    // what make that regression loud.
+    expect(parsed).not.toHaveProperty('errorMapping');
+  });
+
+  it('fails tsc at the authoring site: the input type of the key is `never`', () => {
+    const connector: Connector = {
+      ...ERROR_MAPPING_WELL_FORMED,
+      // @ts-expect-error — `errorMapping` is a retiredKey() tombstone: its
+      // input type is `never`, so a typed literal cannot carry it (#14676).
+      errorMapping: AUTHORED_ERROR_MAPPING,
+    };
+    // The parse channel agrees with the type channel on the same literal.
+    expect(ConnectorSchema.safeParse(connector).success).toBe(false);
+  });
+
+  it('the D2 conversion strips the block from `connectors[]` — one attributed notice per connector', () => {
+    const { stack, notices } = collectConversionNotices(
+      {
+        connectors: [
+          { ...ERROR_MAPPING_WELL_FORMED, errorMapping: AUTHORED_ERROR_MAPPING },
+          // Never authored the key: rides through untouched.
+          { name: 'warehouse_sync', label: 'Warehouse Sync', type: 'saas' },
+        ],
+      },
+      { includeRetired: true },
+    );
+    expect(stack).toEqual({
+      connectors: [
+        { name: 'payments_api', label: 'Payments API', type: 'api' },
+        { name: 'warehouse_sync', label: 'Warehouse Sync', type: 'saas' },
+      ],
+    });
+    // One notice — the block is the unit of removal; the eleven nested keys
+    // are not counted separately.
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toMatchObject({
+      conversionId: 'connector-error-mapping-removed',
+      toMajor: 18,
+      path: 'connectors[0].errorMapping',
+    });
+    // And the stripped entry parses through the real authoring schema: the
+    // conversion output is exactly what the tombstone accepts.
+    const stripped = (stack.connectors as unknown[])[0];
+    expect(DeclarativeConnectorEntrySchema.safeParse(stripped).success).toBe(true);
+  });
+});
+
+describe('[#14676] integration/ErrorMappingConfig + ErrorMappingRule + ConnectorErrorCategory def retirement', () => {
+  /** The 7 names the three retired defs exported (3 schema consts + 4 types). */
+  const RETIRED_NAMES = [
+    'ErrorMappingConfigSchema',
+    'ErrorMappingConfig',
+    'ErrorMappingConfigParsed',
+    'ErrorMappingRuleSchema',
+    'ErrorMappingRule',
+    'ConnectorErrorCategorySchema',
+    'ConnectorErrorCategory',
+  ] as const;
+
+  it('every retired name has ZERO holders on any public entry; the carriers survive', () => {
+    // Anti-vacuity: the baseline must cover the real surface.
+    for (const needed of ['.', './integration']) {
+      expect(EXPORT_ENTRY_POINTS, `exports map must include ${needed}`).toContain(needed);
+    }
+    expect(exportNamesOf('./integration').length, './integration must export a non-trivial surface')
+      .toBeGreaterThan(20);
+
+    // ── ABSENCE (every entry, not just ./integration) ─────────────────────
+    for (const name of RETIRED_NAMES) {
+      expect(holdersOf(name), `${name} must have zero holders after #14676`).toEqual([]);
+    }
+
+    // ── SURVIVAL ──────────────────────────────────────────────────────────
+    // The connector module itself stays: the carrier def and its neighbours
+    // are untouched — this retirement is a narrowing, not a module sweep.
+    const integrationNames = exportNamesOf('./integration');
+    for (const name of [
+      'ConnectorSchema',
+      'DeclarativeConnectorEntrySchema',
+      'ConnectorHealthSchema',
+      'RetryConfigSchema',
+      'ConnectorFieldMappingSchema',
+    ]) {
+      expect(integrationNames, `${name} must SURVIVE this retirement`).toContain(name);
+    }
+  });
+
+  it('the integration barrel resolves without the retired schemas and keeps the survivors', async () => {
+    const integration = await import('./index');
+    expect(integration).not.toHaveProperty('ErrorMappingConfigSchema');
+    expect(integration).not.toHaveProperty('ErrorMappingRuleSchema');
+    expect(integration).not.toHaveProperty('ConnectorErrorCategorySchema');
+    // Anti-vacuity: the barrel really resolved and still exports the carrier.
+    expect(integration).toHaveProperty('ConnectorSchema');
+    expect(integration).toHaveProperty('DeclarativeConnectorEntrySchema');
+  });
+});
+
+describe('[#14676] ADR-0087 registration', () => {
+  it('declares both carrier keys and the three removed defs under major 18, with the D2 conversion in the step-18 chain', () => {
+    expect(RETIRED_KEYS_BY_MAJOR[18]).toContain('integration/Connector:errorMapping');
+    expect(RETIRED_KEYS_BY_MAJOR[18]).toContain('integration/DeclarativeConnectorEntry:errorMapping');
+    for (const def of [
+      'integration/ErrorMappingConfig',
+      'integration/ErrorMappingRule',
+      'integration/ConnectorErrorCategory',
+    ]) {
+      expect(RETIRED_DEFS_BY_MAJOR[18], `${def} must be declared`).toContain(def);
+    }
+    const step = MIGRATIONS_BY_MAJOR[18];
+    // The D2 conversion IS wired (a connector is a stack collection member, so
+    // the chain has a seam) — a chain-replay red on its fixture reads as
+    // "not wired", never as "transform broken" (playbook §3).
+    expect(step.conversionIds).toContain('connector-error-mapping-removed');
   });
 });

@@ -834,8 +834,6 @@ export type Iso377 = Assert<Eq< z.input< typeof M78.ConnectorConflictResolutionS
 export type Iso378 = Assert<Eq< z.input< typeof M78.WebhookEventSchema >, z.infer< typeof M78.WebhookEventSchema > >>;
 export type Iso379 = Assert<Eq< z.input< typeof M78.WebhookSignatureAlgorithmSchema >, z.infer< typeof M78.WebhookSignatureAlgorithmSchema > >>;
 export type Iso380 = Assert<Eq< z.input< typeof M78.ConnectorRetryStrategySchema >, z.infer< typeof M78.ConnectorRetryStrategySchema > >>;
-export type Iso381 = Assert<Eq< z.input< typeof M78.ConnectorErrorCategorySchema >, z.infer< typeof M78.ConnectorErrorCategorySchema > >>;
-export type Iso382 = Assert<Eq< z.input< typeof M78.ErrorMappingRuleSchema >, z.infer< typeof M78.ErrorMappingRuleSchema > >>;
 export type Iso383 = Assert<Eq< z.input< typeof M78.ConnectorTypeSchema >, z.infer< typeof M78.ConnectorTypeSchema > >>;
 export type Iso384 = Assert<Eq< z.input< typeof M78.ConnectorStatusSchema >, z.infer< typeof M78.ConnectorStatusSchema > >>;
 // [#4395] Added after the generated corpus, so its number continues from the
