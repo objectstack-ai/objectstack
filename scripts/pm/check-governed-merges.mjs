@@ -701,7 +701,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the generator co-edit fence (#11084), pinned in BOTH directions': 10,
   'the #11705 generator-owned rows inside `skills/**`': 23,
   '#11705 end to end, against the REAL generator': 7,
-  "the live battery's prerequisite, and the floor it was misread as": 16,
+  "the live battery's prerequisite, and the floor it was misread as": 17,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -3775,14 +3775,36 @@ async function selfTest() {
       'scripts/cli-build-prerequisite.mjs',
       'scripts/invoked-as.mjs',
     ];
-    for (const rel of moduleGraph) {
-      mkdirSync(join(copiedCheckout, dirname(rel)), { recursive: true });
-      cpSync(join(repoRoot, rel), join(copiedCheckout, rel));
+    // ⛔ And the child must never spawn a child of its own. It reaches this
+    // battery only when the probe did NOT refuse — and there its fixture tree
+    // is a perfect seed for the next copy. Measured, with the probe ablated:
+    // an unbounded chain of self-tests, one per second, each waiting on the
+    // next, 67 processes before it was cut off by hand. A HANG is the worst
+    // reading a gate can return — neither green nor red, and nothing in CI
+    // distinguishes it from slow — so a marked run refuses to spawn and FAILS
+    // these cases with the reason, in the same number of them.
+    const childArgv = [join(copiedCheckout, 'scripts/pm/check-governed-merges.mjs'), '--self-test', '--fixture-child'];
+    const nestedFixture = process.argv.includes('--fixture-child');
+    let refused;
+    if (nestedFixture) {
+      refused = {
+        status: null,
+        stdout: '',
+        stderr: 'this run was spawned BY the prerequisite battery and then reached that battery itself, '
+          + 'which can only happen when the probe did not refuse. Refusing to spawn a grandchild.',
+      };
+    } else {
+      for (const rel of moduleGraph) {
+        mkdirSync(join(copiedCheckout, dirname(rel)), { recursive: true });
+        cpSync(join(repoRoot, rel), join(copiedCheckout, rel));
+      }
+      refused = spawnSync(process.execPath, childArgv, {
+        encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 120_000,
+      });
     }
-    const refused = spawnSync(process.execPath, [join(copiedCheckout, 'scripts/pm/check-governed-merges.mjs'), '--self-test'], {
-      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 120_000,
-    });
     const said = `${refused.stderr ?? ''}${refused.stdout ?? ''}`;
+    assert('the-fixture-child-is-marked-so-it-can-never-spawn-one-of-its-own',
+      childArgv.includes('--fixture-child') && nestedFixture === false, JSON.stringify(childArgv.slice(1)));
     assert('an-uninstalled-checkout-refuses-end-to-end-with-that-very-code',
       refused.status === EXIT_PREREQUISITE_NOT_MET, `status=${refused.status} ${said.slice(0, 400)}`);
     assert('and-the-refusal-names-the-class-the-prerequisite-and-the-remedy',
