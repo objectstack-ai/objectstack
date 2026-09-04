@@ -1,7 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { FilterConditionSchema } from '../data/filter.zod';
 import { ViewFilterRuleSchema, ViewDataSchema } from './view.zod';
 import { InlineActionSchema, ActionLocationSchema } from './action.zod';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
@@ -2181,7 +2180,38 @@ export const ElementRecordPickerPropsSchema = lazySchema(() => strictObject({
   valueField: z.string().optional().describe('Field whose value is written into the bound page variable (default `id`)'),
   /** Control label rendered above the select. */
   label: I18nLabelSchema.optional().describe('Control label rendered above the select'),
-  filter: FilterConditionSchema.optional().describe('Filter criteria for available records'),
+  /**
+   * Filter rules narrowing which records the picker offers — the
+   * `ViewFilterRule` ARRAY form, `[{ field, operator, value }, ...]`, the one
+   * filter orthography every other `filter` input in this map declares
+   * (`record:related_list` and its Add-affordance picker, the `object-*`
+   * blocks, and — since #12039 Key 2 — `element:number`). Until #14406 this
+   * entry alone still said `FilterConditionSchema`, the MongoDB-style record
+   * form: the last record-form `filter` in `ComponentPropsMap` after the
+   * ui#6206 ruling (2026-08-25, Option B, verbatim 「同意」: one filter
+   * orthography platform-wide).
+   *
+   * Sequenced measurement-first, as the `element:number` convergence had to
+   * be (the 2026-08-25 Option-A ordering ruling): the read path was measured
+   * at the objectui pin (`00d3f09c`) before this declaration moved. The
+   * renderer hands the value to `query.$filter` and calls `adapter.find()`
+   * (`components/src/renderers/basic/record-picker.tsx`);
+   * `ObjectStackAdapter.convertQueryParams` lowers an ARRAY `$filter` through
+   * `translateFilterArray` — `[{ field, operator, value }]` → filter AST
+   * tuples (`data-objectstack/src/index.ts`) — the same door every list view's
+   * stored rule array already takes, and the engine lowers the tuples before
+   * the driver (`objectql/src/engine-filter-array-lowering.test.ts`). Nothing
+   * on that path parses `properties` against the installed spec, so no
+   * refusal stands between an authored array and the query. The record form
+   * is refused at `filter`; the migration prescription is the
+   * `element-record-picker-filter-rule-array` semantic entry.
+   *
+   * The binding-level `dataSource.filter` this shorthand yields to
+   * (`ds.filter ?? props.filter`) is `ElementDataSourceSchema`'s key, not this
+   * entry's subject.
+   */
+  filter: z.array(ViewFilterRuleSchema).optional()
+    .describe('Filter rules narrowing which records the picker offers — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` input in this map shares. The MongoDB-style record form is refused — see migration `element-record-picker-filter-rule-array`. The binding-level `dataSource.filter` wins outright when both are set'),
   /**
    * Row order (#6276). The flat shorthand for `dataSource.sort`, and the same
    * shape — `SortItemSchema[]`, the pairs the renderer forwards to the query as
@@ -2257,6 +2287,15 @@ export const ElementRecordPickerPropsSchema = lazySchema(() => strictObject({
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 }));
 export type ElementRecordPickerProps = z.input<typeof ElementRecordPickerPropsSchema>;
+/**
+ * ADR-0122: the parsed state differs from the authored state on exactly one
+ * key — `filter` carries `ViewFilterRuleSchema` (the ui#6206 convergence,
+ * #14406), whose own input ≠ infer (`operator` is normalized on parse, which
+ * is why `ViewFilterRuleParsed` exists). So `element:record_picker` leaves
+ * the type-alias convention pin's isomorphic family (the Iso819 line deleted
+ * with this alias), the route `element:number` took one entry earlier.
+ */
+export type ElementRecordPickerPropsParsed = z.infer<typeof ElementRecordPickerPropsSchema>;
 
 /**
  * A single-line free-text input — the data-entry half of an SDUI page (Airtable

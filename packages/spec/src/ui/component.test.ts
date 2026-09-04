@@ -1667,13 +1667,17 @@ describe('Interactive Elements — element:record_picker', () => {
       labelField: 'name',
       valueField: 'id',
       label: 'Account',
-      filter: { status: 'active' },
+      // The ViewFilterRule array form (ui#6206-B, #14406) — this fixture
+      // authored the record form `{ status: 'active' }` while the entry alone
+      // accepted it.
+      filter: [{ field: 'status', operator: 'equals', value: 'active' }],
       placeholder: 'Search accounts...',
       emptyText: 'No accounts',
     });
     expect(props.labelField).toBe('name');
     expect(props.valueField).toBe('id');
     expect(props.label).toBe('Account');
+    expect(props.filter).toEqual([{ field: 'status', operator: 'equals', value: 'active' }]);
     expect(props.emptyText).toBe('No accounts');
   });
 
