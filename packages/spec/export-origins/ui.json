@@ -287,6 +287,7 @@
     "RECORD_CONTEXT_BLOCK_TAGS": "src/ui/react-blocks.ts#RECORD_CONTEXT_BLOCK_TAGS (const)",
     "RECORD_CONTEXT_TYPE_PREFIX": "src/ui/react-blocks.ts#RECORD_CONTEXT_TYPE_PREFIX (const)",
     "RESERVED_COMPONENT_TYPE_NAMESPACES": "src/ui/component-type-vocabulary.ts#RESERVED_COMPONENT_TYPE_NAMESPACES (const)",
+    "RETIRED_PAGE_COMPONENT_TYPES": "src/ui/page.zod.ts#RETIRED_PAGE_COMPONENT_TYPES (const)",
     "ReactBlockDef": "src/ui/react-blocks.ts#ReactBlockDef (interface)",
     "ReactInteractionProp": "src/ui/react-blocks.ts#ReactInteractionProp (interface)",
     "ReactPropKind": "src/ui/react-blocks.ts#ReactPropKind (type)",

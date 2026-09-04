@@ -9,6 +9,10 @@ import { FeedItemType, FeedFilterMode } from '../data/feed.zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { ExpressionInputSchema } from '../shared/expression.zod';
 import { retiredKey } from '../shared/retired-key';
+// `user:profile`'s retirement prescription — one string, three doors (#14159):
+// the enum's error map and the `PageComponentSchema.type` check in page.zod.ts,
+// and the kept `ComponentPropsMap` row below (`retiredComponentProps`).
+import { RETIRED_PAGE_COMPONENT_TYPES } from './page.zod';
 // `element:record_picker`'s flat `sort` shorthand is the SAME contract as
 // `ElementDataSourceSchema.sort` (page.zod.ts) — one shape, imported from the
 // shared source rather than re-spelled here (#6276).
@@ -318,15 +322,17 @@ const COMPONENT_LEVEL_GUIDANCE: readonly KeySetGuidance[] = [
 
 /**
  * A component that declares no props at all — `app:launcher`, `nav:menu`,
- * `nav:breadcrumb`, `global:search`, `global:notifications`, `user:profile`,
+ * `nav:breadcrumb`, `global:search`, `global:notifications`,
  * `element:divider`, and the three plugin console widgets
  * `cloud-connection:panel` and `marketplace:installed-list` (#11575) and
- * `mcp:connect-agent` (#12344).
+ * `mcp:connect-agent` (#12344). `user:profile` left this list at #14159 — it
+ * is not author-placeable at all, so its row refuses the whole bag
+ * ({@link retiredComponentProps}).
  *
  * A factory rather than one shared `EmptyProps` const, because the surface name
  * is the whole value of the rejection here: an empty shape has no candidate
  * keys, so the edit-distance fallback can say nothing, and "unrecognized key on
- * this component" would leave the author guessing which of the ten it meant.
+ * this component" would leave the author guessing which of the nine it meant.
  * One `strictObject(` call site either way — the ledger counts sites from the
  * AST, and this is one.
  *
@@ -344,6 +350,33 @@ const emptyProps = (type: string) =>
     },
     {},
   );
+
+/**
+ * A component RETIRED at element grain whose props bag is refused WHOLE —
+ * `user:profile` (#14159). The `retiredKey` channel one grain wider: where a
+ * tombstoned KEY accepts absence and refuses any value, a retired ELEMENT has
+ * nothing an author may write at all, so the row is `z.never` — `{}` is refused
+ * exactly like a populated bag, `expected: 'never'` / `code: 'invalid_type'` is
+ * the same issue shape a key tombstone raises, and the message is the element's
+ * retirement prescription from `RETIRED_PAGE_COMPONENT_TYPES` (page.zod.ts), so
+ * the row and the node-level refusal on `PageComponentSchema.type` cannot drift
+ * apart. A type that map does not name has no business here — the throw makes
+ * a row without its prescription a module-load error, not a silent `undefined`
+ * message.
+ *
+ * Why not delete the row: `component-type-vocabulary.ts` derives the KNOWN set
+ * from the row keys, the #5068 props gate skips a type with no row as an
+ * unregistered custom string, and `check-yaml-examples` judges only rowed types
+ * — deleting the row would demote a loud retirement to a silent skip on every
+ * reader that dispatches on it (the `element:filter` argument, #9220).
+ */
+const retiredComponentProps = (type: string) => {
+  const guidance = RETIRED_PAGE_COMPONENT_TYPES.get(type);
+  if (!guidance) {
+    throw new Error(`retiredComponentProps: \`${type}\` has no RETIRED_PAGE_COMPONENT_TYPES entry (page.zod.ts)`);
+  }
+  return z.never({ error: () => guidance }).describe(`[REMOVED] ${guidance}`);
+};
 
 /**
  * The composition slot every thin container renders: `page:section`,
@@ -2859,7 +2892,15 @@ export const ComponentPropsMap = {
   // Utility
   'global:search': emptyProps('global:search'),
   'global:notifications': emptyProps('global:notifications'),
-  'user:profile': emptyProps('user:profile'),
+  // RETIRED at element grain (#14159, ruling B: not author-placeable) — the
+  // row STAYS, as for `element:filter` / `element:form` below, so every reader
+  // that dispatches on the row (the #5068 props gate, `check-yaml-examples`,
+  // the vocabulary's known set) keeps recognising the name and refuses it with
+  // the prescription instead of skipping it as an unregistered custom string.
+  // Unlike those two, the WHOLE bag is refused — `{}` included — because the
+  // node itself is refused by name at `PageComponentSchema.type`; a row that
+  // accepted the empty bag would contradict the door one level up.
+  'user:profile': retiredComponentProps('user:profile'),
 
   // Plugin console widgets — #11575, the #8691/#8744 mechanism two instances
   // over, on `@objectstack/cloud-connection`'s published Setup pages: both
