@@ -4,6 +4,8 @@ import { Plugin, PluginContext } from '@objectstack/core';
 import { resolveAllowDegradedTenancy, resolveAllowDevPlugin, resolveTenancyPosture } from '@objectstack/types';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 
+import { devI18nPluginOptions } from './dev-i18n.js';
+
 /**
  * Dev Plugin Options
  *
@@ -522,19 +524,19 @@ export class DevPlugin implements Plugin {
     //     file-based i18n. Falls back to the core in-memory i18n fallback
     //     (with locale resolution) if the package is not installed.
     if (enabled('i18n') && this.options.stack) {
-      const stack = this.options.stack;
-      const hasTranslations = Array.isArray(stack.translations) && stack.translations.length > 0;
-      const hasI18nConfig = !!(stack.i18n || (stack.manifest && stack.manifest.i18n));
-      const hasManifestTranslations = !!(stack.manifest && Array.isArray(stack.manifest.translations) && stack.manifest.translations.length > 0);
+      // [#15232] The detection AND the locales it derives are one decision,
+      // resolved in `dev-i18n.ts` — which reads `translations` at the flattened
+      // top level first and then through `resolveArtifactPackageOrder`, so a
+      // multi-package app under ADR-0130 D4's option-B shape is detected
+      // instead of silently falling back to the in-memory i18n. The dynamic
+      // import and its degradation stay HERE, because they are about the
+      // optional PACKAGE being installed, not about what the stack declares.
+      const i18nOptions = devI18nPluginOptions(this.options.stack);
 
-      if (hasTranslations || hasI18nConfig || hasManifestTranslations) {
+      if (i18nOptions) {
         try {
           const { I18nServicePlugin } = await import('@objectstack/service-i18n') as any;
-          const i18nConfig = stack.i18n || (stack.manifest || stack)?.i18n || {};
-          const i18nPlugin = new I18nServicePlugin({
-            defaultLocale: i18nConfig.defaultLocale,
-            fallbackLocale: i18nConfig.fallbackLocale || i18nConfig.defaultLocale || 'en',
-          });
+          const i18nPlugin = new I18nServicePlugin(i18nOptions);
           this.childPlugins.push(i18nPlugin);
           ctx.logger.info('  ✔ I18nServicePlugin auto-registered (translations detected in stack)');
         } catch (err) {

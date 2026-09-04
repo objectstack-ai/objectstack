@@ -151,6 +151,13 @@
     // into this program needs no widening.
     "paths": {
       "@objectstack/objectql": ["../objectql/src/index.ts"],
+      // [#15232] The fourth, added for the same reason and under the same
+      // no-star rule: the option-B probe calls `@objectstack/plugin-dev`'s
+      // shipped i18n auto-detect decision, and this package's vitest config
+      // aliases that same bare specifier to the same source entry, so the type
+      // verdict and the run agree about which artifact is under test. The
+      // package publishes only `"."`.
+      "@objectstack/plugin-dev": ["../plugins/plugin-dev/src/index.ts"],
       "@objectstack/plugin-security": ["../plugins/plugin-security/src/index.ts"],
       "@objectstack/runtime": ["../runtime/src/index.ts"]
     }
