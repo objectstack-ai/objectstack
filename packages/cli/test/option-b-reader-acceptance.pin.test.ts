@@ -66,9 +66,17 @@
  *
  * Run with `OPTION_B_LOSSES` emptied on `origin/main` `33681eaef`, the pin
  * reports **24 subsystems** losing their collections, across all three packages
- * the program scopes — the full red output is recorded in this card's PR body.
+ * the program scopes — the full red output is recorded in #15004's PR body.
  * In the SAME run the additive baseline and the `packages[]` control both pass,
  * which is what makes the red a discrimination rather than a broken fixture.
+ *
+ * Re-verified at the empty ledger, which is the state that could go vacuous:
+ * with `@objectstack/runtime`'s `resolveArtifactCollections` neutered to the
+ * identity function and that package REBUILT (the pin reaches it through its
+ * `exports` map, so `dist/` is what it measures), this pin goes RED naming
+ * exactly 23 rows — the same 23, byte for byte, that the ledger carried before
+ * #15005. Restored and rebuilt, 7 passed. So the empty ledger is a measurement
+ * of the readers, not of a probe that stopped looking.
  *
  * One row in that output is worth naming here, because it is a loss no
  * presence-check would have found: on the compiled path a function declared
@@ -129,25 +137,34 @@ import { measureShape, type ProbeRow, type ShapeMeasurement } from './fixtures/o
 
 /**
  * The subsystems that silently lose their collection when the flattened top
- * level is gone — MEASURED, not curated. Opened at 24 rows on `origin/main`
- * `33681eaef` (#15004); 23 of them were deleted by #15005 when
- * `@objectstack/runtime` learned to resolve `packages[]` — the whole of
- * boundaries B1 and B5, plus every B2 row whose reader ships in that package.
+ * level is gone — MEASURED, not curated. ⭐ EMPTY: the reader half of the
+ * option-B program is done, and the emitter half (#14512) is unblocked.
  *
- * The one row left is NOT a runtime reader: `appSecurityPluginOptions`
- * (`@objectstack/plugin-security`) reads `config.permissions` off the
- * from-source config directly, so nothing on the artifact side can reach it.
- * Card #15007 owns it, and the ledger is empty — the reader half done, the
- * emitter half #14512 unblocked — when it goes.
+ * How it got here, in the order the rows actually went:
  *
- * Its B1 twin is already gone: that row runs `appSecurityPluginOptions` over
- * `createStandaloneStack`'s RESULT, and the result now surfaces `permissions`
- * resolved across both shapes. Same reader, two boundaries, one of them fed by
- * a producer this card fixed — which is the two-boundary split #15005 warns
- * about, seen from the ledger's side.
+ *   - opened at **24 rows** on `origin/main` `33681eaef` (#15004);
+ *   - **23 → 23** when #15007 (`@objectstack/plugin-security`) landed, deleting
+ *     `B2 · plugin-security appSecurityPluginOptions over the from-source
+ *     config`, the one row no artifact-side change could reach;
+ *   - **23 → 0** here (#15005), when `@objectstack/runtime` learned to resolve
+ *     `packages[]`: the whole of boundaries B1 and B5, and every B2 row whose
+ *     reader ships in that package.
  *
- * ⛔ SHRINK-ONLY, audited in BOTH directions (see the header). Each line names
- * a boundary, a subsystem and the collection it reads.
+ * ⚠️ The last row to go was a plugin-security one and it is NOT #15007's twin
+ * arriving late: `B1 · plugin-security appSecurityPluginOptions over the
+ * artifact-serve config` runs that same reader over `createStandaloneStack`'s
+ * RESULT. Nothing inside `@objectstack/plugin-security` could move it — the
+ * standalone result carried neither the permission sets nor a route to them —
+ * and it goes green because that result now surfaces `permissions` resolved
+ * across both shapes, which plugin-security's existing top-level branch then
+ * answers. One reader, two boundaries, each owned by a different card: that
+ * split is what the header's B1/B2 distinction is for.
+ *
+ * ⛔ SHRINK-ONLY, audited in BOTH directions (see the header). An empty ledger
+ * is the STRONGEST state this pin has, not a disabled one: every row the probe
+ * measures must now be `present` in BOTH shapes, so a reader that regresses —
+ * or a new reader that arrives unresolved — is red on arrival with nothing left
+ * to absorb it. Adding a line is never how that red is fixed.
  */
 const OPTION_B_LOSSES: readonly string[] = [];
 
