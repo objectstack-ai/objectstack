@@ -915,7 +915,7 @@ export class MetadataPlugin implements Plugin {
             const def = ObjectStackDefinitionSchema.parse(this._convertArtifactForward(ctx, obj, label));
             const canonical = JSON.stringify(def, Object.keys(def).sort());
             const checksum = createHash('sha256').update(canonical).digest('hex');
-            const environmentId = this.options.environmentId ?? 'proj_local';
+            const environmentId = this.options.environmentId ?? 'env_local';
             EnvironmentArtifactSchema.parse({
                 schemaVersion: '0.1',
                 environmentId,
