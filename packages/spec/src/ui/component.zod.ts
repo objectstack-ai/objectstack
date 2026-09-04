@@ -2212,7 +2212,7 @@ export const ElementRecordPickerPropsSchema = lazySchema(() => strictObject({
    * entry's subject.
    */
   filter: z.array(ViewFilterRuleSchema).optional()
-    .describe('Filter rules narrowing which records the picker offers — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography the map's array-declared `filter` doors share. The MongoDB-style record form is refused — see migration `element-record-picker-filter-rule-array`. The binding-level `dataSource.filter` wins outright when both are set'),
+    .describe('Filter rules narrowing which records the picker offers — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography the array-declared `filter` doors of this map share. The MongoDB-style record form is refused — see migration `element-record-picker-filter-rule-array`. The binding-level `dataSource.filter` wins outright when both are set'),
   /**
    * Row order (#6276). The flat shorthand for `dataSource.sort`, and the same
    * shape — `SortItemSchema[]`, the pairs the renderer forwards to the query as
