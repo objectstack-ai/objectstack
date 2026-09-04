@@ -21,6 +21,13 @@ stated reason the reader half was revertible on its own and safe to land before
 the emitter half (#14512), and the next reader would have believed the mechanism
 was there.
 
+⚠️ Release-notes note: this supersedes one sentence of the #15226 entry in this same
+unreleased batch — "The resolution now reads the flattened top level FIRST and then each
+package body". That described #15226 accurately when it landed; after this change the
+`packages[]` pass runs only where the top level named no default. The earlier entry is
+left as written rather than retro-edited, so whoever compiles the notes collapses the two
+deliberately instead of reading a contradiction.
+
 The reader now walks the discipline the docblock claims — start from the
 expression this program replaced, `appDefaultPermissionSetName(config.permissions)`,
 and consult `packages[]` only where it came back `undefined`.
