@@ -40,7 +40,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { assertEngineDeleteDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import type { AutomationContext } from '@objectstack/spec/contracts';
 import { defineActionDescriptor } from '@objectstack/spec/automation';
 
@@ -57,8 +57,8 @@ function createTestLogger() {
  * Minimal in-memory ObjectQL-like engine: rows keyed by id, with `where`
  * equality filtering — the same double `suspended-run-store.test.ts` drives
  * {@link ObjectStoreSuspendedRunStore} with, copied rather than shared so this
- * file registers no tests it does not own. `delete` routes through the real
- * engine's dispatch predicate (`check:engine-double-contract`).
+ * file registers no tests it does not own. `delete` and `update` route through
+ * the real engine's dispatch predicates (`check:engine-double-contract`).
  */
 function createFakeEngine(): SuspendedRunStoreEngine & { rows: Map<string, any> } {
     const rows = new Map<string, any>();
@@ -81,6 +81,8 @@ function createFakeEngine(): SuspendedRunStoreEngine & { rows: Map<string, any> 
             return data;
         },
         async update(_object, data, options) {
+            // Refuses what a real server refuses (`check:engine-double-contract`).
+            assertEngineUpdateDispatch(data, options as any);
             const id = options?.where?.id ?? data.id;
             const existing = rows.get(String(id)) ?? { id };
             rows.set(String(id), { ...existing, ...data });
