@@ -296,6 +296,7 @@ import { createProgramChecked } from './ts-parse.mjs';
 import {
   WORKSPACE_FILE,
   selfTest as workspaceEnumeratorSelfTest,
+  workspaceEnumeratorFloorFailures,
   workspacePackageDirs,
 } from './workspace-enumerator.mjs';
 
@@ -3545,6 +3546,7 @@ function selfTest() {
   // The shared workspace enumerator is a plain module with no CI invocation of
   // its own (#11510); every gate that consolidated onto it folds in its checks.
   failures.push(...workspaceEnumeratorSelfTest({ root: ROOT }));
+  failures.push(...workspaceEnumeratorFloorFailures());
 
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
   //
