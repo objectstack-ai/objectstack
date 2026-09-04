@@ -4808,7 +4808,33 @@ jobs:
       - name: Build the ledgered packages' dependencies
         run: pnpm exec turbo run build --filter='./packages/*' --filter='./packages/*/*'
 
+      # ⚠️ `NODE_OPTIONS` here is HALF of the heap ceiling this gate runs tsc
+      # under, and the two halves ship together or not at all (#14569, ruled
+      # 2026-09-03). The other half is `CI_TSC_HEAP_CEILING_MB` in
+      # scripts/check-type-check-coverage.mjs, which is a DESCRIPTION of the old
+      # space the process running tsc really has -- and the gate chooses the
+      # MINIMUM of that pin and this process's actual limit. So without this
+      # line the pin buys nothing (V8's default old space on this runner is
+      # 4096 MB, measured) and the gate's `stale` arm refuses the run outright,
+      # before the first tsc, on every PR and on `main`. That refusal is the
+      # pairing's enforcement, and it is deliberate.
+      #
+      # Why 6144 and not more, measured on this runner rather than reasoned
+      # (run 33708954003, job 100504131338, 2026-09-03): the heaviest ledger
+      # program keeps 4,077,718K live under a 4096 cap and 4,420,706K under
+      # 6144 while finishing ~5s sooner -- i.e. under 4096 it was paying GC
+      # pressure to fit -- and 10,562,192 kB of the box's 16,373,452 kB stayed
+      # available at the tightest moment of either run. The raise is headroom
+      # the box really has, not a promise it cannot keep; a ceiling above the
+      # box's real memory buys nothing and converts a recoverable heap error
+      # into an exit-137 SIGKILL with no diagnostic.
+      #
+      # ⛔ Do not change this number without changing the constant, or the
+      # reverse. The constant's comment carries the full reading and both
+      # directions are pinned in that file's `--self-test`.
       - name: Re-measure the type-check DEBT / TEST_DEBT ledger
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
         run: pnpm check:type-check-debt
 
   # Lane 4 of 4 behind the required `TypeScript Type Check` context. The

@@ -2792,7 +2792,7 @@ function countTscErrors(output, { dropRootDirDiagnostics = false } = {}) {
 // same tree. ⚠️ The asymmetry IS the defect: a local pass was never a claim
 // about CI, and nothing said so out loud.
 //
-// ## Where the number comes from -- CI, never this box
+// ## Where the runner's DEFAULT old space comes from -- CI, never this box
 //
 // Read off the CI runner itself: run 33136681083, job `Type Check · debt
 // ledger`, at 6d097a604, Node v22.23.2. The `packages/qa/http-conformance`
@@ -2812,10 +2812,83 @@ function countTscErrors(output, { dropRootDirDiagnostics = false } = {}) {
 // with `NODE_OPTIONS` on a box under this file's own eyes), so a 4096 old space
 // reports 4144 and commits the 4147.5 above it.
 //
-// ⚠️ If 4096 is wrong, it is wrong DOWNWARD -- the only safe direction. This
-// number's entire job is to be no HIGHER than CI's ceiling. A pin ABOVE CI's is
-// worse than no pin at all: it makes local runs pass where CI still OOMs, which
-// is exactly this defect with extra confidence attached.
+// ## Re-measured FIRST-HAND on the runner, 2026-09-03 (#14569)
+//
+// The bracket above is archaeology through a failed job's GC trace. #14569
+// asked for a raise to 6144 to be taken on a measurement rather than on a
+// typed number, so the reading was taken where the verdict is taken: inside
+// the `Type Check · debt ledger` job itself, by a temporary probe step that
+// emitted its numbers as `::notice` annotations (run 33708954003, job
+// 100504131338, image `ubuntu24 20260831.293.1`, Node v22.23.2, 4 vCPU).
+//
+//   the runner        MemTotal 16,373,452 kB (~15.6 GiB) plus 3,145,724 kB of
+//                     swap -- NOT the 7 GB #14569 assumed. MemAvailable at the
+//                     point the re-measure starts: 14,329,064 kB.
+//   other consumers   153 processes holding 940,316 kB (~918 MB) altogether:
+//                     Runner.Worker 144 MB, Runner.Listener 98 MB, provjobd
+//                     96 MB, dockerd 73 MB, containerd 43 MB. The job's steps
+//                     are sequential, so nothing in it runs BESIDE the
+//                     re-measure -- the ledger's tsc has the box to itself.
+//   this gate's own   `heap_size_limit` 4144 MB with `NODE_OPTIONS` unset --
+//     ceiling         the runner's V8 default, read directly rather than
+//                     inferred. It confirms the 4096 MB old space the GC trace
+//                     above could only bracket.
+//   the heaviest      `packages/qa/http-conformance`'s TEST_DEBT program (906
+//     program         files, 692,003 lines of definitions, 7,328,937
+//                     instantiations) under `--extendedDiagnostics`, twice:
+//
+//                       cap 4096  Memory used 4,077,718K  peak RSS 4,212,904 kB
+//                                 check 26.84s
+//                       cap 6144  Memory used 4,420,706K  peak RSS 4,545,500 kB
+//                                 check 21.90s
+//
+//                     Neither OOMs, and the pair IS the headroom finding
+//                     #14569 asked for: handed 343 MB more heap the same
+//                     program keeps 343 MB more live and finishes ~5s sooner,
+//                     so under 4096 it is paying GC pressure to fit rather
+//                     than fitting. Lowest MemAvailable seen at any point
+//                     during either run: 10,562,192 kB.
+//
+// The scarce resource is therefore NOT the runner's memory -- 15.6 GiB with
+// ~918 MB of it spoken for -- but V8's DEFAULT old space on that runner, which
+// the reading above pins at 4096 MB from two directions.
+//
+// ## The raise, on that measurement (#14569, ruled A then A1, 2026-09-03)
+//
+// A default is not a budget. The ledger's heaviest program was paying GC
+// pressure to fit inside 4096 rather than fitting, and the tripwire (spec
+// declaration growth) is a weekly event, so the ruling raises the ceiling --
+// on the measurement above, never on a typed number. What that raise is NOT
+// is a bigger promise about the box. It is the pair below, and ⛔ neither
+// half is shippable alone:
+//
+//   the workflow   `.github/workflows/lint.yml`, job `typecheck-debt`, step
+//                  "Re-measure the type-check DEBT / TEST_DEBT ledger", now
+//                  runs under `NODE_OPTIONS: --max-old-space-size=6144`. That
+//                  is the half that actually hands the process the old space:
+//                  V8's default there is 4096 and no constant in this file can
+//                  move it.
+//   this constant  6144 -- a description of the old space that step now
+//                  really has, exactly as 4096 described the default before it.
+//
+// ⛔ Raising this constant ALONE cannot buy the ledger a roomier run --
+// measured on 2026-09-03, not reasoned. `remeasureHeapCeiling` below takes the
+// MINIMUM of this pin and the limit the running process actually has, so with
+// the pin at 6144 and the gate started under the runner's DEFAULT the chosen
+// ceiling is still 4144 -- and the `stale` arm below then refuses the run
+// outright: `--re-measure` exits 1 before the first tsc ("the pin is now ABOVE
+// the ceiling it claims to describe"), on every PR and on `main`. That
+// refusal is the pairing's enforcement -- it is what caught the bare raise
+// when it was attempted -- and both directions are pinned as self-test rows
+// below ("the runner as the workflow now starts it" and "the same runner
+// WITHOUT it"). Delete the `NODE_OPTIONS` line and the lane says so, loudly,
+// on the runner.
+//
+// ⚠️ If 6144 is wrong, it is wrong DOWNWARD -- the only safe direction. This
+// number's entire job is to be no HIGHER than the ceiling the process running
+// tsc on CI really has. A pin ABOVE it is worse than no pin at all: it makes
+// local runs pass where CI still OOMs, which is exactly this defect with extra
+// confidence attached.
 //
 // ⛔ Do not raise this to make a local measurement complete. `--re-measure`
 // OOMing under this ceiling is the gate WORKING -- it is CI's failure,
@@ -2823,8 +2896,21 @@ function countTscErrors(output, { dropRootDirDiagnostics = false } = {}) {
 // memory CI has. (`packages/spec/tsup.config.ts` carries the other half of this
 // lesson from the build side: a ceiling above the box's real memory does not
 // buy a bigger run, it converts a recoverable heap error into an exit-137
-// SIGKILL that carries no diagnostic at all.)
-const CI_TSC_HEAP_CEILING_MB = 4096;
+// SIGKILL that carries no diagnostic at all.) The 6144 is not an exception to
+// that rule, it is an application of it: the runner was MEASURED to carry the
+// heaviest program under a 6144 cap (4,420,706K used, 4,545,500 kB peak RSS,
+// 10,562,192 kB still available at the tightest moment) before it was pinned.
+//
+// ⚠️ One protection the pair costs, recorded here so nobody rediscovers it as
+// a surprise. With `NODE_OPTIONS` set explicitly on that step,
+// `heap_size_limit` there reads 6192 whatever the runner's physical memory
+// does -- so on THAT job the `stale` arm can no longer notice the runner
+// shrinking; it now only notices a pin above a DEFAULTED process. The margin
+// is what makes that acceptable: the pin asks for 6144 MB where the
+// measurement found 10,562,192 kB available at the heaviest moment, ~1.7x. If
+// that margin is ever in doubt the answer is a fresh runner measurement and a
+// smaller number in BOTH places, ⛔ never a bigger one here.
+const CI_TSC_HEAP_CEILING_MB = 6144;
 
 /**
  * The last `--max-old-space-size` in a `NODE_OPTIONS` string, in MB, or null.
@@ -5169,9 +5255,43 @@ function selfTest() {
       expect: { mb: CI_TSC_HEAP_CEILING_MB, stale: false },
     },
     {
+      // `+ 48` is the RUNNER's offset, not a construction: V8 reports the old
+      // space plus a fixed ~48 MB of other spaces, measured on the `Type Check
+      // · debt ledger` job itself (4144 for a 4096 old space, 2026-09-03,
+      // #14569). So this row is the machine whose limit EQUALS the pin with no
+      // caller flag in play -- and the row above it is every box roomier than
+      // that one.
       label: 'on a box shaped like CI the ceiling is a no-op that still names itself',
       where: { heapLimitMb: CI_TSC_HEAP_CEILING_MB + 48, onCi: true },
       expect: { mb: CI_TSC_HEAP_CEILING_MB, stale: false },
+    },
+    {
+      // THE RUNNER AS THE WORKFLOW NOW STARTS IT (#14569). `lint.yml`'s
+      // re-measure step sets `NODE_OPTIONS: --max-old-space-size=6144`, so the
+      // gate process reports 6192 AND carries a caller cap EQUAL to the pin.
+      // Both candidates tie, the tie-break keeps the CI ceiling's name, and
+      // that name is what the job's log then prints. Pinned because an
+      // off-by-one in either direction here reads as a caller cap overriding
+      // the pin on the one machine whose verdict counts.
+      label: "the workflow's own NODE_OPTIONS ties the pin and is not read as a tighter caller cap",
+      where: {
+        heapLimitMb: CI_TSC_HEAP_CEILING_MB + 48,
+        nodeOptions: `--max-old-space-size=${CI_TSC_HEAP_CEILING_MB}`,
+        onCi: true,
+      },
+      expect: { mb: CI_TSC_HEAP_CEILING_MB, stale: false },
+    },
+    {
+      // THE OTHER HALF OF THE PAIR, and the row that keeps the two halves
+      // inseparable. 4144 is the runner's DEFAULT `heap_size_limit`, measured
+      // on that job 2026-09-03. Take the `NODE_OPTIONS` line back out of
+      // `lint.yml` and this is the reading the gate gets: refused outright,
+      // before the first tsc, on every PR and on `main`. A bare raise of the
+      // constant was attempted and this is what caught it, so the pin above
+      // cannot quietly outlive the workflow line that pays for it.
+      label: 'the same runner WITHOUT the workflow NODE_OPTIONS -- its 4144 MB default -- is refused',
+      where: { heapLimitMb: 4144, onCi: true },
+      expect: { mb: 4144, stale: true },
     },
     {
       // Never RAISE. Promising V8 memory the box does not have trades a

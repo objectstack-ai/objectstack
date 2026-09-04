@@ -812,23 +812,6 @@ const TRIAGE = new Map([
     why: 'workspace manifests only — 4 of 241 (1.7%), re-measured 2026-08-26; the spelling reaches '
       + '4 of 4, 100% precise and complete. Deferred with its packages half',
   }],
-  ['scripts/check-adr-0087-registration.mjs PACKAGE_ROOTS packages', {
-    verdict: 'SPELLABLE-UNDECLARED',
-    spelling: 'packages manifests',
-    why: 'workspace manifests only — 74 of 5275 (1.4%), re-measured 2026-08-26 rather than '
-      + 'inherited from the identically-shaped row above; the spelling reaches 74 of 74. Deferred '
-      + 'for the reason recorded there',
-  }],
-  ['scripts/check-adr-0087-registration.mjs PACKAGE_ROOTS apps', {
-    verdict: 'SPELLABLE-UNDECLARED',
-    spelling: 'apps manifests',
-    why: 'workspace manifests only — 1 of 40 (2.5%), re-measured 2026-08-26; 1 of 1 covered',
-  }],
-  ['scripts/check-adr-0087-registration.mjs PACKAGE_ROOTS examples', {
-    verdict: 'SPELLABLE-UNDECLARED',
-    spelling: 'examples manifests',
-    why: 'workspace manifests only — 4 of 241 (1.7%), re-measured 2026-08-26; 4 of 4 covered',
-  }],
   ['check:skill-compatibility PACKAGE_ROOTS packages', {
     verdict: 'SPELLABLE-UNDECLARED',
     spelling: 'packages manifests',
@@ -899,6 +882,67 @@ const TRIAGE = new Map([
     why: 'second-key twin, examples half — same file, same constant, same root as the unflagged '
       + 'row. Verdict and spelling carried as one decision about one population, counts '
       + 'deliberately not restated',
+  }],
+  // ── The same twins, one turn further: an argv the workflow FILLS IN (#15083)
+  //
+  // The three rows these replace were keyed on `scripts/check-adr-0087-
+  // registration.mjs` with no argv, and they went STALE without the gate
+  // changing a byte. `dispatch-gates` now renders a value-bearing invocation
+  // instead of dropping back to a bare path key, and CI invokes this gate only
+  // as `--base "$MERGE_BASE"` (pr-automation.yml) and `--base "$SNAPSHOT_SHA"`
+  // (cut-rc.yml) — never bare — so the unflagged key stopped being derived at
+  // all and two keys arrived in its place. The `--self-test` twins above still
+  // say "the row keyed on this same script without the flag"; that row is
+  // these two, split by the workflow that runs it.
+  //
+  // ⛔ Still not new populations, and still no count restated: one literal, one
+  // constant, one file, read through more keys. The verdict and the spelling
+  // are the retired row's, carried whole, for the reason the block above gives
+  // — a different verdict on the same literal would have this map assert two
+  // decisions about one population.
+  ['scripts/check-adr-0087-registration.mjs --base "$MERGE_BASE" PACKAGE_ROOTS packages', {
+    verdict: 'SPELLABLE-UNDECLARED',
+    spelling: 'packages manifests',
+    why: 'the pr-automation.yml invocation of the row that used to be keyed on this script bare — '
+      + 'same file, same constant, same root, one population. It exists because the derivation '
+      + 'renders the argv CI actually passes, and this gate has no bare invocation to fall back '
+      + 'to. Verdict and spelling are that row decision, unchanged; ⛔ no count is restated here, '
+      + 'because this pass measured none',
+  }],
+  ['scripts/check-adr-0087-registration.mjs --base "$MERGE_BASE" PACKAGE_ROOTS apps', {
+    verdict: 'SPELLABLE-UNDECLARED',
+    spelling: 'apps manifests',
+    why: 'apps half of the pr-automation.yml invocation — same file, same constant, same root as '
+      + 'the retired bare row. Verdict and spelling carried as one decision about one population, '
+      + 'counts deliberately not restated',
+  }],
+  ['scripts/check-adr-0087-registration.mjs --base "$MERGE_BASE" PACKAGE_ROOTS examples', {
+    verdict: 'SPELLABLE-UNDECLARED',
+    spelling: 'examples manifests',
+    why: 'examples half of the pr-automation.yml invocation — same file, same constant, same root '
+      + 'as the retired bare row. Verdict and spelling carried as one decision about one '
+      + 'population, counts deliberately not restated',
+  }],
+  ['scripts/check-adr-0087-registration.mjs --base "$SNAPSHOT_SHA" PACKAGE_ROOTS packages', {
+    verdict: 'SPELLABLE-UNDECLARED',
+    spelling: 'packages manifests',
+    why: 'the cut-rc.yml invocation of the same literal — the release cut pins the base to its '
+      + 'snapshot instead of a merge base, which is a different ARGV and the same population. '
+      + 'Verdict and spelling carried whole, counts deliberately not restated',
+  }],
+  ['scripts/check-adr-0087-registration.mjs --base "$SNAPSHOT_SHA" PACKAGE_ROOTS apps', {
+    verdict: 'SPELLABLE-UNDECLARED',
+    spelling: 'apps manifests',
+    why: 'apps half of the cut-rc.yml invocation — same file, same constant, same root. Verdict '
+      + 'and spelling carried as one decision about one population, counts deliberately not '
+      + 'restated',
+  }],
+  ['scripts/check-adr-0087-registration.mjs --base "$SNAPSHOT_SHA" PACKAGE_ROOTS examples', {
+    verdict: 'SPELLABLE-UNDECLARED',
+    spelling: 'examples manifests',
+    why: 'examples half of the cut-rc.yml invocation — same file, same constant, same root. '
+      + 'Verdict and spelling carried as one decision about one population, counts deliberately '
+      + 'not restated',
   }],
   ['scripts/check-declaration-mirrors.mjs --self-test SCRIPTS_DIR scripts', {
     verdict: 'REFUSE-UNSPELLABLE',
