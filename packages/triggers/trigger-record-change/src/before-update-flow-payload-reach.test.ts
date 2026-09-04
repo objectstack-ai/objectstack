@@ -461,6 +461,11 @@ describe('[#15356] can a record-before-update flow reach a multi:true batch payl
         argKeys: Object.keys(args ?? {}).sort(),
         sameAsVariable: args.variables?.get('record') === rec,
         previousTitle: (args.automation?.previous as any)?.title,
+        // #4862 fact 4, re-checked rather than inherited: `title` is NOT in
+        // this write's payload, so a `record` that is the BARE payload could
+        // not supply it. A per-row value here says `record` is the row's own
+        // state, folded from its pre-image.
+        recordTitle: rec?.title,
       });
       rec.residue = 'REACHED';
       return { ok: true };
@@ -481,6 +486,9 @@ describe('[#15356] can a record-before-update flow reach a multi:true batch payl
     // #4862 re-check on today's tree: `previous` IS bound, and it is THIS row's
     // pre-image — the two rows started in different states and each run saw its own.
     expect(seen.map((s) => s.previousTitle).sort()).toEqual(['alpha', 'beta']);
+    // #4862 fact 4, re-checked: `record` is NOT the bare payload — it carries
+    // this row's own `title`, a field this write never mentioned.
+    expect(seen.map((s) => s.recordTitle).sort()).toEqual(['alpha', 'beta']);
     // The `record` CEL root and the flow's `record` variable are ONE object.
     expect(seen.every((s) => s.sameAsVariable === true)).toBe(true);
     // The function is handed no payload handle at all: `AutomationContext`
