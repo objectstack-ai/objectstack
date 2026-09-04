@@ -11495,12 +11495,12 @@ export function bannerLines({ identity, paths = [], drift = null }) {
  * "1288 cases pass" to zero bytes of output and exit 0 — a self-test that never
  * finished, reported as one that passed.
  *
- * The mechanical probe in `scripts/measure-self-test-floor.mjs` cannot read this
- * file (its anchor matches the first `function selfTest() {` in the source, which
- * here is a FIXTURE STRING, so the injection lands inside a template literal and
- * only ever produces a SyntaxError). That is a limit of the instrument, not a
- * property of this file, and it is why the entry is hand-read there. Anchoring an
- * early return on the real definition below measures it in one run.
+ * The mechanical probe in `scripts/measure-self-test-floor.mjs` anchored on the
+ * FIRST `function selfTest() {` in raw source until #14963 -- here a docblock
+ * sentence, then a FIXTURE STRING -- so its injection landed inside a template
+ * literal and produced only a SyntaxError. It anchors on the definition below
+ * now, and that copy parses and runs; the entry is still read by hand there, and
+ * the row's remaining NOT MEASURED is the probe's own artifact (#15515).
  */
 const SELF_TEST_VERDICT = 'dispatch-gates self-test reached its verdict';
 
