@@ -25,8 +25,8 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { registerStorageRoutes } from './storage-routes';
-import { STORAGE_ROUTE_LEDGER } from './storage-route-ledger';
+import { registerStorageRoutes } from './storage-routes.js';
+import { STORAGE_ROUTE_LEDGER } from './storage-route-ledger.js';
 
 /** Minimal IHttpServer mock that records registrations. */
 function createMockServer() {
