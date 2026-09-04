@@ -132,6 +132,19 @@ export function appDefaultPermissionSetName(permissions: unknown): string | unde
  * `[]`-is-truthy trap for free. The answer is the only condition that cannot
  * be wrong in either direction, so the answer is what this branches on.
  *
+ * ⚠️ That is deliberately NOT the shape of the sibling reader's condition, and
+ * the difference is a property of the readers, not an inconsistency to
+ * converge away. `resolveStackCollection` (`packages/cli/src/utils/
+ * stack-collections.ts`, #15006) branches on the CONTAINER — `if
+ * (Array.isArray(top)) return top;` — and is right to: it returns a whole
+ * collection, so a top level that carries the key has, by construction,
+ * already answered, and `composeStacks` flattened that array into the union.
+ * This reader extracts a DISTINGUISHED ELEMENT out of the collection instead,
+ * so "the key is present" and "the key answers" are two different facts here
+ * and one of them is the wrong one to branch on. Same discipline — start from
+ * the expression this program replaced, consult `packages[]` only where it came
+ * back empty — read against what each reader's expression actually returns.
+ *
  * ## The order is `resolveArtifactPackageOrder`'s, not the array's
  *
  * The first package body that names a default wins, so with more than one
