@@ -1,22 +1,36 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #14423 (a) — MEASUREMENT, not a fix. Can `meta.loadMany('action')` omit a
- * name that `meta.load` / `loadDiagnosed` serves?
+ * #14423 (a) — the AGREEMENT, where this file used to pin the divergence.
  *
  * The two sites the card names:
  *  - the AUDIT, `runActionGovernanceInventory` (`packages/objectql/src/
- *    action-governance.ts`), whose metadata-plane source is
- *    `loadStandaloneActions = () => meta.loadMany('action')` — wired in
+ *    action-governance.ts`), whose metadata-plane sources are now
+ *    `loadStandaloneActionsKeyed = () => meta.loadManyKeyed('action')` and the
+ *    by-name rung `lookupMetadataAction` — both wired in
  *    `packages/objectql/src/plugin.ts` off `ctx.getService('metadata')`;
  *  - the ROUTER, `resolveRouteActionDeclaration` (`./action-execution.ts`),
  *    whose third rung is `meta.loadDiagnosed('action', name)` — resolved per
  *    request off `deps.resolveService(requestContext, 'metadata', envId)`.
  *
- * PR #14421 closed the registry rung. This file measures the remaining one.
- * ⛔ It pins a CURRENT DIVERGENCE; it does not assert a fixed behaviour, and
- * nothing here is a behaviour change. Should (a) ever be fixed, these
- * expectations are the ones that must be REWRITTEN, not defended.
+ * PR #14421 closed the registry rung. This file measured the remaining one and
+ * reproduced it four ways; the measurement is now the fix's pin, case for
+ * case, with the same harness. **C1 and C5 are unchanged controls** — they
+ * were green before and must stay green, because a "fix" that simply stopped
+ * the audit from speaking would satisfy every flipped case and nothing else.
+ *
+ * ## What changed, per mechanism
+ *
+ *  - **C2 / C6 — IDENTITY.** The audit enumerates the plane KEYED, so a body
+ *    that does not name itself is a declaration under the key its store holds
+ *    it by (#14205). It was dropped before, in both shipped loaders.
+ *  - **C3 — AVAILABILITY.** The audit also asks the plane BY NAME, the
+ *    router's own third rung, so a loader fault that a plural read swallows no
+ *    longer converts a served handler into an accusation. Its counterpart in
+ *    the manager is `MetadataManager.listNames` gaining `loadMany`'s
+ *    per-loader fault parity — asserted here too, because that is where the
+ *    asymmetry lived.
+ *  - **C4 — a BOUNDARY, not a defect, and pinned as one.** See its case.
  *
  * ---------------------------------------------------------------------------
  * What is real and what is doubled
@@ -169,18 +183,33 @@ function auditAccused(warnings: Array<{ message: string; meta?: Record<string, u
  * Run the audit exactly as `ObjectQLPlugin.runGovernanceInventory` does, with
  * ONE handler registered and NO object-embedded declaration and NO registry
  * item — so the metadata plane is the only source that can clear it.
+ *
+ * [#14423] Transcribed from the plugin's wiring after the fix, including its
+ * fallbacks: the keyed plural read when the plane offers one, the unkeyed one
+ * otherwise, and the by-name rung preferring `loadDiagnosed` over `load`
+ * exactly as `resolveRouteActionDeclaration` does. Keeping the branches rather
+ * than hard-wiring the happy path is deliberate — C4 hands this `undefined`,
+ * and a helper that assumed a plane would throw where the plugin degrades.
  */
 async function runAudit(meta: any) {
     const { warnings, logger } = recorder();
     const loadMany = meta?.loadMany;
-    const loadStandaloneActions = meta && typeof loadMany === 'function'
-        ? () => loadMany.call(meta, 'action')
-        : undefined;
+    const loadManyKeyed = meta?.loadManyKeyed;
+    const loadDiagnosed = meta?.loadDiagnosed;
+    const load = meta?.load;
     await runActionGovernanceInventory({
         registered: [{ objectName: OBJECT_KEY, actionName: ACTION }],
         objects: [],
-        loadStandaloneActions,
+        loadStandaloneActions: meta && typeof loadMany === 'function'
+            ? () => loadMany.call(meta, 'action')
+            : undefined,
+        loadStandaloneActionsKeyed: meta && typeof loadManyKeyed === 'function'
+            ? () => loadManyKeyed.call(meta, 'action')
+            : undefined,
         lookupRegistryAction: () => undefined, // rung 2 holds nothing — #14421's rung is not the one under test
+        lookupMetadataAction: meta && typeof loadDiagnosed === 'function'
+            ? async (name: string) => (await loadDiagnosed.call(meta, 'action', name))?.data
+            : (meta && typeof load === 'function' ? (name: string) => load.call(meta, 'action', name) : undefined),
         logger,
     });
     return { accused: auditAccused(warnings), warnings };
@@ -202,7 +231,7 @@ async function runRouter(meta: any, envId?: string) {
     });
 }
 
-describe('#14423 (a) — can `loadMany` omit a name `load` serves?', () => {
+describe('#14423 (a) — the audit and the router now answer from one identity and one source set', () => {
     /**
      * C1 — CONTROL. One plane, one scope, a row whose `name` COLUMN and whose
      * body `name` agree. If the harness cannot show AGREEMENT here, nothing it
@@ -228,10 +257,13 @@ describe('#14423 (a) — can `loadMany` omit a name `load` serves?', () => {
      * C2 — the row-key / body-name shape (#14205's `MetadataKeyedItem`
      * defect, measured there for `view`). `DatabaseLoader.load` filters on the
      * `name` COLUMN and returns `rowToData(row)` — the BODY, with the column
-     * deliberately not folded in. `loadMany` returns bodies only. So the name
+     * deliberately not folded in. `loadMany` returns bodies only, so the name
      * is served by `load` and is NOT ENUMERABLE from `loadMany`'s answer.
+     *
+     * That much is unchanged and still asserted: `loadMany`'s published shape
+     * does not move. What changed is which read the audit is defined on.
      */
-    it('C2 — row keyed by the `name` COLUMN, body carries none: `load` serves it, the audit cannot name it', async () => {
+    it('C2 — row keyed by the `name` COLUMN, body carries none: the KEYED read names it, and audit and router AGREE', async () => {
         const meta = planeOver([row(ACTION, { type: 'script', target: ACTION })]); // body has NO `name`
 
         const enumerated = await meta.loadMany<any>('action');
@@ -239,23 +271,24 @@ describe('#14423 (a) — can `loadMany` omit a name `load` serves?', () => {
 
         expect(byName.data).toBeTruthy();                       // load SERVES the name
         expect(enumerated).toHaveLength(1);                     // loadMany returns the body
-        expect(enumerated.map((a: any) => a?.name)).toEqual([undefined]); // ...unnamed
+        expect(enumerated.map((a: any) => a?.name)).toEqual([undefined]); // ...unnamed, still
 
-        // The audit keys declarations by `action.name` and drops a nameless one.
-        const declarations = await collectEngineActionDeclarations([], () => meta.loadMany<any>('action'));
-        expect(declarations).toHaveLength(0);
+        // BEFORE: keyed by `action.name`, a nameless row is not a declaration.
+        const unkeyed = await collectEngineActionDeclarations([], () => meta.loadMany<any>('action'));
+        expect(unkeyed).toHaveLength(0);
 
-        // The plane KNOWS the name — the keyed enumeration serves it. It is
-        // `loadMany`, the UNKEYED plural read the audit was wired to, that
-        // cannot carry it. (⛔ Naming the remedy is not shipping it: rewiring
-        // `loadStandaloneActions` is a behaviour change and out of scope here.)
+        // AFTER: the plane KNOWS the name, and the audit now asks for it.
         expect(await meta.listNames('action')).toContain(ACTION);
+        expect((await meta.loadManyKeyed<any>('action')).map((e) => e.name)).toEqual([ACTION]);
+        const keyed = await collectEngineActionDeclarations(
+            [], undefined, () => meta.loadManyKeyed<any>('action'));
+        expect(keyed).toEqual([{ action: { type: 'script', target: ACTION }, objectName: OBJECT_KEY, storeKey: ACTION }]);
 
         const audit = await runAudit(meta);
         const router = await runRouter(meta);
 
         expect(router.action).toBeTruthy();  // router: the declaration EXISTS
-        expect(audit.accused).toBe(true);    // audit: "registered handler with NO declaration"
+        expect(audit.accused).toBe(false);   // audit: and so does the audit, now
     });
 
     /**
@@ -265,8 +298,18 @@ describe('#14423 (a) — can `loadMany` omit a name `load` serves?', () => {
      * `reportLoaderReadFailure` and CONTINUES ("every list served from now on
      * is a PARTIAL set presented as a complete one" — its own words), while
      * `loadDiagnosed` walks `loader.load` and is served.
+     *
+     * The plural read is STILL short — that is the seam's documented posture
+     * and no keying can change it. What closes C3 is the audit reading the
+     * same by-name rung the router does, so the two cannot disagree about a
+     * name one of them was served.
+     *
+     * The manager-side half of the same defect is asserted here as well:
+     * `listNames` used to THROW out of this configuration while `loadMany`
+     * swallowed it — one loader fault, two different facts, decided only by
+     * which method the caller reached for.
      */
-    it('C3 — plural read throws, by-name read answers: `loadMany` omits the name `load` serves', async () => {
+    it('C3 — plural read throws, by-name read answers: the audit asks by name too, and AGREES', async () => {
         const rows = [row(ACTION, { name: ACTION, type: 'script', target: ACTION })];
         const meta = planeOver(rows, listDownEngine(rows));
 
@@ -277,16 +320,22 @@ describe('#14423 (a) — can `loadMany` omit a name `load` serves?', () => {
         expect(byName.data?.name).toBe(ACTION);  // by name: SERVED
         expect(byName.degraded).toBe(false);     // and not even reported degraded
 
+        // The keyed enumeration is short for the same reason — keying is not a
+        // cure for an unreachable loader, and does not claim to be.
+        expect(await meta.loadManyKeyed<any>('action')).toEqual([]);
+        // [#14423 item 1] ...and the sibling enumeration no longer THROWS where
+        // its two siblings merely came back short.
+        await expect(meta.listNames('action')).resolves.toEqual([]);
+
         const audit = await runAudit(meta);
         const router = await runRouter(meta);
 
         expect(router.action?.name).toBe(ACTION);
-        expect(audit.accused).toBe(true);
+        expect(audit.accused).toBe(false);
     });
 
     /**
-     * C4 — the shape the card names: an env-scoped kernel where enumeration
-     * and by-name reads answer from DIFFERENT SCOPES.
+     * C4 — a BOUNDARY, not a defect, and pinned as one.
      *
      * `metadata` is registered `SCOPED`, so `PluginLoader.getService` mints one
      * instance per `scopeId`. The audit's accessor
@@ -294,10 +343,30 @@ describe('#14423 (a) — can `loadMany` omit a name `load` serves?', () => {
      * `services` map and `PluginLoader.getServiceInstance`, and the latter
      * reads `serviceInstances` — never `scopedServices`. So the audit's lookup
      * cannot see a scoped instance at all, and `plugin.ts` swallows the throw
-     * into `loadStandaloneActions === undefined`. The router's lookup, given
-     * the request's `envId`, gets the env's own plane.
+     * into "no metadata plane at all". The router's lookup, given the
+     * request's `envId`, gets the env's own plane.
+     *
+     * ## Why this stays accused, and why that is CORRECT
+     *
+     * The divergence here is upstream of every read this card touched: the
+     * throw happens at `ctx.getService('metadata')`, before `loadManyKeyed`,
+     * `loadDiagnosed` or anything else could run. Keying an enumeration
+     * cannot help a caller that never obtained the object to enumerate, and
+     * neither can a by-name rung. A boot-time audit runs OUTSIDE any request
+     * scope by construction; reaching a request-scoped instance from there is
+     * a different change with its own product decision, tracked on its own
+     * card. ⛔ Do NOT "fix" this by weakening what the audit claims.
+     *
+     * And it is not reachable today: no shipped composition registers
+     * `metadata` as SCOPED — `packages/metadata/src/plugin.ts` registers a
+     * static instance — which is what C5 exercises directly.
+     *
+     * So the assertions below pin the BOUNDARY: the accusation, AND the fact
+     * that its cause is the service lookup rather than any disagreement
+     * between two reads of one plane. Pinning the cause is the point — an
+     * accusation asserted alone would keep passing if the reads regressed.
      */
-    it('C4 — env-scoped `metadata`: the audit\'s lookup and the router\'s answer from different scopes', async () => {
+    it('C4 — BOUNDARY: env-scoped `metadata` is unreachable from a boot-time audit, before any read runs', async () => {
         const kernel = new ObjectKernel({});
         const perEnv = new Map<string, MetadataManager>();
         kernel.registerServiceFactory(
@@ -327,17 +396,23 @@ describe('#14423 (a) — can `loadMany` omit a name `load` serves?', () => {
         // The router's lookup — the dispatcher's scoped branch, with the request's envId.
         const routerMeta = await kernel.getServiceAsync<MetadataManager>('metadata', 'env_a');
 
-        expect(auditLookupError).toBeTruthy();          // the audit gets NO metadata plane at all
-        expect(auditMeta).toBeUndefined();
+        // The CAUSE, pinned: the lookup itself fails, so no read method is
+        // ever reached. This is what makes C4 a boundary rather than a fifth
+        // read asymmetry.
+        expect(auditLookupError).toMatch(/async/i);     // `Service 'metadata' is async - use await`
+        expect(auditMeta).toBeUndefined();              // the audit gets NO metadata plane at all
         expect(routerMeta).toBeInstanceOf(MetadataManager);
         expect((await routerMeta.loadDiagnosed<any>('action', ACTION)).data?.name).toBe(ACTION);
+        // Every read this card added is healthy on the plane the audit cannot
+        // hold — so the divergence is provably NOT in the reads.
+        expect((await routerMeta.loadManyKeyed<any>('action')).map((e) => e.name)).toEqual([ACTION]);
 
         const audit = await runAudit(auditMeta);
         const router = await runRouter(async (scopeId?: string) =>
             scopeId ? kernel.getServiceAsync('metadata', scopeId) : undefined, 'env_a');
 
         expect(router.action?.name).toBe(ACTION);  // the router dispatches it
-        expect(audit.accused).toBe(true);          // the audit calls it undeclared
+        expect(audit.accused).toBe(true);          // and the boot-time audit cannot see the scope
     });
 
     /**
@@ -375,14 +450,16 @@ describe('#14423 (a) — can `loadMany` omit a name `load` serves?', () => {
      * (`findFile` -> `ROOT/action/<name>.json`), so identity is path-derived;
      * `loadMany` globs the directory and returns BODIES. A flat file whose body
      * carries no `name` is therefore served by `load` and comes back unnamed
-     * from `loadMany` — and `collectEngineActionDeclarations` requires
-     * `typeof action.name === 'string'`, so the audit never sees it.
+     * from `loadMany` — and keyed by `body.name` the audit never saw it.
      *
      * This is C2's mechanism in the OTHER shipped loader, which is what makes it
      * a rule rather than a `DatabaseLoader` quirk: #14205's finding (identity is
      * the key the store holds an item under, not `body.name`) reaches both.
+     * It is also the case that reproduces on the shipped `os dev` composition
+     * — real `NodeMetadataManager`, real `FilesystemLoader`, no injection and
+     * no scoping — which is why the fix is judged here and not only on C2.
      */
-    it('C6 — real filesystem plane, body carries no `name`: `load` serves it, `loadMany` returns it unnamed, the audit cannot name it', async () => {
+    it('C6 — real filesystem plane, body carries no `name`: the KEYED read names it, and audit and router AGREE', async () => {
         const root = await mkdtemp(join(tmpdir(), 'os-14423-'));
         try {
             await mkdir(join(root, 'action'), { recursive: true });
@@ -401,14 +478,18 @@ describe('#14423 (a) — can `loadMany` omit a name `load` serves?', () => {
             expect(enumerated.map((a: any) => a?.name)).toEqual([undefined]); // ...unnamed
             expect(await meta.listNames('action')).toContain(ACTION);        // the KEYED read has it
 
-            const declarations = await collectEngineActionDeclarations([], () => meta.loadMany<any>('action'));
-            expect(declarations).toHaveLength(0);
+            // BEFORE / AFTER on one plane, same as C2.
+            expect(await collectEngineActionDeclarations([], () => meta.loadMany<any>('action'))).toHaveLength(0);
+            expect(await collectEngineActionDeclarations(
+                [], undefined, () => meta.loadManyKeyed<any>('action'))).toEqual([
+                { action: { type: 'script', target: ACTION }, objectName: OBJECT_KEY, storeKey: ACTION },
+            ]);
 
             const audit = await runAudit(meta);
             const router = await runRouter(meta);
 
             expect(router.action).toBeTruthy();  // router: the declaration EXISTS
-            expect(audit.accused).toBe(true);    // audit: "registered handler with NO declaration"
+            expect(audit.accused).toBe(false);   // audit: and so does the audit, now
         } finally {
             await rm(root, { recursive: true, force: true });
         }
