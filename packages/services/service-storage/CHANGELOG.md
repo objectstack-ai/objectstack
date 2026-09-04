@@ -1,5 +1,1018 @@
 # @objectstack/service-storage
 
+## 17.3.0
+
+### Minor Changes
+
+- 6b285ec: Report the refused writes three `catch { }` sites swallowed (#12981 batch 7)
+  
+  Three tier-1 DARK sites from the #12981 swallow-family worklist, across two
+  packages. Control flow is unchanged at every one of them — none of these
+  failures should abort the operation it sits inside — but none of them is silent
+  any more.
+  
+  **`metadata-protocol` — `reassignOrphanedMetadata` (the durability one).**
+  ADR-0070 D5's orphan-adoption loop dropped a refused `sys_metadata` update
+  whole: not logged, not rethrown, not carried on the response. The return line
+  reports `success: reassigned.length > 0`, so an adoption in which 99 of 100
+  orphans were refused answered `{ success: true, reassignedCount: 1 }` — a
+  response identical in shape to a healthy run with one orphan to move — while
+  the 99 stayed orphans, with nothing retrying them and no record that they had
+  been tried. The loop now counts refusals and states the degradation **once**
+  after the loop at `console.error`, naming the count, the target package, the
+  driver's own sentence and the fix. `error` and not this file's usual
+  `console.warn`, by the AGENTS.md question this turns on: the system keeps
+  looking normal while something it claims to have persisted did not land. It is
+  the verdict `recordPackageCommit` in the same file already reaches on the same
+  sink, and the inverse of the one `clientFacingRowFailureText` records for its
+  `console.warn` (there the row reports `success: false` and the counters
+  reconcile; here neither holds). The response shape is untouched — no
+  `failedCount` was added.
+  
+  **`service-storage` — two sites at the tail of `StorageServicePlugin.start()`,
+  both functional, both `warn`.**
+  
+  - The settings-namespace binding ended in `catch { }` with a comment naming
+    only one of the two outcomes it caught. The settings service being **absent**
+    (a bare kernel, where nothing ever claimed the admin UI could swap adapters)
+    is now resolved on its own line and stays correctly silent; a binding that
+    **fails with the service present** is reported, because `start()` otherwise
+    completes into a healthy-looking boot whose storage settings screen is wired
+    to nothing — an operator's adapter or credential change is saved and never
+    applied.
+  - The `storage/test` probe cleanup swallowed its own failure in
+    `catch { /* ignore */ }`. The result returned beside it reports the *probe's*
+    failure, which is a different failure: one stray `__objectstack_probe__/…`
+    key accrued per failed test and the only record of its name died with the
+    frame. The refused cleanup now names the key it left behind.
+  
+  Both `service-storage` sites are `warn` on the merits, not by default: neither
+  is a durability degradation. Storage keeps serving from the adapter the
+  plugin's own options built, and the leaked probe object is inert content no
+  record references — AGENTS.md is explicit that escalating these is what makes
+  `error` unreadable. No sink type is changed at any of the three sites: the two
+  `service-storage` reports go to `PluginContext.logger`, whose `error` is
+  already non-optional, and `metadata-protocol` reports on `console`.
+  
+  Each repaired seam is pinned by a test that fails if it goes quiet again, plus
+  absence-asserting controls — declared as controls — so a seam that reports
+  unconditionally cannot pass.
+- c94be62: fix(service-storage): stamp `sys_file` with the acting organization, and backfill the rows that were never stamped (#12745)
+  
+  `sys_file` is a tenancy-ENABLED object — it declares no `tenancy` key, so
+  `isTenancyDisabled()` reads `false` and `applySystemFields` provisions
+  `organization_id` on it. Nothing ever wrote that column:
+  `StorageMetadataStore.createFile` inserted with **no execution context at all**
+  (the string `context` appeared 0 times in `metadata-store.ts`), so the SQL
+  driver's `injectTenantOnInsert` had no `tenantId` to stamp from and every row
+  landed NULL. Both callers already held the session — `storage-routes.ts` reads
+  `owner_id: session?.userId` ten lines below each `createFile` — so the
+  organization was in hand and simply had nowhere in the signature to go.
+  
+  Maintainer ruling 2026-08-28 on #12745: **A with backfill** — stamp forward AND
+  repair the existing rows. Both halves ship here.
+  
+  **Forward stamping.** `createFile(rec, context?)` takes a new optional
+  `StorageWriteContext` (`{ organizationId }`) and passes it to the engine as
+  `{ context: { tenantId } }`. The column is deliberately NOT written onto the
+  payload: whether the object has a tenant column, and whether an explicit value
+  on the row wins, are the driver's answers (`injectTenantOnInsert` →
+  `resolveTenantField`), and a metadata store re-deciding them one package away
+  from the schema is how a stamp starts failing on installs that opted the object
+  out. Both upload doors thread the session's active organization, and the
+  plugin's session bridge now reports it (`session.session.activeOrganizationId`,
+  the platform's existing spelling). ⛔ No membership fallback: here the value
+  becomes a *wall*, and a file stamped from a guessed membership is a file its
+  uploader can no longer see from the organization they were acting in. A session
+  with no active organization stamps nothing, exactly as before.
+  
+  **Why the backfill is not optional.** The SQL driver's tenant predicate is
+  NULL-tolerant (`organization_id = :tenant OR organization_id IS NULL`), but
+  Layer 0 AND-composes a strict `organization_id = <active org>` above it and
+  "the conjunction is the strict equality alone". Forward-only stamping would
+  therefore split the table: new files org-walled, every existing NULL-org file
+  invisible to **every** principal. (`single` posture is inert —
+  `computeTenantLayer0Filter` returns `null` — so single-tenant installs are
+  unaffected either way.)
+  
+  **The backfill.** A one-off, idempotent, dry-run-first sweep
+  (`backfill-sys-file-organizations.ts`), following the tree's own precedent in
+  `plugin-approvals`. It derives each row's organization from the file's HOLDERS —
+  the exclusive field reference (`ref_object`/`ref_id`) and every `sys_attachment`
+  join row — and stamps **only where they all answered and all answered the same
+  organization**. ⛔ Rows that cannot be derived unambiguously stay NULL and are
+  REPORTED, never guessed, with the residual-NULL count and its per-reason
+  breakdown on the report and in the rendered text — for the dry run as well as
+  the applied run. It is a one-off operational module: not exported from the
+  package index and not shipped in `dist`.
+  
+  ⛔ Scope: `sys_file` only. The precedent requires a maintainer order per table
+  and the ruling is that order for this one table — `sys_upload_session` sits in
+  the same package with the same NULL column and is deliberately not swept.
+  
+  **Compatibility.** `createFile`'s new parameter is optional and
+  `StorageRoutesOptions.resolveSession` only WIDENS its return type
+  (`{ userId? }` → `{ userId?, organizationId? }`), so existing resolvers and
+  callers keep compiling and keep their current behaviour.
+- f087c37: Scope the `sys_file` / `sys_upload_session` update and delete doors to the acting organization (#13178)
+  
+  `StorageMetadataStore` issues eight engine calls. #12745 gave `createFile` an
+  execution context and #12928 gave `createSession` one, so both INSERTS carried
+  the acting organization — while their `update` and `delete` siblings, same two
+  tables and twenty lines apart, still passed none. The tenant-audit census
+  counted 175 service write call sites against a tenancy-enabled object, 24 of
+  them carrying no tenant context at all; these four were the un-repaired halves
+  of the two inserts already fixed, and the maintainer's ruling narrowed this
+  change to exactly them.
+  
+  `updateFile`, `deleteFile`, `updateSession` and `deleteSession` now take the
+  same optional `StorageWriteContext` the two create doors take, and the upload
+  routes pass it — two of them had already resolved the session and were throwing
+  the value away.
+  
+  What the context does here is NOT what it does on the insert, and the
+  difference is the point. Write-side tenancy in the SQL driver is two mechanisms
+  wearing one option: on insert `injectTenantOnInsert` STAMPS the tenant column
+  from `options.tenantId`, while on update and delete `applyTenantScope` SCOPES
+  the statement with it. So on these four doors the value buys reach rather than
+  a value:
+  
+  - a row belonging to ANOTHER organization is no longer reachable through them
+    on a walled deployment, and
+  - the `[tenant-audit]` warning these two verbs raise from the same
+    `auditMissingTenant` call the create verb uses is silenced for the right
+    reason — the write now carries its tenant — rather than suppressed.
+  
+  Rows whose `organization_id` is NULL keep updating and deleting exactly as
+  before. That is deliberate and load-bearing rather than incidental: the driver's
+  tenant term is `(organization_id = :tenantId OR organization_id IS NULL)`, so
+  the entire pre-#12928 session population — which the ruling on that change
+  deliberately did not backfill, leaving it to the object's own TTL sweep — stays
+  in reach and no in-flight upload is stranded.
+  
+  Graded `minor` rather than `patch` on two counts: the four exported store
+  methods gain a parameter callers can pass, and on a walled install the reach of
+  an existing call NARROWS. A behavioural narrowing on a tenant-isolation surface
+  is not a silent patch, even when the narrowing is the repair.
+  
+  No class-level control is added here. Whether `isSystem` writes belong inside
+  this control scope at all is an open design question and is not answered by this
+  change; the guard order inside `auditMissingTenant` is untouched.
+
+### Patch Changes
+
+- 6a180e4: fix(core,rest,services)!: a permission-store read failure now fails LOUD instead of resolving as an authenticated caller holding zero capabilities (#13279)
+  
+  **BREAKING** runtime behaviour change on the shared authorization resolver,
+  shipped as `minor` under the repo's launch-window convention.
+  
+  `resolveAuthzContext`'s per-read helper `tryFind` answered a THROWN read exactly
+  the way it answered an EMPTY one: `[]`. So an outage of the permission store
+  resolved as a well-formed context for an authenticated principal holding no
+  capabilities, and the package-management door answered
+  `403 FORBIDDEN` — "Reading packages requires the `studio.access` or
+  `setup.access` capability." That answer was measured byte-identical
+  (`JSON.stringify` equal, against a control that separates two answers which do
+  differ) to what a caller who genuinely holds nothing receives. An administrator
+  was told they lack a capability, during an outage of the store that holds the
+  capability.
+  
+  Maintainer ruling 2026-08-30, verbatim 「第一批其余同意」: `tryFind` 区分「无行」
+  与「读失败」,读失败 fail-loud —— 权限库不可达时不再解析为「已认证零能力」,而是
+  响亮拒绝(与真实能力拒绝的 403 可区分)。
+  
+  Second maintainer ruling the same day (第 5 场总监席决裁批 #9, verbatim 「同意」),
+  after implementing the first one showed that "the read failed" is two facts:
+  采**选项 A** —— 把 `isMissingTableError` 从 `@objectstack/metadata` 迁至
+  `@objectstack/types`(core 已依赖),metadata 保留 re-export 兼容;`tryFind` 仅对
+  **未被判定为「表未 provision」**的读失败抛 `AuthzStoreUnavailableError`。
+  
+  **What changed.** A permission-store read that is issued and throws now raises
+  `AuthzStoreUnavailableError`, which carries the EXISTING ADR-0112 wire code
+  `SERVICE_UNAVAILABLE` and status `503`. No code is added to the closed wire
+  vocabulary and no response envelope gains or loses a key — only which declared
+  code an outage selects. Doors that map thrown errors through
+  `resolveThrownHttpError` answer 503 with no per-door change.
+  
+  **What did NOT change**, and is pinned:
+  
+  - A reachable, genuinely EMPTY store (reads return no rows) still resolves to
+    zero capabilities.
+  - A genuine capability denial still answers `403 FORBIDDEN` with its message.
+  - An ABSENT engine (`ql` unwired, so no read is ever issued) still resolves to
+    an empty-but-valid envelope.
+  - Anonymous requests never reach the store, so an outage cannot make them loud.
+  - A REAL engine whose `sys_*` tables were never provisioned resolves to zero
+    capabilities, quietly — pinned to be byte-identical to the empty-store
+    envelope, in every dialect spelling and in the production wrapper shape where
+    the driver's phrase is on `cause` rather than the outer message.
+  
+  **The boundary between the two kinds of read failure.** An earlier revision of
+  this changeset claimed "embedders without a data plane are unaffected". That
+  claim was too broad; it is retracted here, and the gap it named is now closed
+  rather than merely disclosed. A read also throws when the table was never
+  PROVISIONED — a real engine, wired and reachable, whose `sys_*` tables were
+  never created — and that is a supported deployment shape, not an outage. There
+  "zero capabilities" is the TRUE answer rather than a fabrication: nothing is
+  provisioned, so nothing was withheld. Only an UNREACHABLE store — the ruling's
+  own word 不可达 — leaves the capability set unknown, and only an unknown answer
+  may not be reported as a denial.
+  
+  Treating the two alike was measured, not theorised: it turned four CI suites
+  red, all from `no such table` on `sys_user` / `sys_member` /
+  `sys_user_position` / `sys_user_permission_set`. Ordinary CRUD in
+  `@objectstack/client` answered `503`; batch validation errors that owe `400`
+  answered `503`, because authorization refused before validation ran; runtime
+  notifications answered `401` where authenticated callers must be served `200`;
+  and two `.integration.test.ts` noise guards reported that the driver and engine
+  diagnostics for `sys_position` stopped being emitted — the eager throw aborted
+  the resolution before that later read was ever issued, so a change made to stop
+  a failed read being silent had made two other channels silent.
+  
+  `tryFind` therefore raises `AuthzStoreUnavailableError` only for a read failure
+  that is NOT positively identified as an unprovisioned table.
+  
+  **`isMissingTableError` moved to `@objectstack/types`.** The classifier that
+  draws that boundary already existed and was already right — driver-code based
+  rather than prose-sniffing, documented so that "cannot say" never means "be
+  loud". It lived in `@objectstack/metadata`, which DEPENDS ON `@objectstack/core`,
+  so the resolver could not import it. Rather than keep a second copy of a
+  security-relevant predicate, the ruling relocated the one classifier to
+  `@objectstack/types` — the package core already depends on, and the repo's own
+  stated Home rule for a cross-package error predicate ("every consumer of the
+  question already depends on it, so adopting the predicate never adds an edge",
+  `packages/types/src/unique-violation.ts`). `@objectstack/metadata/errors` still
+  exports `isMissingTableError`, re-exported from the new home, so no consumer of
+  that published subpath changes.
+  
+  Its sibling `isSchemaAlreadyExistsError` moved with it — the two are not two
+  modules but two signatures over one matcher, and separating them would have
+  meant re-rolling the matcher, which is the duplication the module exists to
+  prevent. Both are now exported from `@objectstack/types`; the metadata subpath
+  deliberately still publishes only `isMissingTableError`, which is the only one
+  anything imports through it.
+  
+  ⚠️ **Signed-off risk, recorded because it is load-bearing.** Gating loudness on
+  a driver-error predicate was approved with its false-positive direction stated:
+  mis-reading a genuine outage as "table not provisioned" silently restores the
+  quiet 403 this change removes, with no thrown error and no other failing test.
+  That direction is accepted, not overlooked — the predicate keys on driver codes,
+  SQLSTATEs and errnos first, excludes the known superstring traps up front, and
+  returns `false` for anything it does not positively recognise, so an
+  unrecognised outage stays loud by default. The risk is written beside the
+  predicate in `resolve-authz-context.ts` and both directions are pinned by name
+  in `authz-store-unavailable.test.ts`. ⛔ Do not widen `isMissingTableError` to
+  make a first boot quieter: every widening moves outages into the quiet branch.
+  
+  **All-transport, not just REST.** Every transport authorizing through
+  `resolveAuthzContext` inherits this. Six of the eight production transports
+  wrapped the call in a fail-closed `catch` that would have re-silenced the
+  outage — measured, not assumed: with the resolver loud but the nets untouched,
+  the package door answered `401`, i.e. the outage merely changed disguises. Those
+  `catch` blocks now re-raise via `isAuthzStoreUnavailableError` and keep their
+  previous behaviour for every other fault. The transport set is rebuilt from
+  source and audited for set equality on every test run, so a transport added
+  later cannot inherit the old silence unnoticed.
+  
+  Callers that treat any throw from `resolveAuthzContext` as "anonymous" should
+  re-raise `isAuthzStoreUnavailableError(err)` instead: degrading it restores the
+  disguise this removes.
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/core/src/security/resolve-authz-context.ts#ResolvedAuthzContext, packages/core/src/security/authz-store-unavailable.ts#AuthzStoreUnavailableError) The breaking surface is runtime TypeScript in `@objectstack/core`'s security module and nothing else: `resolveAuthzContext` stops always-resolving and raises `AuthzStoreUnavailableError` when a permission-store read is issued and throws. NO metadata surface is touched in either direction. No Zod schema changes, no `packages/spec` declaration is added or removed, no authorable key moves, no stored row shape changes, and no object definition is edited — a customer's metadata app is byte-for-byte unaffected, so `objectstack migrate meta` has nothing to visit and there is no tombstone to mint. The wire vocabulary is likewise untouched: `SERVICE_UNAVAILABLE` is an EXISTING `StandardErrorCode` member that `HttpStatusErrorCodeMap` already maps to 503, so this change only selects a different DECLARED code for an outage rather than adding one. Both named symbols resolve at HEAD as exported declarations whose files are not `*.zod.ts`, are not under `packages/spec/src/contracts/`, are not object definitions and are not `z.input` projections; neither is referenced in code by any metadata surface (the `packages/spec` hits for `resolveAuthzContext` are comment prose describing the envelope, which this gate masks). The channel that reaches an affected consumer is therefore code review and this changeset, never the upgrade guide: a ledger entry could not express "your fail-closed catch should re-raise this error", because there is no metadata for a migration to rewrite. -->
+- e7191ce: fix(build): give each `exports` condition its own `types` target in the 28 dual-build packages (#13112)
+  
+  **Published-surface change, zero runtime change.** No emitted byte moves; what
+  moves is which declaration file a resolver READS. Maintainer ruling 2026-08-29
+  (decision batch #3, verbatim 「同意」) chose declaring the files over deleting
+  them.
+  
+  ## What was wrong
+  
+  These 28 packages are `"type": "module"` and dual-built, and each spelled one
+  `types` condition as a **sibling** of `import`/`require`:
+  
+  ```json
+  "exports": { ".": {
+    "types": "./dist/index.d.ts", "import": "./dist/index.js", "require": "./dist/index.cjs"
+  } }
+  ```
+  
+  A sibling `types` answers for **both** conditions, so a CommonJS consumer was
+  handed `dist/index.d.ts` — an ES-module declaration, because the package is
+  `"type": "module"` — for an entry point it reaches with `require`. Measured with
+  `tsc --traceResolution` on a `"type": "commonjs"` fixture at `moduleResolution:
+  node16`:
+  
+  ```
+  error TS1479: The current file is a CommonJS module whose imports will produce
+  'require' calls; however, the referenced file is an ECMAScript module and cannot
+  be imported with 'require'.
+  ```
+  
+  The JavaScript at `dist/index.cjs` loads perfectly (`check:dual-build-cjs-loads`
+  has asserted that for months). It is the **types** that told the consumer the
+  supported `require` entry point could not be required. The `dist/index.d.cts`
+  twin tsup emits beside it — 36 files, 5,517,701 B on this build — was named by
+  no condition at all and shipped in every tarball unreachable.
+  
+  ## What changed
+  
+  Each condition now names its own declaration, the shape TypeScript documents:
+  
+  ```json
+  "exports": { ".": {
+    "import":  { "types": "./dist/index.d.ts",  "default": "./dist/index.js" },
+    "require": { "types": "./dist/index.d.cts", "default": "./dist/index.cjs" }
+  } }
+  ```
+  
+  33 entry points across 27 packages, subpaths included. The root `types` field is
+  untouched, so `node10` resolvers are unaffected; the `import` condition resolves
+  exactly what it resolved before, measured as an unchanged control in the same
+  run.
+  
+  ## `@objectstack/core` is deliberately NOT changed
+  
+  Splitting a declaration in two makes TypeScript compare it nominally, and
+  `ObjectKernel` carries a `private plugins` member that reaches every plugin
+  through `PluginContext.getKernel()`. With core split, whole-repo `pnpm build`
+  fails in `@objectstack/verify` with 5 × TS2345 ("Types have separate
+  declarations of a private property 'plugins'"); with core held back and the
+  other 27 split, 71/71 tasks pass. So core keeps the sibling-`types` shape and
+  its two `.d.cts` files (220,854 B) stay unreachable, declared as such in
+  `check:dual-build-cjs-loads`. Splitting it needs a decision about core's public
+  types, not about an exports map.
+  
+  ## For consumers
+  
+  - **ESM consumers: nothing changes.** Same declaration file, byte for byte.
+  - **CJS consumers under `node16`/`nodenext`: TS1479 goes away** and the
+    declarations they get are the ones built for CommonJS.
+  - **`node10` / `moduleResolution: node` consumers: nothing changes** — they never
+    read `exports`.
+  - Nothing is removed: every path that resolved before still resolves.
+  
+  Packages that are CJS-first (`require` → `./dist/index.js`, no `"type": "module"`)
+  were already correct and are untouched — their `dist/index.d.ts` really is the
+  CommonJS declaration. Their ESM mirror (an unreachable `.d.mts` under the
+  `import` condition) is a separate, larger population and is filed separately per
+  the ruling, not fixed here.
+  
+  `check:dual-build-cjs-loads` grew a fourth invariant (TYPED) that reds on the old
+  shape, so the drift cannot return silently.
+- c3c72a4: Record file-field hydration now answers the same question about a `sys_file` tombstone that the download path answers (#11427). `#10246` stopped `GET /api/v1/storage/files/:id` treating a tombstone (`status: 'deleted'` + `deleted_at`) as the last word — it asks the reap guard's own `findFileHolder` and serves the row for as long as something still holds it — but the record read kept the older `status === 'committed'` rule. One `sys_file` row therefore answered `200` at the download endpoint and a bare id inside a record payload, which UI and export render as "this record has no attachment".
+  
+  The population is narrow and unchanged in every other respect: `claimFile` already un-tombstones a field file synchronously when a record re-points at it, and attachments-scope files are never reached by field hydration, so what this closes is the residual the reap guard's sweep-time re-verification names — hook races, direct-driver writes, and future trash restore. A tombstone nothing holds still hydrates as a bare id, and a `pending` upload is untouched.
+  
+  The predicate is not re-derived in the engine. `ObjectQL` gains `registerHeldFileResolver` (type `HeldFileResolver`), which the storage plugin fills with `findHeldFiles` — the batched form of `findFileHolder`, asking the same union of `sys_attachment` join rows and the `ref_*` ownership columns. Batched because hydration runs over many rows per read: a read with no tombstone costs nothing, and the residual case costs one extra query for the whole read rather than one per file. Engines with no storage plugin keep tombstones un-hydrated exactly as before.
+- 30928a6: fix(i18n): read the provenance companion at serving time, not only record it (#12642)
+  
+  Maintainer ruling #12069 Option A (#11671) landed translation provenance as
+  **two** halves: `os i18n extract --source-hashes` RECORDS which source revision
+  a generated leaf is still a byte copy of, and `withSourceFallback` READS those
+  records at serving time and substitutes the current source for a leaf whose
+  source has moved underneath it. The recording half was then rolled out to every
+  bundle set. The reading half was not — measured on `main`: provenance
+  **recorded in 9 of 9** bundle sets and **read at serving time in 1**.
+  
+  The other eight assembled their `TranslationBundle` straight from the raw
+  generated modules and never consulted the companion sitting beside them, so
+  they recorded the drift and went on serving the superseded draft. Nothing said
+  so: `check:i18n` compares key sets and they still matched, `check:i18n-coverage`
+  counts a present leaf as translated, and `check:i18n-stale-fill`'s cross-locale
+  rule needs a SECOND locale holding the same stale bytes before it can testify.
+  The measured case had one locale and no second witness.
+  
+  All eight are wired here, in the shape `@objectstack/platform-objects`'s own
+  `metadata-translations/index.ts` uses — the committed
+  `<locale>.source-hashes.generated.ts` passed as the fourth argument, the third
+  left `undefined` because these sets have no hand-authored sections. Provenance
+  is now recorded in 9 of 9 sets and served in 9 of 9.
+  
+  `@objectstack/plugin-webhooks` was the last of them and is the only one whose
+  manifest changed: `withSourceFallback` lives in `@objectstack/platform-objects`,
+  which that package did not declare. It was **already in that package's install
+  closure** through `@objectstack/service-messaging`, so the edge declares a
+  resolution that already resolved rather than adding a package to the graph —
+  and relying on it undeclared would have been a phantom dependency under this
+  repo's strict package manager.
+  
+  `check:i18n-stale-fill` gains a second verdict, **UNSERVED PROVENANCE**, so this
+  cannot silently come apart again: a bundle set that commits a companion and
+  does not consult it at serving time now fails the build, including a tenth set
+  that lands tomorrow.
+  
+  **Graded `patch`, and the grade is the interesting part.** No API changes, no
+  new exported surface, and no key set moves — substitution was chosen over
+  deletion precisely so key-set claims stay put (ruling #8765 Option B). What
+  changes is which STRING a stale leaf serves. On this tree that is **zero
+  leaves**: a record is only ever written for a leaf that IS a byte copy of the
+  current source, so the companions arrive 0-stale by construction. The change is
+  in what happens the next time a source string moves — the reader sees the
+  English source rather than a superseded draft of it, which is the same
+  degradation an untranslated key already produces and not a new state.
+- de47336: chore(i18n): roll the generated-leaf provenance companion out to the remaining bundle sets (#12559)
+  
+  `os i18n extract --source-hashes` (#11671, maintainer ruling #12069 Option A)
+  records, per generated translation leaf, the digest of the source revision that
+  leaf is **still a byte copy of** — the one signal that tells a stale fill from a
+  real translation once the source has moved and the two stopped being
+  distinguishable by value. It shipped opt-in, and exactly one of the nine i18n
+  bundle sets opted in. A landed detector, a changeset announcing it and a green
+  gate read together as *"generated translation staleness is now caught"*; for
+  eight of nine sets it was not, and the thing making it not caught was a single
+  absent flag in an extract config — invisible from all three of those surfaces.
+  
+  **All eight remaining sets now opt in** — `plugin-approvals`, `plugin-audit`,
+  `plugin-security`, `plugin-sharing`, `plugin-webhooks`, `service-messaging`,
+  `service-realtime`, `service-storage`. Each documents `source-hashes` in its
+  extract config and commits three `<locale>.source-hashes.generated.ts`
+  companions, produced by the same extract run as the bundles they sit beside
+  (`check:i18n` compares them byte-for-byte, so they cannot be written by hand).
+  `check:i18n` now reports 7 bundles per set where it reported 4, and 11 for
+  `platform-objects` where it reported 8.
+  
+  **Records count what is currently RECORDABLE, never what is covered.** A record
+  is written only for a leaf that *is* right now a byte copy of the current
+  source, so a fully translated locale starts with an empty table — which is the
+  instrument armed, not an instrument that measures nothing: the entry appears by
+  itself on the first extract after a leaf becomes a fill. Measured at this
+  commit, per set over its three translated locales: `service-messaging` 289,
+  `plugin-approvals` 61, `plugin-security` 33, `plugin-webhooks` 20,
+  `plugin-audit` 8, `service-storage` 7, `plugin-sharing` 1 (es-ES only; zh-CN and
+  ja-JP are fully translated and start empty), `service-realtime` 0 (all three
+  locales fully translated). **419 records written across the eight sets, 0
+  stale.**
+  
+  **One extractor fix the rollout forced.** `--source-hashes` had one user, and
+  that user commits both generated sections, so the interaction with
+  `--no-metadata-forms` had never been exercised. The provenance table is computed
+  over every generated section the extractor builds; the eight sets here commit no
+  metadata-forms bundle, and their `metadataForms` subtree — absent from their
+  merge baseline — arrives as a fresh `--fill=default` copy of `en`, so every leaf
+  of it was recordable. First measured on `plugin-audit`: **763 records, of which
+  2 were its own objects and 761 were digests of the Studio metadata-form baseline
+  `@objectstack/platform-objects` owns.** Those records are unreadable in the
+  package holding them and would have rewritten all 24 companions on any unrelated
+  `*.form.ts` change in `packages/spec` — the cross-package coupling ADR-0029 D8
+  and every `bundle-ownership.test.ts` keep out of committed bundles. The
+  companion now covers exactly the sections a run commits, decided by the same two
+  predicates that decide the bundle files. `platform-objects` commits both, so its
+  three committed companions are byte-for-byte unchanged.
+  
+  **Grade: `patch`, and behaviour on the day it lands is unchanged for every
+  leaf.** A record is written only where a leaf is currently a byte copy of the
+  **current** source, so every record written equals the current digest and none
+  of them can be stale; the mechanism cannot arrive red. No committed translation
+  bundle changed a byte, no public API moved, and no leaf's rendered text changed.
+  `narrowToCommittedSections` is new but internal to `@objectstack/cli` — the
+  package's entrypoint does not re-export the extractor utils.
+  
+  **What this does not do**, stated so the boundary is not inferred wrongly a
+  second time: these eight sets now *record* provenance. Reading it at serving
+  time is `withSourceFallback`, and that is still wired in
+  `@objectstack/platform-objects` alone — so a stale fill in one of the eight is
+  now recorded and reportable, but not yet substituted at runtime. Tracked
+  separately.
+- 6426b86: fix(service-storage,service-sms): a schema default is not a configuration — converge the "authored value" criterion on `ResolvedSettingValue.source` (#5536)
+  
+  Both settings-bound plugins decided "has anyone configured this namespace?" by
+  value presence, but the manifest defaults are non-empty on every boot, so an
+  unopened settings page read as configuration:
+  
+  - **service-storage**: the swap gate now requires an adapter-relevant key
+    (`adapter`, `local_root`, `s3_*` — exactly the inputs `resolveStorageTarget`
+    reads) whose `source` is not `'default'` before settings may override the
+    constructor-built adapter. Previously the schema defaults
+    (`adapter: 'local'`, `local_root: './.objectstack/data/uploads'`) could
+    silently move a deployment's declared backing store — and an authored save
+    that touched only, say, the upload limit could open the same door.
+  - **service-sms**: the downgrade to `LogSmsTransport` now requires an
+    operator-authored `provider: 'log'` (`source !== 'default'`). Previously
+    the manifest default `'log'` — a value nobody selected — switched off the
+    transport the deployment declared via constructor options on every boot.
+  
+  Same criterion, same reason as `EmailServicePlugin` (the in-repo precedent):
+  the manifest default (`source: 'default'`) is not a decision anyone made.
+  Admin-saved rows and env overrides behave exactly as before. A snapshot with
+  no `source` at all reads as `'default'` — the conservative side keeps the
+  deployment-declared adapter/transport. The sms `daily_quota` reader keeps its
+  declared #2814 exception and still binds by value, never by source.
+- dd3ea16: fix(service-storage): the `storage/test` probe cleans up in the store it wrote to (#13726)
+  
+  The settings action behind the storage screen's "Test" button writes a small
+  `__objectstack_probe__/…` object, reads it back, and deletes it. When the form
+  posts values it builds a **temporary** adapter first, so an operator can
+  validate credentials that are typed but not yet saved, and probes that adapter
+  instead of the persisted one. Two paths left the probe object behind in the
+  customer's bucket.
+  
+  - **The failure cleanup deleted from the wrong store.** `target` was declared
+    inside the `try`, so the `catch` could only name the persisted adapter — even
+    when the probe had written to the temporary one, which is the whole case the
+    temporary adapter exists for. Deleting a key that was never there is a no-op
+    on both shipped adapters, so the wrong-store delete "succeeded" and nothing
+    looked wrong. The adapter is now resolved before that `try`, which makes the
+    cleanup name the store the upload named by construction.
+  - **The content-mismatch return path cleaned up nothing.** Reaching that
+    comparison means the upload already succeeded, so the object is definitely
+    there — and the `return` walked straight past the delete on the next line. It
+    now runs the same best-effort cleanup as the failure path, which also carries
+    the "cleanup refused — here is the key it left behind" warning to this path
+    for the first time.
+  
+  One stray object accrued per failed test, under a name minted per call from a
+  timestamp and a random suffix and recorded nowhere, in whichever store the probe
+  actually wrote to — a button whose entire purpose is to be pressed repeatedly
+  while credentials are being got right.
+  
+  An adapter that fails to *construct* still attempts no cleanup: nothing has been
+  written at that point, and the delete would have to name an adapter that does
+  not exist. What the probe reports to the operator is unchanged on every path.
+- a41069b: **Fix:** a tombstoned `sys_file` that something still holds is downloadable again — no 30-day 404 in between (#10246).
+  
+  Re-pointing a `sys_attachment` join row onto a file inside its 30-day grace-window tombstone has always been byte-safe: the reap guard re-verifies references at sweep time, finds the new holder, un-tombstones the row and vetoes the reap. But the sweep is the only thing that ever asked, and `sys_file`'s declared lifecycle (`ttl { field: 'deleted_at', expireAfter: '30d' }`) nominates a tombstone only **after** the window expires — measured candidates inside the window: `[]`. So the file simply sat at `status='deleted'` while `GET /api/v1/storage/files/:fileId` and `/files/:fileId/url` refused anything not `committed`. A live attachment could point at a file that 404s for up to 30 days and then silently starts working.
+  
+  **What changed:** the two download endpoints stop treating the tombstone as the last word. They now ask the reap guard's own `findFileHolder` — the single definition of "is anything still holding this file?", a union over `sys_attachment` join rows and the `ref_*` ownership columns — and serve the file for exactly as long as that answers yes.
+  
+  **What did not change**, deliberately:
+  
+  - **No lifecycle verb was added.** There is no un-tombstone, revive or resurrect on the read path; the download writes nothing to the row. Revival remains solely the sweep guard's, which is why the fix is a read-side predicate and not a second revival mechanism (the duplicate-mechanism hazard #10241 avoided). The tombstone stays, and the sweep still reaps when the last holder goes.
+  - **`pending` is still refused.** Only the `deleted` limb widened; an upload that was never completed has no bytes to promise.
+  - **Authorization is untouched.** A served tombstone goes through the same `authorizeFileRead` gate as any other file — `AUTH_REQUIRED` (401) and `ATTACHMENT_DOWNLOAD_DENIED` / `FILE_DOWNLOAD_DENIED` (403) are unaffected. Servability is not authorization.
+  - **Bare kernels are unaffected.** With no data engine there is no holder question to ask, so tombstones stay refused exactly as before.
+  
+  The read side and the sweep now answer the same question from the same code, so a file the download path serves is by construction a file the next sweep would veto rather than reap — and the instant the last holder goes, both flip together. That pair is what the new tests pin; the 404 text on the refusal changed from "File not found or not committed" to "File not found or not downloadable" to match (the `FILE_NOT_FOUND` code is unchanged).
+- c75962a: fix(service-storage): report `createdAt` on every stranded-orphan sample, not only on SQLite (#13996)
+  
+  `inventoryStrandedFileOrphans` projects `created_at` out of the `sys_file` read
+  door and then tested it with `typeof row.created_at === 'string'`. `created_at`
+  is a BUILTIN audit column — it is not in `datetimeFields`, and
+  `SqlDriver#formatOutput` repairs the audit columns only inside its
+  `if (this.isSqlite)` arm — so that door hands the value back as canonical ISO-Z
+  text on SQLite and as a JS `Date` on Postgres and MySQL, the production default
+  drivers (pinned per dialect in driver-sql's
+  `sql-driver-13567-audit-stamp-materialisation.test.ts`).
+  
+  The guard was therefore `false` for **every** row on both live dialects: a field
+  explicitly asked for from the driver was silently discarded, and every sample in
+  an operator's stranded-orphan report carried `createdAt: undefined` there while
+  looking correct on the SQLite the suite runs on.
+  
+  The consumer now accepts both shapes and reports the canonical ISO-Z spelling —
+  the repair `@objectstack/metadata-protocol` already carries for `occurred_at`.
+  Normalising at the driver's read door instead would reverse the deliberate
+  `withPostgresCalendarDayAsText` decision that a `timestamptz` is an instant, so
+  the consumer owes the spelling.
+  
+  No exported shape changes: `StrandedOrphanSample.createdAt` stays
+  `string | undefined`. An ISO string is still passed through byte-for-byte, and
+  an absent, null or unparseable stamp still reports `undefined` — never the
+  literal `"Invalid Date"` or `"undefined"` in the position an operator reads a
+  timestamp from. The sibling `key` / `name` guards are untouched: those are text
+  columns on every dialect, and only the timestamp straddles the divergence.
+- d475838: fix(service-storage): stamp the acting organization on the last two `sys_file` insert doors (#13547)
+  
+  `sys_file` declares no `tenancy` key, so `isTenancyDisabled()` reads `false`
+  and the registry provisions `organization_id` on it. Four doors on the object
+  had been given the acting organization one card at a time — `createFile`
+  (#12745), `createSession` (#12928), and the `update`/`delete` halves (#13178) —
+  and all four run through `StorageMetadataStore`, which threads a
+  `StorageWriteContext` into `context.tenantId` so the platform's insert-side
+  chokepoint can stamp the column.
+  
+  Two doors bypassed that store entirely and carried no organization at all:
+  
+  - `copyOwnedFile` (`file-reference-lifecycle.ts`) — the copy-on-claim
+    lifecycle hook, which inserts a fresh `sys_file` whenever a record writes an
+    id already owned by another field slot;
+  - `materializeDataUri` (`backfill-file-references.ts`) — the operator backfill
+    pass, which inserts one `sys_file` per inline `data:` URI it converts.
+  
+  Both passed `{ isSystem: true, [RAW_FILE_VALUES_CONTEXT_KEY]: true }`, so
+  `buildDriverOptions` emitted no `DriverOptions.tenantId`,
+  `SqlDriver.injectTenantOnInsert` had nothing to stamp from, and every row
+  landed `organization_id = NULL`. The driver's tenant term is
+  `(organization_id = :tenantId OR organization_id IS NULL)`, so those rows were
+  reachable from **every** organization — including through the very update and
+  delete doors #13178 had just scoped.
+  
+  ⚠️ Nothing warned, and the silence was explained rather than reassuring:
+  `isSystem` also sets `bypassTenantAudit = true`, which is exactly the guard
+  `auditMissingTenant` returns at — so the `[tenant-audit]` line naming this
+  defect ("writes will not be tenant-isolated") never fired for either door.
+  
+  Each door now threads the organization the platform can actually justify, as
+  an execution context — ⛔ never as a column on the payload, so
+  `resolveTenantField` / `injectTenantOnInsert` keep deciding whether the object
+  has a tenant column and whether an explicit value wins:
+  
+  - the **copy** takes the organization of the write that triggered it, read
+    from `HookContext.session.organizationId` (which ObjectQL's `buildSession()`
+    copies verbatim from `ExecutionContext.tenantId`);
+  - the **backfill** takes the organization of the record whose field held the
+    bytes, resolved with the same `createWallOrganizationResolver` the `sys_file`
+    organization sweep uses, so an object declaring `tenancy.tenantField` is read
+    by the column it is really walled by.
+  
+  Both stamp exactly what that sweep would independently derive from the new
+  file's field-reference holder, so the forward and repair halves agree by
+  construction. The backfill needs **no** operator-supplied organization and
+  deliberately takes none: one run spans every object and organization in the
+  deployment, so a single supplied value would be stamped onto other tenants'
+  files — and a wrongly-stamped row is walled into somebody else's tenant, which
+  is strictly worse than a NULL row that stays reachable.
+  
+  Where no organization is in scope — a caller with no active org, an unwalled
+  object, a legacy row that carries none — the `tenantId` key is omitted
+  entirely and the write proceeds exactly as before. ⛔ Forward-stamping only:
+  no existing `sys_file` row's organization is written by either door.
+- 96940b7: feat(storage): report-only inventory for stranded `sys_file` orphans, plus `os storage orphans` (#10950)
+  
+  The tombstone repairs in #10171 (update verb) and #10240 (delete verb) are forward-only:
+  they changed what the next write does and touched no row already written. Every
+  attachments-scope file orphaned before them still sits at `status='committed'` with
+  `deleted_at` NULL and no `sys_attachment` join row — and `sys_file`'s declared lifecycle
+  nominates a sweep candidate only via `ttl { field: 'deleted_at' }` or
+  `retention { onlyWhen: { status: 'pending' } }`, so such a row matches **neither**. It is
+  never a candidate, the reap guard is never asked about it, and its bytes are never
+  reclaimed. The leak is permanent rather than late.
+  
+  This ships the measurement half only, per the maintainer's ruling on #10950:
+  
+  - `inventoryStrandedFileOrphans()` — a read-only reconciliation pass that walks
+    attachments-scope committed `sys_file` rows and reports how many are stranded, their
+    byte magnitude, and why each excluded row was excluded. `formatStrandedOrphanInventory()`
+    renders it; those two plus the inventory's result types are what
+    `@objectstack/service-storage` publishes — the shared ownership predicate stays internal,
+    since nothing outside the package pulls on it.
+  - `os storage orphans` — the operator-invoked surface, with `--json` for a machine-readable
+    payload. There is no `--apply` and no write path, deliberately.
+  
+  **It writes nothing, tombstones nothing and deletes nothing.** Authorising the destructive
+  backfill is a separate decision that these numbers exist to inform; a tombstone written
+  here would start a 30-day clock ending in an irreversible byte delete.
+  
+  The ownership question is not reimplemented. `createSysFileReapGuard`'s "is anything still
+  holding this file?" test — zero `sys_attachment` join rows **and** empty `ref_*` ownership
+  columns — is extracted as `findFileHolder()` and called by both the guard and the
+  inventory, so "the same question, never a weaker one" is a property of the code rather
+  than a claim in a comment. A file with zero join rows that is `ref_*`-owned (ADR-0104 /
+  #3459) is a live file and is excluded from the count.
+  
+  Behaviour of the reap guard is unchanged — the extraction is a pure refactor, and the
+  guard's existing pins cover it. Both counts are labelled `attachments` scope: files in the
+  other scopes are governed by the field-reference seam and are reconciled by
+  `verifyFileReferences`, which skips attachments-scope files, so the two passes partition
+  the population rather than overlapping.
+- 2ff01cf: fix(service-storage): stamp `sys_upload_session.organization_id` from the acting session (#12928)
+  
+  `StorageMetadataStore.createSession` inserted into `sys_upload_session` with no
+  execution context, so the SQL driver's `injectTenantOnInsert` had no `tenantId`
+  to stamp from and every chunked-upload session row landed with
+  `organization_id` NULL — on a tenancy-ENABLED object (the declaration carries no
+  `tenancy` key, so `applySystemFields` provisions the column unconditionally).
+  This is the `sys_upload_session` sibling of the `sys_file` gap fixed in #12745,
+  and the chunked-upload door already held the value: it threads the identical
+  `session?.organizationId` into the `createFile` immediately above.
+  
+  `createSession` now takes the same optional `StorageWriteContext` as
+  `createFile` and hands the engine `{ context: { tenantId } }`, so the platform's
+  existing insert-side chokepoint decides the rest — whether the object has a
+  tenant column at all, and whether an explicit value on the row wins. A caller
+  with no organization passes no options and the row lands unstamped exactly as
+  before.
+  
+  Maintainer ruling 2026-08-29, verbatim and untranslated: 「同意」 — forward stamp
+  only. There is deliberately **no backfill**: rows already NULL age out through
+  this object's own ADR-0057 TTL sweep. That premise is verified rather than
+  assumed — `sys-upload-session-ttl-sweep.test.ts` drives the shipped declaration
+  through the real `LifecycleService` against live SQL and pins that an expired
+  NULL-organization row is reaped, that a stamped row is reaped by the same
+  sweep, that a live session survives it, and that a run with no declaration reaps
+  nothing.
+  
+  Why an unstamped row mattered even without a cross-tenant read: both walled
+  Layer 0 predicates are exclusive (`{ organization_id: <id> }` under `isolated`,
+  `{ $in: [...] }` under `group`), and neither matches NULL — so on a walled
+  deployment an unstamped session row was invisible to its own tenant, the same
+  silent-empty class `sys_api_key` was renamed to avoid.
+- Updated dependencies [809d417]
+- Updated dependencies [387e231]
+- Updated dependencies [f794e4e]
+- Updated dependencies [cae2169]
+- Updated dependencies [b812a54]
+- Updated dependencies [2d4fa75]
+- Updated dependencies [0e4e51b]
+- Updated dependencies [e84bbf6]
+- Updated dependencies [effae80]
+- Updated dependencies [efb3513]
+- Updated dependencies [d62f990]
+- Updated dependencies [c45d8e6]
+- Updated dependencies [2e3e8c7]
+- Updated dependencies [e621291]
+- Updated dependencies [655b106]
+- Updated dependencies [40a93b5]
+- Updated dependencies [101ad2c]
+- Updated dependencies [d5b330d]
+- Updated dependencies [dda969c]
+- Updated dependencies [1f45690]
+- Updated dependencies [277948f]
+- Updated dependencies [8bdd955]
+- Updated dependencies [f3bbbef]
+- Updated dependencies [4f24e9d]
+- Updated dependencies [e27583e]
+- Updated dependencies [4bd6faa]
+- Updated dependencies [86cbe37]
+- Updated dependencies [6a180e4]
+- Updated dependencies [474242f]
+- Updated dependencies [63cd487]
+- Updated dependencies [bd4aa4e]
+- Updated dependencies [803eaab]
+- Updated dependencies [f8e8f03]
+- Updated dependencies [983edf1]
+- Updated dependencies [eae824e]
+- Updated dependencies [f6fa22c]
+- Updated dependencies [8a483b3]
+- Updated dependencies [3bc2e38]
+- Updated dependencies [97bcd99]
+- Updated dependencies [df59de0]
+- Updated dependencies [96e25a8]
+- Updated dependencies [f75a38a]
+- Updated dependencies [7a25e7d]
+- Updated dependencies [1fa05a6]
+- Updated dependencies [c85a265]
+- Updated dependencies [dcb10a5]
+- Updated dependencies [773a999]
+- Updated dependencies [35dffea]
+- Updated dependencies [d8024f0]
+- Updated dependencies [8120808]
+- Updated dependencies [776a098]
+- Updated dependencies [5060877]
+- Updated dependencies [4f6325d]
+- Updated dependencies [52954c0]
+- Updated dependencies [2aa8456]
+- Updated dependencies [93809a3]
+- Updated dependencies [7c0d0c3]
+- Updated dependencies [daae7aa]
+- Updated dependencies [8dc22d6]
+- Updated dependencies [a392dbf]
+- Updated dependencies [279431e]
+- Updated dependencies [948dd6b]
+- Updated dependencies [3b4c56c]
+- Updated dependencies [ae8edd2]
+- Updated dependencies [e25403c]
+- Updated dependencies [a81aa9d]
+- Updated dependencies [64baa68]
+- Updated dependencies [9fa70d7]
+- Updated dependencies [09db64a]
+- Updated dependencies [92916e7]
+- Updated dependencies [a84f3ea]
+- Updated dependencies [f2eaae8]
+- Updated dependencies [56c093c]
+- Updated dependencies [c09451b]
+- Updated dependencies [ba64877]
+- Updated dependencies [e7191ce]
+- Updated dependencies [7345308]
+- Updated dependencies [79b6a22]
+- Updated dependencies [30d96ab]
+- Updated dependencies [f658793]
+- Updated dependencies [c95ad19]
+- Updated dependencies [e58ea8b]
+- Updated dependencies [4a17645]
+- Updated dependencies [3795c5f]
+- Updated dependencies [8ab926b]
+- Updated dependencies [7317cf2]
+- Updated dependencies [e25e839]
+- Updated dependencies [5997207]
+- Updated dependencies [8b13cc8]
+- Updated dependencies [4a4a35d]
+- Updated dependencies [86e765a]
+- Updated dependencies [1d7e76a]
+- Updated dependencies [53dc739]
+- Updated dependencies [fd289be]
+- Updated dependencies [03bf7b1]
+- Updated dependencies [f90e820]
+- Updated dependencies [18d816a]
+- Updated dependencies [e8bd715]
+- Updated dependencies [b91c351]
+- Updated dependencies [a28a3c0]
+- Updated dependencies [daeaaf9]
+- Updated dependencies [c459da6]
+- Updated dependencies [e914733]
+- Updated dependencies [f887e52]
+- Updated dependencies [881f8d8]
+- Updated dependencies [3bfa1e6]
+- Updated dependencies [0a8ebf3]
+- Updated dependencies [901355c]
+- Updated dependencies [34ce8e7]
+- Updated dependencies [33681ea]
+- Updated dependencies [bfe13c8]
+- Updated dependencies [0fb3044]
+- Updated dependencies [4635f3e]
+- Updated dependencies [fd289be]
+- Updated dependencies [ee3595c]
+- Updated dependencies [09b4f4e]
+- Updated dependencies [b2eab95]
+- Updated dependencies [93940d4]
+- Updated dependencies [3a04b01]
+- Updated dependencies [45b9051]
+- Updated dependencies [3954fb7]
+- Updated dependencies [4805b56]
+- Updated dependencies [b9e9227]
+- Updated dependencies [d395692]
+- Updated dependencies [5894d30]
+- Updated dependencies [a3765f6]
+- Updated dependencies [2d5cee3]
+- Updated dependencies [e22158f]
+- Updated dependencies [7404925]
+- Updated dependencies [0c2334f]
+- Updated dependencies [778c59f]
+- Updated dependencies [d2619fd]
+- Updated dependencies [af56546]
+- Updated dependencies [6acb11a]
+- Updated dependencies [33c5fd3]
+- Updated dependencies [20b0fdb]
+- Updated dependencies [905019b]
+- Updated dependencies [a286411]
+- Updated dependencies [98c0d33]
+- Updated dependencies [368a82e]
+- Updated dependencies [a3d5724]
+- Updated dependencies [93ea19b]
+- Updated dependencies [9ee2dcf]
+- Updated dependencies [8cb96ec]
+- Updated dependencies [8f10a79]
+- Updated dependencies [6269a55]
+- Updated dependencies [a17da05]
+- Updated dependencies [a8c00e2]
+- Updated dependencies [22e5236]
+- Updated dependencies [0fb8760]
+- Updated dependencies [37e82eb]
+- Updated dependencies [e5ce2ed]
+- Updated dependencies [be21955]
+- Updated dependencies [bc56e18]
+- Updated dependencies [be21955]
+- Updated dependencies [a9ee989]
+- Updated dependencies [4d0d944]
+- Updated dependencies [15d58db]
+- Updated dependencies [d63b014]
+- Updated dependencies [9abe4e4]
+- Updated dependencies [2cc7122]
+- Updated dependencies [50d6c92]
+- Updated dependencies [9e0ba21]
+- Updated dependencies [311433f]
+- Updated dependencies [3e5ad08]
+- Updated dependencies [9abe4e4]
+- Updated dependencies [b7131f3]
+- Updated dependencies [e5812fa]
+- Updated dependencies [7085f90]
+- Updated dependencies [dee4dd4]
+- Updated dependencies [ce7e497]
+- Updated dependencies [51ecb2f]
+- Updated dependencies [9086761]
+- Updated dependencies [f6344e7]
+- Updated dependencies [42a117b]
+- Updated dependencies [1401ae7]
+- Updated dependencies [4297fe7]
+- Updated dependencies [e398863]
+- Updated dependencies [d16df74]
+- Updated dependencies [d79c602]
+- Updated dependencies [f11fc61]
+- Updated dependencies [e808890]
+- Updated dependencies [8f79379]
+- Updated dependencies [e6ca40e]
+- Updated dependencies [0c77ea4]
+- Updated dependencies [52954c0]
+- Updated dependencies [89eb997]
+- Updated dependencies [7131f12]
+- Updated dependencies [aa5994e]
+- Updated dependencies [be93457]
+- Updated dependencies [a65db76]
+- Updated dependencies [2cf5a96]
+- Updated dependencies [15eb2c9]
+- Updated dependencies [5691b07]
+- Updated dependencies [2a6122b]
+- Updated dependencies [225e769]
+- Updated dependencies [8af88dd]
+- Updated dependencies [fb5fbb8]
+- Updated dependencies [d7b3963]
+- Updated dependencies [33184fd]
+- Updated dependencies [7c41693]
+- Updated dependencies [b72db01]
+- Updated dependencies [dce5cd4]
+- Updated dependencies [9688f58]
+- Updated dependencies [556ebc1]
+- Updated dependencies [177ebdc]
+- Updated dependencies [8d237b4]
+- Updated dependencies [2d2e6f0]
+- Updated dependencies [2d8dd8d]
+- Updated dependencies [22d573e]
+- Updated dependencies [b5a2398]
+- Updated dependencies [348860c]
+- Updated dependencies [5383fa6]
+- Updated dependencies [5b3ff63]
+- Updated dependencies [1a6a19c]
+- Updated dependencies [064d484]
+- Updated dependencies [527e050]
+- Updated dependencies [dd33bf9]
+- Updated dependencies [4cb2a90]
+- Updated dependencies [74a7804]
+- Updated dependencies [53d3689]
+- Updated dependencies [b3a63d3]
+- Updated dependencies [49f0dcf]
+- Updated dependencies [033a34c]
+- Updated dependencies [4d25d22]
+- Updated dependencies [1ffee51]
+- Updated dependencies [5ae4303]
+- Updated dependencies [ece4dad]
+- Updated dependencies [e9b377e]
+- Updated dependencies [146f448]
+- Updated dependencies [735f5c7]
+- Updated dependencies [a7e18de]
+- Updated dependencies [366f895]
+- Updated dependencies [dc75ba8]
+- Updated dependencies [cce0aa9]
+- Updated dependencies [e764507]
+- Updated dependencies [cff17af]
+- Updated dependencies [39404f3]
+- Updated dependencies [ca1965f]
+- Updated dependencies [8619f95]
+- Updated dependencies [b706af9]
+- Updated dependencies [db8c288]
+- Updated dependencies [0e5fe7f]
+- Updated dependencies [add4360]
+- Updated dependencies [e0abc38]
+- Updated dependencies [fc9ba76]
+- Updated dependencies [0f94cc7]
+- Updated dependencies [a11c1a5]
+- Updated dependencies [71f9cd1]
+- Updated dependencies [ee17d86]
+- Updated dependencies [cdbd920]
+- Updated dependencies [18c432e]
+- Updated dependencies [3c418c4]
+- Updated dependencies [fa8715a]
+- Updated dependencies [a933ed7]
+- Updated dependencies [b3ca463]
+- Updated dependencies [a933ed7]
+- Updated dependencies [0d4a6a8]
+- Updated dependencies [518d5e5]
+- Updated dependencies [6643ba1]
+- Updated dependencies [eeba2ef]
+- Updated dependencies [ec4c4d2]
+- Updated dependencies [424f73c]
+- Updated dependencies [cccbe51]
+- Updated dependencies [a8d6b1d]
+- Updated dependencies [e4a7695]
+- Updated dependencies [87075b1]
+- Updated dependencies [fc58a99]
+- Updated dependencies [14cfc00]
+- Updated dependencies [1c6f7b4]
+- Updated dependencies [e854a53]
+- Updated dependencies [dfebfc8]
+- Updated dependencies [598b7ec]
+- Updated dependencies [d028b37]
+- Updated dependencies [f7b25c5]
+- Updated dependencies [122ef38]
+- Updated dependencies [4a37870]
+- Updated dependencies [428f9b2]
+- Updated dependencies [aa7ff56]
+- Updated dependencies [811a3c2]
+- Updated dependencies [1401ae7]
+- Updated dependencies [2fd3f1c]
+- Updated dependencies [c41b42e]
+- Updated dependencies [c4db311]
+- Updated dependencies [750fff5]
+- Updated dependencies [c19035e]
+- Updated dependencies [ececf7a]
+- Updated dependencies [d173125]
+- Updated dependencies [8eeca27]
+- Updated dependencies [8425c17]
+- Updated dependencies [a5ef1d8]
+- Updated dependencies [87ad30c]
+- Updated dependencies [772d5de]
+- Updated dependencies [ce80ec2]
+- Updated dependencies [b372318]
+- Updated dependencies [97a2263]
+- Updated dependencies [29d0676]
+- Updated dependencies [0169d49]
+- Updated dependencies [6bd3231]
+- Updated dependencies [d2b5ba8]
+- Updated dependencies [b799ac5]
+- Updated dependencies [8f74307]
+- Updated dependencies [d23dc08]
+- Updated dependencies [644ad50]
+- Updated dependencies [9735662]
+- Updated dependencies [4d5b4f8]
+- Updated dependencies [0da7cd2]
+- Updated dependencies [28a5c3e]
+- Updated dependencies [4bc18e5]
+- Updated dependencies [9f57f1e]
+  - @objectstack/spec@17.3.0
+  - @objectstack/platform-objects@17.3.0
+  - @objectstack/core@17.3.0
+  - @objectstack/types@17.3.0
+  - @objectstack/observability@17.3.0
+
 ## 17.2.0
 
 ### Patch Changes

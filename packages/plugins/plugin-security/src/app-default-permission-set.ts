@@ -1,5 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { resolveArtifactPackageOrder } from '@objectstack/core';
+
 /**
  * [ADR-0090 D5, #7555] The PLATFORM's own human baseline permission set.
  *
@@ -84,6 +86,83 @@ export function appDefaultPermissionSetName(permissions: unknown): string | unde
 }
 
 /**
+ * [ADR-0130 D4, #15007] Every permission set a stack config DECLARES — from the
+ * flattened top level, and from `packages[]`.
+ *
+ * ## What this exists to stop
+ *
+ * A multi-package artifact carries each definition twice today: flattened onto
+ * the top level, and again inside `packages[i]`. Option B (the ADR-0130 D4
+ * ruling on #14512) removes the flattened copy, so `packages[]` carries it
+ * once. A reader that only ever looked at the top level does not fail when that
+ * happens — it reads `undefined`, finds no `isDefault` set, and answers "the app
+ * declared no default profile".
+ *
+ * For THIS reader that silence has a security posture attached. The name it
+ * resolves becomes the `SecurityPlugin`'s `fallbackPermissionSet`, i.e. the
+ * app's half of every authenticated human's additive baseline
+ * ({@link composeHumanBaselinePermissionSets}). Losing it does not deny the
+ * boot and does not log: the deployment simply runs on the platform floor
+ * alone, and every member of a multi-package app quietly holds less than the
+ * app declared they should. #7555 measured what that looks like from the
+ * outside — nav entries served, 403 behind them — and could only measure it
+ * because someone went looking.
+ *
+ * ## Top level FIRST, `packages[]` second — and why that order is the contract
+ *
+ * The reader half of the program lands while the artifact is still ADDITIVE, so
+ * this function has to be a superset of the old read rather than a replacement
+ * for it: for every artifact the platform emits today the flattened level
+ * answers first and this returns exactly what it returned before. The
+ * `packages[]` pass only supplies a set where the top level had none — which is
+ * precisely the option-B artifact. That is what makes this card revertible on
+ * its own and safe to land before the emitter half (#14512).
+ *
+ * ## The order is `resolveArtifactPackageOrder`'s, not the array's
+ *
+ * `appDefaultPermissionSetName` resolves the FIRST `isDefault` set, so with more
+ * than one package declaring one, "first" has to mean the same thing here as it
+ * does everywhere else the artifact is read. `resolveArtifactPackageOrder`
+ * (`@objectstack/core`, ADR-0130 D4+D5, #14643) is the ONE place that turns an
+ * artifact into its ordered package list — dependency-topological, so a package
+ * that extends another is read after it regardless of which array slot it
+ * occupies. ⛔ Do not iterate `config.packages` directly here; a second
+ * traversal is a second ordering, and the depended-upon package would win or
+ * lose by authoring accident.
+ *
+ * ## Two things it deliberately does NOT do
+ *
+ *   • It does not look inside the SINGULAR `manifest`. That constraint is
+ *     #7001's and it still holds — the harness must not honour a declaration
+ *     `serve.ts` ignores. Note this is not a special case bolted on: an
+ *     artifact carrying no `packages` key makes `resolveArtifactPackageOrder`
+ *     return the caller's own object as the single package body (D4's second
+ *     branch, D7's compatibility term), so that branch reads `permissions` from
+ *     exactly where the old code read it and nowhere else.
+ *   • It does not catch `resolveArtifactPackageOrder`'s refusals. A malformed
+ *     `packages` (not an array, an unwrapped entry, a duplicate package id)
+ *     raises an ADR-0112 envelope here, the same one the manifest service
+ *     raises when it registers that artifact moments later. Swallowing it would
+ *     resolve a permission surface out of an artifact the loader refuses to
+ *     load — the gate travels with the read.
+ */
+function declaredPermissionSets(config: unknown): unknown[] {
+  const sets: unknown[] = [];
+
+  const flattened = (config as { permissions?: unknown } | null | undefined)?.permissions;
+  if (Array.isArray(flattened)) sets.push(...flattened);
+
+  const packages = (config as { packages?: unknown } | null | undefined)?.packages;
+  if (packages === undefined || packages === null) return sets;
+
+  for (const body of resolveArtifactPackageOrder(config)) {
+    const declared = (body as { permissions?: unknown } | null | undefined)?.permissions;
+    if (Array.isArray(declared)) sets.push(...declared);
+  }
+  return sets;
+}
+
+/**
  * [#7001] The `SecurityPlugin` options a stack config implies — ONE resolution
  * for EVERY boot path.
  *
@@ -112,14 +191,13 @@ export function appDefaultPermissionSetName(permissions: unknown): string | unde
  * the result straight through — `new SecurityPlugin(appSecurityPluginOptions(config))`
  * — and a caller cannot get the undefined case subtly wrong.
  *
- * Reads `config.permissions`, top-level, exactly as `serve.ts` always has.
- * Being cleverer here (also looking inside `manifest`) would re-open the gap it
- * closes, in the other direction.
+ * Reads the sets through {@link declaredPermissionSets} — the flattened top
+ * level `serve.ts` has always read, and, for a multi-package artifact, the
+ * `packages[]` bodies that carry the same declaration under ADR-0130 D4.
  */
 export function appSecurityPluginOptions(
   config: unknown,
 ): { fallbackPermissionSet: string } | undefined {
-  const permissions = (config as { permissions?: unknown } | null | undefined)?.permissions;
-  const name = appDefaultPermissionSetName(permissions);
+  const name = appDefaultPermissionSetName(declaredPermissionSets(config));
   return name ? { fallbackPermissionSet: name } : undefined;
 }

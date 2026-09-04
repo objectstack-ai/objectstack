@@ -1,5 +1,796 @@
 # @objectstack/driver-mongodb
 
+## 17.3.0
+
+### Minor Changes
+
+- aa3f9ba: fix(drivers): a declared field written as an explicit `undefined` is indistinguishable from one never written (#9276)
+  
+  A row has exactly two states to say about a field, each with a defined meaning:
+  **the key is absent** ("no value was ever written") or **the key holds a
+  value**. An own key holding `undefined` is neither. Only a JS-backed driver can
+  emit it — a SQL NULL arrives as `null`, which is a value — and every consumer
+  downstream had to invent a reading of it. Measured on `origin/main`, they did
+  not agree: `has(record.f)` on the real `@objectstack/formula` CEL engine reads
+  it as ABSENT, `materializeDeclaredFields` reads it as ABSENT by documented
+  design, and a bare `f in row` reads it as PRESENT.
+  
+  Both JS-backed drivers were measured separately, and they did **not** match:
+  
+  - **`driver-memory`** preserved the own key holding `undefined` through
+    `create` and handed it back from `find`. Its own projection path and its own
+    matcher already read the shape as absent (`projectFields` skips `undefined`
+    values, `{f: {$exists: true}}` excluded it, `{f: {$null: true}}` included it)
+    — so the returned row was the only surface in the driver still claiming the
+    key was present, and the same stored row answered `'f' in row` differently
+    depending on whether a projection was requested.
+  - **`driver-mongodb`** SPLIT. `create()` returns the object it built in
+    process, so the field came back as an own key holding `undefined`; but the
+    MongoClient default is `ignoreUndefined: false` and this driver sets no
+    override, so BSON stored `null` for that same field and a subsequent `find()`
+    answered `null` — a value. One write, two answers, from one driver.
+  
+  Both drivers now drop own keys holding `undefined` on the way into storage, so
+  a declared field written as `undefined` and one never written are the same row:
+  deep-equal, same own keys, same answer to every presence test. `null` is
+  untouched and stays a value.
+  
+  Fixed at the producer rather than at each consumer: converging one consumer
+  resolves one seam, but the next consumer that reasons about key presence
+  re-acquires the problem.
+  
+  **Behaviour that changes, precisely.** What these two packages RETURN for one
+  input class, and what `driver-mongodb` STORES for it. A caller passing an
+  explicitly-`undefined` property to `create`/`bulkCreate`/`update`/`updateMany`
+  (or seeding `initialData`) no longer sees that key in the returned row, and no
+  `null` is written for it in MongoDB. `undefined` does not survive JSON, so this
+  shape cannot arrive over the wire — reaching it requires in-process code.
+  
+  **What does NOT change.** No accept set moves: no schema, refine, validator or
+  public type is touched, nothing that parsed before is refused now, and no
+  exported name is added, removed or moved. Filter results are unchanged in both
+  drivers — measured identical before and after for `$null` / `$exists` /
+  equality on `driver-memory`, and on `driver-mongodb` `$null: true` lowers to
+  `$eq: null` and `$null: false` to `$ne: null`, which MongoDB matches
+  identically against a missing field and a stored `null`.
+  
+  Scope on `driver-mongodb` is the INSERT doors and the values returned.
+  `$set`-shaped patches are deliberately untouched: changing them would answer
+  "what does a patch carrying `undefined` mean — clear the field, or leave the
+  prior value standing" which is a storage-contract question, not this repair's
+  to settle. On `driver-memory` the normalisation is applied POST-merge for the
+  same reason — it keeps today's answer (every measured consumer read the merged
+  own-key-`undefined` as "absent", and the row now says absent outright) rather
+  than silently turning such a patch into a no-op.
+- ca3fd4b: fix(drivers): `update()` on a missing id answers `null` on MongoDB and on Turso's remote face
+  
+  **BREAKING** for TypeScript consumers — a published TYPE-surface narrowing alongside a
+  runtime behaviour change, shipped as `minor` under the launch-window convention. Two
+  published declared returns move: `MongoDBDriver.update()` and `RemoteTransport.update()`
+  (both exported from their package index) now declare
+  `Promise<Record<string, unknown> | null>` where they declared
+  `Promise<Record<string, unknown>>`. A caller that reads fields off either result —
+  `result.id`, `result.title` — no longer compiles until it narrows the `null` arm first.
+  The narrowing is delivered by the compiler at every call site, and it is the honest
+  declaration: the value that arm carries has always been reachable, it was simply being
+  answered with a fabricated record instead.
+  
+  `IDataDriver.update()` declares `Promise<Record<string, unknown> | null>` — the
+  not-found arm landed with the ruling on the contract (`packages/spec` is untouched here),
+  and it is the answer `InMemoryDriver`, `SqlDriver`, `SqliteWasmDriver` and `TursoDriver`'s
+  local face have always given. Two implementations did not honour it. They **invented a
+  record** instead:
+  
+  - `MongoDBDriver.update()` ran `updateOne({ id })`, then `findOne({ id })`, and
+    when nothing came back returned
+    `withoutUndefinedOwnKeys({ id: String(id), ...updateData })` — a row assembled
+    from the caller's own payload plus the `updated_at` it had just stamped, under
+    an id that names no document.
+  - `RemoteTransport.update()` ran `UPDATE … WHERE "id" = ?`, then
+    `SELECT * … WHERE "id" = ?`, and when no row came back returned
+    `{ id, ...data }` — the caller's payload with the id stapled on.
+  
+  Both now return `null`. That is the runtime half of this change, and it is why this
+  release is not a pure type-surface move: the value a caller receives for a missing id is
+  different at run time, not only in the `.d.ts`.
+  
+  This is the expensive direction of wrong, not merely the wrong answer: the
+  fabricated row said **succeeded** where the truth was **not found**, and said it
+  in a shape carrying the caller's own fields back, so nothing about it looked
+  wrong. Through the engine's by-id door a REST / SDK / MCP `update` against a
+  deleted or mistyped id answered **200 with a record that does not exist** — on
+  these two implementations only. A caller, human or agent, read that as a landed
+  write and did not retry, alert or roll back.
+  
+  Two things downstream become correct rather than merely different:
+  
+  - **One `TursoDriver`, one answer.** Its remote branch passes the transport
+    result through `formatRemoteRow`, which already guards
+    `row && typeof row === 'object'`, so `null` reaches the engine untouched and
+    the two faces converge with no edit at that seam. Previously the same driver
+    answered the same missing id two ways, chosen by `isRemote`.
+  - **`RemoteTransport.bulkUpdate()`'s skip stops being dead code.**
+    `if (updated) results.push(updated)` is the cross-driver convention
+    `SqlDriver.bulkUpdate` follows; on this transport `updated` could never be
+    falsy, so a batch over N missing ids answered N invented rows. It now answers
+    the rows that exist.
+  
+  `upsert()` is untouched on both drivers: an upsert never answers "not found".
+  
+  No landed test pinned the fabricating posture on either driver, so the
+  regression pins added here are net-new coverage rather than a changed baseline.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata key is removed, renamed or re-shaped: the moving surfaces are two driver methods' declared return types and the value they answer for an id that names no row, so there is nothing for `objectstack migrate meta`, `spec-changes.json` or the upgrade guide to project, and this changeset prescribes no rewrite. The consumer obligation is a TypeScript narrowing at the call site, delivered by the compiler. `type-surface-only` is NOT claimable here: its predicate 4 (narrowed-from-erased) is false — neither declared return was `any` at the merge base, they were the non-null `Promise<Record<string, unknown>>` — and, independently, runtime behaviour moves in the same diff, which is more than a type surface. Same disposition and reasoning as `.changeset/driver-memory-update-upsert-honest-types.md` (PR #14434), one day earlier in this same series. -->
+- 9dac1ae: fix(drivers): `$exists` means HAS A VALUE on the live mingo path, the analytics face and `translateFilter` (#13195)
+  
+  The platform's settled semantic is that `$exists` means "the field has a value"
+  (`!= null`), never key-presence — #5298 leg ③ / #5369, landed in PR #5962. Three
+  exits still read key-presence; the maintainer ruled on 2026-08-30 that all three
+  align. They now do:
+  
+  - `driver-memory`'s **live mingo query path** (`InMemoryDriver.find()`) — the
+    operator went to mingo under its own name, and mingo tests key presence;
+  - `driver-memory`'s **analytics execution face** — it built its own
+    `{$exists: <bool>}`, so it inherited key-presence independently;
+  - `driver-mongodb`'s **`translateFilter`** — it passed the operator through, and
+    MongoDB's `$exists` is key-presence at the wire level.
+  
+  Nothing was invented. All three lower to `{$ne: null}` / `{$eq: null}` — the
+  spelling the same files already emit for `$null` — which answers has-value on
+  **both** readings of "no value": a stored `null` and an absent key.
+  
+  **Grading, argued from what was measured rather than from custom.** This is
+  `minor`, not `patch`, and the sibling card #13166 is why the distinction is
+  worth stating: that one graded `patch` on the explicit ground that
+  `InMemoryDriver.find()` was unaffected and only the non-exported reference
+  matcher moved. Here the opposite is true — the live query path callers actually
+  reach changes on **two published drivers**, on a filter operator in the public
+  Filter Protocol. Measured on a 3-row fixture where one row stores `name: null`:
+  
+  | filter | before | after |
+  |:--|:--|:--|
+  | `{name: {$exists: true}}` | `['1','2','3']` | `['1','2']` |
+  | `{name: {$exists: false}}` | `[]` | `['3']` |
+  | `{$not: {name: {$exists: true}}}` | `[]` | `['3']` |
+  
+  The middle row is the harm the ruling's record calls the hardest live one: a
+  caller asking for the rows with **no value** got an empty result — silent
+  absence, with nothing to narrow — on three of the four exits. A caller who was
+  getting nothing starts getting rows, which is a behaviour change however welcome
+  it is.
+  
+  The **key-absent** reading is unchanged on every exit, by construction and by
+  test: `{$ne: null}` already answers has-value there, so the column that agreed
+  with the ruling before still agrees. It is kept in the suites as the control
+  that the alignment moved only what it was meant to.
+  
+  **One thing the ruled lowering needed that the ruling did not name.** `{$ne:
+  null}` / `{$eq: null}` reuse keys an author can write on the same field, so
+  `{name: {$exists: true, $ne: 'b'}}` would assign `$ne` twice into one object and
+  one of the two constraints would vanish — with *which* one decided by the
+  author's key order. Measured unguarded: that filter answered `['1','3']` and its
+  key-swapped twin answered `['1','2']`, where the reference matcher says `['1']`
+  for both. Four composed cells that agreed with the reference matcher on `main`
+  would have started disagreeing. So a lowered `$exists` whose key is already
+  taken is promoted to its own `$and` branch instead of merged; a free key still
+  merges inline. Both key orders now emit one document, and every composed cell
+  measured agrees with the reference matcher — including two that did **not**
+  agree before this change.
+  
+  ⛔ Not included, deliberately: no `FILTER_LOGIC_CASES` enrolment and no
+  `packages/spec` edit (the backends had to move first — that is the card's own
+  step 4, and it is the next card), and nothing retires or discourages `$exists`
+  in favour of `$null`. Whether one predicate should keep two authorable spellings
+  is the consumer census, #13492.
+- eaba72e: feat(driver-mongodb): index `lookup` joins off the canonical `reference` key (#13222)
+  
+  `syncCollectionSchema`'s field-level join-index arm gated on `field.reference_to`.
+  That is a REJECTED ALIAS — `FieldSchema` answers `unrecognized_keys` for it on any
+  field type — and this driver's own schema door refuses it outright. So the arm's
+  `lookup` conjunct could not be satisfied by any input at all, and no authored
+  lookup had ever been indexed on MongoDB. The arm now reads `reference`, the only
+  relationship spelling the spec declares.
+  
+  Measured as a complete case split over the key's value domain rather than a
+  sample: every `reference_to` value except `undefined` is refused at the door, and
+  `undefined` is falsy, so the old conjunct was unreachable for every possible
+  input. The `user` disjunct was unaffected and is why the feature looked healthy —
+  it needs no relationship key, so `idx_owner_lookup`-shaped indexes were always
+  created.
+  
+  The refusal door itself is unchanged: predicate, `VALIDATION_ERROR`/400 envelope,
+  placement and instruction are all as they were. Only the tail of its message
+  moved, because it told the reader that renaming the key would not by itself get
+  the field an index — true when written, false now.
+  
+  A `lookup` that declares no `reference` is still not indexed. Measured on
+  `FieldSchema`: `{ type: 'lookup' }` and `{ type: 'lookup', reference: '' }` both
+  parse successfully — the spec's prose calls `reference` required for these types
+  but the schema does not enforce it — so this is a real authorable shape, and an
+  index for a join with no declared target would cost every write and buy no read.
+  `master_detail` and `tree` are unchanged: they reach this arm on neither spelling.
+  
+  ## ⚠️ OPERATORS — this changes boot behaviour on existing deployments
+  
+  **What it costs.** The first `syncSchema` after this upgrade CREATES these
+  indexes on collections that already hold data. Each one is an awaited
+  `createIndex`: a full collection scan plus an external sort of the extracted
+  keys, followed by permanent index storage and a small write amplification on
+  every subsequent insert/update of the indexed field. ("Awaited" describes the
+  driver, not the server — see the build-feature note below for what the server
+  does during it.) Later boots are free —
+  `createIndex` is idempotent for an index that already exists, and this driver
+  already relies on that.
+  
+  ⚠️ **The builds are SERIALIZED, so the times ADD.** `syncCollectionSchema` awaits
+  `createIndex` once per index in a sequential loop, and `syncSchemasBatch` awaits
+  `syncSchema` once per object the same way. Startup is extended by the SUM of
+  every build, not by the slowest one. This is the figure to plan the maintenance
+  window around.
+  
+  **How much.** Measured on this tree: **65 lookup fields carrying `reference`
+  across the 52 exported platform objects** — every one gains an index, and this is
+  the floor, not the total. Add the objects of any enabled plugin (`plugin-security`
+  14 lookup fields, `plugin-approvals` 13, `plugin-audit` 6, `plugin-sharing` 4) and
+  one index per lookup field on your own authored objects.
+  
+  Per index, as an order-of-magnitude planning figure and **not** a benchmark — get
+  your own numbers before sizing a window, because they depend entirely on document
+  count, storage and cache:
+  
+  | collection size | build time, one index | index storage added |
+  |---|---|---|
+  | empty / a few thousand docs | effectively instant (metadata-only) | negligible |
+  | ~1M docs | seconds | tens of MB |
+  | ~10M docs | ~a minute | hundreds of MB |
+  | ~100M docs | tens of minutes | a few GB |
+  
+  Most `sys_*` collections are small and will finish instantly. Budget for the ones
+  that accumulate: `sys_metadata_history`, `sys_metadata_audit`, `sys_notification`,
+  `sys_email`, `sys_session`, and any audit-log object. Count them first
+  (`db.<collection>.estimatedDocumentCount()`) and multiply by the lookup fields
+  each carries; watch a live boot with `db.currentOp()`.
+  
+  **Build feature — hybrid builds, unconditionally.** `@objectstack/driver-mongodb`
+  depends on `mongodb@^7.5.0`, whose own compatibility statement is "the driver
+  currently supports 4.2+ servers". MongoDB 4.2 is exactly the release that made
+  index builds hybrid, so **every server version this driver can connect to builds
+  these indexes with the hybrid builder**: an exclusive lock is taken only briefly
+  at the start and end of each build, and the collection accepts reads AND writes
+  throughout the rest of it. This is not a full write stall. Two caveats that
+  remain: the brief exclusive lock at each end is real, and on a replica set the
+  build runs on every member.
+  
+  **To take the cost outside the boot window,** create the indexes ahead of the
+  upgrade, with the names and specs the driver uses — `{ name: 'idx_FIELD_lookup' }`
+  over `{ FIELD: 1 }`, no `unique` and no `sparse`. The driver's `createIndex` is
+  then a no-op and startup is unaffected. Matching the options matters: a
+  pre-existing index of the same name with different options raises
+  `IndexOptionsConflict`, which this driver deliberately swallows and skips, leaving
+  your index in place unchanged.
+- 602d4a0: fix(driver-mongodb): refuse the rejected alias `reference_to` at the schema door instead of honouring it (#13222)
+  
+  `syncCollectionSchema` gated its field-level join index on `field.reference_to`.
+  `reference` is the only relationship spelling `@objectstack/spec` declares —
+  `reference_to` is a **rejected alias**, answered by `FieldSchema` with
+  `unrecognized_keys` and *"Did you mean `reference_to` → `reference`?"* — so one
+  key had two doors with opposite answers, and the silent one was the one that
+  touched the database.
+  
+  A field still carrying `reference_to` when it reaches schema sync now throws
+  `VALIDATION_ERROR`/400 naming it as a rejected alias of `reference`, in the same
+  words `FieldSchema` uses. The refusal is stated ahead of `createCollection` and
+  ahead of every per-field branch, because the spec's verdict is gated on neither
+  the field's type nor the key's value: `{ type: 'text', reference_to: 'x' }` is
+  refused exactly as the `lookup` fixture is, and `'company'`, `null` and `''`
+  alike. One key, one answer, on both doors — this is the same door
+  `@objectstack/driver-sql` grew in #11567.
+  
+  **⚠️ Upgrade note — this IS a behaviour change for a real, non-zero population,
+  which is why it is graded `minor` and not `patch`.** #11567 could grade the SQL
+  half `patch` on "no authored deployment could reach the branch". That reasoning
+  does **not** transfer here: this package's own published `README.md` taught
+  `reference_to`, in a sample calling `driver.syncSchema(...)` **directly** —
+  
+  ```typescript
+  company_id: { type: 'lookup', reference_to: 'company' }   // what the README taught
+  ```
+  
+  — and `syncSchema(object, schema: unknown)` casts and forwards that metadata
+  **verbatim**, with no Zod, no normalisation and no key filtering. `README.md` is
+  in the package's `files` array, so it shipped to npm at
+  `@objectstack/driver-mongodb` **17.2.0 and every earlier version**. A deployment
+  that copied that sample boots today and, after this release, is refused at the
+  schema-sync door. The affected population is therefore non-zero **by
+  construction**, not by speculation — and it is not measurable from inside this
+  repo. There is deliberately **no deprecation window**: a warn-and-continue
+  release would be a third answer to a key the schema has always refused.
+  
+  Fix, if you have such metadata — the same rename the schema has always asked for:
+  
+  | Wrote | Write instead |
+  |---|---|
+  | `{ type: 'lookup', reference_to: 'company' }` | `{ type: 'lookup', reference: 'company' }` |
+  
+  The README no longer teaches the key; its remaining mention is prose recording
+  that the spelling is refused.
+  
+  **What this does NOT change.** No index is added, removed or renamed. A `user`
+  field still gets `idx_FIELD_lookup`; a canonically-spelled `reference` lookup
+  still gets none. Renaming the key therefore does not, by itself, produce a join
+  index — whether it should is a separate open question, because starting to build
+  that index changes boot behaviour for deployments already holding large
+  collections. It is tracked apart from this release on purpose.
+
+### Patch Changes
+
+- f6fa22c: `min`/`max` over a **boolean** aggregand now answer the numbers `0`/`1` on every face — maintainer ruling 2026-08-28 (#11152, option A), superseding #11249's `false`/`true`: booleans aggregate as numbers, with no per-aggregate exception, so one flag column's `sum`/`avg`/`min`/`max` all answer in one numeric domain.
+  
+  FROM → TO, per face: `driver-sql` (every dialect, `driver-sqlite-wasm` included via the shared compiler) no longer re-presents `min`/`max` results over a declared boolean as JSON booleans — `false`/`true` → `0`/`1`; row reads (`find()`) still present booleans, and `min`/`max` over an empty window still answer `null`. `driver-memory` (data and analytics faces) and objectql's in-memory fallback compare booleans as the numbers they are worth — `false`/`true` → `0`/`1`; strings, dates and numbers reach the same comparison they always did. `driver-mongodb` wraps `$min`/`$max` in the same boolean-only `$cond` coercion `$sum`/`$avg` use — `false`/`true` → `0`/`1`; null/missing still pass through, so the empty window still answers `null`. A caller reading `min`/`max` over a boolean column as a JSON boolean should read the number (`0` is false-y, `1` truthy, so boolean coercion at the call site keeps working).
+  
+  The cross-driver aggregation conformance fixture (`AGGREGATION_ROWS`, `@objectstack/spec/data`) now carries the boolean column those rulings are pinned by: `flag` (3 true / 3 false), with cases for `sum`=3, `avg`=0.5, `min`=0, `max`=1, `count`=6, `count_distinct`=2 and a grouped `min` over the deliberately asymmetric groups — the reach gap #11065 and #11151 were both found through (a boolean aggregand no conformance cell could see) is closed.
+- e062370: `driver-mongodb` refuses an aggregate function it does not lower, instead of
+  answering it as a silent SUM (#12818).
+  
+  `buildAccumulator`'s `switch` on `agg.function` ended with
+  `default: return { $sum: fieldRef ?? 0 }`, so ANY name this driver does not
+  lower — a typo (`median`), a miscased spelling (`COUNT_DISTINCT`), a function
+  added to the contract but not to this file, or an unnarrowed `method` arriving
+  from `StrategyContext.executeAggregate` (#12776) — was answered as a **sum of
+  that column**, under the alias the caller asked for, with no error, no envelope
+  and no log. It is the worst available answer precisely because it is
+  arithmetically plausible: a dashboard tile renders the number without complaint,
+  so nothing downstream can tell "your function ran" from "your function was
+  silently replaced". The field-less spelling was quieter still — `{ $sum: 0 }`,
+  i.e. `0`, which reads as "no matching rows".
+  
+  The refusal is the two-class ADR-0112 envelope both SQL faces already answer
+  with (#5907), first sentence for first sentence, so one condition cannot have
+  two wire identities depending on which backend served it:
+  
+  - a name the Query Protocol does not declare answers `INVALID_QUERY` / **400**
+    and names the declared vocabulary (`@objectstack/spec AggregationFunction`);
+  - a DECLARED name this backend does not lower answers `NOT_IMPLEMENTED` / **501**
+    and names what it does lower. That class is empty today — every member of
+    `AggregationFunction` lowers here — and is pinned as a positive assertion, so
+    the day the spec grows a function this driver misses, the suite goes red
+    rather than quietly stopping to cover anything.
+  
+  Judged case-sensitively, which is what the enum is: `COUNT_DISTINCT` is not
+  `count_distinct`, and telling its author the backend has a capability gap would
+  be false.
+  
+  **Graded `patch`, deliberately.** No correct query's answer moves: all six
+  declared functions and the two retired ones this face still lowers
+  (`array_agg` / `string_agg`, an existing divergence from the SQL faces, recorded
+  and filed as #13075 rather than closed here) are byte-identically unchanged,
+  pinned by controls that compute their values in the same suite. The only inputs
+  whose behaviour changes are ones this driver was already answering *wrongly*, so
+  there is no working capability being removed — the same shape, in this same
+  package, that #10576's per-aggregation-`filter` refusal shipped as a patch.
+  
+  Nothing to migrate. A caller that was reaching the old `default` arm was reading
+  a SUM in place of the function it asked for; the refusal now names the function
+  and the remedy.
+- df18120: Stop a field operator whose lowering reuses another operator's key from silently clobbering it.
+  
+  Both document-shaped drivers translated a field constraint by writing every lowered key into one object literal. Several authorable operators do not lower to a key of their own name — `$null` writes `$eq`/`$ne`, `$between` writes `$gte` plus `$lte`/`$lt`, `$lte` on a bare calendar day writes `$lt`, and MongoDB's `$contains`/`$startsWith`/`$endsWith`/`$icontains` all write `$regex` — so two constraints on one field landed on one key and the second assignment won. One constraint disappeared with no error and no trace in the emitted query, and which one disappeared was decided by the author's key order. On a row-level-security read scope, a dropped constraint is a widened one.
+  
+  A lowered write whose key is free now merges inline as before; a write whose key is already taken becomes its own `$and` branch, where both constraints survive. Which write keeps the inline slot is decided by the spec's declared operator order rather than by the author's key order, so one predicate emits the same query however it is spelled. `driver-memory`'s analytics (cube) face carried a wider form of the same defect — its `$match` was keyed by field path, so a second predicate on a member replaced the first entirely, for every operator pair — and is promoted the same way.
+  
+  Filters with no contested key are unchanged.
+- c4ecf0c: fix(driver-mongodb): a boolean aggregand answers the ruled values (#11151)
+  
+  `sum` and `avg` over a **boolean** column answered `0` and `null` on this
+  driver, where every SQL dialect (#11635), `driver-memory` (#11065) and
+  objectql's in-memory fallback already answered `3` and `0.5` over the same
+  3-true/3-false rows. The lowering passed the boolean straight to MongoDB's
+  `$sum` / `$avg`, which are arithmetic accumulators and ignore every non-numeric
+  value: with nothing numeric to fold, `$sum` returns its identity `0` and `$avg`
+  returns `null`. Both arms now wrap the aggregand in the boolean-only `$cond`
+  coercion #11065 landed, so a rate measure over a flag column reads the same on
+  this driver as on the others.
+  
+  **⛔ `min` / `max` are deliberately NOT coerced.** They are order statistics
+  over BSON canonical comparison order, which ranks booleans and returns a member
+  of the input domain — #11249 ruled they answer `false` / `true`, and coercing
+  them would have answered `0` / `1`, breaking that contract in the opposite
+  direction from the defect being fixed. Their lowering is unchanged; a pin reads
+  the emitted stages to keep it that way.
+  
+  **The coercion stays boolean-only.** `null`, a missing key and a non-numeric
+  string reach the accumulators exactly as before and stay excluded. Widening to
+  the other half of objectql's `toNumber` — which maps a non-numeric string to
+  `0` — would average garbage as zero rather than excluding it, a separate
+  question this change does not open; a control pins the exclusion.
+  
+  **Why `patch` and not `minor`.** This changes what an existing operation
+  returns, which ordinarily argues for `minor`. It is graded `patch` because the
+  returned values were **already ruled** before this change (#11065 for the
+  arithmetic pair, #11249 for the order statistics) and are stated as shared
+  values in `@objectstack/spec/data`; every other face already produced them, and
+  the sibling repair on `driver-memory` shipped as a patch. There is no new API,
+  no option, and no opt-out to describe — nothing here is a feature, and the only
+  behaviour a consumer could have depended on is a value this project has ruled
+  wrong and that no other driver produces. Calling it `minor` would advertise a
+  capability that does not exist and imply the old answer had standing.
+  
+  Not user-visible, and shipped in the same change because the two are one cell:
+  `mongodb-pipeline-evaluator.testkit.ts` — the server-free instrument that holds
+  this lowering to the shared table — applied its "arithmetic accumulators ignore
+  non-numeric values" filter to `$min` / `$max` as well, one arm too far, and so
+  answered `null` for them over a boolean column while the lowering under test was
+  correct. Those arms now ignore only null and missing, compare by BSON canonical
+  order, and refuse a type the evaluator does not rank instead of silently
+  answering `null`.
+- 2cf35d4: docs(driver-mongodb): stop teaching the spec-refused `reference_to` in the published README, and stop promising a lookup index the driver does not build (#12252 / #13223)
+  
+  The schema-sync example in this package's README — which ships to npm — declared
+  its lookup as `company_id: { type: 'lookup', reference_to: 'company' }` and
+  closed with `// Creates: … idx_company_id_lookup`. Both halves were wrong, in
+  opposite directions:
+  
+  - `reference` is the only relationship spelling `@objectstack/spec` declares.
+    `reference_to` is a **rejected alias**, answered by `FieldSchema` with
+    `unrecognized_keys` and *"Did you mean `reference_to` → `reference`?"* — so
+    the sample instructed authors to write a key the platform refuses, in the one
+    place a reader is most likely to copy verbatim.
+  - The `// Creates:` line promised an index that a *correctly* spelled lookup
+    does not get. `syncCollectionSchema`'s lookup arm gates on
+    `field.reference_to`, so it cannot fire for a spec-conformant lookup. Fixing
+    only the spelling would have left the sample promising an outcome the driver
+    had just stopped producing.
+  
+  The sample now uses `reference`, lists only the three indexes an authored object
+  actually gets, and the surrounding prose no longer claims lookup fields index
+  themselves — it names the defect and points at #13222, which owns the fix.
+  
+  **No runtime behaviour changes here.** Whether the lookup arm learns to read
+  `reference` — which would index 57 relationship fields across the 44 exported
+  platform objects that get no join index today — is #13222's decision, not this
+  change's.
+- 795d14e: fix(driver-mongodb): refuse the retired `array_agg` / `string_agg` instead of lowering them (#13075)
+  
+  `buildAccumulator` still carried `case 'array_agg'` and `case 'string_agg'`
+  arms — both lowering to `$push` — plus a matching `string_agg` join in
+  `postProcessAggregation`. Both names left `AggregationFunction` at **#6188**
+  under ADR-0049 enforce-or-remove, and both SQL faces have refused them as
+  class-1 undeclared names ever since (`driver-sql`'s `refuseAggregateFunction`,
+  `driver-turso`'s `RemoteTransport`, each `INVALID_QUERY` / **400**).
+  `driver-mongodb` was the only face still answering them, so **one query got a
+  400 on two backends and a `$push` array on the third** — the local/remote fork
+  #5907 exists to prevent, one vocabulary later.
+  
+  Why this face kept them when `objectql`'s in-memory fallback deleted its arms
+  for the same two names at #6188: that fallback switches on the **enum type**, so
+  `case 'array_agg'` there stopped type-checking the moment the value left the
+  enum. `AggregationInput.function` here is a bare `string` — the driver's own
+  `aggregate` reads aggregations through an `any` cast — so these arms compiled
+  fine and survived the retirement unnoticed.
+  
+  Both names now answer `INVALID_QUERY` / **400**, answer-for-answer parity with
+  both SQL faces. They are named explicitly rather than left to fall through.
+  When this change was written, falling through was not safe at all:
+  `buildAccumulator`'s `default` arm answered `{ $sum: … }`, so deleting the arms
+  alone would have turned a visibly-wrong ARRAY into an arithmetically PLAUSIBLE
+  NUMBER — strictly the worse failure, and exactly the defect #13076 has since
+  fixed in that arm (#12818). Naming them was correct whichever order the two
+  landed in, and now that #13076 is on `main` the named arm still draws the
+  distinction `AggregationFunction`'s own error map draws: a caller who bypassed
+  the parse door is told the name was **removed** at #6188, which is a different
+  fact from `default`'s "is not a declared aggregate function". Both producers are
+  kept for that reason.
+  
+  The retirement prescription itself is not restated here — it lives once, on the
+  enum's error map in `@objectstack/spec`, and a copy in the driver would be a
+  second wording of one vocabulary with nothing keeping the two in step.
+  
+  **Graded `patch`, deliberately.** No correct query's answer moves: all six
+  declared functions are byte-identically unchanged, pinned by a positive control
+  in the same suite that walks `AggregationFunction.options`. `AggregationNodeSchema`
+  already rejects both spellings at the parse door, so the only callers whose
+  behaviour changes are ones reaching the exported builder or the driver's
+  `aggregate` directly — and they were reading a value the protocol has no name
+  for. Nothing to migrate: read the rows with an ordinary `fields` query and shape
+  them in the caller, or model the roll-up as a stored field.
+- Updated dependencies [809d417]
+- Updated dependencies [387e231]
+- Updated dependencies [f794e4e]
+- Updated dependencies [cae2169]
+- Updated dependencies [b812a54]
+- Updated dependencies [2d4fa75]
+- Updated dependencies [0e4e51b]
+- Updated dependencies [e84bbf6]
+- Updated dependencies [effae80]
+- Updated dependencies [efb3513]
+- Updated dependencies [d62f990]
+- Updated dependencies [c45d8e6]
+- Updated dependencies [2e3e8c7]
+- Updated dependencies [e621291]
+- Updated dependencies [655b106]
+- Updated dependencies [40a93b5]
+- Updated dependencies [101ad2c]
+- Updated dependencies [d5b330d]
+- Updated dependencies [dda969c]
+- Updated dependencies [1f45690]
+- Updated dependencies [277948f]
+- Updated dependencies [8bdd955]
+- Updated dependencies [f3bbbef]
+- Updated dependencies [4f24e9d]
+- Updated dependencies [e27583e]
+- Updated dependencies [4bd6faa]
+- Updated dependencies [86cbe37]
+- Updated dependencies [6a180e4]
+- Updated dependencies [474242f]
+- Updated dependencies [63cd487]
+- Updated dependencies [bd4aa4e]
+- Updated dependencies [803eaab]
+- Updated dependencies [f8e8f03]
+- Updated dependencies [983edf1]
+- Updated dependencies [eae824e]
+- Updated dependencies [f6fa22c]
+- Updated dependencies [8a483b3]
+- Updated dependencies [97bcd99]
+- Updated dependencies [df59de0]
+- Updated dependencies [96e25a8]
+- Updated dependencies [f75a38a]
+- Updated dependencies [7a25e7d]
+- Updated dependencies [1fa05a6]
+- Updated dependencies [c85a265]
+- Updated dependencies [dcb10a5]
+- Updated dependencies [773a999]
+- Updated dependencies [35dffea]
+- Updated dependencies [d8024f0]
+- Updated dependencies [8120808]
+- Updated dependencies [776a098]
+- Updated dependencies [5060877]
+- Updated dependencies [4f6325d]
+- Updated dependencies [52954c0]
+- Updated dependencies [2aa8456]
+- Updated dependencies [93809a3]
+- Updated dependencies [7c0d0c3]
+- Updated dependencies [daae7aa]
+- Updated dependencies [8dc22d6]
+- Updated dependencies [279431e]
+- Updated dependencies [948dd6b]
+- Updated dependencies [3b4c56c]
+- Updated dependencies [ae8edd2]
+- Updated dependencies [e25403c]
+- Updated dependencies [a81aa9d]
+- Updated dependencies [64baa68]
+- Updated dependencies [9fa70d7]
+- Updated dependencies [09db64a]
+- Updated dependencies [92916e7]
+- Updated dependencies [a84f3ea]
+- Updated dependencies [f2eaae8]
+- Updated dependencies [56c093c]
+- Updated dependencies [c09451b]
+- Updated dependencies [ba64877]
+- Updated dependencies [7345308]
+- Updated dependencies [79b6a22]
+- Updated dependencies [30d96ab]
+- Updated dependencies [f658793]
+- Updated dependencies [c95ad19]
+- Updated dependencies [e58ea8b]
+- Updated dependencies [4a17645]
+- Updated dependencies [3795c5f]
+- Updated dependencies [8ab926b]
+- Updated dependencies [7317cf2]
+- Updated dependencies [e25e839]
+- Updated dependencies [5997207]
+- Updated dependencies [8b13cc8]
+- Updated dependencies [4a4a35d]
+- Updated dependencies [86e765a]
+- Updated dependencies [1d7e76a]
+- Updated dependencies [53dc739]
+- Updated dependencies [fd289be]
+- Updated dependencies [03bf7b1]
+- Updated dependencies [f90e820]
+- Updated dependencies [18d816a]
+- Updated dependencies [e8bd715]
+- Updated dependencies [b91c351]
+- Updated dependencies [a28a3c0]
+- Updated dependencies [daeaaf9]
+- Updated dependencies [c459da6]
+- Updated dependencies [e914733]
+- Updated dependencies [f887e52]
+- Updated dependencies [881f8d8]
+- Updated dependencies [3bfa1e6]
+- Updated dependencies [0a8ebf3]
+- Updated dependencies [901355c]
+- Updated dependencies [34ce8e7]
+- Updated dependencies [33681ea]
+- Updated dependencies [bfe13c8]
+- Updated dependencies [0fb3044]
+- Updated dependencies [4635f3e]
+- Updated dependencies [fd289be]
+- Updated dependencies [ee3595c]
+- Updated dependencies [b2eab95]
+- Updated dependencies [93940d4]
+- Updated dependencies [3a04b01]
+- Updated dependencies [45b9051]
+- Updated dependencies [b9e9227]
+- Updated dependencies [d395692]
+- Updated dependencies [5894d30]
+- Updated dependencies [a3765f6]
+- Updated dependencies [2d5cee3]
+- Updated dependencies [e22158f]
+- Updated dependencies [7404925]
+- Updated dependencies [0c2334f]
+- Updated dependencies [778c59f]
+- Updated dependencies [d2619fd]
+- Updated dependencies [af56546]
+- Updated dependencies [6acb11a]
+- Updated dependencies [33c5fd3]
+- Updated dependencies [20b0fdb]
+- Updated dependencies [905019b]
+- Updated dependencies [a286411]
+- Updated dependencies [98c0d33]
+- Updated dependencies [368a82e]
+- Updated dependencies [a3d5724]
+- Updated dependencies [93ea19b]
+- Updated dependencies [9ee2dcf]
+- Updated dependencies [8cb96ec]
+- Updated dependencies [8f10a79]
+- Updated dependencies [6269a55]
+- Updated dependencies [a17da05]
+- Updated dependencies [a8c00e2]
+- Updated dependencies [22e5236]
+- Updated dependencies [0fb8760]
+- Updated dependencies [e5ce2ed]
+- Updated dependencies [be21955]
+- Updated dependencies [bc56e18]
+- Updated dependencies [be21955]
+- Updated dependencies [a9ee989]
+- Updated dependencies [4d0d944]
+- Updated dependencies [15d58db]
+- Updated dependencies [d63b014]
+- Updated dependencies [9abe4e4]
+- Updated dependencies [2cc7122]
+- Updated dependencies [50d6c92]
+- Updated dependencies [9e0ba21]
+- Updated dependencies [311433f]
+- Updated dependencies [3e5ad08]
+- Updated dependencies [9abe4e4]
+- Updated dependencies [b7131f3]
+- Updated dependencies [e5812fa]
+- Updated dependencies [7085f90]
+- Updated dependencies [dee4dd4]
+- Updated dependencies [ce7e497]
+- Updated dependencies [51ecb2f]
+- Updated dependencies [9086761]
+- Updated dependencies [42a117b]
+- Updated dependencies [1401ae7]
+- Updated dependencies [4297fe7]
+- Updated dependencies [e398863]
+- Updated dependencies [d16df74]
+- Updated dependencies [f11fc61]
+- Updated dependencies [e808890]
+- Updated dependencies [8f79379]
+- Updated dependencies [e6ca40e]
+- Updated dependencies [0c77ea4]
+- Updated dependencies [52954c0]
+- Updated dependencies [89eb997]
+- Updated dependencies [7131f12]
+- Updated dependencies [aa5994e]
+- Updated dependencies [be93457]
+- Updated dependencies [a65db76]
+- Updated dependencies [2cf5a96]
+- Updated dependencies [15eb2c9]
+- Updated dependencies [5691b07]
+- Updated dependencies [2a6122b]
+- Updated dependencies [225e769]
+- Updated dependencies [8af88dd]
+- Updated dependencies [fb5fbb8]
+- Updated dependencies [d7b3963]
+- Updated dependencies [33184fd]
+- Updated dependencies [7c41693]
+- Updated dependencies [b72db01]
+- Updated dependencies [dce5cd4]
+- Updated dependencies [9688f58]
+- Updated dependencies [556ebc1]
+- Updated dependencies [177ebdc]
+- Updated dependencies [8d237b4]
+- Updated dependencies [2d2e6f0]
+- Updated dependencies [2d8dd8d]
+- Updated dependencies [22d573e]
+- Updated dependencies [b5a2398]
+- Updated dependencies [348860c]
+- Updated dependencies [5383fa6]
+- Updated dependencies [5b3ff63]
+- Updated dependencies [1a6a19c]
+- Updated dependencies [527e050]
+- Updated dependencies [dd33bf9]
+- Updated dependencies [4cb2a90]
+- Updated dependencies [74a7804]
+- Updated dependencies [53d3689]
+- Updated dependencies [b3a63d3]
+- Updated dependencies [49f0dcf]
+- Updated dependencies [033a34c]
+- Updated dependencies [4d25d22]
+- Updated dependencies [1ffee51]
+- Updated dependencies [5ae4303]
+- Updated dependencies [ece4dad]
+- Updated dependencies [e9b377e]
+- Updated dependencies [146f448]
+- Updated dependencies [735f5c7]
+- Updated dependencies [a7e18de]
+- Updated dependencies [366f895]
+- Updated dependencies [dc75ba8]
+- Updated dependencies [cce0aa9]
+- Updated dependencies [e764507]
+- Updated dependencies [cff17af]
+- Updated dependencies [39404f3]
+- Updated dependencies [ca1965f]
+- Updated dependencies [8619f95]
+- Updated dependencies [b706af9]
+- Updated dependencies [db8c288]
+- Updated dependencies [0e5fe7f]
+- Updated dependencies [add4360]
+- Updated dependencies [fc9ba76]
+- Updated dependencies [0f94cc7]
+- Updated dependencies [a11c1a5]
+- Updated dependencies [71f9cd1]
+- Updated dependencies [ee17d86]
+- Updated dependencies [cdbd920]
+- Updated dependencies [18c432e]
+- Updated dependencies [3c418c4]
+- Updated dependencies [fa8715a]
+- Updated dependencies [a933ed7]
+- Updated dependencies [b3ca463]
+- Updated dependencies [a933ed7]
+- Updated dependencies [0d4a6a8]
+- Updated dependencies [518d5e5]
+- Updated dependencies [6643ba1]
+- Updated dependencies [eeba2ef]
+- Updated dependencies [ec4c4d2]
+- Updated dependencies [424f73c]
+- Updated dependencies [cccbe51]
+- Updated dependencies [a8d6b1d]
+- Updated dependencies [e4a7695]
+- Updated dependencies [87075b1]
+- Updated dependencies [fc58a99]
+- Updated dependencies [14cfc00]
+- Updated dependencies [1c6f7b4]
+- Updated dependencies [e854a53]
+- Updated dependencies [dfebfc8]
+- Updated dependencies [d028b37]
+- Updated dependencies [f7b25c5]
+- Updated dependencies [122ef38]
+- Updated dependencies [4a37870]
+- Updated dependencies [428f9b2]
+- Updated dependencies [aa7ff56]
+- Updated dependencies [c41b42e]
+- Updated dependencies [c4db311]
+- Updated dependencies [750fff5]
+- Updated dependencies [c19035e]
+- Updated dependencies [ececf7a]
+- Updated dependencies [d173125]
+- Updated dependencies [8eeca27]
+- Updated dependencies [8425c17]
+- Updated dependencies [a5ef1d8]
+- Updated dependencies [87ad30c]
+- Updated dependencies [772d5de]
+- Updated dependencies [ce80ec2]
+- Updated dependencies [b372318]
+- Updated dependencies [97a2263]
+- Updated dependencies [29d0676]
+- Updated dependencies [0169d49]
+- Updated dependencies [6bd3231]
+- Updated dependencies [d2b5ba8]
+- Updated dependencies [b799ac5]
+- Updated dependencies [8f74307]
+- Updated dependencies [d23dc08]
+- Updated dependencies [644ad50]
+- Updated dependencies [9735662]
+- Updated dependencies [4d5b4f8]
+- Updated dependencies [0da7cd2]
+- Updated dependencies [28a5c3e]
+- Updated dependencies [4bc18e5]
+  - @objectstack/spec@17.3.0
+  - @objectstack/core@17.3.0
+  - @objectstack/types@17.3.0
+
 ## 17.2.0
 
 ### Patch Changes
