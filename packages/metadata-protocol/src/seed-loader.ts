@@ -15,7 +15,7 @@ import type {
 } from '@objectstack/spec/data';
 import { SeedLoaderConfigSchema, isMultiValueField } from '@objectstack/spec/data';
 import { resolveSeedRecord } from '@objectstack/formula';
-import { bulkWrite, withTransientRetry, defaultIsTransientError, type BulkWriteRowResult } from '@objectstack/core';
+import { bulkWrite, withTransientRetry, defaultIsTransientError, type BulkWriteRowResult, runWithAdvisoryAggregation, type AdvisoryGroup } from '@objectstack/core';
 // [#8442] The repo's ONE recogniser for "this throw is a record-validation
 // failure" — duck-typed on `code`/`name`, the same predicate `mapDataError` and
 // both dispatcher error exits use. Imported rather than re-spelled so the seed
@@ -395,7 +395,68 @@ export class SeedLoaderService implements ISeedLoaderService {
   // Public API
   // ==========================================================================
 
+  /**
+   * Load every dataset in the request.
+   *
+   * [#13889] The whole load runs inside an ADVISORY AGGREGATION SCOPE. A
+   * `severity: 'warning'` validation rule is a hint written for a human in a
+   * form; evaluated across a seed load it produces one `WARN` line per row, and
+   * a clean-database first boot then opens with a wall of them that reads like a
+   * failed boot. Inside the scope those hits are folded by rule and reported by
+   * {@link reportAdvisorySummary} as ONE line each — maintainer ruling
+   * 2026-09-01, 「⛔ 不改规则语义,只改日志形状」.
+   *
+   * The scope is opened HERE rather than at the callers because this method is
+   * the one funnel every seeding path goes through — boot inline seed, per-org
+   * replay, hot reload, package apply, draft publish, marketplace install — the
+   * same reason `resolveEnvConfig` is resolved here rather than at the six call
+   * sites that build a request (#4704). A caller that writes seed rows through
+   * the engine directly, bypassing this loader (app-plugin's metadata-service
+   * fallback), keeps the per-row lines: no scope is open, so nothing changes for
+   * it.
+   */
   async load(request: SeedLoaderRequestParsed): Promise<SeedLoaderResultParsed> {
+    return runWithAdvisoryAggregation(
+      () => this.loadDatasets(request),
+      (groups) => this.reportAdvisorySummary(groups),
+    );
+  }
+
+  /**
+   * One summary line per advisory rule tripped during a load.
+   *
+   * Shape, from the ruling: 「N 行触发 advisory 规则 X,详见…」 — the count is
+   * of ROWS, the rule is named, and the 「详见…」 half is the structured meta:
+   * the rule's own message plus example row ids, which is what turns a summary
+   * back into something actionable.
+   *
+   * Emitted at `warn`, the level the per-row lines used: the defect is N lines
+   * where one belongs, NOT that the report exists. Dropping it to `info` would
+   * hide it under the default log level entirely — deleting the report rather
+   * than aggregating it, which is option C the ruling excluded.
+   */
+  private reportAdvisorySummary(groups: AdvisoryGroup[]): void {
+    for (const group of groups) {
+      const examples = group.sampleRecordIds.length > 0
+        ? ` Example row(s): ${group.sampleRecordIds.join(', ')}${group.rows > group.sampleRecordIds.length ? ', …' : ''}.`
+        : '';
+      this.logger.warn(
+        `[SeedLoader] ${group.rows} row(s) triggered advisory rule '${group.rule}' (${group.severity}) on '${group.object}': ` +
+          `${group.message} — advisory rules are authoring guidance for interactive writes; they never block a seed load ` +
+          `and nothing here failed.${examples}`,
+        {
+          object: group.object,
+          rule: group.rule,
+          severity: group.severity,
+          rows: group.rows,
+          message: group.message,
+          sampleRecordIds: group.sampleRecordIds,
+        },
+      );
+    }
+  }
+
+  private async loadDatasets(request: SeedLoaderRequestParsed): Promise<SeedLoaderResultParsed> {
     const startTime = Date.now();
     // Pin the environment `Seed.env` is gated on BEFORE anything reads config.
     // Resolving it here — the one funnel every seeding path goes through — is
