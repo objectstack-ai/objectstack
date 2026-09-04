@@ -14,11 +14,17 @@
  *      it;
  *   2. an option-B artifact yields the package bodies' collections, in
  *      `resolveArtifactPackageOrder`'s order;
- *   3. a PARTIALLY flattened artifact resolves per item, which is the state a
- *      "top level, else `packages[]`" fallback answers wrongly;
- *   4. a key NO source declares stays ABSENT rather than becoming `[]` —
+ *   3. a key NO source declares stays ABSENT rather than becoming `[]` —
  *      `createStandaloneStack` omits `objects` on that basis and consumers gate
- *      on the key's presence.
+ *      on the key's presence;
+ *   4. two sources spelling one collection differently are REFUSED with an
+ *      ADR-0112 envelope rather than one of them being skipped.
+ *
+ * ⛔ There is deliberately NO test for a partially flattened artifact. #14512
+ * ruled "⛔ Not D (a partly flattened artifact is a new permanent shape)", so
+ * the emitter flips whole-artifact and that state does not occur; the module
+ * header records what it would actually do on one, which is not something to
+ * pin as a guarantee.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -177,18 +183,6 @@ describe('resolveArtifactCollections', () => {
         ]);
     });
 
-    it('resolves a PARTIALLY flattened artifact per item, not per artifact', () => {
-        // The transition state: one package's collections are flattened, the
-        // other's are not. "Use the top level when present, else `packages[]`"
-        // answers this one wrongly and silently.
-        const partial = {
-            objects: [obj('account')],
-            packages: packagesOf({ objects: [obj('account')] }, { objects: [obj('order')] }),
-        };
-        const resolved = resolveArtifactCollections(partial) as Record<string, any>;
-        expect(resolved.objects.map((o: any) => o.name)).toEqual(['account', 'order']);
-    });
-
     it('merges the RECORD spelling of a collection, top level winning', () => {
         // `functions` is a map, and `datasources` is legitimately either shape.
         const artifact = {
@@ -206,6 +200,81 @@ describe('resolveArtifactCollections', () => {
         expect('objects' in resolved).toBe(true);
         expect('permissions' in resolved).toBe(false);
         expect('jobs' in resolved).toBe(false);
+    });
+
+    it('REFUSES a collection spelled both ways, in BOTH orders — never skips one', () => {
+        // `functions` is `z.union([z.record(…), z.array(…)])` in
+        // `packages/spec/src/stack.zod.ts`, so BOTH spellings pass
+        // `AssembledPackageBodySchema` and two packages in one artifact can each
+        // be valid and disagree. Skipping the losing spelling drops a whole
+        // package's collection with nothing thrown — on `functions` that is a
+        // handler declared `effect: 'writes'` coming back bare and defaulting to
+        // `'pure'`, the sharpest loss the whole reader program exists to close.
+        //
+        // Both directions are driven because the defect was order-dependent:
+        // whichever spelling came first decided the shape and the other was
+        // dropped, so a single-direction test passes over half the defect.
+        const recordForm = { syncBilling: { handler: 'syncBilling', effect: 'writes' } };
+        const arrayForm = [{ name: 'sendMail', handler: 'sendMail', effect: 'writes' }];
+
+        // `core` sorts FIRST (`orders` depends on it), so this is record-then-array.
+        let raised: any;
+        try {
+            resolveArtifactCollections({
+                packages: packagesOf({ functions: recordForm }, { functions: arrayForm }),
+            });
+        } catch (err) {
+            raised = err;
+        }
+        expect(raised?.code).toBe('MIXED_ARTIFACT_COLLECTION_SHAPE');
+        expect(raised?.status).toBe(422);
+        expect(raised?.message).toContain('`functions`');
+
+        // …and array-then-record, which the pre-refusal code lost in the other
+        // direction (it dropped `syncBilling` instead of `sendMail`).
+        let reversed: any;
+        try {
+            resolveArtifactCollections({
+                packages: packagesOf({ functions: arrayForm }, { functions: recordForm }),
+            });
+        } catch (err) {
+            reversed = err;
+        }
+        expect(reversed?.code).toBe('MIXED_ARTIFACT_COLLECTION_SHAPE');
+        expect(reversed?.status).toBe(422);
+    });
+
+    it('refuses a mix against the flattened TOP LEVEL too, and names both sources', () => {
+        let raised: any;
+        try {
+            resolveArtifactCollections({
+                functions: { syncBilling: { handler: 'syncBilling', effect: 'writes' } },
+                packages: packagesOf({ functions: [{ name: 'sendMail', handler: 'sendMail' }] }),
+            });
+        } catch (err) {
+            raised = err;
+        }
+        expect(raised?.code).toBe('MIXED_ARTIFACT_COLLECTION_SHAPE');
+        expect(raised?.status).toBe(422);
+        // The message has to say WHICH two sources disagree, or the author has
+        // no way to act on it: an artifact carries N packages and the refusal
+        // names one collection key.
+        expect(raised?.message).toContain("the artifact's flattened top level");
+        expect(raised?.message).toContain('com.example.core');
+    });
+
+    it('leaves a collection spelled ONE way alone — the refusal is not a shape check on each source', () => {
+        // The anti-vacuity control for the two tests above: the same record
+        // spelling in both bodies resolves, so the refusal discriminates a MIX
+        // rather than firing on `functions` at all.
+        const resolved = resolveArtifactCollections({
+            packages: packagesOf(
+                { functions: { syncBilling: { handler: 'syncBilling', effect: 'writes' } } },
+                { functions: { sendMail: { handler: 'sendMail' } } },
+            ),
+        }) as Record<string, any>;
+        expect(Object.keys(resolved.functions).sort()).toEqual(['sendMail', 'syncBilling']);
+        expect(resolved.functions.syncBilling.effect).toBe('writes');
     });
 
     it('raises the load path\'s OWN refusal for a malformed `packages[]`', () => {

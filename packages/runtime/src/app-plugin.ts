@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { Plugin, PluginContext, resolveArtifactCollections, wireAuthoredTranslationSync } from '@objectstack/core';
+import { Plugin, PluginContext, wireAuthoredTranslationSync } from '@objectstack/core';
+import { resolveArtifactCollections } from './artifact-collections.js';
 import { applyArtifactForwardConversions, assertProtocolCompat } from '@objectstack/metadata-core';
 import { resolveTenancyPosture } from '@objectstack/types';
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
@@ -144,9 +145,9 @@ export class AppPlugin implements Plugin {
     /**
      * `this.bundle` with every package-owned collection resolved across BOTH
      * artifact shapes — the flattened top level and `packages[]` (ADR-0130 D4 /
-     * option B, #15005; the resolution itself is
-     * `resolveArtifactCollections` in `@objectstack/core`, shared with the
-     * other readers of the same key).
+     * option B, #15005; the resolution itself is `resolveArtifactCollections`
+     * in `./artifact-collections.ts`, package-private because every call site
+     * it has today ships in this package).
      *
      * ⛔ Read COLLECTIONS through this, never `this.bundle` — `this.bundle` is
      * what the caller handed us and, on a multi-package option-B artifact, its
@@ -1882,9 +1883,9 @@ export class AppPlugin implements Plugin {
 // through `resolveArtifactCollections` FIRST, so a multi-package artifact that
 // carries the collection under `packages[]` instead of flattened at the top
 // level is read rather than silently seen as empty. The resolution is shared
-// (`@objectstack/core`) rather than open-coded per collector: three walks of
-// one `packages[]` that ordered or de-duplicated differently would disagree
-// about what the artifact CONTAINS. On any bundle without `packages[]` it
+// (`./artifact-collections.ts`) rather than open-coded per collector: three
+// walks of one `packages[]` that ordered or de-duplicated differently would
+// disagree about what the artifact CONTAINS. On any bundle without `packages[]` it
 // returns the argument itself, so these three functions are unchanged for every
 // single-package artifact and every `defineStack()` config.
 

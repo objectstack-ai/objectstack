@@ -57,7 +57,7 @@ import { mkdirSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { z } from 'zod';
 import { stampSearchPinyinEnabled } from '@objectstack/types';
-import { resolveArtifactCollections } from '@objectstack/core';
+import { resolveArtifactCollections } from './artifact-collections.js';
 import {
     BUILTIN_DRIVER_IDS,
     DATABASE_DRIVER_SELECTION_ALIASES,

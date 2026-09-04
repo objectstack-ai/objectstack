@@ -30,7 +30,7 @@ import { readFile } from 'node:fs/promises';
 import { resolve as resolvePath, isAbsolute, dirname } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-import { resolveArtifactCollections } from '@objectstack/core';
+import { resolveArtifactCollections } from './artifact-collections.js';
 
 export interface LoadArtifactBundleOptions {
     /** Optional log tag for warnings (defaults to `[loadArtifactBundle]`). */

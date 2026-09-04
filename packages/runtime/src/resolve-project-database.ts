@@ -44,7 +44,7 @@
 import { resolve as resolvePath, isAbsolute } from 'node:path';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { resolveArtifactCollections } from '@objectstack/core';
+import { resolveArtifactCollections } from './artifact-collections.js';
 import { resolveDatabaseDriverId, resolveDriverId } from '@objectstack/spec/data';
 
 /** The unified default database filename (`<state dir>/data/objectstack.db`). */

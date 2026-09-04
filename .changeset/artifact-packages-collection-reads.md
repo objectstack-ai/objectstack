@@ -1,5 +1,4 @@
 ---
-"@objectstack/core": patch
 "@objectstack/runtime": patch
 ---
 
@@ -15,13 +14,24 @@ EMPTY — and nothing threw. The app booted clean having lost its
 declarative actions, its scheduled jobs, its seed data, its object routing
 or its default permission set.
 
-`resolveArtifactCollections` (`@objectstack/core`) is now the one way to
-read a top-level collection out of an artifact in either shape. It takes
-the artifact's own top-level value first and whole, then adds from each
-package body — in `resolveArtifactPackageOrder`'s dependency order — the
-items the top level did not already claim. A bundle that carries no
-`packages[]` is returned unchanged, by identity: every single-package
-artifact and every `defineStack()` config reads exactly as before.
+`resolveArtifactCollections` — new, and PACKAGE-PRIVATE to
+`@objectstack/runtime` — is now the one way this package reads a top-level
+collection out of an artifact in either shape. It takes the artifact's own
+top-level value first and whole, then adds from each package body — in
+`resolveArtifactPackageOrder`'s dependency order — the items the top level
+did not already claim. A bundle that carries no `packages[]` is returned
+unchanged, by identity: every single-package artifact and every
+`defineStack()` config reads exactly as before. Nothing is added to any
+package's published surface: `@objectstack/core` is untouched by this
+change, and the new module is not named by
+`packages/runtime/src/index.ts`.
+
+Where one collection key is spelled two ways inside one artifact —
+`functions` is `z.union([z.record(…), z.array(…)])`, so two packages can
+each be schema-valid and disagree — the read is REFUSED with an ADR-0112
+envelope (`MIXED_ARTIFACT_COLLECTION_SHAPE`, 422) rather than one spelling
+being skipped. `composeStacks` already refuses the same mix at compose
+time for the same reason.
 
 Taught to use it, in `@objectstack/runtime`:
 
