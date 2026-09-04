@@ -379,11 +379,12 @@ default for a row-scoped action on a `private` object is to refuse.
 (`AutomationContext`, the `@objectstack/spec` contract) declares the same key
 in the same spelling, `recordLoadDenied?: true`, so a `runAs: 'system'` flow
 has something to guard on before it acts on a row its invoker could not read.
-On the flow face the key is **declared but not yet populated**: the flow
-dispatcher does not pass the signal into the run's context yet, so until that
-lands a flow run never sees it and a guard on it is inert (never `true`), never
-wrong. A `runAs: 'user'` flow needs no guard — it re-derives the caller's
-scope on its own reads, and the stub resolves to nothing.
+On the flow face the key is **populated** since #15168: `dispatchFlowAction`
+takes the producer's load outcome and spreads the signal into the context it
+hands `automation.execute`, on both doors — the REST `/actions` endpoint and
+the MCP `run_action` bridge — so a flow run receives this key exactly when a
+handler would. A `runAs: 'user'` flow needs no guard — it re-derives the
+caller's scope on its own reads, and the stub resolves to nothing.
 
 ## Call it over REST
 
