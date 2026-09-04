@@ -419,7 +419,7 @@ describe('compileListViewGroupRowsQuery — rows inside a group are the EXISTING
     });
   });
 
-  it('spells the empty group with the null predicate — `$eq: null` is not a comparand', () => {
+  it('spells the empty group with the `$null` predicate — the spelling `is_empty` lowers to', () => {
     expect(compileListViewGroupRowsQuery(VIEW, { business_unit: null }, { limit: 10 })).toEqual({
       where: { $and: [{ business_unit: { $null: true } }] },
       limit: 10,

@@ -31,7 +31,8 @@ New on the `ui` entry, `view-grouping-query.ts`:
 - `compileListViewGroupQuery(view, { where?, depth? })` → the header query;
   `compileListViewGroupRowsQuery(view, groupKey, { where?, limit?, offset?, orderBy?, fields? })`
   → the row page; `listViewGroupKeyPredicate` (the empty group is spelled with
-  the `$null` predicate, never `$eq: null`).
+  the `$null` predicate — the spelling the view filter dialect's `is_empty`
+  lowers to).
 - `COLUMN_SUMMARY_AGGREGATION` — the `ColumnSummary` → `AggregationFunction`
   table, exhaustive by type: `count` → a fieldless `count` (`COUNT(*)`),
   `count_unique` → `count_distinct`, `sum` / `avg` / `min` / `max` → the same

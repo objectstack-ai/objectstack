@@ -415,9 +415,11 @@ export function compileListViewGroupQuery(
 /**
  * The predicate that selects ONE group's rows: for each grouped field, in
  * nesting order, `{ field: { $eq: key } }` — or `{ field: { $null: true } }`
- * for the empty group, whose header key is `null` and which no `$eq` can
- * select (`null` is not a comparand; `$null` is the AST's spelling for
- * absence, `data/filter.zod.ts`).
+ * for the empty group, whose header key is `null`: the `$null` predicate is
+ * the AST's own spelling for absence (`data/filter.zod.ts`, lowered to
+ * `IS NULL` on the SQL family) and the one the view filter dialect's
+ * `is_empty` / `is_null` lower to (`parseFilterAST`), so a group predicate
+ * and a view filter agree on what "empty" means.
  *
  * `groupKey` must carry a PREFIX of the nesting order — every level from the
  * outermost down to the group being opened, and no level past it — so the
