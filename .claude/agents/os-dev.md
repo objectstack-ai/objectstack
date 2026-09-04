@@ -229,6 +229,14 @@ dispatch prompt 只携带每单增量(裁决引文、裁决 / PM-机制假设分
   之后**他人已合并的文件**整批 stage 成你的(实测一次四个 agent 的合并文件,commit 前才逮
   住)。「我从哪开始」的 reset/diff/log/rebase 一律锚基本规则 1 记录的 `"$BASE"`。
 - **`log -S/--follow/blame` 判日期或先后前**,先 `git rev-parse --is-shallow-repository`,true 就加深申报。
+- **`merge-base --is-ancestor` 的「非祖先」在浅检出上是假绿 —— 它没有「我看不了那么远」这条错误通道。**
+  缺的对象只会**扣下**一条祖先路径、永不凭空造出一条 ⇒ **失效单向:exit 0(「是祖先」)自证,任何检出
+  里都作数;只有 exit 1 要控制腿** —— 而「还没发布」「不在 main 上」「`Blocked-by` 已落地」这些前提核验
+  要的恰是 exit 1。阴性读数按**两条腿的一次测量**写(与空结果要控制词同形):同一检出、同一目标 ref 上
+  再跑一个**已知在目标历史里**的 commit,它必须答 exit 0;否则阴性作废 —— `git fetch --deepen` /
+  `--unshallow` 到控制腿转 0 再重读。⛔ 控制腿别挑浅窗内的近亲:实测 depth 50 上 `HEAD~5` 与边界 commit
+  都照答 exit 0,对截断完全致盲 —— 控制 commit 至少与被测那个同深。`--is-shallow-repository` 是便宜的触
+  发器不是判据(实测 `--unshallow` 后它仍可为 true);判据是控制腿。两条腿的退出码都进报告。
 - **要做反向验证(「回退修复,看诊断变化」)?先 commit 修复。** 已 commit,恢复只是
   `git checkout <your-branch> -- <path>`;对着未提交的编辑, `git checkout origin/main -- <path>` 不留任何恢
   复点 —— 工作树曾是唯一副本,而丢弃它是一次正常、无声、exit-0 的操作(恢复机制与字
