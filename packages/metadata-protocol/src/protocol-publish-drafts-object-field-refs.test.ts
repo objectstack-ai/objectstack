@@ -179,7 +179,6 @@ function makeStubEngine() {
     return { engine, rows, historyRows };
 }
 
-const PKG = 'app.ops';
 const PKG = 'app.studio';
 
 /**
