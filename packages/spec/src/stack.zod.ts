@@ -259,6 +259,12 @@ export type ArtifactPackageEntryParsed = z.infer<typeof ArtifactPackageEntrySche
  * built from this shape, so putting it in the shape would make the declaration
  * circular.
  *
+ * Two members of this shape are envelope keys as well: `plugins` and
+ * `devPlugins` are stack collections (they compose by `concat`, so they live
+ * here), but they are runtime ASSEMBLY instructions rather than metadata, and
+ * {@link ASSEMBLED_PACKAGE_BODY_ENVELOPE_KEYS} keeps them out of the assembled
+ * package body (#15219 — {@link AssembledPackageBodyKey} says why).
+ *
  * @internal
  */
 const STACK_DEFINITION_COLLECTIONS_SHAPE = {
@@ -967,17 +973,45 @@ const CONCAT_ARRAY_FIELDS = (Object.keys(COMPOSE_KEY_DISPOSITIONS) as (keyof Obj
  * would refuse a multi-package artifact naming a key its author correctly
  * wrote, and the refusal would look like a defect in the author's metadata.
  *
- * `packages` is the one collection excluded: an artifact carries packages, a
- * package inside it does not carry packages of its own (ADR-0130 D1 — the
- * artifact is the co-ownership boundary, and nesting would put a second
- * boundary inside the first).
+ * Three `concat` keys are excluded — the artifact ENVELOPE keys, declared once
+ * in {@link ASSEMBLED_PACKAGE_BODY_ENVELOPE_KEYS} for this type and the runtime
+ * shape alike:
+ *
+ * - `packages`: an artifact carries packages, a package inside it does not
+ *   carry packages of its own (ADR-0130 D1 — the artifact is the co-ownership
+ *   boundary, and nesting would put a second boundary inside the first).
+ * - `plugins` / `devPlugins`: runtime ASSEMBLY instructions, not metadata
+ *   (#15219, maintainer ruling A for both keys, 2026-09-04). `plugins` holds
+ *   what a host hands to `kernel.use()` — live plugin instances, manifests or
+ *   package names (`z.array(z.unknown())`) — and `devPlugins` is the `os dev`
+ *   load list. An artifact is inert JSON: a plugin written inside
+ *   `packages[i].manifest` could never be constructed by a loader, so a reader
+ *   that resolved it there would register garbage where it used to skip in
+ *   silence. An artifact carries metadata; a host assembles plugins — at the top
+ *   level, where `composeStacks` still concatenates them (`concat` stays, for
+ *   in-memory composition) and where `os serve` / `os migrate` read them.
+ *   Inside a body both are refused by the manifest's strict close, naming the
+ *   key.
  *
  * @internal
  */
 type AssembledPackageBodyKey = Exclude<{
   [K in keyof typeof COMPOSE_KEY_DISPOSITIONS]:
     (typeof COMPOSE_KEY_DISPOSITIONS)[K] extends 'concat' | 'objects' | 'functions' ? K : never;
-}[keyof typeof COMPOSE_KEY_DISPOSITIONS], 'packages'>;
+}[keyof typeof COMPOSE_KEY_DISPOSITIONS], AssembledPackageBodyEnvelopeKey>;
+
+/**
+ * The `concat` keys of {@link COMPOSE_KEY_DISPOSITIONS} that belong to the
+ * artifact envelope and are therefore NOT assembled into a package body — the
+ * reasons, per key, sit on {@link AssembledPackageBodyKey}. One declaration
+ * feeds both that type and {@link assembledPackageBodyShape}, so the static and
+ * runtime halves cannot name different sets.
+ * @internal
+ */
+const ASSEMBLED_PACKAGE_BODY_ENVELOPE_KEYS = ['packages', 'plugins', 'devPlugins'] as const satisfies readonly StackDefinitionKey[];
+
+/** One member of {@link ASSEMBLED_PACKAGE_BODY_ENVELOPE_KEYS}. @internal */
+type AssembledPackageBodyEnvelopeKey = (typeof ASSEMBLED_PACKAGE_BODY_ENVELOPE_KEYS)[number];
 
 /** The dispositions that mark a stack key as a metadata COLLECTION. @internal */
 const ASSEMBLED_PACKAGE_BODY_DISPOSITIONS: readonly string[] = ['concat', 'objects', 'functions'];
@@ -985,7 +1019,8 @@ const ASSEMBLED_PACKAGE_BODY_DISPOSITIONS: readonly string[] = ['concat', 'objec
 /**
  * Runtime half of {@link AssembledPackageBodyKey}: the collection members of
  * {@link STACK_DEFINITION_COLLECTIONS_SHAPE}, read off the same disposition
- * table the type is derived from.
+ * table the type is derived from, minus the same
+ * {@link ASSEMBLED_PACKAGE_BODY_ENVELOPE_KEYS}.
  *
  * The return type is `Pick<typeof STACK_DEFINITION_COLLECTIONS_SHAPE,
  * AssembledPackageBodyKey>`, which is what makes the derivation mechanical
@@ -999,7 +1034,9 @@ const ASSEMBLED_PACKAGE_BODY_DISPOSITIONS: readonly string[] = ['concat', 'objec
 function assembledPackageBodyShape(): Pick<typeof STACK_DEFINITION_COLLECTIONS_SHAPE, AssembledPackageBodyKey> {
   const shape: Record<string, unknown> = {};
   for (const [key, disposition] of Object.entries(COMPOSE_KEY_DISPOSITIONS)) {
-    if (key === 'packages') continue;
+    // Envelope keys stay on the artifact: `packages` cannot nest, and
+    // `plugins` / `devPlugins` are assembly instructions no body could carry.
+    if ((ASSEMBLED_PACKAGE_BODY_ENVELOPE_KEYS as readonly string[]).includes(key)) continue;
     if (!ASSEMBLED_PACKAGE_BODY_DISPOSITIONS.includes(disposition)) continue;
     shape[key] = (STACK_DEFINITION_COLLECTIONS_SHAPE as Record<string, unknown>)[key];
   }
@@ -1034,10 +1071,10 @@ function assembledPackageBodyShape(): Pick<typeof STACK_DEFINITION_COLLECTIONS_S
  * ## What it is, mechanically
  *
  * The manifest's own fields, plus every metadata COLLECTION the stack schema
- * declares — the key set derived from one table rather than transcribed (see
- * {@link AssembledPackageBodyKey}). Where the two halves declare the SAME key,
- * the collection wins, because that is what the assembled payload actually
- * carries and what `registerApp` reads:
+ * declares minus the envelope keys — the key set derived from one table rather
+ * than transcribed (see {@link AssembledPackageBodyKey}). Where the two halves
+ * declare the SAME key, the collection wins, because that is what the assembled
+ * payload actually carries and what `registerApp` reads:
  *
  * | key | manifest (authoring) | assembled body |
  * | --- | --- | --- |

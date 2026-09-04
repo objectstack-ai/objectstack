@@ -196,7 +196,7 @@ describe('#15004 — option-B acceptance pin: every subsystem must see its colle
     // than two empties agreeing.
     expect(PACKAGE_OWNED_COLLECTION_KEYS.length).toBeGreaterThan(30);
     expect(ARTIFACT_ENVELOPE_KEYS).toEqual(
-      ['api', 'i18n', 'manifest', 'onEnable', 'packages', 'runtimeModule', 'server'],
+      ['api', 'devPlugins', 'i18n', 'manifest', 'onEnable', 'packages', 'plugins', 'runtimeModule', 'server'],
     );
 
     // Every key option B drops is a package-owned collection, and every key it
