@@ -170,9 +170,65 @@ function expect(what, ok) {
 // and still exits 0 — a self-test that never finished, reported as one that
 // passed (#13798). The self-test's own exit code stays load-bearing, so the
 // handshake is a flag rather than a returned sentinel.
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed
+// the way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. The floor requires the OPENED set to
+// equal the DECLARED set with each battery at or above its own count.
+//
+// This file declares ONE battery, opened at the top of the self-test body. It
+// carries fewer than the two named section banners the sectioning criterion
+// needs, and ⛔ a comment is NOT promoted to a section head — that is a
+// judgement per comment this transplant does not make. The hoisted single
+// battery is the shape PR #14896, PR #15003 and PR #15217 landed for exactly
+// this case.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The count is a FLOOR, not an equality — adding cases is ordinary work and must
+// not red. A battery BELOW its floor means cases stopped running; the remedy is
+// to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'render-release-coverage-anchor self-test': 10,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 1;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 let selfTestReachedVerdict = false;
 
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const batterySeen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+  };
+  battery('render-release-coverage-anchor self-test');
+  // A thin in-body wrapper over the module-level `expect`: it attributes the case
+  // to the open battery and then defers to the existing assertion, whose
+  // semantics (the `assertions` tally, the ok/FAIL line, the `failures` tally)
+  // are unchanged.
+  const check = (what, ok) => {
+    registerCase();
+    expect(what, ok);
+  };
   const base = {
     report: 'check-release-section-coverage: 2 finding(s)',
     errText: '',
@@ -180,13 +236,13 @@ function selfTest() {
     sweptAt: '2026-08-24T00:00:00.000Z',
   };
 
-  expect(
+  check(
     'verdict — a non-zero ADVISORY code is did-not-run whatever --strict said, because a broken '
     + 'instrument makes the predicate meaningless',
     verdict({ advisoryCode: 1, strictCode: 0 }) === 'did-not-run'
     && verdict({ advisoryCode: 1, strictCode: 1 }) === 'did-not-run',
   );
-  expect(
+  check(
     'verdict — instrument healthy + strict 0 is clean; instrument healthy + strict non-zero is '
     + 'findings',
     verdict({ advisoryCode: 0, strictCode: 0 }) === 'clean'
@@ -194,34 +250,34 @@ function selfTest() {
   );
 
   const down = renderBody({ ...base, advisoryCode: 1, strictCode: 0, errText: 'BROKEN INSTRUMENT' });
-  expect(
+  check(
     'did-not-run — never renders as a clean corpus (#4690): it carries the DID NOT RUN heading and '
     + 'none of the clean body\'s claim',
     down.includes('THE SWEEP DID NOT RUN') && !down.includes('Every published minor has its section'),
   );
-  expect(
+  check(
     'did-not-run — wraps the gate\'s classified stderr rather than re-wording it',
     down.includes('BROKEN INSTRUMENT'),
   );
 
   const clean = renderBody({ ...base, advisoryCode: 0, strictCode: 0, report: 'OK — 5 published minor(s)' });
-  expect(
+  check(
     'clean — states the no-findings verdict and carries the gate\'s own OK line',
     clean.includes('Every published minor has its section') && clean.includes('OK — 5 published minor(s)'),
   );
 
   const found = renderBody({ ...base, advisoryCode: 0, strictCode: 1 });
-  expect(
+  check(
     'findings — names the remedy as a curated write and points at the maintenance process',
     found.includes('docs/releases-maintenance.md') && found.includes('curated write'),
   );
-  expect(
+  check(
     'findings — wraps the gate\'s authored prose verbatim',
     found.includes('check-release-section-coverage: 2 finding(s)'),
   );
 
   for (const [name, body] of [['did-not-run', down], ['clean', clean], ['findings', found]]) {
-    expect(
+    check(
       `${name} — carries the machine-findable marker and the heartbeat, so no branch can lose `
       + 'either',
       body.startsWith(MARKER) && body.includes('Swept 2026-08-24T00:00:00.000Z') && body.includes(HEARTBEAT_NOTE),
@@ -231,9 +287,59 @@ function selfTest() {
   // Counted, never a literal: a hard-coded total silently stops matching the
   // moment a case is added, and a self-test that misreports its own size is the
   // first thing a reader stops trusting.
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  // The floor's refusal joins the SAME sink the cases use — a `FAIL` line and the
+  // `failures` tally the verdict reads — so a breached floor cannot be printed
+  // over by the success line.
+  const floorFailure = (message) => {
+    failures += 1;
+    console.error(`  FAIL  ${message}`);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned `
+        + `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in `
+        + 'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. `
+          + 'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of `
+          + `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the '
+        + 'number. Find what stopped registering (an early return, a deleted block, a guard that now '
+        + 'skips) and restore it.',
+    );
+  }
+
   console.log(failures === 0
     ? `\nOK  render-release-coverage-anchor --self-test: ${assertions} assertions pass`
-    : `\nFAILED  ${failures} of ${assertions} assertion(s)`);
+    : `\nFAILED  ${failures} failure(s) (cases and floor) of ${assertions} assertion(s)`);
   selfTestReachedVerdict = true;
   return failures === 0 ? 0 : 1;
 }
