@@ -393,7 +393,7 @@ export function runControls() {
     .replaceAll('declaredBatteries', 'declaredNames'))) === 'NONE',
     'POSITIVE CONTROL FAILED: the ternary exit alone was classified ROSTER -- producing a failure is HALF the criterion; a roster this criterion can NAME is the other half');
   // Reuse rather than invention: the shape now recognised is the one the ACCIDENT
-  // fixture below actually dispatches with (and the audit file it is reduced
+  // fixture above actually dispatches with (and the audit file it is reduced
   // from), so the criterion stays pinned to a spelling measured in this tree.
   say(PRODUCES_FAILURE_TERNARY_EXIT.test(ACCIDENT_GATE.split('\n').find((l) => l.includes('process.exit(')) ?? ''),
     'CONTROL FAILED: the accident fixture no longer dispatches with the ternary exit this criterion was extended to read; the two have drifted apart');
