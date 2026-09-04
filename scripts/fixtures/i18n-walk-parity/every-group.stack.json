@@ -1,0 +1,163 @@
+{
+  "_readme": [
+    "Fixture for scripts/check-i18n-walk-parity.mjs — a normalized stack config that",
+    "authors ONE member of every translation group the extractor can reach, so the",
+    "gate's walked set is a property of the WALKER and not of how thin the fixture is.",
+    "",
+    "⛔ Do NOT trim a group out of this file to make the gate green. The gate asks",
+    "'does collectExpectedEntries produce this declared group for SOME config', and a",
+    "group deleted here answers that question 'no' for a walker that is perfectly",
+    "healthy — a false red that reads exactly like the real one.",
+    "",
+    "Adding a group to TranslationDataSchema? Author a member of it here in the same",
+    "PR as the walker change. `metadataForms` is deliberately absent: the extractor",
+    "sources it from METADATA_FORM_REGISTRY unconditionally, independent of config."
+  ],
+
+  "objects": [
+    {
+      "name": "parity_object",
+      "label": "Parity Object",
+      "pluralLabel": "Parity Objects",
+      "description": "The one object every group in this fixture hangs off.",
+      "fields": [
+        {
+          "name": "status",
+          "type": "select",
+          "label": "Status",
+          "help": "Where this record sits in the pipeline.",
+          "placeholder": "Pick a status",
+          "options": [
+            { "value": "open", "label": "Open" },
+            { "value": "closed", "label": "Closed" }
+          ]
+        }
+      ],
+      "validations": [
+        { "name": "status_required", "message": "Status is required before closing." }
+      ],
+      "actions": [
+        {
+          "name": "approve",
+          "label": "Approve",
+          "description": "Approve this record.",
+          "confirmText": "Approve this record?",
+          "successMessage": "Record approved.",
+          "params": [
+            { "name": "note", "type": "text", "label": "Note", "helpText": "Shown to the requester.", "placeholder": "Optional note" }
+          ],
+          "resultDialog": {
+            "title": "Approved",
+            "description": "The record was approved.",
+            "acknowledge": "Got it"
+          }
+        }
+      ]
+    }
+  ],
+
+  "views": [
+    {
+      "name": "parity_object_list",
+      "object": "parity_object",
+      "label": "All Parity Objects",
+      "description": "Every parity object.",
+      "emptyState": { "title": "Nothing here yet", "message": "Create the first one." },
+      "bulkActions": [
+        {
+          "name": "bulk_close",
+          "label": "Close selected",
+          "confirmText": "Close the selected records?",
+          "confirmLabel": "Close them",
+          "params": [
+            { "name": "reason", "type": "text", "label": "Reason", "help": "Why these are being closed.", "placeholder": "Reason" }
+          ]
+        }
+      ]
+    }
+  ],
+
+  "actions": [
+    {
+      "name": "export_csv",
+      "label": "Export CSV",
+      "description": "Download the current selection.",
+      "confirmText": "Start the export?",
+      "successMessage": "Export queued."
+    }
+  ],
+
+  "apps": [
+    {
+      "name": "parity_app",
+      "label": "Parity App",
+      "description": "The app this fixture's navigation hangs off.",
+      "navigation": [
+        { "id": "parity_home", "label": "Home" }
+      ]
+    }
+  ],
+
+  "dashboards": [
+    {
+      "name": "parity_dashboard",
+      "label": "Parity Dashboard",
+      "description": "One dashboard, one widget.",
+      "widgets": [
+        { "id": "parity_tile", "title": "Open records", "description": "Records still open." }
+      ]
+    }
+  ],
+
+  "datasets": [
+    {
+      "name": "parity_metrics",
+      "label": "Parity Metrics",
+      "description": "Semantic layer behind the dashboard tile.",
+      "object": "parity_object",
+      "dimensions": [
+        { "name": "status", "label": "Status", "field": "status", "type": "string" }
+      ],
+      "measures": [
+        { "name": "record_count", "label": "Records", "aggregate": "count" }
+      ]
+    }
+  ],
+
+  "pages": [
+    {
+      "name": "parity_page",
+      "label": "Parity Page",
+      "description": "One page, one header, one addressable component.",
+      "regions": [
+        {
+          "name": "main",
+          "components": [
+            { "type": "page:header", "properties": { "title": "Parity", "subtitle": "One of everything" } },
+            { "id": "parity_card", "type": "page:card", "properties": { "title": "A card", "description": "Card copy." } }
+          ]
+        }
+      ]
+    }
+  ],
+
+  "flows": [
+    {
+      "name": "parity_flow",
+      "label": "Parity Flow",
+      "nodes": [
+        {
+          "id": "collect_details",
+          "type": "screen",
+          "label": "Collect details",
+          "config": {
+            "title": "Collect details",
+            "fields": [
+              { "name": "reason", "type": "text", "label": "Reason", "placeholder": "Why?" }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

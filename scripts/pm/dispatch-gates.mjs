@@ -2939,6 +2939,7 @@ const COMPOUND_ANCHOR_LEDGER = [
   ['scripts/check-platform-checklist.mjs', 'selfTestUnreferencedRecipes', false],
   ['scripts/check-platform-checklist.mjs', 'selfTestMetaCallSpelling', false],
   ['scripts/check-platform-checklist.mjs', 'selfTestSourceLineCitations', false],
+  ['scripts/check-platform-checklist.mjs', 'selfTestSymbolAnchors', false],
   ['scripts/check-regen-pending.mjs', 'fixtureSelfTest', false],
   ['scripts/check-regen-pending.mjs', 'prePushIsArmedSelfTest', false],
   ['scripts/check-regen-pending.mjs', 'decisionTableSelfTest', false],
@@ -9730,9 +9731,20 @@ export function parseRunRecord(text) {
  * heading) and which deduplicates the two spellings of one family into one
  * command before this function ever sees them. What the tool CAN still meet in
  * a record it classifies itself — a CI-measured-only family, which `commandsFor`
- * subtracts by design, and a pending-changeset family, derived against a path
- * that did not exist at derivation time. Both are matched byte-exactly against
- * sets this same derivation produced.
+ * subtracts by design; a VALUE-BEARING family, which `commandsFor` subtracts for
+ * the same reason one step later because its argv takes a value from the
+ * workflow (#15083); and a pending-changeset family, derived against a path
+ * that did not exist at derivation time. All three are matched byte-exactly
+ * against sets this same derivation produced.
+ *
+ * ⭐ The third bucket is not a convenience: this file's own rule is that an
+ * omission is disclosed WHERE the omission happens, and a class `commandsFor`
+ * deliberately withholds is a class the runner cannot be expected to have
+ * derived. Left in the remainder it reads as a command "named by nothing this
+ * run derived" — the one sentence that is false about it, because this run
+ * derived it and then classified it out. The likeliest recorder is a dev who
+ * writes the bare spelling of one of these scripts out of habit, and what they
+ * are owed is the reason, not a shrug (#15115).
  *
  * What is left for the runner to explain is therefore only what the tool
  * genuinely cannot know: a gate that refused with its own prerequisite. That is
@@ -9751,6 +9763,12 @@ export function parseRunRecord(text) {
 export function runReconciliation({
   derived = [],
   ciOnlyCommands = new Set(),
+  // Beside `ciOnlyCommands` and not after `pendingCommands`, because the file
+  // already groups them: these are the TWO subtractions `commandsFor` makes
+  // from the runnable union, in that order, and the pending families are a
+  // different fact (a path that did not exist at derivation time). Defaulting
+  // to empty keeps every existing caller's verdict byte-identical.
+  notRunnableCommands = new Set(),
   pendingCommands = new Set(),
   record = [],
 } = {}) {
@@ -9792,6 +9810,7 @@ export function runReconciliation({
   }
 
   const explainedCiOnly = [];
+  const explainedNotRunnable = [];
   const explainedPending = [];
   const extra = [];
   const nearMiss = [];
@@ -9802,6 +9821,14 @@ export function runReconciliation({
     if (derivedSet.has(entry.command)) continue;
     if (ciOnlyCommands.has(entry.command)) {
       explainedCiOnly.push(entry.command);
+      continue;
+    }
+    // The order is the precedence, and it is the one `commandsFor` already
+    // states: `ciOnly` is the FIRST subtraction, so a family that were somehow
+    // both is reported as CI-measured — one bucket per command, chosen the same
+    // way in both places rather than two counts for one omission.
+    if (notRunnableCommands.has(entry.command)) {
+      explainedNotRunnable.push(entry.command);
       continue;
     }
     if (pendingCommands.has(entry.command)) {
@@ -9823,6 +9850,7 @@ export function runReconciliation({
     unrun,
     notMeasured,
     explainedCiOnly: explainedCiOnly.sort(),
+    explainedNotRunnable: explainedNotRunnable.sort(),
     explainedPending: explainedPending.sort(),
     extra: extra.sort(),
     nearMiss,
@@ -9884,6 +9912,13 @@ export function runReconciliationLines(recon) {
       `  Classified by this tool, no explanation owed (${recon.explainedCiOnly.length}) — CI-MEASURED ONLY, and outside the derived total by design:`,
     );
     for (const command of recon.explainedCiOnly) lines.push(`    - ${command}`);
+  }
+  if (recon.explainedNotRunnable.length > 0) {
+    lines.push(
+      `  Classified by this tool, no explanation owed (${recon.explainedNotRunnable.length}) — VALUE-BEARING famil(ies):`
+        + ' its argv takes a value from the workflow, so it is recorded, not derived as runnable:',
+    );
+    for (const command of recon.explainedNotRunnable) lines.push(`    - ${command}`);
   }
   if (recon.explainedPending.length > 0) {
     lines.push(
@@ -10159,9 +10194,10 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
   const pending = pendingChangesetFamilies([...byCheck], new Set(matched.keys()));
 
   if (mode === 'ran') {
-    // Built from the SAME three expressions the other renderings read, in this
-    // process, on this tree: the union `--commands` prints, the CI-measured set
-    // that union subtracts, and the pending families it holds back. A second
+    // Built from the SAME four expressions the other renderings read, in this
+    // process, on this tree: the union `--commands` prints, the two sets that
+    // union subtracts — CI-measured, and value-bearing — and the pending
+    // families it holds back. A second
     // traversal here would be a second answer to a question this file already
     // answers once — and it would be the answer the reconciliation is judged
     // against, which is the worst possible place to keep a duplicate.
@@ -10172,6 +10208,11 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
       // makes it a contract rather than a note (#14189).
       derived: commandsFor({ matchedRows, kindGroups, alwaysRunsRows }),
       ciOnlyCommands: ciOnlyCommandSet(matchedRows, alwaysRunsRows),
+      // The SECOND set `commandsFor` subtracts, read from the SAME rows by the
+      // SAME expression it uses — so the union and the reconciliation cannot
+      // drift about which invocations are withheld, exactly as they cannot for
+      // the CI-measured set above it (#15115).
+      notRunnableCommands: notRunnableCommandSet(matchedRows, alwaysRunsRows),
       pendingCommands: new Set(pending.map(({ entry }) => runnableInvocation(entry))),
       record: runRecord,
     });
@@ -18770,15 +18811,50 @@ function selfTest() {
     t('the malformed line is reported against its line number too', unexplained.malformed.length === 1 && unexplained.malformed[0].line === 1);
 
     // ── What the TOOL classifies, so no prose has to ────────────────────────
+    // ⭐ The value-bearing spelling is the LIVE one — `pr-automation.yml`
+    // really passes `--base "$MERGE_BASE"` to this script — for the reason the
+    // neighbouring cases take theirs from the live workflows: a fixture
+    // invented here would keep passing after the renderer that produces the
+    // real one changed shape, which is the failure this whole file is about.
+    const valueBearing = 'node scripts/check-empty-changeset.mjs --base "$MERGE_BASE"';
     const explained = runReconciliation({
       derived: ['pnpm check:a'],
       ciOnlyCommands: new Set(['node scripts/check-payload-guard.mjs']),
+      notRunnableCommands: new Set([valueBearing]),
       pendingCommands: new Set(['pnpm check:changeset-shape']),
-      record: parseRunRecord(['pnpm check:a', 'node scripts/check-payload-guard.mjs', 'pnpm check:changeset-shape'].join('\n')),
+      record: parseRunRecord(['pnpm check:a', 'node scripts/check-payload-guard.mjs', valueBearing, 'pnpm check:changeset-shape'].join('\n')),
     });
     t(
       'a CI-measured-only entry and a pending-changeset entry are classified by the tool, not dumped into the remainder',
       explained.ok && explained.explainedCiOnly.length === 1 && explained.explainedPending.length === 1 && explained.extra.length === 0,
+    );
+    // ⭐ #15115: the THIRD class `commandsFor` withholds gets the same
+    // courtesy. Recorded, derived by this run, classified out of the union —
+    // so `extra`'s caption ("named by nothing this run derived") would be the
+    // one sentence that is false about it.
+    t(
+      'a recorded VALUE-BEARING family is classified by the tool too, never folded into the remainder',
+      explained.explainedNotRunnable.length === 1 && explained.explainedNotRunnable[0] === valueBearing && !explained.extra.includes(valueBearing),
+    );
+    // CONTROL, and it is the load-bearing half: the bucket explains the class
+    // it was given and nothing else. A command named by no set is still
+    // `extra` — a third bucket that swallowed unknowns would have deleted the
+    // remainder rather than shrunk it.
+    const unknownBeside = runReconciliation({
+      derived: ['pnpm check:a'],
+      notRunnableCommands: new Set([valueBearing]),
+      record: parseRunRecord(['pnpm check:a', valueBearing, 'pnpm check:not-a-family'].join('\n')),
+    });
+    t(
+      'and an unknown command beside it still reads `extra` — the new bucket explains its class only',
+      unknownBeside.explainedNotRunnable.length === 1 && unknownBeside.extra.length === 1 && unknownBeside.extra[0] === 'pnpm check:not-a-family',
+    );
+    // The bucket is DIAGNOSTIC, exactly like the two beside it: the verdict
+    // reads `unrun` and nothing else, so classifying an entry can never move
+    // it in either direction (#15115).
+    t(
+      'the new bucket cannot move the verdict — it is diagnostic, like the two beside it',
+      unknownBeside.ok && unknownBeside.unrun.length === 0 && unknownBeside.ran.length === 1,
     );
 
     // ── Bookkeeping the classes cannot lose ─────────────────────────────────
@@ -18822,6 +18898,21 @@ function selfTest() {
     t(
       'the near-miss line refuses the pairing out loud rather than quietly',
       runReconciliationLines(nearMiss).join('\n').includes('is NOT paired with it'),
+    );
+    // ⭐ #15115, in the rendering: a bucket that classified an entry and then
+    // printed nothing would leave the runner exactly where `extra` left them.
+    const explainedText = runReconciliationLines(explained).join('\n');
+    t(
+      'the value-bearing bucket gets its OWN labelled line, naming the reason and the command',
+      explainedText.includes('VALUE-BEARING famil(ies)')
+        && explainedText.includes('its argv takes a value from the workflow')
+        && explainedText.includes(valueBearing),
+    );
+    t(
+      'and the two buckets beside it keep their own lines, with the remainder heading absent entirely',
+      explainedText.includes('CI-MEASURED ONLY')
+        && explainedText.includes('pending-changeset famil(ies)')
+        && !explainedText.includes("Outside this card's derivation"),
     );
 
     // ── argv: a two-token flag's value must not become a path ───────────────
@@ -18888,6 +18979,58 @@ function selfTest() {
       t('a valueless run record refuses, and its message does not name the OTHER flag', valueless.status === 2 && !(valueless.stderr ?? '').includes('as an owner and a name'));
     } finally {
       rmSync(ranTmp, { recursive: true, force: true });
+    }
+  }
+
+  // ── END TO END: the VALUE-BEARING bucket is WIRED, not merely present (#15115) ──
+  //
+  // Every unit case above stays green if the `--ran` call site never PASSES
+  // the value-bearing set — a parameter that defaults to empty is exactly the
+  // shape that keeps its own tests green while the live mode still dumps the
+  // class in the remainder, which is the state this card was filed about.
+  // Only a real run reads the wiring.
+  //
+  // The fixture is this tool's OWN answer on this tree, read from `--json`,
+  // rather than an invocation typed here: a hardcoded spelling would keep
+  // passing after the renderer that produces the real one changed shape, and
+  // the two sides of the comparison would stop being the same strings — the
+  // property the whole `--ran` design rests on.
+  {
+    const vbTmp = mkdtempSync(nodePath.join(tmpdir(), 'dg-ran-vb-'));
+    try {
+      // A changeset path, because that is what reaches the live value-bearing
+      // families — and it is the tool's own constant rather than a spelling
+      // this test invented.
+      const vbCard = CHANGESET_PROBE_PATH;
+      const jsonRun = runCli(['--json', vbCard]);
+      const doc = jsonRun.status === 0 ? JSON.parse(jsonRun.stdout ?? '{}') : null;
+      const vbRows = [...(doc?.matched ?? []), ...(doc?.alwaysRunsPopulation ?? [])].filter((row) => row.notRunnable);
+      t('CONTROL: this tree still derives at least one VALUE-BEARING family for a changeset path', Boolean(doc) && vbRows.length >= 1);
+      if (doc && vbRows.length >= 1) {
+        const vbCommand = vbRows[0].command;
+        t('CONTROL: and the runnable union WITHHOLDS it — which is the whole reason the bucket exists', !doc.commands.includes(vbCommand));
+        const vbRecord = nodePath.join(vbTmp, 'ran-value-bearing.list');
+        writeFileSync(vbRecord, `${[...doc.commands, vbCommand].join('\n')}\n`);
+        const vbRun = runCli([RAN_FLAG, vbRecord, vbCard]);
+        const vbOut = vbRun.stdout ?? '';
+        t(
+          '⭐ a real run that RECORDS it lands it in the VALUE-BEARING bucket, with the remainder heading gone entirely',
+          vbRun.status === 0
+            && vbOut.includes('VALUE-BEARING famil(ies)')
+            && vbOut.includes(vbCommand)
+            && !vbOut.includes("Outside this card's derivation"),
+        );
+        t(
+          'and the reason travels with it, so the runner learns why this invocation is not one they could have derived',
+          vbOut.includes('its argv takes a value from the workflow'),
+        );
+        t(
+          'while the verdict is unmoved — the bucket is diagnostic, and every derived family is still accounted for',
+          vbOut.includes(`${doc.commands.length} derived famil(ies) accounted for`),
+        );
+      }
+    } finally {
+      rmSync(vbTmp, { recursive: true, force: true });
     }
   }
 

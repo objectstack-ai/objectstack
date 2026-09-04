@@ -230,8 +230,16 @@ function generateEventUuid(): string {
  * Payload format for cluster-wide metadata change broadcasts.
  *
  * Published on channel `metadata.changed` by any node mutating metadata
- * and consumed by peers to invalidate their local caches. Aligns with
- * `MetadataChangedEventPayload` in `cluster-semantics.mdx` §5.
+ * and consumed by peers to invalidate their local caches
+ * (`content/docs/kernel/cluster.mdx` §6.2, lane 1). This shape IS the whole
+ * contract: the origin node for loopback suppression, the metadata type, and
+ * the local watch event replayed verbatim — an address-only signal. There is
+ * no `version`, `name`, `tenantId` or `operation` at the top level and no
+ * version comparison on receipt; a peer drops its cache entry and re-reads
+ * the shared store. The spec once declared a richer, version-stamped
+ * `metadata:changed` payload that this shape was said to align with; it never
+ * did, and that schema was retired (ADR-0087 entry
+ * `metadata-changed-event-payload-retired`).
  */
 export interface ClusterMetadataChangedPayload {
   /** Origin nodeId — used for loopback suppression. */

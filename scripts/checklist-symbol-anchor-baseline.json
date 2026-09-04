@@ -1,0 +1,22 @@
+{
+  "$comment": "Symbol-anchor floor for docs/qa/platform-checklist/ — the shrink-never population of `path/to/file.ts#symbol` citations that scripts/check-platform-checklist.mjs resolves against real source. Authored from `node scripts/check-platform-checklist.mjs --anchor-census` (#13788, step (2) of #13482's ruling). Each entry is the count of anchors that RESOLVED in that family file; adding anchors is ordinary work and never reds. A count that falls below its floor means citations gave up the one half this gate can read, which is the silent remedy every red here would otherwise have.",
+  "$authority": "⛔ MAINTAINER-ONLY: lowering a floor is a maintainer's call. Retiring items legitimately removes anchors — that is the case a maintainer rules on, per instance, and never the author's way past a red.",
+  "floors": {
+    "README.md": 1,
+    "areas/access-security.json": 44,
+    "areas/ai.json": 18,
+    "areas/api-backend.json": 41,
+    "areas/approvals.json": 37,
+    "areas/attachments-storage.json": 28,
+    "areas/automation.json": 51,
+    "areas/cli.json": 42,
+    "areas/dashboards.json": 22,
+    "areas/i18n.json": 11,
+    "areas/identity-auth.json": 82,
+    "areas/integration-system.json": 57,
+    "areas/platform-core.json": 58,
+    "areas/records-forms.json": 78,
+    "areas/search.json": 14,
+    "areas/studio-authoring.json": 26
+  }
+}

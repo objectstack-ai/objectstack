@@ -270,7 +270,7 @@ import type * as M183 from './api/sortability.zod.js';
 import type * as M184 from './shared/value-domain.zod.js';
 
 // ---------------------------------------------------------------------------
-// 830 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 828 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -860,8 +860,6 @@ export type Iso389 = Assert<Eq< z.input< typeof M80.ServiceClusterScopeSchema >,
 export type Iso390 = Assert<Eq< z.input< typeof M80.ServiceLeaderStrategySchema >, z.infer< typeof M80.ServiceLeaderStrategySchema > >>;
 export type Iso391 = Assert<Eq< z.input< typeof M80.ClusterDriverSchema >, z.infer< typeof M80.ClusterDriverSchema > >>;
 export type Iso392 = Assert<Eq< z.input< typeof M80.ClusterTenantIsolationSchema >, z.infer< typeof M80.ClusterTenantIsolationSchema > >>;
-export type Iso393 = Assert<Eq< z.input< typeof M80.MetadataChangeOperationSchema >, z.infer< typeof M80.MetadataChangeOperationSchema > >>;
-export type Iso394 = Assert<Eq< z.input< typeof M80.MetadataChangedEventPayloadSchema >, z.infer< typeof M80.MetadataChangedEventPayloadSchema > >>;
 
 // kernel/context.zod.ts
 export type Iso395 = Assert<Eq< z.input< typeof M81.RuntimeMode >, z.infer< typeof M81.RuntimeMode > >>;
@@ -1686,7 +1684,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 830 isomorphic pins', () => {
+  it('still declares all 828 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2116,9 +2114,24 @@ describe('ADR-0122 type-alias convention', () => {
     // default or transform: the (RISE) case, one new pin (`Iso867`).
     // `SpecifierValueDomainSchema` became an alias of it, so its own pin
     // (`Iso758`) stays and the two hold or fall together. +1 added.
+    //
+    // 830 -> 828 is #14180's ADR-0049 retirement of the `metadata:changed`
+    // event payload (kernel/cluster.zod.ts): `MetadataChangedEventPayloadSchema`
+    // — a MUST-emit contract nothing ever produced or consumed, whose
+    // `z.bigint()` version could not cross a JSON transport — and the
+    // `MetadataChangeOperationSchema` enum that existed only to type its
+    // `operation` field left the module whole (RETIRED_DEFS_BY_MAJOR[18]
+    // `kernel/MetadataChangedEventPayload` + `kernel/MetadataChangeOperation`),
+    // so their pins `Iso393` / `Iso394` left with them — the aliases no longer
+    // exist, so there is nothing to be isomorphic. `kernel/cluster.test.ts`
+    // asserts the absence of both names on the module and the `./kernel`
+    // entry. -2 removed; the Iso numbers stay vacant (ids are claims about
+    // pins, not positions). (Authored as 829 -> 827; restated from the
+    // post-merge base after #14168's +1 landed first — the two changes touch
+    // disjoint pins.)
     const self = readFileSync(fileURLToPath(import.meta.url), 'utf8');
     const pins = self.match(/^export type Iso\d+ = Assert</gm) ?? [];
-    expect(pins).toHaveLength(830);
+    expect(pins).toHaveLength(828);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until #6605 nothing read either

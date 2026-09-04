@@ -224,8 +224,8 @@
       ],
       "traps": ["stale-console-bundle", "hydration-race"],
       "source": [
-        "packages/spec/src/ui/view.zod.ts (container keys list/form/listViews/formViews; the 'read by getViewsByObject() / GET /meta/view?object=' binding; guidance map for wrong-layer keys)",
-        "packages/spec/src/api/protocol.zod.ts (SaveMetaItemResponse: state draft|active, 'staged only — not served until published')",
+        "packages/spec/src/ui/view.zod.ts#listViews (container keys list/form/listViews/formViews; the 'read by getViewsByObject() / GET /meta/view?object=' binding; guidance map for wrong-layer keys)",
+        "packages/spec/src/api/protocol.zod.ts#SaveMetaItemResponse (SaveMetaItemResponse: state draft|active, 'staged only — not served until published')",
         "docs/audits/2026-07-studio-package-create-ux-dogfood.md (publish→live launcher/list inside one server session)"
       ],
       "history": [
@@ -432,12 +432,12 @@
       "traps": ["hydration-race", "dispatcher-vs-hono-route"],
       "automated": { "kind": "e2e", "ref": "packages/qa/dogfood/test/dashboard-designer-roundtrip.dogfood.test.ts" },
       "source": [
-        "packages/spec/src/api/protocol.zod.ts (SaveMetaItemResponse: state draft|active, version as If-Match/409 OCC token, 'staged only — not served until published')",
-        "packages/runtime/src/domains/packages.ts (POST /packages/:id/publish-drafts, ADR-0033/ADR-0045 visibility flip + its failure warning)",
+        "packages/spec/src/api/protocol.zod.ts#SaveMetaItemResponse (SaveMetaItemResponse: state draft|active, version as If-Match/409 OCC token, 'staged only — not served until published')",
+        "packages/runtime/src/domains/packages.ts#packages (POST /packages/:id/publish-drafts, ADR-0033/ADR-0045 visibility flip + its failure warning)",
         "packages/objectql/src/protocol-publish-package-drafts.test.ts (atomic namespace gate; #4463 author-time rules gate the draft→active transition)",
-        "packages/rest/src/rest-server.ts (GET /meta/:type/:name/{history,audit,diff} + POST .../rollback: overlay-type history vs { events: [] } for non-overlay; rollback body { toVersion }, 400 on a missing/invalid toVersion; actor from resolveMetaWriteActor — the authenticated session identity ONLY, [#7941] — X-Actor is ignored outright, not read as a fallback either)",
-        "packages/rest/src/meta-write-actor-identity.test.ts (unit pin: an explicit X-Actor does NOT outrank the authenticated identity, and is inert on the machine-write path too)",
-        "packages/rest/src/rest-route-ledger.ts (client bindings meta.getHistory / getAudit / diffItem / rollbackItem; the 'dispatcher /meta swallows /history as a compound name and 404s' note — routes hunter #12)",
+        "packages/rest/src/rest-server.ts#toVersion (GET /meta/:type/:name/{history,audit,diff} + POST .../rollback: overlay-type history vs { events: [] } for non-overlay; rollback body { toVersion }, 400 on a missing/invalid toVersion; actor from resolveMetaWriteActor — the authenticated session identity ONLY, [#7941] — X-Actor is ignored outright, not read as a fallback either)",
+        "packages/rest/src/meta-write-actor-identity.test.ts#Actor (unit pin: an explicit X-Actor does NOT outrank the authenticated identity, and is inert on the machine-write path too)",
+        "packages/rest/src/rest-route-ledger.ts#getHistory (client bindings meta.getHistory / getAudit / diffItem / rollbackItem; the 'dispatcher /meta swallows /history as a compound name and 404s' note — routes hunter #12)",
         "docs/audits/2026-07-studio-package-create-ux-dogfood.md ('Unpublished draft' badge, 'Changes · n', 'one atomic release' toast)"
       ],
       "history": [
@@ -510,8 +510,8 @@
       ],
       "traps": ["stale-console-bundle", "automation-input"],
       "source": [
-        "packages/runtime/src/http-dispatcher.test.ts (the located '[invalid_metadata] object/bad failed spec validation: fields.amount.type: Required' error shape)",
-        "packages/spec/src/ui/view.zod.ts (container guidance map: type/columns/data/viewKind/filters/sort each name the wrap prescription)",
+        "packages/runtime/src/http-dispatcher.test.ts#error (the located '[invalid_metadata] object/bad failed spec validation: fields.amount.type: Required' error shape)",
+        "packages/spec/src/ui/view.zod.ts#viewKind (container guidance map: type/columns/data/viewKind/filters/sort each name the wrap prescription)",
         "dashboards.strict-widget-rejects-stray-keys (dashboard-kind stray keys — cross-referenced, not duplicated)"
       ],
       "history": [
@@ -592,11 +592,11 @@
       "traps": ["dispatcher-vs-hono-route"],
       "automated": { "kind": "unit", "ref": "packages/objectql/src/overlay-precedence.test.ts" },
       "source": [
-        "packages/spec/src/kernel/metadata-plugin.zod.ts (DEFAULT_METADATA_TYPE_REGISTRY per-kind flags; allowOrgOverride doc: 'runtime returns HTTP 403 not_overridable'; the object/field lock rationale; job's #4509 create lock)",
-        "packages/objectql/src/overlay-precedence.test.ts ('denied — must throw 403 (not_overridable or not_creatable)')",
-        "packages/metadata-protocol/src/protocol.ts (isRuntimeCreateAllowed — the write-gate authority)",
+        "packages/spec/src/kernel/metadata-plugin.zod.ts#DEFAULT_METADATA_TYPE_REGISTRY (DEFAULT_METADATA_TYPE_REGISTRY per-kind flags; allowOrgOverride doc: 'runtime returns HTTP 403 not_overridable'; the object/field lock rationale; job's #4509 create lock)",
+        "packages/objectql/src/overlay-precedence.test.ts#not_overridable ('denied — must throw 403 (not_overridable or not_creatable)')",
+        "packages/metadata-protocol/src/protocol.ts#isRuntimeCreateAllowed (isRuntimeCreateAllowed — the write-gate authority)",
         "ADR-0005 (metadata customization opt-in), ADR-0049 (enforce-or-remove — the job rationale)",
-        "packages/spec/src/api/protocol.zod.ts (overrideSource registry|env — how GET /meta reports an OS_METADATA_WRITABLE-granted override, the read that made the #7637 correction checkable)",
+        "packages/spec/src/api/protocol.zod.ts#overrideSource (overrideSource registry|env — how GET /meta reports an OS_METADATA_WRITABLE-granted override, the read that made the #7637 correction checkable)",
         "objectui packages/app-shell/src/views/metadata-admin/ResourceEditPage.tsx, 1311-1323 (the artifact-backed heuristic behind the read-only banner; cross-linked to objectui#4308)"
       ],
       "history": [
@@ -903,12 +903,12 @@
       ],
       "traps": ["hydration-race", "stale-console-bundle", "seed-data-thin", "single-datapoint", "automation-input"],
       "source": [
-        "packages/spec/src/ui/page.zod.ts (PageComponentType enum — namespaced page:/record:/element: block types; PageComponentSchema.dataSource per-element binding; PageComponentSchema.type = union(enum, string) so objectui-registered custom blocks like object-metric/object-chart/object-grid/object-form/object-master-detail-form/flex/grid are valid)",
-        "examples/app-showcase/src/ui/pages/command-center.page.ts (object-metric bare KPIs + object-chart bar/donut/area on datasets + object-grid work queue), my-work.page.ts ({current_user_id} object-grid + page:card visible-gate), project-workspace.page.ts (object-master-detail-form), active-projects.page.ts (interfaceConfig list: filterBy/sort/appearance/userFilters/addRecord)",
+        "packages/spec/src/ui/page.zod.ts#PageComponentType (PageComponentType enum — namespaced page:/record:/element: block types; PageComponentSchema.dataSource per-element binding; PageComponentSchema.type = union(enum, string) so objectui-registered custom blocks like object-metric/object-chart/object-grid/object-form/object-master-detail-form/flex/grid are valid)",
+        "examples/app-showcase/src/ui/pages/command-center.page.ts#chart (object-metric bare KPIs + object-chart bar/donut/area on datasets + object-grid work queue), my-work.page.ts ({current_user_id} object-grid + page:card visible-gate), project-workspace.page.ts (object-master-detail-form), active-projects.page.ts (interfaceConfig list: filterBy/sort/appearance/userFilters/addRecord)",
         "objectui: packages/components/src/renderers/layout/page.tsx (PageRenderer — region/template dispatch, full-bleed for width:'full' main)",
         "objectui: packages/react/src/SchemaRenderer.tsx (the OBJUI-001 'Unknown component type' red panel + the SchemaErrorBoundary 'Component failed to render' panel — the NAMED-degradation contract; page.<var>/data/user expression scope)",
         "objectui: e2e/live/showcase-smoke.spec.ts (the shallow render-clean sweep for my-work/project-workspace/active-projects — this item deepens it with block-composition + data-binding assertions)",
-        "examples/app-showcase/src/ui/datasets/chart-gallery.dataset.ts (showcase_task_metrics / showcase_project_metrics — the chart bindings)"
+        "examples/app-showcase/src/ui/datasets/chart-gallery.dataset.ts#showcase_task_metrics (showcase_task_metrics / showcase_project_metrics — the chart bindings)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-08", "change": "new item: declarative custom pages render their real block composition and bind data (API cross-check, not pixels), with a scratch-page probe proving a bad binding degrades to a NAMED error not a blank — grounded in the four showcase declarative page sources, the PageComponentType enum, objectui PageRenderer + SchemaRenderer, and deepening the shallow showcase-smoke render-clean pin", "ref": "claude/platform-test-checklist-ocwugl" }
@@ -995,8 +995,8 @@
       ],
       "traps": ["hydration-race", "stale-console-bundle", "automation-input"],
       "source": [
-        "packages/spec/src/ui/page.zod.ts (PageVariableSchema — `source` is the WRITER component id, read by predicates as page.<name>; PageSchema.variables runtime-live per ADR-0049; PageComponentSchema.visibleWhen binds record/current_user/page.<var>, ADR-0089)",
-        "examples/app-showcase/src/ui/pages/page-variables.page.ts (selectedProjectId ← project_picker; empty-hint vs detail gated on page.selectedProjectId), contact-form.page.ts (four string vars ← text_inputs; submit `api` action posting {{page.<var>}} to /api/v1/forms/contact-us/submit → showcase_inquiry)",
+        "packages/spec/src/ui/page.zod.ts#PageVariableSchema (PageVariableSchema — `source` is the WRITER component id, read by predicates as page.<name>; PageSchema.variables runtime-live per ADR-0049; PageComponentSchema.visibleWhen binds record/current_user/page.<var>, ADR-0089)",
+        "examples/app-showcase/src/ui/pages/page-variables.page.ts#selectedProjectId (selectedProjectId ← project_picker; empty-hint vs detail gated on page.selectedProjectId), contact-form.page.ts (four string vars ← text_inputs; submit `api` action posting {{page.<var>}} to /api/v1/forms/contact-us/submit → showcase_inquiry)",
         "objectui: packages/components/src/renderers/layout/page.tsx (PageVariablesProvider mounts the declared variables; PageVariableActionBridge publishes the live snapshot into the action runtime so a submit resolves {{page.<var>}})",
         "objectui: packages/react/src/SchemaRenderer.tsx (page.<var> threaded into the ExpressionEvaluator scope; visibleWhen/visibility re-evaluated on variable change)",
         "ADR-0056 (public web-to-lead form → showcase_inquiry), ADR-0089 (visibleWhen canonical predicate)"
@@ -1085,10 +1085,10 @@
       ],
       "traps": ["stale-console-bundle", "hydration-race", "single-datapoint", "automation-input"],
       "source": [
-        "packages/spec/src/ui/page.zod.ts (PageSchema.kind = full|slotted|html|react|jsx; html = constrained JSX/HTML+Tailwind compiled by @objectstack/sdui-parser 'parse, never execute' ADR-0080; react = real React executed at render, gated by a host capability defaulting ON, disabled via OS_PAGE_REACT=off, ADR-0081; the superRefine that fails an html/react page with no `source`)",
+        "packages/spec/src/ui/page.zod.ts#PageSchema (PageSchema.kind = full|slotted|html|react|jsx; html = constrained JSX/HTML+Tailwind compiled by @objectstack/sdui-parser 'parse, never execute' ADR-0080; react = real React executed at render, gated by a host capability defaulting ON, disabled via OS_PAGE_REACT=off, ADR-0081; the superRefine that fails an html/react page with no `source`)",
         "objectui: packages/components/src/renderers/layout/page.tsx (PageRenderer kind dispatch — compile(src, getJsxManifest()) + SchemaRenderer for html with the 'HTML page failed to compile' panel; ReactKindPage for react; the manifest whitelist is built from the LIVE registry's known types)",
         "objectui: packages/components/src/renderers/layout/react-page.tsx (ReactKindPage — CAP_REACT_PAGES gate + CapabilityDisabledNotice for OS_PAGE_REACT=off; lazy Sucrase @object-ui/react-runtime transpile; useAdapter/ListView/ObjectForm scope; the 'React page error' fallback)",
-        "objectui: packages/sdui-parser/src/index.ts (compile(source, manifest) — the pure in-browser parse used at render, no build step)",
+        "objectui: packages/sdui-parser/src/index.ts#compile (compile(source, manifest) — the pure in-browser parse used at render, no build step)",
         "examples/app-showcase/src/ui/pages/command-center-jsx.page.ts (kind:'html', static sample KPIs — 'parsed, never executed'), capability-map.page.ts (kind:'html' landing), crm-workbench.page.ts (kind:'react' — useAdapter().find reads the .data envelope, note the #… KPIs-stuck-at-0 fix)",
         "objectui: content/docs/guide/react-pages.md (react tier: transpiled + evaluated in-app, react-pages capability, OS_PAGE_REACT=off disable)"
       ],
@@ -1242,7 +1242,7 @@
       ],
       "traps": ["stale-console-bundle", "hydration-race", "automation-input", "cache-staleness"],
       "source": [
-        "packages/spec/src/kernel/metadata-plugin.zod.ts (view allowOrgOverride:true), (dashboard allowOrgOverride:true — the overlay door the dashboard leg rides, verified present), (flow allowOrgOverride:false — the same-surface Regime-C negative)",
+        "packages/spec/src/kernel/metadata-plugin.zod.ts#allowOrgOverride (view allowOrgOverride:true), (dashboard allowOrgOverride:true — the overlay door the dashboard leg rides, verified present), (flow allowOrgOverride:false — the same-surface Regime-C negative)",
         "docs/adr/0126-packaged-metadata-customization-model.md §3 (Regime O = view, dashboard, report, translation, email_template; flow = Regime C)",
         "content/docs/capabilities/integrations.mdx + content/docs/build-without-code.mdx (the E1 tier-1 claim under test: 'views and dashboards are yours to edit directly' on installed/packaged apps)",
         "packages/platform-objects/src/apps/dashboards/system_overview.dashboard.ts (the code-shipped built-in board the dashboard leg edits)",
@@ -1349,11 +1349,11 @@
         "ref": "packages/metadata-protocol/src/protocol.diagnostics-store-outage.test.ts — pins the outage clause ONLY (503 rethrown, never '0 problems'); the live sweep, scoping parity, refusals, and both browser surfaces still need the run"
       },
       "source": [
-        "packages/rest/src/rest-server.ts (the route: registered BEFORE /meta/:type so 'diagnostics' is not captured as a type; severity defaults 'error'; ?type/?severity/?package each single-valued via refuseRepeatedQueryParams #6877; 501 NOT_IMPLEMENTED when the kernel's protocol lacks getMetaDiagnostics; answers res.json(result) BARE)",
-        "packages/rest/src/rest-route-ledger.ts (REST-only route, bare body = GetMetaDiagnosticsResponseSchema, client meta.getDiagnostics, #12038)",
-        "packages/metadata-protocol/src/protocol.ts (getMetaDiagnostics: registry-derived type set filtered to registered schemas; reuses the _diagnostics read decoration; stats { count, locked, packages } computed in the same sweep 'so the Studio directory page can render tile counts and a package filter in one round-trip'; 503 outage rethrown #8855 / ADR-0110 D3; 400 unrecognised-spelling rethrown #8924; warnings 'reserved for a future lint layer')",
-        "packages/metadata-protocol/src/metadata-diagnostics.ts (computeMetadataDiagnostics — errors only, undefined = no opinion for schema-less types; zodIssuesToMetadataIssues names union branches #5598 so Studio has a path to highlight)",
-        "packages/spec/src/api/protocol.zod.ts (GetMetaDiagnosticsResponseSchema — entries[].diagnostics is the canonical MetadataValidationResultSchema the save path's 422 also speaks)",
+        "packages/rest/src/rest-server.ts#route (the route: registered BEFORE /meta/:type so 'diagnostics' is not captured as a type; severity defaults 'error'; ?type/?severity/?package each single-valued via refuseRepeatedQueryParams #6877; 501 NOT_IMPLEMENTED when the kernel's protocol lacks getMetaDiagnostics; answers res.json(result) BARE)",
+        "packages/rest/src/rest-route-ledger.ts#REST (REST-only route, bare body = GetMetaDiagnosticsResponseSchema, client meta.getDiagnostics, #12038)",
+        "packages/metadata-protocol/src/protocol.ts#getMetaDiagnostics (getMetaDiagnostics: registry-derived type set filtered to registered schemas; reuses the _diagnostics read decoration; stats { count, locked, packages } computed in the same sweep 'so the Studio directory page can render tile counts and a package filter in one round-trip'; 503 outage rethrown #8855 / ADR-0110 D3; 400 unrecognised-spelling rethrown #8924; warnings 'reserved for a future lint layer')",
+        "packages/metadata-protocol/src/metadata-diagnostics.ts#computeMetadataDiagnostics (computeMetadataDiagnostics — errors only, undefined = no opinion for schema-less types; zodIssuesToMetadataIssues names union branches #5598 so Studio has a path to highlight)",
+        "packages/spec/src/api/protocol.zod.ts#GetMetaDiagnosticsResponseSchema (GetMetaDiagnosticsResponseSchema — entries[].diagnostics is the canonical MetadataValidationResultSchema the save path's 422 also speaks)",
         "objectui packages/app-shell/src/views/metadata-admin/DiagnosticsPage.tsx (groups by type descending, per-row deep link../<type>/<name>, severity tabs, the summary badge, the clean Empty state, the loadFailed banner) + useMetadata.ts (useGlobalDiagnostics: strict error count vs warn-only count, counts/locked/packages from stats, older-server catch degrades to empty-not-fatal) + DirectoryPage.tsx,242-254 (package-scoped sweep drives tile badges; diagnostics link only when total > 0) + console/AppContent.tsx,982 (the metadata/_diagnostics route)",
         "studio-authoring.authoring-validation-not-persisted (why stock stores are clean — the save-time gate; also the known spurious _diagnostics banner on the DESIGNER, which is that item's business, not this sweep's)"
       ],

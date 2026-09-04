@@ -43,6 +43,10 @@ import {
   errorCodeFields,
 } from '../utils/format.js';
 import { checkProtocolVersionGap } from '../utils/protocol-version-gap.js';
+// [#14553] The compile-time half of the navigation-contribution group ruling.
+// Reports; never refuses — the runtime still relocates, deliberately.
+import { findNavGroupDiagnostics } from '../utils/nav-contribution-groups.js';
+import type { NavContributionGroupDiagnostic } from '@objectstack/objectql';
 
 /**
  * The artifact's package entries, as `{ index, id, body }` (ADR-0130 D4).
@@ -178,11 +182,23 @@ export default class Compile extends Command {
     let capProviderWarnings: Array<{ token: string; message: string }> = [];
     let unknownKeyWarnings: string[] = [];
     let docWarnings: DocIssue[] = [];
+    // [#14553] A member of `warningsSoFar()`, NOT a payload key of its own.
+    //
+    // ⛔ The first cut made it a separate top-level key and two standing pins
+    // refused it by name — `build-json-advisory-parity` and
+    // `build-json-undeclared-key-parity`, both titled "adds NO new top-level
+    // key to the payload — this fills a declared key, it is not a new
+    // surface". #11643 and #11727 each faced this choice and filled
+    // `warnings`. `os validate` computes the same list, so the parity the
+    // third pin in that file asserts ("nothing rides in build that validate
+    // does not also report") holds rather than being weakened to fit.
+    let navGroupWarnings: NavContributionGroupDiagnostic[] = [];
     const warningsSoFar = () => [
       ...ruleAdvisories,
       ...docWarnings,
       ...unknownKeyWarnings,
       ...capProviderWarnings,
+      ...navGroupWarnings,
     ];
     // [#12125] The ADR-0087 D2 conversion notices, hoisted for the SAME reason
     // and under the SAME ruling as the four lists above — one field over. The
@@ -443,6 +459,37 @@ export default class Compile extends Command {
           printAuthoringRuleErrors(perPackageErrors, { remedy: JSON_FULL_LIST_REMEDY });
           this.exit(1);
         }
+      }
+
+      // 3b-bis. [#14553] Navigation contributions whose `group` names no group
+      //     in the target app. RUNS ON EVERY BUILD, artifact or not — the block
+      //     above is skipped for a single-package stack, but a stack that
+      //     declares an app AND contributes into it has the identical defect
+      //     and `collectNavGroupInputs` reads it from the top-level manifest.
+      //
+      //     ⛔ REPORTS, NEVER REFUSES. The maintainer ruled option B: the
+      //     runtime keeps relocating the items to the app's top level (the fold
+      //     stays order-independent, contributions into optional groups keep
+      //     working) and the failure becomes VISIBLE instead. Making this exit
+      //     non-zero would be option A wearing a warning's clothes, and would
+      //     narrow what `os build` accepts — which the ruling explicitly does
+      //     not do.
+      //
+      //     A contribution whose target app is NOT in this compilation unit
+      //     yields nothing: contributing into an app another artifact ships is
+      //     the supported cross-artifact case, and is precisely why the merge
+      //     is a read-time fold. Only the composed case can be judged here.
+      navGroupWarnings = await findNavGroupDiagnostics(result.data as Record<string, unknown>);
+      if (navGroupWarnings.length > 0 && !flags.json) {
+        console.log('');
+        printWarning(
+          `Navigation contributions aimed at a group the target app does not declare ` +
+            `(${navGroupWarnings.length}) — the items still install, RELOCATED to the app's top level`,
+        );
+        printBulletList(
+          navGroupWarnings.map((d) => `[${d.code}] ${d.message} Fix: ${d.fix}`),
+          { noun: 'navigation-contribution diagnostic' },
+        );
       }
 
       // 3c. [#3366] Installable-provider preflight. Every capability the app

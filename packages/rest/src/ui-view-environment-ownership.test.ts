@@ -116,9 +116,28 @@ function kernelManagerFor(spec: Record<string, KernelSpec>) {
                     }
                     if (name === 'objectql') return emptyQl() as T;
                     if (name === 'protocol') return protocolFor(entry?.schema ?? null) as T;
-                    // `i18n`, `tenancy`, `settings`, … — absent, which every
-                    // caller in `computeExecCtx` treats as best-effort.
-                    throw new Error(`no ${name} service`);
+                    // `i18n`, `tenancy`, `settings`, … — ABSENT from this
+                    // environment's kernel.
+                    //
+                    // [#13906] Absence is spelled as a RESOLVED `undefined`,
+                    // ⛔ no longer as a bare `Error`. The seam contract names
+                    // that spelling itself (`wiredEngineOrLoud`: "a provider
+                    // that RESOLVES `undefined` still means no engine, quietly
+                    // — that is the seam contract declaring absence, not
+                    // failing"), and the double now says the fact it always
+                    // MEANT rather than one the registry never produces for
+                    // absence: a real `getServiceAsync` rejects for an
+                    // unregistered name with a BRANDED rejection (#13905), and
+                    // reserves the bare, unbranded rejection for a service that
+                    // IS registered and FAILED TO CONSTRUCT.
+                    //
+                    // Under the old collapse the difference was invisible, so
+                    // the inaccuracy was free. It is not free now: the tenancy
+                    // seam classifies an unbranded rejection as the outage it
+                    // is, and this double was claiming every absent service had
+                    // broken. ⛔ Do not "restore" the throw — that reintroduces
+                    // a fake reporting a fault it does not have.
+                    return undefined as T;
                 },
             } as any;
         },
