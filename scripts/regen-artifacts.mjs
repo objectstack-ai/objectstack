@@ -324,21 +324,18 @@ export const REGEN_ARTIFACTS = Object.freeze([
   //
   // No `readsDist`/`readsSchemaTree`: the generator walks `src/` directly.
   { path: 'skills/*/references/_index.md', gen: 'gen:skill-refs', check: 'check:skill-refs' },
-  // #13731. The ADR-0081 react-tier contract, both halves. Generated WHOLE — the
-  // markdown's frontmatter and its "do not edit by hand" banner are emitted by the
-  // generator too, so there is no hand-written region for a deferral to launder,
-  // which is the question this table exists to ask. A projection of the
-  // `REACT_BLOCKS` definition in `@objectstack/spec/ui`, one section per block: two
-  // PRs adding different blocks are a set union that git reports as a conflict.
+  // #13731. The ADR-0081 react-tier contract — ONE artifact since #14296 item 3
+  // retired its machine-readable JSON twin (the same table rendered twice, with
+  // zero consumers). Generated WHOLE — the markdown's frontmatter and its "do not
+  // edit by hand" banner are emitted by the generator too, so there is no
+  // hand-written region for a deferral to launder, which is the question this
+  // table exists to ask. A projection of the `REACT_BLOCKS` definition in
+  // `@objectstack/spec/ui`, one section per block: two PRs adding different blocks
+  // are a set union that git reports as a conflict.
   //
   // Same cheap-half caveat as its neighbour above, same answer: `check:react-blocks`
   // runs in `lint.yml` on `pull_request` and `merge_group`, re-deriving from the
   // definition, so the driver removes hand-merge rounds and is never the only signal.
-  {
-    path: 'skills/objectstack-ui/contracts/react-blocks.contract.json',
-    gen: 'gen:react-blocks',
-    check: 'check:react-blocks',
-  },
   {
     path: 'skills/objectstack-ui/references/react-blocks.md',
     gen: 'gen:react-blocks',
