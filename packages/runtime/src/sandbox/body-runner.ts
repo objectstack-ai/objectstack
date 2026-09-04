@@ -505,6 +505,45 @@ function vmVisibleEntryKeys(entryInput: unknown): string[] {
 }
 
 /**
+ * [#14760] The entry value as the VM could actually have seen it, or `ok:
+ * false` for a host value the round-trip cannot evaluate at all.
+ *
+ * Leg 2 of {@link carriedInputKeys} compares an entry snapshot against the VM's
+ * exit dump. The dump has been through `JSON.stringify` on the way in and
+ * `JSON.parse` on the way out; the snapshot had not. Comparing them raw asks
+ * whether a HOST value equals its own JSON projection, which for a `Date` is
+ * always false — so an untouched caller-supplied `Date` was reported as written
+ * THROUGH, carried back onto the engine's flat-input Proxy, recorded by the
+ * #14088 `set` trap as hook-written, and therefore KEPT by
+ * `stripReadonlyFields`. Measured end to end before this fix: a readonly
+ * `datetime` field no body ever names lands the CALLER's value on the row,
+ * while the same run's readonly `text` field is correctly stripped. The class
+ * is wider than `Date` — it is every object-valued entry value a round-trip
+ * cannot prove equal, an object carrying an `undefined` member included.
+ *
+ * The write-back's second harm has the same one cause: a key carried by this
+ * leg is re-asserted FROM THE DUMP, so the host `Date` reached the driver as an
+ * ISO string and the object lost its `undefined` member even where nothing was
+ * readonly. Normalising the comparison closes both, because an untouched key is
+ * no longer carried at all and the host simply keeps its own value.
+ *
+ * ⛔ The fail-open is NOT reversed. #14758 chose "anything we cannot prove
+ * equal is reported as changed and therefore CARRIED" deliberately, and a value
+ * that throws here — a cycle, a bigint, a `toJSON` returning `undefined` — still
+ * takes exactly that path. What changes is that the fail-open stops firing on
+ * values the round-trip CAN evaluate, which is where it was never needed. The
+ * verdict is per KEY: one unrepresentable entry value must not decide the set.
+ */
+function jsonSeenByVm(value: unknown): { ok: true; value: unknown } | { ok: false } {
+  try {
+    return { ok: true, value: JSON.parse(JSON.stringify(value)) as unknown };
+  } catch {
+    /* unrepresentable (cycle, bigint) — #14758's fail-open, for this key only */
+    return { ok: false };
+  }
+}
+
+/**
  * [#14758] Which keys of the exit dump the write-back should re-assert, or
  * `undefined` to assert all of them (the pre-#14758 behaviour).
  *
@@ -519,13 +558,17 @@ function vmVisibleEntryKeys(entryInput: unknown): string[] {
  *     assigned and then deleted, or assigned `undefined`, is absent from the
  *     dump and belongs to the deletion leg, not to this merge.
  *  2. Object-valued entry keys whose dumped value no longer matches the entry
- *     snapshot. A body that writes THROUGH a value it read (`ctx.input.meta.x =
- *     1`) never trips a trap on `ctx.input`, so (1) cannot list it and dropping
- *     it would be exactly the silent loss this card exists to end. The
- *     comparison is confined to keys whose ENTRY value is an object because a
- *     primitive cannot be mutated in place — every change to one is an
- *     assignment (1) already saw — and confining it there is what keeps this
- *     leg from re-widening into the value diff #14099's ruling refused.
+ *     snapshot **as the VM saw it** ({@link jsonSeenByVm}). A body that writes
+ *     THROUGH a value it read (`ctx.input.meta.x = 1`) never trips a trap on
+ *     `ctx.input`, so (1) cannot list it and dropping it would be exactly the
+ *     silent loss this card exists to end. The comparison is confined to keys
+ *     whose ENTRY value is an object because a primitive cannot be mutated in
+ *     place — every change to one is an assignment (1) already saw — and
+ *     confining it there is what keeps this leg from re-widening into the value
+ *     diff #14099's ruling refused. [#14760] Normalising the entry side is what
+ *     makes the comparison answer "did the body write through this?" instead of
+ *     "is this host value already JSON?"; without it every `Date`-valued key
+ *     answered the second question, in the wrong direction, forever.
  *
  * `undefined` (no narrowing) whenever the evidence is not there: no recorder,
  * or no usable entry snapshot to read leg 2 from.
@@ -546,7 +589,8 @@ function carriedInputKeys(
     if (carried.has(key)) continue;
     if (!before || typeof before !== 'object') continue;
     if (!Object.prototype.hasOwnProperty.call(mutated, key)) continue;
-    if (!sameJsonValue(before, mutated[key])) carried.add(key);
+    const seen = jsonSeenByVm(before);
+    if (!seen.ok || !sameJsonValue(seen.value, mutated[key])) carried.add(key);
   }
   return [...carried];
 }
@@ -557,14 +601,18 @@ function carriedInputKeys(
  *
  * Key ORDER is deliberately not significant: a JSON round-trip through the VM
  * preserves insertion order for string keys but reorders integer-like ones, and
- * a reorder is not a write. Every failure direction is the safe one — anything
- * this cannot prove equal is reported as changed and therefore CARRIED, which
- * is the pre-#14758 behaviour for that key. That covers the host values JSON
- * cannot represent (a `Date` arrives back as a string and compares unequal, so
- * it is carried exactly as it was before this card).
+ * a reorder is not a write.
  *
- * Terminates on a cyclic `a`: `b` is always JSON-parsed and therefore finite,
- * so the walk is bounded by `b`'s depth.
+ * [#14760] BOTH sides are JSON values by the time they reach here: `b` is the
+ * VM's exit dump, and `a` is the entry snapshot already put through
+ * {@link jsonSeenByVm}. So this compares like for like, and it no longer stands
+ * in for the round-trip itself. It used to: an unequal verdict meant either
+ * "the body wrote this" or "JSON cannot represent this host value", and the
+ * caller could not tell the two apart — which is how an untouched `Date` was
+ * read as a write. Distinguishing them is now {@link jsonSeenByVm}'s job, and
+ * the fail-open direction lives there with it, unchanged.
+ *
+ * Terminates: both sides are JSON-parsed and therefore finite.
  */
 function sameJsonValue(a: unknown, b: unknown): boolean {
   if (a === b) return true;
@@ -661,9 +709,10 @@ function sameJsonValue(a: unknown, b: unknown): boolean {
  *    itself ever fires, so the recorder cannot list `meta`. The dump is the only
  *    witness for those, and {@link carriedInputKeys} reads it the narrowest way
  *    available: an OBJECT-valued entry key whose dumped value no longer matches
- *    the entry snapshot was written through, and is carried. Primitives need no
- *    such leg — a primitive cannot be mutated in place, so every change to one
- *    is an assignment the recorder saw.
+ *    the entry snapshot — [#14760] as {@link jsonSeenByVm} shows it to the VM —
+ *    was written through, and is carried. Primitives need no such leg: a
+ *    primitive cannot be mutated in place, so every change to one is an
+ *    assignment the recorder saw.
  */
 function applyMutationsToInput(
   engineCtx: any,
