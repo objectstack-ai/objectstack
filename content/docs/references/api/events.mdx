@@ -30,6 +30,7 @@ const result = BulkDataEventSchema.parse(data);
 | **id** | `string` | ✅ | Unique event identifier |
 | **type** | `Enum<'data.records.updated' \| 'data.records.deleted'>` | ✅ | Event type |
 | **object** | `string` | ✅ | Object name |
+| **organizationId** | `string` | optional | Organization every record the predicate write affected belongs to — one organization for the whole batch, never per-row. Present = exactly that organization, asserted by the producer from the composed tenant wall, never fabricated and never the caller's active organization standing in for the rows'; the empty string is refused. Absent = the producer did not assert one organization for the batch (every event on a single-posture deployment; a system, environment-wide or cross-membership predicate write; any write whose affected rows are not known to belong to one organization) — deliberately NOT the DataEvent reading "belongs to no organization". A tenant-scoped consumer must treat an absent key as not attributable to its organization and must not deliver the event inside an organization wall; a deployment-wide consumer may use it. |
 | **matched** | `integer` | ✅ | Number of records affected |
 | **userId** | `string` | optional | User who triggered the event |
 | **timestamp** | `string` | ✅ | Event timestamp |
