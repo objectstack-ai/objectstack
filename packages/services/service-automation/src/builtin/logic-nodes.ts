@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { PluginContext } from '@objectstack/core';
-import { defineActionDescriptor } from '@objectstack/spec/automation';
+import { defineActionDescriptor, isExpressionEnvelopeShaped } from '@objectstack/spec/automation';
 import { DEFAULT_BRANCH_LABEL, type AutomationEngine } from '../engine.js';
 import { interpolate } from './template.js';
 
@@ -90,6 +90,30 @@ export function registerLogicNodes(engine: AutomationEngine, ctx: PluginContext)
         //     the variables).
         // Values interpolate `{var}` against the live flow variables, matching
         // the CRUD / screen nodes (so `value: '{record.amount}'` resolves).
+        //
+        // [#15137] …with ONE exception, and only in the canonical map: a value
+        // that is envelope-shaped (`isExpressionEnvelopeShaped` — a plain object
+        // naming a string `dialect`) is a CEL **value** envelope and is
+        // evaluated by the expression engine, not written through as data. That
+        // is the executor half of the 2026-09-02 ruling on #14149, whose spec
+        // half declared the slot (`FLOW_NODE_EXPRESSION_PATHS`'s
+        // `assignment.assignments.*`, role `value`) and the contract its values
+        // take (`AssignmentValueSchema`).
+        //
+        // The exception is scoped to the shape the ledger declares, which is the
+        // whole of what makes it safe:
+        //   • `assignments: { <var>: <value> }` — the canonical map, the one
+        //     slot the ledger names, the one place an envelope is an expression;
+        //   • `assignments: [{ variable, value }]` (legacy array) and the bare
+        //     `{ <var>: <value> }` config (no wrapper) — NOT declared, so an
+        //     envelope-shaped object there is the literal object it always was.
+        //     Nothing that registers today changes meaning in either shape, and
+        //     `AssignmentConfigSchema` is deliberately not wired into
+        //     `parseNodeConfig` for the array form.
+        // The discriminator is imported from the spec, never re-spelled: the
+        // ledger's resolver tests the same predicate on the same slot, so "which
+        // values does the validator judge" and "which values does the executor
+        // evaluate" cannot drift apart.
         engine.registerNodeExecutor({
             type: 'assignment',
             descriptor: defineActionDescriptor({
@@ -112,7 +136,10 @@ export function registerLogicNodes(engine: AutomationEngine, ctx: PluginContext)
             async execute(node, variables, context) {
                 const config = (node.config ?? {}) as Record<string, unknown>;
                 const raw = config.assignments;
-                const pairs: Array<[string, unknown]> = [];
+                // `declared` = this pair sits in the ledger's `assignments.*`
+                // slot, so an envelope there is an expression (#15137). False for
+                // both legacy shapes, whose values keep every meaning they had.
+                const pairs: Array<{ key: string; value: unknown; declared: boolean }> = [];
 
                 if (Array.isArray(raw)) {
                     // [{ variable | name | key, value }, …]
@@ -120,18 +147,28 @@ export function registerLogicNodes(engine: AutomationEngine, ctx: PluginContext)
                         if (item && typeof item === 'object') {
                             const e = item as Record<string, unknown>;
                             const name = (e.variable ?? e.name ?? e.key) as unknown;
-                            if (typeof name === 'string' && name) pairs.push([name, e.value]);
+                            if (typeof name === 'string' && name) pairs.push({ key: name, value: e.value, declared: false });
                         }
                     }
                 } else if (raw && typeof raw === 'object') {
-                    // { <var>: <value>, … }
-                    for (const [k, v] of Object.entries(raw as Record<string, unknown>)) pairs.push([k, v]);
+                    // { <var>: <value>, … } — the canonical, declared map.
+                    for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+                        pairs.push({ key: k, value: v, declared: true });
+                    }
                 } else {
                     // No `assignments` wrapper — top-level config keys ARE the variables.
-                    for (const [k, v] of Object.entries(config)) pairs.push([k, v]);
+                    for (const [k, v] of Object.entries(config)) pairs.push({ key: k, value: v, declared: false });
                 }
 
-                for (const [key, value] of pairs) {
+                for (const { key, value, declared } of pairs) {
+                    if (declared && isExpressionEnvelopeShaped(value)) {
+                        // A malformed envelope throws here rather than degrading
+                        // to a literal — but it cannot normally get this far:
+                        // `registerFlow` refuses the same set, derived from the
+                        // same call (`AutomationEngine.valueEnvelopeRefusals`).
+                        variables.set(key, engine.evaluateValueEnvelope(value, variables, `assignments.${key}`));
+                        continue;
+                    }
                     variables.set(key, interpolate(value, variables, context));
                 }
                 return { success: true };
