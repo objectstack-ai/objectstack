@@ -3048,6 +3048,31 @@ export class AuthManager {
             );
             return;
           }
+          // #14641 — the invitee's OWN stored language, when the address
+          // already carries a `sys_user` row. Two branches, and the split is
+          // the whole point:
+          //
+          //  1. the address HAS a row — an existing platform user invited into
+          //     a second organization, or a re-invitation (better-auth's
+          //     `create-invitation` refuses only an address that is already a
+          //     member of THIS org, measured in the installed 1.7.x
+          //     `routes/crud-invites.mjs`, so an existing account being invited
+          //     elsewhere reaches this callback normally). Their column is a
+          //     language they chose for themselves — the same authority the
+          //     reset / verification sends read since #14762.
+          //  2. NO row — a genuinely new invitee. Their language is still truly
+          //     unknown at invitation time, so the deployment default stands,
+          //     exactly as before.
+          //
+          // Matched EXACTLY on the address, which is safe here rather than
+          // merely tolerable: better-auth lowercases the invitee address on the
+          // invite route (`crud-invites.mjs` — both the create and the resend
+          // branch) and lowercases the stored `user.email` on sign-up
+          // (`api/routes/sign-up.mjs`), so both sides of this predicate are
+          // already in the same case. A spelling that resolves no row lands on
+          // the deployment default, which is the documented floor rather than a
+          // failure.
+          const storedLocale = await this.storedRecipientLocale({ email: recipientEmail });
           try {
             await emailService.sendTemplate({
               template: 'auth.invitation',
@@ -3059,13 +3084,11 @@ export class AuthManager {
               // very card one seat over. The 2026-09-02 ruling enumerates
               // signup, sign-in and password reset — sends where the requester
               // IS the recipient — and the superseded 2026-08-13 ruling named
-              // invitations as its own counterexample. A per-user language
-              // now EXISTS to read — `sys_user.locale` (#13881, ruling
-              // 2026-09-01) — but an invitee has no `sys_user` row until they
-              // accept, so this send keeps the deployment rung; reading the
-              // invitee's column where one exists is #14641's rung, not this
-              // card's.
-              ...this.emailLocaleArg(),
+              // invitations as its own counterexample. #13881's ruling item 3
+              // fixes the chain as RECIPIENT locale → deployment default, so
+              // the inviter direction stays rejected: what #14641 added above
+              // is the invitee's own column, never the inviter's header.
+              ...this.emailLocaleArg(undefined, storedLocale),
               data: {
                 inviter: {
                   name: inviter?.user?.name ?? inviter?.user?.email ?? 'A teammate',
@@ -4573,8 +4596,10 @@ export class AuthManager {
    * then this request's `Accept-Language`, then the deployment default. The
    * request rung did not lose its argument — it is still what answers for an
    * account with no stored column — it lost the tie, per the #14788 option-D
-   * ruling of 2026-09-03. (Invitations remain #14641's: an invitee has no
-   * `sys_user` row to read.)
+   * ruling of 2026-09-03. (#14641 then gave the invitation sends the SAME top
+   * rung, on the address / phone number rather than a user id — an invitee who
+   * ALREADY holds a row gets their own language, and only a genuinely new
+   * invitee still takes the deployment default.)
    */
   private async sendChangeEmailNotice(
     from: { email: string; name?: string; id?: string },
@@ -4778,11 +4803,25 @@ export class AuthManager {
     // `loginUrl` points at the actual Console sign-in page; `baseUrl` (bare
     // origin) is kept for backward-compatibility with tenant-overridden
     // templates that still interpolate `{{baseUrl}}`.
-    const body = await this.renderPhoneSmsBody(PHONE_SMS_TOPICS.invite, {
-      appName: this.getAppName(),
-      baseUrl: this.getCanonicalOrigin(),
-      loginUrl: this.getConsolePageUrl('/login'),
-    });
+    //
+    // #14641 — the invitee's OWN stored language, on the same two branches the
+    // invitation EMAIL takes. This surface is the branch-1 case in its purest
+    // form: the doc comment above is not describing a possibility but the
+    // invariant of the one in-repo caller — the identity import endpoint
+    // CREATES the account and only then sends this SMS, so the row exists
+    // before the send does. A number that resolves no row (a caller outside
+    // that flow) keeps the deployment default. Matched exactly on
+    // `phone_number`, the same predicate {@link deliverPhoneOtp} matches on.
+    const storedLocale = await this.storedRecipientLocale({ phone_number: phone });
+    const body = await this.renderPhoneSmsBody(
+      PHONE_SMS_TOPICS.invite,
+      {
+        appName: this.getAppName(),
+        baseUrl: this.getCanonicalOrigin(),
+        loginUrl: this.getConsolePageUrl('/login'),
+      },
+      storedLocale,
+    );
     const result = await sms.send({ to: phone, body, templateParams: { content: body } });
     if (result.status === 'failed') {
       // #6039 — same quota wall, same outward shape as the OTP path above.
@@ -4810,8 +4849,11 @@ export class AuthManager {
    * #14762 — this is now the SECOND rung, not the whole answer. The OTP send
    * reads the recipient's own `sys_user.locale` first (#13881, ruling
    * 2026-09-01, the same column the messaging channels resolve per recipient)
-   * and falls here when the account holds none. The SMS invite path still
-   * names this rung alone — its recipient's column is #14641's.
+   * and falls here when the account holds none. #14641 gave the SMS INVITE
+   * path the same rung — matched on `phone_number`, and for the one in-repo
+   * caller (identity import) the row always exists, since the account is
+   * created before the invitation SMS is sent. This rung answers when the
+   * number resolves no row, or the row names no language.
    */
   setDefaultSmsLocale(locale: string | undefined): void {
     this.smsLocale = locale?.trim() || undefined;
@@ -4862,8 +4904,11 @@ export class AuthManager {
    * and the change-email notice — so the order is stored → request → this
    * rung, per the #14788 option-D ruling of 2026-09-03. Nothing here changed:
    * this is still what answers when neither rung above names a locale, which
-   * is every send to an account that never set one. The invitation send still
-   * reads this rung alone (#14641).
+   * is every send to an account that never set one. #14641 then reached the
+   * invitation send too — but only through the STORED rung, matched on the
+   * invitee's address: an invitation to an address with no `sys_user` row (the
+   * common case) still reads exactly this rung, and the inviter's
+   * `Accept-Language` remains rejected on that send.
    */
   setDefaultEmailLocale(locale: string | undefined): void {
     this.emailLocale = normalizeAuthEmailLocale(locale);
@@ -4883,10 +4928,16 @@ export class AuthManager {
    * notification path (`email-channel.ts` retries address-only and warns), and
    * the ruling's item 3 — no path may dead-letter because of the locale read.
    *
-   * The read is one row on an indexed predicate (`sys_user.id`, or the unique
-   * `phone_number`), projected to the single column, under a system context —
-   * the recipient's own language must resolve regardless of who triggered the
-   * send, which is exactly the admin-initiated case this card is about.
+   * The read is one row on an indexed predicate, projected to the single
+   * column, under a system context — the recipient's own language must resolve
+   * regardless of who triggered the send, which is exactly the
+   * admin-initiated case #14762 was about, and the INVITER-triggered case
+   * #14641 added. Three predicates, one per caller shape: `sys_user.id` (the
+   * sends that hold a user row), the unique `phone_number` (the SMS sends,
+   * which are handed a number and nothing else), and the unique `email` (the
+   * invitation send, which is handed an address for an account that may not
+   * exist yet). All three are `unique: true` in the better-auth `user` table
+   * this object is backed by (`@better-auth/core` `db/get-tables.mjs`).
    */
   private async storedRecipientLocale(where: Record<string, unknown>): Promise<string | undefined> {
     const engine = this.getDataEngine();
@@ -4959,8 +5010,10 @@ export class AuthManager {
    * ruled chain collapses here to stored → deployment, with the built-in `en`
    * row as {@link phoneSmsLocaleChain}'s terminal floor exactly as before.
    *
-   * A caller that passes nothing — the SMS invite path, whose rung is #14641's
-   * — gets exactly the pre-#14762 deployment-default behaviour.
+   * A caller that passes nothing — or one whose recipient resolves no row —
+   * gets exactly the pre-#14762 deployment-default behaviour. #14641 made the
+   * SMS invite path a passer rather than an abstainer; it is no longer the
+   * standing example of a caller that names nothing.
    */
   private async renderPhoneSmsBody(
     topic: string,
