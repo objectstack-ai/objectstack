@@ -128,10 +128,23 @@ const SKILL_MAP: Record<string, string[]> = {
     'automation/flow.zod.ts',
     'automation/time-relative-trigger.zod.ts',
     'automation/approval.zod.ts',
-    'automation/state-machine.zod.ts',
+    // `automation/state-machine.zod.ts` left this list: ADR-0020 retired that
+    // shape AS A RECORD-LIFECYCLE DECLARATION (the top-level `workflow` type
+    // and `object.stateMachines` are both gone), and a record's legal
+    // transitions are now a `state_machine` VALIDATION RULE — `data/validation`
+    // below, already the correct destination. The file's one surviving door is
+    // `ai/agent.zod.ts`'s `lifecycle`, an objectstack-ai door, and that index
+    // reaches it transitively. Advertising it here pointed automation authors
+    // at a shape the platform deliberately removed from their surface.
     'automation/execution.zod.ts',
     'automation/webhook.zod.ts',
     'automation/node-executor.zod.ts',
+    // The per-node-type `config` shapes the body teaches and the index did not
+    // name: screen `fields` and the ADR-0031 loop/parallel/try_catch containers
+    // reach `builtin-node-config`, `NotifyConfigSchema` and the `http`
+    // `timeoutMs` reach `io-node-config`.
+    'automation/builtin-node-config.zod.ts',
+    'automation/io-node-config.zod.ts',
     'data/validation.zod.ts',
   ],
   'objectstack-ui': [

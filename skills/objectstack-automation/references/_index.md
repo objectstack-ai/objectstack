@@ -10,10 +10,11 @@ from `node_modules` — there is no local copy in the skill bundle.
 ## Core schemas
 
 - `node_modules/@objectstack/spec/src/automation/approval.zod.ts` — Exports: ApproverType, ApprovalDecision, ApprovalNodeApproverSchema, DecisionOutputDefSchema, ApprovalEscalationSchema
+- `node_modules/@objectstack/spec/src/automation/builtin-node-config.zod.ts` — Config contracts for the remaining flat builtins — the CRUD quartet
 - `node_modules/@objectstack/spec/src/automation/execution.zod.ts` — Automation Execution Protocol
 - `node_modules/@objectstack/spec/src/automation/flow.zod.ts` — Exports: FlowNodeAction, FlowVariableSchema, FlowNodeSchema, FlowEdgeSchema, FlowSchema
+- `node_modules/@objectstack/spec/src/automation/io-node-config.zod.ts` — Config contracts for the flat IO builtins — `notify` and `http` (#4045).
 - `node_modules/@objectstack/spec/src/automation/node-executor.zod.ts` — Node Executor Plugin Protocol — Wait Node Pause/Resume
-- `node_modules/@objectstack/spec/src/automation/state-machine.zod.ts` — XState-inspired State Machine Protocol — hierarchical states, guarded
 - `node_modules/@objectstack/spec/src/automation/time-relative-trigger.zod.ts` — Time-Relative Trigger Protocol
 - `node_modules/@objectstack/spec/src/automation/webhook.zod.ts` — Exports: WebhookTriggerType, WebhookSchema
 - `node_modules/@objectstack/spec/src/data/validation.zod.ts` — ObjectStack Validation Protocol
