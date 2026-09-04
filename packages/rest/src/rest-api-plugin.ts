@@ -279,6 +279,74 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
                 } catch { return undefined; }
             };
 
+            // [#15256 — maintainer ruling 2026-09-04, decision 1A] Tenancy
+            // service resolver — the SAME single-kernel fallback shape as
+            // `authServiceProvider` directly above, for the seam that had none.
+            //
+            // ## What its absence measured
+            //
+            // `RestServer.computeExecCtx` derives the effective tenancy posture
+            // from the per-request kernel — and on this wiring there IS no
+            // per-request kernel, so the posture was `undefined` on every
+            // request. Both posture-conditional API-key refusals are gated on
+            // it (`organization_required` in `api-key.ts`,
+            // `organization_membership_ended` in `resolve-authz-context.ts`),
+            // so both were skipped. Measured twice, on two repositories, under
+            // a live non-degraded `isolated` posture: an API key stamped with
+            // an organization its owner is no longer a member of READ that
+            // organization's rows (GET 200) and WROTE a new one into it (POST
+            // 201, the row read back from the store carrying the other
+            // organization's id). objectstack#15163 measured it on the
+            // framework; cloud#1982 reproduced it with the real, cloud-private
+            // `@objectstack/organizations` mounted, which adds no request-time
+            // refusal of its own.
+            //
+            // ## Why this is NOT `authServiceProvider`'s catch-all
+            //
+            // The shape is the same; the CLASSIFICATION is `objectQLProvider`'s
+            // (immediately below), because decision 1 option A already ruled
+            // what a fault at THIS seam means and a catch-all would re-collapse
+            // the two facts that ruling separated:
+            //
+            //  - never registered → branded → `undefined`, quiet. The supported
+            //    no-tenancy composition: no wall exists, and refusing there
+            //    would break every single-org embedder.
+            //  - registered and FAILED to build → unbranded → re-raised, so
+            //    `computeExecCtx` answers `AuthzStoreUnavailableError` (503).
+            //    A posture that could not be READ is not a posture that is
+            //    ABSENT; admitting on it is how a failure came to read as "this
+            //    check does not apply".
+            //
+            // ⛔ Do not "simplify" this to `try { ctx.getService('tenancy') }
+            // catch { return undefined }`. That spelling is the defect
+            // #13906 repaired one branch over.
+            //
+            // ⛔ And no BOOT refusal belongs here: the 2026-09-02 ruling's B′
+            // half (refusing to start a wall-enforcing posture on this wiring)
+            // was withdrawn 2026-09-04. A load-bearing comment in
+            // `rest-server.ts` pointed at that withdrawn remedy until this
+            // change; it now describes this provider instead.
+            const tenancyServiceProvider = async (_environmentId?: string): Promise<unknown | undefined> => {
+                const kernel = typeof ctx.getKernel === 'function' ? ctx.getKernel() : undefined;
+                if (kernel && typeof kernel.getServiceAsync === 'function') {
+                    try {
+                        return await kernel.getServiceAsync<unknown>('tenancy');
+                    } catch (err) {
+                        if (isServiceNotRegisteredError(err)) return undefined;
+                        throw err;
+                    }
+                }
+                // The sync leg, for a `KernelBase`-shaped host (`LiteKernel`)
+                // with no `getServiceAsync` — identical reasoning to
+                // `objectQLProvider`'s: such a host supports no service
+                // factories, so "not registered" is the only fault its accessor
+                // can report and absorbing it is the same classification rather
+                // than a second collapse.
+                try {
+                    return ctx.getService<unknown>('tenancy');
+                } catch { return undefined; }
+            };
+
             // ObjectQL resolver — single-kernel fallback so resolveExecCtx
             // can run sys_member / sys_user_permission_set lookups when
             // there is no kernelManager wired (e.g. `pnpm dev:crm`).
@@ -453,7 +521,7 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
             // `RouteManager` in the first place.
             let restServer: RestServer | undefined;
             try {
-                restServer = new RestServer(server, protocol, config.api as any, kernelManager, envRegistry, defaultEnvironmentIdProvider, authServiceProvider, objectQLProvider, emailServiceProvider, sharingServiceProvider, reportsServiceProvider, approvalsServiceProvider, sharingRulesServiceProvider, i18nServiceProvider, analyticsServiceProvider, settingsServiceProvider, serviceExistsProvider, securityServiceProvider, requestEnvResolver, metadataServiceProvider);
+                restServer = new RestServer(server, protocol, config.api as any, kernelManager, envRegistry, defaultEnvironmentIdProvider, authServiceProvider, objectQLProvider, emailServiceProvider, sharingServiceProvider, reportsServiceProvider, approvalsServiceProvider, sharingRulesServiceProvider, i18nServiceProvider, analyticsServiceProvider, settingsServiceProvider, serviceExistsProvider, securityServiceProvider, requestEnvResolver, metadataServiceProvider, tenancyServiceProvider);
                 restServer.registerRoutes();
 
                 ctx.logger.info('REST API successfully registered');
