@@ -10,8 +10,8 @@ There are **two upgrades** on this platform, and they run on separate clocks:
 | Ships as | a Docker image (or the `os` CLI on a host) | a compiled artifact, `dist/objectstack.json` |
 | Versioned by | our release train (`X.Y.Z`) | your own catalog |
 | Whose cadence | ours | yours |
-| The upgrade action | move the image tag, restart | `os migrate meta --from 16`, then rebuild and ship |
-| Touches your metadata? | no | yes — you edit your source, guided by the tool's change list |
+| The upgrade action | move the image tag, or the dependency pins, then restart | `os migrate meta --from 16`, then rebuild and ship |
+| Touches your metadata? | it never *rewrites* your metadata — but it can start *refusing* it ([measured](#a-runtime-move-can-still-force-metadata-edits)) | yes — you edit your source, guided by the tool's change list |
 
 Most upgrade questions are really the question *which of these am I doing*. You
 can do either one alone. A platform move does not rewrite your app, and
@@ -61,6 +61,35 @@ previous artifact.
 See [Self-hosting](/docs/deployment/self-hosting) for both deployment shapes in
 full.
 
+### Moving the dependency pins
+
+Not every deployment moves a tag. An app that consumes the platform as **npm
+dependencies** — `@objectstack/*` in its own `package.json`, which is the shape
+[`create-objectstack`](/docs/getting-started/quick-start) scaffolds — carries the
+platform version in its dependency tree and moves it there. There is no `os`
+command for this move; it is three steps you run yourself.
+
+1. **Bump every `@objectstack/*` dependency together, to the same version.**
+   The train is version-locked — every package on it shares one version number —
+   so a partial bump produces a combination that was never built or released as a
+   set. Include `devDependencies`: `@objectstack/cli` is the `os` binary that
+   validates and builds your app, and a CLI left a release behind runs the
+   *previous* release's author-time rules over your metadata.
+2. **Regenerate the lockfile, and commit it** (`pnpm install` / `npm install` /
+   `yarn install`). This is the step that actually moves the code. A project
+   pinned to exact versions moves because step 1 edited the pins; a project on the
+   scaffold's default ranges (`^17.0.0`) moves entirely here. Read whatever
+   peer-dependency warnings this prints — the `--frozen-lockfile` install your CI
+   runs skips resolution and will never print them.
+3. **Check the two protocol declarations your app ships** — `specVersion` in
+   `objectstack.manifest.json`, and `engines.protocol` in your `defineStack`
+   manifest. Both name the protocol **major**, so a move inside one major leaves
+   both alone, and a major boundary is where they change. Move them deliberately
+   when you cross one; never edit them to silence a mismatch.
+
+Then run [the loop](#the-loop) below — `os validate` before `os build` — because
+moving the pins can move the gate.
+
 ### What the boot does when the database disagrees
 
 Moving the runtime can leave the physical database shaped for the previous
@@ -83,6 +112,40 @@ itself, and **refuses to start on destructive drift**, printing every change and
 the command that resolves it. Nothing is skipped silently — "shrug and serve" is
 the state that gate exists to delete. The refusal happens before the HTTP port
 binds, so a refused boot is a boot that never served traffic.
+
+### A runtime move can still force metadata edits
+
+The table at the top of this page says a runtime move does not touch your
+metadata. That is true in the narrow sense — nothing rewrites your source files
+— and it is **not** the same claim as *no metadata work is needed*. The
+difference has been measured.
+
+An application repository was upgraded across a single minor, **17.2.0 →
+17.3.0**, by a reader holding only this documentation, the `CHANGELOG.md` files
+inside the published npm tarballs, and the `os` CLI's own output. Moving the pins
+and restarting was not enough:
+
+- **`os validate` refused the stack, and so did `os build`.** The release
+  registered one more author-time rule — the count printed by `os validate` moved
+  from 41 to 42 — and two objects that compiled on 17.2.0 stopped compiling. That
+  is a build-stopping gate, not a warning.
+- **A lint family widened onto surfaces it had not read before.** In that app the
+  count went from zero findings to 429.
+- **A constraint that had been declared but inert started being enforced**, so
+  nine identifier fields acquired a unique index on the next migration.
+
+None of that is a protocol-major event. It does not appear in the conversion
+window described below, and `os migrate meta` has nothing to replay for any of it
+— see ["Nothing to migrate" is not "you are
+done"](#what-it-does-not-do--read-the-output). The only channel that carries
+these is the release's own checklist, under [Per-release
+specifics](#per-release-specifics).
+
+<Callout type="warn">
+**After any runtime move, minor included, run `os validate` before you ship.** A
+stack that built clean on the release you are leaving is not evidence that it
+builds clean on the one you are landing on.
+</Callout>
 
 ### When a platform move forces an app move
 
@@ -169,6 +232,27 @@ for you to resolve — and a clean-looking run can still carry dozens of them. T
 command's output is the work list, not a receipt.
 </Callout>
 
+<Callout type="warn">
+**"Nothing to migrate" is not "you are done".** This command's scope is the
+protocol chain, so on a move **inside** one major it has — correctly — nothing to
+replay, and says so:
+
+```text
+$ os migrate meta --from 17
+Nothing to migrate — the metadata is already canonical for this range.
+```
+
+That sentence is true, and it is narrow. It is silent about author-time rules
+added inside the major, lint families that widened, defaults that flipped,
+declared constraints that started being enforced, and grants that changed
+meaning — none of which is a protocol conversion, and any of which can stop your
+build or change your runtime's behaviour. Measured on one 17.2.0 → 17.3.0
+upgrade: the command printed exactly the line above and exited 0 while **nine**
+separate changes were live and unaddressed on that stack. Read it as *the
+protocol chain is clean*, then get the rest from [Per-release
+specifics](#per-release-specifics).
+</Callout>
+
 That split is the reason the per-major checklists below still matter: renames
 and retired keys the tool enumerates for you; decisions it cannot make for you
 stay yours.
@@ -211,8 +295,8 @@ have no other channel to reach you than the page below.
 
 | Release | Where its upgrade notes live |
 | :--- | :--- |
-| v17.3.0 | [Breaking changes & migration in 17.3.0](/docs/releases/v17#breaking-changes--migration-in-1730) |
-| v17.2.0 | [Breaking changes & migration in 17.2.0](/docs/releases/v17#breaking-changes--migration-in-1720) |
+| v17.3.0 | [Upgrade checklist — 17.3.0](/docs/releases/v17#1730) |
+| v17.2.0 | [Upgrade checklist — 17.2.0](/docs/releases/v17#1720) |
 | v17.1.0 | [Upgrade checklist — 17.1.0](/docs/releases/v17#1710) |
 | v17.0.0 | [Upgrade checklist — 17.0.0](/docs/releases/v17#1700) |
 | v16.0.0 | [Upgrade checklist](/docs/releases/v16#upgrade-checklist) |
@@ -228,9 +312,34 @@ breaking change as `minor` rather than `major`, so the version number is not the
 migration signal and the changelog entry is. Earlier majors' release pages carry
 one checklist per major, which is what those rows link to.
 
-Curated notes for v10 and v11 were never backfilled; consult the per-package
-`CHANGELOG.md` files for those two. The [release notes
-overview](/docs/releases) summarizes what each major changed.
+The [release notes overview](/docs/releases) summarizes what each major changed.
+
+### The per-package changelogs are the exhaustive record
+
+The release pages above are **triaged**, deliberately: a change is written up
+there when it can be reached from something an application ships or operates, and
+changes that move only the platform's own internals are left out. That triage is
+what makes a release page readable — 17.3.0 alone carries 862 changelog entries
+across the train — and it is also the page's limit.
+
+The exhaustive record is the `CHANGELOG.md` shipped **inside every published
+package**, so you already have a copy of the ones that matter to you:
+
+```bash
+less node_modules/@objectstack/spec/CHANGELOG.md
+less node_modules/@objectstack/cli/CHANGELOG.md
+# …one per @objectstack/* package your app depends on
+```
+
+Read them whenever a release checklist does not explain what you are seeing,
+whenever you maintain a plugin or a driver against our internal contracts, and
+whenever you are crossing several releases at once. They are per-change, and they
+carry the reasoning and the migration for entries too narrow to reach a release
+page. On one measured documentation-only upgrade, these files — not the release
+pages — were where the answer to every question turned out to be, which is why
+this section is here rather than one line about two old majors. Curated notes for
+**v10 and v11** were never backfilled at all, so for those two majors the
+changelogs are the only record there is.
 
 What a major is *allowed* to change in the first place — which edits count as breaking,
 and the deprecation window a property must sit through before it can be removed — is the
