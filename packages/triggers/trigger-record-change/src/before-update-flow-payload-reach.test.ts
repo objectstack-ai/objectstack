@@ -72,6 +72,11 @@ import { ObjectKernel } from '@objectstack/core';
 import { ObjectQLPlugin } from '@objectstack/objectql';
 import { AutomationServicePlugin, type AutomationEngine } from '@objectstack/service-automation';
 import type { IDataEngine, IObjectQLEngine } from '@objectstack/spec/contracts';
+// `check:test-source-alias` — this package resolves `@objectstack/driver-sql`
+// through `dist/`, so its first load must be paid during COLLECTION, not inside
+// a clocked test body: a `it(…, 25000)` that also transforms a dependency's
+// whole module graph measures loading, not behaviour.
+import { SqlDriver } from '@objectstack/driver-sql';
 import { RecordChangeTriggerPlugin } from './plugin.js';
 
 /**
@@ -126,7 +131,20 @@ function makeDriver(): any {
       const cur = storeFor(o).get(id) ?? {}; const u = { ...cur, ...data, id };
       storeFor(o).set(id, u); return { ...u };
     },
-    async find(o: string, ast: any) { return sel(o, ast).map((r) => ({ ...r })); },
+    // The caller's bound is honoured, applied AFTER the filter and by PRESENCE
+    // (`check:objectql-double-limit`): a double that silently ignores `limit`
+    // answers a question the engine did not ask.
+    async find(o: string, ast: any, opts?: { limit?: number }) {
+      // The bound is read by PRESENCE (`limit: 0` must return nothing, not
+      // everything) from EITHER position it can arrive in — the engine passes
+      // driver options third, the AST-shaped call carries it second.
+      const bound = typeof opts?.limit === 'number'
+        ? opts.limit
+        : typeof ast?.limit === 'number' ? ast.limit : undefined;
+      const rows = sel(o, ast);
+      const page = typeof bound === 'number' ? rows.slice(0, bound) : rows;
+      return page.map((r) => ({ ...r }));
+    },
     async findOne(o: string, ast: any) { const [r] = sel(o, ast); return r ? { ...r } : null; },
     async delete(o: string, id: string) { return storeFor(o).delete(id); },
     async count(o: string, ast: any) { return sel(o, ast).length; },
@@ -238,7 +256,7 @@ async function seedTwoRows(data: IDataEngine, object: string): Promise<void> {
   await data.insert(object, [
     { title: 'alpha', status: 'todo' },
     { title: 'beta', status: 'blocked' },
-  ] as any, { context: { userId: 'u1' } } as any);
+  ], { context: { userId: 'u1' } });
 }
 
 /** The ONE predicate write every probe measures. */
@@ -248,7 +266,7 @@ async function batchUpdate(
   payload: Record<string, unknown>,
 ): Promise<{ ok: boolean; error?: string }> {
   try {
-    await data.update(object, payload as any, { multi: true, where: {}, context: { userId: 'u1' } } as any);
+    await data.update(object, payload, { multi: true, where: {}, context: { userId: 'u1' } });
     return { ok: true };
   } catch (err) {
     return { ok: false, error: (err as Error)?.message ?? String(err) };
@@ -256,7 +274,7 @@ async function batchUpdate(
 }
 
 const rowsByTitle = async (data: IDataEngine, object: string) => {
-  const rows: any[] = await data.find(object, {} as any);
+  const rows: any[] = await data.find(object, {});
   return new Map<string, any>(rows.map((r) => [r.title, r]));
 };
 
@@ -323,7 +341,7 @@ describe('[#15356] can a record-before-update flow reach a multi:true batch payl
     expect(residues[0]).toBe(`from:${dispatched[dispatched.length - 1]}`);
     // Every per-row context carried the SAME payload object (D3).
     expect(new Set(stack.witness.map((w) => w.payloadRef)).size).toBe(1);
-    expect(stack.witness.at(-1)?.data.residue).toBe(residues[0]);
+    expect(stack.witness[stack.witness.length - 1]?.data.residue).toBe(residues[0]);
   }, 20000);
 
   it('⭐ #14099 ARMED CONTROL: divergent key sets across rows refuse the batch whole', async () => {
@@ -378,7 +396,7 @@ describe('[#15356] can a record-before-update flow reach a multi:true batch payl
     expect(wrote).toMatchObject({ ok: true });
     await sleep(200);
 
-    const audit: any[] = await stack.data.find(`${object}_audit`, {} as any);
+    const audit: any[] = await stack.data.find(`${object}_audit`, {});
     expect(audit.map((r) => r.seen).sort(), 'the flow must have RUN, once per row').toEqual(['alpha', 'beta']);
 
     const rows = await rowsByTitle(stack.data, object);
@@ -402,7 +420,7 @@ describe('[#15356] can a record-before-update flow reach a multi:true batch payl
     expect(wrote).toMatchObject({ ok: true });
     await sleep(200);
 
-    const audit: any[] = await stack.data.find(`${object}_audit`, {} as any);
+    const audit: any[] = await stack.data.find(`${object}_audit`, {});
     expect(audit.map((r) => r.seen).sort()).toEqual(['alpha', 'beta']);
     const rows = await rowsByTitle(stack.data, object);
     expect(rows.get('alpha')?.residue ?? null).toBeNull();
@@ -423,7 +441,7 @@ describe('[#15356] can a record-before-update flow reach a multi:true batch payl
     expect(wrote).toMatchObject({ ok: true });
     await sleep(200);
 
-    const audit: any[] = await stack.data.find(`${object}_audit`, {} as any);
+    const audit: any[] = await stack.data.find(`${object}_audit`, {});
     expect(audit.map((r) => r.seen).sort(), 'the flow must have RUN, once per row').toEqual(['alpha', 'beta']);
     const rows = await rowsByTitle(stack.data, object);
     expect(rows.get('alpha')?.residue ?? null).toBeNull();
@@ -552,7 +570,7 @@ describe('[#15356] can a record-before-update flow reach a multi:true batch payl
     await stack.data.update(
       object,
       { id: before.get('alpha')?.id, status: 'done', tags: ['seed'] } as any,
-      { context: { userId: 'u1' } } as any,
+      { context: { userId: 'u1' } },
     );
     await sleep(200);
 
@@ -634,7 +652,6 @@ describe('[#15356] can a record-before-update flow reach a multi:true batch payl
  */
 describe('[#15356] S5 on the real SQL driver — the reach lands on every row of a real UPDATE', () => {
   it('a flow script mutating `record.tags` in place writes both dispatches onto both rows', async () => {
-    const { SqlDriver } = await import('@objectstack/driver-sql');
     const kernel = new ObjectKernel({ logger: { level: 'silent' } });
     await kernel.use(new ObjectQLPlugin());
     await kernel.use(new AutomationServicePlugin());
@@ -671,7 +688,7 @@ describe('[#15356] S5 on the real SQL driver — the reach lands on every row of
     const wrote = await batchUpdate(data, 'sq', { status: 'done', tags: ['seed'] });
     await sleep(300);
 
-    const audit: any[] = await data.find('sq_audit', {} as any);
+    const audit: any[] = await data.find('sq_audit', {});
     expect(audit.map((r) => r.seen).sort(), 'the flow must have RUN, once per row').toEqual(['alpha', 'beta']);
     expect(wrote, 'and #14099 did NOT refuse it').toMatchObject({ ok: true });
 
