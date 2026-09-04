@@ -274,8 +274,12 @@ so under this record it is a definition, not an assignment: the spec gains `Posi
 position names its sets there, a Studio-authored position names them in its definition, the `everyone`
 baseline stays derived from `isDefault`, and an ADR-0090 D9 suggestion, when accepted, edits the position's
 definition instead of inserting a row. Under `single` an admin binding a set to a position in Setup is an
-environment metadata write; under a wall a plant admin cannot rebind a position (§6 Q2 records the
-alternative reading). There is **no organization-level catalog**: the objects `sys_position`,
+environment metadata write; under a wall a plant admin cannot rebind a position. **Ruled 2026-09-04**
+(「ok」 to the reading that a position's sets are its definition): the alternative — an org-owned binding
+table letting each plant compose roles from the environment's sets — is recorded and rejected in §5; the
+escape valves are direct user ↔ permission-set assignment (`sys_user_permission_set`, organization-level),
+a plant-specific position authored centrally, or a plant's own environment. There is **no
+organization-level catalog**: the objects `sys_position`,
 `sys_permission_set`, `sys_position_permission_set` and `sys_capability` retire (D13), completing
 [ADR-0094](./0094-sys-permission-set-pure-projection.md) D1 — the metadata layer was already the sole
 authoritative store; the projected row no longer exists either. Consequences by posture, verbatim from
@@ -698,6 +702,7 @@ compatibility shims for a shape nobody has used yet.
 | **A string sentinel (`__global__`) as owner** | Breaks the FK to `sys_organization`; every layer special-cases it forever (ADR-0120 D3's COALESCE is the running cost). |
 | **Declare a legitimately org-less write per call** (#13636 option B, draft PR #14923) | Makes NULL a *declared* state instead of removing it; every future writer of a conditionally-scoped object must know to declare; the column stays nullable, so the constraint D1 wants can never land. Superseded by taking the column off the objects whose rows are legitimately org-less (§1.6). |
 | **An organization-level catalog beside the environment one** (this record's second draft: tenant-created positions and sets as org-owned rows, pickers unioning registry and rows) | Two sources at selection time, a uniqueness check spanning both, a resolution order — three costs paid so that a tenant of a shared-DB deployment can define its own roles, a need no customer has stated. Deferred: if it arrives, it returns as an org-owned catalog object (the same shape), never as rows in a nullable-column table. |
+| **Position → permission-set binding as an organization-level assignment table** (each plant composes roles from the environment's sets) | A position name is the public vocabulary approvals, sharing rules, reports and audits reference; per-plant rebinding gives one name N meanings, lets a plant admin silently widen a shared role for every holder in the plant, and puts a managed package's shipped bindings in conflict with the plant's. SAP master/derived roles, Salesforce permission-set groups (org = environment) and 集团统管 all keep role content central. Exceptions are expressed by assigning a set to a person, not by redefining the role. Rejected 2026-09-04. |
 | **Keep ADR-0126's overlay and disable + clone regimes live for managed content** | Each regime is a per-type customization mechanism with its own ledger, walls and UI; under the startup posture the maintainer chose one switch (the install mode) over three mechanisms. Regime E stays because it costs nothing (a package). Paused, not rejected: the regimes return only on a measured pull, and never through a nullable tenant column. |
 
 ---
@@ -716,12 +721,7 @@ overlay axis is retired (D6). One remains:
    (builds the read half of a copy-on-write door now), or accept the loss under the startup posture
    with a release note? Depends on whether any deployment relies on the feature — this record cannot
    see that; the maintainer rules it when the C4 card is cut.
-2. **Position → permission-set binding: definition or assignment?** (D3) This record reads "which sets
-   a position carries" as part of the position's definition — environment-level, `PositionSchema.permissionSets`,
-   plants cannot rebind — because the maintainer's rule is 「单库多租户禁止创建，但要支持绑定到人员」 and
-   rebinding changes what a role grants. The alternative reading keeps `sys_position_permission_set` as an
-   org-owned assignment table (position name, set name, organization NOT NULL): a plant composes its roles
-   from the environment's sets. That is per-plant role composition by another door; proposed: definition.
+
 
 ## 7. Verification notes
 
