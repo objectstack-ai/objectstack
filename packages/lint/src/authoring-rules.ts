@@ -682,8 +682,37 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // crossing would be a silent no-op that reads as coverage — the very shape
     // #9313 was filed about. Flow snapshots are unchanged: every member keeps
     // the default `flow` declaration.
+    //
+    // [#15254] `object` joins, and the granularity mechanism above is what
+    // makes it a NARROW crossing rather than the whole suite arriving at the
+    // hottest write door: this entry says an `object` write dispatches the
+    // suite; the suite's per-member `runtimeTypes` says exactly ONE member
+    // judges that snapshot (`validateObjectFieldRefs`), because it is the
+    // only member that resolves an object's references against the object's
+    // OWN field map. Every other member keeps `['flow', 'view']` (or the
+    // frozen `['flow']` default) and does not run on an object write.
+    //
+    // The measured state that forced it: `runtimeAuthoringRulesFor('object')`
+    // dispatched seven rules and no reference-integrity rule among them, so
+    // the ONLY door a Studio tenant has ran no reference-integrity judgement
+    // at all on the artifact Studio actually authors — while the app builder
+    // mints no `view` items, leaving the members crossed by #9313 with
+    // nothing to inspect on the click path. That is not a rule that missed a
+    // case; it is a wall whose fourth door was pointed at a surface the click
+    // path never produces.
+    //
+    // ⚠️ This is a REFUSAL widening on the object door, and unlike #4716 it is
+    // not fenced by the advisory tier: an object republished with a
+    // pre-existing dangling `highlightFields` entry is now refused (422)
+    // rather than warned. That is the acceptance bar of the card, stated in
+    // its own words ("Warning-level is not enough for the claim; it has to
+    // refuse"), and it is called out in the changeset's Migration section
+    // because it turns a publish that used to succeed into one that does not.
+    // The gate's differential keeps it honest in the one direction that
+    // matters: a STORED sibling already in violation is never charged to this
+    // write (#4463 D4).
     surfaces: CLI_AND_RUNTIME,
-    runtimeTypes: ['flow', 'view'],
+    runtimeTypes: ['flow', 'view', 'object'],
     run: (stack, ctx) => validateReferenceIntegrity(stack, ctx),
   },
   // ADR-0078 / #5068 — the SDUI component-props gate. `PageComponent.properties`

@@ -34,7 +34,16 @@ export interface BuildProbeReport {
     /** Findings, empty when every probe passed. */
     issues: RuntimeBuildIssue[];
     /** How many probes actually ran, per plane (0s mean nothing to probe). */
-    checked: { seeds: number; views: number; widgets: number };
+    /**
+     * [#15254] `objects` joined the planes because its ABSENCE was the tell.
+     * A publish of a package Studio's app builder authored reported
+     * `{seeds: 0, views: 0, widgets: 0}` — three zeroes, no `objects` key —
+     * and that receipt was accurate: the builder mints no `view` items, so
+     * every plane the report carried had genuinely nothing to inspect while
+     * the objects it DID publish were probed by nothing. A count that cannot
+     * go up is indistinguishable from a plane that found nothing wrong.
+     */
+    checked: { seeds: number; views: number; widgets: number; objects: number };
 }
 
 /** The single read the probes need from the data engine. */
@@ -108,7 +117,10 @@ async function hasRows(
  *    renderer uses must not throw (`view_read_failed`);
  *  • per published `dashboard` widget — its real dataset selection must
  *    execute (`widget_query_failed`) and must not return empty on an object
- *    that HAS rows (`empty_query` — the four-layer staging incident class).
+ *    that HAS rows (`empty_query` — the four-layer staging incident class);
+ *  • per published `object` — the field-name lists it writes about its own
+ *    fields must resolve (`object_field_ref_unknown`, #15254). The one plane
+ *    that judges rather than reads; see its own note below.
  *
  * All probes are reads (limit-1 / single aggregate); a probe crash is
  * reported, never thrown — verification must not break the publish it
@@ -116,7 +128,7 @@ async function hasRows(
  */
 export async function runBuildProbes(opts: RunBuildProbesOptions): Promise<BuildProbeReport> {
     const issues: RuntimeBuildIssue[] = [];
-    const checked = { seeds: 0, views: 0, widgets: 0 };
+    const checked = { seeds: 0, views: 0, widgets: 0, objects: 0 };
     const { engine, getItem, published, analytics, organizationId } = opts;
 
     // Memoized active-item reads (a dashboard and its widgets share datasets).
@@ -192,6 +204,66 @@ export async function runBuildProbes(opts: RunBuildProbesOptions): Promise<Build
                 message: `View "${p.name}" cannot read object "${objectName}": ${String((e as Error)?.message ?? e)} — it will render as an error for every user.`,
                 fix: `Verify object "${objectName}" published successfully (its table must exist) and that the view's binding is correct.`,
             });
+        }
+    }
+
+    // ── Objects: the field-name lists an object writes about itself ────────
+    //
+    // [#15254] The one plane that is NOT a read. Every other probe here
+    // exercises the published artifact through the engine, because the class
+    // ADR-0038 L3 was written for is "schema-valid but returns nothing at
+    // runtime". A dangling `highlightFields` entry is the opposite shape: the
+    // read succeeds, the list renders, and the reference is silently dropped
+    // — nothing to observe by querying. So this plane re-runs the authoring
+    // judgement over what actually landed.
+    //
+    // It is deliberately NOT the gate: `assertRuntimeAuthoringRules` already
+    // refused this write before it was persisted, and probes never fail the
+    // publish they verify. What this adds is the receipt — `checked.objects`
+    // is the count that makes "no object was inspected" and "every object was
+    // clean" different numbers — and a second, non-differential reading of the
+    // ACTIVE body. The gate judges only what a write ADDED (#4463 D4, so a
+    // stored row in violation never blocks someone else); this reads the
+    // published body whole, so an object that arrived carrying a dangling
+    // reference before the rule existed is reported here rather than staying
+    // invisible forever.
+    //
+    // The rule is loaded lazily, for the reason the whole module is: it is
+    // only reachable when a package actually published an object.
+    const publishedObjects = published.filter((x) => x.type === 'object');
+    if (publishedObjects.length > 0) {
+        let validateObjectFieldRefs:
+            | ((stack: Record<string, unknown>) => Array<{ path: string; message: string; hint: string }>)
+            | undefined;
+        try {
+            ({ validateObjectFieldRefs } = await import('@objectstack/lint'));
+        } catch {
+            validateObjectFieldRefs = undefined;
+        }
+        for (const p of publishedObjects) {
+            if (!validateObjectFieldRefs) break;
+            const body = asRec(await readItem('object', p.name));
+            if (!body) continue;
+            checked.objects += 1;
+            // One object is the whole universe the question has: every name in
+            // an object-level field-name list resolves against that object's
+            // OWN field map, never a sibling's. See the rule's module note.
+            let findings: Array<{ path: string; message: string; hint: string }> = [];
+            try {
+                findings = validateObjectFieldRefs({ objects: [{ ...body, name: p.name }] }) ?? [];
+            } catch {
+                findings = [];
+            }
+            for (const f of findings) {
+                issues.push({
+                    layer: 'runtime',
+                    severity: 'error',
+                    artifact: { type: 'object', name: p.name },
+                    code: 'object_field_ref_unknown',
+                    message: `Object "${p.name}" names a field that does not exist (${f.path}): ${f.message}`,
+                    fix: f.hint,
+                });
+            }
         }
     }
 

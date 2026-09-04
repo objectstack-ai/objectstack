@@ -103,6 +103,7 @@ import { validateObjectReferences } from './validate-object-references.js';
 import { validateSearchableFields } from './validate-searchable-fields.js';
 import { validateSortableFields } from './validate-sortable-fields.js';
 import { validateListViewFieldRefs } from './validate-list-view-field-refs.js';
+import { validateObjectFieldRefs } from './validate-object-field-refs.js';
 import { validateActionNameRefs } from './validate-action-name-refs.js';
 import { validatePageFieldBindings } from './validate-page-field-bindings.js';
 import { validatePageVisualizationBindings } from './validate-page-visualization-bindings.js';
@@ -232,6 +233,41 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // MCP/AI author writes goes through that door and no CLI, so a
   // build-time-only rule would never reach the author who made the typo.
   { name: 'validateListViewFieldRefs', runtimeTypes: ['flow', 'view'], run: validateListViewFieldRefs },
+  // [#15254] The same question, one surface IN: the field-name lists the
+  // OBJECT itself carries (`highlightFields`, `publicSharing.redactFields`),
+  // which the three list-view members above do not walk because they are not
+  // on a list view. Placed directly after them because it completes the same
+  // sweep — every field name an object or its built-in views write down.
+  //
+  // `runtimeTypes` is `['flow', 'object']` — the ONLY member of this suite
+  // that names `object`, and `flow` for the floor the suite keeps.
+  //
+  // It names `object` because that is the point of the member: Studio's app
+  // builder mints no `view` items at all, so the list-view members have
+  // nothing to inspect on the only artifacts the click path authors. What it
+  // authors is the OBJECT. The crossing carries the #9313 property that makes
+  // it safe — this member resolves only against `stack.objects`, the
+  // collection the per-write snapshot does carry, so it has no
+  // missing-collection false-positive channel; and it resolves each name
+  // against the object's OWN field map, so a one-object snapshot is not
+  // merely sufficient, it is the whole universe the question has.
+  //
+  // It names `flow` because EVERY member of this suite does — the #4463 P1
+  // surface is the floor the member axis was never meant to narrow, and
+  // `runtime-gate.view-writes.test.ts` pins it as an invariant over the whole
+  // roster rather than a preference per member. Worth being plain about what
+  // it buys here: on a flow snapshot the objects are CONTEXT, present in the
+  // baseline and the candidate alike, so anything this member could raise
+  // there cancels in the gate's differential (#4463 D4 — a stored object
+  // already in violation is never charged to someone else's write). So it
+  // adds a pass, not a verdict. That is the right trade against being the
+  // first member to leave the floor.
+  //
+  // It does NOT name `view`, and that IS an argued omission: the `crossed`
+  // list in that same test is written out precisely so each view crossing is
+  // argued, and this member judges no list view. A view write cannot change
+  // an object's own field-name lists.
+  { name: 'validateObjectFieldRefs', runtimeTypes: ['flow', 'object'], run: validateObjectFieldRefs },
   { name: 'validateActionNameRefs', run: validateActionNameRefs },
   { name: 'validatePageFieldBindings', run: validatePageFieldBindings },
   // [#14073] The same page, one question out. `validatePageFieldBindings`
