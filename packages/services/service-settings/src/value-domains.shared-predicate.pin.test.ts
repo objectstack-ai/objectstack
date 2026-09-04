@@ -46,11 +46,24 @@
  * nothing else. A table can exist anywhere in the tree without harm as long as
  * the door cannot reach it, and a relative import is how it would.
  *
+ * Every scan below is DELIMITER-AGNOSTIC. It was not, and that is the round-2
+ * finding: a verbatim double-quoted copy of the array mutation passed the
+ * whole file green, because the import pin and both shape regexes hard-coded
+ * the single quote. This package has no `quotes` lint rule active, so both
+ * spellings are legal here and only these pins can tell them apart. The
+ * space after `from` is optional for the same reason.
+ *
+ * The alternation shape (`/^(?:AD|AE|…|ZW)$/`) needs neither quotes nor an
+ * import, so it is caught by DENSITY instead of by spelling, on the door.
+ *
  * NOT covered, stated so the claim stays the size of the evidence: a 3-letter
- * currency array is not shape-detected (the two alpha-2 shapes are), and a
- * membership table reached through a BARE package specifier rather than a
- * relative one would pass the import pin. The import surface being one line
- * long is what makes both remote.
+ * table (a currency list) is not shape-detected in any spelling — the density
+ * and shape scans are two-letter — and a membership table reached through a
+ * BARE package specifier rather than a relative one would pass the import pin.
+ * A currency table is instead reached BEHAVIOURALLY, by the population
+ * agreement pin in `value-domains.test.ts`, which walks every code this
+ * runtime enumerates through the door and the shared predicate and requires
+ * the two to answer alike.
  *
  * Test sources are exempt from the scan: they are evidence, not enforcement.
  */
@@ -111,9 +124,30 @@ describe('value-domains.ts answers from the shared predicate', () => {
     // membership. A 249-code array literal in a sibling module is harmless
     // while nothing here can import it, and a relative specifier is how it
     // would be reached.
+    // Delimiter-agnostic and space-agnostic on purpose. An earlier draft read
+    // `/\bfrom\s+'([^']+)'/` — single quotes and a mandatory space — and a
+    // verbatim double-quoted copy of the mutation below walked straight past
+    // it: `from "./zz-alpha2-array.js"` is not seen, so the pin reported the
+    // one legal specifier and passed. ESLint does not close that door either;
+    // this package has no `quotes` rule active, so both spellings are legal
+    // here and only this pin can tell them apart.
     const code = stripComments(readFileSync(DOOR, 'utf8'));
-    const specifiers = [...code.matchAll(/\bfrom\s+'([^']+)'/g)].map((m) => m[1]);
+    const specifiers = [...code.matchAll(/\bfrom\s*(['"])([^'"]+)\1/g)].map((m) => m[2]);
     expect(specifiers).toEqual(['@objectstack/spec/shared']);
+  });
+
+  it('carries no dense run of two-letter tokens in ANY delimiter — the alternation shape', () => {
+    // A membership table needs no quotes and no import at all: the 249 codes
+    // as a regex alternation (`/^(?:AD|AE|…|ZW)$/`) inside this very file is a
+    // table by every meaning of the word, and passes a quote-shaped scan and
+    // the import pin alike. What is invariant across every spelling is the
+    // DENSITY: seven or more bare two-uppercase-letter tokens separated by
+    // one or two non-alphanumerics. Applied to the door alone, which is where
+    // this shape has to live to matter — the import pin above is what keeps
+    // one in a sibling module out of reach.
+    const code = stripComments(readFileSync(DOOR, 'utf8'));
+    const DENSE = /(?:\b[A-Z]{2}\b[^A-Za-z0-9\n]{1,2}){7}/;
+    expect(DENSE.test(code), 'the door carries a dense run of two-letter tokens').toBe(false);
   });
 
   it('declares no membership machinery of its own', () => {
@@ -136,8 +170,11 @@ describe('no membership table anywhere in this package', () => {
     // space-separated string this package used to carry, and the array literal
     // a fresh re-typing produces — an earlier draft checked only the first and
     // a 249-element array passed it green.
-    const SPACED = /'(?:[A-Z]{2} ){7}/;
-    const ARRAY = /(?:'[A-Z]{2}',\s*){7}/;
+    // Both shapes, and — the round-2 finding — EVERY delimiter. The first
+    // draft of these two regexes hard-coded the single quote, so a verbatim
+    // double-quoted copy of the same table passed the whole file green.
+    const SPACED = /(['"`])(?:[A-Z]{2} ){7}/;
+    const ARRAY = /(?:(['"])[A-Z]{2}\1,\s*){7}/;
     for (const [name, src] of runtimeSources()) {
       const code = stripComments(src);
       expect(SPACED.test(code), `${name} carries a space-separated alpha-2 code list`).toBe(false);

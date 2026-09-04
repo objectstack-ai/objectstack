@@ -30,7 +30,12 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { ISO_3166_ALPHA2_CODES, isValueDomainMember, ValueDomainSchema } from '@objectstack/spec/shared';
+import {
+  ISO_3166_ALPHA2_CODES,
+  isValueDomainMember,
+  type ValueDomain,
+  ValueDomainSchema,
+} from '@objectstack/spec/shared';
 import { BUILTIN_VALIDATION_MESSAGES, VALIDATION_MESSAGE_FALLBACK_LOCALE } from '@objectstack/spec/system';
 import {
   firstRejectedDomainMember,
@@ -147,20 +152,33 @@ describe('the door is a walker over the shared predicate, not a second judge', (
    * The invariant this package actually owns, and the one that survives the
    * re-point: `firstRejectedDomainMember` adds no membership opinion of its
    * own — it walks a carrier and asks `isValueDomainMember`. Asserted as
-   * AGREEMENT over a corpus carrying each domain's traps, so a local filter
-   * creeping back in (an extra case fold, a length or shape check, a curated
-   * allow-list) reddens here even though every representative case above would
-   * still pass.
+   * AGREEMENT, so a second membership definition inside this door — the exact
+   * divergence the 2026-09-02 ruling closed — reddens here.
    *
-   * ⚠️ Deliberately NOT a probe of `Intl.supportedValuesOf('currency')`. An
-   * earlier draft asserted that everything the RUN-TIME probe enumerates is
-   * admitted by the door. That was a time bomb and a duplicate at once: the
-   * door now answers from the checked-in CLDR snapshot, CI pins only the Node
-   * MAJOR, and the ICU build moves underneath it — so a host enumerating one
-   * currency the snapshot lacks would redden a CORRECT implementation, in a
-   * package with nothing to fix. Probe-versus-snapshot belongs beside the
-   * snapshot and is already pinned there, in both directions and with a size,
-   * by `packages/spec/src/shared/value-domain.test.ts`.
+   * ## Population, not samples — the round-2 finding
+   *
+   * A hand-written corpus is not enough, and the measurement says by how much.
+   * With a four-code currency corpus, a door answering `iso_4217_currency`
+   * from a ten-entry `.includes` allow-list passed the whole package green
+   * (529/529): every sampled member happened to be inside the allow-list. So
+   * agreement is asserted over each domain's whole POPULATION, sampled only
+   * for the traps that no population contains.
+   *
+   * ## Why the host enumeration is safe HERE and was not before
+   *
+   * An earlier draft asserted that everything `Intl.supportedValuesOf`
+   * enumerates is ADMITTED by the door. That made the host's ICU build an
+   * ORACLE, and the door answers from a checked-in snapshot — so a runtime
+   * enumerating one code the snapshot lacks reddened a CORRECT implementation,
+   * in a package with nothing to fix. Below, the enumeration is only the
+   * POPULATION: each code is put to the door and to the predicate, and the two
+   * must answer alike. A code the snapshot lacks is false on both sides; a
+   * code the host lacks is never asked. So no ICU build can redden a correct
+   * door, and no ICU build can hide a divergent one either.
+   *
+   * Probe-versus-snapshot — the definition question — stays where the snapshot
+   * is, pinned in both directions and with a size by
+   * `packages/spec/src/shared/value-domain.test.ts`.
    */
   const CORPUS = [
     // members, one or more per domain
@@ -173,15 +191,46 @@ describe('the door is a walker over the shared predicate, not a second judge', (
     'ZZ', 'UK', 'XX', 'us', 'AAA', '', ' CH', 'CH ',
   ];
 
-  it('agrees with isValueDomainMember on every domain, value by value', () => {
+  /** Door and predicate, one value: `true` when both admit, `false` when both refuse. */
+  const agrees = (domain: ValueDomain, value: string): boolean =>
+    (firstRejectedDomainMember(domain, value) === null) === isValueDomainMember(domain, value);
+
+  /** Every member of `population` on which the two disagree. */
+  const disagreements = (domain: ValueDomain, population: readonly string[]): string[] =>
+    population.filter((v) => !agrees(domain, v));
+
+  it('agrees with isValueDomainMember on every domain, over the trap corpus', () => {
     for (const domain of ValueDomainSchema.options) {
-      for (const value of CORPUS) {
-        expect(
-          firstRejectedDomainMember(domain, value) === null,
-          `${domain} / ${JSON.stringify(value)}: the door and the shared predicate must agree`,
-        ).toBe(isValueDomainMember(domain, value));
-      }
+      expect(disagreements(domain, CORPUS), `${domain}: door and shared predicate disagree`).toEqual([]);
     }
+  });
+
+  it('agrees over every ISO 4217 code this runtime enumerates', () => {
+    // POPULATION, not oracle — see the block comment above. This is the case a
+    // hand-written corpus cannot cover: measured, a ten-entry allow-list
+    // inside the door disagrees on 152 of these, and a `!startsWith('X')`
+    // filter on 7 (XAF, XCD, XCG, XDR, XOF, XPF, XSU); neither moves any
+    // sampled case.
+    const intl = Intl as typeof Intl & { supportedValuesOf(k: 'currency'): string[] };
+    const population = intl.supportedValuesOf('currency');
+    // The population must be real, or every assertion over it is vacuous.
+    expect(population.length, 'the runtime enumerated no currencies').toBeGreaterThan(100);
+    expect(disagreements('iso_4217_currency', population)).toEqual([]);
+  });
+
+  it('agrees over every IANA zone this runtime enumerates', () => {
+    // Same form, same reason. The zone domain has no checked-in table on
+    // either side, so this is a wide agreement corpus rather than a
+    // divergence-prone one — but a door that started case-folding or
+    // trimming would show up here and nowhere else.
+    const intl = Intl as typeof Intl & { supportedValuesOf(k: 'timeZone'): string[] };
+    const population = intl.supportedValuesOf('timeZone');
+    expect(population.length, 'the runtime enumerated no time zones').toBeGreaterThan(100);
+    expect(disagreements('iana_time_zone', population)).toEqual([]);
+  });
+
+  it('agrees over the whole published ISO 3166-1 alpha-2 population', () => {
+    expect(disagreements('iso_3166_alpha2', [...ISO_3166_ALPHA2_CODES])).toEqual([]);
   });
 
   it('agrees element-wise across a multi-value carrier too', () => {
