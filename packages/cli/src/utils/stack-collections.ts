@@ -104,19 +104,29 @@ function packageBodies(stack: unknown): Bag[] {
 }
 
 /**
- * One collection, concatenated across `packages[]` in dependency order.
+ * One collection, concatenated across already-resolved bodies.
  *
  * ⚠️ The TOP LEVEL IS NOT CONSULTED — this is the option-B leg only. Callers
  * that must preserve today's answer read their own expression first; see
  * {@link resolveStackCollection} for the combined form.
+ *
+ * Takes the BODIES rather than the stack so a caller asking about several keys
+ * resolves the package list once. `resolveArtifactPackageOrder` parses every
+ * entry whole, and `authoringRuleUnionStack` asks about all 37 collections —
+ * re-resolving per key would run that parse 37 times on every `os build`.
  */
-function packageCollection(stack: unknown, key: string): unknown[] {
+function collectFrom(bodies: readonly Bag[], key: string): unknown[] {
   const out: unknown[] = [];
-  for (const body of packageBodies(stack)) {
+  for (const body of bodies) {
     const value = body[key];
     if (Array.isArray(value)) out.push(...value);
   }
   return out;
+}
+
+/** {@link collectFrom} for a caller that has a stack and asks about one key. */
+function packageCollection(stack: unknown, key: string): unknown[] {
+  return collectFrom(packageBodies(stack), key);
 }
 
 /**
@@ -210,8 +220,9 @@ export function shouldAutoRegisterStorageDriver(stack: unknown, plugins: readonl
 export function stackDeclaresMetadata(stack: unknown): boolean {
   const bag = asBag(stack);
   if (bag?.objects || bag?.manifest || bag?.apps || bag?.flows || bag?.apis) return true;
+  const bodies = packageBodies(stack);
   return ['objects', 'apps', 'flows', 'apis']
-    .some((key) => packageCollection(stack, key).length > 0);
+    .some((key) => collectFrom(bodies, key).length > 0);
 }
 
 /**
@@ -237,8 +248,9 @@ export function bundleDeclaresTranslations(bundle: unknown): boolean {
   if (manifest && ((Array.isArray(manifest.translations) && manifest.translations.length > 0) || manifest.i18n)) {
     return true;
   }
-  if (packageCollection(bundle, 'translations').length > 0) return true;
-  return packageBodies(bundle).some((body) => !!body.i18n);
+  const bodies = packageBodies(bundle);
+  if (collectFrom(bodies, 'translations').length > 0) return true;
+  return bodies.some((body) => !!body.i18n);
 }
 
 /**
@@ -348,7 +360,7 @@ export function authoringRuleUnionStack<T extends Bag>(stack: T): T {
   let folded: Bag | undefined;
   for (const key of packageOwnedCollectionKeys()) {
     if (stack[key] !== undefined && stack[key] !== null) continue;
-    const items = packageCollection(stack, key);
+    const items = collectFrom(bodies, key);
     if (items.length > 0) {
       folded ??= { ...stack };
       folded[key] = items;

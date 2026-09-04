@@ -385,11 +385,14 @@ export async function measureShape(project: unknown, projectRoot: string): Promi
 
   // ── B2/B3/B4 · the CLI's OWN reads, through the #15006 seam ──────────────
   //
-  // These four rows are the ones this file's "Boundaries" note used to say a
-  // probe could not reach. They were not unreachable because of the artifact —
-  // they were unreachable because the reads were EXPRESSIONS inside oclif
-  // command bodies. #15006 made each of them a callable, and a callable is what
-  // a row can attach to.
+  // Four of the six rows below are the ones this file's "Boundaries" note used
+  // to say a probe could not reach. They were not unreachable because of the
+  // artifact — they were unreachable because the reads were EXPRESSIONS inside
+  // oclif command bodies. #15006 made each of them a callable, and a callable is
+  // what a row can attach to. The other two are the reads that sit beside them
+  // on the same boundaries: the `AppPlugin` wrap gate (which, MEASURED, does not
+  // lose — `manifest` is an envelope key) and the i18n auto-registration gate
+  // (which does).
   //
   // ⛔ Note what these rows deliberately are NOT: an assertion that
   // `config.objects` is non-empty on an option-B config. That row would be a
