@@ -182,8 +182,6 @@ function makeEngine() {
   return engine;
 }
 
-type Engine = ReturnType<typeof makeEngine>;
-
 const OBJECT = 'request';
 const RULE = 'approved_to_assignees';
 
