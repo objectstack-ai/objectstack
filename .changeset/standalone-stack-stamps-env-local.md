@@ -19,11 +19,20 @@ validation envelope for a bare definition.
 
 TO: both stamp `env_local`.
 
-WHO SEES IT. Only a host that calls `createStandaloneStack` (or
-`createDefaultHostConfig`) **directly** and lets the id default. A boot started
-by `os dev` / `os start` never reached the changed line: those commands export
-`OS_ENVIRONMENT_ID=env_local` into the child process, which the fallback yields
-to. Where the id is observable — row scoping in `ObjectQLPlugin`, the
+WHO SEES IT. Two audiences, both on the DEFAULT path — no `environmentId` in
+the config and no `OS_ENVIRONMENT_ID` in the environment:
+
+1. a host that calls `createStandaloneStack` / `createDefaultHostConfig`
+   **directly**;
+2. a **bare `os serve`** — one not spawned by `os dev` / `os start`. Those two
+   commands export `OS_ENVIRONMENT_ID=env_local` into the child process, which
+   the fallback yields to, so a boot they start never reached the changed line.
+   `os serve` sets no such variable for its own boot: it only READS one to name
+   the runtime state file. So a bare `os serve` used to run a kernel stamped
+   `proj_local` while publishing `runtime.env_local.json` beside it; the two now
+   agree.
+
+Where the id is observable — row scoping in `ObjectQLPlugin`, the
 `X-Environment-Id` header, `sys_metadata.environment_id` — such an embedder now
 sees `env_local` where it saw `proj_local`, so an install with rows already
 written under the old id should set `environmentId: 'proj_local'` (or
