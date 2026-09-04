@@ -45,7 +45,9 @@ describe('SessionUserSchema', () => {
     expect(user.id).toBe('usr_123');
     expect(user.emailVerified).toBe(false);
     expect(user.roles).toEqual([]);
-    expect(user.language).toBe('en');
+    // #14788 — `language` is retired: no default is minted any more, and the
+    // parsed user carries no such property at all (pinned again below).
+    expect(user).not.toHaveProperty('language');
   });
 
   it('should accept user with all optional fields', () => {
@@ -58,14 +60,13 @@ describe('SessionUserSchema', () => {
       username: 'admin',
       roles: ['admin', 'editor'],
       tenantId: 'tenant_1',
-      language: 'fr',
       timezone: 'Europe/Paris',
       createdAt: '2025-01-01T00:00:00Z',
       updatedAt: '2025-06-01T00:00:00Z',
     });
     expect(user.emailVerified).toBe(true);
     expect(user.roles).toEqual(['admin', 'editor']);
-    expect(user.language).toBe('fr');
+    expect(user.timezone).toBe('Europe/Paris');
   });
 
   it('should reject invalid email', () => {
@@ -81,6 +82,72 @@ describe('SessionUserSchema', () => {
   it('should reject missing required fields', () => {
     expect(() => SessionUserSchema.parse({ id: 'usr_1' })).toThrow();
     expect(() => SessionUserSchema.parse({ email: 'a@b.com' })).toThrow();
+  });
+});
+
+describe('SessionUser.language retirement (#14788, ADR-0049 — maintainer ruling D, 2026-09-03)', () => {
+  const base = { id: 'usr_1', email: 'a@b.com', name: 'A' };
+
+  it('REJECTS a `language` value, with the prescription in the message', () => {
+    // Tombstoned, not deleted: SessionUserSchema is a non-strict `z.object`,
+    // so a plain deletion would have STRIPPED the key silently and a producer
+    // still writing it would never learn. `retiredKey()` makes the rejection
+    // carry the fix — that prescription is the payload, and what this pins.
+    expect(() => SessionUserSchema.parse({ ...base, language: 'fr' }))
+      .toThrow(/SessionUser\.language.*removed.*\/auth\/me\/localization/s);
+  });
+
+  it('parses cleanly without it, and mints NO default in its place', () => {
+    // The retired key used to default to `'en'` — a constant a reader took
+    // for the user's language. Absence of the key is the whole point: a
+    // reader now gets `undefined`, never a wrong-but-plausible value.
+    const user = SessionUserSchema.parse(base);
+    expect(user).not.toHaveProperty('language');
+    expect(Object.keys(user)).not.toContain('language');
+    // Positive control: the sibling preference key survives untouched.
+    expect(SessionUserSchema.parse({ ...base, timezone: 'Asia/Shanghai' }).timezone).toBe('Asia/Shanghai');
+  });
+
+  it('the response envelopes carrying SessionUser refuse it too (both faces)', () => {
+    const rejects = (fn: () => unknown) =>
+      expect(fn).toThrow(/SessionUser\.language.*removed/s);
+    rejects(() => SessionResponseSchema.parse({
+      success: true,
+      data: { session: { id: 's', expiresAt: '2025-12-31T23:59:59Z', userId: 'usr_1' }, user: { ...base, language: 'fr' } },
+    }));
+    rejects(() => UserProfileResponseSchema.parse({ success: true, data: { ...base, language: 'fr' } }));
+  });
+
+  it('nothing in packages/spec/src reads `.language` off a SessionUser any more', async () => {
+    // Tree-scoped over this package's own source (the radius a spec test may
+    // walk without a cross-package declaration — a repo-wide glob would put
+    // spec's whole suite on every PR, the radius `check:cross-package-test-
+    // inputs` exists to keep narrow). Beyond this tree the tombstone's `never`
+    // input type is the enforcement: writing the key anywhere in the monorepo
+    // fails `tsc`; objectui was measured at zero readers at dispatch.
+    // Excluded, with the reason: the tombstone itself names the key in its
+    // prescription, and this pin names it in its own assertions.
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const srcRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+    const self = fileURLToPath(import.meta.url);
+    const tombstone = path.join(srcRoot, 'api', 'auth.zod.ts');
+    const readers: string[] = [];
+    const walk = (dir: string) => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (entry.name.endsWith('.ts') && full !== self && full !== tombstone) {
+          const src = fs.readFileSync(full, 'utf-8');
+          if (/SessionUser/.test(src) && /\.language\b/.test(src)) readers.push(path.relative(srcRoot, full));
+        }
+      }
+    };
+    walk(srcRoot);
+    // Anti-vacuity: the walk must have seen the tombstone's own neighbours.
+    expect(fs.existsSync(tombstone)).toBe(true);
+    expect(readers, 'a reader of SessionUser.language reappeared — the key is retired (#14788)').toEqual([]);
   });
 });
 
