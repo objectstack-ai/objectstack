@@ -5,7 +5,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { InMemoryMetricsRegistry, SEMCONV } from '@objectstack/observability';
-import { LocalStorageAdapter } from './local-storage-adapter';
+import { LocalStorageAdapter } from './local-storage-adapter.js';
 
 describe('LocalStorageAdapter instrumentation', () => {
     let rootDir: string;

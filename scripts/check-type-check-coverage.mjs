@@ -680,6 +680,28 @@ const ROOT_PROGRAM_COUPLED_SCRIPT = 'scripts/check-test-typecheck.mts';
 // route -- a `tsconfig.test.json` over the test layer, named by a new `typecheck`
 // script -- so the entry is deleted rather than lowered.
 //
+// `@objectstack/service-storage` GRADUATED from this ledger (#15050, the
+// `packages/services/**` sibling of #14181; entry: 51 raw, repaired to 0 --
+// re-measured at exactly 51, confirming the entry's own composition note).
+// Same road as `service-cluster` (no `typecheck` script at all; BUILD config
+// already includes tests) but a longer repair: unlike that package, THIS
+// one's BUILD reading was not already clean, so both programs needed fixing,
+// not just the test-only split. code-tier 8 (TS2339 x4 a `driveInsert` test
+// helper's spread dropped its `Record<string, unknown>` index signature --
+// annotated the return type; TS2347 x4 a fake `ctx: any`'s
+// `getService<T>(...)` calls -- converted to `getService(...) as T`, the
+// pattern one call site in the same file had already adopted for exactly this
+// reason). config-tier 26 (TS2835 x23 relative imports missing `.js` under
+// BUILD's NodeNext resolution -- ADDED the extension rather than routed
+// around it, since that resolves under both BUILD's NodeNext and the split's
+// bundler mode; TS2550 x3 `Array.prototype.at` needing `lib` es2022 --
+// rewritten to indexed access rather than widening the shared BUILD
+// `tsconfig.json`). noise 17 (TS7006 x15, all a downstream CASCADE from the
+// same unresolved imports -- cleared as a side effect of the TS2835 repair,
+// the same shape `@objectstack/core` reported at 98 -> 4; TS6196 x1 dead
+// import, TS6133 x1 unused param, both one-line). The two readings AGREE at
+// 0/0 after repair, the same result `service-cluster` reported.
+//
 // `@objectstack/service-knowledge` GRADUATED from this ledger too (#15049,
 // PR #15032's sibling for `packages/services/**`; entry: 10 raw, repaired to
 // 0 under BOTH the build config and the new `tsconfig.test.json` split). This
@@ -732,37 +754,6 @@ const DEBT = {
   '@objectstack/observability': {
     errors: 11,
     note: 'all code-tier (TS2554 wrong arity x10, TS2552).',
-  },
-  '@objectstack/service-storage': {
-    errors: 51,
-    note: 'code-tier 8 (TS2339 x4, TS2347 x4); config-tier 26 (TS2835 x23, TS2550 x3); noise 17 '
-      + '(TS7006 x15, TS6196, TS6133). RE-TALLIED from tsc at the 51 below (62b2655d8), not the older '
-      + '42-composition rescaled -- the previous tally summed to 42 and was never restated when this '
-      + 'entry was lowered onto 51. The code tier is the half that did NOT move: the same 8, and all 8 '
-      + 'sit in two files (src/file-reference-lifecycle.test.ts x4, src/storage-service-plugin.test.ts '
-      + 'x4). Everything in the 42 -> 51 delta is config-tier and noise -- TS2835 21 -> 23, TS7006 '
-      + '11 -> 15, plus TS2550 x3 (`Array.prototype.at` against a `lib` older than es2022, in '
-      + 'src/storage-adapter-list.conformance.test.ts), a class the old tally did not list at all. Which '
-      + 'PRs contributed the +9 is NOT attributed: the pre-#8225 per-file counts were not retained, and '
-      + 'an invented attribution is worse than an admitted gap. '
-      + 'This entry WAS the fourth bootstrap margin, and it earned the label the hard way inside '
-      + 'one flight: 42 -> 41 at e8db1a230 (the spec half of the `IStorageService.list(prefix)` '
-      + 'retirement, #5540 / PR #5983, removed one error, and it was lowered rather than left standing) '
-      + '-> 42 again at 77c7c884b an hour later, when the adapter half (#5541 / PR #6061) deleted the '
-      + 'old list tests (-1 TS7006) and added storage-adapter-list-retirement.test.ts (+2 TS2835). A '
-      + 'two-PR retirement moves a count twice, and an exact number recorded between the halves is stale '
-      + 'before it is pushed -- so this one took the same documented margin as the three proven-hot '
-      + 'packages instead of a sixth calibration lap. (The `storage-adapter-list-retirement.test.ts` '
-      + 'that history names no longer exists under that name; the adapter-list coverage is now '
-      + 'src/storage-adapter-list.conformance.test.ts and src/storage-adapter-list-contract.test.ts.) '
-      + 'The two concentrations the old note gave for the 42 both re-verify at 51: 11 in '
-      + 'storage-route-ledger.conformance.test.ts and 7 in storage-service-plugin.test.ts, with '
-      + 'swappable-storage-service.test.ts x7 and storage-routes.test.ts x5 next. '
-      + 'THE MARGIN IS GONE. RECORDED 52 was a bootstrap margin (+10 over 42 measured at 77c7c884b), '
-      + 'and it was spending itself the whole time it stood: the real count climbed 42 -> 51 underneath '
-      + 'it, which is why the composition above had to be re-tallied rather than adjusted. #7888 / '
-      + 'PR #8225 then lowered 52 -> 51 onto the exact measurement, re-confirmed at 51 at 62b2655d8, so '
-      + 'the next new error here goes red on arrival (#5278 option A).',
   },
   '@objectstack/spec-monorepo': {
     errors: 26,
@@ -1275,18 +1266,22 @@ const PHANTOM_PIN_DEBT = {};
 //   The shape these eight copy is the minimal one -- `packages/objectql`
 //   (#10756) and `packages/plugins/plugin-auth` (#10869).
 //
-// THE NINTH CONFIG IS NOT HERE, deliberately.
-// `packages/services/service-storage/scripts/i18n-extract.config.ts` is the
-// ninth instance #10868 annotated, and that package appears in no line of this
-// ledger for a reason SOURCES_COVERED makes structural: the invariant only asks
-// its question of a package that DECLARES a `typecheck` script, and
-// service-storage declares none. It is covered instead by
-// DEBT['@objectstack/service-storage'], which records 51 errors -- so giving it
-// a `typecheck` script is not a one-line graduation, it is a 51-error
-// burn-down, and wiring one that ran ONLY `tsconfig.scripts.json` would be
-// worse than leaving it: COVERED would start passing on a script that never
-// reads `src`, and RECONCILED would then force out a 51-error DEBT entry whose
-// errors are all still there. It graduates with that entry, not before it.
+// THE NINTH CONFIG JOINED THE EIGHT (#15050), completing what this section
+// used to say was deliberately deferred. `packages/services/
+// service-storage/scripts/i18n-extract.config.ts` is the ninth instance
+// #10868 annotated, and this ledger carried no line for it because
+// SOURCES_COVERED's invariant only asks its question of a package that
+// DECLARES a `typecheck` script, and service-storage declared none -- it was
+// covered instead by `DEBT['@objectstack/service-storage']` (51 errors), so
+// wiring a `typecheck` that ran ONLY `tsconfig.scripts.json` would have been
+// worse than leaving it: COVERED would have started passing on a script that
+// never read `src`, while the 51 real errors stood. #15050 repairs the DEBT
+// entry to 0 (deleted, not lowered -- see the graduation note above `DEBT`)
+// in the SAME change that adds `tsconfig.scripts.json` here, so the ordering
+// this paragraph used to insist on -- "it graduates with that entry, not
+// before it" -- is satisfied by construction rather than deferred again. The
+// directory type-checks clean (0 errors, matching all eight siblings), so no
+// entry is added here either.
 //
 // ── #14710: `packages/cli/test` GRADUATED, exactly as its own entry foretold ──
 //

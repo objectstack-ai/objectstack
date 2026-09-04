@@ -1,0 +1,42 @@
+// The SCRIPTS-layer type-check program for this package (#11351, the ninth
+// instance — see `scripts/check-type-check-coverage.mjs`'s
+// `UNCHECKED_SOURCE_DEBT` docblock for why this package was deliberately left
+// out of that ledger's eight: it had NO `typecheck` script at all, so
+// SOURCES_COVERED's invariant — which only asks its question of a package
+// that DECLARES one — never fired on it, and the directory below was covered
+// instead by the (now-deleted) `DEBT['@objectstack/service-storage']` entry.
+// #15050 gives this package a `typecheck` script, so this file completes the
+// family the same PR that makes SOURCES_COVERED start asking here.
+//
+// `scripts/i18n-extract.config.ts` is the input to this package's i18n
+// extraction: it composes the package's own objects and translation bundles
+// into an `ObjectStackDefinition`. It is real source, and until this file
+// existed no tsc program read a line of it -- `tsconfig.json` selects only
+// `src`, so the package would have passed `check:type-check-coverage` as
+// COVERED with the directory unread the moment `typecheck` existed.
+//
+// A SIBLING rather than a wider `include` on `tsconfig.json`, the
+// distinction #5475 drew for `packages/spec` and #10756 for
+// `packages/objectql/scripts`: that config emits, so widening it to reach
+// `scripts/` would put the directory in front of the emit. This program
+// emits nothing.
+//
+// STRICTNESS IS INHERITED and deliberately not relaxed: `strict`,
+// `noUnusedLocals`, `noUnusedParameters`, `noImplicitReturns` and the rest
+// come from the root config through `tsconfig.json`. The directory
+// type-checks clean under them -- it enters with ZERO recorded debt, and
+// there is no ledger here to record any in. Module semantics are inherited
+// too (NodeNext): this config already spells its relative imports with `.js`
+// extensions (#10868 annotated it), so nothing here needs `packages/spec`'s
+// bundler resolution or `allowImportingTsExtensions`.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    // `.` rather than the inherited `src`, because the file this program
+    // checks is the one outside `src`. Safe precisely because nothing is
+    // emitted from here -- see the header.
+    "rootDir": "."
+  },
+  "include": ["scripts/**/*"]
+}
