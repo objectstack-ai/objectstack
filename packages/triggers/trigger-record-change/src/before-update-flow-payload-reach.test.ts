@@ -315,13 +315,18 @@ const rowsByTitle = async (data: IDataEngine, object: string) => {
  * AFTER the probe node, so a probe node that failed its own config takes the
  * audit row with it rather than reporting a silent "does not reach".
  */
-function probeFlow(name: string, object: string, probeNode: Record<string, unknown>) {
+function probeFlow(
+  name: string,
+  object: string,
+  probeNode: Record<string, unknown>,
+  startExtra: Record<string, unknown> = {},
+) {
   return {
     name, label: name, type: 'record_change',
     nodes: [
       {
         id: 'start', type: 'start', label: 'Start',
-        config: { objectName: object, triggerType: 'record-before-update' },
+        config: { objectName: object, triggerType: 'record-before-update', ...startExtra },
       },
       probeNode,
       {
@@ -696,6 +701,59 @@ describe('[#15356] can a record-before-update flow reach a multi:true batch payl
     const rows = await rowsByTitle(stack.data, object);
     expect(rows.get('alpha')?.tags).toEqual(['seed']);
     expect(rows.get('beta')?.tags).toEqual(['seed']);
+  }, 20000);
+
+  /**
+   * ⭐ [#14744] THE CONTROL ON THE FIX'S SHAPE — why a COPY and not a FREEZE.
+   *
+   * The ruling named deep-copy and freeze as alternatives. They are not
+   * equivalent, and this case is the measurement that chose between them:
+   * `service-automation`'s `expandDeclaredLookups` (#3475) writes
+   * `record[field] = expanded` INTO the context `buildContext` returns — its own
+   * docblock says "Mutates `record` in place (the same object the run's variable
+   * map already references)" — and `AutomationServicePlugin` bridges that
+   * expander in every deployment that has objectql.
+   *
+   * Under a deep FREEZE that assignment throws, `expandDeclaredLookups`'
+   * best-effort `catch` swallows it, and every flow declaring `config.expand`
+   * silently degrades to unexpanded scalar ids while logging "could not expand
+   * lookups". Measured: with the freeze variant in `buildContext` this case goes
+   * RED and the copy keeps it green. That is a shipped feature, so freeze was
+   * not available and the copy is not a preference.
+   *
+   * ⚠️ A red here means the flow-facing `record` stopped accepting the ONE
+   * in-place write the platform itself performs on it.
+   */
+  it('#14744 — a flow declaring `config.expand` still gets its lookup grafted onto the copy', async () => {
+    const object = 'exp';
+    const stack = await bootStack(object);
+    const seen: unknown[] = [];
+    // Stand in for the plugin-bridged expander (whose own wiring and identity
+    // scoping are pinned by service-automation's `record-lookup-expand`
+    // integration test); what is under test here is whether its in-place graft
+    // lands on the object the flow is handed.
+    stack.automation.setRecordExpander(async () => ({ owner: { id: 'u9', name: 'Owner Nine' } }));
+    stack.objectql.registerFunction('read_expanded', async (args: any) => {
+      seen.push((args.automation?.record as Record<string, unknown>)?.owner);
+      return { ok: true };
+    });
+    await seedTwoRows(stack.data, object);
+    stack.automation.registerFlow('exp_flow', probeFlow('exp_flow', object, {
+      id: 'probe', type: 'script', label: 'Script',
+      config: { function: 'read_expanded', inputs: {} },
+    }, { expand: ['owner'] }) as any);
+
+    const wrote = await batchUpdate(stack.data, object, { status: 'done' });
+    expect(wrote).toMatchObject({ ok: true });
+    await sleep(200);
+
+    expect(seen, 'the script function must have RUN, once per row').toHaveLength(2);
+    expect(seen[0], 'the expansion must have landed on the record the flow holds').toEqual({
+      id: 'u9', name: 'Owner Nine',
+    });
+    expect(seen[1]).toEqual({ id: 'u9', name: 'Owner Nine' });
+    // ...and grafting it still reached nothing: `owner` is not in the payload.
+    expect(stack.witness.every((w) => !('owner' in w.data))).toBe(true);
   }, 20000);
 });
 
