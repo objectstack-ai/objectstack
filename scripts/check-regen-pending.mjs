@@ -887,13 +887,19 @@ if (invokedDirectly) {
     const floorBreaches = batteryFloorFailures(callees.map(([, run]) => run.name));
     for (const breach of floorBreaches) console.error(`✗ self-test floor: ${breach}`);
 
+    // The verdict is an explicit BRANCH rather than a ternary over
+    // `process.exit`, so the failure path literally IS a `process.exit(1)`.
+    // That is what `measure-self-test-floor.mjs` reads as a floor that PRODUCES
+    // A FAILURE rather than one that merely names a roster: this file's previous
+    // `process.exit(ok ? 0 : 1)` classified NONE on that instrument even with a
+    // sound floor above it. The success line's text is unchanged.
     const failures = [noDist, noTree, ...results].filter((ok) => !ok).length + floorBreaches.length;
-    console.log(
-      failures === 0
-        ? '\n✓ check-regen-pending self-test passed.'
-        : `\n✗ self-test failed -- ${failures} failure(s) (cases and floor).`,
-    );
-    process.exit(failures === 0 ? 0 : 1);
+    if (failures > 0) {
+      console.log(`\n✗ self-test failed -- ${failures} failure(s) (cases and floor).`);
+      process.exit(1);
+    }
+    console.log('\n✓ check-regen-pending self-test passed.');
+    process.exit(0);
   }
   process.exit(main({ prePush: process.argv.includes('--pre-push') }));
 }
