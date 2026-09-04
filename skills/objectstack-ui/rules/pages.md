@@ -191,7 +191,7 @@ why it silently does nothing.
 > **Do not guess props — read the contract.** Each injected block's full prop set
 > (name, type, `data`/`controlled`/`callback` kind, required, description) is the
 > **[React-tier component contract](../references/react-blocks.md)**, generated from
-> [`contracts/react-blocks.contract.json`](../contracts/react-blocks.contract.json).
+> the block→schema index in `@objectstack/spec`.
 > It is the authoritative answer to "what props does `<ObjectForm>`/`<ListView>`/…
 > take?" — author against it, not from memory. The `data` props are sourced from the platform's spec schemas (FormView,
 > ListView, Chart, …) — the same protocol the server validates;
