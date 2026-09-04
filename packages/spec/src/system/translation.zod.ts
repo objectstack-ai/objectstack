@@ -875,8 +875,9 @@ const translationDataShape = () => ({
      * `translation-component-submit-label-removed` conversion strips the key
      * from stored bundles.
      *
-     * Two deliberate exclusions, both of which a mirror of the issue's proposed
-     * shape would have got wrong:
+     * Three deliberate exclusions — the first two because a mirror of the
+     * issue's proposed shape would have got them wrong, the third because the
+     * key was asked for and declined:
      *
      * - **`help` is not here** — no component in the model declares it. It
      *   would parse clean and translate nothing, which is the ADR-0078 shape
@@ -886,6 +887,14 @@ const translationDataShape = () => ({
      *   that component is addressed by page name above. Declaring it in both
      *   places would give one string two spellings, which is how the
      *   dashboards/pages asymmetry started.
+     * - **`content` is not here** — `element:text`'s one authored string is
+     *   declared `content: I18nLabelSchema` (`ui/component.zod.ts`), so it is
+     *   localizable at its own authoring site, and adding it to this face would
+     *   be the face widening the `submitLabel` retirement declined for the
+     *   identical shape (#10926). The inline locale map is the ruled route for
+     *   page prose, not a workaround. That such maps are invisible to
+     *   `os i18n extract` and `check:i18n-coverage` is real, and is its own
+     *   question about the extractor (#14749) rather than a second key here.
      *
      * `properties` is an open record and custom component types are legal, so
      * these keys are also the route for a bespoke component that speaks the
