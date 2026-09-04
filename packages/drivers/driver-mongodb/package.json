@@ -30,6 +30,7 @@
     "@objectstack/objectql": "workspace:*",
     "@types/node": "^26.2.0",
     "mongodb-memory-server": "^11.2.0",
+    "tsx": "^4.23.12",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"
   },
