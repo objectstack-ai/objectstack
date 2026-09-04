@@ -2972,6 +2972,42 @@ jobs:
           node scripts/check-merge-queue-triage-outcome.mjs --self-test
           node scripts/check-merge-queue-triage-outcome.mjs
 
+      # Merged-branch reaper classifier contract (#13503). The third harness of
+      # this shape, and the one with the sharpest consequence: the classifier in
+      # merged-branch-reaper.yml decides which branches a deletion pass would
+      # take, and the maintainer's ruling of 2026-09-03 turns its dry-run list
+      # into an action a human releases. The workflow's own token grant
+      # (`contents: read`) stops it deleting anything; nothing stopped the LIST
+      # from being wrong.
+      #
+      # The ruling added a base-ref guard — `merged_at` says a PR landed, not
+      # WHERE, and 48 of the 575 merged `copilot/*` branches in the #13503
+      # census merged into another branch, one of them (based on a PR that
+      # closed unmerged) with no confirmed path to `main` at all. Read alone,
+      # the classifier's diff looks the same whether an edit narrows what gets
+      # reaped or widens it, and a dry run over a real repository prints a list,
+      # which is not a contract. So the contract is asserted: the shipped script
+      # is extracted from the YAML with a real parser (never retyped) and run
+      # under doubles the way actions/github-script runs it, as one
+      # AsyncFunction body, holding `reaped ⇒ that branch has a merged PR based
+      # on main` over every scenario.
+      #
+      # Its --self-test deletes the guard, inverts it, renames the base it
+      # compares against, flips its fail-closed direction, and unrecords and
+      # unrenders its bucket — and requires the battery to redden for each,
+      # naming the scenario that catches it. It also mutates the decisions the
+      # guard sits beside (open-PR precedence, the grace window, the defensive
+      # head-ref filter, the protected short-circuit), because a guard that cost
+      # something already there is not a narrowing.
+      #
+      # Invoked as `node` rather than through a `pnpm check:*` alias, same
+      # reason as the two steps above: see the GATE INVOCATION IDIOM note at the
+      # top of this file.
+      - name: Merged-branch reaper classifier contract
+        run: |
+          node scripts/check-merged-branch-reaper-outcome.mjs --self-test
+          node scripts/check-merged-branch-reaper-outcome.mjs
+
       # Shard positive-attestation gate (#6082). ci.yml's two aggregate gates
       # used to decide from one `needs.<matrix>.result` word, which cannot carry
       # three shards' verdicts: run 31120902911 read the undocumented

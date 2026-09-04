@@ -477,6 +477,56 @@ const baseDefaultPermissionSets: PermissionSet[] = [
       // target set does not already name (`name in objects` → skip), so this
       // line is preserved rather than overwritten.
       sys_api_key: { allowRead: true, allowCreate: false, allowEdit: true, allowDelete: false },
+      // [#14959 — maintainer ruling 2026-09-03, decision batch #22, verbatim
+      // 「同意」] The SECOND override of the managed-object write deny, and it is
+      // deliberately shaped as a copy of the `sys_api_key` one above rather than
+      // as a new idea: a rank-and-file member may edit their OWN `sys_user` row.
+      //
+      // Why it had to be here and nowhere else. The 2026-09-03 ruling that
+      // admitted `locale` to the ADR-0092 D2 column whitelist opened WHICH
+      // COLUMNS a permitted actor may touch; it did not open WHO. With this
+      // entry absent, a member's `PATCH` to their own row was refused by THIS
+      // layer — the object gate — before the column guard was ever consulted,
+      // so `sys_user.locale` shipped as a user-facing preference only a platform
+      // admin could set. That is the "declared, not reachable" shape ADR-0049
+      // exists to forbid, one step removed.
+      //
+      // The opening is bounded by the same TWO pre-existing mechanisms that
+      // bound `sys_api_key`, and by neither this line alone:
+      //   - WHICH ROWS: the `sys_user_self` RLS carve-out below
+      //     (`id == current_user.id`), widened from `select` to `all` by the
+      //     same ruling and enforced on by-id writes through the security
+      //     middleware's pre-image check. A member PATCHing ANOTHER member's
+      //     row is still refused there — `sys_user_org_members` (the org-peer
+      //     visibility policy) stays `select`-ONLY precisely so it cannot
+      //     widen this write to the whole organization.
+      //   - WHICH FIELDS: ADR-0092 D2's identity write guard, whose update
+      //     whitelist for this table is `SYS_USER_PROFILE_EDIT_FIELDS`
+      //     (plugin-auth — `name`, `image`, `locale`). `email`, `role`, the ban
+      //     columns and every system stamp stay unwritable on this path; the
+      //     guard strips them and throws when nothing editable survives.
+      //
+      // `allowCreate` / `allowDelete` stay false and are NOT an oversight:
+      // accounts are minted and retired through better-auth's own endpoints
+      // (sign-up, invite, admin remove-member), and this set is bound to the
+      // `everyone` anchor, which must remain anchor-safe (ADR-0090 D5).
+      //
+      // ⚠️ Still not a pattern to copy across the managed list. What makes this
+      // pair legitimate is that BOTH bounding mechanisms already existed for
+      // this exact table before the bit flipped. A managed object without an
+      // owner-scoped RLS carve-out and a registered column whitelist has
+      // nothing holding the opening, and `allowEdit: true` on it is table-wide.
+      //
+      // Being an EXPLICIT entry is what makes it survive `kernel:ready`:
+      // `applyManagedWriteDenies` injects its deny only for managed objects a
+      // target set does not already name (`name in objects` → skip).
+      //
+      // ADR-0092 D5 is AMENDED by the same ruling to say so: self-service edits
+      // of the whitelisted columns route through the generic data path, with the
+      // D6 `afterUpdate` hook as the session-cache refresh. `name` / `image`
+      // therefore become editable here too, not only through better-auth
+      // `/update-user`.
+      sys_user: { allowRead: true, allowCreate: false, allowEdit: true, allowDelete: false },
       // Self-service preferences. NOT a better-auth table, so it is not covered
       // by the block above, and its `sys_user_preference_self` RLS policy below
       // (`operation: 'all'`) declares exactly this intent: a member reads and
@@ -565,10 +615,27 @@ const baseDefaultPermissionSets: PermissionSet[] = [
         operation: 'all',
         using: 'id == current_user.organization_id',
       },
+      // [#14959 — maintainer ruling 2026-09-03, decision batch #22, verbatim
+      // 「同意」] `all`, not `select`. This is the WHICH-ROWS half of the
+      // member self-service opening declared by the explicit `sys_user`
+      // object entry above; neither half means anything without the other.
+      //
+      // `all` (rather than adding a second `update`-only policy) is the shape
+      // `sys_api_key_self` already ships for exactly this situation, and it is
+      // safe here for the same reason: the object entry keeps `allowCreate` /
+      // `allowDelete` false, so the insert and delete faces of `all` gate
+      // shut one layer up and this policy can only ever NARROW them.
+      //
+      // ⚠️ The sibling below (`sys_user_org_members`) must STAY `select`.
+      // Applicable policies OR-combine, so widening it to `all` would compose
+      // an update filter of `id == me OR id IN <every user in my org>` — a
+      // member editing any colleague's profile. The self scope and the
+      // org-peer VISIBILITY scope are two different questions, and only the
+      // first one was ruled.
       {
         name: 'sys_user_self',
         object: 'sys_user',
-        operation: 'select',
+        operation: 'all',
         using: 'id == current_user.id',
       },
       // Org collaborators: members can see other users in the same
