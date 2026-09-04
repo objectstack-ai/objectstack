@@ -44,6 +44,21 @@
  * this file may claim, and no more: the inventory reports a handler as
  * undeclared only when EVERY source the router resolves through answered
  * nothing for it.
+ *
+ * [#14423] EXISTENCE is settled now too, on both halves of the D5 bijection
+ * and in both of the ways the two sides could disagree:
+ *
+ *  - IDENTITY — the metadata plane is read KEYED
+ *    (`MetadataManager.loadManyKeyed`), so a declaration is identified by the
+ *    key its store holds it under (#14205) rather than by `body.name`. A body
+ *    is not required to name itself, and both shipped loaders can hold one
+ *    that does not; keying by the body dropped exactly those, in an audit
+ *    whose whole job is to say what exists.
+ *  - AVAILABILITY — the handler half also asks the metadata plane BY NAME,
+ *    the router's third rung, so a loader fault that a plural read swallows
+ *    can no longer turn a dispatchable handler into an accusation. Its
+ *    counterpart in the manager is `listNames` gaining `loadMany`'s
+ *    per-loader fault parity, which is where that asymmetry was born.
  */
 
 /**
@@ -172,7 +187,7 @@ export function resolveActionHandlerKeys(action: any, fallbackKey?: string): str
  */
 export function reconcileActionRegistrations(
     registered: Array<{ objectName: string; actionName: string; package?: string }>,
-    declarations: Array<{ action: any; objectName: string }>,
+    declarations: Array<ActionDeclarationRow>,
 ): {
     undeclaredHandlers: Array<{ objectName: string; actionName: string; package?: string }>;
     unboundDeclarations: Array<{ objectName: string; actionName: string }>;
@@ -184,8 +199,8 @@ export function reconcileActionRegistrations(
         if (!set) addressable.set(objectKey, (set = new Set<string>()));
         set.add(handlerKey);
     };
-    for (const { action, objectName } of declarations) {
-        for (const key of resolveActionHandlerKeys(action)) addKey(objectName, key);
+    for (const { action, objectName, storeKey } of declarations) {
+        for (const key of resolveActionHandlerKeys(action, storeKey)) addKey(objectName, key);
     }
 
     const covers = (objectName: string, actionName: string): boolean => {
@@ -203,15 +218,65 @@ export function reconcileActionRegistrations(
 
     const registeredKeys = new Set(registered.map((r) => `${r.objectName}:${r.actionName}`));
     const unboundDeclarations: Array<{ objectName: string; actionName: string }> = [];
-    for (const { action, objectName } of declarations) {
+    for (const { action, objectName, storeKey } of declarations) {
         if ((action?.type ?? 'script') !== 'script') continue; // only script needs a handler
         if (action?.body) continue;                            // its handler is synthesized
-        const bound = resolveActionHandlerKeys(action).some((key) =>
+        // A row with neither an own `name` nor a store key cannot be addressed
+        // by anything and cannot be NAMED in a finding either — the old
+        // spelling reported it as `actionName: undefined`, which reads as a
+        // parse failure in the warning. `collectEngineActionDeclarations`
+        // already refuses to admit one; this is the same refusal for a caller
+        // that assembles rows itself.
+        const identity = declarationIdentity(action, storeKey);
+        if (!identity) continue;
+        const bound = resolveActionHandlerKeys(action, storeKey).some((key) =>
             actionHandlerObjectKeys(objectName).some((obj) => registeredKeys.has(`${obj}:${key}`)));
-        if (!bound) unboundDeclarations.push({ objectName, actionName: action?.name });
+        if (!bound) unboundDeclarations.push({ objectName, actionName: identity });
     }
 
     return { undeclaredHandlers, unboundDeclarations };
+}
+
+/**
+ * One declaration the engine can dispatch against.
+ *
+ * ## [#14423] `storeKey` — the identity a body is not required to carry
+ *
+ * `action` is the declaration BODY, exactly as its source hands it over.
+ * `storeKey` is the key the metadata plane holds that body under, present
+ * only for rows that came from a keyed plural read
+ * (`MetadataManager.loadManyKeyed`), and it is carried BESIDE the body rather
+ * than folded into it — the #14205 rule, for the same reason: a body that
+ * deliberately has no `name` must stay byte-identical to what was stored.
+ *
+ * It is optional because the object-embedded source has no store at all: an
+ * `actions[]` entry inside an object definition is identified by its own
+ * `name` and nothing else holds it.
+ *
+ * Every read of the identity goes through {@link declarationIdentity} or
+ * through `resolveActionHandlerKeys(action, storeKey)`, so the precedence
+ * (`action.name` first, the store key second) is stated once.
+ */
+export interface ActionDeclarationRow {
+    action: any;
+    objectName: string;
+    /** The metadata plane's key for `action`, when it came from a keyed read. */
+    storeKey?: string;
+}
+
+/**
+ * A declaration's identity: its own `name` when the body carries one, else the
+ * key its store holds it under.
+ *
+ * The order is the router's. `resolveRouteActionDeclaration` resolves a
+ * declaration BY the name in the route and then derives handler keys from what
+ * came back, so a body with no `name` is addressed under the key it was
+ * resolved by — which is the store key, and is exactly what
+ * `resolveActionHandlerKeys(action, storeKey)` produces via its `fallbackKey`.
+ */
+function declarationIdentity(action: any, storeKey?: string): string | undefined {
+    if (typeof action?.name === 'string' && action.name.length > 0) return action.name;
+    return storeKey;
 }
 
 /** Minimal logger surface the inventory needs — matches PluginContext.logger. */
@@ -222,17 +287,39 @@ export interface GovernanceLogger {
 
 /**
  * Collect every action declaration this engine can dispatch against, as
- * `{ action, objectName }` rows: each registry object's embedded `actions[]`
+ * {@link ActionDeclarationRow}s: each registry object's embedded `actions[]`
  * (the same schemas `getSchema` serves to the router), then standalone
  * `action` items from the metadata service — deduped by `<object>:<name>`
  * with the object-embedded copy winning, mirroring the execution layer's
  * artifact-wins rule.
+ *
+ * ## [#14423] Two spellings for the metadata source, and why the keyed one wins
+ *
+ * `loadStandaloneActionsKeyed` reads the plane under the identity the STORE
+ * holds each row by (`MetadataManager.loadManyKeyed`); `loadStandaloneActions`
+ * is the older unkeyed read (`loadMany`), which returns bodies and leaves
+ * every consumer to guess the identity from `body.name`.
+ *
+ * That guess is the defect this card closes. A body is not required to name
+ * itself — `register(type, name, data)` takes the key as its ARGUMENT — so the
+ * `typeof action.name === 'string'` gate below DROPPED every nameless row,
+ * while the router, which resolves by name through `loadDiagnosed`, served the
+ * very same row. Measured on both shipped loaders: a `sys_metadata` row keyed
+ * by its `name` COLUMN, and a `FilesystemLoader` file whose identity is its
+ * path. The audit then reported a live, dispatchable handler as "registered
+ * handler with NO declaration".
+ *
+ * So when the keyed source is present it REPLACES the unkeyed one — they read
+ * the same population, and reading both would only re-admit the guess. The
+ * unkeyed parameter stays for callers that have no keyed read to offer; it is
+ * the pre-#14423 behaviour verbatim, nameless rows dropped and all.
  */
 export async function collectEngineActionDeclarations(
     objects: any[],
     loadStandaloneActions: (() => Promise<any[]>) | undefined,
-): Promise<Array<{ action: any; objectName: string }>> {
-    const out: Array<{ action: any; objectName: string }> = [];
+    loadStandaloneActionsKeyed?: (() => Promise<Array<{ name: string; data: any }>>) | undefined,
+): Promise<Array<ActionDeclarationRow>> {
+    const out: Array<ActionDeclarationRow> = [];
     const seen = new Set<string>();
     for (const obj of objects ?? []) {
         const objectName: string | undefined = obj?.name;
@@ -243,6 +330,31 @@ export async function collectEngineActionDeclarations(
             out.push({ action, objectName });
         }
     }
+
+    const admit = (action: any, storeKey?: string): void => {
+        const identity = declarationIdentity(action, storeKey);
+        if (!action || !identity) return;
+        const objectName = standaloneActionOwnerKey(action);
+        const key = `${objectName}:${identity}`;
+        if (seen.has(key)) return; // object-embedded declaration wins
+        seen.add(key);
+        out.push({ action, objectName, storeKey });
+    };
+
+    if (loadStandaloneActionsKeyed) {
+        let keyed: Array<{ name: string; data: any }> = [];
+        try {
+            keyed = (await loadStandaloneActionsKeyed()) ?? [];
+        } catch {
+            keyed = []; // the plane could not be enumerated on this kernel
+        }
+        for (const entry of keyed) {
+            if (!entry || typeof entry.name !== 'string' || entry.name === '') continue;
+            admit(entry.data, entry.name);
+        }
+        return out;
+    }
+
     let standalone: any[] = [];
     try {
         standalone = (await loadStandaloneActions?.()) ?? [];
@@ -251,55 +363,72 @@ export async function collectEngineActionDeclarations(
     }
     for (const action of standalone) {
         if (!action || typeof action.name !== 'string') continue;
-        const objectName = standaloneActionOwnerKey(action);
-        const key = `${objectName}:${action.name}`;
-        if (seen.has(key)) continue; // object-embedded declaration wins
-        seen.add(key);
-        out.push({ action, objectName });
+        admit(action);
     }
     return out;
 }
 
 /**
- * The router's SECOND rung, applied to the handlers the declaration set did
- * not cover: `registry.getItem('action', <the key it is registered under>)`,
+ * The router's BY-NAME rungs, applied to the handlers the declaration set did
+ * not cover — `registry.getItem('action', <key>)` (rung 2) and, since #14423,
+ * `meta.loadDiagnosed('action', <key>)` / `meta.load(…)` (rung 3) — each
  * accepted on the router's own ownership test.
  *
- * Why a by-NAME probe rather than folding the registry into the declaration
- * set: the router never enumerates the registry, it asks it for one name, so
- * mirroring it means asking for one name. That also keeps the other finding
- * — `unboundDeclarations`, declared script actions with no handler — reading
- * exactly the population it read before; whether a registry-only declaration
- * with no handler should join it is a different question from this one, and
- * folding would have answered it silently.
+ * ## Why by-NAME probes and not more enumeration
+ *
+ * The router never enumerates either source: it asks for ONE name. Mirroring
+ * it means asking for one name. And enumeration is not a substitute here even
+ * where it exists — a plural read and a by-name read of the same plane can
+ * disagree, which is the whole subject of #14423: one loader fault is
+ * swallowed by the plural read and served by the by-name read, so a handler
+ * whose declaration lives on the faulted loader reads "undeclared" from the
+ * enumeration alone. The keyed enumeration closes the IDENTITY half of that
+ * (a nameless row is now nameable); this probe closes the AVAILABILITY half.
+ * Both halves of the D5 bijection therefore mirror the router: the
+ * declaration half enumerates keyed, the handler half asks by name.
  *
  * A handler registered under key `K` on object `O` is dispatchable at
  * `/actions/O/K` precisely when the router resolves a declaration for the
  * name `K` that owns `O` (its `fallbackKey` then addresses `K` back). So this
  * probe is not an approximation of dispatch — for the direct route it is the
- * same question, asked of the same source.
+ * same question, asked of the same sources.
  *
  * Conservative in exactly one direction, on purpose: a lookup that throws, or
- * answers something that is not an object, leaves the handler ON the list.
- * The audit can therefore over-report a broken registry; it cannot clear a
- * handler on the strength of an answer it could not read.
+ * answers something that is not an object, leaves the handler ON the list —
+ * and one probe's failure never suppresses the next probe's answer. The audit
+ * can therefore over-report a broken source; it cannot clear a handler on the
+ * strength of an answer it could not read.
+ *
+ * ## Cost
+ *
+ * Bounded by the handlers still unaccounted for after set reconciliation, not
+ * by the registry or the plane: on a healthy composition that list is empty
+ * and no probe runs at all. Each surviving handler costs one lookup per
+ * source — on `DatabaseLoader` that is one `findOne` each, the N+1 the census
+ * measured, over N = the accusation list rather than N = the population.
  */
-async function dropHandlersDeclaredInRegistry(
+async function dropHandlersDeclaredByName(
     handlers: Array<{ objectName: string; actionName: string; package?: string }>,
-    lookupRegistryAction: ((actionName: string) => unknown) | undefined,
+    lookups: Array<((actionName: string) => unknown) | undefined>,
 ): Promise<Array<{ objectName: string; actionName: string; package?: string }>> {
-    if (!lookupRegistryAction || handlers.length === 0) return handlers;
+    const probes = lookups.filter((l): l is (actionName: string) => unknown => typeof l === 'function');
+    if (probes.length === 0 || handlers.length === 0) return handlers;
     const kept: Array<{ objectName: string; actionName: string; package?: string }> = [];
     for (const handler of handlers) {
-        let item: unknown;
-        try {
-            item = await lookupRegistryAction(handler.actionName);
-        } catch {
-            kept.push(handler); // registry could not answer — see above
-            continue;
+        let declared = false;
+        for (const probe of probes) {
+            let item: unknown;
+            try {
+                item = await probe(handler.actionName);
+            } catch {
+                continue; // this source could not answer — see above
+            }
+            if (item && typeof item === 'object' && standaloneActionOwnsRoute(item, handler.objectName)) {
+                declared = true;
+                break;
+            }
         }
-        if (item && typeof item === 'object' && standaloneActionOwnsRoute(item, handler.objectName)) continue;
-        kept.push(handler);
+        if (!declared) kept.push(handler);
     }
     return kept;
 }
@@ -320,11 +449,51 @@ function fingerprint(r: ReturnType<typeof reconcileActionRegistrations>): string
  * what was reported so callers can suppress byte-identical repeats
  * (`metadata:reloaded` re-runs this; a re-sync that changed nothing should
  * not repeat the same warning).
+ *
+ * ## [#14423] Both halves of the bijection read what the router reads
+ *
+ * The two findings used to stand on different sources, which is how the audit
+ * could contradict the router about whether a declaration exists:
+ *
+ *  - `undeclaredHandlers` now passes through EVERY by-name rung the router
+ *    resolves through — the engine registry, then the metadata plane — before
+ *    a word of it is reported;
+ *  - `unboundDeclarations` now reads the metadata plane KEYED, under the
+ *    identity the store holds each row by (#14205), so a row whose body
+ *    carries no `name` is a declaration here exactly as it is to the router.
+ *
+ * ## ⚠️ The boundary this audit does NOT cross, stated so nobody re-discovers it
+ *
+ * This runs at boot, OUTSIDE any request scope, so it reads the metadata
+ * service its host can hand it — `ctx.getService('metadata')`. If a
+ * composition ever registers `metadata` with a SCOPED lifecycle, that
+ * accessor cannot reach the per-scope instance at all (it throws before any
+ * read method runs), the audit falls back to the sources it does have, and it
+ * may then report a handler the router serves from a scoped plane. That is a
+ * BOUNDARY of a boot-time audit, not a defect in these reads, and it is not
+ * reachable today: no shipped composition registers `metadata` as SCOPED
+ * (`packages/metadata/src/plugin.ts` registers a static instance). Making a
+ * boot-time audit reach a request-scoped service is a separate product
+ * change, tracked on its own card — ⛔ do not "fix" it by loosening what the
+ * reads below claim.
  */
 export async function runActionGovernanceInventory(args: {
     registered: Array<{ objectName: string; actionName: string; package?: string }>;
     objects: any[];
+    /**
+     * The metadata plane's `action` rows, UNKEYED (`meta.loadMany('action')`).
+     * Superseded by {@link loadStandaloneActionsKeyed} and ignored when that
+     * is present — see {@link collectEngineActionDeclarations}.
+     */
     loadStandaloneActions?: () => Promise<any[]>;
+    /**
+     * [#14423] The metadata plane's `action` rows KEYED by the store's own key
+     * (`meta.loadManyKeyed('action')`). This is the source the declaration
+     * half of the bijection is defined on, so that the audit and the router
+     * share ONE identity — the store key (#14205) — instead of the audit
+     * keying by `body.name` and dropping every row that has none.
+     */
+    loadStandaloneActionsKeyed?: () => Promise<Array<{ name: string; data: any }>>;
     /**
      * The router's rung 2, injected: `registry.getItem('action', name)` from
      * the caller that holds the engine. Omitting it is not a neutral default
@@ -333,17 +502,29 @@ export async function runActionGovernanceInventory(args: {
      * at dispatch. Callers with an engine in hand pass it.
      */
     lookupRegistryAction?: (actionName: string) => unknown;
+    /**
+     * [#14423] The router's rung 3, injected the same way:
+     * `meta.loadDiagnosed('action', name)?.data`, falling back to
+     * `meta.load('action', name)` — the caller unwraps, so this returns the
+     * declaration or nothing, exactly like {@link lookupRegistryAction}.
+     *
+     * Omitting it is not neutral either: the handler half then rests on the
+     * plural read alone, and a loader fault the plural read swallows makes a
+     * handler the router dispatches read as undeclared.
+     */
+    lookupMetadataAction?: (actionName: string) => unknown;
     logger: GovernanceLogger;
     /** Fingerprint returned by the previous run — identical findings are not re-logged. */
     lastFingerprint?: string;
 }): Promise<string> {
     try {
-        const declarations = await collectEngineActionDeclarations(args.objects, args.loadStandaloneActions);
+        const declarations = await collectEngineActionDeclarations(
+            args.objects, args.loadStandaloneActions, args.loadStandaloneActionsKeyed);
         const reconciled = reconcileActionRegistrations(args.registered, declarations);
         const findings = {
             ...reconciled,
-            undeclaredHandlers: await dropHandlersDeclaredInRegistry(
-                reconciled.undeclaredHandlers, args.lookupRegistryAction),
+            undeclaredHandlers: await dropHandlersDeclaredByName(
+                reconciled.undeclaredHandlers, [args.lookupRegistryAction, args.lookupMetadataAction]),
         };
         const fp = fingerprint(findings);
         if (fp === (args.lastFingerprint ?? '')) return fp;
