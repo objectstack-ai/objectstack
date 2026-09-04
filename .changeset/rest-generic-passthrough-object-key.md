@@ -1,5 +1,5 @@
 ---
-"@objectstack/rest": patch
+"@objectstack/rest": minor
 ---
 
 fix(rest): the generic declared-status passthrough names its object on both error doors (#14725)
