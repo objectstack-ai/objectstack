@@ -636,12 +636,16 @@ const KNOWN_DIST_RESOLVED_TYPE_IMPORTS = {
   // gate's own failure text.
   //
   // Provenance measured four ways on one checkout, by varying only what the
-  // `typecheck` script NAMES (`--list`, totals as printed):
+  // `typecheck` script NAMES (`--list`, totals as printed). RE-MEASURED on the
+  // merge of `origin/main` @ 919beca43b, which had landed the `service-knowledge`
+  // onboarding below (#15049) since this card's first reading: that merge moved
+  // every ABSOLUTE here (+1 program, +3 pairs, +1 package before this entry
+  // exists) and moved none of the DELTAS, which are what this block claims.
   //
-  //   no `typecheck` script (origin/main)  absent   119 programs / 290 pairs
-  //   names `tsconfig.json` only           absent   119 programs / 290 pairs
-  //   names `tsconfig.test.json` only      PRESENT  120 programs / 299 pairs
-  //   names both (this card)               PRESENT  120 programs / 299 pairs
+  //   no `typecheck` script (origin/main)  absent   120 programs / 293 pairs
+  //   names `tsconfig.json` only           absent   120 programs / 293 pairs
+  //   names `tsconfig.test.json` only      PRESENT  121 programs / 302 pairs
+  //   names both (this card)               PRESENT  121 programs / 302 pairs
   //
   // Row 2 is the load-bearing one: the BUILD program (which already includes
   // every test file -- `tsconfig.json`'s `include` has never excluded them)
@@ -649,8 +653,8 @@ const KNOWN_DIST_RESOLVED_TYPE_IMPORTS = {
   // not merely first SEEN through the onboarded program, it is only REACHABLE
   // through it. Numbers, before/after on the same checkout:
   //
-  //   before   58 of 78 packages, 119 programs, 290 pairs, 20 clean
-  //   after    59 of 78 packages, 120 programs, 299 pairs, 19 clean
+  //   before   59 of 78 packages, 120 programs, 293 pairs, 19 clean
+  //   after    60 of 78 packages, 121 programs, 302 pairs, 18 clean
   //
   // so +1 package, +1 program, +9 pairs (one per dep below) -- this entry and
   // nothing else.
