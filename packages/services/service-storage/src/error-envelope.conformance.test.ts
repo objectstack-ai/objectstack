@@ -40,9 +40,9 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { BaseResponseSchema, envelopeViolations } from '@objectstack/spec/api';
 import type { IHttpRequest, IHttpResponse, RouteHandler } from '@objectstack/spec/contracts';
-import { LocalStorageAdapter } from './local-storage-adapter';
-import { StorageMetadataStore } from './metadata-store';
-import { registerStorageRoutes } from './storage-routes';
+import { LocalStorageAdapter } from './local-storage-adapter.js';
+import { StorageMetadataStore } from './metadata-store.js';
+import { registerStorageRoutes } from './storage-routes.js';
 
 const BASE = '/api/v1/storage';
 

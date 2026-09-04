@@ -9,7 +9,7 @@ import {
   OBSERVABILITY_METRICS_SERVICE,
   SEMCONV,
 } from '@objectstack/observability';
-import { StorageServicePlugin } from './storage-service-plugin';
+import { StorageServicePlugin } from './storage-service-plugin.js';
 
 /**
  * Mirror of `cache-service-plugin.metrics.test.ts` — verifies the
