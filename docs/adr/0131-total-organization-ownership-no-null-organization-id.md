@@ -380,6 +380,24 @@ Creating one's own item — a new permission set, position, view, flow — is en
 capability and refused to tenants of a shared-DB deployment (D3). It is not customization of a
 managed item; pre-filling the form from a managed item is a UI convenience that records no linkage.
 
+**How far "lock the base, clone to customize" reaches, by type** (maintainer, 2026-09-04: 「是不是可以复制到
+各种元数据类型，包括流程？克隆再定制之后，之前软件包中的元数据还需要停用吗？」). Locking the base reaches every
+type — that is D6. Cloning reaches only the types whose items are **inert until referenced**:
+
+| Type family | Clone-to-customize under managed | Does the base need switching off? |
+|:--|:--|:--|
+| Referenced by name — permission sets, positions, capabilities, templates | **Yes.** Create your own, assign or reference the clone. | **No.** An unassigned set or an unreferenced template does nothing. |
+| Presentational — views, dashboards, reports, pages | **Partly.** The clone can be used, but the platform lists every view bound to an object (the switcher), so the base stays visible beside the clone. | Hiding it needs an overlay (retired) or a switch (sealed) — so under managed the base remains; a template install is the clean answer. |
+| Self-triggering behaviour — flows, workflows, validation rules, scheduled jobs, object-bound actions | **No.** A clone fires **beside** the base: two flows on one record change, two validations on one save. | It would — and that is the disable half this record seals. Under managed such an item is **not customizable**: the vendor exposes a setting in the package, the customer installs as a template, or asks for a version. |
+| Structural — objects, fields, app navigation | Extend (Regime E). | n/a — an extension adds, it does not replace. |
+
+The third row is why ADR-0126 paired clone with disable for flows, and why sealing removed both together
+rather than one. If a measured pull for customizing managed behaviour returns, the smallest reopening is
+**supersede declared on the environment clone** — `supersedes: <managed name>` in the clone's own definition,
+the registry treating the managed item as shadowed whole, environment-level, by a metadata author. That is
+a declaration in the environment ledger, not an activation ledger and not a per-field merge. Recorded here
+so the shape is known; not decided.
+
 **Code-provenance metadata is edited in code.** No runtime door edits a managed item.
 
 **Environment-provenance metadata is edited in the UI.** What Studio, the cloud build agent or a
