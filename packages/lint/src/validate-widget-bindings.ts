@@ -1,7 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { isIncoherentAggregate } from '@objectstack/spec/data';
-import { ChartTypeSchema } from '@objectstack/spec/ui';
 
 import { walkFilterFieldKeys } from './filter-walk.js';
 import {
@@ -77,8 +76,13 @@ import {
  *
  * Advisory rules — severity `warning`, build stays green:
  *
- * - `chart-config-missing` — a chart-type widget (bar/line/pie/…) has no
- *   `chartConfig`, so the renderer cannot tell which measure to plot.
+ * - `chart-config-missing` — a `combo` widget has no `chartConfig`, so no
+ *   series carries a mark and the combination chart draws as one uniform
+ *   family. Narrowed to `combo` because `chartConfig` carries NO binding:
+ *   `DatasetWidget` derives the axis and one series per measure from the
+ *   widget's own `dimensions` / `values`, and actively REFUSES an authored
+ *   `ChartAxis.field` / `ChartSeries.name`. See "What the renderer actually
+ *   derives" below for the pinned contract this now mirrors.
  * - `table-count-only` (#1719) — a `table`/`pivot` widget whose selected
  *   measures are ALL `aggregate: 'count'` and which declares no
  *   `dimensions` asks the analytics service for a single summary row. That
@@ -191,6 +195,65 @@ import {
  * through the flat `SYSTEM_FIELDS` union, which is what lets a reference to
  * `owner_id` on an `ownership: 'none'` object stay a real finding.
  *
+ * ### What the renderer actually derives (#14436)
+ *
+ * `chart-config-missing` used to fire on EVERY chart family that was not a
+ * single-value or tabular type, on the stated grounds that without
+ * `chartConfig` "the renderer cannot determine which measure to plot, so the
+ * series renders empty". That consequence was false, and it fired on this
+ * platform's OWN shipped metadata: the `system_overview` dashboard draws a pie
+ * and a bar, each with one dimension and one measure and no `chartConfig`, and
+ * both render correctly. A warning-tier rule that mis-fires on first-party
+ * metadata is the ADR-0072 D1 cost the whole family exists to avoid — it
+ * teaches every reader, human and agent, that this family is noise.
+ *
+ * The renderer's contract, read at the `@object-ui` revision this repo PINS
+ * (`.objectui-sha`), not at objectui's `origin/main` — the Console ships the
+ * pin, so the exemption is written against the behaviour the pin has:
+ *
+ *  - `DatasetWidget` calls `buildChartSeries(rows, dimensions, values, …)`,
+ *    which returns `{ data, xAxisKey, series }` — the x-axis key is
+ *    `dimensions[0]` and there is exactly one series per entry of `values`.
+ *    `chartConfig` is not an argument to it.
+ *  - The authored `chartConfig` reaches the chart only through
+ *    `mergeAuthoredPresentation` (per-series/axis PRESENTATION merged ONTO
+ *    those derived bindings) and `chartConfigPresentation` (chrome: titles,
+ *    height, colours, data labels, annotations, legend).
+ *  - The BINDING half of an authored `chartConfig` is refused outright. The
+ *    renderer pins this by name in
+ *    `packages/plugin-dashboard/src/__tests__/DatasetWidget.chartConfig.test.tsx`:
+ *    *"ignores an authored axis `field` and keeps the derived axis binding"*,
+ *    *"ignores an authored series and keeps one derived series per measure"*,
+ *    *"ignores `chartConfig.type` — the widget type owns the chart family"*,
+ *    and *"emits none of the presentation keys when no chartConfig is
+ *    declared"*.
+ *
+ * So for every chart family except one, a missing `chartConfig` costs the
+ * widget nothing at all, and ADDING one could not have repaired a widget whose
+ * selection is empty either — `chart-field-unknown` above refuses a
+ * `yAxis[].field` that names anything the widget did not select, so
+ * `chartConfig` can never supply a measure the `values` array is missing.
+ *
+ * **The one surviving arm is `combo`**, and it is a real loss rather than an
+ * inferred one. A combination chart's whole identity is a per-series MARK, and
+ * that mark is authored as `chartConfig.series[].type` — presentation, so it
+ * does merge forward. `mergeAuthoredSeries` states the default it falls back
+ * to: *"a derived series with no authored entry keeps the family default"*,
+ * and `DatasetWidget.comboPresentation.test.tsx` records what that cost when
+ * the merge was missing — *"Without it the line measure drew as the second
+ * bar."* A `combo` with no `chartConfig` therefore draws every measure with
+ * one mark: the author asked for a combination and got a plain one. Warning
+ * rather than error, because the numbers are right and the chart renders — it
+ * is the shape that is wrong.
+ *
+ * ⚠️ Two genuinely un-renderable shapes are NOT this rule's, and are
+ * deliberately left unreported here rather than folded in under an id that
+ * would then misname its own condition: a chart-type widget selecting NO
+ * measures (the pin renders an explicit "Pick measures (values)" placeholder)
+ * and one selecting no dimensions (the pin's `isMetric` covers
+ * `dimensions.length === 0`, so it renders as a KPI number instead of the
+ * family asked for). Neither is caused by, nor repairable with, `chartConfig`.
+ *
  * Warnings can be deliberately suppressed per widget via
  * `suppressWarnings: ['<rule-id>']`; errors cannot — they describe a
  * binding the analytics service cannot satisfy.
@@ -274,28 +337,26 @@ function asStrings(v: unknown): string[] {
 }
 
 /**
- * Chart families that plot a single value or every column, and so need no
- * `chartConfig` measure mapping: single-value types plot their lone value,
- * tabular types render each column as-is.
- */
-const MEASURE_EXEMPT_CHART_TYPES = new Set([
-  'gauge', 'solid-gauge', 'metric', 'kpi', 'bullet',
-  'table', 'pivot',
-]);
-
-/**
- * Chart families whose renderer needs a `chartConfig` measure mapping — the
- * taxonomy minus the exemptions above.
+ * Chart families whose rendered SHAPE depends on `chartConfig` — today exactly
+ * one, `combo`, whose per-series mark is authored as `chartConfig.series[].type`
+ * and has no other channel.
  *
- * Derived from `ChartTypeSchema` rather than restated. As a hand-written list it
- * had no way to know when the taxonomy grew, and the omission is silent in
- * exactly the wrong direction: an unlisted family is treated as "not a chart",
- * so a widget missing its measure mapping passes validation instead of being
- * reported. objectui#2945.
+ * ⛔ This is NOT "the families that need a measure mapping". No family needs one:
+ * `DatasetWidget` derives the axis key and one series per measure from the
+ * widget's `dimensions` / `values`, and refuses an authored `ChartAxis.field` /
+ * `ChartSeries.name` outright — the rule docblock's "What the renderer actually
+ * derives" carries the pinned test names that establish it (#14436). The
+ * previous spelling of this set was the taxonomy minus a hand-written exemption
+ * list, which reported every bar, line and pie that never wrote a `chartConfig`
+ * — including this platform's own `system_overview` tiles.
+ *
+ * Membership is checked against `ChartTypeSchema` in this rule's tests rather
+ * than derived from it: a family belongs here because of what its RENDERER does
+ * with `chartConfig`, which a taxonomy cannot know. objectui#2945's lesson —
+ * that a hand-written list cannot notice the taxonomy growing — survives as
+ * that check: a member that stops being a declared chart type reds.
  */
-const CHART_TYPES = new Set<string>(
-  ChartTypeSchema.options.filter(t => !MEASURE_EXEMPT_CHART_TYPES.has(t)),
-);
+export const MARK_MIXING_CHART_TYPES = new Set<string>(['combo']);
 
 function list(names: Iterable<string>): string {
   const arr = [...names];
@@ -863,7 +924,11 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
       const chartConfig = (w.chartConfig && typeof w.chartConfig === 'object')
         ? (w.chartConfig as AnyRec)
         : undefined;
-      const isChartType = typeof w.type === 'string' && CHART_TYPES.has(w.type);
+      // [#14436] Not "is this a chart" — the renderer derives every chart's
+      // binding from `dimensions`/`values`. This asks the only question a
+      // MISSING `chartConfig` can still answer badly: does this family carry
+      // its shape in `chartConfig`?
+      const isMarkMixing = typeof w.type === 'string' && MARK_MIXING_CHART_TYPES.has(w.type);
 
       if (chartConfig) {
         // The query result carries the widget's selected dimensions and
@@ -916,17 +981,23 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
           const name = series[k]?.name;
           if (typeof name === 'string') measureField(`series[${k}].name`, name);
         }
-      } else if (isChartType) {
+      } else if (isMarkMixing) {
         push({
           severity: 'warning',
           rule: CHART_CONFIG_MISSING,
           message:
-            `chart-type widget ('${w.type}') has no chartConfig — the renderer ` +
-            `cannot determine which measure to plot, so the series renders empty.`,
+            `'${w.type}' widget has no chartConfig — a combination chart takes its ` +
+            `per-series mark from \`chartConfig.series[].type\`, and with none declared ` +
+            `every measure (${list(values)}) draws with the same default mark, so the ` +
+            `chart is not a combination at all. The data and the axis are unaffected: ` +
+            `the renderer derives those from this widget's dimensions and values.`,
           hint:
-            `Add chartConfig with xAxis.field set to a dimension (${list(dims)}) and ` +
-            `yAxis[].field set to a measure name (${list(values)}). If the default ` +
-            `rendering is intentional, suppress with: suppressWarnings: ['${CHART_CONFIG_MISSING}']`,
+            `Give each measure its mark — chartConfig: { series: [{ name: '<measure>', ` +
+            `type: 'bar' | 'line' | 'area' }] } — naming measures this widget selects ` +
+            `(${list(values)}). \`series[].name\` selects WHICH derived series the mark ` +
+            `lands on; it cannot add, remove or re-point one. If one uniform mark is ` +
+            `intentional, prefer that family's own widget type, or suppress with: ` +
+            `suppressWarnings: ['${CHART_CONFIG_MISSING}']`,
         });
       }
 

@@ -27,7 +27,6 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import type {
-  DriverOptions,
   EngineAggregateOptions,
   EngineCountOptions,
   EngineQueryOptions,
@@ -90,15 +89,14 @@ interface SeenRead { ast: DriverQuery }
  * the annotation THIS declaration is what fails when a member is added or a
  * signature moves.
  *
- * The one extension: `aggregate` is NOT on `IDataDriver`. The engine reaches it
- * by duck-typing (`typeof drv.aggregate === 'function'`, `engine.ts`), so it is
- * declared here explicitly — the pin exercises that verb and must keep
- * witnessing it. ⚠️ Declared here does NOT make it contractual; it records that
- * this double answers a call the interface does not describe.
+ * `aggregate` included: the engine reaches it by duck-typing
+ * (`typeof drv.aggregate === 'function'`, `engine.ts`), and until #14345 the
+ * interface did not declare it, so this file carried a local extension for
+ * the one verb. `IDataDriver.aggregate?` now spells the signature the engine
+ * calls, so the double's `aggregate` is checked by the same annotation as
+ * every other verb — no local extension, nothing this double answers that the
+ * contract does not describe.
  */
-interface RecordingDriver extends IDataDriver {
-  aggregate(object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown>[]>;
-}
 
 /**
  * A verb the pin does not exercise, present only because `IDataDriver` requires
@@ -152,7 +150,7 @@ function makeRecordingDriver() {
     const out = [...rows.values()].filter((r) => matches(r, ast?.where));
     return typeof ast?.limit === 'number' && ast.limit > 0 ? out.slice(0, ast.limit) : out;
   };
-  const driver: RecordingDriver = {
+  const driver: IDataDriver = {
     name: 'recording', version: '0.0.0', supports: {},
     async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async execute() { return null; },
     async find(_o: string, ast: DriverQuery) { reads.push({ ast }); return run(ast); },

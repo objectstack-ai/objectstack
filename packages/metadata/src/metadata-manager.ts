@@ -66,7 +66,7 @@ import { YAMLSerializer } from './serializers/yaml-serializer.js';
 import { TypeScriptSerializer } from './serializers/typescript-serializer.js';
 import type { MetadataSerializer } from './serializers/serializer-interface.js';
 import type { IDataDriver, IDataEngine } from '@objectstack/spec/contracts';
-import type { MetadataLoader } from './loaders/loader-interface.js';
+import type { MetadataLoader, MetadataKeyedItem } from './loaders/loader-interface.js';
 import { DatabaseLoader } from './loaders/database-loader.js';
 import { generateSimpleDiff, generateDiffSummary } from './utils/metadata-history-utils.js';
 import type {
@@ -1575,6 +1575,30 @@ export class MetadataManager implements IMetadataService {
 
   /**
    * List all names of metadata items of a given type
+   *
+   * ## [#14423] One loader's fault does not take the whole enumeration down
+   *
+   * This loop used to be bare — `const result = await loader.list(type)` with
+   * no `try`, while the two sibling plural reads (`list()` via
+   * {@link admitLoaderItems}, and {@link loadMany}) have carried a per-loader
+   * `catch` since #5108. That asymmetry is the defect, independent of any one
+   * caller: the SAME storage outage was swallowed by one plural read and
+   * thrown out of the other, so which answer a caller got depended only on
+   * which method it happened to call. A caller reading both — the action
+   * governance audit is one — saw `loadMany` report a short-but-successful
+   * set and `listNames` throw, and had no way to tell that one fact was
+   * behind both.
+   *
+   * Same shape as `loadMany`'s, deliberately, down to the helpers: the outage
+   * is spoken once per loader through {@link reportLoaderReadFailure} and
+   * un-said through {@link reportLoaderReadRecovered}. ⛔ Not a third spelling
+   * for "a loader faulted" — a second vocabulary for one event is how the two
+   * reads drifted apart in the first place.
+   *
+   * The degradation is the same one `list()` documents and is graded the same
+   * way (AGENTS.md → "Degradation log levels"): the caller still gets an
+   * array, nothing 500s, and the set is quietly short — so it is reported at
+   * `error`, by the shared helper, rather than being re-graded here.
    */
   async listNames(type: string): Promise<string[]> {
     // [#7378 row 2] Same store `get` reads: the canonical type.
@@ -1591,8 +1615,15 @@ export class MetadataManager implements IMetadataService {
 
     // From loaders
     for (const loader of this.loaders.values()) {
-      const result = await loader.list(type);
-      result.forEach(item => names.add(item));
+      try {
+        const result = await loader.list(type);
+        result.forEach(item => names.add(item));
+        this.reportLoaderReadRecovered(loader.contract.name);
+      } catch (e) {
+        // [#14423] Parity with `loadMany` and `list()` — see this method's
+        // docblock. Same seam, same verdict, same helper.
+        this.reportLoaderReadFailure(loader.contract.name, type, e);
+      }
     }
 
     return Array.from(names);
@@ -2692,6 +2723,113 @@ export class MetadataManager implements IMetadataService {
         }
     }
     return results;
+  }
+
+  /**
+   * [#14423] {@link loadMany}, read under the identity the STORE holds each
+   * item by — the keyed plural read, beside the unkeyed one.
+   *
+   * ## Why a second method and not a widened `loadMany`
+   *
+   * `loadMany` keys nothing: it returns bodies, and every consumer that needs
+   * an identity reads `body.name` off them. #14205 already ruled what identity
+   * IS — the key the store holds the item under (`register(type, name, data)`
+   * takes it as the ARGUMENT, and a body is not required to name itself) — so
+   * `body.name` is a guess that happens to be right for most items and drops
+   * the rest ENTIRELY: an item whose body carries no `name` is served by
+   * `load(type, name)` and is not nameable from `loadMany`'s answer at all.
+   *
+   * Widening `loadMany`'s return would fix that and break every consumer of a
+   * published shape (the ones counted on this card all read `body.name` as the
+   * identity). So this is additive: `loadMany`'s return shape is untouched,
+   * and a caller that needs the key asks for the key.
+   *
+   * ## What it reads — the same population `loadMany` reads
+   *
+   * Loaders only, deliberately, so this is `loadMany` keyed and nothing more.
+   * It is NOT `list()`/{@link listNames}, which also merge the in-memory
+   * `register()` registry; a caller wanting that set has those. Reading the
+   * loaders alone is also what makes this the enumerable twin of
+   * {@link loadDiagnosed}, which walks the same loaders by name — that pairing
+   * is the point on the audit side of #14423, where an enumeration and a
+   * by-name read that disagree about a population make one subsystem accuse
+   * another of a defect neither has.
+   *
+   * ## Delegate first, fall back second — and why that order is not a style
+   *
+   * Per loader: {@link MetadataLoader.loadManyKeyed} where the loader offers
+   * one, else its `list()` + a per-name `load()`. Measured, on
+   * `DatabaseLoader`: the keyed method shares `loadMany`'s single query
+   * (`{find:1, findOne:0}` — zero extra cost), while enumerate-then-read-each
+   * on that same loader is a real N+1 (`{find:1, findOne:5}` for five items).
+   * The fallback exists for loaders that cannot produce keys at all
+   * (`RemoteLoader`'s wire format carries bodies only), and it recovers the
+   * nameless item the pre-#14205 `loadMany`-and-key-by-`body.name` fallback
+   * drops — which is why it is `list()` + `load()` and not `loadMany()`.
+   *
+   * ## Failure posture
+   *
+   * Per-loader `try`/`catch`, the same seam and the same helpers as
+   * {@link loadMany} and `list()` — one loader's outage does not take the
+   * enumeration down, and it is reported once through
+   * {@link reportLoaderReadFailure} rather than in a third vocabulary.
+   * Earlier loaders win a key collision, mirroring `list()`.
+   */
+  async loadManyKeyed<T = any>(
+    type: string,
+    options?: MetadataLoadOptions
+  ): Promise<MetadataKeyedItem<T>[]> {
+    const items = new Map<string, T>();
+
+    for (const loader of this.loaders.values()) {
+      try {
+        await this.admitKeyedLoaderItems<T>(loader, type, items, options);
+        this.reportLoaderReadRecovered(loader.contract.name);
+      } catch (e) {
+        // Same seam, same verdict as `loadMany` and `list()`.
+        this.reportLoaderReadFailure(loader.contract.name, type, e);
+      }
+    }
+
+    return Array.from(items, ([name, data]) => ({ name, data }));
+  }
+
+  /**
+   * Merge ONE loader's answer for `type` into `items`, keyed by that loader's
+   * own key for each item — {@link loadManyKeyed}'s per-loader body.
+   *
+   * Distinct from {@link admitLoaderItems} on exactly one axis, and that axis
+   * is the whole of #14423: the fallback for a loader with no
+   * `loadManyKeyed`. `admitLoaderItems` falls back to `loadMany` keyed by
+   * `data.name` — the pre-#14205 behaviour, verbatim, which drops a nameless
+   * body. Here the fallback is `list()` + a per-name `load()`, so a loader
+   * that cannot enumerate keys and bodies together still answers with both.
+   *
+   * Read failures are NOT caught here — the caller owns that verdict, as in
+   * {@link admitLoaderItems}.
+   */
+  private async admitKeyedLoaderItems<T = any>(
+    loader: MetadataLoader,
+    type: string,
+    items: Map<string, T>,
+    options?: MetadataLoadOptions
+  ): Promise<void> {
+    if (typeof loader.loadManyKeyed === 'function') {
+      const keyed = await loader.loadManyKeyed<T>(type, options);
+      for (const entry of keyed) {
+        if (!entry || typeof entry.name !== 'string' || entry.name === '') continue;
+        if (items.has(entry.name)) continue;
+        items.set(entry.name, entry.data);
+      }
+      return;
+    }
+
+    for (const name of await loader.list(type)) {
+      if (typeof name !== 'string' || name === '' || items.has(name)) continue;
+      const result = await loader.load(type, name, options);
+      if (result?.data == null) continue;
+      items.set(name, result.data as T);
+    }
   }
 
   /**

@@ -170,6 +170,7 @@
     "IntrospectedTable": "src/contracts/schema-diff-service.ts#IntrospectedTable (interface)",
     "JobExecution": "src/system/job.zod.ts#JobExecution (type)",
     "JobHandler": "src/contracts/job-service.ts#JobHandler (type)",
+    "JobReplayOptions": "src/contracts/job-service.ts#JobReplayOptions (interface)",
     "JobRetryPolicy": "src/contracts/job-service.ts#JobRetryPolicy (interface)",
     "JobRunOutcome": "src/contracts/job-service.ts#JobRunOutcome (interface)",
     "JobSchedule": "src/contracts/job-service.ts#JobSchedule (interface)",

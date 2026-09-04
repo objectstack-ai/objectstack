@@ -65,6 +65,15 @@
  *   ACCIDENT  exit != 0 AND it printed nothing -- a non-zero exit with no
  *             refusal behind it. NOT counted among HELD, ever.
  *
+ * A FOURTH reading sits UNDER all three, and it is a PRECONDITION rather than a
+ * verdict: if the UNMUTATED file already exits non-zero, this tree cannot run
+ * it at all, so the mutation had nothing to defeat and NOTHING WAS MEASURED.
+ * That case does not look like an absence -- both runs exit non-zero and both
+ * print a module-resolution stack, so the mutated run "speaks" and the verdict
+ * above reads HELD. A checkout that has not been `pnpm install`ed therefore
+ * reports the FLATTERING answer for every file it cannot load, and the same row
+ * reads ACCIDENT once the tree is installed (#15391).
+ *
  * The `mutatedBytes` / `mutatedHead` fields the row already carried are what this
  * reads; `mutatedSpoke` publishes the reading. Deliberately the verdict does NOT
  * match the refusal WORDING: the repair landed in three spellings and teaching
@@ -104,6 +113,9 @@ const DISPATCH = /(?:includes|has)\(\s*['"`]--self-test['"`]\s*\)/;
 /** Marker injected by the probe. Its presence on disk is the mutation's proof. */
 const PROBE_MARKER = 'OS_SELF_TEST_FLOOR_PROBE';
 
+/** "Did this run SAY anything": its first non-blank line, or '' if it said nothing. */
+const firstNonBlankLine = (out) => out.split('\n').find((l) => l.trim()) ?? '';
+
 // ---------------------------------------------------------------------------
 // Instrument 1 -- the static assertion-floor criterion
 // ---------------------------------------------------------------------------
@@ -111,8 +123,32 @@ const PROBE_MARKER = 'OS_SELF_TEST_FLOOR_PROBE';
 /**
  * A FLOOR must PRODUCE A FAILURE, not merely be named. Keying on a name is the
  * mistake this card is about one level up, and the control below proves it.
+ *
+ * The criterion is published in two halves so a control can test each on its own:
+ *
+ *   NAMED    the failure is produced by a spelling that names itself --
+ *            `failures.push`, a literal `process.exit(1)`, `throw new Error`,
+ *            `exitCode = 1`, `ok(false`.
+ *   TERNARY  the EXIT CODE is the verdict: `process.exit(<cond> ? 0 : 1)`, the
+ *            same with any non-zero failing arm (`? 0 : N`), and the inverted
+ *            `process.exit(<cond> ? 1 : 0)`. A failing arm that is a non-zero
+ *            LITERAL produces a failure exactly as `process.exit(1)` does; it is
+ *            an ordinary spelling, and reading only the literal form called a
+ *            complete, working roster floor NONE (#15339) -- the roster half
+ *            matched, the file carried no other recognised spelling, and the
+ *            failure half missed.
+ *
+ * BOUNDARY -- a bare `process.exit(<expr>)` is deliberately NOT a failure
+ * producer, however likely the expression is to be non-zero. That is the
+ * accident shape this file's header is about: over a self-test that returned
+ * early, `process.exit(runSelfTest())` is `process.exit(undefined)` -- exit 0,
+ * nothing produced, nothing noticed. Source text cannot tell what an opaque
+ * expression yields; a non-zero literal in the failing arm it can.
  */
-const PRODUCES_FAILURE = /failures\.push|process\.exit\(1\)|throw new Error|exitCode = 1|ok\(false/;
+const PRODUCES_FAILURE_NAMED = /failures\.push|process\.exit\(1\)|throw new Error|exitCode = 1|ok\(false/;
+const PRODUCES_FAILURE_TERNARY_EXIT =
+  /process\.exit\(\s*[^;]{0,200}?\?\s*(?:0\s*:\s*[1-9]\d*|[1-9]\d*\s*:\s*0)\s*\)/;
+const PRODUCES_FAILURE = new RegExp(`${PRODUCES_FAILURE_NAMED.source}|${PRODUCES_FAILURE_TERNARY_EXIT.source}`);
 const ROSTER_COMPARISON =
   /(?:declaredBatteries|SELF_TEST_BATTERIES|BATTERY_FLOOR)[^;]{0,400}?(?:\.length|\.size|includes\(|has\(|!==|===|<)/s;
 const COUNT_COMPARISON = [
@@ -188,6 +224,15 @@ export function injectEarlyReturn(src, name) {
  * resolution still answer the same, and the marker is re-read FROM DISK before
  * the run: an editor step that matched nothing exits 0 just as happily as one
  * that landed, and an unmutated file would report "held" for no reason at all.
+ *
+ * THE BASELINE IS A PRECONDITION, NOT A DATA POINT. It is read BEFORE any
+ * reading of the mutated run, and a non-zero one ends the probe as NOT MEASURED
+ * with the reason -- see the fourth reading in this file's header. The mutated
+ * run is then not spawned AT ALL: in the shape that motivates this (a checkout
+ * whose dependencies are absent) every row is baseline-red, so running each
+ * doomed mutation would double a whole sweep of spawns to learn nothing. The
+ * row still publishes what the baseline said, because `baselineHead` is usually
+ * the whole diagnosis (`Cannot find package ...` reads as "run pnpm install").
  */
 export function probeEarlyReturn(absFile, entry, { timeout = 120000 } = {}) {
   const src = readFileSync(absFile, 'utf8');
@@ -204,10 +249,28 @@ export function probeEarlyReturn(absFile, entry, { timeout = 120000 } = {}) {
     if (onDisk !== 1) return { verdict: 'NOT MEASURED', why: `mutation not on disk (marker x${onDisk})` };
 
     const base = spawnSync(cmd, [absFile, '--self-test'], { cwd: ROOT, timeout, encoding: 'utf8' });
-    const mut = spawnSync(cmd, [probePath, '--self-test'], { cwd: ROOT, timeout, encoding: 'utf8' });
     const baseOut = (base.stdout ?? '') + (base.stderr ?? '');
+    if (base.signal) return { verdict: 'NOT MEASURED', why: `killed by ${base.signal}` };
+    // PRECONDITION. A file the tree cannot run offered the mutation nothing to
+    // defeat, so no verdict below is available -- however loudly the mutated run
+    // would have exited and spoken. Read before the mutated run is spawned.
+    if (base.status !== 0) {
+      return {
+        verdict: 'NOT MEASURED',
+        why:
+          base.status === null
+            ? `baseline run could not start (${base.error?.code ?? 'no exit status'})`
+            : `baseline run failed (exit ${base.status})`,
+        entry,
+        baselineExit: base.status,
+        baselineBytes: baseOut.length,
+        baselineHead: firstNonBlankLine(baseOut),
+      };
+    }
+
+    const mut = spawnSync(cmd, [probePath, '--self-test'], { cwd: ROOT, timeout, encoding: 'utf8' });
     const mutOut = (mut.stdout ?? '') + (mut.stderr ?? '');
-    if (mut.signal || base.signal) return { verdict: 'NOT MEASURED', why: `killed by ${mut.signal ?? base.signal}` };
+    if (mut.signal) return { verdict: 'NOT MEASURED', why: `killed by ${mut.signal}` };
     // A mutation that changed nothing observable did not reach the executed
     // path, whatever its exit code says.
     if (baseOut === mutOut && base.status === mut.status) {
@@ -216,7 +279,7 @@ export function probeEarlyReturn(absFile, entry, { timeout = 120000 } = {}) {
     // Did the mutated run SAY anything? Read as "printed a non-blank line", the
     // same reading `mutatedHead` already publishes and quotes -- a run whose whole
     // output is a newline has non-zero bytes and still refused nothing.
-    const mutatedHead = mutOut.split('\n').find((l) => l.trim()) ?? '';
+    const mutatedHead = firstNonBlankLine(mutOut);
     const mutatedSpoke = mutatedHead !== '';
     return {
       // Exit code alone cannot tell a refusal from an accident -- see the header.
@@ -300,6 +363,69 @@ const ACCIDENT_GATE = [
 ].join('\n');
 
 /**
+ * The measured BASELINE-RED shape, reduced: a file this tree cannot run at all,
+ * because one of its imports does not resolve. Its self-test is otherwise
+ * perfectly ordinary and injectable -- the point is that neither run ever
+ * reaches it. Both runs die in module resolution, both exit non-zero, and both
+ * PRINT a stack trace, so `mutatedSpoke` is true and an exit-code-and-speech
+ * verdict scores it HELD: a hold awarded for the tree being broken. This is the
+ * shape `scripts/audits/14744-before-update-per-row-value-census.mjs` takes in a
+ * checkout whose `node_modules` lacks its `typescript` dependency, where it read
+ * HELD while reading ACCIDENT in an installed one (#15391).
+ *
+ * The unresolvable import is a name no registry can supply, and it is the
+ * FIRST statement, so the failure is the module loader's and cannot be confused
+ * with anything the self-test did.
+ */
+const UNRUNNABLE_GATE = [
+  '#!/usr/bin/env node',
+  "import 'os-self-test-floor-control-no-such-package';",
+  'function selfTest() {',
+  '  const failures = [];',
+  "  if (1 !== 1) failures.push('x');",
+  "  if (failures.length) { console.error('nope'); process.exit(1); }",
+  "  console.log('fixture self-test: 1 case passes');",
+  '}',
+  "if (process.argv.includes('--self-test')) selfTest();",
+  '',
+].join('\n');
+
+/**
+ * The ternary exit, reduced: a roster floor whose ONLY failure production is
+ * `process.exit(<cond> ? 0 : 1)`. It carries none of the NAMED spellings -- no
+ * `failures.push`, no literal `process.exit(1)`, no `throw`, no `exitCode = 1`,
+ * no `ok(false` -- and a control asserts that, so reading it ROSTER can only be
+ * the ternary being recognised and never some other half of the criterion
+ * sneaking in. This is the shape `scripts/check-regen-pending.mjs` carried while
+ * its floor was sound, its ablations all fired, and this instrument still said
+ * NONE (#15339).
+ *
+ * The classifier is a pure function of source text, so unlike the three fixtures
+ * above this one is never spawned -- it is read, not run.
+ */
+const TERNARY_EXIT_GATE = [
+  '#!/usr/bin/env node',
+  'const SELF_TEST_BATTERIES = Object.freeze({ only: 1 });',
+  'function runSelfTest() {',
+  '  const seen = new Map();',
+  '  const battery = (n) => seen.set(n, (seen.get(n) ?? 0) + 1);',
+  "  battery('only');",
+  '  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);',
+  '  let held = declaredBatteries.length >= 1;',
+  '  for (const n of declaredBatteries) if ((seen.get(n) ?? 0) < SELF_TEST_BATTERIES[n]) held = false;',
+  "  console.log('fixture self-test: floor ' + (held ? 'held' : 'shrank'));",
+  '  return held;',
+  '}',
+  "if (process.argv.includes('--self-test')) {",
+  '  process.exit(runSelfTest() ? 0 : 1);',
+  '}',
+  '',
+].join('\n');
+
+/** The one dispatch line of `TERNARY_EXIT_GATE`, the anchor the variants replace. */
+const TERNARY_EXIT_DISPATCH = 'runSelfTest() ? 0 : 1';
+
+/**
  * Both instruments, against both directions. Returns the failures; the caller
  * refuses on any. Nothing here reads the repo, so a control failure is always
  * the instrument and never the tree.
@@ -314,18 +440,46 @@ export function runControls() {
   say(classifyFloor(maskComments(SOUND_GATE)) === 'ROSTER',
     'NEGATIVE CONTROL FAILED: a roster-floored self-test was not classified ROSTER');
 
+  // The ternary exit, both directions. The failing arm being a NON-ZERO LITERAL
+  // is what produces the failure; the roster half still has to match on its own,
+  // and an opaque expression still has to produce nothing.
+  const ternaryExit = (dispatchArgs) =>
+    maskComments(TERNARY_EXIT_GATE.replace(TERNARY_EXIT_DISPATCH, dispatchArgs));
+  say(!PRODUCES_FAILURE_NAMED.test(maskComments(TERNARY_EXIT_GATE)),
+    'CONTROL FIXTURE INVALID: the ternary fixture picked up one of the NAMED failure spellings; every verdict below it would then be passing for the wrong reason');
+  say(classifyFloor(maskComments(TERNARY_EXIT_GATE)) === 'ROSTER',
+    'NEGATIVE CONTROL FAILED: a roster floor whose only failure production is `process.exit(<cond> ? 0 : 1)` was not classified ROSTER');
+  say(classifyFloor(ternaryExit('runSelfTest() ? 0 : 2')) === 'ROSTER',
+    'NEGATIVE CONTROL FAILED: a ternary exit whose failing arm is a non-zero literal other than 1 was not classified ROSTER');
+  say(classifyFloor(ternaryExit('!runSelfTest() ? 1 : 0')) === 'ROSTER',
+    'NEGATIVE CONTROL FAILED: the inverted ternary exit (`? 1 : 0`, the failing arm first) was not classified ROSTER');
+  say(classifyFloor(ternaryExit('runSelfTest()')) === 'NONE',
+    'POSITIVE CONTROL FAILED: a bare `process.exit(<expr>)` was read as producing a failure -- an opaque expression is the accident shape (it is `process.exit(undefined)` after an early return), not a floor');
+  say(classifyFloor(maskComments(TERNARY_EXIT_GATE
+    .replaceAll('SELF_TEST_BATTERIES', 'FIXTURE_BATTERIES_BY_NAME')
+    .replaceAll('declaredBatteries', 'declaredNames'))) === 'NONE',
+    'POSITIVE CONTROL FAILED: the ternary exit alone was classified ROSTER -- producing a failure is HALF the criterion; a roster this criterion can NAME is the other half');
+  // Reuse rather than invention: the shape now recognised is the one the ACCIDENT
+  // fixture above actually dispatches with (and the audit file it is reduced
+  // from), so the criterion stays pinned to a spelling measured in this tree.
+  say(PRODUCES_FAILURE_TERNARY_EXIT.test(ACCIDENT_GATE.split('\n').find((l) => l.includes('process.exit(')) ?? ''),
+    'CONTROL FAILED: the accident fixture no longer dispatches with the ternary exit this criterion was extended to read; the two have drifted apart');
+
   // Instrument 2, both directions, against real processes on disk.
   const dir = mkdtempSync(join(tmpdir(), 'self-test-floor-control-'));
   try {
     const holed = join(dir, 'holed-gate.mjs');
     const sound = join(dir, 'sound-gate.mjs');
     const accident = join(dir, 'accident-gate.mjs');
+    const unrunnable = join(dir, 'unrunnable-gate.mjs');
     writeFileSync(holed, HOLED_GATE);
     writeFileSync(sound, SOUND_GATE);
     writeFileSync(accident, ACCIDENT_GATE);
+    writeFileSync(unrunnable, UNRUNNABLE_GATE);
     const h = probeEarlyReturn(holed, 'selfTest');
     const s = probeEarlyReturn(sound, 'selfTest');
     const a = probeEarlyReturn(accident, 'runSelfTest');
+    const u = probeEarlyReturn(unrunnable, 'selfTest');
     say(h.verdict === 'DEFEATED',
       `POSITIVE CONTROL FAILED: the probe read a known-holed gate as ${h.verdict} (${h.why ?? ''})`);
     say(h.mutatedBytes === 0,
@@ -341,6 +495,16 @@ export function runControls() {
       `POSITIVE CONTROL FAILED: the probe read a silent non-zero exit as ${a.verdict} (${a.why ?? ''}) -- an exit code is not a handshake`);
     say(a.mutatedExit !== 0 && a.mutatedBytes === 0 && a.mutatedSpoke === false,
       `POSITIVE CONTROL FAILED: the accident fixture no longer produces the measured shape (exit ${a.mutatedExit}, ${a.mutatedBytes} byte(s)); the ACCIDENT verdict above would then be passing for the wrong reason`);
+    // The precondition, in the direction that matters: a baseline that already
+    // failed ends the probe, and it must end it as NOT MEASURED -- never as the
+    // HELD an exit-code-and-speech reading would award it (#15391).
+    say(u.verdict === 'NOT MEASURED' && /^baseline run failed \(exit /.test(u.why ?? ''),
+      `POSITIVE CONTROL FAILED: a file whose BASELINE run already exits non-zero was read as ${u.verdict} (${u.why ?? ''}); the mutation had nothing to defeat, so nothing was measured`);
+    // ... and for the RIGHT reason: this fixture has to be the flattering shape,
+    // a red baseline that SPEAKS. A fixture that fell silent, or that stopped
+    // being red, would satisfy the verdict above while testing nothing.
+    say(u.baselineExit !== 0 && u.baselineBytes > 0 && u.baselineHead !== '',
+      `POSITIVE CONTROL FAILED: the unrunnable fixture no longer produces the measured shape (baseline exit ${u.baselineExit}, ${u.baselineBytes} byte(s)); the NOT MEASURED verdict above would then be passing for the wrong reason`);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -55,6 +55,27 @@ interface ProtocolWithDbRestore {
   }>;
 }
 
+/**
+ * [#14423] The keyed plural read the governance audit reads the metadata plane
+ * through — `MetadataManager.loadManyKeyed(type)`, structurally.
+ *
+ * Declared HERE, beside the one call site, rather than on `IMetadataService`:
+ * `packages/spec` is a contract surface owned by another lane, and widening it
+ * is its own decision with its own review. This is the same position
+ * `loadDiagnosed` was in before it was declared — the call site and the
+ * implementation agreed, and the contract was what nobody had written — and
+ * the same remedy applies when that lane takes it: delete this and read the
+ * contract. ⛔ Not `any`: intersecting the slot's real contract keeps the
+ * lookup typed (#4251), and the member stays optional so a plane that predates
+ * it type-checks and is simply read as "no keyed read here".
+ */
+type KeyedPluralMetadataRead = {
+  loadManyKeyed?<T = unknown>(
+    type: string,
+    options?: Record<string, unknown>,
+  ): Promise<Array<{ name: string; data: T }>>;
+};
+
 /** Type guard — checks whether the service exposes `loadMetaFromDb`. */
 function hasLoadMetaFromDb(service: unknown): service is ProtocolWithDbRestore {
   return (
@@ -2476,11 +2497,34 @@ export class ObjectQLPlugin implements Plugin {
     const ql: any = this.ql;
     if (!ql || typeof ql.listRegisteredActions !== 'function') return;
     let loadStandaloneActions: (() => Promise<any[]>) | undefined;
+    let loadStandaloneActionsKeyed: (() => Promise<Array<{ name: string; data: any }>>) | undefined;
+    let lookupMetadataAction: ((actionName: string) => unknown) | undefined;
     try {
-      const meta = ctx.getService<IMetadataService>('metadata');
+      const meta = ctx.getService<IMetadataService & KeyedPluralMetadataRead>('metadata');
       const loadMany = meta?.loadMany;
       if (meta && typeof loadMany === 'function') {
         loadStandaloneActions = () => loadMany.call(meta, 'action');
+      }
+      // [#14423] The KEYED plural read, preferred over `loadMany` — see
+      // `collectEngineActionDeclarations`. A plane that predates it (or a test
+      // double) simply does not offer it and the unkeyed read above stands.
+      const loadManyKeyed = meta?.loadManyKeyed;
+      if (meta && typeof loadManyKeyed === 'function') {
+        loadStandaloneActionsKeyed = () => loadManyKeyed.call(meta, 'action');
+      }
+      // [#14423] The router's THIRD rung, injected the same way its second one
+      // is. `resolveRouteActionDeclaration` prefers `loadDiagnosed` and falls
+      // back to `load`; this mirrors that branch and unwraps, so the audit
+      // receives a declaration-or-nothing exactly like `lookupRegistryAction`.
+      // A degraded read answers `data: null` here and therefore CLEARS
+      // nothing — the audit's conservative direction, unchanged.
+      const loadDiagnosed = meta?.loadDiagnosed;
+      const load = meta?.load;
+      if (meta && typeof loadDiagnosed === 'function') {
+        lookupMetadataAction = async (actionName: string) =>
+          (await loadDiagnosed.call(meta, 'action', actionName))?.data;
+      } else if (meta && typeof load === 'function') {
+        lookupMetadataAction = (actionName: string) => load.call(meta, 'action', actionName);
       }
     } catch { /* no metadata service — registry objects still audit */ }
     // [#9285] BOTH swallows are gone. The old spelling —
@@ -2517,6 +2561,8 @@ export class ObjectQLPlugin implements Plugin {
       registered: ql.listRegisteredActions(),
       objects,
       loadStandaloneActions,
+      loadStandaloneActionsKeyed,
+      lookupMetadataAction,
       // The router's SECOND rung, handed over from here because objectql
       // cannot import the router (runtime -> objectql, never the reverse).
       // `resolveRouteActionDeclaration` resolves a declaration through
