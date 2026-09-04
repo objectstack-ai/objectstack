@@ -34,6 +34,12 @@
  * whose emission was — contrary to that card's premise — already observed
  * elsewhere. See its own comment for where, and why it is pinned here too.
  *
+ * [#14849] Six more rows joined that home: VALIDATION_FAILED, DUPLICATE_REQUEST,
+ * INVALID_STATE, REQUEST_NOT_FOUND, RESUME_TARGET_LOST and RESUME_FAILED had no
+ * live-emission pin ANYWHERE — established by ablating each row and running the
+ * whole `packages/rest` suite, not by grepping this file. The per-row results and
+ * the instrument's positive control are recorded beside those cases below.
+ *
  * 3. The union stays CLOSED — the control case in
  *    `rest-field-visibility-fault-envelope.test.ts` covers this file too (same
  *    schema instance); membership green here is evidence, not vacuity.
@@ -202,6 +208,157 @@ describe('approvals wire codes are registered vocabulary (#8885)', () => {
         expect(
             ApiErrorSchema.safeParse({ code: answer.body?.code, message: answer.body?.error }).success,
             'READ_BACK_FAILED must be in StandardErrorCode ∪ ERROR_CODE_LEDGER',
+        ).toBe(true);
+    });
+
+    // ── [#14849] The six rows that had NO live-emission pin ──────────────
+    //
+    // Method first, because this card exists BECAUSE a grep got this wrong
+    // once already: every one of the nine rows was confirmed by ABLATION, not
+    // by grep. The row's regex prefix was corrupted (`/^CODE/` →
+    // `/^ZZABLATED_CODE/`) so the row can never match while its literal text
+    // stays in the file — a red under that mutation is therefore an
+    // observation of LIVE EMISSION, never of literal presence — and the WHOLE
+    // 176-file `packages/rest` suite was run for each row on its own.
+    //
+    // Measured 2026-09-04, one row at a time:
+    //   THROTTLED         → 1 red   (its case above)
+    //   FORBIDDEN         → 3 reds  (its case above, plus BOTH cases of §7 in
+    //                                `rest-data-door-code-prefix.test.ts`)
+    //   READ_BACK_FAILED  → 1 red   (its case above)
+    //   each of the six below → 0 reds
+    //
+    // The FORBIDDEN leg is the instrument's positive control: it reproduces
+    // the three reds the #14573 correction measured, two of them in a file
+    // whose declared subject is a DIFFERENT contract — precisely the pin a
+    // file-scoped grep cannot see. Same instrument, zero reds for the six ⇒
+    // they were genuinely uncovered, not covered somewhere unobvious. #14849
+    // predicted at least one of the six would turn out already pinned; it did
+    // not, and that prediction is now answered by measurement rather than
+    // carried forward as a caveat.
+    //
+    // Each case below drives a DIFFERENT route, so the six also cover all four
+    // catch arms that call `handleApprovalError`: `decisionRoute`, the `recall`
+    // route, `flowMoveRoute` and `threadRoute`. A row lost from the table fails
+    // CLOSED into its arm's terminal 500 `APPROVAL_<ACTION>_FAILED`, which
+    // forwards `String(error?.message ?? error)` verbatim — so `code` and the
+    // stripped sentence are what catch the degraded shape, and for RESUME_FAILED
+    // (already a 500) they are the ONLY things that catch it. That is the
+    // ADR-0112 minimum earning its keep, not decoration.
+    //
+    // The thrown messages mirror the real throw sites named per case. They are
+    // INPUT FIXTURES to the door, not transcriptions pinned for equality: the
+    // contract under test is prefix → (status, code, [#13095] strip), so a copy
+    // edit at the throw site must not red these.
+
+    it('reassign with no `to` answers 400 VALIDATION_FAILED, prefix stripped', async () => {
+        // `approval-service.ts` `reassign()` — the first thing it refuses.
+        const rest = boot({
+            reassign: vi.fn().mockRejectedValue(new Error('VALIDATION_FAILED: `to` (new approver) is required')),
+        });
+        const answer = await drive(rest, 'POST', `${REQ}/reassign`);
+        expect(answer.status).toBe(400);
+        expect(answer.body?.code).toBe('VALIDATION_FAILED');
+        expect(answer.body?.error).toBe('`to` (new approver) is required');
+        expect(
+            ApiErrorSchema.safeParse({ code: answer.body?.code, message: answer.body?.error }).success,
+            'VALIDATION_FAILED must be in StandardErrorCode ∪ ERROR_CODE_LEDGER',
+        ).toBe(true);
+    });
+
+    it('resubmit onto an already-pending record answers 409 DUPLICATE_REQUEST, prefix stripped', async () => {
+        // `approval-service.ts` `resubmit()` — a second request would collide
+        // on the same record, so the re-entry is refused before any mutation.
+        const rest = boot({
+            resubmit: vi.fn().mockRejectedValue(new Error(
+                'DUPLICATE_REQUEST: another approval request is already pending on '
+                + 'showcase_inquiry/rec_1 — resolve it before resubmitting',
+            )),
+        });
+        const answer = await drive(rest, 'POST', `${REQ}/resubmit`);
+        expect(answer.status).toBe(409);
+        expect(answer.body?.code).toBe('DUPLICATE_REQUEST');
+        expect(answer.body?.error).toMatch(/^another approval request is already pending on/);
+        expect(
+            ApiErrorSchema.safeParse({ code: answer.body?.code, message: answer.body?.error }).success,
+            'DUPLICATE_REQUEST must be in StandardErrorCode ∪ ERROR_CODE_LEDGER',
+        ).toBe(true);
+    });
+
+    it('recall of a request that is no longer pending answers 409 INVALID_STATE, prefix stripped', async () => {
+        // `approval-service.ts` `recall()` — the row is fine, its state is not.
+        const rest = boot({
+            recall: vi.fn().mockRejectedValue(new Error('INVALID_STATE: request is approved')),
+        });
+        const answer = await drive(rest, 'POST', `${REQ}/recall`);
+        expect(answer.status).toBe(409);
+        expect(answer.body?.code).toBe('INVALID_STATE');
+        expect(answer.body?.error).toBe('request is approved');
+        expect(
+            ApiErrorSchema.safeParse({ code: answer.body?.code, message: answer.body?.error }).success,
+            'INVALID_STATE must be in StandardErrorCode ∪ ERROR_CODE_LEDGER',
+        ).toBe(true);
+    });
+
+    it('revise on an id that resolves to nothing answers 404 REQUEST_NOT_FOUND, prefix stripped', async () => {
+        // `approval-service.ts` `sendBack()` → `loadPendingRow()`, which throws
+        // `REQUEST_NOT_FOUND: ${requestId}` when the id resolves to no row.
+        // The 404 half is the whole point: without the row this degrades to a
+        // 500, which reads as "the server broke" for a caller who simply named
+        // a request that is not there.
+        const rest = boot({
+            sendBack: vi.fn().mockRejectedValue(new Error('REQUEST_NOT_FOUND: req_1')),
+        });
+        const answer = await drive(rest, 'POST', `${REQ}/revise`);
+        expect(answer.status).toBe(404);
+        expect(answer.body?.code).toBe('REQUEST_NOT_FOUND');
+        expect(answer.body?.error).toBe('req_1');
+        expect(
+            ApiErrorSchema.safeParse({ code: answer.body?.code, message: answer.body?.error }).success,
+            'REQUEST_NOT_FOUND must be in StandardErrorCode ∪ ERROR_CODE_LEDGER',
+        ).toBe(true);
+    });
+
+    it('approve whose flow run has vanished answers 409 RESUME_TARGET_LOST, prefix stripped', async () => {
+        // `approval-service.ts` `assertRunResumable()`, reached through
+        // `decide()`. A conflict, like INVALID_STATE: the request is fine, the
+        // run behind it is not — which is why this row is 409 and not a 500.
+        const rest = boot({
+            decide: vi.fn().mockRejectedValue(new Error(
+                "RESUME_TARGET_LOST: the flow run 'run_1' behind request req_1 no longer exists",
+            )),
+        });
+        const answer = await drive(rest, 'POST', `${REQ}/approve`);
+        expect(answer.status).toBe(409);
+        expect(answer.body?.code).toBe('RESUME_TARGET_LOST');
+        expect(answer.body?.error).toMatch(/^the flow run 'run_1' behind request req_1/);
+        expect(
+            ApiErrorSchema.safeParse({ code: answer.body?.code, message: answer.body?.error }).success,
+            'RESUME_TARGET_LOST must be in StandardErrorCode ∪ ERROR_CODE_LEDGER',
+        ).toBe(true);
+    });
+
+    it('a recorded rejection whose run could not be resumed answers 500 RESUME_FAILED — named, not the template fallback', async () => {
+        // `approval-service.ts` `resumeRecordedOutcome()`, reached through
+        // `decide()`. ⚠️ This is the row where the STATUS assertion alone is
+        // vacuous: the degraded shape is a 500 too. What separates "named" from
+        // "the template fallback" is the `code` — `APPROVAL_REJECT_FAILED`
+        // without the row — and the [#13095] strip, which the fallback arm does
+        // not perform, so the caller would read the raw `RESUME_FAILED: ` token.
+        // Both are asserted below; neither is redundant with the first.
+        const rest = boot({
+            decide: vi.fn().mockRejectedValue(new Error(
+                "RESUME_FAILED: the rejection was recorded on request req_1, but its flow run 'run_1' "
+                + 'could not be resumed — an operator has to advance it',
+            )),
+        });
+        const answer = await drive(rest, 'POST', `${REQ}/reject`);
+        expect(answer.status).toBe(500);
+        expect(answer.body?.code).toBe('RESUME_FAILED');
+        expect(answer.body?.error).toMatch(/^the rejection was recorded on request req_1/);
+        expect(
+            ApiErrorSchema.safeParse({ code: answer.body?.code, message: answer.body?.error }).success,
+            'RESUME_FAILED must be in StandardErrorCode ∪ ERROR_CODE_LEDGER',
         ).toBe(true);
     });
 
