@@ -5314,7 +5314,21 @@ const step18: MigrationStep = {
     '`reference` wins, a disagreeing pair is kept for the author), replays on every ' +
     'stored-row rehydration so the serve face only ever emits the canonical spelling, ' +
     'and `os migrate meta` rewrites old sources; the authoring-surface rejection with ' +
-    'its rename prescription is unchanged.',
+    'its rename prescription is unchanged. ' +
+    'It also retires `connector.errorMapping` (#14676, ADR-0049 enforce-or-remove; triage ' +
+    'ruling 2026-09-02): `ErrorMappingConfig` (4 keys) and its `ErrorMappingRule[]` (7 keys) ' +
+    'were authorable through `ConnectorSchema` — and, via `DeclarativeConnectorEntrySchema`, ' +
+    'through `stack.connectors[]` and the `/meta/connector` door — and read by nothing: no ' +
+    'provider, dispatcher or materializer ever mapped an external error through the rules, so ' +
+    '`unmappedBehavior` configured nothing and a rule\'s `userMessage` was never shown to ' +
+    'anyone. That spelling is the live API-error channel\'s (`ApiError.userMessage`), so an ' +
+    'author who wrote a rule here reasonably believed they were marking a refusal for an end ' +
+    'user; the failure was silent in both directions. The carrier key is a retiredKey ' +
+    'tombstone on the non-strict `ConnectorSchema` (a bare deletion would be a silent strip), ' +
+    'the three defs — `integration/ErrorMappingConfig`, `integration/ErrorMappingRule` and the ' +
+    'orphaned `integration/ConnectorErrorCategory` enum — leave via RETIRED_DEFS_BY_MAJOR, and ' +
+    'the mechanical conversion strips the block from `connectors[]` (pure lossless delete; ' +
+    'it never had an effect to lose).',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5331,6 +5345,7 @@ const step18: MigrationStep = {
     'permission-allow-restore-purge-removed',
     'form-view-option-default-removed',
     'field-reference-to-alias',
+    'connector-error-mapping-removed',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by
@@ -9024,6 +9039,43 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // conversion `metric-filters-removed`, which strips the key from every metric
     // in `analyticsCubes[].measures`.
     'data/Metric:filters',
+    // #14676 — ADR-0049 enforce-or-remove on `ConnectorSchema.errorMapping` (triage
+    // ruling 2026-09-02: removal via the `spec-property-retirement` playbook; the
+    // split condition — a downstream consumer in objectui or a customer stack —
+    // measured empty at objectui `0d8fd7c`, hotcrm not measurable). The key carried
+    // `ErrorMappingConfig` (4 keys) and its `ErrorMappingRule[]` (7 keys), and
+    // NOTHING read them: outside the declaring file and its unit test the only
+    // reference in the tree was a type-identity pin. No provider, dispatcher or
+    // materializer ever mapped an external error through the rules, so
+    // `unmappedBehavior` configured nothing and a rule's `userMessage` was never
+    // shown to anyone — and that spelling is the name of the LIVE API-error channel
+    // (`ApiError.userMessage`), so an author who had read that documentation and
+    // wrote a rule here reasonably believed they were marking a refusal for an end
+    // user; the failure was silent in both directions (it validated, it published,
+    // nothing was shown). Removal resolves the collision by deletion. Tombstoned
+    // with `retiredKey()`: `ConnectorSchema` is a non-strict `z.object`, so a bare
+    // deletion would be a silent strip (#3733, ADR-0104). The def shapes leave
+    // whole — `integration/ErrorMappingConfig`, `integration/ErrorMappingRule` and
+    // the orphaned `integration/ConnectorErrorCategory` enum, all in
+    // `RETIRED_DEFS_BY_MAJOR[18]`. Sources are rewritten by the D2 conversion
+    // `connector-error-mapping-removed` (one strip per `connectors[]` entry; the
+    // eleven nested keys leave with the block).
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // removal ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look (the #12497 / #13823 grading).
+    'integration/Connector:errorMapping',
+    // #14676 — the same tombstone seen through the second carrier.
+    // `DeclarativeConnectorEntrySchema` is `ConnectorSchema.superRefine(...)`, so the
+    // `errorMapping` tombstone on the base is inherited by the shape that
+    // `stack.connectors[]` (`stack.zod.ts`) and the `PUT /meta/connector/:name` door
+    // (`kernel/metadata-type-schemas.ts`) actually parse, and the authorable-surface
+    // walk publishes the `[RETIRED]` row under this def key as well. One tombstone,
+    // two registered keys: gate (b) of `scripts/build-schemas.ts` reads EXACT
+    // `${defKey}:${name}` membership per def, never by radiating from a neighbour.
+    // See `18.integration__Connector__errorMapping.ts` for the retirement record.
+    'integration/DeclarativeConnectorEntry:errorMapping',
     // #12428 — ADR-0049 enforce-or-remove, one symbol over from #12340 (PR #12425)
     // in the same file and on the same per-key test. `HotReloadManager.startWatching`
     // contained NO watcher: a guard plus `logger.info('File watching started',
@@ -10464,6 +10516,42 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // narrowings ride minor releases) and the prescription lives at the major
     // boundary where `migrate meta` users look (the #8586 / PR #8702 precedent).
     'identity/ApiKey',
+    // #14676 — `integration/ConnectorErrorCategory` (the 8-value connector-side
+    // error category enum) left with its two carriers: `ErrorMappingRule.targetCategory`
+    // and `ErrorMappingConfig.defaultCategory`, both retired in this same major
+    // (`RETIRED_DEFS_BY_MAJOR[18]`). Measured before removal: outside the declaring
+    // file its only references were a value round-trip in `connector.test.ts` and a
+    // type-identity pin — no runtime reader — so the enum had no remaining consumer,
+    // and an exported value schema with no consumer reads as a capability (#3950,
+    // the `api/HandlerStatus` precedent). `api/ErrorCategory` — the HTTP-response
+    // vocabulary this enum was deliberately kept from sharing a name with
+    // (ADR-0112 D9a) — is unaffected. See
+    // `retired-keys/18.integration__Connector__errorMapping.ts` for the retirement
+    // record.
+    'integration/ConnectorErrorCategory',
+    // #14676 — `integration/ErrorMappingConfig` (`rules`, `defaultCategory`,
+    // `unmappedBehavior`, `logUnmapped`) leaves with its only carrier:
+    // `ConnectorSchema.errorMapping`, tombstoned in this same major under ADR-0049
+    // enforce-or-remove (`RETIRED_KEYS_BY_MAJOR[18]`). Nothing outside the declaring
+    // file ever parsed or constructed one, and an exported value schema with no
+    // consumer reads as a capability (#3950). Its two `.default()`s
+    // (`defaultCategory: 'integration_error'`, `logUnmapped: true`) were only ever
+    // materialized INSIDE an authored `errorMapping` block, so there is no
+    // residue window on the carrier (#12840 does not apply: the key itself carried
+    // no default). See `retired-keys/18.integration__Connector__errorMapping.ts`
+    // for the retirement record.
+    'integration/ErrorMappingConfig',
+    // #14676 — `integration/ErrorMappingRule` (`sourceCode`, `sourceMessage`,
+    // `targetCode`, `targetCategory`, `severity`, `retryable`, `userMessage`) leaves
+    // with `integration/ErrorMappingConfig`, whose `rules[]` was its only carrier.
+    // The `userMessage` member is the reason the census filed the card: its
+    // `describe` read, to the letter, like the LIVE `ApiError.userMessage` channel
+    // (the user-facing refusal text a thrown HTTP error declares), while no code
+    // path ever read this one — two keys meaning different things under one
+    // spelling in the same spec package. Deletion resolves the collision without a
+    // rename. See `retired-keys/18.integration__Connector__errorMapping.ts` for the
+    // retirement record.
+    'integration/ErrorMappingRule',
     // #11825 — kernel/plugin-lifecycle-advanced.zod.ts
     // `AdvancedPluginLifecycleConfigSchema`, retired whole (ADR-0049
     // enforce-or-remove; maintainer ruling 2026-08-25, route 2). The aggregating
