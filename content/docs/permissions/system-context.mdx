@@ -137,7 +137,7 @@ The largest single consumer — **17 of the 106 sites**.
 | 36 | `sys_record_share` reads are **not** self-scoped | Get: tenant-wide share listing without `manage_sharing` | `sharing-plugin.ts:1088` |
 | 37 | Share-link policy `enabled` check bypassed; system callers re-enter under a system context | Get: link **creation** while the policy is off — resolution is **not** bypassed since #14033 (`publicSharing.enabled` is a standing policy held at every redemption): a link minted this way does not resolve until the block is enabled | `plugin-sharing/src/share-link-service.ts:469`, `:523`, `:527`, `:600`, `:630` |
 | 38 | Sharing-rule provenance stamp skipped | Lose: the row is not marked as an admin customization — seeder / `defineRule` / boot reconcilers are "the package door" | `sharing-rule-provenance.ts:47` |
-| 39 | Sharing-rule service write + delete paths return early | Lose: the manage-rules gate on the service surface, and the platform-global-rule delete guard | `sharing-rule-service.ts:241`, `:466` |
+| 39 | Sharing-rule service write + delete paths return early | Lose: the manage-rules gate on the service surface, and the platform-global-rule delete guard | `sharing-rule-service.ts:278`, `:503` |
 
 ### 4. Approvals, reports, attachments, comments, knowledge
 
