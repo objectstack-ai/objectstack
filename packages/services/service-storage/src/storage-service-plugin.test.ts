@@ -4,9 +4,9 @@ import { describe, it, expect } from 'vitest';
 import { promises as fs } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import type { IStorageService, StorageFileInfo } from '@objectstack/spec/contracts';
-import { StorageServicePlugin } from './storage-service-plugin';
-import { SwappableStorageService } from './swappable-storage-service';
+import type { IStorageService } from '@objectstack/spec/contracts';
+import { StorageServicePlugin } from './storage-service-plugin.js';
+import { SwappableStorageService } from './swappable-storage-service.js';
 
 /**
  * Plugin-level integration test exercising the settings live-wire.
@@ -89,7 +89,10 @@ describe('StorageServicePlugin: settings live-wire', () => {
     });
     const ctx = makeCtx();
     await plugin.init(ctx);
-    const svc = ctx.getService<IStorageService>('storage');
+    // Plain call with a cast, not `getService<T>(...)` — the fake ctx's
+    // getService is untyped, and each type-argument call adds a frozen-debt
+    // TS2347 to this package's shrink-only type-check ledger.
+    const svc = ctx.getService('storage') as IStorageService;
     expect(svc).toBeInstanceOf(SwappableStorageService);
   });
 
@@ -132,7 +135,7 @@ describe('StorageServicePlugin: settings live-wire', () => {
 
     await plugin.init(ctx);
     await plugin.start(ctx);
-    const proxy = ctx.getService<SwappableStorageService>('storage');
+    const proxy = ctx.getService('storage') as SwappableStorageService;
     const innerBefore = proxy.getInner();
 
     await ctx._flushReady();
@@ -160,7 +163,7 @@ describe('StorageServicePlugin: settings live-wire', () => {
 
     await plugin.init(ctx);
     await plugin.start(ctx);
-    const proxy = ctx.getService<SwappableStorageService>('storage');
+    const proxy = ctx.getService('storage') as SwappableStorageService;
     const before = proxy.getInner();
     await ctx._flushReady();
     expect(proxy.getInner()).toBe(before);
@@ -414,7 +417,7 @@ describe('StorageServicePlugin: settings live-wire', () => {
 
     await plugin.init(ctx);
     await plugin.start(ctx);
-    const proxy = ctx.getService<SwappableStorageService>('storage');
+    const proxy = ctx.getService('storage') as SwappableStorageService;
     const before = proxy.getInner();
     await ctx._flushReady();
     expect(proxy.getInner()).toBe(before); // no swap

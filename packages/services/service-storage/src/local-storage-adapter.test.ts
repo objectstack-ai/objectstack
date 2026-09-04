@@ -4,7 +4,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { promises as fs } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { LocalStorageAdapter } from './local-storage-adapter';
+import { LocalStorageAdapter } from './local-storage-adapter.js';
 import type { IStorageService } from '@objectstack/spec/contracts';
 
 describe('LocalStorageAdapter', () => {
