@@ -76,11 +76,11 @@
         "#3358 §7",
         "#3362",
         "#3354",
-        "examples/app-showcase/objectstack.config.ts (supportedLocales)",
-        "packages/spec/src/system/translation.zod.ts (TRANSLATION_KEY_GUIDANCE — `notifications` is the retired object-first dialect; notifications have no translation group)",
+        "examples/app-showcase/objectstack.config.ts#supportedLocales (supportedLocales)",
+        "packages/spec/src/system/translation.zod.ts#TRANSLATION_KEY_GUIDANCE (TRANSLATION_KEY_GUIDANCE — `notifications` is the retired object-first dialect; notifications have no translation group)",
         "#3403 (platform-side assignment notifications moved to app-authored flows; pinned by packages/plugins/plugin-audit/src/audit-writers.test.ts)",
-        "examples/app-showcase/src/automation/flows/index.ts (the notify_assignee node whose literal cfg.title this item now asserts)",
-        "packages/services/service-automation/src/builtin/notify-node.ts (title = interpolate(cfg.title) — no locale lookup on the flow notify path)",
+        "examples/app-showcase/src/automation/flows/index.ts#notify_assignee (the notify_assignee node whose literal cfg.title this item now asserts)",
+        "packages/services/service-automation/src/builtin/notify-node.ts#title (title = interpolate(cfg.title) — no locale lookup on the flow notify path)",
         "#7684 (the decision this revision implements), #7640 (the run that surfaced it)"
       ],
       "history": [
@@ -153,8 +153,8 @@
       "traps": ["stale-console-bundle"],
       "source": [
         "#3358 §7",
-        "packages/spec/src/system/translation.zod.ts (metadataForms group + resolveMetadataFormLabels convention)",
-        "scripts/check-i18n-coverage.mjs (platform metadata-form baseline is platform-objects-owned)",
+        "packages/spec/src/system/translation.zod.ts#metadataForms (metadataForms group + resolveMetadataFormLabels convention)",
+        "scripts/check-i18n-coverage.mjs#baseline (platform metadata-form baseline is platform-objects-owned)",
         "scripts/i18n-coverage-baseline.json (the frozen per-config untranslated counts this item's mixed-language clause is judged against)",
         "#7640 (i18n area run — the residual EN strings that exposed the clause/ratchet collision), #7686"
       ],
@@ -298,10 +298,10 @@
       ],
       "traps": ["stale-console-bundle", "hydration-race", "wrong-panel", "dispatcher-vs-hono-route"],
       "source": [
-        "packages/spec/src/system/translation.zod.ts (translationDataShape — the authoritative group vocabulary: objects/_views/_actions/_sections, apps.navigation, messages, globalActions, dashboards, pages, settings, metadataForms, settingsCommon)",
+        "packages/spec/src/system/translation.zod.ts#translationDataShape (translationDataShape — the authoritative group vocabulary: objects/_views/_actions/_sections, apps.navigation, messages, globalActions, dashboards, pages, settings, metadataForms, settingsCommon)",
         "examples/app-showcase/src/system/translations/index.ts (full-column coverage rationale)",
-        "packages/services/service-i18n/src/i18n-service-plugin.ts (GET /i18n/locales | /translations/:locale | /labels/:object/:locale; { success, data } envelope #3636/#3675; resolveObjectFieldLabels nested shape #3778/#3833; the plugin mount and the dispatcher /i18n domain serve the same routes interchangeably)",
-        "packages/services/service-i18n/src/file-i18n-adapter.ts (getLocales / getTranslations — unloaded locale → {}; fallbackLocale applies per-KEY in t(), not to the bulk route)",
+        "packages/services/service-i18n/src/i18n-service-plugin.ts#i18n (GET /i18n/locales | /translations/:locale | /labels/:object/:locale; { success, data } envelope #3636/#3675; resolveObjectFieldLabels nested shape #3778/#3833; the plugin mount and the dispatcher /i18n domain serve the same routes interchangeably)",
+        "packages/services/service-i18n/src/file-i18n-adapter.ts#getLocales (getLocales / getTranslations — unloaded locale → {}; fallbackLocale applies per-KEY in t(), not to the bulk route)",
         "packages/services/service-i18n/src/i18n-route-ledger.ts (the three routes, conformance-guarded #3636)",
         "content/docs/ui/translations.mdx",
         "scripts/check-i18n-coverage.mjs + scripts/i18n-coverage-baseline.json (frozen-debt ratchet)",
@@ -396,7 +396,7 @@
       ],
       "traps": ["dispatcher-vs-hono-route"],
       "source": [
-        "packages/spec/src/system/translation.zod.ts (TRANSLATION_HISTORY, LEGACY_OBJECT_FIRST_KEYS, TRANSLATION_KEY_GUIDANCE, strict shapes at both doors — #4001, #3778, #4667)",
+        "packages/spec/src/system/translation.zod.ts#TRANSLATION_HISTORY (TRANSLATION_HISTORY, LEGACY_OBJECT_FIRST_KEYS, TRANSLATION_KEY_GUIDANCE, strict shapes at both doors — #4001, #3778, #4667)",
         "packages/spec/src/shared/strict-object.ts (surface/aliases/guidance rejection contract)"
       ],
       "history": [
@@ -466,7 +466,7 @@
         "--write printing 'regenerated' while writing nothing (the historical unbuilt-CLI shape) is a FAIL"
       ],
       "source": [
-        "scripts/check-i18n-bundles.mjs (#4804 undeclared-key verdict, #5217 prerequisite check, #4690 self-test rationale; the merge-mode regenerate hint that makes value edits green by design)",
+        "scripts/check-i18n-bundles.mjs#undeclared (#4804 undeclared-key verdict, #5217 prerequisite check, #4690 self-test rationale; the merge-mode regenerate hint that makes value edits green by design)",
         "scripts/check-i18n-coverage.mjs (#3370 declared-surface ratchet, #5862 prerequisite check)",
         "scripts/i18n-coverage-baseline.json",
         "AGENTS.md §Documentation Guardrails, the translations/*.generated.ts row (merge-mode extract ⇒ values are hand-written and expected to differ; adding or dropping keys is the drift)",
