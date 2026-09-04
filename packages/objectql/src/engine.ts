@@ -14072,14 +14072,47 @@ export class ObjectRepository implements IScopedObjectRepository {
     });
   }
 
-  /** Execute a named action registered on this object */
+  /**
+   * Execute a named action registered on this object.
+   *
+   * [#13866, Director ruling 决裁批 #24 2026-09-01] Elevated to the SAME
+   * trusted posture REST `/actions` (`domains/actions.ts`) and MCP
+   * `run_action` (`action-execution.ts`) already give an action body (#13832,
+   * #2849). This is the third `executeAction` caller those two files' own
+   * comments name `ScopedRepo.execute()` — until now it handed the body
+   * neither `api` nor `executionContext`, the context-less facade #3914
+   * argues an action body must never get. A caller reaching another action
+   * via `ctx.api.object(x).execute(y)` (an in-process handler composing a
+   * sibling handler, `action-execution.ts`'s own description of this path)
+   * now dispatches under the same identity its own body runs under.
+   *
+   * `{ ...this.context, isSystem: true }` is the `sudo()`-shaped elevation
+   * `buildActionExecutionContext` and `recomputeSummaries`'s `systemCtx` both
+   * use, not a bare `{ isSystem: true }`: spreading the caller's envelope
+   * FIRST keeps the resulting write attributable and correctly scoped —
+   * `userId` stamps `created_by`/`updated_by`, `tenantId` stamps the org
+   * column and drives driver-level tenant isolation, an open `transaction`
+   * joins rather than escapes — instead of the unattributable, org-less rows
+   * a bare `{ isSystem: true }` would produce.
+   *
+   * The census behind this change (repo + `examples/` + `apps/`, production
+   * and test) found ZERO existing callers of this method anywhere — every
+   * `ObjectRepository.execute()` / `ScopedRepo.execute()` hit in the tree was
+   * prose describing the shape, never an invocation — so this widens what a
+   * FUTURE caller's write is accepted to do (the static `readonly` strip now
+   * skips this path exactly as it already skips REST `/actions` and MCP
+   * `run_action`) without changing any write anyone ships today.
+   */
   async execute(actionName: string, params?: any): Promise<any> {
     if (this.engine.executeAction) {
+      const executionContext: ExecutionContext = { ...this.context, isSystem: true };
       return this.engine.executeAction(this.objectName, actionName, {
         ...params,
         userId: this.context.userId,
         tenantId: this.context.tenantId,
         roles: this.context.positions,
+        executionContext,
+        api: new ScopedContext(executionContext, this.engine),
       });
     }
     throw new Error(`Actions not supported by engine`);
