@@ -4,6 +4,7 @@ import {
   DataEventType,
   MetadataEventSchema,
   DataEventSchema,
+  BulkDataEventSchema,
   type MetadataEventSubject,
 } from './events.zod';
 
@@ -245,10 +246,10 @@ describe('DataEventSchema', () => {
   // "declared = enforced" is a measurement rather than a sentence: the key is
   // optional and NOTHING else — no default fabricates a tenant, absence has
   // exactly one spelling, and a value that is not a non-empty string is
-  // refused at the path a producer can act on. `BulkDataEventSchema` is
-  // deliberately untouched here: a predicate write's affected set is a
-  // separate contract with its own tenant question (recorded on the change
-  // that adds this member), so nothing below pins that schema either way.
+  // refused at the path a producer can act on. `BulkDataEventSchema` carries
+  // the same key with a DIFFERENT absence reading — one organization for the
+  // whole batch, or "not asserted" — pinned in its own block below; the two
+  // blocks share the refusal pins so the key stays one spelling and one shape.
   describe('organizationId', () => {
     const base = {
       id: '4b4720e8-97c3-4a12-9b70-b70a3d2314a6',
@@ -300,6 +301,105 @@ describe('DataEventSchema', () => {
       expect(Object.keys(DataEventSchema.shape).sort()).toEqual([
         'after', 'before', 'changes', 'id', 'object', 'organizationId', 'recordId', 'timestamp', 'type', 'userId',
       ]);
+    });
+  });
+});
+
+describe('BulkDataEventSchema', () => {
+  // The bulk twin of the DataEvent tenant term. Same spelling, same refusal
+  // set, same optionality — and a deliberately DIFFERENT absence reading: a
+  // bulk event names no rows, so an absent key says the producer did not
+  // assert one organization for the batch, never "the rows belong to none".
+  // Present means ONE organization for the whole batch (never per-row, never a
+  // list), which is what keeps a tenant-scoped fan-out one comparison.
+  describe('organizationId', () => {
+    const base = {
+      id: '4b4720e8-97c3-4a12-9b70-b70a3d2314a7',
+      type: 'data.records.updated',
+      object: 'account',
+      matched: 40,
+      timestamp: '2026-09-04T00:00:00.000Z',
+    } as const;
+
+    it('parses without the key and does not fabricate one (absent = not asserted for the batch)', () => {
+      const event = BulkDataEventSchema.parse(base);
+      expect(Object.prototype.hasOwnProperty.call(event, 'organizationId')).toBe(false);
+      expect(event.organizationId).toBeUndefined();
+    });
+
+    it('parses with the key and carries the one batch organization through verbatim', () => {
+      const event = BulkDataEventSchema.parse({ ...base, organizationId: 'org_jia' });
+      expect(event.organizationId).toBe('org_jia');
+      expect(event.matched).toBe(40);
+    });
+
+    it('refuses a non-string value with invalid_type at ["organizationId"]', () => {
+      const result = BulkDataEventSchema.safeParse({ ...base, organizationId: 42 });
+      expect(result.success).toBe(false);
+      if (result.success) throw new Error('unreachable');
+      expect(result.error.issues).toEqual([
+        expect.objectContaining({ code: 'invalid_type', expected: 'string', path: ['organizationId'] }),
+      ]);
+    });
+
+    it('refuses null — "not asserted" has exactly one spelling, the missing key', () => {
+      const result = BulkDataEventSchema.safeParse({ ...base, organizationId: null });
+      expect(result.success).toBe(false);
+      if (result.success) throw new Error('unreachable');
+      expect(result.error.issues).toEqual([
+        expect.objectContaining({ code: 'invalid_type', expected: 'string', path: ['organizationId'] }),
+      ]);
+    });
+
+    it('refuses the empty string — one organization is never spelled ""', () => {
+      const result = BulkDataEventSchema.safeParse({ ...base, organizationId: '' });
+      expect(result.success).toBe(false);
+      if (result.success) throw new Error('unreachable');
+      expect(result.error.issues).toEqual([
+        expect.objectContaining({ code: 'too_small', minimum: 1, path: ['organizationId'] }),
+      ]);
+    });
+
+    it('refuses a per-row list — the batch carries one organization, never an array', () => {
+      const result = BulkDataEventSchema.safeParse({ ...base, organizationId: ['org_jia', 'org_yi'] });
+      expect(result.success).toBe(false);
+      if (result.success) throw new Error('unreachable');
+      expect(result.error.issues).toEqual([
+        expect.objectContaining({ code: 'invalid_type', expected: 'string', path: ['organizationId'] }),
+      ]);
+    });
+
+    it('is the only member added — every pre-existing member is still declared, and no plural spelling exists', () => {
+      expect(Object.keys(BulkDataEventSchema.shape).sort()).toEqual([
+        'id', 'matched', 'object', 'organizationId', 'timestamp', 'type', 'userId',
+      ]);
+      expect('organizationIds' in BulkDataEventSchema.shape).toBe(false);
+      expect('organizationIds' in DataEventSchema.shape).toBe(false);
+    });
+
+    it('spells and shapes the key identically to DataEventSchema.organizationId', () => {
+      // Structural identity of the two declarations: both optional, both a
+      // string with the same minimum-length check, so a consumer discriminates
+      // both event families on ONE key with ONE comparison.
+      const bulk = BulkDataEventSchema.shape.organizationId;
+      const single = DataEventSchema.shape.organizationId;
+      expect(bulk.def.type).toBe(single.def.type);
+      expect(bulk.def.type).toBe('optional');
+      expect(bulk.def.innerType.def.type).toBe(single.def.innerType.def.type);
+      expect(bulk.def.innerType.def.type).toBe('string');
+      expect(bulk.def.innerType.def.checks).toEqual(single.def.innerType.def.checks);
+      // And behaviourally: the same probes yield the same verdicts on both.
+      for (const probe of ['', null, 42, ['org_jia']]) {
+        const b = bulk.safeParse(probe);
+        const s = single.safeParse(probe);
+        expect(b.success).toBe(false);
+        expect(s.success).toBe(false);
+        if (b.success || s.success) throw new Error('unreachable');
+        expect(b.error.issues.map((i) => i.code)).toEqual(s.error.issues.map((i) => i.code));
+      }
+      expect(bulk.safeParse('org_jia')).toEqual(single.safeParse('org_jia'));
+      expect(bulk.safeParse(undefined).success).toBe(true);
+      expect(single.safeParse(undefined).success).toBe(true);
     });
   });
 });

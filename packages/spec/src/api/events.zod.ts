@@ -344,6 +344,14 @@ export type DataEvent = z.input<typeof DataEventSchema>;
  * external URL a webhook points at. The caller's own pre-composition filter is
  * no better: it is a second, divergent answer to "what did this write touch".
  * So the event reports the count it can state truthfully and stops there.
+ *
+ * **The tenant term is ONE organization for the whole batch, or nothing.**
+ * `organizationId` (below) names the organization every affected record
+ * belongs to. It is never per-row — a bulk event names no rows, so a per-row
+ * answer would have nothing to attach to — and never a list. That is what
+ * keeps a tenant-scoped fan-out one comparison, never a partition of the
+ * batch. Its ABSENCE means something different from the same key's absence on
+ * {@link DataEventSchema}; the member's own doc states both readings.
  */
 export const BulkDataEventSchema = lazySchema(() => z.object({
   /** Unique event identifier */
@@ -354,6 +362,62 @@ export const BulkDataEventSchema = lazySchema(() => z.object({
 
   /** Object name */
   object: z.string().describe('Object name'),
+
+  /**
+   * Organization every record the predicate write affected belongs to — ONE
+   * organization for the whole batch, never per-row and never a list. Same
+   * spelling, same refusal of the empty string, and the same position (beside
+   * the match term `object`) as {@link DataEventSchema}'s `organizationId`, so
+   * a tenant-scoped consumer discriminates both event families on one key.
+   *
+   * **One for the batch, by construction.** A predicate write reaches the
+   * driver with the middleware-COMPOSED query (see "Why there is no `where`"
+   * above): under a walled posture the security layer AND-composes its tenant
+   * wall (Layer 0, ADR-0095 D1) onto the caller's filter first — under
+   * `isolated` an equality on the caller's active organization, under `group`
+   * membership in the caller's organization set (ADR-0105 D2) — and nothing in
+   * Layer 1 (business RLS, sharing's editable-rows filter) can widen it. So
+   * when the wall names exactly one organization, every affected row belongs
+   * to it, and the producer can state that from what it already holds: no
+   * second query on the publish path.
+   *
+   * **Present = every affected record belongs to exactly this organization.**
+   * Never fabricated (no `.default()`, the empty string is refused), and never
+   * the caller's active organization standing in for the rows': under `group`
+   * the wall is the caller's membership SET, so the batch is attributable to
+   * one organization only when that set names exactly one.
+   *
+   * **Absent = the producer did not assert one organization for the batch.**
+   * Deliberately DIVERGENT from `DataEventSchema.organizationId`, whose absence
+   * means "this record belongs to no organization, not behind any wall". A
+   * bulk event names no rows, so its absence is a statement about the
+   * producer's knowledge, not about the rows: every event on a
+   * `single`-posture deployment (no wall); an environment-wide or system /
+   * unscoped predicate write (an `isSystem` context, a true `PLATFORM_ADMIN`
+   * crossing the wall); a `group`-posture sweep across several memberships;
+   * any write whose affected rows are not known to belong to one
+   * organization. It is NOT the single-record reading "belongs to no
+   * organization".
+   *
+   * **What a consumer may do with each reading.** A tenant-scoped consumer —
+   * a per-organization webhook subscription, a per-organization realtime
+   * subscriber — matches on equality when the key is present, and MUST treat
+   * an absent key as "not attributable to my organization": it must not
+   * deliver that event inside an organization wall. A deployment-wide consumer
+   * may use it. Either way the fan-out filter stays one comparison.
+   */
+  organizationId: z.string().min(1).optional().describe(
+    'Organization every record the predicate write affected belongs to — one organization '
+    + 'for the whole batch, never per-row. Present = exactly that organization, asserted by '
+    + 'the producer from the composed tenant wall, never fabricated and never the caller\'s '
+    + 'active organization standing in for the rows\'; the empty string is refused. '
+    + 'Absent = the producer did not assert one organization for the batch (every event on a '
+    + 'single-posture deployment; a system, environment-wide or cross-membership predicate '
+    + 'write; any write whose affected rows are not known to belong to one organization) — '
+    + 'deliberately NOT the DataEvent reading "belongs to no organization". A tenant-scoped '
+    + 'consumer must treat an absent key as not attributable to its organization and must '
+    + 'not deliver the event inside an organization wall; a deployment-wide consumer may use it.',
+  ),
 
   /**
    * Number of records the predicate write affected. The ObjectQL engine does
