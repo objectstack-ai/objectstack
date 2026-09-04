@@ -215,7 +215,21 @@
  */
 
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
-import { maskComments, scanSource } from './js-comment-mask.mjs';
+// [#15487] The SHARED half of the regex-literal recogniser: the 14-word
+// `REGEX_AFTER_KEYWORD` set, `IDENT_CHAR`, and the literal WALK (character
+// class, backslash sequences, line-terminator refusal, flags) live ONCE, in
+// `js-comment-mask.mjs`, which already owns "which bytes are literal". What
+// stays in this file is `regexMayBeginAt` — the POSITION RULE, the one half the
+// two consumers answer differently and on purpose. See `walkRegexBody`'s
+// docblock for why that is the line, and `makeRegexRecogniser`'s for why the
+// rule is bound once here rather than passed at each of this file's call sites.
+import {
+  IDENT_CHAR,
+  REGEX_AFTER_KEYWORD,
+  makeRegexRecogniser,
+  maskComments,
+  scanSource,
+} from './js-comment-mask.mjs';
 // [#12925] The OTHER gate's detector, imported so the kebab declaration below is
 // pinned against its real recognizers rather than a paraphrase of them. That gate
 // imports nothing from here, so this is a one-way edge.
@@ -1481,16 +1495,14 @@ function unwrapExpression(expr) {
  * divergence itself, so neither the copy nor the deliberate difference can
  * drift unnoticed.
  */
-const REGEX_AFTER_KEYWORD = new Set([
-  'return', 'typeof', 'instanceof', 'in', 'of', 'case', 'delete', 'void',
-  'yield', 'await', 'new', 'do', 'else', 'throw',
-]);
-
-/** IdentifierPart, near enough for the ASCII this population is written in. */
-const IDENT_CHAR = /[\w$]/;
-
-/** LineTerminator — the four the grammar names, not just `\n`. */
-const isLineTerminator = (c) => c === '\n' || c === '\r' || c === '\u2028' || c === '\u2029';
+// `REGEX_AFTER_KEYWORD` and `IDENT_CHAR` are IMPORTED (#15487). They used to be
+// byte-identical copies of the two constants in `scripts/js-comment-mask.mjs`,
+// and that module's own header records what a drifting copy costs: dropping
+// `return` from the set passes all 23 of its self-test cases and is caught only
+// by the corpus sweep, on a file this tree writes today. A copy that can drift
+// silently in exactly the direction its owner warns about is not one to keep.
+// The LineTerminator test went with the walk, which is the only thing that
+// consulted it.
 
 /**
  * [#14742] Is the `/` at `at` in a position where an expression may BEGIN?
@@ -1544,32 +1556,7 @@ function regexMayBeginAt(src, at) {
  * so a `/` whose body does not close on its line was a division operator, and
  * answering "not a regex" skips nothing.
  */
-export function regexLiteralAt(src, at) {
-  if (src[at] !== '/') return -1;
-  const first = src[at + 1];
-  // RegularExpressionFirstChar excludes `*` and `/`, which is the grammar's own
-  // reason comments are unambiguous.
-  if (first === undefined || first === '*' || first === '/') return -1;
-  if (!regexMayBeginAt(src, at)) return -1;
-  let inClass = false;
-  for (let i = at + 1; i < src.length; i += 1) {
-    const c = src[i];
-    if (isLineTerminator(c)) return -1;
-    if (c === '\\') {
-      // RegularExpressionBackslashSequence :: `\` RegularExpressionNonTerminator
-      if (i + 1 >= src.length || isLineTerminator(src[i + 1])) return -1;
-      i += 1;
-      continue;
-    }
-    if (inClass) {
-      if (c === ']') inClass = false;
-      continue; // ⭐ a `/`, a quote or a backtick in here is an ORDINARY CHARACTER
-    }
-    if (c === '[') { inClass = true; continue; }
-    if (c === '/') return i; // flags are IdentifierPartChars — code bytes, walked as such
-  }
-  return -1;
-}
+export const regexLiteralAt = makeRegexRecogniser({ mayBeginAt: regexMayBeginAt });
 
 /**
  * [#14742] Does a literal OPEN at `at`? The dispatch the four primitives share,
