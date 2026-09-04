@@ -393,10 +393,10 @@ jobs:
               arr.slice(0, k).map(fmt).join('\n') + (arr.length > k ? `\n_...and ${arr.length - k} more_` : '');
 
             const lines = [];
-            lines.push('## Merged-branch reaper — DRY RUN. Nothing was deleted.');
+            lines.push('## Merged-branch reaper — classification. THIS JOB deletes nothing.');
             lines.push('');
             lines.push(`Criterion: **a PR whose head ref is the branch reports \`merged_at\`**. ⛔ Never \`is-ancestor\`.`);
-            lines.push(`Grace period: **${graceDays} day(s)** since merge. Token grant: \`contents: read\` — this job cannot delete a ref.`);
+            lines.push(`Grace period: **${graceDays} day(s)** since merge. Token grant: \`contents: read\` — this job cannot delete a ref; only the \`reap\` job can, and only over the ✅ row below.`);
             lines.push('');
             lines.push(`### Population: ${total} \`${PREFIX}\` branches (of ${allBranches.length} on the remote)`);
             lines.push('');
@@ -440,7 +440,13 @@ jobs:
             const payload = { generated_at: new Date().toISOString(), grace_days: graceDays, total_branches: allBranches.length, prefix_branches: total, buckets };
             require('fs').writeFileSync(`${process.env.RUNNER_TEMP}/branch-reaper-report.json`, JSON.stringify(payload, null, 2));
 
-            core.notice(`Dry run: ${n(buckets.reapable)} of ${total} ${PREFIX} branches would be deleted. ${n(buckets.mergedElsewhere)} merged somewhere other than \`${BASE_REF}\` and are held by the base-ref guard. ${n(buckets.noPr)} have no PR and are unreachable by this criterion. Nothing was deleted.`);
+            core.notice(
+              `Sweep: ${n(buckets.reapable)} of ${total} ${PREFIX} branches are reapable and are handed to the \`reap\` job. `
+              + `Report-only, never reaped: ${n(buckets.mergedElsewhere)} merged somewhere other than \`${BASE_REF}\` and held by the base-ref guard; `
+              + `${n(buckets.noPr)} have no PR and are unreachable by this criterion; ${n(buckets.open)} have an open PR; `
+              + `${n(buckets.closedUnmerged)} closed unmerged; ${n(buckets.grace)} merged within the ${graceDays}-day grace window; `
+              + `${n(buckets.protectedBranch)} protected. This job deleted nothing — its token grant is \`contents: read\`.`,
+            );
             core.setOutput('reapable', String(n(buckets.reapable)));
             core.setOutput('no_pr', String(n(buckets.noPr)));
             core.setOutput('merged_elsewhere', String(n(buckets.mergedElsewhere)));
