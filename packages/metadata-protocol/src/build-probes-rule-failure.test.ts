@@ -29,6 +29,18 @@
  * `@objectstack/lint` LAZILY (`await import`) at call time, so `vi.doMock`
  * plus a fresh module graph per test is exact: nothing else in the file, and
  * no other suite, sees a mocked lint package.
+ *
+ * ## The `adr0112-ok:` marks below
+ *
+ * `object_field_ref_rule_failed` is a build-probe diagnostics code shipped
+ * inside a 200 receipt (ADR-0112 D6c), not an `error.code` from the closed
+ * catalog — the same vocabulary as every other probe code, for which
+ * `check:error-code-casing` exempts `build-probes.ts` and
+ * `packages/objectql/src/build-probes.test.ts` whole. The marks here are the
+ * narrower per-literal spelling of that same exemption, and they are written
+ * on the literal's OWN line deliberately: a multi-line comment above the
+ * literal was measured to move it out of the gate's recognition window
+ * entirely, which reads as a suppression while actually being a blind spot.
  */
 
 import { describe, expect, it, vi, afterEach } from 'vitest';
@@ -86,7 +98,7 @@ describe('runBuildProbes — a throwing object rule is reported, never swallowed
         expect(report.issues[0]).toMatchObject({
             layer: 'runtime',
             severity: 'error',
-            code: 'object_field_ref_rule_failed',
+            code: 'object_field_ref_rule_failed', // adr0112-ok: D6c build-probe diagnostics code
             artifact: { type: 'object', name: 'crm_lead' },
         });
         // The thrown message rides the receipt: without it the report says a
@@ -101,7 +113,7 @@ describe('runBuildProbes — a throwing object rule is reported, never swallowed
         const report = await probeWith(() => {
             throw 'rule exploded';
         });
-        expect(report.issues[0]).toMatchObject({ code: 'object_field_ref_rule_failed' });
+        expect(report.issues[0]).toMatchObject({ code: 'object_field_ref_rule_failed' }); // adr0112-ok: D6c build-probe diagnostics code
         expect(report.issues[0].message).toContain('rule exploded');
     });
 
