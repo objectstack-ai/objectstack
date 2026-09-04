@@ -276,14 +276,25 @@ describe('bootStack multiTenant — host-app package resolution (#4700)', () => 
       // Not a new behaviour, a CONTROL. #14270 rewrote this branch's SHAPE
       // (two-way → three-way); this arm's text has to come out byte-identical,
       // or the third kind's fix moved something that was already right.
-      const err = await bootStack(app as never, {
-        multiTenant: true,
-        hostRoot: appDeclaredNotInstalled,
-      }).then(
-        (stack) => stack.stop().then(() => new Error('bootStack resolved; it must refuse')),
-        (e: unknown) => e as Error,
-      );
-      expect(err.message).toContain(
+      // ⚠️ try/catch rather than `.then(onFulfilled, onRejected)`: `./harness`
+      // is imported without its `.js` extension, so under NodeNext the
+      // specifier does not resolve and every symbol it names is `any` — which
+      // makes a `.then` callback PARAMETER implicitly any and adds a TS7006 to
+      // this package's frozen TEST_DEBT ledger entry, a shrink-only ratchet.
+      // The one-line fix that graduates the entry belongs to whoever takes that
+      // card; this file must at least not push the count up.
+      let message: string | undefined;
+      try {
+        const stack = await bootStack(app as never, {
+          multiTenant: true,
+          hostRoot: appDeclaredNotInstalled,
+        });
+        await stack.stop();
+      } catch (e) {
+        message = (e as Error).message;
+      }
+      expect(message, 'bootStack resolved; it must refuse').toBeDefined();
+      expect(message).toContain(
         `It IS declared in ${appDeclaredNotInstalled}'s package.json, so the declaration is `
         + 'not the problem — repair the install there (`pnpm install`, un-prune, rebuild its dist).',
       );
@@ -300,25 +311,30 @@ describe('bootStack multiTenant — host-app package resolution (#4700)', () => 
       // APP … and DECLARE it in that app's package.json" — to an operator whose
       // app has already done both. Same confidently-wrong-verdict class #4700
       // and #4719 removed from this very sentence, one kind along.
-      const boot = bootStack(app as never, {
-        multiTenant: true,
-        hostRoot: appDeclaredNoLoadableEntry,
-      });
-      const err = await boot.then(
-        (stack) => stack.stop().then(() => new Error('bootStack resolved; it must refuse')),
-        (e: unknown) => e as Error,
-      );
+      // try/catch, not `.then(onFulfilled, onRejected)` — see the note on the
+      // control above: a callback parameter here would be implicitly any.
+      let message: string | undefined;
+      try {
+        const stack = await bootStack(app as never, {
+          multiTenant: true,
+          hostRoot: appDeclaredNoLoadableEntry,
+        });
+        await stack.stop();
+      } catch (e) {
+        message = (e as Error).message;
+      }
+      expect(message, 'bootStack resolved; it must refuse').toBeDefined();
       // Which arm fired: the deferral, naming the two things that are NOT the
       // problem and handing the remedy to the importer's own message, which is
       // interpolated at the end of this same string.
-      expect(err.message).toMatch(/AND installed there, so neither is the problem/);
-      expect(err.message).toMatch(/publishes no entry Node can load/);
+      expect(message).toMatch(/AND installed there, so neither is the problem/);
+      expect(message).toMatch(/publishes no entry Node can load/);
       // ⛔ Neither of the other two arms: both are unfollowable here.
-      expect(err.message).not.toMatch(/Install\/link it in THIS APP/);
-      expect(err.message).not.toMatch(/repair the install there/);
+      expect(message).not.toMatch(/Install\/link it in THIS APP/);
+      expect(message).not.toMatch(/repair the install there/);
       // The importer's own wording is what the remedy defers TO, so it has to
       // still be there — the deferral is only honest if the message arrives.
-      expect(err.message).toMatch(/publishes no entry that Node can load/);
+      expect(message).toMatch(/publishes no entry that Node can load/);
       expect(process.env.OS_TENANCY_POSTURE).toBeUndefined();
     },
     BOOT_TIMEOUT,
