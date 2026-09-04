@@ -127,7 +127,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { dirname, join, resolve, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { blank, scanSource } from './js-comment-mask.mjs';
+import { blank, maskComments, scanSource } from './js-comment-mask.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 import { workspacePackageDirs } from './check-console-intercept-disarm.mjs';
 
@@ -178,19 +178,21 @@ const REMEDY = `    // #13517: quiet the registry's per-item registration chatte
     // default. Enforced by scripts/check-registry-log-declared.mjs.
     env: { OS_REGISTRY_LOG: 'warn' },`;
 
-/** Comments blanked, offsets kept. Import specifiers survive — S2/S3 need them. */
-function maskComments(source) {
-  return blank(source, scanSource(source).comment);
-}
-
 /**
  * Comments AND string/template/regex content blanked, offsets kept. Used where
  * the signal is a bare CODE position (`new SchemaRegistry(`, a property key), so
  * a spelling inside prose or a template literal can never satisfy it.
  *
- * Both masks preserve offsets, so a range brace-matched on the code mask indexes
- * the comment mask identically — which is how the level VALUE (a string, blanked
- * by this mask) is read out of a block located with it.
+ * It COMPOSES the shared scanner — `scanSource`'s `comment` and `literal` flags
+ * OR-ed through `blank` — and carries no scanning logic of its own; it stays
+ * local only because `js-comment-mask.mjs` publishes no comments+literals
+ * projection yet, and hoisting one waits on a follow-up card.
+ *
+ * The imported `maskComments` (comments blanked, string/template/regex content
+ * INTACT — S2/S3 read import specifiers out of it) and this mask both preserve
+ * offsets, so a range brace-matched on the code mask indexes the comment mask
+ * identically — which is how the level VALUE (a string, blanked by this mask)
+ * is read out of a block located with it.
  */
 function maskCode(source) {
   const { comment, literal } = scanSource(source);
