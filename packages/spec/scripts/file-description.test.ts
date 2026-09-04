@@ -652,19 +652,18 @@ describe('renderFileDescription — #13796: the `@module` marker is machinery, n
     expect(out).toContain('@module');
   });
 
-  it('leaves every other block tag alone — the filter is `@module`, not `^@\\w+`', () => {
-    // Scope, pinned. `@example Basic field mapping` is the caption of the fence
-    // beneath it and `@category Security` is a classification: a blanket
-    // tag-line drop would take that prose off the page, which is the one thing
-    // this fix may not do. How a tag WITH content should render is a different
-    // question and not this one.
+  it('is still not a `^@\\w+` filter — the caption beside it survives as prose', () => {
+    // Scope, pinned, and REWRITTEN at #14455 — this case used to assert that
+    // `@example Basic field mapping` reached the page as literal tag text,
+    // which is the defect that card fixed. What #13796 owns is unchanged and is
+    // what is asserted here: its drop is scoped to its own tag, and the caption
+    // prose beside it is not collateral. That the caption now arrives BOLDED
+    // rather than raw is #14455's verdict, pinned in its own block below.
     const out = renderFileDescription(
       moduleBlock(
         '@module shared/mapping',
         '',
         'Field mapping.',
-        '',
-        '@category Security',
         '',
         '@example Basic field mapping',
         '```ts',
@@ -674,8 +673,173 @@ describe('renderFileDescription — #13796: the `@module` marker is machinery, n
       ctx,
     );
     expect(out).not.toContain('@module');
-    expect(out).toContain('@category Security');
+    expect(out).toContain('Basic field mapping');
+    expect(out).toContain('const m = 1;');
+  });
+});
+
+/**
+ * #14455 — a block tag with a PAYLOAD is rewritten, not dropped.
+ *
+ * #13796 removed `@module` from the page and said, in its own scope note, that
+ * the two remaining tags were a different question because they carry prose a
+ * drop would take with them. This is that question answered: eighteen lines of
+ * literal `@example` / `@category` text across fourteen customer-facing
+ * reference pages, measured with the card's own repro
+ * (`grep -rn '^@example\|^@category' content/docs/references/`) — fourteen
+ * `@example` lines on ten pages and four `@category Security` lines on four
+ * more, unchanged from the count taken when the card was filed.
+ *
+ * The answer is per tag, and the axis is the payload rather than the spelling:
+ *
+ * - `@example CAPTION` (twelve lines) captions the block directly beneath it,
+ *   so it is REWRITTEN into that caption in bold — the shape `@see` beside it
+ *   already had. Why bold rather than a heading or an `Example:` label is on
+ *   `EXAMPLE_CAPTION`.
+ * - `@example` bare (two lines, `studio/plugin` and `studio/object-designer`)
+ *   has no payload at all, which is the `@module` case exactly, so it is
+ *   DROPPED.
+ * - `@category Security` (four lines) carries a payload and is dropped anyway,
+ *   the one verdict here that is a judgement rather than a mechanism. The
+ *   measurement it rests on — four pages, one value, and no consumer anywhere
+ *   in the repo — is on `CATEGORY_MARKER`, and it is what would have to change
+ *   first.
+ *
+ * Asserted on the RENDERED fragment and never on the emitted `.mdx`, for the
+ * reason the rest of this file is: `check:docs` compares the artifact against
+ * the source and the artifact reproduced all eighteen tag lines faithfully, so
+ * it was green through every one of them.
+ */
+describe('renderFileDescription — #14455: a tag WITH a payload is rewritten, not dropped', () => {
+  const ctx = { fromCategory: 'shared', sourcePathToDocsRoute: () => null, sectionLevel: PAGE_SECTION_LEVEL };
+
+  const moduleBlock = (...body: string[]): string =>
+    ['/**', ...body.map(l => (l === '' ? ' *' : ` * ${l}`)), ' */', '', "import { z } from 'zod';", ''].join('\n');
+
+  it('renders `@example CAPTION` as the caption of the fence beneath it', () => {
+    // `shared/mapping.zod.ts`, reduced — the page the card opened with. Both
+    // captions, because the source writes a RUN of them and a fix that only
+    // reached the first would still publish the second.
+    const out = renderFileDescription(
+      moduleBlock(
+        'Base Field Mapping Protocol',
+        '',
+        '@example Basic field mapping',
+        '```typescript',
+        "const mapping = { source: 'a' };",
+        '```',
+        '',
+        '@example With a fallback for missing source values',
+        '```typescript',
+        "const mapping = { source: 'b' };",
+        '```',
+      ),
+      ctx,
+    );
+    expect(out).not.toContain('@example');
+    expect(out).toContain('**Basic field mapping**');
+    expect(out).toContain('**With a fallback for missing source values**');
+    // The caption sits on its own line directly above the fence it captions —
+    // a fenced block may interrupt a paragraph, so this is what a reader sees
+    // as a caption rather than as the first words of one.
+    expect(out).toContain('**Basic field mapping**\n```typescript');
+  });
+
+  it('leaves the caption\'s own markdown intact', () => {
+    // `api/plugin-rest-api.zod.ts` writes an inline code span inside its
+    // caption. Wrapping the line in `**` must not disturb it: CommonMark parses
+    // the span first, and a `**` run closing against `)` is still right-flanking.
+    const out = renderFileDescription(
+      moduleBlock('@example Serving routes from a plugin (imperative `http.server` mount)', '```ts', 'x;', '```'),
+      ctx,
+    );
+    expect(out).toContain('**Serving routes from a plugin (imperative `http.server` mount)**');
+  });
+
+  it('still resolves a source path written inside a caption', () => {
+    // The rewrite runs BEFORE the link and code-span steps, so a caption is
+    // ordinary prose to every transform after it. Were it run last, a caption
+    // naming a neighbour would reach the page as bare text — the #6484 defect,
+    // re-acquired on one line.
+    const out = renderFileDescription(
+      moduleBlock('@example Mapping a mapping.zod.ts field', '```ts', 'x;', '```'),
+      { ...ctx, sourcePathToDocsRoute: () => '/docs/references/shared/mapping' },
+    );
+    expect(out).toContain('**Mapping a [mapping.zod.ts](/docs/references/shared/mapping) field**');
+  });
+
+  it('drops a BARE `@example` — with no payload it is the `@module` case', () => {
+    // `studio/plugin.zod.ts` and `studio/object-designer.zod.ts`, the two
+    // sources that write it bare, and they write it directly above the
+    // `os:check` marker. Both lines are machinery and both come off, which is
+    // why this drop runs before classification alongside the marker's: the
+    // fence has to stay attached to the prose above it, not to a leftover line.
+    const out = renderFileDescription(
+      moduleBlock(
+        'Studio Plugin Protocol',
+        '',
+        '@example',
+        '<!-- os:check -->',
+        '```typescript',
+        "import { StudioPluginManifestSchema } from '@objectstack/spec/studio';",
+        '```',
+      ),
+      ctx,
+    );
+    expect(out).not.toContain('@example');
+    expect(out).not.toContain('os:check');
+    expect(out).toContain('Studio Plugin Protocol\n\n```typescript');
+  });
+
+  it('drops `@category VALUE`, and keeps the `@see` line it sits under', () => {
+    // All four sources write the pair in this order, so a drop that took the
+    // line above with it would be invisible in a fixture that omitted the
+    // `@see`. `See also:` is #13796-era behaviour and stays untouched.
+    const out = renderFileDescription(
+      moduleBlock(
+        'Supplier Security Protocol',
+        '',
+        '@see https://www.iso.org/standard/27001',
+        '@category Security',
+      ),
+      ctx,
+    );
+    expect(out).not.toContain('@category');
+    // Asked of whole LINES: the header prose legitimately contains the word, so
+    // a substring test here would assert about `Supplier Security Protocol`
+    // rather than about the payload that was dropped.
+    expect(out.split('\n')).not.toContain('Security');
+    expect(out).toContain('See also: https://www.iso.org/standard/27001');
+  });
+
+  it('keeps both tags shown INSIDE a fence — there an author is illustrating the convention', () => {
+    // The prose-level condition, the same one #10924 and #13796 rest on. A
+    // rewrite by text alone would edit a header that documents the convention.
+    const out = renderFileDescription(
+      moduleBlock(
+        'How a module header captions an example:',
+        '',
+        '```md',
+        '@example Basic field mapping',
+        '@category Security',
+        '```',
+      ),
+      ctx,
+    );
     expect(out).toContain('@example Basic field mapping');
+    expect(out).toContain('@category Security');
+  });
+
+  it('keeps a mid-sentence mention and an indented one — only a line that OPENS with the tag is a tag', () => {
+    // Judged with the same UNTRIMMED test `MODULE_MARKER` uses, so prose about
+    // the tag survives and a list item that happens to start with one is not
+    // rewritten out from under its bullet.
+    const out = renderFileDescription(
+      moduleBlock('Write `@example Foo` to caption a block.', '', '- see @category for the retired spelling'),
+      ctx,
+    );
+    expect(out).toContain('@example Foo');
+    expect(out).toContain('@category');
   });
 });
 
@@ -1946,6 +2110,60 @@ describe('corpus — every rendered description is well-formed markdown', () => 
       }
     }
     expect(offenders).toEqual([]);
+  });
+
+  it('never prints a literal `@example` or `@category` line on a page (#14455)', () => {
+    // The half that cannot rot, re-derived from the real `packages/spec/src`
+    // tree: eighteen such lines were published across fourteen pages, and a
+    // source that acquires either tag tomorrow cannot re-acquire the defect
+    // with it. An invariant (zero) rather than a count, for the reason the
+    // `@module` case beside it is one — a fifteenth captioned module is a good
+    // thing, not a regression.
+    //
+    // Read on the rendered fragment and not on the emitted `.mdx`, because
+    // `check:docs` reproduced all eighteen faithfully and was green through
+    // every one.
+    const offenders: string[] = [];
+    for (const { rel, out } of described) {
+      for (const line of withoutFences(out).split('\n')) {
+        if (/^@(?:example|category)\b/.test(line)) offenders.push(`${rel}: ${line.trim()}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('loses no caption to that — every `@example CAPTION` reaches its page (#14455)', () => {
+    // The other half, and the card's acceptance criterion: "no page loses
+    // non-tag prose". The drop and the rewrite are one line apart, so a fix
+    // that got the partition backwards would pass the assertion above by
+    // deleting exactly the prose this one requires.
+    //
+    // Re-derived from the SOURCES rather than from a fixture list: every
+    // prose-level `@example` line in a selected block that carries a payload
+    // must have that payload on the page, bolded. Captions holding a construct
+    // a later transform rewrites (a brace to escape, a `.zod.ts` to link) are
+    // counted but not string-matched — none exist today, and the count below is
+    // what stops that exemption from quietly swallowing the whole corpus.
+    const captions: string[] = [];
+    const offenders: string[] = [];
+    for (const file of zodFiles) {
+      const rel = path.relative(SRC_DIR, file);
+      const block = findModuleDocBlock(fs.readFileSync(file, 'utf-8'));
+      if (block === null) continue;
+      const ctx = { fromCategory: rel.split(path.sep)[0], sourcePathToDocsRoute, sectionLevel: PAGE_SECTION_LEVEL };
+      const out = renderFileDescription(fs.readFileSync(file, 'utf-8'), ctx);
+      for (const line of withoutFences(block.split('\n').map(l => l.replace(/^\s*\*\s?/, '')).join('\n')).split('\n')) {
+        const caption = /^@example[ \t]+(\S.*?)[ \t]*$/.exec(line)?.[1];
+        if (caption === undefined) continue;
+        captions.push(`${rel}: ${caption}`);
+        if (/[{}]|\.zod\.ts|\{@link/.test(caption)) continue;
+        if (!out.includes(`**${caption}**`)) offenders.push(`${rel}: ${caption}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+    // Vacuity guard: the loop above is only evidence while the corpus still
+    // writes captions. Twelve at #14455, on ten pages.
+    expect(captions.length).toBeGreaterThan(9);
   });
 
   it('keeps a description for every source that had one — #6134 selection is untouched', () => {
