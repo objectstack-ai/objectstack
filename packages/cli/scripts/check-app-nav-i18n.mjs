@@ -585,6 +585,80 @@ function selfTest() {
   expect('#8764 verdict names the key path', renderedPage.includes('pages.marketplace_installed.subtitle'), renderedPage);
   expect('#8764 verdict names the authoring package', renderedPage.includes('@objectstack/cloud-connection'), renderedPage);
 
+  // ── The refusal CLASS, and the advisory that must move with it (#14857) ──
+  //
+  // `checkBuildPrerequisite` is this gate's only refusal, and until its printer
+  // was split into `buildPrerequisiteText` there was no VALUE to assert on: the
+  // string was built inline inside `console.error(...)` and the code was typed
+  // into the `process.exit` on the next line. So the number PR #14856 moved
+  // from 1 to 3 was pinned here by nothing, while four sibling gates pin both
+  // the code and the advisory that names it.
+  //
+  // ⛔ The verdict cases above are NOT this coverage: they decide WHICH finding
+  // fires and stay green whatever number the refusal beside them returns.
+  const refusalAdvisory = buildPrerequisiteText('/repo/packages/cli/node_modules/@objectstack/setup/dist/index.mjs');
+  expect(
+    '#14857 the refusal class is 3 — the code the four sibling gates answer these words with',
+    EXIT_PREREQUISITE_NOT_MET === 3,
+    String(EXIT_PREREQUISITE_NOT_MET),
+  );
+  expect(
+    '#14857 the refusal class is distinct from a finding and from a pass',
+    EXIT_PREREQUISITE_NOT_MET !== EXIT_FINDINGS && EXIT_PREREQUISITE_NOT_MET !== 0,
+    `prerequisite ${EXIT_PREREQUISITE_NOT_MET}, finding ${EXIT_FINDINGS}`,
+  );
+
+  // Pinned over the FUNCTION BODIES, not over the constant alone. The
+  // regression that costs something is not a mistyped constant: it is a
+  // `process.exit(1)` written back into the refusal by an author who never
+  // thought about exit codes, or a number typed into the advisory instead of
+  // interpolated. Either leaves the constant reading 3, every consumer green
+  // (they all treat any non-zero as failure), and a message that still reads
+  // perfectly right.
+  const hardcodesExitCall = (fn) => /process\.exit\(\s*\d/.test(fn.toString());
+  const spellsALiteralCode = (fn) => /Exit code \d/.test(fn.toString());
+  expect(
+    '#14857 the refusal exits through the named constant, never a literal',
+    !hardcodesExitCall(checkBuildPrerequisite),
+    checkBuildPrerequisite.toString(),
+  );
+  // The seam the advisory cases depend on: a text pinned here is worthless if
+  // the refusal stops printing THIS text.
+  expect(
+    '#14857 the refusal prints the pinned text function',
+    /console\.error\(\s*buildPrerequisiteText\(/.test(checkBuildPrerequisite.toString()),
+    checkBuildPrerequisite.toString(),
+  );
+  expect(
+    '#14857 the advisory INTERPOLATES the code rather than spelling one',
+    !spellsALiteralCode(buildPrerequisiteText),
+    buildPrerequisiteText.toString(),
+  );
+  expect(
+    '#14857 the advisory names its own code AND the finding code it is distinct from',
+    refusalAdvisory.includes(`Exit code ${EXIT_PREREQUISITE_NOT_MET}`)
+      && refusalAdvisory.includes(`a finding's ${EXIT_FINDINGS}`),
+    refusalAdvisory,
+  );
+  expect('#14857 the advisory carries NO stale spelling of the old code', !/Exit code 1\b/.test(refusalAdvisory), refusalAdvisory);
+  expect('#14857 the advisory still states that nothing was measured', refusalAdvisory.includes('Nothing was measured'), refusalAdvisory);
+  expect(
+    '#14857 the advisory names the probe file it was handed, not a re-derived one',
+    refusalAdvisory.includes('/repo/packages/cli/node_modules/@objectstack/setup/dist/index.mjs'),
+    refusalAdvisory,
+  );
+
+  // The NEGATIVE CONTROLS, and the reason the predicates above are
+  // measurements rather than tautologies: each is run against a function that
+  // does the forbidden thing and must SEE it. Without these, one typo in either
+  // regex passes forever — a pin that cannot fail is not a pin. ⛔ Neither
+  // control is ever CALLED; they exist to be read by `toString()`.
+  const controlHardcodedExit = () => { process.exit(1); };
+  const controlLiteralAdvisory = () => `  (Exit code 1, distinct from a finding's 1 — capture it BEFORE any pipe:`;
+  expect('#14857 NEGATIVE CONTROL: the literal-exit pin can still fail', hardcodesExitCall(controlHardcodedExit), 'the predicate no longer sees a hard-coded exit');
+  expect('#14857 NEGATIVE CONTROL: the literal-advisory pin can still fail', spellsALiteralCode(controlLiteralAdvisory), 'the predicate no longer sees a spelled-out code');
+  expect('#14857 NEGATIVE CONTROL: the stale-code pin can still fail', /Exit code 1\b/.test(controlLiteralAdvisory()), 'the stale-spelling predicate no longer sees `Exit code 1`');
+
   if (failures.length) {
     console.error(`\ncheck-app-nav-i18n --self-test: ${failures.length} failure(s)\n`);
     for (const f of failures) console.error(`  ${f}`);
@@ -592,7 +666,9 @@ function selfTest() {
   }
   console.log(
     '✓ check:app-nav-i18n --self-test — the nav walk, the per-locale label verdict, the silent-contributor guard, ' +
-      'and the `pages.*` default-locale parity verdict (drift, orphan, phantom key) all go red on the shapes they exist to catch.',
+      'and the `pages.*` default-locale parity verdict (drift, orphan, phantom key) all go red on the shapes they exist to catch; ' +
+      `and the build-prerequisite refusal exits ${EXIT_PREREQUISITE_NOT_MET} — distinct from a finding's ${EXIT_FINDINGS} — ` +
+      'with an advisory that names the number it claims (#14857).',
   );
 }
 
@@ -632,7 +708,25 @@ if (process.argv.includes('--self-test')) {
 function checkBuildPrerequisite() {
   const probe = join(CLI_ROOT, 'node_modules', '@objectstack', 'setup', 'dist', 'index.mjs');
   if (existsSync(probe)) return;
-  console.error(
+  console.error(buildPrerequisiteText(probe));
+  process.exit(EXIT_PREREQUISITE_NOT_MET);
+}
+
+/**
+ * The text `checkBuildPrerequisite` prints, as a value — so `--self-test` can
+ * assert on the advisory (and on the code it names) without spawning a process,
+ * stubbing `process.exit`, or unbuilding the tree. The extraction is the whole
+ * point: while the string was built inline inside `console.error(...)`, there
+ * was no value for a test to read, so the number this gate answers
+ * `PREREQUISITE NOT MET` with was pinned by nothing (#14857). Same shape as
+ * `scripts/import-prerequisite.mjs`'s `prerequisiteNotMetText`.
+ *
+ * Takes the probe path rather than recomputing it: the message names the file
+ * that was actually missing, and a text function that re-derived it could name
+ * a different one than the check refused on.
+ */
+function buildPrerequisiteText(probe) {
+  return (
     `\ncheck-app-nav-i18n: PREREQUISITE NOT MET — the workspace packages are not built\n\n` +
       `  This gate boots the real Setup composition, so it imports the BUILT output of\n` +
       `  every contributing package. This one is not there:\n\n` +
@@ -646,9 +740,8 @@ function checkBuildPrerequisite() {
       `  is the false green, and no pipe shape repairs it. \`\${PIPESTATUS[0]}\`/\`pipefail\` do recover\n` +
       `  this gate's own code: \`| tail\` reads to EOF and forwards it, while \`| head -N\` closes the\n` +
       `  read end early — the gate takes EPIPE, its verdict text is TRUNCATED, and a producer that\n` +
-      `  dies on SIGPIPE reports 141 rather than what it meant to say.)`,
+      `  dies on SIGPIPE reports 141 rather than what it meant to say.)`
   );
-  process.exit(EXIT_PREREQUISITE_NOT_MET);
 }
 
 checkBuildPrerequisite();
