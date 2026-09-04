@@ -455,7 +455,7 @@ enabled), so disable state would otherwise be lost. Persistence is local-first:
 - `packages/runtime/src/http-dispatcher.ts` — `assemblePackageManifest` + `GET /packages/:id/export` (§9.2)
 - `packages/runtime/src/cloud/marketplace-install-local-plugin.ts` — inline-manifest import + register-before-persist (§9.2–9.3)
 - `packages/objectql/src/registry.ts` — `isPackageDisabled` + `listItems` disabled-package filter (§9.5); `setInitialDisabledPackageIds` + `installPackage` disable seeding (§9.7)
-- `packages/objectql/src/protocol.ts` — `getMetaItems` final-merge disabled-package filter (§9.5)
+- `packages/metadata-protocol/src/protocol.ts` — `getMetaItems` final-merge disabled-package filter (§9.5)
 - `packages/objectql/src/engine.ts` — `registerApp` consumes `tools` / `skills` (§9.6)
 - `packages/spec/src/shared/metadata-collection.zod.ts` — `PLURAL_TO_SINGULAR` gains `tools` / `skills` (§9.6)
 - `packages/spec/src/stack.zod.ts` — top-level `tools` on `ObjectStackDefinition` (§9.6)

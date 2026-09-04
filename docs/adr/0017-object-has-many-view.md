@@ -116,7 +116,7 @@ lists `view`, keeps `v.viewKind && v.object === object`, sorts by
 rows on top.
 
 ### 3.4 Runtime storage — `sys_view_definition`
-`packages/platform-objects/src/metadata/sys-view-definition.object.ts` —
+`packages/metadata-core/src/objects/sys-view-definition.object.ts` —
 a `sys_`-prefixed **system object** (auto-provisioned). Columns:
 `name`, `object`, `view_kind`, `label`, `is_default`, `view_order`,
 `scope` (`shared`|`personal`), `owner`, `hidden`, `config` (JSON),
