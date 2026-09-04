@@ -66,6 +66,48 @@ export function stripComments(source: string): string;
 export function maskComments(source: string): string;
 
 /**
+ * The outcome of walking the body of the regex literal opening at `at`.
+ *
+ * `closed: true` means `end` is the index of the CLOSING `/`. `closed: false`
+ * means the body ran into a LineTerminator or EOF and `end` is where it
+ * stopped — what THAT means is the caller's to decide, and the two consumers of
+ * this walk decide it differently on purpose (see the module's header).
+ */
+export interface RegexBodyWalk {
+  end: number;
+  closed: boolean;
+}
+
+/** IdentifierPart, near enough for the ASCII this tree is written in. */
+export const IDENT_CHAR: RegExp;
+
+/**
+ * Keywords after which a `/` opens a REGEX rather than a division. Shared, so
+ * that a second copy cannot drift: dropping `return` from it passes every
+ * pinned case and is caught only by the corpus sweep.
+ */
+export const REGEX_AFTER_KEYWORD: ReadonlySet<string>;
+
+/** LineTerminator — the four the grammar names, which a regex body excludes. */
+export function isRegexLineTerminator(c: string): boolean;
+
+/**
+ * Walk the body of the regex literal opening at `at`, which the CALLER has
+ * already decided sits where an expression may begin.
+ */
+export function walkRegexBody(src: string, at: number): RegexBodyWalk;
+
+/**
+ * Bind a POSITION RULE to the shared walk and get back a recogniser answering
+ * "index of the closing `/`, or -1". There is no default rule and omitting one
+ * throws — a default would be one of two opposite failure directions, handed
+ * silently to whichever caller forgot.
+ */
+export function makeRegexRecogniser(options: {
+  mayBeginAt: (src: string, at: number) => boolean;
+}): (src: string, at: number) => number;
+
+/**
  * Drive the scanner over its own fixture corpus, printing a line per case.
  *
  * Returns nothing: a failing case calls `process.exit(1)` rather than reporting
