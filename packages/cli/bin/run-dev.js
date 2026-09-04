@@ -195,6 +195,41 @@ settings.debug = true;
 // why the re-assert has to sit on the write path rather than run once here.
 keepStderrNonBlocking();
 
+/**
+ * Make a FAILED stderr write non-fatal, so a caller whose read end is gone
+ * still gets this CLI's own exit status instead of a crash. #14858.
+ *
+ * `process.stderr` is an `EventEmitter`, and an `error` event with nothing
+ * listening IS an uncaught exception. Measured on this shim with the parent's
+ * read end DESTROYED (`stdio: ['ignore', 'ignore', 'pipe']`, then
+ * `child.stderr.destroy()`): oclif's `displayWarnings()` makes the first write,
+ * the pipe is already gone, node raises `write EPIPE` on `process.stderr`, and
+ * the process dies of an uncaught exception before this file's `.catch()` — and
+ * before `writeStderr()` above — has run at all. __REPRO__
+ *
+ * Every OTHER reader of the same child answers **2**, the status oclif's
+ * `handle()` produces and the one #14715 pinned for the never-read reader.
+ * __READERS__ So the closed reader was the single shape that could not tell
+ * "the command failed" from "the CLI crashed", on the only channel it had left.
+ *
+ * ⛔ Deliberately NOT narrowed to `error.code === 'EPIPE'`, though that is the
+ * code the first failure carries. __CODES__ A predicate would therefore have to
+ * enumerate the codes a dead pipe produces AFTER the first one, and get that
+ * enumeration right forever, to buy a distinction nothing here can act on:
+ * every error event on this stream means one thing — a write to stderr failed —
+ * and the only channel it could be reported on is the stream that just failed.
+ *
+ * ⚠️ What it costs, and it is not nothing. With the write no longer fatal the
+ * run continues into `writeStderr()`'s drain, which for this path had never
+ * executed at all. Re-measured on this tree, destroyed read end, `bin/run-dev.js`
+ * ablated 2x2 (this listener present/absent x the `write` callback kept/removed):
+ *
+ * __ABLATION__
+ */
+process.stderr.on('error', () => {
+  // Nothing to report, and nowhere left to report it.
+});
+
 const running = run(process.argv.slice(2), import.meta.url);
 
 // ⚠️ ATTACHED AFTER `run()`, and that order is load-bearing rather than style.
