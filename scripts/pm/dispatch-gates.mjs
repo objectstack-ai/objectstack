@@ -1177,6 +1177,70 @@ export function argvTokens(tail) {
 }
 
 /**
+ * The part of a token this tool could NOT resolve, or null when the token is
+ * whole — a token the tokeniser above had to swallow to the end of the tail
+ * because the construct it opened never closed, or a token left ending in a
+ * bare `$`.
+ *
+ * ## The seam, and why it is one predicate rather than three
+ *
+ * `DIRECT_CHECK_INVOCATION` ends the tail at the first `;|&<>()`, which is the
+ * shell boundary it has always drawn and is right: past one of those the text
+ * belongs to another command or to the shell. What this reads is what the CUT
+ * leaves behind. A value written as a command substitution is cut INSIDE its
+ * own construct — `--base "$(git merge-base origin/main HEAD)"` is cut at the
+ * `(` and leaves the tail `--base "$` — and `argvTokens` handles the unclosed
+ * quote by swallowing the rest into one token. That token carries no
+ * `WORKFLOW_VALUE_SOURCE` hit, so without this it classified as a LITERAL and
+ * the key `scripts/check-x.mjs --base "$` rendered into `--commands`: a
+ * truncated argv that LOOKS runnable, which `renderedArgv`'s docblock below
+ * names as the worst of the outcomes.
+ *
+ * Three spellings reach that state and they are ONE state, so they get one
+ * predicate rather than a list: an unclosed quote (`"$` from a `$(…)`, `'a`
+ * from a terminator inside a quoted value like `--gate 'a;b'`), an unclosed
+ * `${{ … }}` (a GitHub expression holding a terminator, `${{ inputs.x || 'y' }}`
+ * being the live-looking spelling), and a token ending in a bare `$` (the same
+ * cut with the value unquoted, `--base $(…)`). Each is the tokeniser's OWN
+ * unterminated branch, replayed here over the finished token — which is
+ * faithful because that branch copies the remainder verbatim (`text.slice(i)`)
+ * and a closing delimiter is always inside the token that used it, so the
+ * replay reaches the same verdict the tokeniser did.
+ *
+ * ⛔ NOT done here: widening `DIRECT_CHECK_INVOCATION`'s terminator set to
+ * carry the whole `$(…)` through. The cut at `(` is the shell's boundary and a
+ * matcher that reads past it would have to know which parens are a
+ * substitution and which end the command — this reads what the cut left, which
+ * needs no such knowledge.
+ *
+ * Measured when this landed: 114 direct invocations across `.github/workflows`
+ * and ZERO of them reach this branch, so nothing this tool prints today moves.
+ * The shape is latent, and this is here because the day a workflow writes a
+ * `$(…)` value is the day the derivation would otherwise render the truncation
+ * silently.
+ */
+function unresolvedRemainder(token) {
+  const text = String(token ?? '');
+  let i = 0;
+  while (i < text.length) {
+    if (text[i] === "'" || text[i] === '"') {
+      const close = text.indexOf(text[i], i + 1);
+      if (close === -1) return text.slice(i);
+      i = close + 1;
+      continue;
+    }
+    if (text.startsWith('${{', i)) {
+      const close = text.indexOf('}}', i + 3);
+      if (close === -1) return text.slice(i);
+      i = close + 2;
+      continue;
+    }
+    i += 1;
+  }
+  return /\$$/.test(text) ? '$' : null;
+}
+
+/**
  * Every spelling by which a workflow puts a value into an argv WITHOUT writing
  * the value down: a GitHub expression, a shell parameter expansion, a shell
  * special. Anything else in a token is a literal — a value that appears
@@ -1277,6 +1341,14 @@ export function renderedArgv(tail) {
     for (const hit of token.matchAll(WORKFLOW_VALUE_SOURCE)) {
       if (!variables.includes(hit[0])) variables.push(hit[0]);
     }
+    // A remainder this tool could not resolve is a value that comes FROM THE
+    // WORKFLOW just as surely as `${{ … }}` does — it is the visible half of a
+    // construct the cut ran through. Naming it here is the whole fix, and it
+    // rides the channel the classification already has: any entry in
+    // `variables` marks the row NOT RUNNABLE LOCALLY and keeps the key out of
+    // `--commands`, so the truncation is NAMED rather than rendered runnable.
+    const remainder = unresolvedRemainder(token);
+    if (remainder !== null && !variables.includes(remainder)) variables.push(remainder);
   }
   return { args: tokens.join(' '), variables };
 }
@@ -11347,11 +11419,100 @@ function selfTest() {
   // a bare backslash or a stray redirection fd is the outcome #14880 refused
   // the whole class to avoid, and rendering is only an improvement while none
   // of them can appear.
+  //
+  // ⭐ The QUOTE half (#15116). `DIRECT_CHECK_INVOCATION` cuts at `(`, so a
+  // value written as a command substitution is cut INSIDE its own construct and
+  // leaves a tail whose quote never closes — `--base "$` from
+  // `--base "$(git merge-base origin/main HEAD)"`. Reading that shape here is
+  // deliberately INDEPENDENT of `argvTokens`: this scans the finished KEY with
+  // the shell's own outermost-quote rule (a `'` inside a `"…"` is text, not a
+  // delimiter), so a bug in the tokeniser cannot make the pin agree with it. A
+  // parity count would not do — measured on this tree zero live keys nest a
+  // quote, and the day one does a parity scan calls a balanced key truncated.
+  const carriesTruncation = (text) => {
+    const s = String(text);
+    let quote = null;
+    let i = 0;
+    while (i < s.length) {
+      if (quote !== null) {
+        if (s[i] === quote) quote = null;
+        i += 1;
+        continue;
+      }
+      if (s[i] === "'" || s[i] === '"') {
+        quote = s[i];
+        i += 1;
+        continue;
+      }
+      if (s.startsWith('${{', i)) {
+        const close = s.indexOf('}}', i + 3);
+        if (close === -1) return true;
+        i = close + 2;
+        continue;
+      }
+      i += 1;
+    }
+    return quote !== null || /\$(?=\s|$)/.test(s);
+  };
+  // The statement is over EVERY derived key and it is the contrapositive rather
+  // than a flat "every key is balanced": under this file's own rule a truncated
+  // tail is NAMED — its unresolved remainder is a value the workflow supplies,
+  // so the row is marked NOT RUNNABLE LOCALLY and the key stays out of
+  // `--commands`. What must never happen is a truncation that RENDERS as a
+  // command a dev can paste, and that is exactly what this says.
   t(
-    '⛔ no derived key is a TRUNCATED argv — no continuation backslash, and no redirection fd survives as an argument',
+    '⛔ no derived key is a TRUNCATED argv — no continuation backslash, no redirection fd surviving as an argument, and ⭐ no key carrying an unclosed quote, an unclosed ${{ … }} or a bare `$` is RUNNABLE (#15116)',
     keyNames.every((n) => !/\\/.test(n))
       && keyNames.includes('scripts/check-prerelease-pin-watch.mjs --verbose')
-      && !keyNames.some((n) => /^scripts\/check-prerelease-pin-watch\.mjs --verbose\s+\d+$/.test(n)),
+      && !keyNames.some((n) => /^scripts\/check-prerelease-pin-watch\.mjs --verbose\s+\d+$/.test(n))
+      && keyInvs.every((i) => !carriesTruncation(i.check) || (i.argvVariables ?? []).length > 0),
+  );
+
+  // ⭐ THE UNRENDERABLE KIND (#15116), and this fixture is the ONLY place the
+  // tree has it. Measured at this commit: 114 direct invocations across
+  // `.github/workflows` and ZERO carry a paren or a terminator inside a quoted
+  // value — the three paren hits in the workflow text are all comment lines. So
+  // unlike `keyWf` above, whose every step is quoted from live workflow text,
+  // this fixture is WRITTEN rather than quoted, and it says so: the shape is
+  // latent, and a fixture is what stands in for a tree that does not have it
+  // yet. The live half at the end of the block asserts the same property over
+  // the workflows and is vacuous today by that measurement, which is the whole
+  // reason these three steps exist.
+  const cutWf = [
+    'jobs:',
+    '  gates:',
+    '    steps:',
+    '      - name: a command substitution in the value position — the tail is cut at the paren',
+    '        run: node scripts/check-x.mjs --base "$(git merge-base origin/main HEAD)"',
+    '      - name: a terminator INSIDE a quoted value — the tail is cut at the semicolon',
+    "        run: node scripts/check-y.mjs --gate 'a;b'",
+    '      - name: CONTROL — the two live spellings, which must classify exactly as before',
+    "        run: node scripts/check-z.mjs --gate 'Test Core' --shard ${{ matrix.shard }}",
+  ].join('\n');
+  const cutInvs = extractCheckInvocations(cutWf, 'x.yml').filter((i) => i.direct);
+  const cutOf = (script) => cutInvs.find((i) => i.script === script);
+  t(
+    'the `$(…)` value really IS cut to a truncation — the fixture reproduces the key this card measured, so the cases below cannot go vacuous',
+    cutOf('scripts/check-x.mjs')?.check === 'scripts/check-x.mjs --base "$',
+  );
+  t(
+    '⭐ …and that truncation is NOT runnable: the unresolved remainder is named as the value the workflow supplies',
+    (cutOf('scripts/check-x.mjs')?.argvVariables ?? []).join(',') === '"$',
+  );
+  t(
+    '⭐ a terminator inside a quoted value lands the same way — named, never rendered as a command a dev could paste',
+    cutOf('scripts/check-y.mjs')?.check === "scripts/check-y.mjs --gate 'a"
+      && (cutOf('scripts/check-y.mjs')?.argvVariables ?? []).join(',') === "'a",
+  );
+  t(
+    "CONTROL: `--gate 'Test Core'` and `--shard ${{ matrix.shard }}` tokenise and classify EXACTLY as today — the expression is the one variable, the quoted literal contributes none",
+    cutOf('scripts/check-z.mjs')?.check === "scripts/check-z.mjs --gate 'Test Core' --shard ${{ matrix.shard }}"
+      && (cutOf('scripts/check-z.mjs')?.argvVariables ?? []).join(',') === '${{ matrix.shard }}',
+  );
+  t(
+    '⛔ …and the shape-level statement over every key this fixture derives: carrying a truncation and rendering as runnable are mutually exclusive — non-vacuously, 2 of the 3 carry one',
+    cutInvs.every((i) => !carriesTruncation(i.check) || i.argvVariables.length > 0)
+      && cutInvs.filter((i) => carriesTruncation(i.check)).length === 2,
   );
   // ...while a REDIRECTION really does end the argv, so the flag run before it
   // is complete and is keyed. Unchanged by #15083, verdict and all: what the
@@ -11372,12 +11533,23 @@ function selfTest() {
       && renderedArgv(' --days 90').variables.length === 0
       && renderedArgv(' --base "$MERGE_BASE"').variables.join(',') === '$MERGE_BASE'
       && renderedArgv(' "$RUNNER_TEMP/test-core.log"').variables.join(',') === '$RUNNER_TEMP'
-      && renderedArgv(' --shard ${{ matrix.shard }}').args === '--shard ${{ matrix.shard }}',
+      && renderedArgv(' --shard ${{ matrix.shard }}').args === '--shard ${{ matrix.shard }}'
+      // ⭐ #15116: the three spellings the CUT leaves unresolved. Each names its
+      // own remainder, which is what keeps the key out of `--commands`.
+      && renderedArgv(' --base "$').variables.join(',') === '"$'
+      && renderedArgv(' --base $').variables.join(',') === '$'
+      && renderedArgv(' --job ${{ inputs.a').variables.join(',') === '${{ inputs.a'
+      // …and the CONTROL, on the same call: a CLOSED quote resolves, so a
+      // quoted literal is still a literal and still renders as runnable.
+      && renderedArgv(" --gate 'Test Core'").args === "--gate 'Test Core'"
+      && renderedArgv(" --gate 'Test Core'").variables.length === 0,
   );
   t(
-    'argvTokens holds a quoted value and a ${{ … }} expression together, spaces and all',
+    'argvTokens holds a quoted value and a ${{ … }} expression together, spaces and all — and ⭐ swallows an UNCLOSED one into a single token, which is the seam #15116 reads',
     argvTokens(' --gate \'Test Core\' --shard ${{ matrix.shard }}').join('|')
-      === "--gate|'Test Core'|--shard|${{ matrix.shard }}",
+      === "--gate|'Test Core'|--shard|${{ matrix.shard }}"
+      && argvTokens(' --base "$').join('|') === '--base|"$'
+      && argvTokens(' --job ${{ inputs.a').join('|') === '--job|${{ inputs.a',
   );
   t(
     'joinLineContinuations splices a continued command into one line, and ⛔ never joins a COMMENT',
@@ -11457,9 +11629,16 @@ function selfTest() {
       !direct.some((i) => i.check === i.script)
         || direct.filter((i) => i.check === i.script).every((bare) => liveInvs.some((i) => i.script === bare.script && i.check === i.script)),
     );
+    // The same property the fixture block asserts, read from the workflows. It
+    // is VACUOUS today and that is the reading, not an oversight: at this commit
+    // no live invocation carries an unclosed quote, an unclosed `${{ … }}` or a
+    // bare `$`, so the non-vacuous subjects live in the fixture above. What this
+    // half adds is the day the tree grows one — the property holds then too,
+    // because the classification names the remainder rather than rendering it.
     t(
-      '⛔ and no live key is truncated: no continuation backslash reaches one',
-      direct.every((i) => !i.check.includes('\\')),
+      '⛔ and no live key is truncated: no continuation backslash reaches one, and ⭐ any key carrying an unclosed quote, an unclosed ${{ … }} or a bare `$` is NOT runnable (#15116)',
+      direct.every((i) => !i.check.includes('\\'))
+        && direct.every((i) => !carriesTruncation(i.check) || (i.argvVariables ?? []).length > 0),
     );
     // A script invoked BOTH ways gets BOTH entries — the card's third clause,
     // read off the live tree. `check-release-section-coverage.mjs` is the
