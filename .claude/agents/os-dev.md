@@ -146,21 +146,21 @@ model: opus
 
 ## 本地验证范围 —— 本地只跑定向门禁,全农场归 CI
 
-**不要**把 lint workflow 里的 `check:*` 全枚举出来本地跑 55+ 个 —— 无论如何 CI 都会把农场恰
-好跑一遍。你的本地清单:① 先 build 依赖闭包(`pnpm --filter '<pkg>^...' build` —— 新 worktree 的
-第一条命令);② 受影响包自己的 `pnpm test` / `pnpm typecheck`,用 `--filter` 圈定 ——
-`packages/cli` 只欠 `unit` 层(见「Definition of done」的测试条);③ 派发词点名的
-门禁族,加上你看得出被牵连的(新 fake engine ⇒ `check:engine-double-contract`;新错误码 ⇒
-`check:error-code-casing`; `.claude/agents/**` ⇒ `check:agent-model-declared`;任何编辑 ⇒ `check:nul-bytes`);④
-派发词的门禁清单是**线索不是规格** —— 哪怕当天仔细取的清单也会漏族,点名的跑绿之
-后,对你 **实际**改动的路径重新推导 —— **`node scripts/pm/dispatch-gates.mjs` 不传路径**,脚本自
-己从 merge-base 取变更集(含未提交与未跟踪);⛔ 别自己 `git diff` 出一份清单喂它:两点
-`origin/main..HEAD` 按**此刻**的 origin/main 求值,分支切出后落地的姊妹 PR 文件会算到你头上(实
-测一次三个),而它**退出码 0**、门禁只多不少,于是全绿、无人察觉,只有报告里那
-份「我跑了哪些门禁」悄悄变成假的。浅检出上脚本会**响亮拒绝**而不是给错清单 —— 照
-它说的加深即可。补跑它新增而你的 diff 确实触及的,并在报告里点名新增项。代价是偶尔
-一轮 push-fix;安全的另一半归 PM,在你报告之后读真实门禁 job 结论。⛔ 这不是跳过点名族的
-许可 —— 它们是你仍然欠的便宜一半;你不再欠的是报告前等 CI。
+**不要**把 lint workflow 的 `check:*` 全枚举本地跑 —— CI 会把农场跑满。你的本地清单:① 先
+build 依赖闭包(`pnpm --filter '<pkg>^...' build` —— 新 worktree 的第一条命令);② 受影响包自己的
+`pnpm test` / `pnpm typecheck`,用 `--filter` 圈定,受影响包 = CI 会测的包,清单读
+`TURBO_SCM_BASE="$BASE" pnpm exec turbo ls --affected`,⛔ 不按「我改了哪些包」猜:普通 import 被改模
+块的包也在清单里,欠它们的测试;`packages/cli` 只欠 `unit` 层(见「Definition of done」测试条);③
+派发词点名的门禁族,加上你看得出被牵连的(新 fake engine ⇒ `check:engine-double-contract`;新错
+误码 ⇒ `check:error-code-casing`; `.claude/agents/**` ⇒ `check:agent-model-declared`;任何编辑 ⇒
+`check:nul-bytes`);④ 派发词的门禁清单是**线索不是规格**,当天取的也会漏族,点名的跑绿
+后,对你**实际**改动的路径重新推导 —— **`node scripts/pm/dispatch-gates.mjs` 不传路径**,脚本
+自己从 merge-base 取变更集(含未提交与未跟踪);⛔ 别自己 `git diff` 出一份清单喂它:两点
+`origin/main..HEAD` 按**此刻**的 origin/main 求值,分支切出后落地的姊妹 PR 文件算到你头上,而
+它**退出码 0**、门禁只多不少,全绿无人察觉,报告里那份「我跑了哪些门禁」却是假的。
+浅检出上脚本**响亮拒绝**而非给错清单,照它说的加深。补跑它新增而你的 diff 触及的,报
+告里点名新增项。代价是偶尔一轮 push-fix;另一半归 PM,在你报告后读真实门禁结论。⛔ 这
+不是跳过点名族的许可 —— 它们仍是你欠的便宜一半;你不再欠的是报告前等 CI。
 ⑤ diff 编辑了门禁/工具脚本 ⇒ 该脚本**自己的**测试套件是不可省的一步,在派生族之外另
 欠 —— 派生答「哪些门禁读你改的文件」,不含「哪些测试测这个脚本」:跑同目录点名它
 的 `*.test.ts`,加同包 tests 下 `git grep` 该脚本文件名的全部命中(实测:一次门禁脚本编辑,派生
