@@ -288,7 +288,11 @@ export const CEILINGS = new Map([
   // ≤5-same-family batch convention that replaces them costs less than they
   // did. Landed count, headroom 0, same convention (lowering is always
   // legitimate).
-  ['.claude/skills/pm-dispatch/SKILL.md', 1005],
+  // Lowered 1005 → 804 by the rules-only rewrite (maintainer ruling: provenance
+  // narratives, incident post-mortems and rationale tails leave the corpus; one
+  // rule per ≤120-byte line, 红线 first, templates last). Landed count, headroom
+  // 0, same convention (lowering is always legitimate).
+  ['.claude/skills/pm-dispatch/SKILL.md', 804],
   // Raised 223 → 244 by the triage reading-cost card (maintainer ruling
   // 2026-08-20, quoted in the raising PR): three mandated conventions land in
   // the runbook's triage sections. Landed count, headroom 0, same convention.
@@ -909,7 +913,11 @@ export const CROSS_FILE_MOVES = new Map([
 export const MAX_TABLE_ROW_BYTES = new Map([
   // The five files that carry a table row today, each seeded at its own widest.
   // The corpus's #1 longest LINE of any shape is the AGENTS.md row below.
-  ['.claude/skills/pm-dispatch/SKILL.md', 642],
+  // Lowered 642 → 342 by the rules-only rewrite: the state-model and domain
+  // rows lost their in-cell provenance and rationale; the widest survivor is
+  // the `domain:engine` row. Landed width, headroom 0 (lowering is always
+  // legitimate).
+  ['.claude/skills/pm-dispatch/SKILL.md', 342],
   ['.claude/skills/pm-dispatch/references/dispatch-runbook.md', 0],
   ['.claude/skills/pm-dispatch/references/state-machine.md', 0],
   ['.claude/skills/pm-dispatch/references/contract-review.md', 0],
