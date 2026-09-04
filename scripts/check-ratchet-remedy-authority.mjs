@@ -39,12 +39,29 @@
 // gains anything: the reason a move is not a weakening is that the corpus SHRANK
 // on net, which is a property of the act, not of the author.
 //
-// ⚠️ TODAY THE EXCEPTION IS DOCUMENTARY, and recording that is half the point of
-// writing it here. The corpus walk is a NON-RECURSIVE readdir of `scripts/` (see
-// corpusFiles), and the gate the ruling amends lives one directory down, in
-// scripts/pm/ — it has never been in this sweep, so no verdict of this gate
-// moves. A self-test assertion pins that, so a wider walk reds HERE and makes
-// the class a decision someone takes rather than one that lands in silence.
+// ⚠️ THE EXCEPTION IS NO LONGER DOCUMENTARY — the walk now REACHES the gate the
+// ruling amends, and what that reached is recorded here because it is the whole
+// answer. Until #15179 the corpus was a non-recursive readdir of `scripts/`
+// alone, so check-skill-line-ratchet.mjs — one directory down, in scripts/pm/ —
+// had never been in this sweep, and a self-test assertion pinned that absence so
+// a wider walk would red HERE rather than let the class land in silence. It did
+// red, deliberately: the walk was widened to `scripts/pm/` under the maintainer
+// ruling of 2026-09-04, measurement first.
+//
+// WHAT THE MEASUREMENT FOUND, and why no verdict of this gate moves after all:
+// check-skill-line-ratchet.mjs classifies `excluded`. Its ceiling-raise remedy
+// already names its owner, and it names it in words this file's offer grammar
+// does not admit — the act it hands the reader is spelled "raising a ceiling",
+// which is not one of OFFER_VERB's verbs — so stage 1 finds nothing to judge and
+// stages 2 and 3 are never consulted. The exception therefore governs an act
+// this detector cannot see, in a gate this detector now reads. Both halves of
+// that sentence are pinned below: the two-level walk, and that file's presence
+// in it, so the walk narrowing back would take this reading with it and red.
+//
+// ⛔ THE `excluded` READING IS NOT A LICENCE TO STOP LOOKING. `excluded` means
+// "no offer this grammar reaches", never "no act to govern": if that gate ever
+// spells its ceiling path with one of the offer verbs, it becomes an ordinary
+// instance and its verdict is read and recorded like every other.
 //
 // ⛔ NO NEW VERDICT CLASS. `marked` / `refused` / `unmarked` / `excluded` stay as
 // they are. A fifth class for "authorised by standing ruling" would have a
@@ -70,7 +87,15 @@
 // WHY THE GLOB IS `scripts/*.{mjs,mts}` AND NEVER `scripts/*.mjs`. A census keyed
 // to `.mjs` alone is the blind spot that made #8538 necessary:
 // check-test-typecheck.mts is a gate like any other and a `.mjs` glob cannot see
-// it. Two of the 80 scripts are `.mts` today.
+// it. Six of the 187 top-level scripts are `.mts` today.
+//
+// WHY THE WALK IS TWO DIRECTORIES AND STILL NOT RECURSIVE (#15179). The corpus is
+// the scripts root plus `scripts/pm/`, each read one level deep — see CORPUS_DIRS
+// and corpusFiles. `scripts/**` is the easy spelling and it is the wrong one: the
+// other eight nested directories under `scripts/` hold codemods, benchmarks and
+// audits rather than gates, and naming this sweep for them would cost the same
+// precision the declaration below prices above a missing declaration. A directory
+// joins this list when the ruling that widens the walk says so, never by default.
 //
 // ── The two ⛔ tokens are DISTINCT, deliberately (triage ruling on #8540) ─────
 //
@@ -189,7 +214,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '(19) …and the mirror: the token in a string literal DOES count. Paired with': 1,
   '(17) This gate must not be an instance of its own convention.': 1,
   '(20) The declared population, held to the walk in BOTH directions (#13813)': 7,
-  '(21) The ruled cross-file-move exception (2026-09-03)': 2,
+  '(21) The ruled cross-file-move exception (2026-09-03)': 3,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -204,6 +229,10 @@ const UNATTRIBUTED_BATTERY = '(no battery open)';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '..');
 const SCRIPTS_DIR = join(REPO_ROOT, 'scripts');
+/** `SCRIPTS_DIR` as a repo-relative, forward-slashed path. One source of truth for
+ *  the declaration below, the self-test that holds it, and the human spelling the
+ *  banner and the OK line print. */
+const CORPUS_ROOT = relative(REPO_ROOT, SCRIPTS_DIR).split('\\').join('/');
 const SELF_FILE = 'check-ratchet-remedy-authority.mjs';
 const SELF = `scripts/${SELF_FILE}`;
 
@@ -214,6 +243,31 @@ const SELF = `scripts/${SELF_FILE}`;
  * The `.mts` half is the #8538 blind spot and is not decoration: see the header.
  */
 const CORPUS_EXTENSIONS = ['.mjs', '.mts'];
+
+/**
+ * The directories the corpus walk reads, relative to `SCRIPTS_DIR`, ONE LEVEL
+ * each. `''` is the scripts root; `pm` joined it on #15179, under the maintainer
+ * ruling of 2026-09-04 that widened the sweep to the PM gate directory.
+ *
+ * ⛔ Not a recursion switch. Each entry is read with a single `readdirSync` and
+ * its subdirectories are not descended, so this list is the whole depth of the
+ * walk and a reader can hold it in their head. Adding an entry is a decision
+ * about which gates this convention governs, which is why the header records the
+ * ruling beside it rather than leaving the array to speak for itself.
+ */
+const CORPUS_DIRS = ['', 'pm'];
+
+/**
+ * The corpus as a human reads it, assembled from the two constants the walk is a
+ * function of so the banner and the OK line cannot drift from what was swept.
+ *
+ * ⚠️ Brace-expanded for a READER. It is not a watch hint and must never be
+ * copied into `ROOT_DIR_WATCH_HINTS` — `hintCovers` has no brace expansion, so
+ * the same string there reaches nothing. A self-test case pins that separation.
+ */
+const CORPUS_SPELLING = CORPUS_DIRS
+  .map((dir) => `${CORPUS_ROOT}/${dir ? `${dir}/` : ''}*.{${CORPUS_EXTENSIONS.map((e) => e.slice(1)).join(',')}}`)
+  .join(' + ');
 
 /**
  * The population this gate READS, declared for `scripts/pm/dispatch-gates.mjs`
@@ -237,20 +291,25 @@ const CORPUS_EXTENSIONS = ['.mjs', '.mts'];
  * paths, every one of them at `gate source 'scripts/**'`, because their
  * populations are spelled where the derivation can read them.
  *
- * ## Why the spelling is the flat-directory glob and NOT `scripts/**`
+ * ## Why the spelling is a flat-directory glob PER WALKED DIRECTORY, not `scripts/**`
  *
- * `corpusFiles()` is a NON-RECURSIVE `readdirSync` admitted by extension. It
- * reads the top level of `scripts/` only -- never `scripts/pm/`,
- * `scripts/docs-audit/` or any other nested directory -- and only the two
- * extensions above. `scripts/**` would be the easy spelling and it would be
- * FALSE: it pastes this gate onto every card touching any nested script, for
+ * `corpusFiles()` is a NON-RECURSIVE `readdirSync` per entry of `CORPUS_DIRS`,
+ * admitted by extension. It reads the top level of `scripts/` and the top level
+ * of `scripts/pm/` -- never `scripts/docs-audit/`, `scripts/audits/` or any
+ * other nested directory, and never a level below either walked one -- and only
+ * the two extensions above. `scripts/**` would be the easy spelling and it would
+ * be FALSE: it pastes this gate onto every card touching any nested script, for
  * files this gate never opens, which is the costlier error `hintCovers`' own
  * docblock prices above a missing declaration.
  *
- * The two hints here are 100% precise AND complete against this tree, set-equal
- * in both directions to what `corpusFiles()` walks -- 183 of 183, against 310
- * tracked files under the bare root -- and the self-test below re-measures that
- * rather than trusting this sentence.
+ * So the hint set is one glob per (walked directory, extension) pair the walk
+ * really admits, and no more. `scripts/pm/*.mts` is deliberately ABSENT: that
+ * directory carries no `.mts` file, and a hint reaching nothing is a dead
+ * declaration -- the same silence as declaring nothing at all. The self-test
+ * below derives the expected set from `corpusFiles()` itself and holds this
+ * array to it in both directions, so the pair-per-directory rule is re-measured
+ * rather than trusted, and a new `.mts` under `scripts/pm/` reds here until the
+ * hint that reaches it is declared.
  *
  * ⚠️ NOT `scripts/*.{mjs,mts}`, however natural it looks beside the header and
  * the failure text, which both spell the corpus that way for a human reader.
@@ -268,10 +327,20 @@ const CORPUS_EXTENSIONS = ['.mjs', '.mts'];
  * `scripts/.mjs`, a string no tree can hold. #13448 retired that collapse for
  * exactly this shape -- a glob carrying a literal SUFFIX in the final segment is
  * MATCHED now, through `judgedAsPattern`/`triggerCovers`, not collapsed -- so
- * the refusal became false of the tree without anything reddening. That row is
- * re-decided alongside this declaration, in the file that owns it.
+ * the refusal became false of the tree without anything reddening. That row was
+ * re-decided to DECLARED-NARROWER on 2026-09-01 (#13813), in the file that owns
+ * it.
+ *
+ * ⚠️ THAT ROW NOW DESCRIBES A NARROWER WALK THAN THIS ONE. It records this
+ * population as the scripts root read one level, set-equal at 183 of 183, and
+ * says in as many words that no nested script at any depth is reached. #15179
+ * made the second half false: `scripts/pm/*.mjs` is reached, and the declared
+ * set is three hints rather than two. Re-deciding a row on that shrink-only map
+ * is the owning file's act and not this one's, so it is reported rather than
+ * edited here -- and nothing mechanical rests on it, because that map pins its
+ * recorded spellings against the TREE, not against this array.
  */
-const ROOT_DIR_WATCH_HINTS = ['scripts/*.mjs', 'scripts/*.mts'];
+const ROOT_DIR_WATCH_HINTS = ['scripts/*.mjs', 'scripts/*.mts', 'scripts/pm/*.mjs'];
 
 /** The compliance token. Byte-identical to every instrumented gate's const. */
 const RATCHET_AUTHORITY_MARKER = '⛔ MAINTAINER-ONLY';
@@ -1003,14 +1072,87 @@ const CONTROL = {
     expect: 'excluded',
     why: 'This gate. Its control is a declaration registry, so its own remedy is not an expanding one. If this flips, this file started talking like an offer.',
   },
+
+  // ── scripts/pm/, reached from #15179 onward ───────────────────────────────
+  //
+  // The whole roster was MEASURED before the walk moved, in a throwaway worktree
+  // at the same tree, so these two rows record what the sweep found rather than
+  // what the widening was expected to find. Fourteen `.mjs` files live there and
+  // twelve of them classify `excluded` and need no row: they are PM tooling —
+  // a dispatch derivation, a CI failure reader, a git-history helper, a release
+  // rehearsal clone — or gates whose remedies name no registry this grammar
+  // reaches. Two are recorded, one because the sweep reports it and one because
+  // the header's claim about the ruled exception rests on it.
+  //
+  // ⚠️ Keys under this heading carry their directory, because `corpusFiles()`
+  // returns paths relative to `scripts/` rather than bare filenames. A row keyed
+  // on the filename alone would go STALE on the next run and read as a file that
+  // had been deleted.
+
+  // The twelfth marked instance, the first reached from scripts/pm/, and the
+  // first that is not a gate over a registry of its own: it is the dispatch
+  // derivation, and the offer it hands out is a RELAY. Its ROOT-tsc-program lead
+  // quotes check:type-check-debt's ratchet remedy to the same author who would
+  // otherwise read it from that gate, so the convention reads on it exactly as it
+  // reads on the gate being quoted — a relayed path is still a path handed to an
+  // author, and the #8435 question is who owns the act, never which file printed
+  // it. Marking rather than refusal, and not a close call: the lead's own prose
+  // already said the raise belonged to a maintainer and never to the landing
+  // author, so the act is real, is legitimate, and has an owner. What #15179
+  // supplied was the token, in that same message, where an author reads it.
+  //
+  // ⚠️ Recorded from the sweep's own verdict, and the route it took is worth
+  // stating because a reader checking by eye will not find it: stage 1 matched
+  // inside the change-KIND sentence, whose target resolves to a path constant
+  // rather than to a ledger, and stage 2 anchored on the shrink testimony sitting
+  // beside that constant's other mentions. The verdict is right, the route is
+  // incidental, and the row says so rather than implying the two agreed.
+  'pm/dispatch-gates.mjs': {
+    expect: 'marked',
+    why: 'PR for #15179, the first instance reached from scripts/pm/. The dispatch derivation relays another gate\'s shrink-only ratchet remedy to the landing author; its ROOT-program lead already named the maintainer as that path\'s owner in prose and now carries the token in the same message an author reads. Recorded from the sweep\'s own verdict.',
+  },
+
+  // The gate the 2026-09-03 cross-file-move ruling amends, and the reason the
+  // walk was widened at all. Its verdict is `excluded`, measured, and that is the
+  // whole answer to the question the old header left open: the exception governs
+  // an act this file's offer grammar never reaches, because that gate spells the
+  // ceiling path as a raise rather than as one of the offer verbs, and it already
+  // names the authority the raise requires. So the ruled class still moves no
+  // verdict here, and ⛔ NO NEW VERDICT CLASS stands on a measurement rather than
+  // on the walk being too narrow to find out.
+  //
+  // ⛔ Recorded even though an `excluded` file needs no row. The point is exactly
+  // that it is not required: without it, a respelling of that gate's remedy into
+  // the offer grammar would surface as an UNCLASSIFIED finding with no history,
+  // and the header sentence resting on this reading would already have been false
+  // for however long it took someone to notice. With it, the sweep and this file
+  // disagree loudly the moment the reading changes.
+  'pm/check-skill-line-ratchet.mjs': {
+    expect: 'excluded',
+    why: 'PR for #15179. The per-file line ratchet the 2026-09-03 ruling amends, reached the first time the walk read a second directory. Its ceiling-raise remedy already names the authority it requires, and it names the act in words this offer grammar does not admit, so stage 1 finds nothing to judge and no verdict moved when the walk arrived. Recorded so that reading is measured rather than asserted.',
+  },
 };
 
 // ── The sweep ───────────────────────────────────────────────────────────────
 
-/** @returns {string[]} corpus filenames, sorted. `*.{mjs,mts}` — never `*.mjs`. */
+/**
+ * The corpus, as paths RELATIVE TO `SCRIPTS_DIR` — `check-x.mjs` at the root,
+ * `pm/check-x.mjs` one directory down. Sorted. `*.{mjs,mts}` — never `*.mjs`.
+ *
+ * ⛔ The relative path, never the bare filename, is what every downstream key is
+ * built from: `CONTROL`'s keys, the path a failure prints under `scripts/`, and the
+ * paths the declaration is held against. Two directories can hold the same
+ * filename, and a bare-filename key would silently make one file's verdict
+ * answer for the other's.
+ *
+ * @returns {string[]}
+ */
 export function corpusFiles() {
-  return readdirSync(SCRIPTS_DIR)
-    .filter((f) => CORPUS_EXTENSIONS.some((ext) => f.endsWith(ext)))
+  const admitted = (f) => CORPUS_EXTENSIONS.some((ext) => f.endsWith(ext));
+  return CORPUS_DIRS
+    .flatMap((dir) => readdirSync(join(SCRIPTS_DIR, dir))
+      .filter(admitted)
+      .map((f) => (dir === '' ? f : `${dir}/${f}`)))
     .sort();
 }
 
@@ -1027,7 +1169,7 @@ function list() {
   const results = sweep();
   const byVerdict = { marked: [], refused: [], unmarked: [], excluded: [] };
   for (const [file, r] of results) byVerdict[r.verdict].push({ file, r });
-  console.log(`corpus: ${results.size} scripts (scripts/*.{mjs,mts})\n`);
+  console.log(`corpus: ${results.size} scripts (${CORPUS_SPELLING})\n`);
   for (const v of ['unmarked', 'marked', 'refused']) {
     console.log(`── ${v} (${byVerdict[v].length})`);
     for (const { file, r } of byVerdict[v]) {
@@ -1102,7 +1244,7 @@ function main() {
   const counts = { marked: 0, refused: 0, unmarked: 0, excluded: 0 };
   for (const [, r] of results) counts[r.verdict] += 1;
   console.log(
-    `OK  check-ratchet-remedy-authority: ${results.size} scripts swept (scripts/*.{mjs,mts}); `
+    `OK  check-ratchet-remedy-authority: ${results.size} scripts swept (${CORPUS_SPELLING}); `
     + `${counts.marked} mark the expanding remedy ${RATCHET_AUTHORITY_MARKER}, ${counts.refused} turn `
     + `it down outright, ${counts.excluded} hand out no ratchet-expanding remedy. Control corpus: `
     + `${Object.keys(CONTROL).length} hand-classified scripts, set-equality audited both ways.`,
@@ -1347,28 +1489,45 @@ function selfTest() {
   // here. What is asserted is that the hints are a function of the two constants
   // the walk is a function of — move the read and this reds, in this file.
   battery('(20) The declared population, held to the walk in BOTH directions (#13813)');
-  const CORPUS_ROOT = relative(REPO_ROOT, SCRIPTS_DIR).split('\\').join('/');
-  expect('declaration — one hint per admitted extension, each the flat-directory glob under the '
-    + `very root the walk reads from (declared: ${JSON.stringify(ROOT_DIR_WATCH_HINTS)}, root: `
-    + `${CORPUS_ROOT}, extensions: ${CORPUS_EXTENSIONS.join(' ')})`,
-    ROOT_DIR_WATCH_HINTS.length === CORPUS_EXTENSIONS.length
-    && CORPUS_EXTENSIONS.every((ext) => ROOT_DIR_WATCH_HINTS.includes(`${CORPUS_ROOT}/*${ext}`)));
+  const corpusPaths = corpusFiles().map((f) => `${CORPUS_ROOT}/${f}`);
 
-  // ⛔ The subtree spelling is the one this declaration must never take. The walk
-  // is a NON-RECURSIVE readdir; `scripts/**` would name this gate for every
-  // nested script it never opens, which is the costlier error the idiom prices
-  // above a missing declaration.
-  expect('declaration — the subtree spelling is refused: the walk is non-recursive, so no hint '
-    + 'ends in a subtree glob and none collapses back to the bare root',
-    !ROOT_DIR_WATCH_HINTS.some((h) => h.endsWith('/**') || h.replace(/\/\*+$/, '') === CORPUS_ROOT));
+  // The expected hint set, DERIVED FROM THE WALK rather than restated: one
+  // flat-directory glob per (walked directory, admitted extension) pair the sweep
+  // really opens a file for. Deriving it is what makes this survive a third entry
+  // joining CORPUS_DIRS, and what makes a `.mts` appearing under scripts/pm/ red
+  // here — a live pair with no hint — instead of landing unnamed and silent.
+  const expectedHints = [...new Set(corpusPaths.map((relPath) => {
+    const cut = relPath.lastIndexOf('/');
+    const ext = CORPUS_EXTENSIONS.find((e) => relPath.endsWith(e));
+    return `${relPath.slice(0, cut)}/*${ext}`;
+  }))].sort();
+  expect('declaration — SET-EQUAL to the walk: one flat-directory glob per (walked directory, '
+    + 'admitted extension) pair the sweep really opens a file for, and no other (declared: '
+    + `${JSON.stringify([...ROOT_DIR_WATCH_HINTS].sort())}, derived from the walk: `
+    + `${JSON.stringify(expectedHints)})`,
+    expectedHints.length === ROOT_DIR_WATCH_HINTS.length
+    && expectedHints.every((h) => ROOT_DIR_WATCH_HINTS.includes(h)));
 
-  // The local matcher for `<root>/*<ext>`: one directory level, one extension.
+  // ⛔ The subtree spelling is the one this declaration must never take. Each
+  // walked directory is read by a NON-RECURSIVE readdir; `scripts/**` would name
+  // this gate for every nested script it never opens, which is the costlier error
+  // the idiom prices above a missing declaration. Held against EVERY walked root,
+  // so `scripts/pm/**` is refused on the same terms as `scripts/**`.
+  const walkedRoots = CORPUS_DIRS.map((dir) => (dir ? `${CORPUS_ROOT}/${dir}` : CORPUS_ROOT));
+  expect('declaration — the subtree spelling is refused: every walked directory is read one level '
+    + 'only, so no hint ends in a subtree glob and none collapses back to a walked root',
+    !ROOT_DIR_WATCH_HINTS.some((h) => h.endsWith('/**') || walkedRoots.includes(h.replace(/\/\*+$/, ''))));
+
+  // The local matcher for `<dir>/*<ext>`: one directory level below `<dir>`, one
+  // extension. `<dir>` may itself carry a separator — `scripts/pm` does — so the
+  // prefix is matched WHOLE rather than as a single segment. A single-segment
+  // prefix class was the spelling before the walk grew its second directory, and
+  // it would silently answer "unnamed" for every file the new hint covers.
   const declaresPath = (p) => ROOT_DIR_WATCH_HINTS.some((h) => {
-    const m = /^([^/]+)\/\*(\.[a-z]+)$/.exec(h);
+    const m = /^(.+)\/\*(\.[a-z]+)$/.exec(h);
     return Boolean(m) && p.startsWith(`${m[1]}/`)
       && !p.slice(m[1].length + 1).includes('/') && p.endsWith(m[2]);
   });
-  const corpusPaths = corpusFiles().map((f) => `${CORPUS_ROOT}/${f}`);
   const unnamed = corpusPaths.filter((p) => !declaresPath(p));
   expect('declaration — COMPLETE: every file the sweep opens is named by a declared hint '
     + `(${corpusPaths.length} swept, ${unnamed.length} unnamed`
@@ -1378,23 +1537,27 @@ function selfTest() {
     ROOT_DIR_WATCH_HINTS.every((h) => corpusPaths.some((p) => declaresPath(p) && p.endsWith(h.slice(h.indexOf('*') + 1)))));
 
   // PRECISE, against the two shapes `scripts/**` would wrongly sweep in, both
-  // taken from the tree rather than spelled: a nested script, and a top-level
-  // file at an extension the walk does not admit. Non-vacuous by construction —
-  // the assertion fails if the tree stops carrying an example of either.
-  const topLevel = readdirSync(SCRIPTS_DIR, { withFileTypes: true });
-  const nested = topLevel
-    .filter((e) => e.isDirectory())
+  // taken from the tree rather than spelled: a script in a directory this walk
+  // does NOT read, and a file at an extension it does not admit. Non-vacuous by
+  // construction — the assertion fails if the tree stops carrying an example of
+  // either. ⛔ The depth half is measured against the UNWALKED directories, not
+  // against "nested" as such: since #15179 one nested directory IS read, and an
+  // assertion still refusing every nested path would have to be satisfied by
+  // dropping the hint that reaches it.
+  const unwalkedNested = readdirSync(SCRIPTS_DIR, { withFileTypes: true })
+    .filter((e) => e.isDirectory() && !CORPUS_DIRS.includes(e.name))
     .flatMap((d) => readdirSync(join(SCRIPTS_DIR, d.name))
       .filter((f) => CORPUS_EXTENSIONS.some((ext) => f.endsWith(ext)))
       .map((f) => `${CORPUS_ROOT}/${d.name}/${f}`));
-  expect('declaration — PRECISE against depth: the tree carries nested scripts at the admitted '
-    + `extensions (${nested.length}) and the declaration names NONE of them`,
-    nested.length > 0 && !nested.some(declaresPath));
-  const otherExt = topLevel
+  expect('declaration — PRECISE against depth: the tree carries scripts at the admitted extensions '
+    + `in directories this walk does NOT read (${unwalkedNested.length}) and the declaration names `
+    + 'NONE of them',
+    unwalkedNested.length > 0 && !unwalkedNested.some(declaresPath));
+  const otherExt = CORPUS_DIRS.flatMap((dir) => readdirSync(join(SCRIPTS_DIR, dir), { withFileTypes: true })
     .filter((e) => e.isFile() && !CORPUS_EXTENSIONS.some((ext) => e.name.endsWith(ext)))
-    .map((e) => `${CORPUS_ROOT}/${e.name}`);
-  expect('declaration — PRECISE against extension: the root carries top-level files the walk does '
-    + `not admit (${otherExt.length}) and the declaration names NONE of them`,
+    .map((e) => `${CORPUS_ROOT}/${dir ? `${dir}/` : ''}${e.name}`));
+  expect('declaration — PRECISE against extension: the walked directories carry files the walk '
+    + `does not admit (${otherExt.length}) and the declaration names NONE of them`,
     otherExt.length > 0 && !otherExt.some(declaresPath));
 
   // ⚠️ The brace form is what the header, the `--list` banner and the OK line all
@@ -1424,10 +1587,29 @@ function selfTest() {
     selfSrc.includes(EXCEPTION_PHRASE)
     && !authorFacingMessages(selfSrc).some((m) => m.includes(EXCEPTION_PHRASE)));
 
-  expect('the ruled exception is documentary today: the amended line ratchet lives one directory '
-    + 'down and this walk is non-recursive, so a wider walk reds HERE rather than admitting a new '
-    + 'remedy class in silence',
-    !corpusFiles().includes('check-skill-line-ratchet.mjs'));
+  // The flip #15179 landed. The previous spelling asserted the amended ratchet was
+  // NOT in the corpus, so that a wider walk would red here rather than admit a new
+  // remedy class in silence. The walk was widened, deliberately and measurement
+  // first, so what is pinned now is the state that replaced it — and it is pinned
+  // FROM THE WALK, never as a typed count of anything: `corpusFiles()` is asked
+  // whether it returns that path, so a narrowing back to one directory reds here
+  // instead of quietly restoring the documentary reading the header used to carry.
+  const walked = corpusFiles();
+  const RULED_GATE = 'pm/check-skill-line-ratchet.mjs';
+  expect('the ruled exception is NO LONGER documentary: the walk reads scripts/pm/ beside the '
+    + `scripts root and reaches ${RULED_GATE}, the gate the 2026-09-03 ruling amends `
+    + `(${walked.filter((f) => f.startsWith('pm/')).length} file(s) reached under pm/)`,
+    walked.includes(RULED_GATE) && walked.some((f) => f.startsWith('pm/')));
+
+  // …and the reading that widening produced, held where it can rot: that gate
+  // classifies `excluded`, so the ruled exception governs an act this grammar
+  // never reaches and ⛔ NO NEW VERDICT CLASS stays a fact rather than a promise.
+  // Asserted from the sweep, so a respelling of that gate's ceiling remedy into
+  // the offer grammar reds here and is read and recorded like any other instance.
+  expect('the reached gate classifies `excluded` — its ceiling-raise remedy names its owner in '
+    + 'words this offer grammar does not admit, which is why no verdict of this gate moved when '
+    + 'the walk reached it',
+    results.get(RULED_GATE) !== undefined && results.get(RULED_GATE).verdict === 'excluded');
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so
