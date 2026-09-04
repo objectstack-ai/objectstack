@@ -30,8 +30,10 @@ import { findModuleDocBlock } from './lib/file-description';
 import { createSink, type Owns } from './lib/generated-output';
 import {
   SHARED_CORE_SCHEMAS,
+  TRANSITIVE_ALLOWLIST,
   checkCoreEntryShape,
   checkSingleOwner,
+  checkTransitiveAllowlist,
 } from './lib/skill-map-guards';
 
 // ── Paths ────────────────────────────────────────────────────────────────────
@@ -396,6 +398,14 @@ function main() {
   ];
   let totalSkills = 0;
 
+  // The allowlist guard needs each package's closure, so the closures are
+  // resolved once, up front, and reused by the emit loop below.
+  const closures: Record<string, string[]> = {};
+  for (const [skillName, coreFiles] of Object.entries(SKILL_MAP)) {
+    closures[skillName] = resolveAll(coreFiles).files;
+  }
+  problems.push(...checkTransitiveAllowlist(SKILL_MAP, TRANSITIVE_ALLOWLIST, closures));
+
   for (const [skillName, coreFiles] of Object.entries(SKILL_MAP)) {
     const skillDir = path.resolve(SKILLS_DIR, skillName);
     if (!fs.existsSync(skillDir)) {
@@ -404,8 +414,19 @@ function main() {
     }
 
     console.log(`📦 ${skillName}`);
-    const { files: allFiles, missing } = resolveAll(coreFiles);
+    const { files: resolved, missing } = resolveAll(coreFiles);
     for (const m of missing) problems.push(`${skillName} → ${m} (no such file under packages/spec/src)`);
+
+    // A package that declares a transitive allowlist publishes its core files
+    // plus exactly those pointers; one that declares none publishes the whole
+    // closure, as before. See TRANSITIVE_ALLOWLIST for why the constraint is a
+    // hand-authored list and not a rule over the import graph.
+    const allowed = TRANSITIVE_ALLOWLIST[skillName];
+    const coreSet = new Set(coreFiles);
+    const allFiles =
+      allowed === undefined
+        ? resolved
+        : resolved.filter((f) => coreSet.has(f) || allowed.includes(f));
     console.log(`   ${coreFiles.length} core + ${allFiles.length - coreFiles.length} deps`);
 
     const refsDir = path.resolve(skillDir, 'references');

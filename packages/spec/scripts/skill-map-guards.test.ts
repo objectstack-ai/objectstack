@@ -34,8 +34,10 @@ import { describe, expect, it } from 'vitest';
 
 import {
   SHARED_CORE_SCHEMAS,
+  TRANSITIVE_ALLOWLIST,
   checkCoreEntryShape,
   checkSingleOwner,
+  checkTransitiveAllowlist,
   type SkillCoreMap,
 } from './lib/skill-map-guards';
 
@@ -115,6 +117,70 @@ describe('checkSingleOwner — one schema file, one owning package', () => {
   });
 });
 
+describe('checkTransitiveAllowlist — a constraint that constrains nothing is refused', () => {
+  const map: SkillCoreMap = { 'objectstack-i18n': ['system/translation.zod.ts'] };
+  const closures = {
+    'objectstack-i18n': ['system/translation.zod.ts', 'shared/identifiers.zod.ts'],
+  };
+
+  it('accepts a list naming a file the closure really reaches', () => {
+    expect(
+      checkTransitiveAllowlist(map, { 'objectstack-i18n': ['shared/identifiers.zod.ts'] }, closures),
+    ).toEqual([]);
+  });
+
+  it('accepts an empty list — publishing no transitive pointer is a real answer', () => {
+    expect(checkTransitiveAllowlist(map, { 'objectstack-i18n': [] }, closures)).toEqual([]);
+  });
+
+  it('refuses a package name that is not in the map', () => {
+    // The failure this exists for: a typo leaves the over-eager closure fully
+    // published while the map LOOKS constrained.
+    const problems = checkTransitiveAllowlist(map, { 'objectstack-i18nn': [] }, closures);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain('not a SKILL_MAP package');
+  });
+
+  it('refuses a file the closure never reaches', () => {
+    const problems = checkTransitiveAllowlist(
+      map,
+      { 'objectstack-i18n': ['data/query.zod.ts'] },
+      closures,
+    );
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain('does not exist');
+  });
+
+  it('refuses a file that is already a core entry', () => {
+    const problems = checkTransitiveAllowlist(
+      map,
+      { 'objectstack-i18n': ['system/translation.zod.ts'] },
+      closures,
+    );
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain('already a core entry');
+  });
+
+  it('refuses a file listed twice', () => {
+    const problems = checkTransitiveAllowlist(
+      map,
+      { 'objectstack-i18n': ['shared/identifiers.zod.ts', 'shared/identifiers.zod.ts'] },
+      closures,
+    );
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain('listed twice');
+  });
+
+  it('every shipped list names a package the map has', () => {
+    // The one fact about the real list this file can assert without re-running
+    // the generator; reachability of each row is `check:skill-refs`'s job,
+    // because only it has the closure.
+    for (const skillName of Object.keys(TRANSITIVE_ALLOWLIST)) {
+      expect(skillName).toMatch(/^objectstack-/);
+    }
+  });
+});
+
 describe('the generator wires the guards in', () => {
   const source = (): string => fs.readFileSync(GENERATOR, 'utf-8');
 
@@ -130,5 +196,12 @@ describe('the generator wires the guards in', () => {
 
   it('calls checkSingleOwner on SKILL_MAP and the declared ledger', () => {
     expect(source()).toContain('checkSingleOwner(SKILL_MAP, SHARED_CORE_SCHEMAS)');
+  });
+
+  it('calls checkTransitiveAllowlist, and filters the emitted set by the list', () => {
+    // Both halves matter: the guard alone would validate a list the emit path
+    // never reads, which is the shape of a constraint that constrains nothing.
+    expect(source()).toContain('checkTransitiveAllowlist(SKILL_MAP, TRANSITIVE_ALLOWLIST, closures)');
+    expect(source()).toContain('allowed.includes(f)');
   });
 });

@@ -135,6 +135,118 @@ export function checkSingleOwner(map: SkillCoreMap, shared: Record<string, strin
 }
 
 /**
+ * Which transitive pointers a package publishes, when the closure is wrong.
+ *
+ * ## The feasibility question this answers, decided before anything was built
+ *
+ * The closure walks every local `import ... from` edge out of a package's core
+ * files. Two routes were on the table for constraining it: (1) a REACHABILITY
+ * RULE -- follow only imports the package's authorable face can reach, which
+ * would generalise to every package; (2) a per-package list beside the map,
+ * which fixes one package at a time. Route 1 is the better shape IF it can be
+ * made precise. It cannot, and the measurement is specific rather than
+ * hand-wavy:
+ *
+ *  - `objectstack-i18n` publishes eight transitive pointers, and SEVEN of them
+ *    arrive through one edge -- `shared/strict-object.ts` imports
+ *    `shared/suggestions.zod.ts` for its "did you mean?" text, which imports
+ *    `data/field.zod.ts`, which drags in filter, expression, field-value,
+ *    identifiers and value-domain. That is a schema-building HELPER's
+ *    implementation, not the authorable shape of a translation bundle. Cutting
+ *    traversal through non-shipping helpers is the obvious precise rule, and it
+ *    removes five of the five pointers the finding names.
+ *  - It also removes `shared/identifiers.zod.ts`, which MUST STAY: a bundle's
+ *    object and field keys are the `snake_case` identifiers that file defines,
+ *    and the SKILL.md spends a table and a "Critical:" note on exactly that.
+ *    No import edge expresses it -- `system/translation.zod.ts` does not import
+ *    the file at all, because a bundle addresses everything by NAME STRING.
+ *  - And it KEEPS `kernel/metadata-protection.zod.ts`, which must go: that one
+ *    is a first-class direct `.zod.ts` import of `translation.zod.ts`.
+ *
+ * So the required outcome puts a depth-4 pointer reached through a helper on
+ * the KEEP side and a depth-1 pointer reached through a schema edge on the DROP
+ * side. No predicate over the import graph orders those two that way, because
+ * the fact that separates them -- what a translation bundle can address -- is
+ * not in the graph. Route 1 is therefore not merely unbuilt here; it is
+ * unbuildable from this input, and route 2 is what ships.
+ *
+ * The list is an ALLOWLIST, not a denylist, and that is the half that keeps it
+ * from rotting the way the closure did: `shared/value-domain.zod.ts` joined the
+ * i18n index recently, unnoticed, when a new import edge appeared several files
+ * away. An allowlist cannot silently gain a row; a denylist silently misses
+ * every new arrival.
+ *
+ * A package with NO entry here publishes its full closure, unchanged. Declaring
+ * a list is a claim about that package's authorable face, and only a package
+ * whose face someone has actually read should carry one.
+ */
+export const TRANSITIVE_ALLOWLIST: Record<string, readonly string[]> = {
+  // Everything else the closure reaches here is `strictObject()`'s error-message
+  // machinery and what that drags behind it -- the Unified Query DSL among them,
+  // a different skill's whole subject, shipped into every i18n session with an
+  // instruction to read it.
+  'objectstack-i18n': [
+    // Bundle keys ARE these identifiers: `objects.<name>.fields.<name>` must
+    // match the `snake_case` names the object and field schemas declare, which
+    // the SKILL.md states as a "Critical:" rule with its own table.
+    'shared/identifiers.zod.ts',
+    // `FieldTranslationSchema.options` is keyed by select-option VALUE, and the
+    // SKILL.md teaches that keying by example. `SelectOptionSchema` -- the
+    // declaration those keys must match -- lives here.
+    'data/field.zod.ts',
+  ],
+};
+
+/**
+ * A declared transitive allowlist must name a real package and reachable files.
+ *
+ * The list is hand-authored, and a hand-authored list that can quietly say
+ * nothing is the same defect one layer up: a typo'd package name would leave
+ * the over-eager closure fully published while the map LOOKS constrained, and a
+ * file the closure never reaches would read as a pointer that is being kept
+ * when it was never there to keep.
+ */
+export function checkTransitiveAllowlist(
+  map: SkillCoreMap,
+  allowlist: Record<string, readonly string[]>,
+  closures: Record<string, readonly string[]>,
+): string[] {
+  const problems: string[] = [];
+  for (const [skillName, allowed] of Object.entries(allowlist)) {
+    const coreFiles = map[skillName];
+    if (coreFiles === undefined) {
+      problems.push(
+        `TRANSITIVE_ALLOWLIST names ${skillName}, which is not a SKILL_MAP package — ` +
+          `the list would constrain nothing. Fix the name or delete the entry.`,
+      );
+      continue;
+    }
+    const core = new Set(coreFiles);
+    const closure = new Set(closures[skillName] ?? []);
+    const seen = new Set<string>();
+    for (const rel of allowed) {
+      if (seen.has(rel)) {
+        problems.push(`${skillName} → ${rel} is listed twice in TRANSITIVE_ALLOWLIST.`);
+        continue;
+      }
+      seen.add(rel);
+      if (core.has(rel)) {
+        problems.push(
+          `${skillName} → ${rel} is already a core entry; listing it as a transitive ` +
+            `pointer says it is both, and the index would name it once regardless.`,
+        );
+      } else if (!closure.has(rel)) {
+        problems.push(
+          `${skillName} → ${rel} is in TRANSITIVE_ALLOWLIST but nothing in the package's ` +
+            `core closure imports it — this row keeps a pointer that does not exist.`,
+        );
+      }
+    }
+  }
+  return problems;
+}
+
+/**
  * Every core entry must be a path this generator can actually publish.
  *
  * `resolveAll()` keeps only `*.zod.ts` from the closure, because the published
