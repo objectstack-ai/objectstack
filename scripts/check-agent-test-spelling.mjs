@@ -351,7 +351,22 @@ const SCANNED_EXTENSIONS = new Set([
   '.json',
 ]);
 
-const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', 'coverage', '.turbo']);
+/**
+ * Directories the three walks below never descend into: dependencies, build
+ * output -- and `.cache`, which holds ANOTHER REPOSITORY.
+ *
+ * `scripts/build-console.sh` materialises objectui at the pinned SHA into
+ * `.cache/objectui-<sha>/`, a whole foreign checkout that every console pin
+ * bump MUST create because the console cannot be built without it. All three
+ * walks reached into it: `scannedFiles`'s loose walk read objectui's own
+ * `AGENTS.md` -- instructions objectui writes for objectui's agents -- and red
+ * this gate on it, and `deriveVitestScripts` read its manifests, so a foreign
+ * package's script names silently widened the set of names this gate judges in
+ * OUR corpus. CI never saw either, because the lint job does not build the
+ * console; the red landed on whoever bumped the pin, over a file their diff
+ * could not have touched.
+ */
+const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', 'coverage', '.turbo', '.cache']);
 
 /* ────────────────────────────── the classifier ────────────────────────────── */
 
@@ -847,11 +862,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the declared lists cannot quietly become mute buttons': 4,
   'the dispatch-gates declaration — both directions, derived from the scan roots': 8,
   'the derivation reads THIS workspace, and reads it non-empty': 4,
+  'a vendored checkout under .cache/ is not our corpus — both directions': 5,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 12;
+const SELF_TEST_BATTERY_FLOOR = 13;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -938,6 +954,39 @@ function selfTest() {
     t('and the exemption is COUNTED, not silent', exempted.exempted, 1);
   } finally {
     rmSync(redTree, { recursive: true, force: true });
+  }
+
+  console.log('a vendored checkout under .cache/ is not our corpus — both directions');
+  battery('a vendored checkout under .cache/ is not our corpus — both directions');
+  // The plant is objectui's OWN instruction, in objectui's own AGENTS.md, in the
+  // place `scripts/build-console.sh` puts it. Both directions are asserted from
+  // the SAME BYTES: under `.cache/` the sweep is clean and the walk never
+  // reaches the file, and one directory higher the identical text still reds —
+  // an exclusion that also silenced the loose walk would be a mute button, not
+  // a skip. The manifest case covers the second walk: a foreign package's
+  // script names must not widen the set of names judged in our corpus.
+  const foreignInstruction = 'Run one package with `pnpm --filter <pkg> test -- --run`.\n';
+  const cachedTree = makeFixtureTree(
+    baseFixtureFiles({
+      '.cache/objectui-pin/AGENTS.md': foreignInstruction,
+      '.cache/objectui-pin/package.json': JSON.stringify({ name: 'foreign', scripts: { 'test:foreign-only': 'vitest run' } }),
+    }),
+  );
+  try {
+    t('a planted .cache/ checkout leaves the sweep CLEAN', run(cachedTree, () => {}), EXIT_CLEAN);
+    t('the walk never reaches it', scannedFiles(cachedTree).filter((f) => f.startsWith('.cache')), []);
+    t('and its manifests do not widen the vitest-script derivation', deriveVitestScripts(cachedTree).names.has('test:foreign-only'), false);
+  } finally {
+    rmSync(cachedTree, { recursive: true, force: true });
+  }
+
+  const vendoredTree = makeFixtureTree(baseFixtureFiles({ 'vendor/objectui-pin/AGENTS.md': foreignInstruction }));
+  try {
+    const vendoredLines = [];
+    t('the SAME bytes one directory outside .cache/ still RED', run(vendoredTree, (s) => vendoredLines.push(s)), EXIT_VIOLATIONS);
+    t('...and the finding names that file', vendoredLines.join('\n').includes('vendor/objectui-pin/AGENTS.md'), true);
+  } finally {
+    rmSync(vendoredTree, { recursive: true, force: true });
   }
 
   console.log('the same tree WITHOUT the plant is green — the red above is the plant, not the fixture');
