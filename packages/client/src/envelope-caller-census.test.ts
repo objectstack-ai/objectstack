@@ -130,7 +130,16 @@ import { fileURLToPath } from 'node:url';
 // over code it never read, which for THIS file would silently shrink the
 // census. `maskComments` blanks comment spans in place, so every byte offset
 // and line number below stays true to the original file.
-import { maskComments } from '../../../scripts/js-comment-mask.mjs';
+//
+// [#13874] `scanSource` comes from the SAME pass. It is the function
+// `maskComments` is built on, and it reports a per-character `literal` flag
+// beside the `comment` flag the mask is made of. The census keeps masking
+// comments ONLY — nothing below changes that — but the failure text now uses
+// the literal flag to say when a counted site sits inside a quoted example.
+// Borrowing the house scanner rather than writing a second, private one is
+// the whole reason that answer can be trusted: a private literal scanner is
+// the very defect the block above refuses.
+import { maskComments, scanSource } from '../../../scripts/js-comment-mask.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** `packages/client/src` → the workspace root. */
@@ -160,6 +169,15 @@ interface Site {
     receiver: Receiver;
     /** Whether a LINE-oriented matcher (a plain `git grep`) would also find it. */
     visibleToLineGrep: boolean;
+    /**
+     * [#13874] Byte offset of the METHOD NAME in the file, recorded during the
+     * scan because it is already in hand there and cannot be recovered later
+     * without re-running the matcher. Nothing reads it while counting — it
+     * exists so the failure text can ask whether this site sits inside a
+     * literal. The offset is true of the ORIGINAL file too: `maskComments`
+     * blanks in place and moves nothing.
+     */
+    index: number;
 }
 
 function walk(dir: string, acc: string[] = []): string[] {
@@ -176,37 +194,205 @@ function walk(dir: string, acc: string[] = []): string[] {
 
 interface Census { sites: Site[]; filesScanned: number }
 
+/**
+ * Every counted site in ONE source text, under the repo-relative name `file`.
+ *
+ * [#13874] Lifted out of `scanCallSites` unchanged — same mask, same patterns,
+ * same fields — so that section 6 can drive THE MATCHER THAT COUNTS over a
+ * fixture instead of a copy of it. A pin written against a second, hand-rolled
+ * matcher measures the copy and stays green through any drift in the original,
+ * which is the same class of mistake as a private comment stripper.
+ */
+function sitesInSource(source: string, file: string): Site[] {
+    const code = maskComments(source);
+    const rawLines = source.split('\n');
+    const sites: Site[] = [];
+    for (const [ns, method] of METHODS) {
+        // `\s*` spans newlines because the match runs over the WHOLE file,
+        // not line by line — that is what catches the split-call shape.
+        const re = new RegExp(`([A-Za-z0-9_$.\\]\\)]{0,40}?)\\b${ns}\\s*\\.\\s*${method}\\s*\\(`, 'g');
+        let m: RegExpExecArray | null;
+        while ((m = re.exec(code)) !== null) {
+            const line = code.slice(0, m.index).split('\n').length;
+            const onOneLine = new RegExp(`\\b${ns}\\s*\\.\\s*${method}\\s*\\(`).test(rawLines[line - 1] ?? '');
+            sites.push({
+                file,
+                line,
+                method: `${ns}.${method}`,
+                receiver: /client\.$/.test(m[1] ?? '') ? 'sdk' : 'service',
+                visibleToLineGrep: onOneLine,
+                // The prefix group is what makes `client.` visible, so the
+                // method name starts after it — that is the character whose
+                // literal flag decides the question, not the prefix's.
+                index: m.index + (m[1] ?? '').length,
+            });
+        }
+    }
+    return sites;
+}
+
 function scanCallSites(root: string): Census {
     const files = walk(root);
     const sites: Site[] = [];
     for (const abs of files) {
         let raw: string;
         try { raw = readFileSync(abs, 'utf8'); } catch { continue; }
-        const code = maskComments(raw);
-        const rawLines = raw.split('\n');
-        for (const [ns, method] of METHODS) {
-            // `\s*` spans newlines because the match runs over the WHOLE file,
-            // not line by line — that is what catches the split-call shape.
-            const re = new RegExp(`([A-Za-z0-9_$.\\]\\)]{0,40}?)\\b${ns}\\s*\\.\\s*${method}\\s*\\(`, 'g');
-            let m: RegExpExecArray | null;
-            while ((m = re.exec(code)) !== null) {
-                const line = code.slice(0, m.index).split('\n').length;
-                const onOneLine = new RegExp(`\\b${ns}\\s*\\.\\s*${method}\\s*\\(`).test(rawLines[line - 1] ?? '');
-                sites.push({
-                    file: relative(root, abs).split('\\').join('/'),
-                    line,
-                    method: `${ns}.${method}`,
-                    receiver: /client\.$/.test(m[1] ?? '') ? 'sdk' : 'service',
-                    visibleToLineGrep: onOneLine,
-                });
-            }
-        }
+        sites.push(...sitesInSource(raw, relative(root, abs).split('\\').join('/')));
     }
     sites.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
     return { sites, filesScanned: files.length };
 }
 
 const CENSUS = scanCallSites(REPO_ROOT);
+
+// ---------------------------------------------------------------------------
+// [#13874] The literal-span note — what a bare count mismatch would not say
+// ---------------------------------------------------------------------------
+
+/**
+ * [#13874] ⭐ WHY THE COUNT IS RIGHT AND THE MESSAGE WAS NOT.
+ *
+ * `sitesInSource` blanks COMMENTS and leaves string, template and regex
+ * literals intact, deliberately: a scanner that also blanked literals opens a
+ * phantom comment on any block-comment opener inside a string and shrinks this
+ * census in silence. ⛔ That decision is NOT revisited here. Teaching the
+ * census a literal/context distinction is a separate design and a separate
+ * measurement, weighed against the reason above; #13874 ruled it ⏸️ suspended
+ * and ruled THIS change strictly additive.
+ *
+ * The price of keeping the decision is that example code quoted INSIDE a
+ * literal is counted as a real call site — a refusal message showing an author
+ * what to write instead, a usage banner, a fixture embedded in a gate script.
+ * That is not hypothetical: a gate script's fixture pushed this census red and
+ * the merge queue ejected the PR.
+ *
+ * What made that expensive was never the count. It was the FAILURE TEXT. It
+ * read `expected 21 to be 19` and said nothing about strings, masking or gate
+ * scripts — in a package the author had not edited, naming a ledger the author
+ * had never read, at the most expensive point in the pipeline, and invisible
+ * to every local gate a `scripts/**` edit derives. So the count stands exactly
+ * as it was, and the message explains itself.
+ *
+ * ## Three properties this note must have, and what buys each
+ *
+ *  1. **It must not move the count.** It classifies nothing during the walk
+ *     and decides nothing afterwards: `sitesInSource` gained one recorded
+ *     offset it already had in hand, and every line below reads that offset
+ *     only while a MESSAGE is being built. Section 6 pins the count against
+ *     the same matcher to keep that honest.
+ *  2. **It must not be a second, private literal scanner.** This tree has ONE
+ *     code/prose separator. `scanSource` is the pass `maskComments` is built
+ *     on, and it already reports the `literal` flag beside the `comment` flag
+ *     — so this note cannot disagree with the census about what a literal is,
+ *     and it inherits a scanner that was measured against an independent
+ *     parser over the whole tree (`check-comment-mask-corpus.mjs`) rather than
+ *     one written here this afternoon.
+ *  3. **It must never throw.** A helper that crashes converts a legible count
+ *     mismatch into a stack trace — strictly worse than the failure it was
+ *     added to explain. An unreadable file, a stale offset and a garbage site
+ *     all degrade to "not in a literal"; section 6 pins that. ⚠️ Because it
+ *     runs only to EXPLAIN, a wrong answer here degrades a message and can
+ *     never degrade the census — the counts above are computed without it.
+ */
+interface LiteralHit {
+    site: Site;
+    /** The delimiter that OPENED the literal the site sits in. */
+    quote: string;
+    /** 1-based line of that opening delimiter — often far above the site. */
+    openedAtLine: number;
+}
+
+/**
+ * Which of `sites` — whose `index` are offsets into `source` — sit inside a
+ * literal span.
+ *
+ * Pure, and takes the source TEXT rather than a path, so section 6 can pin it
+ * on a fixture built in memory. `scanSource().literal` flags a literal's
+ * CONTENT and not its delimiters, which is what makes the walk back exact: the
+ * first unflagged character before a run of flagged ones IS the opening quote.
+ */
+function literalEmbeddedSites(source: string, sites: readonly Site[]): LiteralHit[] {
+    const { literal } = scanSource(source);
+    const hits: LiteralHit[] = [];
+    for (const site of sites) {
+        // An out-of-range offset indexes `undefined`, which is not 1 — a stale
+        // or garbage site is "not in a literal", never an exception.
+        if (literal[site.index] !== 1) continue;
+        let open = site.index;
+        while (open > 0 && literal[open - 1] === 1) open -= 1;
+        hits.push({
+            site,
+            quote: source[open - 1] ?? '?',
+            openedAtLine: source.slice(0, open).split('\n').length,
+        });
+    }
+    return hits;
+}
+
+/**
+ * The negative reading, spelled out rather than left as silence. ⭐ A note that
+ * only ever speaks up is a note that says "it is the literal trap" about every
+ * failure; saying so when it is NOT the cause is what keeps the positive
+ * reading worth acting on, and it stops the next author chasing a lead that
+ * does not exist.
+ */
+const NO_LITERAL_SITES =
+    'Literal check: no counted site sits inside a string, template or regex literal, so a '
+    + 'quoted example is NOT what moved this number — every site the census counted is code '
+    + 'it read as code, and the delta is a real call site to classify.';
+
+const LITERAL_NOTE_UNAVAILABLE =
+    'Literal check: UNAVAILABLE — the diagnostic itself could not run. That says nothing '
+    + 'either way about the count above; read the sites by hand.';
+
+function formatLiteralHits(hits: readonly LiteralHit[]): string {
+    if (hits.length === 0) return NO_LITERAL_SITES;
+    return [
+        `Literal check: ${hits.length} counted site(s) sit INSIDE A LITERAL. This census blanks`,
+        'COMMENTS ONLY and leaves literals intact on purpose, so example code quoted in an',
+        'author-facing message — a refusal string showing what to write instead, a usage',
+        'banner, a fixture embedded in a gate script — is counted as a real SDK call site:',
+        ...hits.map((h) =>
+            `    ${h.site.file}:${h.site.line}  ${h.site.method}  (receiver: ${h.site.receiver})`
+            + `  — inside the ${h.quote} literal opened at line ${h.openedAtLine}`),
+        'Those sites are very likely this whole delta, and the repair belongs in the file that',
+        'quotes them, not here. The census matches a CALL SHAPE, so an example that names the',
+        'method without its argument list is not counted; the ejected PR was fixed instead by',
+        'making its fixture demonstrate the symbol the fixture itself names.',
+        '⛔ Do NOT weaken, skip or exempt this census, and ⛔ do NOT add the quoted prose to',
+        'LEDGER — a ledger is worth having only while every row in it is a real call site.',
+    ].join('\n');
+}
+
+/**
+ * The note every census-derived assertion below carries.
+ *
+ * Built at most once per run and only over the sites the census already
+ * counted — 29 files today, never the 5,000+ the walk visits — so it is
+ * invisible next to the scan it explains. ⛔ Guarded whole: property 3.
+ */
+const literalNote = (() => {
+    let memo: string | undefined;
+    return (sites: readonly Site[] = CENSUS.sites): string => {
+        if (sites === CENSUS.sites && memo !== undefined) return memo;
+        let answer: string;
+        try {
+            const byFile = new Map<string, Site[]>();
+            for (const s of sites) byFile.set(s.file, [...(byFile.get(s.file) ?? []), s]);
+            const hits: LiteralHit[] = [];
+            for (const [file, fileSites] of byFile) {
+                let src: string;
+                try { src = readFileSync(join(REPO_ROOT, file), 'utf8'); } catch { continue; }
+                hits.push(...literalEmbeddedSites(src, fileSites));
+            }
+            answer = formatLiteralHits(hits);
+        } catch {
+            answer = LITERAL_NOTE_UNAVAILABLE;
+        }
+        if (sites === CENSUS.sites) memo = answer;
+        return answer;
+    };
+})();
 
 // ---------------------------------------------------------------------------
 // The classification ledger — reviewed by hand, cross-checked mechanically
@@ -468,7 +654,11 @@ describe('#13079 §2 — positive controls on the matcher itself', () => {
 
     it('separates the producer-service receiver from the SDK receiver', () => {
         const service = CENSUS.sites.filter((s) => s.receiver === 'service');
-        expect(service.length).toBe(1);
+        // [#13874] A quoted example rarely spells `client.` in front of the
+        // method, so a literal-embedded site lands HERE first, as a phantom
+        // producer call. That makes this the assertion most likely to break
+        // for a reason that has nothing to do with receivers.
+        expect(service.length, literalNote()).toBe(1);
         expect(service[0]?.file).toBe('packages/client/src/analytics-automation-json-erasure.test.ts');
     });
 });
@@ -488,10 +678,14 @@ describe('#13079 §3 — every call site is classified', () => {
 
         // An UNCLASSIFIED site is the failure this ratchet exists to produce:
         // whoever adds a call site to these four methods must say what it reads.
-        expect(Object.fromEntries([...enumerated].sort())).toEqual(
+        // [#13874] …and if the "call site" is example code inside a quoted
+        // message, the note says so, names it, and says where to repair it.
+        expect(Object.fromEntries([...enumerated].sort()), literalNote()).toEqual(
             Object.fromEntries([...ledgered].sort()),
         );
-        expect(ledgerTotal).toBe(CENSUS.sites.length);
+        // ⭐ THE bare count mismatch — `expected 21 to be 19` is the shape that
+        // ejected a PR from the merge queue while explaining nothing.
+        expect(ledgerTotal, literalNote()).toBe(CENSUS.sites.length);
     });
 
     it('⭐ THE NUMBER, post-convergence: ZERO call sites still read the envelope, and none is production code', () => {
@@ -502,15 +696,21 @@ describe('#13079 §3 — every call site is classified', () => {
         expect(verdictTotal('ENVELOPE_DEPENDENT')).toBe(0);
         // Every site is a test pin. There is still no production call site in
         // this repo, so the migration in-repo was exactly this change's diff.
+        // [#13874] A refusal string that quotes `client.` + the method inside a
+        // `.mjs` gate script reads as a PRODUCTION SDK call site and breaks
+        // exactly here — the loudest possible wrong conclusion this file can
+        // reach, so the note travels with it.
         const production = sdkSites.filter((s) => !/\.test\.tsx?$/.test(s.file));
-        expect(production).toEqual([]);
+        expect(production, literalNote()).toEqual([]);
     });
 
     it('records the split: 18 payload pins, 10 result-insensitive, 1 not-SDK', () => {
         expect(verdictTotal('PAYLOAD_DEPENDENT')).toBe(18);
         expect(verdictTotal('RESULT_INSENSITIVE')).toBe(10);
         expect(verdictTotal('NOT_SDK')).toBe(1);
-        expect(sdkSites.length).toBe(28);
+        // The three above are LEDGER sums and cannot move on a census reading;
+        // this one is census-derived, so it carries the note. [#13874]
+        expect(sdkSites.length, literalNote()).toBe(28);
     });
 });
 
@@ -562,5 +762,123 @@ describe('#13079 §5 — what was NOT measured', () => {
         expect(CLOUD_CENSUS_COMMAND).toContain('fetch origin main');
         expect(CLOUD_CENSUS_COMMAND).toContain('(analytics|automation)');
         expect(CLOUD_CENSUS_COMMAND).toContain('RUNTIME BREAK');
+    });
+});
+
+describe('#13874 §6 — the failure text names the string-literal trap, and only when it applies', () => {
+    // ⚠️ EVERY fixture here is assembled from parts, and that is not style.
+    // This file sits inside the tree the census walks, so a fixture spelled as
+    // one literal would BE a counted site — this section would arm the very
+    // trap it exists to explain, and move the numbers section 3 ratchets. The
+    // interpolation splits the spelling in the SOURCE while restoring it in
+    // the VALUE, which is what the matcher below is handed. The last test in
+    // this section is the control that pins the whole file at zero sites.
+    const NS = 'analytics';
+
+    /** A gate script's refusal message, beside the real call it teaches. */
+    const QUOTED = [
+        `const refusal = 'read the payload: ${NS}.query(q).rows, not q.data.rows';`,
+        `const rows = (await client.${NS}.query({ cube: 'orders' })).rows;`,
+    ].join('\n');
+
+    /** A usage banner in a template — not line-bounded, and the `//` inside it
+     *  is template CONTENT, not a comment, which is the case a naive stripper
+     *  gets wrong in the opposite direction. */
+    const BANNER = [
+        'const usage = `',
+        `  ${NS}.query(q)   // shown to the author; this file calls nothing`,
+        '`;',
+    ].join('\n');
+
+    /** The same spelling in a real comment — masked, so never a site at all. */
+    const COMMENTED = [
+        `// call ${NS}.query(q) and read .rows off the result`,
+        'const x = 1;',
+    ].join('\n');
+
+    it('⭐ says so when a counted site sits inside a literal, and names file, line and the quote', () => {
+        const sites = sitesInSource(QUOTED, 'scripts/example-gate.mjs');
+        // ⛔ BOTH are still counted. The ruling is that the count does not move
+        // and the message explains itself; a fixture that showed one site here
+        // would be pinning option 3, which is suspended.
+        expect(sites.length).toBe(2);
+
+        const hits = literalEmbeddedSites(QUOTED, sites);
+        expect(hits.length).toBe(1);
+        expect(hits[0]?.site.line).toBe(1);
+        expect(hits[0]?.quote).toBe("'");
+        expect(hits[0]?.openedAtLine).toBe(1);
+
+        const text = formatLiteralHits(hits);
+        expect(text).toContain('INSIDE A LITERAL');
+        expect(text).toContain('COMMENTS ONLY');
+        expect(text).toContain('scripts/example-gate.mjs:1');
+        expect(text).toContain('analytics.query');
+        // The four properties the card measured, each answered in the text:
+        // where it is, why it counted, where to repair it, and what NOT to do.
+        expect(text).toContain('the repair belongs in the file that');
+        expect(text).toContain('do NOT add the quoted prose to');
+    });
+
+    it('⛔ and stays silent about literals when a real call site is the cause — the negative half', () => {
+        // Without this, a helper that answered "inside a literal" about every
+        // site would satisfy the assertion above and mislead every reader of a
+        // genuine count change.
+        const real = sitesInSource(QUOTED, 'scripts/example-gate.mjs').filter((s) => s.line === 2);
+        expect(real.length).toBe(1);
+        expect(real[0]?.receiver).toBe('sdk');
+        expect(literalEmbeddedSites(QUOTED, real)).toEqual([]);
+        expect(formatLiteralHits([])).toBe(NO_LITERAL_SITES);
+        expect(formatLiteralHits([])).not.toContain('INSIDE A LITERAL');
+    });
+
+    it('reads a template banner as a literal, and a real comment as no site at all', () => {
+        const banner = sitesInSource(BANNER, 'scripts/usage-banner.mjs');
+        expect(banner.length).toBe(1);
+        const hits = literalEmbeddedSites(BANNER, banner);
+        expect(hits.length).toBe(1);
+        expect(hits[0]?.quote).toBe('`');
+        // ⭐ The template OPENS a line above the site — the number a reader
+        // needs, and the one a per-line check could not produce.
+        expect(hits[0]?.openedAtLine).toBe(1);
+        expect(hits[0]?.site.line).toBe(2);
+
+        // The control on the other side: comments are masked by the census, so
+        // a commented mention never reaches this diagnostic in the first place.
+        expect(sitesInSource(COMMENTED, 'scripts/commented.mjs')).toEqual([]);
+    });
+
+    it('⛔ never throws — a crashing diagnostic would turn a legible count mismatch into a stack trace', () => {
+        const ghost: Site = {
+            file: 'no/such/file/anywhere.ts', line: 1, method: 'analytics.query',
+            receiver: 'service', visibleToLineGrep: true, index: 999_999,
+        };
+        // An unreadable file is skipped, so the answer is the negative note.
+        expect(() => literalNote([ghost])).not.toThrow();
+        expect(literalNote([ghost])).toBe(NO_LITERAL_SITES);
+        // An offset past the end of a real source is "not in a literal".
+        expect(() => literalEmbeddedSites(QUOTED, [ghost])).not.toThrow();
+        expect(literalEmbeddedSites(QUOTED, [ghost])).toEqual([]);
+        expect(() => literalNote([])).not.toThrow();
+    });
+
+    it('runs end to end over the real tree, and records the reading at this revision', () => {
+        // Proves the disk path works — the pins above are in-memory, and a
+        // helper green on fixtures while throwing on the workspace would be
+        // exactly the false comfort this file exists to refuse.
+        const note = literalNote();
+        expect(note).not.toBe(LITERAL_NOTE_UNAVAILABLE);
+        // ⭐ TODAY'S READING: no counted site anywhere in this workspace sits
+        // inside a literal. A red here is the trap firing, and the message it
+        // prints is the whole point of #13874 — read it, do not silence it.
+        expect(note, note).toBe(NO_LITERAL_SITES);
+    });
+
+    it('⭐ and this file — which quotes all four spellings throughout — contributes ZERO counted sites', () => {
+        // The self-control. Every paragraph and message above names the four
+        // methods; if any of them had been written as a call shape inside a
+        // literal, this section would have added sites to the census it
+        // documents. That is not a hypothetical failure mode: it is the card.
+        expect(CENSUS.sites.filter((s) => s.file.endsWith('envelope-caller-census.test.ts'))).toEqual([]);
     });
 });
