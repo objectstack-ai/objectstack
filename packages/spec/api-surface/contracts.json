@@ -170,6 +170,7 @@
     "IntrospectedTable (interface)",
     "JobExecution (type)",
     "JobHandler (type)",
+    "JobReplayOptions (interface)",
     "JobRetryPolicy (interface)",
     "JobRunOutcome (interface)",
     "JobSchedule (interface)",
