@@ -3110,6 +3110,7 @@ const COMPOUND_ANCHOR_LEDGER = [
   ['scripts/check-platform-checklist.mjs', 'selfTestUnreferencedRecipes', false],
   ['scripts/check-platform-checklist.mjs', 'selfTestMetaCallSpelling', false],
   ['scripts/check-platform-checklist.mjs', 'selfTestSourceLineCitations', false],
+  ['scripts/check-platform-checklist.mjs', 'selfTestSymbolAnchors', false],
   ['scripts/check-regen-pending.mjs', 'fixtureSelfTest', false],
   ['scripts/check-regen-pending.mjs', 'prePushIsArmedSelfTest', false],
   ['scripts/check-regen-pending.mjs', 'decisionTableSelfTest', false],

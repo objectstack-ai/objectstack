@@ -65,9 +65,9 @@
       "traps": ["hydration-race"],
       "source": [
         "#3358 §6",
-        "packages/spec/src/system/auth-config.zod.ts (ssoOnlyMode + OS_AUTH_SSO_ONLY, break-glass endpoint stays enabled)",
-        "packages/spec/src/api/auth-endpoints.zod.ts (AuthFeaturesConfigSchema.ssoEnforced description)",
-        "packages/spec/src/kernel/public-auth-features.ts (ssoEnforced: login-surface flag; LoginForm hides password form + self-registration, break-glass link remains)"
+        "packages/spec/src/system/auth-config.zod.ts#ssoOnlyMode (ssoOnlyMode + OS_AUTH_SSO_ONLY, break-glass endpoint stays enabled)",
+        "packages/spec/src/api/auth-endpoints.zod.ts#AuthFeaturesConfigSchema (AuthFeaturesConfigSchema.ssoEnforced description)",
+        "packages/spec/src/kernel/public-auth-features.ts#ssoEnforced (ssoEnforced: login-surface flag; LoginForm hides password form + self-registration, break-glass link remains)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "initial import from #3358", "ref": "#3358" },
@@ -136,9 +136,9 @@
       "source": [
         "#3358 §6",
         "#3408",
-        "examples/app-showcase/src/security/seed-approval-demo.ts (PHONE_DEMO_USER)",
-        "packages/spec/src/system/auth-config.zod.ts (phoneNumber plugin: unique phone_number + phone_number_verified columns)",
-        "packages/spec/src/kernel/public-auth-features.ts (phoneNumber gates sys_user.actions.create_user.params.phoneNumber — #2871)"
+        "examples/app-showcase/src/security/seed-approval-demo.ts#PHONE_DEMO_USER (PHONE_DEMO_USER)",
+        "packages/spec/src/system/auth-config.zod.ts#phoneNumber (phoneNumber plugin: unique phone_number + phone_number_verified columns)",
+        "packages/spec/src/kernel/public-auth-features.ts#phoneNumber (phoneNumber gates sys_user.actions.create_user.params.phoneNumber — #2871)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "initial import from #3358; encoded the #3408 silent-seed-failure as an explicit negative", "ref": "#3358" },
@@ -262,12 +262,12 @@
       "automated": { "kind": "e2e", "ref": "packages/qa/dogfood/test/oidc-authorization-code-flow.dogfood.test.ts" },
       "traps": ["hydration-race", "dispatcher-vs-hono-route", "wrong-persona"],
       "source": [
-        "packages/spec/src/system/auth-config.zod.ts (AuthPluginConfigSchema: phoneNumber/twoFactor/deviceAuthorization/magicLink/passkeys; socialProviders; oidcProviders; EmailAndPasswordConfigSchema)",
-        "packages/spec/src/api/auth-endpoints.zod.ts (AuthEndpointPaths; AuthFeaturesConfigSchema; device-flow response schemas)",
-        "packages/plugins/plugin-auth/src/auth-route-ledger.ts (BETTER_AUTH_MOUNTED_SURFACE: the live change-email/delete-user + /.well-known/* rows; auth-plugin.ts mounts the two discovery docs at app root)",
-        "packages/spec/src/kernel/public-auth-features.ts (flag semantics, gated inputs, the objectui#2513 known gap, and PUBLIC_AUTH_FEATURES_NOT_ADVERTISED — the reserved-but-unserved record for magicLink/passkeys)",
+        "packages/spec/src/system/auth-config.zod.ts#AuthPluginConfigSchema (AuthPluginConfigSchema: phoneNumber/twoFactor/deviceAuthorization/magicLink/passkeys; socialProviders; oidcProviders; EmailAndPasswordConfigSchema)",
+        "packages/spec/src/api/auth-endpoints.zod.ts#AuthEndpointPaths (AuthEndpointPaths; AuthFeaturesConfigSchema; device-flow response schemas)",
+        "packages/plugins/plugin-auth/src/auth-route-ledger.ts#BETTER_AUTH_MOUNTED_SURFACE (BETTER_AUTH_MOUNTED_SURFACE: the live change-email/delete-user + /.well-known/* rows; auth-plugin.ts mounts the two discovery docs at app root)",
+        "packages/spec/src/kernel/public-auth-features.ts#PUBLIC_AUTH_FEATURES_NOT_ADVERTISED (flag semantics, gated inputs, the objectui#2513 known gap, and PUBLIC_AUTH_FEATURES_NOT_ADVERTISED — the reserved-but-unserved record for magicLink/passkeys)",
         "packages/qa/dogfood/test/oidc-authorization-code-flow.dogfood.test.ts",
-        "packages/qa/dogfood/test/two-factor-lockout.dogfood.test.ts (cookie-lane 2FA completion pinned end-to-end — sign-in → twoFactorRedirect + two-factor cookie → verify-totp → session — plus lockout counting/reset/lock-at-threshold/lazy-expiry/admin-unlock; also the arming precedent: OS_AUTH_TWO_FACTOR=true must precede bootStack)"
+        "packages/qa/dogfood/test/two-factor-lockout.dogfood.test.ts#cookie (cookie-lane 2FA completion pinned end-to-end — sign-in → twoFactorRedirect + two-factor cookie → verify-totp → session — plus lockout counting/reset/lock-at-threshold/lazy-expiry/admin-unlock; also the arming precedent: OS_AUTH_TWO_FACTOR=true must precede bootStack)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new matrix item: per-method sign-in proof with both-sides gate checks and advertisement parity, grounded in the spec's plugin config + public feature registry", "ref": "claude/platform-test-checklist-ocwugl" },
@@ -354,10 +354,10 @@
       "traps": ["wrong-persona", "dispatcher-vs-hono-route"],
       "source": [
         "packages/qa/dogfood/test/delegated-admin-invite.dogfood.test.ts (ADR-0105 D8 / #3697; the escalation chain the role cap blocks)",
-        "packages/spec/src/identity/organization.zod.ts (InvitationSchema, InvitationStatus enum)",
-        "packages/rest/src/rest-route-ledger.ts (GET /api/v1/security/my-delegable-scope — security.describeDelegableScope, ADR-0090 D12 / ADR-0105 D8, self-scoped read half of the delegated-admin gate)",
-        "packages/spec/src/contracts/security-service.ts (DelegableScope: isTenantAdmin, scopes, placeableBusinessUnitIds, assignablePositions — no invitation-role field, which is why the scope read cannot be the invite picker's allowlist)",
-        "packages/spec/src/kernel/public-auth-features.ts (organization feature gates sys_invitation invite/cancel/resend actions)"
+        "packages/spec/src/identity/organization.zod.ts#InvitationSchema (InvitationSchema, InvitationStatus enum)",
+        "packages/rest/src/rest-route-ledger.ts#describeDelegableScope (GET /api/v1/security/my-delegable-scope — security.describeDelegableScope, ADR-0090 D12 / ADR-0105 D8, self-scoped read half of the delegated-admin gate)",
+        "packages/spec/src/contracts/security-service.ts#DelegableScope (DelegableScope: isTenantAdmin, scopes, placeableBusinessUnitIds, assignablePositions — no invitation-role field, which is why the scope read cannot be the invite picker's allowlist)",
+        "packages/spec/src/kernel/public-auth-features.ts#sys_invitation (organization feature gates sys_invitation invite/cancel/resend actions)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new item: invitation scope gates and lifecycle, pinned to the delegated-admin-invite dogfood test", "ref": "claude/platform-test-checklist-ocwugl" },
@@ -475,12 +475,12 @@
       "traps": ["wrong-persona", "shared-browser-tab"],
       "source": [
         "packages/spec/src/system/auth-config.zod.ts (admin plugin: endpoint list, sys_user role/banned/ban_reason/ban_expires, sys_session.impersonated_by)",
-        "packages/plugins/plugin-auth/src/auth-route-ledger.ts (BETTER_AUTH_MOUNTED_SURFACE admin/* rows: list-users, create-user, set-role, remove-user, revoke-user-session(s))",
-        "packages/plugins/plugin-auth/src/admin-user-endpoints.ts (create-user resolvePassword: explicit password wins over generatePassword — #3031/#3033; leaves sys_user + credential sys_account)",
-        "packages/plugins/plugin-security/src/security-plugin.ts (§A5 #3023 EXEMPTION: __referentialFieldClear owner_id-null cascade rides a server-derived context, the owner-anchor guard must not veto it) + security-plugin.test.ts '[#3023] … engine referential FK clear … is exempt'",
-        "packages/spec/src/kernel/public-auth-features.ts (admin flag gates the sys_user lifecycle actions; SCIM forces it on — ADR-0071)",
+        "packages/plugins/plugin-auth/src/auth-route-ledger.ts#BETTER_AUTH_MOUNTED_SURFACE (BETTER_AUTH_MOUNTED_SURFACE admin/* rows: list-users, create-user, set-role, remove-user, revoke-user-session(s))",
+        "packages/plugins/plugin-auth/src/admin-user-endpoints.ts#resolvePassword (create-user resolvePassword: explicit password wins over generatePassword — #3031/#3033; leaves sys_user + credential sys_account)",
+        "packages/plugins/plugin-security/src/security-plugin.ts#__referentialFieldClear (§A5 #3023 EXEMPTION: __referentialFieldClear owner_id-null cascade rides a server-derived context, the owner-anchor guard must not veto it) + security-plugin.test.ts '[#3023] … engine referential FK clear … is exempt'",
+        "packages/spec/src/kernel/public-auth-features.ts#sys_user (admin flag gates the sys_user lifecycle actions; SCIM forces it on — ADR-0071)",
         "packages/qa/dogfood/test/admin-identity-audit-trail.dogfood.test.ts",
-        "packages/plugins/plugin-auth/src/session-of-record.test.ts (better-auth answers /get-session with HTTP 200 + a JSON null body when the session is gone — NOT 401; a status-only assertion would pass against a fully revoked session)"
+        "packages/plugins/plugin-auth/src/session-of-record.test.ts#body (better-auth answers /get-session with HTTP 200 + a JSON null body when the session is gone — NOT 401; a status-only assertion would pass against a fully revoked session)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new item: admin lifecycle operations with persistence, enforcement, attribution and both-sides gate checks", "ref": "claude/platform-test-checklist-ocwugl" },
@@ -568,9 +568,9 @@
       ],
       "traps": ["wrong-persona", "shared-browser-tab"],
       "source": [
-        "packages/plugins/plugin-auth/src/auth-route-ledger.ts (GET list-sessions=auth.sessions.list, POST revoke-session=auth.sessions.revoke, revoke-other-sessions=auth.sessions.revokeOthers, revoke-sessions=auth.sessions.revokeAll)",
-        "packages/platform-objects/src/identity/sys-session.object.ts (mine view filter user_id={current_user_id}; all_sessions admin view; revoked_at/revoke_reason fields ADR-0069 D4; revoke_session action recordIdParam:'token'; apiMethods ['get','list'] — writes 405 before 403, #1591/ADR-0092 D2)",
-        "packages/platform-objects/src/apps/setup-nav.contributions.ts (nav_sessions → Setup Sessions, objectName sys_session)"
+        "packages/plugins/plugin-auth/src/auth-route-ledger.ts#revokeOthers (GET list-sessions=auth.sessions.list, POST revoke-session=auth.sessions.revoke, revoke-other-sessions=auth.sessions.revokeOthers, revoke-sessions=auth.sessions.revokeAll)",
+        "packages/platform-objects/src/identity/sys-session.object.ts#user_id (mine view filter user_id={current_user_id}; all_sessions admin view; revoked_at/revoke_reason fields ADR-0069 D4; revoke_session action recordIdParam:'token'; apiMethods ['get','list'] — writes 405 before 403, #1591/ADR-0092 D2)",
+        "packages/platform-objects/src/apps/setup-nav.contributions.ts#nav_sessions (nav_sessions → Setup Sessions, objectName sys_session)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-08", "change": "new item: owner-scoped active-session list (RLS) + per-primitive revoke semantics (revoke-session by token, revoke-other-sessions keeps current) + admin all-sessions view with revoked_at/revoke_reason, grounded in the auth route ledger and sys_session object (PENDING-GAPS §B)", "ref": "claude/platform-test-checklist-ocwugl" },
@@ -651,8 +651,8 @@
       "source": [
         "objectui apps/console/src/pages/developer/AgentConnectSection.tsx (ADR-0036 Phase 2b: POST /api/v1/keys mint, show-once dialog, x-api-key connect steps)",
         "packages/runtime/src/route-ledger.ts (POST /keys → client keys.create)",
-        "packages/platform-objects/src/identity/sys-api-key.object.ts (revoke_api_key/restore_api_key actions PATCH /api/v1/data/sys_api_key/{id} bodyExtra revoked; mine view user_id={current_user_id} vs all_keys; hashed hidden `key`, visible `prefix`; apiMethods ['get','list'])",
-        "packages/platform-objects/src/apps/setup-nav.contributions.ts (nav_api_keys requiredPermissions ['manage_platform_settings'] — admin all-view)"
+        "packages/platform-objects/src/identity/sys-api-key.object.ts#bodyExtra (revoke_api_key/restore_api_key actions PATCH /api/v1/data/sys_api_key/{id} bodyExtra revoked; mine view user_id={current_user_id} vs all_keys; hashed hidden `key`, visible `prefix`; apiMethods ['get','list'])",
+        "packages/platform-objects/src/apps/setup-nav.contributions.ts#nav_api_keys (nav_api_keys requiredPermissions ['manage_platform_settings'] — admin all-view)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-08", "change": "new item: personal API key mint (show-once, POST /api/v1/keys) → authenticate-as-owner via x-api-key → revoke 401 → restore 200, plus mine-view vs admin all-view scoping, grounded in AgentConnectSection + sys_api_key object (PENDING-GAPS §B)", "ref": "claude/platform-test-checklist-ocwugl" }
@@ -735,8 +735,8 @@
       "traps": ["hydration-race", "stale-console-bundle"],
       "source": [
         "objectui apps/console/src/pages/system/ProfilePage.tsx (updateUser name/image; useUpload avatar; PasswordCard changePassword vs setInitialPassword gated on hasLocalPassword; email immutable; data-testids profile-avatar-file/-upload-btn/-remove-btn)",
-        "packages/plugins/plugin-auth/src/auth-route-ledger.ts (POST /api/v1/auth/update-user=auth.updateUser, POST /api/v1/auth/change-password=auth.changePassword, GET /api/v1/auth/get-session=auth.me)",
-        "packages/platform-objects/src/identity/sys-account.object.ts (previous_password_hashes ring — ADR-0069 D1 reuse-prevention backs change-password)"
+        "packages/plugins/plugin-auth/src/auth-route-ledger.ts#updateUser (POST /api/v1/auth/update-user=auth.updateUser, POST /api/v1/auth/change-password=auth.changePassword, GET /api/v1/auth/get-session=auth.me)",
+        "packages/platform-objects/src/identity/sys-account.object.ts#previous_password_hashes (previous_password_hashes ring — ADR-0069 D1 reuse-prevention backs change-password)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-08", "change": "new item: self-service name + avatar (real storage write, persists) and password change with current-password verification, plus the passwordless set-initial branch, grounded in ProfilePage.tsx + the auth route ledger (PENDING-GAPS §B)", "ref": "claude/platform-test-checklist-ocwugl" }
@@ -821,13 +821,13 @@
       ],
       "traps": ["wrong-persona", "dispatcher-vs-hono-route", "hydration-race"],
       "source": [
-        "packages/platform-objects/src/apps/setup-nav.contributions.ts (nav_organization recordId {current_org_id}, ADR-0081; Teams/Invitations always mounted per ADR-0081 D1)",
+        "packages/platform-objects/src/apps/setup-nav.contributions.ts#nav_organization (nav_organization recordId {current_org_id}, ADR-0081; Teams/Invitations always mounted per ADR-0081 D1)",
         "packages/plugins/plugin-auth/src/auth-route-ledger.ts (organization family: update-member-role, remove-member, update, create-team, add-team-member, list-members/teams/invitations, get-active-member, get-full-organization)",
-        "packages/spec/src/identity/membership-role.ts (BUILTIN_MEMBERSHIP_ROLES / BUILTIN_MEMBERSHIP_ROLE_OPTIONS — THE role vocabulary: owner/admin/delegated_admin/member, ADR-0108; 'nothing widens these at boot any more')",
+        "packages/spec/src/identity/membership-role.ts#BUILTIN_MEMBERSHIP_ROLES (BUILTIN_MEMBERSHIP_ROLES / BUILTIN_MEMBERSHIP_ROLE_OPTIONS — THE role vocabulary: owner/admin/delegated_admin/member, ADR-0108; 'nothing widens these at boot any more')",
         "docs/adr/0108-membership-grade-is-not-a-capability-channel.md (why the list is closed: a grade decides what you can REACH, never a bundle of what you may do)",
-        "packages/qa/dogfood/test/membership-role-vocabulary.dogfood.test.ts (both enforced selects offer exactly the four; a declared position or PermissionSet name is refused at better-auth's role check — ROLE_NOT_FOUND — before any insert)",
-        "packages/platform-objects/src/identity/sys-member.object.ts + sys-invitation.object.ts (role select options: [...BUILTIN_MEMBERSHIP_ROLE_OPTIONS])",
-        "packages/platform-objects/src/identity/sys-team-member.object.ts (add_team_member/remove_team_member actions → organization/add-team-member; unique team_id+user_id; requiresFeature organization)"
+        "packages/qa/dogfood/test/membership-role-vocabulary.dogfood.test.ts#PermissionSet (both enforced selects offer exactly the four; a declared position or PermissionSet name is refused at better-auth's role check — ROLE_NOT_FOUND — before any insert)",
+        "packages/platform-objects/src/identity/sys-member.object.ts#BUILTIN_MEMBERSHIP_ROLE_OPTIONS + sys-invitation.object.ts (role select options: [...BUILTIN_MEMBERSHIP_ROLE_OPTIONS])",
+        "packages/platform-objects/src/identity/sys-team-member.object.ts#team_id (add_team_member/remove_team_member actions → organization/add-team-member; unique team_id+user_id; requiresFeature organization)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-08", "change": "new item: Setup Organization page {current_org_id} resolution (ADR-0081) with Members/Invitations/Teams tabs, update-member-role (4-name vocab)/remove-member/rename, create-team + add-team-member → sys_team_member rows, non-admin refused server-side (PENDING-GAPS §B). Teams membership deep-tested in identity-auth.teams-bu-membership; org-member management stays here", "ref": "claude/platform-test-checklist-ocwugl" },
@@ -903,12 +903,12 @@
       ],
       "traps": ["wrong-persona", "seed-data-thin", "hydration-race"],
       "source": [
-        "packages/platform-objects/src/identity/sys-team-member.object.ts (add_team_member/remove_team_member → organization/add-team-member|remove-team-member; unique team_id+user_id)",
-        "packages/platform-objects/src/identity/sys-business-unit.object.ts (canonical BU tree ADR-0057 D2; kind enum; parent_business_unit_id self-ref; org_chart tree view; managedBy 'platform' — writable over the data API)",
-        "packages/platform-objects/src/identity/sys-business-unit-member.object.ts (user↔BU placement: function_in_business_unit member/lead/deputy, is_primary)",
-        "docs/qa/platform-checklist/areas/access-security.json (access-security.scope-depth-asymmetry — the depth matrix this cross-references for the tree-widening geometry)",
-        "examples/app-showcase/src/security/sharing-rules.ts (`share_new_inquiries_with_field_ops` — the shipped BU-consuming geometry: expands the bu_field_ops subtree onto showcase_inquiry)",
-        "examples/app-showcase/src/data/seed/index.ts (the sys_business_unit tree is seeded with explicit ids; user↔unit membership — sys_business_unit_member — and position assignments are NOT seeded, they stay runtime admin actions)"
+        "packages/platform-objects/src/identity/sys-team-member.object.ts#team_id (add_team_member/remove_team_member → organization/add-team-member|remove-team-member; unique team_id+user_id)",
+        "packages/platform-objects/src/identity/sys-business-unit.object.ts#parent_business_unit_id (canonical BU tree ADR-0057 D2; kind enum; parent_business_unit_id self-ref; org_chart tree view; managedBy 'platform' — writable over the data API)",
+        "packages/platform-objects/src/identity/sys-business-unit-member.object.ts#function_in_business_unit (user↔BU placement: function_in_business_unit member/lead/deputy, is_primary)",
+        "docs/qa/platform-checklist/areas/access-security.json#access (access-security.scope-depth-asymmetry — the depth matrix this cross-references for the tree-widening geometry)",
+        "examples/app-showcase/src/security/sharing-rules.ts#share_new_inquiries_with_field_ops (`share_new_inquiries_with_field_ops` — the shipped BU-consuming geometry: expands the bu_field_ops subtree onto showcase_inquiry)",
+        "examples/app-showcase/src/data/seed/index.ts#sys_business_unit (the sys_business_unit tree is seeded with explicit ids; user↔unit membership — sys_business_unit_member — and position assignments are NOT seeded, they stay runtime admin actions)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-08", "change": "new item: team membership rows (create-team/add/remove) + child business-unit creation and user placement on the sys_business_unit tree, with a scope-geometry-consumes-the-tree clause cross-referencing access-security.scope-depth-asymmetry (PENDING-GAPS §C). Org-member management lives in identity-auth.org-membership-team-management", "ref": "claude/platform-test-checklist-ocwugl" },
@@ -984,9 +984,9 @@
       ],
       "traps": ["dispatcher-vs-hono-route", "wrong-persona"],
       "source": [
-        "packages/plugins/plugin-auth/src/auth-route-ledger.ts (BETTER_AUTH_MOUNTED_SURFACE: POST /api/v1/auth/request-password-reset, POST /api/v1/auth/reset-password, GET /api/v1/auth/reset-password/:token — the LIVE routes; AuthEndpointPaths.forgetPassword='/forget-password' is the divergent spec name)",
-        "packages/plugins/plugin-email/src/transports/index.ts (EMAIL_TRANSPORT_PROVIDERS 'log' → LogTransport — the dev capture transport)",
-        "packages/platform-objects/src/identity/sys-account.object.ts (previous_password_hashes ring — ADR-0069 D1 reuse-prevention)"
+        "packages/plugins/plugin-auth/src/auth-route-ledger.ts#BETTER_AUTH_MOUNTED_SURFACE (BETTER_AUTH_MOUNTED_SURFACE: POST /api/v1/auth/request-password-reset, POST /api/v1/auth/reset-password, GET /api/v1/auth/reset-password/:token — the LIVE routes; AuthEndpointPaths.forgetPassword='/forget-password' is the divergent spec name)",
+        "packages/plugins/plugin-email/src/transports/index.ts#EMAIL_TRANSPORT_PROVIDERS (EMAIL_TRANSPORT_PROVIDERS 'log' → LogTransport — the dev capture transport)",
+        "packages/platform-objects/src/identity/sys-account.object.ts#previous_password_hashes (previous_password_hashes ring — ADR-0069 D1 reuse-prevention)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-08", "change": "new item: forgot-password round trip (request-password-reset → dev-transport token capture → reset-password), old-password-refused/new-works, single-use + expiry refusals, anti-enumeration, with the token-capture dev-mail dependency recorded as a knownGap (PENDING-GAPS §B)", "ref": "claude/platform-test-checklist-ocwugl" }
@@ -1075,12 +1075,12 @@
       ],
       "traps": ["dispatcher-vs-hono-route", "wrong-persona", "hydration-race"],
       "source": [
-        "packages/plugins/plugin-auth/src/auth-route-ledger.ts (oauth-provider family, requires oidcProvider: oauth2/create-client=oauth.applications.register, get-client, consent=oauth.consent, get-consents) + (POST /api/v1/auth/sys-oauth-application/register — the console's session-required registration wrapper) + BETTER_AUTH_MOUNTED_SURFACE rows for oauth2/authorize, oauth2/token, oauth2/register (DCR)",
-        "packages/plugins/plugin-auth/src/auth-manager.ts (resolveOidcProviderEnabled: OS_OIDC_PROVIDER_ENABLED ?? config.oidcProvider ?? readMcpServerEnabledEnv — the default-ON chain, #2698) + (resolveDcrEnabled follows the same MCP default) + (oauthProvider plugin registration; consentPage = console /oauth/consent, loginPage = console /login)",
-        "packages/types/src/env.ts (isMcpServerEnabled — unset means TRUE; explicit false/0/off/no opts out)",
+        "packages/plugins/plugin-auth/src/auth-route-ledger.ts#BETTER_AUTH_MOUNTED_SURFACE (oauth-provider family, requires oidcProvider: oauth2/create-client=oauth.applications.register, get-client, consent=oauth.consent, get-consents) + (POST /api/v1/auth/sys-oauth-application/register — the console's session-required registration wrapper) + BETTER_AUTH_MOUNTED_SURFACE rows for oauth2/authorize, oauth2/token, oauth2/register (DCR)",
+        "packages/plugins/plugin-auth/src/auth-manager.ts#resolveOidcProviderEnabled (resolveOidcProviderEnabled: OS_OIDC_PROVIDER_ENABLED ?? config.oidcProvider ?? readMcpServerEnabledEnv — the default-ON chain, #2698) + (resolveDcrEnabled follows the same MCP default) + (oauthProvider plugin registration; consentPage = console /oauth/consent, loginPage = console /login)",
+        "packages/types/src/env.ts#isMcpServerEnabled (isMcpServerEnabled — unset means TRUE; explicit false/0/off/no opts out)",
         "objectui apps/console/src/App.tsx (/oauth/consent → OAuthConsentPage) + apps/console/src/pages/auth/OAuthConsentPage.tsx",
-        "packages/platform-objects/src/identity/sys-oauth-consent.object.ts (row implies consent for listed scopes — consent_given removed; apiEnabled:false so verify via get-consents, not the data API)",
-        "packages/platform-objects/src/identity/sys-oauth-application.object.ts + setup-nav.contributions.ts (nav_oauth_apps → Setup OAuth Applications)"
+        "packages/platform-objects/src/identity/sys-oauth-consent.object.ts#apiEnabled (row implies consent for listed scopes — consent_given removed; apiEnabled:false so verify via get-consents, not the data API)",
+        "packages/platform-objects/src/identity/sys-oauth-application.object.ts#OAuth + setup-nav.contributions.ts (nav_oauth_apps → Setup OAuth Applications)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-08", "change": "new item: OAuth client registration (secret once) + authorization-code consent loop (approve mints tokens + consent record, deny mints none, recorded consent short-circuits), mine-view scoped; blocked(fixture) pending a configured oidcProvider flow (PENDING-GAPS §C)", "ref": "claude/platform-test-checklist-ocwugl" },
@@ -1152,9 +1152,9 @@
       ],
       "traps": ["wrong-persona", "dispatcher-vs-hono-route", "hydration-race"],
       "source": [
-        "packages/platform-objects/src/identity/sys-account.object.ts (link_social type:'url' → /api/v1/auth/sign-in/social?provider=&callbackURL=; unlink_account → /api/v1/auth/unlink-account accountId=row id; mine view user_id={current_user_id} vs all_links; provider options; apiMethods ['get','list'])",
-        "packages/plugins/plugin-auth/src/auth-route-ledger.ts (POST link-social=auth.accounts.linkSocial, GET list-accounts=auth.accounts.list, POST unlink-account=auth.accounts.unlink)",
-        "packages/platform-objects/src/apps/setup-nav.contributions.ts (nav_accounts → 'Identity Links', objectName sys_account)"
+        "packages/platform-objects/src/identity/sys-account.object.ts#user_id (link_social type:'url' → /api/v1/auth/sign-in/social?provider=&callbackURL=; unlink_account → /api/v1/auth/unlink-account accountId=row id; mine view user_id={current_user_id} vs all_links; provider options; apiMethods ['get','list'])",
+        "packages/plugins/plugin-auth/src/auth-route-ledger.ts#linkSocial (POST link-social=auth.accounts.linkSocial, GET list-accounts=auth.accounts.list, POST unlink-account=auth.accounts.unlink)",
+        "packages/platform-objects/src/apps/setup-nav.contributions.ts#nav_accounts (nav_accounts → 'Identity Links', objectName sys_account)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-08", "change": "new item: social/OIDC account linking round-trip → sys_account mine-view row, unlink removal, provider-less honest degradation; blocked(fixture) pending a configured IdP (PENDING-GAPS §C)", "ref": "claude/platform-test-checklist-ocwugl" }
@@ -1243,8 +1243,8 @@
       "traps": ["wrong-persona", "seed-data-thin"],
       "source": [
         "objectui packages/app-shell/src/views/identityImport.ts (IdentityPasswordPolicy 'auto'|'none'|'invite'|'temporary'; wraps ImportWizard onto POST /api/v1/auth/admin/import-users; ≤500-row batches; one-time passwords response-only, never persisted; upsert idempotent on email/phone)",
-        "packages/plugins/plugin-auth/src/admin-user-endpoints.ts (POST /api/v1/auth/admin/import-users — platform-admin-gated login-capable account creation; explicit-password/generatePassword resolution)",
-        "packages/plugins/plugin-auth/src/admin-import-users.ts (the `auto` per-row plan: invite where email- or SMS-deliverable, temporary only otherwise) + auth-manager.ts,4074 (isEmailServiceAvailable / isPhoneOtpDeliverable — the two gates that decide it)"
+        "packages/plugins/plugin-auth/src/admin-user-endpoints.ts#explicit (POST /api/v1/auth/admin/import-users — platform-admin-gated login-capable account creation; explicit-password/generatePassword resolution)",
+        "packages/plugins/plugin-auth/src/admin-import-users.ts#plan (the `auto` per-row plan: invite where email- or SMS-deliverable, temporary only otherwise) + auth-manager.ts,4074 (isEmailServiceAvailable / isPhoneOtpDeliverable — the two gates that decide it)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-08", "change": "new item: admin CSV identity import with password-policy matrix (auto/temporary/invite/none), imported-user sign-in, upsert idempotency, response-only one-time passwords, non-admin denied, grounded in objectui identityImport.ts + admin-user-endpoints.ts (PENDING-GAPS §G)", "ref": "claude/platform-test-checklist-ocwugl" },
@@ -1327,14 +1327,14 @@
       ],
       "traps": ["dispatcher-vs-hono-route", "absence-inference"],
       "source": [
-        "packages/plugins/plugin-auth/src/auth-manager.ts (twoFactor: twoFactorFromEnv ?? pluginConfig.twoFactor ?? false — resolved once at construction) + (features.twoFactor, same resolution)",
-        "packages/plugins/plugin-auth/src/auth-route-ledger.ts (POST /two-factor/enable, SDK row) + (POST /two-factor/get-totp-uri in BETTER_AUTH_MOUNTED_SURFACE — publication, not liveness, #7735)",
-        "packages/plugins/plugin-auth/src/auth-route-ledger.conformance.test.ts (endpoint EXISTENCE is already pinned at LEDGERED_PLUGIN_CONFIG twoFactor:true — behavior is this item's gap, not existence)",
-        "packages/platform-objects/src/identity/sys-two-factor.object.ts (enable_two_factor resultDialog: totpURI qrcode + backupCodes code-list + acknowledge; the 'shown only once' copy)",
-        "packages/platform-objects/src/identity/sys-user.object.ts (the navigable variant: no resultDialog, successMessage only; the engine-can't-render-it-yet admission)",
-        "packages/spec/src/ui/action.zod.ts (resultDialog: dot paths into result.data; renderer contract is a SHOULD to objectui, no in-repo consumer)",
-        "packages/qa/dogfood/test/two-factor-lockout.dogfood.test.ts (the hand-rolled RFC 6238 helper to copy — no OTP dependency exists or may be added) + (arming must precede bootStack) + (enable → totpURI → secret extraction precedent)",
-        "packages/platform-objects/src/apps/account.app.ts (mounts sys_inbox_message/sys_member/sys_account/sys_session/sys_api_key/sys_oauth_application — sys_two_factor absent, which is why the browser lane is blocked)"
+        "packages/plugins/plugin-auth/src/auth-manager.ts#twoFactor (twoFactor: twoFactorFromEnv ?? pluginConfig.twoFactor ?? false — resolved once at construction) + (features.twoFactor, same resolution)",
+        "packages/plugins/plugin-auth/src/auth-route-ledger.ts#BETTER_AUTH_MOUNTED_SURFACE (POST /two-factor/enable, SDK row) + (POST /two-factor/get-totp-uri in BETTER_AUTH_MOUNTED_SURFACE — publication, not liveness, #7735)",
+        "packages/plugins/plugin-auth/src/auth-route-ledger.conformance.test.ts#LEDGERED_PLUGIN_CONFIG (endpoint EXISTENCE is already pinned at LEDGERED_PLUGIN_CONFIG twoFactor:true — behavior is this item's gap, not existence)",
+        "packages/platform-objects/src/identity/sys-two-factor.object.ts#resultDialog (enable_two_factor resultDialog: totpURI qrcode + backupCodes code-list + acknowledge; the 'shown only once' copy)",
+        "packages/platform-objects/src/identity/sys-user.object.ts#resultDialog (the navigable variant: no resultDialog, successMessage only; the engine-can't-render-it-yet admission)",
+        "packages/spec/src/ui/action.zod.ts#resultDialog (resultDialog: dot paths into result.data; renderer contract is a SHOULD to objectui, no in-repo consumer)",
+        "packages/qa/dogfood/test/two-factor-lockout.dogfood.test.ts#secret (the hand-rolled RFC 6238 helper to copy — no OTP dependency exists or may be added) + (arming must precede bootStack) + (enable → totpURI → secret extraction precedent)",
+        "packages/platform-objects/src/apps/account.app.ts#sys_inbox_message (mounts sys_inbox_message/sys_member/sys_account/sys_session/sys_api_key/sys_oauth_application — sys_two_factor absent, which is why the browser lane is blocked)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-20", "change": "authored in the scoped scan-functionality (扫描功能) coverage sweep: the TOTP 'scan the QR' enrollment lifecycle had only its challenge gate covered (one clause of identity-auth.auth-method-matrix). This item takes the reveal half: enable's { totpURI, backupCodes } shape, the resultDialog path contract, the get-totp-uri re-reveal probe, and the recorded no-QR gap on the only navigable surface", "ref": "claude/new-session-0pv25p" }
@@ -1410,9 +1410,9 @@
       "traps": ["dispatcher-vs-hono-route", "absence-inference"],
       "source": [
         "packages/plugins/plugin-auth/src/auth-route-ledger.ts (POST /two-factor/verify-totp, SDK row)",
-        "packages/qa/dogfood/test/two-factor-lockout.dogfood.test.ts (the verify-to-activate SETUP precedent this item promotes to a tested contract: enrolment confirmed through the session path, TOTP_NOT_ENABLED posture for unverified enrolments) + (isSignIn decides lockout bookkeeping) + (completing enrolment rotates the session token)",
-        "packages/platform-objects/src/identity/sys-two-factor.object.ts (verified: defaultValue TRUE — the declared default the probe interrogates)",
-        "packages/plugins/plugin-auth/src/auth-schema-config.ts (AUTH_TWO_FACTOR_SCHEMA: four renamed fields, verified unmapped-because-unrenamed) + AUTH_TWO_FACTOR_USER_FIELDS (twoFactorEnabled → two_factor_enabled)",
+        "packages/qa/dogfood/test/two-factor-lockout.dogfood.test.ts#confirmed (the verify-to-activate SETUP precedent this item promotes to a tested contract: enrolment confirmed through the session path, TOTP_NOT_ENABLED posture for unverified enrolments) + (isSignIn decides lockout bookkeeping) + (completing enrolment rotates the session token)",
+        "packages/platform-objects/src/identity/sys-two-factor.object.ts#defaultValue (verified: defaultValue TRUE — the declared default the probe interrogates)",
+        "packages/plugins/plugin-auth/src/auth-schema-config.ts#AUTH_TWO_FACTOR_SCHEMA (AUTH_TWO_FACTOR_SCHEMA: four renamed fields, verified unmapped-because-unrenamed) + AUTH_TWO_FACTOR_USER_FIELDS (twoFactorEnabled → two_factor_enabled)",
         "packages/plugins/plugin-auth/src/auth-manager.ts (arming default false, resolved once at construction)"
       ],
       "history": [
@@ -1498,9 +1498,9 @@
       "traps": ["dispatcher-vs-hono-route", "absence-inference"],
       "source": [
         "packages/plugins/plugin-auth/src/auth-route-ledger.ts (POST /two-factor/generate-backup-codes, POST /two-factor/verify-backup-code — SDK rows)",
-        "packages/platform-objects/src/identity/sys-two-factor.object.ts (regenerate_backup_codes: password param, one-shot resultDialog, 'previous codes stop working immediately') + (backup_codes storage declaration)",
-        "packages/platform-objects/src/identity/sys-user.object.ts (generate_backup_codes on the navigable surface: successMessage only, NO resultDialog — the recorded lockout path)",
-        "packages/qa/dogfood/test/two-factor-lockout.dogfood.test.ts (the arming + challenge-cookie rig this item reuses: beginChallenge/cookieHeader; TOTP helper)"
+        "packages/platform-objects/src/identity/sys-two-factor.object.ts#resultDialog (regenerate_backup_codes: password param, one-shot resultDialog, 'previous codes stop working immediately') + (backup_codes storage declaration)",
+        "packages/platform-objects/src/identity/sys-user.object.ts#successMessage (generate_backup_codes on the navigable surface: successMessage only, NO resultDialog — the recorded lockout path)",
+        "packages/qa/dogfood/test/two-factor-lockout.dogfood.test.ts#beginChallenge (the arming + challenge-cookie rig this item reuses: beginChallenge/cookieHeader; TOTP helper)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-20", "change": "authored in the scoped scan-functionality (扫描功能) coverage sweep: backup codes had zero coverage — spend/single-use/regenerate-invalidates were asserted nowhere, and the no-reveal regenerate on the navigable sys_user surface (a self-lockout path) was unrecorded", "ref": "claude/new-session-0pv25p" }
@@ -1584,9 +1584,9 @@
       "traps": ["dispatcher-vs-hono-route", "absence-inference"],
       "source": [
         "packages/plugins/plugin-auth/src/auth-route-ledger.ts (POST /two-factor/disable, SDK row)",
-        "packages/platform-objects/src/identity/sys-user.object.ts (disable_two_factor: password param, visible only while two_factor_enabled) + packages/platform-objects/src/identity/sys-two-factor.object.ts (the sys_two_factor variant, same endpoint)",
-        "packages/plugins/plugin-auth/src/auth-manager.ts (computeAuthGate: MFA_REQUIRED after the grace window; mfa_required_at stamped lazily, no clearing write anywhere in the source; fail-open) + (isAuthGateActive)",
-        "packages/plugins/plugin-auth/src/auth-plugin.ts (mfa_required forces plugins.twoFactor on — 'otherwise gated users would have no way to comply' — the not-stranded contract the last clause tests)",
+        "packages/platform-objects/src/identity/sys-user.object.ts#two_factor_enabled (disable_two_factor: password param, visible only while two_factor_enabled) + packages/platform-objects/src/identity/sys-two-factor.object.ts#sys_two_factor (the sys_two_factor variant, same endpoint)",
+        "packages/plugins/plugin-auth/src/auth-manager.ts#computeAuthGate (computeAuthGate: MFA_REQUIRED after the grace window; mfa_required_at stamped lazily, no clearing write anywhere in the source; fail-open) + (isAuthGateActive)",
+        "packages/plugins/plugin-auth/src/auth-plugin.ts#twoFactor (mfa_required forces plugins.twoFactor on — 'otherwise gated users would have no way to comply' — the not-stranded contract the last clause tests)",
         "packages/qa/dogfood/test/two-factor-lockout.dogfood.test.ts (arming + challenge rig + TOTP helper precedent, as on the sibling items)"
       ],
       "history": [
@@ -1675,10 +1675,10 @@
       "source": [
         "objectui apps/console/src/components/SetupRoute.tsx (one URL, two surfaces — first-run wizard vs platform-admin deep link, objectui#2794) + setupEntry.ts (the latched verdict: fresh only from an unauthenticated probe)",
         "objectui apps/console/src/pages/auth/SetupPage.tsx (renders only at hasOwner:false; creates owner + names the auto-provisioned personal org) + (why both exits are FULL-PAGE navigations — objectui#4181) + handleSubmit (rename-not-create, refreshOrganizations poll, slug guard)",
-        "packages/plugins/plugin-auth/src/auth-plugin.ts (bootstrap-status exempt from the auth wall) + (the route: hasOwner from dataEngine.count('sys_user'))",
-        "packages/plugins/plugin-auth/src/auth-route-ledger.ts (GET /api/v1/auth/bootstrap-status = auth.bootstrapStatus, objectstack-mount)",
-        "packages/plugins/plugin-auth/src/auth-manager.ts (the bypass's contract comment) + (the before-hook: isBootstrapCreation flips disableSignUp for this request — [#11767] fixed the inert probe) + (isBootstrapCreation: human rows, fail-closed on a full page)",
-        "packages/plugins/plugin-auth/src/audience-posture.ts (isHumanUserRow) + (decideAudienceAdmission isBootstrap arm) + (undeclared audience ⇒ invite_only, maintainer ruling 2026-08-24)",
+        "packages/plugins/plugin-auth/src/auth-plugin.ts#dataEngine (bootstrap-status exempt from the auth wall) + (the route: hasOwner from dataEngine.count('sys_user'))",
+        "packages/plugins/plugin-auth/src/auth-route-ledger.ts#bootstrapStatus (GET /api/v1/auth/bootstrap-status = auth.bootstrapStatus, objectstack-mount)",
+        "packages/plugins/plugin-auth/src/auth-manager.ts#isBootstrapCreation (the bypass's contract comment) + (the before-hook: isBootstrapCreation flips disableSignUp for this request — [#11767] fixed the inert probe) + (isBootstrapCreation: human rows, fail-closed on a full page)",
+        "packages/plugins/plugin-auth/src/audience-posture.ts#isHumanUserRow (isHumanUserRow) + (decideAudienceAdmission isBootstrap arm) + (undeclared audience ⇒ invite_only, maintainer ruling 2026-08-24)",
         "packages/cli/src/commands/dev.ts,339 (seed-admin defaults ON — why a zero-user boot needs --no-seed-admin)"
       ],
       "history": [
@@ -1765,9 +1765,9 @@
       "enumSource": { "file": "packages/spec/src/system/auth-config.zod.ts", "export": "AUDIENCE_POSTURES", "expect": 3 },
       "traps": ["dispatcher-vs-hono-route", "auth-state-leak", "absence-inference"],
       "source": [
-        "packages/plugins/plugin-auth/src/audience-posture.ts (the single owner of audience admission: resolveAudience default invite_only; decideAudienceAdmission — operator/provider exempt, bootstrap admit, invitation carve-out, posture semantics; SELF_REGISTRATION_CLOSED / EMAIL_DOMAIN_NOT_ALLOWED; pinned domain rules in the module doc)",
-        "packages/plugins/plugin-auth/src/auth-manager.ts (readDisableSignUpEnv: OS_AUTH_SIGNUP_ENABLED wins, then OS_DISABLE_SIGNUP) + (effective disableSignUp: ssoOnly forces true, else env ?? config) + (the sign-up route raises the audience refusal BEFORE the anti-enumeration shield — measured swallow documented in place) +,5040 (getPublicConfig: disableSignUp NOT forced by posture, features.audiencePosture advertised)",
-        "packages/spec/src/system/auth-config.zod.ts (AUDIENCE_POSTURES const — invite_only/email_domain/open, the named enum backing posture z.enum) + (AudienceConfigSchema on AuthConfigSchema — config-only, no env knob)",
+        "packages/plugins/plugin-auth/src/audience-posture.ts#resolveAudience (the single owner of audience admission: resolveAudience default invite_only; decideAudienceAdmission — operator/provider exempt, bootstrap admit, invitation carve-out, posture semantics; SELF_REGISTRATION_CLOSED / EMAIL_DOMAIN_NOT_ALLOWED; pinned domain rules in the module doc)",
+        "packages/plugins/plugin-auth/src/auth-manager.ts#readDisableSignUpEnv (readDisableSignUpEnv: OS_AUTH_SIGNUP_ENABLED wins, then OS_DISABLE_SIGNUP) + (effective disableSignUp: ssoOnly forces true, else env ?? config) + (the sign-up route raises the audience refusal BEFORE the anti-enumeration shield — measured swallow documented in place) +,5040 (getPublicConfig: disableSignUp NOT forced by posture, features.audiencePosture advertised)",
+        "packages/spec/src/system/auth-config.zod.ts#AUDIENCE_POSTURES (AUDIENCE_POSTURES const — invite_only/email_domain/open, the named enum backing posture z.enum) + (AudienceConfigSchema on AuthConfigSchema — config-only, no env knob)",
         "objectui apps/console/src/pages/auth/RegisterPage.tsx,69-88 (probe /auth/config, bounce to /login when disableSignUp; server-side gate named as the source of truth in its own header)",
         "objectui apps/console/src/pages/auth/LoginPage.tsx,136,298 (signUpDisabled from /auth/config; registerUrl withheld when disabled)"
       ],
@@ -1853,9 +1853,9 @@
       ],
       "traps": ["eventual-consistency", "auth-state-leak", "hydration-race"],
       "source": [
-        "packages/plugins/plugin-auth/src/auth-manager.ts (requireEmailVerification wiring — [#11739]: a self-registration-permitting posture FORCES it on; otherwise config passthrough) + (emailVerification block: sendOnSignUp/sendOnSignIn/autoSignInAfterVerification/expiresIn passthrough; sendVerificationEmail via template auth.verify_email, failures thrown into the log) + (getPublicConfig mirrors the forced flag)",
-        "packages/plugins/plugin-auth/src/audience-posture.ts (entry validation refuses the permitting-posture + explicit-false contradiction)",
-        "packages/plugins/plugin-auth/src/auth-route-ledger.ts (POST /api/v1/auth/send-verification-email = auth.sendVerificationEmail) + (GET /api/v1/auth/verify-email = auth.verifyEmail)",
+        "packages/plugins/plugin-auth/src/auth-manager.ts#requireEmailVerification (requireEmailVerification wiring — [#11739]: a self-registration-permitting posture FORCES it on; otherwise config passthrough) + (emailVerification block: sendOnSignUp/sendOnSignIn/autoSignInAfterVerification/expiresIn passthrough; sendVerificationEmail via template auth.verify_email, failures thrown into the log) + (getPublicConfig mirrors the forced flag)",
+        "packages/plugins/plugin-auth/src/audience-posture.ts#entry (entry validation refuses the permitting-posture + explicit-false contradiction)",
+        "packages/plugins/plugin-auth/src/auth-route-ledger.ts#sendVerificationEmail (POST /api/v1/auth/send-verification-email = auth.sendVerificationEmail) + (GET /api/v1/auth/verify-email = auth.verifyEmail)",
         "objectui apps/console/src/App.tsx (/verify-email + /verify-email-prompt routes)",
         "objectui apps/console/src/pages/auth/VerifyEmailPage.tsx (consumes ?token= via the POST variant — GET 302s, POST returns JSON so the SPA controls the post-verify UX)",
         "objectui apps/console/src/pages/auth/VerifyEmailPromptPage.tsx (shown after sign-up or an EMAIL_NOT_VERIFIED-blocked sign-in; resend via useAuth().sendVerificationEmail)",
@@ -1946,9 +1946,9 @@
         "objectui packages/app-shell/src/layout/CurrentOrganizationIndicator.tsx (objectui#5287: read-only name for exactly-one membership, gated on postureHasOrgWall — single posture renders nothing by design; no click target)",
         "objectui packages/app-shell/src/hooks/useTenancyPosture.ts (postureHasOrgWall restated locally for bundle size, spec-parity test-locked)",
         "objectui packages/app-shell/src/providers/MetadataProvider.tsx (objectui#4486: an org change drops the whole metadata cache — one organization's metadata never survives into another organization's reads; the reloading switch paths and the SPA-internal path both covered)",
-        "packages/plugins/plugin-auth/src/auth-route-ledger.ts (POST /api/v1/auth/organization/set-active = organizations.setActive, requires organization)",
-        "packages/plugins/plugin-auth/src/auth-manager.ts (multiOrgEnabled = postureEnforcesWall(effectiveTenancyPosture()) — the SAME call the org-create gate makes, #5233/#5261) + area (features advertised)",
-        "packages/types/src/env.ts (resolveTenancyPosture: OS_TENANCY_POSTURE, invalid value refuses boot; unset falls back to `single` unless legacy multi-org env)"
+        "packages/plugins/plugin-auth/src/auth-route-ledger.ts#setActive (POST /api/v1/auth/organization/set-active = organizations.setActive, requires organization)",
+        "packages/plugins/plugin-auth/src/auth-manager.ts#multiOrgEnabled (multiOrgEnabled = postureEnforcesWall(effectiveTenancyPosture()) — the SAME call the org-create gate makes, #5233/#5261) + area (features advertised)",
+        "packages/types/src/env.ts#resolveTenancyPosture (resolveTenancyPosture: OS_TENANCY_POSTURE, invalid value refuses boot; unset falls back to `single` unless legacy multi-org env)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-30", "change": "authored in the 2026-08-30 coverage sweep (angle 1): the workspace-switch surface had no item. CORRECTED against source from the register's 'single membership → indicator' hypothesis: the indicator is posture-gated (postureHasOrgWall — group/isolated only), so the stock `single` boot renders NO org chrome at all and the whole matrix needs an OS_TENANCY_POSTURE boot; encoded the three-cell affordance matrix, the deliberate full-document reload, the #4486 cache-drop read-follow proof, group-posture labeling, and the forged-switch refusal", "ref": "#sweep-2026-08-30" }
