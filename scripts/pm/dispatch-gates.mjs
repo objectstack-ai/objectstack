@@ -284,12 +284,12 @@
  * command. The proposed general repair was a third withholding class beside
  * the CI-measured and value-bearing ones: "scheduled-only, not a PR gate".
  *
- * Measured first, from the workflow text at 50d6c924 (2026-09-04):
+ * Measured first, from the workflow text at fa8c1963 (2026-09-04):
  *
  *     .github/workflows/*.yml                                            30
  *       declaring `schedule:`                                            15
  *       …of those, contributing a discovered check family                 8
- *     discovered families                                               251
+ *     discovered families                                               252
  *       reaching a scheduled workflow at all                             21
  *       reached ONLY through scheduled workflows                         10
  *       SCHEDULED-ONLY — reached by no PR-time trigger                    0
