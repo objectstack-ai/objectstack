@@ -283,7 +283,7 @@
       "automated": { "kind": "e2e", "ref": "examples/app-showcase/e2e/showcase-smoke.spec.ts" },
       "traps": ["hydration-race", "single-datapoint", "stale-console-bundle"],
       "source": [
-        "examples/app-showcase/e2e/showcase-smoke.spec.ts (SURFACES)",
+        "examples/app-showcase/e2e/showcase-smoke.spec.ts#SURFACES (SURFACES)",
         ".github/workflows/showcase-smoke.yml",
         "objectui: packages/app-shell/src/chrome/ErrorBoundary.tsx (route-level fallback + recovery actions)",
         "examples/app-showcase/src/ui/apps/index.ts (nav truth)"
@@ -367,10 +367,10 @@
       "traps": ["dispatcher-vs-hono-route"],
       "automated": { "kind": "api", "ref": "packages/qa/dogfood/test/meta-types-create-seed.dogfood.test.ts" },
       "source": [
-        "packages/spec/src/kernel/metadata-plugin.zod.ts (MetadataTypeSchema + DEFAULT_METADATA_TYPE_REGISTRY)",
+        "packages/spec/src/kernel/metadata-plugin.zod.ts#MetadataTypeSchema (MetadataTypeSchema + DEFAULT_METADATA_TYPE_REGISTRY)",
         "packages/spec/src/kernel/metadata-create-seeds.ts",
         "packages/runtime/src/route-ledger.ts (GET /meta, GET /meta/types, GET /meta/:type, GET /meta/:type/:name)",
-        "examples/app-showcase/src/data/extensions/account.extension.ts (AccountExtension — additive overlay on showcase_account, priority 210)",
+        "examples/app-showcase/src/data/extensions/account.extension.ts#AccountExtension (AccountExtension — additive overlay on showcase_account, priority 210)",
         "packages/spec/src/data (defineObjectExtension — extend merges fields at registerApp, higher priority wins on conflict)"
       ],
       "history": [
@@ -462,8 +462,8 @@
       },
       "source": [
         "packages/runtime/src/route-ledger.ts (PUT /meta/:type/:name, GET /meta/_drafts, GET /meta/:type/:name/published, POST /packages/:id/publish-drafts)",
-        "packages/spec/src/kernel/metadata-plugin.zod.ts (allowOrgOverride 403 not_overridable contract; validateOnWrite; registry flags per type)",
-        "ADR-0070 via packages/qa/dogfood/test/package-first-authoring.dogfood.test.ts (writable_package_required)",
+        "packages/spec/src/kernel/metadata-plugin.zod.ts#allowOrgOverride (allowOrgOverride 403 not_overridable contract; validateOnWrite; registry flags per type)",
+        "ADR-0070 via packages/qa/dogfood/test/package-first-authoring.dogfood.test.ts#writable_package_required (writable_package_required)",
         "ADR-0033 (drafts / publish)"
       ],
       "history": [
@@ -557,11 +557,11 @@
       ],
       "traps": ["hydration-race", "wrong-persona", "stale-console-bundle"],
       "source": [
-        "packages/platform-objects/src/apps/setup.app.ts (shell group anchors + requiredPermissions setup.access)",
-        "packages/platform-objects/src/apps/studio.app.ts (static nav; requiredPermissions studio.access)",
-        "packages/platform-objects/src/apps/account.app.ts (no requiredPermissions; hidden from App Switcher; requiresObject/requiresService entry gates)",
-        "packages/platform-objects/src/apps/setup-nav.contributions.ts (nav_organizations requiresService org-scoping; nav_api_keys manage_platform_settings; no nav_jwks — removed in #7544)",
-        "packages/plugins/plugin-auth/src/auth-plugin.ts (SSO Providers nav_sso_providers contributed only when isSsoWired())",
+        "packages/platform-objects/src/apps/setup.app.ts#requiredPermissions (shell group anchors + requiredPermissions setup.access)",
+        "packages/platform-objects/src/apps/studio.app.ts#requiredPermissions (static nav; requiredPermissions studio.access)",
+        "packages/platform-objects/src/apps/account.app.ts#requiresObject (no requiredPermissions; hidden from App Switcher; requiresObject/requiresService entry gates)",
+        "packages/platform-objects/src/apps/setup-nav.contributions.ts#nav_organizations (nav_organizations requiresService org-scoping; nav_api_keys manage_platform_settings; no nav_jwks — removed in #7544)",
+        "packages/plugins/plugin-auth/src/auth-plugin.ts#Providers (SSO Providers nav_sso_providers contributed only when isSsoWired())",
         "ADR-0048 (Setup/Studio/Account as one-app packages com.objectstack.{setup,studio,account}); ADR-0029 (nav contributions); ADR-0066 (sys_jwks private)"
       ],
       "history": [
@@ -717,13 +717,13 @@
       ],
       "traps": ["stale-console-bundle", "dispatcher-vs-hono-route"],
       "source": [
-        "packages/services/service-settings/src/settings-routes.ts (GET/PUT /api/settings, POST :ns/:actionId; 403 SETTINGS_FORBIDDEN / 409 SETTINGS_LOCKED / 400 SETTINGS_VALIDATION|UNKNOWN_KEY mapping; secure anonymous default)",
-        "packages/services/service-settings/src/settings-service.ts (cascade source default→scope; effectiveEnvOverride lock; encrypted→sys_secret handle via cryptoProvider+secretStore; validatePatch invalid_option)",
-        "packages/services/service-settings/src/settings-service-plugin.ts (verifiedContextFromRequest fail-closed; buildAuditWriter→sys_setting_audit; buildSecretStore→sys_secret; LocalCryptoProvider)",
-        "packages/services/service-settings/src/settings-service.types.ts (envKeyOf OS_<NAMESPACE>_<KEY>)",
+        "packages/services/service-settings/src/settings-routes.ts#actionId (GET/PUT /api/settings, POST :ns/:actionId; 403 SETTINGS_FORBIDDEN / 409 SETTINGS_LOCKED / 400 SETTINGS_VALIDATION|UNKNOWN_KEY mapping; secure anonymous default)",
+        "packages/services/service-settings/src/settings-service.ts#effectiveEnvOverride (cascade source default→scope; effectiveEnvOverride lock; encrypted→sys_secret handle via cryptoProvider+secretStore; validatePatch invalid_option)",
+        "packages/services/service-settings/src/settings-service-plugin.ts#verifiedContextFromRequest (verifiedContextFromRequest fail-closed; buildAuditWriter→sys_setting_audit; buildSecretStore→sys_secret; LocalCryptoProvider)",
+        "packages/services/service-settings/src/settings-service.types.ts#envKeyOf (envKeyOf OS_<NAMESPACE>_<KEY>)",
         "packages/services/service-settings/src/manifests/{localization,mail,ai,branding}.manifest.ts",
-        "packages/core/src/security/resolve-authz-context.ts (localization timezone/locale/currency → ExecutionContext — the observable consumer)",
-        "packages/services/service-settings/src/settings-secret-redaction.ts (SETTINGS_SECRET_MASK = eight U+2022 BULLETs; READ: set→mask, unset→null; WRITE: a submitted value equal to the mask means 'unchanged' and the key is DROPPED from the patch)",
+        "packages/core/src/security/resolve-authz-context.ts#locale (localization timezone/locale/currency → ExecutionContext — the observable consumer)",
+        "packages/services/service-settings/src/settings-secret-redaction.ts#SETTINGS_SECRET_MASK (SETTINGS_SECRET_MASK = eight U+2022 BULLETs; READ: set→mask, unset→null; WRITE: a submitted value equal to the mask means 'unchanged' and the key is DROPPED from the patch)",
         "packages/services/service-settings/src/settings-routes.test.ts (#7522 / PR #7554 — the ten route-level pins these secret clauses mirror rather than re-inventing)",
         "framework#5087 (a test action must not fake success), #5204 (env override enforcement)"
       ],
@@ -819,7 +819,7 @@
       ],
       "traps": ["dispatcher-vs-hono-route", "stale-console-bundle"],
       "source": [
-        "packages/runtime/src/route-ledger.ts (PATCH /packages/:id/enable|disable, DELETE /packages/:id, POST /packages/:id/publish|publish-drafts, GET /packages/:id/commits, POST /packages/:id/commits/:commitId/revert, POST /packages/:id/revert)",
+        "packages/runtime/src/route-ledger.ts#commitId (PATCH /packages/:id/enable|disable, DELETE /packages/:id, POST /packages/:id/publish|publish-drafts, GET /packages/:id/commits, POST /packages/:id/commits/:commitId/revert, POST /packages/:id/revert)",
         "platform-core.metadata-authoring-roundtrip (the writable probe package this reuses)",
         "ADR-0070 (writable vs read-only packages), ADR-0033 (drafts/publish/commits)"
       ],
@@ -913,7 +913,7 @@
         "objectui packages/app-shell/src/layout/inboxGrouping.ts (groupNotifications — (topic,title) coalescing, #2765)",
         "objectui packages/app-shell/src/layout/AppHeader.tsx (postMarkRead → POST /api/v1/notifications/read[/all]; poll GET /notifications?view=mine)",
         "packages/runtime/src/route-ledger.ts (GET /notifications, POST /notifications/read, POST /notifications/read/all)",
-        "packages/runtime/src/domains/notifications.ts (markRead upserts sys_notification_receipt; empty/mis-keyed ids → 400)",
+        "packages/runtime/src/domains/notifications.ts#markRead (markRead upserts sys_notification_receipt; empty/mis-keyed ids → 400)",
         "ADR-0030 (sys_inbox_message L5 materialization + sys_notification_receipt); ADR-0103 (receipt object api-method lockdown)"
       ],
       "history": [
@@ -1177,8 +1177,8 @@
         "ADR-0046 §6 (documentation spine), §6.2.1 (membership is DERIVED), §6.4 (implicit per-package book), §6.7 (read-layer audience gating)",
         "ADR-0090 (audience vocabulary)",
         "ADR-0049 (fail closed — unresolvable holdings deny)",
-        "packages/spec/src/system/book.zod.ts — audienceAllows / resolveDocAudiences / docAudienceAllows / resolveBookClaimedDocs / deriveImplicitPackageBook / resolveBookTree (UNCATEGORIZED_KEY exclusion)",
-        "packages/rest/src/rest-server.ts — GET <metaPath>/book/:name/tree (audience gate, per-entry filter, resolveDocLocale, refuseRepeatedQueryParams)",
+        "packages/spec/src/system/book.zod.ts#audienceAllows — audienceAllows / resolveDocAudiences / docAudienceAllows / resolveBookClaimedDocs / deriveImplicitPackageBook / resolveBookTree (UNCATEGORIZED_KEY exclusion)",
+        "packages/rest/src/rest-server.ts#metaPath — GET <metaPath>/book/:name/tree (audience gate, per-entry filter, resolveDocLocale, refuseRepeatedQueryParams)",
         "#2774 (feat(security)!: enforce book audience at the REST read layer)",
         "packages/spec/liveness/book.json + doc.json (the ledgers whose coverage.json waivers this item retires)"
       ],
@@ -1260,10 +1260,10 @@
       "traps": ["absence-inference", "stale-dist"],
       "automated": { "kind": "unit", "ref": "packages/runtime/src/migration-recovery-plugin.test.ts" },
       "source": [
-        "packages/runtime/src/migration-recovery-plugin.ts — kernel:ready hook; silent no-engine return; silent absent-journal return; scan-failure warning (string); per-run warns + NOT-resumed summary; describeInterruptedRun (unresumable variant); the boot-discovers/CLI-acts ruling in the header",
-        "packages/core/src/utils/migration-journal.ts — findInterruptedRuns (started ∧ ¬done; run_done concludes; a run_failed run fully compensated is settled)",
-        "packages/platform-objects/src/system/sys-migration-journal.object.ts (row contract, (run_id, seq) unique index, apiMethods get/list — registered by PlatformObjectsPlugin)",
-        "packages/cli/src/commands/serve.ts (PlatformObjectsPlugin auto-registered into every served kernel — which is why the absent-journal arm cannot be staged on a served boot; MigrationRecoveryPlugin itself is auto-registered NOWHERE)",
+        "packages/runtime/src/migration-recovery-plugin.ts#describeInterruptedRun — kernel:ready hook; silent no-engine return; silent absent-journal return; scan-failure warning (string); per-run warns + NOT-resumed summary; describeInterruptedRun (unresumable variant); the boot-discovers/CLI-acts ruling in the header",
+        "packages/core/src/utils/migration-journal.ts#findInterruptedRuns — findInterruptedRuns (started ∧ ¬done; run_done concludes; a run_failed run fully compensated is settled)",
+        "packages/platform-objects/src/system/sys-migration-journal.object.ts#run_id (row contract, (run_id, seq) unique index, apiMethods get/list — registered by PlatformObjectsPlugin)",
+        "packages/cli/src/commands/serve.ts#kernel (PlatformObjectsPlugin auto-registered into every served kernel — which is why the absent-journal arm cannot be staged on a served boot; MigrationRecoveryPlugin itself is auto-registered NOWHERE)",
         "packages/runtime/CHANGELOG.md 17.0.0, commit 071d0dc — 'boot reconciliation and os migrate resume for the migration journal' (ADR-0119 D2, #4617 deliverable 3)",
         "cli.migrate-plan-apply-json (the CLI side of the same journal — this item is the boot-side DETECTION that item's `os migrate resume --json` step presumes)"
       ],
@@ -1364,9 +1364,9 @@
         "eventual-consistency"
       ],
       "source": [
-        "packages/metadata-core/src/protocol-handshake.ts — resolveDeclaredRange (protocol → platform → legacy engine.objectstack); rangeAdmitsMajor (null = unrecognized, admit-with-warning); checkProtocolCompat (the OS_PROTOCOL_INCOMPATIBLE diagnostic and its migrateCommand); assertProtocolCompat (the four arms: ok silent, no-range warn, unparsed-range warn, incompatible throw)",
-        "packages/metadata-protocol/src/protocol.ts — namespace derivation for namespace-less runtime packages, then assertProtocolCompat(manifest) BEFORE registry.installPackage",
-        "packages/objectql/src/registry.ts — the ADR-0048 install-time namespace gate (shareable exemption, same-package exclusion, OS_METADATA_COLLISION=warn downgrade); NamespaceConflictError",
+        "packages/metadata-core/src/protocol-handshake.ts#resolveDeclaredRange — resolveDeclaredRange (protocol → platform → legacy engine.objectstack); rangeAdmitsMajor (null = unrecognized, admit-with-warning); checkProtocolCompat (the OS_PROTOCOL_INCOMPATIBLE diagnostic and its migrateCommand); assertProtocolCompat (the four arms: ok silent, no-range warn, unparsed-range warn, incompatible throw)",
+        "packages/metadata-protocol/src/protocol.ts#assertProtocolCompat — namespace derivation for namespace-less runtime packages, then assertProtocolCompat(manifest) BEFORE registry.installPackage",
+        "packages/objectql/src/registry.ts#NamespaceConflictError — the ADR-0048 install-time namespace gate (shareable exemption, same-package exclusion, OS_METADATA_COLLISION=warn downgrade); NamespaceConflictError",
         "ADR-0087 (metadata protocol upgrade contract) D1 · ADR-0048 (cross-package metadata collision) · ADR-0025 §3.10 #3 (protocol-first precedence)",
         "content/docs/releases/v15.mdx — 'ADR-0087 completed (#2972)': the handshake on boot-time durable rehydration and on code-defined AppPlugin loads, plus the objectstack lint nudge",
         "sibling items: api-backend.package-rest-lifecycle (the same install door, judged on its 201/409/PATCH contract rather than on the manifest gates) · cli.plugin-manifest-build-contract (the same manifest at the packaging boundary) · platform-core.package-lifecycle-enable-disable (what happens to a package after it installs)"
@@ -1451,10 +1451,10 @@
         "ref": "packages/qa/dogfood/test/packaged-activation-ledger-reach.dogfood.test.ts (both describes); packages/services/service-automation/src/activation-ledger-registration.test.ts (the negative half of the MOVE); packages/platform-objects/src/plugin.test.ts (the owning manifest + routing triple)"
       },
       "source": [
-        "packages/platform-objects/src/plugin.ts (the registration-home rationale — the measured 503; MOVE-not-add), (why the ledger rides its OWN manifest — the datasource-routing measurement), (ACTIVATION_LEDGER_MANIFEST), (the two register calls), (lean-kernel degradation: no manifest service → the door refuses loudly with 503 rather than keeping a bit that reverts)",
-        "packages/services/service-automation/src/plugin.ts (the flow leg attaches by probe() of the real table — runObjectRegistered no longer vouches for it; not attached on a failed probe)",
-        "packages/spec/src/system/constants/platform-object-names.ts (PLATFORM_OBJECTS_BY_PACKAGE receipt)",
-        "packages/verify/src/harness.ts (bootStack's automation option — how the no-automation composition is constructed)",
+        "packages/platform-objects/src/plugin.ts#ACTIVATION_LEDGER_MANIFEST (the registration-home rationale — the measured 503; MOVE-not-add), (why the ledger rides its OWN manifest — the datasource-routing measurement), (ACTIVATION_LEDGER_MANIFEST), (the two register calls), (lean-kernel degradation: no manifest service → the door refuses loudly with 503 rather than keeping a bit that reverts)",
+        "packages/services/service-automation/src/plugin.ts#runObjectRegistered (the flow leg attaches by probe() of the real table — runObjectRegistered no longer vouches for it; not attached on a failed probe)",
+        "packages/spec/src/system/constants/platform-object-names.ts#PLATFORM_OBJECTS_BY_PACKAGE (PLATFORM_OBJECTS_BY_PACKAGE receipt)",
+        "packages/verify/src/harness.ts#bootStack (bootStack's automation option — how the no-automation composition is constructed)",
         "docs/adr/0126-packaged-metadata-customization-model.md §4 (one generic activation ledger)",
         "#12438 (the scoped sweep this item lands from), #12419 (the registration-home PR), #12359 (the 503 measurement + the 2026-08-26 「同意」 ruling: registration follows the declaration)"
       ],
@@ -1552,11 +1552,11 @@
         "ref": "packages/objectql/src/action-activation.test.ts + packages/services/service-automation/src/flow-activation-ledger.test.ts (the store-level pins: org-row skip, 0-reads-as-false, update-not-delete, organization_id never in the write payload); packages/qa/dogfood/test/packaged-activation-ledger-reach.dogfood.test.ts (row shape + update-not-delete on a live boot)"
       },
       "source": [
-        "packages/platform-objects/src/system/sys-metadata-activation.object.ts — apiMethods ['get','list']; unique:'organization' NULL-collapsed index + the #5030 rationale; organization_id reserved-NULL; no-lifecycle ruling; what the object is NOT (§4 posture)",
-        "packages/core/src/utils/metadata-activation-store.ts — org-row skip on read (the wall); read-then-write setActive, organization_id never in the payload; delete-less engine slice; 0-reads-as-false",
-        "packages/runtime/src/api-exposure.ts (checkApiExposure — the 405 shape for a whitelisted-methods object)",
+        "packages/platform-objects/src/system/sys-metadata-activation.object.ts#apiMethods — apiMethods ['get','list']; unique:'organization' NULL-collapsed index + the #5030 rationale; organization_id reserved-NULL; no-lifecycle ruling; what the object is NOT (§4 posture)",
+        "packages/core/src/utils/metadata-activation-store.ts#setActive — org-row skip on read (the wall); read-then-write setActive, organization_id never in the payload; delete-less engine slice; 0-reads-as-false",
+        "packages/runtime/src/api-exposure.ts#checkApiExposure (checkApiExposure — the 405 shape for a whitelisted-methods object)",
         "packages/services/service-automation/src/flow-activation-store.ts + packages/objectql/src/action-activation.ts (the two metadata_type string literals — the whole live vocabulary)",
-        "packages/objectql/src/engine.ts (listDisabledActions — zero route consumers; the data-API read is the only operability surface)",
+        "packages/objectql/src/engine.ts#listDisabledActions (listDisabledActions — zero route consumers; the data-API read is the only operability surface)",
         "docs/adr/0126-packaged-metadata-customization-model.md §3 (scope wall + amendment ruling 1), §4 (row contract), §5 (org column reserved), §6 wall 3 (record the choice, never erase it)",
         "#12438 (the scoped sweep), #12419 (registration home — the sibling item), #12159 (the permission-rides-its-own-field ruling, 2026-08-26)"
       ],
@@ -1623,10 +1623,10 @@
       ],
       "traps": ["dispatcher-vs-hono-route", "cache-staleness"],
       "source": [
-        "examples/app-showcase/src/data/extensions/account.extension.ts (AccountExtension — the shipped fixture, priority 210)",
-        "packages/objectql/src/registry.ts (mergeObjectDefinitions — additive fields fold, the spread) + vicinity via engine: packages/objectql/src/engine.ts (the objectExtensions loop registering 'extend' contributors)",
-        "packages/spec/src/data/object.zod.ts (ObjectExtensionSchema — what an extension may carry, the #4001 silently-dropped history, 'Fields to add/override', priority wins-on-conflict; defineObjectExtension)",
-        "packages/metadata-protocol/src/protocol.ts (the NOT_OVERRIDABLE refusal text and escape hatch)",
+        "examples/app-showcase/src/data/extensions/account.extension.ts#AccountExtension (AccountExtension — the shipped fixture, priority 210)",
+        "packages/objectql/src/registry.ts#mergeObjectDefinitions (mergeObjectDefinitions — additive fields fold, the spread) + vicinity via engine: packages/objectql/src/engine.ts#objectExtensions (the objectExtensions loop registering 'extend' contributors)",
+        "packages/spec/src/data/object.zod.ts#ObjectExtensionSchema (ObjectExtensionSchema — what an extension may carry, the #4001 silently-dropped history, 'Fields to add/override', priority wins-on-conflict; defineObjectExtension)",
+        "packages/metadata-protocol/src/protocol.ts#refusal (the NOT_OVERRIDABLE refusal text and escape hatch)",
         "packages/plugins/plugin-auth/src/managed-extension-fields.ts + managed-extension-fields.test.ts (the build-time collision gate — better-auth-managed objects ONLY; adopted by ADR-0126 §3 as Regime E prior art, NOT a generic gate)",
         "docs/adr/0126-packaged-metadata-customization-model.md §2-§3 (Regime E: additive contributions at package grain, base never edited, install-grain not per-org)",
         "content/docs/capabilities/integrations.mdx + content/docs/build-without-code.mdx (the E1 docs claim this item grounds)",
@@ -1734,10 +1734,10 @@
       ],
       "traps": ["dispatcher-vs-hono-route", "absence-inference", "destructive-in-place", "wrong-persona", "auth-state-leak"],
       "source": [
-        "packages/cli/src/commands/serve.ts (planMarketplaceWiring — the pure wiring decision; cloud arm vs offline arm, host-composed instances never replaced), (INSTALL_LOCAL/RUNTIME_CONFIG/MARKETPLACE_PROXY/CLOUD_CONNECTION identities + RUNTIME_CONFIG_OPTIONS + OFFLINE_CONTROL_PLANE and why '' vs 'off' must differ), (the §5 wiring block: #8343 install-local deliberately NOT gated on a cloud URL; #8389 offline runtime-config mount)",
-        "packages/cloud-connection/src/marketplace-install-local-plugin.ts (header contract; INSTALL_LOCAL_CAPABILITY = manage_metadata with the #8976 rationale; reseed/purge mounts; purge semantics; rehydrate skip on sampleDataPurged)",
+        "packages/cli/src/commands/serve.ts#planMarketplaceWiring (planMarketplaceWiring — the pure wiring decision; cloud arm vs offline arm, host-composed instances never replaced), (INSTALL_LOCAL/RUNTIME_CONFIG/MARKETPLACE_PROXY/CLOUD_CONNECTION identities + RUNTIME_CONFIG_OPTIONS + OFFLINE_CONTROL_PLANE and why '' vs 'off' must differ), (the §5 wiring block: #8343 install-local deliberately NOT gated on a cloud URL; #8389 offline runtime-config mount)",
+        "packages/cloud-connection/src/marketplace-install-local-plugin.ts#INSTALL_LOCAL_CAPABILITY (header contract; INSTALL_LOCAL_CAPABILITY = manage_metadata with the #8976 rationale; reseed/purge mounts; purge semantics; rehydrate skip on sampleDataPurged)",
         "packages/cloud-connection/src/cloud-connection-route-ledger.ts (the five install-local rows: POST/GET/DELETE + reseed-sample-data + purge-sample-data, each with its gate stated), the marketplace-proxy passthrough row, and the runtime-config rows",
-        "packages/cli/src/commands/package/install.ts (inline artifact mode), (the POST to /api/v1/marketplace/install-local), (the 401 remedy)",
+        "packages/cli/src/commands/package/install.ts#artifact (inline artifact mode), (the POST to /api/v1/marketplace/install-local), (the 401 remedy)",
         "#8343 (install-local off the cloud gate), #8389 (offline runtime-config discovery), #8356 (features.marketplace derived), #8388 (features.installLocal derived), #8976 (manage_metadata gate), #9011 (per-principal projection)"
       ],
       "history": [
@@ -1820,8 +1820,8 @@
       "traps": ["stale-console-bundle", "hydration-race", "absence-inference", "wrong-persona"],
       "source": [
         "objectui packages/app-shell/src/console/marketplace/MarketplaceDisabled.tsx (the configuration-conclusion card, #5504 — its header states the whole design rationale), MarketplaceAccessDenied.tsx + MarketplacePackagePage.tsx and MarketplacePage.tsx (guard/disabled resolution order, #5583), MarketplaceResolving.tsx (the no-flash window, #5533/#5557), marketplaceApi.ts (isMarketplaceEnabled reads the server-pushed runtime config, never infers from failure)",
-        "packages/cloud-connection/src/marketplace-ui.ts (MARKETPLACE_BROWSE_UI_BUNDLE → nav_marketplace_browse owned by the proxy; MARKETPLACE_INSTALLED_UI_BUNDLE → nav_marketplace_installed + the marketplace_installed page owned by install-local)",
-        "packages/cloud-connection/src/cloud-connection-ui.ts (CLOUD_CONNECTION_NAV_CONTRIBUTIONS → nav_cloud_connection)",
+        "packages/cloud-connection/src/marketplace-ui.ts#MARKETPLACE_BROWSE_UI_BUNDLE (MARKETPLACE_BROWSE_UI_BUNDLE → nav_marketplace_browse owned by the proxy; MARKETPLACE_INSTALLED_UI_BUNDLE → nav_marketplace_installed + the marketplace_installed page owned by install-local)",
+        "packages/cloud-connection/src/cloud-connection-ui.ts#CLOUD_CONNECTION_NAV_CONTRIBUTIONS (CLOUD_CONNECTION_NAV_CONTRIBUTIONS → nav_cloud_connection)",
         "objectui apps/console/src/AppContent.tsx (marketplace routes registered by DefaultAppContent for every host)",
         "platform-core.marketplace-install-local-lifecycle (the api-lane sibling this item's wire captures delegate their effects to)"
       ],
@@ -1891,9 +1891,9 @@
       ],
       "traps": ["dispatcher-vs-hono-route", "absence-inference", "cache-staleness"],
       "source": [
-        "packages/cloud-connection/src/runtime-config-plugin.ts (the payload contract in the header; features.marketplace derived from the live route table #8356+; features.installLocal derived with the option as ceiling #8388+; branding key resolution; telemetry.errorReporting #12681)",
+        "packages/cloud-connection/src/runtime-config-plugin.ts#installLocal (the payload contract in the header; features.marketplace derived from the live route table #8356+; features.installLocal derived with the option as ceiling #8388+; branding key resolution; telemetry.errorReporting #12681)",
         "packages/cloud-connection/src/cloud-connection-route-ledger.ts (both runtime-config rows: the anonymous-by-construction posture and why the alias is its own row)",
-        "packages/cli/src/commands/serve.ts (RuntimeConfigPlugin mounted on the cloud arm AND the offline arm — #8389; RUNTIME_CONFIG_OPTIONS shared by both on purpose so the arms differ only in what is mounted)",
+        "packages/cli/src/commands/serve.ts#RUNTIME_CONFIG_OPTIONS (RuntimeConfigPlugin mounted on the cloud arm AND the offline arm — #8389; RUNTIME_CONFIG_OPTIONS shared by both on purpose so the arms differ only in what is mounted)",
         "platform-core.marketplace-install-local-lifecycle (owns the flag-vs-route-table agreement; this item owns the route/alias/payload-hygiene contract)",
         "api-backend.route-ledger-live-parity (samples GET /api/v1/runtime/config only for raw-app MOUNT parity and defers the marketplace/runtime-config depth to platform-core by its own words — the split is deliberate on both sides)"
       ],
@@ -2163,7 +2163,7 @@
         "objectui packages/app-shell/src/context/CommandPaletteProvider.tsx (⌘/Ctrl+K — wired)",
         "objectui packages/components/src/ui/sidebar.tsx (SIDEBAR_KEYBOARD_SHORTCUT = 'b'), (the handler requires metaKey||ctrlKey — the source of the B-vs-⌘B display mismatch)",
         "objectui packages/app-shell/src/layout/chatDockState.ts (matchChatDockShortcut — ⌘/Ctrl+Shift+I, composer-safe)",
-        "objectui packages/app-shell/src/console/ai/AiChatPage.tsx:~605-615 (matchAiChatShortcut — ⌘⇧O/⌘⇧S, PAGE-scoped)",
+        "objectui packages/app-shell/src/console/ai/AiChatPage.tsx (matchAiChatShortcut — ⌘⇧O/⌘⇧S, PAGE-scoped)",
         "repo-grep evidence for the five dead accelerators: no handler for ⌘/ / N / R / ⌘E / ⌘D anywhere in app-shell, console or components (the only near-misses are page-scoped: ApprovalsInboxPage's plain `r` quick-decide and useDebugMode's Ctrl+Shift+D — neither matches an advertised accelerator)"
       ],
       "history": [
@@ -2354,11 +2354,11 @@
         "ref": "packages/objectql/src/lifecycle/lifecycle-service.test.ts (archive-pending skip, bounded reap, rotation fallback, governance)"
       },
       "source": [
-        "packages/objectql/src/lifecycle/lifecycle-service.ts (the ADR-0057 enforcer: header contract — reaper/rotator/archiver, the never-hot-delete-unarchived safety rule, #5194 bounds; SYSTEM_CTX; DEFAULT_LIFECYCLE_SWEEP_MS 3_600_000; DEFAULT_LIFECYCLE_INITIAL_DELAY_MS 60_000; REAP_BATCH_SIZE 500 / REAP_MAX_BATCHES_PER_SWEEP 20; enabled getter incl. OS_LIFECYCLE_DISABLED; start()/timer; archive safety; the aggregate sweep line)",
-        "packages/objectql/src/plugin.ts (registered as service 'lifecycle' by the engine plugin — every kernel with data has enforcement; a declared retention driving no sweeper is ADR-0049 dead surface), (armed at start), (#4747 disarm on destroy)",
-        "packages/objectql/src/engine.ts (SYSTEM_LEDGER_LIFECYCLE_CLASSES = audit|telemetry|event; transient deliberately absent) + the getDriver §3.6 class-routing priority note",
-        "packages/spec/src/data/object.zod.ts (LifecycleClassSchema, 5 members)",
-        "packages/services/service-automation/src/sys-automation-run.object.ts (telemetry 30d onlyWhen terminal — the MIXED-table rationale in its own comment), packages/plugins/plugin-audit/src/objects/sys-audit-log.object.ts (archive 90d/7y + the never-hot-delete note), packages/services/service-messaging/src/objects/inbox-message.object.ts (transient), http-delivery.object.ts (telemetry)",
+        "packages/objectql/src/lifecycle/lifecycle-service.ts#SYSTEM_CTX (the ADR-0057 enforcer: header contract — reaper/rotator/archiver, the never-hot-delete-unarchived safety rule, #5194 bounds; SYSTEM_CTX; DEFAULT_LIFECYCLE_SWEEP_MS 3_600_000; DEFAULT_LIFECYCLE_INITIAL_DELAY_MS 60_000; REAP_BATCH_SIZE 500 / REAP_MAX_BATCHES_PER_SWEEP 20; enabled getter incl. OS_LIFECYCLE_DISABLED; start()/timer; archive safety; the aggregate sweep line)",
+        "packages/objectql/src/plugin.ts#registered (registered as service 'lifecycle' by the engine plugin — every kernel with data has enforcement; a declared retention driving no sweeper is ADR-0049 dead surface), (armed at start), (#4747 disarm on destroy)",
+        "packages/objectql/src/engine.ts#SYSTEM_LEDGER_LIFECYCLE_CLASSES (SYSTEM_LEDGER_LIFECYCLE_CLASSES = audit|telemetry|event; transient deliberately absent) + the getDriver §3.6 class-routing priority note",
+        "packages/spec/src/data/object.zod.ts#LifecycleClassSchema (LifecycleClassSchema, 5 members)",
+        "packages/services/service-automation/src/sys-automation-run.object.ts#onlyWhen (telemetry 30d onlyWhen terminal — the MIXED-table rationale in its own comment), packages/plugins/plugin-audit/src/objects/sys-audit-log.object.ts (archive 90d/7y + the never-hot-delete note), packages/services/service-messaging/src/objects/inbox-message.object.ts (transient), http-delivery.object.ts (telemetry)",
         "ADR-0057 (§3.3 single enforcer, system context, isolation; §3.6 class separation), #5194 (bounded reap), #2834 (the automation-run declaration)"
       ],
       "history": [
@@ -2458,12 +2458,12 @@
       },
       "traps": ["destructive-in-place", "seed-data-thin", "silent-coercion"],
       "source": [
-        "packages/spec/src/data/seed.zod.ts (SeedMode — the five modes with their declared semantics, incl. replace's 'Delete ALL records … Dangerous' claim)",
-        "packages/metadata-protocol/src/seed-loader.ts (mode = dataset.mode || config.defaultMode), (existing-records preload for upsert/update/ignore ONLY — insert/replace never match), (writeRecord per-mode switch; the replace arm's bare insert + 'caller should have cleared the table' comment), (decideWriteAction — the batched mirror, replace → insert),+ (isNoOpReplay — seed-declared fields only, conservative on doubt)",
-        "packages/spec/src/data/seed-loader.zod.ts (defaultMode default 'upsert')",
-        "packages/metadata-protocol/src/protocol.ts+ (applySeedBodies — published seed bodies materialize through the same loader; failures returned, never thrown, surfaced as seedApplied)",
-        "packages/runtime/src/seed-loader.ts (the MOVED shim — one SeedLoaderService for every path)",
-        "packages/spec/src/kernel/metadata-plugin.zod.ts (seed: allowRuntimeCreate true — the scratch-draft fixture path)",
+        "packages/spec/src/data/seed.zod.ts#SeedMode (SeedMode — the five modes with their declared semantics, incl. replace's 'Delete ALL records … Dangerous' claim)",
+        "packages/metadata-protocol/src/seed-loader.ts#writeRecord (mode = dataset.mode || config.defaultMode), (existing-records preload for upsert/update/ignore ONLY — insert/replace never match), (writeRecord per-mode switch; the replace arm's bare insert + 'caller should have cleared the table' comment), (decideWriteAction — the batched mirror, replace → insert),+ (isNoOpReplay — seed-declared fields only, conservative on doubt)",
+        "packages/spec/src/data/seed-loader.zod.ts#defaultMode (defaultMode default 'upsert')",
+        "packages/metadata-protocol/src/protocol.ts#applySeedBodies+ (applySeedBodies — published seed bodies materialize through the same loader; failures returned, never thrown, surfaced as seedApplied)",
+        "packages/runtime/src/seed-loader.ts#SeedLoaderService (the MOVED shim — one SeedLoaderService for every path)",
+        "packages/spec/src/kernel/metadata-plugin.zod.ts#allowRuntimeCreate (seed: allowRuntimeCreate true — the scratch-draft fixture path)",
         "platform-core.seed-integrity (owns the stock boot-seed baselines this item must not contaminate)"
       ],
       "history": [

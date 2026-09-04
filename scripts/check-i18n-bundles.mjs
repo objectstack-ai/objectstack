@@ -124,11 +124,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'Fourth classifier (#7681): the OTHER prerequisite — a workspace package this': 24,
   'Fifth classifier (#11647): the POPULATION — is there anything to grade, and': 11,
   'The other cause, and the reason `=== 0` alone is not the whole condition: a': 8,
+  'The prerequisite refusal CLASS, and the advisory that names it (#14857).': 14,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 4;
+const SELF_TEST_BATTERY_FLOOR = 5;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -986,6 +987,98 @@ function selfTest() {
   const longWalkError = unreadablePopulationDetail(new Error('E'.repeat(400))).join('\n');
   expect('#11647 long walk errors are truncated', longWalkError.includes(`${'E'.repeat(160)}…`), 'a 400-char message must not be pasted whole');
 
+  // ── The refusal CLASS, and the advisory that must move with it (#14857) ──
+  //
+  // `reportPrerequisiteNotMet` is the only site that answers this gate's
+  // "nothing was checked" words — five call sites, one printer — and until it
+  // was split into a pure text function there was no VALUE to assert on: the
+  // string was built inline inside `console.error(...)` and the code was typed
+  // into the `process.exit` on the next line. So the number PR #14856 moved
+  // from 1 to 3 was pinned here by nothing, while four sibling gates pin it.
+  //
+  // ⛔ The classifier batteries above are NOT this coverage: they decide WHICH
+  // verdict fires and stay green whatever number the printer beside them
+  // returns.
+  //
+  // Both `scanned` branches are rendered, because the in-loop net's wording is
+  // a second copy of the closing paragraph and could drift on its own.
+  battery('The prerequisite refusal CLASS, and the advisory that names it (#14857).');
+
+  const REFUSAL_ADVISORIES = [
+    ['pre-loop probe (scanned 0)', prerequisiteNotMetText('the CLI is not built', ['probe detail'])],
+    ['in-loop net (scanned > 0)', prerequisiteNotMetText('a workspace package is stale', ['probe detail'], { scanned: 4 })],
+  ];
+
+  expect(
+    'the refusal class is 3 — the code the four sibling gates answer these words with',
+    EXIT_PREREQUISITE_NOT_MET === 3,
+    String(EXIT_PREREQUISITE_NOT_MET),
+  );
+  expect(
+    'the refusal class is distinct from a finding and from a pass',
+    EXIT_PREREQUISITE_NOT_MET !== EXIT_FINDINGS && EXIT_PREREQUISITE_NOT_MET !== 0,
+    `prerequisite ${EXIT_PREREQUISITE_NOT_MET}, finding ${EXIT_FINDINGS}`,
+  );
+
+  // Pinned over the FUNCTION BODIES, not over the constant alone. The
+  // regression that costs something is not a mistyped constant: it is a
+  // `process.exit(1)` written back into the refusal by an author who never
+  // thought about exit codes, or a number typed into the advisory instead of
+  // interpolated. Either leaves the constant reading 3, every consumer green
+  // (they all treat any non-zero as failure), and a message that still reads
+  // perfectly right.
+  const hardcodesExitCall = (fn) => /process\.exit\(\s*\d/.test(fn.toString());
+  const spellsALiteralCode = (fn) => /Exit code \d/.test(fn.toString());
+  expect(
+    'the refusal exits through the named constant, never a literal',
+    !hardcodesExitCall(reportPrerequisiteNotMet),
+    reportPrerequisiteNotMet.toString(),
+  );
+  // The seam the advisory cases depend on: a text pinned here is worthless if
+  // the printer stops printing THIS text.
+  expect(
+    'the printer prints the pinned text function',
+    /console\.error\(\s*prerequisiteNotMetText\(/.test(reportPrerequisiteNotMet.toString()),
+    reportPrerequisiteNotMet.toString(),
+  );
+  expect(
+    'the advisory INTERPOLATES the code rather than spelling one',
+    !spellsALiteralCode(prerequisiteNotMetText),
+    prerequisiteNotMetText.toString(),
+  );
+  for (const [label, advisory] of REFUSAL_ADVISORIES) {
+    expect(
+      `${label}: the advisory names its own code AND the finding code it is distinct from`,
+      advisory.includes(`Exit code ${EXIT_PREREQUISITE_NOT_MET}`) && advisory.includes(`a finding's ${EXIT_FINDINGS}`),
+      advisory,
+    );
+    expect(
+      `${label}: the advisory carries NO stale spelling of the old code`,
+      !/Exit code 1\b/.test(advisory),
+      advisory,
+    );
+    expect(
+      `${label}: the advisory still states that nothing was checked or judged`,
+      /Nothing was (checked|judged)/.test(advisory),
+      advisory,
+    );
+  }
+
+  // The NEGATIVE CONTROLS, and the reason the predicates above are
+  // measurements rather than tautologies: each is run against a function that
+  // does the forbidden thing and must SEE it. Without these, one typo in either
+  // regex passes forever — a pin that cannot fail is not a pin. ⛔ Neither
+  // control is ever CALLED; they exist to be read by `toString()`.
+  const controlHardcodedExit = () => { process.exit(1); };
+  const controlLiteralAdvisory = () => `  (Exit code 1, distinct from a finding's 1 — capture it BEFORE any pipe:`;
+  expect('NEGATIVE CONTROL: the literal-exit pin can still fail', hardcodesExitCall(controlHardcodedExit), 'the predicate no longer sees a hard-coded exit');
+  expect('NEGATIVE CONTROL: the literal-advisory pin can still fail', spellsALiteralCode(controlLiteralAdvisory), 'the predicate no longer sees a spelled-out code');
+  expect(
+    'NEGATIVE CONTROL: the stale-code pin can still fail',
+    /Exit code 1\b/.test(controlLiteralAdvisory()),
+    'the stale-spelling predicate no longer sees `Exit code 1`',
+  );
+
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so
@@ -1038,8 +1131,10 @@ function selfTest() {
   console.log(
     '✓ check:i18n --self-test — bundle-drift, undeclared-authoring-key, missing-CLI-build, ' +
       'stale-workspace-dist and empty-population classifiers all go red, and stay distinct; ' +
-      'the population walk is CWD-independent; and the build-prerequisite closure names every ' +
-      'package this gate extracts plus the CLI, refusing whole rather than naming some.',
+      'the population walk is CWD-independent; the build-prerequisite closure names every ' +
+      'package this gate extracts plus the CLI, refusing whole rather than naming some; and the ' +
+      `refusal exits ${EXIT_PREREQUISITE_NOT_MET} — distinct from a finding's ${EXIT_FINDINGS} — with ` +
+      'an advisory that names the number it claims, in both `scanned` branches (#14857).',
   );
 
   return SELF_TEST_VERDICT;
@@ -1091,6 +1186,23 @@ if (process.argv.includes('--self-test')) {
  * @param {{ fix?: string, alsoFix?: string[], scanned?: number }} [options]
  */
 function reportPrerequisiteNotMet(headline, detail, options = {}) {
+  console.error(prerequisiteNotMetText(headline, detail, options));
+  process.exit(EXIT_PREREQUISITE_NOT_MET);
+}
+
+/**
+ * The text `reportPrerequisiteNotMet` prints, as a value — so `--self-test` can
+ * assert on the advisory (and on the code it names) without spawning a process
+ * or stubbing `process.exit`. The extraction is the whole point: while the
+ * string was built inline inside `console.error(...)`, there was no value for a
+ * test to read, so the number this gate answers `PREREQUISITE NOT MET` with was
+ * pinned by nothing (#14857). Same shape as `import-prerequisite.mjs`'s
+ * `prerequisiteNotMetText` and the three sibling gates that followed it.
+ *
+ * Both `scanned` branches render here, so both are reachable from the pin — the
+ * in-loop net's wording is not a second, unobserved copy of the advisory.
+ */
+function prerequisiteNotMetText(headline, detail, options = {}) {
   const { fix = CLI_BUILD_FIX, alsoFix = [], scanned = 0 } = options;
   const nothingChecked =
     scanned === 0
@@ -1100,7 +1212,7 @@ function reportPrerequisiteNotMet(headline, detail, options = {}) {
         `  packages after it were never attempted, and the ${scanned} attempted before it read the\n` +
         `  same unbuilt output — an "in sync" line above is not a clean bill. So this\n` +
         `  result says NOTHING about whether the committed translation bundles are in sync.`;
-  console.error(
+  return (
     `\ncheck-i18n-bundles: PREREQUISITE NOT MET — ${headline}\n\n` +
       detail.map((l) => (l ? `  ${l}` : '')).join('\n') +
       `\n\n  Fix:  ${fix}\n` +
@@ -1112,9 +1224,8 @@ function reportPrerequisiteNotMet(headline, detail, options = {}) {
       `  is the false green, and no pipe shape repairs it. \`\${PIPESTATUS[0]}\`/\`pipefail\` do recover\n` +
       `  this gate's own code: \`| tail\` reads to EOF and forwards it, while \`| head -N\` closes the\n` +
       `  read end early — the gate takes EPIPE, its verdict text is TRUNCATED, and a producer that\n` +
-      `  dies on SIGPIPE reports 141 rather than what it meant to say.)`,
+      `  dies on SIGPIPE reports 141 rather than what it meant to say.)`
   );
-  process.exit(EXIT_PREREQUISITE_NOT_MET);
 }
 
 /**

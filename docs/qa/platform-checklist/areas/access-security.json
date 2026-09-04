@@ -200,8 +200,8 @@
         "release-15.1 plan §A1–A4",
         "#3106",
         "#5126",
-        "examples/app-showcase/src/data/objects/contact.object.ts (lead_score)",
-        "examples/app-showcase/src/data/objects/invoice.object.ts (readonlyWhen)"
+        "examples/app-showcase/src/data/objects/contact.object.ts#lead_score (lead_score)",
+        "examples/app-showcase/src/data/objects/invoice.object.ts#readonlyWhen (readonlyWhen)"
       ],
       "history": [
         {
@@ -370,7 +370,7 @@
         "#3358 §5",
         "packages/spec/src/api/error-code-ledger.zod.ts (@objectstack/metadata-protocol codes)",
         "ADR-0010 §3.3 (_lock)",
-        "packages/runtime/src/domains/packages.ts (POST /packages/:id/duplicate — ADR-0070 D4 'duplicate base', the writable-target route)",
+        "packages/runtime/src/domains/packages.ts#packages (POST /packages/:id/duplicate — ADR-0070 D4 'duplicate base', the writable-target route)",
         "docs/adr/0070-package-first-authoring.md §D4 ('clone a base into a new writable package')"
       ],
       "history": [
@@ -610,7 +610,7 @@
       ],
       "source": [
         "packages/spec/src/security/sharing.zod.ts (the four-model enum — variant source)",
-        "examples/app-showcase/access-matrix.json (sharingModel column)",
+        "examples/app-showcase/access-matrix.json#sharingModel (sharingModel column)",
         "ADR-0055",
         "authz-conformance.matrix.ts rows owd-private / owd-public-read / controlled-by-parent",
         "cross-ref access-security.rls-both-sides clause 5 — canonical home of the private D11 expected-fail probe (#7637, #7463 ruling)"
@@ -819,7 +819,7 @@
       ],
       "source": [
         "examples/app-showcase/src/security/permission-sets.ts (ADR-0057 D1 dials)",
-        "examples/app-showcase/access-matrix.json (readScope/writeScope columns — variant source)",
+        "examples/app-showcase/access-matrix.json#readScope (readScope/writeScope columns — variant source)",
         "ADR-0057 D1"
       ],
       "history": [
@@ -1110,11 +1110,11 @@
         "wrong-persona"
       ],
       "source": [
-        "packages/rest/src/rest-route-ledger.ts (record-shares family: GET/POST /data/:object/:id/shares, DELETE .../:shareId; sharing-rules family evaluate)",
-        "packages/rest/src/rest-server.ts (registerRecordShareEndpoints ~L7246-7331; registerSharingRuleEndpoints evaluate ~L7477-7493)",
-        "packages/plugins/plugin-sharing/src/objects/sys-record-share.object.ts (recipient_type/recipient_id/access_level/source fields)",
-        "packages/plugins/plugin-sharing/src/sharing-rule-service.ts (evaluateRule → SharingRuleEvaluationResult)",
-        "examples/app-showcase/src/security/sharing-rules.ts (share_key_account_qualified_contacts_with_managers seeded criteria rule)",
+        "packages/rest/src/rest-route-ledger.ts#shareId (record-shares family: GET/POST /data/:object/:id/shares, DELETE .../:shareId; sharing-rules family evaluate)",
+        "packages/rest/src/rest-server.ts#registerSharingRuleEndpoints (the evaluate leg; the record-shares family GET/POST /data/:object/:id/shares + DELETE .../:shareId is registered inline, under no registrar of its own — #13788 measured that the registerRecordShareEndpoints this citation used to name is not in the file)",
+        "packages/plugins/plugin-sharing/src/objects/sys-record-share.object.ts#recipient_type (recipient_type/recipient_id/access_level/source fields)",
+        "packages/plugins/plugin-sharing/src/sharing-rule-service.ts#evaluateRule (evaluateRule → SharingRuleEvaluationResult)",
+        "examples/app-showcase/src/security/sharing-rules.ts#share_key_account_qualified_contacts_with_managers (share_key_account_qualified_contacts_with_managers seeded criteria rule)",
         "ADR-0111 D1/D4/D5"
       ],
       "history": [
@@ -1221,8 +1221,8 @@
         "stale-console-bundle"
       ],
       "source": [
-        "packages/plugins/plugin-audit/src/objects/sys-audit-log.object.ts (action enum, actor/user_id/object_name/record_id/old_value/new_value fields, enable.apiMethods get+list)",
-        "packages/plugins/plugin-audit/src/audit-plugin.ts (nav_audit_logs → sys_audit_log)",
+        "packages/plugins/plugin-audit/src/objects/sys-audit-log.object.ts#user_id (action enum, actor/user_id/object_name/record_id/old_value/new_value fields, enable.apiMethods get+list)",
+        "packages/plugins/plugin-audit/src/audit-plugin.ts#nav_audit_logs (nav_audit_logs → sys_audit_log)",
         "objectui apps/console/src/pages/system/AuditLogPage.tsx (/api/v1/data/sys_audit_log, $filter/$orderby/$top/$skip, Before/After drawer)",
         "objectui apps/console/src/AppContent.tsx (route system/audit-log)"
       ],
@@ -1320,10 +1320,10 @@
         "hydration-race"
       ],
       "source": [
-        "packages/plugins/plugin-security/src/object-posture-gate.ts (R1 owd_widening_forbidden / R2 owd_external_wider, 403)",
-        "packages/lint/src/validate-security-posture.ts (OWD_WIDTH + SECURITY_EXTERNAL_WIDER lint parity)",
+        "packages/plugins/plugin-security/src/object-posture-gate.ts#owd_widening_forbidden (R1 owd_widening_forbidden / R2 owd_external_wider, 403)",
+        "packages/lint/src/validate-security-posture.ts#OWD_WIDTH (OWD_WIDTH + SECURITY_EXTERNAL_WIDER lint parity)",
         "objectui packages/app-shell/src/views/studio-design/owd-sharing.ts (isExternalWider) + PackageOwdOverviewPanel.tsx + ObjectSettingsPanel.tsx",
-        "examples/app-showcase/src/data/objects/announcement.object.ts + account.object.ts (externalSharingModel declarations)",
+        "examples/app-showcase/src/data/objects/announcement.object.ts#externalSharingModel + account.object.ts (externalSharingModel declarations)",
         "ADR-0090 D11, ADR-0086 D1, ADR-0124 D1, #3050, objectui#2508"
       ],
       "history": [
@@ -1421,11 +1421,11 @@
         "stale-console-bundle"
       ],
       "source": [
-        "examples/app-showcase/src/ui/views/inquiry.view.ts (formViews.contact: allowAnonymous, publicLink '/forms/contact-us', whitelist, submitBehavior)",
-        "examples/app-showcase/src/data/objects/inquiry.object.ts (sharingModel private, publicFormGrant docblock, server-controlled status/source)",
+        "examples/app-showcase/src/ui/views/inquiry.view.ts#formViews (formViews.contact: allowAnonymous, publicLink '/forms/contact-us', whitelist, submitBehavior)",
+        "examples/app-showcase/src/data/objects/inquiry.object.ts#sharingModel (sharingModel private, publicFormGrant docblock, server-controlled status/source)",
         "examples/app-showcase/src/data/hooks/index.ts (guest-defaults stamping)",
         "packages/rest/src/rest-route-ledger.ts (forms family: GET /forms/:slug, POST /forms/:slug/submit, GET /forms/:slug/lookup/:field)",
-        "packages/rest/src/public-form-routes.test.ts (#3022 anchor-enforcement: whitelist strip, __proto__ guard, publicFormGrant, LOOKUP_NOT_PUBLIC)",
+        "packages/rest/src/public-form-routes.test.ts#__proto__ (#3022 anchor-enforcement: whitelist strip, __proto__ guard, publicFormGrant, LOOKUP_NOT_PUBLIC)",
         "ADR-0056 Option A, #3022/#3036/#3004"
       ],
       "history": [
@@ -1528,8 +1528,8 @@
         "wrong-persona"
       ],
       "source": [
-        "packages/runtime/src/domains/share-links.ts (resolve/create/list/revoke; 401 NEEDS_PASSWORD/WRONG_PASSWORD/SIGN_IN_REQUIRED, 410 EXPIRED_OR_REVOKED/RECORD_GONE, applyRedaction)",
-        "packages/plugins/plugin-sharing/src/share-link-service.ts (getPolicy publicSharing gate → 422 SHARING_NOT_ENABLED, resolveToken audience/password/expiry, #5190 recordStillExists fail-closed, list createdBy scoping)",
+        "packages/runtime/src/domains/share-links.ts#WRONG_PASSWORD (resolve/create/list/revoke; 401 NEEDS_PASSWORD/WRONG_PASSWORD/SIGN_IN_REQUIRED, 410 EXPIRED_OR_REVOKED/RECORD_GONE, applyRedaction)",
+        "packages/plugins/plugin-sharing/src/share-link-service.ts#getPolicy (getPolicy publicSharing gate → 422 SHARING_NOT_ENABLED, resolveToken audience/password/expiry, #5190 recordStillExists fail-closed, list createdBy scoping)",
         "packages/runtime/src/route-ledger.ts (share-links rows incl. public resolve/messages)",
         "packages/plugins/plugin-sharing/src/objects/sys-share-link.object.ts",
         "ADR-0047, ADR-0111 D8, #5190",
@@ -1645,7 +1645,7 @@
       ],
       "source": [
         "packages/runtime/src/domains/security.ts (GET list / POST :id/confirm|dismiss; 400 unknown-status, 401 anon, 403/404/409 typed-error mapping)",
-        "packages/plugins/plugin-security/src/suggested-audience-bindings.ts (syncAudienceBindingSuggestions convergent reconcile; SuggestionNotFoundError 404, SuggestionStateError 409; confirm under caller context)",
+        "packages/plugins/plugin-security/src/suggested-audience-bindings.ts#syncAudienceBindingSuggestions (syncAudienceBindingSuggestions convergent reconcile; SuggestionNotFoundError 404, SuggestionStateError 409; confirm under caller context)",
         "packages/plugins/plugin-security/src/objects/sys-audience-binding-suggestion.object.ts",
         "packages/rest/src/rest-route-ledger.ts (security suggested-bindings rows)",
         "examples/app-showcase/src/security/bind-position-sets.ts + permission-sets.ts (isDefault auto-bind)",
@@ -1752,11 +1752,11 @@
         "hydration-race"
       ],
       "source": [
-        "packages/rest/src/rest-server.ts (registerSharingRuleEndpoints ~L7345-7494: list/create/get/delete)",
+        "packages/rest/src/rest-server.ts#registerSharingRuleEndpoints (list/create/get/delete)",
         "packages/spec/src/security/sharing.zod.ts (criteria rule authoring + match-all refusal #3896)",
         "packages/plugins/plugin-sharing/src/objects/sys-sharing-rule.object.ts + sys-record-share.object.ts",
-        "objectui packages/plugins/plugin-sharing/src/sharing-plugin.ts (nav_sharing_rules Setup nav → sys_sharing_rule)",
-        "examples/app-showcase/src/data/objects/contact.object.ts (showcase_contact — sharingModel 'private', `stage` select) + src/security/permission-sets.ts (the showcase_manager readScope 'org' grant this item must avoid as its audience)",
+        "objectui packages/plugins/plugin-sharing/src/sharing-plugin.ts#nav_sharing_rules (nav_sharing_rules Setup nav → sys_sharing_rule)",
+        "examples/app-showcase/src/data/objects/contact.object.ts#sharingModel (showcase_contact — sharingModel 'private', `stage` select) + src/security/permission-sets.ts (the showcase_manager readScope 'org' grant this item must avoid as its audience)",
         "cross-ref access-security.sharing-rules-widen (seeded-rule enforcement), ADR-0058 D3, ADR-0111 D6"
       ],
       "history": [
@@ -1859,8 +1859,8 @@
       ],
       "source": [
         "objectui packages/app-shell/src/views/metadata-admin/PermissionMatrixEditor.tsx (type=permission editor; client.save → PUT /api/v1/meta/permission/<name>; object CRUD+VAMA+lifecycle + field R/W)",
-        "packages/spec/src/security/permission.zod.ts (PermissionSetSchema)",
-        "packages/rest/src/rest-route-ledger.ts (PUT /api/v1/meta/:type/:name saveItem; POST .../publish publishItem)",
+        "packages/spec/src/security/permission.zod.ts#PermissionSetSchema (PermissionSetSchema)",
+        "packages/rest/src/rest-route-ledger.ts#saveItem (PUT /api/v1/meta/:type/:name saveItem; POST .../publish publishItem)",
         "examples/app-showcase/src/security/permission-sets.ts",
         "cross-ref access-security.crud-permission-matrix + access-security.readonly-package-locks-studio, ADR-0090 D1/D5, ADR-0033"
       ],
@@ -1955,13 +1955,13 @@
       ],
       "source": [
         "packages/spec/liveness/capability.json (ADR-0066 D1, #5961 — the kind's own liveness ledger)",
-        "packages/plugins/plugin-security/src/bootstrap-declared-capabilities.ts (upsertPackageCapability, capabilityRowFields, PLATFORM_CAPABILITY_NAMES guard)",
-        "packages/lint/src/validate-capability-references.ts (authoring lint known-name set)",
+        "packages/plugins/plugin-security/src/bootstrap-declared-capabilities.ts#upsertPackageCapability (upsertPackageCapability, capabilityRowFields, PLATFORM_CAPABILITY_NAMES guard)",
+        "packages/lint/src/validate-capability-references.ts#known (authoring lint known-name set)",
         "examples/app-showcase/src/security/{capabilities.ts,permission-sets.ts} (DEFINE + GRANT fixtures)",
-        "packages/runtime/src/action-execution.ts (actionPermissionError — ADR-0066 D4, the single-sourced REQUIRE-side gate every invoke surface calls)",
+        "packages/runtime/src/action-execution.ts#actionPermissionError (actionPermissionError — ADR-0066 D4, the single-sourced REQUIRE-side gate every invoke surface calls)",
         "packages/runtime/src/domains/{actions.ts,mcp.ts} + packages/runtime/src/route-ledger.ts (the platform action-invoke surfaces that reach it)",
         "examples/app-showcase/src/ui/actions/predicate-matrix.action.ts (the four REQUIRE-side specimens: held / missing / and / empty)",
-        "packages/rest/src/rest-route-ledger.ts `data-actions` block (why there is no REST action-invoke route, and the day-one enforcement requirement if one is ever added — #7680)"
+        "packages/rest/src/rest-route-ledger.ts#data `data-actions` block (why there is no REST action-invoke route, and the day-one enforcement requirement if one is ever added — #7680)"
       ],
       "history": [
         {
@@ -2191,10 +2191,10 @@
         "ref": "packages/runtime/src/domains/automation-activation-posture-gate.test.ts (#12157, flow door) + packages/runtime/src/domains/action-activation-posture-gate.test.ts (#12160, action door) — the full posture x identity matrix for both doors, including the group/isolated legs this item marks blocked(fixture), the no-write-on-refusal assertion, and the isSystem bypass"
       },
       "source": [
-        "packages/runtime/src/domains/activation-gate.ts (the shared §5 gate: posture read 141-147, platform_admin POSITION test 149-150, manage_metadata tier 184-203, per-artifact remedies 100-118, fail-open rationale 50-56)",
-        "packages/runtime/src/domains/automation.ts (FLOW_ENABLEMENT_DENY_MESSAGE), (isFlowActivationWrite), (gate ordering ahead of service probe and body checks)",
+        "packages/runtime/src/domains/activation-gate.ts#posture (the shared §5 gate: posture read 141-147, platform_admin POSITION test 149-150, manage_metadata tier 184-203, per-artifact remedies 100-118, fail-open rationale 50-56)",
+        "packages/runtime/src/domains/automation.ts#FLOW_ENABLEMENT_DENY_MESSAGE (FLOW_ENABLEMENT_DENY_MESSAGE), (isFlowActivationWrite), (gate ordering ahead of service probe and body checks)",
         "packages/runtime/src/domains/actions.ts (both tiers at the action door)",
-        "packages/spec/src/security/tenancy-posture.ts (TenancyPostureSchema — the variants source; postureEnforcesWall; the ADR-0105 D12 entitlement note)",
+        "packages/spec/src/security/tenancy-posture.ts#TenancyPostureSchema (TenancyPostureSchema — the variants source; postureEnforcesWall; the ADR-0105 D12 entitlement note)",
         "docs/adr/0126-packaged-metadata-customization-model.md §5 (D3: install-level rows, operator-gated in multi-org postures)",
         "#12438 (the sweep), #12159 (ADR-0126 flow legs), #10243 (the measured incident the gate makes durable), #12157 / #12160 (the two door cards)"
       ],
@@ -2272,8 +2272,8 @@
         "dispatcher-vs-hono-route"
       ],
       "source": [
-        "packages/runtime/src/domains/automation.ts (PUT/DELETE /automation/:name → registerFlow/unregisterFlow, manage_metadata gate only)",
-        "packages/services/service-automation/src/engine.ts (registerFlow/unregisterFlow — zero lock/provenance check on this path)",
+        "packages/runtime/src/domains/automation.ts#registerFlow (PUT/DELETE /automation/:name → registerFlow/unregisterFlow, manage_metadata gate only)",
+        "packages/services/service-automation/src/engine.ts#registerFlow (registerFlow/unregisterFlow — zero lock/provenance check on this path)",
         "docs/adr/0126-packaged-metadata-customization-model.md §2 (Regime C: 'the packaged base is locked — in-place edit refused loudly at the write door') + §6 wall 2 (sole definition ledger)",
         "packages/plugins/plugin-security/src/packaged-permission-set-lock.ts (the same lock implemented at the permission-set data door — the regime's first instance, proving the refusal shape the /automation door lacks)",
         "cross-ref access-security.readonly-package-locks-studio (the /meta door's locked-base class on objects) + access-security.owd-save-gate rev 3 (why the /meta control leg records the answering layer instead of assuming it)",
@@ -2378,7 +2378,7 @@
       "source": [
         "packages/plugins/plugin-security/src/packaged-permission-set-lock.ts (classifier + both refusals; the SchemaRegistry-not-managed_by decision)",
         "packages/plugins/plugin-security/src/permission-set-projection.ts (insert-path lock + duplicate 409; the #4669 row-state carve-out ordered BEFORE the update-path lock)",
-        "packages/plugins/plugin-security/src/objects/sys-permission-set.object.ts (activate/deactivate bodyExtra {active}, clone_permission_set params — the payload contract)",
+        "packages/plugins/plugin-security/src/objects/sys-permission-set.object.ts#bodyExtra (activate/deactivate bodyExtra {active}, clone_permission_set params — the payload contract)",
         "docs/adr/0126-packaged-metadata-customization-model.md §1.1 (the #11513 machinery, named as the regime's first instance), §8 item 3 (permission sets converge later; the landed shape stays valid meanwhile)",
         "#11513 (lock the base, clone to customize — the 2026-08-24 ruling), #11703 (the three dropped clone facets), #12159 (ruling 2026-08-26: no ledger rows for permission sets pending the convergence card), #12438 (the sweep)"
       ],
@@ -2482,12 +2482,12 @@
         "ref": "packages/core/src/security/resolve-authz-context.platform-admin-config.test.ts (the acceptance criterion, all four fail-closed arms, the ⭐ stored-row-not-seed pin, the legacy-grant pointer loudness) + packages/core/src/security/platform-admin.test.ts (parse/refusal/memo) + packages/core/src/security/admin-standing-surface.test.ts. STILL MANUAL: the live-HTTP arms over a real boot (clauses 1-4 and 6) — the pins run the derivation in-process; this item's live legs prove the same verdicts through the mounted server"
       },
       "source": [
-        "packages/core/src/security/resolve-authz-context.ts (§6b-config — the config anchor inside the ONE derivation site; additive, never subtractive) + (hasPlatformAdminStanding, the id-shaped projection)",
-        "packages/core/src/security/platform-admin.ts (parsePlatformAdminEmails whole-variable refusal, loud-once resolve, matchesConfiguredPlatformAdmin verified-only, reportLegacyPlatformAdminGrant)",
+        "packages/core/src/security/resolve-authz-context.ts#hasPlatformAdminStanding (§6b-config — the config anchor inside the ONE derivation site; additive, never subtractive) + (hasPlatformAdminStanding, the id-shaped projection)",
+        "packages/core/src/security/platform-admin.ts#parsePlatformAdminEmails (parsePlatformAdminEmails whole-variable refusal, loud-once resolve, matchesConfiguredPlatformAdmin verified-only, reportLegacyPlatformAdminGrant)",
         "packages/core/src/security/admin-standing-surface.ts (the env declared a non-table derivation input — no break-glass write can reach it)",
-        "packages/types/src/env.ts,200 (PLATFORM_OWNER_EMAIL_ENV / resolvePlatformOwnerEmail)",
+        "packages/types/src/env.ts#PLATFORM_OWNER_EMAIL_ENV,200 (PLATFORM_OWNER_EMAIL_ENV / resolvePlatformOwnerEmail)",
         "packages/plugins/plugin-auth/src/auth-plugin.ts (#11343 — the dev seed stamps its admin's address verified)",
-        "packages/services/service-datasource/src/admin-routes.ts,261 (the manage_platform_settings-floor probe)",
+        "packages/services/service-datasource/src/admin-routes.ts#manage_platform_settings,261 (the manage_platform_settings-floor probe)",
         "#11663 L2 (the design and ruled bundle), #13146 (landed 2026-08-29), ADR-0068 D2 (the stored-grant anchor beside it)"
       ],
       "history": [
@@ -2592,8 +2592,8 @@
         "ref": "packages/qa/dogfood/test/me-apps-and-everyone-baseline.dogfood.test.ts (the /me/apps half: member sees showcase, requiredPermissions gates, anonymous [], tabPermissions hidden drop and more-visible grant wins) + plugin-hono-server unit suites hono-current-user-endpoints.test.ts / current-user-endpoints-additive-baseline.test.ts / current-user-endpoints-position-grants.test.ts / current-user-endpoints-delegated-resolution.test.ts. STILL MANUAL: the live parity cross-check of the returned maps against actual enforcement responses (clauses 1-2) and the self-scoping probe"
       },
       "source": [
-        "packages/plugins/plugin-hono-server/src/current-user-endpoints.ts (/auth/me/permissions aggregation + most-permissive merge), (/auth/me/localization), (/me/apps requiredPermissions/tabPermissions filter), (the /api/v1 prefix)",
-        "packages/core/src/security/auth-gate.ts (ALLOW_SUFFIXES — /me/apps + /me/localization reachable to gated users)",
+        "packages/plugins/plugin-hono-server/src/current-user-endpoints.ts#tabPermissions (/auth/me/permissions aggregation + most-permissive merge), (/auth/me/localization), (/me/apps requiredPermissions/tabPermissions filter), (the /api/v1 prefix)",
+        "packages/core/src/security/auth-gate.ts#ALLOW_SUFFIXES (ALLOW_SUFFIXES — /me/apps + /me/localization reachable to gated users)",
         "#7616 (delegated permission-set resolution — the enforcement path's own answer), #2752 (/me/apps registry sourcing), #3391 (effective apiOperations annotation), #4093 (guarded degraded branch), ADR-0090 D5 (additive baseline)",
         "cross-ref access-security.anonymous-deny-surfaces — the 401 floor this trio is the declared exception to",
         "cross-ref access-security.fls-mask-and-strip — owns the FLS enforcement this item's clause 2 cross-checks"
@@ -2698,8 +2698,8 @@
         "ref": "packages/plugins/plugin-audit/src/read-audit.test.ts (discriminator, batching/flush, isSystem + no-principal skips, exclusion filter) + audit-plugin.test.ts. STILL MANUAL: the stock-boot honest-default (clause 1) and the configured live loop through the mounted server (clauses 2-5, fixture-gapped per knownGaps)"
       },
       "source": [
-        "packages/plugins/plugin-audit/src/read-audit.ts (READ_AUDIT_ACTION, installReadAuditWriter opt-in + exclusion filter, extractDetailReadId, buildRow nulls + view instant, isSystem/no-principal skips, batcher)",
-        "packages/plugins/plugin-audit/src/audit-plugin.ts (wiring readAudit options into the writer; the install log line)",
+        "packages/plugins/plugin-audit/src/read-audit.ts#READ_AUDIT_ACTION (READ_AUDIT_ACTION, installReadAuditWriter opt-in + exclusion filter, extractDetailReadId, buildRow nulls + view instant, isSystem/no-principal skips, batcher)",
+        "packages/plugins/plugin-audit/src/audit-plugin.ts#writer (wiring readAudit options into the writer; the install log line)",
         "content/docs/permissions/record-view-auditing.mdx ('Under os serve' — the option-less auto-instance audits no views; last-one-wins supersession is the opt-in path; no metadata key / stack key / env flag by design)",
         "#8992 (the card and the 2026-08-16 maintainer ruling: Option A scoped MVP — detail views only, per-object closed opt-in, async batched writes)"
       ],
