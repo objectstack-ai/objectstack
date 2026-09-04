@@ -312,6 +312,52 @@ export function readPackageItems(parsed, listPath) {
   return items;
 }
 
+// -- The self-test's own battery roster and floor (#13489) ------------------
+//
+// `--self-test` reaching its verdict used to be this self-test's ONLY success
+// condition, so "every case held" and "the cases never ran" printed the same
+// line. Closed the way PR #13487 validated on check-doc-authoring: what is
+// pinned is the registered NAMES, not a number. Every section opens with
+// `battery('<name>')`, every assertion is attributed to the battery most
+// recently opened, and the floor requires the OPENED set to equal the DECLARED
+// set with each battery at or above its own count.
+//
+// This file's assertions are bare `throw`s rather than calls to an assertion
+// helper, so they are counted by the `check(() => { ... })` THUNK: the existing
+// `if (...) throw ...` is carried into the thunk verbatim and the condition is
+// never touched. Routing these through a boolean helper instead would mean
+// inverting 36 failure conditions by hand, and a dropped `!` yields an
+// assertion that still registers its case and still passes -- invisible to the
+// very floor being installed here.
+//
+// The counts are a FLOOR, not an equality -- adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'coverage + determinism': 2,
+  'LPT balance bound': 1,
+  'the two heaviest packages must not share a bin': 1,
+  'degenerate inputs': 2,
+  'payload assertions: the cross-writer count/items invariant': 9,
+  'path resolution: the silent weight-0 cwd defect': 5,
+  // 2 of these 16 are the end-to-end inversion pin, which runs only while the
+  // dataset still carries both packages of its inversion pair. That guard is
+  // silent today: drop either package in a timings refresh and the pin stops
+  // testing anything. Flooring at the measured 16 makes that loud, and the
+  // remedy is the one the pin itself names -- pick a new inversion pair from
+  // the dataset -- never lowering this number.
+  'the balancing pins (#10472)': 16,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 7;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 // Returned by `selfTest()` only after its verdict is printed. The dispatch
 // refuses anything else: a `return` that leaves the function above that line
 // prints nothing and still exits 0 — a self-test that never finished, reported
@@ -319,33 +365,74 @@ export function readPackageItems(parsed, listPath) {
 const SELF_TEST_VERDICT = 'partition-test-shards self-test reached its verdict';
 
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const batterySeen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+  };
+  // The thunk every assertion in this body now runs inside. It COUNTS a case
+  // and then runs the case unchanged: the `if (...) throw ...` inside each
+  // thunk is the one that was already there, carried in verbatim modulo
+  // indentation. Nothing inverts a condition, so the failure mode a boolean
+  // helper would have introduced here -- a dropped `!`, an assertion that still
+  // registers and still passes -- cannot arise. The throw still propagates:
+  // this file fails fast on the FIRST broken assertion, as it always has.
+  const check = (fn) => {
+    registerCase();
+    fn();
+  };
   const mk = (name, weight) => ({ name, weight });
   // Coverage + determinism: every package lands in exactly one bin, and two
   // runs over differently-ordered input agree.
+  battery('coverage + determinism');
   const items = [mk('e', 1), mk('a', 9), mk('c', 4), mk('b', 9), mk('d', 3)];
   const shuffled = [items[2], items[4], items[0], items[3], items[1]];
   const a = partition(items, 2);
   const b = partition(shuffled, 2);
   const flatA = a.flatMap((bin) => bin.names).sort();
-  if (flatA.join() !== 'a,b,c,d,e') throw new Error(`coverage: got ${flatA.join()}`);
-  if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error('determinism: input order changed the split');
+  check(() => {
+    if (flatA.join() !== 'a,b,c,d,e') throw new Error(`coverage: got ${flatA.join()}`);
+  });
+  check(() => {
+    if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error('determinism: input order changed the split');
+  });
   // LPT balance bound: bin spread never exceeds the heaviest single weight.
+  battery('LPT balance bound');
   const totals = a.map((bin) => bin.total);
-  if (Math.max(...totals) - Math.min(...totals) > 9) throw new Error(`balance: totals ${totals}`);
+  check(() => {
+    if (Math.max(...totals) - Math.min(...totals) > 9) throw new Error(`balance: totals ${totals}`);
+  });
   // The two 9s must not share a bin.
+  battery('the two heaviest packages must not share a bin');
   const binOfA = a.findIndex((bin) => bin.names.includes('a'));
   const binOfB = a.findIndex((bin) => bin.names.includes('b'));
-  if (binOfA === binOfB) throw new Error('balance: both heaviest packages in one bin');
+  check(() => {
+    if (binOfA === binOfB) throw new Error('balance: both heaviest packages in one bin');
+  });
   // Degenerate inputs: empty list, more shards than packages.
+  battery('degenerate inputs');
   const empty = partition([], 2);
-  if (empty.some((bin) => bin.names.length > 0)) throw new Error('empty input produced packages');
+  check(() => {
+    if (empty.some((bin) => bin.names.length > 0)) throw new Error('empty input produced packages');
+  });
   const sparse = partition([mk('only', 5)], 3);
-  if (sparse.flatMap((bin) => bin.names).join() !== 'only') throw new Error('sparse input lost the package');
+  check(() => {
+    if (sparse.flatMap((bin) => bin.names).join() !== 'only') throw new Error('sparse input lost the package');
+  });
 
   // Payload assertions. The document reaching this script has two writers --
   // `turbo ls` and `--union-into` in check-cross-package-test-inputs.mjs -- so
   // "count agrees with items" is a cross-script invariant; this is its reading
   // half (the writing half is that script's own `--self-test`).
+  battery('payload assertions: the cross-writer count/items invariant');
   const threw = (fn) => {
     try {
       fn();
@@ -356,16 +443,34 @@ function selfTest() {
   };
   const doc = (packages) => ({ packageManager: 'pnpm9', packages });
   const two = [{ name: 'a', path: 'p' }, { name: 'b', path: 'q' }];
-  if (readPackageItems(doc({ count: 2, items: two }), 'f').length !== 2) throw new Error('payload: a consistent list was rejected');
-  if (readPackageItems(doc({ items: two }), 'f').length !== 2) throw new Error('payload: a list with no count was rejected');
-  if (readPackageItems(doc({ count: 0, items: [] }), 'f').length !== 0) throw new Error('payload: a legitimately empty list was rejected');
+  check(() => {
+    if (readPackageItems(doc({ count: 2, items: two }), 'f').length !== 2) throw new Error('payload: a consistent list was rejected');
+  });
+  check(() => {
+    if (readPackageItems(doc({ items: two }), 'f').length !== 2) throw new Error('payload: a list with no count was rejected');
+  });
+  check(() => {
+    if (readPackageItems(doc({ count: 0, items: [] }), 'f').length !== 0) throw new Error('payload: a legitimately empty list was rejected');
+  });
   // The exact document `--union-into` used to write: two items, count still 0.
-  if (!threw(() => readPackageItems(doc({ count: 0, items: two }), 'f'))) throw new Error('payload: count 0 beside 2 items was accepted');
-  if (!threw(() => readPackageItems(doc({ count: 3, items: two }), 'f'))) throw new Error('payload: an over-count was accepted');
-  if (!threw(() => readPackageItems(doc({ count: '2', items: two }), 'f'))) throw new Error('payload: a non-numeric count was accepted');
-  if (!threw(() => readPackageItems(doc({ count: 2 }), 'f'))) throw new Error('payload: a missing items array was accepted');
-  if (!threw(() => readPackageItems(doc({ count: 0, items: {} }), 'f'))) throw new Error('payload: a non-array items was accepted');
-  if (!threw(() => readPackageItems({}, 'f'))) throw new Error('payload: a document with no packages key was accepted');
+  check(() => {
+    if (!threw(() => readPackageItems(doc({ count: 0, items: two }), 'f'))) throw new Error('payload: count 0 beside 2 items was accepted');
+  });
+  check(() => {
+    if (!threw(() => readPackageItems(doc({ count: 3, items: two }), 'f'))) throw new Error('payload: an over-count was accepted');
+  });
+  check(() => {
+    if (!threw(() => readPackageItems(doc({ count: '2', items: two }), 'f'))) throw new Error('payload: a non-numeric count was accepted');
+  });
+  check(() => {
+    if (!threw(() => readPackageItems(doc({ count: 2 }), 'f'))) throw new Error('payload: a missing items array was accepted');
+  });
+  check(() => {
+    if (!threw(() => readPackageItems(doc({ count: 0, items: {} }), 'f'))) throw new Error('payload: a non-array items was accepted');
+  });
+  check(() => {
+    if (!threw(() => readPackageItems({}, 'f'))) throw new Error('payload: a document with no packages key was accepted');
+  });
 
   // Path resolution. `it.path` reaches this script in two conventions and the
   // weight it produces must not depend on where the process happens to stand.
@@ -373,24 +478,35 @@ function selfTest() {
   // this a defect rather than a style question, and it fails SILENTLY (weight 0,
   // package still assigned) rather than loudly, so nothing but an assertion can
   // hold it.
-  if (packageDir('packages/spec') !== path.join(REPO_ROOT, 'packages', 'spec')) {
-    throw new Error('path: a repo-relative entry did not resolve against the repo root');
-  }
+  battery('path resolution: the silent weight-0 cwd defect');
+  check(() => {
+    if (packageDir('packages/spec') !== path.join(REPO_ROOT, 'packages', 'spec')) {
+      throw new Error('path: a repo-relative entry did not resolve against the repo root');
+    }
+  });
   const absolute = path.join(REPO_ROOT, 'packages', 'spec');
-  if (packageDir(absolute) !== absolute) {
-    throw new Error('path: an already-absolute entry was not left alone');
-  }
+  check(() => {
+    if (packageDir(absolute) !== absolute) {
+      throw new Error('path: an already-absolute entry was not left alone');
+    }
+  });
   const hereWeight = countTestFiles(packageDir('packages/spec'));
-  if (hereWeight === 0) throw new Error('path: fixture package `packages/spec` has no test files to weigh');
+  check(() => {
+    if (hereWeight === 0) throw new Error('path: fixture package `packages/spec` has no test files to weigh');
+  });
   const cwdBefore = process.cwd();
   try {
     process.chdir(path.parse(REPO_ROOT).root);
-    if (packageDir('packages/spec') !== absolute) {
-      throw new Error('path: resolution moved with the cwd');
-    }
-    if (countTestFiles(packageDir('packages/spec')) !== hereWeight) {
-      throw new Error('path: weight changed with the cwd -- the silent weight-0 regression is back');
-    }
+    check(() => {
+      if (packageDir('packages/spec') !== absolute) {
+        throw new Error('path: resolution moved with the cwd');
+      }
+    });
+    check(() => {
+      if (countTestFiles(packageDir('packages/spec')) !== hereWeight) {
+        throw new Error('path: weight changed with the cwd -- the silent weight-0 regression is back');
+      }
+    });
   } finally {
     process.chdir(cwdBefore);
   }
@@ -402,6 +518,7 @@ function selfTest() {
   // 5.0/6.2/6.3/13.6/6.3/9.0 minutes, because a perfectly-balanced split of the
   // WRONG quantity satisfies every one of those assertions. These five pin the
   // quantity and the outcome.
+  battery('the balancing pins (#10472)');
 
   // 1. The weight is TIME, not file count -- stated as a case where the two
   //    answers DIFFER, which is the only kind of case that can catch a revert.
@@ -415,9 +532,11 @@ function selfTest() {
     2
   );
   const slowBin = byTime.find((bin) => bin.names.includes('slow'));
-  if (slowBin.names.length !== 1) {
-    throw new Error(`weight: the 600s package was co-scheduled with ${slowBin.names.join('+')} -- is the weight a count again?`);
-  }
+  check(() => {
+    if (slowBin.names.length !== 1) {
+      throw new Error(`weight: the 600s package was co-scheduled with ${slowBin.names.join('+')} -- is the weight a count again?`);
+    }
+  });
 
   // 2. The committed dataset, split at the shard count CI actually uses, meets
   //    the acceptance bound. This is the pin that fails when a suite grows
@@ -432,23 +551,29 @@ function selfTest() {
   // the balance assertion would fail over a package no shard was ever going to
   // execute.
   const ciExcludes = new Set([...ciYml.matchAll(/--exclude\s+(@[\w./-]+)/g)].map((m) => m[1]));
-  if (ciExcludes.size === 0) throw new Error('ci.yml: no --exclude found for the partitioner invocation');
+  check(() => {
+    if (ciExcludes.size === 0) throw new Error('ci.yml: no --exclude found for the partitioner invocation');
+  });
   const timings = loadTimings();
   const datasetItems = Object.entries(timings.packages)
     .filter(([name]) => !ciExcludes.has(name))
     .map(([name, weight]) => mk(name, weight));
-  if (datasetItems.length < 20) {
-    throw new Error(`dataset: only ${datasetItems.length} package(s) measured -- that is not the workspace`);
-  }
+  check(() => {
+    if (datasetItems.length < 20) {
+      throw new Error(`dataset: only ${datasetItems.length} package(s) measured -- that is not the workspace`);
+    }
+  });
   const real = partition(datasetItems, SHARD_COUNT);
   const balance = balanceOf(real, datasetItems);
-  if (balance.ratio > MAX_SHARD_OVER_MEAN) {
-    throw new Error(
-      `balance: at ${SHARD_COUNT} shards the heaviest bin is ${balance.ratio.toFixed(2)}x the mean ` +
-        `(${balance.max.toFixed(0)}s vs ${balance.mean.toFixed(0)}s), past the ${MAX_SHARD_OVER_MEAN}x bound. ` +
-        'Bins: ' + balance.totals.map((t) => t.toFixed(0)).join('/') + 's.'
-    );
-  }
+  check(() => {
+    if (balance.ratio > MAX_SHARD_OVER_MEAN) {
+      throw new Error(
+        `balance: at ${SHARD_COUNT} shards the heaviest bin is ${balance.ratio.toFixed(2)}x the mean ` +
+          `(${balance.max.toFixed(0)}s vs ${balance.mean.toFixed(0)}s), past the ${MAX_SHARD_OVER_MEAN}x bound. ` +
+          'Bins: ' + balance.totals.map((t) => t.toFixed(0)).join('/') + 's.'
+      );
+    }
+  });
 
   // 3. The bound is REACHABLE at this shard count -- the arithmetic #10472
   //    asked about when it floated 6 -> 8. No split can put the heaviest bin
@@ -458,43 +583,63 @@ function selfTest() {
   //    next person to reach for more shards gets the answer from a failing
   //    assertion naming the floor, not from a CI run that quietly misses the
   //    target.
-  if (balance.floor > MAX_SHARD_OVER_MEAN * balance.mean) {
-    throw new Error(
-      `balance: the heaviest single package is ${balance.floor.toFixed(0)}s against a ${balance.mean.toFixed(0)}s mean, ` +
-        `so NO split at ${SHARD_COUNT} shards can meet ${MAX_SHARD_OVER_MEAN}x. Splitting that suite below package ` +
-        'granularity, not a different shard count, is the only thing that moves this.'
-    );
-  }
+  check(() => {
+    if (balance.floor > MAX_SHARD_OVER_MEAN * balance.mean) {
+      throw new Error(
+        `balance: the heaviest single package is ${balance.floor.toFixed(0)}s against a ${balance.mean.toFixed(0)}s mean, ` +
+          `so NO split at ${SHARD_COUNT} shards can meet ${MAX_SHARD_OVER_MEAN}x. Splitting that suite below package ` +
+          'granularity, not a different shard count, is the only thing that moves this.'
+      );
+    }
+  });
 
   // 4. The shard count is spelled in ci.yml too, and drift there is silent:
   //    a partitioner cutting six bins for a five-job matrix simply loses a
   //    sixth of the workspace, with every step green. Read it back.
   const declaredMatrix = /^\s*shard:\s*\[([^\]]*)\]/m.exec(ciYml);
-  if (!declaredMatrix) throw new Error('ci.yml: could not find the Test Core shard matrix to compare against');
+  check(() => {
+    if (!declaredMatrix) throw new Error('ci.yml: could not find the Test Core shard matrix to compare against');
+  });
   const matrixSize = declaredMatrix[1].split(',').filter((s) => s.trim() !== '').length;
-  if (matrixSize !== SHARD_COUNT) {
-    throw new Error(`ci.yml: the shard matrix declares ${matrixSize} shards, this script splits into ${SHARD_COUNT}`);
-  }
-  if (!ciYml.includes(`--shard \${{ matrix.shard }}/${SHARD_COUNT}`)) {
-    throw new Error(`ci.yml: the partitioner is not invoked with --shard <n>/${SHARD_COUNT}`);
-  }
-  if (!ciYml.includes(`--total ${SHARD_COUNT}`)) {
-    throw new Error(`ci.yml: the shard attestation does not declare --total ${SHARD_COUNT}`);
-  }
+  check(() => {
+    if (matrixSize !== SHARD_COUNT) {
+      throw new Error(`ci.yml: the shard matrix declares ${matrixSize} shards, this script splits into ${SHARD_COUNT}`);
+    }
+  });
+  check(() => {
+    if (!ciYml.includes(`--shard \${{ matrix.shard }}/${SHARD_COUNT}`)) {
+      throw new Error(`ci.yml: the partitioner is not invoked with --shard <n>/${SHARD_COUNT}`);
+    }
+  });
+  check(() => {
+    if (!ciYml.includes(`--total ${SHARD_COUNT}`)) {
+      throw new Error(`ci.yml: the shard attestation does not declare --total ${SHARD_COUNT}`);
+    }
+  });
 
   // 5. An unmeasured package is ESTIMATED, never silently free. A new package
   //    with real tests and no dataset entry must still carry weight, or the
   //    first shard to receive it absorbs it invisibly.
   const fakeTimings = { packages: { known: 42 }, rate: 2 };
   const specDir = packageDir('packages/spec');
-  if (weighPackage('known', specDir, fakeTimings).seconds !== 42) throw new Error('weight: a measured package was re-estimated');
-  if (!weighPackage('known', specDir, fakeTimings).measured) throw new Error('weight: a measured package was not reported as measured');
+  check(() => {
+    if (weighPackage('known', specDir, fakeTimings).seconds !== 42) throw new Error('weight: a measured package was re-estimated');
+  });
+  check(() => {
+    if (!weighPackage('known', specDir, fakeTimings).measured) throw new Error('weight: a measured package was not reported as measured');
+  });
   const estimate = weighPackage('brand-new', specDir, fakeTimings);
-  if (estimate.measured) throw new Error('weight: an unmeasured package claimed to be measured');
-  if (estimate.seconds !== hereWeight * 2) throw new Error(`weight: estimate was ${estimate.seconds}, expected ${hereWeight * 2}`);
-  if (weighPackage('measured-empty', specDir, { packages: { 'measured-empty': 0 }, rate: 2 }).seconds !== 0) {
-    throw new Error('weight: a package measured at 0s was re-estimated instead of trusted');
-  }
+  check(() => {
+    if (estimate.measured) throw new Error('weight: an unmeasured package claimed to be measured');
+  });
+  check(() => {
+    if (estimate.seconds !== hereWeight * 2) throw new Error(`weight: estimate was ${estimate.seconds}, expected ${hereWeight * 2}`);
+  });
+  check(() => {
+    if (weighPackage('measured-empty', specDir, { packages: { 'measured-empty': 0 }, rate: 2 }).seconds !== 0) {
+      throw new Error('weight: a package measured at 0s was re-estimated instead of trusted');
+    }
+  });
 
   // 6. END-TO-END: the weight a REAL RUN gives a REAL package is its measured
   //    duration, not its test-file count. Pins 1 and 5 each cover half of this
@@ -529,19 +674,70 @@ function selfTest() {
     // Guard the fixture itself: if the inversion ever stops being an inversion
     // (files rebalance, a suite is split), this pin silently stops testing
     // anything, so say so rather than passing vacuously.
-    if (!(fA < fB)) {
-      throw new Error(
-        `inversion pin: ${invA} no longer has fewer test files than ${invB} (${fA} vs ${fB}), ` +
-          'so this case can no longer tell duration from count. Pick a new inversion pair from the dataset.'
-      );
-    }
-    if (!(wA.weight > wB.weight)) {
-      throw new Error(
-        `weight: ${invA} weighed ${wA.weight} and ${invB} weighed ${wB.weight}, but ${invA} is the ` +
-          `SLOWER suite (${timings.packages[invA]}s vs ${timings.packages[invB]}s) with FEWER test files ` +
-          `(${fA} vs ${fB}). The run is weighing test-file count again -- that is #10472.`
-      );
-    }
+    check(() => {
+      if (!(fA < fB)) {
+        throw new Error(
+          `inversion pin: ${invA} no longer has fewer test files than ${invB} (${fA} vs ${fB}), ` +
+            'so this case can no longer tell duration from count. Pick a new inversion pair from the dataset.'
+        );
+      }
+    });
+    check(() => {
+      if (!(wA.weight > wB.weight)) {
+        throw new Error(
+          `weight: ${invA} weighed ${wA.weight} and ${invB} weighed ${wB.weight}, but ${invA} is the ` +
+            `SLOWER suite (${timings.packages[invA]}s vs ${timings.packages[invB]}s) with FEWER test files ` +
+            `(${fA} vs ${fB}). The run is weighing test-file count again -- that is #10472.`
+        );
+      }
+    });
+  }
+
+  // -- The floor: every declared battery RAN, and ran its cases (#13489) ----
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered cases EQUALS the set declared. A set difference
+  // names WHICH battery stopped; a count says only that something did.
+  //
+  // It THROWS rather than collecting into a `failures` array because that is
+  // how every other assertion in this file reports: the dispatch below turns an
+  // unfinished self-test into a non-zero exit, and a floor breach is exactly
+  // that -- a self-test that did not run what it claims to run.
+  const floorFailures = [];
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorFailures.push(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} -- a battery deleted from the roster takes its own floor with it.`
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorFailures.push(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES -- a case attributed to no declared battery is one nothing floors.'
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorFailures.push(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN -- 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} -- cases that used to run no longer do.`
+    );
+  }
+  if (floorFailures.length > 0) {
+    throw new Error(
+      `partition-test-shards self-test floor (${floorFailures.length} breach(es)):\n` +
+        floorFailures.map((f) => `  - ${f}`).join('\n') +
+        '\n  A battery at or below its floor means cases STOPPED RUNNING -- the battery is the bug, ' +
+        'not the number. Find what stopped registering (an early return, a deleted block, a guard ' +
+        'that now skips) and restore it.'
+    );
   }
 
   console.log(
