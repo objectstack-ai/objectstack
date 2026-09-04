@@ -1,0 +1,62 @@
+// The TEST-layer type-check program (#15145), adopting the #5286 mechanism that
+// #5449 generalised and that 30 sibling configs now use. `tsconfig.json` beside
+// this file is unchanged: it is the BUILD config, its `exclude` of
+// `**/*.test.ts` stays, and this sibling puts the excluded layer in front of
+// tsc. `package.json`'s `typecheck` NAMES this file (via
+// `check:test-typecheck --project`), because a config no script invokes is
+// exactly the phantom this whole mechanism is about.
+//
+// BEFORE THIS FILE, NO tsc PROGRAM COMPILED A SINGLE TEST FILE HERE, and that
+// is measured rather than read off the config. On the tree at 1d67130585 with
+// the workspace closure built first, `tsc --noEmit --listFiles -p tsconfig.json`
+// puts 0 of this package's 10 `src/*.test.ts` files in the program while
+// holding all 9 of its non-test `src/**` files -- so the zero is the `exclude`
+// line and not a probe that sees nothing. The same probe against THIS config,
+// on that same tree, names 10 of 10 (981 program files -> 990).
+//
+// ⚠️ ROUTE (b) WAS AVAILABLE HERE AND WAS NOT TAKEN, which is worth recording
+// because `check-type-check-coverage.mjs` tells the next reader to assume it is
+// not: dropping `**/*.test.ts` from `tsconfig.json`'s `exclude` leaves
+// `pnpm check:type-source-resolution` GREEN for this package (measured under a
+// trap-restored mutation at 1d67130585 -- exit 0, 124 programs across 78
+// packages), unlike the 14 of 18 entries that gate reports as red. It was
+// declined on module semantics, not on availability: vitest executes these
+// files through vite, which resolves extension-less relative specifiers, while
+// `tsconfig.json` inherits `NodeNext` from the repo root and demands `.js` on
+// every one of them. Route (b) would hold the test layer to a resolver that
+// never runs it -- the same config-tier noise the shared gate's header
+// attributes 108 of spec's 842 raw errors to. Matching vitest is fidelity, not
+// laxity, and it is why 28 of the 30 sibling configs override these two keys.
+//
+// ⛔ STRICTNESS IS UNTOUCHED. `strict`, `noUnusedLocals`, `noUnusedParameters`,
+// `noImplicitReturns`, `esModuleInterop` and the rest are inherited from
+// `tsconfig.json` (and through it from the repo root). `rootDir: ".."` and the
+// `@objectstack/core` source `paths` rule are inherited too, deliberately: this
+// program resolves core's types from source for the same #15229 reason the
+// build config does. Nothing here may loosen a type rule; if a test does not
+// compile, that is the finding.
+//
+// MEASURED on the tree at 1d67130585, workspace closure built first (an error
+// count taken against an unbuilt closure is not a reading -- unresolved-import
+// cascades inflate it): this program reports 0 errors over 10 test files, so
+// there is no `test-typecheck-debt.json` beside it and every error any of those
+// 10 files ever gains is red on arrival. 14 of the 30 sibling configs are in
+// that same state. This layer also holds ZERO `@ts-expect-error` directives
+// (grepped with a positive control -- the same grep hits `packages/spec/src`),
+// so no pin was silently dead here; what the gap cost was the other half. The `@objectstack/verify` TEST_DEBT entry in
+// `scripts/check-type-check-coverage.mjs` graduates in this same PR: it recorded
+// TS2835 x3 for three extension-less `./harness` imports, and with those three
+// given their `.js` the gate re-measured the entry at 0 ("TEST_DEBT records 3,
+// and tsc now reports 0 -- graduation candidate").
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"],
+    "types": ["node"]
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}
