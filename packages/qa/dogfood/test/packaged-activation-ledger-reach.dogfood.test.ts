@@ -138,19 +138,35 @@ describe('#12359 — actions and NO automation service: the ledger is there', ()
         expect(res.status, `activation flip answered ${res.status}: ${text}`).toBe(200);
     });
 
-    it('writes ONE install-level row — `organization_id` NULL, `metadata_type: action`', async () => {
+    it('writes ONE deployment-level row, and the TABLE has no tenant column at all', async () => {
         const rows = await actionRows(stack);
         const row = rows.find((r) => r.name === ACTION);
 
         expect(row, `no '${ACTION}' row in ${LEDGER}: ${JSON.stringify(rows)}`).toBeDefined();
         expect(row!.metadata_type).toBe('action');
-        // ADR-0126 §5: the per-org dimension is RESERVED and unwritten on this
-        // line. A driver may materialize the column as NULL, so this asserts
-        // the VALUE is nullish rather than the key's absence (that half is
-        // pinned at the store, where the payload is visible).
-        expect(row!.organization_id ?? null).toBeNull();
         // SQLite/libsql round-trip booleans as 0/1 — either spelling is "off".
         expect(row!.active === false || row!.active === 0).toBe(true);
+
+        // ⚠️ The tenant-column assertion here used to read
+        // `expect(row!.organization_id ?? null).toBeNull()`, back when the
+        // table declared that column as RESERVED and never written. That
+        // spelling cannot be carried forward: once the column is gone the
+        // property is `undefined`, `undefined ?? null` is `null`, and the
+        // assertion passes while measuring NOTHING — green for precisely the
+        // reason it should have gone red.
+        //
+        // So it is inverted into a key-set assertion. This row came back from
+        // the driver's own SELECT over the physical table in a real booted
+        // stack, so its keys ARE the materialized columns — this is a DDL
+        // reading, not a re-statement of the declaration.
+        expect(Object.keys(row!)).not.toContain('organization_id');
+
+        // Anti-vacuity: the same key-set really does report the columns that
+        // ARE there, so `not.toContain` above cannot be passing because the
+        // row is empty or opaque.
+        expect(Object.keys(row!)).toEqual(
+            expect.arrayContaining(['id', 'metadata_type', 'name', 'active']),
+        );
     });
 
     it('dispatch consults it — the disabled action is refused, nothing runs', async () => {
