@@ -134,7 +134,12 @@ function makeMemoryDriver() {
     async connect() {}, async disconnect() {}, async checkHealth() { return true; },
     async execute() { return null; },
     async find(object: string, ast: any) {
-      return Array.from(storeFor(object).values()).filter((r) => matchesWhere(r, ast?.where));
+      const rows = Array.from(storeFor(object).values()).filter((r) => matchesWhere(r, ast?.where));
+      // Hold the caller's bound, AFTER the filter and by PRESENCE. Not
+      // decoration: `claimSeedOwnership`'s paged fallback reads with
+      // `limit: CLAIM_PAGE_ROWS`, so a limit-blind double would answer a paged
+      // read with the whole table and quietly test a different function.
+      return typeof ast?.limit === 'number' ? rows.slice(0, ast.limit) : rows;
     },
     async findOne(object: string, ast: any) {
       for (const r of storeFor(object).values()) if (matchesWhere(r, ast?.where)) return r;
