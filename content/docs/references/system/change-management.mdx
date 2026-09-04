@@ -30,14 +30,14 @@ const result = ChangeImpactSchema.parse(data);
 | **level** | `Enum<'low' \| 'medium' \| 'high' \| 'critical'>` | ✅ | Impact level |
 | **affectedSystems** | `string[]` | ✅ | Affected systems |
 | **affectedUsers** | `number` | optional | Affected user count |
-| **downtime** | `{ required: boolean; durationMinutes?: number }` | optional | Downtime information |
+| **downtime** | `{ required: boolean }` | optional | Downtime information |
 
 ### Nested Shape: `ChangeImpact.downtime`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **required** | `boolean` | ✅ | Downtime required |
-| **durationMinutes** | `number` | optional | Downtime duration |
+| **durationMinutes** | `never` | optional | [REMOVED] `ChangeImpact.downtime.durationMinutes` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read it: no engine scheduled a maintenance window or measured an outage against it, so the declared downtime was never enforced, announced or compared with what happened. Delete the key. There is no replacement, because no change-management engine exists. |
 
 
 ---
@@ -84,14 +84,14 @@ const result = ChangeImpactSchema.parse(data);
 | **level** | `Enum<'low' \| 'medium' \| 'high' \| 'critical'>` | ✅ | Impact level |
 | **affectedSystems** | `string[]` | ✅ | Affected systems |
 | **affectedUsers** | `number` | optional | Affected user count |
-| **downtime** | `{ required: boolean; durationMinutes?: number }` | optional | Downtime information |
+| **downtime** | `{ required: boolean }` | optional | Downtime information |
 
 ### Nested Shape: `ChangeRequest.implementation`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **description** | `string` | ✅ | Implementation description |
-| **steps** | `{ order: number; description: string; estimatedMinutes: number }[]` | ✅ | Implementation steps |
+| **steps** | `{ order: number; description: string }[]` | ✅ | Implementation steps |
 | **testing** | `string` | optional | Testing procedure |
 
 ### Nested Shape: `ChangeRequest.rollbackPlan`
@@ -99,7 +99,7 @@ const result = ChangeImpactSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **description** | `string` | ✅ | Rollback description |
-| **steps** | `{ order: number; description: string; estimatedMinutes: number }[]` | ✅ | Rollback steps |
+| **steps** | `{ order: number; description: string }[]` | ✅ | Rollback steps |
 | **testProcedure** | `string` | optional | Test procedure |
 
 ### Nested Shape: `ChangeRequest.schedule`
@@ -177,7 +177,7 @@ const result = ChangeImpactSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **description** | `string` | ✅ | Rollback description |
-| **steps** | `{ order: number; description: string; estimatedMinutes: number }[]` | ✅ | Rollback steps |
+| **steps** | `{ order: number; description: string }[]` | ✅ | Rollback steps |
 | **testProcedure** | `string` | optional | Test procedure |
 
 ### Nested Shape: `RollbackPlan.steps[number]`
@@ -186,7 +186,7 @@ const result = ChangeImpactSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **order** | `number` | ✅ | Step order |
 | **description** | `string` | ✅ | Step description |
-| **estimatedMinutes** | `number` | ✅ | Estimated duration |
+| **estimatedMinutes** | `never` | optional | [REMOVED] `RollbackPlan.steps[].estimatedMinutes` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read it: no engine executed, timed or summed rollback steps, so the estimate was never compared with anything. Delete the key from every step. There is no replacement, because no change-management engine exists. |
 
 
 ---
