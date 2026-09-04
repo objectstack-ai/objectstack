@@ -334,6 +334,72 @@ function report(problems) {
 // handshake is a flag rather than a returned sentinel.
 let selfTestReachedVerdict = false;
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failed === 0` used to be this self-test's ONLY success condition, so "every
+// case held" and "the cases never ran" printed the same line. Closed the PR
+// #13487 way: what is pinned is the registered NAMES, not a number.
+//
+// This self-test is TABLE-DRIVEN — one literal `cases` table, one loop over it,
+// and a sink (`failed += 1`) that writes only when a case FAILS. Routing THAT
+// sink through `registerCase()` would register a case only when it fails: a
+// fully green run would register 0 and every battery would read DID NOT RUN,
+// the floor inverted rather than installed. So the roster is the table's own
+// rows. Each row LABEL is a declared battery, verbatim, with a floor of 1, and
+// `registerCase(c.label)` is the FIRST statement of the driving loop body —
+// before the `try` whose `catch` ends in `continue`, and before the two guards
+// that also end in `continue`. The floor asserts REACH, so a registration
+// placed after a guard would reintroduce the very inversion it exists to avoid:
+// a row whose guard always skips would read DID NOT RUN, indistinguishable from
+// a deleted row. There is no `battery()` opener: for a table-driven self-test
+// the ROW is the battery, so attribution is the loop variable rather than a
+// most-recently-opened section.
+//
+// ⛔ A pinned TOTAL is not the repair, and neither is a roster DERIVED from the
+// table: `cases.length` moves with the table, so a deleted row would delete its
+// own floor. The roster below is a LITERAL the table is checked against, which
+// is what lets a deleted or renamed row name ITSELF in the refusal.
+//
+// The counts are a FLOOR, not an equality — a row that grows into several
+// registrations must not red. 1 is the honest floor for a table row: the loop
+// reaches it exactly once per run.
+//
+// SCOPE, stated so the next reader does not mistake the number: the four
+// discovery-block assertions below the loop (`*.md` only, a missing
+// `.claude/agents/`, a directory holding no `.md`, and real-tree discovery) are
+// NOT rows of this table — they are written inline, one at a time, and the
+// verdict line has always counted the 18 ROWS rather than the 22 assertions
+// that run. This roster floors the 18 rows; those four assertions are left
+// exactly as they are.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'a definition pinning a tier alias → GREEN': 1,
+  'a definition pinning a fully-qualified model id → GREEN': 1,
+  'a quoted value → GREEN (both YAML spellings are legal)': 1,
+  'a value with a trailing comment → GREEN': 1,
+  'R1 — frontmatter with name+description and NO model: → RED': 1,
+  'R2 — `model:` present but empty → RED': 1,
+  'R3 — no frontmatter at all → RED': 1,
+  'R4 — unterminated frontmatter → RED': 1,
+  'R5 — a typo of a tier alias → RED (declared-looking, undeclared in effect)': 1,
+  'R5b — an alias with a version suffix is not an alias → RED': 1,
+  'R6 — `model: inherit` with nothing justifying it → RED': 1,
+  'R6b — `model: inherit` WITH a justification entry whose reason is in the file → GREEN': 1,
+  'R7 — a justified inherit whose written reason was edited away → RED (self-invalidating)': 1,
+  'R8 — a justification entry naming an unscanned file → RED (anti-dormancy)': 1,
+  'R9 — a justification entry on a file that now pins a tier → RED (dead config)': 1,
+  'R10 — an empty scan → RED, never a green skip (#4690, the whole point)': 1,
+  'one bad definition among several → RED, naming the bad one only': 1,
+  'an indented `model:` inside description prose does NOT satisfy the rule → RED': 1,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too. This pin is also half of
+// the duplicate-label refusal: two rows sharing a label collapse to ONE key in
+// the literal above, so the roster falls below this number; the table
+// cross-check in the floor block is the other half, and names WHICH label
+// collided.
+const SELF_TEST_BATTERY_FLOOR = 18;
+
 function selfTest() {
   const fm = (modelLine) =>
     `---\nname: demo\ndescription: >\n  A demo agent.\n${modelLine ? `${modelLine}\n` : ''}---\n\nBody.\n`;
@@ -466,8 +532,15 @@ function selfTest() {
     },
   ];
 
+  // The ledger this self-test's floor is evaluated against (#13489).
+  const batterySeen = new Map();
+  const registerCase = (name) => {
+    batterySeen.set(name, (batterySeen.get(name) ?? 0) + 1);
+  };
+
   let failed = 0;
   for (const c of cases) {
+    registerCase(c.label);
     let problems;
     try {
       ({ problems } = runAllChecks(c.files, c.justified ?? []));
@@ -542,8 +615,64 @@ function selfTest() {
     console.log(`  ✓ real-tree discovery: ${disc.files.length} agent definition(s), ${disc.problems.length} layout problem(s)`);
   }
 
+  // ── The floor: every declared row RAN, and ran its case (#13489) ───────
+  //
+  // Evaluated after every row has had its chance and BEFORE the verdict, so the
+  // success line below can only be printed by a run in which the set of rows
+  // that registered EQUALS the set declared. A set difference names WHICH row
+  // stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    console.error(`✗ self-test floor: ${message}`);
+    failed += 1;
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  const rowLabels = cases.map((c) => c.label);
+  const duplicated = [...new Set(rowLabels.filter((name, i) => rowLabels.indexOf(name) !== i))];
+  if (duplicated.length > 0) {
+    floorBreached = true;
+    floorFailure(
+      `the cases table uses ${duplicated.map((n) => JSON.stringify(n)).join(', ')} as a row label more than once — ` +
+        'two rows sharing a label are ONE battery, so the second can stop running while the first keeps the floor met.',
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — a case attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed that case holds.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (a deleted row, a renamed label, a loop that no longer ' +
+        'reaches it) and restore it.',
+    );
+  }
+
   if (failed > 0) {
-    console.error(`\n✗ check-agent-model-declared self-test failed (${failed} case(s)).`);
+    console.error(`\n✗ check-agent-model-declared self-test: ${failed} failure(s) (cases and floor).`);
     process.exit(1);
   }
   console.log(`\n✓ check-agent-model-declared self-test: ${cases.length} cases pass.`);
