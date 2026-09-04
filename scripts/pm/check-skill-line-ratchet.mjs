@@ -599,6 +599,12 @@ export const CEILINGS = new Map([
   // over-120B lines are all `table` rows, structurally exempt and NOT
   // re-wrappable; they are metered instead by MAX_TABLE_ROW_BYTES below.
   ['.claude/skills/pm-dispatch/references/compile-surfaces.md', 26],
+  // Plain-language digest of the corpus's binding rules, one rule per line, added
+  // under the 2026-09-04 rules-only ruling so the maintainer reviews the rules
+  // instead of the corpus. Set at the landed line count (headroom 0, same
+  // convention as every entry above); it is a NEW file, so this is an added row
+  // and no other row moves.
+  ['.claude/skills/pm-dispatch/references/core-rules.md', 150],
   // The app-vs-platform boundary — the deciding question (could this be written
   // from the metadata alone, with no knowledge of this company?), the publication
   // test (one consumer is a use, two is a contract) and the two anti-patterns.
@@ -924,6 +930,7 @@ export const MAX_TABLE_ROW_BYTES = new Map([
   ['.claude/skills/pm-dispatch/references/seat-post-protocol.md', 0],
   ['.claude/skills/pm-dispatch/references/true-green.md', 0],
   ['.claude/skills/pm-dispatch/references/compile-surfaces.md', 352],
+  ['.claude/skills/pm-dispatch/references/core-rules.md', 0],
   ['.claude/skills/pm-dispatch/references/app-platform-boundary.md', 219],
   ['.claude/skills/pm-dispatch/references/lanes/engine.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/services.md', 0],
