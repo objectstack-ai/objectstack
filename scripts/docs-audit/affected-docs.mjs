@@ -5761,7 +5761,7 @@ for (const f of implementationChanges) {
 // Both guards run BEFORE the bridge, not after it, and that ordering is the fix rather
 // than a detail: the bridge answers "which routes mention this name", so a name left in
 // the set does not merely add a noisy row — it mints noisy ROUTE and SDK anchors from
-// every registrar handler that happens to mention it. Measured both ways: `label` /
+// every route-source handler that happens to mention it. Measured both ways: `label` /
 // `start` / `subject` (locals in the auth-email change 445ae4deb) pulled `/:object/import`
 // and `/forms/:slug` into an advisory about email templates, and `ObjectQL` did the same
 // to the objectql cascade fix 650cd3daa.
@@ -5897,7 +5897,7 @@ if (bridgeSymbols.length) {
     if (tails.size > MAX_ROUTES_PER_SYMBOL) { crossCuttingSymbols.push(`${s} (${tails.size} routes)`); continue; }
     for (const t of tails) {
       routeAnchors.add(t);
-      noteAnchorFrom('route', t, `bridged from symbol ${s} — its registrar handler names it`);
+      noteAnchorFrom('route', t, `bridged from symbol ${s} — its route source's handler names it`);
     }
   }
   // route → client method (the ledger's declared binding), and the reverse direction for
