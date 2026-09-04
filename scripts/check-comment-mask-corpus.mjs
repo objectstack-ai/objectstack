@@ -125,8 +125,9 @@
 
 // dispatch-gates: whole-tree-population -- `collectSources` walks every authored JS/TS file from the repo root, so the corpus is the whole tree; the one literal below names the masker this gate exercises, not the files it reads.
 
-import { readdirSync, readFileSync } from 'node:fs';
-import { dirname, extname, join, relative, resolve } from 'node:path';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, extname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isEntrypoint } from './invoked-as.mjs';
 
@@ -137,11 +138,24 @@ const REPO_ROOT = resolve(HERE, '..');
 export const SOURCE_EXTENSIONS = new Set(['.ts', '.tsx', '.mts', '.cts', '.js', '.mjs', '.cjs', '.jsx']);
 
 /**
- * Directories that hold dependencies or build output rather than source. Same
- * list `js-comment-mask.mjs`'s header states, so the prose and the instrument
- * cannot drift apart. Every package in this tree builds to `dist`.
+ * Directories that hold dependencies or build output rather than source -- plus
+ * one that holds ANOTHER REPOSITORY. Every package in this tree builds to
+ * `dist`. `js-comment-mask.mjs`'s header quotes the six this walk started from
+ * as part of the 2026-08-21 measurement it records; the set below is the
+ * instrument and has grown past that sentence since (`.git`, and now `.cache`),
+ * so this declaration is the list, and the header is the history.
+ *
+ * `.cache` is where `scripts/build-console.sh` materialises objectui at the
+ * pinned SHA: a whole foreign checkout, gitignored, that every console pin bump
+ * MUST create because the console cannot be built without it. Walked, it put
+ * ~4,300 files this repo does not author into the corpus and reported one of
+ * them as a disagreement -- against a masker objectui's pages have no stake in.
+ * The failure text below is correct for OUR sources and wrong for those: it
+ * sends the reader to pin a shape in `js-comment-mask.mjs`, which is the last
+ * thing a pin bump should be editing. CI never saw it, because the lint job
+ * does not build the console; every instance landed on a person instead.
  */
-export const SKIPPED_DIRECTORIES = new Set(['node_modules', 'dist', '.next', 'build', '.turbo', 'coverage', '.git']);
+export const SKIPPED_DIRECTORIES = new Set(['node_modules', 'dist', '.next', 'build', '.turbo', 'coverage', '.git', '.cache']);
 
 /** Below this, the corpus is not a corpus -- see the header. */
 export const CORPUS_FLOOR = 1000;
@@ -449,7 +463,7 @@ async function main(argv) {
 // not red. A battery BELOW its floor means cases stopped running; the remedy is
 // to find what stopped registering.
 const SELF_TEST_BATTERIES = Object.freeze({
-  'check-comment-mask-corpus self-test': 12,
+  'check-comment-mask-corpus self-test': 17,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -610,6 +624,47 @@ async function runSelfTestCases(parse) {
 
   ok(`the corpus walk finds at least ${CORPUS_FLOOR} files in this tree`, collectSources().length >= CORPUS_FLOOR);
   ok('...and every path it returns carries a known source extension', collectSources().every((file) => SOURCE_EXTENSIONS.has(extname(file))));
+
+  // ── The walk's exclusions, on a REAL tree, in both directions ─────────────
+  //
+  // `SKIPPED_DIRECTORIES` is the kind of declaration that reads as obviously
+  // correct and is measured by nothing: for `.cache` it was wrong for as long
+  // as `scripts/build-console.sh` has existed, and the only reader who ever
+  // found out was an operator staring at a red gate over someone else's file.
+  // So the exclusion is proven the way the corpus is judged -- by walking a
+  // directory on disk. The SAME BYTES are planted twice, inside `.cache` and
+  // outside it, against a masker that disagrees with the parser on them: the
+  // copy outside reds, the copy inside never enters the corpus at all, and the
+  // only variable between the two is location.
+  //
+  // ⚠️ These cases run on the production sweep path too (`main()` calls this
+  // body on every sweep), which is deliberate: what they hold is a property of
+  // the corpus that sweep is about to report on. The fixture is two files in a
+  // temp dir, removed in `finally`.
+  const plantedSource = 'export const Probe = () => null;\n';
+  const fixtureRoot = mkdtempSync(join(tmpdir(), 'comment-mask-corpus-'));
+  try {
+    const outsidePath = join('src', 'probe.tsx');
+    const insidePath = join('.cache', 'objectui-pin', 'src', 'probe.tsx');
+    for (const relPath of [outsidePath, insidePath]) {
+      mkdirSync(dirname(join(fixtureRoot, relPath)), { recursive: true });
+      writeFileSync(join(fixtureRoot, relPath), plantedSource, 'utf8');
+    }
+
+    const collected = collectSources(fixtureRoot).map((file) => relative(fixtureRoot, file));
+    ok('the walk collects a planted source that sits outside .cache', collected.includes(outsidePath));
+    ok('...and collects NOTHING under .cache', collected.every((file) => !file.split(sep).includes('.cache')));
+
+    const swept = sweep({ root: fixtureRoot, parse, scan: flagEverything });
+    ok('the copy outside .cache DISAGREES -- the plant is genuinely red', swept.disagreements.length === 1 && swept.disagreements[0].file === outsidePath);
+    ok('...and the sweep judged exactly the one file it walked', swept.files.length === 1);
+    // Excluded by LOCATION, not because those bytes happen to agree: compared
+    // directly, the identical copy under `.cache` disagrees just as loudly.
+    const wouldDisagree = compareFile(join(fixtureRoot, insidePath), plantedSource, { scan: flagEverything, parse });
+    ok('...while the identical bytes under .cache would have disagreed if walked', wouldDisagree.overMasks > 0);
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  }
 
   SELF_TEST_CASE_COUNT = cases.length;
   for (const testCase of cases) if (!testCase.condition) failures.push(testCase.label);
