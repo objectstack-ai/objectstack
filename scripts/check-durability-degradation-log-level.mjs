@@ -263,8 +263,44 @@ const READ_INVENTION_BASELINE_PATH = join(
  *
  * Each entry names WHY it is durability-critical — the note is printed in the
  * violation message, so the author reads the consequence rather than a rule id.
+ *
+ * ## The raw ObjectQL verbs are still NOT here — measured, not assumed (#12981)
+ *
+ * `insert` / `update` sit in the same excluded class as the read rule's
+ * `find` / `findOne` / `count`: names too generic to declare repo-wide. #12981
+ * closed by declaring the SEEDER WRAPPERS instead — `tryInsert` / `tryUpdate`
+ * are the `catch { return null; }` helpers that whole family is made of, so
+ * naming them puts the family in the vocabulary without dragging every write in
+ * the monorepo in with it. That order was deliberate: the wrappers could only be
+ * declared once the family had been REPAIRED, which is what the census
+ * (`scripts/measure-durability-swallow-family.mjs`) exists to prove, and it is
+ * what keeps `durability-degradation.baseline.json` at its designed empty
+ * steady state rather than filling it with transitional debt.
+ *
+ * Both halves measured on `origin/main@f01adfa5c` while landing the wrappers,
+ * so the next author reads a number rather than re-deriving one:
+ *
+ *   - the two wrappers   → 0 findings (this file, unchanged verdict)
+ *   - bare `insert`      → 36 quiet degradations in 30 files
+ *
+ * ⇒ The second is a repair programme wearing the costume of a vocabulary edit,
+ * and it is the thing #12981 was filed to NOT do by accident. If a future card
+ * needs one specific `ql.insert(...)` seam visible — `keys.ts::handleKeysRequest`
+ * is the standing example, whose catch answers the caller a 500 envelope on
+ * every path and is waiting to say so in `FAILURE_PROPAGATION_SITES` — the
+ * choice is between paying for those 36 and giving this map a per-site scope
+ * the way `FAILURE_PROPAGATION_SITES` already scopes the other vocabulary. That
+ * is a design call, and it is deliberately not taken here.
  */
 const DURABILITY_CRITICAL_CALLEES = new Map([
+    [
+        'tryInsert',
+        "A seeder's insert was refused and the helper answered `null` — the row is simply absent while the seeding pass moves on and its per-boot summary still reads clean. This is the shape #12981 was filed over: the RBAC catalog seeders swallowed refused writes in `catch { return null; }`, and a boot logged \"RBAC catalog seeded\" at `info` over zero landed rows, on a deployed plane, for weeks (#12923). The helper answers its CALLER, which reports the refusal through the #12923 accumulator; what this entry holds is that no caller may re-swallow that answer in a quiet `catch`.",
+    ],
+    [
+        'tryUpdate',
+        "A seeder's update was refused and the helper answered `false` — the row keeps its pre-seed contents while the pass counts it as reconciled, so a catalog that never converged reports the same bytes as one that had nothing to do (#12923, #12970). The helper answers its CALLER, which reports the refusal through the #12923 accumulator; what this entry holds is that no caller may re-swallow that answer in a quiet `catch`.",
+    ],
     [
         'syncSchema',
         'DDL for the object never ran — the table/columns do not exist, yet the object stays registered and served.',
