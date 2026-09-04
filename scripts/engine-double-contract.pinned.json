@@ -162,6 +162,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol-publish-drafts-object-field-refs.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol-publish-drafts-object-field-refs.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol-publish-drafts-object-field-refs.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol-publish-drafts-org-scope.test.ts",
       "verb": "delete",
       "pinned": 1
