@@ -3828,6 +3828,218 @@ function observed() {
 // as one that passed (#13798).
 const SELF_TEST_VERDICT = 'check-type-check-coverage self-test reached its verdict';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition,
+// so "every case held" and "the cases never ran" printed the same line. And the
+// tally the green line prints is DERIVED from the case tables, so a deleted row
+// shrinks the printed number with it and the gate stays green. Closed the way
+// PR #13487 validated on `check-doc-authoring`: what is pinned is the registered
+// NAMES, not a number. A set difference says WHICH battery stopped; a count says
+// only that something did.
+//
+// This self-test is a COMBINATION, so the roster is shaped by what was measured
+// rather than by one recipe:
+//
+//   * The literal `cases` table (48 rows, one driving loop) takes the
+//     TABLE-DRIVEN shape. Each row `label` is a declared battery, verbatim, with
+//     a floor of 1, and `registerCase(c.label)` is the FIRST statement of the
+//     driving loop body -- so the case is attributed to the row actually being
+//     run, whatever that row asserts afterwards. There is no `battery()` opener:
+//     for a table-driven battery the ROW is the battery, so attribution is the
+//     loop variable rather than a most-recently-opened section.
+//   * The five further families the green line already names -- observation,
+//     re-measure, built-closure, auto-lowering, exit-code -- are ONE battery
+//     each, at their measured count. Their tables and inline assertions are
+//     INTERLEAVED in file order (a built-closure table sits between two
+//     re-measure ones, and two banner blocks sit between a third pair), so
+//     attribution here is an explicit family name written at each site. A
+//     most-recently-opened `battery()` pointer would file whole tables under
+//     whichever section last opened, which is worse than not flooring them.
+//   * Three assertion blocks the green line's tally does NOT count get their own
+//     batteries: the ratchet-remedy authority block, the graduation-remedy block
+//     and the TS6059 wiring pin. Leaving them unregistered would leave them
+//     exactly as silenceable as they were before this floor existed, and the
+//     set-difference refusal below cannot see an assertion that registers
+//     nowhere.
+//
+// The five family floors therefore equal the per-family numbers the green line
+// prints -- 57 observation (the line adds the 11 folded-in cases to that figure,
+// see below), 45 re-measure, 28 built-closure, 19 auto-lowering, 18 exit-code --
+// so a reader can check this roster against the verdict without re-deriving
+// either.
+//
+// ⛔ TWO FOLDED-IN SELF-TESTS ARE NOT BATTERIES OF THIS FILE. `typecheck-configs`
+// and `workspace-enumerator` are libraries whose `selfTest()` this one calls and
+// whose failures it adopts; their cases register into THEIR module's ledger (or
+// none), never into `batterySeen` below. Measured, not assumed: the observation
+// battery registers 57, not the 68 the green line prints for it. A fold-in is
+// floored where it is defined, and `typecheck-configs` was floored there in
+// PR #15327's batch.
+//
+// ⛔ A pinned TOTAL is not the repair, and neither is a roster DERIVED from the
+// tables -- that is exactly what the printed tally already is. The roster below
+// is a LITERAL, and it is cross-checked against the `cases` table BOTH ways: a
+// row the roster does not declare names ITSELF the moment it registers, and a
+// roster key no row carries reads DID NOT RUN. A duplicate-label refusal closes
+// the third door, since two rows sharing a label are one battery and the second
+// can stop running while the first keeps the floor met.
+//
+// The counts are a FLOOR, not an equality: adding cases is ordinary work and
+// must not red. 1 is the honest floor for a table row -- the loop reaches it
+// exactly once per run. A battery falling BELOW its floor means cases stopped
+// running, and the remedy is to find what stopped registering, never to lower
+// the number.
+//
+// ⛔ The floor is NOT evaluated at the end of `selfTest()` before its `return`:
+// it sits at the VERDICT SITE, immediately before the green line, which is the
+// same place for this file because the verdict is printed inside the registering
+// body. The two holes stay orthogonal -- an early `return` above the verdict is
+// the #13798 handshake's to catch (it prints nothing and the dispatch refuses
+// the missing sentinel), and a run that reaches the verdict having registered
+// nothing is this floor's.
+const SELF_TEST_BATTERIES = Object.freeze({
+  // The `cases` table's own rows (recipe A) -- floor 1 each, one per row.
+  'covered package passes': 1,
+  'a covered package that hides its tests fails TESTS_COVERED': 1,
+  'a test-debt entry covers the exclusion, but an empty measurement fails': 1,
+  'a TEST_DEBT entry that writes the derived file count down fails, even when it is right today': 1,
+  'an unread source directory in a COVERED package fails SOURCES_COVERED': 1,
+  'an unread ROOT-level source file in a COVERED package fails SOURCES_COVERED too, keyed at the package directory itself (#14386)': 1,
+  'an UNCHECKED_SOURCE_DEBT entry covers it, but only with a reason': 1,
+  'an UNCHECKED_SOURCE_DEBT entry whose directory is now read fails RECONCILED': 1,
+  'a DEBT package is not also billed for unread source': 1,
+  'a generated `include` root with no declared row fails GENERATED_COVERED': 1,
+  'a declared generator the typecheck script runs before tsc passes': 1,
+  'a declared generator the script never runs fails': 1,
+  'a generator that runs AFTER tsc in the same command fails': 1,
+  'a row declaring the root deliberately ungenerated passes': 1,
+  'an ungenerated row without a reason fails -- the reason IS the guard there': 1,
+  'a row that declares no generator at all fails rather than defaulting to ungenerated': 1,
+  'a GENERATED_INCLUDE_ROOTS row no `include` names any more fails RECONCILED': 1,
+  'include roots that are checked-in source are not this invariant\'s business': 1,
+  'a pin in a file no tsc program compiles fails PINS_CHECKED': 1,
+  'a PHANTOM_PIN_DEBT entry covers it, but only with a reason': 1,
+  'a pin that entered a tsc program fails RECONCILED until its entry is deleted': 1,
+  'a checked test file with pins is silent — PINS_CHECKED is about the unchecked ones only': 1,
+  'excluding tests when there are none to hide is not debt': 1,
+  'dropping the exclusion without deleting TEST_DEBT fails RECONCILED': 1,
+  'TEST_DEBT for a vanished package fails RECONCILED': 1,
+  'a hidden test layer is judged independently of src coverage': 1,
+  'uncovered, unledgered package fails COVERED': 1,
+  'debt-ledgered package passes, but an empty measurement fails': 1,
+  'exempt package passes only with a reason': 1,
+  'a typecheck script that never runs tsc fails REAL': 1,
+  'graduating without deleting the ledger entry fails RECONCILED': 1,
+  'ledger entries for vanished packages fail RECONCILED': 1,
+  'a missing turbo task or CI step fails RUNNABLE': 1,
+  'an unledgered root without typecheck:root fails COVERED': 1,
+  'a debt-ledgered root passes; graduating it stale-fails like anyone else': 1,
+  'a root aggregator that does not run turbo fails RUNNABLE': 1,
+  'a covered root that CI never runs fails RUNNABLE': 1,
+  'a note whose opening tier itemisation contradicts its own field fails COMPOSITION': 1,
+  'a multi-tier itemisation is summed across the tiers, not read one tier at a time': 1,
+  'the same itemisation agreeing with the field is silent': 1,
+  'a note quoting its own history is SKIPPED, not guessed at': 1,
+  'a note carrying no tier itemisation at all is not a note this check reads': 1,
+  'a composition declared stale at the size it was tallied at passes, and the field is what is compared': 1,
+  'a declaration that does not match the tally it claims to describe still fails': 1,
+  'a declaration BELOW the field is a raised count wearing an unrewritten note, and is refused': 1,
+  'a declaration equal to the field states nothing and is refused, so the field only ever shrinks away': 1,
+  'a declaration over a note with no readable itemisation describes nothing and is refused': 1,
+  'COMPOSITION reads TEST_DEBT on the same terms as DEBT': 1,
+  // The five families the green line names, one battery each, at their measured
+  // counts. ⚠️ `observation cases` is 57 here and 68 on the printed line: the
+  // line adds `typecheck-configs`' 11 folded-in cases, which are floored in that
+  // module and register nowhere in this one.
+  'observation cases': 57,
+  're-measure cases': 45,
+  'built-closure cases': 28,
+  'auto-lowering cases': 19,
+  'exit-code cases': 18,
+  // The three blocks the printed tally does not count.
+  'ratchet-remedy authority (#8435)': 3,
+  'graduation remedy (#11491)': 8,
+  'TS6059 wiring (#10779)': 2,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too. This pin is also half of
+// the duplicate-label refusal: two `cases` rows sharing a label collapse to ONE
+// key in the literal above, so the roster falls below this number; the table
+// cross-check in `batteryFloorFailures()` is the other half, and names WHICH
+// label collided.
+const SELF_TEST_BATTERY_FLOOR = 56;
+
+// The ledger `batteryFloorFailures()` reads.
+//
+// ⚠️ Named for the roster's role, deliberately NOT with a self-test spelling:
+// `check:pm-dispatch-gates` anchors on a top-level declaration whose NAME spells
+// self-test and every such name owes a row in its COMPOUND_ANCHOR_LEDGER. This
+// machinery holds no fixtures to mask and reads no path literal, so the accurate
+// name is the one that says `battery`.
+const batterySeen = new Map();
+
+/** Called once per case, before that case runs, by every battery in `selfTest()`. */
+function registerCase(label) {
+  batterySeen.set(label, (batterySeen.get(label) ?? 0) + 1);
+}
+
+/**
+ * The floor: every declared battery RAN, and ran its cases (#13489).
+ *
+ * Called at the verdict site, after every battery has had its chance and
+ * immediately before the success line, so that line can only be printed by a run
+ * in which the set of batteries that registered EQUALS the set declared, each at
+ * or above its own count.
+ *
+ * @param {string[]} rowLabels  the `cases` table's row labels, in table order
+ * @returns {string[]} floor breaches; empty means the floor held
+ */
+function batteryFloorFailures(rowLabels) {
+  const declared = Object.keys(SELF_TEST_BATTERIES);
+  const problems = [];
+  if (declared.length < SELF_TEST_BATTERY_FLOOR) {
+    problems.push(
+      `SELF_TEST_BATTERIES declares ${declared.length} batteries, below the pinned `
+        + `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  const duplicated = [...new Set(rowLabels.filter((label, i) => rowLabels.indexOf(label) !== i))];
+  if (duplicated.length > 0) {
+    problems.push(
+      `the cases table uses ${duplicated.map((n) => JSON.stringify(n)).join(', ')} as a row label more than once — `
+        + 'two rows sharing a label are ONE battery, so the second can stop running while the first keeps the floor met.',
+    );
+  }
+  for (const [label, count] of batterySeen) {
+    if (declared.includes(label)) continue;
+    problems.push(
+      `self-test battery "${label}" registered ${count} case(s) but is not declared in `
+        + 'SELF_TEST_BATTERIES — a case attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const label of declared) {
+    const count = batterySeen.get(label) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[label]) continue;
+    problems.push(
+      count === 0
+        ? `self-test battery "${label}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[label]} pinned. `
+          + 'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${label}" registered ${count} case(s), below its pinned floor of `
+          + `${SELF_TEST_BATTERIES[label]} — cases that used to run no longer do.`,
+    );
+  }
+  if (problems.length) {
+    problems.push(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the '
+        + 'number. Find what stopped registering (a deleted row, a renamed label, a loop that no longer '
+        + 'reaches it) and restore it.',
+    );
+  }
+  return problems;
+}
+
 /**
  * The ledger semantics are the one part of this gate that can be wrong while
  * every package is right -- an evaluate() that under-reports waves the next
@@ -4332,6 +4544,7 @@ function selfTest() {
 
   const failures = [];
   for (const c of cases) {
+    registerCase(c.label);
     const got = evaluate(c.packages, c.root, c.state);
     if (got.length !== c.expect.length || !c.expect.every((rx, i) => rx.test(got[i]))) {
       failures.push(`${c.label}: expected ${c.expect.length} problem(s) matching ${c.expect}, got ${JSON.stringify(got)}`);
@@ -4346,6 +4559,12 @@ function selfTest() {
   // population. Their cases moved WITH them -- one rule, one home, one battery
   // -- and are folded in here so this gate still fails when the predicate it
   // depends on breaks.
+  //
+  // ⛔ NOT a battery of this file. `typecheck-configs` floors its own cases in
+  // its own module-level ledger (PR #15327), so this call registers nothing
+  // here -- which is why the observation battery below floors at 57 while the
+  // green line prints 68 for that family. Flooring a fold-in from the calling
+  // side would pin a number this file cannot keep true.
   for (const failure of typecheckConfigsSelfTest()) failures.push(failure);
 
   const src = { file: 'tsconfig.json', roots: ['src'], excludesTests: false };
@@ -4388,6 +4607,7 @@ function selfTest() {
     },
   ];
   for (const c of coverCases) {
+    registerCase('observation cases');
     const got = configCovers(c.config, c.rel);
     if (got !== c.expect) failures.push(`configCovers — ${c.label}: expected ${c.expect}, got ${got}`);
   }
@@ -4430,6 +4650,7 @@ function selfTest() {
     },
   ];
   for (const c of unreadCases) {
+    registerCase('observation cases');
     const got = unreadFiles(c.testRels, c.programs);
     if (JSON.stringify(got) !== JSON.stringify(c.expect)) {
       failures.push(`unreadFiles — ${c.label}: expected ${JSON.stringify(c.expect)}, got ${JSON.stringify(got)}`);
@@ -4464,6 +4685,7 @@ function selfTest() {
     { label: 'a non-TypeScript file is not source for this purpose', name: 'README.md', depth: 1, expect: false },
   ];
   for (const c of sourceCandidateCases) {
+    registerCase('observation cases');
     const got = isUncheckedSourceCandidate(c.name, c.depth);
     if (got !== c.expect) {
       failures.push(`isUncheckedSourceCandidate — ${c.label}: expected ${c.expect}, got ${got}`);
@@ -4494,6 +4716,7 @@ function selfTest() {
     },
   ];
   for (const c of accountedCases) {
+    registerCase('observation cases');
     const got = accountedPrograms(c.configs, c.invoked).map((p) => p.file);
     if (JSON.stringify(got) !== JSON.stringify(c.expect)) {
       failures.push(`accountedPrograms — ${c.label}: expected ${JSON.stringify(c.expect)}, got ${JSON.stringify(got)}`);
@@ -4512,6 +4735,7 @@ function selfTest() {
     { label: 'a single star roots the same way a double one does', glob: '.next/types/*.ts', expect: '.next/types' },
   ];
   for (const c of includeRootCases) {
+    registerCase('observation cases');
     const got = includeRoot(c.glob);
     if (got !== c.expect) failures.push(`includeRoot — ${c.label}: expected ${JSON.stringify(c.expect)}, got ${JSON.stringify(got)}`);
   }
@@ -4526,6 +4750,7 @@ function selfTest() {
     { label: 'no typecheck script is an empty chain', scripts: { build: 'tsup' }, expect: [] },
   ];
   for (const c of chainCases) {
+    registerCase('observation cases');
     const got = typecheckScriptChain(c.scripts);
     if (JSON.stringify(got) !== JSON.stringify(c.expect)) {
       failures.push(`typecheckScriptChain — ${c.label}: expected ${JSON.stringify(c.expect)}, got ${JSON.stringify(got)}`);
@@ -4552,6 +4777,7 @@ function selfTest() {
     { label: 'nothing at all', chain: [], expect: 'missing' },
   ];
   for (const c of generatorCases) {
+    registerCase('observation cases');
     const got = generatorVerdict(c.chain, 'next typegen');
     if (got !== c.expect) failures.push(`generatorVerdict — ${c.label}: expected ${c.expect}, got ${got}`);
   }
@@ -4575,6 +4801,7 @@ function selfTest() {
     { label: 'a workspace with none', packages: [pkg('a')], table: {}, expect: { entries: 0, packages: 0, produced: 0, ungenerated: 0 } },
   ];
   for (const c of layerCases) {
+    registerCase('observation cases');
     const got = generatedIncludeLayer(c.packages, c.table);
     if (JSON.stringify(got) !== JSON.stringify(c.expect)) {
       failures.push(`generatedIncludeLayer — ${c.label}: expected ${JSON.stringify(c.expect)}, got ${JSON.stringify(got)}`);
@@ -4618,6 +4845,7 @@ function selfTest() {
     },
   ];
   for (const c of derivedCases) {
+    registerCase('observation cases');
     const got = hiddenTestFiles(c.packages, c.testDebt);
     if (got !== c.expect) failures.push(`hiddenTestFiles — ${c.label}: expected ${c.expect}, got ${got}`);
   }
@@ -4722,6 +4950,7 @@ function selfTest() {
     },
   ];
   for (const c of driftCases) {
+    registerCase('re-measure cases');
     const got = evaluateMeasurements(c.measurements);
     const ok =
       got.problems.length === c.problems.length &&
@@ -4757,6 +4986,7 @@ function selfTest() {
     { ledger: 'TEST_DEBT', name: 'plugin-auth', recorded: 111, actual: 112 },
   ]).problems[0];
 
+  registerCase('ratchet-remedy authority (#8435)');
   if (!RATCHET_EXPANSION_OFFER.test(driftMessage)) {
     failures.push(
       '#8435 convention — the ratchet-offer DETECTOR no longer matches the drift message it is ' +
@@ -4765,6 +4995,7 @@ function selfTest() {
         'convention check passes vacuously on every message.',
     );
   }
+  registerCase('ratchet-remedy authority (#8435)');
   if (!ratchetRemedyCarriesAuthority(driftMessage)) {
     failures.push(
       '#8435 convention — the drift message offers the ratchet-raising path in ' +
@@ -4782,6 +5013,7 @@ function selfTest() {
     // constant the detector is, it stays green under a rewording, so (1) owns
     // that failure alone. Measured, not assumed: this exact case is why.
     const unmarkedOffer = `TEST_DEBT drifted upward. raise the entry in ${SELF} AND rewrite its note.`;
+    registerCase('ratchet-remedy authority (#8435)');
     if (!RATCHET_EXPANSION_OFFER.test(unmarkedOffer)) {
       failures.push(
         '#8435 convention — the synthetic unmarked-offer fixture is no longer recognised as an offer, ' +
@@ -4860,6 +5092,7 @@ function selfTest() {
     },
   ];
   for (const c of gradCases) {
+    registerCase('graduation remedy (#11491)');
     for (const needle of c.present) {
       if (!c.message.includes(needle))
         failures.push(`#11491 graduation remedy — ${c.label}: message does not contain ${needle}. ${c.why}`);
@@ -4883,6 +5116,7 @@ function selfTest() {
     '`--lower` deliberately leaves this one alone: 0 is not a lower ceiling, it is a graduation, and an '
     + 'entry recording 0 fails the structural half of this gate.';
   for (const [what, message] of [['DEBT', debtGrad], ['TEST_DEBT', testDebtGrad], ['the root', rootGrad]]) {
+    registerCase('graduation remedy (#11491)');
     if (!message.includes(LOWER_CLAUSE))
       failures.push(
         `#11491 graduation remedy — the \`--lower\` clause is missing from the ${what} branch. That `
@@ -4951,6 +5185,7 @@ function selfTest() {
     },
   ];
   for (const c of countCases) {
+    registerCase('re-measure cases');
     const got = countTscErrors(c.output, c.options);
     if (got !== c.expect) failures.push(`countTscErrors — ${c.label}: expected ${c.expect}, got ${got}`);
   }
@@ -4965,6 +5200,7 @@ function selfTest() {
     // that name too, and a scan that counted those would report 6 and fail on
     // its own test data.
     const dropCallers = [...src.matchAll(/tscErrorCount\([^)]*\{ dropRootDirDiagnostics: true \}/g)].length;
+    registerCase('TS6059 wiring (#10779)');
     if (dropCallers !== 1) {
       failures.push(
         `#10779 wiring — ${dropCallers} call site(s) in ${SELF} ask \`tscErrorCount\` to drop TS6059; ` +
@@ -4972,6 +5208,7 @@ function selfTest() {
           "measuring a package's own shipped config with the tape measure's allowance.",
       );
     }
+    registerCase('TS6059 wiring (#10779)');
     if (!/return tscErrorCount\(configPath, \{ dropRootDirDiagnostics: true \}\)/.test(src)) {
       failures.push(
         `#10779 wiring — \`measureTestDebt\` no longer asks \`tscErrorCount\` to drop TS6059, so the ` +
@@ -4999,6 +5236,7 @@ function selfTest() {
     { label: 'runtime entry points are not type entry points', manifest: { main: 'dist/index.js', module: 'dist/index.mjs' }, expect: [] },
   ];
   for (const c of typeEntryCases) {
+    registerCase('built-closure cases');
     const got = declaredTypeEntries(c.manifest);
     if (JSON.stringify(got) !== JSON.stringify(c.expect)) {
       failures.push(`declaredTypeEntries — ${c.label}: expected ${JSON.stringify(c.expect)}, got ${JSON.stringify(got)}`);
@@ -5059,6 +5297,7 @@ function selfTest() {
     },
   ];
   for (const c of closureCases) {
+    registerCase('built-closure cases');
     const got = unbuiltClosure(c.roots, c.graph);
     if (JSON.stringify(got) !== JSON.stringify(c.expect)) {
       failures.push(`unbuiltClosure — ${c.label}: expected ${JSON.stringify(c.expect)}, got ${JSON.stringify(got)}`);
@@ -5137,6 +5376,7 @@ function selfTest() {
     },
   ];
   for (const c of staleCases) {
+    registerCase('built-closure cases');
     const got = staleClosure(c.roots, c.graph);
     if (JSON.stringify(got) !== JSON.stringify(c.expect)) {
       failures.push(`staleClosure — ${c.label}: expected ${JSON.stringify(c.expect)}, got ${JSON.stringify(got)}`);
@@ -5157,6 +5397,7 @@ function selfTest() {
     { label: 'a .json fixture is not', name: 'fixture.json', expect: false },
   ];
   for (const c of sourceFileCases) {
+    registerCase('built-closure cases');
     const got = isBuildSource(c.name);
     if (got !== c.expect) {
       failures.push(`source-file read — ${c.label}: expected ${c.expect}, got ${got}`);
@@ -5222,6 +5463,7 @@ function selfTest() {
     },
   ];
   for (const c of projectCases) {
+    registerCase('re-measure cases');
     const got = remeasureProject({ pkgAbs: PKG, rootAbs: REPO, ...c.input });
     const problems = [];
     if (c.expect && JSON.stringify(got) !== JSON.stringify(c.expect)) {
@@ -5272,6 +5514,7 @@ function selfTest() {
     { label: 'a code that merely starts with the same digits is not a setup error', output: 'packages/a/src/x.ts(1,2): error TS26881: invented.', expect: false },
   ];
   for (const c of setupErrorCases) {
+    registerCase('re-measure cases');
     const got = TSC_SETUP_ERROR.test(c.output);
     if (got !== c.expect) failures.push(`TSC_SETUP_ERROR — ${c.label}: expected ${c.expect}, got ${got}`);
   }
@@ -5364,6 +5607,7 @@ function selfTest() {
     },
   ];
   for (const c of ceilingCases) {
+    registerCase('re-measure cases');
     const got = remeasureHeapCeiling(c.where);
     if (got.mb !== c.expect.mb || (got.stale !== null) !== c.expect.stale) {
       failures.push(
@@ -5394,6 +5638,7 @@ function selfTest() {
     { label: 'the cap is found among other flags', options: '--enable-source-maps --max-old-space-size=2048 --no-warnings', expect: 2048 },
   ];
   for (const c of heapEnvCases) {
+    registerCase('re-measure cases');
     const got = maxOldSpaceMb(c.options);
     if (got !== c.expect) failures.push(`maxOldSpaceMb — ${c.label}: expected ${c.expect}, got ${got}`);
     // The appended env must be the thing V8 then obeys -- i.e. OUR flag has to
@@ -5460,6 +5705,7 @@ function selfTest() {
     },
   ];
   for (const c of planCases) {
+    registerCase('auto-lowering cases');
     const got = plannedLowerings(c.measurements);
     if (JSON.stringify(got.lowerings) !== JSON.stringify(c.lowerings) || JSON.stringify(got.graduations) !== JSON.stringify(c.graduations)) {
       failures.push(`plannedLowerings — ${c.label}: expected ${JSON.stringify(c)}, got ${JSON.stringify(got)}`);
@@ -5557,6 +5803,7 @@ function selfTest() {
     },
   ];
   for (const c of rewriteCases) {
+    registerCase('auto-lowering cases');
     const got = lowerLedgerEntries(ledgerFixture, c.lowerings);
     if (got.applied.length !== c.applied || got.skipped.length !== c.skipped || !c.assert(got.source)) {
       failures.push(
@@ -5591,6 +5838,7 @@ function selfTest() {
     },
   ];
   for (const c of roundTripCases) {
+    registerCase('auto-lowering cases');
     const got = compositionProblems('DEBT', debtOf(lowerLedgerEntries(ledgerFixture, [c.lowering]).source));
     if (got.length !== c.expect.length || !c.expect.every((rx, i) => rx.test(got[i]))) {
       failures.push(`lowerLedgerEntries round-trip — ${c.label}: expected ${c.expect}, got ${JSON.stringify(got)}`);
@@ -5616,6 +5864,7 @@ function selfTest() {
   const REFUSING = [refreshBuiltClosure, tscErrorCount, measureLedgers, gitIgnoredPaths];
   for (const fn of REFUSING) {
     const body = fn.toString();
+    registerCase('exit-code cases');
     if (/throw new Error\(/.test(body)) {
       failures.push(
         `${fn.name} raises a bare \`throw new Error(\` — an uncaught throw exits 1, the code this gate ` +
@@ -5623,6 +5872,7 @@ function selfTest() {
           `refusePrerequisite() so it exits ${EXIT_PREREQUISITE_NOT_MET}.`,
       );
     }
+    registerCase('exit-code cases');
     if (!body.includes('refusePrerequisite(')) {
       failures.push(`${fn.name} no longer refuses through refusePrerequisite() — the exit-code class is unpinned`);
     }
@@ -5632,6 +5882,7 @@ function selfTest() {
   // A `tsconfig.json` checked into the tree that does not parse is a fact about
   // the TREE -- a finding -- not a prerequisite the caller forgot to supply, so
   // it keeps exit 1 and the pin above must be able to SEE a bare throw.
+  registerCase('exit-code cases');
   if (!/throw new Error\(/.test(readTsconfig.toString())) {
     failures.push(
       'readTsconfig no longer throws — the bare-throw pin above can no longer fail, so it stopped measuring',
@@ -5645,6 +5896,7 @@ function selfTest() {
       ok: EXIT_PREREQUISITE_NOT_MET !== EXIT_FINDINGS && EXIT_PREREQUISITE_NOT_MET !== EXIT_OK },
   ];
   for (const c of exitCodeCases) {
+    registerCase('exit-code cases');
     if (!c.ok) failures.push(`exit-code contract — ${c.label}`);
   }
 
@@ -5667,16 +5919,38 @@ function selfTest() {
     { label: 'warns that the code must be captured before any pipe', ok: refusalText.includes('BEFORE any pipe') },
   ];
   for (const c of textCases) {
+    registerCase('exit-code cases');
     if (!c.ok) failures.push(`prerequisiteNotMetText — ${c.label}`);
   }
 
   // The shared workspace enumerator is a plain module with no CI invocation of
   // its own (#11510); every gate that consolidated onto it folds in its checks.
+  // ⛔ NOT a battery of this file either, for the same reason as the fold-in
+  // above: its cases are defined and run in `workspace-enumerator.mjs`, and a
+  // floor written here would pin a count that module is free to change.
   failures.push(...workspaceEnumeratorSelfTest({ root: ROOT }));
 
   if (failures.length) {
     console.error(`✗ check:type-check-coverage --self-test — ${failures.length} failure(s)\n`);
     for (const f of failures) console.error('  • ' + f);
+    process.exit(1);
+  }
+
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
+  //
+  // Evaluated here, after every battery has had its chance and BEFORE the
+  // verdict, so the line below can only be printed by a run in which the set of
+  // batteries that registered equals the set declared. Its own branch rather
+  // than a push into `failures`: that sink is a failure LIST whose entries the
+  // red line above enumerates as cases, and a floor breach is not a case that
+  // failed -- it is the report that cases never ran.
+  const floorProblems = batteryFloorFailures(cases.map((c) => c.label));
+  if (floorProblems.length) {
+    console.error(
+      `✗ check:type-check-coverage --self-test — the assertion floor over this run's registrations `
+        + `was breached (${floorProblems.length} problem(s)); every case that DID run passed.\n`,
+    );
+    for (const p of floorProblems) console.error('  • ' + p);
     process.exit(1);
   }
   console.log(

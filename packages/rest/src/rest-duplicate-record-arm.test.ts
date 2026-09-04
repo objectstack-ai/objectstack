@@ -236,9 +236,9 @@ describe('#14389 §1 — the engine\'s DUPLICATE_RECORD envelope answers 409 UNI
                 'No record was written.',
         );
         // The envelope's OWN `developerMessage` addresses the in-process caller
-        // of `engine.insert` ("attached as `cause`", "branch on `code ===
-        // 'DUPLICATE_RECORD'`") and neither holds on this wire — it is not
-        // relayed.
+        // of `engine.insert` ("attached as `cause`", and the in-process
+        // spelling beside the wire one — #14723) and `cause` never reaches
+        // this wire — it is not relayed.
         expect(r.body.developerMessage).not.toBe(env.developerMessage);
         expect(String(r.body.developerMessage)).not.toContain('cause');
     });

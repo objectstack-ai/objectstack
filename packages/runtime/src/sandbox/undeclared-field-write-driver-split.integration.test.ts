@@ -159,8 +159,8 @@ import { join } from 'node:path';
 import { ObjectQL, bindHooksToEngine } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { InMemoryDriver } from '@objectstack/driver-memory';
-import { hookBodyRunnerFactory } from './body-runner.js';
-import { QuickJSScriptRunner } from './quickjs-runner.js';
+import { hookBodyRunnerFactory, actionBodyRunnerFactory } from './body-runner.js';
+import { QuickJSScriptRunner, SandboxError } from './quickjs-runner.js';
 import type { EngineQueryOptions } from '@objectstack/spec/data';
 import {
   captureExpectedReadRefusals,
@@ -174,6 +174,9 @@ import {
  * two to be erased — the options bag is an ordinary `where`.
  */
 const rowById = (id: unknown): EngineQueryOptions => ({ where: { id } });
+
+/** [#14241] The unfiltered read, typed for the same reason `rowById` is. */
+const allRows: EngineQueryOptions = { where: {} };
 
 /** `stagee` is the typo under test; `stage` is the field that exists. */
 const DEAL = {
@@ -456,6 +459,168 @@ describe('#4271 / #13657 an undeclared field written by an L2 body — one answe
       expect(err?.status).toBe(400);
       const stored: any = (await e.find('deal', rowById(row.id)))[0];
       expect(stored).not.toHaveProperty('stagee');
+    }, 30000);
+  });
+
+  // ─── [#14241] The THIRD shape: a write the body issues through `ctx.api` ───
+
+  /**
+   * [#14241] Why neither block above answers for a `ctx.api` write.
+   *
+   * `hook-body-write-unknown-field`, `action-body-write-unknown-field` and
+   * `flow-node-write-unknown-field` all tell authors the same thing about
+   * `ctx.api.object('<lit>').update({ stagee: … })`: it is REFUSED at run time —
+   * `INVALID_FIELD` / 400, identically on every driver, before any statement is
+   * built. #13858 measured that and rewrote the three messages to say it. The
+   * harness it measured with was a scratch and was deleted, which left three
+   * live author-facing sentences with nothing under them.
+   *
+   * The two blocks above are the corroboration those sentences were written
+   * from, and they are about DIFFERENT call shapes:
+   *
+   *   • the L2 BODY block mutates `ctx.input`, which the engine folds into the
+   *     CALLER's payload — refused by the POST-hook half of the door (#13657);
+   *   • the CALLER block hands the engine a payload directly — refused by the
+   *     PRE-hook half (#8682 / #8738).
+   *
+   * A `ctx.api` write is neither. It is a SECOND, nested engine call the body
+   * makes on its own behalf, with its own payload and its own trip through the
+   * door — and its verdict comes back through the VM BOUNDARY, which is exactly
+   * where a code and a status can be lost with every gate green (#3918 lost
+   * both directions of the payload once; #7867 lost `status` alone, and served
+   * the right diagnosis at the wrong HTTP status until it was restored).
+   *
+   * So what these cases pin is not "the engine refuses" — that is proved above —
+   * but that the refusal ARRIVES: intact, in its ADR-0112 envelope, at the
+   * caller who invoked the body. Asserting `code` AND `status` is the whole
+   * point; a bare `toThrow()` here would pass on the VM's flattened
+   * `<name>: <message>` string, i.e. on the precise regression this exists to
+   * catch.
+   */
+
+  /**
+   * The hook body the lint rule's own example describes: a literal object name,
+   * a nested write, one key misspelled. `capabilities: ['api.write']` because
+   * the sandbox refuses the surface without it — a body that cannot reach
+   * `ctx.api` at all would make these cases green for the wrong reason.
+   */
+  const apiTypoHook = (targetId: unknown) => ({
+    name: 'deal_api_typo',
+    object: 'deal',
+    events: ['beforeInsert'],
+    body: {
+      language: 'js',
+      source: `await ctx.api.object('deal').update({ id: ${JSON.stringify(targetId)}, stagee: 'won' });`,
+      capabilities: ['api.write'],
+    },
+  });
+
+  /** The same nested write, spelled right — the control for both faces. */
+  const apiCorrectHook = (targetId: unknown) => ({
+    name: 'deal_api_ok',
+    object: 'deal',
+    events: ['beforeInsert'],
+    body: {
+      language: 'js',
+      source: `await ctx.api.object('deal').update({ id: ${JSON.stringify(targetId)}, stage: 'won' });`,
+      capabilities: ['api.write'],
+    },
+  });
+
+  /** The action face of the same write. `type: 'script'` or no handler binds. */
+  const apiTypoAction = (targetId: unknown) => ({
+    name: 'deal_api_typo_action',
+    object: 'deal',
+    type: 'script',
+    body: {
+      language: 'js',
+      source:
+        `await ctx.api.object('deal').update({ id: ${JSON.stringify(targetId)}, stagee: 'won' });` +
+        ` return 'unreachable';`,
+      capabilities: ['api.write'],
+    },
+  });
+
+  describe("a `ctx.api` write from a HOOK body — refused identically on both families", () => {
+    it.each(FAMILIES)('%s: the refusal reaches the caller in its ADR-0112 envelope', async (_name, bootFamily) => {
+      const e = await bootFamily();
+      // Seeded BEFORE the hook is bound, so the body's nested write names a row
+      // that exists: a refusal on a missing row would be RECORD_NOT_FOUND and
+      // would pin nothing about undeclared fields.
+      const seed = await e.insert('deal', { stage: 'open', amount: 10 });
+      bindHooksToEngine(e, [apiTypoHook(seed.id) as any], { packageId: 'deal' });
+
+      const err: any = await e.insert('deal', { stage: 'new', amount: 20 }).catch((x: unknown) => x);
+
+      expect(err?.code).toBe('INVALID_FIELD');
+      expect(err?.status).toBe(400);
+      // The envelope crossed the VM boundary as a SandboxError — the hop that
+      // #3918/#7867 each broke once. `innerMessage` is the un-wrapped text a
+      // toast shows; `message` carries the sandbox's origin prefix.
+      expect(err).toBeInstanceOf(SandboxError);
+      expect(err?.innerMessage).toBe("Unknown field 'stagee' on object 'deal'");
+    }, 30000);
+
+    it.each(FAMILIES)('%s: nothing lands — not the nested write, not the write that triggered it', async (_name, bootFamily) => {
+      const e = await bootFamily();
+      const seed = await e.insert('deal', { stage: 'open', amount: 10 });
+      bindHooksToEngine(e, [apiTypoHook(seed.id) as any], { packageId: 'deal' });
+
+      await expect(e.insert('deal', { stage: 'new', amount: 20 })).rejects.toThrow();
+
+      // The half that distinguishes a REFUSAL from a silent write: on the
+      // schemaless family a persisted `stagee` would be an undeclared column
+      // nothing downstream reads and field-level security can never gate.
+      const rows: any[] = await e.find('deal', allRows);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].stage).toBe('open');
+      expect(rows[0]).not.toHaveProperty('stagee');
+    }, 30000);
+
+    it.each(FAMILIES)('%s: CONTROL — the same nested write spelled right lands', async (_name, bootFamily) => {
+      const e = await bootFamily();
+      const seed = await e.insert('deal', { stage: 'open', amount: 10 });
+      bindHooksToEngine(e, [apiCorrectHook(seed.id) as any], { packageId: 'deal' });
+
+      // Proves the refusals above are about the undeclared key and not about a
+      // `ctx.api` surface that never worked in this fixture at all.
+      await e.insert('deal', { stage: 'new', amount: 20 });
+
+      expect((await e.find('deal', rowById(seed.id)))[0].stage).toBe('won');
+    }, 30000);
+  });
+
+  describe("a `ctx.api` write from an ACTION body — refused identically on both families", () => {
+    it.each(FAMILIES)('%s: the refusal reaches the caller in its ADR-0112 envelope', async (_name, bootFamily) => {
+      const e = await bootFamily();
+      const seed = await e.insert('deal', { stage: 'open', amount: 10 });
+      // The action face binds through its OWN factory rather than the engine's
+      // default body runner, which is the only structural difference from the
+      // hook face — same VM, same `ctx.api`, same door.
+      const handler = actionBodyRunnerFactory(new QuickJSScriptRunner(), { ql: e, appId: 'deal' })(
+        apiTypoAction(seed.id) as any,
+      );
+
+      const err: any = await handler!({ object: 'deal', params: {} }).catch((x: unknown) => x);
+
+      expect(err?.code).toBe('INVALID_FIELD');
+      expect(err?.status).toBe(400);
+      expect(err).toBeInstanceOf(SandboxError);
+      expect(err?.innerMessage).toBe("Unknown field 'stagee' on object 'deal'");
+    }, 30000);
+
+    it.each(FAMILIES)('%s: the target row is untouched, with no shadow column', async (_name, bootFamily) => {
+      const e = await bootFamily();
+      const seed = await e.insert('deal', { stage: 'open', amount: 10 });
+      const handler = actionBodyRunnerFactory(new QuickJSScriptRunner(), { ql: e, appId: 'deal' })(
+        apiTypoAction(seed.id) as any,
+      );
+
+      await expect(handler!({ object: 'deal', params: {} })).rejects.toThrow();
+
+      const after: any = (await e.find('deal', rowById(seed.id)))[0];
+      expect(after.stage).toBe('open');
+      expect(after).not.toHaveProperty('stagee');
     }, 30000);
   });
 });
