@@ -400,8 +400,8 @@ whole-item, `(organization, name, locale)`, *Reset to default* deletes it — ne
 
 Rows that belong to the deployment and not to an organization live in objects **without** the column
 (D1): the environment metadata ledger and its family (`sys_metadata`, `sys_metadata_audit`,
-`sys_metadata_commit`, `sys_metadata_history`, environment-level `sys_view_definition` — D6;
-`sys_metadata_activation` is reverted before 17.3 and does not return), operational plumbing whose
+`sys_metadata_commit`, `sys_metadata_history` — D6; `sys_metadata_activation` is reverted before 17.3 and
+does not return; `sys_view_definition` is not in this family — see D13), operational plumbing whose
 rows no writer attributes to an organization (`sys_job`, `sys_job_run`, `sys_job_queue`,
 `sys_flow_dispatch`, `sys_migration`, `sys_migration_journal`), the audit ledger
 (`sys_audit_log`, whose rows may concern deployment-level actions — the organization an audit row is
@@ -565,7 +565,15 @@ and `email-template-provenance.ts`; the `__global__` sentinel and ADR-0120 D3's 
 `platform-object-tenancy.ts` and `isPlatformObjectOutOfTenantAuditScope`; #12699's stand-down
 semantics (replaced by D7's no-column); ADR-0005's org-scoped write path for the five tier-A types;
 the catalog objects `sys_position`, `sys_permission_set`, `sys_position_permission_set` and
-`sys_capability` (D3 — definitions live in the registry; ADR-0094's projection is no longer needed).
+`sys_capability` (D3 — definitions live in the registry; ADR-0094's projection is no longer needed);
+`sys_view_definition` with its two runtime index migrations (`view-definition-active-index.ts`, the
+`runtime-index-preflight` row) and the `overlay-views-to-sys-view-definition` runbook — **verified inert
+on 2026-09-04**: no writer and no reader exists in the framework, `objectui` has never referenced the
+object in its history (its `createView` / `updateView` / `listViews` write ADR-0005 `view` overlays through
+`client.meta.saveItem`), and cloud lists it only in permission tables. ADR-0017 §3.4/§3.6's runtime-view
+store never acquired its consumer; runtime-authored views are environment metadata (D6) and a per-user
+"personal view" scope stays the parked v18 direction objectui records — if pulled, it returns as a
+user-owned D3 object, not as this table. ADR-0017 carries the amendment note.
 The packaged-flow disable/clone door and `sys_metadata_activation` are **not** on this list because they
 do not wait for protocol 18: unreleased, they are removed in C5 before the next release (D6). Each
 retirement of an authorable shape is an [ADR-0087](./0087-metadata-protocol-upgrade-contract.md) entry.
@@ -698,6 +706,16 @@ overlay axis is retired (D6). One remains:
 
 ## 7. Verification notes
 
+**`sys_view_definition` (2026-09-04, maintainer: 「现在就核实」).** Read across three repositories: the
+framework holds the declaration, two runtime index migrations, a CLI migration allowlist entry, the
+registry name and a runbook for migrating overlay views *into* it — and **no writer or reader of its rows**;
+`objectui` `origin/main` has **zero** references and `git log -S sys_view_definition` is empty across its
+history (its runtime-view CRUD writes the ADR-0005 `view` overlay via `client.meta.saveItem`; per-user
+scope is recorded there as "a parked platform-side v18 direction"); cloud references it only in
+`control-plane-permissions.ts` and the platform-global list. Verdict: not a projection — an ADR-0017 store
+whose consumer never landed; retired under D13. The read-side ledger's "no direct read call site" was the
+same fact seen from one repository.
+
 **The post-17.2 audit (2026-09-04, maintainer: 「查 17.2 之后的修改就可以」).** Every merged change between the
 17.2.0 tag (2026-08-23) and `origin/main` touching organization ownership was read, with a mechanical
 scan of the unreleased diff for newly added NULL-tolerant reads (`organization_id: null`, `IS NULL`,
@@ -739,7 +757,7 @@ One epic tracks the family. C0 lands before 17.3; every other card is on the **v
 | C2 | Catalog resolution reads the registry; assignment tables reference by name (id→name columns + rewrite); dangling-name boot report; every reader of the four catalog tables enumerated and converted | D2, D3, D4 | ADR merge |
 | C3 | Retire the seeders, the per-organization catalog machinery and the four catalog objects; built-ins and audience anchors as declared metadata; Setup catalog creation = environment metadata write under `single`, refused under a wall; platform-admin grant row owned by the Default Organization | D2, D3, D5, D13 | C1, C2 |
 | C4 | Templates: `sendTemplate` resolves the registry; seed and provenance stamp retired; door closed; customized-rows ruling applied | D6, D10 | ADR merge (+ §6 Q1) |
-| C5 | `sys_metadata` family tenant-less (environment definitions, UI-editable by metadata authors); per-organization overlay axis retired (org-scoped writes of the five tier-A types refused); managed content sealed — the unreleased packaged-flow disable/clone machinery and `sys_metadata_activation` **removed before the next release**; ADR-0005 and ADR-0126 amended | D6, D7 | C1 |
+| C5 | `sys_metadata` family tenant-less (environment definitions, UI-editable by metadata authors); per-organization overlay axis retired (org-scoped writes of the five tier-A types refused); managed content sealed; `sys_view_definition` and its two runtime index migrations retired as inert (ADR-0087 entry; ADR-0017 amended); ADR-0005 amended | D6, D7, D13 | C1 |
 | C12 | Template install mode: manifest `installModes`, one-time import into the environment ledger with provenance, refusal on `group` / `isolated`, CLI + marketplace surfaces | D6 | C5 |
 | C6 | Deployment-level state has no column: settings global rung leaves `sys_setting`; plumbing objects drop the column; #12699 declaration made total | D7 | ADR merge (+ §6 Q3) |
 | C7 | Inventory + migration: four fates, id→name rewrite verified before mirror deletion, per-table boot report | D10 | C2, C3, C4, C5, C6 |
