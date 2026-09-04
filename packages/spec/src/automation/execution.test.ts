@@ -114,6 +114,73 @@ describe('ExecutionStepLogSchema', () => {
     expect(step.parentNodeId).toBe('guard');
     expect(step.regionKind).toBe('try');
     expect(step.iteration).toBe(3);
+    // Only a `parallel` branch has an index of its own; a try/catch region
+    // never carries `branch`, so the key is absent — not `0`, not `null`.
+    expect(step.branch).toBeUndefined();
+    expect('branch' in step).toBe(false);
+  });
+
+  it('a step inside a parallel branch nested in a loop body carries the loop iteration on `iteration` and the branch index on `branch`', () => {
+    // `loop { body: [ parallel { branches: [A, B] } ] }` — `iteration` is
+    // single-valued (the enclosing LOOP's, carried through any nesting) and a
+    // parallel region, which DOES have an index of its own, reports it on
+    // `branch`. Both at once is what makes a per-row failure inside a branch
+    // attributable to its row; under the old one-field-two-meanings declaration
+    // the branch index displaced the loop iteration and the row was lost.
+    const step = ExecutionStepLogSchema.parse({
+      nodeId: 'notify',
+      nodeType: 'email',
+      status: 'failure',
+      startedAt: '2026-01-01T00:00:00Z',
+      parentNodeId: 'fan_out',
+      regionKind: 'parallel-branch',
+      iteration: 3,
+      branch: 1,
+      error: { code: 'NODE_FAILURE', message: 'mailbox unavailable' },
+    });
+    expect(step.parentNodeId).toBe('fan_out');
+    expect(step.regionKind).toBe('parallel-branch');
+    expect(step.iteration).toBe(3);
+    expect(step.branch).toBe(1);
+  });
+
+  it('`branch: 0` — the first branch — survives the parse as 0', () => {
+    // Zero is a real index; a falsy-check anywhere on the way would drop it.
+    const step = ExecutionStepLogSchema.parse({
+      nodeId: 'notify',
+      nodeType: 'email',
+      status: 'success',
+      startedAt: '2026-01-01T00:00:00Z',
+      parentNodeId: 'fan_out',
+      regionKind: 'parallel-branch',
+      branch: 0,
+    });
+    expect(step.branch).toBe(0);
+    expect(step.iteration).toBeUndefined();
+  });
+
+  it.each([
+    [-1, 'too_small'],
+    [1.5, 'invalid_type'],
+  ])('refuses `branch: %j` with one zod issue at path ["branch"] (code %s)', (value, code) => {
+    // A branch index is a zero-based integer, like `iteration`. The assertion
+    // is on the issue's PATH and CODE, not on "it threw": a refusal from some
+    // other key would otherwise pass for this one.
+    const result = ExecutionStepLogSchema.safeParse({
+      nodeId: 'notify',
+      nodeType: 'email',
+      status: 'success',
+      startedAt: '2026-01-01T00:00:00Z',
+      parentNodeId: 'fan_out',
+      regionKind: 'parallel-branch',
+      iteration: 0,
+      branch: value,
+    });
+    expect(result.success).toBe(false);
+    const issues = result.success ? [] : result.error.issues;
+    expect(issues).toHaveLength(1);
+    expect(issues[0].path).toEqual(['branch']);
+    expect(issues[0].code).toBe(code);
   });
 });
 
