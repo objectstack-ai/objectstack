@@ -244,8 +244,14 @@ It is hydrated into the same registry the code layer feeds (`loadMetaFromDb`), s
 that says "registry" means both provenances. The rule that separates them is provenance, verbatim:
 「代码推送过来的元数据就只能在代码中修改；studio 界面上配置的元数据，保存在库中，可以在界面上修改」.
 Environment metadata belongs to the deployment, not to an organization: its ledger carries **no
-organization column** (D6/D7), and writing it requires the metadata-authoring capability
-(`manage_metadata` / `studio.access`), which `organization_admin` deliberately does not hold.
+organization column** (D6/D7). It has **two authoring doors** with different gates. **Studio** — every
+type — requires the metadata-authoring capability (`manage_metadata` / `studio.access`), which
+`organization_admin` deliberately does not hold. **Setup** — the security catalog only (positions,
+permission sets, capabilities) — keeps the security-administration authority an organization admin holds
+today (the object grants on the catalog), and is **open under `single`** (the organization is the
+environment) and **refused under a wall** (a plant is not the environment). This is what keeps a
+single-tenant admin's Setup experience unchanged: the same page, the same editor, the write landing in the
+environment ledger exactly as ADR-0094 D3 already redirects it today.
 
 A package reaches a deployment in one of **two install modes** (D6): **managed** — registered as code,
 sealed, upgradeable; or **template** — copied once into the environment ledger as environment
@@ -285,10 +291,11 @@ organization-level catalog**: the objects `sys_position`,
 authoritative store; the projected row no longer exists either. Consequences by posture, verbatim from
 the ruling 「单库多租户我可以禁止他们创建。但是你要支持我绑定到人员」:
 
-- **Single-tenant** (`single`): the organization is the environment. An admin who creates a position
-  or permission set in Setup performs an environment metadata write — the redirect ADR-0094 D3
-  already makes today — gated by the metadata-authoring capability, which the deployment's owner holds
-  and grants as they see fit.
+- **Single-tenant** (`single`): the organization is the environment. An admin who creates or edits a
+  position or permission set in Setup performs an environment metadata write — the redirect ADR-0094 D3
+  already makes today — under the security-administration authority `organization_admin` already holds;
+  no Studio capability is required. Managed-package items stay locked as they have been since
+  2026-08-24 (clone to customize).
 - **Shared-DB multi-tenant** (`group` / `isolated`): tenant admins **cannot create or edit catalog
   items**; the operator defines the catalog for every tenant (managed packages, Studio). Creation
   through Setup or the API is refused with a message naming the posture and the capability.
@@ -659,6 +666,10 @@ compatibility shims for a shape nobody has used yet.
   larger population and are enumerated by C2.
 - **Setup changes shape** (D7): its catalog pages become registry views (editors under `single`,
   read-only under a wall); its assignment pages stay data pages. No server-side merge is built.
+  ⚠️ **Parity is an acceptance criterion, not a hope**: the permission-set page keeps its list views,
+  filters, the object × CRUD / field-level matrix editor and the active/inactive switch (the `active`
+  row state moves into the environment-authored definition's lifecycle, since there is no row). A JSON
+  textarea in place of the matrix editor fails C9.
 - **Tenants of a shared-DB deployment lose catalog authoring** they nominally have today (creating a
   position or set in Setup). They keep assignment. A tenant that needs its own catalog gets its own
   environment.
