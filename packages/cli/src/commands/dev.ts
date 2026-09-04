@@ -17,6 +17,7 @@ import {
   formatMtimeGap,
 } from '../utils/dev-restart.js';
 import { childEnvWithResolvedArtifact } from '../utils/internal-artifact-channel.js';
+import { artifactObjectNames } from '../utils/stack-collections.js';
 import { readEnvWithDeprecation, isMcpServerEnabled } from '@objectstack/types';
 // The ONE port contract, shared with `start` and with the `serve` child this
 // command spawns (#12673). ⛔ Nothing about ports is declared in this file —
@@ -650,16 +651,16 @@ export default class Dev extends Command {
       // newly added *.object.ts is called out explicitly (15.1 third-party
       // eval: "recompiled" alone read as all-green while the new object's
       // table/seed sync was invisible to the user).
+      // [ADR-0130 D4 / option B, #15006] The envelope unwrap and the object
+      // read are `artifactObjectNames` — one of this package's four reads of a
+      // PACKAGE-OWNED collection, and the only one whose loss is non-fatal: with
+      // the flattened top level gone this inventory went permanently EMPTY, so
+      // `os dev` stopped naming a newly added *.object.ts and every recompile
+      // read as all-green. The file read and the `null`-on-failure contract stay
+      // here; the seam is what the acceptance probe can call.
       const readArtifactObjects = (): Set<string> | null => {
         try {
-          const raw = JSON.parse(fs.readFileSync(opts.artifactPath, 'utf8'));
-          const meta = raw?.metadata ?? raw?.data?.metadata ?? raw;
-          const objects = Array.isArray(meta?.objects) ? meta.objects : [];
-          return new Set(
-            objects
-              .map((o: any) => o?.name)
-              .filter((n: any): n is string => typeof n === 'string'),
-          );
+          return new Set(artifactObjectNames(JSON.parse(fs.readFileSync(opts.artifactPath, 'utf8'))));
         } catch {
           return null;
         }

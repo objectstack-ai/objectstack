@@ -28,6 +28,14 @@ import path from 'path';
 import { exportListDescription } from './lib/export-list';
 import { findModuleDocBlock } from './lib/file-description';
 import { createSink, type Owns } from './lib/generated-output';
+import {
+  SHARED_CORE_SCHEMAS,
+  TRANSITIVE_ALLOWLIST,
+  checkCoreEntryShape,
+  checkSingleOwner,
+  checkTransitiveAllowlist,
+  stripInternalIssueIds,
+} from './lib/skill-map-guards';
 
 // ── Paths ────────────────────────────────────────────────────────────────────
 
@@ -100,12 +108,18 @@ const SKILL_MAP: Record<string, string[]> = {
     'ai/tool.zod.ts',
     'ai/skill.zod.ts',
     'ai/model-registry.zod.ts',
-    'ai/conversation.zod.ts',
-    'ai/mcp.zod.ts',
-    'ai/embedding.zod.ts',
     'ai/knowledge-source.zod.ts',
-    'ai/knowledge-document.zod.ts',
-    'ai/usage.zod.ts',
+    // The schema behind the `solution_design` built-in skill the body's
+    // built-in-skills table names. Taught, never advertised until now.
+    'ai/solution-blueprint.zod.ts',
+    // `conversation`, `mcp`, `embedding`, `knowledge-document` and `usage`
+    // left this list: the body teaches none of them, and three had zero
+    // consumers outside packages/spec. An index entry is a POINTER, and
+    // pointing at a schema the body cannot help with is the defect — the
+    // schemas keep existing and stay importable. `embedding` is still
+    // published here as a transitive dep, because `knowledge-source.zod.ts`
+    // composes `EmbeddingModelSchema`: that pointer is reachable from the
+    // authorable face, which is exactly the test the other four fail.
   ],
   'objectstack-api': [
     'api/endpoint.zod.ts',
@@ -121,10 +135,23 @@ const SKILL_MAP: Record<string, string[]> = {
     'automation/flow.zod.ts',
     'automation/time-relative-trigger.zod.ts',
     'automation/approval.zod.ts',
-    'automation/state-machine.zod.ts',
+    // `automation/state-machine.zod.ts` left this list: ADR-0020 retired that
+    // shape AS A RECORD-LIFECYCLE DECLARATION (the top-level `workflow` type
+    // and `object.stateMachines` are both gone), and a record's legal
+    // transitions are now a `state_machine` VALIDATION RULE — `data/validation`
+    // below, already the correct destination. The file's one surviving door is
+    // `ai/agent.zod.ts`'s `lifecycle`, an objectstack-ai door, and that index
+    // reaches it transitively. Advertising it here pointed automation authors
+    // at a shape the platform deliberately removed from their surface.
     'automation/execution.zod.ts',
     'automation/webhook.zod.ts',
     'automation/node-executor.zod.ts',
+    // The per-node-type `config` shapes the body teaches and the index did not
+    // name: screen `fields` and the ADR-0031 loop/parallel/try_catch containers
+    // reach `builtin-node-config`, `NotifyConfigSchema` and the `http`
+    // `timeoutMs` reach `io-node-config`.
+    'automation/builtin-node-config.zod.ts',
+    'automation/io-node-config.zod.ts',
     'data/validation.zod.ts',
   ],
   'objectstack-ui': [
@@ -162,7 +189,11 @@ const SKILL_MAP: Record<string, string[]> = {
   ],
   'objectstack-formula': [
     'shared/expression.zod.ts',
-    'data/date-macros.zod.ts',
+    // `data/date-macros.zod.ts` left this list: it is objectstack-query's, and
+    // both bodies say so — view list filters are not a CEL surface, and the
+    // token list lives in objectstack-query's `rules/filters.md`. One schema
+    // file, one owning package; see SHARED_CORE_SCHEMAS for the three the map
+    // deliberately shares and why.
   ],
 };
 
@@ -271,11 +302,11 @@ function extractDescription(filePath: string): string {
     const firstLine = lines[0];
     if (firstLine && firstLine.length > 5) {
       const clean = firstLine.replace(/^#+\s*/, '');
-      const sentence = clean.split(/\.\s/)[0];
+      const sentence = stripInternalIssueIds(clean.split(/\.\s/)[0]);
       return sentence.length > 120 ? sentence.slice(0, 117) + '...' : sentence;
     }
   }
-  return exportListDescription(content) ?? '';
+  return stripInternalIssueIds(exportListDescription(content) ?? '');
 }
 
 // ── Index generator ──────────────────────────────────────────────────────────
@@ -359,8 +390,22 @@ function ownsReferenceEntry(refsDir: string): Owns {
 
 function main() {
   console.log('🔗 Building skill schema reference indexes...\n');
-  const problems: string[] = [];
+  // Map-level guards run before any file is read: they ask questions of the
+  // authored config that the artifact-vs-generator comparison structurally
+  // cannot (see lib/skill-map-guards.ts).
+  const problems: string[] = [
+    ...checkCoreEntryShape(SKILL_MAP),
+    ...checkSingleOwner(SKILL_MAP, SHARED_CORE_SCHEMAS),
+  ];
   let totalSkills = 0;
+
+  // The allowlist guard needs each package's closure, so the closures are
+  // resolved once, up front, and reused by the emit loop below.
+  const closures: Record<string, string[]> = {};
+  for (const [skillName, coreFiles] of Object.entries(SKILL_MAP)) {
+    closures[skillName] = resolveAll(coreFiles).files;
+  }
+  problems.push(...checkTransitiveAllowlist(SKILL_MAP, TRANSITIVE_ALLOWLIST, closures));
 
   for (const [skillName, coreFiles] of Object.entries(SKILL_MAP)) {
     const skillDir = path.resolve(SKILLS_DIR, skillName);
@@ -370,8 +415,19 @@ function main() {
     }
 
     console.log(`📦 ${skillName}`);
-    const { files: allFiles, missing } = resolveAll(coreFiles);
+    const { files: resolved, missing } = resolveAll(coreFiles);
     for (const m of missing) problems.push(`${skillName} → ${m} (no such file under packages/spec/src)`);
+
+    // A package that declares a transitive allowlist publishes its core files
+    // plus exactly those pointers; one that declares none publishes the whole
+    // closure, as before. See TRANSITIVE_ALLOWLIST for why the constraint is a
+    // hand-authored list and not a rule over the import graph.
+    const allowed = TRANSITIVE_ALLOWLIST[skillName];
+    const coreSet = new Set(coreFiles);
+    const allFiles =
+      allowed === undefined
+        ? resolved
+        : resolved.filter((f) => coreSet.has(f) || allowed.includes(f));
     console.log(`   ${coreFiles.length} core + ${allFiles.length - coreFiles.length} deps`);
 
     const refsDir = path.resolve(skillDir, 'references');
