@@ -24,7 +24,7 @@
  * re-deriving a ceiling never helped — a ceiling separates slow from stuck, and
  * this was stuck at a point where nothing in the file had run yet.
  *
- * `bin/stderr-nonblocking.mjs` carries the mechanism in full: node sets
+ * `src/utils/stderr-nonblocking.ts` carries the mechanism in full: node sets
  * `O_NONBLOCK` on fd 2 when it opens the pipe, libuv clears it again in the
  * pre-exec of any child spawned with inherited stdio, and the flag lives on the
  * SHARED open file description — so the spawner loses it too. Under `tsx` that
@@ -57,6 +57,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { transformSync } from 'esbuild';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 
 import { maskComments } from '../../../scripts/js-comment-mask.mjs';
@@ -65,7 +66,7 @@ import { childEnv } from './helpers/serve-process.js';
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const FIXTURE = resolve(HERE, 'fixtures/stderr-nonblocking-probe.mjs');
 const SHIM = resolve(HERE, '../bin/run-dev.js');
-const GUARD = resolve(HERE, '../bin/stderr-nonblocking.mjs');
+const GUARD = resolve(HERE, '../src/utils/stderr-nonblocking.ts');
 
 /**
  * The one ceiling here, and it is a CONSTANT on purpose.
@@ -103,6 +104,8 @@ interface Probe {
 }
 
 let dir: string;
+/** The guard, type-stripped into a module a bare `node` fixture can import. */
+let guardModule: string;
 let guarded: Probe;
 let unguarded: Probe;
 
@@ -124,7 +127,7 @@ function runProbe(arm: 'guarded' | 'unguarded', killAfterWriting: boolean): Prom
     }
   };
   return new Promise((resolvePromise) => {
-    const child = spawn(process.execPath, [FIXTURE, marks, arm], {
+    const child = spawn(process.execPath, [FIXTURE, marks, arm, guardModule], {
       env: childEnv({ NO_COLOR: '1' }),
       stdio: ['ignore', 'ignore', 'pipe'],
     });
@@ -157,6 +160,20 @@ function runProbe(arm: 'guarded' | 'unguarded', killAfterWriting: boolean): Prom
 
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), 'os-stderr-nonblocking-'));
+  // ⚠️ Type-stripped, not built. The guard moved to `src/` so `bin/run.js` can
+  // reach a COMPILED copy from `dist/` (it is the published entry point and
+  // nothing under `bin/` but itself is packed) — but this suite's whole subject
+  // is the tree where nothing has been built, and the fixture is a bare `node`
+  // process that cannot load a `.ts` file. `esbuild` is already a dependency of
+  // this package and the file's only TypeScript is type annotations, so the
+  // transform erases and copies rather than compiling. The SHIPPED `dist/` copy
+  // is driven by `published-entry-stderr-nonblocking.e2e.test.ts`, through the
+  // real entry point, which is where an emit difference would show up.
+  guardModule = join(dir, 'stderr-nonblocking.mjs');
+  writeFileSync(
+    guardModule,
+    transformSync(readFileSync(GUARD, 'utf8'), { loader: 'ts', format: 'esm', sourcefile: GUARD }).code,
+  );
   unguarded = await runProbe('unguarded', true);
   guarded = await runProbe('guarded', false);
 }, HARD_CAP_MS * 3);
@@ -235,7 +252,7 @@ describe('the shim installs the guard, and installs it in time', () => {
     const shim = maskComments(readFileSync(SHIM, 'utf8'));
     const installed = shim.indexOf('keepStderrNonBlocking(');
     const started = shim.indexOf('run(process.argv.slice(2)');
-    expect(shim, 'run-dev.js no longer imports the guard').toContain('./stderr-nonblocking.mjs');
+    expect(shim, 'run-dev.js no longer imports the guard').toContain('../src/utils/stderr-nonblocking.ts');
     expect(installed, 'run-dev.js no longer calls keepStderrNonBlocking()').toBeGreaterThan(-1);
     expect(started, 'run-dev.js no longer calls run() — this parity case is reading the wrong file').toBeGreaterThan(-1);
     // oclif writes every one of its ~138 KB of warning blocks inside
@@ -248,9 +265,12 @@ describe('the shim installs the guard, and installs it in time', () => {
   });
 
   it('keeps the guard where the shim can reach it without a build', () => {
-    // `bin/run-dev.js` exists to run from source in an UNBUILT tree; a guard
-    // that lived behind `dist/` would be missing in exactly the tree this whole
-    // suite is about.
+    // `bin/run-dev.js` exists to run from source in an UNBUILT tree, and it
+    // reaches this file through `tsx`. A guard the shim could only reach behind
+    // `dist/` would be missing in exactly the tree this whole suite is about —
+    // which is why the move that put a COMPILED copy within reach of
+    // `bin/run.js` had to leave the SOURCE within reach of this one, rather
+    // than relocating the module wholesale.
     expect(readFileSync(GUARD, 'utf8')).toContain('export function keepStderrNonBlocking');
   });
 });

@@ -13,7 +13,7 @@
 // exactly as it did.
 import { flush, handle, run, settings } from '@oclif/core';
 
-import { keepStderrNonBlocking } from './stderr-nonblocking.mjs';
+import { keepStderrNonBlocking } from '../src/utils/stderr-nonblocking.ts';
 
 /**
  * How long stderr may make NO PROGRESS before this shim stops waiting for it.
@@ -189,7 +189,7 @@ settings.debug = true;
 // kernel with the diagnostic still unwritten, and only a reader or a kill ends
 // it. Measured that way on an unbuilt workspace with the reader gone — 27 of 30
 // cold-cache runs, main thread in `write(2)` on fd 2 at `sock_alloc_send_pskb`,
-// still alive at a 90 s ceiling. `stderr-nonblocking.mjs` carries the whole
+// still alive at a 90 s ceiling. `src/utils/stderr-nonblocking.ts` carries the whole
 // derivation, including who clears the flag (a child spawned with inherited
 // stdio — libuv clears `O_NONBLOCK` on the SHARED open file description) and
 // why the re-assert has to sit on the write path rather than run once here.

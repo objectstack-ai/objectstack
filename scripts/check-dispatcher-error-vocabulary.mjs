@@ -215,7 +215,7 @@
  */
 
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
-import { maskComments } from './js-comment-mask.mjs';
+import { maskComments, scanSource } from './js-comment-mask.mjs';
 // [#12925] The OTHER gate's detector, imported so the kebab declaration below is
 // pinned against its real recognizers rather than a paraphrase of them. That gate
 // imports nothing from here, so this is a one-way edge.
@@ -242,6 +242,7 @@ import { isEntrypoint } from './invoked-as.mjs';
 const SELF_TEST_BATTERIES = Object.freeze({
   '[#14626] THE NESTED TEMPLATE, across all FOUR shared textual primitives.': 242,
   '[#13790] The INLINE literal EXPRESSION at an object-literal `code:`.': 40,
+  '[#14742] THE REGEX LITERAL, across all FOUR shared textual primitives.': 39,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -753,8 +754,8 @@ export const OBJECT_LITERAL_CODE_HELPER_BLINDNESS = Object.freeze({
    *     ON and 0 with it OFF; a same-name-shadowing negative control yielded 0.
    *
    * ⚠️ The headline zero is NOT "the position is empty". The position is
-   * populated — 26 value-position candidates feed a `code:` through a local or
-   * a destructured binding. Every one of them holds a RUNTIME value, which is
+   * populated — [#14742] 29 value-position candidates feed a `code:` through a
+   * local or a destructured binding. Every one of them holds a RUNTIME value, which is
    * the #9460 bound this gate declares rather than a hole. What is empty is the
    * REDUCIBLE subclass: not one local in this tree holds the ternary-or-chain
    * of literals that the widening would newly admit.
@@ -769,26 +770,31 @@ export const OBJECT_LITERAL_CODE_HELPER_BLINDNESS = Object.freeze({
     /**
      * Every position where `objlithelper` declines a non-parameter identifier.
      *
-     * [#14626] RE-DERIVED, and the two deltas are separated because they are
-     * different facts. Against the pinned 125 this tree reads 136, of which
-     * 125 → 134 is TREE DRIFT (measured by running the PRE-fix primitives over
-     * today's sources) and 134 → 136 is the nested-template fix newly placing
-     * two positions `enclosingOpeners` used to skip. The reducible subclass is
-     * still EMPTY at both ends, so no verdict row moves — but the numbers below
-     * describe today's tree rather than #13478's.
+     * [#14742] RE-DERIVED again, the two deltas separated as #14626 separated
+     * them, because they are different facts. Against the pinned 136 this tree
+     * reads 144, of which 136 → 142 is TREE DRIFT (measured by running the
+     * PRE-fix primitives over today's sources) and 142 → 144 is the
+     * regex-literal fix newly placing two positions `enclosingOpeners` used to
+     * skip. The reducible subclass is still EMPTY at both ends, so no verdict
+     * row moves — but the numbers below describe today's tree.
+     *
+     * Both readings carry the instrument checks the census was built with: the
+     * replica with its fallback OFF reproduces the real `deriveSites`
+     * `objlithelper` output EXACTLY (29 sites, 5 unresolved) on the pre-fix and
+     * post-fix primitives alike.
      */
-    candidatePositions: 136,
+    candidatePositions: 144,
     /**
      * Of those, the ones another object-literal shape ALREADY matches at the
      * same `code` token — SCREAMING_SNAKE module constants, which `objlitconst`
      * resolves or reports today. Not newly reached, and counting them as such
      * is the easiest way to inflate this census.
      */
-    alreadyCoveredByObjlitconst: 41,
+    alreadyCoveredByObjlitconst: 43,
     /** Genuinely newly reached: no other shape matches that token. */
-    newlyReached: 95,
-    newlyReachedDistinctFileIdent: 73,
-    newlyReachedDistinctFiles: 47,
+    newlyReached: 101,
+    newlyReachedDistinctFileIdent: 79,
+    newlyReachedDistinctFiles: 52,
     /** ⭐ Of the newly reached, how many reduce to a literal set. */
     reduce: 0,
     /** ⇒ nothing to emit ⇒ no rows owed in the declaration file. */
@@ -809,10 +815,10 @@ export const OBJECT_LITERAL_CODE_HELPER_BLINDNESS = Object.freeze({
      * more than the assignment position's did.
      */
     reduceToEmptyByClass: Object.freeze({
-      typeKeywordPosition: 53, // `code: string` / `number` / `undefined`
+      typeKeywordPosition: 56, // `code: string` / `number` / `undefined`
       namedTypePosition: 16, // `code: FieldErrorCode` / `ErrorCode` / `FlowRefusalCode` / …
-      runtimeValueLocal: 17, // `const code = e?.body?.code ?? …` — the #9460 bound
-      bindingWithoutDeclarator: 9, // destructured `const { code } = resolveThrownHttpError(…)`
+      runtimeValueLocal: 18, // `const code = e?.body?.code ?? …` — the #9460 bound
+      bindingWithoutDeclarator: 11, // destructured `const { code } = resolveThrownHttpError(…)`
     }),
     /**
      * The card's EXACT shape — a lower-case local reducible to a literal SET,
@@ -875,20 +881,22 @@ export const OBJECT_LITERAL_CODE_HELPER_BLINDNESS = Object.freeze({
  * ## The three guards, and why each is not the reduction
  *
  *   ⓪ THE REGEX itself refuses a bare quoted literal (see the SHAPES entry): of
- *     the 906 `code:` tokens in the population it reaches 349.
+ *     the 929 `code:` tokens in the population it reaches 358.
  *   ① STRUCTURAL (`enclosingOpeners`) — the innermost enclosing bracket must be
- *     `{`. 70 of the 349 fail it: 41 are `(`, a function PARAMETER LIST where
- *     `code: number | null` is an annotation, 18 are bytes GENUINELY inside a
- *     string literal (the correct answer) and 11 are positions in a file whose
- *     scan is not health-certified — [#14626] two numbers where there used to
- *     be one, and the whole point of that card.
- *   ② OWNERSHIP — 48 of the survivors are already `objlit`'s (4, the
- *     `code: 'X' as const` spelling the lookahead cannot refuse),
- *     `objlitconst`'s (41) or `objlittemplate`'s (3) at that same `code` token,
- *     and 9 more are a bare identifier, which is `objlithelper`'s candidate and
- *     — when it is not a parameter — the lower-case-LOCAL remainder #13478
- *     censused and deliberately left open. Tested against those shapes' own
- *     published regexes, so this partition cannot drift from what it partitions.
+ *     `{`. 64 of the 358 fail it: 44 are `(`, a function PARAMETER LIST where
+ *     `code: number | null` is an annotation, and 20 are bytes GENUINELY inside
+ *     a string literal (the correct answer). [#14742] The third number — the
+ *     positions in a file whose scan is not health-certified — is now ZERO;
+ *     #14626 split it out of the second so that closing it would be visible,
+ *     and this is that column going to nought.
+ *   ② OWNERSHIP — 51 of the survivors are already `objlit`'s (5, the
+ *     `code: 'X' as const` spelling the lookahead cannot refuse, plus a union
+ *     of literal TYPES), `objlitconst`'s (43) or `objlittemplate`'s (3) at that
+ *     same `code` token, and 10 more are a bare identifier, which is
+ *     `objlithelper`'s candidate and — when it is not a parameter — the
+ *     lower-case-LOCAL remainder #13478 censused and deliberately left open.
+ *     Tested against those shapes' own published regexes, so this partition
+ *     cannot drift from what it partitions.
  *   ③ CONDITIONAL TYPE — `code: T extends X ? 'A' : 'B'`. The one type form the
  *     reduction would accept, because its branches really are literals and only
  *     the POSITION is a type. Zero on this tree; the guard is against the class.
@@ -905,38 +913,46 @@ export const OBJECT_LITERAL_CODE_HELPER_BLINDNESS = Object.freeze({
  * they are the identical catalog ternary with the identical values, so they
  * derive the site keys the `:1125` instance already derives.
  *
- * ## [#14626] What moved this census, separated from what merely drifted
+ * ## [#14742] What moved this census, separated from what merely drifted
  *
  * ⚠️ Two different deltas land in the same numbers, and reading them as one is
- * how a census stops being a measurement. Re-derived on this tree at BOTH ends:
+ * how a census stops being a measurement. #14626 established the two-ended
+ * re-derivation; this card repeats it for the REGEX-literal mode, on the tree
+ * as it stands today:
  *
- *   · TREE DRIFT (nothing to do with the fix): the population grew from 2186
- *     files / 902 `code:` tokens / 346 anchor hits to 2187 / 906 / 349, and the
- *     reduction bucket with it (216 → 219 candidates, 214 → 217 declined) —
+ *   · TREE DRIFT (nothing to do with the fix): the population grew from 2187
+ *     files / 906 `code:` tokens / 349 anchor hits to 2232 / 929 / 358, and the
+ *     reduction bucket with it (222 → 224 candidates, 218 → 220 declined) —
  *     measured by running the PRE-fix primitives over today's tree.
- *   · THE FIX: 349 → 349 anchor hits (the regex did not move), 33 → 29
- *     positions guard ① cannot place, 219 → 222 reaching the reduction, and
- *     2 → 4 live positions. The two recovered are `domains/automation.ts`
- *     `:1384` and `:1399` — exactly the two the card predicted.
+ *   · THE FIX: 358 → 358 anchor hits (the regex did not move), 30 → 20
+ *     positions guard ① cannot place, 224 → 233 reaching the reduction, and
+ *     4 → 4 live positions. All 12 positions that sat behind the regex class
+ *     at this anchor now get an ANSWER — 9 reach the reduction, 1 is a
+ *     parameter list, 2 are certified genuinely inside a string — and none of
+ *     them reduces, so no verdict row moves and no site appears. The
+ *     `deriveSites` diff across the change is EMPTY in both directions.
  *
- * ⚠️ `livePositions` is STILL a lower bound, for a DIFFERENT reason, and the
- * new reason is measured rather than inherited. The nested-template class this
- * census used to declare is CLOSED (`skipStringLiteral` tracks `${ … }`
- * nesting). What remains is a REGEX LITERAL whose character class contains a
- * quote or a backtick — `/\brelation\s+["'`][^"'`]+["'`]\s+does not exist/i` in
- * `packages/rest/src/error-response.ts` is the live one — which opens a literal
- * the source does not have. 11 positions at this shape's anchor sit behind that
- * class today, and they are counted as their own row rather than folded into
- * the 18 that really are inside a string. See `SCANNER_LITERAL_BLIND_SPOTS`.
+ * ⚠️ `livePositions` is still a lower bound in principle, but the reason this
+ * census carried since #13790 is now GONE rather than replaced. The
+ * nested-template class is closed (#14626) and the REGEX-LITERAL class is
+ * closed here: `skipStringLiteral` recognises `/…/` from the preceding
+ * significant token, so `/\brelation\s+["'`][^"'`]+["'`]\s+does not exist/i` in
+ * `packages/rest/src/error-response.ts` no longer opens a literal the source
+ * does not have. 0 positions at this shape's anchor sit behind a desync, and 0
+ * across the whole population. What is left is not a literal class at all — it
+ * is the handful of `/` bytes whose goal symbol the preceding character cannot
+ * decide, read conservatively as DIVISION and counted in
+ * `SCANNER_LITERAL_BLIND_SPOTS.regexRecogniser`, together with the standing
+ * caveat that a desync which re-balances by luck is invisible to any of this.
  */
 /**
- * ## [#14626] What the shared textual scanners still cannot read
+ * ## [#14742] What the shared textual scanners CAN now read, and what is left
  *
- * The card that closed the NESTED-TEMPLATE class measured a second one on the
- * way past, and this block is it — declared with numbers rather than left to be
- * rediscovered, which is the discipline the census above was praised for.
+ * #14626 closed the NESTED-TEMPLATE class and measured a second one on the way
+ * past. This block was that measurement; it is now the record of the second
+ * class being closed too, re-derived end to end rather than edited in place.
  *
- * ## The class
+ * ## The class this card closed
  *
  * A REGEX LITERAL whose character class carries a quote or a backtick. The live
  * one on this tree is in `packages/rest/src/error-response.ts`:
@@ -945,18 +961,34 @@ export const OBJECT_LITERAL_CODE_HELPER_BLINDNESS = Object.freeze({
  * const RELATION_DOES_NOT_EXIST = /\brelation\s+["'`][^"'`]+["'`]\s+does not exist/i;
  * ```
  *
- * A textual walk with no lexer sees the `"` and opens a string the source does
- * not have. Everything after it in that file is read inside out — the same
- * symptom the nested template had, from a different cause.
+ * A textual walk that opens a string on any quote sees the `"` inside the
+ * character class and opens a literal the source does not have. Everything
+ * after it in that file is read inside out — the same symptom the nested
+ * template had, from a different cause. 69 of 2232 files were being read that
+ * way; today it is 0.
  *
- * ## ⛔ Why it is NOT fixed here
+ * ## Why this is not the heuristic #14626 refused to bolt on
  *
- * Because the fix is not mechanical. Telling `/re/` from division needs the
- * PRECEDING token's grammatical class (`a / b / c` and `x = /b/` differ only in
- * what came before the slash), which is lexer state this scan deliberately does
- * not carry — the file's own "Why textual, not AST" note is the reason. A
- * heuristic here would trade a blind spot that is now COUNTED for one that is
- * not, which is the wrong direction. Filed as its own card.
+ * That refusal was right and this block keeps its reasoning: telling `/re/`
+ * from division needs the PRECEDING token's grammatical class, and trading a
+ * COUNTED blind spot for an UNCOUNTED one is the wrong direction. What changed
+ * is that the rule is now taken from the grammar and its residue is counted:
+ *
+ *   · the rule is `regexMayBeginAt`, written from ECMA-262's two lexical goal
+ *     symbols rather than from a guess about which characters "look like" an
+ *     operator (see its docblock);
+ *   · the three preceding tokens the rule genuinely cannot decide — `)`, `}`
+ *     and a bare `<`/`>` — are classified as DIVISION, which SKIPS NOTHING and
+ *     so can only leave a regex unread, never invent a literal. Reading them
+ *     the other way would be this card's own defect in a new spelling;
+ *   · the residue is measured against an INDEPENDENT instrument rather than
+ *     asserted: `regexRecogniser` below is a two-direction diff against the
+ *     TypeScript compiler's own parser, which carries the real
+ *     `InputElementDiv` / `InputElementRegExp` goal state.
+ *
+ * This is still not an AST. The recogniser reads one character backwards and
+ * matches one production forwards; the file's "Why textual, not AST" note
+ * stands unchanged.
  *
  * ## What makes the count trustworthy
  *
@@ -965,58 +997,112 @@ export const OBJECT_LITERAL_CODE_HELPER_BLINDNESS = Object.freeze({
  * and every bracket inside a real literal is skipped, so a correct walk of
  * well-formed source ENDS EMPTY; not ending empty is proof it did not.
  * ⚠️ Necessary, not sufficient: a desync that re-balances by luck is invisible,
- * which is why these are floors.
+ * which is why these are floors — and it is why `regexRecogniser`'s control is
+ * a parser diff and not the health certificate a second time.
  */
 export const SCANNER_LITERAL_BLIND_SPOTS = Object.freeze({
   /** The class this card CLOSED. */
-  fixedClass: 'nested template literal — `a ${xs.map((k) => `<k>`).join()} b`',
-  /** The class it measured and deliberately left open. */
-  residualClass: 'regex literal whose character class carries a quote or a backtick',
-  residualExample: "packages/rest/src/error-response.ts — RELATION_DOES_NOT_EXIST",
+  fixedClass: "regex literal whose character class carries a quote or a backtick — /[\"'`]/",
+  /** The class the card before it closed, kept so the sequence reads. */
+  previouslyFixedClass: 'nested template literal — `a ${xs.map((k) => `<k>`).join()} b`',
+  /**
+   * ⚠️ What is left is NOT a literal class. It is the `/` bytes whose lexical
+   * goal symbol the preceding character cannot decide, read as division and
+   * counted in `regexRecogniser`. On this tree none of them is a regex.
+   */
+  residualClass: 'a `/` whose goal symbol the preceding token cannot decide — see `regexRecogniser`',
+  residualExample: 'packages/client-react/src/context.tsx — the `/` of JSX `</ObjectStackContext.Provider>`',
   /** `packages/**` non-test source files swept, both readings on the same sweep. */
-  filesScanned: 2187,
+  filesScanned: 2232,
   /** Files whose whole-file walk ends health-certified, PRE-fix and POST-fix. */
-  scansHealthyBefore: 2108,
-  scansHealthyAfter: 2119,
-  filesRecovered: 11,
-  filesStillDesynchronised: 68,
+  scansHealthyBefore: 2163,
+  scansHealthyAfter: 2232,
+  filesRecovered: 69,
+  filesStillDesynchronised: 0,
   /** Over the whole `code:` token population, not just one shape's anchor. */
-  codePositions: 906,
-  unplacedBefore: 86,
-  /** ⭐ Positions the template-literal mode newly PLACED. */
-  newlyPlaced: 19,
+  codePositions: 929,
+  unplacedBefore: 70,
+  /** ⭐ Positions the regex-literal mode newly PLACED. */
+  newlyPlaced: 47,
   /** Of the rest: the answer that is CORRECT, now certified as such. */
-  genuinelyInsideAString: 21,
-  /** Of the rest: the answer that is a BLIND SPOT, now named as such. */
-  behindScannerDesync: 46,
+  genuinelyInsideAString: 23,
+  /** Of the rest: the answer that is a BLIND SPOT. Now none. */
+  behindScannerDesync: 0,
   /** The same split, restricted to `objlitexpr`'s anchor — see the census below. */
   atThisShapesAnchor: Object.freeze({
-    genuinelyInsideAString: 18,
-    behindScannerDesync: 11,
+    genuinelyInsideAString: 20,
+    behindScannerDesync: 0,
   }),
   /**
    * ⭐⭐ THE ROW THAT DECIDES IT, on the standard #13478 and #13790 were closed
-   * on: unregistered WIRE codes the 19 newly placed positions surfaced. None —
+   * on: unregistered WIRE codes the 47 newly placed positions surfaced. None —
    * verified by diffing `deriveSites` key-by-key across the change, both
-   * directions empty. So this card moved a MEASUREMENT, not a verdict.
+   * directions empty (63 sites, 5 unresolved, before and after). So this card
+   * moved a MEASUREMENT, not a verdict, and the card's own "not knowable until
+   * the class closes" row resolves to zero rather than to a registration
+   * decision.
    */
   unregisteredWireCodesSurfaced: 0,
+  /**
+   * ## [#14742] The recogniser's residue, measured against an INDEPENDENT parser
+   *
+   * A scanner cannot certify its own literal spans — that is the caveat above,
+   * and re-reading the health certificate would just be the same walk agreeing
+   * with itself. So every `/` the LANGUAGE calls code (the TypeScript compiler's
+   * parse, minus comment and literal ranges) is classified by both instruments
+   * and the two answers are diffed in both directions.
+   *
+   * `fabricated` is the number that matters: a span claimed as a regex that is
+   * really division is a literal the source does not have, which is this card's
+   * defect wearing new clothes. `missed` is the opposite direction and is only
+   * the status quo — harmful just when the body carries a quote.
+   */
+  regexRecogniser: Object.freeze({
+    control: 'typescript 6.0.3 — ts.createSourceFile, RegularExpressionLiteral nodes',
+    slashesInCodePosition: 1615,
+    /** Agreed to be a regex literal, closing `/` included. */
+    regexLiteralsAgreed: 1496,
+    /** ⭐⭐ Division read as a regex — a fabricated span. */
+    fabricated: 0,
+    /** ⭐ A real regex read as division. */
+    missed: 0,
+    missedCarryingAQuote: 0,
+    /** The recogniser's closing `/` differing from the compiler's. */
+    closingSlashMismatches: 0,
+    /**
+     * The undecidable positions, read as division by rule. Counted so the
+     * conservative choice is a FLOOR a reader can act on rather than a caveat:
+     * every one of them is a real division on this tree, which is why `missed`
+     * above is zero.
+     */
+    ambiguousReadAsDivision: 47,
+    ambiguousByPrecedingToken: Object.freeze({
+      /** `(a + b) / 2` — all 45 are arithmetic on this tree. */
+      closeParen: 45,
+      /** `{ … } / 2` versus a statement starting with a regex. None today. */
+      closeBrace: 0,
+      /** Both are JSX closing tags in `packages/client-react/src/context.tsx`. */
+      bareAngleBracket: 2,
+    }),
+    /** ⭐ Of those, how many the compiler says really were regex literals. */
+    ambiguousThatWereRegexLiterals: 0,
+  }),
 });
 
 export const INLINE_LITERAL_EXPRESSION_CENSUS = Object.freeze({
-  /** `packages/**` non-test source files swept. [#14626] re-derived. */
-  filesScanned: 2187,
+  /** `packages/**` non-test source files swept. [#14742] re-derived. */
+  filesScanned: 2232,
   /**
    * Every `code:` token in the population, the denominator the split below is
    * read against. The shape's own anchor reaches fewer, by the negative
    * lookahead the SHAPES entry explains: a bare quoted literal is `objlit`'s
    * (or, kebab-spelled, nobody's by declaration) and must not even MATCH here.
    */
-  objectLiteralCodeTokens: 906,
+  objectLiteralCodeTokens: 929,
   /** What the shipped regex reaches, before any guard. */
-  anchorHits: 349,
+  anchorHits: 358,
   /** ① rejected: the enclosing bracket is not a `{`. */
-  notObjectLiteral: 70,
+  notObjectLiteral: 64,
   /**
    * [#14626] THREE classes where there used to be two, because the third used
    * to be indistinguishable from the second. `insideAString` is now asserted
@@ -1026,11 +1112,16 @@ export const INLINE_LITERAL_EXPRESSION_CENSUS = Object.freeze({
    * ⛔ Do not merge these two back into one number to make the sum tidier: one
    * of them is a correct answer and the other is a blind spot, and the whole
    * card is that they used to be printed as the same figure.
+   *
+   * ⭐ [#14742] `behindScannerDesync` is now ZERO, and keeping the class here
+   * with a zero in it is the point: the split is what made closing it visible,
+   * and folding it away would leave the next such class arriving as the same
+   * single number this pair was separated out of.
    */
   notObjectLiteralByClass: Object.freeze({
-    parameterList: 41, // `(code: number | null, signal) => void`
-    insideAString: 18, // certified: the byte really is inside a string literal
-    behindScannerDesync: 11, // the file's scan is not health-certified — see SCANNER_LITERAL_BLIND_SPOTS
+    parameterList: 44, // `(code: number | null, signal) => void`
+    insideAString: 20, // certified: the byte really is inside a string literal
+    behindScannerDesync: 0, // [#14742] the regex-literal class is closed — see SCANNER_LITERAL_BLIND_SPOTS
   }),
   /**
    * ② rejected: an existing object-literal shape owns that same token. Small
@@ -1038,15 +1129,15 @@ export const INLINE_LITERAL_EXPRESSION_CENSUS = Object.freeze({
    * `code: 'X'` spelling; what is left here is `code: 'X' as const`, which
    * `objlit`'s regex matches and this one must not double-count.
    */
-  ownedBySibling: Object.freeze({ objlit: 4, objlitconst: 41, objlittemplate: 3 }),
+  ownedBySibling: Object.freeze({ objlit: 5, objlitconst: 43, objlittemplate: 3 }),
   /** ② rejected: a bare identifier — `objlithelper`'s candidate, #13478's remainder. */
-  bareIdentifier: 9,
+  bareIdentifier: 10,
   /** ③ rejected: a conditional TYPE, whose branches are literals. */
   conditionalType: 0,
   /** What actually reaches `literalCodeValues`. */
-  candidatesReachingReduction: 222,
+  candidatesReachingReduction: 233,
   /** Of those, declined by ALL-OR-NOTHING — no site, no unresolved. */
-  declinedByReduction: 218,
+  declinedByReduction: 229,
   /**
    * The declined bucket, split by a REPORTING heuristic (a single `|`, a
    * top-level `;`, or a bare type expression reads as an annotation). The SUM
@@ -1054,8 +1145,8 @@ export const INLINE_LITERAL_EXPRESSION_CENSUS = Object.freeze({
    * question directly: the type-annotation noise `objlithelper` pays per value
    * stamp is reached here too, and all of it costs a `continue`.
    */
-  declinedTypeAnnotation: 155,
-  declinedRuntimeValue: 63,
+  declinedTypeAnnotation: 163,
+  declinedRuntimeValue: 66,
   /** ⭐ Positions that reduce — the shape's whole output on this tree. */
   livePositions: 4,
   /** Values behind them, summed over `liveSites`. */
@@ -1112,14 +1203,24 @@ export const INLINE_LITERAL_EXPRESSION_CENSUS = Object.freeze({
   /**
    * [#14626] Positions of the same genre this scan still cannot place. The
    * NESTED-TEMPLATE class this field was opened for is CLOSED — the two it
-   * counted are the two `liveSites` rows above. What it counts now is the
-   * REGEX-LITERAL class, measured on the same sweep and left open deliberately:
-   * telling a regex literal from a division needs lexical state this textual
-   * scan does not have, which is a different card from this one.
+   * counted are the two `liveSites` rows above. [#14742] The REGEX-LITERAL
+   * class it counted next is closed too, so this field is ZERO. ⛔ It is kept
+   * rather than deleted: it is the field that would have to go back above zero
+   * for the next literal class, and a census that drops a row the moment it
+   * reads nought cannot show a class re-opening.
    */
-  positionsBehindScannerDesync: 11,
+  positionsBehindScannerDesync: 0,
   /** [#14626] Positions the template-literal mode RECOVERED — the card's own prediction. */
   positionsRecoveredByTemplateMode: 2,
+  /**
+   * [#14742] Positions the REGEX-literal mode gave an answer to at this anchor:
+   * all 12 that sat behind the class. 9 reach the reduction, 1 is a parameter
+   * list and 2 are certified genuinely inside a string. ⭐ None reduces, so
+   * `livePositions` did not move and no verdict row is owed — which is what
+   * `SCANNER_LITERAL_BLIND_SPOTS.unregisteredWireCodesSurfaced: 0` says from
+   * the other end, over the whole population rather than this anchor.
+   */
+  positionsRecoveredByRegexMode: 12,
   /**
    * ⚠️ Why the lowercase catalog above is reported HERE and not delegated to
    * `check:error-code-casing`, measured rather than assumed. That gate needs a
@@ -1139,9 +1240,10 @@ export const INLINE_LITERAL_EXPRESSION_CENSUS = Object.freeze({
    * `objlit`, which reports 'A' and not 'B'. Partial reporting, not silence,
    * and the deliberate price of a partition in which one stamp can never be
    * reported under two shape names and owe two verdict rows. Live instances of
-   * the spelling on this tree: none. The four positions the guard does hand to
+   * the spelling on this tree: none. The five positions the guard does hand to
    * `objlit` are three `code: 'X' as const` (a whole-value literal wearing
-   * decoration, correctly `objlit`'s) and one union of literal TYPES.
+   * decoration, correctly `objlit`'s) and two unions of literal TYPES. [#14742]
+   * Re-derived: four became five with tree drift, not with the fix.
    */
   chainWhoseFirstOperandIsABareLiteral: 0,
   /**
@@ -1303,7 +1405,190 @@ function unwrapExpression(expr) {
 }
 
 /**
- * [#14626] THE ONE string-skipper the four textual primitives share.
+ * [#14742] Where a `/` opens a RegularExpressionLiteral rather than a division
+ * operator — stated FROM THE GRAMMAR, because the approximation is the defect.
+ *
+ * ## The grammar, and why a textual scan needs this at all
+ *
+ * ECMA-262's lexical grammar has TWO goal symbols, `InputElementDiv` and
+ * `InputElementRegExp`, and it is the SYNTACTIC grammar that decides which one
+ * applies at each point: `InputElementRegExp` where a RegularExpressionLiteral
+ * is permitted — anywhere an expression may BEGIN — and `InputElementDiv` where
+ * `/` and `/=` are, which is only after an expression has ENDED. `a / b / c`
+ * and `x = /b/` differ in nothing but that state.
+ *
+ * That state is what this deliberately textual scan does not carry (the file's
+ * "Why textual, not AST" note stands, and this is not an AST). What it CAN read
+ * is the preceding significant character, which decides the goal symbol for
+ * every token the enumeration below covers — and, for the three that it does
+ * not, the class is stated and COUNTED rather than guessed. See
+ * `SCANNER_LITERAL_BLIND_SPOTS.regexRecogniser`.
+ *
+ * The productions this recogniser implements, verbatim in effect:
+ *
+ *   RegularExpressionLiteral :: `/` RegularExpressionBody `/` RegularExpressionFlags
+ *   RegularExpressionFirstChar :: RegularExpressionNonTerminator but not one of
+ *       `*` or `\` or `/` or `[` | RegularExpressionBackslashSequence | RegularExpressionClass
+ *   RegularExpressionNonTerminator :: SourceCharacter but not LineTerminator
+ *   RegularExpressionClass :: `[` RegularExpressionClassChars `]`
+ *   RegularExpressionClassChar :: RegularExpressionNonTerminator but not one of `]` or `\`
+ *   RegularExpressionFlags :: [empty] | RegularExpressionFlags IdentifierPartChar
+ *
+ * Three consequences are load-bearing here rather than incidental:
+ *   · `*` and `/` are excluded as a FIRST char, which is exactly why `/*` and
+ *     `//` are unambiguously comments and never a regex. Not a special case.
+ *   · a RegularExpressionClass is where `/`, `'`, `"` and `` ` `` are ORDINARY
+ *     CHARACTERS. That is this card's whole defect: `/["'`][^"'`]+["'`]/` in
+ *     `packages/rest/src/error-response.ts` opened a string the source does not
+ *     have, and every byte after it in that file was read with the string/code
+ *     polarity reversed.
+ *   · a regex literal cannot cross a LineTerminator, so a `/` whose body runs
+ *     to the end of the line was never a regex.
+ *
+ * ## The three positions the preceding character cannot decide
+ *
+ * ⛔ Not approximated, and not silently resolved in the convenient direction.
+ * Reading a `/` as a regex SKIPS a span; if the `/` was division, that span is
+ * a literal the source does not contain — the identical failure this card
+ * exists to close, in a new spelling and one the count would not show. So each
+ * undecidable case is classified as DIVISION, which skips nothing and can only
+ * leave a regex unread (the status quo, already counted), never invent one:
+ *
+ *   · after `)` — `(a + b) / 2` is division, `if (x) /re/.test(y)` is a regex.
+ *   · after `}` — `{ a: 1 } / 2` is division (NaN, but it parses), `if (x) { f() }`
+ *     followed by `/re/.test(y)` is a regex.
+ *   · after a bare `<` or `>` — `a > b / c` and `a > /re/.test(s)` are both
+ *     legal, and in `.tsx` (this population includes it) `</div>` and `<X/>`
+ *     put a `/` after `<` and after an identifier in JSX rather than in an
+ *     expression at all. `=>` and `>=`/`<=` are NOT this case — the character
+ *     before the `>` decides them, and both are expression positions.
+ *
+ * `SCANNER_LITERAL_BLIND_SPOTS.regexRecogniser` counts what each of those costs
+ * on this tree, so the residue is a floor a reader can act on rather than a
+ * caveat.
+ *
+ * ## Its sibling, and where the two deliberately disagree
+ *
+ * `scripts/js-comment-mask.mjs` carries the same question for a different
+ * consumer. It agrees with this module that a `/` after `)` or `]` is
+ * division, and DIFFERS on the rest of the undecidable set: it reads `}` and a
+ * bare `<`/`>` as regex positions. That is right THERE and wrong here, because
+ * the two modules fail in opposite directions by design — a masker that
+ * over-masks under-reports loudly, while a scanner that skips a span it
+ * invented desynchronises silently, which is this card. The keyword set below
+ * is the same set, and `--self-test` pins the two recognisers against each
+ * other on every fixture where they are supposed to agree AND on the
+ * divergence itself, so neither the copy nor the deliberate difference can
+ * drift unnoticed.
+ */
+const REGEX_AFTER_KEYWORD = new Set([
+  'return', 'typeof', 'instanceof', 'in', 'of', 'case', 'delete', 'void',
+  'yield', 'await', 'new', 'do', 'else', 'throw',
+]);
+
+/** IdentifierPart, near enough for the ASCII this population is written in. */
+const IDENT_CHAR = /[\w$]/;
+
+/** LineTerminator — the four the grammar names, not just `\n`. */
+const isLineTerminator = (c) => c === '\n' || c === '\r' || c === '\u2028' || c === '\u2029';
+
+/**
+ * [#14742] Is the `/` at `at` in a position where an expression may BEGIN?
+ *
+ * Reads backwards to the preceding significant character. Comments are already
+ * blanked to spaces by `maskComments` (it blanks, never deletes, so offsets
+ * survive), so skipping whitespace skips them too.
+ */
+function regexMayBeginAt(src, at) {
+  let i = at - 1;
+  while (i >= 0 && /\s/.test(src[i])) i -= 1;
+  if (i < 0) return true; // start of input: an expression may begin
+  const prev = src[i];
+
+  // An expression just ENDED — `InputElementDiv`. The first group is decided;
+  // the second is the undecidable one the docblock enumerates, read
+  // conservatively as division so that nothing is skipped.
+  if (prev === "'" || prev === '"' || prev === '`') return false; // a literal closed
+  if (prev === '/') return false; // a regex's closing `/`, or a division operator
+  if (prev === ')' || prev === '}') return false; // undecidable — see the docblock
+  if (prev === ']') return false; // `arr[0] / n`
+  if (prev === '<') return false; // undecidable, and JSX `</div>` in `.tsx`
+  if (prev === '>') {
+    // `=>` and `>=`/`<=` are expression positions; a bare `>` is the
+    // undecidable comparison/generic/JSX close.
+    return src[i - 1] === '=';
+  }
+  // `x++ / y` and `x-- / y` are division: an UpdateExpression is a value.
+  if ((prev === '+' || prev === '-') && src[i - 1] === prev) return false;
+
+  if (!IDENT_CHAR.test(prev)) return true; // `(`, `,`, `=`, `:`, `[`, `!`, `&`, `|`, `?`, `{`, `;`, an operator
+
+  // An identifier, a numeric literal, or a keyword. Only a keyword can leave an
+  // expression position open, and only when it IS the keyword rather than a
+  // property name spelled the same (`map.delete / 2` is division).
+  let j = i;
+  while (j >= 0 && IDENT_CHAR.test(src[j])) j -= 1;
+  const word = src.slice(j + 1, i + 1);
+  if (src[j] === '.' || src[j] === '#') return false; // a member name, never a keyword
+  return REGEX_AFTER_KEYWORD.has(word);
+}
+
+/**
+ * [#14742] The index of the CLOSING `/` of the regex literal opening at `at`,
+ * or `-1` when there is no regex literal there.
+ *
+ * `-1` is returned for every reason: the byte is not a `/`, the position is a
+ * division position, the first character is one the grammar excludes, or the
+ * body ran to a LineTerminator or to EOF without closing. That last one is
+ * deliberate — an unterminated regex cannot exist in source TypeScript compiles,
+ * so a `/` whose body does not close on its line was a division operator, and
+ * answering "not a regex" skips nothing.
+ */
+export function regexLiteralAt(src, at) {
+  if (src[at] !== '/') return -1;
+  const first = src[at + 1];
+  // RegularExpressionFirstChar excludes `*` and `/`, which is the grammar's own
+  // reason comments are unambiguous.
+  if (first === undefined || first === '*' || first === '/') return -1;
+  if (!regexMayBeginAt(src, at)) return -1;
+  let inClass = false;
+  for (let i = at + 1; i < src.length; i += 1) {
+    const c = src[i];
+    if (isLineTerminator(c)) return -1;
+    if (c === '\\') {
+      // RegularExpressionBackslashSequence :: `\` RegularExpressionNonTerminator
+      if (i + 1 >= src.length || isLineTerminator(src[i + 1])) return -1;
+      i += 1;
+      continue;
+    }
+    if (inClass) {
+      if (c === ']') inClass = false;
+      continue; // ⭐ a `/`, a quote or a backtick in here is an ORDINARY CHARACTER
+    }
+    if (c === '[') { inClass = true; continue; }
+    if (c === '/') return i; // flags are IdentifierPartChars — code bytes, walked as such
+  }
+  return -1;
+}
+
+/**
+ * [#14742] Does a literal OPEN at `at`? The dispatch the four primitives share,
+ * so that "which bytes are literal content" is answered in ONE place rather
+ * than in four conditions that can drift — the same reason `skipStringLiteral`
+ * exists.
+ */
+export function opensLiteralAt(src, at) {
+  const c = src[at];
+  if (c === "'" || c === '"' || c === '`') return true;
+  return c === '/' && regexLiteralAt(src, at) !== -1;
+}
+
+/**
+ * [#14626] THE ONE literal-skipper the four textual primitives share.
+ *
+ * [#14742] Four literal forms now, not three: `'…'`, `"…"`, `` `…` `` and
+ * `/…/`. Which BYTES open one is `opensLiteralAt`'s question and not each
+ * caller's, for the same reason this function exists at all.
  *
  * ## What it replaced, and why one helper rather than four
  *
@@ -1331,6 +1616,8 @@ function unwrapExpression(expr) {
  *
  * ## The state machine
  *
+ *   · `/` — [#14742] REGEX mode, delegated whole to `regexLiteralAt`: it cannot
+ *     nest and cannot cross a line, so it matches or it does not.
  *   · `'` / `"` — walk to the matching quote, `\\` escapes the next byte.
  *   · `` ` `` — TEMPLATE mode: `\\` escapes, a bare `` ` `` closes, and `${`
  *     pushes an INTERPOLATION frame.
@@ -1360,6 +1647,15 @@ function unwrapExpression(expr) {
  */
 export function skipStringLiteral(src, at) {
   const opener = src[at];
+  // [#14742] A REGEX literal is the fourth form, and it has no closing-quote
+  // ambiguity to track: it cannot nest and cannot cross a line, so it is
+  // matched whole or not at all. `regexLiteralAt` answering `-1` means "no
+  // literal opens here" — the same `{ end: at }` no-op this function has always
+  // returned for a byte that opens nothing.
+  if (opener === '/') {
+    const close = regexLiteralAt(src, at);
+    return { end: close === -1 ? at : close, closed: true };
+  }
   if (opener !== "'" && opener !== '"' && opener !== '`') return { end: at, closed: true };
   // A STACK of open frames, not a single mode: `quote` and `template` are
   // string modes, `interp` is a code mode, and a quote inside an interpolation
@@ -1376,6 +1672,13 @@ export function skipStringLiteral(src, at) {
         stack.push(c === '`' ? { kind: 'template', quote: '`' } : { kind: 'quote', quote: c });
         i += 1;
         continue;
+      }
+      // [#14742] `${ ... }` is CODE, so a regex literal can open here — and a
+      // quote inside its character class would otherwise push a frame this
+      // template never closes.
+      if (c === '/') {
+        const close = regexLiteralAt(src, i);
+        if (close !== -1) { i = close + 1; continue; }
       }
       i += 1;
       continue;
@@ -1438,8 +1741,9 @@ function noteDesync(report, at) {
  * depth reads `a < b ? 'A' : 'B'` as unbalanced and gives up on a reducible one.
  *
  * [#14626] Strings and templates are skipped by `skipStringLiteral`, so a nested
- * template no longer ends the walk early; pass a `scanReport()` to learn whether
- * it ran off the end with a literal open.
+ * template no longer ends the walk early; [#14742] so are regex literals, so a
+ * quote inside a character class no longer opens one. Pass a `scanReport()` to
+ * learn whether it ran off the end with a literal open.
  */
 export function scanTopLevel(src, visit, report = null) {
   let depth = 0;
@@ -1447,7 +1751,7 @@ export function scanTopLevel(src, visit, report = null) {
     const c = src[i];
     if (c === '(' || c === '[' || c === '{') { depth += 1; continue; }
     if (c === ')' || c === ']' || c === '}') { depth -= 1; continue; }
-    if (c === "'" || c === '"' || c === '`') {
+    if (opensLiteralAt(src, i)) {
       const skipped = skipStringLiteral(src, i);
       if (!skipped.closed) noteDesync(report, i);
       i = skipped.end;
@@ -1862,7 +2166,7 @@ export function enclosingOpeners(src, indices, report = null) {
     else if (c === ')' || c === ']' || c === '}') {
       if (stack.length === 0) health.underflow = true;
       else stack.pop();
-    } else if (c === "'" || c === '"' || c === '`') {
+    } else if (opensLiteralAt(src, i)) {
       const skipped = skipStringLiteral(src, i);
       if (!skipped.closed) noteDesync(health, i);
       i = skipped.end;
@@ -1903,7 +2207,7 @@ export function sliceBalanced(src, open, report = null) {
     else if (c === ')' || c === ']' || c === '}') {
       depth -= 1;
       if (depth === 0) return src.slice(open + 1, i);
-    } else if (c === "'" || c === '"' || c === '`') {
+    } else if (opensLiteralAt(src, i)) {
       const skipped = skipStringLiteral(src, i);
       if (!skipped.closed) noteDesync(report, i);
       i = skipped.end;
@@ -1919,7 +2223,8 @@ export function sliceBalanced(src, open, report = null) {
  * this: it asserted template-awareness ("or template") over a seek-to-matching-
  * backtick that a NESTED template desynchronises, so a reader checking whether
  * templates were handled found a "yes". The claim is now true — `skipStringLiteral`
- * tracks `${ … }` nesting — and it is pinned by `--self-test` rather than
+ * tracks `${ … }` nesting, and [#14742] a regex literal keeps its own commas
+ * and quotes too — and both halves are pinned by `--self-test` rather than
  * asserted here, because a comment is exactly what failed last time.
  *
  * Pass a `scanReport()` as `report` to learn whether the walk ran off the end
@@ -1934,7 +2239,7 @@ export function splitTopLevel(args, report = null) {
     const c = args[i];
     if (c === '(' || c === '[' || c === '{' || c === '<') depth += 1;
     else if (c === ')' || c === ']' || c === '}' || c === '>') depth -= 1;
-    else if (c === "'" || c === '"' || c === '`') {
+    else if (opensLiteralAt(args, i)) {
       const skipped = skipStringLiteral(args, i);
       if (!skipped.closed) noteDesync(report, i);
       i = skipped.end;
@@ -4748,15 +5053,20 @@ function selfTest() {
       );
     }
 
-    // ⑨ [#14626] THE RESIDUAL BLIND SPOT, kept live rather than left as prose.
+    // ⑨ [#14626/#14742] THE RESIDUAL BLIND SPOT, kept live rather than left as
+    //    prose.
     //
     //    `SCANNER_LITERAL_BLIND_SPOTS` claims two things a number cannot assert
     //    on its own, and each is pinned in the direction it can fail:
     //      · the arithmetic is a PARTITION of the pre-fix unplaced positions —
     //        an off sum means a class was counted twice or dropped;
-    //      · the class is still OPEN. If the regex-literal fixture below starts
-    //        being placed, the card that block defers to has landed and every
-    //        figure in it is stale — re-measure, do not edit the numbers.
+    //      · [#14742] the class is now CLOSED. This pin ran in the OPPOSITE
+    //        direction until this card — it asserted the regex fixture came
+    //        back `desync`, and its own message said to re-measure rather than
+    //        edit it if it ever stopped. It stopped, the sweep was re-run, and
+    //        the numbers above are that sweep. The fixture is unchanged; only
+    //        the expected answer moved, which is what makes the two readings
+    //        comparable.
     {
       const S = SCANNER_LITERAL_BLIND_SPOTS;
       ok(
@@ -4771,24 +5081,288 @@ function selfTest() {
           S.filesScanned - S.scansHealthyAfter === S.filesStillDesynchronised,
         'SCANNER_LITERAL_BLIND_SPOTS: the file-level health figures do not agree with each other',
       );
-      // ⭐ POSITIVE CONTROL FOR THE DECLARATION: the regex class really does
-      //    still desynchronise the walk, and the SAME source without it really
-      //    does place the position. A block declaring an open blind spot that
-      //    is in fact closed is worse than no block at all.
+      // ⭐ POSITIVE CONTROL FOR THE DECLARATION: the very fixture that used to
+      //    come back `desync` is now PLACED, and the SAME source without the
+      //    regex is placed too — so a green here is the recogniser working and
+      //    not a fixture that stopped exercising anything. ⛔ If this reds, the
+      //    class has RE-OPENED: re-run the sweep (the census instruments are
+      //    described in `regexRecogniser`) and rewrite the numbers. Do not
+      //    edit the fixture, and do not flip the expectation back.
       const regexBlind = "const re = /[`'\"]/;\nconst body = { code: 'RX_ONE' };\n";
       const rxAt = regexBlind.indexOf('code:');
       ok(
-        enclosingOpeners(regexBlind, [rxAt]).get(rxAt).kind === 'desync',
-        'SCANNER_LITERAL_BLIND_SPOTS declares the regex-literal class OPEN, but the scan now places a ' +
-          'position after one. If that class was closed, this block is stale: re-run the sweep and rewrite ' +
-          'it — including whether `positionsBehindScannerDesync` is still 11',
+        enclosingOpeners(regexBlind, [rxAt]).get(rxAt).kind === 'bracket',
+        'SCANNER_LITERAL_BLIND_SPOTS declares the regex-literal class CLOSED, but a `code:` after a regex ' +
+          'literal carrying a quote is not placed any more. The class has re-opened: re-measure and rewrite ' +
+          'this block — including whether `behindScannerDesync` is still 0',
       );
       const noRegex = "const re = 1;\nconst body = { code: 'RX_ONE' };\n";
       const nrAt = noRegex.indexOf('code:');
       ok(
         enclosingOpeners(noRegex, [nrAt]).get(nrAt).kind === 'bracket',
         '⭐ the same source WITHOUT the regex literal is not placed either — so the assertion above is ' +
-          'measuring a broken fixture rather than the declared blind spot',
+          'measuring a broken fixture rather than the recogniser',
+      );
+      ok(
+        SCANNER_LITERAL_BLIND_SPOTS.regexRecogniser.fabricated === 0 &&
+          SCANNER_LITERAL_BLIND_SPOTS.regexRecogniser.ambiguousThatWereRegexLiterals === 0,
+        '[#14742] `regexRecogniser` no longer records the readings that made the conservative rule ' +
+          'defensible. A fabricated span is this card\'s own defect in a new spelling, and an ambiguous ' +
+          'position that IS a regex is a cost the block has to name — both are new measurements against ' +
+          'the parser, not numbers to edit',
+      );
+    }
+  }
+
+
+  // ── [#14742] THE REGEX LITERAL, across all FOUR shared textual primitives ──
+  //
+  // The sibling of the nested-template battery above, and the same discipline:
+  // the four primitives share ONE literal-skipper, so each is asserted through
+  // its own entry point rather than through the helper they happen to call.
+  //
+  // ⭐ What makes this battery mean something is that it runs in BOTH
+  // directions. A recogniser that answered "regex" everywhere would pass every
+  // positive case below and skip spans the source does not have — the exact
+  // defect this card closed, re-opened one layer up — so every positive case
+  // has a DIVISION twin, and the divisions are the cases that were measured on
+  // the real tree (43 of the 45 ambiguous `/` bytes on it are arithmetic).
+  battery('[#14742] THE REGEX LITERAL, across all FOUR shared textual primitives.');
+  {
+    // ⭐ THE LIVE INSTANCE, copied from packages/rest/src/error-response.ts —
+    // the position the card was filed on.
+    const LIVE = '/\\brelation\\s+["\'`][^"\'`]+["\'`]\\s+does not exist/i';
+    const liveSrc = `const RELATION_DOES_NOT_EXIST = ${LIVE};\nconst body = { code: 'LIVE_ONE' };\n`;
+    const liveSlash = liveSrc.indexOf('/');
+    ok(
+      regexLiteralAt(liveSrc, liveSlash) === liveSrc.lastIndexOf('/'),
+      `regexLiteralAt did not close the live instance at its final \`/\` — it answered ` +
+        `${regexLiteralAt(liveSrc, liveSlash)} where the source has ${liveSrc.lastIndexOf('/')}. A character ` +
+        'class is where `/` and quotes are ORDINARY CHARACTERS; that is the whole defect',
+    );
+    {
+      const at = liveSrc.indexOf('code:');
+      const health = scanReport();
+      const placed = enclosingOpeners(liveSrc, [at], health);
+      ok(
+        placed.get(at).kind === 'bracket' && placed.get(at).ch === '{',
+        `enclosingOpeners answered ${JSON.stringify(placed.get(at))} for a \`code:\` after the live regex ` +
+          'instance instead of the enclosing `{` — the walk is still entering at the quote inside the ' +
+          'character class',
+      );
+      ok(
+        !health.desynchronised && !health.underflow && !health.unbalanced,
+        'the whole-file walk over the live instance is not health-certified — the class is not closed, ' +
+          'whatever the position above answered',
+      );
+    }
+
+    // ① scanTopLevel — the walk must come back OUT of the regex and see BOTH
+    //    top-level `;`, not the ones a phantom string would hide.
+    {
+      const src = `const re = ${LIVE};\nconst n = 1;\n`;
+      const semis = [];
+      scanTopLevel(src, (c, i) => { if (c === ';') semis.push(i); });
+      ok(
+        semis.length === 2,
+        `scanTopLevel saw ${semis.length} top-level \`;\` past a quote-carrying regex, not 2 — the walk ` +
+          'did not come back out of the literal it entered',
+      );
+    }
+    // ② enclosingOpeners — a `code:` INSIDE a regex is not a stamp, and must
+    //    still be reported as literal content rather than placed in a bracket.
+    {
+      const inRegex = "const re = /code: '[A-Z]+'/;\n";
+      const at = inRegex.indexOf('code:');
+      ok(
+        enclosingOpeners(inRegex, [at]).get(at).kind === 'inside-string',
+        'a `code:` written INSIDE a regex literal is placed as code — the skip has to cover the body, not ' +
+          'just the delimiters',
+      );
+    }
+    // ③ sliceBalanced — an argument slice must survive a regex whose class
+    //    carries a bracket AND a quote.
+    {
+      const args = `s.replace(/[)'"]/g, ''), 2`;
+      const call = `f(${args})`;
+      ok(
+        sliceBalanced(call, 1) === args,
+        `sliceBalanced returned ${JSON.stringify(sliceBalanced(call, 1))} for an argument list containing a ` +
+          'regex whose character class holds a `)` and a quote',
+      );
+    }
+    // ④ splitTopLevel — a comma inside a regex is the regex's own.
+    {
+      const args = `/[,'"]/, x`;
+      ok(
+        splitTopLevel(args).length === 2,
+        `splitTopLevel cut a regex-carrying argument list into ${splitTopLevel(args).length} parts, not 2 — ` +
+          'a comma inside a character class is not a separator',
+      );
+    }
+    // ⑤ skipStringLiteral itself, including the shapes the grammar decides.
+    {
+      const cls = "x = /[/]/.test(s);";
+      ok(
+        skipStringLiteral(cls, 4).end === cls.indexOf('/', 6) + 2,
+        'skipStringLiteral let a `/` inside a CHARACTER CLASS close the regex — RegularExpressionClassChar ' +
+          'admits it as an ordinary character',
+      );
+      const esc = 'x = /a\\/b/.test(s);';
+      ok(
+        skipStringLiteral(esc, 4).end === esc.lastIndexOf('/', esc.indexOf('.')),
+        'skipStringLiteral mis-placed the close of a regex whose body carries an ESCAPED `/`',
+      );
+      // An interpolation is CODE, so a regex can open inside one — and a
+      // backtick in its class would otherwise open a frame the template never
+      // closes.
+      const interp = 'const t = `a ${ /["\'`]/.test(s) } b`;\nconst o = { code: \'I_ONE\' };\n';
+      const at = interp.indexOf('code:');
+      ok(
+        skipStringLiteral(interp, interp.indexOf('`')).closed === true &&
+          enclosingOpeners(interp, [at]).get(at).kind === 'bracket',
+        'a regex carrying a backtick INSIDE a `${ … }` interpolation still loses the template — the ' +
+          'interpolation is code, and a `/` there opens a literal like any other code position',
+      );
+    }
+
+    // ⑥ ⛔ THE NEGATIVE HALF — DIVISION. Every one of these is a `/` that must
+    //    skip NOTHING. A recogniser that reads them as regexes invents literal
+    //    spans, which is strictly worse than the blind spot this card closed:
+    //    the blind spot was counted, an invented span is not.
+    {
+      const divisions = [
+        'a / b / c',
+        'x = y / 2 / z',
+        '(a) / b',
+        'arr[0] / n',
+        'const r = (total - used) / total;',
+        'map.delete / 2', // a property NAME spelled like a keyword, not the keyword
+        'i++ / 2',
+      ];
+      for (const src of divisions) {
+        const slashes = [...src].map((c, i) => (c === '/' ? i : -1)).filter((i) => i >= 0);
+        const read = slashes.filter((i) => regexLiteralAt(src, i) !== -1);
+        ok(
+          read.length === 0,
+          `regexLiteralAt read a DIVISION as a regex literal in ${JSON.stringify(src)} (at ${read.join(', ')}). ` +
+            'That invents a literal the source does not contain — the same failure this card closed, one ' +
+            'layer up and uncounted',
+        );
+        ok(
+          slashes.every((i) => opensLiteralAt(src, i) === false),
+          `opensLiteralAt disagrees with regexLiteralAt on ${JSON.stringify(src)} — the four primitives ` +
+            'dispatch on the former, so a disagreement is a skip nobody tested',
+        );
+      }
+      // ...and the division must not eat the stamp that follows it.
+      const after = "const ratio = (a) / b;\nconst o = { code: 'DIV_ONE' };\n";
+      const at = after.indexOf('code:');
+      ok(
+        enclosingOpeners(after, [at]).get(at).kind === 'bracket',
+        'a `code:` after a DIVISION is no longer placed — the recogniser opened a literal on an operator',
+      );
+      ok(
+        splitTopLevel('a / b, c / d').length === 2,
+        'splitTopLevel lost a top-level comma between two divisions — a `/` operator swallowed it',
+      );
+    }
+
+    // ⑦ The grammar's own exclusions, which are why comments are unambiguous:
+    //    RegularExpressionFirstChar admits neither `*` nor `/`.
+    {
+      ok(
+        regexLiteralAt('x = // not a regex\ny;', 4) === -1 && regexLiteralAt('x = /* not a regex */ y;', 4) === -1,
+        'regexLiteralAt read a COMMENT opener as a regex literal. `//` and `/*` are excluded by ' +
+          'RegularExpressionFirstChar, which is the grammar\'s own reason the two goal symbols never ' +
+          'collide on a comment',
+      );
+      ok(
+        regexLiteralAt('x = /never closed\ny;', 4) === -1,
+        'regexLiteralAt accepted a body that runs past a LineTerminator — RegularExpressionNonTerminator ' +
+          'excludes one, so a `/` whose body does not close on its line was a division',
+      );
+    }
+
+    // ⑧ The KEYWORD positions, which are the ones a bare punctuation rule gets
+    //    wrong: a value character precedes, and only the keyword says otherwise.
+    {
+      const kw = "function f(s) { return /[`'\"]/.test(s); }\nconst o = { code: 'KW_ONE' };\n";
+      const at = kw.indexOf('code:');
+      ok(
+        regexLiteralAt(kw, kw.indexOf('/[')) !== -1 && enclosingOpeners(kw, [at]).get(at).kind === 'bracket',
+        '`return /re/` is not read as a regex — this is the exact shape whose omission was measured to ' +
+          'fabricate hits out of every comment below it in `js-comment-mask.mjs`',
+      );
+      const arrow = "const f = (s) => /['\"]/.test(s);\nconst o = { code: 'AR_ONE' };\n";
+      const aAt = arrow.indexOf('code:');
+      ok(
+        regexLiteralAt(arrow, arrow.indexOf("/['")) !== -1 && enclosingOpeners(arrow, [aAt]).get(aAt).kind === 'bracket',
+        'a regex in an ARROW BODY is read as division — `=>` ends in `>`, and the character before the `>` ' +
+          'is what separates an arrow from a comparison',
+      );
+    }
+
+    // ⑨ ⚠️ THE UNDECIDABLE POSITIONS, pinned as DIVISION so the conservative
+    //    choice is a decision on the record rather than an accident. These are
+    //    the positions `SCANNER_LITERAL_BLIND_SPOTS.regexRecogniser` counts; if
+    //    a future card decides one of them the other way, this is where the
+    //    change has to be argued, and the counts there are the evidence.
+    {
+      ok(
+        regexLiteralAt('if (x) /re/.test(y);', 7) === -1,
+        'a `/` after `)` is read as a REGEX. It is undecidable without parser state, and reading it as a ' +
+          'literal skips a span that `(a + b) / 2` does not have — 45 of them on this tree, all arithmetic',
+      );
+      ok(
+        regexLiteralAt('if (x) { f() }\n/re/.test(y);', 15) === -1,
+        'a `/` after `}` is read as a REGEX — same undecidability, same conservative answer',
+      );
+      ok(
+        regexLiteralAt('const el = <Ctx.Provider>{x}</Ctx.Provider>;', 28) === -1,
+        'the `/` of a JSX CLOSING TAG is read as a regex. `.tsx` is in this gate\'s population, and ' +
+          '`</div>` puts a `/` after `<` in something that is not an expression at all',
+      );
+    }
+
+    // ⑩ ⭐ THE SIBLING RECOGNISER, pinned against this one rather than described.
+    //    `js-comment-mask.mjs` answers the same question for a different
+    //    consumer; the two are supposed to AGREE everywhere except the three
+    //    undecidable positions, where they fail in deliberately opposite
+    //    directions. A copy that drifts is the failure this pin exists for.
+    {
+      const agreeing = [
+        "x = /['\"]/.test(s);",
+        'function f(s) { return /[`]/.test(s); }',
+        'a / b / c',
+        'x = y / 2 / z',
+        'arr[0] / n',
+      ];
+      for (const src of agreeing) {
+        const mask = scanSource(src);
+        const mine = [...src].map((c, i) => (c === '/' && regexLiteralAt(src, i) !== -1 ? i : -1)).filter((i) => i >= 0);
+        // The masker flags a regex's BODY as literal, so the byte after an
+        // opening `/` is the tell it also saw a regex there.
+        const theirs = [...src].map((c, i) => (c === '/' && mask.literal[i + 1] && !mask.comment[i] ? i : -1)).filter((i) => i >= 0);
+        ok(
+          JSON.stringify(mine) === JSON.stringify(theirs),
+          `[#14742] the two regex recognisers disagree on ${JSON.stringify(src)} — this one says ` +
+            `${JSON.stringify(mine)} and js-comment-mask.mjs says ${JSON.stringify(theirs)}. They are two ` +
+            'copies of one rule and are meant to differ ONLY at `)`, `}` and a bare `<`/`>`',
+        );
+      }
+      // ...and the divergence itself, asserted rather than left to be
+      // rediscovered as a bug: after `}` the masker says regex (right for a
+      // masker, which fails safe by over-masking) and this one says division
+      // (right for a scanner, which must never skip a span it invented). ⚠️ `)`
+      // is NOT one of the divergences — both read it as division — and pinning
+      // the wrong one of the three was caught here by this very case.
+      const diverge = 'if (x) { f() }\n/re/.test(y);';
+      ok(
+        regexLiteralAt(diverge, 15) === -1 && scanSource(diverge).literal[16] === 1,
+        '[#14742] the documented DIVERGENCE between the two recognisers is gone. If both now answer the ' +
+          'same way after `}`, one of them changed its failure direction and the comment explaining why ' +
+          'they differ is stale',
       );
     }
   }
@@ -4954,19 +5528,25 @@ function main() {
     `${inline.unregisteredWireCodesHiding} unregistered WIRE code(s) hiding. So the widening is PREVENTIVE. ` +
     `⚠️ ${inline.typeAnnotationsSurviving} type-annotation position survives the guards — the cost ` +
     `\`objlithelper\` pays per value stamp is reached here and costs nothing. ` +
-    `\n  [#14626] the shared textual scanners now carry a TEMPLATE-LITERAL mode (\`skipStringLiteral\` ` +
-    `tracks \`\${ … }\` nesting instead of seeking a matching backtick) in all four primitives, and ` +
-    `\`enclosingOpeners\` answers each position with WHICH of its two former \`undefined\`s applies. ` +
-    `Over the ${SCANNER_LITERAL_BLIND_SPOTS.codePositions} \`code:\` tokens in the population that ` +
-    `recovered ${SCANNER_LITERAL_BLIND_SPOTS.newlyPlaced} positions (${inline.positionsRecoveredByTemplateMode} ` +
-    `of them at this shape's anchor, both in domains/automation.ts) and surfaced ` +
-    `${SCANNER_LITERAL_BLIND_SPOTS.unregisteredWireCodesSurfaced} unregistered wire code(s). ` +
-    `⚠️ The count is STILL a lower bound, now for a measured and different reason: ` +
-    `${inline.positionsBehindScannerDesync} position(s) at this anchor ` +
-    `(${SCANNER_LITERAL_BLIND_SPOTS.behindScannerDesync} across the whole population, in ` +
-    `${SCANNER_LITERAL_BLIND_SPOTS.filesStillDesynchronised} of ${SCANNER_LITERAL_BLIND_SPOTS.filesScanned} ` +
-    `files) sit behind a REGEX LITERAL carrying a quote — see SCANNER_LITERAL_BLIND_SPOTS, which says why ` +
-    `that class is counted rather than guessed at. ` +
+    `\n  [#14626/#14742] the shared textual scanners now carry a TEMPLATE-LITERAL mode ` +
+    `(\`skipStringLiteral\` tracks \`\${ … }\` nesting instead of seeking a matching backtick) AND a ` +
+    `REGEX-LITERAL mode (a \`/\` is read as a literal only where the grammar's \`InputElementRegExp\` ` +
+    `goal applies) in all four primitives, and \`enclosingOpeners\` answers each position with WHICH of ` +
+    `its two former \`undefined\`s applies. Over the ${SCANNER_LITERAL_BLIND_SPOTS.codePositions} ` +
+    `\`code:\` tokens in the population the regex mode recovered ` +
+    `${SCANNER_LITERAL_BLIND_SPOTS.newlyPlaced} positions ` +
+    `(${inline.positionsRecoveredByRegexMode} of them at this shape's anchor) and surfaced ` +
+    `${SCANNER_LITERAL_BLIND_SPOTS.unregisteredWireCodesSurfaced} unregistered wire code(s); ` +
+    `${SCANNER_LITERAL_BLIND_SPOTS.filesStillDesynchronised} of ` +
+    `${SCANNER_LITERAL_BLIND_SPOTS.filesScanned} files are left desynchronised and ` +
+    `${inline.positionsBehindScannerDesync} position(s) at this anchor sit behind one. ` +
+    `⚠️ Still a floor, for a smaller and measured reason: ` +
+    `${SCANNER_LITERAL_BLIND_SPOTS.regexRecogniser.ambiguousReadAsDivision} \`/\` byte(s) whose goal ` +
+    `symbol the preceding token cannot decide are read as DIVISION, of which ` +
+    `${SCANNER_LITERAL_BLIND_SPOTS.regexRecogniser.ambiguousThatWereRegexLiterals} are regex literals, ` +
+    `and the recogniser diffs ${SCANNER_LITERAL_BLIND_SPOTS.regexRecogniser.fabricated} fabricated / ` +
+    `${SCANNER_LITERAL_BLIND_SPOTS.regexRecogniser.missed} missed against the TypeScript parser — see ` +
+    `SCANNER_LITERAL_BLIND_SPOTS.regexRecogniser. ` +
     `See INLINE_LITERAL_EXPRESSION_CENSUS in this file, pinned by --self-test.`;
 
   if (argv.includes('--report')) {
