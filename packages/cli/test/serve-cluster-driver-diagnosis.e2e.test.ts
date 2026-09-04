@@ -64,6 +64,23 @@
  * app declares (the hazard `serve-i18n-load-diagnostic.test.ts` names for the
  * sibling site), which would make the `undeclared` case unproducible.
  *
+ * ## The suite was ablated, and what each mutation reds
+ *
+ * Both mutations were applied to `serve.ts` in the working tree, run, and
+ * reverted (`git checkout HEAD --`, byte-identity re-checked against the HEAD
+ * blob). No rebuild was needed or done, and that is a fact about this harness
+ * rather than an omission: `runServe()` spawns `bin/run-dev.js`, which runs the
+ * command from `src/` through tsx — the crash case's own stack frame names
+ * `packages/cli/src/commands/serve.ts`, so the file the ablation edits is the
+ * file the child executes.
+ *
+ *   • Inverting the visibility test (`indexOf(…) >= 0` to `< 0`) reds FIVE of
+ *     the six boots, the `registered` silence among them. The `no-accessor`
+ *     silence stays green, correctly: it is not bought by visibility.
+ *   • Making the absent accessor claim an empty registry (`: undefined` to
+ *     `: []`) reds EXACTLY ONE — `no-accessor` — which is the branch that
+ *     declines to claim either answer, and nothing else.
+ *
  * ## What is deliberately NOT re-asserted here
  *
  * `serve-cluster-host-resolution.test.ts` pins the SHAPE of this block by
