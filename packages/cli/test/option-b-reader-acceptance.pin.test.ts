@@ -66,9 +66,17 @@
  *
  * Run with `OPTION_B_LOSSES` emptied on `origin/main` `33681eaef`, the pin
  * reports **24 subsystems** losing their collections, across all three packages
- * the program scopes — the full red output is recorded in this card's PR body.
+ * the program scopes — the full red output is recorded in #15004's PR body.
  * In the SAME run the additive baseline and the `packages[]` control both pass,
  * which is what makes the red a discrimination rather than a broken fixture.
+ *
+ * Re-verified at the empty ledger, which is the state that could go vacuous:
+ * with `@objectstack/runtime`'s `resolveArtifactCollections` neutered to the
+ * identity function and that package REBUILT (the pin reaches it through its
+ * `exports` map, so `dist/` is what it measures), this pin goes RED naming
+ * exactly 23 rows — the same 23, byte for byte, that the ledger carried before
+ * #15005. Restored and rebuilt, 7 passed. So the empty ledger is a measurement
+ * of the readers, not of a probe that stopped looking.
  *
  * One row in that output is worth naming here, because it is a loss no
  * presence-check would have found: on the compiled path a function declared
@@ -129,36 +137,36 @@ import { measureShape, type ProbeRow, type ShapeMeasurement } from './fixtures/o
 
 /**
  * The subsystems that silently lose their collection when the flattened top
- * level is gone — MEASURED on `origin/main` `33681eaef`, not curated.
+ * level is gone — MEASURED, not curated. ⭐ EMPTY: the reader half of the
+ * option-B program is done, and the emitter half (#14512) is unblocked.
  *
- * ⛔ SHRINK-ONLY, audited in BOTH directions (see the header). Each line names
- * a boundary, a subsystem and the collection it reads.
+ * How it got here, in the order the rows actually went:
+ *
+ *   - opened at **24 rows** on `origin/main` `33681eaef` (#15004);
+ *   - **23 → 23** when #15007 (`@objectstack/plugin-security`) landed, deleting
+ *     `B2 · plugin-security appSecurityPluginOptions over the from-source
+ *     config`, the one row no artifact-side change could reach;
+ *   - **23 → 0** here (#15005), when `@objectstack/runtime` learned to resolve
+ *     `packages[]`: the whole of boundaries B1 and B5, and every B2 row whose
+ *     reader ships in that package.
+ *
+ * ⚠️ The last row to go was a plugin-security one and it is NOT #15007's twin
+ * arriving late: `B1 · plugin-security appSecurityPluginOptions over the
+ * artifact-serve config` runs that same reader over `createStandaloneStack`'s
+ * RESULT. Nothing inside `@objectstack/plugin-security` could move it — the
+ * standalone result carried neither the permission sets nor a route to them —
+ * and it goes green because that result now surfaces `permissions` resolved
+ * across both shapes, which plugin-security's existing top-level branch then
+ * answers. One reader, two boundaries, each owned by a different card: that
+ * split is what the header's B1/B2 distinction is for.
+ *
+ * ⛔ SHRINK-ONLY, audited in BOTH directions (see the header). An empty ledger
+ * is the STRONGEST state this pin has, not a disabled one: every row the probe
+ * measures must now be `present` in BOTH shapes, so a reader that regresses —
+ * or a new reader that arrives unresolved — is red on arrival with nothing left
+ * to absorb it. Adding a line is never how that red is fixed.
  */
-const OPTION_B_LOSSES: readonly string[] = [
-  'B1 · AppPlugin declared-datasource auto-connect (compiled artifact) · datasources',
-  'B1 · AppPlugin job scheduling (compiled artifact) · jobs',
-  'B1 · AppPlugin objects handed to datasource connect (compiled artifact) · objects',
-  'B1 · AppPlugin ql.setDatasourceMapping (object routing) (compiled artifact) · datasourceMapping',
-  'B1 · AppPlugin seed datasets merged (compiled artifact) · data',
-  'B1 · AppPlugin translation loading into the i18n service (compiled artifact) · translations',
-  'B1 · createStandaloneStack surfaced objects (CLI tier resolution + engine/driver auto-registration) · objects',
-  'B1 · createStandaloneStack surfaced permissions (ADR-0056 D7) · permissions',
-  'B1 · createStandaloneStack surfaced positions · positions',
-  'B1 · plugin-security appSecurityPluginOptions over the artifact-serve config (default permission set) · permissions',
-  'B1 · runtime collectBundleActions (action dispatch registration) · actions + objects[].actions',
-  'B1 · runtime collectBundleFunctionEntries (declared function effect) · functions',
-  'B1 · runtime collectBundleHooks (declarative hook binding) · hooks',
-  'B2 · AppPlugin declared-datasource auto-connect (from source) · datasources',
-  'B2 · AppPlugin job scheduling (from source) · jobs',
-  'B2 · AppPlugin objects handed to datasource connect (from source) · objects',
-  'B2 · AppPlugin ql.setDatasourceMapping (object routing) (from source) · datasourceMapping',
-  'B2 · AppPlugin seed datasets merged (from source) · data',
-  'B2 · AppPlugin translation loading into the i18n service (from source) · translations',
-  'B2 · runtime collectBundleActions over the from-source config · actions + objects[].actions',
-  'B2 · runtime collectBundleFunctionEntries over the from-source config · functions',
-  'B2 · runtime collectBundleHooks over the from-source config · hooks',
-  'B5 · resolve-project-database readConfigDeclaredDefault (project database tier) · datasourceMapping + datasources',
-];
+const OPTION_B_LOSSES: readonly string[] = [];
 
 const render = (rows: ProbeRow[], only?: (r: ProbeRow) => boolean): string =>
   rows
@@ -230,8 +238,33 @@ describe('#15004 — option-B acceptance pin: every subsystem must see its colle
         `platform emits TODAY. This is never an option-B finding — it means the fixture stopped ` +
         `carrying a collection, or a reader regressed on the additive path.\n${render(additive.rows)}`,
     ).toEqual([]);
-    // Anti-vacuity: a probe that measured no rows would satisfy the line above.
-    expect(additive.rows.length).toBeGreaterThanOrEqual(OPTION_B_LOSSES.length);
+    // Anti-vacuity: the assertion above is satisfied by an EMPTY row set, so a
+    // probe that quietly stopped measuring has to be caught right here.
+    //
+    // ⚠️ RE-ANCHORED when the ledger reached zero. The floor used to be
+    // `OPTION_B_LOSSES.length`, which was a real bound only while the ledger
+    // was non-empty; at zero it reads `rows.length >= 0` — true of every
+    // array, including an empty one. It was dead code wearing a control's
+    // comment, and the fourth direction this file's header claims ("the probe
+    // itself quietly measuring less ⇒ RED") had silently stopped existing.
+    //
+    // 30 is MEASURED, not remembered: with this line temporarily written
+    // `expect(additive.rows.length).toBe(-1)`, the run reports
+    // `expected 30 to be -1`. Verified live at the boundary in the same
+    // session — a floor of 31 goes RED on the same fixture, so the assertion
+    // is not satisfied by construction.
+    //
+    // `>=` rather than `toBe` on purpose, and it is the same shrink-only
+    // direction the ledger uses: a row ADDED to the probe is welcome and stays
+    // green, a row that stops being measured is red. Raise the floor when the
+    // probe grows; ⛔ never lower it to make a red run green.
+    expect(
+      additive.rows.length,
+      `The probe measured ${additive.rows.length} rows, fewer than the 30 it measured when ` +
+        `this floor was set. A row that stops being measured stops being able to fail, which ` +
+        `is the one direction this pin cannot detect anywhere else — fix the probe rather ` +
+        `than the floor.`,
+    ).toBeGreaterThanOrEqual(30);
   });
 
   // ── The pin ──────────────────────────────────────────────────────────────
