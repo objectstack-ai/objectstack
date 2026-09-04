@@ -90,6 +90,11 @@
  * rather than behind a `--self-test` flag, precisely so they cannot become
  * unrun; that is the `inline` route `check-self-test-wired.mjs` records.
  *
+ * The POPULATION CRITERION is controlled here too, and for the sharper version
+ * of the same reason: a dispatch spelling it cannot see does not produce a
+ * generous classification, it produces an ABSENCE -- and an absent row is
+ * indistinguishable from a file that was never in scope.
+ *
  * The controls have already earned their place once: an earlier revision of
  * `classifyFloor` keyed on the NAME `SELF_TEST_BATTERIES` rather than on a
  * comparison that produces a failure, and called a fixture floored after the
@@ -107,8 +112,45 @@ import { maskComments } from './js-comment-mask.mjs';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 
-/** A `--self-test` DISPATCH: argv membership tested, not a literal passed to a child. */
-const DISPATCH = /(?:includes|has)\(\s*['"`]--self-test['"`]\s*\)/;
+/**
+ * A `--self-test` DISPATCH: argv examined, not a literal passed to a child.
+ *
+ * Published in two halves so a control can test each on its own, the same way
+ * the failure-producer criterion below is:
+ *
+ *   MEMBERSHIP  argv membership tested -- `argv.includes('--self-test')`, and
+ *               the `Set` spelling `has('--self-test')`.
+ *   EQUALITY    a flag ALREADY EXTRACTED into a variable, compared against the
+ *               literal -- `flag === '--self-test'`. `==` and `===`, all three
+ *               quote styles, the literal on either side.
+ *
+ * The membership half alone left SIX tracked files outside the census, five of
+ * them gates lint.yml already invokes with `--self-test`, so no batch of #13799
+ * could be dispatched against them and nothing recorded that they were never
+ * floored. Absence from a census is not a clearance -- it is the one reading
+ * that looks like a clean bill of health while saying nothing at all (#15421).
+ *
+ * BOUNDARY -- the compared operand must be a BARE IDENTIFIER. A property or a
+ * call result (`renderedArgv(' --self-test').args === '--self-test'`, live in
+ * `scripts/pm/dispatch-gates.mjs`'s own self-test) is a tool EXAMINING the flag
+ * as data, not a script dispatching on it, and those comparisons cluster in
+ * exactly the tools that reason about self-tests -- so admitting them would
+ * seed this census with its own instruments. The `.` in front of the operand is
+ * what excludes them.
+ *
+ * WARNING: like the floor criterion below, this reads SPELLINGS. Its error runs
+ * in one direction, and that direction is INVISIBILITY rather than a NONE: a
+ * dispatch spelled some way neither half knows is not classified generously, it
+ * is not in the population at all. Two further spellings have no tracked
+ * carrier in this tree today and are deliberately left unadmitted rather than
+ * written blind -- an inequality guard (`arg !== '--self-test'`) and a `switch`
+ * case label. Widen the same way this half was: a control in both directions,
+ * and the delta in the census measured and published.
+ */
+const DISPATCH_MEMBERSHIP = /(?:includes|has)\(\s*['"`]--self-test['"`]\s*\)/;
+const DISPATCH_EQUALITY =
+  /(?:^|[^\w$.])[A-Za-z_$][\w$]*\s*={2,3}\s*['"`]--self-test['"`]|['"`]--self-test['"`]\s*={2,3}\s*[A-Za-z_$][\w$]*/;
+const DISPATCH = new RegExp(`${DISPATCH_MEMBERSHIP.source}|${DISPATCH_EQUALITY.source}`);
 
 /** Marker injected by the probe. Its presence on disk is the mutation's proof. */
 const PROBE_MARKER = 'OS_SELF_TEST_FLOOR_PROBE';
@@ -484,6 +526,48 @@ const TERNARY_EXIT_GATE = [
 const TERNARY_EXIT_DISPATCH = 'runSelfTest() ? 0 : 1';
 
 /**
+ * The EQUALITY dispatch, reduced: the flag pulled out of argv into a variable
+ * and compared against the literal. This is the shape all six files the
+ * membership half could not see carry -- among them `scripts/pnpm-filter-
+ * targets.mjs`, whose `--self-test` `check:pnpm-filter-targets` runs in lint.yml
+ * (#15421). Like the ternary fixture above it is READ, never spawned: the
+ * population criterion is a pure function of source text.
+ */
+const EQUALITY_DISPATCH_GATE = [
+  '#!/usr/bin/env node',
+  'function selfTest() {',
+  '  const failures = [];',
+  "  if (1 !== 1) failures.push('x');",
+  "  console.log('fixture self-test: 1 case passes');",
+  '  return failures.length;',
+  '}',
+  'const flag = process.argv[2];',
+  "if (flag === '--self-test') process.exit(selfTest());",
+  '',
+].join('\n');
+
+/** The one comparison that IS the dispatch, the anchor the spellings replace. */
+const EQUALITY_DISPATCH = "flag === '--self-test'";
+
+/**
+ * The shapes that MENTION the flag without dispatching on it, in one file:
+ * prose describing a dispatch, a comparison against a CALL RESULT (the
+ * `scripts/pm/dispatch-gates.mjs` shape, where the flag is the data a gate is
+ * examining), and the literal handed to a child process -- the boundary this
+ * criterion has drawn since it was one line long. None of them may put a file
+ * in the population, and the comment is written so that it WOULD match unmasked,
+ * so the control below reads the masking rather than assuming it.
+ */
+const NON_DISPATCH_MENTION_GATE = [
+  '#!/usr/bin/env node',
+  "// Gates are dispatched with `if (arg === '--self-test') selfTest();` -- prose, not code.",
+  'const rendered = (argv) => ({ args: argv.trim() });',
+  "if (rendered(' --self-test').args === '--self-test') console.log('the renderer kept the flag');",
+  "spawnSync(process.execPath, [target, '--self-test']);",
+  '',
+].join('\n');
+
+/**
  * Both instruments, against both directions. Returns the failures; the caller
  * refuses on any. Nothing here reads the repo, so a control failure is always
  * the instrument and never the tree.
@@ -491,6 +575,29 @@ const TERNARY_EXIT_DISPATCH = 'runSelfTest() ? 0 : 1';
 export function runControls() {
   const failures = [];
   const say = (cond, label) => { if (!cond) failures.push(label); };
+
+  // The POPULATION criterion, both halves and both directions. What is at stake
+  // here is not a classification but a ROW: a spelling this criterion cannot see
+  // removes its file from the census silently (#15421).
+  say(DISPATCH.test(maskComments(HOLED_GATE)),
+    'POPULATION CONTROL FAILED: a gate dispatching by argv membership was not admitted to the population');
+  say(DISPATCH.test(maskComments(EQUALITY_DISPATCH_GATE)),
+    "POPULATION CONTROL FAILED: a gate dispatching by equality on an extracted flag (`flag === '--self-test'`) was not admitted to the population");
+  say(!DISPATCH_MEMBERSHIP.test(maskComments(EQUALITY_DISPATCH_GATE)),
+    'CONTROL FIXTURE INVALID: the equality fixture also carries a membership dispatch, so the verdict above would pass without the equality half being read at all');
+  say(EQUALITY_DISPATCH_GATE.includes(EQUALITY_DISPATCH),
+    'CONTROL FIXTURE INVALID: the equality fixture no longer carries the dispatch line the spellings below replace, so every variant is the SAME file');
+  const equalityDispatch = (spelling) => maskComments(EQUALITY_DISPATCH_GATE.replace(EQUALITY_DISPATCH, spelling));
+  say(DISPATCH.test(equalityDispatch('flag == "--self-test"')),
+    'POPULATION CONTROL FAILED: loose equality against a double-quoted literal was not admitted');
+  say(DISPATCH.test(equalityDispatch("'--self-test' === flag")),
+    'POPULATION CONTROL FAILED: the literal on the LEFT of the comparison was not admitted');
+  say(DISPATCH.test(equalityDispatch('flag === `--self-test`')),
+    'POPULATION CONTROL FAILED: a template-literal spelling of the flag was not admitted');
+  say(!DISPATCH.test(maskComments(NON_DISPATCH_MENTION_GATE)),
+    'POSITIVE CONTROL FAILED: a file that only MENTIONS the flag -- in prose, in a comparison against a call result, and as a literal handed to a child -- entered the population; the census would then be seeded with the very tools that reason about self-tests');
+  say(DISPATCH.test(NON_DISPATCH_MENTION_GATE),
+    'CONTROL FIXTURE INVALID: the mention fixture does not match even UNMASKED, so the verdict above says nothing about comments being masked away');
 
   // Instrument 1, both directions.
   say(classifyFloor(maskComments(HOLED_GATE)) === 'NONE',
