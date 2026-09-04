@@ -23,15 +23,21 @@
  *     unless this file is compiled — and it is: `tsconfig.test.json` includes
  *     `src/**`, and its ledger (`test-typecheck-debt.json`) lists this file
  *     nowhere, so the file must compile with exactly zero errors.
- *  4. **The JSDoc says who sets it and that the flow face does not yet
- *     populate it.** Prose is unassertable except by reading it; the contract
- *     source is read and the doc block above the key is required to name the
- *     producer and the not-yet-populated state, so the day the runtime half
- *     lands, this test tells its author which sentence to retire.
+ *  4. **The JSDoc says who sets it, and that the flow face now populates it.**
+ *     Prose is unassertable except by reading it; the contract source is read
+ *     and the doc block above the key is required to name the producer and the
+ *     populated state. [#15168] This assertion used to require the opposite —
+ *     a "NOT YET POPULATED" sentence — precisely so that the day the runtime
+ *     half landed, this test would tell its author which sentence to retire.
+ *     It did; the sentence is retired, and the pin now refuses its return.
  *
- * ⛔ Not pinned, deliberately: that any flow run actually RECEIVES the key.
- * That is the runtime half (`dispatchFlowAction` / the REST `/actions` door
- * passing the producer's signal into the run's context), a separate card.
+ * ⛔ Not pinned HERE, deliberately: that any flow run actually RECEIVES the
+ * key. That is the runtime half's own pin — `packages/runtime`'s
+ * `action-record-load-denied.test.ts` drives both doors (`dispatchFlowAction`
+ * via REST `/actions` and via the MCP `run_action` bridge) against a
+ * row-scoped engine and reads the context the automation service is handed.
+ * A type-level contract test cannot assert a runtime wiring, and a copy of
+ * that assertion here would be a second, weaker one.
  */
 
 import { readFileSync } from 'node:fs';
@@ -103,8 +109,14 @@ describe('[#14244] AutomationContext.recordLoadDenied mirrors the producer signa
     expect(doc).toMatch(/both doors/i);
     expect(doc).toMatch(/run_action/);
     expect(doc).toMatch(/runAs: 'system'/);
-    // The honesty clause: declared, not yet populated on the flow face.
-    expect(doc).toMatch(/NOT YET POPULATED/);
+    // [#15168] The honesty clause, now the other way round: the runtime half
+    // landed, so the doc must say the flow face IS populated and must no longer
+    // carry the retired sentence. Both directions are asserted — the positive
+    // alone would survive a doc that says both things at once, and the negative
+    // alone is satisfied by deleting the paragraph altogether, which is how a
+    // contract loses the record of who populates a key.
+    expect(doc).toMatch(/Populated on the flow face/);
+    expect(doc).not.toMatch(/NOT YET POPULATED/);
     expect(doc).toContain('dispatchFlowAction');
     // Absence semantics, in the handler face's own words.
     expect(doc).toMatch(/never\s+\*?\s*`false`/);
