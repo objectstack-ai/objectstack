@@ -386,11 +386,12 @@ describe('#13937 — a re-armed run is not double-runnable (ObjectStoreSuspended
         const restored = await a.restoreConsumedSuspension(runId);
         expect(restored.restored).toBe(true);
         // Re-armed at the pause the run actually left — never back at `hold`,
-        // which would re-run `tail` a second time on the way to `hold2`.
+        // which would run `tail` a THIRD time on the way to `hold2`. (The
+        // second `tail` is the successful re-run after the first restore.)
         expect(restored.nodeId).toBe('hold2');
         knobs.throwAt.clear();
         expect((await a.resume(runId)).success).toBe(true);
-        expect(led.ran).toEqual(['tail', 'tail2', 'tail2']);
+        expect(led.ran).toEqual(['tail', 'tail', 'tail2', 'tail2']);
     });
 
     it('⭐ two witnesses, different pauses: a landed hot copy yields to the later strand another replica recorded', async () => {
@@ -409,20 +410,20 @@ describe('#13937 — a re-armed run is not double-runnable (ObjectStoreSuspended
         knobs.throwAt = new Set(['tail2']);
         expect((await b.resume(runId)).status).toBe('paused');
         expect((await b.resume(runId)).status).toBe('stranded');
-        expect(led.ran).toEqual(['tail', 'tail2']);
+        expect(led.ran).toEqual(['tail', 'tail', 'tail2']);
         for (let i = 0; i < 200 && (await store.loadTerminal!(runId))?.consumedSuspension?.nodeId !== 'hold2'; i++) {
             await new Promise(r => setTimeout(r, 1));
         }
         expect((await store.loadTerminal!(runId))?.consumedSuspension?.nodeId).toBe('hold2');
 
         // A's copy is of a pause the run has LEFT. Re-arming it would send the
-        // run back through `tail` a second time.
+        // run back through `tail` a third time.
         const restored = await a.restoreConsumedSuspension(runId);
         expect(restored.restored).toBe(true);
         expect(restored.nodeId).toBe('hold2');
         knobs.throwAt.clear();
         expect((await a.resume(runId)).success).toBe(true);
-        expect(led.ran).toEqual(['tail', 'tail2', 'tail2']);
+        expect(led.ran).toEqual(['tail', 'tail', 'tail2', 'tail2']);
     });
 
     it('two concurrent resumes of a restored run on two replicas run the tail once more', async () => {
