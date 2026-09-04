@@ -127,8 +127,8 @@ an exception for itself.)
 ## TypeScript Usage
 
 ```typescript
-import { CircuitBreakerConfigSchema, ConnectorSchema, ConnectorActionSchema, ConnectorActionEffectSchema, ConnectorConflictResolutionSchema, ConnectorErrorCategorySchema, ConnectorFieldMappingSchema, ConnectorHealthSchema, ConnectorInstanceAPIKeyAuthSchema, ConnectorInstanceAuthSchema, ConnectorInstanceBasicAuthSchema, ConnectorInstanceBearerAuthSchema, ConnectorInstanceNoAuthSchema, ConnectorRetryStrategySchema, ConnectorStatusSchema, ConnectorTriggerSchema, ConnectorTypeSchema, DataSyncConfigSchema, DeclarativeConnectorEntrySchema, ErrorMappingConfigSchema, ErrorMappingRuleSchema, HealthCheckConfigSchema, RetryConfigSchema, SyncStrategySchema, WebhookConfigSchema, WebhookEventSchema, WebhookSignatureAlgorithmSchema } from '@objectstack/spec/integration';
-import type { CircuitBreakerConfig, Connector, ConnectorAction, ConnectorActionEffect, ConnectorConflictResolution, ConnectorErrorCategory, ConnectorFieldMapping, ConnectorHealth, ConnectorInstanceAPIKeyAuth, ConnectorInstanceAuth, ConnectorInstanceBasicAuth, ConnectorInstanceBearerAuth, ConnectorInstanceNoAuth, ConnectorRetryStrategy, ConnectorStatus, ConnectorTrigger, ConnectorType, DataSyncConfig, DeclarativeConnectorEntry, ErrorMappingConfig, ErrorMappingRule, HealthCheckConfig, RetryConfig, SyncStrategy, WebhookConfig, WebhookEvent, WebhookSignatureAlgorithm } from '@objectstack/spec/integration';
+import { CircuitBreakerConfigSchema, ConnectorSchema, ConnectorActionSchema, ConnectorActionEffectSchema, ConnectorConflictResolutionSchema, ConnectorFieldMappingSchema, ConnectorHealthSchema, ConnectorInstanceAPIKeyAuthSchema, ConnectorInstanceAuthSchema, ConnectorInstanceBasicAuthSchema, ConnectorInstanceBearerAuthSchema, ConnectorInstanceNoAuthSchema, ConnectorRetryStrategySchema, ConnectorStatusSchema, ConnectorTriggerSchema, ConnectorTypeSchema, DataSyncConfigSchema, DeclarativeConnectorEntrySchema, HealthCheckConfigSchema, RetryConfigSchema, SyncStrategySchema, WebhookConfigSchema, WebhookEventSchema, WebhookSignatureAlgorithmSchema } from '@objectstack/spec/integration';
+import type { CircuitBreakerConfig, Connector, ConnectorAction, ConnectorActionEffect, ConnectorConflictResolution, ConnectorFieldMapping, ConnectorHealth, ConnectorInstanceAPIKeyAuth, ConnectorInstanceAuth, ConnectorInstanceBasicAuth, ConnectorInstanceBearerAuth, ConnectorInstanceNoAuth, ConnectorRetryStrategy, ConnectorStatus, ConnectorTrigger, ConnectorType, DataSyncConfig, DeclarativeConnectorEntry, HealthCheckConfig, RetryConfig, SyncStrategy, WebhookConfig, WebhookEvent, WebhookSignatureAlgorithm } from '@objectstack/spec/integration';
 
 // Validate data
 const result = CircuitBreakerConfigSchema.parse(data);
@@ -180,7 +180,7 @@ Circuit breaker configuration
 | **requestTimeoutMs** | `number` | optional (default: `30000`) | Request timeout in ms |
 | **status** | `Enum<'active' \| 'inactive' \| 'error' \| 'configuring'>` | optional (default: `"inactive"`) | Connector status |
 | **enabled** | `boolean` | optional (default: `true`) | Enable connector. On declarative stack entries, false marks a deliberate catalog-only descriptor. |
-| **errorMapping** | `{ rules: object[]; defaultCategory?: Enum<'validation' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| …>; unmappedBehavior: Enum<'passthrough' \| 'generic_error' \| 'throw'>; logUnmapped?: boolean }` | optional | Error mapping configuration |
+| **errorMapping** | `never` | optional | [REMOVED] `connector.errorMapping` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read it: no provider, dispatcher or materializer mapped an external error through the rules, so `unmappedBehavior` configured nothing and a rule's `userMessage` was never shown to anyone (that spelling is the live API-error channel, `ApiError.userMessage`, which a thrown HTTP error declares — not connector metadata). Delete the key; the whole shape leaves with it (`ErrorMappingConfig`, `ErrorMappingRule` and the `ConnectorErrorCategory` enum). There is no replacement, because no error-mapping engine exists: a connector's failures reach callers as the provider's own errors (ADR-0097). Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **health** | `{ healthCheck?: object; circuitBreaker?: object }` | optional | Health and resilience configuration |
 | **metadata** | `Record<string, any>` | optional | Custom connector metadata |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
@@ -339,15 +339,6 @@ Circuit breaker configuration
 | **retryOnNetworkError** | `boolean` | optional (default: `true`) | Retry on network errors |
 | **jitter** | `boolean` | optional (default: `true`) | Add jitter to retry delays |
 
-### Nested Shape: `Connector.errorMapping`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **rules** | `{ sourceCode: string \| number; sourceMessage?: string; targetCode: string; targetCategory: Enum<'validation' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| …>; … }[]` | ✅ | Error mapping rules |
-| **defaultCategory** | `Enum<'validation' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| …>` | optional (default: `"integration_error"`) | Default category for unmapped errors |
-| **unmappedBehavior** | `Enum<'passthrough' \| 'generic_error' \| 'throw'>` | ✅ | What to do with unmapped errors |
-| **logUnmapped** | `boolean` | optional (default: `true`) | Log unmapped errors |
-
 ### Nested Shape: `Connector.health`
 
 | Property | Type | Required | Description |
@@ -396,24 +387,6 @@ Conflict resolution strategy
 * `target_wins`
 * `latest_wins`
 * `manual`
-
-
----
-
-## ConnectorErrorCategory
-
-Standard error category
-
-### Allowed Values
-
-* `validation`
-* `authorization`
-* `not_found`
-* `conflict`
-* `rate_limit`
-* `timeout`
-* `server_error`
-* `integration_error`
 
 
 ---
@@ -690,7 +663,7 @@ Connector type
 | **requestTimeoutMs** | `number` | optional (default: `30000`) | Request timeout in ms |
 | **status** | `Enum<'active' \| 'inactive' \| 'error' \| 'configuring'>` | optional (default: `"inactive"`) | Connector status |
 | **enabled** | `boolean` | optional (default: `true`) | Enable connector. On declarative stack entries, false marks a deliberate catalog-only descriptor. |
-| **errorMapping** | `{ rules: object[]; defaultCategory?: Enum<'validation' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| …>; unmappedBehavior: Enum<'passthrough' \| 'generic_error' \| 'throw'>; logUnmapped?: boolean }` | optional | Error mapping configuration |
+| **errorMapping** | `never` | optional | [REMOVED] `connector.errorMapping` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read it: no provider, dispatcher or materializer mapped an external error through the rules, so `unmappedBehavior` configured nothing and a rule's `userMessage` was never shown to anyone (that spelling is the live API-error channel, `ApiError.userMessage`, which a thrown HTTP error declares — not connector metadata). Delete the key; the whole shape leaves with it (`ErrorMappingConfig`, `ErrorMappingRule` and the `ConnectorErrorCategory` enum). There is no replacement, because no error-mapping engine exists: a connector's failures reach callers as the provider's own errors (ADR-0097). Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **health** | `{ healthCheck?: object; circuitBreaker?: object }` | optional | Health and resilience configuration |
 | **metadata** | `Record<string, any>` | optional | Custom connector metadata |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
@@ -849,70 +822,12 @@ Connector type
 | **retryOnNetworkError** | `boolean` | optional (default: `true`) | Retry on network errors |
 | **jitter** | `boolean` | optional (default: `true`) | Add jitter to retry delays |
 
-### Nested Shape: `DeclarativeConnectorEntry.errorMapping`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **rules** | `{ sourceCode: string \| number; sourceMessage?: string; targetCode: string; targetCategory: Enum<'validation' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| …>; … }[]` | ✅ | Error mapping rules |
-| **defaultCategory** | `Enum<'validation' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| …>` | optional (default: `"integration_error"`) | Default category for unmapped errors |
-| **unmappedBehavior** | `Enum<'passthrough' \| 'generic_error' \| 'throw'>` | ✅ | What to do with unmapped errors |
-| **logUnmapped** | `boolean` | optional (default: `true`) | Log unmapped errors |
-
 ### Nested Shape: `DeclarativeConnectorEntry.health`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **healthCheck** | `{ enabled: boolean; intervalMs?: number; timeoutMs?: number; endpoint?: string; … }` | optional | Health check configuration |
 | **circuitBreaker** | `{ enabled: boolean; failureThreshold?: number; resetTimeoutMs?: number; halfOpenMaxRequests?: number; … }` | optional | Circuit breaker configuration |
-
-
----
-
-## ErrorMappingConfig
-
-Error mapping configuration
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **rules** | `{ sourceCode: string \| number; sourceMessage?: string; targetCode: string; targetCategory: Enum<'validation' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| …>; … }[]` | ✅ | Error mapping rules |
-| **defaultCategory** | `Enum<'validation' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| 'timeout' \| 'server_error' \| 'integration_error'>` | optional (default: `"integration_error"`) | Default category for unmapped errors |
-| **unmappedBehavior** | `Enum<'passthrough' \| 'generic_error' \| 'throw'>` | ✅ | What to do with unmapped errors |
-| **logUnmapped** | `boolean` | optional (default: `true`) | Log unmapped errors |
-
-### Nested Shape: `ErrorMappingConfig.rules[number]`
-
-Error mapping rule
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **sourceCode** | `string \| number` | ✅ | External system error code |
-| **sourceMessage** | `string` | optional | Pattern to match against error message |
-| **targetCode** | `string` | ✅ | ObjectStack standard error code |
-| **targetCategory** | `Enum<'validation' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| …>` | ✅ | Error category |
-| **severity** | `Enum<'low' \| 'medium' \| 'high' \| 'critical'>` | ✅ | Error severity level |
-| **retryable** | `boolean` | ✅ | Whether the error is retryable |
-| **userMessage** | `string` | optional | Human-readable message to show users |
-
-
----
-
-## ErrorMappingRule
-
-Error mapping rule
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **sourceCode** | `string \| number` | ✅ | External system error code |
-| **sourceMessage** | `string` | optional | Pattern to match against error message |
-| **targetCode** | `string` | ✅ | ObjectStack standard error code |
-| **targetCategory** | `Enum<'validation' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| 'timeout' \| 'server_error' \| 'integration_error'>` | ✅ | Error category |
-| **severity** | `Enum<'low' \| 'medium' \| 'high' \| 'critical'>` | ✅ | Error severity level |
-| **retryable** | `boolean` | ✅ | Whether the error is retryable |
-| **userMessage** | `string` | optional | Human-readable message to show users |
 
 
 ---
