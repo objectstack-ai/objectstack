@@ -1190,7 +1190,7 @@ only.
 | Command | Alias | Description |
 |---------|-------|-------------|
 | `os generate <type> <name>` | `os g` | Generate metadata files |
-| `os create <type> [name]` | | Create a new package from template |
+| `os create <type> [name]` | | Scaffold a standalone plugin or example project |
 
 #### `os generate` (alias: `os g`)
 
@@ -1263,12 +1263,31 @@ third-party extension primitive, authored as `src/skills/<name>.skill.ts` with
 
 #### `os create`
 
-Creates new packages from built-in templates (for monorepo-level scaffolding):
+Scaffolds a **standalone** project — a plugin, or an example application — into
+the current directory:
 
 ```bash
-os create plugin analytics    # Create packages/plugins/plugin-analytics
-os create example my-app      # Create examples/my-app
+os create plugin analytics    # Create ./plugin-analytics
+os create example my-app      # Create ./my-app
+
+cd plugin-analytics
+pnpm install
+pnpm build
 ```
+
+The emitted `package.json` declares its `@objectstack/*` dependencies as
+published semver ranges pinned to the version of the CLI that generated it, and
+the emitted `tsconfig.json` is self-contained, so the project installs and
+builds anywhere — a workspace around it is neither needed nor assumed.
+
+**Options:**
+- `-d, --dir <directory>` — Write the project here instead of `./<name>`
+- `--in-repo` — Scaffold **inside an ObjectStack monorepo checkout** instead
+  (`packages/plugins/<name>` for a plugin, `examples/<name>` for an example),
+  with `workspace:*` dependencies and a `tsconfig.json` that extends the
+  repository root config. For ObjectStack platform work only: the project it
+  writes installs nowhere else, and the command refuses the flag when the
+  current directory is not a pnpm workspace root.
 
 ### Quality
 

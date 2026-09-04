@@ -1,0 +1,123 @@
+# `os create` scaffold smoke — the emitted project installs and builds OUTSIDE
+# this monorepo (#14824).
+#
+# ## What this gate holds
+#
+# `os create` is presented on four public documentation pages as a user-facing
+# scaffolder, and every project it emitted was monorepo-shaped: `workspace:*`
+# dependency specs, a `tsconfig.json` extending `'../../tsconfig.json'`, and a
+# default output directory inside this repository. A reader who followed the
+# docs got a project `pnpm install` refuses. The maintainer ruled that a
+# documented developer-facing command must work for the developer who follows
+# the docs, and attached an executable criterion: scaffold each template into a
+# temporary directory outside the repository, install it with the registry, and
+# boot / typecheck it — green outside the monorepo, ON CI, not on a developer
+# box. `scripts/create-scaffold-smoke.sh` is that criterion; this workflow is
+# the "on CI" half.
+#
+# ## Why paths-filtered rather than label-gated opt-in
+#
+# `pack-smoke-optin.yml` covers a different defect class — an author widening
+# the unauthenticated surface — where the only reliable trigger is the author
+# recognising their own change, so a label is the honest shape and its header
+# forbids growing a `paths:` filter. This gate's defect class is the opposite:
+# it can only be introduced by editing a bounded, nameable set of files, and
+# those files are the `paths:` below. A label would mean a scaffolder change
+# could be merged by anyone who did not think to apply it, which is precisely
+# how the emitted contract drifted into being uninstallable in the first place.
+#
+# `init.ts` is in the set even though this gate does not test `os init`. The
+# standalone emission CALLS that module — `getCliVersion`, `SCAFFOLD_PNPM_RANGE`
+# and `renderPnpmWorkspaceYaml` are its exports — so its build approvals and its
+# version resolution decide whether an `os create` scaffold installs. Naming the
+# consumer and not the producer is the shape of coupling that lets a gate sit
+# green through the change that breaks it.
+#
+# The nightly run is the backstop for everything the `paths:` set cannot name: a
+# scaffolded project resolves the whole `@objectstack/*` graph, so a change in
+# any of those packages can break its install or its boot without touching a
+# single file listed here.
+#
+# ⛔ Not a required context — `scripts/check-required-contexts.mjs` owns that
+# registry, and a paths-filtered job cannot be required: on a PR that does not
+# trip the filter it never reports, and branch protection would block forever.
+# It is advisory in the same way `scaffold-e2e.yml` is.
+#
+# Every step below is part of a build / scaffold / install / build pipeline, not
+# a named local verification a dev pre-runs with `pnpm check:x`:
+# dispatch-gates: no-check-families -- scaffold + install + build pipeline, no named local check family exists for it
+
+name: OS Create Smoke
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'packages/cli/src/commands/create.ts'
+      - 'packages/cli/src/commands/init.ts'
+      - 'scripts/create-scaffold-smoke.sh'
+      - 'scripts/publish-smoke-pack.mjs'
+      - '.github/workflows/os-create-smoke.yml'
+  schedule:
+    - cron: '41 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  create-scaffold-smoke:
+    name: Scaffold outside the monorepo, install, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    concurrency:
+      group: os-create-smoke-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: true
+    steps:
+      # No `ref:` — on `pull_request` the default checkout is `refs/pull/N/merge`,
+      # the merge preview, which is what `main` will actually contain.
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Setup pnpm
+        uses: ./.github/actions/setup-pnpm
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-v3-
+
+      - name: Setup turbo cache
+        uses: actions/cache@v6
+        with:
+          path: .turbo/cache
+          key: ${{ runner.os }}-turbo-${{ github.job }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-${{ github.job }}-
+            ${{ runner.os }}-turbo-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The smoke's own prerequisite, asserted by the script itself: it refuses
+      # to run without packages/cli/dist and the `os` bin.
+      - name: Build
+        run: pnpm run build
+
+      # ⛔ Do not add flags or env here to make a red go away. A refusal this
+      # script reports is a refusal a developer following the docs would get.
+      - name: Scaffold smoke (packed tarballs, outside the repo)
+        run: bash scripts/create-scaffold-smoke.sh

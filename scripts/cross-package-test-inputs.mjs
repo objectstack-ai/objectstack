@@ -279,6 +279,18 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     // any package here, and a subtree glob would put cli's e2e suite on every
     // documentation PR.
     //
+    // The three pages added for #14824 are read by
+    // test/create-plugin-docs-parity.test.ts, which holds the `plugin` template's
+    // emitted file set equal to the tree each page PRINTS. They are the only
+    // statement of that template's shape -- it emits no `objectstack.config.ts`,
+    // so `ManifestSchema` does not govern it and the manifest sweep cannot see
+    // it. The coupling runs both ways and so must the re-run: a template that
+    // grows a file must redden the pages that no longer list it, and a page
+    // rewrite must redden if it drops or invents one. Undeclared, a
+    // documentation-only PR would leave cli outside the affected set and the
+    // merge queue would be the first signal -- the shape the three e2e pages
+    // above were declared for.
+    //
     // `connector-mcp-plugin.ts` is read by test/serve-capability-identity.test.ts,
     // which pins that the connector still registers the name the #7652 repro uses
     // rather than importing the class. It surfaced with the three above and has the
@@ -338,6 +350,9 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'content/docs/deployment/cli.mdx',
       'content/docs/deployment/index.mdx',
       'content/docs/permissions/authentication.mdx',
+      'content/docs/plugins/index.mdx',
+      'content/docs/protocol/kernel/index.mdx',
+      'content/docs/protocol/kernel/plugin-spec.mdx',
       'scripts/check-nul-bytes.mjs',
       // This gate's OWN script, the third entry of the mention shape on this
       // package: test/scaffold-workspace-consistency.test.ts quotes it while
