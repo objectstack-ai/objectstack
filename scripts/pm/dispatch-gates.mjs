@@ -1082,18 +1082,113 @@ const SELF_TEST_INVOCATION =
  * because everything past one of those belongs to a different command, or to
  * the shell, and never to this argv.
  *
- * ⚠️ A line-continuation backslash is deliberately NOT a terminator: it is
- * INSIDE the tail, so a continued invocation carries a character that is not
- * flag-shaped and `renderableArgv` refuses the whole tail. That is the point.
- * Ending the tail at the backslash would hand back a tail that looks complete
- * and is not — `node scripts/check-shard-attestation.mjs --emit` reads as the
- * whole argv while `ci.yml` continues it with
+ * ⚠️ A line-continuation backslash is NOT a terminator, and since #15083 it is
+ * not a refusal either: `joinLineContinuations` splices the continued lines
+ * into one command text BEFORE this matcher runs, so the tail this captures is
+ * the invocation's WHOLE argv. Ending the tail at the backslash would still be
+ * wrong for the reason it always was — `node scripts/check-shard-attestation.mjs
+ * --emit` reads as the whole argv while `ci.yml` continues it with
  * `--job test --shard N --total 6 --out "$RUNNER_TEMP/…"` on the next two
- * lines. A truncated argv that LOOKS runnable is the one outcome worse than
- * the bare path key those invocations keep.
+ * lines, and a truncated argv that LOOKS runnable is the worst of the three
+ * outcomes. Joining is how that hazard is removed rather than merely refused.
  */
 const DIRECT_CHECK_INVOCATION =
   /node[ \t]+(scripts\/[\w./-]*check-[\w.-]+\.mjs)([^\n;|&<>()]*)/g;
+
+/**
+ * Splice a shell line-continuation back into ONE line, so a matcher reading a
+ * `run:` body sees the command the shell sees.
+ *
+ * The workflow corpus really does continue check invocations: measured on this
+ * tree, 107 lines inside `run:` bodies end in a backslash, and five of the nine
+ * scripts #15083 is about carry their values on a continued line. Before the
+ * join the matchers read only the first physical line of those, which is why
+ * `renderedArgv`'s predecessor had to refuse the whole tail rather than render
+ * half of it.
+ *
+ * ⛔ A COMMENT line is never joined, and that is shell semantics rather than
+ * caution: a `#` comment runs to the end of the line, so a trailing backslash
+ * is comment TEXT and the line below it is a command in its own right. Joining
+ * one would splice prose onto the command underneath and hand a matcher an
+ * invocation nobody wrote. Measured when this landed: zero comment lines in any
+ * `run:` body on this tree end in a backslash, so the guard costs nothing today
+ * and is here because the day one does is the day it matters.
+ */
+export function joinLineContinuations(text) {
+  const out = [];
+  for (const line of String(text ?? '').split('\n')) {
+    const prev = out.length > 0 ? out[out.length - 1] : null;
+    if (prev !== null && /\\$/.test(prev) && !/^[ \t]*#/.test(prev)) {
+      out[out.length - 1] = `${prev.slice(0, -1).replace(/[ \t]+$/, '')} ${line.replace(/^[ \t]+/, '')}`;
+      continue;
+    }
+    out.push(line);
+  }
+  return out.join('\n');
+}
+
+/**
+ * Split an argument tail into argv tokens the way the shell would — quotes and
+ * `${{ … }}` expressions hold their spaces.
+ *
+ * Two live spellings make a bare whitespace split wrong, and both are in
+ * `ci.yml`: `--gate 'Test Core'` (a quoted literal with a space in it) and
+ * `--shard ${{ matrix.shard }}` (a GitHub expression with two). A split that
+ * broke either into three tokens would classify the pieces separately and
+ * render an invocation no shell would accept.
+ */
+export function argvTokens(tail) {
+  const text = String(tail ?? '');
+  const tokens = [];
+  let i = 0;
+  while (i < text.length) {
+    while (i < text.length && (text[i] === ' ' || text[i] === '\t')) i += 1;
+    if (i >= text.length) break;
+    let token = '';
+    while (i < text.length && text[i] !== ' ' && text[i] !== '\t') {
+      if (text[i] === "'" || text[i] === '"') {
+        const close = text.indexOf(text[i], i + 1);
+        if (close === -1) {
+          token += text.slice(i);
+          i = text.length;
+          break;
+        }
+        token += text.slice(i, close + 1);
+        i = close + 1;
+        continue;
+      }
+      if (text.startsWith('${{', i)) {
+        const close = text.indexOf('}}', i + 3);
+        if (close === -1) {
+          token += text.slice(i);
+          i = text.length;
+          break;
+        }
+        token += text.slice(i, close + 2);
+        i = close + 2;
+        continue;
+      }
+      token += text[i];
+      i += 1;
+    }
+    if (token.length > 0) tokens.push(token);
+  }
+  return tokens;
+}
+
+/**
+ * Every spelling by which a workflow puts a value into an argv WITHOUT writing
+ * the value down: a GitHub expression, a shell parameter expansion, a shell
+ * special. Anything else in a token is a literal — a value that appears
+ * verbatim in the workflow text and is the same on every run.
+ *
+ * This is the whole classifier #15083 asked for, and it is read from the
+ * workflow text rather than declared per script. The triage's ⛔ stands on that
+ * measurement: a per-script declaration table would be owed only if the split
+ * could NOT be read from the workflow, and over all fifteen live invocations of
+ * the nine scripts every value is one or the other by inspection.
+ */
+const WORKFLOW_VALUE_SOURCE = /\$\{\{[\s\S]*?\}\}|\$\{[A-Za-z_]\w*\}|\$[A-Za-z_]\w*|\$[@?*#!$0-9]/g;
 
 /**
  * The captured tail, rendered as the argv half of a derivation key — or null
@@ -1119,40 +1214,89 @@ const DIRECT_CHECK_INVOCATION =
  * argv, and every one of them carries a `check-` basename, so every one of
  * them collapsed. 41 across all workflow files.
  *
- * ## Why the tail must be a COMPLETE run of flag-shaped tokens
+ * ## Why a VALUE-BEARING tail is rendered rather than refused (#15083)
  *
- * `--commands` promises one runnable command per line, so a key is only worth
- * splitting on when this tool can render the invocation faithfully. A tail
- * carrying a VALUE cannot be rendered: `--base "$MERGE_BASE"` and
- * `--days 90` and a bare `"$RUNNER_TEMP/test-core.log"` are argv this file
- * would have to either truncate (`… --base`, which is not runnable) or emit
- * with an unset workflow variable in it (which is not runnable either). Those
- * keep the bare path key they have today — a runnable command, and the same
- * answer this tool already gave — and the refusal is stated here rather than
- * discovered by a dev pasting a broken line.
+ * The first cut of this key admitted only a complete run of flag-shaped
+ * tokens. Nine scripts whose ONLY CI invocations carry a value or a line
+ * continuation therefore kept a BARE path key, and CI never runs any of them
+ * bare. That is not a neutral omission — it is a command this tool made up.
+ * Measured on this tree, invocation by invocation:
  *
- * Live specimens of the refused shape on this tree, none of them invented:
- * `check-adr-0087-registration.mjs --base "$MERGE_BASE"`,
- * `check-engine-split-ratio.mjs --days 90`,
- * `check-test-completeness.mjs "$RUNNER_TEMP/test-core.log"`,
- * `check-shard-attestation.mjs --emit` continued across two more lines that
- * carry `--job`, `--shard`, `--total` and `--out "$RUNNER_TEMP/…"`, and
- * `check-cross-package-test-inputs.mjs` continued into `--union-into`/
- * `--changed` with quoted values — both refused by the continuation
- * backslash the tail keeps, which is why the matcher above does not treat one
- * as a terminator.
+ *   `node scripts/check-test-completeness.mjs`  →  exit 3, `PREREQUISITE NOT
+ *       MET — this gate grades a saved `turbo run test` log, and no log was
+ *       named.` A dev following the list runs it and gets a non-verdict.
+ *   `node scripts/check-required-contexts.mjs`  →  exit 0 — but it runs the
+ *       STATIC pin check, while `required-set-patrol.yml` runs
+ *       `--verify-required-set`, a live sweep of the repo's required set. Same
+ *       script, different question, and the row said `[required-set-patrol.yml]`.
+ *   `node scripts/check-shard-attestation.mjs` and
+ *       `node scripts/check-cross-package-test-inputs.mjs`  →  exit 0, and both
+ *       duplicate what `lint.yml` already runs under a `pnpm check:` alias
+ *       this derivation keys separately. The bare row added no gate and
+ *       misattributed the ci.yml `--emit`/`--verify`/`--union-into`
+ *       invocations to a run CI never makes.
+ *   `--base` gates (`check-empty-changeset`, `check-changeset-no-major`,
+ *       `check-adr-0087-registration`)  →  exit 0 against their DEFAULT base,
+ *       while CI pins the base to the PR's merge base or the cut's snapshot.
  *
- * ⛔ The direction NOT taken: keying on the truncated flag run. It splits the
- * family — which reads as the fix — and hands the dev `node scripts/…
- * --base`, a command that exits non-zero for a reason that has nothing to do
- * with the tree. A missing lead, never a fabricated one, is the direction this
- * file errs in everywhere.
+ * ## The rule, and it is read from the workflow text
+ *
+ * Each argv token is a workflow LITERAL (it appears verbatim in the workflow
+ * and is the same on every run) or a workflow VARIABLE (`${{ … }}`, a shell
+ * expansion, a step output, a path an earlier step produced). The classifier
+ * is `WORKFLOW_VALUE_SOURCE` above; no per-script declaration is involved,
+ * which is the triage's ⛔ discharged by measurement rather than by assertion.
+ *
+ *   Every token literal  →  the invocation renders in full, exactly as CI runs
+ *       it, and goes into `--commands` as a command a dev can paste.
+ *       `check-engine-split-ratio.mjs --days 90` is one; so are
+ *       `check-required-contexts.mjs --verify-required-set` and
+ *       `check-prerelease-pin-watch.mjs --verbose`, whose argv were complete
+ *       all along and were refused only because a REDIRECTION and a
+ *       CONTINUATION sat behind them.
+ *   Any token a variable  →  the invocation still renders, with the variable's
+ *       own name in the value position, and the row is marked NOT RUNNABLE
+ *       LOCALLY on its own labelled line. It is named, its workflow is named,
+ *       and it is ⛔ NOT in `--commands` — that list promises runnable.
+ *
+ * ⛔ Both directions NOT taken, and they are the two ways this gets worse.
+ * Keying on the TRUNCATED flag run hands the dev `node scripts/… --base`, a
+ * command that exits non-zero for a reason that has nothing to do with the
+ * tree. Emitting the variable-bearing command INTO `--commands` hands them
+ * `--base ""`, which is worse still: it runs, and it answers a question CI
+ * never asked. A missing lead, never a fabricated one.
+ *
+ * Returns `null` for an invocation with no argv at all — that one keeps the
+ * bare path key, because bare is what CI runs.
  */
-export function renderableArgv(tail) {
-  const text = String(tail ?? '');
-  if (!/^(?:[ \t]+-{1,2}[A-Za-z0-9][\w-]*)*[ \t]*$/.test(text)) return null;
-  const args = text.trim();
-  return args.length > 0 ? args : null;
+export function renderedArgv(tail) {
+  const tokens = argvTokens(tail);
+  if (tokens.length === 0) return null;
+  const variables = [];
+  for (const token of tokens) {
+    for (const hit of token.matchAll(WORKFLOW_VALUE_SOURCE)) {
+      if (!variables.includes(hit[0])) variables.push(hit[0]);
+    }
+  }
+  return { args: tokens.join(' '), variables };
+}
+
+/**
+ * The captured tail minus the file descriptor of a redirection that follows it.
+ *
+ * `DIRECT_CHECK_INVOCATION` stops the tail before `>`, which is right — the
+ * redirection is the shell's. But `2>&1` puts its fd on the argv side of that
+ * boundary, so `--verbose 2>&1` captured as ` --verbose 2` and the stray `2`
+ * read as an argument. It is the live spelling in `prerelease-pin-watch.yml`,
+ * and it is why an argv that was complete all along scored unrenderable.
+ *
+ * The discriminator is the shell's own: digits touching the operator are a
+ * descriptor (`2>`), digits with a space before it are an argument
+ * (`--total 6 > out`). Applied only when a redirection really follows.
+ */
+function tailBeforeRedirection(tail, nextChar) {
+  if (nextChar !== '>' && nextChar !== '<') return tail;
+  return String(tail ?? '').replace(/\d+$/, '');
 }
 
 /**
@@ -1207,7 +1351,7 @@ export function renderableArgv(tail) {
  * 52774 pairs changed. That argument held only while the bare key was the
  * whole key: with the plain invocation and the `--self-test` invocation
  * sharing one entry, the entry kept was the plain one, and CI's failing
- * invocation had no entry at all (PR #14958, measured; `renderableArgv`'s
+ * invocation had no entry at all (PR #14958, measured; `renderedArgv`'s
  * docblock carries it). The split is the repair, not the hazard. What survives
  * of the old argument is its standard of proof, and it is met the same way: a
  * family whose invocation this tool can render keeps every pair it had — the
@@ -1260,27 +1404,37 @@ export function renderableArgv(tail) {
  */
 export function extractCheckInvocations(workflowText, workflowFile) {
   const out = [];
-  for (const cmd of runCommandTexts(workflowText)) {
+  for (const raw of runCommandTexts(workflowText)) {
+    // ONE joined text for all three matchers, so no two of them can disagree
+    // about where a command ends — the discipline `discoverFamilies` follows
+    // for the workflow reads it makes.
+    const cmd = joinLineContinuations(raw);
     for (const m of cmd.matchAll(/pnpm\s+(?:--filter\s+(\S+)\s+)?(?:run\s+)?(check:[\w:-]+)/g)) {
       out.push({ check: m[2], filter: m[1] ?? null, workflow: workflowFile });
     }
     for (const m of cmd.matchAll(DIRECT_CHECK_INVOCATION)) {
       const script = m[1];
-      // The KEY is (script, args), never the path alone — `renderableArgv`'s
-      // docblock carries the measurement and the one shape it refuses.
-      const args = renderableArgv(m[2]);
+      // The KEY is (script, args), never the path alone — `renderedArgv`'s
+      // docblock carries the measurement and the classification it applies.
+      const argv = renderedArgv(tailBeforeRedirection(m[2], cmd[m.index + m[0].length]));
       out.push({
-        check: args ? `${script} ${args}` : script,
+        check: argv ? `${script} ${argv.args}` : script,
         script,
         filter: null,
         workflow: workflowFile,
         direct: true,
+        // The values this invocation takes FROM THE WORKFLOW, in the workflow's
+        // own spelling — empty when every token is a literal. This is what
+        // decides whether the rendered command is one a dev can paste, and it
+        // travels on the invocation so every rendering downstream reads one
+        // answer rather than re-deriving it (#15083).
+        argvVariables: argv ? argv.variables : [],
         // The same declaration the matcher below reads, on the same flag: this
         // invocation runs the script's SELF-TEST rather than its work, and two
         // narrowings downstream turn on knowing that (the import/spawn/manifest
         // follows in `discoverFamilies`, and `ciOnlyMeasurement`). Before the
         // key carried the argv there was nothing here to read it off.
-        selfTest: Boolean(args) && args.split(/[ \t]+/).includes('--self-test'),
+        selfTest: Boolean(argv) && argv.args.split(/[ \t]+/).includes('--self-test'),
       });
     }
     for (const m of cmd.matchAll(SELF_TEST_INVOCATION)) {
@@ -8280,7 +8434,8 @@ export function alwaysRunsPopulationLines(rows) {
     lines.push(`  - ${row.command}   [${row.workflows.join(', ')}]   declared whole-tree population — ${row.reason}`);
     lines.push(
       `      ↳ liveness: its own source carries ${row.rootWalk}` +
-        `${row.ciOnly ? ' · CI-MEASURED ONLY — no local run of it can produce a verdict, so it is NOT in --commands' : ''}`,
+        `${row.ciOnly ? ' · CI-MEASURED ONLY — no local run of it can produce a verdict, so it is NOT in --commands' : ''}` +
+        `${row.notRunnable ? ` · ⛔ NOT RUNNABLE LOCALLY — its argv takes ${row.notRunnable.variables.join(', ')} from the workflow, so it is NOT in --commands` : ''}`,
     );
   }
   lines.push(
@@ -8564,12 +8719,12 @@ export const MANDATORY_TIER_GLOBS = [
   {
     glob: '.claude/agents/os-dev.md',
     tier: CONTRACT_REVIEW_TIER,
-    why: 'clause ① (2026-08-20 narrowing): the dev-agent definition is protocol semantics — every dispatched dev runs under it, and it carries an enforced copy of the decision frame',
+    why: 'clause ① (2026-08-20 narrowing): the dev-agent definition is protocol semantics — every dispatched dev runs under it, and receives the decision frame the PM pastes into its prompt at dispatch time rather than carrying a copy of its own',
   },
   {
     glob: 'skills/objectstack-pm-dispatch/SKILL.md',
     tier: CONTRACT_REVIEW_TIER,
-    why: 'clause ① (2026-08-20 narrowing): the published PM skill carries two enforced copies of the decision frame (check:skill-frame-sync COPIES) and ships verbatim to third-party projects',
+    why: 'clause ① (2026-08-20 narrowing): the published PM skill carries one enforced copy of the decision frame (check:skill-frame-sync COPIES) and ships verbatim to third-party projects',
   },
 ];
 
@@ -9009,6 +9164,16 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
     // reached no file at all reaches no classification either.
     entry.payloadEnv ??= null;
     entry.ciOnly = ciOnlyMeasurement(entry, rootScripts);
+    // The SECOND not-runnable-here classification (#15083), and it is read off
+    // the INVOCATION rather than off the gate's source — which is the whole
+    // difference between the two. `ciOnly` is a fact about what the gate reads;
+    // this is a fact about what the workflow passes it. A family whose argv
+    // takes a value from the workflow has no local run at all, so it is named,
+    // its workflow is named, and it is kept out of `--commands` — the same
+    // treatment, reached by a different measurement.
+    entry.notRunnable = (entry.argvVariables ?? []).length > 0
+      ? { variables: [...entry.argvVariables] }
+      : null;
   }
   return { byCheck, workflows, workflowEntries };
 }
@@ -9049,6 +9214,18 @@ export function ciOnlyCommandSet(matchedRows = [], alwaysRunsRows = []) {
   return new Set([...matchedRows, ...alwaysRunsRows].filter((row) => row.ciOnly).map((row) => row.command));
 }
 
+/**
+ * The commands a VALUE-BEARING family renders — the second not-runnable-here
+ * set, built the same way and from the same rows as `ciOnlyCommandSet` above,
+ * and kept separate from it because the two are different facts a reader is
+ * owed separately: one family cannot be run here because it needs the workflow
+ * EVENT PAYLOAD, the other because it needs a workflow VALUE. Folding them
+ * would print one count for two omissions and tell nobody which.
+ */
+export function notRunnableCommandSet(matchedRows = [], alwaysRunsRows = []) {
+  return new Set([...matchedRows, ...alwaysRunsRows].filter((row) => row.notRunnable).map((row) => row.command));
+}
+
 export function commandsFor({ matchedRows = [], kindGroups = [], alwaysRunsRows = [] } = {}) {
   const commands = new Set();
   // A CI-MEASURED-ONLY family contributes NOTHING here (#14004). This list's
@@ -9061,13 +9238,21 @@ export function commandsFor({ matchedRows = [], kindGroups = [], alwaysRunsRows 
   // omission happens is this file's own rule for the pending-changeset
   // families, and it applies here unchanged.
   const ciOnly = ciOnlyCommandSet(matchedRows, alwaysRunsRows);
-  for (const row of matchedRows) if (!row.ciOnly) commands.add(row.command);
+  // The SECOND subtraction, and it is made for the identical reason (#15083):
+  // this list's caption promises one RUNNABLE command per line, and an
+  // invocation whose values come from the workflow has no value outside a CI
+  // run. Rendering it here with `$MERGE_BASE` unset would produce a command
+  // that RUNS and answers a question CI never asked — the one outcome worse
+  // than the bare key it replaces. Loud in both other renderings: its own
+  // heading in the human output, `notRunnable` on its row in `--json`.
+  const notRunnable = notRunnableCommandSet(matchedRows, alwaysRunsRows);
+  for (const row of matchedRows) if (!row.ciOnly && !row.notRunnable) commands.add(row.command);
   // The whole-tree channel is IN the union, on every card (#14189). It is not
   // a lead — nothing about `matched` moves — but it is a gate the card owes,
   // and this list's whole contract is that it is the complete runnable answer
   // for the paths it was given. A declaring family left out of it would be the
   // very omission the card was filed about, reproduced inside its own fix.
-  for (const row of alwaysRunsRows) if (!row.ciOnly) commands.add(row.command);
+  for (const row of alwaysRunsRows) if (!row.ciOnly && !row.notRunnable) commands.add(row.command);
   for (const group of kindGroups) {
     // The exclusion follows the COMMAND, not the section it was reached
     // through: a family named by change KIND as well as by path is one family,
@@ -9075,7 +9260,9 @@ export function commandsFor({ matchedRows = [], kindGroups = [], alwaysRunsRows 
     // Reachable only in a corner today — no CI-measured family is in
     // CHANGE_KIND_GATES — but a rule that held in one section and not the
     // other is exactly the two-renderings drift this file keeps closing.
-    for (const gate of group.gates) if (gate.command && !ciOnly.has(gate.command)) commands.add(gate.command);
+    for (const gate of group.gates) {
+      if (gate.command && !ciOnly.has(gate.command) && !notRunnable.has(gate.command)) commands.add(gate.command);
+    }
   }
   return [...commands].sort();
 }
@@ -9143,23 +9330,31 @@ export function familyReconciliation({ matchedRows = [], kindGroups = [], always
   // The SAME expression commandsFor uses for its matched half. Written as a
   // second traversal it would be a second answer to a question this file
   // already answers once.
-  const runnableRows = matchedRows.filter((row) => !row.ciOnly);
+  const runnableRows = matchedRows.filter((row) => !row.ciOnly && !row.notRunnable);
   const ciOnlyRows = matchedRows.filter((row) => row.ciOnly);
+  const notRunnableRows = matchedRows.filter((row) => row.notRunnable);
   const matchedCommands = new Set(runnableRows.map((row) => row.command));
   // Counted, never folded into the total: the total is the RUNNABLE answer and
   // a CI-measured family is outside it by construction. Kept as its own term so
   // the omission is a number the reader gets rather than a difference they have
   // to notice (#14004).
   const ciOnlyCommands = ciOnlyCommandSet(matchedRows, alwaysRunsRows);
+  // Counted and kept OUT of the total on the same rule as the term above: the
+  // total is the RUNNABLE answer, and an invocation whose values come from the
+  // workflow is outside it by construction (#15083).
+  const notRunnableCommands = notRunnableCommandSet(matchedRows, alwaysRunsRows);
   // The SAME expression `commandsFor` unions for the whole-tree channel, for
   // the reason this function's header gives for the other two terms: a count
   // built by a second traversal can drift from the section it claims to
   // reconcile, and this one is asserted against the union below.
-  const alwaysRunsCommands = new Set(alwaysRunsRows.filter((row) => !row.ciOnly).map((row) => row.command));
+  const alwaysRunsCommands = new Set(
+    alwaysRunsRows.filter((row) => !row.ciOnly && !row.notRunnable).map((row) => row.command),
+  );
   const conventionCommands = new Set();
   let conventionRows = 0;
   let staleRows = 0;
   let ciOnlyConventionRows = 0;
+  let notRunnableConventionRows = 0;
   for (const group of kindGroups) {
     for (const gate of group.gates) {
       conventionRows += 1;
@@ -9173,6 +9368,7 @@ export function familyReconciliation({ matchedRows = [], kindGroups = [], always
       // own so the rows-versus-commands note names this reason rather than
       // charging it to the two it already knows about.
       if (ciOnlyCommands.has(gate.command)) ciOnlyConventionRows += 1;
+      else if (notRunnableCommands.has(gate.command)) notRunnableConventionRows += 1;
       else conventionCommands.add(gate.command);
     }
   }
@@ -9193,12 +9389,15 @@ export function familyReconciliation({ matchedRows = [], kindGroups = [], always
     matchedRows: runnableRows.length,
     ciOnly: ciOnlyCommands.size,
     ciOnlyRows: ciOnlyRows.length,
+    notRunnable: notRunnableCommands.size,
+    notRunnableRows: notRunnableRows.length,
     convention: conventionCommands.size,
     conventionRows,
     conventionOnly: conventionCommands.size - both,
     both,
     staleRows,
     ciOnlyConventionRows,
+    notRunnableConventionRows,
   };
   if (recon.matched + recon.convention - recon.both + recon.alwaysRunsOnly !== recon.total) {
     throw new Error(
@@ -9239,11 +9438,23 @@ export function familyReconciliationLines(recon) {
         ' they read the workflow event payload, so no local run of them can produce a verdict. Named under their own' +
         ' heading above, carried on their row in --json, and omitted from --commands by design.'
       : null;
+  // The second omission term, rendered on both branches for the reason the
+  // first one is (#15083): a card whose only matched family is value-bearing
+  // must not read as "nothing matched" — the family matched, it is named
+  // above, and what is zero is what the dev can run.
+  const notRunnableLine =
+    (recon.notRunnable ?? 0) > 0
+      ? `  + ${recon.notRunnable} famil(ies) this card's paths reach take a VALUE FROM THE WORKFLOW and sit OUTSIDE this total —` +
+        ' their argv carries a variable that has no value outside a CI run, so there is no local invocation to hand you.' +
+        ' Named under their own heading above with the variable in the value position, carried on their row in --json,' +
+        ' and omitted from --commands by design.'
+      : null;
   if (recon.total === 0) {
     return [
       'Reconciliation — 0 famil(ies): this card\'s whole runnable answer, and the derivation COMPLETED to reach it.',
       '  0 named by PATH (the matched block) + 0 named by change KIND (the convention block). An empty answer, not a missing one.',
       ...(ciOnlyLine ? [ciOnlyLine] : []),
+      ...(notRunnableLine ? [notRunnableLine] : []),
       '  ⇒ --commands prints nothing for these paths and exits 0. The always-runs tail below still applies and is NOT covered by this number.',
     ];
   }
@@ -9261,6 +9472,7 @@ export function familyReconciliationLines(recon) {
     );
   }
   if (ciOnlyLine) lines.push(ciOnlyLine);
+  if (notRunnableLine) lines.push(notRunnableLine);
   if (recon.alwaysRuns > 0) {
     lines.push(
       `  + ${recon.alwaysRuns} of the ${recon.total} DECLARE that their population is the WHOLE TREE` +
@@ -9286,8 +9498,16 @@ export function familyReconciliationLines(recon) {
     // the kinds table rather than about a family nobody can run here (#14004).
     const ciOnlyConventionRows = recon.ciOnlyConventionRows ?? 0;
     if (ciOnlyConventionRows > 0) notes.push(`${ciOnlyConventionRows} CI-measured only, contributing no runnable command`);
-    if (recon.conventionRows - recon.staleRows - ciOnlyConventionRows > recon.convention) {
-      notes.push(`${recon.conventionRows - recon.staleRows - ciOnlyConventionRows - recon.convention} a repeat of a family another kind already hit`);
+    // Named for the same reason the term above it is: an unnamed reason is
+    // charged to "a repeat" and read as a fact about the kinds table rather
+    // than about a family nobody can run here (#15083).
+    const notRunnableConventionRows = recon.notRunnableConventionRows ?? 0;
+    if (notRunnableConventionRows > 0) {
+      notes.push(`${notRunnableConventionRows} value-bearing argv, contributing no runnable command`);
+    }
+    const accounted = recon.staleRows + ciOnlyConventionRows + notRunnableConventionRows;
+    if (recon.conventionRows - accounted > recon.convention) {
+      notes.push(`${recon.conventionRows - accounted - recon.convention} a repeat of a family another kind already hit`);
     }
     lines.push(
       `  (the convention block prints ${recon.conventionRows} rows for those ${recon.convention}: ${notes.join('; ')}.)`,
@@ -9712,10 +9932,11 @@ function machineReadableOutput(mode, { paths, matchedRows, kindGroups, pending, 
 
   const conventionCount = kindGroups.reduce((n, g) => n + g.gates.filter((x) => x.command).length, 0);
   const ciOnlyRows = matchedRows.filter((row) => row.ciOnly);
-  const alwaysRunsRunnable = alwaysRunsRows.filter((row) => !row.ciOnly && !row.refused);
+  const notRunnableRows = matchedRows.filter((row) => row.notRunnable);
+  const alwaysRunsRunnable = alwaysRunsRows.filter((row) => !row.ciOnly && !row.notRunnable && !row.refused);
   console.error(
     `dispatch-gates --${mode}: ${commands.length} command(s) — ${split.pnpm} pnpm, ${split.node} direct node` +
-      `${split.other ? `, ${split.other} neither` : ''} (${matchedRows.length - ciOnlyRows.length} matched by path, ${conventionCount} by change KIND` +
+      `${split.other ? `, ${split.other} neither` : ''} (${matchedRows.length - ciOnlyRows.length - notRunnableRows.length} matched by path, ${conventionCount} by change KIND` +
       `${alwaysRunsRunnable.length ? `, ${alwaysRunsRunnable.length} declared WHOLE-TREE and named on every card` : ''}).`,
   );
   // Stated on stderr where every other provenance is stated, and stated even
@@ -9736,6 +9957,16 @@ function machineReadableOutput(mode, { paths, matchedRows, kindGroups, pending, 
     console.error(
       `  + ${ciOnlyRows.length} famil(ies) matched by path are CI-MEASURED ONLY and are ${mode === 'json' ? 'flagged as ciOnly on their matched row, not in commands' : 'NOT above'} — ` +
         'they read the workflow event payload, so no local run of them can produce a verdict. Run without --commands/--json to see them named.',
+    );
+  }
+  // The FIFTH thing stdout deliberately omits (#15083), on stderr for the same
+  // reason as the four around it: a quiet omission is the defect this mode
+  // exists to fix, and this one subtracts commands the list used to carry —
+  // as a BARE key CI never ran.
+  if (notRunnableRows.length) {
+    console.error(
+      `  + ${notRunnableRows.length} famil(ies) matched by path take a VALUE FROM THE WORKFLOW and are ${mode === 'json' ? 'flagged as notRunnable on their matched row, not in commands' : 'NOT above'} — ` +
+        'their argv carries a variable with no value outside a CI run. Run without --commands/--json to see each one printed as CI spells it.',
     );
   }
   if (pending.length) {
@@ -9825,6 +10056,10 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
     // family cannot be runnable in one output and CI-measured in another
     // (#14004).
     ciOnly: entry.ciOnly ?? null,
+    // Travels on the row for the identical reason `ciOnly` does: every
+    // rendering below is a reading of these rows, so a family cannot be
+    // runnable in one output and value-bearing in another (#15083).
+    notRunnable: entry.notRunnable ?? null,
   }));
   // Built the same way `matchedRows` is, and for the same reason: every
   // rendering below is a reading of these rows, so the human block, the
@@ -9840,6 +10075,7 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
     rootWalk: entry.rootWalk ?? null,
     refused: wholeTreePopulationRefusal(entry),
     ciOnly: entry.ciOnly ?? null,
+    notRunnable: entry.notRunnable ?? null,
   }));
   const kindGroups = changeKindGates(paths, resolveInvocation);
   // The pending-changeset section is derived in BOTH input modes and is gated
@@ -9912,8 +10148,14 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
   // the blank line the published harvest stops at, so the family stays named
   // and named ONCE, and no harvest of this block can pick up a command whose
   // only local outcome is a nonzero exit.
-  const runnableRows = matchedRows.filter((row) => !row.ciOnly);
+  const runnableRows = matchedRows.filter((row) => !row.ciOnly && !row.notRunnable);
   const ciOnlyRows = matchedRows.filter((row) => row.ciOnly);
+  // The second not-runnable channel (#15083). Kept out of the pasted block for
+  // the reason the CI-measured rows are: the block a dev pastes carries only
+  // families a dev can run, and these get their own heading below the blank
+  // line the published harvest stops at — named ONCE, and unable to reach a
+  // harvest of the block above.
+  const notRunnableRows = matchedRows.filter((row) => row.notRunnable);
   const viaText = (hits) => hits.map((h) => `${h.path} ⇢ ${h.via} '${h.hint}'`).join('; ');
   if (runnableRows.length) {
     console.log('Local gates for this card (paste into the dispatch prompt):');
@@ -9927,11 +10169,11 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
     for (const line of spellingFooterLines(spellingSplit(runnableRows.map((r) => r.command)), recon)) {
       console.log(line);
     }
-  } else if (ciOnlyRows.length) {
+  } else if (ciOnlyRows.length || notRunnableRows.length) {
     // ⛔ NOT the "nothing matched" sentence below: families DID match, and
     // saying otherwise would hide the one row this card is about behind a
     // claim the run just measured as false.
-    console.log('No LOCALLY runnable check family names the given paths — every family they matched is CI-measured only; see the heading below.');
+    console.log('No LOCALLY runnable check family names the given paths — every family they matched is CI-measured only or takes a value from the workflow; see the headings below.');
   } else {
     console.log("No check family names the given paths in its own source, and no workflow's path filter schedules one for them.");
   }
@@ -9949,6 +10191,32 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
       );
     }
     console.log('  ⇒ Derived from the gate\'s own source, not from a list of names: a family that reads the payload and has no local invocation classifies itself.');
+  }
+
+  // The value-bearing channel (#15083), rendered on the CI-measured section's
+  // exact shape and placed beside it because it answers the same question — a
+  // family this card owes that this machine cannot run — from a different
+  // measurement. The invocation prints in FULL, as CI spells it, so the reader
+  // can see which value is missing and where it comes from; the refusal is a
+  // labelled line of its own, never an ellipsis and never a truncated command.
+  if (notRunnableRows.length) {
+    console.log('');
+    console.log(`Value-bearing argv — matched by path, and NOT runnable here (${notRunnableRows.length} famil(ies)):`);
+    for (const { command, workflows: wfs, via: hits, notRunnable } of notRunnableRows) {
+      console.log(`  - ${command}   [${wfs.join(', ')}]   matched via ${viaText(hits)}`);
+      console.log(
+        `      ⛔ NOT RUNNABLE LOCALLY — ${notRunnable.variables.length} value(s) come from the workflow:` +
+          ` ${notRunnable.variables.join(', ')}`,
+      );
+    }
+    console.log(
+      '  ⇒ Printed as CI spells it, variable names in the value positions, so nothing above reads as a command to paste:' +
+        ' these are ⛔ NOT in --commands, and a BARE run of any of these scripts is an invocation CI never makes.',
+    );
+    console.log(
+      '  ⇒ Read from the workflow text, not from a table in this script: a token carrying ${{ … }} or a shell expansion' +
+        ' is a variable, everything else is a literal and renders in full under the heading above.',
+    );
   }
   const kindLines = changeKindLines(paths, resolveInvocation);
   if (kindLines.length) {
@@ -10826,7 +11094,11 @@ function selfTest() {
   ].join('\n');
   const blockInvs = extractCheckInvocations(blockWf, 'pr-automation.yml');
   const blockNames = blockInvs.map((i) => i.check);
-  t('extracts a direct script from a literal block body', blockNames.includes('scripts/check-adr-0087-registration.mjs'));
+  // The key carries the argv the block body really spells (#15083), so the
+  // subject of this case — a direct script pulled out of a literal block —
+  // is asserted on the invocation the body contains rather than on a bare path
+  // the body does not.
+  t('extracts a direct script from a literal block body', blockNames.includes('scripts/check-adr-0087-registration.mjs --base "$MERGE_BASE"'));
   t('extracts a pnpm check from a folded block body, with its filter', blockInvs.some((i) => i.check === 'check:folded-surface' && i.filter === '@objectstack/spec'));
   t('a dedented step ends the block body (the one-liner after it still parses)', blockNames.includes('scripts/check-nul-bytes.mjs'));
   t('a blank line does NOT end the block body', blockNames.includes('check:folded-surface'));
@@ -10914,7 +11186,7 @@ function selfTest() {
   // the family lands under the BARE path key, and that half WAS the defect
   // #14880 fixed: it is what collapsed CI's two invocations of one script into
   // the plain one and left the failing `--self-test` invocation with no entry.
-  // The key now carries the argv (`renderableArgv`'s docblock has the
+  // The key now carries the argv (`renderedArgv`'s docblock has the
   // measurement), so the expectation moves with it.
   const dualWf = [
     'jobs:',
@@ -10941,13 +11213,32 @@ function selfTest() {
     dualInvs[0]?.selfTest === true,
   );
 
-  // ── The derivation KEY is (script, args) (#14880) ──────────────────────────
+  // ── The derivation KEY is (script, args) (#14880), and the argv is RENDERED
+  //    rather than refused (#15083) ───────────────────────────────────────────
   //
-  // The card's third mechanism, and the one no better output mode reaches: the
+  // #14880's third mechanism, and the one no better output mode reaches: the
   // derived list named the PLAIN invocation of a script CI also runs with a
-  // flag, and the flagged invocation was the red one. Both halves are pinned —
-  // the split, and the refusal that keeps a split from inventing an unrunnable
-  // command.
+  // flag, and the flagged invocation was the red one. That split is pinned
+  // below, unchanged.
+  //
+  // ⚠️ #14880's other half — the REFUSAL — is what #15083 retired, so the two
+  // cases that pinned it are rewritten here rather than dropped. They asserted
+  // that a value-bearing tail and a continued tail keep the BARE path key, and
+  // that key is an invocation CI never runs: measured on this tree,
+  // `node scripts/check-test-completeness.mjs` exits 3 with `PREREQUISITE NOT
+  // MET`, and four more of the nine answer a different question than CI asks.
+  // The subject of each case is unchanged — same tail, same fixture — and what
+  // moved is the expectation, from "keeps the bare key" to "renders in full and
+  // says whether it is runnable". Every OTHER case in this block keeps its
+  // verdict untouched, the two census cases and the redirection case included.
+  //
+  // The fixtures below are QUOTED FROM the live workflow text, invocation for
+  // invocation, so no case can pin a shape the tree does not have. Their
+  // sources: `pr-automation.yml` (the `--base` gates), `ci.yml` (the shard
+  // attestation), `engine-split-metric.yml` (`--days 90`),
+  // `required-set-patrol.yml` (a complete argv behind a continuation and a
+  // redirection), `prerelease-pin-watch.yml` (`--verbose 2>&1`). The live half
+  // at the end of the block re-reads them from the workflows themselves.
   const keyWf = [
     'jobs:',
     '  gates:',
@@ -10956,12 +11247,21 @@ function selfTest() {
     '        run: |',
     '          node scripts/check-tenant-audit-census.mjs --self-test',
     '          node scripts/check-tenant-audit-census.mjs',
-    '      - name: An invocation whose tail carries a VALUE',
+    '      - name: VARIABLE — pr-automation.yml pins the base to a step output',
     '        run: node scripts/check-empty-changeset.mjs --base "$MERGE_BASE"',
-    '      - name: An invocation CONTINUED onto the next line, where its values are',
+    '      - name: VARIABLE — ci.yml continues the attestation across two more lines',
     '        run: |',
     '          node scripts/check-shard-attestation.mjs --emit \\',
-    '            --job test --total 6 --out "$RUNNER_TEMP/att"',
+    '            --job test --shard ${{ matrix.shard }} --total 6 \\',
+    '            --out "$RUNNER_TEMP/att"',
+    '      - name: LITERAL — engine-split-metric.yml writes the window down',
+    '        run: node scripts/check-engine-split-ratio.mjs --days 90',
+    "      - name: LITERAL behind a CONTINUATION and a REDIRECTION, both the shell's",
+    '        run: |',
+    '          node scripts/check-required-contexts.mjs --verify-required-set \\',
+    '            > "$RUNNER_TEMP/required-set.md" 2> "$RUNNER_TEMP/required-set.err"',
+    '      - name: LITERAL whose line ends in a REDIRECTION carrying its own fd',
+    '        run: node scripts/check-prerelease-pin-watch.mjs --verbose 2>&1',
     '      - name: A complete flag run whose line ends in a REDIRECTION, not an argument',
     '        run: node scripts/check-release-section-coverage.mjs --strict > "$RUNNER_TEMP/x.txt"',
   ].join('\n');
@@ -10987,40 +11287,102 @@ function selfTest() {
       .join('|')
       === 'node scripts/check-tenant-audit-census.mjs|node scripts/check-tenant-audit-census.mjs --self-test',
   );
-  // ⛔ The refusal, and it is the half that keeps the split honest: a tail this
-  // tool cannot render runnably keeps the bare path key it has today. Keying on
-  // the truncated flag run would print `node scripts/check-empty-changeset.mjs
-  // --base`, which fails for a reason that has nothing to do with the tree.
+  // ⭐ THE VARIABLE KIND (#15083). Rewritten from "keeps the bare path key": the
+  // bare key is an invocation `pr-automation.yml` never makes, and it answered
+  // against the DEFAULT base while CI pins it to the PR's merge base. The
+  // invocation now renders in full, with the variable's own name in the value
+  // position, and carries the variable so the row can be labelled.
+  const emptyKey = keyInvs.find((i) => i.script === 'scripts/check-empty-changeset.mjs');
   t(
-    '⛔ an invocation whose tail carries a VALUE keeps the bare path key — a truncated argv is not a runnable command',
-    keyNames.includes('scripts/check-empty-changeset.mjs')
-      && !keyNames.some((n) => n.startsWith('scripts/check-empty-changeset.mjs ')),
+    '⭐ an invocation whose tail carries a VARIABLE renders in FULL, and the bare key CI never runs is gone',
+    keyNames.includes('scripts/check-empty-changeset.mjs --base "$MERGE_BASE"')
+      && !keyNames.includes('scripts/check-empty-changeset.mjs'),
   );
-  // ⛔ The sharpest of the three, and the one a terminator at the backslash
-  // would have got wrong in the direction that LOOKS right: ` --emit ` reads as
-  // a complete flag run, and the invocation's real values are on the next line.
   t(
-    '⛔ an invocation CONTINUED onto the next line keeps the bare key — its flag run only LOOKS complete',
-    keyNames.includes('scripts/check-shard-attestation.mjs')
-      && !keyNames.some((n) => n.startsWith('scripts/check-shard-attestation.mjs ')),
+    '…and it carries the variable it takes from the workflow, which is what marks the row NOT RUNNABLE LOCALLY',
+    (emptyKey?.argvVariables ?? []).join(',') === '$MERGE_BASE',
+  );
+  // ⭐ The sharpest of them, and the one a terminator at the backslash would
+  // have got wrong in the direction that LOOKS right: ` --emit ` reads as a
+  // complete flag run and the invocation's real values are on the next two
+  // lines. Joining is how the whole argv arrives; refusing it was how a
+  // truncation was avoided before there was a join.
+  const shardKey = keyInvs.find((i) => i.script === 'scripts/check-shard-attestation.mjs');
+  t(
+    '⭐ an invocation CONTINUED across two lines renders as ONE command, values and all',
+    shardKey?.check
+      === 'scripts/check-shard-attestation.mjs --emit --job test --shard ${{ matrix.shard }} --total 6 --out "$RUNNER_TEMP/att"',
+  );
+  t(
+    '…with BOTH of its workflow variables named, the expression and the shell expansion',
+    (shardKey?.argvVariables ?? []).join(',') === '${{ matrix.shard }},$RUNNER_TEMP',
+  );
+  t(
+    '…and ⛔ no bare key survives beside it — a bare run of this script is an invocation ci.yml never makes',
+    !keyNames.includes('scripts/check-shard-attestation.mjs'),
+  );
+  // ⭐ THE LITERAL KIND (#15083) — three shapes, all of them renderable, and the
+  // last two were refused before this card only because a REDIRECTION and a
+  // CONTINUATION stood behind an argv that was already complete.
+  const literalKeys = [
+    'scripts/check-engine-split-ratio.mjs --days 90',
+    'scripts/check-required-contexts.mjs --verify-required-set',
+    'scripts/check-prerelease-pin-watch.mjs --verbose',
+  ];
+  t(
+    '⭐ an invocation whose every token is a LITERAL renders as the command CI runs, value included',
+    literalKeys.every((k) => keyNames.includes(k)),
+  );
+  t(
+    '…and every one of them is runnable — no variable, so nothing to label',
+    keyInvs.filter((i) => literalKeys.includes(i.check)).every((i) => i.argvVariables.length === 0),
+  );
+  t(
+    '…and none of the three keeps a bare key CI never runs',
+    !['scripts/check-engine-split-ratio.mjs', 'scripts/check-required-contexts.mjs', 'scripts/check-prerelease-pin-watch.mjs']
+      .some((k) => keyNames.includes(k)),
+  );
+  // ⛔ The truncation this card must not reintroduce, asserted as a shape over
+  // every key rather than as one expectation: a key ending in a dangling flag,
+  // a bare backslash or a stray redirection fd is the outcome #14880 refused
+  // the whole class to avoid, and rendering is only an improvement while none
+  // of them can appear.
+  t(
+    '⛔ no derived key is a TRUNCATED argv — no continuation backslash, and no redirection fd survives as an argument',
+    keyNames.every((n) => !/\\/.test(n))
+      && keyNames.includes('scripts/check-prerelease-pin-watch.mjs --verbose')
+      && !keyNames.some((n) => /^scripts\/check-prerelease-pin-watch\.mjs --verbose\s+\d+$/.test(n)),
   );
   // ...while a REDIRECTION really does end the argv, so the flag run before it
-  // is complete and is keyed. The two cases differ by one character and by
-  // whether the shell hands the rest to this command or to itself.
+  // is complete and is keyed. Unchanged by #15083, verdict and all: what the
+  // shell hands to this command and what it keeps for itself is the same
+  // boundary it always was.
   t(
     'a complete flag run followed by a redirection IS keyed — the redirection is the shell\'s, never this argv',
     keyNames.includes('scripts/check-release-section-coverage.mjs --strict')
       && !keyNames.includes('scripts/check-release-section-coverage.mjs'),
   );
   t(
-    'renderableArgv keeps a complete flag run and refuses everything else',
-    renderableArgv(' --self-test') === '--self-test'
-      && renderableArgv(' --emit --verify') === '--emit --verify'
-      && renderableArgv('') === null
-      && renderableArgv(' --base "$MERGE_BASE"') === null
-      && renderableArgv(' --days 90') === null
-      && renderableArgv(' --emit \\') === null
-      && renderableArgv(' "$RUNNER_TEMP/test-core.log"') === null,
+    'renderedArgv renders every tail and reports which values come from the workflow',
+    renderedArgv(' --self-test').args === '--self-test'
+      && renderedArgv(' --self-test').variables.length === 0
+      && renderedArgv(' --emit --verify').args === '--emit --verify'
+      && renderedArgv('') === null
+      && renderedArgv(' --days 90').args === '--days 90'
+      && renderedArgv(' --days 90').variables.length === 0
+      && renderedArgv(' --base "$MERGE_BASE"').variables.join(',') === '$MERGE_BASE'
+      && renderedArgv(' "$RUNNER_TEMP/test-core.log"').variables.join(',') === '$RUNNER_TEMP'
+      && renderedArgv(' --shard ${{ matrix.shard }}').args === '--shard ${{ matrix.shard }}',
+  );
+  t(
+    'argvTokens holds a quoted value and a ${{ … }} expression together, spaces and all',
+    argvTokens(' --gate \'Test Core\' --shard ${{ matrix.shard }}').join('|')
+      === "--gate|'Test Core'|--shard|${{ matrix.shard }}",
+  );
+  t(
+    'joinLineContinuations splices a continued command into one line, and ⛔ never joins a COMMENT',
+    joinLineContinuations('a \\\n  b').trim() === 'a b'
+      && joinLineContinuations('  # a comment \\\n  node scripts/check-x.mjs').split('\n').length === 2,
   );
   // The LIVE half, and the count is READ from the workflow rather than typed —
   // a number typed here would rot the first time lint.yml moved. The point of
@@ -11047,9 +11409,68 @@ function selfTest() {
       (argvOfScript.get('scripts/check-tenant-audit-census.mjs')?.size ?? 0) === 2,
     );
     t(
-      'every derived key is either the bare script path or that path plus a complete flag run — never a truncated argv',
+      'every derived key is either the bare script path or that path plus the WHOLE argv, re-tokenising to itself',
       [...argvOfScript.entries()].every(([script, keys]) =>
-        [...keys].every((k) => k === script || renderableArgv(k.slice(script.length)) !== null)),
+        [...keys].every((k) => k === script || renderedArgv(k.slice(script.length))?.args === k.slice(script.length).trim())),
+    );
+  }
+
+  // ── The value-bearing class, read from the LIVE workflows (#15083) ─────────
+  //
+  // The card counted nine scripts whose only CI invocations carry a value or a
+  // continuation. The count is READ here rather than typed, for the reason the
+  // block above reads its own: a list typed into a self-test rots the first
+  // time a workflow moves, and this one already has — the same sweep over the
+  // tree at this commit finds `scripts/pm/check-half-states.mjs` too, a TENTH
+  // member the card's table does not name (`half-state-patrol.yml` runs it
+  // `--format=markdown --provenance="$PROVENANCE"` and nowhere else).
+  //
+  // What is asserted is the PROPERTY, not the roster: every direct invocation
+  // in the tree renders, and every rendered key is either all-literal (and
+  // therefore in `--commands`) or names the variables that keep it out. A
+  // script with both kinds gets both entries, which is the card's third clause.
+  {
+    const liveInvs = [];
+    for (const wf of readdirSync(nodePath.join(ROOT, '.github/workflows')).filter((f) => /\.ya?ml$/.test(f))) {
+      liveInvs.push(...extractCheckInvocations(readFileSync(nodePath.join(ROOT, '.github/workflows', wf), 'utf8'), wf));
+    }
+    const direct = liveInvs.filter((i) => i.direct);
+    const valueBearing = direct.filter((i) => (i.argvVariables ?? []).length > 0);
+    t(
+      `the live tree really carries ${valueBearing.length} value-bearing invocation(s) across ${new Set(valueBearing.map((i) => i.script)).size} script(s), so the cases above judge a live class`,
+      valueBearing.length > 0,
+    );
+    t(
+      '⭐ the card\'s named specimens all classify as VARIABLE from the workflow text — no per-script table was needed',
+      ['scripts/check-empty-changeset.mjs', 'scripts/check-test-completeness.mjs', 'scripts/check-shard-attestation.mjs',
+        'scripts/check-cross-package-test-inputs.mjs', 'scripts/check-adr-0087-registration.mjs', 'scripts/check-changeset-no-major.mjs']
+        .every((script) => valueBearing.some((i) => i.script === script)),
+    );
+    t(
+      '⭐ …and the three the card called value-bearing that are really LITERAL render as runnable commands instead',
+      ['scripts/check-engine-split-ratio.mjs --days 90', 'scripts/check-required-contexts.mjs --verify-required-set',
+        'scripts/check-prerelease-pin-watch.mjs --verbose']
+        .every((key) => direct.some((i) => i.check === key && i.argvVariables.length === 0)),
+    );
+    t(
+      '⛔ no live key survives as a bare path for a script CI only ever invokes WITH argv',
+      !direct.some((i) => i.check === i.script)
+        || direct.filter((i) => i.check === i.script).every((bare) => liveInvs.some((i) => i.script === bare.script && i.check === i.script)),
+    );
+    t(
+      '⛔ and no live key is truncated: no continuation backslash reaches one',
+      direct.every((i) => !i.check.includes('\\')),
+    );
+    // A script invoked BOTH ways gets BOTH entries — the card's third clause,
+    // read off the live tree. `check-release-section-coverage.mjs` is the
+    // specimen: `lint.yml` runs it bare, `release-coverage-patrol.yml` runs it
+    // bare AND `--strict`, and before the continuation join the `--strict` run
+    // had no entry of its own at all.
+    const coverageKeys = new Set(direct.filter((i) => i.script === 'scripts/check-release-section-coverage.mjs').map((i) => i.check));
+    t(
+      '⭐ a script CI invokes bare AND with argv keeps BOTH entries — the bare key is kept where CI really runs it bare',
+      coverageKeys.has('scripts/check-release-section-coverage.mjs')
+        && coverageKeys.has('scripts/check-release-section-coverage.mjs --strict'),
     );
   }
 
@@ -13655,9 +14076,23 @@ function selfTest() {
   // than deleting it.
   const liveWf = readFileSync(nodePath.join(ROOT, '.github/workflows/pr-automation.yml'), 'utf8');
   const liveInvs = extractCheckInvocations(liveWf, 'pr-automation.yml').map((i) => i.check);
-  t('the live Check Changeset job discovers its ADR-0087 gate', liveInvs.includes('scripts/check-adr-0087-registration.mjs'));
-  t('the live Check Changeset job discovers its empty-changeset gate', liveInvs.includes('scripts/check-empty-changeset.mjs'));
-  t('the live one-line gate in that file still discovers', liveInvs.includes('scripts/check-changeset-no-major.mjs'));
+  // ⚠️ Asserted on the SCRIPT, not on a key (#15083). All three of these gates
+  // are invoked by `pr-automation.yml` with `--base "$MERGE_BASE"` and by
+  // nothing bare, so their keys now carry that argv — the discovery this case
+  // is about is unchanged, and pinning the bare key here would pin the very
+  // invocation CI never makes. The keyed half is asserted immediately below,
+  // so a rewrite of the step cannot quietly satisfy this by discovering the
+  // script under some other argv.
+  const liveScripts = extractCheckInvocations(liveWf, 'pr-automation.yml').map((i) => i.script);
+  t('the live Check Changeset job discovers its ADR-0087 gate', liveScripts.includes('scripts/check-adr-0087-registration.mjs'));
+  t('the live Check Changeset job discovers its empty-changeset gate', liveScripts.includes('scripts/check-empty-changeset.mjs'));
+  t('the live one-line gate in that file still discovers', liveScripts.includes('scripts/check-changeset-no-major.mjs'));
+  t(
+    '…each under the argv that file really runs it with, merge base and all',
+    ['scripts/check-adr-0087-registration.mjs --base "$MERGE_BASE"',
+      'scripts/check-empty-changeset.mjs --base "$MERGE_BASE"',
+      'scripts/check-changeset-no-major.mjs --base "$MERGE_BASE"'].every((k) => liveInvs.includes(k)),
+  );
   // The end-to-end direction: a `.changeset/` path must now REACH the ADR-0087
   // gate through the ordinary watch-hint match. That gate names `.changeset` in
   // its own source, so this asserts the whole chain (discover -> resolve ->
@@ -16397,7 +16832,7 @@ function selfTest() {
   const fableOf = (paths) => deriveTier(paths);
   t('the pm-dispatch SKILL.md MAIN file is fable-mandatory', fableOf(['.claude/skills/pm-dispatch/SKILL.md']).tier === CONTRACT_REVIEW_TIER);
   t('the dev-agent definition is fable-mandatory', fableOf(['.claude/agents/os-dev.md']).tier === CONTRACT_REVIEW_TIER);
-  t('the published PM skill (two enforced frame copies) is fable-mandatory', fableOf(['skills/objectstack-pm-dispatch/SKILL.md']).tier === CONTRACT_REVIEW_TIER);
+  t('the published PM skill (one enforced frame copy) is fable-mandatory', fableOf(['skills/objectstack-pm-dispatch/SKILL.md']).tier === CONTRACT_REVIEW_TIER);
   t('a pm-dispatch REFERENCES path carries NO path mandate — the 2026-08-20 narrowing, inverted from the pre-narrowing pin', fableOf(['.claude/skills/pm-dispatch/references/review-checklist.md']).mandatory === false);
   const mixed = fableOf(['packages/spec/src/data/filter.zod.ts', '.claude/agents/os-dev.md']);
   t('a MIXED surface is mandatory — one mandatory path decides, ordinary paths do not dilute it', mixed.mandatory && mixed.tier === CONTRACT_REVIEW_TIER);
@@ -17323,7 +17758,10 @@ function selfTest() {
       'because those families are in the MATCHED list instead, each one exactly once',
       changesetCommands.length > 0
         && new Set(changesetCommands).size === changesetCommands.length
-        && changesetCommands.filter((c) => c === 'node scripts/check-empty-changeset.mjs').length === 1,
+        // The `--base` run is the one this section is ABOUT — it is the family a
+        // changeset brings into scope — and since #15083 it renders with the
+        // merge base the workflow pins rather than as a bare path CI never runs.
+        && changesetCommands.filter((c) => c === 'node scripts/check-empty-changeset.mjs --base "$MERGE_BASE"').length === 1,
     );
 
     // REACHED THROUGH A SYMLINK — the form a plain path equality gets wrong.
@@ -17935,6 +18373,27 @@ function selfTest() {
       ['--tier', '--residue', '--commands', '--json', '--ran', '--repo', '--changed', '--self-test']
         .every((flag) => USAGE_LINE.includes(flag)),
     );
+    // ⭐ #14870 — the mirror-image fix: `--changed` sat OUTSIDE the alternation
+    // as a whole-invocation alternative, which reads as excluding every mode
+    // beside it, though `--changed --commands` is legal and answers (CONTROL
+    // below). Moved to the position `<path> ...` occupies, the other path
+    // source it stands in for.
+    t(
+      '⭐ the usage line no longer presents --changed as a whole-invocation alternative that takes no other flag (#14870)',
+      !USAGE_LINE.includes('] | --changed | --self-test'),
+    );
+    t(
+      '…and it still offers --changed where <path> ... sits, combining with the modes before it',
+      USAGE_LINE.includes('[<path> ... | --changed]'),
+    );
+    // CONTROL: --changed really does combine with a stdout-shape flag — the
+    // usage-line fix above would otherwise be cosmetic on a refusal that does
+    // not exist.
+    const changedCommandsRun = runCli(['--changed', '--commands']);
+    t(
+      'CONTROL: --changed --commands is legal and answers, so the moved usage line describes a real combination',
+      changedCommandsRun.status === 0 && (changedCommandsRun.stdout ?? '').length > 0,
+    );
   }
 
   // ── END TO END: the CI-measured family, on the card it was measured on (#14004)
@@ -18304,6 +18763,14 @@ const invokedDirectly = isEntrypoint(import.meta.url);
  * ⛔ Deleting `[--residue]` instead would understate it — the flag really is
  * legal with the other three, and with the plain human rendering.
  *
+ * `--changed` had the mirror-image problem: it sat OUTSIDE the alternation as
+ * a whole-invocation alternative, which reads as excluding every member next
+ * to it — `--commands`/`--json` included, though `--changed --commands` is
+ * legal and answers (it derives the path list `<path> ...` would otherwise
+ * supply, and nothing more). Moved to the position `<path> ...` occupies, the
+ * other path source it stands in for, so the line no longer implies a refusal
+ * the argv chain does not make (#14870).
+ *
  * A CONSTANT rather than a literal at the print site, because the pin belongs
  * beside the refusals it mirrors: reaching the print site needs a checkout
  * where `changedPathsFromGit()` refuses, and a pin that cannot be run in the
@@ -18312,7 +18779,7 @@ const invokedDirectly = isEntrypoint(import.meta.url);
 const USAGE_LINE =
   'usage: node scripts/pm/dispatch-gates.mjs'
   + ' [--tier | [--residue] [--commands | --json | --ran <file>]]'
-  + ' [--repo owner/name] [<path> ...] | --changed | --self-test';
+  + ' [--repo owner/name] [<path> ... | --changed] | --self-test';
 
 /**
  * Executed only as a CLI. Importing this module must have NO side effect.

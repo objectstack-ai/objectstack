@@ -457,6 +457,61 @@ const query: QueryAST = {
 //      AND (amount > 100000 OR is_strategic = true)
 ```
 
+### Comparing Two Fields
+
+A comparand can be a **field reference** instead of a literal — `{ $field: 'other_column' }`
+— as the *whole* comparand of one of the six scalar comparison operators
+(`$eq` / `$ne` / `$gt` / `$gte` / `$lt` / `$lte`). Both execution paths answer it: the
+in-memory evaluator (`matchesFilter`, `@objectstack/formula`) resolves the reference
+against the record, and SQL push-down (`driver-sql`, `driver-sqlite-wasm`) compiles it to
+a same-table column-to-column comparison written total across NULLs, so the two return
+the same rows. A reference is **not** allowed as an `$in` / `$nin` member or a `$between`
+endpoint — the schema refuses those positions by name.
+
+{/* os:check */}
+```typescript
+import type { FilterCondition } from '@objectstack/spec/data';
+
+// completed_at <= due_date
+const onTime: FilterCondition = {
+  completed_at: { $lte: { $field: 'due_date' } },
+};
+
+// completed_at <= due_date + grace_days   (grace_days is a numeric column)
+const onTimeWithGrace: FilterCondition = {
+  completed_at: { $lte: { $field: 'due_date', addDays: { $field: 'grace_days' } } },
+};
+
+// completed_at > due_date + 5   (a literal binds where the column would)
+const lateByMoreThanFive: FilterCondition = {
+  completed_at: { $gt: { $field: 'due_date', addDays: 5 } },
+};
+
+// completed_at >= due_date - 3   (a negative integer subtracts; there is no subDays)
+const withinThreeDaysBefore: FilterCondition = {
+  completed_at: { $gte: { $field: 'due_date', addDays: -3 } },
+};
+```
+
+`addDays` adds a **whole-day offset** to the referenced column before the comparison:
+an integer literal of any sign, or a nested `{ $field }` reference to a numeric column
+holding the number of days. Whole days are the only unit. The NULL semantics are
+stated rather than inherited from SQL three-valued logic:
+
+| Case | Reads as |
+|:-----|:---------|
+| The offset column is NULL | zero days — `due_date + NULL` is `due_date` |
+| The referenced column is NULL | the comparison is **false**, for every operator (`$ne` included) — no deadline is never "on time", so `$not` re-admits the row |
+| The target column is NULL | its ordinary reading — fails the orderings and `$eq`, satisfies `$ne` when the offset deadline exists |
+
+On SQL push-down the offset compiles only between two temporal columns of the same
+class (`date` with `date`, `datetime` with `datetime`) against a numeric offset column,
+on every dialect the `$field` compiler covers (SQLite, PostgreSQL, MySQL); the
+memory evaluator matches, and a fractional offset *value* is truncated toward zero on
+both. The same-table rule applies to the offset column too: `addDays: { $field:
+'duty.grace_days' }` (a relation path) is resolved by the memory evaluator and refused
+by SQL push-down with `INVALID_FILTER`, exactly as a dotted `$field` is.
+
 ### Date, Datetime, and Time Filters
 
 Before a comparison is built, the driver puts the comparand into the **same canonical

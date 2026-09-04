@@ -3,6 +3,7 @@ import {
   FilterConditionSchema,
   QueryFilterSchema,
   FieldOperatorsSchema,
+  FieldReferenceSchema,
   EqualityOperatorSchema,
   ComparisonOperatorSchema,
   SetOperatorSchema,
@@ -1701,5 +1702,135 @@ describe('VALID_AST_OPERATORS', () => {
     for (const op of expected) {
       expect(VALID_AST_OPERATORS.has(op)).toBe(true);
     }
+  });
+});
+
+// ============================================================================
+// #14104 — `addDays`, a whole-day offset on a `{ $field }` reference. Ruled
+// 2026-09-02 (option A): an integer literal of any sign OR a nested `{ $field }`
+// reference; no other unit, no other spelling. The schema door refuses the
+// rest with a pointed first sentence, and the operator slot repeats it rather
+// than answering zod's generic union text. The NULL semantics the ruling
+// pins are executed, not declared, so they live in the drivers' conformance
+// corpus and the memory evaluator's pins — not here.
+// ============================================================================
+
+describe('FieldReferenceSchema.addDays (#14104)', () => {
+  const firstIssue = (result: { error?: { issues: Array<{ code: string; path: PropertyKey[]; message: string }> } }) =>
+    result.error?.issues[0];
+
+  describe('accepts the ruled shapes', () => {
+    it('an integer literal', () => {
+      expect(FieldReferenceSchema.safeParse({ $field: 'due_date', addDays: 5 }).success).toBe(true);
+      expect(FieldReferenceSchema.safeParse({ $field: 'due_date', addDays: 0 }).success).toBe(true);
+    });
+
+    it('a NEGATIVE integer literal — the only subtraction there is', () => {
+      expect(FieldReferenceSchema.safeParse({ $field: 'due_date', addDays: -3 }).success).toBe(true);
+    });
+
+    it('a nested { $field } reference to the offset column', () => {
+      expect(FieldReferenceSchema.safeParse({
+        $field: 'due_date', addDays: { $field: 'grace_days' },
+      }).success).toBe(true);
+    });
+
+    it('a DOT-PATH nested reference — exactly as `$field` itself allows', () => {
+      // The ruling's driving shape: `completed_at <= due_date + duty.grace_days`.
+      expect(FieldReferenceSchema.safeParse({
+        $field: 'due_date', addDays: { $field: 'duty.grace_days' },
+      }).success).toBe(true);
+    });
+
+    it('positive control — a bare reference is unchanged', () => {
+      const result = FieldReferenceSchema.safeParse({ $field: 'due_date' });
+      expect(result.success).toBe(true);
+      expect(result.data).toEqual({ $field: 'due_date' });
+    });
+
+    it('rides in every ordering slot, on both the documentation and the ENFORCED copy', () => {
+      const ref = { $field: 'due_date', addDays: { $field: 'duty.grace_days' } };
+      for (const op of ['$gt', '$gte', '$lt', '$lte'] as const) {
+        expect(ComparisonOperatorSchema.safeParse({ [op]: ref }).success, op).toBe(true);
+        expect(FieldOperatorsSchema.safeParse({ [op]: ref }).success, op).toBe(true);
+      }
+      // The normalized AST spells every field condition with an explicit
+      // operator map; the authorable `FilterConditionSchema` keeps implicit
+      // equality. Both admit the offset reference.
+      expect(NormalizedFilterSchema.safeParse({
+        $and: [{ status: { $eq: 'done' } }, { completed_at: { $lte: ref } }],
+      }).success).toBe(true);
+      expect(FilterConditionSchema.safeParse({
+        status: 'done', completed_at: { $lte: ref },
+      }).success).toBe(true);
+    });
+  });
+
+  describe('refuses what the ruling did not admit — code + path + first sentence', () => {
+    it('a fractional number: whole days only', () => {
+      const result = FieldReferenceSchema.safeParse({ $field: 'due_date', addDays: 1.5 });
+      expect(result.success).toBe(false);
+      const issue = firstIssue(result);
+      expect(issue?.code).toBe('invalid_union');
+      expect(issue?.path).toEqual(['addDays']);
+      expect(issue?.message.startsWith('addDays must be a whole number of days, and 1.5 is not an integer.')).toBe(true);
+      expect(issue?.message).toContain('negative value subtracts');
+      // The refusal is printed AT the author, who has no tracker: no issue id in it.
+      expect(issue?.message).not.toMatch(/#\d{3,}/);
+      expect(FieldReferenceSchema.shape.addDays.description).not.toMatch(/#\d{3,}/);
+    });
+
+    it('a string: a number is a number, and "5 days" is not a grammar this filter has', () => {
+      const result = FieldReferenceSchema.safeParse({ $field: 'due_date', addDays: '5' });
+      expect(result.success).toBe(false);
+      const issue = firstIssue(result);
+      expect(issue?.code).toBe('invalid_union');
+      expect(issue?.path).toEqual(['addDays']);
+      expect(issue?.message.startsWith(
+        'addDays must be an integer or a { "$field" } reference, not the string "5".',
+      )).toBe(true);
+    });
+
+    it('an offset object without $field', () => {
+      const result = FieldReferenceSchema.safeParse({ $field: 'due_date', addDays: { days: 5 } });
+      expect(result.success).toBe(false);
+      const issue = firstIssue(result);
+      expect(issue?.code).toBe('invalid_union');
+      expect(issue?.path).toEqual(['addDays']);
+      expect(issue?.message.startsWith(
+        'addDays as an object must be a { "$field": "numeric_column" } reference, and this object has no $field.',
+      )).toBe(true);
+    });
+
+    it('an offset object whose $field is not a string', () => {
+      const result = FieldReferenceSchema.safeParse({ $field: 'due_date', addDays: { $field: 5 } });
+      expect(result.success).toBe(false);
+      const issue = firstIssue(result);
+      expect(issue?.path).toEqual(['addDays']);
+      expect(issue?.message.startsWith(
+        'addDays as an object must be a { "$field": "numeric_column" } reference, and its $field is not a string (5).',
+      )).toBe(true);
+    });
+
+    it('the ordering slot repeats the pointed sentence instead of zod\'s generic union text', () => {
+      const result = ComparisonOperatorSchema.safeParse({ $lte: { $field: 'due_date', addDays: 1.5 } });
+      expect(result.success).toBe(false);
+      const issue = firstIssue(result);
+      expect(issue?.code).toBe('invalid_union');
+      expect(issue?.path).toEqual(['$lte']);
+      expect(issue?.message.startsWith('addDays must be a whole number of days, and 1.5 is not an integer.')).toBe(true);
+      expect(issue?.message).not.toContain('Invalid input');
+      // The enforced copy answers the same sentence — one factory, no drift.
+      const enforced = FieldOperatorsSchema.safeParse({ $lte: { $field: 'due_date', addDays: '5' } });
+      expect(enforced.success).toBe(false);
+      expect(firstIssue(enforced)?.message.startsWith('addDays must be an integer or a { "$field" } reference')).toBe(true);
+    });
+
+    it('adds no LIST position — a reference carrying addDays is refused where a bare one is (#7596)', () => {
+      const result = SetOperatorSchema.safeParse({ $in: [{ $field: 'due_date', addDays: 1 }] });
+      expect(result.success).toBe(false);
+      expect(firstIssue(result)?.path).toEqual(['$in', 0]);
+      expect(firstIssue(result)?.message).toContain('$in member at index 0');
+    });
   });
 });
