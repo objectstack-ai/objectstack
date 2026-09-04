@@ -186,10 +186,10 @@ import {
   isViewContainerShaped,
 } from '@objectstack/spec';
 // [#14399] The ONE spelling of "which object does an aggregated `defineView`
-// container bind to", imported rather than re-spelled. See
-// `resolveMetadataItemName` below for why this registrar had a fourth copy and
-// why it lost it.
-import { deriveViewContainerObject } from '@objectstack/metadata';
+// container bind to", imported rather than re-spelled — from the LEAF subpath,
+// for the reason the `/errors` import above states (#14680). See
+// `resolveMetadataItemName` below for why this registrar lost its fourth copy.
+import { deriveViewContainerObject } from '@objectstack/metadata/view-container';
 import { bindHooksToEngine } from './hook-binder.js';
 import { validateRecord, normalizeMultiValueFields, coerceBooleanFields, ValidationError, buildFieldError, resolveFieldLabel, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
 import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
