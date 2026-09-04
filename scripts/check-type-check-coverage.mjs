@@ -673,6 +673,26 @@ const ROOT_PROGRAM_COUPLED_SCRIPT = 'scripts/check-test-typecheck.mts';
 // ran even though that config DOES include the tests. Repaired by the #5286
 // route -- a `tsconfig.test.json` over the test layer, named by a new `typecheck`
 // script -- so the entry is deleted rather than lowered.
+//
+// `@objectstack/service-automation` GRADUATED from this ledger (#15048; entry:
+// 3 raw, repaired to 0), the `packages/services/**` sibling of the
+// `service-cluster` graduation above (#14181/PR #15032) -- same road in: no
+// `typecheck` script at all (only `build` and `test`), and a BUILD
+// `tsconfig.json` that does NOT exclude tests, so the program that would have
+// read them already existed and was simply never invoked. Measured BOTH ways
+// (`tsc -p tsconfig.json`, which already included the tests, vs the new
+// `tsconfig.test.json`): 3 and 3 -- the two readings AGREE, so this package
+// carried no config-tier pile either, and the 3 were genuinely code-tier from
+// the start. All 3 were TS2341 ("Property 'flows' is private..."), all in
+// `src/nested-region-parity.test.ts` (95/151/180), where three tests dot-read
+// the PRIVATE `AutomationEngine#flows` map directly instead of the class's own
+// public accessor -- `await engine.getFlow(name)`, already the idiom every
+// other test file in this package uses. Repaired by replacing the three
+// private reads with that existing public call (no widened source signature,
+// no cast, no bracket-notation workaround); the tests were made `async` where
+// they were not already. Repaired by the #5286 route -- a `tsconfig.test.json`
+// over the test layer, named by a new `typecheck` script -- so the entry is
+// deleted rather than lowered.
 const DEBT = {
   '@objectstack/cloud-connection': {
     errors: 13,
@@ -685,20 +705,6 @@ const DEBT = {
   '@objectstack/observability': {
     errors: 11,
     note: 'all code-tier (TS2554 wrong arity x10, TS2552).',
-  },
-  '@objectstack/service-automation': {
-    errors: 3,
-    note: 'code-tier 3 (TS2341 x3), all in src/nested-region-parity.test.ts at 95/151/180, where the '
-      + 'tests dot-read the private `engine.flows` -- not `engine[\'flows\']`, not `as any` (the casts on '
-      + 'two of those lines sit on `.config`, not on the engine, so they do not suppress it). Re-measured '
-      + '3 at 53a48c93f4, DOWN from 5 at 5ab08428: the two TS2741 in engine.test.ts this note used to '
-      + 'itemise alongside them have graduated -- that file now builds its pausing fixtures through a '
-      + 'single defineActionDescriptor helper that declares resumeAuthority (#5561), and engine.test.ts '
-      + 'still compiles in this project (`--listFiles` lists it) while reporting nothing. The residue is '
-      + 'therefore one decision, not an oversight: whether tests may read private state at all. This '
-      + 'entry is the specimen #5278 cites for composition drift and has now drifted BOTH ways -- 2 -> 5 '
-      + 'by acquiring a second file, then 5 -> 3 by graduating the first -- so re-read what the pile is '
-      + 'made of before sizing it, never just the number.',
   },
   '@objectstack/service-knowledge': {
     errors: 10,
