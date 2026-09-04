@@ -5674,17 +5674,19 @@ const step18: MigrationStep = {
       id: 'client-envelope-convergence-analytics-automation',
       surface:
         'client.analytics.query / client.analytics.meta / client.analytics.explain / '
-        + 'client.automation.trigger (the resolved value of four published '
-        + '`@objectstack/client` methods — the runtime dispatcher\'s '
-        + '`{ success, data }` envelope before, its `data` member after)',
+        + 'client.automation.trigger — the resolved value of four published '
+        + '`@objectstack/client` methods: the runtime dispatcher\'s '
+        + '`{ success, data }` envelope before, its `data` member after',
       replacement:
-        'the payload — `r.data.X` → `r.X` on all four. `client.analytics.query(q)` now '
-        + 'resolves to `AnalyticsResult` (`r.data.rows` → `r.rows`); '
-        + '`client.analytics.meta(cube?)` to `AnalyticsMetadataResponse[\'data\']`, the bare '
-        + 'cube list (`r.data[0].name` → `r[0].name`); `client.analytics.explain(q)` to '
-        + '`AnalyticsSqlResponse[\'data\']`, `{ sql, params }` (`r.data.sql` → `r.sql`); '
-        + '`client.automation.trigger(name, payload)` to `AutomationResult` '
-        + '(`r.data.status` → `r.status`, `r.data.runId` → `r.runId`) — the same value '
+        'the payload — `r.data.X` → `r.X` on all four. `client.analytics.query`, called '
+        + 'with a query, now resolves to `AnalyticsResult`: `r.data.rows` → `r.rows`. '
+        + '`client.analytics.meta`, with or without a cube name, resolves to '
+        + '`AnalyticsMetadataResponse[\'data\']`, the bare cube list: `r.data[0].name` → '
+        + '`r[0].name`. `client.analytics.explain` resolves to '
+        + '`AnalyticsSqlResponse[\'data\']`, `{ sql, params }`: `r.data.sql` → `r.sql`. '
+        + '`client.automation.trigger`, given a trigger name and a payload, resolves to '
+        + '`AutomationResult`: `r.data.status` → `r.status` and `r.data.runId` → '
+        + '`r.runId` — the same value '
         + '`client.automation.execute` already answered for the same handler. Same call, '
         + 'same wire body, one SDK calling convention',
       reason:
@@ -5726,8 +5728,8 @@ const step18: MigrationStep = {
         + 'carrying the ADR-0112 error envelope, and `unwrapResponse` itself never throws. '
         + 'ADR-0087 D3.',
       acceptanceCriteria:
-        'No code reads `.data` off a `client.analytics.query()`, `client.analytics.meta()`, '
-        + '`client.analytics.explain()` or `client.automation.trigger()` result. For the '
+        'No code reads `.data` off a `client.analytics.query`, `client.analytics.meta`, '
+        + '`client.analytics.explain` or `client.automation.trigger` result. For the '
         + 'three analytics methods `tsc` names every site for a typed caller (TS2339); an '
         + 'untyped JS caller must be swept by hand for the four spellings, because nothing '
         + 'will report it. ⚠️ `client.automation.trigger` needs the hand sweep even WITH a '
