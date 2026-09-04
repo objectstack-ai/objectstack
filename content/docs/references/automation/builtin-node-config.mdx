@@ -7,8 +7,9 @@ description: Builtin Node Config protocol schemas
 
 Config contracts for the remaining flat builtins — the CRUD quartet
 (`get_record` / `create_record` / `update_record` / `delete_record`),
-`screen`, and `map` (#4045). Sibling of `io-node-config.zod.ts`
-(notify / http) and `control-flow.zod.ts` (loop / parallel / try_catch).
+`screen`, `map` (#4045) and, since #14149, `assignment`'s value contract.
+Sibling of `io-node-config.zod.ts` (notify / http) and `control-flow.zod.ts`
+(loop / parallel / try_catch).
 
 ## Provenance — written from the executors, not from the forms
 
@@ -58,11 +59,15 @@ finding is that a bespoke guard's detection generalizes for free the moment
 a default flips, while its PROSE does not, so the prose is copied to the new
 door rather than left behind at the old one.
 
+`assignment` is described by its VALUES, not by a key set (#14149): the
+canonical `assignments` map's keys are the author's variable names, and with
+no `assignments` wrapper the TOP-LEVEL config keys are (logic-nodes.ts), so
+`AssignmentConfigSchema` below declares one key and an open catchall and puts
+the contract on what a value may be. The form↔Zod ledger test still pins the
+descriptor's free-form `assignments` map as the openness it is; that pin and
+this contract describe the same surface from the two sides.
+
 Deliberately absent:
- - `assignment` — its config cannot be described by a fixed key set: with no
-   `assignments` wrapper the TOP-LEVEL config keys ARE the author's variable
-   names (logic-nodes.ts). The ledger test pins that exemption with its
-   reason instead of pretending a shape.
  - `decision` / `script` / `subflow` / `wait` / `connector_action` — the
    descriptor-schemaless class (config-schemas.test.ts). `wait` and
    `connector_action` keep their contracts in FlowNodeSchema's sibling
@@ -79,12 +84,46 @@ Deliberately absent:
 ## TypeScript Usage
 
 ```typescript
-import { CreateRecordConfigSchema, DeleteRecordConfigSchema, GetRecordConfigSchema, MapConfigSchema, ScreenConfigSchema, ScreenFieldConfigSchema, UpdateRecordConfigSchema } from '@objectstack/spec/automation';
-import type { CreateRecordConfig, DeleteRecordConfig, GetRecordConfig, MapConfig, ScreenConfig, ScreenFieldConfig, UpdateRecordConfig } from '@objectstack/spec/automation';
+import { AssignmentConfigSchema, AssignmentExpressionValueSchema, AssignmentValueSchema, CreateRecordConfigSchema, DeleteRecordConfigSchema, GetRecordConfigSchema, MapConfigSchema, ScreenConfigSchema, ScreenFieldConfigSchema, UpdateRecordConfigSchema } from '@objectstack/spec/automation';
+import type { AssignmentConfig, AssignmentExpressionValue, AssignmentValue, CreateRecordConfig, DeleteRecordConfig, GetRecordConfig, MapConfig, ScreenConfig, ScreenFieldConfig, UpdateRecordConfig } from '@objectstack/spec/automation';
 
 // Validate data
-const result = CreateRecordConfigSchema.parse(data);
+const result = AssignmentConfigSchema.parse(data);
 ```
+
+---
+
+## AssignmentConfig
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **assignments** | `Record<string, any>` | optional | Variables to set: each key is a variable name, each value a `{token}` template, a CEL value envelope, or a literal |
+
+
+---
+
+## AssignmentExpressionValue
+
+CEL value envelope `{ dialect: 'cel', source }` — evaluated by the expression engine to the value the variable takes; the whole CEL stdlib (`joinNonEmpty`, …) is reachable
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **dialect** | `'cel'` | ✅ |  |
+| **source** | `string` | optional |  |
+| **ast** | `any` | optional |  |
+| **meta** | `{ rationale?: string; generatedBy?: string }` | optional |  |
+
+
+---
+
+## AssignmentValue
+
+Value the variable takes: a string (`{token}` flow interpolation — a sole token keeps its type), a CEL value envelope `{ dialect: 'cel', source }` evaluated by the expression engine (the CEL stdlib such as `joinNonEmpty` is reachable), or any other literal
+
 
 ---
 
