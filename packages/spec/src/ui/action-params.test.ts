@@ -402,19 +402,24 @@ describe('#5779 — ActionSession `positions` canonical + `roles` deprecated ali
 type Eq< A, B > = (< T >() => T extends A ? 1 : 2) extends (< T >() => T extends B ? 1 : 2) ? true : false;
 type Assert< T extends true > = T;
 
+// The declared slot, read off the interface — not a retyped copy of it, so a
+// re-widening back to an open record, or a rename of the type behind it, fails
+// HERE rather than in the first consumer to notice.
+type FindFilter = Parameters<ActionEngineFacade['find']>[1];
+
+// The type-level pin (the tsc channel, `tsc -p tsconfig.test.json`). `Eq` is
+// the strict mutual-assignability test, so `Record<string, unknown>` — the type
+// this slot carried before, and the one it must not drift back to — does not
+// satisfy it (measured: the same `Assert` against `Record<string, unknown>` is
+// a TS2344). Exported, as the sibling pins are, so `noUnusedLocals` does not
+// read a type that exists only to be checked as one that is never used.
+export type FindFilterIsFilterCondition = Assert< Eq< FindFilter, FilterCondition > >;
+
 describe('#14175 — ActionEngineFacade.find takes a FILTER (the `where` half), never an ObjectQL envelope', () => {
-  // The declared slot, read off the interface — not a retyped copy of it, so a
-  // re-widening back to an open record, or a rename of the type behind it,
-  // fails HERE rather than in the first consumer to notice.
-  type FindFilter = Parameters<ActionEngineFacade['find']>[1];
-
   it('types the second parameter as the published `FilterCondition` (the tsc channel)', () => {
-    // `Eq` is the strict mutual-assignability test, so `Record<string, unknown>`
-    // — the type this slot carried before, and the one it must not drift back
-    // to — does not satisfy it (measured: the same `Assert` against
-    // `Record<string, unknown>` is a TS2344).
-    type _slotIsFilterCondition = Assert<Eq<FindFilter, FilterCondition>>;
-
+    // The value-level half of `FindFilterIsFilterCondition` above: a literal
+    // annotated with the slot type, so the runtime run exercises the same
+    // declaration the type pin reads.
     const filter: FindFilter = { position_code: 'qa_lead', active: true };
     expect(Object.keys(filter)).toEqual(['position_code', 'active']);
   });
