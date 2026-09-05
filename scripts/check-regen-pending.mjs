@@ -1066,14 +1066,19 @@ function fixtureSelfTest() {
     const runnerMissing = runHook('runner-missing', ['--pre-push']);
     check('a gate whose RUNNER is not installed refuses the same way',
       runnerMissing.code === EXIT_PREREQUISITE_NOT_MET && !/— stale/.test(runnerMissing.out));
-    check('  …naming the command the shell could not find',
-      /os-regen-fixture-absent-runner/.test(runnerMissing.out));
+    // ⛔ Not a bare name match: the raw child output is echoed under the old `stale`
+    // line too, so `/os-regen-fixture-absent-runner/` alone passes against the
+    // pre-fix code. Assert the DIAGNOSIS, which only the refusal produces.
+    check('  …naming the command the shell could not find, in the diagnosis',
+      /the gate's runner `os-regen-fixture-absent-runner` is not installed/.test(runnerMissing.out));
 
     const gateRefused = runHook('gate-refused', ['--pre-push']);
     check('a gate that ALREADY refused with an unmet prerequisite is propagated, not relabelled',
       gateRefused.code === EXIT_PREREQUISITE_NOT_MET && !/— stale/.test(gateRefused.out));
+    // Same trap, same repair: the child's line is echoed either way, so what is
+    // asserted is that this file PROPAGATED it as its own headline.
     check('  …quoting the gate\'s own words rather than a second opinion',
-      /the dependency yaml is not installed/.test(gateRefused.out));
+      /refused to measure — the dependency yaml is not installed/.test(gateRefused.out));
 
     // THE CONTROL. Everything above must leave this reading untouched: a gate that
     // RAN and exited non-zero for its own reason is a finding about the artifact,
