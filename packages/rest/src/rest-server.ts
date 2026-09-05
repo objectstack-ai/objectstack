@@ -4752,15 +4752,22 @@ export class RestServer {
                         // [#13753] STATE THE ORG PARTITION — but only on the
                         // arm where ONE organization is the whole truth.
                         //
-                        // `getMetaDiagnostics` reads each type through
-                        // `getMetaItems({ type: t, organizationId })`, and
-                        // `getMetaItems` applies NO registry gate of its own:
-                        // whatever organization arrives is used for the type it
-                        // is handed, overridable or not (measured — the only
-                        // `organizationIdForMetaRead` call inside
-                        // `metadata-protocol` is the `page` read in
-                        // `protocol.ts`, nothing on this path). The scope is
-                        // therefore decided HERE, per type, by the caller.
+                        // `getMetaDiagnostics` reads each swept type through
+                        // `getMetaItems({ type: t, organizationId })`.
+                        //
+                        // ⚠️ [#14683] `getMetaItems` NOW APPLIES THE REGISTRY GATE
+                        // ITSELF — `organizationIdForMetaRead(request.type,
+                        // request.organizationId)`, one statement after it folds the
+                        // type through `canonicalizeMetaRequestType`. That is the
+                        // ONE inner gate this call site now sits above; the sibling
+                        // gate in the same file guards `getMetaItem` (the singular
+                        // overlay read, #14908), which this arm never reaches.
+                        //
+                        // ⛔ Until #14683 this comment said `getMetaItems` applied NO
+                        // registry gate of its own and the scope was therefore
+                        // decided HERE, per type, by the caller. That sentence is
+                        // FALSE on today's tree — do not reintroduce it, and do not
+                        // reason from it.
                         //
                         // ⇒ The `?type=` arm is exactly one type
                         // (`targetTypes = [request.type]`), so the predicate
@@ -4768,6 +4775,31 @@ export class RestServer {
                         // the answer is correct by construction. That is the
                         // arm Studio's per-type directory drill-down uses, and
                         // it is the arm repaired here.
+                        //
+                        // ── WHY THE FOLD IS DOUBLED, AND STAYS DOUBLED (#15034) ──
+                        //
+                        // The VALUE is redundant, and measured to be. Both sites fold
+                        // the identical string through the identical map — here
+                        // `canonicalMetaUrlType`, inside `getMetaItems` the same
+                        // function reached through `canonicalizeMetaRequestType` →
+                        // `canonicalMetaType` — so `f(t, f(t, o)) === f(t, o)` and the
+                        // inner application is the algebraic no-op. MEASURED: replace
+                        // this predicate with a raw `diagnosticsCtx?.tenantId` and
+                        // `rest-server-meta-read-org-scope.test.ts` stays 30/30 GREEN;
+                        // the inner gate re-folds it, phantom control included.
+                        //
+                        // ⭐ It is KEPT anyway, and the reason is TRUST DOMAIN rather
+                        // than value. `getMetaDiagnostics` is not a member of
+                        // `MetadataProtocol` at all — not required, not optional —
+                        // which is why it is reached through the `(p as any)` cast and
+                        // why the 501 above exists. The inner gate therefore belongs
+                        // to ONE implementation of an UNDECLARED extension, while this
+                        // predicate sits on the REST boundary and holds for every
+                        // `RestProtocol` a host can mount. Delete it and a REST door's
+                        // tenant scope becomes a function of which kernel is mounted —
+                        // and no pin can see that happen, because the harness boots the
+                        // bundled implementation. Defence in depth, on a seam the type
+                        // system does not cover.
                         //
                         // ⛔ The UNTYPED sweep is deliberately left env-wide,
                         // and this is a recorded gap rather than an oversight
@@ -4783,13 +4815,25 @@ export class RestServer {
                         // be read back INTO the governance report as `stats`
                         // counts and diagnostic entries. A dashboard whose job
                         // is reporting what is wrong would report rows that do
-                        // not survive a restart. One org id cannot express a
-                        // per-type scope, and inventing one at this call site
-                        // (a fan-out per overridable type, plus a REST-side
-                        // re-aggregation of `total`/`stats`/`scannedTypes`)
-                        // would make this door a second owner of the sweep's
-                        // arithmetic. The decision belongs where the type is
-                        // known — see the card.
+                        // not survive a restart.
+                        //
+                        // ⚠️ #14683 MOVED THIS ARGUMENT and the gap outlived it, so
+                        // read the two apart. What used to hold the untyped arm shut
+                        // was that one org id could not express a per-type scope from
+                        // here without a fan-out per overridable type and a REST-side
+                        // re-aggregation of `total`/`stats`/`scannedTypes`. That is no
+                        // longer the obstacle: `getMetaDiagnostics` calls
+                        // `getMetaItems` once per `t` INSIDE its own loop, and the
+                        // inner gate folds each `t` separately, so a single
+                        // `organizationId` handed to the untyped arm would already be
+                        // narrowed per type — phantoms of non-overridable types
+                        // included. ⛔ The gap nevertheless stays OPEN and stays
+                        // PINNED: closing it moves observable behaviour and is a
+                        // decision somebody makes on a card, not a side effect of a
+                        // comment repair (#15034 files it). The pin that guards it is
+                        // `the untyped sweep is still env-wide` in
+                        // `rest-server-meta-read-org-scope.test.ts` — if it reddens,
+                        // read that card before making it green.
                         //
                         // ⚠️ NOT a new org-resolution seam: `resolveExecCtx` is
                         // memoised per request (WeakMap keyed by `req`), the
