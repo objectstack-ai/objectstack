@@ -921,6 +921,11 @@ function selfTest() {
   for (const c of failed) console.error(`  ✗ ${c.name}${c.detail ? ` -- ${c.detail}` : ''}`);
   if (failed.length) {
     console.error(`✗ check-cli-examples-parity self-test: ${failed.length} of ${cases.length} case(s) failed.`);
+    // A verdict was REACHED and it is red. The handshake below is about a
+    // `return` that skips this block entirely, not about which way the verdict
+    // went -- leaving the flag false here would print "never finished" over a
+    // run that finished and failed, which is a different (and untrue) claim.
+    selfTestReachedVerdict = true;
     return EXIT_FINDINGS;
   }
   console.log(
