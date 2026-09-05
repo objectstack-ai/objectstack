@@ -98,22 +98,22 @@ const COPY_LEDGER: Readonly<Record<string, string>> = {
   // local array-branch filter and four read only the list shape behind a
   // call-site `if (!page) continue`. They are not #15636's defect; they are its
   // cause, and re-pointing them is bookkeeping this ledger now forces.
-  'validate-action-body-writes.ts': '#15669',
-  'validate-ai-agent-authoring.ts': '#15669',
-  'validate-ai-surface-affinity.ts': '#15669',
-  'validate-ai-tool-references.ts': '#15669',
-  'validate-flow-node-writes.ts': '#15669',
-  'validate-hook-body-writes.ts': '#15669',
-  'validate-jsx-pages.ts': '#15669',
-  'validate-nav-object-servability.ts': '#15669',
-  'validate-nav-target-refs.ts': '#15669',
-  'validate-page-source-styling.ts': '#15669',
-  'validate-page-visualization-bindings.ts': '#15669',
-  'validate-react-page-props.ts': '#15669',
-  'validate-react-pages.ts': '#15669',
-  'validate-readonly-action-writes.ts': '#15669',
-  'validate-rule-compilability.ts': '#15669',
-  'validate-view-page-refs.ts': '#15669',
+  'validate-action-body-writes.ts': '#15728',
+  'validate-ai-agent-authoring.ts': '#15728',
+  'validate-ai-surface-affinity.ts': '#15728',
+  'validate-ai-tool-references.ts': '#15728',
+  'validate-flow-node-writes.ts': '#15728',
+  'validate-hook-body-writes.ts': '#15728',
+  'validate-jsx-pages.ts': '#15728',
+  'validate-nav-object-servability.ts': '#15728',
+  'validate-nav-target-refs.ts': '#15728',
+  'validate-page-source-styling.ts': '#15728',
+  'validate-page-visualization-bindings.ts': '#15728',
+  'validate-react-page-props.ts': '#15728',
+  'validate-react-pages.ts': '#15728',
+  'validate-readonly-action-writes.ts': '#15728',
+  'validate-rule-compilability.ts': '#15728',
+  'validate-view-page-refs.ts': '#15728',
 };
 
 /**
@@ -128,11 +128,11 @@ const COPY_LEDGER: Readonly<Record<string, string>> = {
 const UNGUARDED_ALLOWANCE: Readonly<Record<string, string>> = {
   // 2026-09-05 — removed by #15575.
   'validate-chart-bindings.ts': '#15575',
-  // 2026-09-05 — removed by #15669.
-  'validate-jsx-pages.ts': '#15669',
-  'validate-page-source-styling.ts': '#15669',
-  'validate-react-page-props.ts': '#15669',
-  'validate-react-pages.ts': '#15669',
+  // 2026-09-05 — removed by #15728.
+  'validate-jsx-pages.ts': '#15728',
+  'validate-page-source-styling.ts': '#15728',
+  'validate-react-page-props.ts': '#15728',
+  'validate-react-pages.ts': '#15728',
 };
 
 /** Every rule/reader module — tests excluded, this file excluded. */
