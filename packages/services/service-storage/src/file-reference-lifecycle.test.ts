@@ -127,7 +127,13 @@ function recordDispatch(scope: Record<string, unknown> = {}) {
 async function driveInsert(engine: Engine, object: string, data: Record<string, unknown>, id: string) {
   const ctx: any = { object, event: 'beforeInsert', input: { data }, dispatch: recordDispatch() };
   await engine.trigger('beforeInsert', ctx);
-  const row = { ...(ctx.input.data as Record<string, unknown>), id };
+  // Explicitly typed rather than left to spread-inference: TS drops a spread
+  // source's index signature when it has no KNOWN properties, so an
+  // un-annotated `row` here infers as bare `{ id: string }` and every
+  // `row.<dataKey>` read below is an error — the shape IS
+  // `Record<string, unknown>` at runtime (the caller's `data` plus `id`), this
+  // just states it so the checker agrees.
+  const row: Record<string, unknown> & { id: string } = { ...(ctx.input.data as Record<string, unknown>), id };
   (engine.tables[object] ??= []).push(row);
   ctx.event = 'afterInsert';
   ctx.result = row;

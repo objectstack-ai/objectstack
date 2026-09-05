@@ -18,6 +18,18 @@ export {
   WIDGET_MEASURE_UNKNOWN,
   CHART_FIELD_UNKNOWN,
   CHART_CONFIG_MISSING,
+  // [#15462] The two empty-selection shapes the pinned renderer degrades on
+  // before `chartConfig` is ever consulted: no measures (an authoring
+  // placeholder replaces the chart) and no dimensions (`isMetric` draws a KPI
+  // number instead of the declared family).
+  CHART_MEASURES_MISSING,
+  CHART_DIMENSIONS_MISSING,
+  // [#15508] The measures half of that pair, for the families the pin routes
+  // through the SAME placeholder without drawing a chart: `metric`/`kpi`/
+  // `gauge`/`solid-gauge`/`bullet` and `table`/`pivot`. A separate id because
+  // "chart" does not name their condition; the chart-family id above is
+  // unchanged, so a board suppressing it keeps working.
+  WIDGET_MEASURES_MISSING,
   TABLE_COUNT_ONLY,
   MEASURE_AGGREGATE_INCOHERENT,
   WIDGET_LEGACY_ANALYTICS_SHAPE,
@@ -453,6 +465,22 @@ export type {
   ListViewFieldRefFinding,
   ListViewFieldRefSeverity,
 } from './validate-list-view-field-refs.js';
+
+// [#15254] The object-level half of the same sweep: the field-name LISTS an
+// object carries about its own fields (`highlightFields`,
+// `publicSharing.redactFields`). `error`, and on the runtime publish door as
+// well as the three commands — Studio's app builder mints no `view` items, so
+// the list-view members above have nothing to inspect on the only artifacts
+// the click path authors, and a dangling `highlightFields` reference produced
+// by clicking in the natural order published green.
+export {
+  validateObjectFieldRefs,
+  OBJECT_FIELD_REF_UNKNOWN,
+} from './validate-object-field-refs.js';
+export type {
+  ObjectFieldRefFinding,
+  ObjectFieldRefSeverity,
+} from './validate-object-field-refs.js';
 
 export { validateActionNameRefs, ACTION_NAME_UNDEFINED } from './validate-action-name-refs.js';
 export type { ActionNameRefFinding, ActionNameRefSeverity } from './validate-action-name-refs.js';

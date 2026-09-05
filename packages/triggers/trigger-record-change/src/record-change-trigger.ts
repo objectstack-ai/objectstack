@@ -3,6 +3,8 @@
 import type { AutomationContext } from '@objectstack/spec/contracts';
 import type { HookContext } from '@objectstack/spec/data';
 
+import { decoupleFromEngineState } from './decouple-flow-record.js';
+
 /**
  * Structural mirror of the automation engine's `FlowTriggerBinding`
  * (service-automation/src/engine.ts). Declared locally so this trigger plugin
@@ -117,7 +119,9 @@ export interface TriggerLogger {
  * Mutates `record` in place (matching the canonical copy's contract) and
  * returns it. Callers that must not mutate a shared object — this file's own
  * `ctx.previous`, observed by every OTHER binding sharing the same
- * HookContext — pass a shallow copy in.
+ * HookContext — pass a copy in. ⚠️ A SHALLOW copy is enough for THIS function
+ * (it only ever assigns top-level keys), and it is NOT enough for the object
+ * that reaches a flow: see {@link decoupleFromEngineState} and #14744.
  *
  * Exported (module-scope only — NOT re-exported from `index.ts`, so this
  * stays off the package's published API) so
@@ -331,6 +335,19 @@ export class RecordChangeTrigger implements FlowTrigger {
      * fields (see {@link hydrateComputedFields}) via a data-engine re-read,
      * AND — since #4953 (services half) — made total over the object's
      * declared fields (see the `materializeDeclaredFields` call below).
+     *
+     * ⭐ Both roots it returns are a SNAPSHOT and are DECOUPLED from the
+     * engine's own state (#14744): a flow can mutate them however it likes and
+     * reach nothing outside its own run. Until #14744 that was true only of the
+     * TOP LEVEL — every overlay here is a shallow spread, so each nested value
+     * was still the engine's own object, and `inputData` is the batch payload
+     * ADR-0058 Addendum II D3 shares across every row of a `multi: true` write.
+     * The reading "buildContext materialises a NEW record object by overlay, so
+     * a flow cannot reach `ctx.input.data`" was therefore true of the object and
+     * FALSE of its contents; #15356 measured a `script` node's registered
+     * function reaching the payload through a nested in-place mutation, and the
+     * `decoupleFromEngineState` call below is what makes the sentence true as
+     * stated. A flow that needs to WRITE uses the `update_record` node.
      */
     private async buildContext(binding: FlowTriggerBinding, ctx: HookContext): Promise<AutomationContext> {
         // objectql lifecycle hooks carry the written row under `input.data` (insert /
@@ -427,13 +444,36 @@ export class RecordChangeTrigger implements FlowTrigger {
         // is handed to every OTHER flow binding on this write (see the class doc
         // on `hydrationCache`), so writing into it would leak materialised
         // `null`s into bindings that haven't run yet. Same rule
-        // `readonlyWhenBindings` follows for the identical reason.
+        // `readonlyWhenBindings` follows for the identical reason. This spread
+        // guards the KEY SET only; the `decoupleFromEngineState` call below is
+        // what makes the no-write-through rule hold for nested values too.
         const materializedPrevious =
             priorBase && fields ? materializeDeclaredFields({ ...priorBase }, fields) : previous;
 
+        // #14744 — DECOUPLE the flow-facing roots from the engine's own objects.
+        // Every overlay above is a SHALLOW spread, so until this point each
+        // nested value in `record` is still the engine's: `inputData` is
+        // `ctx.input.data`, which ADR-0058 Addendum II D3 shares across every
+        // per-row context of a `multi: true` write AS the SET clause of the one
+        // `driver.updateMany`. A flow function mutating a nested value in place
+        // therefore wrote the batch payload while assigning no key at all —
+        // invisible to #14099's key-set refusal, and landing every dispatch's
+        // contribution on every matched row (measured, #15356 S5; pinned in
+        // `before-update-flow-payload-reach.test.ts`). ⛔ Not a widening of
+        // #14099: that refusal is untouched, and this closes the ALIASING the
+        // refusal was never instrumented to see. A flow that needs to write the
+        // record uses the `update_record` node, which issues its own by-id write
+        // (S6). ONE `seen` map for both roots, so substructure the two shared
+        // with EACH OTHER stays shared inside the flow's own context — the copy
+        // changes what a flow can reach outward, not what it observes inward.
+        // See `decouple-flow-record.ts` for why a copy and not a freeze.
+        const isolation = new WeakMap<object, unknown>();
+        const isolatedRecord = decoupleFromEngineState(hydrated, isolation);
+        const isolatedPrevious = decoupleFromEngineState(materializedPrevious, isolation);
+
         return {
-            record: hydrated,
-            previous: materializedPrevious,
+            record: isolatedRecord,
+            previous: isolatedPrevious,
             object,
             event: binding.event,
             userId: session.userId,
@@ -452,8 +492,11 @@ export class RecordChangeTrigger implements FlowTrigger {
             // driver-layer `tenantId` field unchanged.
             ...(session.organizationId ? { tenantId: session.organizationId } : {}),
             // Expose the record as params too, so flows with named `isInput`
-            // variables matching record fields get them seeded.
-            params: hydrated,
+            // variables matching record fields get them seeded. Deliberately the
+            // SAME object as `record` (unchanged by #14744 — `params` was never a
+            // second snapshot, and making it one here would be an observable
+            // change on top of the aliasing fix).
+            params: isolatedRecord,
         };
     }
 

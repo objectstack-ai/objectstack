@@ -70,9 +70,9 @@
       "source": [
         "#3358 §9",
         "packages/spec/src/api/batch.zod.ts (ADR-0119 D4)",
-        "packages/spec/src/api/error-code-ledger.zod.ts (BATCH_NOT_ATOMIC, BATCH_TOO_LARGE, NOT_ATTEMPTED, ROLLED_BACK — #4793)",
+        "packages/spec/src/api/error-code-ledger.zod.ts#BATCH_NOT_ATOMIC (BATCH_NOT_ATOMIC, BATCH_TOO_LARGE, NOT_ATTEMPTED, ROLLED_BACK — #4793)",
         "packages/rest/src/rest-route-ledger.ts (batch family)",
-        "packages/spec/src/api/discovery.zod.ts (transactionalBatch)"
+        "packages/spec/src/api/discovery.zod.ts#transactionalBatch (transactionalBatch)"
       ],
       "history": [
         {
@@ -419,9 +419,9 @@
         "dispatcher-vs-hono-route"
       ],
       "source": [
-        "packages/spec/src/data/filter.zod.ts (AST_OPERATOR_MAP / FieldOperatorsSchema — the operator variant source)",
-        "packages/spec/src/data/query.zod.ts (QueryAST keys)",
-        "packages/metadata-protocol/src/protocol.ts (supported $-params + UNSUPPORTED_QUERY_PARAM #2926 ⑩, INVALID_FIELD #4134)",
+        "packages/spec/src/data/filter.zod.ts#AST_OPERATOR_MAP (AST_OPERATOR_MAP / FieldOperatorsSchema — the operator variant source)",
+        "packages/spec/src/data/query.zod.ts#QueryAST (QueryAST keys)",
+        "packages/metadata-protocol/src/protocol.ts#UNSUPPORTED_QUERY_PARAM (supported $-params + UNSUPPORTED_QUERY_PARAM #2926 ⑩, INVALID_FIELD #4134)",
         "#5869 (commit 10c4ea9)",
         "release-15.1 plan §A6",
         "examples/app-showcase/src/data/seed/index.ts"
@@ -521,7 +521,7 @@
       ],
       "source": [
         "packages/spec/src/api/error-code-ledger.zod.ts (ADR-0112 D3)",
-        "packages/spec/src/api/errors.zod.ts (StandardErrorCode, FieldErrorCode, HttpStatusErrorCodeMap)",
+        "packages/spec/src/api/errors.zod.ts#StandardErrorCode (StandardErrorCode, FieldErrorCode, HttpStatusErrorCodeMap)",
         "packages/spec/src/shared/error-map.zod.ts",
         "packages/rest/src/rest-route-ledger.ts (sampled families)",
         "ADR-0114 D2/D4"
@@ -627,7 +627,7 @@
       "source": [
         "packages/rest/src/rest-route-ledger.ts (batch family — the four doors)",
         "packages/spec/src/api/batch.zod.ts",
-        "packages/spec/src/api/error-code-ledger.zod.ts (BATCH_TOO_LARGE, ERR_BULK_RESULT_MISMATCH)",
+        "packages/spec/src/api/error-code-ledger.zod.ts#BATCH_TOO_LARGE (BATCH_TOO_LARGE, ERR_BULK_RESULT_MISMATCH)",
         "#2982",
         "release-15.1 plan §A3/A4"
       ],
@@ -782,20 +782,20 @@
         "absence-inference"
       ],
       "source": [
-        "packages/rest/src/rest-route-ledger.ts (variant source — the 19 REST families)",
+        "packages/rest/src/rest-route-ledger.ts#REST (variant source — the 19 REST families)",
         "packages/rest/src/rest-route-ledger.conformance.test.ts",
-        "packages/runtime/src/route-ledger.ts (dispatcher ledger — share-links/keys/notifications/suggested-bindings/i18n/analytics families + the meta.getLegalNextStates state route)",
-        "packages/plugins/plugin-auth/src/auth-route-ledger.ts (AUTH_ROUTE_LEDGER — the enumerated better-auth table, #3656; raw-app mount)",
+        "packages/runtime/src/route-ledger.ts#getLegalNextStates (dispatcher ledger — share-links/keys/notifications/suggested-bindings/i18n/analytics families + the meta.getLegalNextStates state route)",
+        "packages/plugins/plugin-auth/src/auth-route-ledger.ts#AUTH_ROUTE_LEDGER (AUTH_ROUTE_LEDGER — the enumerated better-auth table, #3656; raw-app mount)",
         "packages/services/service-storage/src/storage-route-ledger.ts + packages/services/service-i18n/src/i18n-route-ledger.ts (tranche-3 per-service ledgers, #3636)",
         "packages/services/service-settings/src/settings-route-ledger.ts (#7526 — the /api/settings family, ledgered; guarded by the parity dogfood gate, no per-package test by design)",
         "packages/services/service-datasource/src/datasource-route-ledger.ts + datasource-route-ledger.conformance.test.ts (#7744 — the admin family, ledgered)",
-        "packages/services/service-datasource/src/admin-routes.ts (the #9391/#9593 manage_platform_settings floor on all eleven routes, drivers catalog included)",
+        "packages/services/service-datasource/src/admin-routes.ts#manage_platform_settings (the #9391/#9593 manage_platform_settings floor on all eleven routes, drivers catalog included)",
         "packages/metadata/src/metadata-route-ledger.ts (metadata HMR — raw-app mount, dev-only posture #12140/#5673)",
-        "packages/triggers/trigger-api/src/trigger-api-route-ledger.ts (#11863 — POST /api/v1/automation/hooks/:flowName/:hookId, raw-app mount)",
+        "packages/triggers/trigger-api/src/trigger-api-route-ledger.ts#flowName (#11863 — POST /api/v1/automation/hooks/:flowName/:hookId, raw-app mount)",
         "packages/cloud-connection/src/cloud-connection-route-ledger.ts (#11882 — 16 rows / four registrar families, raw-app mounts unfindable by the parity gate by construction)",
         "packages/cli/src/utils/console-route-ledger.ts (#11882 — the four static-asset rows)",
-        "packages/qa/dogfood/test/route-ledger-live-mount-parity.dogfood.test.ts (#7526 — the parity gate whose getMountedRoutes() blind spot the raw-app clause covers)",
-        "examples/app-showcase/src/data/objects/task.object.ts (task_status_flow transitions for the meta state-route clause)",
+        "packages/qa/dogfood/test/route-ledger-live-mount-parity.dogfood.test.ts#getMountedRoutes (#7526 — the parity gate whose getMountedRoutes() blind spot the raw-app clause covers)",
+        "examples/app-showcase/src/data/objects/task.object.ts#task_status_flow (task_status_flow transitions for the meta state-route clause)",
         "#3587",
         "#3361"
       ],
@@ -979,10 +979,10 @@
         "dispatcher-vs-hono-route"
       ],
       "source": [
-        "packages/runtime/src/domains/packages.ts (POST install: pkgId-required 400, 409-duplicate guard + overwrite opt-in #2995; PATCH partial-patch validators; routes through protocol.installPackage / protocol.updatePackage)",
+        "packages/runtime/src/domains/packages.ts#pkgId (POST install: pkgId-required 400, 409-duplicate guard + overwrite opt-in #2995; PATCH partial-patch validators; routes through protocol.installPackage / protocol.updatePackage)",
         "packages/runtime/src/route-ledger.ts (POST /packages → packages.install, PATCH /packages/:id → packages.update, GET /packages → packages.list)",
         "packages/rest/src/rest-route-ledger.ts (POST /api/v1/packages/publish moved off the bare POST /packages in #3610; GET/DELETE /packages/:id direct-mount shadows)",
-        "packages/spec/src/api/errors.zod.ts (HttpStatusErrorCodeMap 409 → RESOURCE_CONFLICT)",
+        "packages/spec/src/api/errors.zod.ts#HttpStatusErrorCodeMap (HttpStatusErrorCodeMap 409 → RESOURCE_CONFLICT)",
         "PENDING-GAPS §G3 (#2995 dup-clobber, #2971, #3007)"
       ],
       "history": [
@@ -1065,7 +1065,7 @@
       "source": [
         "objectui apps/console/src/pages/developer/ApiConsolePage.tsx (the API console: raw fetch to `${client.baseUrl}${url}`, status/duration/JSON pane, request history)",
         "objectui apps/console/src/pages/developer/hooks/useApiDiscovery.ts (tree built from GET /api/v1/discovery services/routes + client.meta types/objects; isServiceUsable gate per ADR-0076 D12)",
-        "packages/rest/src/rest-route-ledger.ts (the REST families the tree is spot-checked against)",
+        "packages/rest/src/rest-route-ledger.ts#REST (the REST families the tree is spot-checked against)",
         "packages/spec/src/api/discovery.zod.ts (the discovery payload)"
       ],
       "history": [
@@ -1157,10 +1157,10 @@
       },
       "traps": ["silent-coercion"],
       "source": [
-        "packages/spec/src/data/filter-comparand-type.ts (ACCEPTED_FILTER_COMPARAND_TYPES, ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE, FILTER_COMPARAND_BIGINT_EXACT_LIMIT, isAcceptedFilterComparand, normalizeFilterComparandTypes)",
+        "packages/spec/src/data/filter-comparand-type.ts#ACCEPTED_FILTER_COMPARAND_TYPES (ACCEPTED_FILTER_COMPARAND_TYPES, ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE, FILTER_COMPARAND_BIGINT_EXACT_LIMIT, isAcceptedFilterComparand, normalizeFilterComparandTypes)",
         "packages/spec/src/data/filter-comparand-shape.ts",
         "packages/spec/src/data/filter-comparand-type-conformance.ts",
-        "packages/spec/src/data/filter-dotted-head.ts (classifyDottedFilterHead, DottedFilterHeadClass)",
+        "packages/spec/src/data/filter-dotted-head.ts#classifyDottedFilterHead (classifyDottedFilterHead, DottedFilterHeadClass)",
         "packages/spec/src/data/filter-subtree-provenance.ts",
         "packages/spec/src/migrations/entries/semantic/18.engine-dotted-filter-refused.ts",
         "packages/spec/src/migrations/entries/semantic/17.engine-dotted-projection-refused.ts",
@@ -1261,7 +1261,7 @@
       },
       "traps": ["clock-skew", "timezone-boundary"],
       "source": [
-        "packages/spec/src/data/date-range-presets.ts (DATE_RANGE_PRESETS, DATE_RANGE_PRESET_MACRO_WINDOWS, isDateRangePresetName, bareDateRangePresetComparandMessage)",
+        "packages/spec/src/data/date-range-presets.ts#DATE_RANGE_PRESETS (DATE_RANGE_PRESETS, DATE_RANGE_PRESET_MACRO_WINDOWS, isDateRangePresetName, bareDateRangePresetComparandMessage)",
         "packages/spec/src/migrations/entries/semantic/18.filter-preset-ordering-comparand-refused.ts",
         "packages/spec/src/data/temporal-comparand.ts + packages/core/src/utils/temporal-comparand.ts",
         "packages/objectql/src/temporal-comparand-door.ts"
@@ -1355,7 +1355,7 @@
       "title": "A disabled packaged action is refused 409 ACTION_DISABLED at BOTH dispatch doors — after the capability gate (a 403 is never an oracle for the switch), before the param contract and the record load, durable across restart",
       "since": "v17",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -1377,7 +1377,7 @@
       },
       "steps": [
         "boot showcase isolated on the real HTTP stack (os dev); sign in as admin",
-        "disable the probe: POST /api/v1/actions/_activation/showcase_task/showcase_mark_done {\"enabled\": false} → 200 (the door's own arms are api-backend.action-activation-door-contract's item — do not re-prove them here); confirm the row via GET /api/v1/data/sys_metadata_activation (metadata_type 'action', name showcase_mark_done, organization_id NULL, active false)",
+        "disable the probe: POST /api/v1/actions/_activation/showcase_task/showcase_mark_done {\"enabled\": false} → 200 (the door's own arms are api-backend.action-activation-door-contract's item — do not re-prove them here); confirm the row via GET /api/v1/data/sys_metadata_activation (metadata_type 'action', name showcase_mark_done, active false) and confirm the row's KEY SET carries NO organization_id at all — the ledger has no tenant column (#15024 / ADR-0131 D7). ⛔ Never confirm the tenant half by reading the value: a check of the shape `row.organization_id ?? null` answers `null` for a column that does not exist, so it passes while measuring nothing",
         "REST door: POST /api/v1/actions/showcase_task/showcase_mark_done with {\"recordId\": \"no-such-record-0000\"}; capture status + body; then re-read a REAL seeded task and confirm no done/progress write happened anywhere",
         "param-ordering discriminator: disable showcase_action_param_gallery (POST /actions/_activation/showcase_field_zoo/showcase_action_param_gallery {\"enabled\":false}), then invoke POST /actions/showcase_field_zoo/showcase_action_param_gallery with params: {\"bogus_key\": 1} (missing required p_text AND an unknown key) plus a nonexistent recordId; capture. Re-enable and repeat the IDENTICAL request; capture the contrast",
         "403-oracle: POST /actions/showcase_field_zoo/showcase_zoo_perm_missing while it is ENABLED; capture the 403 body. Disable it via /actions/_activation/showcase_field_zoo/showcase_zoo_perm_missing, repeat the identical invocation, capture again; byte-compare the two refusals",
@@ -1442,7 +1442,7 @@
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/qa/dogfood/test/packaged-activation-ledger-reach.dogfood.test.ts (live boots, both compositions: the flip lands 200, ONE install-level row with organization_id NULL, REST-door dispatch 409, re-enable UPDATES the row and re-arms, flows+actions share one table without touching each other's rows) + packages/runtime/src/domains/action-activation-dispatch.test.ts (unit: both doors incl. the MCP envelope, the 403-not-an-oracle leg, the flow-type-refused-by-its-own-switch leg, absence-means-active). ⚠️ Neither pin covers the RESTART leg, the param-ordering contrast, or a LIVE MCP transport call — those stay manual"
+        "ref": "packages/qa/dogfood/test/packaged-activation-ledger-reach.dogfood.test.ts (live boots, both compositions: the flip lands 200, ONE deployment-level row on a table with no tenant column at all — 'writes ONE deployment-level row, and the TABLE has no tenant column at all', a KEY-SET reading off the driver's own SELECT rather than a value read — REST-door dispatch 409, re-enable UPDATES the row and re-arms, flows+actions share one table without touching each other's rows) + packages/runtime/src/domains/action-activation-dispatch.test.ts (unit: both doors incl. the MCP envelope, the 403-not-an-oracle leg, the flow-type-refused-by-its-own-switch leg, absence-means-active). ⚠️ Neither pin covers the RESTART leg, the param-ordering contrast, or a LIVE MCP transport call — those stay manual"
       },
       "traps": [
         "dispatcher-vs-hono-route",
@@ -1451,10 +1451,10 @@
         "first-boot-cold-start"
       ],
       "source": [
-        "packages/runtime/src/domains/actions.ts (the REST door's ordered gates: ADR-0066 D4 capability gate → activation consult → type branch → ADR-0104 param contract → best-effort record load)",
-        "packages/runtime/src/action-execution.ts (disabledActionRefusal — ACTION_DISABLED_CODE/STATUS 409, the shared consult both doors call; invokeBusinessAction — the MCP door, whose AI-exposure + capability gates run ahead of the consult)",
-        "packages/objectql/src/engine.ts (isActionEnabled / describeDisabledAction / hydrateActionActivations / setActionActive — projection over the durable ledger, row-first then projection)",
-        "packages/spec/src/api/error-code-ledger.zod.ts (ACTION_DISABLED registered — the *_DISABLED family)",
+        "packages/runtime/src/domains/actions.ts#record (the REST door's ordered gates: ADR-0066 D4 capability gate → activation consult → type branch → ADR-0104 param contract → best-effort record load)",
+        "packages/runtime/src/action-execution.ts#disabledActionRefusal (disabledActionRefusal — ACTION_DISABLED_CODE/STATUS 409, the shared consult both doors call; invokeBusinessAction — the MCP door, whose AI-exposure + capability gates run ahead of the consult)",
+        "packages/objectql/src/engine.ts#isActionEnabled (isActionEnabled / describeDisabledAction / hydrateActionActivations / setActionActive — projection over the durable ledger, row-first then projection)",
+        "packages/spec/src/api/error-code-ledger.zod.ts#ACTION_DISABLED (ACTION_DISABLED registered — the *_DISABLED family)",
         "examples/app-showcase/src/ui/actions/index.ts + predicate-matrix.action.ts (the four probe actions)",
         "docs/adr/0126-packaged-metadata-customization-model.md (§8 item 2, §4 absence-means-active, §6 wall 3)",
         "#12438",
@@ -1466,6 +1466,12 @@
           "date": "2026-08-26",
           "change": "new — ADR-0126 §8 item 2 landed the packaged-action kill switch with a two-door consult and nothing in the ledger asserted the dispatch-side contract: the 409, its position in the gate order (after the D4 403, before params/record), the MCP twin, or restart durability. Register corrections folded in during source verification: the param-ordering discriminator must be showcase_action_param_gallery (showcase_mark_done declares no params, so enforceActionParams is a no-op for it and its enabled control proves nothing); the 403 leg must be an action with requiredPermissions (showcase_zoo_perm_missing — mark_done has none, every authed caller passes its gate); the live MCP leg must be showcase_portfolio_snapshot (the only ai.exposed stock action — the exposure gate refuses everything else ahead of the consult); and the record-load leg has no contrasting 404 because the load is best-effort by design",
           "ref": "#12438"
+        },
+        {
+          "revision": 2,
+          "date": "2026-09-04",
+          "change": "ledger read-back detail only — the dispatch contract itself is UNCHANGED and no clause moved. #15024 dropped sys_metadata_activation's reserved organization_id column before it ever shipped (systemFields { tenant: false } removes it rather than leaving it unwritten), so step 2's row confirmation asked a runner to read a column that is not there. It now asserts the row's KEY SET carries no organization_id, because the value spelling passes VACUOUSLY once the column is gone (`row.organization_id ?? null` is `null` either way) — green for exactly the reason it should be red. automated.ref was stale in the same direction: it described the dogfood pin as asserting 'ONE install-level row with organization_id NULL', and that pin has been a key-set reading named 'writes ONE deployment-level row, and the TABLE has no tenant column at all' since #15024; the ref now quotes the pin's live name so a runner who opens the file finds it",
+          "ref": "#15253"
         }
       ]
     },
@@ -1474,7 +1480,7 @@
       "title": "POST /actions/_activation/:object/:action — the activation door's ordered arms: authority before body and lookup, the exact 400 shapes, 404 undeclared, 409 ambiguity, 501/503 honesty, and the reserved segment surviving the real mount",
       "since": "v17",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -1500,7 +1506,7 @@
         "shape arms, as admin: POST /api/v1/actions/_activation/showcase_mark_done {} (2-segment); POST /api/v1/actions/_activation/showcase_task/showcase_mark_done/extra {} (4-segment); capture both",
         "body arms, as admin, against the declared action: {\"enable\": false} (one letter off); {\"enabled\": \"false\"} (string, not boolean); [] (non-object body); {} (empty); capture each with full envelope",
         "declaration arm: POST /actions/_activation/showcase_task/no_such_action {\"enabled\": false} as admin; capture; then GET /api/v1/data/sys_metadata_activation and confirm NO row was written by any refused probe so far",
-        "happy path: POST /actions/_activation/showcase_task/showcase_mark_done {\"enabled\": false} → capture the 200 body; read the ledger row (metadata_type 'action', name, organization_id NULL, active false); POST again {\"enabled\": true} → re-read: the SAME row updated in place, active true — never deleted, never duplicated",
+        "happy path: POST /actions/_activation/showcase_task/showcase_mark_done {\"enabled\": false} → capture the 200 body; read the ledger row (metadata_type 'action', name, active false) and capture its KEY SET — organization_id is ABSENT from it, because the table carries no tenant column (#15024 / ADR-0131 D7). ⛔ Do not record the tenant half as a value: `row.organization_id ?? null` is `null` for a column that does not exist, so a value read passes while measuring nothing; POST again {\"enabled\": true} → re-read: the SAME row updated in place, active true — never deleted, never duplicated",
         "record the ambiguity / 501 / 503 arms against their unit pins (knownGaps above) — run the pins and cite their output rather than skipping the clauses silently"
       ],
       "acceptance": [
@@ -1535,10 +1541,10 @@
           "evidence": "the 404 trace + the ledger read"
         },
         {
-          "clause": "the happy path writes exactly ONE install-level row and re-enable UPDATES it: 200 {name, objectName, enabled}; the row carries metadata_type 'action', the declarative name, organization_id NULL (the per-org dimension is reserved and unwritten); flipping back answers 200 and the same row flips active — never a second row, never a delete (§6 wall 3: the ledger records the choice)",
+          "clause": "the happy path writes exactly ONE DEPLOYMENT-level row and re-enable UPDATES it: 200 {name, objectName, enabled}; the row carries metadata_type 'action', the declarative name and active — and NO organization_id key, because the ledger has no tenant column to carry one (ADR-0131 D7 WITHDREW ADR-0126 §5 D3's reserved-and-never-written column before 17.3, and names this table as not getting it back — so the per-org dimension is not 'reserved', it is gone); flipping back answers 200 and the same row flips active — never a second row, never a delete (§6 wall 3: the ledger records the choice)",
           "oracle": "api",
-          "verify": "step-6: the 200 body + before/after ledger reads (one row throughout, active false then true)",
-          "evidence": "the traces + both row reads"
+          "verify": "step-6: the 200 body + before/after ledger reads (one row throughout, active false then true), each read scored on the row's KEY SET for the tenant half. ⛔ Never score it from a value: a check of the shape `row.organization_id ?? null` answers `null` for a column that does not exist, so it passes while measuring nothing (platform-core.activation-ledger-row-contract owns the schema-side probe)",
+          "evidence": "the traces + both row reads, key sets included"
         },
         {
           "clause": "the ambiguity arm refuses instead of switching off artifacts the caller did not name: a name declared on 2+ objects answers 409 RESOURCE_CONFLICT (standard catalog — no new code minted) naming every owner object, and writes nothing",
@@ -1561,7 +1567,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/runtime/src/domains/action-activation-posture-gate.test.ts (the door's own contract: both authority tiers across all three postures, unknown-key/non-boolean 400s, empty-body-enables, undeclared 404 + no row, ambiguity 409 + no write, 501 no-projection, 503 non-durable) + packages/qa/dogfood/test/action-params-contract.dogfood.test.ts ('[#12160] the reserved `_activation` segment survives the real mount' — the 2-segment 400 and undeclared 404 measured through the live dispatcher reconstruction) + packages/qa/dogfood/test/packaged-activation-ledger-reach.dogfood.test.ts (the live happy path: 200 flip, one org-NULL row, re-enable updates). The live-server body/authority arm sweep as a whole stays manual"
+        "ref": "packages/runtime/src/domains/action-activation-posture-gate.test.ts (the door's own contract: both authority tiers across all three postures, unknown-key/non-boolean 400s, empty-body-enables, undeclared 404 + no row, ambiguity 409 + no write, 501 no-projection, 503 non-durable) + packages/qa/dogfood/test/action-params-contract.dogfood.test.ts ('[#12160] the reserved `_activation` segment survives the real mount' — the 2-segment 400 and undeclared 404 measured through the live dispatcher reconstruction) + packages/qa/dogfood/test/packaged-activation-ledger-reach.dogfood.test.ts (the live happy path: 200 flip, then 'writes ONE deployment-level row, and the TABLE has no tenant column at all' — a key-set reading off the driver's own SELECT, not a value read — and re-enable updates). The live-server body/authority arm sweep as a whole stays manual"
       },
       "traps": [
         "dispatcher-vs-hono-route",
@@ -1569,12 +1575,13 @@
         "auth-state-leak"
       ],
       "source": [
-        "packages/runtime/src/domains/actions.ts (ACTION_ACTIVATION_SEGMENT, handleActionActivationWrite — the five ordered steps: authority → shape → body → declaration/ambiguity → durable write; refuseAmbiguousActionActivation)",
-        "packages/runtime/src/domains/activation-gate.ts (refuseUngrantedActivationAuthoring — manage_metadata tier, #10243 sentence; refuseUngrantedActivationWrite — the §5 posture tier; ACTION_ACTIVATION_SUBJECT's no-clone remedy)",
-        "packages/runtime/src/route-ledger.ts (the #12160 server-only row: servedBy reconstruction through /actions/:object/:action/:recordId, the 4-segment router-404, and why the segment is reserved)",
-        "packages/objectql/src/engine.ts (setActionActive — durable row first, projection second; the 503-on-no-ledger contract)",
+        "packages/runtime/src/domains/actions.ts#ACTION_ACTIVATION_SEGMENT (ACTION_ACTIVATION_SEGMENT, handleActionActivationWrite — the five ordered steps: authority → shape → body → declaration/ambiguity → durable write; refuseAmbiguousActionActivation)",
+        "packages/runtime/src/domains/activation-gate.ts#refuseUngrantedActivationAuthoring (refuseUngrantedActivationAuthoring — manage_metadata tier, #10243 sentence; refuseUngrantedActivationWrite — the §5 posture tier; ACTION_ACTIVATION_SUBJECT's no-clone remedy)",
+        "packages/runtime/src/route-ledger.ts#servedBy (the #12160 server-only row: servedBy reconstruction through /actions/:object/:action/:recordId, the 4-segment router-404, and why the segment is reserved)",
+        "packages/objectql/src/engine.ts#setActionActive (setActionActive — durable row first, projection second; the 503-on-no-ledger contract)",
         "sibling item api-backend.packaged-action-disabled-dispatch (what DISPATCH does with the row this door writes) · access-security.activation-write-operator-gate owns the gate's posture depths",
-        "docs/adr/0126-packaged-metadata-customization-model.md (§4, §5, §6 walls, §8 item 2)",
+        "docs/adr/0126-packaged-metadata-customization-model.md (§4, §5, §6 walls, §8 item 2) — ⚠️ §5's operator-gate half STANDS (access-security.activation-write-operator-gate owns its depths); only §5 D3's separate 'the org column is reserved, written NULL' bullet was WITHDRAWN, which is why the happy path's row read names no organization_id",
+        "docs/adr/0131-total-organization-ownership-no-null-organization-id.md D7 (deployment-level state has no organization column — sys_metadata_activation is named there as reverted before 17.3 and not returning; a reserved nullable tenant column is the shape D1 forbids)",
         "#12438",
         "Epic #12150"
       ],
@@ -1584,6 +1591,12 @@
           "date": "2026-08-26",
           "change": "new — the ADR-0126 §8 activation door is the only non-invocation shape /actions serves, is absent from every REST-ledger sweep (server-only, servedBy reconstruction), and none of its arms were in the ledger. Register corrections folded in during source verification: the 400-shape message carries a '(use `global` for an object-less action)' tail; a 4-segment path 404s at the ROUTER rather than reaching the door's 400 (no mount pattern matches); the authority gates run ahead of even the path-shape check, not just body/lookup; an empty body ENABLES by contract (a trap for a runner reading it as a refusal); and the ambiguity arm's no-stock-fixture status was verified across both showcase action files rather than assumed",
           "ref": "#12438"
+        },
+        {
+          "revision": 2,
+          "date": "2026-09-04",
+          "change": "ledger read-back detail and one citation — the door's ordered arms are UNCHANGED and no arm moved. Two corrections, both downstream of #15024 dropping sys_metadata_activation's reserved organization_id column before it ever shipped. (1) VACUITY: step 6 and the happy-path clause read the column back and asserted it NULL. With the column gone that read passes rather than failing (`row.organization_id ?? null` is `null` either way), so the leg was green for the wrong reason; both now score the row's KEY SET, the same inversion #15024 applied to the dogfood pin. automated.ref carried the same staleness as 'one org-NULL row' and now quotes the pin's live name. (2) DECISION: the clause glossed the column as 'the per-org dimension is reserved and unwritten', citing ADR-0126 §5 D3 — a bullet ADR-0131 D7 WITHDREW ('a reserved nullable tenant column is the shape D1 forbids'), naming this table as reverted before 17.3 and not returning. Left as it stood it told a runner the tenant dimension was coming back. The source list now carries ADR-0131 D7 and marks which half of §5 survives: the operator gate stands, the reserved column does not",
+          "ref": "#15253"
         }
       ]
     },
@@ -1687,12 +1700,12 @@
         "wrong-persona"
       ],
       "source": [
-        "packages/spec/src/data/query.zod.ts (AggregationFunction + ARRAY_AGG_RETIRED/STRING_AGG_RETIRED error map), (DateGranularity), GroupByNodeSchema (dateGranularity spelling)",
-        "packages/objectql/src/in-memory-aggregation.ts (the six function arms incl. #11152 boolean-as-number and the #10576 per-aggregation filter; bucketDateValue ISO shapes; the #3839 real-null bucket rule at the module head)",
-        "packages/spec/src/data/aggregation-policy.ts (emptyGroupValueFor — the ruled empty-set identities; objectui#3136)",
-        "packages/runtime/src/action-execution.ts (the aggregate door: engine-only, at-least-one-aggregation, the raw-rows degradation hazard)",
-        "packages/rest/src/rest-server.ts (POST /data/:object/query — the wire door that accepts groupBy/aggregations)",
-        "packages/metadata-protocol/src/protocol.ts (assertAggregationFieldsExist — the located unknown-field refusal)",
+        "packages/spec/src/data/query.zod.ts#AggregationFunction (AggregationFunction + ARRAY_AGG_RETIRED/STRING_AGG_RETIRED error map), (DateGranularity), GroupByNodeSchema (dateGranularity spelling)",
+        "packages/objectql/src/in-memory-aggregation.ts#bucketDateValue (the six function arms incl. #11152 boolean-as-number and the #10576 per-aggregation filter; bucketDateValue ISO shapes; the #3839 real-null bucket rule at the module head)",
+        "packages/spec/src/data/aggregation-policy.ts#emptyGroupValueFor (emptyGroupValueFor — the ruled empty-set identities; objectui#3136)",
+        "packages/runtime/src/action-execution.ts#engine (the aggregate door: engine-only, at-least-one-aggregation, the raw-rows degradation hazard)",
+        "packages/rest/src/rest-server.ts#data (POST /data/:object/query — the wire door that accepts groupBy/aggregations)",
+        "packages/metadata-protocol/src/protocol.ts#assertAggregationFieldsExist (assertAggregationFieldsExist — the located unknown-field refusal)",
         "#10576, #11152, #3839, #3773"
       ],
       "history": [
@@ -1784,8 +1797,8 @@
         "timezone-boundary"
       ],
       "source": [
-        "packages/formula/src/stdlib.ts (registerStdLib — the 27 registerFunction calls; calendarDayUtc ADR-0053 D1; addMonthsUtc clamp; the floor/ceil #3306 note), (registerNumericCoercions #1928)",
-        "packages/objectql/src/engine.ts (applyFormulaPlan — evaluate-fault → null, the silent-null contract; the evaluateFormulaField docblock states the compile-throws vs evaluate-nulls split)",
+        "packages/formula/src/stdlib.ts#registerStdLib (registerStdLib — the 27 registerFunction calls; calendarDayUtc ADR-0053 D1; addMonthsUtc clamp; the floor/ceil #3306 note), (registerNumericCoercions #1928)",
+        "packages/objectql/src/engine.ts#applyFormulaPlan (applyFormulaPlan — evaluate-fault → null, the silent-null contract; the evaluateFormulaField docblock states the compile-throws vs evaluate-nulls split)",
         "content/docs/data-modeling/formulas.mdx (the advertised catalog the matrix cross-checks)",
         "examples/app-showcase/src/data/objects/field-zoo.object.ts + project.object.ts (the stock live-leg formulas)",
         "ADR-0053 Phase 2 D1 (calendar-day timezone contract)",
@@ -1903,11 +1916,11 @@
         "auth-state-leak"
       ],
       "source": [
-        "packages/spec/src/data/object.zod.ts (ApiMethod — the six primitives), (LEGACY_API_METHODS + LEGACY_API_METHOD_GUIDANCE), (stripLegacyApiMethods — strip-and-warn + the deny-all cliff), (the z.preprocess wiring)",
-        "packages/spec/src/data/api-derivation.ts (resolveEffectiveApiMethods three-state, isApiOperationAllowed bulk∧child + writeMode precision, effectiveOperationsArray)",
-        "packages/rest/src/rest-server.ts (apiAccessDenialFromEnable — the 404/405 fork + effective allowed[]), (enforceApiAccess — external boundary only, default-allow, #3770 unknown-object pass-through), (writeMode-precise import), (batch per-op before txn), (bulk doors with bulkChild)",
-        "packages/objectql/src/registry.ts (warnStrippedLegacyApiMethods — the per-object registration diagnostic)",
-        "packages/spec/src/api/error-code-ledger.zod.ts (OBJECT_API_DISABLED, OBJECT_API_METHOD_NOT_ALLOWED)",
+        "packages/spec/src/data/object.zod.ts#ApiMethod (ApiMethod — the six primitives), (LEGACY_API_METHODS + LEGACY_API_METHOD_GUIDANCE), (stripLegacyApiMethods — strip-and-warn + the deny-all cliff), (the z.preprocess wiring)",
+        "packages/spec/src/data/api-derivation.ts#resolveEffectiveApiMethods (resolveEffectiveApiMethods three-state, isApiOperationAllowed bulk∧child + writeMode precision, effectiveOperationsArray)",
+        "packages/rest/src/rest-server.ts#apiAccessDenialFromEnable (apiAccessDenialFromEnable — the 404/405 fork + effective allowed[]), (enforceApiAccess — external boundary only, default-allow, #3770 unknown-object pass-through), (writeMode-precise import), (batch per-op before txn), (bulk doors with bulkChild)",
+        "packages/objectql/src/registry.ts#warnStrippedLegacyApiMethods (warnStrippedLegacyApiMethods — the per-object registration diagnostic)",
+        "packages/spec/src/api/error-code-ledger.zod.ts#OBJECT_API_DISABLED (OBJECT_API_DISABLED, OBJECT_API_METHOD_NOT_ALLOWED)",
         "packages/platform-objects/src/identity/sys-session.object.ts + sys-device-code.object.ts + sys-api-key.object.ts + sys-oauth-consent.object.ts (the stock narrowed objects)",
         "ADR-0049 / #1889 (shipping a non-enforcing apiEnabled is false security), #3391 (three-state), #3543 (enum shrink + strip), #3545 (non-array fails closed), #7912 (apiExposureDenialReason order)",
         "sibling clause: identity-auth.session-list-revoke (the sys_session 405-before-403 precedent this item generalizes)"
@@ -1918,6 +1931,446 @@
           "date": "2026-08-30",
           "change": "new — the enable.apiMethods verb gate had no item of its own: identity-auth.session-list-revoke asserts one consequence on one object, and nothing covered the three-state contract, the derived allowed[] closure, bulk∧child, writeMode-precise import, the legacy strip-and-warn (with its deny-all cliff), or the batch per-op ordering. Register corrections folded in during source verification: the strip lives at object.zod.ts wired via z.preprocess (the register's '' pointed at the guidance table); the enforcement docblock is rest-server.ts with the denial producer; and the stock free negatives are richer than 'three system objects' — sys_session/sys_device_code/sys_api_key give three whitelist shapes and sys_oauth_* adds the apiEnabled:false 404 fork",
           "ref": "#sweep-2026-08-30"
+        }
+      ]
+    },
+    {
+      "id": "api-backend.rest-crud-config-contract",
+      "title": "RestServerConfig.crud is the CRUD surface's construction contract: five switches gate six mounts, dataPrefix moves the routes and their discovery advertisement together, and both tombstones refuse at construction",
+      "since": "v17",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "personas": [
+        "admin, authenticated — on the live-boot half a 401 must never be mistaken for an absent mount",
+        "no persona for the variant half: a non-default `crud` block is authorable only by a programmatic embedder (knownGaps), so those clauses are driven in a scratch harness, not by a signed-in user"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a stock showcase boot for the default-config half (dataPrefix defaults to /data — every mounted data route proves the default)",
+          "a scratch vitest harness in packages/rest for the variant half: construct a RestServer with the config under test, call registerRoutes(), and read the route table back with getRoutes() — packages/rest/src/rest-batch-size-cap.test.ts is the shape to copy"
+        ],
+        "knownGaps": [
+          "NO stock boot authors this sub-object. `os serve` constructs the REST plugin with a fixed config (only project scoping is threaded) and `os dev` passes none at all, so `crud.operations` / `crud.dataPrefix` are reachable only through createRestApiPlugin({ api: ... }) or createHonoServerPlugin({ restConfig }) in embedder code. Every non-default clause below is therefore scored with oracle `test` against a real RestServer, and the run record must say so instead of claiming a live deployment was reconfigured",
+          "the MOUNT half has no permanent pin: packages/rest/src/rest-sub-config-parse-not-cast.test.ts asserts the NORMALIZED CONFIG a switch produces, and nothing asserts that the route disappears from the route table — the scratch harness is the only observation until that pin exists (recorded in FOLLOW-UPS.md)"
+        ]
+      },
+      "steps": [
+        "boot showcase isolated; as admin fire the six default-config data mounts and capture status per route: GET /api/v1/data/showcase_task (list), GET /api/v1/data/showcase_task/<id> (read), POST /api/v1/data/showcase_task (create), POST /api/v1/data/showcase_task/query (the QueryAST door), PATCH /api/v1/data/showcase_task/<id> (update), DELETE /api/v1/data/showcase_task/<id> (delete)",
+        "fire the routing-404 control (GET /api/v1/definitely-not-a-route) and keep its body — every absence verdict below is scored against this shape, never against a bare status",
+        "GET /api/v1/discovery and read routes.data — it must equal the base plus the configured dataPrefix",
+        "harness: construct a RestServer with { crud: { operations: { create: false } } }, registerRoutes(), and read getRoutes() — POST {dataPrefix}/:object must be absent while the other five mounts remain",
+        "harness: repeat per switch — read, update, delete each remove exactly one mount; list removes TWO (GET {dataPrefix}/:object and POST {dataPrefix}/:object/query, which rides the same switch and has none of its own)",
+        "harness: construct with { crud: { dataPrefix: '/records' } } and confirm every data route, the data-action routes, the sharing routes and the batch routes all re-base together, and that the discovery body advertises the same new prefix",
+        "harness: construct with { crud: { patterns: { list: { method: 'GET', path: '/x' } } } } and then with { crud: { objectParamStyle: 'path' } } and with 'query'; capture the constructor's refusal text in each case",
+        "harness control: construct with an empty config and confirm all five switches normalize to true and dataPrefix to '/data' — the schema's own defaults, not a second copy"
+      ],
+      "acceptance": [
+        {
+          "clause": "on a stock boot all six default mounts answer something other than the routing-404 control — the default `crud` block is what every deployment actually runs",
+          "oracle": "api",
+          "verify": "per-route status table vs the step-2 control body; a data route answering the control shape is a FAIL (not mounted)",
+          "evidence": "the status table + the control trace"
+        },
+        {
+          "clause": "each of create / read / update / delete removes exactly ONE mount when set false, and `list` removes TWO — GET {dataPrefix}/:object and POST {dataPrefix}/:object/query, because the query door is gated by `operations.list` and has no switch of its own",
+          "oracle": "test",
+          "verify": "per-switch diff of getRoutes() against the all-true baseline: the set difference is exactly the routes named in the steps, and no other route moves",
+          "evidence": "the six route-table diffs"
+        },
+        {
+          "clause": "an unmounted route is NOT the object-level 404: `enable.apiEnabled: false` answers a handler envelope with OBJECT_API_DISABLED, while a switched-off operation has no handler at all and falls to the routing 404 — the two absences must stay distinguishable",
+          "oracle": "api",
+          "verify": "compare the switched-off route's answer with the routing-404 control and with an OBJECT_API_DISABLED body from api-backend.api-methods-verb-gate; a coded envelope where the mount was removed means the switch did not gate the mount",
+          "evidence": "the three bodies side by side"
+        },
+        {
+          "clause": "`dataPrefix` is the single knob that moves the data surface, and the advertisement moves with it: the CRUD, data-action, sharing and batch registrars all build their base from it, and registerDiscoveryEndpoints sets discovery.routes.data from the same value (ADR-0076 D12 — advertise only what is mounted)",
+          "oracle": "test",
+          "verify": "with dataPrefix '/records', getRoutes() shows no path under /data and the discovery body advertises /api/v1/records; a discovery body still naming /data while the mounts moved is a FAIL of the advertise-what-is-mounted rule",
+          "evidence": "route table + discovery body at the non-default prefix"
+        },
+        {
+          "clause": "the two #14691 tombstones are REFUSED at construction, not stripped: `crud.patterns` and `crud.objectParamStyle` (both former enum values) throw naming the sub-object, the declaring schema (CrudEndpointsConfigSchema), and the prescription — a declarative `api` endpoint for a custom path, the object name always being a path segment",
+          "oracle": "test",
+          "verify": "the constructor throws; the message contains `crud.patterns` / `crud.objectParamStyle`, `CrudEndpointsConfigSchema`, and the removal prescription. A clean construction is the silent-strip failure ADR-0049 forbids",
+          "evidence": "both refusal texts"
+        },
+        {
+          "clause": "the schema's defaults are the ONLY defaults: an absent `crud` block normalizes to five true switches and '/data', and a partial `operations` keeps the author's key while the rest default true (ADR-0122 author-state)",
+          "oracle": "test",
+          "verify": "pnpm --filter @objectstack/rest exec vitest run src/rest-sub-config-parse-not-cast.test.ts — green (§C/§D pin the defaults and the partial-operations shape); then confirm the same normalized values in the harness the mount clauses used",
+          "evidence": "test output + the normalized config"
+        }
+      ],
+      "negative": [
+        "a route that stays mounted with its switch false is the declared-not-enforced shape ADR-0049 exists to catch, and is a FAIL rather than a nuisance — the switch would be config an operator can set and nothing honours",
+        "⛔ never score the absence of a mount from a 404 alone: an unauthenticated probe answers 401 before routing, and an object-level gate answers a coded 404 — both read as 'route gone' to a status-only oracle"
+      ],
+      "variants": [
+        "switch:operations.create",
+        "switch:operations.read",
+        "switch:operations.update",
+        "switch:operations.delete",
+        "switch:operations.list (two mounts)",
+        "knob:dataPrefix",
+        "tombstone:patterns",
+        "tombstone:objectParamStyle"
+      ],
+      "traps": [
+        "dispatcher-vs-hono-route",
+        "absence-inference",
+        "stale-dist"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/rest/src/rest-sub-config-parse-not-cast.test.ts (the construction half only — §C/§D normalized defaults, §E the two tombstone refusals; the mount-table half has no pin)"
+      },
+      "source": [
+        "packages/spec/liveness/crud_endpoints.json (the ADR-0049 ledger this item answers: five live `operations.*` switches + `dataPrefix`, two dead keys)",
+        "packages/spec/src/api/rest-server.zod.ts#CrudEndpointsConfigSchema (the declared contract, its defaults and the two retiredKey tombstones)",
+        "packages/rest/src/rest-server.ts#registerCrudEndpoints (the six mounts and their five gates), (normalizeConfig — the parsed sub-config every consumer reads), (parseDeclaredSubConfig — the construction-time refusal), (registerDiscoveryEndpoints — discovery.routes.data built from dataPrefix), (getRoutes — the route table the mount clauses read)",
+        "#14691 (the ADR-0049 retirement of patterns/objectParamStyle) · #11984 (parse-and-consume instead of cast) · ADR-0122 (author state) · ADR-0076 D12 (advertise only what is mounted)",
+        "sibling clause: api-backend.api-methods-verb-gate (the per-OBJECT exposure gate this config-level switch must stay distinguishable from) · api-backend.route-ledger-live-parity (the routing-404 control technique)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-09-04",
+          "change": "new — `crud_endpoints` was UNCLASSIFIED in coverage.json: the checklist drove the mounted CRUD routes (query-contract-matrix, crud-roundtrip) but nothing covered the deployment config that decides WHICH of them exist, what they are mounted under, or that the two retired keys refuse. Authored against the shipped surface rather than the ledger's prose: the six-mounts-from-five-switches asymmetry (POST /query rides `operations.list`) and the discovery co-movement were read out of registerCrudEndpoints and registerDiscoveryEndpoints",
+          "ref": "#14961"
+        }
+      ]
+    },
+    {
+      "id": "api-backend.rest-batch-config-contract",
+      "title": "RestServerConfig.batch is the bulk surface's construction contract: three switches and enableBatchEndpoint gate four per-object mounts (each ANDed with its protocol member), maxBatchSize is the one cap every bulk door measures, and both tombstones refuse at construction",
+      "since": "v17",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "personas": [
+        "admin, authenticated — the live-boot half",
+        "no persona for the variant half: a non-default `batch` block is authorable only by a programmatic embedder (knownGaps)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a stock showcase boot for the default-config half (cap 200, all four per-object bulk doors mounted)",
+          "showcase_private_note or another baseline-writable object for the cap probe",
+          "a scratch vitest harness in packages/rest for the variant half — packages/rest/src/rest-batch-size-cap.test.ts already constructs a RestServer with a non-default cap and reads getRoutes(); copy that shape"
+        ],
+        "knownGaps": [
+          "NO stock boot authors this sub-object (same door as the crud block: `os serve` fixes the config, `os dev` passes none), so every non-default clause is scored with oracle `test` against a real RestServer and the run record must say so",
+          "the mount half of `enableBatchEndpoint` / `operations.*Many` has no permanent pin — the existing pins assert the normalized config and the cap, not the route table (recorded in FOLLOW-UPS.md)"
+        ]
+      },
+      "steps": [
+        "boot showcase isolated; as admin fire the four per-object bulk doors on the default config and capture status: POST /api/v1/data/showcase_private_note/batch, /createMany, /updateMany, /deleteMany; fire the routing-404 control alongside them",
+        "fire the cross-object door POST /api/v1/batch on the same boot — it is NOT gated by enableBatchEndpoint and must answer whether or not the per-object door is switched off",
+        "cap probe on the live boot: POST /createMany with 201 records against the default cap of 200; capture the status, code and the reported max",
+        "harness: construct with { batch: { enableBatchEndpoint: false } }, registerRoutes(), read getRoutes() — POST {dataPrefix}/:object/batch is absent, the three *Many mounts and POST {basePath}/batch remain",
+        "harness: repeat for operations.createMany / updateMany / deleteMany false, one at a time — each removes exactly its own mount",
+        "harness: construct with a protocol that omits batchData / createManyData / updateManyData / deleteManyData while leaving every switch true — the mount must be absent, because each gate is `switch AND protocol member`",
+        "harness: construct with { batch: { maxBatchSize: 5 } } and drive each of the four per-object doors plus the cross-object door with 6 records/ids; then with exactly 5",
+        "harness: construct with { batch: { operations: { upsertMany: false } } } and with { batch: { defaultAtomic: true } } and with false; capture each refusal text",
+        "harness controls: maxBatchSize 0, 2000 and 2.5 must each be refused by the declared bounds (int, 1..1000), and an empty config must normalize to 200 with all switches true"
+      ],
+      "acceptance": [
+        {
+          "clause": "on a stock boot all four per-object bulk doors are mounted and answer something other than the routing-404 control — the default `batch` block is what every deployment runs",
+          "oracle": "api",
+          "verify": "per-route status table vs the control body",
+          "evidence": "status table + control trace"
+        },
+        {
+          "clause": "`enableBatchEndpoint` gates ONLY POST {dataPrefix}/:object/batch — the cross-object POST {basePath}/batch is mounted unconditionally by the same registrar and survives the switch",
+          "oracle": "test",
+          "verify": "route-table diff with enableBatchEndpoint false: the per-object batch path is gone, {basePath}/batch is still there; a run that reads 'batch is off' from the cross-object door has read the wrong door",
+          "evidence": "the route-table diff"
+        },
+        {
+          "clause": "each of createMany / updateMany / deleteMany removes exactly its own mount, and every one of the four gates is an AND with the protocol member behind it — a protocol without createManyData mounts nothing even with the switch true",
+          "oracle": "test",
+          "verify": "per-switch route-table diffs, plus the protocol-member run where all switches stay true and the mounts are still absent",
+          "evidence": "the four diffs + the protocol-member run"
+        },
+        {
+          "clause": "`maxBatchSize` is the ONE cap all five bulk doors measure against, and the refusal names it: 400 BATCH_TOO_LARGE carrying count and max, with the protocol never called — at the configured value, not a hardcoded 200",
+          "oracle": "test",
+          "verify": "pnpm --filter @objectstack/rest exec vitest run src/rest-batch-size-cap.test.ts — green (it pins all five doors, the exactly-at-cap pass, the configured-not-hardcoded case and shape-error precedence); reproduce the configured-cap leg in the harness at maxBatchSize 5 and confirm max: 5 in the body",
+          "evidence": "test output + the max:5 envelopes"
+        },
+        {
+          "clause": "the live cap holds on the real server too: 201 records against the default 200 answers 400 BATCH_TOO_LARGE and creates nothing",
+          "oracle": "api",
+          "verify": "step-3 response is 400 with code BATCH_TOO_LARGE and max 200; a follow-up count of that batch's marker rows is 0",
+          "evidence": "response + count"
+        },
+        {
+          "clause": "the two #14691 tombstones are REFUSED at construction with their prescriptions: `batch.operations.upsertMany` (no such route was ever built — upsert is an operation TYPE of the generic batch door) and `batch.defaultAtomic` (atomicity is the per-request options.atomic, ADR-0119 D4), whatever value is authored",
+          "oracle": "test",
+          "verify": "the constructor throws for both, and for defaultAtomic at true AND false; each message names the key, BatchEndpointsConfigSchema and the replacement",
+          "evidence": "both refusal texts"
+        },
+        {
+          "clause": "the declared bounds are enforced at construction, which is the #11984 defect closed: maxBatchSize 0 — the value that used to become the live cap because 0 is not nullish — is refused, as are 2000 and 2.5",
+          "oracle": "test",
+          "verify": "pnpm --filter @objectstack/rest exec vitest run src/rest-sub-config-parse-not-cast.test.ts — green (§A pins all three); confirm the empty-config default of 200 in the same run",
+          "evidence": "test output"
+        }
+      ],
+      "negative": [
+        "a bulk door still mounted with its switch false, or a cap that answers 200-max while the config says 5, is the declared-not-enforced shape — a FAIL, not a rounding difference",
+        "⛔ do not read the cross-object POST /batch as evidence about enableBatchEndpoint in either direction: it is mounted unconditionally, so its presence proves nothing about the per-object switch and its 501 (no transactional runtime) proves nothing about the cap"
+      ],
+      "variants": [
+        "switch:enableBatchEndpoint",
+        "switch:operations.createMany",
+        "switch:operations.updateMany",
+        "switch:operations.deleteMany",
+        "knob:maxBatchSize",
+        "tombstone:operations.upsertMany",
+        "tombstone:defaultAtomic"
+      ],
+      "traps": [
+        "dispatcher-vs-hono-route",
+        "absence-inference"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/rest/src/rest-batch-size-cap.test.ts (the cap on all five doors) + packages/rest/src/rest-sub-config-parse-not-cast.test.ts (bounds, defaults, both tombstone refusals); the mount-table half has no pin"
+      },
+      "source": [
+        "packages/spec/liveness/batch_endpoints.json (the ADR-0049 ledger this item answers: maxBatchSize, enableBatchEndpoint and three operations.* live, upsertMany and defaultAtomic dead)",
+        "packages/spec/src/api/rest-server.zod.ts#BatchEndpointsConfigSchema (declared bounds 1..1000 int, default 200, and the two retiredKey tombstones)",
+        "packages/rest/src/rest-server.ts#registerBatchEndpoints (the four per-object gates, each ANDed with its protocol member, and the unconditionally-mounted cross-object door), (enforceBatchSize — the one envelope), (normalizeConfig), (parseDeclaredSubConfig)",
+        "packages/spec/src/api/error-code-ledger.zod.ts#BATCH_TOO_LARGE (the code the cap answers with)",
+        "#3939 (one cap, one envelope, every door) · #11984 (maxBatchSize 0 was the live cap under the old cast) · #14691 (the two retirements) · ADR-0119 D4 (per-request atomicity)",
+        "sibling clause: api-backend.bulk-write-contract and api-backend.batch-transactional-discovery (they drive the doors' BEHAVIOUR on the default config; this item covers the config that decides the doors exist)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-09-04",
+          "change": "new — `batch_endpoints` was UNCLASSIFIED in coverage.json: two items drove the bulk doors' behaviour on a default boot and neither covered the sub-object that mounts them. Two asymmetries were read out of registerBatchEndpoints rather than assumed: the cross-object POST /batch is NOT under enableBatchEndpoint, and all four per-object gates are ANDs with a protocol member, so a missing protocol member and a false switch are indistinguishable from the route table alone",
+          "ref": "#14961"
+        }
+      ]
+    },
+    {
+      "id": "api-backend.rest-metadata-config-contract",
+      "title": "RestServerConfig.metadata is the metadata surface's construction contract: prefix moves eleven mounts and their discovery advertisement, three endpoint switches gate more routes than their names suggest, maskObjectFields is the ADR-0106 D8 disclosure gate, and both tombstones refuse at construction",
+      "since": "v17",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "admin, authenticated — the live-boot half",
+        "a restricted member who cannot read every field of showcase_account — the masking clause is only observable as a non-admin",
+        "no persona for the variant half: a non-default `metadata` block is authorable only by a programmatic embedder (knownGaps)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a stock showcase boot for the default-config half (prefix /meta, cache on, masking ON by default)",
+          "a persona whose field-level security hides at least one field of a served object — without one, the masking clause scores blocked(fixture), never green",
+          "a scratch vitest harness in packages/rest for the variant half (construct, registerRoutes(), getRoutes())"
+        ],
+        "knownGaps": [
+          "NO stock boot authors this sub-object (`os serve` fixes the config, `os dev` passes none), so every non-default clause is scored with oracle `test` and the run record must say so",
+          "OS_ALLOW_UNMASKED_OBJECT_METADATA is a deployment-wide escape hatch that also covers the runtime /metadata dispatcher; a boot that sets it makes the masking clause vacuous — record the env posture beside the verdict"
+        ]
+      },
+      "steps": [
+        "boot showcase isolated; as admin fire the default-prefix metadata mounts and capture status: GET /api/v1/meta, /meta/types, /meta/diagnostics, /meta/_drafts, GET /meta/object, GET /meta/object/showcase_task, /meta/object/showcase_task/references, /meta/object/showcase_task/layers, /meta/book/<a seeded book>/tree; fire the routing-404 control alongside",
+        "GET /api/v1/discovery and read routes.metadata — it must equal the base plus the configured prefix",
+        "as the restricted persona GET /api/v1/meta/object/showcase_account and diff the served fields against the admin's copy of the same document",
+        "harness: construct with { metadata: { prefix: '/metadata' } } and confirm every metadata mount re-bases and the discovery body advertises the new prefix",
+        "harness: construct with { metadata: { endpoints: { types: false } } } — GET {prefix} and GET {prefix}/types both disappear (one handler, two paths)",
+        "harness: construct with { metadata: { endpoints: { items: false } } } and enumerate what leaves: GET {prefix}/:type AND {prefix}/diagnostics AND {prefix}/_drafts AND the POST {prefix}/_migrate-stored write door — four mounts, not the one its describe() names",
+        "harness: construct with { metadata: { endpoints: { item: false } } } and enumerate: GET {prefix}/:type/:name, /:type/:name/references, /:type/:name/layers and {prefix}/book/:name/tree",
+        "harness: construct with { metadata: { enableCache: false } } and confirm the item read takes the uncached branch; then with enableCache true against an app-type, a dashboard-type, a draft read, a preview-drafts read, a package-scoped read and an audience-gated type — each is a carve-out that bypasses the cached path even when the switch is on",
+        "harness: construct with { metadata: { maskObjectFields: false } }; separately construct with the default and metaType != 'object'",
+        "harness: construct with { metadata: { cacheTtl: 3600 } }, then 0, then -1, then { metadata: { endpoints: { schema: false } } }; capture each refusal text"
+      ],
+      "acceptance": [
+        {
+          "clause": "on a stock boot every default-prefix metadata mount answers something other than the routing-404 control",
+          "oracle": "api",
+          "verify": "per-route status table vs the control body",
+          "evidence": "status table + control trace"
+        },
+        {
+          "clause": "`prefix` moves the whole metadata surface AND its advertisement together: registerMetadataEndpointsInner builds every metaPath from it and registerDiscoveryEndpoints sets discovery.routes.metadata from the same value (ADR-0076 D12)",
+          "oracle": "test",
+          "verify": "at prefix '/metadata' no route remains under /meta and the discovery body advertises /api/v1/metadata; a discovery body naming the old prefix is a FAIL",
+          "evidence": "route table + discovery body at the non-default prefix"
+        },
+        {
+          "clause": "the three endpoint switches gate MORE than their describe() strings say, and the run must enumerate what each removes: `types` takes two paths (one handler at {prefix} and {prefix}/types), `items` takes four INCLUDING the POST {prefix}/_migrate-stored write door and the diagnostics sweep, `item` takes four including the book-tree read",
+          "oracle": "test",
+          "verify": "per-switch route-table diffs against the all-true baseline; the diff sets must be exactly the routes enumerated in the steps. An operator reading `items` as 'list items of type' would silently disarm a migration door — the run records the real radius whatever it finds",
+          "evidence": "the three route-table diffs"
+        },
+        {
+          "clause": "`maskObjectFields` defaults ON and is a real disclosure gate: a caller who cannot read a field gets a served object schema without that field at all — not its name, label, type, options, formula, visibleWhen, defaultValue or requiredPermissions — and `false` serves the full schema to every authenticated caller (ADR-0106 D8)",
+          "oracle": "api",
+          "verify": "diff the restricted persona's /meta/object/showcase_account against the admin's on the default config: the hidden field is absent, not blanked. Then in the harness confirm maskObjectFields:false is preserved through normalizeConfig (it must not be re-defaulted to true) and that resolveObjectMasker returns the pass-through masker for it and for any metaType other than 'object'",
+          "evidence": "the two served documents + the normalized value"
+        },
+        {
+          "clause": "`enableCache` selects the protocol's cached item read, and the cached path is additionally conditional: app types, dashboard types, draft reads, preview-drafts reads, package-scoped reads and audience-gated types each bypass it with the switch still on — so a cache-miss is not evidence the switch is dead",
+          "oracle": "test",
+          "verify": "with enableCache false the item read calls the uncached protocol member; with it true, the six carve-outs still call the uncached member. Score each carve-out separately and name it in the record",
+          "evidence": "per-branch call trace"
+        },
+        {
+          "clause": "the two #14691 tombstones are REFUSED at construction with their prescriptions: `metadata.cacheTtl` at 3600, 0 and the -1 the old unbounded contract accepted, and the nested `metadata.endpoints.schema` — a tombstone inside a live block, which must not be stripped while its siblings parse",
+          "oracle": "test",
+          "verify": "the constructor throws for all four; each message names the key, MetadataEndpointsConfigSchema and the replacement (enableCache is the live switch; no GET /meta/:type/:name/schema route exists)",
+          "evidence": "the four refusal texts"
+        }
+      ],
+      "negative": [
+        "a served object schema that still carries a field the caller cannot read — its name alone is the disclosure ADR-0106 D8 closes — is a SECURITY finding, recorded under RUNNER.md rule 2's authentication/authorization carve-out rather than written out in full",
+        "⛔ never score masking from the admin's own document: an admin can read every field, so the masked and unmasked shapes are identical for them (wrong-persona)",
+        "a metadata route still mounted with its switch false is the declared-not-enforced shape and is a FAIL"
+      ],
+      "variants": [
+        "knob:prefix",
+        "switch:endpoints.types (2 mounts)",
+        "switch:endpoints.items (4 mounts)",
+        "switch:endpoints.item (4 mounts)",
+        "switch:enableCache (+6 carve-outs)",
+        "switch:maskObjectFields",
+        "tombstone:cacheTtl",
+        "tombstone:endpoints.schema"
+      ],
+      "traps": [
+        "dispatcher-vs-hono-route",
+        "wrong-persona",
+        "cache-staleness",
+        "absence-inference"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/rest/src/rest-sub-config-parse-not-cast.test.ts (§D pins prefix/enableCache/maskObjectFields survival and the partial endpoints shape; §E pins cacheTtl and endpoints.schema); the mount-table, masking-effect and cache-branch halves have no pin"
+      },
+      "source": [
+        "packages/spec/liveness/metadata_endpoints.json (the ADR-0049 ledger this item answers: prefix, enableCache, maskObjectFields and three endpoints.* live, cacheTtl and endpoints.schema dead)",
+        "packages/spec/src/api/rest-server.zod.ts#MetadataEndpointsConfigSchema (the declared contract, the ADR-0106 D8 docblock and the two retiredKey tombstones)",
+        "packages/rest/src/rest-server.ts#registerMetadataEndpointsInner (metaPath and the three endpoint gates with their real radius), (resolveObjectMasker — the metaType/maskObjectFields fork), (normalizeConfig — isObjectSchemaMaskingEnabled and the OS_ALLOW_UNMASKED_OBJECT_METADATA escape hatch), (registerDiscoveryEndpoints — discovery.routes.metadata built from prefix), (getRoutes)",
+        "ADR-0106 D8 (per-caller field masking of served object schemas) · #14691 (the two retirements) · #7526 (the /meta/types ordering fix the `types` switch takes with it) · ADR-0076 D12",
+        "sibling clause: platform-core.metadata-registry-serving (it drives the served REGISTRY on the default config; this item covers the config that decides what is served and to whom) · platform-core.docs-audience-gate (the audience-gated types that are a cache carve-out here)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-09-04",
+          "change": "new — `metadata_endpoints` was UNCLASSIFIED in coverage.json: metadata-registry-serving drove /meta on a default boot and nothing covered the sub-object that decides the prefix, which endpoints exist, whether the cached read path is taken, or whether served object schemas are masked. The switch radii were enumerated from registerMetadataEndpointsInner rather than from the schema's describe() strings, which name one route each and understate three of them — `endpoints.items` also gates the POST _migrate-stored write door",
+          "ref": "#14961"
+        }
+      ]
+    },
+    {
+      "id": "api-backend.rest-route-generation-tombstones",
+      "title": "RestServerConfig.routes is an all-tombstone sub-object: every one of the four retired selectors refuses at construction with the prescription that names where the contract moved, while the empty block still constructs",
+      "since": "v17",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "build",
+      "personas": [
+        "no persona — this is a construction-time and build-time contract, driven by an embedder authoring a config, not by a signed-in caller"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a scratch vitest harness in packages/rest that constructs a RestServer (and the createRestApiPlugin path, so both cast hops are covered)",
+          "a TypeScript check over the authored config — a retiredKey is a tsc error as well as a parse error"
+        ],
+        "knownGaps": [
+          "the positive half of each prescription is proved by OTHER items, not here: per-object exposure by api-backend.api-methods-verb-gate (404/405) and the data base path by api-backend.rest-crud-config-contract. This item scores the REFUSAL and the accuracy of the prescription; a run that finds the prescription's named replacement broken files against those items"
+        ]
+      },
+      "steps": [
+        "harness: construct a RestServer with { routes: { includeObjects: ['showcase_account'] } }; capture the refusal text",
+        "repeat for { routes: { excludeObjects: ['sys_log'] } }, { routes: { nameTransform: 'none' } } and 'plural', and { routes: { overrides: { showcase_account: { enabled: false } } } }",
+        "drive the same four through the plugin door — createRestApiPlugin({ api: { routes: ... } }).start() — so the refusal is proved past both cast hops, not only at the direct constructor",
+        "author each key in a TypeScript source and run the package typecheck; capture the tsc diagnostic",
+        "control: construct with { routes: {} } and confirm it succeeds and normalizes to an empty object — the tombstones refuse KEYS, not the block",
+        "control: construct with { routes: { someUnknownKey: 1 } } and confirm it is silently STRIPPED — the schema is not .strict(), which is precisely why the four retired keys had to be tombstoned rather than deleted",
+        "read each refusal's prescription and check it against the surface it names: `enable.apiEnabled` / `enable.apiMethods` on the object for exposure, the object `name` as the canonical path segment, `crud.dataPrefix` for the base path, and a declarative `api` endpoint for a custom path"
+      ],
+      "acceptance": [
+        {
+          "clause": "all four `routes.*` keys are REFUSED at construction whatever value is authored — includeObjects, excludeObjects, nameTransform (both former enum values) and the per-object overrides record",
+          "oracle": "test",
+          "verify": "the constructor throws for each; the message names `routes.<key>`, RouteGenerationConfigSchema and 'was removed in @objectstack/spec 17'. A clean construction for any of them is the silent-strip state ADR-0049 forbids and a P1 FAIL",
+          "evidence": "the four refusal texts"
+        },
+        {
+          "clause": "the refusal survives the plugin path, not only the direct constructor — createRestApiPlugin({ api: { routes: ... } }).start() rejects with the same message",
+          "oracle": "test",
+          "verify": "pnpm --filter @objectstack/rest exec vitest run src/rest-sub-config-parse-not-cast.test.ts — green (§B drives a tombstone through the plugin path, §E drives all four routes.* keys); reproduce one leg in the harness",
+          "evidence": "test output + the harness rejection"
+        },
+        {
+          "clause": "each prescription names a replacement that actually exists today: exposure moved onto the object (enable.apiEnabled hides it 404, enable.apiMethods whitelists 405), the object name IS the path segment so there is no transform to configure, the base path is crud.dataPrefix, and a custom path is a declarative `api` endpoint",
+          "oracle": "test",
+          "verify": "for each prescription, confirm the named key/route exists in the shipped surface (the enable keys on the object schema, dataPrefix on CrudEndpointsConfigSchema, the object_operation endpoint type). A prescription pointing at something that does not exist is a documentation FAIL even though the refusal itself is correct",
+          "evidence": "the four prescription-to-surface mappings"
+        },
+        {
+          "clause": "authoring any of the four is ALSO a tsc error, not only a runtime refusal — the retiredKey mechanism closes the authoring door at build time",
+          "oracle": "build",
+          "verify": "the package typecheck fails on the authored key and the diagnostic points at it; a clean typecheck with a runtime-only refusal is a partial door and is recorded as such",
+          "evidence": "the tsc diagnostics"
+        },
+        {
+          "clause": "the block itself is still declared: `routes: {}` constructs cleanly and normalizes to an empty object, and an unknown key inside it is stripped rather than refused — the non-strict parse that makes the tombstones necessary",
+          "oracle": "test",
+          "verify": "both controls hold; if `routes: {}` throws, the retirement over-reached and every embedder that kept an empty block breaks",
+          "evidence": "the two control results"
+        }
+      ],
+      "negative": [
+        "a `routes.*` key that parses CLEAN anywhere — direct constructor, plugin path, or tsc — is the silent fourth state ADR-0049/0078 forbid, and the more dangerous direction: excludeObjects: ['sys_log'] reading as accepted would leave an operator believing an object is off the REST surface when every route is still mounted",
+        "⛔ do not score this item from the SCHEMA's own unit tests alone: packages/spec pins the schema, and what this item asks is whether the SERVER runs it — the two were separate for as long as the sub-objects were cast instead of parsed"
+      ],
+      "variants": [
+        "tombstone:includeObjects",
+        "tombstone:excludeObjects",
+        "tombstone:nameTransform",
+        "tombstone:overrides"
+      ],
+      "traps": [
+        "absence-inference",
+        "stale-dist"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/rest/src/rest-sub-config-parse-not-cast.test.ts (§E pins all four routes.* refusals, the empty-block control and the plugin-path leg)"
+      },
+      "source": [
+        "packages/spec/liveness/route_generation.json (the ADR-0049 ledger this item answers: all four properties dead, removed 2026-09-03 — the sub-object ships nothing but its refusals)",
+        "packages/spec/src/api/rest-server.zod.ts#RouteGenerationConfigSchema (the four retiredKey tombstones and the section note explaining why the block stays declared)",
+        "packages/spec/src/shared/retired-key.ts (the retiredKey mechanism — refuse rather than strip)",
+        "packages/rest/src/rest-server.ts#parseDeclaredSubConfig (the construction-time refusal and its message shape), (normalizeConfig — `routes` threaded as nothing, the seat kept)",
+        "#14691 (the retirement) · #14369 (the liveness census that found the block read by nothing) · ADR-0049 enforce-or-remove · Prime Directive #6 (the object name is the canonical id on every surface)",
+        "sibling clause: api-backend.enforce-or-remove-authoring-gates (the same mechanism sampled across the ADR-0087 registries; this item is the REST-config instance, where the whole sub-object is tombstones)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-09-04",
+          "change": "new — `route_generation` was UNCLASSIFIED in coverage.json and is the one of the four kinds with no live property left: all four selectors were retired under ADR-0049 on 2026-09-03. Authored rather than waived because the retirement is itself the shipped behaviour — the sub-object stays declared so an authored key is refused with its prescription instead of silently stripped, and that refusal is exactly what a checklist can drive. The prescription-accuracy clause exists because a correct refusal pointing at a replacement that does not exist would still leave the operator stuck",
+          "ref": "#14961"
         }
       ]
     }

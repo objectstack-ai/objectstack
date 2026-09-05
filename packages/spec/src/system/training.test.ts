@@ -48,7 +48,6 @@ describe('TrainingCourseSchema', () => {
       title: 'Information Security Fundamentals',
       description: 'Annual security awareness training for all employees',
       category: 'security_awareness',
-      durationMinutes: 60,
       targetRoles: ['all_employees'],
     });
 
@@ -63,10 +62,8 @@ describe('TrainingCourseSchema', () => {
       title: 'Phishing Awareness Training',
       description: 'Recognize and report phishing attempts',
       category: 'phishing_awareness',
-      durationMinutes: 30,
       mandatory: true,
       targetRoles: ['all_employees', 'contractors'],
-      validityDays: 365,
       passingScore: 80,
       version: '2.0',
     };
@@ -87,21 +84,23 @@ describe('TrainingCourseSchema', () => {
         title: `${category} Training`,
         description: `Training for ${category}`,
         category,
-        durationMinutes: 30,
         targetRoles: ['all'],
       })).not.toThrow();
     });
   });
 
-  it('should reject invalid duration', () => {
+  it('REFUSES an authored `durationMinutes` — a retiredKey() tombstone since #14477 (ADR-0049)', () => {
+    // The full refusal envelope (path, code, prescription) is pinned in
+    // `deadline-keys-retirement.test.ts`; this keeps the family suite honest
+    // about the shape it parses: any value, not only `0`, is refused.
     expect(() => TrainingCourseSchema.parse({
       id: 'COURSE-001',
       title: 'Test',
       description: 'Test',
       category: 'other',
-      durationMinutes: 0,
+      durationMinutes: 30,
       targetRoles: ['all'],
-    })).toThrow();
+    })).toThrow(/`TrainingCourse\.durationMinutes` was removed/s);
   });
 
   it('should reject passing score out of range', () => {
@@ -110,7 +109,6 @@ describe('TrainingCourseSchema', () => {
       title: 'Test',
       description: 'Test',
       category: 'other',
-      durationMinutes: 30,
       targetRoles: ['all'],
       passingScore: 101,
     })).toThrow();
@@ -120,7 +118,6 @@ describe('TrainingCourseSchema', () => {
       title: 'Test',
       description: 'Test',
       category: 'other',
-      durationMinutes: 30,
       targetRoles: ['all'],
       passingScore: -1,
     })).toThrow();
@@ -197,18 +194,17 @@ describe('TrainingPlanSchema', () => {
           title: 'Security Awareness',
           description: 'Annual security training',
           category: 'security_awareness',
-          durationMinutes: 60,
           targetRoles: ['all_employees'],
         },
       ],
     });
 
     expect(plan.enabled).toBe(true);
-    expect(plan.recertificationIntervalDays).toBe(365);
+    expect(plan).not.toHaveProperty('recertificationIntervalDays');
     expect(plan.trackCompletion).toBe(true);
-    expect(plan.gracePeriodDays).toBe(30);
+    expect(plan).not.toHaveProperty('gracePeriodDays');
     expect(plan.sendReminders).toBe(true);
-    expect(plan.reminderDaysBefore).toBe(14);
+    expect(plan).not.toHaveProperty('reminderDaysBefore');
   });
 
   it('should accept full plan configuration', () => {
@@ -220,10 +216,8 @@ describe('TrainingPlanSchema', () => {
           title: 'Security Fundamentals',
           description: 'Core security training',
           category: 'security_awareness',
-          durationMinutes: 60,
           mandatory: true,
           targetRoles: ['all_employees'],
-          validityDays: 365,
           passingScore: 80,
         },
         {
@@ -231,24 +225,19 @@ describe('TrainingPlanSchema', () => {
           title: 'Secure Development',
           description: 'Secure coding practices',
           category: 'secure_development',
-          durationMinutes: 120,
           mandatory: true,
           targetRoles: ['developers', 'devops'],
-          validityDays: 365,
           passingScore: 85,
         },
       ],
-      recertificationIntervalDays: 180,
       trackCompletion: true,
-      gracePeriodDays: 14,
       sendReminders: true,
-      reminderDaysBefore: 30,
     });
 
     expect(plan.courses).toHaveLength(2);
-    expect(plan.recertificationIntervalDays).toBe(180);
-    expect(plan.gracePeriodDays).toBe(14);
-    expect(plan.reminderDaysBefore).toBe(30);
+    expect(plan).not.toHaveProperty('recertificationIntervalDays');
+    expect(plan).not.toHaveProperty('gracePeriodDays');
+    expect(plan).not.toHaveProperty('reminderDaysBefore');
   });
 
   it('should accept plan with empty courses', () => {

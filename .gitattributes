@@ -117,8 +117,9 @@
 # artifact that was in NEITHER list, which is how #13646 and #13335 were each found
 # by hand, during a merge. Eleven generators were unaccounted; each now has one.
 #
-# The three rows added here are the ones whose answer was "route": the per-skill
-# reference indexes (#13335) and both halves of the react-blocks contract. Their
+# The two rows added here are the ones whose answer was "route": the per-skill
+# reference indexes (#13335) and the react-blocks contract (#14296 item 3 retired
+# its second, JSON rendering — one artifact now, so one row). Their
 # neighbours got the other answer for reasons recorded per path — the skill docs and
 # the AI skills guide are MIXED (a spliced block in hand-written prose, so a deferral
 # would launder the prose; #14064 added a THIRD answer for the mixed file whose
@@ -152,5 +153,5 @@ docs/audits/2026-07-unknown-key-strictness-ledger.counts.md  merge=os-regen
 content/docs/references/**                                   merge=os-regen
 content/docs/permissions/system-context.mdx                  merge=os-regen
 skills/*/references/_index.md                                merge=os-regen
-skills/objectstack-ui/contracts/react-blocks.contract.json   merge=os-regen
 skills/objectstack-ui/references/react-blocks.md             merge=os-regen
+scripts/platform-object-tenancy-census.json                  merge=os-regen

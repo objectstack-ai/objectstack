@@ -30,8 +30,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { LocalStorageAdapter } from './local-storage-adapter';
-import { S3StorageAdapter } from './s3-storage-adapter';
+import { LocalStorageAdapter } from './local-storage-adapter.js';
+import { S3StorageAdapter } from './s3-storage-adapter.js';
 
 /** Every method name reachable on an instance, own + prototype chain. */
 function reachableMethodNames(instance: object): string[] {

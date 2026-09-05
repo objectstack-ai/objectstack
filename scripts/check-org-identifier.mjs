@@ -203,10 +203,13 @@
 //   ... of them wrong today ............................................ 0
 //   the same literal in the SCANNED (non-test) population ............... 0
 //
-//     packages/spec/src/data/hook.test.ts:619                   #3290 absence pin
-//     packages/plugins/plugin-audit/src/audit-writers.test.ts:1666  absence pin
-//     packages/plugins/plugin-audit/src/comment-access-hooks.test.ts:529  #9691
-//     packages/services/service-storage/src/attachment-access-hooks.test.ts:750
+//   (the file, never a line in it — the recipe above re-derives the position on
+//   every run, and a `file:NNN` pointer written here would rot silently, #15765)
+//
+//     `packages/spec/src/data/hook.test.ts`                                  #3290 absence pin
+//     `packages/plugins/plugin-audit/src/audit-writers.test.ts`              absence pin
+//     `packages/plugins/plugin-audit/src/comment-access-hooks.test.ts`       #9691
+//     `packages/services/service-storage/src/attachment-access-hooks.test.ts`
 //
 // (The recipe reports 5 matches across those 4 files: `hook.test.ts` carries a
 // second one whose `tenantId` sits inside a COMMENT in the literal's body.)
@@ -275,6 +278,34 @@ import { maskComments } from './js-comment-mask.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 
 const ROOTS = ['examples', 'apps', 'packages'];
+
+/**
+ * The population this gate enumerates, declared for
+ * `scripts/pm/dispatch-gates.mjs`.
+ *
+ * `sourceFiles` runs `git ls-files -- examples apps packages` — three SUBTREES,
+ * seeded from the `ROOTS` constant above. The derivation reads SOURCE TEXT and
+ * `hintCovers` refuses a bare single-segment literal by design (accepting them
+ * was priced at +139084 fabricated (gate, file) pairs, because these three words
+ * are path COMPONENTS in dozens of gates that never read those roots), so this
+ * gate declared nothing and was scored `undetermined` for EVERY card: it reached
+ * no dispatch brief and no `--commands` harvest while CI ran it on every pull
+ * request.
+ *
+ * ⛔ Not a whole-tree marker, and this gate is the reason that boundary is
+ * written down. It was held OUT of the whole-tree bucket with a
+ * `ROOT_WALK_RESIDUE_LEDGER` row precisely because the liveness predicate that
+ * vouches for a whole-tree declaration sees a `git ls-files` call and cannot
+ * tell a three-subtree enumeration apart from a repo-wide one — so a whole-tree
+ * marker here would be exactly the mis-declaration that predicate cannot catch.
+ * That ledger row named this declaration as the remedy; landing it clears the
+ * row, and the two moves are coupled by construction (a stale exclusion reds).
+ *
+ * The self-test derives the coupling from `ROOTS` on both sides rather than
+ * re-spelling it, so widening or renaming a root cannot leave this declaration
+ * describing the old population.
+ */
+const ROOT_DIR_WATCH_HINTS = ['examples/**', 'apps/**', 'packages/**'];
 const EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.cts', '.mts'];
 const EXCLUDED = /(^|\/)(node_modules|dist|build|\.next|\.turbo)\//;
 // Dropped WHOLESALE: absence pins and fixtures that CONSTRUCT the removed
@@ -591,7 +622,65 @@ export function countSessionBindings(text, file) {
 // handshake is a flag rather than a returned sentinel.
 let selfTestReachedVerdict = false;
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failed` used to be this self-test's ONLY success condition, so "every case
+// held" and "the cases never ran" printed the same line. Closed the way
+// PR #13487 validated on check-doc-authoring: what is pinned is the registered
+// NAMES, not a number. The floor requires the OPENED set to equal the DECLARED
+// set with each battery at or above its own count.
+//
+// This file declares ONE battery, opened at the top of the self-test body. Its
+// blocks are headed by unmarked prose comments, so it carries fewer than the two
+// named section banners the sectioning criterion needs, and ⛔ a comment is NOT
+// promoted to a section head — that is a judgement per comment this transplant
+// does not make. The hoisted single battery is the shape PR #14896, PR #15003
+// and PR #15217 landed for exactly this case.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The count is a FLOOR, not an equality — adding cases is ordinary work and must
+// not red. A battery BELOW its floor means cases stopped running; the remedy is
+// to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'check-org-identifier self-test': 31,
+  'the dispatch-gates population declaration': 4,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 2;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const batterySeen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+  };
+  battery('check-org-identifier self-test');
+  // The thunk PR #15198 measured: it registers the case and then runs the
+  // existing site VERBATIM, so no assertion condition is inverted or rewritten
+  // and the sink keeps its own semantics. Registration happens whether or not
+  // the site fires, which is what makes the count a floor on cases RUN rather
+  // than a count of failures.
+  const check = (fn) => {
+    registerCase();
+    fn();
+  };
   const BT = String.fromCharCode(96); // backtick, kept out of the literals below
   const cases = [
     // [source, expected offender count, label]
@@ -670,10 +759,12 @@ function selfTest() {
   let failed = 0;
   for (const [src, want, label] of cases) {
     const got = findOffenders(src, 'self-test.ts').length;
-    if (got !== want) {
-      console.error(`  ✗ self-test "${label}": expected ${want} offender(s), got ${got}`);
-      failed++;
-    }
+check(() => {
+      if (got !== want) {
+        console.error(`  ✗ self-test "${label}": expected ${want} offender(s), got ${got}`);
+        failed++;
+      }
+});
   }
 
   // The population invariant is itself a contract: a resolver that discovers
@@ -682,11 +773,89 @@ function selfTest() {
     'function h(ctx) {\n  const sess = ctx.session ?? {};\n  return sess.organizationId;\n}',
     'self-test.ts',
   );
-  if (populated.length !== 1) {
-    console.error(
-      `  ✗ self-test "the binding population is discovered at all": expected 1 binding, got ${populated.length}`,
+check(() => {
+    if (populated.length !== 1) {
+      console.error(
+        `  ✗ self-test "the binding population is discovered at all": expected 1 binding, got ${populated.length}`,
+      );
+      failed++;
+    }
+});
+
+  // ── The dispatch-gates population declaration ────────────────────────────
+  battery('the dispatch-gates population declaration');
+  const declFail = (msg) => { console.error(`  ✗ ${msg}`); failed++; };
+check(() => {
+    if (!ROOTS.filter((r) => !r.includes('/')).every((r) => ROOT_DIR_WATCH_HINTS.includes(`${r}/**`))) {
+      declFail('a separator-less ROOT is not declared in the subtree spelling — a bare root is refused '
+        + 'as too generic, so the hint extractor reads nothing and this gate returns to scoring '
+        + '`undetermined` for every card.');
+    }
+});
+check(() => {
+    if (!ROOT_DIR_WATCH_HINTS.every((h) => ROOTS.includes(h.replace(/\/\*+$/, '')))) {
+      declFail('ROOT_DIR_WATCH_HINTS declares a root this gate does not enumerate — a declaration that '
+        + 'has drifted from the scan replaces a silent gate with a lying one.');
+    }
+});
+check(() => {
+    if (ROOTS.some((r) => ROOT_DIR_WATCH_HINTS.includes(r))) {
+      declFail('the declared form is a ROOTS entry — the bare form is what `git ls-files` takes, and it '
+        + 'is exactly what the hint extractor cannot read.');
+    }
+});
+check(() => {
+    if (ROOT_DIR_WATCH_HINTS.length !== ROOTS.length) {
+      declFail('the declaration is not one hint per enumerated root — a short list reads exactly like '
+        + 'the undetermined verdict it exists to leave.');
+    }
+});
+
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  // This file's sink is the `failed` counter, so the floor speaks its idiom: a
+  // breach prints like any other case failure and reds through the existing
+  // verdict below.
+  const floorFailure = (message) => { console.error(message); failed++; };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned `
+        + `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
     );
-    failed++;
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in `
+        + 'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. `
+          + 'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of `
+          + `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the '
+        + 'number. Find what stopped registering (an early return, a deleted block, a guard that now '
+        + 'skips) and restore it.',
+    );
   }
 
   if (failed) {

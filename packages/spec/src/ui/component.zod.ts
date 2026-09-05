@@ -1,7 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { FilterConditionSchema } from '../data/filter.zod';
 import { ViewFilterRuleSchema, ViewDataSchema } from './view.zod';
 import { InlineActionSchema, ActionLocationSchema } from './action.zod';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
@@ -675,18 +674,17 @@ export const PageTabsProps = strictObject({
      * false candidate a component over).
      *
      * The key is LIVE at the objectui pin this repo builds against
-     * (`.objectui-sha` = `67dadd602`; re-derived at that pin 2026-09-02 —
-     * `containers.tsx` DID change across the move off `d8ec8d6d4`, but that
-     * change lands from `:995` on, below both anchors, so neither moved: the
-     * icon block is still `729-735` and the registration input still `788`,
-     * each re-READ there with the cited text unchanged, never inferred; the
-     * earlier hop off `9602dc820` is the one that moved them, `662-668` →
-     * `729-735` and `721` → `788`): `containers.tsx:729-735`
+     * (`.objectui-sha` = `a472b0716`; re-derived at that pin 2026-09-04 —
+     * `containers.tsx` is byte-identical to the one at `00d3f09c5`, the hop on
+     * which both anchors moved by exactly one line (the icon block from
+     * `729-735`, the registration input from `788`), so NO anchor moved here;
+     * both were re-READ at the new pin with the cited text unchanged rather
+     * than inferred from that identity): `containers.tsx:730-736`
      * renders
      * `{item.icon && <LazyIcon name={item.icon} …/>}` inside the
      * `TabsTrigger`, left of the label span (`mr-1.5 h-3.5 w-3.5 shrink-0
      * opacity-70`, `aria-hidden`), and the renderer's registration publishes
-     * the key to the Studio block designer at `:788` (the `items` input,
+     * the key to the Studio block designer at `:789` (the `items` input,
      * documented as `[{ label, value?, icon?, count?, visibleWhen?, children
      * }]`).
      *
@@ -1735,18 +1733,17 @@ export const PageAccordionProps = strictObject({
      * re-derive the same false candidate).
      *
      * The key is LIVE at the objectui pin this repo builds against
-     * (`.objectui-sha` = `67dadd602`; re-derived at that pin 2026-09-02 —
-     * `containers.tsx` DID change across the move off `d8ec8d6d4`, but that
-     * change lands from `:995` on, below both anchors, so neither moved: the
-     * icon block is still `918-924` and the registration input still `965`,
-     * each re-READ there with the cited text unchanged, never inferred; the
-     * earlier hop off `9602dc820` is the one that moved them, `851-857` →
-     * `918-924` and `898` → `965`): `containers.tsx:918-924`
+     * (`.objectui-sha` = `a472b0716`; re-derived at that pin 2026-09-04 —
+     * `containers.tsx` is byte-identical to the one at `00d3f09c5`, the hop on
+     * which both anchors moved by exactly one line (the icon block from
+     * `918-924`, the registration input from `965`), so NO anchor moved here;
+     * both were re-READ at the new pin with the cited text unchanged rather
+     * than inferred from that identity): `containers.tsx:919-925`
      * renders
      * `{item.icon && <LazyIcon name={item.icon} …/>}` inside the
      * `AccordionTrigger`, grouped with the label in the trigger's one wrapping
      * span, and the renderer's registration publishes the key to the Studio
-     * block designer at `:965` (the `items` input, documented as
+     * block designer at `:966` (the `items` input, documented as
      * `[{ label, icon?, collapsed?, children }]`).
      *
      * Vocabulary is Lucide, resolved through objectui's `LazyIcon`
@@ -1943,15 +1940,22 @@ export const ElementButtonPropsSchema = lazySchema(() => strictObject({
    * the button.
    *
    * The key is LIVE at the objectui pin this repo builds against
-   * (`.objectui-sha` = `67dadd602`; re-derived at that pin 2026-09-02 —
-   * `button.tsx` and `resolve-icon.ts` are both byte-identical to the ones at
-   * `d8ec8d6d4` (and at `9602dc820` before it) and every anchor below is
-   * unmoved, each one re-READ at the new pin rather than carried on that
-   * identity (#10274). The read point MOVED
-   * rather than died on the earlier hop onto `9602dc820`, which is why the
-   * anchors below span a second file): `components/src/renderers/form/
-   * button.tsx:36` resolves `schema.icon` through the shared `resolveIcon`,
-   * and `:57` / `:59` render it on either side of the label per
+   * (`.objectui-sha` = `a472b0716`; re-derived at that pin 2026-09-04 — both
+   * files, `resolve-icon.ts` and `button.tsx`, are byte-identical to the ones
+   * at `00d3f09c5`, so no anchor MOVED; the re-READ still corrected two that
+   * had been wrong since they were written — the registration's input list and
+   * its `defaultProps`, see the last paragraph of this block. The hop onto
+   * `00d3f09c5` was the one that moved this record's SUBSTANCE rather than
+   * only its line numbers: `resolve-icon.ts` was restructured (110 insertions)
+   * so the resolution runs through a named `describeIconLookup` seam, and its
+   * tokeniser accepts more spellings than this record used to claim — see the
+   * corrected breakdown below. Every anchor below was re-READ at the new pin,
+   * never carried (#10274); the read point first MOVED rather than died on the
+   * earlier hop onto `9602dc820`, which is why the anchors span a second
+   * file):
+   * `components/src/renderers/form/
+   * button.tsx:43` resolves `schema.icon` through the shared `resolveIcon`,
+   * and `:72` / `:74` render it on either side of the label per
    * `iconPosition` (`mr-2 h-4 w-4` left, `ml-2 h-4 w-4` right), both
    * suppressed while `loading`.
    *
@@ -1959,11 +1963,16 @@ export const ElementButtonPropsSchema = lazySchema(() => strictObject({
    * this surface use — it is the `action:*` resolver, and the two accept
    * different spellings:
    *   - here: `resolveIcon`
-   *     (`components/src/renderers/action/resolve-icon.ts:30-35`) →
-   *     `toPascalCase`, which splits on `-` only, then a one-entry rename map
-   *     (`Home` → `House`), both at `:14-24` → `icons[name]` from
-   *     `lucide-react`. An unknown name resolves to `null` and the button
-   *     renders with NO icon and no diagnostic anywhere.
+   *     (`components/src/renderers/action/resolve-icon.ts:129-132`) delegates
+   *     to `describeIconLookup` (`:117-120`), which PascalCases through
+   *     `toPascalCase` (`:100-105`) and then applies a one-entry rename map
+   *     (`Home` becomes `House`, `:90-92`) before the `icons[key]` lookup from
+   *     `lucide-react`. ⚠️ The tokeniser splits on hyphen, underscore OR
+   *     whitespace (`/[-_\s]+/`) as of this pin; this record previously said
+   *     "splits on `-` only", which was true when written and is not now — a
+   *     re-READ caught it, a line-number refresh would not have. An unknown
+   *     name still resolves to `null` and the button renders with NO icon and
+   *     no diagnostic anywhere.
    *   - `LazyIcon` / `getLazyIcon` (`components/src/lib/lazy-icon.tsx:66-92`):
    *     normalises to kebab-case, checks the name against Lucide's own name
    *     list, and degrades an unknown name to the `Database` glyph.
@@ -1979,9 +1988,12 @@ export const ElementButtonPropsSchema = lazySchema(() => strictObject({
    * behaviour promised above is the same on both sides of that move.
    *
    * Also measured at the same pin: the renderer's registration publishes no
-   * `icon` input (`button.tsx:70-87` lists `label`, `variant`, `size`,
-   * `className`; `:88-92` is `defaultProps`), so the Studio block designer
-   * does not offer the key. Unpublished is not unread — the header `icon`
+   * `icon` input (`button.tsx:85-102` lists `label`, `variant`, `size`,
+   * `className`; `:103-107` is `defaultProps`), so the Studio block designer
+   * does not offer the key. Those two anchors read `70-87` / `88-92` until the
+   * `a472b0716` re-measure: wrong since written rather than shifted —
+   * `button.tsx` is byte-identical at `00d3f09c5` and `a472b0716`, so only a
+   * re-READ could find them and a line-number refresh never would (#10274). Unpublished is not unread — the header `icon`
    * above is refused for the second, not the first, and this docblock exists
    * to hold them apart.
    */
@@ -2174,7 +2186,39 @@ export const ElementRecordPickerPropsSchema = lazySchema(() => strictObject({
   valueField: z.string().optional().describe('Field whose value is written into the bound page variable (default `id`)'),
   /** Control label rendered above the select. */
   label: I18nLabelSchema.optional().describe('Control label rendered above the select'),
-  filter: FilterConditionSchema.optional().describe('Filter criteria for available records'),
+  /**
+   * Filter rules narrowing which records the picker offers — the
+   * `ViewFilterRule` ARRAY form, `[{ field, operator, value }, ...]`, the one
+   * filter orthography the map's array-declared `filter` doors share
+   * (`record:related_list`, its nested Add-affordance picker, and — since
+   * #12039 Key 2 — `element:number`; the four `object-*` blocks declare
+   * `filter` as `z.unknown()`, no orthography at all — #15449). Until #14406
+   * this entry alone still said `FilterConditionSchema`, the MongoDB-style
+   * record form: the last record-form `filter` in `ComponentPropsMap` after
+   * the ui#6206 ruling (2026-08-25, Option B, verbatim 「同意」: one filter
+   * orthography platform-wide).
+   *
+   * Sequenced measurement-first, as the `element:number` convergence had to
+   * be (the 2026-08-25 Option-A ordering ruling): the read path was measured
+   * at the objectui pin (`00d3f09c`) before this declaration moved. The
+   * renderer hands the value to `query.$filter` and calls `adapter.find()`
+   * (`components/src/renderers/basic/record-picker.tsx`);
+   * `ObjectStackAdapter.convertQueryParams` lowers an ARRAY `$filter` through
+   * `translateFilterArray` — `[{ field, operator, value }]` → filter AST
+   * tuples (`data-objectstack/src/index.ts`) — the same door every list view's
+   * stored rule array already takes, and the engine lowers the tuples before
+   * the driver (`objectql/src/engine-filter-array-lowering.test.ts`). Nothing
+   * on that path parses `properties` against the installed spec, so no
+   * refusal stands between an authored array and the query. The record form
+   * is refused at `filter`; the migration prescription is the
+   * `element-record-picker-filter-rule-array` semantic entry.
+   *
+   * The binding-level `dataSource.filter` this shorthand yields to
+   * (`ds.filter ?? props.filter`) is `ElementDataSourceSchema`'s key, not this
+   * entry's subject.
+   */
+  filter: z.array(ViewFilterRuleSchema).optional()
+    .describe('Filter rules narrowing which records the picker offers — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography the array-declared `filter` doors of this map share. The MongoDB-style record form is refused — see migration `element-record-picker-filter-rule-array`. The binding-level `dataSource.filter` wins outright when both are set'),
   /**
    * Row order (#6276). The flat shorthand for `dataSource.sort`, and the same
    * shape — `SortItemSchema[]`, the pairs the renderer forwards to the query as
@@ -2250,6 +2294,15 @@ export const ElementRecordPickerPropsSchema = lazySchema(() => strictObject({
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 }));
 export type ElementRecordPickerProps = z.input<typeof ElementRecordPickerPropsSchema>;
+/**
+ * ADR-0122: the parsed state differs from the authored state on exactly one
+ * key — `filter` carries `ViewFilterRuleSchema` (the ui#6206 convergence,
+ * #14406), whose own input ≠ infer (`operator` is normalized on parse, which
+ * is why `ViewFilterRuleParsed` exists). So `element:record_picker` leaves
+ * the type-alias convention pin's isomorphic family (the Iso819 line deleted
+ * with this alias), the route `element:number` took one entry earlier.
+ */
+export type ElementRecordPickerPropsParsed = z.infer<typeof ElementRecordPickerPropsSchema>;
 
 /**
  * A single-line free-text input — the data-entry half of an SDUI page (Airtable
@@ -2528,14 +2581,14 @@ export const ObjectMetricPropsSchema = lazySchema(() => strictObject({
    * same record for the metric tile.
    *
    * The key is LIVE at the objectui pin this repo builds against
-   * (`.objectui-sha` = `67dadd602`; re-derived at that pin 2026-09-02 — all
+   * (`.objectui-sha` = `a472b0716`; re-derived at that pin 2026-09-04 — all
    * five files in the chain below, `index.tsx`, `ObjectMetricWidget.tsx`,
    * `MetricWidget.tsx`, `MetricCard.tsx` and `lazy-icon.tsx`, are
-   * byte-identical to the ones at `d8ec8d6d4`, so NO anchor moved — the
-   * `object-metric` registration still begins at `:194` and the icon input
-   * still lands on `:204`. Every anchor below was re-READ at the new pin
-   * rather than inferred from that identity), and the chain runs
-   * three files:
+   * byte-identical to the ones at `00d3f09c5` and at `67dadd602` before it, so
+   * NO anchor moved — the `object-metric` registration still begins at `:194`
+   * and the icon input still lands on `:204`. Every anchor below was re-READ
+   * at the new pin rather than inferred from that identity), and the chain
+   * runs three files:
    * `plugin-dashboard/src/index.tsx:204` publishes it as a designer input
    * (`Icon (Lucide name)`) on the registered `object-metric` block;
    * `ObjectMetricWidget.tsx:142` destructures it and forwards it at `:474` to

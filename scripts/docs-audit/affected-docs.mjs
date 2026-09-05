@@ -221,7 +221,7 @@ import { blank, maskComments, scanSource } from '../js-comment-mask.mjs';
 // remedy is to find what stopped registering.
 const SELF_TEST_BATTERIES = Object.freeze({
   'the ADR-0049 ledger-entry exclusion (#12966)': 33,
-  'the WALK\'s admission decision, against a fake tree (#11866)': 67,
+  'the WALK\'s admission decision, against a fake tree (#11866)': 80,
   'the container qualifier every anchor case below runs under (#13713)': 10,
   'anchor PROVENANCE (#12824)': 12,
   'CONTAINER-QUALIFIED DATA-PROPERTY ANCHORS (option D, #13713)': 20,
@@ -248,11 +248,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the sdk bridge\'s REACH over the declared surface (#9572)': 11,
   '#11178: WHY a row is unreachable, and the two causes that printed as one': 28,
   '`causes` GETS THE SAME TREATMENT, AT BOTH ENDS (#11867)': 16,
+  'the ROUTE SOURCE concept: two kinds, and the runtime-registration guard (#11857)': 24,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 28;
+const SELF_TEST_BATTERY_FLOOR = 29;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -588,19 +589,51 @@ function qualifyDataProperty(inner, outer, surface) {
 }
 
 /**
- * Where route REGISTRARS live. Deliberately a filename convention rather than a hand-kept
- * file list — the same choice the package-root derivation made for the same reason (#4162:
- * a hardcoded list fails again on container number eight). A registrar this misses costs
- * recall on the `sdk` anchor kind only.
+ * A ROUTE SOURCE — a file whose source DECLARES a route, so a change to it may nominate
+ * docs. There are TWO KINDS, and keeping them named apart is the point (#11857, maintainer
+ * ruling 2026-09-04 batch #31):
+ *
+ *   (a) a registration CALL SITE — the filename convention in `CALL_SITE_FILE_RE` below.
+ *       The file that MOUNTS the route on a server at runtime.
+ *   (b) a spec contract DECLARATION — a non-test `packages/**` file whose masked source
+ *       declares a route beside the HTTP method it answers (`ROUTE_METHOD_RE`). The file
+ *       that DECLARES the contract a registration serves.
+ *
+ * ⛔ "REGISTRAR" MUST NOT MEAN BOTH, which is why nothing here is called one any more.
+ * Until this card the word meant kind (a) alone — the recognizer, its docblock and its
+ * `--self-test` all said "the file that registers the route" — and the measured widening
+ * that motivated this change admits five `packages/spec` Zod contract declarations, which
+ * register nothing with anything. Stretching the old word over them would have left one
+ * term denoting two constructs in a tool whose whole job is telling declared surfaces
+ * apart; the ruling made the rename a CONDITION of admitting them, not a tidy-up after.
+ *
+ * WHY KIND (b) IS A SOURCE AND NOT A WIDENING OF KIND (a). The drift check exists to say
+ * "the contract changed, re-verify the manual". A Zod API declaration in `packages/spec`
+ * IS the contract — arguably the better source of truth than the mount that serves it —
+ * so admitting it narrows the class of rows this tool STRUCTURALLY cannot see. It does not
+ * make those files registration call sites, and no convention widening would reach them:
+ * `storage.zod.ts` is not going to be renamed `storage-routes.ts`.
+ *
+ * ⛔ THE TWO KINDS ARE NOT INTERCHANGEABLE AT THE ADMISSION TEST. Kind (a) is admitted by
+ * its NAME and contributes every tail it declares; kind (b) is admitted by EVIDENCE and
+ * contributes only the tails carrying a runtime-registration signal — see
+ * `ROUTE_METHOD_RE` for what that buys and what it keeps out.
+ */
+
+/**
+ * Kind (a): where route registration CALL SITES live. Deliberately a filename convention
+ * rather than a hand-kept file list — the same choice the package-root derivation made for
+ * the same reason (#4162: a hardcoded list fails again on container number eight). A call
+ * site this misses costs recall on the `sdk` anchor kind only.
  *
  * ⛔ THE SECOND HALF OF THAT SENTENCE USED TO READ "and `anchorlessChanges` reports the
  * silence". It does not, and #9572 measured why: `anchorlessChanges` fires per changed
- * FILE that yielded ZERO anchors, while a handler change in a missed registrar yields its
+ * FILE that yielded ZERO anchors, while a handler change in a missed call site yields its
  * own symbol anchors, so the run is never anchorless and prints nothing. The silence was
  * reported by no field at all until `bridgeCoverage` existed. Keep that distinction in
  * mind before leaning on any other field to "report" a gap: the populations differ.
  */
-const REGISTRAR_FILE_RE = /(?:^|\/)(?:[\w.-]*route[\w.-]*|[\w.-]*-server)\.ts$/;
+const CALL_SITE_FILE_RE = /(?:^|\/)(?:[\w.-]*route[\w.-]*|[\w.-]*-server)\.ts$/;
 
 /** Route LEDGERS — the declared `route` ⟷ `client` tables the `sdk` anchor rides on. */
 const LEDGER_FILE_RE = /(?:^|\/)[\w.-]*route-ledger\.ts$/;
@@ -622,8 +655,46 @@ const selectsFrom = (tails) => {
   return (route) => tailList.some((t) => route.replace(/^[A-Z*]+\s+/, '').endsWith(t));
 };
 
-/** How far past a `path:` line a registrar's handler body is scanned for identifiers. */
-const REGISTRAR_HANDLER_WINDOW = 150;
+/** How far past a `path:` line a route source's handler body is scanned for identifiers. */
+const ROUTE_SOURCE_HANDLER_WINDOW = 150;
+
+/**
+ * THE RUNTIME-REGISTRATION SIGNAL that admits a kind (b) route source: the declaration
+ * names the HTTP METHOD it answers, beside the path it answers on.
+ *
+ * A route declaration says WHAT VERB it serves; a data payload that happens to carry a
+ * `path:` key does not. That is the whole separation, and it is EVIDENCE READ OFF THE
+ * DECLARATION rather than a hand-kept exclusion list — the same choice, for the same
+ * reason, as `CALL_SITE_FILE_RE` and `packageRootOf` (#4162: a list fails again on the
+ * eighth one).
+ *
+ * ⛔ THE EXCLUSION THIS REPLACES WOULD HAVE BEEN A FILE NAME. The one non-route the
+ * evidence route admits on today's tree is `packages/spec/src/conversions/registry.ts`,
+ * whose `/api/v1/health` is a connector-action INPUT inside an automation fixture —
+ * `config: { input: { path: '/api/v1/health' } }`. Naming that file would have kept it out
+ * and taught the recognizer nothing; the signal keeps out its whole CLASS. Measured on
+ * `460134af8`: of that file's 61 literal `path:` sites, ZERO carry an HTTP method, while
+ * the five spec contract declarations carry one at 61 of their 62 sites — and the 62nd is
+ * a site whose `method:` sits five lines up behind a JSDoc block, which the blank-skipping
+ * below reaches. The separation is total at every lookaround from 1 to 6, so the number is
+ * not load-bearing; it is a margin, not a threshold.
+ *
+ * ⚠️ THIS IS AN ADMISSION TEST, NOT A REACH TEST. It runs per SITE and only for kind (b).
+ * Kind (a) is untouched — a call site admitted by name still contributes every tail it
+ * declares, exactly as before this card, so no reach this tool had can be lost here.
+ */
+const ROUTE_METHOD_RE = /(?:^|[\s{,(])method\s*:\s*(['"`])(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\1/i;
+
+/**
+ * How many NON-BLANK lines either side of a `path:` site are read for the signal above.
+ *
+ * Non-blank is what makes this a property-list test rather than a line-distance one:
+ * `maskComments` blanks a comment to whitespace WITHOUT moving any line, so a JSDoc
+ * between `method:` and `path:` reads as blank here and the two properties stay adjacent
+ * — which is exactly the shape of the one site in `plugin-rest-api.zod.ts` that a naive
+ * line-distance window misses.
+ */
+const ROUTE_METHOD_LOOKAROUND = 4;
 
 /**
  * Above this many routes, a changed symbol is a CROSS-CUTTING helper rather than one
@@ -689,7 +760,7 @@ const OCLIF_COMMANDS_DIR = 'src/commands';
  * inside the prose it describes and is deleted with it. That is the whole difference from
  * the hand-kept registry of canonical-rule sites #9282 considered and rejected — a second
  * source of truth beside the rule drifts from it silently (the same reason `packageRootOf`,
- * `REGISTRAR_FILE_RE` and `commandIdFor` are all derived rather than listed).
+ * `CALL_SITE_FILE_RE` and `commandIdFor` are all derived rather than listed).
  *
  * The opt-in itself is deliberate and is the only authored bit. Deriving from EVERY doc
  * comment in `packages/**` would hand the corpus-share guard a flood to filter rather than
@@ -852,14 +923,14 @@ if (args.includes('--self-test')) {
 // a complete read) is broken rather than clean, and no such verdict can fire on a tree
 // where the scan works at all.
 if (args.includes('--bridge-coverage')) {
-  const { registrarFiles, sourceFiles, ledgers, registrarByTail } = scanRouteSurface();
+  const { routeSources, sourceFiles, ledgers, routeSourceByTail } = scanRouteSurface();
   // THE CEILING (#11178) — read lazily off the walk this scan already did, so the census
   // holds one file's source at a time rather than the tree's. Since #11867 the PHASE 2
   // advisory run pays for it too, through this same `ceilingTailsFrom` — one derivation,
   // so the two paths cannot report the same three buckets from two populations.
   const ceiling = ceilingTailsFrom(sourceFiles);
-  const coverage = bridgeCoverageFrom(ledgers, registrarByTail.keys(), ceiling.keys());
-  const selects = selectsFrom(registrarByTail.keys());
+  const coverage = bridgeCoverageFrom(ledgers, routeSourceByTail.keys(), ceiling.keys());
+  const selects = selectsFrom(routeSourceByTail.keys());
   const causeOf = new Map(coverage.ledgers.map((l) => [l.file, l.cause]));
   // Through the one definition, per tail, so naming a witness cannot drift from the rule
   // that decided the row was remediable in the first place (⛔ never restate the suffix test).
@@ -867,7 +938,7 @@ if (args.includes('--bridge-coverage')) {
   if (asJson) {
     process.stdout.write(JSON.stringify({
       ...coverage,
-      registrarFiles: registrarFiles.filter((f) => !LEDGER_FILE_RE.test(f)),
+      routeSources,
       unreachableRows: ledgers.flatMap(({ file, rows }) =>
         rows.filter((r) => r.client && !selects(r.route)).map((r) => {
           const witnesses = witnessesFor(r.route);
@@ -880,7 +951,14 @@ if (args.includes('--bridge-coverage')) {
     }, null, 2) + '\n');
   } else {
     console.log(`sdk route bridge — reach over the declared client-bound surface`);
-    console.log(`  registrar files scanned .... ${registrarFiles.filter((f) => !LEDGER_FILE_RE.test(f)).length}`);
+    // BOTH KINDS, NAMED, NEVER ONE OPAQUE TOTAL (#11857). The two are admitted by
+    // different tests — a filename for one, evidence for the other — so a count that
+    // merged them would hide exactly the movement this card exists to make legible: a
+    // contract declaration appearing or disappearing reads as "the convention changed".
+    const byKind = (k) => routeSources.filter((r) => r.kind === k).length;
+    console.log(`  route sources scanned ...... ${routeSources.length}`);
+    console.log(`      registration call sites .${String(byKind('call-site')).padStart(4)}   admitted by the filename convention`);
+    console.log(`      contract declarations ...${String(byKind('contract')).padStart(4)}   admitted by evidence: a route declared beside its HTTP method`);
     console.log(`  route tails produced ....... ${coverage.tails}`);
     console.log(`  ledger files ............... ${coverage.ledgers.length}`);
     // BOTH HALVES OF THE FRACTION, ALWAYS. A bare "221" cannot be told apart from a 221
@@ -905,7 +983,7 @@ if (args.includes('--bridge-coverage')) {
     // moves it by zero rows. That misreading is the reason this split exists — it aimed a
     // whole card at widening a recognizer that was never the constraint.
     const CAUSE_NOTE = {
-      'no-in-repo-registrar': () => 'NO in-repo registrar for ANY row — discovery cannot reach this surface',
+      'no-in-repo-declaration': () => 'NO in-repo declaration for ANY row — discovery cannot reach this surface',
       'discovery-gap': (l) => `all ${l.remediable} remediable by discovery`,
       'undecided': (l) => `${l.remediable} remediable by discovery, ${l.unwitnessed} undecided`,
       'no-client-surface': () => 'no client-bound rows to reach',
@@ -921,11 +999,11 @@ if (args.includes('--bridge-coverage')) {
     // fraction is: remediable + structural + undecided === UNREACHABLE, so a reader can see
     // it stay whole, and a bucket that starts absorbing another cannot do it quietly.
     if (coverage.causes.measured) {
-      console.log(`    why — against every \`path:\` any packages/** file declares (${coverage.causes.ceilingTails}-tail ceiling vs the ${coverage.tails} the filename convention yields):`);
+      console.log(`    why — against every \`path:\` any packages/** file declares (${coverage.causes.ceilingTails}-tail ceiling vs the ${coverage.tails} the two route-source kinds yield):`);
       const n = (v) => String(v).padStart(4);
-      console.log(`        remediable by discovery ..${n(coverage.causes.remediable)}   an in-repo file declares the row's path; the convention did not scan that file`);
-      console.log(`        NO in-repo registrar .....${n(coverage.causes.structural)}   on a ledger where not ONE row is declared in-repo — declared upstream and catch-all-mounted, so no discovery change reaches it`);
-      console.log(`        undecided ................${n(coverage.causes.undecided)}   no in-repo declaration, on a ledger that HAS in-repo registrars — absence and an unreadable spelling are not distinguishable here`);
+      console.log(`        remediable by discovery ..${n(coverage.causes.remediable)}   an in-repo file declares the row's path; NEITHER route-source kind admitted that file`);
+      console.log(`        NO in-repo declaration ...${n(coverage.causes.structural)}   on a ledger where not ONE row is declared in-repo — declared upstream and catch-all-mounted, so no discovery change reaches it`);
+      console.log(`        undecided ................${n(coverage.causes.undecided)}   no in-repo declaration, on a ledger that HAS in-repo route sources — absence and an unreadable spelling are not distinguishable here`);
     } else {
       console.log(`    why ........................ ${coverage.causes.reason}`);
     }
@@ -1203,7 +1281,7 @@ const liveManifestIo = {
  * from paths — topic = directory, command = filename — so the machine-readable registry
  * this anchor kind needs ALREADY EXISTS as the convention, and a hand-kept ledger beside
  * it would be a second source of truth that drifts silently (the same reasoning that made
- * `packageRootOf` and `REGISTRAR_FILE_RE` filesystem-derived rather than listed).
+ * `packageRootOf` and `CALL_SITE_FILE_RE` filesystem-derived rather than listed).
  *
  * Shapes it handles, all mechanically:
  *   - `build.ts`             → `build`               (a top-level command)
@@ -1597,6 +1675,28 @@ function symbolAnchorsFromSource(text, changed, surface = liveContainerSurface()
 }
 
 /**
+ * Does the `path:` site at `i` carry the runtime-registration signal — an HTTP `method:`
+ * inside its own property list? See `ROUTE_METHOD_RE` for why the verb is the evidence.
+ *
+ * Reads OUTWARD over NON-BLANK lines in both directions, plus the site's own line (a
+ * one-line `{ method: 'GET', path: '/api/x' }` is one property list, not two). `lines`
+ * must already be MASKED — the blank-skipping is what steps over a JSDoc sitting between
+ * the two properties, and on unmasked source those lines are not blank.
+ */
+function hasRouteMethodSignal(lines, i) {
+  if (ROUTE_METHOD_RE.test(lines[i])) return true;
+  for (const step of [-1, 1]) {
+    let seen = 0;
+    for (let j = i + step; j >= 0 && j < lines.length && seen < ROUTE_METHOD_LOOKAROUND; j += step) {
+      if (!lines[j].trim()) continue;
+      seen++;
+      if (ROUTE_METHOD_RE.test(lines[j])) return true;
+    }
+  }
+  return false;
+}
+
+/**
  * `path:` literals in a route registrar, each mapped to the identifiers its handler body
  * mentions. This is the mechanical half of the SDK bridge: a changed protocol method
  * appears in the handler of the route it serves, which the ledger then binds to a client
@@ -1633,7 +1733,7 @@ function symbolAnchorsFromSource(text, changed, surface = liveContainerSurface()
  * anchor there are DOC-COMMENT-only, so `publishItem`'s behaviour never moved, and the page
  * names none of the three symbols that did.
  */
-function parseRegistrarSource(text) {
+function parseRouteSource(text, { requireMethodSignal = false } = {}) {
   const lines = maskComments(text).split('\n');
   const sites = [];
   for (let i = 0; i < lines.length; i++) {
@@ -1646,14 +1746,18 @@ function parseRegistrarSource(text) {
     // NON-LITERAL `path:` line behave the same way, which is the whole change.
     if (!/(?:^|[\s{,(])path\s*:/.test(lines[i])) continue;
     const m = lines[i].match(/(?:^|[\s{,(])path\s*:\s*([`'"])(.*?)\1/);
-    sites.push({ line: i, tail: m ? routeTailOf(m[2]) : null });
+    sites.push({ line: i, tail: m ? routeTailOf(m[2]) : null, signalled: hasRouteMethodSignal(lines, i) });
   }
   const byTail = new Map();
   for (let k = 0; k < sites.length; k++) {
-    const { line, tail } = sites[k];
-    if (!tail) continue;
+    const { line, tail, signalled } = sites[k];
+    // ⚠️ A SITE DROPPED FOR THE TAIL STILL BOUNDS THE PREVIOUS WINDOW. `next` is read off
+    // the SITES array, never off the tails, so requiring the signal narrows what a file
+    // CONTRIBUTES without moving where any other site's handler window ends (#9503 —
+    // the same reason a `path:` with no literal was always kept in this array).
+    if (!tail || (requireMethodSignal && !signalled)) continue;
     const next = k + 1 < sites.length ? sites[k + 1].line : lines.length;
-    const end = Math.min(next, line + REGISTRAR_HANDLER_WINDOW, lines.length);
+    const end = Math.min(next, line + ROUTE_SOURCE_HANDLER_WINDOW, lines.length);
     let ids = byTail.get(tail);
     if (!ids) byTail.set(tail, (ids = new Set()));
     for (let j = line; j < end; j++) {
@@ -1668,7 +1772,7 @@ function parseRegistrarSource(text) {
  * ignored entirely — the CEILING on what a widened discovery could ever reach (#11178).
  *
  * ⛔ THIS IS NOT A SECOND DISCOVERY ROUTE, and nothing downstream of it selects a row.
- * `REGISTRAR_FILE_RE` is untouched, the bridge still rides on `registrarByTail` alone, and
+ * `CALL_SITE_FILE_RE` is untouched, the bridge still rides on `routeSourceByTail` alone, and
  * the published `reachable` figure is computed exactly where it was. This function exists
  * only so the REPORT can name WHY a row is unreachable, which the report could not do
  * while it had one number for two causes:
@@ -1684,11 +1788,11 @@ function parseRegistrarSource(text) {
  * discovery, whose own remedy was then measured to move the auth ledger by ZERO rows.
  *
  * SUPERSET BY CONSTRUCTION, which is what makes the comparison legitimate: the same
- * `parseRegistrarSource`, over the same walk's files, minus the convention test. So every
+ * `parseRouteSource`, over the same walk's files, minus the convention test. So every
  * tail discovery yields appears here too, and `reachable` can never exceed this ceiling —
  * an invariant `bridgeCoverageFrom` turns into a broken-scan verdict rather than trusting.
  *
- * The `includes('path')` prefilter is a SOUND superset, not a heuristic: `parseRegistrarSource`
+ * The `includes('path')` prefilter is a SOUND superset, not a heuristic: `parseRouteSource`
  * yields a tail only from a line matching `path\s*:` in the MASKED source, and masking
  * replaces bytes with spaces rather than inserting any, so those four bytes must be present
  * in the raw text for any tail to exist. Positive control on `589758d22`: masking all 1930
@@ -1723,7 +1827,7 @@ function maximalTailsFrom(sources) {
   const byTail = new Map();
   for (const { file, text } of sources) {
     if (!text.includes('path')) continue;
-    for (const [tail] of parseRegistrarSource(text)) {
+    for (const [tail] of parseRouteSource(text)) {
       let owners = byTail.get(tail);
       if (!owners) byTail.set(tail, (owners = []));
       owners.push(file);
@@ -1739,7 +1843,7 @@ function maximalTailsFrom(sources) {
  * WHY THIS IS REPORTED AND NOT INFERRED. The bridge's one hop from a changed symbol to
  * `api/client-sdk.mdx` is `registrar tail` ⟶ `ledger row`, and a ledger row no registrar
  * tail can select is STRUCTURALLY unreachable: no symbol change bridges to it, ever. The
- * file's own note on `REGISTRAR_FILE_RE` says a missed registrar "costs recall on the
+ * file's own note on `CALL_SITE_FILE_RE` says a missed registrar "costs recall on the
  * `sdk` anchor kind only, and `anchorlessChanges` reports the silence" — measured on
  * `9ff11921a`, neither half of that holds. `anchorlessChanges` fires per changed FILE
  * with ZERO anchors, and a handler change yields its own symbol anchors, so the run is
@@ -1830,14 +1934,14 @@ function bridgeCoverageFrom(ledgers, tails, maximalTails) {
     // and the plugin mounts them with a single catch-all — and it is derived here rather
     // than asserted, so a ledger that grows an in-repo registrar leaves this bucket by
     // itself. Measured on `589758d22`: exactly one ledger of the seven.
-    else if (hit.length === 0 && witnessed.length === 0) cause = 'no-in-repo-registrar';
+    else if (hit.length === 0 && witnessed.length === 0) cause = 'no-in-repo-declaration';
     else if (unwitnessed.length === 0) cause = 'discovery-gap';
     // ⛔ NOT defaulted into either bucket. This ledger HAS in-repo registrars, so its
     // unwitnessed rows are not the auth shape — but nothing here can tell "no registration
     // site" apart from "a registration site whose path this recognizer cannot read", and
     // rendering that ignorance as either verdict is exactly the #9747 false green.
     else cause = 'undecided';
-    if (cause === 'no-in-repo-registrar') structuralRows += unwitnessed.length;
+    if (cause === 'no-in-repo-declaration') structuralRows += unwitnessed.length;
     else undecidedRows += unwitnessed.length;
     remediableRows += witnessed.length;
     byLedger.push({ file, clientRows: bound.length, reachable: hit.length, unreachable: bound.length - hit.length, rowsParsed: rows.length, routesDeclared, clientsDeclared, declined, outsideCode, cause, remediable: censusMeasured ? witnessed.length : null, unwitnessed: censusMeasured ? unwitnessed.length : null });
@@ -1854,7 +1958,7 @@ function bridgeCoverageFrom(ledgers, tails, maximalTails) {
   // answer, and pinning it would be a false red on an accurate ledger.
   const brokenScan = [];
   if (!ledgers.length) brokenScan.push('no route-ledger file was found at all — the ledger walk selected nothing, so every `sdk` anchor is silently unavailable');
-  if (!tailList.length) brokenScan.push('the registrar scan produced no route tail at all — the symbol → route → sdk bridge cannot fire for any change');
+  if (!tailList.length) brokenScan.push('the route-source scan produced no route tail at all — the symbol → route → sdk bridge cannot fire for any change');
   if (censusBroken) brokenScan.push(censusBroken);
   for (const l of byLedger) {
     if (l.rowsParsed === 0) brokenScan.push(`${l.file} matched the ledger convention but parsed 0 rows — the row recognizer no longer reads this file's shape`);
@@ -1922,7 +2026,7 @@ function bridgeCoverageFrom(ledgers, tails, maximalTails) {
  *
  * ⭐ AND THE EXCLUSION IS RIGHT FOR THE CEILING TOO, which is the question this walk's
  * two consumers make live. `sourceFiles` is the #11178 ceiling population and
- * `registrarFiles` is the bridge's own discovery — one walk, both. It is tempting to
+ * `conventionFiles` is the bridge's own discovery — one walk, both. It is tempting to
  * argue the ceiling wants the WIDEST possible population and so should keep test
  * directories; it does not, because of what the ceiling's verdict MEANS. A row counted
  * `remediable by discovery` is a claim that widening the FILENAME CONVENTION would reach
@@ -1938,10 +2042,14 @@ function bridgeCoverageFrom(ledgers, tails, maximalTails) {
  * @param {string} root  the tree to walk (`packages/**` under it); paths come back
  *   relative to it, which is what `isTestFile` and both file regexes are defined over.
  * @param {(dir: string, opts: {withFileTypes: true}) => Array<{name: string, isFile(): boolean, isDirectory(): boolean}>} [readDir]
- * @returns {{registrarFiles: string[], sourceFiles: string[]}}
+ * @returns {{conventionFiles: string[], sourceFiles: string[]}}
  */
 function walkSourceFiles(root, readDir = readdirSync) {
-  const registrarFiles = [];
+  // The files the FILENAME CONVENTION picks out — route ledgers and kind (a) route
+  // sources, in one list because one walk fills both (#4851). ⛔ NOT the route-source
+  // population: kind (b) is admitted by EVIDENCE in `scanRouteSurface`, off `sourceFiles`,
+  // and no filename convention can see it.
+  const conventionFiles = [];
   // EVERY candidate the convention CHOSE FROM, collected in the same walk (#11178). This
   // is not a second discovery route and nothing downstream of the bridge reads it: it is
   // the population `maximalTailsFrom` measures the convention against, so that "the
@@ -1953,19 +2061,46 @@ function walkSourceFiles(root, readDir = readdirSync) {
     let entries;
     try { entries = readDir(dir, { withFileTypes: true }); } catch { return; }
     for (const e of entries) {
-      if (e.name === 'node_modules' || e.name === 'dist' || e.name === '.turbo') continue;
+      // ⛔ BUILD RESIDUE IS PRUNED AS A CLASS, NOT AS A ROSTER (#15446 / #15457).
+      //
+      // `node_modules` and `dist` are the two named build outputs. Every OTHER tree this
+      // walk has ever had to keep out is a DOT-DIRECTORY: `.turbo` was the first, and
+      // `check:skill-examples` writes three more — `packages/spec/.examples-build/`,
+      // `packages/spec/.examples-build-src/` and `packages/client-react/.examples-build/`
+      // (`.gitignore:66-70` is the source of truth for the set). Those hold ~235 emitted
+      // `.ts` files, five of which declare a `path:` beside an HTTP method and were
+      // therefore admitted by `scanRouteSurface`'s kind (b) as CONTRACT route sources —
+      // reddening this file's own live pin (`every contract declaration admitted is a
+      // packages/spec API declaration`) in any working tree where that gate had run.
+      // CI was green only because `check:docs-audit-scope` happens to run BEFORE
+      // `check:skill-examples` in `lint.yml`; the coupling was latent, not designed.
+      //
+      // Naming the two (three) directories would fix today and leave the next emitted
+      // tree to be discovered the same way, so the rule is the class. It is safe because
+      // it is MEASURED, not assumed: on `6b8c67778`,
+      //   git ls-files 'packages/**' | grep -cE '(^|/)\.[^/]+/'   →   0
+      // no TRACKED file under `packages/**` lives in a dot-directory at all, so this
+      // prunes residue and nothing else. That premise is not left to age quietly — the
+      // live pin in `--self-test` re-measures it on every run and reds the day a tracked
+      // source file appears under one.
+      //
+      // Applied to DIRECTORIES only: a dotfile that is somehow a `.ts` source is still
+      // the file arms' business, not this one's.
       const p = join(dir, e.name);
-      if (e.isDirectory()) { walkSrc(p); continue; }
+      if (e.isDirectory()) {
+        if (e.name === 'node_modules' || e.name === 'dist' || e.name.startsWith('.')) continue;
+        walkSrc(p); continue;
+      }
       if (!e.isFile() || !e.name.endsWith('.ts')) continue;
       // The PATH, never `e.name` — see above.
       const rel = relative(root, p);
       if (isTestFile(rel) || isMigrationLedgerEntry(rel)) continue;
       sourceFiles.push(rel);
-      if (LEDGER_FILE_RE.test(rel) || REGISTRAR_FILE_RE.test(rel)) registrarFiles.push(rel);
+      if (LEDGER_FILE_RE.test(rel) || CALL_SITE_FILE_RE.test(rel)) conventionFiles.push(rel);
     }
   };
   walkSrc(join(root, 'packages'));
-  return { registrarFiles, sourceFiles };
+  return { conventionFiles, sourceFiles };
 }
 
 /**
@@ -1974,12 +2109,24 @@ function walkSourceFiles(root, readDir = readdirSync) {
  * same walk — a second walk here is exactly the drift #4851 billed us for.
  */
 function scanRouteSurface() {
-  const { registrarFiles, sourceFiles } = walkSourceFiles(repoRoot);
+  const { conventionFiles, sourceFiles } = walkSourceFiles(repoRoot);
 
   const ledgers = [];
   const ledgerRows = [];
-  const registrarByTail = new Map();
-  for (const rel of registrarFiles) {
+  const routeSourceByTail = new Map();
+  // Every admitted route source WITH THE KIND THAT ADMITTED IT, so the report can say
+  // which of the two definitions reached a row rather than printing one opaque count.
+  const routeSources = [];
+  const absorb = (byTail) => {
+    for (const [tail, ids] of byTail) {
+      let acc = routeSourceByTail.get(tail);
+      if (!acc) routeSourceByTail.set(tail, (acc = new Set()));
+      for (const id of ids) acc.add(id);
+    }
+  };
+
+  // KIND (a) — the filename convention, unchanged. Ledgers ride the same list.
+  for (const rel of conventionFiles) {
     let text;
     try { text = readFileSync(join(repoRoot, rel), 'utf8'); } catch { continue; }
     if (LEDGER_FILE_RE.test(rel)) {
@@ -1987,15 +2134,42 @@ function scanRouteSurface() {
       ledgers.push({ file: rel, rows, declined, routesDeclared, clientsDeclared, outsideCode });
       ledgerRows.push(...rows);
     }
-    if (REGISTRAR_FILE_RE.test(rel)) {
-      for (const [tail, ids] of parseRegistrarSource(text)) {
-        let acc = registrarByTail.get(tail);
-        if (!acc) registrarByTail.set(tail, (acc = new Set()));
-        for (const id of ids) acc.add(id);
-      }
+    // ⛔ A ROUTE LEDGER IS NOT A ROUTE SOURCE, even though most ledger names match the
+    // call-site convention (`route-ledger.ts` carries the word `route`). A ledger is the
+    // declared TABLE tails are matched INTO; a route source is a file that declares a
+    // route. Before this card the combined convention list meant every ledger was also
+    // parsed as a registrar — harmless, because ledgers declare `route:` rows and not
+    // `path:` sites, but it is the sort of overlap that makes one word mean two things.
+    //
+    // MEASURED, NOT ASSUMED: on `460134af8` all 11 live route ledgers yield ZERO route
+    // tails, so narrowing this predicate moves no tail at all. `--self-test` pins that
+    // against the LIVE tree rather than trusting the sentence, so the day a ledger starts
+    // declaring a `path:` route it reds here instead of losing the tail in silence.
+    if (CALL_SITE_FILE_RE.test(rel) && !LEDGER_FILE_RE.test(rel)) {
+      routeSources.push({ file: rel, kind: 'call-site' });
+      absorb(parseRouteSource(text));
     }
   }
-  return { registrarFiles, sourceFiles, ledgers, ledgerRows, registrarByTail };
+
+  // KIND (b) — the CONTRACT DECLARATION, admitted by evidence (#11857). Same walk, same
+  // parser, same `includes('path')` prefilter that makes `maximalTailsFrom`'s superset
+  // sound: masking replaces bytes with spaces and inserts none, so those four bytes must
+  // be present in the raw text for any tail to exist.
+  //
+  // ⛔ A LEDGER IS NOT A ROUTE SOURCE and a call site is not counted twice — both are
+  // skipped here, so `routeSources` partitions cleanly by kind.
+  for (const rel of sourceFiles) {
+    if (LEDGER_FILE_RE.test(rel) || CALL_SITE_FILE_RE.test(rel)) continue;
+    let text;
+    try { text = readFileSync(join(repoRoot, rel), 'utf8'); } catch { continue; }
+    if (!text.includes('path')) continue;
+    const byTail = parseRouteSource(text, { requireMethodSignal: true });
+    if (!byTail.size) continue;
+    routeSources.push({ file: rel, kind: 'contract' });
+    absorb(byTail);
+  }
+
+  return { conventionFiles, routeSources, sourceFiles, ledgers, ledgerRows, routeSourceByTail };
 }
 
 /**
@@ -2745,13 +2919,13 @@ function selfTest() {
   //
   // ⛔ NON-VACUITY IS THE ENTIRE POINT OF THESE FIXTURES, and it is why none of them is a
   // real repo path. The live population is ZERO — measured on `d63b01436`, the three files
-  // under a test directory that the old walk admitted match neither `REGISTRAR_FILE_RE`
+  // under a test directory that the old walk admitted match neither `CALL_SITE_FILE_RE`
   // nor `LEDGER_FILE_RE` and declare no `path:`, so `--bridge-coverage` is byte-identical
   // across this fix. A pin built from real paths would therefore have passed just as
   // green with the bug in place and pinned NOTHING. Every fixture below is instead a file
   // the BASENAME test admits and the PATH test excludes: `x-route.ts` carries no `.test.`
   // / `.spec.` infix, so under the old call site it was walked, matched
-  // `REGISTRAR_FILE_RE`, and a test double contributed production route tails — the exact
+  // `CALL_SITE_FILE_RE`, and a test double contributed production route tails — the exact
   // failure this is here to keep out. Verified RED against the pre-fix line: 4 registrar
   // files and 6 source files, against the 1 and 2 asserted here.
   battery('the WALK\'s admission decision, against a fake tree (#11866)');
@@ -2770,7 +2944,7 @@ function selfTest() {
     'packages/foo/README.md',                            // not a .ts file
     // #12966. NON-VACUOUS BY CONSTRUCTION, like every fixture above it: neither entry
     // carries a test infix or lives under a test directory, so BOTH are walked under the
-    // previous line and BOTH matched `REGISTRAR_FILE_RE` — an ADR-0049 tombstone
+    // previous line and BOTH matched `CALL_SITE_FILE_RE` — an ADR-0049 tombstone
     // recording that `contributes.routes` was DELETED was being counted as a file that
     // registers routes. Reverting the exclusion turns the two equality checks below red.
     'packages/foo/src/migrations/entries/retired-keys/18.kernel__Manifest__contributes.routes.ts',
@@ -2781,6 +2955,29 @@ function selfTest() {
     // still reach the registrar list. Without it the exclusion could widen to all of
     // `migrations/` and every check here would stay green.
     'packages/foo/src/migrations/runner-route.ts',
+    // #15446 / #15457. THE BUILD-RESIDUE CLASS, and it is non-vacuous by construction
+    // like every fixture above it: not one of these carries a test infix, lives under a
+    // test directory, or is a ledger entry, so under the previous prune roster
+    // (`node_modules` / `dist` / `.turbo` BY NAME) every one of them was walked and
+    // entered `sourceFiles` — which is the population `scanRouteSurface`'s kind (b) reads
+    // for a `path:` beside an HTTP method. That is how ~235 emitted example files became
+    // five CONTRACT route sources and reddened this file's own live pin. All three trees
+    // `check:skill-examples` writes are represented, plus `.turbo` — the arm the class
+    // REPLACED, kept here so the rewrite cannot quietly lose what the roster covered.
+    'packages/spec/.examples-build/docs__api_declarative-endpoints__1.ts',
+    'packages/spec/.examples-build/docs__api_environment-route__1.ts',
+    'packages/spec/.examples-build-src/spec__index__1.ts',
+    'packages/client-react/.examples-build/docs__client__1.ts',
+    'packages/foo/.turbo/route.ts',
+    // ⭐ THE OTHER DIRECTION, and the reason the residue rows above are not vacuous: the
+    // SAME declaration under `packages/spec/src/` is exactly what the walk exists to
+    // reach, so it must still arrive. Excluding the residue by any rule that also took
+    // this file would trade one broken population for another.
+    'packages/spec/src/api/declarative-endpoints.ts',
+    // ⭐ THE OVER-REACH CONTROL for `startsWith('.')` specifically: a directory whose name
+    // merely CONTAINS a dot is ordinary source and must survive. Without it the rule
+    // could widen to "any dotted directory name" and every check here would stay green.
+    'packages/foo/src/api.v2/real-route.ts',
   ];
   const fakeRoot = '/repo';
   const fakeDirs = new Map();
@@ -2803,40 +3000,63 @@ function selfTest() {
   const walked = walkSourceFiles(fakeRoot, fakeReadDir);
   const sorted = (a) => [...a].sort().join(' | ');
   check('walkSourceFiles', 'a registrar-NAMED file under __tests__/ is NOT a registrar — the walk tests the path',
-    'registrarFiles', 'packages/foo/src/migrations/runner-route.ts | packages/foo/src/real-route.ts', sorted(walked.registrarFiles));
+    'conventionFiles', 'packages/foo/src/api.v2/real-route.ts | packages/foo/src/migrations/runner-route.ts | packages/foo/src/real-route.ts', sorted(walked.conventionFiles));
   check('walkSourceFiles', 'and the three test directories contribute nothing to the CEILING population either',
-    'sourceFiles', 'packages/foo/src/engine.ts | packages/foo/src/migrations/runner-route.ts | packages/foo/src/real-route.ts', sorted(walked.sourceFiles));
+    'sourceFiles', 'packages/foo/src/api.v2/real-route.ts | packages/foo/src/engine.ts | packages/foo/src/migrations/runner-route.ts | packages/foo/src/real-route.ts | packages/spec/src/api/declarative-endpoints.ts', sorted(walked.sourceFiles));
   // Per-fixture, so a regression NAMES the arm that came back rather than only the totals.
   const excludedFixtures = [
-    ['packages/foo/src/__tests__/x-route.ts', 'a __tests__/ file matching REGISTRAR_FILE_RE'],
+    ['packages/foo/src/__tests__/x-route.ts', 'a __tests__/ file matching CALL_SITE_FILE_RE'],
     ['packages/foo/src/__mocks__/fake-server.ts', 'a __mocks__/ file matching the `-server` alternative'],
     ['packages/foo/src/__fixtures__/stub-route-ledger.ts', 'a __fixtures__/ file matching LEDGER_FILE_RE'],
     ['packages/foo/src/__tests__/helper.ts', 'a __tests__/ helper with no registrar name'],
     // #11857. NON-VACUOUS BY CONSTRUCTION, exactly as the four above are: neither
     // carries a .test. / .spec. infix, so under the PREVIOUS predicate both were
-    // walked - `stub-route.ts` then matched `REGISTRAR_FILE_RE` and a test fixture
+    // walked - `stub-route.ts` then matched `CALL_SITE_FILE_RE` and a test fixture
     // contributed production route tails, and `engine.bench.ts` entered the ceiling
     // population. Re-admitting either arm breaks the two equality checks above, and
     // these two rows name WHICH arm came back.
-    ['packages/foo/test/fixtures/stub-route.ts', 'a non-underscore test/fixtures/ file matching REGISTRAR_FILE_RE'],
+    ['packages/foo/test/fixtures/stub-route.ts', 'a non-underscore test/fixtures/ file matching CALL_SITE_FILE_RE'],
     ['packages/foo/src/engine.bench.ts', 'a .bench.ts benchmark'],
     // #12966, one row per entry so a regression NAMES which one came back.
     ['packages/foo/src/migrations/entries/retired-keys/18.kernel__Manifest__contributes.routes.ts',
-      'an ADR-0049 retired-keys tombstone matching REGISTRAR_FILE_RE'],
+      'an ADR-0049 retired-keys tombstone matching CALL_SITE_FILE_RE'],
     ['packages/foo/src/migrations/entries/semantic/18.plugin-manifest-contributes-routes-retired.ts',
-      'an ADR-0049 semantic entry matching REGISTRAR_FILE_RE'],
+      'an ADR-0049 semantic entry matching CALL_SITE_FILE_RE'],
     ['packages/foo/src/migrations/entries/semantic/18.plain-rename.ts',
       'a ledger entry with no registrar name — excluded from the CEILING too'],
+    // #15446 / #15457, one row per residue tree so a regression NAMES which one came back.
+    ['packages/spec/.examples-build/docs__api_declarative-endpoints__1.ts',
+      'a check:skill-examples emitted example under packages/spec/.examples-build/'],
+    ['packages/spec/.examples-build/docs__api_environment-route__1.ts',
+      'the same, with a basename that ALSO matches CALL_SITE_FILE_RE'],
+    ['packages/spec/.examples-build-src/spec__index__1.ts',
+      'the SECOND emitted tree, packages/spec/.examples-build-src/ (.gitignore:69)'],
+    ['packages/client-react/.examples-build/docs__client__1.ts',
+      'the THIRD emitted tree, packages/client-react/.examples-build/ (.gitignore:70)'],
+    ['packages/foo/.turbo/route.ts',
+      '.turbo — the named arm the dot-directory CLASS replaced, still pruned'],
   ];
   for (const [rel, label] of excludedFixtures) {
     check('walkSourceFiles', `${label} is walked at all`, rel, false, walked.sourceFiles.includes(rel));
-    check('walkSourceFiles', `${label} reaches the registrar list`, rel, false, walked.registrarFiles.includes(rel));
+    check('walkSourceFiles', `${label} reaches the registrar list`, rel, false, walked.conventionFiles.includes(rel));
   }
   check('walkSourceFiles', 'a genuine registrar still survives the walk', 'packages/foo/src/real-route.ts',
-    true, walked.registrarFiles.includes('packages/foo/src/real-route.ts'));
+    true, walked.conventionFiles.includes('packages/foo/src/real-route.ts'));
   check('walkSourceFiles', 'a migrations/ registrar OUTSIDE entries/ survives — the exclusion is the DIRECTORY class, not the word',
     'packages/foo/src/migrations/runner-route.ts', true,
-    walked.registrarFiles.includes('packages/foo/src/migrations/runner-route.ts'));
+    walked.conventionFiles.includes('packages/foo/src/migrations/runner-route.ts'));
+  // #15446 / #15457, the admitting direction of the residue pair above: the residue copy
+  // is out, the real declaration under `packages/spec/src/` is in. Deleting the prune
+  // reds the exclusion rows; widening it past dot-directories reds this one.
+  check('walkSourceFiles', 'the SAME declaration under packages/spec/src/ IS still admitted — the prune is the RESIDUE, not the name',
+    'packages/spec/src/api/declarative-endpoints.ts', true,
+    walked.sourceFiles.includes('packages/spec/src/api/declarative-endpoints.ts'));
+  check('walkSourceFiles', 'a directory whose name merely CONTAINS a dot is not residue — the rule is the LEADING dot',
+    'packages/foo/src/api.v2/real-route.ts', true,
+    walked.sourceFiles.includes('packages/foo/src/api.v2/real-route.ts'));
+  check('walkSourceFiles', 'and that same file still reaches the registrar list',
+    'packages/foo/src/api.v2/real-route.ts', true,
+    walked.conventionFiles.includes('packages/foo/src/api.v2/real-route.ts'));
   check('walkSourceFiles', 'a .test.ts file is still excluded by the FILE arm', 'packages/foo/src/engine.test.ts',
     false, walked.sourceFiles.includes('packages/foo/src/engine.test.ts'));
   check('walkSourceFiles', 'node_modules/ and dist/ are still pruned', 'packages/foo/{node_modules,dist}/route.ts',
@@ -3353,7 +3573,7 @@ function selfTest() {
   check('changedLineNumbers', 'old-side lines (a REMOVED export still anchors)', 'hunks', JSON.stringify([6376, 13396, 13397]), JSON.stringify(parsed.oldLines));
 
   // The two declared tables the SDK bridge rides on.
-  const registrarSource = [
+  const routeSourceFixture = [
     'this.routeManager.register({',
     "    method: 'GET',",
     '    path: `${metaPath}/:type/:name/audit`,',
@@ -3370,11 +3590,11 @@ function selfTest() {
     '    },',
     '});',
   ].join('\n');
-  const registrar = parseRegistrarSource(registrarSource);
-  check('parseRegistrarSource', 'the audit route is indexed by its tail', 'tail', true, registrar.has('/:type/:name/audit'));
-  check('parseRegistrarSource', 'its handler symbols are captured', 'auditMetaItem', true, !!registrar.get('/:type/:name/audit')?.has('auditMetaItem'));
-  check('parseRegistrarSource', 'a handler does NOT absorb the NEXT route\'s symbols', 'historyMetaItem', false, !!registrar.get('/:type/:name/audit')?.has('historyMetaItem'));
-  check('parseRegistrarSource', 'the second route is indexed too', 'historyMetaItem', true, !!registrar.get('/:type/:name/history')?.has('historyMetaItem'));
+  const registrar = parseRouteSource(routeSourceFixture);
+  check('parseRouteSource', 'the audit route is indexed by its tail', 'tail', true, registrar.has('/:type/:name/audit'));
+  check('parseRouteSource', 'its handler symbols are captured', 'auditMetaItem', true, !!registrar.get('/:type/:name/audit')?.has('auditMetaItem'));
+  check('parseRouteSource', 'a handler does NOT absorb the NEXT route\'s symbols', 'historyMetaItem', false, !!registrar.get('/:type/:name/audit')?.has('historyMetaItem'));
+  check('parseRouteSource', 'the second route is indexed too', 'historyMetaItem', true, !!registrar.get('/:type/:name/history')?.has('historyMetaItem'));
 
   const ledgerSource = [
     'export const REST_ROUTE_LEDGER = [',
@@ -4372,7 +4592,7 @@ function selfTest() {
   // THE CHAIN, each link real and each one but the last correct: a doc-comment line has no
   // declaration of its own and its indent walk climbs past every sibling member to the
   // CLASS, so `RestServer` enters the anchor set (a correct row — three release pages name
-  // that class) → the route bridge accepts it as a bridge symbol → `parseRegistrarSource`
+  // that class) → the route bridge accepts it as a bridge symbol → `parseRouteSource`
   // scans handler windows for the BARE IDENTIFIER and two unrelated handlers call
   // `RestServer.` statics → two route anchors → the ledger maps one to `meta.getBookTree`.
   // Two routes is UNDER `MAX_ROUTES_PER_SYMBOL`, so the cross-cutting cap never saw it.
@@ -4405,10 +4625,10 @@ function selfTest() {
     '    }',
     '}',
   ].join('\n');
-  const bookRegistrar = parseRegistrarSource(serverSource);
-  const bookIds = bookRegistrar.get('/book/:name/tree');
-  check('parseRegistrarSource', 'the mechanism is real: a static-call QUALIFIER lands in the handler window', 'RestServer', true, !!bookIds?.has('RestServer'));
-  check('parseRegistrarSource', 'and so does the handler\'s own implementation symbol', 'anyPermissionSetAudience', true, !!bookIds?.has('anyPermissionSetAudience'));
+  const bookRouteSource = parseRouteSource(serverSource);
+  const bookIds = bookRouteSource.get('/book/:name/tree');
+  check('parseRouteSource', 'the mechanism is real: a static-call QUALIFIER lands in the handler window', 'RestServer', true, !!bookIds?.has('RestServer'));
+  check('parseRouteSource', 'and so does the handler\'s own implementation symbol', 'anyPermissionSetAudience', true, !!bookIds?.has('anyPermissionSetAudience'));
 
   const docCommentLine = 3;   // `* [#9120] Resolve the environment …` — inside the JSDoc
   const methodBodyLine = 6;   // `return this.resolveRequestEnvironmentId(req);`
@@ -4426,8 +4646,8 @@ function selfTest() {
     for (const [tail, ids] of registrarMap) if ([...symbols].some((sym) => ids.has(sym))) tails.push(tail);
     return tails;
   };
-  check('bridge', 'a doc-comment-only edit inside a class selects no route at all', 'tails', JSON.stringify([]), JSON.stringify(tailsSelectedBy(bridgeableAt(serverSource, docCommentLine), bookRegistrar)));
-  check('bridge', 'the pre-fix behaviour, held as the counterfactual: the raw anchor set DID select the book route', 'tails', JSON.stringify(['/book/:name/tree']), JSON.stringify(tailsSelectedBy(anchorsAt(serverSource, docCommentLine), bookRegistrar)));
+  check('bridge', 'a doc-comment-only edit inside a class selects no route at all', 'tails', JSON.stringify([]), JSON.stringify(tailsSelectedBy(bridgeableAt(serverSource, docCommentLine), bookRouteSource)));
+  check('bridge', 'the pre-fix behaviour, held as the counterfactual: the raw anchor set DID select the book route', 'tails', JSON.stringify(['/book/:name/tree']), JSON.stringify(tailsSelectedBy(anchorsAt(serverSource, docCommentLine), bookRouteSource)));
   check('bridge', 'a changed protocol METHOD still selects its own route', 'tails', JSON.stringify(['/:type/:name/audit']), JSON.stringify(tailsSelectedBy(bridgeableAt(protocolSource, 9), registrar)));
 
   // The container/leaf split on the two fixtures the derivation is already pinned against,
@@ -4467,7 +4687,7 @@ function selfTest() {
   // name — that last one is the counterfactual, and it is what stops this block going green
   // because the fixture drifted into carrying no comment at all.
   battery('the handler-window scan reads CODE, never PROSE (#9432)');
-  const commentaryRegistrar = [
+  const commentaryRouteSource = [
     'export class RestServer {',
     '    private registerPublishRoutes() {',
     '        this.routeManager.register({',
@@ -4494,12 +4714,12 @@ function selfTest() {
     '    private describeRegistration() {}',
     '}',
   ].join('\n');
-  const commentary = parseRegistrarSource(commentaryRegistrar);
+  const commentary = parseRouteSource(commentaryRouteSource);
   const publishIds = commentary.get('/:type/:name/publish');
-  check('parseRegistrarSource', 'a leaf the handler actually CALLS is still seen — the bridge is untouched where its premise holds', 'publishMetaItem', true, !!publishIds?.has('publishMetaItem'));
-  check('parseRegistrarSource', 'a leaf named only in an English comment is NOT this route\'s implementation', 'promoteDraftForPublish', false, !!publishIds?.has('promoteDraftForPublish'));
-  check('parseRegistrarSource', 'a `//` inside a STRING opens no comment — this scan rides the shared scanner, not a private regex', 'base + publishMetaItem', true, !!publishIds?.has('base') && !!publishIds?.has('publishMetaItem'));
-  check('parseRegistrarSource', 'a `path:` inside a JSDoc @example is an illustration, not a registration', 'tails', JSON.stringify(['/:type/:name/publish']), JSON.stringify([...commentary.keys()]));
+  check('parseRouteSource', 'a leaf the handler actually CALLS is still seen — the bridge is untouched where its premise holds', 'publishMetaItem', true, !!publishIds?.has('publishMetaItem'));
+  check('parseRouteSource', 'a leaf named only in an English comment is NOT this route\'s implementation', 'promoteDraftForPublish', false, !!publishIds?.has('promoteDraftForPublish'));
+  check('parseRouteSource', 'a `//` inside a STRING opens no comment — this scan rides the shared scanner, not a private regex', 'base + publishMetaItem', true, !!publishIds?.has('base') && !!publishIds?.has('publishMetaItem'));
+  check('parseRouteSource', 'a `path:` inside a JSDoc @example is an illustration, not a registration', 'tails', JSON.stringify(['/:type/:name/publish']), JSON.stringify([...commentary.keys()]));
 
   // The counterfactual, twice: the PRE-FIX scan, verbatim, over the same fixture. Both
   // halves must still be there to be excluded, or this block proves nothing.
@@ -4507,13 +4727,13 @@ function selfTest() {
     const ls = src.split('\n');
     const start = ls.findIndex((l) => l.includes(siteFragment));
     const ids = new Set();
-    for (let j = start; j >= 0 && j < Math.min(ls.length, start + REGISTRAR_HANDLER_WINDOW); j++) {
+    for (let j = start; j >= 0 && j < Math.min(ls.length, start + ROUTE_SOURCE_HANDLER_WINDOW); j++) {
       for (const m of ls[j].matchAll(/[A-Za-z_$][\w$]*/g)) ids.add(m[0]);
     }
     return ids;
   };
-  check('parseRegistrarSource', 'counterfactual: the bare-token scan DID read the prose name out of that window', 'promoteDraftForPublish', true, rawWindowIds(commentaryRegistrar, ':type/:name/publish').has('promoteDraftForPublish'));
-  check('parseRegistrarSource', 'counterfactual: that @example line DID match the registration-site regex', '/api/users/:id', '/api/users/:id', routeTailOf(commentaryRegistrar.split('\n').find((l) => l.includes('/api/users/:id')).match(/(?:^|[\s{,(])path\s*:\s*([`'"])(.*?)\1/)?.[2] ?? ''));
+  check('parseRouteSource', 'counterfactual: the bare-token scan DID read the prose name out of that window', 'promoteDraftForPublish', true, rawWindowIds(commentaryRouteSource, ':type/:name/publish').has('promoteDraftForPublish'));
+  check('parseRouteSource', 'counterfactual: that @example line DID match the registration-site regex', '/api/users/:id', '/api/users/:id', routeTailOf(commentaryRouteSource.split('\n').find((l) => l.includes('/api/users/:id')).match(/(?:^|[\s{,(])path\s*:\s*([`'"])(.*?)\1/)?.[2] ?? ''));
 
   // End to end through the same selection step the bridge runs: a diff confined to the
   // commented-about symbol selects no route, and one on the called symbol still selects its
@@ -4573,7 +4793,7 @@ function selfTest() {
   // which is still the shape the scan cannot see wherever it survives. Kept verbatim
   // for that reason — ⛔ do not "refresh" a hermetic fixture to match today's tree.
   battery('a registration BOUNDS the previous window even when its path is a variable (#9503)');
-  const variablePathRegistrar = [
+  const variablePathRouteSource = [
     'export class RestServer {',
     '    private registerStateRoutes() {',
     "        for (const objectsSegment of ['objects', 'object']) {",
@@ -4602,14 +4822,14 @@ function selfTest() {
     '    }',
     '}',
   ].join('\n');
-  const variablePath = parseRegistrarSource(variablePathRegistrar);
+  const variablePath = parseRouteSource(variablePathRouteSource);
   const stateIds = variablePath.get('/:name/state/:field');
-  check('parseRegistrarSource', 'the site\'s OWN implementation symbol still lands in its window', 'legalNextStates', true, !!stateIds?.has('legalNextStates'));
-  check('parseRegistrarSource', 'a `path:` written in a COMMENT bounds nothing — the boundary rides the same mask the tail does', 'legalNextStates after a commented `path:`', true, !!stateIds?.has('legalNextStates'));
-  check('parseRegistrarSource', 'the NEXT route\'s handler symbol is not this route\'s implementation', 'getMetaItemLayered', false, !!stateIds?.has('getMetaItemLayered'));
-  check('parseRegistrarSource', 'a variable `path:` bounds a window without claiming a tail — the recall half is untouched, not silently faked', 'tails', JSON.stringify(['/:name/state/:field']), JSON.stringify([...variablePath.keys()]));
+  check('parseRouteSource', 'the site\'s OWN implementation symbol still lands in its window', 'legalNextStates', true, !!stateIds?.has('legalNextStates'));
+  check('parseRouteSource', 'a `path:` written in a COMMENT bounds nothing — the boundary rides the same mask the tail does', 'legalNextStates after a commented `path:`', true, !!stateIds?.has('legalNextStates'));
+  check('parseRouteSource', 'the NEXT route\'s handler symbol is not this route\'s implementation', 'getMetaItemLayered', false, !!stateIds?.has('getMetaItemLayered'));
+  check('parseRouteSource', 'a variable `path:` bounds a window without claiming a tail — the recall half is untouched, not silently faked', 'tails', JSON.stringify(['/:name/state/:field']), JSON.stringify([...variablePath.keys()]));
 
-  // The counterfactual: `parseRegistrarSource` verbatim as it stood before this hop —
+  // The counterfactual: `parseRouteSource` verbatim as it stood before this hop —
   // literal `path:` lines are the only sites. Both halves have to be real for the block
   // above to prove anything: the defect must reach the foreign symbol, and it must do so
   // through the boundary and not through the 150-line cap.
@@ -4625,16 +4845,16 @@ function selfTest() {
       const { line, tail } = sites[k];
       if (!tail) continue;
       const next = k + 1 < sites.length ? sites[k + 1].line : ls.length;
-      const end = Math.min(next, line + REGISTRAR_HANDLER_WINDOW, ls.length);
+      const end = Math.min(next, line + ROUTE_SOURCE_HANDLER_WINDOW, ls.length);
       let ids = byTail.get(tail);
       if (!ids) byTail.set(tail, (ids = new Set()));
       for (let j = line; j < end; j++) for (const id of ls[j].matchAll(/[A-Za-z_$][\w$]*/g)) ids.add(id[0]);
     }
     return byTail;
   };
-  const preFix = literalOnlySites(variablePathRegistrar);
-  check('parseRegistrarSource', 'counterfactual: the literal-only site scan DID swallow the next route\'s handler whole', 'getMetaItemLayered', true, !!preFix.get('/:name/state/:field')?.has('getMetaItemLayered'));
-  check('parseRegistrarSource', 'counterfactual: and the fixture is short enough that the 150-line cap is not what stops it', 'lines under the window', true, variablePathRegistrar.split('\n').length < REGISTRAR_HANDLER_WINDOW);
+  const preFix = literalOnlySites(variablePathRouteSource);
+  check('parseRouteSource', 'counterfactual: the literal-only site scan DID swallow the next route\'s handler whole', 'getMetaItemLayered', true, !!preFix.get('/:name/state/:field')?.has('getMetaItemLayered'));
+  check('parseRouteSource', 'counterfactual: and the fixture is short enough that the 150-line cap is not what stops it', 'lines under the window', true, variablePathRouteSource.split('\n').length < ROUTE_SOURCE_HANDLER_WINDOW);
 
   // End to end through the same selection step the bridge runs.
   check('bridge', 'a diff touching only the FOREIGN handler\'s symbol selects no route', 'tails', JSON.stringify([]), JSON.stringify(tailsSelectedBy(new Set(['getMetaItemLayered']), variablePath)));
@@ -5024,7 +5244,7 @@ function selfTest() {
   const causeOf = (f) => causeCov.ledgers.find((l) => l.file === f).cause;
   const causeCases = [
     // THE ONE THIS CARD IS ABOUT: not one row of the surface is declared anywhere in-repo.
-    ['a ledger no in-repo file declares ANY row of is structural', 'no-in-repo-registrar', causeOf('structural-route-ledger.ts')],
+    ['a ledger no in-repo file declares ANY row of is structural', 'no-in-repo-declaration', causeOf('structural-route-ledger.ts')],
     ['a ledger whose every unreachable row has an in-repo witness is a discovery gap', 'discovery-gap', causeOf('gap-route-ledger.ts')],
     // ⛔ NOT defaulted into either bucket — the #9747 rule this whole split is an
     // application of: a recognizer narrower than the repo reports "unrecognised".
@@ -5113,7 +5333,7 @@ function selfTest() {
   // render branch with no ceiling prints `unmeasured` in a nicer shape.
   battery('`causes` GETS THE SAME TREATMENT, AT BOTH ENDS (#11867)');
   check('emit', 'the ADVISORY path measures causes — it passes a ceiling, not just tails', 'affected-docs.mjs',
-    true, /bridgeCoverageFrom\(ledgers, registrarByTail\.keys\(\), ceilingTailsFrom\(sourceFiles\)\.keys\(\)\)/.test(ownSource));
+    true, /bridgeCoverageFrom\(ledgers, routeSourceByTail\.keys\(\), ceilingTailsFrom\(sourceFiles\)\.keys\(\)\)/.test(ownSource));
   // ⚠️ READ THE CODE, NOT THE COMMENT THAT FORBIDS IT. These three pins are about what
   // the renderer DOES, and the block it lives in names `bridge.ledgers` in prose precisely
   // to forbid deriving from it — so a raw-text negative pin fails on its own rationale
@@ -5148,7 +5368,7 @@ function selfTest() {
   // that count is by deriving selection a second time. Pinned at the source, because the
   // two agreeing today is what a re-statement costs nothing to break tomorrow.
   check('emit', 'the --json row list selects through `selectsFrom`, not a second copy of the rule', 'affected-docs.mjs',
-    true, /const selects = selectsFrom\(registrarByTail\.keys\(\)\);/.test(ownSource));
+    true, /const selects = selectsFrom\(routeSourceByTail\.keys\(\)\);/.test(ownSource));
   check('emit', 'and nothing else restates the suffix test inline', 'affected-docs.mjs',
     1, (ownSource.match(/\.some\(\(t\) => route\.replace\(/g) || []).length);
 
@@ -5246,6 +5466,207 @@ function selfTest() {
       'code points 0..0x2FFF', '12225 / 12223 / 25', `${admitsB} / ${admitsPrev} / ${admitsLead}`);
   }
 
+
+  // ── The ROUTE SOURCE concept: two kinds, and the guard between them (#11857) ──
+  //
+  // Ruling A, 2026-09-04 batch #31. Everything here defends ONE sentence: a route source
+  // is a file that DECLARES a route, of two kinds — a registration CALL SITE admitted by
+  // its name, and a spec contract DECLARATION admitted by EVIDENCE — and the evidence is
+  // the HTTP method the declaration answers on.
+  //
+  // ⛔ THE GUARD IS THE POINT, NOT THE ADMISSION. Admitting contract declarations without
+  // it also admits every data payload carrying a `path:` key, and the card that measured
+  // this route named the instance: a connector-action INPUT inside an automation fixture.
+  // So the cases below pin the guard from BOTH sides — that it keeps the payload out, and
+  // that it does not cost the real declarations a single tail.
+  battery('the ROUTE SOURCE concept: two kinds, and the runtime-registration guard (#11857)');
+
+  // The shape kind (b) exists to admit: a contract declaring its verb beside its path.
+  const contractDecl = [
+    'export const StorageApiContracts = {',
+    '  getPresignedUrl: {',
+    "    method: 'POST' as const,",
+    "    path: '/api/v1/storage/upload/presigned',",
+    '    input: GetPresignedUrlRequestSchema,',
+    '  },',
+    '};',
+  ].join('\n');
+  check('parseRouteSource', 'a contract declaring its VERB beside its path is a route source',
+    'tails under the guard', JSON.stringify(['/api/v1/storage/upload/presigned']),
+    JSON.stringify([...parseRouteSource(contractDecl, { requireMethodSignal: true }).keys()]));
+
+  // The shape the guard exists to keep out — `packages/spec/src/conversions/registry.ts`'s
+  // own, reduced to the two lines that matter. A path inside a connector-action `input:`
+  // is an ARGUMENT to an action, not a route anything serves.
+  const connectorInput = [
+    '      {',
+    "        id: 'n5',",
+    "        type: 'connector_action',",
+    "        connectorConfig: { connectorId: 'rest', actionId: 'get' },",
+    "        config: { input: { path: '/api/v1/health' } },",
+    '      },',
+  ].join('\n');
+  check('parseRouteSource', 'a connector-action INPUT is not a route source — the guard declines it',
+    'tails under the guard', 0, parseRouteSource(connectorInput, { requireMethodSignal: true }).size);
+  // ⭐ THE COUNTERFACTUAL, and the reason the case above proves anything: the parser DOES
+  // read a tail out of that payload. What declines it is the guard, not a parse failure —
+  // without this pin the case above would keep passing if `path:` scanning broke entirely.
+  check('parseRouteSource', 'counterfactual: unguarded, that same payload DOES yield a tail',
+    'tails without the guard', JSON.stringify(['/api/v1/health']),
+    JSON.stringify([...parseRouteSource(connectorInput).keys()]));
+
+  // `actionId: 'get'` is one masked line from the path and reads like a verb to a human.
+  // It is not an HTTP `method:`, and the signal must not accept it — otherwise the guard
+  // admits the very file the ruling named.
+  check('hasRouteMethodSignal', 'an actionId is not an HTTP method — the signal keys on the KEY too',
+    "actionId: 'get'", false, hasRouteMethodSignal(["  actionId: 'get',", "  path: '/api/v1/health',"], 1));
+  check('hasRouteMethodSignal', 'and a non-HTTP `method:` value is not the signal either',
+    "method: 'cron'", false, hasRouteMethodSignal(["  method: 'cron',", "  path: '/api/v1/health',"], 1));
+  check('hasRouteMethodSignal', 'a one-line property list carries its own signal',
+    "{ method: 'GET', path: '/api/x' }", true, hasRouteMethodSignal(["  { method: 'GET', path: '/api/x' },"], 0));
+  check('hasRouteMethodSignal', 'and the verb is read case-insensitively — a lowercase `get` still registers',
+    "method: 'get'", true, hasRouteMethodSignal(["  method: 'get',", "  path: '/api/x',"], 1));
+
+  // THE MASKED-COMMENT GAP. `plugin-rest-api.zod.ts` has one site whose `method:` sits five
+  // LINES up but zero PROPERTIES up — a JSDoc block sits between them, which `maskComments`
+  // blanks to whitespace without moving a line. Blank-skipping is what makes the lookaround
+  // a property-list test rather than a line-distance one; a naive window misses this site.
+  const jsdocGap = ["      method: 'POST',", '   ', '  ', '     ', '  ', "      path: '/trigger/:name',"];
+  check('hasRouteMethodSignal', 'a JSDoc between the two properties is blank after masking — the site still signals',
+    'method five blank lines up', true, hasRouteMethodSignal(jsdocGap, 5));
+  // …and the lookaround is still BOUNDED: five non-blank properties away is a different
+  // object, and reads as one. The blank-skipping widens what counts as adjacent, never
+  // how many PROPERTIES away the verb may sit.
+  const farMethod = ["      method: 'POST',", '      a: 1,', '      b: 2,', '      c: 3,', '      d: 4,', "      path: '/trigger/:name',"];
+  check('hasRouteMethodSignal', 'but five NON-BLANK properties away is another object — not a signal',
+    'method past the lookaround', false, hasRouteMethodSignal(farMethod, 5));
+
+  // A DROPPED SITE STILL BOUNDS THE PREVIOUS WINDOW (#9503, one card on). The guard changes
+  // what a file CONTRIBUTES, never where another site's handler window ends — so a payload
+  // sitting between two real declarations must not let the first one swallow the second's
+  // handler symbols.
+  const guardedBoundary = [
+    "  { method: 'GET', path: '/api/v1/a',",
+    '    handler: firstImpl },',
+    '  filler1: 1,',
+    '  filler2: 2,',
+    '  filler3: 3,',
+    '  filler4: 4,',
+    "  { config: { input: { path: '/api/v1/payload' } } },",
+    '  filler5: 5,',
+    '  filler6: 6,',
+    '  filler7: 7,',
+    '  filler8: 8,',
+    "  { method: 'GET', path: '/api/v1/b',",
+    '    handler: secondImpl },',
+  ].join('\n');
+  const guarded = parseRouteSource(guardedBoundary, { requireMethodSignal: true });
+  check('parseRouteSource', 'the payload between them contributes no tail of its own',
+    'tails', JSON.stringify(['/api/v1/a', '/api/v1/b']), JSON.stringify([...guarded.keys()]));
+  check('parseRouteSource', 'and the first route does NOT absorb the second route\'s handler symbol',
+    'secondImpl', false, !!guarded.get('/api/v1/a')?.has('secondImpl'));
+  check('parseRouteSource', 'while its own handler symbol still lands in its window',
+    'firstImpl', true, !!guarded.get('/api/v1/a')?.has('firstImpl'));
+
+  // KIND (a) IS UNTOUCHED, which is the no-reach-regression half. A call site admitted by
+  // NAME contributes every tail it declares, guard or no guard — this is the default.
+  check('parseRouteSource', 'kind (a) is unguarded by DEFAULT — the same source yields the payload tail too',
+    'tails without the guard', JSON.stringify(['/api/v1/a', '/api/v1/payload', '/api/v1/b']),
+    JSON.stringify([...parseRouteSource(guardedBoundary).keys()]));
+
+  // ⚠️ THE GUARD'S KNOWN LIMIT, PINNED RATHER THAN LEFT TO BE DISCOVERED. The signal is a
+  // PROPERTY-LIST test, so a payload written INSIDE a real declaration's property list
+  // inherits that declaration's verb and is admitted. That is a bounded over-admission and
+  // an acceptable one: it can only happen inside a file that is a route source already, so
+  // it widens which TAILS one source contributes — never which FILES are sources. It is
+  // also why the connector-action pin above is stated on the REAL file: `registry.ts` has
+  // 61 path sites and not one of them sits beside an HTTP method.
+  check('hasRouteMethodSignal', 'a payload nested INSIDE a declaration\'s property list does inherit its verb',
+    'adjacent payload', true, hasRouteMethodSignal([
+      "  { method: 'GET', path: '/api/v1/a',",
+      "    config: { input: { path: '/api/v1/payload' } } },",
+    ], 1));
+  check('CALL_SITE_FILE_RE', 'and the call-site convention itself is unchanged by the rename',
+    'packages/rest/src/rest-server.ts', true, CALL_SITE_FILE_RE.test('packages/rest/src/rest-server.ts'));
+
+  // ── The isTestFile pin, stated over the ROUTE SOURCE population (#12965 / #11857) ──
+  //
+  // The card measured THREE non-registrars the evidence route admits. Two of them — a
+  // fixture under `test/fixtures/` and a `.bench.ts` benchmark — stopped being admitted
+  // when `isTestFile` grew those arms, so this card re-excludes NEITHER by name. The
+  // ruling's instruction was to PIN that rather than re-state it: these are the two real
+  // repo paths, asserted over the predicate the walk actually calls, so the day either arm
+  // is loosened the fixture and the benchmark come back as contract declarations and THIS
+  // says so — instead of two phantom route sources appearing in the census.
+  for (const [rel, why] of [
+    ['packages/qa/dogfood/test/fixtures/endpoint-policy-fixture.ts', 'the #11857 fixture — kept out by isTestFile, NOT by name'],
+    ['packages/spec/src/benchmark.bench.ts', 'the #11857 benchmark — kept out by isTestFile, NOT by name'],
+  ]) {
+    check('isTestFile', `${why} — so the walk never offers it to EITHER kind`, rel, true, isTestFile(rel));
+  }
+
+  // ── LIVE pins: the three claims this card makes about the real tree ──
+  //
+  // Fixtures cannot carry these: each is a claim about what the REPO contains, and each is
+  // a number the PR body quotes. Read off the same scan the report prints from.
+  {
+    const live = scanRouteSurface();
+    const liveKind = (k) => live.routeSources.filter((r) => r.kind === k).map((r) => r.file);
+
+    // (1) The guard's target, on the real file rather than a reduced fixture.
+    check('scanRouteSurface', 'the connector-action input is NOT admitted as a route source',
+      'packages/spec/src/conversions/registry.ts', false,
+      live.routeSources.some((r) => r.file === 'packages/spec/src/conversions/registry.ts'));
+    const registryText = (() => {
+      try { return readFileSync(join(repoRoot, 'packages/spec/src/conversions/registry.ts'), 'utf8'); } catch { return null; }
+    })();
+    // The same counterfactual as the fixture pair above, on the real file: it is EVIDENCE
+    // that would admit it, and the guard is the only thing that does not.
+    check('scanRouteSurface', 'counterfactual: unguarded, that real file WOULD be admitted — the guard is what excludes it',
+      'registry.ts tails, unguarded', true, registryText === null || parseRouteSource(registryText).size > 0);
+
+    // (2) THE CONTRACT KIND ADMITS SOMETHING — the anti-vacuity floor, and the case that
+    // names kind (b) when it stops running. ⚠️ Without it the `every()` below passes on an
+    // EMPTY list: disabling the evidence route entirely left this whole battery green,
+    // measured, which is how this pin came to exist. A shape assertion over a population
+    // is only as strong as a floor under that population's size.
+    check('scanRouteSurface', 'the CONTRACT kind admits at least one route source — kind (b) is still running',
+      'kind=contract count', true, liveKind('contract').length >= 1);
+    // …and the one the headline rests on by NAME: `storage.zod.ts` is what closes the
+    // storage ledger from 7-of-7 unreachable to 0-of-7. If it is legitimately renamed,
+    // move this pin with it — do not delete it, or the closure goes back to being asserted.
+    check('scanRouteSurface', 'and the declaration that closes the storage ledger is among them',
+      'packages/spec/src/api/storage.zod.ts', true,
+      liveKind('contract').includes('packages/spec/src/api/storage.zod.ts'));
+    check('scanRouteSurface', 'every contract declaration admitted is a packages/spec API declaration',
+      'kind=contract', true, liveKind('contract').every((f) => f.startsWith('packages/spec/src/api/')));
+
+    // (3) THE LEDGER EXCLUSION IS A MEASURED NO-OP, not an assumption. Most ledger names
+    // match the call-site convention (`route-ledger.ts` carries `route`), so before this
+    // card every ledger was also parsed as a registrar. Narrowing kind (a) to exclude them
+    // moves a tail only if some ledger declares a `path:` route — none does today, and
+    // this is the assertion that reds the day one starts.
+    let ledgerTails = 0;
+    for (const rel of live.conventionFiles.filter((f) => LEDGER_FILE_RE.test(f))) {
+      try { ledgerTails += parseRouteSource(readFileSync(join(repoRoot, rel), 'utf8')).size; } catch { /* unreadable contributes none */ }
+    }
+    check('scanRouteSurface', 'no route LEDGER declares a route tail — so excluding ledgers from kind (a) moved nothing',
+      'tails declared by the live route ledgers', 0, ledgerTails);
+
+    // (4) THE PREMISE OF THE DOT-DIRECTORY PRUNE (#15446 / #15457), RE-MEASURED rather
+    // than quoted. `walkSourceFiles` prunes every dot-directory under `packages/**` as
+    // build residue; that is a safe rule only while no TRACKED source lives in one —
+    // zero of them do, measured on `6b8c67778`. Written as a comment the measurement
+    // would age in silence and the walk would start dropping real source with nothing
+    // saying so. Asserted here it reds on the first tracked file under a dot-directory,
+    // and the remedy is then a choice made deliberately: move the file, or go back to
+    // pruning the residue trees by name.
+    const trackedDotDirFiles = sh('git ls-files packages')
+      .split('\n')
+      .filter((f) => /(^|\/)\.[^/]+\//.test(f));
+    check('walkSourceFiles', 'no TRACKED file under packages/** lives in a dot-directory — the premise the prune rests on',
+      'git ls-files packages, filtered to dot-directories', 0, trackedDotDirFiles.length);
+  }
 
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
   //
@@ -5427,7 +5848,7 @@ for (const f of implementationChanges) {
 // Both guards run BEFORE the bridge, not after it, and that ordering is the fix rather
 // than a detail: the bridge answers "which routes mention this name", so a name left in
 // the set does not merely add a noisy row — it mints noisy ROUTE and SDK anchors from
-// every registrar handler that happens to mention it. Measured both ways: `label` /
+// every route-source handler that happens to mention it. Measured both ways: `label` /
 // `start` / `subject` (locals in the auth-email change 445ae4deb) pulled `/:object/import`
 // and `/forms/:slug` into an advisory about email templates, and `ObjectQL` did the same
 // to the objectql cascade fix 650cd3daa.
@@ -5460,7 +5881,7 @@ for (const name of [...symbolAnchors].sort()) {
   if (!admitAnchor('symbol', name, symbolRe(name))) continue;
   // TWO KINDS OF SYMBOL ARE DOC ANCHORS BUT NOT BRIDGE SYMBOLS. The bridge's premise is
   // "this name IS some route's implementation, so the handler that implements that route
-  // mentions it" — and `parseRegistrarSource` tests that premise by scanning a handler
+  // mentions it" — and `parseRouteSource` tests that premise by scanning a handler
   // window for the BARE IDENTIFIER (over comment-masked source since #9432, so a name a
   // handler only WRITES ABOUT never satisfies it). Any name a handler mentions for some
   // OTHER reason satisfies the scan without satisfying the premise, and mints a route (and,
@@ -5521,7 +5942,7 @@ const crossCuttingSymbols = [];
 // same rule), and a fabricated `0 of 0` here would read as "nothing to reach".
 let bridgeCoverage = { measured: false, reason: 'no bridgeable symbol in this change — the sdk route bridge did not run' };
 if (bridgeSymbols.length) {
-  const { ledgers, ledgerRows, registrarByTail, sourceFiles } = scanRouteSurface();
+  const { ledgers, ledgerRows, routeSourceByTail, sourceFiles } = scanRouteSurface();
   // WITH THE CEILING (#11867). Until now this call omitted the third argument, so every
   // ledger's cause came back `unmeasured` and the three counts `null` — honest, but it
   // meant the PR comment, which is the surface a human actually reads, rendered all 177
@@ -5543,7 +5964,7 @@ if (bridgeSymbols.length) {
   // ⛔ Through `ceilingTailsFrom`, never a second inline census: `--bridge-coverage` and
   // this path now publish the same three buckets, and two spellings of the population they
   // are computed over is how the two surfaces start disagreeing about one repo.
-  bridgeCoverage = bridgeCoverageFrom(ledgers, registrarByTail.keys(), ceilingTailsFrom(sourceFiles).keys());
+  bridgeCoverage = bridgeCoverageFrom(ledgers, routeSourceByTail.keys(), ceilingTailsFrom(sourceFiles).keys());
 
   // symbol → route, capped: the bridge answers "which routes mention this name", and for
   // a CROSS-CUTTING helper that is every route it is wired into. Measured on the REST
@@ -5551,7 +5972,7 @@ if (bridgeSymbols.length) {
   // families whose pages document nothing that change touched. Above the cap a symbol
   // contributes no route anchor — and says so in `crossCuttingSymbols`.
   const routesBySymbol = new Map();
-  for (const [tail, ids] of registrarByTail) {
+  for (const [tail, ids] of routeSourceByTail) {
     for (const s of bridgeSymbols) {
       if (!ids.has(s)) continue;
       let tails = routesBySymbol.get(s);
@@ -5563,7 +5984,7 @@ if (bridgeSymbols.length) {
     if (tails.size > MAX_ROUTES_PER_SYMBOL) { crossCuttingSymbols.push(`${s} (${tails.size} routes)`); continue; }
     for (const t of tails) {
       routeAnchors.add(t);
-      noteAnchorFrom('route', t, `bridged from symbol ${s} — its registrar handler names it`);
+      noteAnchorFrom('route', t, `bridged from symbol ${s} — its route source's handler names it`);
     }
   }
   // route → client method (the ledger's declared binding), and the reverse direction for

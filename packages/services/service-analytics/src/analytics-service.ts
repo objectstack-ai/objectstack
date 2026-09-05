@@ -581,6 +581,24 @@ export interface AnalyticsServiceConfig {
    * - Date bucketing: a date vs datetime dimension drills by the right bound.
    */
   sourceFieldMeta?: (object: string, field: string) => { type?: string; defaultCurrency?: string; max?: number } | undefined;
+  /**
+   * [#15684] The SQL dialect of the datasource backing `object` — `'sqlite'`,
+   * `'postgres'`, `'mysql'`, or `undefined` when the host cannot answer.
+   *
+   * The three SQL compilers need it for ONE thing: the case-EXACT text family
+   * (`$contains` / `$notContains` / `$startsWith` / `$endsWith`, #4706 Q2 = A)
+   * has no construct that is case-exact and parses on every dialect. A plain
+   * `LIKE` is case-exact on Postgres alone — SQLite folds ASCII case
+   * unconditionally, so the query's own `where` AND the RLS read scope
+   * admitted rows the predicate excludes there (over-reach, #3948). The
+   * per-dialect table lives in `text-match-sql.ts`.
+   *
+   * Answered by the plugin from the driver that will EXECUTE the statement, so
+   * the driver stays the single source of truth for its own dialect. A host
+   * that wires nothing keeps the `LIKE` the compilers always emitted —
+   * "cannot answer, do not block".
+   */
+  sqlDialect?: (object: string) => string | undefined;
   /** Pre-defined datasets to compile + register at construction (ADR-0021). */
   datasets?: Dataset[];
   /**
@@ -767,6 +785,16 @@ export class AnalyticsService implements IAnalyticsService {
       coerceTemporalFilterValue: config.coerceTemporalFilterValue,
       coerceTemporalFilterColumn: config.coerceTemporalFilterColumn,
       isExternalObject: config.isExternalObject,
+      // [#14079] The declared field type, read off the same `sourceFieldMeta`
+      // hook the display chains use — so the three SQL compilers can give a
+      // text operator over a numeric or boolean column the contract's answer
+      // at compile time. A host that wired no hook answers `undefined`, and
+      // the compilers keep the behaviour they had.
+      declaredFieldType: (object: string, field: string) => config.sourceFieldMeta?.(object, field)?.type,
+      // [#15684] The dialect that will run the compiled statement, so the
+      // case-EXACT text family picks a construct that IS case-exact there.
+      // Same tiering as the hook above: `undefined` keeps today's `LIKE`.
+      sqlDialect: (object: string) => config.sqlDialect?.(object),
     };
 
     // Build strategy chain (built-in + custom, sorted by priority)

@@ -839,25 +839,31 @@ describe('CRM Workflow', () => {
 os create plugin crm
 
 📁 Creating plugin: crm
-📂 Location: packages/plugins/plugin-crm
+📂 Location: /home/you/projects/plugin-crm
 
 ✓ Created package.json
 ✓ Created tsconfig.json
 ✓ Created src/index.ts
 ✓ Created README.md
+✓ Created pnpm-workspace.yaml
 
 ✅ Project created successfully!
 
 Next steps:
-  cd packages/plugins/plugin-crm
+  cd plugin-crm
   pnpm install
   pnpm build
 ```
 
+The project is standalone — published dependency ranges pinned to the CLI that
+generated it, and a self-contained `tsconfig.json` — so it installs outside any
+workspace. Pass `--in-repo` only to scaffold into an ObjectStack monorepo
+checkout.
+
 ### 2. Develop Locally
 
 ```bash
-cd packages/plugins/plugin-crm
+cd plugin-crm
 
 # Watch mode (auto-rebuild on changes)
 npm run dev

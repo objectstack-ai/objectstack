@@ -10,6 +10,10 @@ import {
     // takes the same loud answer rather than the quiet 403 it used to wear.
     AuthzStoreUnavailableError,
     effectiveTenancyPosture,
+    // [#13906] The REGISTRY's own "never registered" brand — the discriminator
+    // that lets the tenancy seam absorb the supported no-tenancy composition
+    // while every other rejection stays loud. Never message text (#13905).
+    isServiceNotRegisteredError,
     assembleExecutionContext, normalizeAuthGate, type AuthGate,
     shouldDenyAnonymous, ANONYMOUS_DENY_BODY, ANONYMOUS_DENY_STATUS,
     // [#7678] ADR-0090 D5/D9 suggested-binding `?status=` vocabulary — the one
@@ -21,6 +25,11 @@ import {
     looksLikeInternalErrorLeak,
     declaresServerFault,
     INTERNAL_ERROR_MESSAGE,
+    // [#13807] The recogniser half of the stranded-decision carrier — see
+    // `handleApprovalError` below. Constructor and reader share one module in
+    // `@objectstack/types` because the producer is a PLUGIN and rest cannot
+    // import one.
+    strandedDecisionDetails,
 } from '@objectstack/types';
 import {
     allowPerfDisclosure,
@@ -1159,6 +1168,23 @@ export class RestServer {
     private defaultEnvironmentIdProvider?: () => string | undefined;
     private authServiceProvider?: (environmentId?: string) => Promise<any | undefined>;
     private objectQLProvider?: (environmentId?: string) => Promise<any | undefined>;
+    /**
+     * [#15256 — maintainer ruling 2026-09-04, decision 1A] The lone local
+     * kernel's `tenancy` service, on the SINGLE-KERNEL wiring — the seam that
+     * made {@link computeExecCtx}'s posture `undefined` on every deployment the
+     * open core builds, so both posture-conditional API-key refusals were
+     * gated off and an ex-member's org-stamped key read AND wrote another
+     * organization's rows (measured twice: objectstack#15163 on the framework,
+     * cloud#1982 with the real `@objectstack/organizations`).
+     *
+     * Wired by `rest-api-plugin` in the same SHAPE as
+     * {@link authServiceProvider} — a provider closure over the lone kernel —
+     * but with `objectQLProvider`'s CLASSIFICATION, because decision 1 option A
+     * governs what its faults mean: only the branded not-registered rejection
+     * may resolve quietly, and every other rejection must stay loud. See the
+     * posture block in `computeExecCtx`.
+     */
+    private tenancyServiceProvider?: (environmentId?: string) => Promise<any | undefined>;
     private emailServiceProvider?: (environmentId?: string) => Promise<any | undefined>;
     private sharingServiceProvider?: (environmentId?: string) => Promise<any | undefined>;
     private reportsServiceProvider?: (environmentId?: string) => Promise<any | undefined>;
@@ -1218,6 +1244,12 @@ export class RestServer {
         securityServiceProvider?: (environmentId?: string) => Promise<any | undefined>,
         requestEnvResolver?: RestRequestEnvResolver,
         metadataServiceProvider?: (environmentId?: string) => Promise<unknown>,
+        /**
+         * [#15256] Appended LAST on purpose: 135 files construct a
+         * `RestServer`, and inserting the parameter beside its sibling
+         * providers would silently re-bind every positional argument after it.
+         */
+        tenancyServiceProvider?: (environmentId?: string) => Promise<any | undefined>,
     ) {
         this.protocol = protocol;
         this.config = this.normalizeConfig(config);
@@ -1239,6 +1271,7 @@ export class RestServer {
         this.securityServiceProvider = securityServiceProvider;
         this.requestEnvResolver = requestEnvResolver;
         this.metadataServiceProvider = metadataServiceProvider;
+        this.tenancyServiceProvider = tenancyServiceProvider;
     }
 
     /**
@@ -2346,13 +2379,125 @@ export class RestServer {
             };
             // [#8287] The EFFECTIVE tenancy posture, from the kernel's `tenancy`
             // service — the same source plugin-security reconciles for the Layer 0
-            // wall, so API-key admission and the wall agree. Absent ⇒ undefined ⇒
-            // no posture-conditional refusal (behaviour unchanged).
+            // wall, so API-key admission and the wall agree.
+            //
+            // [#13906 — maintainer ruling 2026-09-02, decision 1 option A] The
+            // facts this seam used to answer with one `undefined` are now kept
+            // apart. Measured on a real `ObjectKernel` with a healthy `isolated`
+            // tenancy and an EX-MEMBER's org-stamped API key, the wiring
+            // differing ONLY in the tenancy service's health:
+            //
+            // | `tenancy` service              | before | after |
+            // |:--|:--|:--|
+            // | healthy, wall-enforcing        | 401 refused | 401 — unchanged |
+            // | never registered (supported)   | 200 served  | 200 — unchanged |
+            // | registered and FAILED to build | **200 served** | **503** |
+            //
+            // ⇒ the direction here was PERMISSIVE, and that is what makes this
+            // card's family different from its siblings: a tenancy service that
+            // could not be CONSTRUCTED skipped the Layer 0
+            // `organization_membership_ended` refusal (and its
+            // `organization_required` sibling), so a FAILURE read as "this check
+            // does not apply". #13476 and #13904 answered an unknown with a
+            // REFUSAL; this one answered it with ADMISSION.
+            //
+            // The classification is the REGISTRY's, never message text — the
+            // same discriminator the shipped `objectQLProvider` already uses one
+            // layer down (`isServiceNotRegisteredError`, #13905): "never
+            // registered" is branded and stays quiet; every other rejection (a
+            // factory that threw, a scoped registration resolved without a scope
+            // id, a circular service dependency) is unbranded, and the set is
+            // closed with a LOUD default.
+            //
+            // ⚠️ The WIRING fact is taken from `kernel`'s PRESENCE, asked here
+            // once, and never inferred from what the read returned — the #13476
+            // discipline. Without that guard the single-kernel provider path
+            // (where `kernel` is `undefined`) would raise a `TypeError` from the
+            // dereference and every embedder on that wiring would take the loud
+            // answer.
+            //
+            // [#15256 — maintainer ruling 2026-09-04, decision 1A] ⭐ CORRECTED.
+            // This paragraph used to end by asserting that the single-kernel
+            // path carried no posture at all, and that its half of the #13906
+            // ruling (option B′) was handled by a startup refusal over in
+            // `rest-api-plugin.ts`. Both halves of that were FALSE on this tree:
+            // B′ was WITHDRAWN on 2026-09-04, `rest-api-plugin.ts` never carried
+            // such a refusal, and so this file documented a p0 seam as covered
+            // when nothing covered it. ⛔ Do not reintroduce a startup refusal
+            // here in any form.
+            //
+            // That sentence is PARAPHRASED above rather than quoted, on purpose:
+            // a verbatim copy goes on answering the greps that look for the
+            // withdrawn remedy, and it already caused this seam to be re-read as
+            // unrepaired once. The pin that forbids the phrase returning lives in
+            // `execctx-authz-input-seam-reachability.test.ts`.
+            //
+            // What is true now: the single-kernel branch below DERIVES the
+            // posture, from a provider `rest-api-plugin` wires to the lone local
+            // kernel's `tenancy` service — the same way this method already
+            // obtains `authService`. Measured consequence of its absence, on this
+            // exact wiring under a healthy `isolated` posture, with an API key
+            // stamped with an organization its owner had left:
+            //
+            // | wiring                          | before | after |
+            // |:--|:--|:--|
+            // | ex-member's org-stamped key     | **GET 200 / POST 201, row lands in the other org** | **401 / 401** |
+            // | organization-less key           | **GET 200 total 0 (silent) / POST 403** | **401** |
+            // | CURRENT member's key (control)  | 200 / 201 | 200 / 201 — unchanged |
+            // | no credential (control)         | 401 | 401 — unchanged |
+            //
+            // ⚠️ The ASYNC ACCESSOR's presence is part of the wiring fact, for
+            // the same reason the shipped `objectQLProvider` splits on it: a
+            // `KernelBase`-shaped host (`LiteKernel`) has no `getServiceAsync`
+            // at all, so dereferencing it would raise a `TypeError` — unbranded,
+            // and therefore LOUD — turning "this host shape has no async
+            // registry" into an outage. Such a host also has no service
+            // factories (`registerServiceFactory` throws "not supported"), so
+            // absence is the only fault it could report anyway. It keeps the
+            // previous quiet answer, unchanged.
             let tenancyPosture;
-            try {
-                tenancyPosture = effectiveTenancyPosture(await kernel.getServiceAsync('tenancy') as any);
-            } catch {
-                tenancyPosture = undefined;
+            if (kernel && typeof kernel.getServiceAsync === 'function') {
+                try {
+                    tenancyPosture = effectiveTenancyPosture(await kernel.getServiceAsync('tenancy') as any);
+                } catch (err) {
+                    // Registered and unable to answer. The posture is an
+                    // authorization INPUT, so admission was never decided — the
+                    // same loud answer `wiredEngineOrLoud` gives the engine seam,
+                    // carried to the door by the same nets.
+                    if (!isServiceNotRegisteredError(err)) {
+                        throw new AuthzStoreUnavailableError('tenancy', err);
+                    }
+                    // Never registered ⇒ the supported no-tenancy composition:
+                    // quiet `undefined`, no posture-conditional refusal.
+                    tenancyPosture = undefined;
+                }
+            } else if (this.tenancyServiceProvider) {
+                // [#15256 / 1A] The SINGLE-KERNEL branch — the wiring every
+                // deployment the open core builds actually runs, and the one
+                // that carried no posture at all. Reached only when no `kernel`
+                // was bound above, exactly as `authServiceProvider` is: the
+                // kernelManager branches already read the per-environment
+                // kernel's own `tenancy` service, and asking twice would let a
+                // provider bound to the LOCAL kernel answer for a request that
+                // resolved to another environment.
+                //
+                // Same classification as the branch above, and it is the whole
+                // reason this is not `seamOrUndefined`: decision 1 option A
+                // governs BOTH halves of this seam, so "never registered" stays
+                // quiet (the supported no-tenancy composition) and every other
+                // rejection is the outage it is. The provider re-raises
+                // unbranded rejections for precisely that reason — see
+                // `rest-api-plugin.ts`.
+                try {
+                    tenancyPosture = effectiveTenancyPosture(
+                        await this.tenancyServiceProvider(environmentId) as any,
+                    );
+                } catch (err) {
+                    if (!isServiceNotRegisteredError(err)) {
+                        throw new AuthzStoreUnavailableError('tenancy', err);
+                    }
+                    tenancyPosture = undefined;
+                }
             }
             const authz = await resolveAuthzContext({ ql, headers, getSession, tenancyPosture });
             // [#6216] The anonymous contract IS the shared assembler's default
@@ -2383,13 +2528,51 @@ export class RestServer {
             // (`{ code, message }`), so this is where the declaration is met —
             // a gate with a blank message no longer rides into a 403 body as
             // `undefined`.
+            //
+            // [#13906 — maintainer ruling 2026-09-02, decision 2 option B] The
+            // gate is best-effort NO LONGER in one precisely measured window:
+            // `isAuthGateActive()` answered `true` AND the gate's session
+            // re-read then FAILED. Measured before the repair, same fixture,
+            // the wiring differing only in how the gate faulted:
+            //
+            // | gate wiring                        | before | after |
+            // |:--|:--|:--|
+            // | INACTIVE (the common, correct case)| admitted | admitted — unchanged |
+            // | ACTIVE, healthy re-read, gated user| 403 code+message | 403 — unchanged |
+            // | `isAuthGateActive()` THROWS        | admitted | admitted — unchanged |
+            // | ACTIVE, re-read FAILS              | **admitted** | **503** |
+            //
+            // ⇒ an enforcement the deployment DECLARED active used to vanish
+            // with no wire trace, deep-equal to gate-off. A declared promise
+            // that disappears silently is the fail-OPEN this card measured.
+            //
+            // ⛔ The probe-throws row stays absorbed DELIBERATELY, and it is the
+            // narrowness the ruling asked for: a host whose probe faults never
+            // answered `true`, so it never declared a gate, and refusing on it
+            // would block deployments that never asked for one.
             let authGate: AuthGate | undefined;
+            let gateActive = false;
             try {
-                if (typeof authService.isAuthGateActive === 'function' && authService.isAuthGateActive()) {
-                    const gatedSession: any = await getSession(headers).catch(() => undefined);
-                    authGate = normalizeAuthGate(gatedSession?.user) ?? undefined;
+                gateActive = typeof authService.isAuthGateActive === 'function'
+                    && authService.isAuthGateActive() === true;
+            } catch {
+                gateActive = false;
+            }
+            if (gateActive) {
+                let gatedSession: any;
+                try {
+                    // ⛔ NOT the `getSession` closure above, and not its
+                    // `.catch(() => undefined)`: both convert a THROW into the
+                    // same `undefined` a gate-less user produces, which is
+                    // precisely the collapse being repaired. A session that
+                    // RESOLVES carrying no gate is not a failure — that user is
+                    // simply not gated, and still admits.
+                    gatedSession = await api.getSession({ headers });
+                } catch (err) {
+                    throw new AuthzStoreUnavailableError('auth_gate', err);
                 }
-            } catch { /* gate is best-effort — never break context resolution */ }
+                authGate = normalizeAuthGate(gatedSession?.user) ?? undefined;
+            }
 
             // [#6216 — maintainer ruling 2026-08-08, Option A] The assembly of
             // the ExecutionContext itself is now the SINGLE shared one
@@ -3003,6 +3186,39 @@ export class RestServer {
     }
 
     /**
+     * [#14882] The `ResolveOptions` every metadata-document translation in
+     * this server hands `@objectstack/spec/system`: the request's locale plus
+     * the deployment's DECLARED fallback chain.
+     *
+     * The resolvers walk `requested locale → fallbackChain → authored label`,
+     * and default the chain to a literal `['en']` when a caller passes none.
+     * Every seam here used to pass none, so the stack's `i18n.fallbackLocale`
+     * never reached the chain: a `zh-CN` workspace that shipped a courtesy
+     * `en` bundle served `Entry Sheet` to a `zh-CN` request, ahead of its own
+     * authored `填报单`, because `en` was consulted before the authored label.
+     *
+     * The chain is read from the i18n service — `getFallbackLocale()`, the
+     * locale its own `t()` falls back to, which `I18nServicePlugin` receives
+     * as `fallbackLocale || defaultLocale || 'en'` from the stack config — so
+     * a bundle label and a `t()` message agree on which locale comes second.
+     * Feature-detected like `getPackagedObjectBase`: a service that does not
+     * declare a fallback (the method is optional on `II18nService`, and the
+     * core in-memory fallback has no declared one) gets NO chain, so the
+     * resolver's own default applies exactly as before — the serving layer
+     * threads a declaration, it does not invent one. ⛔ Not derived from
+     * `getDefaultLocale()`: that would decide, for a stack declaring
+     * `defaultLocale: 'zh-CN'` with `fallbackLocale: 'en'`, whether the
+     * authored label or the `en` bundle answers a `zh-CN` request — a
+     * contract question this seam must not answer on its own.
+     */
+    private static translateOptionsFor(i18n: any, locale: string): { locale: string; fallbackChain?: string[] } {
+        const fallback = i18n && typeof i18n.getFallbackLocale === 'function' ? i18n.getFallbackLocale() : undefined;
+        return typeof fallback === 'string' && fallback.length > 0
+            ? { locale, fallbackChain: [fallback] }
+            : { locale };
+    }
+
+    /**
      * An `II18nService.t`-compatible lookup for the request's environment, or
      * `undefined` when no i18n service is registered. Handed to the import
      * runner so its own messages resolve a deployment's `validation.field.*`
@@ -3078,7 +3294,10 @@ export class RestServer {
                 (item as any)?.name,
             )
             : undefined;
-        return translateMetadataDocument(metaType, item, bundle, { locale, packagedBase });
+        return translateMetadataDocument(metaType, item, bundle, {
+            ...RestServer.translateOptionsFor(i18n, locale),
+            packagedBase,
+        });
     }
 
     /**
@@ -3320,7 +3539,7 @@ export class RestServer {
         // the OUTER `{ type, items }`), so every element translates directly —
         // #5563 removed the per-element shape sniff that stood here.
         const translated = arr.map((item) => translateMetadataDocument(metaType, item, bundle, {
-            locale,
+            ...RestServer.translateOptionsFor(i18n, locale),
             packagedBase: this.packagedObjectBase(p, metaType, item?.name),
         }));
         return Array.isArray(items) ? translated : { ...items, items: translated };
@@ -3347,7 +3566,7 @@ export class RestServer {
             resolveMetadataTypeDescription,
             resolveMetadataFormLabels,
         } = await import('@objectstack/spec/system');
-        const opts = { locale } as const;
+        const opts = RestServer.translateOptionsFor(i18n, locale);
         const entries = payload.entries.map((entry: any) => {
             if (!entry || typeof entry !== 'object' || typeof entry.type !== 'string') return entry;
             const next: any = { ...entry };
@@ -4566,63 +4785,138 @@ export class RestServer {
                         const severityParam = (req.query?.severity as string | undefined) ?? 'error';
                         const severity = severityParam === 'warning' ? 'warning' : 'error';
                         const diagnosticsType = (req.query?.type as string | undefined) || undefined;
-                        // [#13753] STATE THE ORG PARTITION — but only on the
-                        // arm where ONE organization is the whole truth.
+                        // [#13753, #15622] STATE THE ORG PARTITION — on BOTH
+                        // arms. They differ only in whether the fold happens
+                        // HERE or is left entirely to the callee.
                         //
-                        // `getMetaDiagnostics` reads each type through
-                        // `getMetaItems({ type: t, organizationId })`, and
-                        // `getMetaItems` applies NO registry gate of its own:
-                        // whatever organization arrives is used for the type it
-                        // is handed, overridable or not (measured — the only
-                        // `organizationIdForMetaRead` call inside
-                        // `metadata-protocol` is the `page` read in
-                        // `protocol.ts`, nothing on this path). The scope is
-                        // therefore decided HERE, per type, by the caller.
+                        // `getMetaDiagnostics` reads each swept type through
+                        // `getMetaItems({ type: t, organizationId })`.
+                        //
+                        // ⚠️ [#14683] `getMetaItems` NOW APPLIES THE REGISTRY GATE
+                        // ITSELF — `organizationIdForMetaRead(request.type,
+                        // request.organizationId)`, one statement after it folds the
+                        // type through `canonicalizeMetaRequestType`. That is the
+                        // ONE inner gate this call site now sits above; the sibling
+                        // gate in the same file guards `getMetaItem` (the singular
+                        // overlay read, #14908), which this arm never reaches.
+                        //
+                        // ⛔ Until #14683 this comment said `getMetaItems` applied NO
+                        // registry gate of its own and the scope was therefore
+                        // decided HERE, per type, by the caller. That sentence is
+                        // FALSE on today's tree — do not reintroduce it, and do not
+                        // reason from it.
                         //
                         // ⇒ The `?type=` arm is exactly one type
                         // (`targetTypes = [request.type]`), so the predicate
                         // over that one type IS the request's whole scope and
                         // the answer is correct by construction. That is the
                         // arm Studio's per-type directory drill-down uses, and
-                        // it is the arm repaired here.
+                        // it is the arm #13753 repaired.
                         //
-                        // ⛔ The UNTYPED sweep is deliberately left env-wide,
-                        // and this is a recorded gap rather than an oversight
-                        // (#13753 reports the shape). `targetTypes` is then the
-                        // whole registry — five `allowOrgOverride: true` types
-                        // and every other declared type together — while the
-                        // request carries ONE `organizationId`. Naming the
-                        // tenant there does not merely over-reach: `getMetaItems`
-                        // UNIONs the env-wide rows with the named org's rows,
-                        // so a non-overridable type's org-scoped rows — the
-                        // pre-#6190 phantoms `reportUnhydratableOrgScopedRows`
-                        // warns about, which boot hydration walks past — would
-                        // be read back INTO the governance report as `stats`
-                        // counts and diagnostic entries. A dashboard whose job
-                        // is reporting what is wrong would report rows that do
-                        // not survive a restart. One org id cannot express a
-                        // per-type scope, and inventing one at this call site
-                        // (a fan-out per overridable type, plus a REST-side
-                        // re-aggregation of `total`/`stats`/`scannedTypes`)
-                        // would make this door a second owner of the sweep's
-                        // arithmetic. The decision belongs where the type is
-                        // known — see the card.
+                        // ── WHY THE FOLD IS DOUBLED, AND STAYS DOUBLED (#15034) ──
+                        //
+                        // The VALUE is redundant, and measured to be. Both sites fold
+                        // the identical string through the identical map — here
+                        // `canonicalMetaUrlType`, inside `getMetaItems` the same
+                        // function reached through `canonicalizeMetaRequestType` →
+                        // `canonicalMetaType` — so `f(t, f(t, o)) === f(t, o)` and the
+                        // inner application is the algebraic no-op. MEASURED: replace
+                        // this predicate with a raw `diagnosticsCtx?.tenantId` and
+                        // `rest-server-meta-read-org-scope.test.ts` stays GREEN IN FULL
+                        // (30/30 at that revision; the file has grown since);
+                        // the inner gate re-folds it, phantom control included.
+                        //
+                        // ⭐ It is KEPT anyway, and the reason is TRUST DOMAIN rather
+                        // than value. `getMetaDiagnostics` is not a member of
+                        // `MetadataProtocol` at all — not required, not optional —
+                        // which is why it is reached through the `(p as any)` cast and
+                        // why the 501 above exists. The inner gate therefore belongs
+                        // to ONE implementation of an UNDECLARED extension, while this
+                        // predicate sits on the REST boundary and holds for every
+                        // `RestProtocol` a host can mount. Delete it and a REST door's
+                        // tenant scope becomes a function of which kernel is mounted —
+                        // and no pin can see that happen, because the harness boots the
+                        // bundled implementation. Defence in depth, on a seam the type
+                        // system does not cover.
+                        //
+                        // ── [#15622] THE UNTYPED SWEEP FORWARDS THE
+                        // ORGANIZATION TOO, and passes it RAW ───────────────
+                        //
+                        // ⛔ This arm used to be a RECORDED GAP, left env-wide
+                        // on this argument: `targetTypes` is then the whole
+                        // registry — five `allowOrgOverride: true` types and
+                        // every other declared type together — while the
+                        // request carries ONE `organizationId`, and one org id
+                        // could not express a per-type scope from here without
+                        // a fan-out per overridable type plus a REST-side
+                        // re-aggregation of `total`/`stats`/`scannedTypes`.
+                        //
+                        // ⚠️ #14683 DISSOLVED THAT OBSTACLE (#15034 recorded
+                        // it, #15622 acted on it). `getMetaDiagnostics` does
+                        // not spend the organization once: it loops `for (const
+                        // t of targetTypes)` calling `getMetaItems({ type: t,
+                        // organizationId, … })`, and the FIRST thing
+                        // `getMetaItems` does with that organization is
+                        // `organizationIdForMetaRead(request.type, …)` on its
+                        // OWN folded type. So one `organizationId` handed to
+                        // this arm is already narrowed PER TYPE by the callee —
+                        // the org for the five overridable types, `undefined`
+                        // for every other, phantoms of non-overridable types
+                        // dropped. That is precisely the scope the paragraph
+                        // above said one id could not say. No fan-out, no
+                        // REST-side re-aggregation, no second owner of the
+                        // sweep's arithmetic: `stats` / `total` /
+                        // `scannedTypes` are untouched by the gate.
+                        //
+                        // ⭐ RULED that the gap CLOSES rather than being
+                        // re-recorded. A governance summary whose whole job is
+                        // surfacing problems, and which structurally cannot see
+                        // a class of them WHILE ITS OWN drill-down can, issues a
+                        // false all-clear — since #13753 repaired the `?type=`
+                        // arm, this summary undercounts relative to the screen
+                        // you reach by clicking into it. An org-scoped caller
+                        // now sees items THEIR OWN organization authored, on the
+                        // five overridable types only, which for a governance
+                        // report is the correct set.
+                        //
+                        // ⛔ RAW, and deliberately NOT pre-folded with
+                        // `organizationIdForMetaRead(...)` the way the `?type=`
+                        // arm folds above. There is no single type to fold on
+                        // here, and folding on any one of them would suppress
+                        // the organization for EVERY type at once. The per-type
+                        // decision belongs to the callee's loop. Identical in
+                        // shape to the `/references` door below, whose
+                        // narrowness control measured the same callee gate; both
+                        // halves are pinned in
+                        // `rest-server-meta-read-org-scope.test.ts`, where ONE
+                        // request shows an overridable type's org-authored row
+                        // present and a planted pre-#6190 phantom on a
+                        // NON-overridable type absent.
+                        //
+                        // ⚠️ ADR-0131 D6/D7 retires the per-organization
+                        // metadata partition in v18 (#15206, C5), so this
+                        // behaviour has ONE MAJOR to live and reverts to
+                        // environment-wide when the partition goes. An existing
+                        // value handed to an existing parameter: no new
+                        // parameter, response field, status code or contract
+                        // surface. ⛔ Nothing is to be built on it.
                         //
                         // ⚠️ NOT a new org-resolution seam: `resolveExecCtx` is
                         // memoised per request (WeakMap keyed by `req`), the
-                        // same result 40+ handlers here already share. It is
-                        // resolved only on the typed arm so the untyped sweep
-                        // keeps its exact behaviour today, authz-store failure
-                        // modes included — which is why this reads as a
+                        // same result 40+ handlers here already share. It is now
+                        // resolved for BOTH arms — which is why this reads as a
                         // statement rather than a ternary: the LOCALLY CAUGHT
                         // continuation-line spelling is the one the sibling
                         // doors use and the one `execctx-consumer-census`
                         // reads, and a third layout would be invisible to it.
-                        let diagnosticsOrganizationId: string | undefined;
-                        if (diagnosticsType) {
-                            const diagnosticsCtx = await this.resolveExecCtx(environmentId, req)
-                                .catch(rethrowAuthzStoreUnavailable);
-                            diagnosticsOrganizationId = organizationIdForMetaRead(
+                        // This door does not sit behind the shared anonymous
+                        // floor, so it decides an authz-store outage for itself
+                        // rather than laundering it into an org-unscoped 200 —
+                        // and the untyped arm now shares that, deliberately.
+                        const diagnosticsCtx = await this.resolveExecCtx(environmentId, req)
+                            .catch(rethrowAuthzStoreUnavailable);
+                        const diagnosticsOrganizationId: string | undefined = diagnosticsType
+                            ? organizationIdForMetaRead(
                                 // [#10340] FOLDED, not raw — see the PUT door's
                                 // org-scope comment for the measurement. The
                                 // protocol keeps receiving the caller's own
@@ -4630,8 +4924,9 @@ export class RestServer {
                                 // unrecognised one with its own 400); only the
                                 // scope decision reads the canonical singular.
                                 canonicalMetaUrlType(diagnosticsType), diagnosticsCtx?.tenantId,
-                            );
-                        }
+                            )
+                            // [#15622] The whole-registry arm — raw, per above.
+                            : diagnosticsCtx?.tenantId;
                         const result = await (p as any).getMetaDiagnostics({
                             type: diagnosticsType,
                             severity,
@@ -5344,60 +5639,72 @@ export class RestServer {
                             });
                             return;
                         }
-                        // [#13753] ⛔ STILL NO `organizationId`, and that is a
-                        // RECORDED GAP, not an omission nobody looked at. Read
-                        // this before adding the one-line repair that looks
-                        // obviously missing here.
+                        // ── [#13753] STATE THE ORG PARTITION — and pass it
+                        // RAW, which is the whole of the decision ───────────
                         //
-                        // The card prescribed the sibling call-site fix —
-                        // `organizationIdForMetaRead(canonicalMetaUrlType(
-                        // req.params.type), ctx?.tenantId)` — on the premise
-                        // that this door "takes one type". Measured on the
-                        // merged tree, it does not: `req.params.type` is the
-                        // TARGET, and `findReferencesToMeta` spends the
-                        // organization on the SOURCES. It resolves
+                        // The admin "Used by" panel renders its empty case as
+                        // "Nothing in the metadata graph points at this item.
+                        // Safe to delete." (objectui `metadata-admin/i18n.ts`),
+                        // shown to an operator about to delete something. With
+                        // no organization stated, the sweep read the env
+                        // partition only: an org-scoped `view` referencing the
+                        // item was invisible and the panel issued a false
+                        // clearance — the ADR-0110 D3 harm this route's own 501
+                        // refusal (#9326) exists to prevent, delivered by the
+                        // door after the protocol had refused to deliver it.
+                        //
+                        // ⛔ NOT pre-gated with `organizationIdForMetaRead(
+                        // canonicalMetaUrlType(req.params.type), ...)`, the way
+                        // the sibling `/meta` doors gate. Here `req.params.type`
+                        // is the TARGET, and `findReferencesToMeta` spends the
+                        // organization on the SOURCES: it resolves
                         // `REFERENCE_SITES.byTarget.get(target)`, groups the
-                        // sites by `fromType`, and reads each with
-                        // `getMetaItems({ type: matcher.fromType,
-                        // ...(organizationId ? { organizationId } : {}) })`. So
-                        // one request-level organization is applied to a SET of
-                        // types the target's own registry flag says nothing
-                        // about, and `getMetaItems` applies no gate of its own.
+                        // sites by `fromType` and reads each through
+                        // `getMetaItems({ type: matcher.fromType, ... })`. The
+                        // target's own registry flag therefore says nothing
+                        // about the types actually read, and gating on it would
+                        // suppress the organization for exactly the `object` /
+                        // `flow` / `app` deletes this card is about — the card's
+                        // own false clearance, left standing by a change that
+                        // looks like its repair.
                         //
-                        // Gating on the target would therefore answer a
-                        // question about the wrong type, in both directions:
+                        // ⭐ And RAW is not the unconditional tenant that
+                        // predicate exists to prevent, because since #14683
+                        // `getMetaItems` applies it ITSELF, to its OWN
+                        // `request.type`, after the fold. The per-SOURCE-type
+                        // decision is already the callee's: an overridable
+                        // source (`view`, `dashboard`, `report`, `translation`,
+                        // `email_template`) honours the organization, every
+                        // other source drops it and stays env-wide, so no
+                        // pre-#6190 phantom row is resurrected into a
+                        // destructive-action clearance. `request.organizationId`
+                        // has exactly ONE use inside `findReferencesToMeta` —
+                        // that `getMetaItems` spread — so passing it raw carries
+                        // no other consequence. Both halves are pinned in
+                        // `rest-server-meta-read-org-scope.test.ts`, the second
+                        // as the narrowness control.
                         //
-                        //  • target `allowOrgOverride: true` (`view`,
-                        //    `dashboard`, `report`, `translation`,
-                        //    `email_template`) ⇒ the org is named for EVERY
-                        //    source type, `object` / `flow` / `app` included —
-                        //    the unconditional tenant the read predicate exists
-                        //    to prevent, unioning pre-#6190 phantom rows back
-                        //    into a destructive-action clearance;
-                        //  • target `allowOrgOverride: false` (`object`,
-                        //    `flow`, `app`, `page`, …) ⇒ nothing is named, so
-                        //    an org-scoped `view` that references the object
-                        //    being deleted stays invisible and the "Used by"
-                        //    panel still renders "Nothing in the metadata graph
-                        //    points at this item. Safe to delete." That is the
-                        //    card's own false clearance, on the most common
-                        //    delete there is.
+                        // ⚠️ ADR-0131 D6/D7 retires the per-organization
+                        // metadata partition in v18 (#15206, C5), so this is a
+                        // repair inside a mechanism being removed: an existing
+                        // value handed to an existing parameter, no new contract
+                        // surface. ⛔ Nothing is to be built on it.
                         //
-                        // ⇒ The correct scope is per SOURCE type, and no value
-                        // this call site can pass expresses it. The repair
-                        // belongs where the type being read is known — the
-                        // predicate applied per `matcher.fromType` inside
-                        // `findReferencesToMeta`, or once inside `getMetaItems`
-                        // so read scope cannot drift from write scope for ANY
-                        // caller. Both are `metadata-protocol` changes that the
-                        // card fences off (⛔ "Do not change ... in
-                        // `protocol.ts`"), so this door is reported rather than
-                        // half-repaired: an org-awareness this door cannot
-                        // deliver must not be advertised by a gate that happens
-                        // to read `true` (Prime Directive #10).
+                        // The same memoised resolution the sibling read doors
+                        // share, in the same locally-caught spelling: this door
+                        // does not sit behind the shared anonymous floor, so it
+                        // decides an authz-store outage for itself rather than
+                        // laundering it into an org-unscoped 200.
+                        const referencesCtx = await this.resolveExecCtx(environmentId, req)
+                            .catch(rethrowAuthzStoreUnavailable);
                         const result = await (p as any).findReferencesToMeta({
                             type: req.params.type,
                             name: req.params.name,
+                            // SPREAD, never `organizationId: x ?? null` — the
+                            // implementation declares `organizationId?: string`
+                            // (optional plain string, not nullable), and it
+                            // forwards on truthiness.
+                            ...(referencesCtx?.tenantId ? { organizationId: referencesCtx.tenantId } : {}),
                             ...(environmentId ? { environmentId } : {}),
                         });
                         res.json(result);
@@ -7827,9 +8134,10 @@ export class RestServer {
                             ...(environmentId ? { environmentId } : {}),
                             ...(context ? { context } : {}),
                         } as any);
-                        // [#3431] Advertise fields the #3043 create ingress strip
-                        // dropped via the response header (body also carries
-                        // `droppedFields`). Status stays 201.
+                        // [#3431] Advertise fields the engine's create-side static-
+                        // `readonly` strip dropped (`engine.insert`, relayed by
+                        // `createData` as `droppedFields`) via the response header
+                        // (body also carries `droppedFields`). Status stays 201.
                         applyDroppedFieldsHeader(res, result);
                         res.status(201).json(result);
                     } catch (error: any) {
@@ -9357,7 +9665,7 @@ export class RestServer {
                                         // one surface still serving the packaged
                                         // string back at a tenant who renamed it.
                                         objectSchema = translateMetadataDocument('object', objectSchema, bundle, {
-                                            locale,
+                                            ...RestServer.translateOptionsFor(i18n, locale),
                                             packagedBase: this.packagedObjectBase(p, 'object', objectSchema?.name),
                                         });
                                     }
@@ -11703,6 +12011,26 @@ export class RestServer {
                 // matching-organization context.
                 [/^READ_BACK_FAILED/, 500, 'READ_BACK_FAILED'],
             ];
+            // [#13807, maintainer ruling 2026-09-04 batch #37] The
+            // machine-readable half of a stranded decision, when the service
+            // attached one. The status code does NOT move — a recorded
+            // decision whose run strands is still a failure and the ruling
+            // upholds that — but the body stops being prose only: `finalized`
+            // says the decision stands, `decision` / `runId` name what and
+            // where, and `repairable` carries the engine's own `'stranded'`
+            // discriminator through instead of dying at the door.
+            //
+            // Before this, a caller reading 500 had exactly one honest move —
+            // assume the rejection did not happen — and it was the wrong one:
+            // the row IS terminal and the record's mirrored status HAS moved.
+            // An operator had to regex the run id out of a sentence.
+            //
+            // ⛔ Presence-gated, never synthesised. `strandedDecisionDetails`
+            // returns `undefined` for any error that did not carry a complete
+            // envelope, and this then answers exactly the body it always did —
+            // a `RESUME_FAILED` from a caller with no decision to report must
+            // not be dressed up as one.
+            const stranded = strandedDecisionDetails(err);
             for (const [re, status, code] of mapping) {
                 if (re.test(msg)) {
                     // [#13095] The strip is anchored to the CODE this row just
@@ -11716,7 +12044,15 @@ export class RestServer {
                     // message opening with a DIFFERENT capitalised word and a
                     // colon), where the anchored form can only ever remove a
                     // duplicate of the `code` already on the wire.
-                    res.status(status).json({ code, error: msg.replace(new RegExp(`^${code}:\\s*`), '') });
+                    res.status(status).json({
+                        code,
+                        error: msg.replace(new RegExp(`^${code}:\\s*`), ''),
+                        // Anchored to the code the envelope describes, for the
+                        // same reason the strip above is: these four facts are
+                        // about a recorded-decision-with-stranded-run and
+                        // about nothing else.
+                        ...(code === 'RESUME_FAILED' && stranded ? stranded : {}),
+                    });
                     return true;
                 }
             }
@@ -12176,22 +12512,25 @@ export class RestServer {
                             if (op.action === 'create') {
                                 // [#3835] Go through the protocol's create ingress —
                                 // the SAME one `POST /data/:object` uses — rather than
-                                // calling `ql.insert` directly. The engine's INSERT path
-                                // is static-`readonly`-exempt by design (#3413), so the
-                                // #3043 strip that stops a non-system caller from seeding
-                                // a read-only column lives at that ingress. Bypassing it
-                                // here made `readonly` mean two different things on two
-                                // create paths: rejected on the single route, written
-                                // through the batch. `createData` also owns the platform-
-                                // object carve-out (a `sys_`/`managedBy` object's own
-                                // guard must REJECT a forged value, not silently swallow
-                                // it), which is why this routes to the ingress instead of
-                                // re-implementing the strip here — one create ingress,
-                                // and a future change to its policy covers the batch for
-                                // free. `trxCtx` carries the caller's context (including
-                                // `isSystem`) plus the open transaction, so the strip
-                                // decides exactly as it does on the single route and the
-                                // insert still joins this transaction.
+                                // calling `ql.insert` directly. When this was written the
+                                // #3043 static-`readonly` strip lived at that ingress and
+                                // a direct `ql.insert` bypassed it, so `readonly` meant
+                                // two different things on two create paths. Since the
+                                // maintainer ruling of 2026-09-03 (option C, #14147) the
+                                // strip runs inside `engine.insert` for every non-system
+                                // caller, so both routes are stripped identically, and the
+                                // platform-object carve-out (a `sys_`/`managedBy` object's
+                                // own guard must REJECT a forged value, not silently
+                                // swallow it) is the engine's as well. The routing stands
+                                // on what the ingress still owns: the #3770 object-
+                                // existence gate, the #7823 `internal: true` response
+                                // strip and the `droppedFields` relay — one create
+                                // ingress, one response contract, and a future change to
+                                // its policy covers the batch for free. `trxCtx` carries
+                                // the caller's context (including `isSystem`) plus the
+                                // open transaction, so the engine's strip decides exactly
+                                // as it does on the single route and the insert still
+                                // joins this transaction.
                                 const created: any = await p.createData({ object: op.object, data, context: trxCtx } as any);
                                 for (const e of (created?.droppedFields ?? []) as DroppedFieldsEvent[]) {
                                     dropped.push({ ...e, index });

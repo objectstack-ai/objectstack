@@ -1,6 +1,6 @@
 # ADR-0017: Object has-many View (Independent View Entities)
 
-**Status**: Accepted · Implemented Phases 1–4 (2026-05-30) · Phase 5 (Studio designer) deferred
+**Status**: Accepted · Implemented Phases 1–4 (2026-05-30) · Phase 5 (Studio designer) deferred · **Amended** (2026-09-04, [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D13 — §3.4's `sys_view_definition` store and §3.6's objectui repointing are **retired as inert**: verified on 2026-09-04 that no framework writer or reader of its rows exists, that `objectui` never referenced the object in its history (its runtime-view CRUD writes the ADR-0005 `view` overlay via `client.meta.saveItem`), and that a per-user view scope is a parked v18 direction. Runtime-authored views are environment metadata; §3.5's `GET /meta/view?object=` filter stands)
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0003](./0003-package-as-first-class-citizen.md) (package as first-class citizen), [ADR-0005](./0005-metadata-customization-overlay.md) (one Zod source per type, org overlay), [ADR-0010](./0010-metadata-protection-model.md) (L1/L2/L3 protection)
 **Consumers**: `@objectstack/spec`, `@objectstack/metadata`, `@objectstack/objectql`, `@objectstack/rest`, `@objectstack/platform-objects`, `../objectui` (runtime switcher + Studio designer)

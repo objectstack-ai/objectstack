@@ -81,10 +81,14 @@
 // 200 internal fragment links across `content/**`, of which 4 pointed at
 // headings that do not exist:
 //
-//   content/docs/automation/flows.mdx:240              #notify
-//   content/docs/concepts/metadata-lifecycle.mdx:77    #overlay-whitelist
-//   content/docs/permissions/authentication.mdx:75     /docs/deployment/cli#os-login--json-is-ndjson--the-one-exception
-//   content/docs/protocol/kernel/http-protocol.mdx:764 /docs/api/client-sdk#clientdata--crud-operations
+// The FRAGMENT is the durable identifier of each row, so the file is named as a
+// file-level anchor and the line it sat on at measurement time is data beside
+// it — a dated reading, not a pointer (#15765).
+//
+//   `content/docs/automation/flows.mdx`               (was line 240)  #notify
+//   `content/docs/concepts/metadata-lifecycle.mdx`    (was line 77)   #overlay-whitelist
+//   `content/docs/permissions/authentication.mdx`     (was line 75)   /docs/deployment/cli#os-login--json-is-ndjson--the-one-exception
+//   `content/docs/protocol/kernel/http-protocol.mdx`  (was line 764)  /docs/api/client-sdk#clientdata--crud-operations
 //
 // Three of the four are the exact shape the card predicted — an anchor written
 // from the heading a reader SEES, one dash off from the heading the slugger
@@ -524,6 +528,39 @@ function idOf(headingLine) {
   return headingIds(headingLine)[0];
 }
 
+// -- The self-test's own battery roster and floor (#13489) ------------------
+//
+// A pass used to be this self-test's ONLY success condition, so "every case
+// held" and "the cases never ran" printed the same line. Closed the way
+// PR #13487 validated on check-doc-authoring: what is pinned is the registered
+// NAMES, not a number. Every section opens with `battery('<name>')`, every
+// assertion is attributed to the battery most recently opened, and the floor
+// requires the OPENED set to equal the DECLARED set with each battery at or
+// above its own count.
+//
+// The counts are a FLOOR, not an equality -- adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'Slug parity with the renderer, on the two shapes that actually broke.': 2,
+  'The inline shapes the flattener has to get right.': 8,
+  'Duplicate headings get the renderer\'s counter suffixes.': 1,
+  'Headings that are not headings.': 2,
+  'Extraction discriminates prose from examples.': 1,
+  'End to end, on a synthetic corpus: a good anchor is silent, a dead one': 3,
+  'The census guard is load-bearing: it is the only thing that tells a': 1,
+  'The dispatch-gates declaration (#9979). Enforcement cannot hold any of': 4,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 8;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 // Returned by `selfTest()` only after its verdict is printed. The dispatch
 // refuses anything else: a `return` that leaves the function above that line
 // prints nothing and still exits 0 — a self-test that never finished, reported
@@ -531,44 +568,70 @@ function idOf(headingLine) {
 const SELF_TEST_VERDICT = 'check-doc-anchors self-test reached its verdict';
 
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const batterySeen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+  };
+  // A thin in-body wrapper over the module-level `assert`: it attributes the
+  // case to the open battery and then defers to the existing assertion, whose
+  // semantics (print and exit 1 on the first failure) are unchanged.
+  const check = (cond, message) => {
+    registerCase();
+    assert(cond, message);
+  };
   // 1. Slug parity with the renderer, on the two shapes that actually broke.
+  battery('Slug parity with the renderer, on the two shapes that actually broke.');
   for (const [heading, expected] of PARITY_PINS) {
-    assert(idOf(heading) === expected, `parity pin failed: ${heading}\n   expected ${expected}\n   got      ${idOf(heading)}`);
+    check(idOf(heading) === expected, `parity pin failed: ${heading}\n   expected ${expected}\n   got      ${idOf(heading)}`);
   }
 
   // 2. The inline shapes the flattener has to get right.
-  assert(idOf('## `os login --json` is NDJSON — the one exception') === 'os-login---json-is-ndjson--the-one-exception', 'code span + em dash');
-  assert(idOf('## `client.data` — CRUD & Batch') === 'clientdata--crud--batch', 'code span + ampersand');
-  assert(idOf('## **Bold** and *emphasis*') === 'bold-and-emphasis', 'emphasis delimiters are syntax');
-  assert(idOf('## The `snake_case` rule') === 'the-snake_case-rule', 'intraword underscore is literal text');
-  assert(idOf('## See [the CLI](/docs/deployment/cli) first') === 'see-the-cli-first', 'a link contributes its text, not its href');
-  assert(idOf('## Closing hashes ##') === 'closing-hashes', 'ATX closing sequence');
-  assert(idOf('## Dynamic approvers (#3447) [#dynamic-approvers-3447]') === 'dynamic-approvers-3447', 'fumadocs custom id');
-  assert(idOf('## A `[#not-an-id]` code span') === 'a-not-an-id-code-span', 'a custom id inside a code span is not a custom id');
+  battery('The inline shapes the flattener has to get right.');
+  check(idOf('## `os login --json` is NDJSON — the one exception') === 'os-login---json-is-ndjson--the-one-exception', 'code span + em dash');
+  check(idOf('## `client.data` — CRUD & Batch') === 'clientdata--crud--batch', 'code span + ampersand');
+  check(idOf('## **Bold** and *emphasis*') === 'bold-and-emphasis', 'emphasis delimiters are syntax');
+  check(idOf('## The `snake_case` rule') === 'the-snake_case-rule', 'intraword underscore is literal text');
+  check(idOf('## See [the CLI](/docs/deployment/cli) first') === 'see-the-cli-first', 'a link contributes its text, not its href');
+  check(idOf('## Closing hashes ##') === 'closing-hashes', 'ATX closing sequence');
+  check(idOf('## Dynamic approvers (#3447) [#dynamic-approvers-3447]') === 'dynamic-approvers-3447', 'fumadocs custom id');
+  check(idOf('## A `[#not-an-id]` code span') === 'a-not-an-id-code-span', 'a custom id inside a code span is not a custom id');
 
   // 3. Duplicate headings get the renderer's counter suffixes.
+  battery('Duplicate headings get the renderer\'s counter suffixes.');
   const dupes = headingIds('## Overview\n## Overview\n## Overview\n');
-  assert(
+  check(
     dupes.join(',') === 'overview,overview-1,overview-2',
     `duplicate-heading counters drifted: ${dupes.join(',')}`,
   );
 
   // 4. Headings that are not headings.
-  assert(headingIds('```md\n## Not a heading\n```\n').length === 0, 'a heading inside a fence is not a heading');
-  assert(headingIds('---\ntitle: Frontmatter\n---\n\n## Real\n').join(',') === 'real', 'frontmatter is not a heading');
+  battery('Headings that are not headings.');
+  check(headingIds('```md\n## Not a heading\n```\n').length === 0, 'a heading inside a fence is not a heading');
+  check(headingIds('---\ntitle: Frontmatter\n---\n\n## Real\n').join(',') === 'real', 'frontmatter is not a heading');
 
   // 5. Extraction discriminates prose from examples.
+  battery('Extraction discriminates prose from examples.');
   const extracted = extractFragmentLinks(
     'See [a](/docs/x#good) and `[b](/docs/x#in-a-code-span)`.\n' +
       '```md\n[c](/docs/x#in-a-fence)\n```\n' +
       'External [d](https://example.com/y#skipped), page-only [e](/docs/x#).\n',
   );
-  assert(
+  check(
     extracted.map((l) => l.fragment).join(',') === 'good',
     `extractor picked up the wrong links: ${extracted.map((l) => l.dest).join(', ')}`,
   );
 
   // 6. End to end, on a synthetic corpus: a good anchor is silent, a dead one
+  battery('End to end, on a synthetic corpus: a good anchor is silent, a dead one');
   //    is found, and an unresolvable page is its own class. A discrimination
   //    rule that only ever says "nothing found" looks exactly like a broken
   //    extractor, so both directions are provoked.
@@ -588,43 +651,91 @@ function selfTest() {
         '[no page](/docs/gone#anywhere)\n',
     );
     const result = sweep(tmp);
-    assert(result.checked === 3, `expected 3 checked fragment links, got ${result.checked}`);
-    assert(result.broken.length === 1 && result.broken[0].fragment === 'overlay-whitelist', 'the dead anchor was not reported');
-    assert(result.unresolved.length === 1 && result.unresolved[0].path === '/docs/gone', 'the unresolvable page was not reported');
+    check(result.checked === 3, `expected 3 checked fragment links, got ${result.checked}`);
+    check(result.broken.length === 1 && result.broken[0].fragment === 'overlay-whitelist', 'the dead anchor was not reported');
+    check(result.unresolved.length === 1 && result.unresolved[0].path === '/docs/gone', 'the unresolvable page was not reported');
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
 
   // 7. The census guard is load-bearing: it is the only thing that tells a
+  battery('The census guard is load-bearing: it is the only thing that tells a');
   //    clean corpus apart from an extractor that matches nothing.
   const live = sweep();
-  assert(live.checked > 0, 'the real corpus yielded zero fragment links — the extractor is over-stripping');
+  check(live.checked > 0, 'the real corpus yielded zero fragment links — the extractor is over-stripping');
 
   // 8. The dispatch-gates declaration (#9979). Enforcement cannot hold any of
+  battery('The dispatch-gates declaration (#9979). Enforcement cannot hold any of');
   //    these: the declaration is read by another tool entirely, so a wrong or
   //    missing entry runs perfectly green here and shows up only as a dev
   //    dispatched on a README.md / ARCHITECTURE.md card who is not told that
   //    this REQUIRED gate — the repo's only fragment coverage — reads it.
-  assert(
+  check(
     EXTRA_SOURCES.every((f) => ROOT_FILE_WATCH_HINTS.includes(`${f}/**`)),
     `every extra source declares a root-file watch hint: ${EXTRA_SOURCES.join(', ')} vs ${ROOT_FILE_WATCH_HINTS.join(', ')}`,
   );
-  assert(
+  check(
     ROOT_FILE_WATCH_HINTS.every((h) => EXTRA_SOURCES.includes(h.replace(/\/\*+$/, ''))),
     `the declaration names no file this gate does not read: ${ROOT_FILE_WATCH_HINTS.join(', ')}`,
   );
   // Provenance, never a lookup key: `listSources` joins each EXTRA_SOURCES
   // entry with the repo root, so the glob form there would drop both from the
   // sweep — and `existsSync` would drop them SILENTLY.
-  assert(
+  check(
     !EXTRA_SOURCES.some((f) => ROOT_FILE_WATCH_HINTS.includes(f)),
     'the declared form is NOT an EXTRA_SOURCES entry — it would silently empty the extra-source half of the sweep',
   );
   // The population the declaration claims is the one the gate really reads.
-  assert(
+  check(
     ROOT_FILE_WATCH_HINTS.every((h) => listSources(process.cwd()).includes(h.replace(/\/\*+$/, ''))),
     'the declared root files are in the live source population this gate sweeps',
   );
+
+  // -- The floor: every declared battery RAN, and ran its cases (#13489) -----
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorMessages = [];
+  const floorFailure = (message) => { floorMessages.push(message); };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned `
+        + `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in `
+        + 'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. `
+          + 'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of `
+          + `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the '
+        + 'number. Find what stopped registering (an early return, a deleted block, a guard that now '
+        + 'skips) and restore it.',
+    );
+  }
+  assert(!floorBreached, floorMessages.join('\n     '));
 
   console.log(
     `✅ check-doc-anchors --self-test: slug parity, custom ids, duplicate counters, extraction discrimination and both finding classes verified (${live.checked} live fragment links)`,

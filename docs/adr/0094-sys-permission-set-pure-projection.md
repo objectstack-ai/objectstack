@@ -30,7 +30,9 @@ not by a subscriber a new write path might forget to trigger:
    `publishMetaItem` / `deleteMetaItem`, after persistence and before the write returns.
    The projector is the **only writer** of the record. A Studio save therefore returns
    only after the record already reflects it — no projection race (the #2867 subscriber
-   was fire-and-forget).
+   was fire-and-forget). (**The three doors named above are no longer the whole list** —
+   the recovery doors project too since 2026-09-03; the sentence is left as written and
+   the full enumeration is in the 2026-09-04 amendment at the end of this record.)
 3. **Boot reconciliation + one-time backfill.** At `kernel:ready` the projection is
    re-derived from metadata (metadata wins), and legacy records that exist **only** in
    the data plane are migrated into the metadata store once.
@@ -91,7 +93,7 @@ recreates ids.
 **Assignments and bindings stay data-plane.** Which users/positions hold a set is
 environment *state*, not part of the definition; those tables are unchanged.
 
-### D2 — The record is written only by the projector, awaited by the protocol
+### D2 — The record is written only by the projector, awaited by the protocol (door enumeration amended 2026-09-04 — see the amendment at the end)
 
 `@objectstack/metadata-protocol` gains `registerMutationProjector(type, fn)`: an
 awaited, best-effort per-type hook invoked after persistence inside `saveMetaItem`
@@ -99,6 +101,14 @@ awaited, best-effort per-type hook invoked after persistence inside `saveMetaIte
 `{ type, name, state, organizationId, body? }`. A projector failure is surfaced on the
 write's response (`projectionApplied: { success:false, error }`) and logged — never
 thrown, the metadata write itself succeeded and boot reconciliation heals on next start.
+
+> **Amended 2026-09-04** (see the amendment at the end of this record): the two
+> sentences above are narrower than the shipped code in two ways. The door list is
+> three of **seven** call sites, and boot reconciliation is not the only thing that
+> re-derives a record a failed projection left stale — every projecting door does,
+> and since 2026-09-03 that set includes the recovery doors. `projectionApplied` is
+> also not surfaced at every site: three of the seven call and await the projector
+> without putting an outcome on the response.
 
 `plugin-security` registers the `permission` projector. It re-reads the **fresh layered
 effective body** and:
@@ -484,3 +494,96 @@ two rules the `object` authoring gate (`objectPostureGate`,
 Door order, as pinned in `packages/rest/src/meta-object-owd-gate.test.ts`:
 the 422 lint gate answers first; this seam's 403 R1 door answers for writes
 that pass lint.
+
+## Amendment (2026-09-04, #15244): the projector has seven doors, not three — and boot reconciliation was never the only re-derivation
+
+D2 enumerates the doors that await the projector as `saveMetaItem` /
+`publishMetaItem` / `deleteMetaItem`. That sentence was accurate when this
+record was written and is **incomplete** on today's tree: PR #14982 (merged
+2026-09-03 as `95464ed65`) extended the projection to the recovery doors, and
+the record did not follow it — that PR's documentation half was closed void, so
+the code shipped alone. This amendment closes the gap and **changes no
+decision**: D1 stands untouched, and D2's rule — *the record is written only by
+the projector, and the projector is awaited before the write returns* — is
+exactly what the four new call sites implement. Only the enumeration was wrong,
+which is the harder kind of error to notice, because nothing it says is false.
+
+### The seven projecting doors, measured on `main`
+
+`runMutationProjector` is declared once in
+`packages/metadata-protocol/src/protocol.ts` and called from **seven** sites in
+that same file — D2's three, plus the four #14982 added:
+
+| Projecting door | `state` passed | Body handed over | Outcome on the response |
+| :-- | :-- | :-- | :-- |
+| `saveMetaItem` | `draft` \| `active` | the saved item | `projectionApplied` |
+| `runPublishSideEffects`, the phase-2 publish helper | `active` | the published body | `projectionApplied` |
+| `deleteMetaItem`, repository branch | `deleted` | none | `projectionApplied` |
+| `rollbackMetaItem`, after its registry write-through | `active` | the restored version's body | — |
+| `revertCommit`, restore limb | `active` | the pre-commit body | — |
+| `revertCommit`, soft-remove limb | `deleted` | none | — |
+| `deleteMetaItem`, legacy raw-engine exit | `deleted` | none | `projectionApplied` |
+
+Three things D2's three-name sentence hides, each measured on the call sites
+rather than inferred from the method names:
+
+- **The publish door is a shared helper, not `publishMetaItem`.** The projecting
+  call site lives in `runPublishSideEffects`, at that helper's own body level,
+  and `publishMetaItem` is one of **two** callers — `publishPackageDrafts`
+  reaches the same projection through the same helper. D2 named only the first,
+  so the package-draft publish path has been projecting, undocumented, since
+  before this amendment.
+- **`deleteMetaItem` projects from two exits, not one.** Its repository branch
+  always did; #14982 added the legacy raw-engine exit, which serves the
+  code-only types the repository path cannot.
+- **`projectionApplied` is not universal.** D2's failure-surfacing sentence
+  holds at four of the seven. `rollbackMetaItem` and both `revertCommit` limbs
+  declare no such key on their response types and #14982 deliberately added
+  none: there the projector is called and awaited, and a failure is logged
+  without reaching the caller.
+
+The count is enforced, not incidental —
+`packages/metadata-protocol/src/protocol.recovery-doors-mutation-projector.test.ts`
+pins "exactly seven" call sites, three original and four recovery-door, with the
+declaration asserted separately as a non-vacuity control. Anyone can re-derive
+the number:
+
+```bash
+git grep -c "this.runMutationProjector(" -- packages/metadata-protocol/src/protocol.ts
+```
+
+which answers `7` on this tree. If it ever answers anything else, the table above
+is what went stale.
+
+### Boot reconciliation is not the only healing path
+
+D2's best-effort clause ends "boot reconciliation heals on next start", which
+reads as though a failed projection is stranded until the next boot. It is not,
+and it never quite was: **any** later projecting door on the same name re-derives
+the record, because the projector re-reads the fresh layered effective body
+rather than trusting whatever it was handed. Before #14982 that set was an
+unrelated save, publish or delete; since #14982 it also includes a rollback and
+both limbs of a commit revert. D4's `kernel:ready` pass remains the guaranteed
+floor — the one heal that needs no subsequent write, and the property D2's
+sentence was reaching for — but it is a floor, not the only path.
+
+The inverse defect is the one #14982 fixed. Before it, the recovery doors
+restored the row and the in-memory registry without projecting, so a rollback
+left the derived record on the rolled-back-from state: applied everywhere except
+the record Setup reads, until an unrelated write or the next boot caught up.
+
+### This mechanism has one major left to live
+
+[ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md)
+(merged 2026-09-04 as PR #14976) retires it. Its D2 names "the
+`sys_permission_set` projector and reconciler of ADR-0094 D2/D4" among the
+machinery that goes, and its D3 retires the `sys_permission_set` object itself
+(with D13) — on the ground that **D1 of this record was right and is being
+generalized**: the metadata layer was already the sole authoritative store, so
+once the catalog is read from the registry the projected row has nothing left to
+be. D14 puts that on the **v18** line, and the card that executes it is C3,
+tracked on #15204.
+
+So this amendment describes a mechanism with one major to live. It is written
+for whoever has to keep the seven doors correct until then — not as an
+invitation to build something new on top of them.

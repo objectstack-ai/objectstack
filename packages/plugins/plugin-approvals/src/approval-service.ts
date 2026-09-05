@@ -18,7 +18,7 @@ import { ExpressionEngine, collectCelRootIdentifiers } from '@objectstack/formul
 // writer-local re-derivation here was rejected by name (Option B): it would be
 // a third answer to a question the codebase already answered two ways.
 import { createRecordOrganizationResolver, type RecordOrganizationResolver } from '@objectstack/metadata-core';
-import { keysetWalk } from '@objectstack/types';
+import { keysetWalk, strandedDecisionFailure } from '@objectstack/types';
 import {
   ADMIN_FULL_ACCESS,
   ORGANIZATION_ADMIN_GRANTS,
@@ -2665,15 +2665,17 @@ export class ApprovalService implements IApprovalService {
     signal: { output?: Record<string, unknown>; branchLabel?: string },
   ): Promise<void> {
     const result = await this.automation!.resume!(runId, { ...signal, [RESUME_AUTHORITY_SERVICE]: true });
-    const reported = result as { success?: boolean; code?: string; error?: string } | undefined;
+    const reported = result as
+      { success?: boolean; code?: string; error?: string; status?: string } | undefined;
     // Only an explicit `success: false` is a failure. An engine (or a test
     // double) that returns nothing is reporting nothing, and has always meant
     // "it ran".
     if (reported && typeof reported === 'object' && reported.success === false) {
       const err = new Error(
         `resume of run '${runId}' failed${reported.code ? ` [${reported.code}]` : ''}: ${reported.error ?? 'unknown error'}`,
-      ) as Error & { resumeCode?: string };
+      ) as Error & { resumeCode?: string; resumeStatus?: string };
       err.resumeCode = reported.code;
+      err.resumeStatus = reported.status;
       throw err;
     }
   }
@@ -2681,6 +2683,23 @@ export class ApprovalService implements IApprovalService {
   /** The engine failure code behind a {@link serviceResume} rejection, if any. */
   private static resumeCodeOf(err: unknown): string | undefined {
     return (err as { resumeCode?: string } | undefined)?.resumeCode;
+  }
+
+  /**
+   * The engine's own run-state discriminator behind a {@link serviceResume}
+   * rejection — `AutomationResult.status` — if the engine reported one
+   * (#13807).
+   *
+   * Read as a SIBLING of {@link resumeCodeOf}, never as a substitute: the two
+   * answer different questions and the stranded exit proves they are not
+   * interchangeable. It reports `status: 'stranded'` and **no `code` at all**
+   * (`service-automation` `engine.ts`, the resume catch arm), so a door that
+   * reads only the code sees an unnamed failure and cannot tell a repairable
+   * strand from a dead run — which is how the platform's own repairability
+   * signal had a producer and zero consumers until this call site.
+   */
+  private static resumeStatusOf(err: unknown): string | undefined {
+    return (err as { resumeStatus?: string } | undefined)?.resumeStatus;
   }
 
   /**
@@ -2788,14 +2807,38 @@ export class ApprovalService implements IApprovalService {
    * which cannot throw without breaking every standalone deployment — it
    * reports through `resumeError` instead.
    *
+   * ## The throw is truthful, not merely loud (#13807)
+   *
+   * Maintainer ruling 2026-09-04 (decision batch #37, option B): this door
+   * KEEPS its status code — the effect landing while the run strands is still
+   * a failure and must still be reported as one — and stops discarding what
+   * the engine said. ⛔ Not "return 200", which the card forbids; ⛔ not
+   * atomic, because rolling a real human decision back is excluded by the
+   * #13937 shape-4 ruling, which binds this door's own writes too (a machine
+   * that re-armed strandings by itself would re-run the node that threw,
+   * forever, with nobody deciding it should).
+   *
+   * So the error carries {@link StrandedDecisionDetails} beside its prose:
+   * `finalized` (the decision stands), `decision`, `runId`, and `repairable`
+   * derived from the engine's `'stranded'` discriminator. Before this a caller
+   * had a 500 and a sentence — and 500 alone reads as "the rejection did not
+   * happen", which is the misreading that makes a caller retry or escalate
+   * against a decision that IS durable.
+   *
    * @param what - how the recorded outcome reads in the error, e.g.
    *   `"the approve decision"`.
+   * @param decision - the outcome label for the machine-readable envelope
+   *   (`'approve'` / `'reject'` / `'revise'` / `'resubmit'`). Passed
+   *   explicitly rather than parsed back out of `what` or the signal: the
+   *   prose is for humans and `output` is the flow's, and neither is a place
+   *   to keep a wire value.
    */
   private async resumeRecordedOutcome(
     runId: string,
     requestId: string,
     what: string,
     signal: { output?: Record<string, unknown>; branchLabel?: string },
+    decision: string,
   ): Promise<{ resumed: boolean; resumeError?: string }> {
     const missing = this.missingRunCapability(runId, requestId, what, 'resume');
     if (missing) return { resumed: false, resumeError: missing };
@@ -2810,12 +2853,20 @@ export class ApprovalService implements IApprovalService {
         });
         return { resumed: false, resumeError: reason };
       }
+      // #13807: the engine's own discriminator decides `repairable`, never
+      // this door and never the message text. `'stranded'` is the ONE exit
+      // that journalled a repair snapshot, so it is the one exit an operator
+      // can act on; every other failure (a lost run, an engine too old to
+      // report a status) is honestly `false`.
+      const status = ApprovalService.resumeStatusOf(err);
+      const repairable = status === 'stranded';
       this.logger?.error?.('[approvals] resume failed — the run is stranded', {
-        request: requestId, run: runId, outcome: what, error: reason,
+        request: requestId, run: runId, outcome: what, error: reason, status, repairable,
       });
-      throw new Error(
+      throw strandedDecisionFailure(
         `RESUME_FAILED: ${what} was recorded on request ${requestId}, but its flow run '${runId}' ` +
         `could not be resumed and is now stranded: ${reason}`,
+        { finalized: true, decision, runId, repairable },
       );
     }
   }
@@ -2862,6 +2913,7 @@ export class ApprovalService implements IApprovalService {
           // whitelist already rejects them; this is defense in depth).
           output: { ...(result.outputs ?? {}), decision: result.decision, requestId },
         },
+        result.decision,
       );
       resumed = outcome.resumed;
       resumeError = outcome.resumeError;
@@ -3254,6 +3306,7 @@ export class ApprovalService implements IApprovalService {
             branchLabel: APPROVAL_BRANCH_LABELS.reject,
             output: { decision: 'reject', autoRejected: true, requestId },
           },
+          'reject',
         );
         resumed = outcome.resumed;
         resumeError = outcome.resumeError;
@@ -3295,6 +3348,7 @@ export class ApprovalService implements IApprovalService {
           branchLabel: APPROVAL_BRANCH_LABELS.revise,
           output: { decision: 'revise', requestId },
         },
+        'revise',
       );
       resumed = outcome.resumed;
       resumeError = outcome.resumeError;
@@ -3384,6 +3438,7 @@ export class ApprovalService implements IApprovalService {
           branchLabel: APPROVAL_BRANCH_LABELS.resubmit,
           output: { resubmitted: true, requestId },
         },
+        'resubmit',
       );
       resumed = outcome.resumed;
       resumeError = outcome.resumeError;

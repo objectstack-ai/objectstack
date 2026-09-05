@@ -79,7 +79,7 @@ REGEN_FILES="$(files_of $REGEN_PATHS)"
 
 F_UNAPPROVED="$(fixture governed-unapproved "$GOVERNED_FILES" "$NO_REVIEWS")"
 F_PINNED="$(fixture governed-pinned "$GOVERNED_FILES" "$(approved_at os-zhuang "$HEAD_SHA")")"
-F_STALE="$(fixture governed-stale "$GOVERNED_FILES" "$(approved_at os-zhuang "$OLD_SHA")")"
+F_OLDER="$(fixture governed-approved-on-an-earlier-commit "$GOVERNED_FILES" "$(approved_at os-zhuang "$OLD_SHA")")"
 F_OUTSIDER="$(fixture governed-outsider "$GOVERNED_FILES" "$(approved_at os-warren "$HEAD_SHA")")"
 F_DISMISSED="$(fixture governed-dismissed "$GOVERNED_FILES" \
   "$(jq -nc --arg c "$HEAD_SHA" '[{state:"APPROVED",user:{login:"os-zhuang"},commit_id:$c},{state:"DISMISSED",user:{login:"os-zhuang"},commit_id:$c}]')")"
@@ -135,6 +135,19 @@ expect_says() { # expect_says <needle> <label> <payload> [env…]
   esac
 }
 
+# The other direction, and it earns its place: a retired RULE leaves its
+# sentence behind in the text a seat actually reads, long after the predicate
+# stopped enforcing it. `expect_says` cannot catch that — only an assertion that
+# a phrase is ABSENT can.
+expect_lacks() { # expect_lacks <needle> <label> <payload> [env…]
+  local needle="$1" label="$2" payload="$3"; shift 3
+  local out; out="$(stderr_of "$payload" "$@")"
+  case "$out" in
+    *"$needle"*) fail=$((fail + 1)); printf '  FAIL still says "%s"  %s\n' "$needle" "$label" ;;
+    *) pass=$((pass + 1)); printf '  ok   lacks  %s\n' "$label" ;;
+  esac
+}
+
 echo "== the incident's own shape: governed + no approval at all =="
 expect block 'enable_pr_auto_merge on a governed PR with zero reviews' \
   "$(mcp $AUTO 13794)" "OS_GOVERNED_ENQUEUE_FIXTURE=$F_UNAPPROVED"
@@ -148,24 +161,31 @@ expect_says 'does NOT re-run on a later approval' 'the no-re-run reason is state
   "$(mcp $AUTO 13794)" "OS_GOVERNED_ENQUEUE_FIXTURE=$F_UNAPPROVED"
 expect_says 'OS_ALLOW_GOVERNED_ENQUEUE=1' 'the deliberate exception is named' \
   "$(mcp $AUTO 13794)" "OS_GOVERNED_ENQUEUE_FIXTURE=$F_UNAPPROVED"
-expect_says "$HEAD_SHA" 'the head sha the approval must pin is named' \
+expect_says "$HEAD_SHA" 'the current head sha is named so the reader knows which PR state this is' \
+  "$(mcp $AUTO 13794)" "OS_GOVERNED_ENQUEUE_FIXTURE=$F_UNAPPROVED"
+expect_says 'does NOT have to sit on the' 'the remedy states the 2026-09-04 predicate, not the retired sha pin' \
+  "$(mcp $AUTO 13794)" "OS_GOVERNED_ENQUEUE_FIXTURE=$F_UNAPPROVED"
+expect_lacks 'unpins it' 'the retired advice (a push unpins the approval) is gone from the refusal' \
   "$(mcp $AUTO 13794)" "OS_GOVERNED_ENQUEUE_FIXTURE=$F_UNAPPROVED"
 expect_says 'AGENTS.md' 'the governed hit is named' \
   "$(mcp $AUTO 13794)" "OS_GOVERNED_ENQUEUE_FIXTURE=$F_UNAPPROVED"
 
-echo "== an AUTHORIZED approval PINNED to the current head is the pass =="
+echo "== an AUTHORIZED APPROVED review is the pass, on the head or on any commit =="
 expect allow 'governed + os-zhuang APPROVED at the current head' \
   "$(mcp $AUTO 13794)" "OS_GOVERNED_ENQUEUE_FIXTURE=$F_PINNED"
+# ⭐ 2026-09-04, verbatim: 只需要有人工批准记录就行，不需要卡最新的提交。 Under the
+# retired sha pin this SAME fixture was the block case, which is exactly why it
+# is pinned in the ruled direction here rather than deleted. The hook holds no
+# predicate of its own, so this direction arrives entirely through the imported
+# `authorizedApprovalVerdict` — flipping it back there flips this case red.
+expect allow 'governed + os-zhuang APPROVED on an EARLIER commit still counts' \
+  "$(mcp $AUTO 13794)" "OS_GOVERNED_ENQUEUE_FIXTURE=$F_OLDER"
 
-echo "== the three ways an approval does not count (pinnedApprovalVerdict, imported) =="
-expect block 'a STALE approval (approved an earlier head) never counts' \
-  "$(mcp $AUTO 13794)" "OS_GOVERNED_ENQUEUE_FIXTURE=$F_STALE"
+echo "== the two ways an approval does not count (authorizedApprovalVerdict, imported) =="
 expect block 'an APPROVED review from outside GOVERNED_APPROVERS never counts' \
   "$(mcp $AUTO 13794)" "OS_GOVERNED_ENQUEUE_FIXTURE=$F_OUTSIDER"
 expect block 'a later DISMISSED supersedes the same reviewer approval' \
   "$(mcp $AUTO 13794)" "OS_GOVERNED_ENQUEUE_FIXTURE=$F_DISMISSED"
-expect_says 'STALE approval' 'a stale approval is reported as stale, not as absent' \
-  "$(mcp $AUTO 13794)" "OS_GOVERNED_ENQUEUE_FIXTURE=$F_STALE"
 expect_says 'outside the authorized set' 'an unauthorized approval is reported as such' \
   "$(mcp $AUTO 13794)" "OS_GOVERNED_ENQUEUE_FIXTURE=$F_OUTSIDER"
 
@@ -321,7 +341,7 @@ rm -rf "$nojq"
 echo "== the two predicates are the imported ones, not a local copy =="
 # A restatement of either predicate inside the hook is the failure this asserts
 # against: grep the hook for a second path list or a second approver list.
-if grep -q 'check-governed-merges.mjs' "$hook" && grep -q 'pinnedApprovalVerdict' "$hook"; then
+if grep -q 'check-governed-merges.mjs' "$hook" && grep -q 'authorizedApprovalVerdict' "$hook"; then
   pass=$((pass + 1)); printf '  ok   wired  both single sources are invoked by name\n'
 else
   fail=$((fail + 1)); printf '  FAIL the hook no longer invokes both single sources\n'

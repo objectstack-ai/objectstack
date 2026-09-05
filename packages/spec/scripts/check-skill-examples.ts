@@ -1332,6 +1332,88 @@ function runTsc(buildDir: string): { code: number; output: string } {
 
 // ── Main ─────────────────────────────────────────────────────────────────────
 
+// ── The build-dir residue guarantee (#15446 / #15457) ───────────────────────
+//
+// Every throwaway build dir this run has materialised, and the ONE place they are
+// removed. The set is module-level rather than a local of `main()` because the
+// `process.on('exit')` listener below has to reach it from OUTSIDE the call stack
+// that created it — that listener is what covers the exit paths a `finally` cannot
+// (see `withBuildDirCleanup`).
+const materialisedBuildDirs = new Set<string>();
+let buildDirExitCleanupInstalled = false;
+
+function removeBuildDirs(dirs: Iterable<string>, keep: boolean): void {
+  if (keep) return;
+  for (const dir of dirs) fs.rmSync(dir, { recursive: true, force: true });
+}
+
+/**
+ * Install the process-level half of the guarantee, once.
+ *
+ * ⚠️ `process.exit()` does NOT run `finally` blocks, and this script exits that way
+ * on every refusal — `fail()`, `refuse()`, and the per-surface staleness guard. An
+ * `'exit'` listener DOES run for all of them, and for an uncaught throw as well, so
+ * it is the only placement that covers the paths this was actually filed about.
+ * SIGINT/SIGTERM get explicit handlers because a default-handled signal terminates
+ * the process without emitting `'exit'` at all.
+ */
+function installBuildDirExitCleanup(): void {
+  if (buildDirExitCleanupInstalled) return;
+  buildDirExitCleanupInstalled = true;
+  process.on('exit', () => removeBuildDirs(materialisedBuildDirs, KEEP));
+  for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+    process.on(signal, () => {
+      removeBuildDirs(materialisedBuildDirs, KEEP);
+      process.exit(130);
+    });
+  }
+}
+
+/**
+ * Run `body`, and guarantee that every directory it hands to `track` is gone when this
+ * run ends — whichever way out it takes: a return, a throw, a `process.exit()` from
+ * `fail()` / `refuse()` / the staleness guard, or Ctrl-C.
+ *
+ * `keep` is a parameter rather than a read of `KEEP` so `--self-test` can pin BOTH
+ * directions (a thrown compile error cleans up; `--keep` still keeps) in-process.
+ */
+function withBuildDirCleanup<T>(body: (track: (dir: string) => void) => T, keep: boolean = KEEP): T {
+  installBuildDirExitCleanup();
+  const tracked = new Set<string>();
+  const track = (dir: string): void => {
+    tracked.add(dir);
+    materialisedBuildDirs.add(dir);
+  };
+  try {
+    return body(track);
+  } finally {
+    removeBuildDirs(tracked, keep);
+    if (!keep) for (const dir of tracked) materialisedBuildDirs.delete(dir);
+  }
+}
+
+/**
+ * Remove a build dir a PREVIOUS run left behind, before this one starts, and say so.
+ *
+ * Not redundant with the guarantee above, and this is the half that repairs an already
+ * dirty tree: `writeBuildDir` wipes only the dir of a surface this run REACHES, so a
+ * run that refuses at surface 1 leaves surface 2's stale tree standing indefinitely —
+ * and `withBuildDirCleanup` cannot clean what this run never materialised. Announced on
+ * stderr rather than tidied silently, because "an earlier run of this gate died" is a
+ * fact the reader wants; a silent tidy-up is how the coupling stayed invisible for as
+ * long as it did.
+ */
+function cleanStaleBuildDirs(): void {
+  const stale = SURFACES.map(buildDirOf).filter((dir) => fs.existsSync(dir));
+  if (stale.length === 0) return;
+  for (const dir of stale) fs.rmSync(dir, { recursive: true, force: true });
+  console.error(
+    `⚠ removed ${stale.length} stale build dir(s) left behind by an earlier interrupted run:\n` +
+      stale.map((dir) => `    ${rel(dir)}`).join('\n') +
+      `\n`,
+  );
+}
+
 function fail(message: string): never {
   console.error(`\n✗ ${message}\n`);
   process.exit(1);
@@ -2478,6 +2560,71 @@ function selfTest(): never {
     fs.rmSync(nonGitDir, { recursive: true, force: true });
   }
 
+  // ── THE BUILD-DIR RESIDUE GUARANTEE (#15446 / #15457), both directions ──────
+  //
+  // ⛔ NON-VACUOUS BY CONSTRUCTION: the body below THROWS after materialising two
+  // trees, which is precisely the path the two trailing `rmSync` sweeps this
+  // replaced never reached. Restore those sweeps in place of `withBuildDirCleanup`
+  // and the two `existsSync` rows go red, in the same run, without a subprocess.
+  //
+  // The third row is the one that says WHY this is a helper and not a bare
+  // `try`/`finally`. `fail()`, `refuse()` and the per-surface staleness guard all
+  // leave via `process.exit()`, and `process.exit()` does not run `finally` — so a
+  // `finally` alone would still leave the trees behind on every refusal, which is
+  // the ORDINARY outcome on a workspace that is not fully built and the exact way
+  // 226 + 10 files were measured left under `packages/spec/`. The `'exit'` listener
+  // is what carries the guarantee across those paths, and this pins that it exists.
+  {
+    const residueDir = fs.mkdtempSync(path.join(os.tmpdir(), 'check-skill-examples-residue-'));
+    const plant = (dir: string): string => {
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'planted.ts'), 'export const planted = 1;\n', 'utf8');
+      return dir;
+    };
+    const treeA = path.join(residueDir, '.examples-build');
+    const treeB = path.join(residueDir, '.examples-build-src');
+
+    let threw = false;
+    try {
+      withBuildDirCleanup((track) => {
+        track(treeA);
+        plant(treeA);
+        track(treeB);
+        plant(treeB);
+        // Stands in for `writeBuildDir` / `runTsc` blowing up part-way through the
+        // surface loop, after earlier surfaces have already written their trees.
+        throw new Error('compile blew up');
+      }, false);
+    } catch {
+      threw = true;
+    }
+    check(threw, 'residue fixture: a thrown compile error must still propagate — the cleanup may not swallow it');
+    check(
+      !fs.existsSync(treeA),
+      'residue fixture: a thrown compile error left .examples-build behind — every exit path must remove what it materialised',
+    );
+    check(
+      !fs.existsSync(treeB),
+      'residue fixture: a thrown compile error left .examples-build-src behind — BOTH emitted trees are the guarantee, not just the first',
+    );
+
+    // The other direction: `--keep` is a real feature (inspect the emitted blocks
+    // after a failing run), so the guarantee must not quietly delete under it.
+    withBuildDirCleanup((track) => {
+      track(treeA);
+      plant(treeA);
+    }, true);
+    check(fs.existsSync(treeA), 'residue fixture: --keep must still keep the tree for inspection');
+
+    check(
+      process.listenerCount('exit') >= 1,
+      "residue fixture: no 'exit' listener is installed — a try/finally alone cannot cover fail() / refuse() / the " +
+        'staleness guard, because process.exit() does not run finally blocks',
+    );
+
+    fs.rmSync(residueDir, { recursive: true, force: true });
+  }
+
   if (failures.length > 0) {
     for (const f of failures) console.error(`✗ self-test: ${f}`);
     console.error(`\ncheck-skill-examples --self-test: ${failures.length} failure(s).\n`);
@@ -2510,7 +2657,10 @@ function selfTest(): never {
       '    and an existing one is not, while a scoped root whose `dir` is absent from this checkout\n' +
       '    entirely is silent in BOTH predicates (with the same list under an existing dir still\n' +
       '    flagged, so the exemption is the dir and not a predicate gone quiet) — and the real\n' +
-      '    SURFACES satisfy both invariants today.',
+      '    SURFACES satisfy both invariants today; and a compile error thrown after two build dirs\n' +
+      '    have been materialised leaves NEITHER behind while still propagating, `--keep` still\n' +
+      '    keeps, and the `exit` listener that carries that guarantee across fail()/refuse() —\n' +
+      '    which `finally` cannot, because process.exit() skips it — is installed.',
   );
   process.exit(0);
 }
@@ -2747,6 +2897,7 @@ function main() {
 
   assertDistinctBuildDirs();
   assertGitignoredBuildDirs();
+  cleanStaleBuildDirs();
   // Before the corpus is read (#12048): a scoped page list that has stopped
   // resolving would otherwise show up as a page quietly back on the surface
   // that cannot resolve its imports, not as an error.
@@ -2946,7 +3097,6 @@ function main() {
   // `paths` map (so it can self-import its own package(s)), but diagnostics
   // from every surface are collected and reported together at the end —
   // one gate, one verdict, whichever surfaces broke named in it.
-  const buildDirs: string[] = [];
   let anyDiags = false;
   const diagBlocks: string[] = [];
   // Which surfaces actually reached `tsc` (#12051). The green line below is a
@@ -2957,111 +3107,133 @@ function main() {
   // true against the next edit that adds a skip or an early `continue` up here.
   const compiled = new Set<string>();
 
-  for (const { surface, examples } of bySurface) {
-    // BEFORE any declaration is resolved (#7181, adopting #7122's primitive).
-    //
-    // Placement differs from the two sibling gates on purpose, because the ROUTE to
-    // the dist differs: those resolve entry points in-process with
-    // `ts.createProgram`, so their first `.d.ts` read is their first statement of
-    // work. Here the declarations are reached indirectly — `surfacePaths()` turns
-    // each self-package's exports map into a tsconfig `paths` table and a spawned
-    // `tsc` follows it — and everything above this loop (extraction, the
-    // orphan-marker guard, the zero-block guard, the bare-`any` guard) is
-    // dist-independent and worth reporting even when a build is stale. So the
-    // guard sits at the boundary rather than at the top: no verdict below it is
-    // computed for a stale surface, and no honest finding above it is suppressed.
-    let staleMessage: string | null = null;
-    for (const pkgDir of surface.selfPackages) {
-      const freshness = inspectDistFreshness(pkgDir, 'check', 'pnpm --filter @objectstack/spec check:skill-examples');
-      if (!freshness.fresh) {
-        staleMessage = freshness.message;
-        break;
+  // ⛔ EVERY EXIT PATH FROM HERE ON REMOVES WHAT IT MATERIALISED (#15446 / #15457).
+  //
+  // The two trailing `rmSync` sweeps this replaces sat on the two paths that RETURN:
+  // the green verdict and the diagnostics verdict. Every other way out of this loop
+  // left the trees on disk — `fail()` on an unbuilt self-package, `refuse()` on a
+  // surface that never reached tsc, the staleness `process.exit(1)`, an uncaught
+  // throw out of `writeBuildDir` / `runTsc`, and Ctrl-C. The refusal path is not the
+  // exotic one: it is the ORDINARY outcome on a workspace that is not fully built,
+  // and it fires AFTER the earlier surfaces have already materialised their trees —
+  // measured, 226 + 10 files left under `packages/spec/` by a single run that exited
+  // 1 on `packages/client-react/dist` holding no `.d.ts`.
+  //
+  // ⚠️ AND A `try`/`finally` ALONE CANNOT CARRY THIS, which is the whole reason this
+  // is a helper and not four lines inline: `process.exit()` terminates the process
+  // WITHOUT running `finally`, and `fail()` / `refuse()` / the staleness guard all
+  // call it. So the guarantee is held in two places — the `finally` for the throwing
+  // and returning paths, and a `process.on('exit')` listener (plus SIGINT/SIGTERM)
+  // for the ones that exit outright. `--self-test` pins both, including that the
+  // listener is actually installed.
+  withBuildDirCleanup((trackBuildDir) => {
+    for (const { surface, examples } of bySurface) {
+      // BEFORE any declaration is resolved (#7181, adopting #7122's primitive).
+      //
+      // Placement differs from the two sibling gates on purpose, because the ROUTE to
+      // the dist differs: those resolve entry points in-process with
+      // `ts.createProgram`, so their first `.d.ts` read is their first statement of
+      // work. Here the declarations are reached indirectly — `surfacePaths()` turns
+      // each self-package's exports map into a tsconfig `paths` table and a spawned
+      // `tsc` follows it — and everything above this loop (extraction, the
+      // orphan-marker guard, the zero-block guard, the bare-`any` guard) is
+      // dist-independent and worth reporting even when a build is stale. So the
+      // guard sits at the boundary rather than at the top: no verdict below it is
+      // computed for a stale surface, and no honest finding above it is suppressed.
+      let staleMessage: string | null = null;
+      for (const pkgDir of surface.selfPackages) {
+        const freshness = inspectDistFreshness(pkgDir, 'check', 'pnpm --filter @objectstack/spec check:skill-examples');
+        if (!freshness.fresh) {
+          staleMessage = freshness.message;
+          break;
+        }
+      }
+      if (staleMessage) {
+        console.error(`\n[${surface.name}]`);
+        console.error(staleMessage);
+        process.exit(1);
+      }
+
+      const { paths, missing } = surfacePaths(surface.selfPackages);
+      // NOT redundant with the freshness check above. That answers "is dist
+      // OLDER than src"; this is the one that survives a PARTIAL dist — a
+      // self-package whose `.d.ts` was never emitted at all while the newest
+      // declaration elsewhere on disk is still newer than `src/`, which the
+      // mtime rule alone would read as fresh.
+      const unbuiltSelfPackages = surface.selfPackages.filter((dir) => !fs.existsSync(paths[pkgName(dir)]?.[0] ?? ''));
+      if (unbuiltSelfPackages.length > 0) {
+        fail(
+          `[${surface.name}] not built — no declarations to check examples against:\n\n` +
+            missing.map((m) => `  - ${m} (missing)`).join('\n') +
+            `\n\n  Build first (CI does this in the "Build workspace packages" step):\n\n` +
+            unbuiltSelfPackages.map((d) => `    pnpm --filter ${pkgName(d)} build`).join('\n'),
+        );
+      }
+
+      const buildDir = buildDirOf(surface);
+      // TRACKED BEFORE IT IS WRITTEN (#15446 / #15457): `writeBuildDir` creates the
+      // directory and can throw part-way through filling it, so registering after the
+      // write would leave exactly the half-written tree this guarantee exists for.
+      trackBuildDir(buildDir);
+      writeBuildDir(buildDir, examples, paths);
+      const { code, output } = runTsc(buildDir);
+      // Every marked block on this surface parsed (the refusal above proved it),
+      // so tsc's syntactic pass was clean and its semantic pass ran. Record that
+      // this surface has a real result — clean or not.
+      compiled.add(surface.name);
+
+      const byFile = new Map(examples.map((e) => [e.fileName, e]));
+      const diags = parseDiagnostics(output);
+
+      if (code === 0 && diags.length === 0) continue;
+
+      anyDiags = true;
+      diagBlocks.push(`\n✗ [${surface.name}] examples do not compile:\n`);
+      // Remap every diagnostic back to the source page:<real line> so the author
+      // reads the error against the file they actually edit, not the throwaway copy.
+      const grouped = new Map<string, string[]>();
+      for (const d of diags) {
+        const ex = byFile.get(d.file);
+        const loc = ex ? `${rel(ex.source)}:${ex.bodyStartLine + d.line - 1}:${d.col}` : d.file;
+        const key = ex ? rel(ex.source) : d.file;
+        if (!grouped.has(key)) grouped.set(key, []);
+        grouped.get(key)!.push(`  ${loc}\n      ${d.text}`);
+      }
+      for (const [, entries] of grouped) diagBlocks.push(...entries);
+
+      // A non-zero exit with no parseable diagnostics (e.g. a tsconfig error) must
+      // still surface — print the raw tail so it is never a silent failure.
+      if (diags.length === 0) {
+        diagBlocks.push(`\n  tsc exited ${code} but produced no parseable diagnostics. Raw output:\n`);
+        diagBlocks.push(output.split('\n').map((l) => `    ${l}`).join('\n'));
       }
     }
-    if (staleMessage) {
-      console.error(`\n[${surface.name}]`);
-      console.error(staleMessage);
-      process.exit(1);
-    }
 
-    const { paths, missing } = surfacePaths(surface.selfPackages);
-    // NOT redundant with the freshness check above. That answers "is dist
-    // OLDER than src"; this is the one that survives a PARTIAL dist — a
-    // self-package whose `.d.ts` was never emitted at all while the newest
-    // declaration elsewhere on disk is still newer than `src/`, which the
-    // mtime rule alone would read as fresh.
-    const unbuiltSelfPackages = surface.selfPackages.filter((dir) => !fs.existsSync(paths[pkgName(dir)]?.[0] ?? ''));
-    if (unbuiltSelfPackages.length > 0) {
-      fail(
-        `[${surface.name}] not built — no declarations to check examples against:\n\n` +
-          missing.map((m) => `  - ${m} (missing)`).join('\n') +
-          `\n\n  Build first (CI does this in the "Build workspace packages" step):\n\n` +
-          unbuiltSelfPackages.map((d) => `    pnpm --filter ${pkgName(d)} build`).join('\n'),
+    if (!anyDiags) {
+      if (compiled.size !== bySurface.length) {
+        const skipped = bySurface.map((s) => s.surface.name).filter((n) => !compiled.has(n));
+        refuse(
+          `${skipped.length} surface(s) never reached tsc: ${skipped.join(', ')}.\n\n` +
+            `  Nothing below this line may report success: a green verdict here would be a claim\n` +
+            `  about a semantic pass that did not run. This is an internal invariant (#12051) — if\n` +
+            `  you just added a skip or an early \`continue\` to the compile loop, that is the cause,\n` +
+            `  and the fix is to give the skipped surface its own verdict rather than to relax this.`,
+        );
+      }
+      console.log(
+        `✅ ${allExamples.length} prose examples type-check across ${bySurface.length} surface(s)` +
+          ` — every marked block parsed, so tsc ran the SEMANTIC pass on all of them`,
       );
+      return;
     }
 
-    const buildDir = buildDirOf(surface);
-    buildDirs.push(buildDir);
-    writeBuildDir(buildDir, examples, paths);
-    const { code, output } = runTsc(buildDir);
-    // Every marked block on this surface parsed (the refusal above proved it),
-    // so tsc's syntactic pass was clean and its semantic pass ran. Record that
-    // this surface has a real result — clean or not.
-    compiled.add(surface.name);
-
-    const byFile = new Map(examples.map((e) => [e.fileName, e]));
-    const diags = parseDiagnostics(output);
-
-    if (code === 0 && diags.length === 0) continue;
-
-    anyDiags = true;
-    diagBlocks.push(`\n✗ [${surface.name}] examples do not compile:\n`);
-    // Remap every diagnostic back to the source page:<real line> so the author
-    // reads the error against the file they actually edit, not the throwaway copy.
-    const grouped = new Map<string, string[]>();
-    for (const d of diags) {
-      const ex = byFile.get(d.file);
-      const loc = ex ? `${rel(ex.source)}:${ex.bodyStartLine + d.line - 1}:${d.col}` : d.file;
-      const key = ex ? rel(ex.source) : d.file;
-      if (!grouped.has(key)) grouped.set(key, []);
-      grouped.get(key)!.push(`  ${loc}\n      ${d.text}`);
-    }
-    for (const [, entries] of grouped) diagBlocks.push(...entries);
-
-    // A non-zero exit with no parseable diagnostics (e.g. a tsconfig error) must
-    // still surface — print the raw tail so it is never a silent failure.
-    if (diags.length === 0) {
-      diagBlocks.push(`\n  tsc exited ${code} but produced no parseable diagnostics. Raw output:\n`);
-      diagBlocks.push(output.split('\n').map((l) => `    ${l}`).join('\n'));
-    }
-  }
-
-  if (!anyDiags) {
-    if (compiled.size !== bySurface.length) {
-      const skipped = bySurface.map((s) => s.surface.name).filter((n) => !compiled.has(n));
-      refuse(
-        `${skipped.length} surface(s) never reached tsc: ${skipped.join(', ')}.\n\n` +
-          `  Nothing below this line may report success: a green verdict here would be a claim\n` +
-          `  about a semantic pass that did not run. This is an internal invariant (#12051) — if\n` +
-          `  you just added a skip or an early \`continue\` to the compile loop, that is the cause,\n` +
-          `  and the fix is to give the skipped surface its own verdict rather than to relax this.`,
-      );
-    }
-    console.log(
-      `✅ ${allExamples.length} prose examples type-check across ${bySurface.length} surface(s)` +
-        ` — every marked block parsed, so tsc ran the SEMANTIC pass on all of them`,
+    console.error(diagBlocks.join('\n'));
+    console.error(
+      `\n  These are examples an AI copies verbatim. Fix the example to match the\n` +
+        `  current declarations, or drop its os:check marker if it is an intentional fragment.\n`,
     );
-    if (!KEEP) for (const d of buildDirs) fs.rmSync(d, { recursive: true, force: true });
-    return;
-  }
-
-  console.error(diagBlocks.join('\n'));
-  console.error(
-    `\n  These are examples an AI copies verbatim. Fix the example to match the\n` +
-      `  current declarations, or drop its os:check marker if it is an intentional fragment.\n`,
-  );
-  if (!KEEP) for (const d of buildDirs) fs.rmSync(d, { recursive: true, force: true });
-  process.exit(1);
+    process.exit(1);
+  });
 }
 
 main();

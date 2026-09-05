@@ -11,11 +11,19 @@
 //
 // Scope — deliberately narrow to keep it false-positive-free:
 //
-//   • Only `update_record`. INSERT is engine-exempt from the readonly strip (a
-//     `create_record` may legitimately seed readonly columns; the ingress strip
-//     added in #3043 lives in metadata-protocol, which the flow engine bypasses
-//     by calling the data engine directly), so a create writing a readonly
-//     field is NOT a no-op and is never flagged.
+//   • Only `update_record`, and ⚠️ this bullet's REASON is spent. It used to
+//     be that INSERT was engine-exempt from the author-declared static-`readonly`
+//     strip (#3043/#3413: "a `create_record` may legitimately seed readonly
+//     columns", with an ingress copy in metadata-protocol that the flow engine
+//     bypassed by calling the data engine directly). The maintainer ruling of
+//     2026-09-03 (option C, #14147) SUPERSEDED that row: `engine.insert` runs
+//     the static strip for a non-system caller, the ingress copy is deleted,
+//     and a `create_record` node without `runAs:'system'` is exactly such a
+//     caller. So a create writing a readonly field IS a silent no-op now, and
+//     this rule does not yet report it — a scan gap, not a decision, recorded
+//     here and filed rather than widened inside #14147's PR (a new
+//     error-severity finding class is its own change). The hook sibling's
+//     `insert`/`create` gap rests on the same superseded premise.
 //
 //   • `runAs:'system'` exempts the STATIC branch ONLY - it is not a flow-level
 //     skip. An elevated run bypasses the static `readonly` strip, so a system
@@ -49,6 +57,7 @@
 // flows are held to the same bar.
 
 import { walkFlowNodes, flowNodeLabel } from './flow-walk.js';
+import { recordsOf } from './object-graph.js';
 
 export type ReadonlyFlowWriteSeverity = 'error' | 'warning';
 
@@ -68,18 +77,6 @@ export const FLOW_UPDATE_READONLY_FIELD = 'flow-update-readonly-field';
 export const FLOW_UPDATE_READONLY_WHEN_FIELD = 'flow-update-readonly-when-field';
 
 type AnyRec = Record<string, unknown>;
-
-/** Coerce an array-or-name-keyed-map collection to an array (name injected). */
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v as AnyRec[];
-  if (v && typeof v === 'object') {
-    return Object.entries(v as AnyRec).map(([name, def]) => ({
-      name,
-      ...(def as AnyRec),
-    }));
-  }
-  return [];
-}
 
 export interface FieldReadonlyMeta {
   /** Static `readonly: true`. */
@@ -148,10 +145,10 @@ function readLiteralObjectName(config: AnyRec): string | undefined {
  */
 export function validateReadonlyFlowWrites(stack: AnyRec): ReadonlyFlowWriteFinding[] {
   const findings: ReadonlyFlowWriteFinding[] = [];
-  const flows = asArray(stack.flows);
+  const flows = recordsOf(stack.flows);
   if (flows.length === 0) return findings;
 
-  const roIndex = buildReadonlyIndex(asArray(stack.objects));
+  const roIndex = buildReadonlyIndex(recordsOf(stack.objects));
 
   flows.forEach((flow, flowIndex) => {
     // `runAs` defaults to 'user' (schema default). Only an explicit 'system'

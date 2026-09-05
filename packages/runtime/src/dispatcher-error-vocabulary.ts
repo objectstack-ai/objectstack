@@ -309,6 +309,30 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
     // (no source site — the producer is tenant code; see SANDBOX_AUTHORED_LIMB)
 
     // ── foreign vocabularies: spelled `code`, not an ADR-0112 error.code ────
+    // [#14553] The navigation-contribution relocation diagnostic.
+    {
+        code: 'nav_contribution_group_missing',
+        file: 'packages/objectql/src/nav-contribution-diagnostics.ts',
+        shape: 'objlitconst',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'ADR-0112 D6c by name, on all four of its tests: it ships as PAYLOAD of a success (carried on ' +
+            'the served app, and in the `warnings` list of `os build --json` AND `os validate --json`, ' +
+            'from runs that exit 0), it describes an ARTIFACT rather than a request (which app, which ' +
+            'package, which group id), its severity is `warning` and cannot be anything else, and no ' +
+            'path routes it to ' +
+            '`error.code` — the producer is a read-time FOLD (`applyNavContributions`) and a compile ' +
+            'step, neither of which throws. The card that added it added the diagnostic and ' +
+            'deliberately added NO refusal: the contribution is still relocated to the app\'s top ' +
+            'level and still installs, so there is no failing request for a catalog to govern. Hence ' +
+            'lowercase and out of the ledger, ' +
+            'exactly as D6c prescribes for `metadata-diagnostics.ts` and `build-probes.ts`, whose ' +
+            '`{ severity, artifact, ref, code, message, fix }` family this record is shaped after. ' +
+            'Reported here rather than delegated to `check:error-code-casing` because the constant is ' +
+            'REFERENCED (`objlitconst`), not quoted at the stamp — that gate\'s lowercase patterns all ' +
+            'need a literal beside the token, so this position is this gate\'s to classify.',
+    },
     {
         code: 'TEXT',
         file: 'packages/cli/src/commands/generate.ts',
@@ -796,6 +820,30 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             'repo\'s rejection tests assert on, not evidence of a door. If an install door ever answers with ' +
             'this code itself, the verdict becomes pending-registration and it belongs in the ledger batch.'
     },
+    // [ADR-0130 D4 / option B] The reader half's own refusal, raised where the
+    // three above are merely propagated. Same pre-HTTP reasoning; what is
+    // specific to it is recorded in its `why`.
+    {
+        code: 'MIXED_ARTIFACT_COLLECTION_SHAPE',
+        file: 'packages/runtime/src/artifact-collections.ts',
+        shape: 'codehelper',
+        door: 'none',
+        verdict: 'boot-refusal',
+        why:
+            'The refusal for one collection key declared in the ARRAY form by one source and in the ' +
+            'RECORD form by another inside the same artifact — `functions` is ' +
+            '`z.union([z.record(…), z.array(…)])` and `datasources` is read in either shape, so both ' +
+            'sides can pass `AssembledPackageBodySchema` and still disagree. Raised by ' +
+            '`resolveArtifactCollections`, whose every call site ships in this package and runs BEFORE ' +
+            'any HTTP boundary exists: `app-plugin.ts` resolves inside plugin init (a throw aborts boot), ' +
+            '`load-artifact-bundle.ts` and `standalone-stack.ts` resolve while the artifact is being ' +
+            'loaded into a stack that has no transport yet, and `resolve-project-database.ts` opens the ' +
+            'artifact file to pick a database before a kernel exists at all. The function is not exported ' +
+            'from `packages/runtime/src/index.ts`, so no package outside this one can reach it to put the ' +
+            'code on a wire. Its `status: 422` is the ADR-0112 envelope shape this repo\'s rejection ' +
+            'tests assert on, not evidence of a door. If an install or serve door ever answers with this ' +
+            'code itself, the verdict becomes pending-registration and it belongs in the ledger batch.'
+    },
     {
         code: 'DUPLICATE_ARTIFACT_OBJECT_NAME',
         file: 'packages/objectql/src/registry.ts',
@@ -1073,6 +1121,20 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             'FieldErrorCode`, so the value is a member of the closed ADR-0114 D2 catalog by construction; ' +
             '\'max_scale\' is one of them. It reaches `ApiError.details.fields[].code`, never `error.code`, so ' +
             'no ledger row can be owed for it (ADR-0112 D6).',
+    },
+    {
+        code: 'value_domain',
+        file: 'packages/objectql/src/validation/record-validator.ts',
+        shape: 'objlithelper',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'record-validator\'s `fail(code: FieldErrorCode, …)` builds one `{ field, code, def, constraint, ' +
+            'messageKey, options, value }` per violated constraint. Its `code` parameter is typed `code: ' +
+            'FieldErrorCode`, so the value is a member of the closed ADR-0114 D2 catalog by construction; ' +
+            '\'value_domain\' is one of them — the field-level `valueDomain` write-path refusal. It ' +
+            'reaches `ApiError.details.fields[].code`, never `error.code`, so no ledger row can be owed for it ' +
+            '(ADR-0112 D6).',
     },
     // fallback() — rule-validator.ts
     {

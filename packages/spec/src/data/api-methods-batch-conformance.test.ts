@@ -61,21 +61,26 @@ const SINGLE_RECORD_WRITE_ONLY: Record<string, string> = {
   // `revoked` on ONE key. The multi-select surface this rule protects does not
   // exist for API keys, and the shape a future one would take does not need
   // `bulk` either — both read off the console build this release pins
-  // (`.objectui-sha` = `67dadd602`, `packages/plugin-grid`; re-measured at
-  // that pin, 2026-09-02 — previously measured at `d8ec8d6d4`, before that at
-  // `9602dc820`, `190fbd01d`, `9a3daf8d3`, originally at `6314e87f2`.
-  // `ObjectGrid.tsx` DID change across the move off `d8ec8d6d4` (seven
-  // commits, 461 lines), so both claims below were re-derived rather than
-  // carried over: `ObjectGrid.tsx:3436-3451`, whose block is byte-identical
-  // to the one cited at `d8ec8d6d4:3187-3202` and shifted only by insertions
-  // above it, and
-  // `hooks/useBulkExecutor.ts:284-289`, in a file byte-identical at both pins
-  // and re-READ there rather than carried on that identity — it still ends on
-  // `label = 'bulk delete'`, the line the `284-288` span cited three pins ago
-  // stopped short of, truncating the second of the two branches it names (the
-  // #10274 class of anchor error, found by re-reading rather than by the file
-  // changing, which is why byte-identity is never taken as proof an anchor is
-  // right):
+  // (`.objectui-sha` = `a472b0716`, `packages/plugin-grid`; re-measured at
+  // that pin, 2026-09-04 — previously measured at `00d3f09c5`, `67dadd602`,
+  // before that at `d8ec8d6d4`, `9602dc820`, `190fbd01d`, `9a3daf8d3`,
+  // originally at `6314e87f2`. `ObjectGrid.tsx` DID change across the move off
+  // `00d3f09c5` (7 insertions, 4 deletions, all at `:1204-1213`, where
+  // `objectName` moved onto the shared `resolveRecordSourceObjectName`), and
+  // the re-READ caught the previous record's OWN grid anchor as wrong rather
+  // than merely shifted: `3790-3805` at `00d3f09c5` is `runBulkActionAggregate`
+  // and says nothing about selection. The block this record means was
+  // `3541-3556` there — byte-identical to the one cited at
+  // `67dadd602:3436-3451` — and is `ObjectGrid.tsx:3544-3559` here, shifted
+  // only by the three insertions above it. That is the #10274 class again, and
+  // the reason a citation refresh re-READS instead of moving numbers:
+  // arithmetic on the wrong anchor would have produced `3793-3808`, a
+  // fresh-looking span still describing the wrong function. The second claim,
+  // `hooks/useBulkExecutor.ts:284-289`, is in a file byte-identical at both
+  // pins and re-READ there rather than carried on that identity — it still
+  // ends on `label = 'bulk delete'`, the line the `284-288` span cited four
+  // pins ago stopped short of, truncating the second of the two branches it
+  // names (byte-identity is never taken as proof an anchor is right):
   //
   //  · No checkbox column is rendered. None of the object's four list views
   //    declares `bulkActions` / `bulkActionDefs` / `selection`, and `ObjectGrid`

@@ -273,6 +273,63 @@
  * them is printed in the residue rather than left as an absence — a schedule
  * this tool cannot narrow is a fact the reader is owed, not one to keep quiet.
  *
+ * ## The SCHEDULED-only routing question, measured and DEFERRED (#14899)
+ *
+ * The section above says what CI's trigger CAN answer. This one records what
+ * a card asked it next, and why the answer was to ship a reading rather than a
+ * rule. The card: the derivation names `node scripts/pm/check-half-states.mjs`
+ * — a live board sweep — for any diff carrying a changeset, on the reading
+ * that its only caller is a `schedule`-triggered workflow, so CI never runs it
+ * on a PR while the dispatch protocol tells a dev to run every printed
+ * command. The proposed general repair was a third withholding class beside
+ * the CI-measured and value-bearing ones: "scheduled-only, not a PR gate".
+ *
+ * Measured first, from the workflow text at fa8c1963 (2026-09-04):
+ *
+ *     .github/workflows/*.yml                                            30
+ *       declaring `schedule:`                                            15
+ *       …of those, contributing a discovered check family                 8
+ *     discovered families                                               252
+ *       reaching a scheduled workflow at all                             21
+ *       reached ONLY through scheduled workflows                         10
+ *       SCHEDULED-ONLY — reached by no PR-time trigger                    0
+ *
+ * All ten candidates dissolve on the same fact, and it is a deliberate repo
+ * posture rather than an accident: every patrol here declares a
+ * `pull_request:` trigger with a `paths:` filter naming its own script, so
+ * "changes to the patrol itself get exercised before they merge"
+ * (`half-state-patrol.yml`'s own comment, and the same words in
+ * `required-set-patrol.yml`, `release-coverage-patrol.yml` and
+ * `merged-branch-reaper.yml`). The card's own specimen is one of those ten:
+ * `half-state-patrol.yml` already carried that trigger on the day the card was
+ * filed. Three of the ten are `validate-deps.yml`'s, including
+ * `check:override-consistency` — a gate every dependency card must run. So
+ * "its only source workflow declares a schedule" is not close to "no PR runs
+ * it", and a class keyed on that predicate would have withheld gates a dev
+ * owes.
+ *
+ * The reading does not turn on where the PR-time line is drawn either:
+ * narrowing `PR_TIME_TRIGGER_EVENTS` to `pull_request` alone leaves the same
+ * zero, because every one of the ten is reached through a `pull_request`
+ * trigger specifically.
+ *
+ * ⛔ So the class is NOT shipped: an empty classification is a capability with
+ * nothing in it, the speculative-capability shape `extractTriggerPaths`'
+ * `paths-ignore:` boundary already refuses two sections down — "when one does
+ * and its families matter, model it then". The cost the card measured (3m09s
+ * of a dev's wall clock, plus shared API quota) is separately gone: #15083
+ * classified that invocation VALUE-BEARING off its `$PROVENANCE` argv, so it
+ * left `--commands` without any scheduled-only rule existing.
+ *
+ * What ships is the reading, and that is the load-bearing half. A deferral is
+ * only honest while its population stays empty, and nothing was watching that:
+ * `declaredTriggerEvents` re-takes the measurement from the workflow text on
+ * every `--self-test`, so the day a family really is scheduled-only the pin
+ * reds on the PR that creates it. Two exits from there, and the pin's own case
+ * names both: give the workflow the `pull_request` paths trigger every patrol
+ * here already carries, or ship the class this section defers. ⛔ Neither exit
+ * is "edit the pin's expectation" — the zero is a reading, not a roster.
+ *
  * ## Why a declaration can only NARROW, and what that guarantee costs (#12842)
  *
  * `declaredInheritedPopulation` refuses any path its own module does not
@@ -574,6 +631,109 @@ const BLOCK_SCALAR_HEADER = /^[|>][+-]?\d*$/;
  * right.
  */
 export function runCommandTexts(workflowText) {
+  return runCommandSteps(workflowText).map((step) => step.text);
+}
+
+/**
+ * An Actions EXPRESSION, which is the only thing a step's `env:` value can
+ * carry that is not a literal.
+ *
+ * ⚠️ Deliberately NOT `WORKFLOW_VALUE_SOURCE`, which the argv reader uses:
+ * that pattern also admits `$NAME` and `${NAME}`, because argv is read by a
+ * SHELL and a shell expands them. An `env:` value is not — Actions substitutes
+ * `${{ … }}` there and hands the rest through verbatim, so `FOO: $HOME` passes
+ * the four characters `$HOME`. Reading the shell forms here would score a
+ * literal env value as a workflow value and subtract a runnable command, which
+ * is the silent direction `payloadEnvDependence` refuses one screen down.
+ */
+const WORKFLOW_ENV_EXPRESSION = /\$\{\{[\s\S]*?\}\}/;
+
+/**
+ * The names in a step's `env:` block whose VALUE is an Actions expression —
+ * the values that step takes from the workflow and passes to its command
+ * through the ENVIRONMENT rather than through argv (#15761).
+ *
+ * `lines` is the whole workflow, and `[start, end)` the step this `run:` key
+ * belongs to; the caller derives both from the same indentation walk it uses
+ * for the body, so the two readings cannot disagree about where a step ends.
+ *
+ * ## The boundaries, each with the direction it fails in
+ *
+ *   - the `env:` key is read only at the step's OWN key column, exactly as
+ *     `extractStepBlocks` reads `if:` and for the same reason: a nested `with:`
+ *     or a `services:` mapping carries `env:` keys of its own, and reading one
+ *     of those would attribute another container's environment to this command;
+ *   - only the DIRECT children of that key are read (the first child column,
+ *     and lines deeper than it are the value of one of them, never a sibling);
+ *   - a flow mapping (`env: {A: …}`) is not parsed at all, and neither is a
+ *     job-level or workflow-level `env:`. Both under-report — a family keeps its
+ *     place in `--commands` — which is the loud direction: the status quo this
+ *     card names, a red the dev has to go read a gate to understand. Widening
+ *     either one SUBTRACTS a row, and a subtraction that fires wrongly is
+ *     silent. Neither form appears in this tree today.
+ */
+export function stepEnvExpressionVariables(lines, start, end, keyColumn) {
+  const names = [];
+  for (let i = start; i < end; i++) {
+    const key = /^([ \t]*)(-[ \t]+)?env:[ \t]*(.*)$/.exec(lines[i]);
+    if (!key) continue;
+    if (key[1].length + (key[2] ? key[2].length : 0) !== keyColumn) continue;
+    if (key[3].trim() !== '') continue;
+    let childColumn = -1;
+    for (let j = i + 1; j < end; j++) {
+      if (lines[j].trim() === '') continue;
+      const column = /^[ \t]*/.exec(lines[j])[0].length;
+      if (column <= keyColumn) break;
+      if (childColumn === -1) childColumn = column;
+      if (column !== childColumn) continue;
+      const pair = /^[ \t]*([A-Za-z_][\w.-]*):[ \t]*(.*)$/.exec(lines[j]);
+      if (!pair) continue;
+      let value = pair[2];
+      if (BLOCK_SCALAR_HEADER.test(value.trim())) {
+        const body = [];
+        for (let k = j + 1; k < end; k++) {
+          if (lines[k].trim() === '') {
+            body.push('');
+            continue;
+          }
+          if (/^[ \t]*/.exec(lines[k])[0].length <= column) break;
+          body.push(lines[k]);
+        }
+        value = body.join('\n');
+      }
+      if (WORKFLOW_ENV_EXPRESSION.test(value) && !names.includes(pair[1])) names.push(pair[1]);
+    }
+  }
+  return names;
+}
+
+/**
+ * Every `run:` step of a workflow as `{ text, envVariables }` — the command
+ * text `runCommandTexts` has always returned, plus the values the STEP passes
+ * to it through `env:` (#15761).
+ *
+ * ## Why the step and not the command text alone
+ *
+ * `runCommandTexts` reads a `run:` value and throws the rest of the step away,
+ * so a value the workflow hands the command through the ENVIRONMENT was
+ * invisible to every reader downstream. `.github/workflows/`
+ * `partof-closing-keyword-guard.yml` is the specimen: `PR_BODY` and
+ * `PR_NUMBER` arrive through `env:` and the argv is bare, so the argv-shaped
+ * classifier scored `node scripts/check-partof-closing-keyword.mjs` as a
+ * command a dev can paste — while the gate's own refusal says the opposite in
+ * its own words ("NOT WIRED — neither PR_BODY nor PR_NUMBER is set … This is a
+ * wiring or usage failure, NOT a verdict"). The step is therefore the unit
+ * this walk returns, and the command text stays exactly what it was.
+ *
+ * The step's extent is found with the SAME rule the body walk uses: the step's
+ * keys sit at the `run:` key column, so the step ends at the first non-blank
+ * line shallower than it — which is the next `- ` dash (a dash is indentation
+ * for the mapping it opens) or the dedent out of the steps list. A compact
+ * step (`- run: …`) opens its own mapping on the dash line, so the walk starts
+ * there; a named step's `env:` may sit either side of its `run:`, so the walk
+ * runs backwards from the key as well as forwards from the body.
+ */
+export function runCommandSteps(workflowText) {
   const lines = workflowText.split('\n');
   const out = [];
   for (let i = 0; i < lines.length; i++) {
@@ -584,27 +744,71 @@ export function runCommandTexts(workflowText) {
     // for the mapping it opens, so it counts. See the header block above for
     // the measurement that settles this.
     const keyColumn = lead.length + (dash ? dash.length : 0);
+    const runLine = i;
+    let text;
     if (!BLOCK_SCALAR_HEADER.test(inline.trim())) {
-      out.push(inline.trim());
-      continue;
-    }
-    // Block scalar: the body is every following line indented deeper than the
-    // key (blank lines belong to it too). Advancing `i` past the body is what
-    // keeps a `run:` MENTIONED inside a body from being parsed as a new key.
-    const body = [];
-    let j = i + 1;
-    for (; j < lines.length; j++) {
-      if (lines[j].trim() === '') {
-        body.push('');
-        continue;
+      text = inline.trim();
+    } else {
+      // Block scalar: the body is every following line indented deeper than the
+      // key (blank lines belong to it too). Advancing `i` past the body is what
+      // keeps a `run:` MENTIONED inside a body from being parsed as a new key.
+      const body = [];
+      let j = i + 1;
+      for (; j < lines.length; j++) {
+        if (lines[j].trim() === '') {
+          body.push('');
+          continue;
+        }
+        if (/^[ \t]*/.exec(lines[j])[0].length <= keyColumn) break;
+        body.push(lines[j]);
       }
-      if (/^[ \t]*/.exec(lines[j])[0].length <= keyColumn) break;
-      body.push(lines[j]);
+      text = body.filter((l) => !/^[ \t]*#/.test(l)).join('\n');
+      i = j - 1;
     }
-    out.push(body.filter((l) => !/^[ \t]*#/.test(l)).join('\n'));
-    i = j - 1;
+    let start = runLine;
+    if (!dash) {
+      let j = runLine - 1;
+      for (; j >= 0; j--) {
+        if (lines[j].trim() === '') continue;
+        if (/^[ \t]*/.exec(lines[j])[0].length >= keyColumn) continue;
+        break;
+      }
+      start = j + 1;
+    }
+    let end = i + 1;
+    for (; end < lines.length; end++) {
+      if (lines[end].trim() === '') continue;
+      if (/^[ \t]*/.exec(lines[end])[0].length >= keyColumn) continue;
+      break;
+    }
+    out.push({ text, envVariables: stepEnvExpressionVariables(lines, start, end, keyColumn) });
   }
   return out;
+}
+
+/**
+ * A step's `env:` names minus the ones its command line spells as a shell
+ * expansion — the split between the two CARRIERS of one workflow value
+ * (#15761).
+ *
+ * A name the command spells (`"$MERGE_BASE"`, `${OS_ATTEST_DIR}`) is read by
+ * the shell, so it is already in the command TEXT and `renderedArgv` has
+ * classified it. A name the command does not spell reaches the program only
+ * through `process.env`, and that is the carrier no reader of the command line
+ * can see — the whole defect this card names.
+ *
+ * Measured on this tree over the 13 `run:` steps that both carry an `env:`
+ * expression and invoke a check: 8 of them spell every one of their env names
+ * in the command (the `--base "$MERGE_BASE"` trio in `pr-automation.yml`, the
+ * two `check-shard-attestation --verify` steps and the affected-set step in
+ * `ci.yml`, `half-state-patrol.yml`'s `--provenance`, `required-set-patrol`'s
+ * `$RUNNER_TEMP` redirection), so this filter is what keeps the classification
+ * off eight invocations it must not touch.
+ */
+function envNamesNotSpelledInCommand(commandText, names) {
+  return (names ?? []).filter(
+    (name) => !new RegExp(String.raw`\$\{?${name.replace(/[^\w]/g, '\\$&')}\b`).test(commandText),
+  );
 }
 
 /** Strip one layer of YAML quoting from a scalar. */
@@ -1053,6 +1257,73 @@ export function jobPathPopulations(workflowText, workflowFile) {
 }
 
 /**
+ * ## The DIRECTORY PREFIX both matchers below carry, and why it is shared (#15342)
+ *
+ * This repo has a package-local gate lane, and `lint.yml` really runs one of
+ * its gates by path — `node packages/lint/scripts/check-reference-carrier-
+ * shape.mjs --self-test`, with the bare production invocation on the next line.
+ * Both patterns used to open on the literal `scripts/` immediately after
+ * `node `, so neither matched that step AT ALL. The gate was in no family, and
+ * `--residue` could not report it either: it is absent from the universe the
+ * matched / silent / undetermined buckets partition, which is the #11397 state
+ * one lane over. Measured on the base tree for a card editing that gate's OWN
+ * file: `--commands` named it zero times, every one of the 27 `--residue`
+ * mentions was the dev's own CHANGED PATH echoed back as an input, and the step
+ * surfaced only in the always-runs STEP tail, as one of the 33 unconditional CI
+ * steps this derivation names no family for.
+ *
+ * ## What the prefix admits, and what it deliberately refuses
+ *
+ *   - A prefix segment must START with an alphanumeric or `_`, so `..` is not
+ *     one. A climbing spelling cannot be resolved against this ROOT without
+ *     knowing what it is relative to, and `entry.files` would then carry a key
+ *     with no file behind it — the phantom `resolveCheckToFiles`' docblock
+ *     prices at "strictly worse than the bug being fixed". Zero occur in the
+ *     workflow corpus today; refusing to match is the safe direction, and the
+ *     sibling anchor in `scripts/check-self-test-wired.mjs` refuses it in the
+ *     same spelling for the same reason.
+ *   - A `scripts/` segment is still REQUIRED, so no new file species is
+ *     admitted. `node packages/cli/bin/run.js` is the only other non-root path
+ *     any workflow invokes with `node`, and it stays out.
+ *   - The prefix cannot RE-ATTRIBUTE an existing match. For a path that already
+ *     began at `scripts/` the group matches empty and the remainder of each
+ *     pattern is byte-identical, so every key this tool minted before it is
+ *     minted after it. Asserted below rather than left as this sentence.
+ *
+ * ## Priced in both directions, over 7472 tracked files (base `65846bc46`)
+ *
+ *   check families discovered        252 -> 254       (+2, ZERO lost)
+ *   gate files                       201 -> 202       (+1, ZERO lost)
+ *   watch-hint (gate, file) pairs  240947 -> 254181   (+13234, ZERO lost)
+ *   existing families re-attributed  0 — every pre-existing family's pair count
+ *                                    is byte-identical before and after
+ *   always-runs steps naming NO family  33 -> 32 (18 -> 17 distinct commands)
+ *
+ * The +13234 is exactly 2 x 6617: the gate declares four subtree hints
+ * (`packages/**`, `examples/**`, `scripts/**`, `apps/**`) and CI runs it twice,
+ * so it arrives as two families under two keys — the split #14880 made, working
+ * as designed. Becoming a GATE FILE is the one direction of this change that
+ * could SUBTRACT (`discoverFamilies` excludes gate files from import-following),
+ * so it is measured rather than argued: no existing family's pair count moved,
+ * in either direction, so the net subtraction is zero.
+ *
+ * ## Why `SELF_TEST_INVOCATION` is widened too, on ZERO specimens
+ *
+ * Today's one package-local specimen carries a `check-` basename, so the direct
+ * matcher takes it and the self-test matcher skips it by design — that half
+ * gains no recall at all. It is widened anyway because the two matchers'
+ * coordination contract is that they mint BYTE-IDENTICAL keys for one script,
+ * and two adjacent patterns with two different path grammars cannot hold it: a
+ * package-local gate NOT named `check-*` would then be discovered by neither,
+ * which is this card's silence wearing a different filename. Same standard as
+ * the extension right-boundary in `resolveCheckToFiles` — zero recall today,
+ * zero cost today (both numbers above are the direct matcher's alone), class
+ * closed before the first specimen arrives. ⛔ Keep the two prefixes spelled
+ * identically; the self-test asserts that both accept the same package-local
+ * path, so a drift reds rather than going quiet.
+ */
+
+/**
  * A `run:` step that invokes a repo script with `--self-test`. The flag is the
  * SCRIPT'S OWN declaration that this invocation verifies the script rather than
  * doing its work, which is what makes the step a gate.
@@ -1073,7 +1344,7 @@ export function jobPathPopulations(workflowText, workflowFile) {
  * its own, which is correct: the inner script is the gate.
  */
 const SELF_TEST_INVOCATION =
-  /node[ \t]+(scripts\/[\w./-]+\.mjs)(?:[ \t]+-{1,2}[A-Za-z0-9][\w-]*)*[ \t]+--self-test\b/g;
+  /node[ \t]+((?:[A-Za-z0-9_][\w.-]*\/)*scripts\/[\w./-]+\.mjs)(?:[ \t]+-{1,2}[A-Za-z0-9][\w-]*)*[ \t]+--self-test\b/g;
 
 /**
  * A `run:` step that invokes a `check-`named repo script directly, WITH the
@@ -1093,7 +1364,7 @@ const SELF_TEST_INVOCATION =
  * outcomes. Joining is how that hazard is removed rather than merely refused.
  */
 const DIRECT_CHECK_INVOCATION =
-  /node[ \t]+(scripts\/[\w./-]*check-[\w.-]+\.mjs)([^\n;|&<>()]*)/g;
+  /node[ \t]+((?:[A-Za-z0-9_][\w.-]*\/)*scripts\/[\w./-]*check-[\w.-]+\.mjs)([^\n;|&<>()]*)/g;
 
 /**
  * Splice a shell line-continuation back into ONE line, so a matcher reading a
@@ -1319,9 +1590,16 @@ const WORKFLOW_VALUE_SOURCE = /\$\{\{[\s\S]*?\}\}|\$\{[A-Za-z_]\w*\}|\$[A-Za-z_]
  *       all along and were refused only because a REDIRECTION and a
  *       CONTINUATION sat behind them.
  *   Any token a variable  →  the invocation still renders, with the variable's
- *       own name in the value position, and the row is marked NOT RUNNABLE
- *       LOCALLY on its own labelled line. It is named, its workflow is named,
- *       and it is ⛔ NOT in `--commands` — that list promises runnable.
+ *       own name in the value position. The KEY is that spelling, always. What
+ *       the row renders as its RUNNABLE member then has two cases (#15441): if
+ *       the script's own usage block declares a default for the flag holding
+ *       that variable, the row renders the invocation with the default filled
+ *       in — the real check, runnable here, in `--commands`, saying which value
+ *       CI pins in its place. Otherwise the row is marked NOT RUNNABLE LOCALLY
+ *       on its own labelled line: it is named, its workflow is named, its
+ *       question is called NOT MEASURED, and it is ⛔ NOT in `--commands` —
+ *       that list promises runnable. See `declaredArgvDefaults` below for why
+ *       the declaration is read from the script rather than from a table here.
  *
  * ⛔ Both directions NOT taken, and they are the two ways this gets worse.
  * Keying on the TRUNCATED flag run hands the dev `node scripts/… --base`, a
@@ -1351,6 +1629,178 @@ export function renderedArgv(tail) {
     if (remainder !== null && !variables.includes(remainder)) variables.push(remainder);
   }
   return { args: tokens.join(' '), variables };
+}
+
+/**
+ * A script's LEADING comment block — its usage block, and nothing past it.
+ *
+ * The declaration below is read from here rather than from the whole file, and
+ * the narrowing is the difference between a declaration and a coincidence.
+ * Measured over the seven scripts whose CI argv carries a workflow value: the
+ * phrase this reader keys on ("<name> defaults to <value>") appears FIVE times
+ * across them, and only three are declarations. `check-changeset-no-major.mjs`
+ * spells it inside an assertion message about the wiring it forbids, and
+ * `pm/check-half-states.mjs` spells it twice in docblocks deep in the file (one
+ * about a `@param`, one about a GitHub endpoint). A whole-file scan takes all
+ * five and mints `--endpoint` as a flag of a script that has no such flag; the
+ * usage block takes the three that are the script telling its caller what it
+ * does with no argument.
+ *
+ * Both header spellings in this corpus are admitted, because both are live: a
+ * run of `//` lines (`check-adr-0087-registration.mjs`) and one JSDoc-opened
+ * block (`check-changeset-no-major.mjs`). The block ends at the first line that
+ * is neither blank nor comment — the first line of code — so nothing a function
+ * docblock says can reach this reader.
+ */
+export function leadingCommentBlock(source) {
+  const lines = String(source ?? '').split('\n');
+  const kept = [];
+  let inBlock = false;
+  let seenAny = false;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!seenAny && trimmed.startsWith('#!')) { seenAny = true; continue; }
+    if (inBlock) {
+      kept.push(line);
+      if (trimmed.includes('*/')) inBlock = false;
+      continue;
+    }
+    if (trimmed === '') { kept.push(line); continue; }
+    if (trimmed.startsWith('//')) { seenAny = true; kept.push(line); continue; }
+    if (trimmed.startsWith('/*')) {
+      seenAny = true;
+      kept.push(line);
+      if (!trimmed.includes('*/')) inBlock = true;
+      continue;
+    }
+    break;
+  }
+  return kept.join('\n');
+}
+
+/**
+ * The argv defaults a script DECLARES for itself, in its own usage block
+ * (#15441) — `Map<'--flag', 'value'>`.
+ *
+ * ## The defect this exists to close
+ *
+ * `renderedArgv` above classifies an argv token as a workflow VARIABLE when the
+ * workflow does not write the value down, and a family whose argv carries one
+ * is marked NOT RUNNABLE LOCALLY and kept out of `--commands`. That rule asks
+ * whether the WORKFLOW supplies the value. It never asks whether the SCRIPT
+ * needs it supplied.
+ *
+ * For the `--base` gates the two answers differ, and the gap was measured
+ * rather than supposed. `pr-automation.yml` runs
+ * `node scripts/check-adr-0087-registration.mjs --base "$MERGE_BASE"`, so the
+ * family scored value-bearing and the only member `--commands` offered for it
+ * was the SELF-TEST invocation lint-side of the same script. A self-test
+ * exercises the script's detector against its own fixtures; it says nothing
+ * about the changeset in the working diff. Its exit 0 is a zero from a command
+ * that cannot answer the question, and in the union it is indistinguishable
+ * from a real green — a dev reported "50 run · 50 exit 0 · 0 red" on a PR whose
+ * Check Changeset job was red in CI the whole time.
+ *
+ * But the script's own first lines say `base defaults to origin/main`, and the
+ * scan starts at `merge-base(base, head)` either way — which is the reading
+ * `check-empty-changeset.mjs` states as idempotent: "merge-base(X, head) is X
+ * again whenever X is already the branch point". The workflow PASSES the merge
+ * base; it does not REQUIRE it. Measured on three real heads with the emitted
+ * command, two controls chosen so neither could answer the other's question:
+ * exit 1 on a PR declaring BREAKING with no ADR-0087 marker, exit 0 on one that
+ * declares it and answers it, exit 0 on one that declares none. The gate
+ * returns both values here, so the red is a reading rather than a command that
+ * always fails.
+ *
+ * ## Why the declaration is read from the SCRIPT, not from a table here
+ *
+ * The same rule `WORKFLOW_VALUE_SOURCE` follows, one file over: a per-script
+ * table in this tool is a second place for the truth to live, and the day a
+ * script drops its default the table still says it has one — which is a
+ * FABRICATED runnable command, the one outcome this file refuses everywhere.
+ * Reading the script's own usage block cannot drift: a script that stops
+ * documenting the default returns its family to NOT RUNNABLE LOCALLY on the
+ * next run, with no edit here. That direction is pinned in the self-test.
+ *
+ * ⛔ What this does NOT do: guess. Only a flag the usage block both NAMES (as
+ * `--flag`) and DECLARES a default for is admitted, only when the workflow
+ * hands that flag a token that is nothing but the variable, and only when EVERY
+ * variable in the invocation is covered. A partially defaulted argv stays
+ * value-bearing and unrunnable, because a command that runs with one real value
+ * and one invented one answers a question CI never asked.
+ */
+export function declaredArgvDefaults(source) {
+  const usage = leadingCommentBlock(source);
+  const out = new Map();
+  if (!usage) return out;
+  for (const m of usage.matchAll(/(?:^|[^\w-])([a-z][a-z0-9-]*)\s+defaults to\s+`?([^\s`'",;)]+)/g)) {
+    const flag = `--${m[1]}`;
+    // The usage block has to name it as a FLAG too. Prose about "the endpoint
+    // defaults to …" is a sentence about behaviour, not a declaration about an
+    // argument, and the two are indistinguishable without this half.
+    if (!usage.includes(flag)) continue;
+    if (!out.has(flag)) out.set(flag, m[2]);
+  }
+  return out;
+}
+
+/**
+ * One argv, re-rendered as the command that runs HERE — the workflow's variable
+ * replaced by the default its script declares for that flag (#15441).
+ *
+ * The default is SPELLED OUT (`--base origin/main`) rather than dropped for the
+ * bare invocation the usage block also documents. Two reasons, and both are
+ * live in this tree: the bare spelling of one of these three scripts is
+ * forbidden by that script's own wiring assertion ("with no `--base` it
+ * defaults to origin/main, which on a stale checkout is the two-dot reading
+ * #6129 rules out"), and a rendered command that differs from CI's by one VALUE
+ * is a command a reader can diff against the row beside it, while one that
+ * differs by a missing flag reads as a different invocation.
+ *
+ * ⛔ The KEY is not touched. `check` stays the invocation as CI spells it, so a
+ * script CI runs with two different bases keeps two entries and neither is
+ * re-attributed onto the other — the invariant #14880 bought and this card must
+ * not spend. What moves is what the row RENDERS as its runnable member.
+ */
+export function defaultedArgv(args, defaults = new Map()) {
+  const tokens = argvTokens(args);
+  const declared = defaults instanceof Map ? defaults : new Map();
+  const rendered = [];
+  const defaulted = [];
+  // A token that is NOTHING BUT the variable, quotes aside. `"$RUNNER_TEMP/x"`
+  // is not one: the workflow wrote half the value down, and substituting the
+  // whole token would throw that half away.
+  const wholeVariable = (text) => {
+    const bare = String(text ?? '').replace(/^(["'])([\s\S]*)\1$/, '$2');
+    const hits = [...bare.matchAll(WORKFLOW_VALUE_SOURCE)];
+    return hits.length === 1 && hits[0][0] === bare ? bare : null;
+  };
+  const spell = (value) => (/^[\w./:@=+-]+$/.test(value) ? value : JSON.stringify(value));
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i];
+    const inline = /^(--[a-z][a-z0-9-]*)=([\s\S]*)$/.exec(token);
+    if (inline && declared.has(inline[1])) {
+      const variable = wholeVariable(inline[2]);
+      if (variable !== null) {
+        const value = declared.get(inline[1]);
+        rendered.push(`${inline[1]}=${spell(value)}`);
+        defaulted.push({ flag: inline[1], variable, value });
+        continue;
+      }
+    }
+    if (declared.has(token) && i + 1 < tokens.length) {
+      const variable = wholeVariable(tokens[i + 1]);
+      if (variable !== null) {
+        const value = declared.get(token);
+        rendered.push(token, spell(value));
+        defaulted.push({ flag: token, variable, value });
+        i += 1;
+        continue;
+      }
+    }
+    rendered.push(token);
+  }
+  return { args: rendered.join(' '), defaulted };
 }
 
 /**
@@ -1476,13 +1926,24 @@ function tailBeforeRedirection(tail, nextChar) {
  */
 export function extractCheckInvocations(workflowText, workflowFile) {
   const out = [];
-  for (const raw of runCommandTexts(workflowText)) {
+  for (const { text: raw, envVariables: stepEnv } of runCommandSteps(workflowText)) {
     // ONE joined text for all three matchers, so no two of them can disagree
     // about where a command ends — the discipline `discoverFamilies` follows
     // for the workflow reads it makes.
     const cmd = joinLineContinuations(raw);
+    // The step's `env:` values, MINUS the ones this command line spells for
+    // itself (#15761). `env: MERGE_BASE: ${{ … }}` beside
+    // `run: node scripts/check-changeset-no-major.mjs --base "$MERGE_BASE"` is
+    // one value with one carrier: the variable reaches the script through
+    // ARGV, the argv reader already sees it, and `declaredArgvDefaults` may
+    // already have repaired the invocation into a runnable one (#15441).
+    // Counting it a second time here would undo that repair and mark three
+    // live `--base` families NOT MEASURED again. What is left is the class
+    // this card is about: a value that reaches the program only through
+    // `process.env`, which no reader of the command line can see.
+    const carriedEnv = envNamesNotSpelledInCommand(cmd, stepEnv);
     for (const m of cmd.matchAll(/pnpm\s+(?:--filter\s+(\S+)\s+)?(?:run\s+)?(check:[\w:-]+)/g)) {
-      out.push({ check: m[2], filter: m[1] ?? null, workflow: workflowFile });
+      out.push({ check: m[2], filter: m[1] ?? null, workflow: workflowFile, envVariables: carriedEnv });
     }
     for (const m of cmd.matchAll(DIRECT_CHECK_INVOCATION)) {
       const script = m[1];
@@ -1501,6 +1962,13 @@ export function extractCheckInvocations(workflowText, workflowFile) {
         // travels on the invocation so every rendering downstream reads one
         // answer rather than re-deriving it (#15083).
         argvVariables: argv ? argv.variables : [],
+        // The same fact for the OTHER carrier (#15761): the values the step
+        // hands this command through `env:`. It rides the invocation for the
+        // same reason `argvVariables` does — so every rendering downstream
+        // reads one answer rather than re-deriving it — and it is a fact about
+        // the STEP, so it is attached to every matcher here and narrowed to the
+        // families it may classify in `workflowEnvValues`, never here.
+        envVariables: carriedEnv,
         // The same declaration the matcher below reads, on the same flag: this
         // invocation runs the script's SELF-TEST rather than its work, and two
         // narrowings downstream turn on knowing that (the import/spawn/manifest
@@ -1527,6 +1995,7 @@ export function extractCheckInvocations(workflowText, workflowFile) {
         workflow: workflowFile,
         direct: true,
         selfTest: true,
+        envVariables: carriedEnv,
       });
     }
   }
@@ -1562,6 +2031,120 @@ export function declaresPullRequestTrigger(workflowText) {
   }
   return false;
 }
+
+/**
+ * Every event a workflow's `on:` block DECLARES, in declaration order.
+ *
+ * The third of the three narrow `on:` walkers, kept beside the two above so
+ * the trio cannot drift: `extractTriggerPaths` reads one event's `paths:`,
+ * `declaresPullRequestTrigger` answers one event's presence, and this one
+ * answers WHICH events there are. All three walk indentation rather than
+ * parse YAML, for the reason `extractTriggerPaths` states — this script is
+ * dependency-free by design.
+ *
+ * ## Why it exists when NO derivation consumes it (#14899)
+ *
+ * It is the instrument for the scheduled-only measurement in the header, and
+ * the self-test's live block is its only caller. That is deliberate and it is
+ * the whole shape of what shipped: the classification the card proposed has
+ * ZERO members on this tree, so shipping it would be a capability with nothing
+ * in it, and the header records why. What a deferral needs to be safe is a
+ * reading that goes loud the day the population stops being empty — and a
+ * reading needs an instrument. ⛔ Do not delete this as unused: its caller is
+ * the pin, and deleting it deletes the detection that makes the deferral
+ * honest rather than merely convenient.
+ *
+ * ## The three `on:` spellings, all read
+ *
+ *   - the mapping (`on:` then `  pull_request:` on its own line) — every
+ *     workflow in this tree today;
+ *   - the flow sequence (`on: [push, pull_request]`);
+ *   - the bare scalar (`on: push`), and the block sequence under it.
+ *
+ * The YAML 1.1 spelling is read too: an unquoted `on` is the BOOLEAN `true` to
+ * a 1.1 parser, so `'on':`, `"on":` and a literal `true:` are all the same key
+ * — the same three spellings the two walkers above already accept.
+ *
+ * ## The boundaries, each with the direction it fails in
+ *
+ *   - Only keys at the FIRST indentation level inside `on:` are events. A
+ *     `paths:`/`types:`/`branches:` under an event is not one, and neither is
+ *     a `schedule:` under `jobs:` — a walk that scooped either would report
+ *     events a workflow does not declare, and this reader's whole use is to
+ *     decide that a workflow has NO PR-time trigger. A fabricated event fails
+ *     in the safe direction (it can only ever REMOVE a family from the
+ *     scheduled-only class); a missed one fails in the loud direction (a false
+ *     member, caught by the reader of the pin). Both are pinned below.
+ *   - `workflow_call` is reported as declared and is NOT a PR-time event: a
+ *     reusable workflow runs with its caller's event, so the caller is where
+ *     the question is answered. No family in this tree reaches one.
+ */
+export function declaredTriggerEvents(workflowText) {
+  const out = [];
+  const add = (name) => {
+    const clean = unquoteScalar(name);
+    if (clean !== '' && !out.includes(clean)) out.push(clean);
+  };
+  let inOn = false;
+  let eventIndent = -1;
+  for (const line of workflowText.split('\n')) {
+    const trimmed = line.trim();
+    if (trimmed === '' || trimmed.startsWith('#')) continue;
+    const indent = /^[ \t]*/.exec(line)[0].length;
+    if (indent === 0) {
+      // A new top-level key closes whatever we were inside — the same reset
+      // the two walkers above make, and what keeps a `jobs:` decoy out.
+      const on = /^(?:on|'on'|"on"|true):\s*(.*)$/.exec(trimmed);
+      inOn = Boolean(on);
+      eventIndent = -1;
+      if (on && on[1].trim() !== '') {
+        const flow = flowSequenceItems(on[1]);
+        if (flow.length > 0) for (const item of flow) add(item);
+        else add(on[1].trim());
+        // An inline value IS the whole declaration; nothing indented under it.
+        inOn = false;
+      }
+      continue;
+    }
+    if (!inOn) continue;
+    // The first indented line fixes the level events live at. Anything deeper
+    // belongs to an event, not to `on:`.
+    if (eventIndent === -1) eventIndent = indent;
+    if (indent !== eventIndent) continue;
+    const item = /^-\s*(.*)$/.exec(trimmed);
+    if (item) {
+      add(item[1]);
+      continue;
+    }
+    const key = /^([A-Za-z_][A-Za-z0-9_]*):/.exec(trimmed);
+    if (key) add(key[1]);
+  }
+  return out;
+}
+
+/**
+ * The events that put a workflow in front of a PULL REQUEST — the predicate
+ * the scheduled-only measurement subtracts by (#14899).
+ *
+ * `pull_request` and `pull_request_target` run on the PR itself; `merge_group`
+ * runs on the speculative merge the queue builds out of it; `push` runs on the
+ * result of landing it. All four judge a diff a dev wrote, which is the
+ * question — `schedule`, `workflow_dispatch`, `workflow_run` and
+ * `workflow_call` judge a board, a human's button, another run, or a caller.
+ *
+ * ⚠️ The set is deliberately WIDE, and the header records that the measured
+ * answer does not depend on it: narrowing it to `pull_request` alone leaves
+ * the scheduled-only count at zero, because every family this tree reaches
+ * through a scheduled workflow is also reached through a `pull_request` one.
+ * A wide set can only ever UNDER-report the class, which is the direction that
+ * fails quietly — so the pin below asserts the narrow reading too.
+ */
+export const PR_TIME_TRIGGER_EVENTS = Object.freeze([
+  'pull_request',
+  'pull_request_target',
+  'merge_group',
+  'push',
+]);
 
 /**
  * A job's steps, each as `{ name, if: <text|null>, text }`, with the original
@@ -1929,6 +2512,91 @@ export function declaredWholeTreePopulation(scriptSource) {
 }
 
 /**
+ * A GATE SCRIPT's own declaration that CI runs it over a population TOO WIDE
+ * TO PLACE — a whole-line comment anywhere in the script's source:
+ *
+ *   // dispatch-gates: wide-population -- <reason>
+ *   #  dispatch-gates: wide-population -- <reason>      (shell gates)
+ *
+ * The THIRD derivation channel, and the one that is neither of the two above.
+ * `no-path-population` says "this gate reads NO file". `whole-tree-population`
+ * says "this gate reads EVERY file". This one says the thing that was true of
+ * eleven measured families and that neither of those could express: "this gate
+ * walks a real subtree — here is which — and NO subtree glob places it, so do
+ * not try to narrow me and do not read my silence as a clearance."
+ *
+ * ## The defect (#15341, ruled 2026-09-05)
+ *
+ * #15341 measured sixteen gates CI runs that declare no path literal at all and
+ * walk a subtree, so this derivation scored them `undetermined` for every card
+ * and no `--commands` harvest could contain them. The card's remedy — declare
+ * the subtree with the `ROOT_DIR_WATCH_HINTS` idiom — collided with a recorded
+ * triage it did not know about: `scripts/pm/bare-root-worklist.mjs` holds
+ * human-decided, per-row-measured verdicts for exactly this species, and eleven
+ * of the sixteen sit on its refused side. `REFUSE-WIDE` says the bare-root
+ * declaration would be TRUE and is refused anyway, because it names the gate
+ * for every card under a root the fleet already touches wholesale — 39%, 37%,
+ * 90% precision — and MATCHED is the one column whose entire value is
+ * precision. `REFUSE-UNSPELLABLE` says the population is a file-KIND filter
+ * inside the root that no glob spelling describes at all.
+ *
+ * Two lanes, wanting compatible things. The card wants a seat to be TOLD about
+ * a gate CI runs. The map refuses ONE WAY of telling them. What did not exist
+ * was a third thing for such a gate to BE. Maintainer ruling, 2026-09-05,
+ * decision batch #43, verbatim reply 「同意」 to the recommendation quoted here
+ * in the terms it was ruled in:
+ *
+ *   `dispatch-gates.mjs` gains a third derivation channel, `wide-population` —
+ *   a gate declares "CI runs me over a population too wide to place", which
+ *   lists it in the residue's declared column and keeps it OUT of the matched
+ *   column; the eleven `REFUSE-WIDE` / `REFUSE-UNSPELLABLE` families move onto
+ *   it; `bare-root-worklist.mjs`'s rows are not deleted.
+ *
+ * ## What the declaration DOES to the derivation
+ *
+ * A declaring family leaves `undetermined` for its own verdict, `wide-population`,
+ * and is rendered under its own heading with its reason — the DECLARED column
+ * the ruling names. Its command is ⛔ NOT in the runnable union `--commands`
+ * prints: that is the whole difference from the whole-tree channel beside it. A
+ * whole-tree gate is owed by every card, so its command belongs in every card's
+ * total; a wide-population gate is owed by CI and by no card in particular, and
+ * pasting it into every harvest is the same fabricated lead the map refused —
+ * arrived at one channel further along. The reason is what a seat reads.
+ *
+ * ⚠️ The one placement it does NOT suppress is the IDENTITY key: a card that
+ * edits the gate's own script still MATCHES it, and still gets its command.
+ * That is not a leak in "keeps it OUT of the matched column" — it is the
+ * boundary of what the declaration is ABOUT. The declaration is a claim about
+ * the gate's POPULATION (`coveringKey`'s docblock: the identity key is "an
+ * identity claim about a single FILE", not a population claim), the ruling's
+ * contrast is with declaring the ROOTS, and a card editing the gate is a 100%
+ * precise lead this channel has no business deleting — the gate you are editing
+ * is the one gate you certainly owe. Suppressing it would make a channel added
+ * to ADD information subtract some, silently, on the one card class where the
+ * derivation is exactly right. Pinned in both directions below.
+ *
+ * ⛔ Not an escape from declaring a real population, and refused rather than
+ * trusted: a gate that carries this marker AND names paths, or that carries
+ * either sibling marker, is REFUSED by `widePopulationRefusal` — a gate
+ * declares exactly ONE population shape, and picking between two would be the
+ * coin toss `wholeTreePopulationRefusal` refuses one channel over.
+ *
+ * The reason is REQUIRED, and it is required to do more work here than on
+ * either sibling: it must NAME the population in words — which root or roots
+ * the gate walks, and why no subtree glob places it — because that sentence is
+ * the entire content of this channel. A reader deciding whether to go run the
+ * gate has nothing else, and an opt-out with no reason reads exactly like a
+ * placeholder nobody will revisit.
+ */
+const WIDE_POPULATION_MARKER =
+  /^[ \t]*(?:\/\/|#)[ \t]*dispatch-gates:[ \t]*wide-population[ \t]*--[ \t]*(\S.*)$/m;
+
+export function declaredWidePopulation(scriptSource) {
+  const m = WIDE_POPULATION_MARKER.exec(String(scriptSource));
+  return m ? m[1].trim() : null;
+}
+
+/**
  * The recognised spellings of a REPO-ROOT WALK — the liveness half of the
  * declaration above, and PUBLISHED here rather than left inside the
  * implementation.
@@ -1972,11 +2640,22 @@ export function declaredWholeTreePopulation(scriptSource) {
  * for a new spelling is to EXTEND this list with a self-test case beside it,
  * never to route around the check.
  *
- * Measured over the six candidate gates #14189 and #14325 nominated: limbs A/B
- * select five, and `check-self-test-workflow-commands.mjs` — whose walk is
- * seeded at `scripts/`, a bounded subtree — is selected by none of them, which
- * is the reading of its source, not a coincidence. That gate's remedy is the
- * ordinary subtree declaration, not this channel.
+ * Measured over the six candidate gates #14189 and #14325 nominated: the limbs
+ * select five — three by A (`check-nul-bytes`, `check-refd-timer-probe`,
+ * `check-closing-keyword-parity`), one by B (`check-watch-hint-literal`), one
+ * by C (`check-comment-mask-corpus`) — and `check-self-test-workflow-commands.mjs`
+ * is selected by none of them, which is the reading of its source, not a
+ * coincidence. Its population is a bounded subtree (`scripts/`), never the
+ * tree, so its remedy is the ordinary subtree declaration and not this channel.
+ *
+ * ⚠️ Re-derived rather than recalled (#15510), and the count is the durable
+ * half of that sentence: the ATTRIBUTION was stale. `check-comment-mask-corpus`
+ * moved from limb B to limb C when limb B was tightened to refuse a path BUILD
+ * (the note on limb B below records that tightening), and "limbs A/B select
+ * five" was left behind. The REASON the sixth is unselected is stale-prone for
+ * its own reason: it was the SHAPE of that gate's walk, and a gate can stop
+ * holding a walk without the census outcome moving at all. What is written
+ * above is the population, which is what the remedy turns on.
  */
 export const REPO_ROOT_WALK_SPELLINGS = [
   {
@@ -2032,6 +2711,17 @@ export function repoRootWalkSpelling(scriptSource) {
 export function wholeTreePopulationRefusal(entry) {
   const reason = entry?.wholeTreeReason ?? null;
   if (!reason) return null;
+  // The THIRD marker (#15341) reaches this refusal for the same reason the
+  // second does: a gate declares exactly ONE population shape, and these two
+  // carry opposite dispositions — a whole-tree family's command is inside every
+  // card's runnable total, a wide-population family's is inside none. Named
+  // from BOTH sides (`widePopulationRefusal` states the mirror), so whichever
+  // channel a reader arrives through, the pair is refused rather than resolved.
+  if (entry?.widePopulationReason) {
+    return 'declares BOTH whole-tree-population and wide-population — a gate declares exactly ONE population shape, and '
+      + 'these two place it in opposite columns: whole-tree is owed by every card, wide-population by none. Delete the '
+      + 'one that is not true; a derivation that picked either would be placing the family by a coin toss.';
+  }
   if (entry?.noPopulationReason) {
     return 'declares BOTH whole-tree-population and no-path-population — "my population is every file" and "my population '
       + 'is no file" cannot both be true of one gate. Delete the one that is not true; a derivation that picked either '
@@ -2044,6 +2734,179 @@ export function wholeTreePopulationRefusal(entry) {
       + 'scripts/pm/dispatch-gates.mjs with a self-test case beside it — never route around this refusal.';
   }
   return null;
+}
+
+/**
+ * Why this family's WIDE-population declaration must be refused, or null when
+ * it stands. Pure, and reading only what the discovery already put on the
+ * entry — the same contract `wholeTreePopulationRefusal` above states, and for
+ * the same reason: the live half of the self-test and any future caller cannot
+ * be allowed to disagree about what a bad declaration is.
+ *
+ * Three refusals, and every one of them is a gate claiming TWO population
+ * shapes at once. A gate declares exactly one:
+ *
+ *   BOTH markers   with `no-path-population`: "a population too wide to place"
+ *                  and "no population at all" are not both true of one gate.
+ *                  With `whole-tree-population`: a gate that reads EVERY file
+ *                  is placed by declaration and its command is owed by every
+ *                  card — the opposite disposition from this one — so the pair
+ *                  would place the family by whichever branch was read first.
+ *   NAMES PATHS    the declaration says no subtree glob places this gate, and
+ *                  the gate's own source spells one. One of the two is wrong
+ *                  and the derivation cannot tell which: the marker's whole
+ *                  content is the sentence a reader trusts, so a marker sitting
+ *                  above a live population is the rot direction that costs —
+ *                  the reader is told "nothing here can be narrowed" while the
+ *                  matched column narrows it.
+ */
+export function widePopulationRefusal(entry) {
+  const reason = entry?.widePopulationReason ?? null;
+  if (!reason) return null;
+  if (entry?.noPopulationReason) {
+    return 'declares BOTH wide-population and no-path-population — "my population is too wide to place" and "my population '
+      + 'is no file" cannot both be true of one gate. Delete the one that is not true; a derivation that picked either '
+      + 'would be placing the family by a coin toss.';
+  }
+  if (entry?.wholeTreeReason) {
+    return 'declares BOTH wide-population and whole-tree-population — a gate declares exactly ONE population shape, and '
+      + 'these two carry OPPOSITE dispositions: a whole-tree family is owed by every card and its command is inside every '
+      + "card's runnable total, a wide-population one is owed by CI and is in no card's. Delete the one that is not true.";
+  }
+  if ((entry?.hints ?? []).length > 0) {
+    return 'declares wide-population and its own source NAMES paths: '
+      + `${(entry.hints ?? []).slice(0, 4).join(', ')}${(entry.hints ?? []).length > 4 ? ', …' : ''}. `
+      + 'The declaration says no subtree glob places this gate and the gate spells one, so one of the two is wrong and '
+      + 'nothing here can tell which. If the literals are the real population, delete the marker and let the matched '
+      + 'column do its job; if they are artifacts rather than a population, the marker stands and the literals do not '
+      + 'belong in a scanned position.';
+  }
+  return null;
+}
+
+/**
+ * The WHOLE-TREE RESIDUE ledger (#15312) — the families whose own source sweeps
+ * the repository root, that this derivation can place on NO card, and that are
+ * deliberately not in the whole-tree bucket above.
+ *
+ * ## The defect
+ *
+ * `check:driver-memory-census` counts a `vi.mock` of a frozen driver package as
+ * a module binding wherever in the tree it is written, and names no path
+ * literal anywhere in its source — so this derivation scored it `undetermined`
+ * for every card and no `--commands` harvest could contain it. A seat derived
+ * its family, ran 57 of them with 53 green, and CI's lint job then failed on
+ * the one gate the derivation could not offer. The gate was right; what was
+ * missing was a way for a seat to be TOLD about it before the push, which is
+ * exactly what the whole-tree channel above exists to be. It now declares.
+ *
+ * ⚠️ Fixing that one gate is not the fix. The question worth answering is
+ * "which gates does CI run that no derivation can name", mechanically, so the
+ * NEXT one reds here rather than in CI a cycle later. This table and the live
+ * case in `--self-test` are that answer for the class the card names.
+ *
+ * ## The population, and why the closure subtraction is load-bearing
+ *
+ * A family is IN it when three things hold at once: its own source carries a
+ * recognised repo-root walk (`repoRootWalkSpelling` — the same predicate that
+ * vouches for a whole-tree declaration), it declares NEITHER marker, and no
+ * path in the tree OUTSIDE the gate's own file closure can place it. That last
+ * subtraction is not a detail: every family matches the card that edits the
+ * gate itself, through the identity key, so counting that as "the derivation
+ * can name it" would score this whole population green on a card nobody files.
+ *
+ * ## Why this class and not "every gate CI runs"
+ *
+ * The wider question was MEASURED for this card rather than guessed at: on
+ * cd1f8ee96, of the 186 gate scripts CI runs, 44 are named by no derivation at
+ * all. The bulk of them are SUBTREE walkers — seeded at `packages`, `apps`,
+ * `examples` through a runtime constant no source scan reads — whose remedy is
+ * the ordinary `ROOT_DIR_WATCH_HINTS` declaration, one per-gate judgement each.
+ * A table that swallowed all 44 would be forty rows nobody revisits, which is
+ * the shape `artifactRosterLines` refuses for its own members. So this holds
+ * the class the card named, the rest is a filed follow-up, and the boundary is
+ * STATED here rather than left to be inferred from what the table happens to
+ * contain.
+ *
+ * ## Maintaining this table
+ *
+ * A member this table does not list reds `check:pm-dispatch-gates`, and there
+ * are exactly two honest repairs. If the gate really does read the whole tree,
+ * give it the `whole-tree-population` marker: it then leaves this population by
+ * DECLARING, which is the outcome this table exists to push toward. If it does
+ * not, add a row saying what it reads INSTEAD, so a reader can check the claim
+ * against the gate. ⛔ Never a row that only says "not whole-tree" — that is
+ * the reason-less opt-out both markers refuse, and it reads exactly like a
+ * placeholder nobody will revisit. A listed family that stops being a member
+ * reds too: a stale exclusion is an exclusion nobody is measuring any more.
+ */
+export const ROOT_WALK_RESIDUE_LEDGER = [
+  [
+    'scripts/check-console-intercept-disarm.mjs',
+    'its `scan(REPO_ROOT)` walks `workspacePackageDirs(root)` — every workspace PACKAGE ROOT\'s package.json and '
+      + 'vitest.config.*, read off pnpm-workspace.yaml. That is workspace-wide but it is not every file: a new test '
+      + 'file under an existing package does not move it, a new PACKAGE does. Declaring the whole tree would put it '
+      + 'on every card on a population it does not read.',
+  ],
+  [
+    'scripts/check-console-intercept-disarm.mjs --self-test',
+    'the same gate file, reached through its self-test invocation; the reading above is the whole of it.',
+  ],
+  [
+    'scripts/check-skill-frame-freshness.mjs --self-test',
+    'lint.yml runs the SELF-TEST HALF and never the scan — its step is named that, and the step comment states why '
+      + '(the pnpm script would drag the scan in with it). The repo-root default parameter belongs to the scan half '
+      + 'CI does not schedule, so a whole-tree row for this family would advertise work no workflow performs.',
+  ],
+  [
+    'check:pm-half-states',
+    'lint.yml runs the SELF-TEST HALF and never the sweep — the npm script is `check-half-states.mjs '
+      + '--self-test`. The `git ls-files` oracle that vouches for the root walk is read ONCE PER LIVE SWEEP, after '
+      + 'the board gathering, so it belongs to the networked half-state patrol that no lint job schedules; a '
+      + 'whole-tree row here would advertise work this family never performs. It became a member under #15753: it '
+      + 'used to be placed BY PATH on every changeset card, through the gate\'s own noise-floor constant read as a '
+      + 'watch surface — a placement that said the opposite of what the constant declares.',
+  ],
+  [
+    'scripts/symbol-anchors.mjs --self-test',
+    'a shared grammar-and-extractor LIBRARY, invoked by CI only as its own self-test; its `git ls-files` runs over a '
+      + 'corpus its caller passes in. The corpus walk it lends is exercised by its registrations — '
+      + 'check-adr-symbol-anchors.mjs, which declares ROOT_DIR_WATCH_HINTS = [docs/adr/**], and '
+      + 'check-scripts-symbol-anchors.mjs, which declares [scripts/**] — and each is placed by its own.',
+  ],
+];
+
+/** The ledger as a Map, keyed by the family key this derivation places. */
+export const ROOT_WALK_RESIDUE_REASONS = new Map(ROOT_WALK_RESIDUE_LEDGER);
+
+/**
+ * Why this family is an unnamed repo-root walker, or null when it is not one.
+ *
+ * Pure, and reading only what discovery already put on the entry plus the
+ * placement this derivation gave it — the same contract
+ * `wholeTreePopulationRefusal` above states, and for the same reason: the live
+ * sweep in `--self-test` and any future caller must not be able to disagree
+ * about what a member of this population IS.
+ *
+ * ⚠️ `placement` is the verdict from `placeFamily` over a probe card that
+ * EXCLUDES the gate's own file closure. Passing the raw whole-tree verdict
+ * instead returns `matched` for every family in the repo and empties this
+ * population silently — which is why the live case builds the probe rather than
+ * taking a convenient shortcut, and why this parameter is a verdict and not a
+ * path list (a caller cannot get the subtraction wrong in a way this function
+ * would then hide).
+ */
+export function unnamedRootWalk(entry, placement) {
+  if (!entry?.rootWalk) return null;
+  // All THREE declarations leave this population, and for one reason rather
+  // than three: this table holds the families nobody has looked at, and a
+  // family carrying any of the markers has been looked at. `wide-population`
+  // (#15341) is the answer for a walker whose population is real, is not the
+  // whole tree, and has no subtree spelling — the exact shape a row here would
+  // otherwise have to describe in prose nobody re-measures.
+  if (entry.wholeTreeReason || entry.noPopulationReason || entry.widePopulationReason) return null;
+  if (placement === 'matched') return null;
+  return entry.rootWalk;
 }
 
 /**
@@ -2173,6 +3036,86 @@ export function ciOnlyMeasurement(entry, rootScripts = {}) {
   );
   if (namedByManifest) return null;
   return { env };
+}
+
+/**
+ * The values a family takes from the workflow through its step's `env:` — the
+ * THIRD carrier, and the generalisation of #14004 rather than a second special
+ * case of it (#15761).
+ *
+ * ## The defect
+ *
+ * `.github/workflows/partof-closing-keyword-guard.yml` passes the pull request
+ * to `node scripts/check-partof-closing-keyword.mjs` through
+ * `env: PR_BODY: ${{ … }}` / `PR_NUMBER: ${{ … }}`, and its argv is BARE. The
+ * argv-shaped classifier one screen up therefore saw a command with no
+ * variable in it and put it in `--commands`, under a caption that promises a
+ * runnable command — while the gate's own refusal says the opposite in its own
+ * words: "NOT WIRED — neither PR_BODY nor PR_NUMBER is set, so this run was
+ * handed no pull request and judged nothing. This is a wiring or usage
+ * failure, NOT a verdict". A dev harvesting the family runs a command whose
+ * only possible outcome outside CI is exit 2.
+ *
+ * ⛔ The fix REFUSED: moving `PR_BODY` into the argv so the existing detector
+ * sees it. That `env:` spelling is a security decision the workflow states at
+ * length ("An expression interpolated into a shell line is substituted before
+ * bash ever sees it, so a PR body is arbitrary attacker-controlled text
+ * landing in a command; through `env:` it is inert data"), and reopening a
+ * deliberately closed injection surface to fix a DISPLAY bug trades the two
+ * the wrong way round. The repair is on the reader's side, which is where this
+ * one is.
+ *
+ * ## What it selects, measured rather than argued
+ *
+ * On this tree: 405 `run:` steps, 52 carrying an `env:` expression, 13 of
+ * those invoking a check. Eight spell every env name in the command itself and
+ * are filtered out before this function sees them (`envNamesNotSpelledInCommand`,
+ * which is what keeps #15441's three repaired `--base` families runnable). Of
+ * the five that reach the limbs below, the conjunction selects THREE — every
+ * one of which was verified by running it here, and every one of which refuses
+ * rather than judges:
+ *
+ *   `check-partof-closing-keyword.mjs`            exit 2, "NOT WIRED"
+ *   `check-single-claim-paths.mjs`                exit 2, "NOT WIRED — PR_NUMBER is not set"
+ *   `check-required-contexts.mjs --verify-required-set`
+ *                                                 exit 2, "NOT VERIFIED — … HTTP 401"
+ *
+ * so the class this card names is three families wide, not one. A fourth,
+ * `check-half-states.mjs --format=markdown --provenance="$PROVENANCE"`, is
+ * already NOT MEASURED through its argv and only gains the two env names it
+ * also carries.
+ *
+ * ## The limbs, each with a live case on this tree
+ *
+ *   selfTest  a `--self-test` invocation runs the script's own fixtures and
+ *             consumes no workflow value, exactly the argument `ciOnlyMeasurement`
+ *             makes one screen up. LIVE: `render-release-coverage-anchor.mjs
+ *             --self-test` sits in a step carrying three `${{ … }}` env values,
+ *             and it is runnable here — this limb is what keeps it in the list.
+ *   direct    a `check:*` family is invocable by name by construction (#14004's
+ *             limb 2), and its KEY drops the argv, so one key is produced by
+ *             steps in different environments and the env of one of them is not
+ *             a property of the key. LIVE: `check:console-injection`, run by
+ *             `ci.yml` and `release.yml` under `CONSOLE_DIST_CACHE_KEY` and by
+ *             the root manifest under nothing.
+ *   ciOnly    the family is ALREADY named in the CI-measured bucket, and one
+ *             family printed as two omissions tells a reader it owes two runs.
+ *             LIVE: `check-governed-queue-guard.mjs`, whose step also passes
+ *             `GITHUB_TOKEN: ${{ … }}` — #14004's own specimen.
+ *
+ * ⚠️ What this does NOT claim, and it is `payloadEnvDependence`'s caveat
+ * unchanged: that the gate READS the variable. It reads what the WORKFLOW
+ * passes, not what the program consumes, so the family stays NAMED with its
+ * variables printed beside it in every rendering — an annotation a reader can
+ * check against the gate, never a family this tool quietly disappears.
+ */
+export function workflowEnvValues(entry) {
+  const names = entry?.envVariables ?? [];
+  if (names.length === 0) return [];
+  if (entry.selfTest) return [];
+  if (!entry.direct) return [];
+  if (entry.ciOnly) return [];
+  return [...names];
 }
 
 /**
@@ -2546,10 +3489,10 @@ const IDENTIFIER_TOKEN = /[A-Za-z_$][\w$]*/g;
  * once, THREE self-test ENTRY POINTS in the `scripts/` tree carry one TODAY, so
  * this repairs live files rather than guarding against a future spelling:
  *
- *   scripts/check-test-completeness.mjs:576
- *   scripts/measure-position-name-fold-census.mjs:689
+ *   `scripts/check-test-completeness.mjs#selfTest`
+ *   `scripts/measure-position-name-fold-census.mjs#selfTest`
  *       both `function selfTest({ quiet = false } = {})`
- *   scripts/workspace-enumerator.mjs:328
+ *   `scripts/workspace-enumerator.mjs#selfTest`
  *       `export function selfTest({ root = null } = {})`
  *
  * Measured at 6193e576d — bytes `maskSelfTests` changes in each file, this
@@ -2930,15 +3873,18 @@ const BARE_ENTRY_POINT_NAME = 'selfTest';
 const COMPOUND_ANCHOR_LEDGER = [
   ['packages/lint/scripts/check-doc-formula-expressions.mjs', 'specSelfTest', false],
   ['packages/lint/scripts/check-doc-formula-expressions.mjs', 'fieldRuleSelfTest', false],
+  ['scripts/audits/14744-before-update-per-row-value-census.mjs', 'runSelfTest', false],
   ['scripts/check-comment-mask-corpus.mjs', 'runSelfTestCases', false],
   ['scripts/check-doc-authoring.mjs', 'selfTestRule3', false],
   ['scripts/check-doc-authoring.mjs', 'selfTestPackagesProse', false],
+  ['scripts/check-durability-degradation-log-level.mjs', 'checkSelfTestFloor', false],
   ['scripts/check-durability-degradation-log-level.mjs', 'selfTestReadSeams', false],
   ['scripts/check-platform-checklist.mjs', 'selfTestTrapVocabulary', false],
   ['scripts/check-platform-checklist.mjs', 'selfTestProvisioningUse', false],
   ['scripts/check-platform-checklist.mjs', 'selfTestUnreferencedRecipes', false],
   ['scripts/check-platform-checklist.mjs', 'selfTestMetaCallSpelling', false],
   ['scripts/check-platform-checklist.mjs', 'selfTestSourceLineCitations', false],
+  ['scripts/check-platform-checklist.mjs', 'selfTestSymbolAnchors', false],
   ['scripts/check-regen-pending.mjs', 'fixtureSelfTest', false],
   ['scripts/check-regen-pending.mjs', 'prePushIsArmedSelfTest', false],
   ['scripts/check-regen-pending.mjs', 'decisionTableSelfTest', false],
@@ -2952,6 +3898,7 @@ const COMPOUND_ANCHOR_LEDGER = [
   ['scripts/measure-self-test-floor.mjs', 'selfTestDefs', true],
   ['scripts/pm/dispatch-gates.mjs', 'selfTestOnlyCallables', true],
   ['scripts/pm/dispatch-gates.mjs', 'maskSelfTests', true],
+  ['scripts/pm/dispatch-gates.mjs', 'selfTestCaseLines', true],
 ];
 
 /**
@@ -3166,8 +4113,8 @@ export function resolveModuleRelativeHint(literal, scriptPath, { root = ROOT } =
  * no hint at all. That is right for `'./invoked-as.mjs'` and `'./package.json'`
  * and wrong for these two, which are unambiguous subtree declarations:
  *
- *   packages/spec/scripts/build-docs.ts:61             path.resolve(__dirname, '../src')
- *   packages/spec/scripts/build-skill-references.ts:35 path.resolve(__dirname, '../src')
+ *   `packages/spec/scripts/build-docs.ts#SRC_DIR`             path.resolve(__dirname, '../src')
+ *   `packages/spec/scripts/build-skill-references.ts#SPEC_SRC` path.resolve(__dirname, '../src')
  *
  * Checked at the declaration site rather than assumed, which is the provenance
  * criterion this file prices: `build-docs.ts` does `fs.readdirSync(SRC_DIR)`
@@ -3485,6 +4432,166 @@ export function packageRootAnchoredHint(hint, base, tree, files) {
 }
 
 /**
+ * The spans of a scanned gate's own EXCLUSION constants — the declarations
+ * whose contents are the paths that gate refuses to look at (#15753).
+ *
+ * ## The defect
+ *
+ * The scan below reads the whole module body, so a path literal sitting inside
+ * a declared exclusion list was admitted as a surface the gate WATCHES — the
+ * exact inverse of what the declaration says. `check-half-states.mjs` declares
+ * a two-spelling noise floor meaning "never pair on this", and the hint
+ * `.changeset` came straight out of the prefix half of it. Every user-visible
+ * PR in this repo adds a changeset, so that derivation landed on essentially
+ * every card: an exclusion list read as an inclusion surface, where the size of
+ * the mistake is set by the spelling that happens to be in the constant rather
+ * than by anything anyone chose. A noise floor that later grows a broader
+ * prefix scales it silently, and the hint reader had no way to tell
+ * watch-this from never-pair-on-this.
+ *
+ * ## Why the DECLARATION, and not a list of paths here
+ *
+ * A copy of any gate's noise floor inside this tool would answer today's
+ * spelling and drift from the constant the moment either side moved — the
+ * defect this file refuses everywhere else. The exclusion is already declared,
+ * in the scanned source, by the identifier the literal is assigned under, so
+ * that is what is read. A comment-marker convention was refused for a
+ * mechanical reason rather than a stylistic one: `maskedModuleBody` blanks
+ * comments before this scan ever runs, so a marker on the constant is invisible
+ * from here, while declaration TEXT survives the mask.
+ *
+ * ## The census, measured on this tree
+ *
+ * 3,513 top-level VALUE declarations over the 230 tracked JS/TS files under
+ * `scripts/`. 64 identifiers match the predicate; 58 carry at least one string
+ * literal; the whole set moves 14 hints, across 6 files:
+ *
+ *   scripts/check-doc-authoring.mjs       SKIP_PATHS, SKIP_FILES,
+ *                                         PACKAGES_PROSE_EXCLUDED           6
+ *   scripts/check-refd-timer-probe.mjs    EXCLUDED_DIRS                     4
+ *   scripts/check-corpus-claim-drift.mjs  SKIP_SUBTREES                     1
+ *   scripts/check-role-word.mjs           SKIP_SUBTREES                     1
+ *   scripts/check-keyed-text-bounds.mjs   SKIP_DIRS                         1
+ *   scripts/pm/check-half-states.mjs      H36_SHARED_PREFIX_NOISE           1
+ *
+ * Each was read against the gate that declares it, and each is an exclusion in
+ * that gate's own words: "whole subtrees skipped by path", "generated
+ * subtrees, excluded by PATH under ROOTS", "generated from spec/frontmatter —
+ * not hand-authored, don't police", "directories `git ls-files` can still name
+ * that hold no authored source", and — for `PACKAGES_PROSE_EXCLUDED`, the one
+ * that is a bare string rather than a list — the `continue` in the gate's own
+ * `descend` that skips it.
+ *
+ * ## What the 14 cost, which is not 14
+ *
+ * EIGHT of them change no derivation at all, because the gate ALSO declares the
+ * containing root as an inclusion population and `hintCovers` still reaches the
+ * path through that. Measured per hint, probing under each dropped hint against
+ * the surviving set: all six of check-doc-authoring's (`.claude/**`, `docs/**`,
+ * `content/**` and `packages/**` are its `ROOT_WATCH_HINTS`) and both
+ * `content/docs/references` (covered by `content/docs`). That gate's own
+ * self-test already said so from the other side — every `SKIP_PATHS` entry must
+ * sit UNDER a declared root — so the exclusion hints were pure duplication.
+ *
+ * SIX really leave a derivation, and every one of them is a lead that was
+ * false: `node_modules`, `dist`, `coverage` and `.turbo` off
+ * check-refd-timer-probe's skip set, and `.changeset` twice — off
+ * check-keyed-text-bounds' `SKIP_DIRS` and off the noise floor the card was
+ * filed on. The changeset pair is what a dev actually saw: a card that has not
+ * written its changeset yet is told which families it will owe once it does,
+ * and that projection carried FOUR fabricated rows, 16 -> 12 — including
+ * `check-half-states.mjs --format=markdown --provenance="$PROVENANCE"`, the
+ * networked half-state-patrol sweep, advertised to every card in the tree as a
+ * gate its changeset would trigger.
+ *
+ * ## The predicate: what the census kept, and what it retired
+ *
+ * `DENY`/`DENIED` was measured and REMOVED. It matched exactly one declaration
+ * on this tree and that one is a false positive — an HTTP fixture, not an
+ * exclusion list — and "deny" in this tree names AUTHORIZATION vocabulary
+ * (`DENY_CODE`), never a path skip list. Matches for the surviving
+ * alternatives, first-match attribution: SKIP 47, EXCLUDED 9, NOISE 2,
+ * SKIPPED 2, EXCLUSION 2, EXCLUSIONS 1, EXCLUDES 1, and EXCLUDE / IGNORE /
+ * IGNORED 0. The three zero-scoring arms are kept deliberately and the reason is
+ * the direction this predicate fails in: over-matching DROPS a hint (a missing
+ * lead — one card, one CI round), while under-matching KEEPS a wrong one (a
+ * fabricated lead pasted into every dispatch prompt whose surface brushes it).
+ * That asymmetry is the extractor's own, stated in its docblock below, and it
+ * is why an author's next spelling should be met by this predicate rather than
+ * by a rediscovery of this card.
+ *
+ * ONE false positive survives, and it costs nothing: `SHOW_EXCLUDED` in
+ * `scripts/objectui-range.mjs` is a CLI flag whose sense is to INCLUDE the
+ * excluded rows, not a population — its only literal is `'--all'`, refused by
+ * the flag rule regardless. A matched identifier that turns out to be an
+ * INCLUSION list is the reading that would narrow this predicate; the census
+ * found none, and `check-watch-hint-literal.mjs`'s roster of the inclusion
+ * idiom (`ROOT_WATCH_HINTS` and its three siblings) shares no word with it.
+ *
+ * ## What this deliberately does NOT reach, so a reader is not told otherwise
+ *
+ * Only TOP-LEVEL declarations, because `topLevelDecls` is anchored at column 0
+ * for the reasons its own docblock gives. A function-local exclusion constant
+ * is not reached — `check-test-completeness.mjs` has the one instance on this
+ * tree, and it costs nothing today because every literal in it is a bare
+ * directory word the admission rule already refuses. camelCase spellings are
+ * not reached either: the anchor is the SCREAMING_SNAKE segment, and the four
+ * camelCase near-misses on this tree (`scripts/docs-audit/affected-docs.mjs`)
+ * are counters and note strings, not populations. Both are the direction that
+ * drops LESS, which is the direction a widening of this rule may not silently
+ * take.
+ */
+const EXCLUSION_DECL_NAME =
+  /(?:^|_)(?:NOISE|SKIP|SKIPPED|EXCLUDE|EXCLUDED|EXCLUDES|EXCLUSION|EXCLUSIONS|IGNORE|IGNORED)(?:_|$)/;
+
+/** `topLevelDecls` classifies self-tests for its OTHER caller; this one has no stake in it. */
+const NO_SELF_TEST_STARTS = new Set();
+
+/**
+ * The VALUE-declaration arm of `TOP_LEVEL_DECL`, on its own, as a prefilter.
+ *
+ * `topLevelDecls` needs a full `scanSource` of the body, and that scan is the
+ * expensive half: measured on this tree with `--commands` over this file, two
+ * runs each, running it unconditionally inside the hint scan cost ~12% of a
+ * whole discovery pass (17.2s -> 19.2s). About 180 of the 230 scripts declare
+ * no exclusion constant at all, so this decides that with a regex before any
+ * scan starts, and the same measurement comes back 18.1s — ~5%, paid only by
+ * the ~50 files that really carry one. ⛔ Not memoised on top of that: the
+ * remaining cost is one scan per declaring file per analyser pass, and a third
+ * bespoke cache for it would buy ~3% for a construct the profile above does not
+ * justify. Re-measure before adding one.
+ *
+ * It is a SUPERSET of what `topLevelDecls` can return — the same arm, minus the
+ * code-position test — so it never hides a declaration; the worst it does is
+ * pay for a scan that then finds nothing, which is what a match inside a
+ * string or a comment costs.
+ */
+const EXCLUSION_DECL_PREFILTER = /^(?:export[ \t]+)?(?:const|let|var)[ \t]+([A-Za-z_$][\w$]*)[ \t]*=/gm;
+
+/**
+ * The `[start, end)` spans of `moduleBody`'s exclusion declarations, in source
+ * order. Pure, and derived from the SAME masked text the scan reads, so the two
+ * cannot disagree about what is code.
+ */
+function exclusionDeclSpans(moduleBody) {
+  EXCLUSION_DECL_PREFILTER.lastIndex = 0;
+  let candidate = false;
+  for (const m of moduleBody.matchAll(EXCLUSION_DECL_PREFILTER)) {
+    if (EXCLUSION_DECL_NAME.test(m[1])) {
+      candidate = true;
+      break;
+    }
+  }
+  if (!candidate) return [];
+  const spans = [];
+  for (const decl of topLevelDecls(moduleBody, scanSource(moduleBody), NO_SELF_TEST_STARTS)) {
+    if (decl.callable || !EXCLUSION_DECL_NAME.test(decl.name)) continue;
+    spans.push([decl.start, decl.end]);
+  }
+  return spans;
+}
+
+/**
  * Scan a check script's MODULE BODY for the path-ish string literals it
  * operates on. A hint is a quoted string that contains a `/` (or names a
  * top-level dotted dir) and looks like a repo path rather than a URL or a
@@ -3571,11 +4678,18 @@ export function packageRootAnchoredHint(hint, base, tree, files) {
  */
 export function extractWatchHints(scriptSource, scriptPath = null, { tree = null } = {}) {
   const moduleBody = maskedModuleBody(scriptSource);
+  const exclusions = exclusionDeclSpans(moduleBody);
   const hints = new Set();
   for (const m of moduleBody.matchAll(/['"`]([^'"`\n]{2,120})['"`]/g)) {
     const raw = m[1];
     if (/^(https?:|[A-Z_]+=|-{1,2}\w)/.test(raw)) continue;
     if (!/^[\w.@][\w.@/*-]*$/.test(raw)) continue;
+    // A literal the scanned gate declares as EXCLUDED is not a surface it
+    // watches — it is the surface it refuses to look at, and admitting it
+    // states the exact inverse of the declaration. See `exclusionDeclSpans`
+    // above for the identifier predicate, the tree-wide census behind it, and
+    // the three shapes it deliberately does not reach.
+    if (exclusions.some(([from, to]) => m.index >= from && m.index < to)) continue;
     // ADMISSION reads the literal as the AUTHOR wrote it, minus the depth
     // prefix — byte for byte the test this scan has always applied. Only the
     // VALUE is resolved, below. Widening admission to the resolved form was
@@ -3819,8 +4933,12 @@ export function firstPartyImportTargets(scriptPath, source, { root = ROOT } = {}
  * `--filter` package is the one piece of provenance this tool parsed and then
  * dropped, and it is the piece needed to run the thing.
  */
-export function runnableInvocation({ check, filter, direct }) {
-  if (direct) return `node ${check}`; // already a script path, never a pnpm script
+export function runnableInvocation({ check, filter, direct, localCheck = null }) {
+  // `localCheck` is the (#15441) repair and it is the ONLY place the two
+  // spellings diverge: the key stays the invocation CI runs, and what a dev
+  // pastes is that invocation with the script's own declared default in the
+  // value position. Absent on every other family, where the two are one string.
+  if (direct) return `node ${localCheck ?? check}`; // already a script path, never a pnpm script
   if (filter) return `pnpm --filter ${filter} run ${check}`;
   return `pnpm ${check}`;
 }
@@ -4144,7 +5262,7 @@ export function collapseHint(hint) {
  * shape the idioms above use: `packages/**` → `packages`, `packages/spec/src/**`
  * → `packages/spec/src`, `packages/client*` → `packages/client`. Each names a
  * subtree root the tree really has, and `ROOT_DIR_WATCH_HINTS` depends on
- * exactly that reduction (`scripts/check-published-files.mjs:215-248` declares
+ * exactly that reduction (`scripts/check-published-files.mjs` declares
  * the workspace globs VERBATIM so "the glob collapse reduces each back to the
  * root it names", justified there at 91.3%).
  *
@@ -5117,7 +6235,29 @@ export function classifyEntry(entry, paths) {
  */
 export function placeFamily(entry, paths) {
   if (entry?.wholeTreeReason) return { verdict: 'always-runs', hits: [] };
-  return classifyEntry(entry, paths);
+  const placed = classifyEntry(entry, paths);
+  // The THIRD channel (#15341), and it is deliberately spelled the other way
+  // round from the one above: consulted AFTER the classifier, not before.
+  //
+  // Why the asymmetry is the design rather than an inconsistency. The
+  // whole-tree declaration is consulted first because such a gate would
+  // otherwise be `matched` on the card that edits its own script and `silent`
+  // on every other — one gate, two placements, which is the shape that channel
+  // exists to retire. This declaration has no such problem to solve: it is a
+  // claim about the gate's POPULATION, and the only way one of these families
+  // can be `matched` at all is through a key that is NOT a population claim —
+  // `coveringKey`'s identity key, "an identity claim about a single FILE". A
+  // card editing the gate's own script is a 100%-precise lead, and the ruling's
+  // "keeps it OUT of the matched column" is about the ROOTS the gate walks:
+  // suppressing the identity match too would make a channel added to ADD
+  // information subtract some, silently, on the one card class where this
+  // derivation is exactly right. `widePopulationRefusal` keeps the two apart by
+  // refusing a marker that sits above any scanned path population at all, so
+  // this branch can only ever override an UNPLACED verdict.
+  if (entry?.widePopulationReason && placed.verdict !== 'matched') {
+    return { verdict: 'wide-population', hits: [] };
+  }
+  return placed;
 }
 
 // ---------------------------------------------------------------------------
@@ -8027,7 +9167,7 @@ export const CHANGE_KIND_GATES = [
     gates: [
       {
         name: 'check:type-check-debt',
-        why: 'the ROOT ledger entry (@objectstack/spec-monorepo) IS this program, so a file here moves its raw tsc count even though your diff touches no package — measured, one added bench file put it 19 over and cost a CI round. It is a shrink-only ratchet: the repair is to make the file typecheck, and raising the entry is maintainer-only, never the co-equal option. Most of this class is one missing setting rather than real breakage — the root config carries lib ES2020 and no types, so process and console are absent unless the file declares them ambiently. Needs the workspace closure BUILT — on an unbuilt worktree it refuses outright, and that throw means NOT MEASURED, never `not applicable to me`. Build first, exactly as lint.yml does: pnpm exec turbo run build --filter=./packages/* --filter=./packages/*/* (quote the filter values for your shell)',
+        why: 'the ROOT ledger entry (@objectstack/spec-monorepo) IS this program, so a file here moves its raw tsc count even though your diff touches no package — measured, one added bench file put it 19 over and cost a CI round. It is a shrink-only ratchet: the repair is to make the file typecheck, and raising the entry is maintainer-only — ⛔ MAINTAINER-ONLY under the #8435 convention — never the co-equal option. Most of this class is one missing setting rather than real breakage — the root config carries lib ES2020 and no types, so process and console are absent unless the file declares them ambiently. Needs the workspace closure BUILT — on an unbuilt worktree it refuses outright, and that throw means NOT MEASURED, never `not applicable to me`. Build first, exactly as lint.yml does: pnpm exec turbo run build --filter=./packages/* --filter=./packages/*/* (quote the filter values for your shell)',
       },
     ],
   },
@@ -8507,7 +9647,7 @@ export function alwaysRunsPopulationLines(rows) {
     lines.push(
       `      ↳ liveness: its own source carries ${row.rootWalk}` +
         `${row.ciOnly ? ' · CI-MEASURED ONLY — no local run of it can produce a verdict, so it is NOT in --commands' : ''}` +
-        `${row.notRunnable ? ` · ⛔ NOT RUNNABLE LOCALLY — its argv takes ${row.notRunnable.variables.join(', ')} from the workflow, so it is NOT in --commands` : ''}`,
+        `${row.notRunnable ? ` · ⛔ NOT RUNNABLE LOCALLY — it takes ${row.notRunnable.variables.join(', ')} from the workflow, so it is NOT in --commands` : ''}`,
     );
   }
   lines.push(
@@ -8517,23 +9657,69 @@ export function alwaysRunsPopulationLines(rows) {
   return lines;
 }
 
+/**
+ * The WIDE-population channel, rendered (#15341) — the residue's DECLARED
+ * column, printed BELOW the reconciliation because its commands are NOT inside
+ * that total.
+ *
+ * That placement is the claim, and it is the one line of difference from
+ * `alwaysRunsPopulationLines` above: everything under the reconciliation names
+ * something OUTSIDE this card's runnable answer. A whole-tree family is owed by
+ * every card, so it prints above the total and its command is in it. A
+ * wide-population family is run by CI over a population no card's paths can
+ * narrow — pasting it into every harvest would be the fabricated lead the
+ * recorded triage refused in the first place — so it prints here, named, with
+ * the reason that is the whole content of the channel.
+ *
+ * A refused declaration prints as REFUSED rather than vanishing, for the reason
+ * the sibling section states: a family dropped from every rendering because its
+ * declaration was malformed is the silent direction.
+ */
+export function widePopulationLines(rows) {
+  if (rows.length === 0) return [];
+  const lines = [
+    `Declared WIDE population — ${rows.length} famil(ies) DECLARE that CI runs them over a population too wide to place, so no`
+      + " path of yours can narrow them and their absence from the matched block above is NOT a clearance.",
+  ];
+  for (const row of rows) {
+    if (row.refused) {
+      lines.push(`  - ⚠ ${row.check}: REFUSED — ${row.refused}`);
+      continue;
+    }
+    lines.push(`  - ${row.command}   [${row.workflows.join(', ')}]   declared wide population — ${row.reason}`);
+  }
+  lines.push(
+    '  ⇒ Declared, and deliberately NOT in this card\'s runnable total: the population is real and every subtree spelling of it'
+      + ' is either false or so wide it would name the gate on every card under the root — the trade scripts/pm/bare-root-worklist.mjs'
+      + ' records per row as REFUSE-WIDE / REFUSE-UNSPELLABLE. CI runs them on every PR regardless, so read this block as "these'
+      + ' gates judge your diff and no derivation can tell you whether they bite" — go read the reason, not the absence.',
+  );
+  return lines;
+}
+
 export function residueLines(
   {
     discovered, matched, undetermined, silent, unfiltered, unreachable, swept,
-    artifactRosters, invertedRosters, documentedNoPopulation, alwaysRuns = 0,
+    artifactRosters, invertedRosters, documentedNoPopulation, alwaysRuns = 0, widePopulation = 0,
   },
   kinds = CHANGE_KIND_GATES,
 ) {
-  // FOUR verdicts now (#14189). The whole-tree channel is a term of the
-  // partition rather than a subset of one, and it is added HERE because the
-  // throw below is the thing that would otherwise absorb it silently: a fourth
+  // FIVE verdicts now (#14189, #15341). Each declaration channel is a term of
+  // the partition rather than a subset of one, and each is added HERE because
+  // the throw below is the thing that would otherwise absorb it silently: a
   // placement wired into the derivation and not into this sum shrinks the
   // residue by exactly the families it placed, and every count still prints.
-  const placed = matched + undetermined + silent + alwaysRuns;
+  const placed = matched + undetermined + silent + alwaysRuns + widePopulation;
   if (placed !== discovered) {
     throw new Error(
       `residue accounting is short: ${placed} famil(ies) placed of ${discovered} discovered ` +
-        '(matched + undetermined + silent + always-runs must cover every discovered family)',
+        '(matched + undetermined + silent + always-runs + wide-population must cover every discovered family)',
+    );
+  }
+  if (!Number.isInteger(widePopulation) || widePopulation < 0 || widePopulation > discovered) {
+    throw new Error(
+      `declared-wide-population count is not derivable: got ${String(widePopulation)} of ${discovered} discovered ` +
+        "(it is read from each gate's own marker — never omitted; a missing count would print as a missing line)",
     );
   }
   if (!Number.isInteger(alwaysRuns) || alwaysRuns < 0 || alwaysRuns > discovered) {
@@ -8595,12 +9781,19 @@ export function residueLines(
     `Residue — all ${discovered} discovered famil(ies) placed, derived at runtime:`,
     `  ${matched} matched above · ${undetermined} undetermined (their sources name no path at all — NOT known irrelevant)` +
       ` · ${silent} silent (their sources name paths, none of which cover yours)` +
-      ` · ${alwaysRuns} always-runs (they DECLARE a whole-tree population, so they are placed by declaration and not by your paths).`,
+      ` · ${alwaysRuns} always-runs (they DECLARE a whole-tree population, so they are placed by declaration and not by your paths)` +
+      ` · ${widePopulation} declared-wide (they DECLARE a population too wide to place, so no path of yours can narrow them either way).`,
     `  Those ${alwaysRuns} are not leads and not silences: a gate that reads EVERY file is named on every card, so naming it in the matched` +
       ' column would be a fabricated lead and leaving it silent would be a false clearance. It declares the fact in its own source' +
       ' (dispatch-gates: whole-tree-population -- REASON, the inverse of the no-path-population marker above), the declaration is checked' +
       " against a repo-root walk in that same source, and the family is listed under its own always-runs heading with its commands INSIDE" +
       ' this card\'s runnable total.',
+    `  Those ${widePopulation} are the THIRD channel (#15341) and the opposite disposition: CI runs each of them over a population too wide to place` +
+      ' — a whole top-level root, or a file-KIND filter inside one that no subtree glob spells — so a true declaration would name the gate on every' +
+      ' card under that root and the matched column would stop discriminating. They declare the fact in their own source' +
+      ' (dispatch-gates: wide-population -- REASON), are listed under their own heading with that reason, and are deliberately' +
+      " not in this card's runnable total: the per-row measured refusals behind them live in scripts/pm/bare-root-worklist.mjs." +
+      ' Their absence from the matched block is NOT a clearance — read the reason.',
     `  ${documentedNoPopulation} of those ${undetermined} undetermined famil(ies) DECLARE that they have no path population, each with its own` +
       ' reason, read from a marker in the gate\'s source and printed against it under --residue. Those have been examined; the rest of the bucket' +
       ' has not, and the two used to read alike. A declaration is not an escape from having a population: a gate that walks a subtree declares it' +
@@ -8970,7 +10163,19 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
   for (const inv of invocations) {
     const key = inv.check;
     if (!byCheck.has(key)) byCheck.set(key, { ...inv, workflows: new Set(), files: [], hints: [] });
-    byCheck.get(key).workflows.add(inv.workflow);
+    const merged = byCheck.get(key);
+    merged.workflows.add(inv.workflow);
+    // INTERSECTION, not union (#15761). `argvVariables` needs no merge — argv
+    // is part of the KEY, so every invocation under one key spells the same
+    // one. `env:` is NOT part of the key, so two workflows can run the same
+    // command in different environments, and the classification this feeds
+    // SUBTRACTS a row from `--commands`: keeping only the names EVERY step
+    // passes means a command one workflow runs bare keeps its place in the
+    // list. A wrong subtraction is silent; a miss is loud (#14004's trade,
+    // same direction). Costs nothing measurable today — 14 of the 260 keys on
+    // this tree carry more than one invocation and NONE of them disagree about
+    // its env, so union and intersection classify identically here.
+    merged.envVariables = (merged.envVariables ?? []).filter((name) => (inv.envVariables ?? []).includes(name));
   }
   for (const entry of byCheck.values()) {
     // Only the workflows that DECLARE a filter become trigger keys. An
@@ -9120,11 +10325,23 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
       // different revision of the gate than the declaration it is grading.
       entry.wholeTreeReason ??= declaredWholeTreePopulation(source);
       entry.rootWalk ??= repoRootWalkSpelling(source);
+      // ONE read, and the TENTH answer off it (#15341). Same source text as
+      // every reader above, for the same reason: `widePopulationRefusal` grades
+      // this declaration against `entry.hints`, and hints and marker have to
+      // come out of one revision of the gate or the refusal is judging two.
+      entry.widePopulationReason ??= declaredWidePopulation(source);
       // ONE read, SIX answers now (#14004). The payload dependence is read off
       // the SAME source text as the five above, so this classification cannot
       // describe a different revision of the gate than the hints printed beside
       // it — the discipline every other reader in this loop follows.
       entry.payloadEnv ??= payloadEnvDependence(source);
+      // ONE read, and the NINTH answer off it (#15441): the argv defaults this
+      // script DECLARES in its own usage block. Read from the SAME source text
+      // as the eight above, and taken from the gate's OWN file only — a
+      // followed module cannot declare on its caller's behalf what the caller
+      // does with an argument it was not given, exactly like the declarations
+      // around it.
+      if (entry.direct && f === entry.script) entry.argvDefaults = declaredArgvDefaults(source);
       // A `--self-test` family follows NO import, and that is a measurement
       // rather than a preference (#11404). The invocation runs the script's
       // SELF-TEST; a module the script imports carries the population of the
@@ -9231,6 +10448,12 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
     // vouches for the declaration has to be in the source that carries it.
     entry.wholeTreeReason ??= null;
     entry.rootWalk ??= null;
+    // Read from the gate's own files only, for the reason the two declarations
+    // above it are: a followed module cannot declare on its caller's behalf
+    // that the CALLER's population is too wide to place — and a caller that
+    // inherited the marker would be excused from the matched column by a
+    // sentence written about a different gate.
+    entry.widePopulationReason ??= null;
     // Read from the gate's own files only, exactly like the declaration above
     // it: a followed module cannot make its caller CI-only, and a family that
     // reached no file at all reaches no classification either.
@@ -9243,8 +10466,48 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
     // takes a value from the workflow has no local run at all, so it is named,
     // its workflow is named, and it is kept out of `--commands` — the same
     // treatment, reached by a different measurement.
-    entry.notRunnable = (entry.argvVariables ?? []).length > 0
-      ? { variables: [...entry.argvVariables] }
+    // The repair of that second classification (#15441). It asked whether the
+    // WORKFLOW supplies the value and never whether the SCRIPT needs it
+    // supplied, so a gate whose own usage block documents a default for the
+    // flag CI pins was filed unrunnable and its `--self-test` was the only
+    // member `--commands` offered for it — a zero from a command that cannot
+    // answer the question, sitting in the union where nothing distinguishes it
+    // from a green. `declaredArgvDefaults` reads the script's declaration; this
+    // is where it is spent, and it is spent ALL-OR-NOTHING: an invocation is
+    // repaired only when every variable in it is covered by a declared default,
+    // because a command that runs with one real value and one invented one
+    // answers a question CI never asked.
+    entry.argvDefaulted = [];
+    entry.localCheck = null;
+    if ((entry.argvVariables ?? []).length > 0 && entry.argvDefaults?.size && entry.script) {
+      const substituted = defaultedArgv(entry.check.slice(entry.script.length + 1), entry.argvDefaults);
+      const remaining = entry.argvVariables.filter(
+        (variable) => !substituted.defaulted.some((d) => d.variable === variable),
+      );
+      if (substituted.defaulted.length > 0 && remaining.length === 0) {
+        entry.argvDefaulted = substituted.defaulted;
+        entry.argvVariables = remaining;
+        // ⛔ The KEY is untouched — `check` stays the invocation as CI spells
+        // it, so nothing is re-attributed and a script CI runs under two
+        // different variables keeps its two entries. This is the LOCAL
+        // spelling, read by `runnableInvocation` and by nothing else.
+        entry.localCheck = `${entry.script} ${substituted.args}`;
+      }
+    }
+    // Both CARRIERS of one fact — a value that comes from the workflow and has
+    // none here (#15761). They are unioned into ONE classification rather than
+    // given a bucket each, because a reader asking "can I run this" is asking
+    // one question: the rendering, the `--json` key and the subtraction from
+    // `--commands` are all the argv one, unchanged. The env names are spelled
+    // `env NAME` so the two carriers stay legible in a single list — an argv
+    // variable always carries its `$`.
+    entry.envValues = workflowEnvValues(entry);
+    const workflowValues = [
+      ...(entry.argvVariables ?? []),
+      ...entry.envValues.map((name) => `env ${name}`),
+    ];
+    entry.notRunnable = workflowValues.length > 0
+      ? { variables: workflowValues, envVariables: [...entry.envValues] }
       : null;
   }
   return { byCheck, workflows, workflowEntries };
@@ -9313,10 +10576,14 @@ export function commandsFor({ matchedRows = [], kindGroups = [], alwaysRunsRows 
   // The SECOND subtraction, and it is made for the identical reason (#15083):
   // this list's caption promises one RUNNABLE command per line, and an
   // invocation whose values come from the workflow has no value outside a CI
-  // run. Rendering it here with `$MERGE_BASE` unset would produce a command
+  // run. Rendering it here with `$RUNNER_TEMP` unset would produce a command
   // that RUNS and answers a question CI never asked — the one outcome worse
   // than the bare key it replaces. Loud in both other renderings: its own
   // heading in the human output, `notRunnable` on its row in `--json`.
+  // ⚠️ `$MERGE_BASE` used to be this comment's example and is no longer a
+  // member: since #15441 a variable the script itself declares a default for is
+  // filled in and the family renders a real runnable command, so what is
+  // subtracted here is only what nothing can supply a value for.
   const notRunnable = notRunnableCommandSet(matchedRows, alwaysRunsRows);
   for (const row of matchedRows) if (!row.ciOnly && !row.notRunnable) commands.add(row.command);
   // The whole-tree channel is IN the union, on every card (#14189). It is not
@@ -9517,7 +10784,7 @@ export function familyReconciliationLines(recon) {
   const notRunnableLine =
     (recon.notRunnable ?? 0) > 0
       ? `  + ${recon.notRunnable} famil(ies) this card's paths reach take a VALUE FROM THE WORKFLOW and sit OUTSIDE this total —` +
-        ' their argv carries a variable that has no value outside a CI run, so there is no local invocation to hand you.' +
+        " their argv, or their step's `env:`, carries a variable that has no value outside a CI run, so there is no local invocation to hand you." +
         ' Named under their own heading above with the variable in the value position, carried on their row in --json,' +
         ' and omitted from --commands by design.'
       : null;
@@ -9575,7 +10842,7 @@ export function familyReconciliationLines(recon) {
     // than about a family nobody can run here (#15083).
     const notRunnableConventionRows = recon.notRunnableConventionRows ?? 0;
     if (notRunnableConventionRows > 0) {
-      notes.push(`${notRunnableConventionRows} value-bearing argv, contributing no runnable command`);
+      notes.push(`${notRunnableConventionRows} value-bearing argv or env, contributing no runnable command`);
     }
     const accounted = recon.staleRows + ciOnlyConventionRows + notRunnableConventionRows;
     if (recon.conventionRows - accounted > recon.convention) {
@@ -9730,9 +10997,20 @@ export function parseRunRecord(text) {
  * heading) and which deduplicates the two spellings of one family into one
  * command before this function ever sees them. What the tool CAN still meet in
  * a record it classifies itself — a CI-measured-only family, which `commandsFor`
- * subtracts by design, and a pending-changeset family, derived against a path
- * that did not exist at derivation time. Both are matched byte-exactly against
- * sets this same derivation produced.
+ * subtracts by design; a VALUE-BEARING family, which `commandsFor` subtracts for
+ * the same reason one step later because its argv takes a value from the
+ * workflow (#15083); and a pending-changeset family, derived against a path
+ * that did not exist at derivation time. All three are matched byte-exactly
+ * against sets this same derivation produced.
+ *
+ * ⭐ The third bucket is not a convenience: this file's own rule is that an
+ * omission is disclosed WHERE the omission happens, and a class `commandsFor`
+ * deliberately withholds is a class the runner cannot be expected to have
+ * derived. Left in the remainder it reads as a command "named by nothing this
+ * run derived" — the one sentence that is false about it, because this run
+ * derived it and then classified it out. The likeliest recorder is a dev who
+ * writes the bare spelling of one of these scripts out of habit, and what they
+ * are owed is the reason, not a shrug (#15115).
  *
  * What is left for the runner to explain is therefore only what the tool
  * genuinely cannot know: a gate that refused with its own prerequisite. That is
@@ -9751,6 +11029,12 @@ export function parseRunRecord(text) {
 export function runReconciliation({
   derived = [],
   ciOnlyCommands = new Set(),
+  // Beside `ciOnlyCommands` and not after `pendingCommands`, because the file
+  // already groups them: these are the TWO subtractions `commandsFor` makes
+  // from the runnable union, in that order, and the pending families are a
+  // different fact (a path that did not exist at derivation time). Defaulting
+  // to empty keeps every existing caller's verdict byte-identical.
+  notRunnableCommands = new Set(),
   pendingCommands = new Set(),
   record = [],
 } = {}) {
@@ -9792,6 +11076,7 @@ export function runReconciliation({
   }
 
   const explainedCiOnly = [];
+  const explainedNotRunnable = [];
   const explainedPending = [];
   const extra = [];
   const nearMiss = [];
@@ -9802,6 +11087,14 @@ export function runReconciliation({
     if (derivedSet.has(entry.command)) continue;
     if (ciOnlyCommands.has(entry.command)) {
       explainedCiOnly.push(entry.command);
+      continue;
+    }
+    // The order is the precedence, and it is the one `commandsFor` already
+    // states: `ciOnly` is the FIRST subtraction, so a family that were somehow
+    // both is reported as CI-measured — one bucket per command, chosen the same
+    // way in both places rather than two counts for one omission.
+    if (notRunnableCommands.has(entry.command)) {
+      explainedNotRunnable.push(entry.command);
       continue;
     }
     if (pendingCommands.has(entry.command)) {
@@ -9823,6 +11116,7 @@ export function runReconciliation({
     unrun,
     notMeasured,
     explainedCiOnly: explainedCiOnly.sort(),
+    explainedNotRunnable: explainedNotRunnable.sort(),
     explainedPending: explainedPending.sort(),
     extra: extra.sort(),
     nearMiss,
@@ -9885,6 +11179,13 @@ export function runReconciliationLines(recon) {
     );
     for (const command of recon.explainedCiOnly) lines.push(`    - ${command}`);
   }
+  if (recon.explainedNotRunnable.length > 0) {
+    lines.push(
+      `  Classified by this tool, no explanation owed (${recon.explainedNotRunnable.length}) — VALUE-BEARING famil(ies):`
+        + " its argv or its step's `env:` takes a value from the workflow, so it is recorded, not derived as runnable:",
+    );
+    for (const command of recon.explainedNotRunnable) lines.push(`    - ${command}`);
+  }
   if (recon.explainedPending.length > 0) {
     lines.push(
       `  Classified by this tool, no explanation owed (${recon.explainedPending.length}) — pending-changeset famil(ies), derived against a path that did not exist at derivation time:`,
@@ -9935,7 +11236,7 @@ export function runReconciliationLines(recon) {
  * That distinction is the card's own subject matter: what is left out of a list
  * must be visible in the list.
  */
-export function derivationJson({ paths, matchedRows, kindGroups, pending, counts, identity, alwaysRunsRows = [], rosters = [] }) {
+export function derivationJson({ paths, matchedRows, kindGroups, pending, counts, identity, alwaysRunsRows = [], widePopulationRows = [], rosters = [] }) {
   const commands = commandsFor({ matchedRows, kindGroups, alwaysRunsRows });
   const { otherCommands, ...spelling } = spellingSplit(commands);
   return {
@@ -9954,6 +11255,13 @@ export function derivationJson({ paths, matchedRows, kindGroups, pending, counts
     // (that would be a lead on every card) and must not have to infer it from
     // the commands list either (#14189).
     alwaysRunsPopulation: alwaysRunsRows,
+    // IN this document and ⛔ NOT in `commands` (#15341) — the mirror of the
+    // key above it, and the pair is why both exist: a whole-tree family is owed
+    // by every card, a wide-population family by none, and a consumer must be
+    // able to read the difference rather than infer it from an absence. Its own
+    // key for the reason `artifactRosterSilences` has one: an omission a machine
+    // consumer has to deduce is the omission this document exists to state.
+    widePopulation: widePopulationRows,
     // IN this document and ⛔ NOT in `commands`, for the reason
     // `artifactRosterLines` states: these families are `silent`, so no path a
     // caller passes can move them, and merging them into the runnable union
@@ -9991,13 +11299,13 @@ export function derivationJson({ paths, matchedRows, kindGroups, pending, counts
  * LOUD. A quiet omission is the defect this mode was added to fix, and adding a
  * new one inside the fix is how that defect reproduces itself one layer up.
  */
-function machineReadableOutput(mode, { paths, matchedRows, kindGroups, pending, counts, alwaysRunsRows = [], rosters = [] }) {
+function machineReadableOutput(mode, { paths, matchedRows, kindGroups, pending, counts, alwaysRunsRows = [], widePopulationRows = [], rosters = [] }) {
   const identity = repoIdentity();
   const commands = commandsFor({ matchedRows, kindGroups, alwaysRunsRows });
   const split = spellingSplit(commands);
 
   if (mode === 'json') {
-    console.log(JSON.stringify(derivationJson({ paths, matchedRows, kindGroups, pending, counts, identity, alwaysRunsRows, rosters }), null, 2));
+    console.log(JSON.stringify(derivationJson({ paths, matchedRows, kindGroups, pending, counts, identity, alwaysRunsRows, widePopulationRows, rosters }), null, 2));
   } else {
     for (const command of commands) console.log(command);
   }
@@ -10022,6 +11330,19 @@ function machineReadableOutput(mode, { paths, matchedRows, kindGroups, pending, 
         ' card, and outside the matched/silent/undetermined verdicts entirely. Run without --commands/--json to see each one with its reason.',
     );
   }
+  // Omitted OUT LOUD for the same reason as everything around it (#15341), and
+  // this one is the omission a reader is most likely to misread as a clearance:
+  // these gates DO judge the diff, CI runs every one of them, and no path
+  // derivation can narrow them — so the stream a consumer executes cannot carry
+  // them and the accounting beside it has to say they exist.
+  const wideRunnable = widePopulationRows.filter((row) => !row.refused);
+  if (wideRunnable.length) {
+    console.error(
+      `  + ${wideRunnable.length} famil(ies) DECLARE a population too wide to place and are ${mode === 'json' ? 'under widePopulation, not in commands' : 'NOT above'} — ` +
+        'CI runs them over a whole root (or a file-kind filter inside one) that no subtree glob spells, so no path of yours narrows them ' +
+        'and their absence here is not a clearance. Run without --commands/--json to see each one with its reason.',
+    );
+  }
   // The THIRD thing stdout deliberately omits, omitted OUT LOUD for the reason
   // this function's header gives for the other two: a quiet omission is the
   // defect this mode exists to fix (#14004).
@@ -10038,7 +11359,18 @@ function machineReadableOutput(mode, { paths, matchedRows, kindGroups, pending, 
   if (notRunnableRows.length) {
     console.error(
       `  + ${notRunnableRows.length} famil(ies) matched by path take a VALUE FROM THE WORKFLOW and are ${mode === 'json' ? 'flagged as notRunnable on their matched row, not in commands' : 'NOT above'} — ` +
-        'their argv carries a variable with no value outside a CI run. Run without --commands/--json to see each one printed as CI spells it.',
+        "their argv or their step's `env:` carries a variable with no value outside a CI run. Run without --commands/--json to see each one printed as CI spells it.",
+    );
+    // Named, one per line, and named as NOT MEASURED rather than as an omission
+    // (#15441). A count says something is missing; it does not say that a
+    // `--self-test` of the same script sitting in the list above is not the
+    // thing that is missing — which is the substitution this card was filed on.
+    for (const row of notRunnableRows) {
+      console.error(`      ⊘ NOT MEASURED — ${row.check}`);
+    }
+    console.error(
+      '      ⛔ A --self-test or any other argv of those same scripts may well be in the list above: it grades the script,' +
+        ' not your diff. Nothing above answers the families just named.',
     );
   }
   if (pending.length) {
@@ -10088,9 +11420,14 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
   // family lands in, so a family that declares nothing reaches exactly the
   // classifier it always reached.
   const alwaysRuns = [];
+  // The FIFTH bucket (#15341): families placed by their own wide-population
+  // declaration. Same seam, opposite disposition to the fourth — declared, and
+  // outside this card's runnable total.
+  const widePopulation = [];
   for (const [check, entry] of byCheck) {
     const { verdict, hits } = placeFamily(entry, paths);
     if (verdict === 'always-runs') alwaysRuns.push([check, entry]);
+    else if (verdict === 'wide-population') widePopulation.push([check, entry]);
     else if (verdict === 'matched') matched.set(check, { entry, hits });
     else if (verdict === 'undetermined') undetermined.push([check, entry]);
     else silent.push([check, entry]);
@@ -10132,6 +11469,15 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
     // rendering below is a reading of these rows, so a family cannot be
     // runnable in one output and value-bearing in another (#15083).
     notRunnable: entry.notRunnable ?? null,
+    // Travels for the same reason again (#15441): the row states which of its
+    // workflow values it filled from the script's own declaration, so the human
+    // block, the `--commands` accounting and `--json` cannot disagree about
+    // whether a family was repaired or merely rendered.
+    argvDefaulted: entry.argvDefaulted ?? [],
+    // The script path, so a rendering can ask whether a family's `--self-test`
+    // sibling is in the runnable list beside it — the substitute this card is
+    // about, which has to be labelled where it is offered.
+    script: entry.script ?? null,
   }));
   // Built the same way `matchedRows` is, and for the same reason: every
   // rendering below is a reading of these rows, so the human block, the
@@ -10149,6 +11495,18 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
     ciOnly: entry.ciOnly ?? null,
     notRunnable: entry.notRunnable ?? null,
   }));
+  // Built the same way the two row sets above are, and for the same reason: the
+  // human block and the `--json` document are readings of THESE rows, so they
+  // cannot disagree about which families declared a wide population or why
+  // (#15341). No `ciOnly`/`notRunnable` here — those two exist to subtract a
+  // command from the runnable union, and no row of this kind is ever in it.
+  const widePopulationRows = [...widePopulation].sort().map(([check, entry]) => ({
+    check,
+    command: runnableInvocation(entry),
+    workflows: [...entry.workflows],
+    reason: entry.widePopulationReason,
+    refused: widePopulationRefusal(entry),
+  }));
   const kindGroups = changeKindGates(paths, resolveInvocation);
   // The pending-changeset section is derived in BOTH input modes and is gated
   // on nothing but the answer itself: the PM's paths are a hypothesis with no
@@ -10159,9 +11517,10 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
   const pending = pendingChangesetFamilies([...byCheck], new Set(matched.keys()));
 
   if (mode === 'ran') {
-    // Built from the SAME three expressions the other renderings read, in this
-    // process, on this tree: the union `--commands` prints, the CI-measured set
-    // that union subtracts, and the pending families it holds back. A second
+    // Built from the SAME four expressions the other renderings read, in this
+    // process, on this tree: the union `--commands` prints, the two sets that
+    // union subtracts — CI-measured, and value-bearing — and the pending
+    // families it holds back. A second
     // traversal here would be a second answer to a question this file already
     // answers once — and it would be the answer the reconciliation is judged
     // against, which is the worst possible place to keep a duplicate.
@@ -10172,6 +11531,11 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
       // makes it a contract rather than a note (#14189).
       derived: commandsFor({ matchedRows, kindGroups, alwaysRunsRows }),
       ciOnlyCommands: ciOnlyCommandSet(matchedRows, alwaysRunsRows),
+      // The SECOND set `commandsFor` subtracts, read from the SAME rows by the
+      // SAME expression it uses — so the union and the reconciliation cannot
+      // drift about which invocations are withheld, exactly as they cannot for
+      // the CI-measured set above it (#15115).
+      notRunnableCommands: notRunnableCommandSet(matchedRows, alwaysRunsRows),
       pendingCommands: new Set(pending.map(({ entry }) => runnableInvocation(entry))),
       record: runRecord,
     });
@@ -10186,6 +11550,7 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
       kindGroups,
       pending,
       alwaysRunsRows,
+      widePopulationRows,
       rosters,
       counts: {
         discovered: byCheck.size,
@@ -10194,6 +11559,7 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
         undetermined: undetermined.length,
         silent: silent.length,
         alwaysRuns: alwaysRuns.length,
+        widePopulation: widePopulation.length,
         unreachable: unreachable.length,
         swept: swept.length,
       },
@@ -10229,16 +11595,60 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
   // harvest of the block above.
   const notRunnableRows = matchedRows.filter((row) => row.notRunnable);
   const viaText = (hits) => hits.map((h) => `${h.path} ⇢ ${h.via} '${h.hint}'`).join('; ');
+  // ⚠️ Since #15441 two matched rows can render ONE command: a script CI
+  // invokes under two different workflow variables has two keys, and both
+  // render the same locally-runnable invocation once the script's own declared
+  // default fills the value position. The block a dev pastes is deduplicated on
+  // the COMMAND for the reason `commandsFor` states in its own docblock — "a
+  // list that says the same command twice teaches its reader to skim" — and
+  // both rows' workflows, provenance and filled values are carried onto the one
+  // row, so the merge loses the repetition and nothing else. It is also what
+  // keeps this block's footer and the reconciliation agreeing: `matchedCommands`
+  // in `familyReconciliation` has always counted DISTINCT commands.
+  const pastedRows = [];
+  const pastedByCommand = new Map();
+  for (const row of runnableRows) {
+    const already = pastedByCommand.get(row.command);
+    if (!already) {
+      const merged = {
+        ...row,
+        workflows: [...row.workflows],
+        via: [...row.via],
+        argvDefaulted: [...(row.argvDefaulted ?? [])],
+      };
+      pastedByCommand.set(row.command, merged);
+      pastedRows.push(merged);
+      continue;
+    }
+    for (const wf of row.workflows) if (!already.workflows.includes(wf)) already.workflows.push(wf);
+    for (const hit of row.via) {
+      if (!already.via.some((h) => h.path === hit.path && h.via === hit.via && h.hint === hit.hint)) already.via.push(hit);
+    }
+    for (const filled of row.argvDefaulted ?? []) {
+      if (!already.argvDefaulted.some((d) => d.flag === filled.flag && d.variable === filled.variable)) {
+        already.argvDefaulted.push(filled);
+      }
+    }
+  }
   if (runnableRows.length) {
     console.log('Local gates for this card (paste into the dispatch prompt):');
-    for (const { command, workflows: wfs, via: hits } of runnableRows) {
-      console.log(`  - ${command}   [${wfs.join(', ')}]   matched via ${viaText(hits)}`);
+    for (const { command, workflows: wfs, via: hits, argvDefaulted } of pastedRows) {
+      // The note rides the SAME line, deliberately: the published harvest ends
+      // this block at the first empty line and reads each row with one regexp,
+      // so a second line under a row would be harvested as another command. It
+      // carries no `   [` for the same reason — that is the separator the
+      // harvest's own `sed` keys on.
+      const filled = (argvDefaulted ?? []).length
+        ? `   · ${[...new Set(argvDefaulted.map((d) => `${d.flag} ${d.value}`))].join(', ')} is this script's own documented`
+          + ` default; CI pins it to ${[...new Set(argvDefaulted.map((d) => d.variable))].join(', ')}`
+        : '';
+      console.log(`  - ${command}   [${wfs.join(', ')}]   matched via ${viaText(hits)}${filled}`);
     }
     // The blank line FIRST, and it is not cosmetic: the published harvest ends
     // the block at the first empty line, so a footer butted against the rows
     // would be harvested AS rows. See spellingFooterLines.
     console.log('');
-    for (const line of spellingFooterLines(spellingSplit(runnableRows.map((r) => r.command)), recon)) {
+    for (const line of spellingFooterLines(spellingSplit(pastedRows.map((r) => r.command)), recon)) {
       console.log(line);
     }
   } else if (ciOnlyRows.length || notRunnableRows.length) {
@@ -10273,13 +11683,44 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
   // labelled line of its own, never an ellipsis and never a truncated command.
   if (notRunnableRows.length) {
     console.log('');
-    console.log(`Value-bearing argv — matched by path, and NOT runnable here (${notRunnableRows.length} famil(ies)):`);
-    for (const { command, workflows: wfs, via: hits, notRunnable } of notRunnableRows) {
+    console.log(`Value-bearing argv or env — matched by path, and NOT runnable here (${notRunnableRows.length} famil(ies)):`);
+    // A sibling of the SAME script that this card CAN run, matched on the
+    // script path rather than on a name (#15441). It is what a reader reaches
+    // for when the row below says the question is unanswered, and it is exactly
+    // what must not be mistaken for an answer: the card that filed this was
+    // filed on a `--self-test` sitting in `--commands` as the only member of a
+    // family whose real check was refused, and a dev reporting "50 run · 50
+    // exit 0 · 0 red" on a PR whose Check Changeset job was red the whole time.
+    const siblingOf = new Map();
+    for (const row of runnableRows) {
+      if (row.script && !siblingOf.has(row.script)) siblingOf.set(row.script, row.command);
+    }
+    for (const { command, workflows: wfs, via: hits, notRunnable, script } of notRunnableRows) {
       console.log(`  - ${command}   [${wfs.join(', ')}]   matched via ${viaText(hits)}`);
       console.log(
         `      ⛔ NOT RUNNABLE LOCALLY — ${notRunnable.variables.length} value(s) come from the workflow:` +
           ` ${notRunnable.variables.join(', ')}`,
       );
+      // Two carriers, two reasons — and the argv sentence is FALSE for an
+      // env-carried row: there is no flag to document a default for (#15761).
+      // Printing it anyway would send a reader to a usage block that cannot
+      // hold the answer, which is the shape of advice this file refuses.
+      const envCarried = (notRunnable.envVariables ?? []).length === notRunnable.variables.length;
+      console.log(
+        `      ⊘ NOT MEASURED — nothing this card can run answers ${command}. `
+          + (envCarried
+            ? "The value reaches its script through the step's `env:` and not through a flag this tool could default"
+            : 'Its script documents no default for the flag the workflow pins')
+          + ', so there is no local invocation of it, and this tool will ⛔ not invent one.',
+      );
+      const sibling = siblingOf.get(script);
+      if (sibling) {
+        console.log(
+          `      ⚠ \`${sibling}\` above is a DIFFERENT invocation of the same script — a self-test grades the script against` +
+            ' its own fixtures, and any other argv asks another question. ⛔ Its exit 0 is a zero from a command that cannot' +
+            ' answer this row, never a green for it.',
+        );
+      }
     }
     console.log(
       '  ⇒ Printed as CI spells it, variable names in the value positions, so nothing above reads as a command to paste:' +
@@ -10325,6 +11766,18 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
   if (rosterOut.length) {
     console.log('');
     for (const line of rosterOut) console.log(line);
+  }
+
+  // BELOW the reconciliation for the reason the roster block is: every section
+  // under that total names something outside this card's runnable answer, and
+  // these commands are outside it by construction (#15341). Printed on EVERY
+  // run and not only under `--residue`, for the reason the roster block states
+  // and this card measured twice over: a dev reading a dispatch brief is never
+  // told to pass that flag, and a gate nobody is told about is the whole defect.
+  const wideOut = widePopulationLines(widePopulationRows);
+  if (wideOut.length) {
+    console.log('');
+    for (const line of wideOut) console.log(line);
   }
 
   const pendingOut = pendingChangesetLines(pending);
@@ -10391,6 +11844,7 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
     undetermined: undetermined.length,
     silent: silent.length,
     alwaysRuns: alwaysRuns.length,
+    widePopulation: widePopulation.length,
     // Neither declaration reaches them: no workflow `paths:` trigger AND no job
     // `if:` that resolves to a paths-filter population (#12956). Counting only
     // the first would keep printing 'no path derivation can narrow them' about
@@ -11094,17 +12548,58 @@ export function bannerLines({ identity, paths = [], drift = null }) {
  * "1288 cases pass" to zero bytes of output and exit 0 — a self-test that never
  * finished, reported as one that passed.
  *
- * The mechanical probe in `scripts/measure-self-test-floor.mjs` cannot read this
- * file (its anchor matches the first `function selfTest() {` in the source, which
- * here is a FIXTURE STRING, so the injection lands inside a template literal and
- * only ever produces a SyntaxError). That is a limit of the instrument, not a
- * property of this file, and it is why the entry is hand-read there. Anchoring an
- * early return on the real definition below measures it in one run.
+ * The mechanical probe in `scripts/measure-self-test-floor.mjs` READS this file
+ * since #14963: its anchor is taken over a comment-and-literal MASK and must
+ * begin a line, so it lands on the real definition below rather than on either
+ * decoy ahead of it — that phrase quoted in a docblock, then a FIXTURE STRING.
+ * Injected there the copy PARSES and RUNS (re-measured on the merge base of
+ * this change: exit 1, `selfTest() returned without reaching its verdict`),
+ * where the unmasked anchor could only ever produce a SyntaxError. The entry is
+ * still hand-read in `ENTRY_BY_HAND` — four self-test-shaped names stand in raw
+ * source — and the NOT MEASURED its row keeps is the probe's own artefact
+ * (#15515: it writes the copy under `scripts/`, where a single-site sweep
+ * refuses the near-duplicate), not a property of this file.
  */
+/**
+ * The lines ONE self-test case prints — a pure renderer, so both directions can
+ * be pinned on fixtures instead of on a run that would have to fail to show the
+ * second one (#15539).
+ *
+ * ## The defect
+ *
+ * `t` was declared with arity TWO and six call sites passed a THIRD argument
+ * carrying the case's diagnostic reading — the hint count before and after an
+ * ablation, the residual verdict, the extensionless roster's contents.
+ * JavaScript dropped every one of them on the floor. Each of the six sits on a
+ * case whose verdict is about the LIVE tree, so the day one goes red the person
+ * triaging it gets the sentence and nothing else, while the author had already
+ * written the reading they would need. Nothing reds over it and `pnpm lint` is
+ * green over it, which is why it survived: the arity and the call sites
+ * disagreed silently.
+ *
+ * ## Why the detail prints on the RED only
+ *
+ * A green case's line is the same byte string it has always been. That is
+ * deliberate twice over: a passing run's log is what every reader has
+ * calibrated on, and a reading appended to 1400-odd passing lines is noise that
+ * teaches the reader to skim exactly where the six red lines will appear. The
+ * reading is owed to whoever is triaging a failure, and that is where it goes.
+ */
+export function selfTestCaseLines(name, cond, detail = null) {
+  const lines = [`  ${cond ? '✓' : '✗'} ${name}`];
+  if (cond) return lines;
+  if (detail === null || detail === undefined || detail === '') return lines;
+  lines.push(`      ↳ reading: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`);
+  return lines;
+}
+
 const SELF_TEST_VERDICT = 'dispatch-gates self-test reached its verdict';
 
 function selfTest() {
   const cases = [];
+  // How many cases handed `t` a diagnostic reading (#15539). Read by one case
+  // near the tail, after every call site that passes one has run.
+  let detailedCases = 0;
   // Stream the verdict the moment it is decided (#14281) rather than only at
   // the tail: every `t()` call evaluates `cond` eagerly at the call site, so
   // the line below is not a preview of the tail loop's output — it prints the
@@ -11114,10 +12609,71 @@ function selfTest() {
   // workaround) used to leave zero case lines; now the log already carries
   // every case decided before the kill. `cases` still collects every entry —
   // the tail's `failed`/`length` summary reads it unchanged.
-  const t = (name, cond) => {
+  const t = (name, cond, detail = null) => {
     cases.push([name, cond]);
-    console.log(`  ${cond ? '✓' : '✗'} ${name}`);
+    // Counted so the repair cannot go vacuous: the six call sites #15539 names
+    // were passing this argument into a function that had no parameter for it,
+    // and a case that only pins the RENDERER would stay green the day someone
+    // "cleaned up" the arguments those call sites pass. See the case near the
+    // tail that reads this.
+    if (detail !== null && detail !== undefined && detail !== '') detailedCases += 1;
+    // The third parameter is #15539's whole repair: six call sites below were
+    // already passing a diagnostic reading into an arity-two function. It is
+    // rendered by `selfTestCaseLines` rather than here so both directions are
+    // pinned by cases of their own.
+    for (const line of selfTestCaseLines(name, cond, detail)) console.log(line);
   };
+
+  // ── A subject this TREE cannot decide is not a passing case (#15255) ──────
+  //
+  // A handful of cases below read the REAL corpus rather than a fixture,
+  // because a fixture cannot show that a live specimen still reaches the tree
+  // it names. That is the right shape, and it carries one hazard a fixture does
+  // not: the specimen's population is a property of the tree, and a tree may
+  // legitimately hold none of it. `.changeset/*.md` is the measured instance —
+  // a changesets version pass consumes the whole population by design, so the
+  // Version Packages PR carries a tree the corpus assertions cannot be
+  // evaluated over, and `main` carries one for as long as it takes the next
+  // changesets to land.
+  //
+  // The control that guarded them asserted the population itself
+  // (`length >= 100`), which is a claim about the release cycle rather than
+  // about this tool, and it made a REQUIRED context red on the one PR whose
+  // merge IS the release. ⛔ The repair is not a quiet `if` around them either:
+  // a silent skip is exactly how a specimen rots unnoticed, which is the
+  // failure the population control was reaching for in the first place.
+  //
+  // So an undecidable subject is neither: it prints its own line, states WHY
+  // this tree cannot decide it in words a reader can check, and is counted
+  // apart from `cases` in the verdict. It is never pushed into `cases` — there
+  // it would be one more `✓`, indistinguishable from a case that ran.
+  const notMeasured = [];
+  const unmeasurable = (subject, why) => {
+    notMeasured.push([subject, why]);
+    console.log(`  ⊘ NOT MEASURED — ${subject}`);
+    console.log(`      ${why}`);
+  };
+
+  /**
+   * The verdict's NOT-MEASURED suffix — a pure renderer so the two properties
+   * that matter can be pinned on fixtures instead of on a run of this tree,
+   * which by construction skips nothing: it is EMPTY when nothing was skipped,
+   * so a fully-measured run's verdict line is byte-identical to the one this
+   * file printed before the tally existed; and it NAMES every skipped subject
+   * when there is one, so no skip can reach a reader as a bare pass count.
+   */
+  const notMeasuredSuffix = (entries) =>
+    entries.length ? ` ⊘ ${entries.length} subject(s) NOT MEASURED on this tree — ${entries.map(([s]) => s).join(' · ')}.` : '';
+
+  /**
+   * The `.changeset/*.md` live specimen's population in a corpus, and the whole
+   * decision behind the block far below: with one member the corpus assertions
+   * are real, with none they are vacuous. Named and pure so both of its call
+   * sites ask the same question and so the boundary can be pinned at the sizes
+   * the release cycle really produces, rather than only at the one this tree
+   * happens to be at today.
+   */
+  const changesetSpecimenPop = (corpus) => corpus.filter((f) => /^\.changeset\/[^/]+\.md$/.test(f));
 
   const wf = [
     'jobs:',
@@ -11137,6 +12693,67 @@ function selfTest() {
   t('extracts filtered check with its package', invs.some((i) => i.check === 'check:authorable-surface' && i.filter === '@objectstack/spec'));
   t('extracts direct node scripts/check-*.mjs', invs.some((i) => i.check === 'scripts/check-nul-bytes.mjs' && i.direct));
   t('ignores non-check runs', !invs.some((i) => String(i.check).includes('build')));
+
+  // ── The package-local gate lane: a path is keyed WHOLE (#15342) ───────────
+  //
+  // `lint.yml` invokes `packages/lint/scripts/check-reference-carrier-shape.mjs`
+  // by path, twice. Before the directory prefix documented beside the patterns,
+  // `node ` had to be followed IMMEDIATELY by `scripts/`, so neither matcher saw
+  // that step at all: no family, no hints, and nothing for `--residue` to place.
+  //
+  // Cases 1-3 and 6 FAIL against the base spelling — measured by applying this
+  // battery to `/node[ \t]+(scripts\/…)/` in a scratch ablation — which is what
+  // makes them an instrument rather than a restatement of the operators. Cases
+  // 4, 5, 7 and 8 hold on BOTH spellings: they are the controls that prove the
+  // widening did not buy its new answers by dropping the old ones.
+  {
+    const PKG = 'packages/lint/scripts/check-reference-carrier-shape.mjs';
+    const pkgInvs = extractCheckInvocations(
+      ['jobs:', '  lint:', '    steps:', '      - name: package-local gate', '        run: |',
+        `          node ${PKG} --self-test`, `          node ${PKG}`].join('\n'),
+      'lint.yml',
+    );
+    t(
+      'a gate CI invokes by a PACKAGE-LOCAL path is discovered at all — unfound, it is in no family, so no '
+        + 'card can be told to run it and --residue has no bucket to place it in either (#15342)',
+      pkgInvs.some((i) => i.check === `${PKG} --self-test` && i.direct),
+    );
+    t(
+      '…and its bare production invocation arrives as the SECOND family under its own key, the #14880 split',
+      pkgInvs.some((i) => i.check === PKG && i.direct),
+    );
+    t(
+      '…both keyed by the REAL path, which is what `entry.files` carries and `existsSync` then opens',
+      pkgInvs.length === 2 && pkgInvs.every((i) => i.script === PKG),
+    );
+    t(
+      'control — no PHANTOM root key is minted beside them: a `scripts/…` TAIL keyed as a path in its own '
+        + 'right names a file this ROOT does not hold, and every audit downstream then passes for the wrong reason',
+      !pkgInvs.some((i) => String(i.script ?? i.check).startsWith('scripts/')),
+    );
+    t(
+      'control — a CLIMBING spelling is refused rather than resolved: `..` is not a prefix segment, because '
+        + 'a path this ROOT cannot resolve is exactly how a phantom identity key gets minted',
+      extractCheckInvocations('    - run: node ../scripts/check-x.mjs\n', 'x.yml').length === 0,
+    );
+    t(
+      'the SELF-TEST matcher carries the same prefix grammar — a package-local gate not named `check-*` '
+        + 'would otherwise be discovered by neither matcher, which is this silence one filename over',
+      extractCheckInvocations('    - run: node packages/lint/scripts/carrier-census.mjs --self-test\n', 'x.yml')
+        .some((i) => i.check === 'packages/lint/scripts/carrier-census.mjs --self-test' && i.direct),
+    );
+    t(
+      'control — the prefix widens the DIRECTORY a gate may sit under and never the SPECIES of file: a path '
+        + 'with no `scripts/` segment is still admitted by neither matcher (`packages/cli/bin/run.js` is live)',
+      extractCheckInvocations('    - run: node packages/cli/bin/run.js check\n', 'x.yml').length === 0,
+    );
+    t(
+      'control — a root-spelled invocation is keyed BYTE-IDENTICALLY to before, so the prefix re-attributes '
+        + 'nothing: it matches empty there and the remainder of each pattern is unchanged',
+      extractCheckInvocations('    - run: node scripts/check-nul-bytes.mjs\n', 'x.yml')
+        .every((i) => i.check === 'scripts/check-nul-bytes.mjs' && i.script === 'scripts/check-nul-bytes.mjs'),
+    );
+  }
 
   // Block-scalar bodies (#8410). A step written `run: |` keeps its commands on
   // the following lines; reading only the `run:` line collected "|" and missed
@@ -11608,6 +13225,20 @@ function selfTest() {
     }
     const direct = liveInvs.filter((i) => i.direct);
     const valueBearing = direct.filter((i) => (i.argvVariables ?? []).length > 0);
+    // The live half of the package-local lane (#15342). The fixtures above prove
+    // the pattern; these two read the tree CI actually runs, so the day the lane
+    // moves this reds here instead of going quiet — and the second one holds the
+    // phantom class over EVERY direct invocation, not only over the specimen.
+    t(
+      '⭐ the live corpus really carries the package-local lane the directory prefix exists for, so the '
+        + 'fixtures above judge a live class. If this reds, the lane moved — re-point it, never widen further',
+      direct.some((i) => i.script === 'packages/lint/scripts/check-reference-carrier-shape.mjs'),
+    );
+    t(
+      `every one of the ${direct.length} direct invocation(s) in the live tree resolves to a file that EXISTS `
+        + 'on disk — a key with no file behind it reads as a confident gate identity in both directions (#15342)',
+      direct.length > 0 && direct.every((i) => existsSync(nodePath.join(ROOT, i.script))),
+    );
     t(
       `the live tree really carries ${valueBearing.length} value-bearing invocation(s) across ${new Set(valueBearing.map((i) => i.script)).size} script(s), so the cases above judge a live class`,
       valueBearing.length > 0,
@@ -11652,6 +13283,171 @@ function selfTest() {
         && coverageKeys.has('scripts/check-release-section-coverage.mjs --strict'),
     );
   }
+
+
+  // ── The DECLARED-DEFAULT repair, and the class it belongs to (#15441) ──────
+  //
+  // The classification above asks whether the WORKFLOW supplies a value. It
+  // never asked whether the SCRIPT needs it supplied, and for the `--base`
+  // gates the two answers differ: `pr-automation.yml` pins the base to the PR's
+  // merge base, and the script's own first lines say `base defaults to
+  // origin/main` while the scan starts at `merge-base(base, head)` either way.
+  // The family scored value-bearing, so the only member `--commands` offered
+  // for it was the SELF-TEST invocation of the same script — a zero from a
+  // command that cannot answer the question, sitting in the union where nothing
+  // distinguishes it from a green. It bit: a dev reported "50 run · 50 exit 0 ·
+  // 0 red" on a PR whose Check Changeset job was red in CI the whole time.
+  //
+  // The class was ENUMERATED by predicate before any of it was repaired, and
+  // the enumeration is asserted below as a property rather than typed as a
+  // roster, for the reason the value-bearing block above states: a list typed
+  // into a self-test rots the first time a workflow moves.
+  {
+    const usageFixture = [
+      '#!/usr/bin/env node',
+      '// check-fixture -- a gate.',
+      '//',
+      '//   node scripts/check-fixture.mjs --base <ref-or-sha> [--head <ref>]',
+      '//   node scripts/check-fixture.mjs              # base defaults to origin/main',
+      '//',
+      "const REPO_ROOT = '.';",
+      '// the endpoint defaults to the repository default branch',
+      'export function work() { return REPO_ROOT; }',
+    ].join('\n');
+    t(
+      '⭐ a script that documents a default for the flag CI pins declares it, and the declaration is read from the script',
+      [...declaredArgvDefaults(usageFixture)].map(([f, v]) => `${f}=${v}`).join(',') === '--base=origin/main',
+    );
+    t(
+      '⛔ and prose PAST the usage block mints nothing — a sentence about behaviour is not a declaration about an argument',
+      !declaredArgvDefaults(usageFixture).has('--endpoint'),
+    );
+    t(
+      '…which is the whole point of reading the LEADING comment block: it stops at the first line of code',
+      leadingCommentBlock(usageFixture).includes('base defaults to origin/main')
+        && !leadingCommentBlock(usageFixture).includes('the endpoint defaults to'),
+    );
+    const fixtureDefaults = declaredArgvDefaults(usageFixture);
+    t(
+      '⭐ DIRECTION ONE — a DEFAULTED variable renders the REAL invocation, with the default spelled out where CI writes the variable',
+      defaultedArgv('--base "$MERGE_BASE"', fixtureDefaults).args === '--base origin/main',
+    );
+    t(
+      '…and it says which workflow value it filled, so the row can state what CI pins instead',
+      JSON.stringify(defaultedArgv('--base "$MERGE_BASE"', fixtureDefaults).defaulted)
+        === JSON.stringify([{ flag: '--base', variable: '$MERGE_BASE', value: 'origin/main' }]),
+    );
+    t(
+      '⭐ DIRECTION TWO — an UNDEFAULTED variable is untouched, so its family stays value-bearing and unrunnable',
+      defaultedArgv('--format=markdown --provenance="$PROVENANCE"', fixtureDefaults).args
+        === '--format=markdown --provenance="$PROVENANCE"'
+        && defaultedArgv('--format=markdown --provenance="$PROVENANCE"', fixtureDefaults).defaulted.length === 0,
+    );
+    t(
+      '⛔ a token the workflow only PART wrote is not a variable this can replace — half a path is not a value to substitute',
+      defaultedArgv('--base "$RUNNER_TEMP/base.txt"', fixtureDefaults).args === '--base "$RUNNER_TEMP/base.txt"'
+        && defaultedArgv('--base "$RUNNER_TEMP/base.txt"', fixtureDefaults).defaulted.length === 0,
+    );
+    t(
+      'the `--flag=value` spelling is covered too, since that is how the tree writes the one flag with no default',
+      defaultedArgv('--base="$MERGE_BASE"', fixtureDefaults).args === '--base=origin/main',
+    );
+    // ⭐ THE DRIFT DIRECTION the ruling names, driven on the REAL specimen
+    // source rather than on a fixture: a script that stops documenting the
+    // default returns its family to NOT RUNNABLE LOCALLY with no edit here.
+    // That is the whole reason the declaration is read from the script instead
+    // of from a table in this file.
+    const specimenPath = 'scripts/check-adr-0087-registration.mjs';
+    const specimenSource = readFileSync(nodePath.join(ROOT, specimenPath), 'utf8');
+    t(
+      'CONTROL: the live specimen really documents its default, so the drift case below is not vacuous',
+      declaredArgvDefaults(specimenSource).get('--base') === 'origin/main',
+    );
+    const undocumented = specimenSource.replace(/^.*base defaults to origin\/main.*$/m, '//');
+    t(
+      '⭐ a script whose usage block STOPS documenting the default returns its family to unrunnable — no table here to drift',
+      undocumented !== specimenSource
+        && !declaredArgvDefaults(undocumented).has('--base')
+        && defaultedArgv('--base "$MERGE_BASE"', declaredArgvDefaults(undocumented)).defaulted.length === 0,
+    );
+
+    // ── The live half: the class, enumerated by predicate on this tree ───────
+    const defaultsFamilies = discoverFamilies().byCheck;
+    const withArgv = [...defaultsFamilies.values()].filter((e) => e.direct && e.script && (e.check !== e.script));
+    const repaired = withArgv.filter((e) => (e.argvDefaulted ?? []).length > 0);
+    const stillValueBearing = withArgv.filter((e) => e.notRunnable);
+    t(
+      `the live tree carries ${repaired.length} repaired and ${stillValueBearing.length} still-value-bearing famil(ies), so both directions below judge a live class`,
+      repaired.length > 0 && stillValueBearing.length > 0,
+    );
+    t(
+      '⭐ ALL OR NOTHING — no family is repaired while a workflow value it cannot fill is still in its argv',
+      repaired.every((e) => !e.notRunnable),
+    );
+    t(
+      '⭐ every repaired family read its default off ITS OWN script, flag by flag — nothing here invented a value',
+      repaired.every((e) => {
+        const declared = declaredArgvDefaults(readFileSync(nodePath.join(ROOT, e.script), 'utf8'));
+        return (e.argvDefaulted ?? []).every((d) => declared.get(d.flag) === d.value);
+      }),
+    );
+    t(
+      '⭐ and every family still filed value-bearing is one whose script declares NO default for what the workflow pins',
+      stillValueBearing.every((e) => {
+        const declared = declaredArgvDefaults(readFileSync(nodePath.join(ROOT, e.script), 'utf8'));
+        return (e.notRunnable?.variables ?? []).length > 0 && ![...declared.keys()].some((flag) => e.check.includes(`${flag} `));
+      }),
+    );
+    t(
+      '⛔ the KEY never moved — a repaired family is still keyed on the invocation CI runs, so nothing was re-attributed',
+      repaired.every((e) => e.check.includes('$') || e.check.includes('${{')),
+    );
+    // ⭐ The card's own specimen, on the live tree.
+    const adrKey = 'scripts/check-adr-0087-registration.mjs --base "$MERGE_BASE"';
+    const adrEntry = defaultsFamilies.get(adrKey);
+    t(
+      '⭐ THE SPECIMEN — the ADR-0087 registration gate is keyed as pr-automation.yml runs it and is no longer filed unrunnable',
+      Boolean(adrEntry) && !adrEntry.notRunnable,
+    );
+    t(
+      '…and what a dev pastes for it is the REAL check with the script\'s own default spelled out, never the self-test',
+      runnableInvocation(adrEntry ?? {}) === 'node scripts/check-adr-0087-registration.mjs --base origin/main',
+    );
+    t(
+      'CONTROL: its --self-test invocation is STILL its own family — the repair ADDS the real check, it moves nothing',
+      defaultsFamilies.has('scripts/check-adr-0087-registration.mjs --self-test'),
+    );
+    t(
+      'CONTROL: the sweeper the workflow hands a provenance string is untouched — no default, so still value-bearing',
+      Boolean(defaultsFamilies.get('scripts/pm/check-half-states.mjs --format=markdown --provenance="$PROVENANCE"')?.notRunnable),
+    );
+  }
+
+  // ── The self-test harness prints the reading its call sites pass (#15539) ──
+  //
+  // `t` was declared with arity TWO while six call sites passed a THIRD
+  // argument carrying the case's diagnostic reading, and JavaScript dropped
+  // every one. Each sits on a case whose verdict is about the LIVE tree, so the
+  // day one goes red the person triaging it gets the sentence and nothing else
+  // — while the author had already written the reading they would need.
+  t(
+    '⭐ a FAILING case with a reading prints the reading, on its own line under the case',
+    JSON.stringify(selfTestCaseLines('subject', false, JSON.stringify({ before: 3, after: 3 })))
+      === JSON.stringify(['  ✗ subject', '      ↳ reading: {"before":3,"after":3}']),
+  );
+  t(
+    '…and a non-string reading is rendered rather than printed as [object Object]',
+    selfTestCaseLines('subject', false, { verdict: 'silent' })[1] === '      ↳ reading: {"verdict":"silent"}',
+  );
+  t(
+    '⛔ a PASSING case is byte-identical to what this harness has always printed — the reading is owed to a red, not to 1400 greens',
+    JSON.stringify(selfTestCaseLines('subject', true, JSON.stringify({ before: 3 }))) === JSON.stringify(['  ✓ subject']),
+  );
+  t(
+    '⛔ and a failing case with NO reading grows no line either — an empty diagnostic is not a diagnostic',
+    JSON.stringify(selfTestCaseLines('subject', false, null)) === JSON.stringify(['  ✗ subject'])
+      && JSON.stringify(selfTestCaseLines('subject', false, '')) === JSON.stringify(['  ✗ subject']),
+  );
 
   // The live halves. Fixtures cannot prove the tree changed; these read it.
   const liveSelfTestFamilies = [...discoverFamilies().byCheck].filter(([, e]) => e.selfTest);
@@ -12039,6 +13835,97 @@ function selfTest() {
   // line (already covered above, but the negative half needs its own pin).
   t('a bare `-run:` is not read as a compact step', runCommandTexts('      -run: pnpm check:not-a-step').length === 0);
 
+  // ── The step's `env:` is the OTHER carrier of a workflow value (#15761) ────
+  //
+  // `partof-closing-keyword-guard.yml` passes the whole input through `env:`
+  // and leaves the argv bare, so the argv-shaped classifier scored
+  // `node scripts/check-partof-closing-keyword.mjs` as a command a dev can
+  // paste — one whose only possible outcome here is the gate's own exit 2
+  // ("NOT WIRED — neither PR_BODY nor PR_NUMBER is set"). The fixture carries
+  // the specimen's shape plus the three shapes that must NOT move.
+  const envWf = [
+    'jobs:',
+    '  guard:',
+    '    steps:',
+    '      - name: The specimen — bare argv, the input through env:',
+    '        env:',
+    '          PR_BODY: ${{ github.event.pull_request.body }}',
+    '          PR_NUMBER: ${{ github.event.pull_request.number }}',
+    '        run: node scripts/check-env-carried.mjs',
+    '      - name: A LITERAL env value is not a workflow value',
+    '        run: node scripts/check-literal-env.mjs',
+    '        env:',
+    '          PR_BODY: a body written down right here',
+    '          HOME_ISH: $HOME/not-an-expression',
+    '      - name: argv-carried, the regression control',
+    '        run: node scripts/check-argv-carried.mjs --base "$MERGE_BASE"',
+    '      - name: one value, one carrier — the command spells this env name itself',
+    '        env:',
+    '          MERGE_BASE: ${{ github.event.pull_request.base.sha }}',
+    '        run: node scripts/check-spelled-env.mjs --base "$MERGE_BASE"',
+    '      - run: node scripts/check-compact-env.mjs',
+    '        env:',
+    '          COMPACT: ${{ github.sha }}',
+    '      - name: an env: that belongs to a nested mapping is not this step\'s',
+    '        uses: some/action@v1',
+    '        with:',
+    '          env:',
+    '            NESTED: ${{ github.sha }}',
+    '        run: node scripts/check-nested-env.mjs',
+  ].join('\n');
+  const envInvs = extractCheckInvocations(envWf, 'partof-closing-keyword-guard.yml');
+  const envOf = (name) => (envInvs.find((i) => i.script === name)?.envVariables ?? null);
+  // (a) The specimen: the step's `env:` names ride the invocation, in order.
+  t(
+    '\u2b50 a bare argv beside an `env:` expression carries the env NAMES the step passes it',
+    (envOf('scripts/check-env-carried.mjs') ?? []).join(',') === 'PR_BODY,PR_NUMBER',
+  );
+  t(
+    '\u2026and it reads the `env:` block whichever side of `run:` the step writes it on',
+    (envOf('scripts/check-compact-env.mjs') ?? []).join(',') === 'COMPACT',
+  );
+  // (b) A literal `env:` value keeps the command runnable — including the shell
+  //     spellings, which Actions does NOT substitute in an env value.
+  t(
+    '\u2b50 a LITERAL `env:` value is not a workflow value, so the command stays runnable',
+    (envOf('scripts/check-literal-env.mjs') ?? null)?.length === 0,
+  );
+  // (c) The regression control: argv-carried detection is untouched, and a name
+  //     the command spells for itself is ONE value with ONE carrier.
+  t(
+    'CONTROL: an argv-carried variable is still detected, and carries no env of its own',
+    envInvs.some((i) => i.check === 'scripts/check-argv-carried.mjs --base "$MERGE_BASE"'
+      && (i.argvVariables ?? []).join(',') === '$MERGE_BASE'
+      && (i.envVariables ?? []).length === 0),
+  );
+  t(
+    '\u2b50 CONTROL: an env name the command SPELLS is argv-carried, not counted twice \u2014 this is what keeps #15441\'s repaired `--base` families runnable',
+    (envOf('scripts/check-spelled-env.mjs') ?? null)?.length === 0,
+  );
+  t(
+    'CONTROL: an `env:` nested under `with:` is not read as the step\'s own',
+    (envOf('scripts/check-nested-env.mjs') ?? null)?.length === 0,
+  );
+  t(
+    'the same walk, read directly: one step per `run:` key, each with its own env',
+    runCommandSteps(envWf).length === 6
+      && runCommandSteps(envWf)[0].envVariables.join(',') === 'PR_BODY,PR_NUMBER'
+      && runCommandSteps(envWf)[1].envVariables.length === 0,
+  );
+  t(
+    'CONTROL: the classic and compact fixtures above carry no `env:` expression, so this widening moved neither',
+    runCommandSteps(blockWf).every((step) => step.envVariables.length === 0)
+      && runCommandSteps(compactWf).every((step) => step.envVariables.length === 0),
+  );
+  // The limbs, each one of which has a live case on this tree (see
+  // `workflowEnvValues`' docblock for which family each keeps out).
+  const envEntry = (over = {}) => ({ envVariables: ['PR_BODY'], direct: true, selfTest: false, ciOnly: null, ...over });
+  t('\u2b50 a direct, non-self-test family with no payload dependence is classified by its env carrier', workflowEnvValues(envEntry()).join(',') === 'PR_BODY');
+  t('a `--self-test` invocation consumes no workflow value, so its step\'s env cannot subtract it', workflowEnvValues(envEntry({ selfTest: true })).length === 0);
+  t('a `check:*` family is invocable by name and its KEY drops the argv, so one step\'s env is not a property of it', workflowEnvValues(envEntry({ direct: false })).length === 0);
+  t('a family already named CI-MEASURED ONLY is not named a second time as value-bearing', workflowEnvValues(envEntry({ ciOnly: { env: 'GITHUB_EVENT_PATH' } })).length === 0);
+  t('CONTROL: no env carrier at all classifies nothing', workflowEnvValues(envEntry({ envVariables: [] })).length === 0);
+
   // #7440: the printed line must be runnable as-is. The three shapes come from
   // the same three fixtures above, so the sample workflow and the print site
   // cannot drift apart.
@@ -12104,6 +13991,57 @@ function selfTest() {
   t('finds glob hint', hints.some((h) => h.startsWith('packages/spec/src')));
   t('skips urls', !hints.some((h) => h.includes('example.com')));
   t('skips flags and bare words', !hints.includes('--self-test') && !hints.includes('hello'));
+
+  // ── An EXCLUSION constant is not a watch surface (#15753) ─────────────────
+  //
+  // The declaration is the whole reading: the same literal, under a name that
+  // says "never look here", must not become a lead — and under any other name
+  // must still be one. Both halves are asserted on ONE literal so the pair
+  // cannot drift, and the positive control is what makes the negative a
+  // measurement rather than a scan that stopped working.
+  //
+  // Every fixture NAME that would MATCH the predicate is assembled at run time
+  // rather than written after a `const`. `maskSelfTests` already blanks this
+  // body before the module scans itself, so no fixture here reaches the live
+  // hint set today; the assembly is what keeps that true if the block is ever
+  // moved out of the masked region, where a verbatim declaration would be a
+  // real declaration site silencing THIS module's own hints. It is the fixture
+  // hazard `check-watch-hint-literal.mjs` records about its own, one class over
+  // — there with no mask standing in the way.
+  const NOISE_SUFFIX = ['NO', 'ISE'].join('');
+  const excluded = `export const SHARED_PREFIX_${NOISE_SUFFIX} = Object.freeze(['.changeset/']);`;
+  const included = "export const SHARED_PREFIX_ROOTS = Object.freeze(['.changeset/']);";
+  t('a path literal declared inside an exclusion constant is NOT a hint', !extractWatchHints(excluded).includes('.changeset'));
+  t('CONTROL: the same literal under a plain declaration still is — the scan did not simply stop', extractWatchHints(included).includes('.changeset'));
+  // The span, not the line: a noise floor is usually written multi-line, and a
+  // per-line check would admit every entry but the first.
+  const multiline = [
+    `const SCAN_${NOISE_SUFFIX} = new Set([`,
+    "  'packages/generated/src',",
+    "  'apps/fixtures/src',",
+    ']);',
+    "const REAL = 'packages/core/src';",
+  ].join('\n');
+  const multilineHints = extractWatchHints(multiline);
+  t('every entry of a MULTI-LINE exclusion list is skipped, not just the one on the declaration line', !multilineHints.some((h) => h.startsWith('packages/generated') || h.startsWith('apps/fixtures')));
+  t('and a declaration AFTER it is unaffected — the span closes where the statement does', multilineHints.includes('packages/core/src'));
+  // The named spellings, one case each, so a narrowing of the predicate is
+  // visible here rather than only in the live census.
+  for (const word of ['SKIP', 'EXCLUDE', 'EXCLUDED', 'EXCLUSIONS', 'IGNORE']) {
+    const named = `const ${word}_PATHS = ['packages/skipped/src'];`;
+    t(`\`${word}\` names an exclusion too — the predicate is the convention, not one constant`, !extractWatchHints(named).includes('packages/skipped/src'));
+  }
+  t('a name that merely CONTAINS the word without a segment boundary is not one', extractWatchHints("const SKIPPY_ROOTS = ['packages/skippy/src'];").includes('packages/skippy/src'));
+  t('nor is a CALLABLE whose name matches — a function body is not a population declaration', extractWatchHints("function skipDirs() { return ['packages/callable/src']; }").includes('packages/callable/src'));
+  // LIVE, against the gate the card was filed on: the noise floor is gone from
+  // its hints and the gate is still reachable by its own script path, which is
+  // the pair a narrowing has to hold. Read from disk rather than restated.
+  {
+    const half = 'scripts/pm/check-half-states.mjs';
+    const liveHints = extractWatchHints(readFileSync(nodePath.join(ROOT, half), 'utf8'), half);
+    t('LIVE: the gate that declares the noise floor no longer offers `.changeset` as a surface it watches', !liveHints.some((h) => h.startsWith('.changeset')));
+    t('LIVE: and it is still reachable — the narrowing took the exclusion, not the gate', liveHints.includes(half));
+  }
 
   // ── What a gate READS vs what its source MENTIONS (#8478) ─────────────────
   //
@@ -13004,14 +14942,86 @@ function selfTest() {
   // `.changeset/*.md` into `.changeset/.md`, so the hint reached ZERO of 548
   // tracked changesets while reading as an ordinary literal, and the residue
   // then named a directory rename as the cause. Read from the REAL corpus: a
-  // fixture cannot show that the tree still holds the population the trap needs,
-  // and this one grows with every merged PR.
+  // fixture cannot show that the hint still reaches the population the trap was
+  // sprung on. What that corpus is NOT is something this file may require: it
+  // grows with every merged PR and a version pass takes all of it back (#15255,
+  // and the docblock under `changesetPop` below).
   const suffixCorpus = trackedFiles();
-  const changesetPop = suffixCorpus.filter((f) => /^\.changeset\/[^/]+\.md$/.test(f));
-  t('the tree really does hold a large `.changeset/*.md` population', changesetPop.length >= 100);
-  t('the live specimen reaches every changeset it names', changesetPop.every((f) => hintCovers('.changeset/*.md', f)));
-  t('and claims nothing else in the whole tree', suffixCorpus.filter((f) => hintCovers('.changeset/*.md', f)).length === changesetPop.length);
-  t('so it is nobody\'s dead literal any more', hintReachesTree('.changeset/*.md', suffixCorpus));
+  const changesetPop = changesetSpecimenPop(suffixCorpus);
+  // ⛔ NOT `changesetPop.length >= 100` (#15255). That control was reaching for
+  // something real — the two assertions under it pass VACUOUSLY over an empty
+  // population, `every` on nothing and `0 === 0` — but it bought the guard with
+  // a claim this tool has no standing to make. The size of that population is
+  // owned by the release cycle: a changesets version pass consumes all of it,
+  // so it is 1 on the Version Packages PR (measured on #11336's head
+  // b8573e843: `.changeset/` holds README.md and config.json and nothing else),
+  // it is whatever has landed since on `main` for the days after, and it is 865
+  // here. A required context that reds at 1 and at 3 blocks the release itself,
+  // and then blocks `main` behind it.
+  //
+  // What a gate CAN require is the specimen's HOME. `.changeset/config.json` is
+  // the changesets tool's own configuration: while it is tracked, an empty
+  // population is this repo mid-cycle and the specimen is merely resting; when
+  // it goes, the specimen has no population to come back to and somebody must
+  // pick a new one for this species. That distinction is the whole difference
+  // between "not measurable today" and "rotted", and it is the one the count
+  // could not draw.
+  //
+  // The vacuity the count was guarding is closed by construction instead: the
+  // three corpus assertions run only where there is a corpus, and where there
+  // is not, `unmeasurable` says so out loud rather than letting them green.
+  // Note the population is 1, not 0, on the real release PR — `README.md`
+  // survives a version pass — so a guard written at `=== 0` would have left the
+  // gate red on the very tree it was written for. It is written at "empty" and
+  // measured at 0, 1, 3 and 865.
+  t('the `.changeset/*.md` specimen still has a home in this tree', suffixCorpus.includes('.changeset/config.json'));
+  if (changesetPop.length === 0) {
+    unmeasurable(
+      'the `.changeset/*.md` live-specimen corpus assertions',
+      'this tree tracks no `.changeset/*.md` at all — that is what a changesets version pass produces, and the ' +
+        'population comes back as changesets land. The specimen still has its home (see the case above); the three ' +
+        'assertions that need a population are the only thing skipped, and every literal case in this block ran. ' +
+        "Check it yourself: git ls-files '.changeset/'",
+    );
+  } else {
+    t('the live specimen reaches every changeset it names', changesetPop.every((f) => hintCovers('.changeset/*.md', f)));
+    t('and claims nothing else in the whole tree', suffixCorpus.filter((f) => hintCovers('.changeset/*.md', f)).length === changesetPop.length);
+    t('so it is nobody\'s dead literal any more', hintReachesTree('.changeset/*.md', suffixCorpus));
+  }
+  // The branch above is a decision this tree can only exercise one way — it
+  // holds a population today and will hold one on almost every run — so the
+  // sizes the release cycle really produces are pinned on fixtures, at the four
+  // states named in the docblock. A boundary written at the wrong one is the
+  // defect that shipped: `>= 100` is green at 865 and red at every size a
+  // version pass leaves behind.
+  const csTree = (...names) => ['AGENTS.md', '.changeset/config.json', ...names];
+  t('at 865 the corpus assertions run, which is this tree and every ordinary day',
+    changesetSpecimenPop(csTree(...Array.from({ length: 865 }, (_, i) => `.changeset/c${i}.md`))).length === 865);
+  t('at 3 they still run — the state `main` is in for days after a release lands, and where `>= 100` was red',
+    changesetSpecimenPop(csTree('.changeset/a.md', '.changeset/b.md', '.changeset/c.md')).length === 3);
+  t('at 1 they still run, and 1 is what the Version Packages PR really carries — README.md survives a version pass',
+    changesetSpecimenPop(csTree('.changeset/README.md')).length === 1);
+  t('only an EMPTY population is undecidable, and that is the only state that skips',
+    changesetSpecimenPop(csTree()).length === 0);
+  // The home discriminator, both directions: it is what separates "resting" from
+  // "rotted", so it must not answer the same way for a tree that has retired
+  // changesets altogether.
+  t('a tree mid-cycle still has the specimen home, so an empty population reads as resting',
+    csTree().includes('.changeset/config.json'));
+  t('...while a tree that retired changesets has no home, and the case above reds instead of skipping',
+    !['AGENTS.md', 'package.json'].includes('.changeset/config.json'));
+  // The tally the skip is reported through. Pinned here rather than at the
+  // verdict because a green run of this file never reaches the non-empty branch
+  // of it, so nothing else in this program can show that a skip is visible.
+  t('a run that skipped nothing prints the verdict it always printed', notMeasuredSuffix([]) === '');
+  t('...and a run that skipped something names it, so no skip reaches a reader as a bare pass count',
+    notMeasuredSuffix([['a subject', 'a reason']]).includes('NOT MEASURED') &&
+      notMeasuredSuffix([['a subject', 'a reason']]).includes('a subject'));
+  t('...naming every one of them, never just a count',
+    notMeasuredSuffix([['first', 'x'], ['second', 'y']]).includes('first') &&
+      notMeasuredSuffix([['first', 'x'], ['second', 'y']]).includes('second'));
+  t('and a skipped subject is never a case, so the pass count cannot absorb one',
+    !cases.some(([name]) => name.includes('NOT MEASURED')));
   t('the extension the glob names is honoured', !hintCovers('.changeset/*.md', '.changeset/config.json'));
   t('a single `*` matches exactly one segment here too', !hintCovers('.changeset/*.md', '.changeset/pre/x.md'));
   t('a directory surface above it still derives the gate', hintCovers('.changeset/*.md', '.changeset'));
@@ -13354,14 +15364,18 @@ function selfTest() {
   t('and claims nothing elsewhere under packages/', !docFormulaHints.some((h) => hintCovers(h, 'packages/core/src/index.ts')));
   t('nor under apps/', !docFormulaHints.some((h) => hintCovers(h, 'apps/console/src/main.tsx')));
   t('nor under examples/', !docFormulaHints.some((h) => hintCovers(h, 'examples/crm/objects/account.object.ts')));
-  // The bounded residual, pinned as pre-existing rather than as a cost of this
-  // declaration. `hintCovers` cannot subtract, so `docs/**` necessarily claims
-  // the exempt `docs/plans` — but that subtree ALREADY derived the gate through
-  // its own SKIP_PATHS literal, so the declaration adds nothing on that side.
+  // The bounded residual, whose PROVENANCE moved under #15753. `hintCovers`
+  // cannot subtract, so `docs/**` necessarily claims the exempt `docs/plans`.
+  // That subtree used to derive the gate a SECOND way as well, through the
+  // `SKIP_PATHS` literal that names it — and a skip list is not a watch
+  // surface, so the extractor no longer reads it. The over-claim is the
+  // declaration's alone now, which is the honest reading rather than a
+  // narrower one: a root claiming a subtree carved out of it, stated here.
   // Asserted with the declaration removed from the hint set, which is what makes
   // it a measurement instead of a restatement.
   const withoutDeclaration = docFormulaHints.filter((h) => !['docs/**', 'skills/**', 'content/**', '.claude/**'].includes(h));
-  t('the exempt subtree derived the gate before this declaration, and still does — the over-claim is bounded, not new', withoutDeclaration.some((h) => hintCovers(h, 'docs/plans/x.md')));
+  t('the exempt subtree no longer derives the gate through the skip list that names it — an exclusion is not a watch surface (#15753)', !withoutDeclaration.some((h) => hintCovers(h, 'docs/plans/x.md')));
+  t('while the declaration still reaches it, so the over-claim is bounded and STATED rather than quietly doubled', docFormulaHints.some((h) => hintCovers(h, 'docs/plans/x.md')));
   t('while the live corpus derived nothing without it — the gap this closes', !withoutDeclaration.some((h) => hintCovers(h, 'docs/qa/platform-checklist/RUNNER.md')));
   // The pair that makes the declaration worth having: the bare words this gate
   // spells in its ROOTS array stay refused, so the coverage above is bought by
@@ -13578,6 +15592,86 @@ function selfTest() {
       JSON.stringify({ before: entry?.hints?.length, after: undeclared?.hints?.length, residual }),
     );
   }
+
+  // ── The MANIFEST population of check:merge-driver (#15501) ────────────────
+  //
+  // That family's `git-merge-regen --self-test` refuses a generator with no
+  // recorded merge disposition, and the population that refusal sweeps is the
+  // MANIFESTS — the root one plus every workspace member's, read for their
+  // `gen:` / `check:` rows. What the family declared HERE was the artifact
+  // paths `scripts/regen-artifacts.mjs` carries, imported one level down: the
+  // generators ALREADY routed. So the one class of card the refusal exists to
+  // catch — a card that ADDS a generator, touching a manifest and a new
+  // `scripts/*.mjs` — was the one class this derivation could not name, and the
+  // gate fired a cycle late, in CI, on every card of that shape. Measured
+  // before the repair, on a `package.json` change set: zero lines naming it.
+  //
+  // Pinned against the LIVE tree through the same discovery pass `derive` runs,
+  // for the reason the scripts/** case above states: a hand-built fixture could
+  // pass here while the real family stayed unnameable, which is the exact
+  // failure these cases exist to stop recurring.
+  const mdFamilies = discoverFamilies().byCheck;
+  const MERGE_DRIVER = 'check:merge-driver';
+  const mdEntry = mdFamilies.get(MERGE_DRIVER);
+  t(`${MERGE_DRIVER} is discovered at all — the pins below mean nothing without this`, Boolean(mdEntry));
+  // The declared halves, stripped for the ablation below. Spelled as a
+  // PREDICATE over the live hint set rather than as a copy of the declaration,
+  // so a hint respelled in `git-merge-regen.mjs` cannot leave a stale twin here
+  // that keeps the ablation passing.
+  const isManifestHint = (h) => h === 'package.json/**' || h.endsWith('/package.json');
+  const mdStripped = mdEntry ? { ...mdEntry, hints: (mdEntry.hints ?? []).filter((h) => !isManifestHint(h)) } : null;
+  // The POSITIVE direction, one probe per declared half. The table is pinned to
+  // its own length first (#13799's floor recipe): a loop over an emptied table
+  // runs zero cases and prints nothing, which reads exactly like a pass.
+  const MD_MANIFEST_PROBES = [
+    ['the ROOT manifest, where the measured CI red added its `gen:` row', 'package.json'],
+    ['a workspace MEMBER manifest', 'packages/plugins/plugin-auth/package.json'],
+  ];
+  t('the manifest probe table still has both declared halves in it', MD_MANIFEST_PROBES.length === 2);
+  for (const [why, probe] of MD_MANIFEST_PROBES) {
+    const verdict = mdEntry ? classifyEntry(mdEntry, [probe]).verdict : null;
+    // The reading rides in the case NAME, never in a third argument: `t` takes
+    // two, so a detail passed beyond them is dropped on the floor — and a
+    // failing case whose reading went with it is a case nobody can act on.
+    t(
+      `a change set touching ${why} derives ${MERGE_DRIVER} — ${probe} => ${verdict}`,
+      verdict === 'matched',
+    );
+    // …and it is the manifest declaration doing it. Without this half the case
+    // above could pass through any hint that happens to cover the probe —
+    // `packages/spec/package.json`, for one, was already reachable through the
+    // `packages/spec` literal, so a probe chosen there would have proved
+    // nothing at all. Both not-matched verdicts are accepted, spelled as an
+    // explicit pair so a NEW verdict value added later cannot slip through as
+    // a pass — the same reasoning as the scripts/** ablation above.
+    const residual = mdStripped ? classifyEntry(mdStripped, [probe]).verdict : null;
+    t(
+      `…and it is the manifest declaration doing it: strip it and ${probe} goes back to NOT MATCHED`
+        + ` (hints ${mdEntry?.hints?.length} -> ${mdStripped?.hints?.length}, residual ${residual})`,
+      // The length comparison is what stops this passing VACUOUSLY: with no
+      // manifest hint to remove, `mdStripped` is the entry itself and a
+      // not-matched verdict compared against itself reads as a pass.
+      Boolean(mdStripped) &&
+        mdStripped.hints.length < (mdEntry.hints ?? []).length &&
+        ['silent', 'undetermined'].includes(residual),
+    );
+  }
+  // The NEGATIVE direction, and it is what keeps the declaration from being a
+  // whole-tree widening in disguise: an unrelated script is not newly derived.
+  // Stated as "the declaration moved NOTHING for it" rather than as a bare
+  // not-matched verdict — the manifest hints are the only thing that changed,
+  // so the two verdicts agreeing is the claim, and it stays true whatever the
+  // rest of the family's population does later.
+  const mdUnrelated = 'scripts/the-one-nobody-has-written-yet.mjs';
+  const mdUnrelatedVerdict = mdEntry ? classifyEntry(mdEntry, [mdUnrelated]).verdict : null;
+  t(
+    `an unrelated brand-new scripts/*.mjs is NOT derived to ${MERGE_DRIVER} (${mdUnrelatedVerdict})`,
+    ['silent', 'undetermined'].includes(mdUnrelatedVerdict),
+  );
+  t(
+    'and the manifest declaration is what moved nothing for it — the same verdict with and without',
+    mdUnrelatedVerdict === (mdStripped ? classifyEntry(mdStripped, [mdUnrelated]).verdict : null),
+  );
 
   // ── The bare root this gate must NOT spell (#10875) ───────────────────────
   //
@@ -14533,6 +16627,150 @@ function selfTest() {
   t('the flow-sequence spelling is read too', extractTriggerPaths("on:\n  pull_request:\n    paths: ['a/**', \"b/c\"]\n").join('|') === 'a/**|b/c');
   t('pull_request_target is not mistaken for pull_request', extractTriggerPaths("on:\n  pull_request_target:\n    paths:\n      - 'x/**'\n").length === 0);
 
+  // ── The SCHEDULED-ONLY routing question, measured and answered ZERO (#14899)
+  //
+  // The card: the derivation named `node scripts/pm/check-half-states.mjs` —
+  // a live board sweep — for any diff carrying a changeset, on the reading
+  // that its only caller is a `schedule`-triggered workflow. Two things were
+  // measured against the tree instead of accepted:
+  //
+  //   1. `half-state-patrol.yml` DOES declare a `pull_request:` trigger, with
+  //      a `paths:` filter naming the sweeper and the workflow — it already
+  //      did on the day the card was filed. So the specimen was never a
+  //      workflow no PR runs; it is a patrol that exercises itself on the PRs
+  //      that change it, the posture every patrol in this tree keeps.
+  //   2. Across the whole tree, the number of discovered families whose
+  //      source workflows ALL lack a PR-time trigger is ZERO — and it stays
+  //      zero under the narrowest reading of "PR-time" as well.
+  //
+  // So the classification the card proposed has no members, and shipping it
+  // would be a capability with nothing in it. What ships instead is this pin:
+  // the reading is re-taken from the workflow text on every run, so the
+  // deferral goes loud the day the population stops being empty. ⛔ The cases
+  // below are the whole remedy for that day — they are not a roster to edit
+  // when one reds. See the header section of the same name for the exits.
+  const wfDirLive = nodePath.join(ROOT, '.github/workflows');
+  const eventsWf = [
+    'name: Fixture',
+    '# a comment before the on: block',
+    'on:',
+    '  schedule:',
+    "    - cron: '37 1,7,13,19 * * *'",
+    '  workflow_dispatch: {}',
+    '  # a comment between events',
+    '  pull_request:',
+    '    types: [opened, synchronize]',
+    '    paths:',
+    "      - 'scripts/pm/check-half-states.mjs'",
+    // A decoy at an event's OWN depth-plus-one: a key under `pull_request:` is
+    // not an event, however event-shaped its name.
+    '    push:',
+    '      branches: [main]',
+    'jobs:',
+    '  sweep:',
+    // A decoy under `jobs:`, the shape a walk without the top-level reset eats.
+    '    merge_group:',
+    '      never: read',
+    '',
+  ].join('\n');
+  const fixtureEvents = declaredTriggerEvents(eventsWf);
+  t('the on: mapping\'s events are read in declaration order', fixtureEvents.join('|') === 'schedule|workflow_dispatch|pull_request');
+  t('a key nested UNDER an event is not an event, however event-shaped its name', !fixtureEvents.includes('push'));
+  t('a decoy event under jobs: is not read', !fixtureEvents.includes('merge_group'));
+  t('an event\'s own sub-keys never enter the list', !fixtureEvents.includes('types') && !fixtureEvents.includes('paths') && !fixtureEvents.includes('branches'));
+  t('the flow-sequence spelling is read', declaredTriggerEvents('on: [push, pull_request]\njobs: {}\n').join('|') === 'push|pull_request');
+  t('the bare-scalar spelling is read', declaredTriggerEvents('on: push\njobs: {}\n').join('|') === 'push');
+  t('the block-sequence spelling is read', declaredTriggerEvents('on:\n  - push\n  - schedule\njobs: {}\n').join('|') === 'push|schedule');
+  // The YAML 1.1 coercion the two walkers above already accept: unquoted `on`
+  // is the boolean `true`, so all three spellings name the same key.
+  t('the quoted and YAML-1.1 spellings of the key are all read', ["'on'", '"on"', 'true'].every((k) => declaredTriggerEvents(`${k}:\n  schedule:\n    - cron: '0 1 * * *'\n`).join('|') === 'schedule'));
+  t('a workflow declaring no on: block yields an empty list, not a fabricated event', declaredTriggerEvents('name: X\njobs: {}\n').length === 0);
+
+  // The same reader against REAL `on:` blocks, read from the tree rather than
+  // pasted: a quoted copy of a workflow is a second revision of it waiting to
+  // rot, which is what this whole file refuses.
+  const eventsOfWorkflow = new Map();
+  for (const f of readdirSync(wfDirLive).filter((x) => /\.ya?ml$/.test(x))) {
+    eventsOfWorkflow.set(f, declaredTriggerEvents(readFileSync(nodePath.join(wfDirLive, f), 'utf8')));
+  }
+  t(
+    '⭐ the card\'s own specimen declares a pull_request trigger beside its schedule — half-state-patrol.yml is not a workflow no PR runs',
+    ['schedule', 'workflow_dispatch', 'pull_request'].every((e) => (eventsOfWorkflow.get('half-state-patrol.yml') ?? []).includes(e)),
+  );
+  t(
+    'and a genuinely scheduled-only workflow reads as one, so the predicate is not answering `pull_request` to everything (stale.yml)',
+    (eventsOfWorkflow.get('stale.yml') ?? []).join('|') === 'schedule|workflow_dispatch',
+  );
+
+  // The live half. Fixtures cannot prove the tree has no scheduled-only
+  // family; this reads it.
+  const reachesPRTime = (workflows, prTime = PR_TIME_TRIGGER_EVENTS) =>
+    [...workflows].some((wf) => (eventsOfWorkflow.get(wf) ?? []).some((e) => prTime.includes(e)));
+  const isScheduled = (wf) => (eventsOfWorkflow.get(wf) ?? []).includes('schedule');
+  const triggerFamilies = [...discoverFamilies().byCheck.values()];
+  const scheduledWorkflows = [...eventsOfWorkflow.keys()].filter(isScheduled);
+  const scheduledContributors = scheduledWorkflows.filter((wf) => triggerFamilies.some((e) => e.workflows.has(wf)));
+  const fromScheduled = triggerFamilies.filter((e) => [...e.workflows].some(isScheduled));
+  const scheduledOnly = triggerFamilies.filter((e) => !reachesPRTime(e.workflows) && [...e.workflows].every(isScheduled));
+  // Non-vacuity, both halves — a zero over an empty sweep is a broken
+  // instrument wearing a clean result's clothes, which is #4690's shape.
+  t(
+    `the live tree really declares ${scheduledWorkflows.length} schedule-triggered workflow(s), so the sweep below has a population`,
+    scheduledWorkflows.length > 0,
+  );
+  t(
+    `…and ${scheduledContributors.length} of them really contribute discovered families (${fromScheduled.length} famil(ies)), so the zero below is a reading`,
+    scheduledContributors.length > 0 && fromScheduled.length > 0,
+  );
+  t(
+    `⭐ ZERO of the ${triggerFamilies.length} discovered families is SCHEDULED-ONLY — every one reaches a workflow that declares a PR-time`
+      + ' event, so no board sweep is routed into a per-PR gate list. If this reds, a scheduled-only family has ARRIVED: give its'
+      + ' workflow the pull_request paths trigger every patrol here already carries, or ship the withheld class the header defers',
+    scheduledOnly.length === 0,
+  );
+  t(
+    '…and the reading does not depend on how wide PR-time is drawn: narrowing it to `pull_request` alone leaves the same zero',
+    triggerFamilies.filter((e) => !reachesPRTime(e.workflows, ['pull_request']) && [...e.workflows].every(isScheduled)).length === 0,
+  );
+  // The complement, so the zero above cannot be the union quietly hiding a
+  // member: a family reached by NO PR-time event at all must come from a
+  // workflow that declares no `schedule` either. Today that is `cut-rc.yml`,
+  // the human release lane, which is `workflow_dispatch`-only.
+  const noPRTime = triggerFamilies.filter((e) => !reachesPRTime(e.workflows));
+  t(
+    `the complement agrees: all ${noPRTime.length} famil(ies) reached by no PR-time event at all come from workflows that declare no schedule`,
+    noPRTime.every((e) => [...e.workflows].every((wf) => !isScheduled(wf))),
+  );
+  // The control the card's ruling names: a family from a scheduled workflow
+  // that ALSO declares a PR-time trigger keeps the class it already had. The
+  // card's own specimen is the subject — it is withheld from `--commands` by
+  // the value-bearing class (#15083) and by nothing else, which is why the
+  // 3m09s it measured is gone without any scheduled-only rule existing.
+  const sweepEntry = triggerFamilies.find((e) => e.check.startsWith('scripts/pm/check-half-states.mjs'));
+  t(
+    'the card\'s specimen is still discovered, still reached only through its patrol, and still classified VALUE-BEARING — not withheld for being scheduled',
+    Boolean(sweepEntry)
+      && [...sweepEntry.workflows].join('|') === 'half-state-patrol.yml'
+      && isScheduled('half-state-patrol.yml')
+      && reachesPRTime(sweepEntry.workflows)
+      && Boolean(sweepEntry.notRunnable)
+      && !sweepEntry.ciOnly,
+  );
+  // And the half this card must NOT move: the OFFLINE self-test lint.yml runs
+  // on every PR stays a runnable command. It is the same script's other
+  // spelling, and a rule keyed on the sweeper's name rather than on the
+  // workflow text — the per-script exclusion the ruling refused — would have
+  // taken this one with it.
+  const offlineHalf = triggerFamilies.find((e) => e.check === 'check:pm-half-states');
+  t(
+    'and the offline half CI runs on every PR is untouched — check:pm-half-states reaches lint.yml, carries neither withholding class, and still renders a runnable command',
+    Boolean(offlineHalf)
+      && offlineHalf.workflows.has('lint.yml')
+      && reachesPRTime(offlineHalf.workflows)
+      && !offlineHalf.ciOnly
+      && !offlineHalf.notRunnable,
+  );
+
   // ── The population a job `if:` names one hop away (#12956) ────────────────
   //
   // The card: an `.objectui-sha` diff derived NO pin-critical gate, because
@@ -15145,13 +17383,67 @@ function selfTest() {
     "nor does one whose --self-test body stages a fixture tree (the self-test is not the gate's work)",
     repoRootWalkSpelling("function selfTest() {\n  execFileSync('git', ['ls-files', '-z'], { cwd: tmp });\n}\n") === null,
   );
-  // The live specimen for the NEGATIVE direction: a walk seeded at a bounded
-  // subtree. check-self-test-workflow-commands.mjs is exactly this shape, and
-  // it is why #14325's census of six is a census of five here.
+  // The NEGATIVE direction: a walk seeded at a bounded subtree, which is why
+  // #14325's census of six is a census of five here.
+  //
+  // The fixture string below is data, not a read of any file, so it cannot go
+  // stale — but it also cannot show that the shape still EXISTS in this tree,
+  // and a specimen named in prose can rot while every case here stays green.
+  // That is exactly what happened to the name this comment used to carry
+  // (#15510): `check-self-test-workflow-commands.mjs` was cited as the live
+  // specimen and then had its walk removed, leaving a sentence pointing at a
+  // file with no walk in it. So the specimens below are MEASURED, and there
+  // are two of them at two different walk roots, so one file's repair cannot
+  // empty the claim again:
+  //
+  //   scripts/check-self-test-wired.mjs   `walkScripts(scriptsDir)`, seeded at
+  //                                       `join(ROOT, 'scripts')`
+  //   scripts/check-spec-parsed-alias.mjs `walkZodFiles(SPEC_SRC)`, seeded at
+  //                                       `join(ROOT, 'packages/spec/src')`
+  //
+  // Both read `null` from this predicate on this tree — the reading is pinned
+  // LIVE two cases down, against their real source rather than against a
+  // string typed here.
   t(
     'a walk seeded at a bounded subtree is not a repo-root walk',
     repoRootWalkSpelling("const scriptsDir = join(ROOT, 'scripts');\nconst files = walkScripts(scriptsDir);") === null,
   );
+
+  // LIVE, on this tree: the two specimens the comment above names, read off
+  // their real source rather than typed here (#15510). This is the half a
+  // fixture cannot carry — that the shape the negative direction is written
+  // for still exists in this repo — and it is the half that went stale last
+  // time. Their walk ROOTS are named in the case text, so a reader who opens
+  // one is told what to look for; a file that has gone is NOT MEASURED rather
+  // than a quiet pass, per the convention at the top of this battery.
+  const SUBTREE_WALK_SPECIMENS = [
+    ['scripts/check-self-test-wired.mjs', "walkScripts(scriptsDir), seeded at join(ROOT, 'scripts')"],
+    ['scripts/check-spec-parsed-alias.mjs', "walkZodFiles(SPEC_SRC), seeded at join(ROOT, 'packages/spec/src')"],
+  ];
+  // The floor (#13799): a loop over an emptied table runs zero cases and reads
+  // exactly like a pass, and this table's whole purpose is to not be down to
+  // one name again.
+  t('the bounded-subtree specimen table still names two files at two walk roots', SUBTREE_WALK_SPECIMENS.length === 2);
+  for (const [file, walk] of SUBTREE_WALK_SPECIMENS) {
+    const abs = nodePath.join(ROOT, file);
+    if (!existsSync(abs)) {
+      unmeasurable(
+        `the bounded-subtree walk specimen ${file}`,
+        'the file is not in this tree, so its source cannot be read — name a specimen that is, or say plainly that only the fixture backs this direction.',
+      );
+      continue;
+    }
+    const src = readFileSync(abs, 'utf8');
+    t(
+      `LIVE: ${file} still holds a bounded-subtree walk (${walk})`,
+      /walk[A-Za-z]*\(/.test(src),
+    );
+    t(
+      `LIVE: …and this predicate reads ${file} as NOT a repo-root walk, the negative direction the fixture above stands for`,
+      repoRootWalkSpelling(src) === null,
+    );
+  }
+
 
   // The refusals — the two contradictions the derivation must not resolve on
   // the gate's behalf.
@@ -15271,6 +17563,155 @@ function selfTest() {
         return /residue accounting is short/.test(err.message) && /always-runs/.test(err.message);
       }
     })(),
+  );
+
+  // ── The gate-level WIDE-population declaration (#15341) ───────────────────
+  //
+  // The THIRD channel, and the pins below are written as the ruling framed it:
+  // one column it must reach (DECLARED, with its reason) and one it must not
+  // (MATCHED, on any card under the roots it walks). The discriminating pins
+  // are the placement ones; the mutation that reddens them is deleting the
+  // `widePopulationReason` branch from `placeFamily`.
+  t(
+    'a wide-population declaration reads its reason back',
+    declaredWidePopulation('// dispatch-gates: wide-population -- walks packages/ entire\n')
+      === 'walks packages/ entire',
+  );
+  t(
+    'the shell comment spelling is read too (all three markers tolerate the same comment forms, deliberately)',
+    declaredWidePopulation('#!/usr/bin/env bash\n# dispatch-gates: wide-population -- a shell gate reason\n')
+      === 'a shell gate reason',
+  );
+  t('no marker present reads as no declared wide population', declaredWidePopulation('// just a comment\n') === null);
+  t(
+    'the marker with no reason text does not count as declared — and the reason carries MORE here than on either sibling, since it is the whole content of the channel',
+    declaredWidePopulation('// dispatch-gates: wide-population\n') === null,
+  );
+  t(
+    'the marker must be its OWN line — prose ABOUT the convention is not a declaration under it',
+    declaredWidePopulation('// see the dispatch-gates: wide-population -- marker for the refused-wide case\n') === null,
+  );
+  // Three markers now share a prefix and a sibling regex, which is exactly the
+  // shape where one parser quietly answers for another. Every pair, both ways.
+  t(
+    'a no-path-population declaration does NOT read as a wide one, and a wide one does NOT read as no-path',
+    declaredWidePopulation('// dispatch-gates: no-path-population -- CI runs the self-test only\n') === null
+      && declaredNoPathPopulation('// dispatch-gates: wide-population -- walks packages/ entire\n') === null,
+  );
+  t(
+    'a whole-tree declaration does NOT read as a wide one, and a wide one does NOT read as whole-tree',
+    declaredWidePopulation('// dispatch-gates: whole-tree-population -- it sweeps git ls-files\n') === null
+      && declaredWholeTreePopulation('// dispatch-gates: wide-population -- walks packages/ entire\n') === null,
+  );
+
+  // The refusals — a gate declares exactly ONE population shape.
+  const wpLive = { widePopulationReason: 'walks packages/ entire', hints: [], noPopulationReason: null, wholeTreeReason: null };
+  t('a family declaring nothing is refused nothing', widePopulationRefusal({ widePopulationReason: null }) === null);
+  t('a wide declaration over an empty hint set stands', widePopulationRefusal(wpLive) === null);
+  t(
+    'declaring BOTH wide and no-path population is a contradiction, refused rather than resolved by a coin toss',
+    (widePopulationRefusal({ ...wpLive, noPopulationReason: 'CI runs the self-test only' }) ?? '')
+      .includes('BOTH wide-population and no-path-population'),
+  );
+  t(
+    'declaring BOTH wide and whole-tree population is refused too, and the refusal names the OPPOSITE dispositions that make it one',
+    (() => {
+      const why = widePopulationRefusal({ ...wpLive, wholeTreeReason: 'sweeps git ls-files' }) ?? '';
+      return why.includes('BOTH wide-population and whole-tree-population') && why.includes('runnable total');
+    })(),
+  );
+  t(
+    'a wide declaration sitting above a live path population is refused, and the refusal NAMES the literals so the reader can decide which half is wrong',
+    (() => {
+      const why = widePopulationRefusal({ ...wpLive, hints: ['packages/rest/src', 'docs/adr'] }) ?? '';
+      return why.includes('NAMES paths') && why.includes('packages/rest/src');
+    })(),
+  );
+
+  // Placement, column by column. The card path is under the very root these
+  // gates walk — the case the ruling is about.
+  const wpEntry = { files: ['scripts/check-wildcard-fallthrough.mjs'], hints: [], widePopulationReason: 'walks packages/ entire' };
+  t(
+    'DECLARED column: a declaring family is placed as wide-population, not undetermined — it has been READ',
+    placeFamily(wpEntry, ['README.md']).verdict === 'wide-population',
+  );
+  t(
+    'MATCHED column: a card under the root it walks does NOT match it — the whole point of the ruling',
+    placeFamily(wpEntry, ['packages/rest/src/server.ts']).verdict === 'wide-population'
+      && placeFamily(wpEntry, ['packages/rest/src/server.ts']).hits.length === 0,
+  );
+  t(
+    'NOT silent either: a gate that really does read your file must never print as a clearance',
+    !['silent', 'undetermined', 'matched'].includes(placeFamily(wpEntry, ['packages/core/src/kernel.ts']).verdict),
+  );
+  t(
+    'the IDENTITY key SURVIVES: a card editing the gate\'s own script still matches it, because the declaration is a claim about the POPULATION and not about that file',
+    placeFamily(wpEntry, ['scripts/check-wildcard-fallthrough.mjs']).verdict === 'matched',
+  );
+  t(
+    'and that is the DIFFERENCE from the whole-tree channel, which suppresses the identity match — pinned as a difference so neither can be "tidied" into the other',
+    placeFamily({ ...wpEntry, widePopulationReason: null, wholeTreeReason: 'sweeps the tree' }, ['scripts/check-wildcard-fallthrough.mjs']).verdict === 'always-runs',
+  );
+  t(
+    'a family that declares nothing is STILL placed byte-for-byte as classifyEntry places it, with the third channel wired in',
+    [
+      { files: ['scripts/check-silent.mjs'], hints: ['packages/spec/src'] },
+      { files: ['scripts/check-empty.mjs'], hints: [] },
+    ].every((e) => ['packages/rest/src/server.ts', 'scripts/check-empty.mjs', 'packages/spec/src/index.ts']
+      .every((p) => JSON.stringify(placeFamily(e, [p])) === JSON.stringify(classifyEntry(e, [p])))),
+  );
+
+  // The union: a wide-population family contributes NO command, which is the
+  // whole difference from the whole-tree rows one section up.
+  const wpRow = { check: 'check:wildcard-fallthrough', command: 'pnpm check:wildcard-fallthrough', workflows: ['lint.yml'], reason: 'walks packages/ entire', refused: null };
+  t(
+    'a wide-population family is NOT in the runnable union --commands prints — no card owes it on the basis of a population no card can narrow',
+    !commandsFor({ matchedRows: [], kindGroups: [], alwaysRunsRows: [] }).includes('pnpm check:wildcard-fallthrough'),
+  );
+  t(
+    'and the union is unmoved by the presence of wide rows: they are not one of its inputs at all',
+    commandsFor({ matchedRows: [{ check: 'check:x', command: 'pnpm check:x', ciOnly: null }], kindGroups: [], alwaysRunsRows: [] }).length === 1,
+  );
+
+  // The rendering — the DECLARED column the ruling names.
+  const wpLines = widePopulationLines([wpRow]);
+  t(
+    'the wide-population section names the gate and its reason',
+    wpLines.some((l) => l.includes('pnpm check:wildcard-fallthrough') && l.includes('walks packages/ entire')),
+  );
+  t('and says out loud that the absence from the matched block is not a clearance', wpLines.some((l) => l.includes('NOT a clearance')));
+  t(
+    'its heading cannot be confused with the whole-tree one, whose commands ARE in the total',
+    wpLines[0].includes('Declared WIDE population') && !wpLines[0].includes('Always runs'),
+  );
+  t(
+    'a REFUSED declaration prints as refused rather than vanishing from every rendering',
+    widePopulationLines([{ ...wpRow, refused: 'declares BOTH wide-population and no-path-population' }]).some((l) => l.includes('REFUSED')),
+  );
+  t('no declaring family, no section', widePopulationLines([]).length === 0);
+
+  // The residue partition. A FIFTH placement wired into the derivation and not
+  // into this sum shrinks the residue silently — the exact failure residueLines'
+  // own throw exists to catch, now one term further along.
+  const wpResidue = residueLines({
+    discovered: 98, documentedNoPopulation: 0, matched: 8, undetermined: 30, silent: 50, alwaysRuns: 5, widePopulation: 5,
+    unfiltered: 80, unreachable: 5, swept: 6000, artifactRosters: 4, invertedRosters: 1,
+  });
+  t('the residue accounts for the wide-population bucket as a fifth term', wpResidue.some((l) => l.includes('5 declared-wide')));
+  t(
+    'and REFUSES a derivation that placed wide families it did not count',
+    (() => {
+      try {
+        residueLines({ discovered: 98, documentedNoPopulation: 0, matched: 8, undetermined: 30, silent: 50, alwaysRuns: 5, widePopulation: 0, unfiltered: 80, unreachable: 5, swept: 6000, artifactRosters: 4, invertedRosters: 1 });
+        return false;
+      } catch (err) {
+        return /residue accounting is short/.test(err.message) && /wide-population/.test(err.message);
+      }
+    })(),
+  );
+  t(
+    'the residue prose states what the bucket IS — declared, unplaceable, and outside this card\'s runnable total',
+    wpResidue.some((l) => /too wide to place/.test(l) && /not in this card's runnable total/.test(l)),
   );
 
   // ── The followed-module inherited-population declaration (#11556) ─────────
@@ -15508,6 +17949,127 @@ function selfTest() {
     ['packages/rest/src/server.ts', 'docs/adr/0112-x.md', 'scripts/check-nul-bytes.mjs'].every((p) =>
       declaredWholeTree.every(([, e]) => placeFamily(e, [p]).verdict === 'always-runs')),
   );
+
+  // The live half of the WIDE-population channel (#15341), held to the same
+  // standard as the two above and for the same reason: a declaration is a claim
+  // about a gate, graded against the real tree. The direction that costs here
+  // is the one the recorded triage is guarding — a marker that rots into a lie
+  // by sitting above a population the gate later declares, so a reader is told
+  // "nothing can narrow this" while the matched column narrows it.
+  const declaredWide = [...liveDiscovery.byCheck].filter(([, e]) => e.widePopulationReason);
+  t(
+    `the live tree carries at least one wide-population declaration (the guard is not vacuous; found ${declaredWide.length})`,
+    declaredWide.length > 0,
+  );
+  t(
+    'every live wide-population declaration carries a non-empty reason',
+    declaredWide.every(([, e]) => typeof e.widePopulationReason === 'string' && e.widePopulationReason.length > 0),
+  );
+  const wpRefused = declaredWide
+    .map(([c, e]) => [c, widePopulationRefusal(e)])
+    .filter(([, why]) => why);
+  t(
+    `every live wide-population declaration names ONE population shape — no sibling marker, no scanned path population (refused: ${wpRefused.map(([c]) => c).join(', ') || 'none'})`,
+    wpRefused.length === 0,
+  );
+  // The two columns, live and per-card. The probe paths are under the roots
+  // these gates actually walk, which is the case the ruling is about: the
+  // family must be DECLARED there and must not be MATCHED there.
+  t(
+    'no live wide-population family is matched by a card under the roots it walks — it stays in its own declared column',
+    ['packages/rest/src/server.ts', 'packages/core/src/kernel.ts', 'examples/app-crm/src/index.ts', 'apps/docs/next.config.mjs']
+      .every((p) => declaredWide.every(([, e]) => placeFamily(e, [p]).verdict === 'wide-population')),
+  );
+  t(
+    'and none of them is left in `undetermined` for a card that touches nothing of theirs — the bucket the ruling moved them OUT of',
+    declaredWide.every(([, e]) => placeFamily(e, ['README.md']).verdict === 'wide-population'),
+  );
+
+  // ── The WHOLE-TREE RESIDUE (#15312) ───────────────────────────────────────
+  //
+  // The channel above says what a DECLARING family gets. This says what happens
+  // to a family that should have declared and did not — the case the card was
+  // filed on, where a gate CI runs appeared in no seat's runnable list and the
+  // seat learned about it from CI a cycle later. Every fixture case below names
+  // the limb it discriminates; the live case is the one that can go red on a
+  // gate added tomorrow, which is the whole point of the table it grades.
+  const rwEntry = (over = {}) => ({
+    rootWalk: REPO_ROOT_WALK_SPELLINGS[0].label,
+    wholeTreeReason: null,
+    noPopulationReason: null,
+    ...over,
+  });
+  t(
+    'an undeclared, unplaceable repo-root walker IS a member, and comes back as the walk that made it one',
+    unnamedRootWalk(rwEntry(), 'undetermined') === REPO_ROOT_WALK_SPELLINGS[0].label,
+  );
+  t(
+    'a `silent` one is a member too — silent and undetermined are both "no card names it"',
+    unnamedRootWalk(rwEntry(), 'silent') === REPO_ROOT_WALK_SPELLINGS[0].label,
+  );
+  t(
+    'declaring the whole tree LEAVES the population — the repair this table exists to push toward',
+    unnamedRootWalk(rwEntry({ wholeTreeReason: 'sweeps git ls-files' }), 'undetermined') === null,
+  );
+  t(
+    'and so does declaring no path population — the opposite answer, but an examined one either way',
+    unnamedRootWalk(rwEntry({ noPopulationReason: 'the self-test is the whole run' }), 'undetermined') === null,
+  );
+  t(
+    'a family the derivation can place BY PATH is not a member: a seat is already told about it',
+    unnamedRootWalk(rwEntry(), 'matched') === null,
+  );
+  t(
+    'and neither is a gate whose source carries no repo-root walk at all — this population is one CLASS, not the whole residue',
+    unnamedRootWalk(rwEntry({ rootWalk: null }), 'undetermined') === null,
+  );
+  // LIVE, against the real tree, and the case the next unnamed census gate reds
+  // on. The probe card is every tracked file MINUS the family's own file
+  // closure: without the subtraction every family matches the card that edits
+  // the gate itself, through the identity key, and this whole population would
+  // score empty while reading like a pass.
+  {
+    const liveAll = [...liveTree.files];
+    const members = [];
+    for (const [check, entry] of liveDiscovery.byCheck) {
+      if (!entry.rootWalk || entry.wholeTreeReason || entry.noPopulationReason) continue;
+      const own = new Set(entry.files ?? []);
+      const probe = own.size ? liveAll.filter((f) => !own.has(f)) : liveAll;
+      const walk = unnamedRootWalk(entry, placeFamily(entry, probe).verdict);
+      if (walk) members.push(check);
+    }
+    const unlisted = members.filter((c) => !ROOT_WALK_RESIDUE_REASONS.has(c)).sort();
+    const stale = [...ROOT_WALK_RESIDUE_REASONS.keys()].filter((c) => !members.includes(c)).sort();
+    t(
+      'every gate CI runs whose own source sweeps the repo root is DECLARED whole-tree, declared path-less, ' +
+        'derivable by path, or a justified row in ROOT_WALK_RESIDUE_LEDGER' +
+        (unlisted.length ? ` — unlisted: ${unlisted.join(', ')}` : '') +
+        (stale.length ? ` — listed but no longer a member: ${stale.join(', ')}` : ''),
+      unlisted.length === 0 && stale.length === 0,
+    );
+    // The control that makes the case above an instrument. A sweep that silently
+    // found NOTHING — a renamed field, a discovery that stopped reading gate
+    // sources — reports "nothing unlisted" and is indistinguishable from a pass,
+    // which is #4690 pointed at this file's own guard. So the population has to
+    // be seen to be non-empty, and the gate the card was filed on has to be seen
+    // to have LEFT it by declaring rather than by going unmeasured.
+    t(
+      `control: the residue population is non-empty (${members.length} member(s)), so the case above is measuring something`,
+      members.length > 0,
+    );
+    t(
+      'control: the card\'s own specimen has left this population through the BUCKET, not through the ledger — ' +
+        'check:driver-memory-census declares whole-tree, is backed by its walk, and is in no exclusion row',
+      Boolean(liveDiscovery.byCheck.get('check:driver-memory-census')?.wholeTreeReason)
+        && wholeTreePopulationRefusal(liveDiscovery.byCheck.get('check:driver-memory-census')) === null
+        && !ROOT_WALK_RESIDUE_REASONS.has('check:driver-memory-census'),
+    );
+    t(
+      'every ledger row carries a reason that says what the gate reads INSTEAD — a reason-less exclusion is the ' +
+        'placeholder shape both markers refuse',
+      ROOT_WALK_RESIDUE_LEDGER.every(([, why]) => typeof why === 'string' && why.trim().length > 40),
+    );
+  }
 
   // ── The CI-MEASURED-ONLY shape (#14004) ───────────────────────────────────
   //
@@ -16698,7 +19260,25 @@ function selfTest() {
   t('...and its reason names the prefix that went missing', unreachableReason(patternPrefixGone).includes('packages/gone-away'));
   // The live half: the specimen is gone from the residue entirely, which is
   // what the card was filed for. A fixture cannot show that.
-  t('the live specimen is not a dead literal on this tree at all', hintReachesTree('.changeset/*.md', trackedFiles()));
+  //
+  // It reads the same live population as the `globCarriesLiteralSuffix` block
+  // above, so it takes the same exit when a version pass has consumed it
+  // (#15255) — the second site, and the reason `unmeasurable` is a primitive
+  // rather than one `if` written once. Left unguarded, this one case would have
+  // kept the release-blocking red after the block above stopped producing it,
+  // which is the shape a repair applied at only the site that was measured red
+  // always has.
+  const residueCorpus = trackedFiles();
+  if (residueCorpus.some((f) => /^\.changeset\/[^/]+\.md$/.test(f))) {
+    t('the live specimen is not a dead literal on this tree at all', hintReachesTree('.changeset/*.md', residueCorpus));
+  } else {
+    unmeasurable(
+      "the residue block's live `.changeset/*.md` specimen",
+      'a hint reaches the tree by matching a FILE, and a tree whose version pass has consumed the population has ' +
+        'no file for this one to match. The judgment this case guards — that a pattern-judged hint is not read as a ' +
+        'dead literal — is pinned on fixtures a few lines above and ran.',
+    );
+  }
 
   // ── A slash is not proof of a path (#10097, option C) ─────────────────────
   //
@@ -17187,11 +19767,10 @@ function selfTest() {
     }
     return { sites, perRoot };
   };
-  // `relative` from `node:path` is SHADOWED inside this function — a fixture
-  // string a few thousand lines up binds that name — so the repo-relative
-  // spelling comes from ROOT, the prefix every sibling case here already joins
-  // against. A prefix that stops holding yields an empty root, which the walk
-  // above reports rather than turning into a pass.
+  // The repo-relative spelling here comes from ROOT, the prefix every sibling
+  // case in this block already joins against — the consistent spelling, not a
+  // workaround. A prefix that stops holding yields an empty root, which the
+  // walk above reports rather than turning into a pass.
   const tierOwnAbs = fileURLToPath(import.meta.url);
   const tierOwnRel = tierOwnAbs.startsWith(ROOT) ? tierOwnAbs.slice(ROOT.length) : '';
   // The definition line is FOUND, not remembered: the one line carrying both
@@ -17937,10 +20516,20 @@ function selfTest() {
       'because those families are in the MATCHED list instead, each one exactly once',
       changesetCommands.length > 0
         && new Set(changesetCommands).size === changesetCommands.length
-        // The `--base` run is the one this section is ABOUT — it is the family a
-        // changeset brings into scope — and since #15083 it renders with the
-        // merge base the workflow pins rather than as a bare path CI never runs.
-        && changesetCommands.filter((c) => c === 'node scripts/check-empty-changeset.mjs --base "$MERGE_BASE"').length === 1,
+        // The `--base` run is the one this section is ABOUT — it is the family
+        // a changeset brings into scope. ⚠️ The SPELLING this looks for moved
+        // once before and moves again here, and the subject and the invariant
+        // are unchanged both times: #15083 took it off the bare path CI never
+        // runs and onto the invocation CI does, spelled with the variable the
+        // workflow pins; #15441 renders that same key as the invocation a DEV
+        // can run, with the `origin/main` this script's own usage block
+        // declares as its `--base` default filled into the value position. What
+        // is asserted is still exactly what it was: the family is in the
+        // matched list, exactly once, and never also in the pending section
+        // whose heading makes a different claim about time. The expectation is
+        // updated rather than the case dropped, for the reason the value-bearing
+        // block above states when #15083 rewrote two of its own.
+        && changesetCommands.filter((c) => c === 'node scripts/check-empty-changeset.mjs --base origin/main').length === 1,
     );
 
     // REACHED THROUGH A SYMLINK — the form a plain path equality gets wrong.
@@ -18049,7 +20638,20 @@ function selfTest() {
   const tail = alwaysRunSteps([{ file: 'fixture.yml', text: tailWf }]);
   const tailNames = tail.rows.map((r) => r.step);
   t('a step whose family the derivation names is NOT in the tail', !tailNames.includes('A discoverable family'));
-  t('a package-local gate invoked by path IS in the tail', tailNames.includes('A package-local gate invoked by path'));
+  // #15342 retired this member from the tail by giving the derivation the anchor
+  // to discover it, so what is pinned is the RETIREMENT WITH ITS CAUSE: the step
+  // has left the tail AND the derivation names a family for it. Either half
+  // alone goes green for the wrong reason — a tail that stopped walking, or a
+  // family list that claims the step while CI's step sits unaccounted for. The
+  // tail's own class ("a step the derivation names NOTHING for is listed") is
+  // unweakened: the interpreter member below still holds it, on this fixture and
+  // on the live tree.
+  t(
+    'a package-local gate invoked by path is NOT in the tail any more (#15342) — the derivation names it',
+    !tailNames.includes('A package-local gate invoked by path')
+      && extractCheckInvocations(tailWf, 'fixture.yml')
+        .some((i) => i.script === 'packages/lint/scripts/check-fixture-shape.mjs'),
+  );
   t('a gate run by another interpreter IS in the tail', tailNames.includes('A gate run by another interpreter'));
   t('a conditional STEP is excluded and counted', !tailNames.includes('Conditional, so no claim is made about it') && tail.counts.conditionalSteps === 1);
   t('a conditional JOB is excluded and counted', !tailNames.includes('Never claimed as always-run') && tail.counts.conditionalJobs === 1);
@@ -18106,9 +20708,21 @@ function selfTest() {
   );
   const liveCommands = liveTail.rows.flatMap((r) => r.commands);
   t('the live tail is not empty — an empty one would mean the walk broke, not that CI runs nothing', liveTail.rows.length > 0);
+  // #13333's first live instance was a package-local gate invoked by path. It is
+  // no longer here, and that is #15342 landing rather than this pin rotting —
+  // both halves are asserted for the reason the fixture case above states.
+  const liveDirectScripts = new Set(
+    readdirSync(nodePath.join(ROOT, '.github/workflows'))
+      .filter((f) => /\.ya?ml$/.test(f))
+      .flatMap((f) => extractCheckInvocations(readFileSync(nodePath.join(ROOT, '.github/workflows', f), 'utf8'), f))
+      .filter((i) => i.direct)
+      .map((i) => i.script),
+  );
   t(
-    'the live tail names the INSTANCE the card was filed about: a package-local gate invoked by path',
-    liveCommands.some((c) => /^node\s+packages\/\S+\/check-[\w.-]+\.mjs/.test(c)),
+    'the INSTANCE the card was filed about has LEFT the live tail (#15342), and the derivation now names a '
+      + 'family for it — the tail shrank because the step became accounted for, not because the walk broke',
+    !liveCommands.some((c) => /^node\s+packages\/\S+\/check-[\w.-]+\.mjs/.test(c))
+      && liveDirectScripts.has('packages/lint/scripts/check-reference-carrier-shape.mjs'),
   );
   // The class assertion. The instance above is invisible because its path is
   // not under `scripts/`; this one is invisible because its INTERPRETER is not
@@ -18568,10 +21182,50 @@ function selfTest() {
     // CONTROL: --changed really does combine with a stdout-shape flag — the
     // usage-line fix above would otherwise be cosmetic on a refusal that does
     // not exist.
+    //
+    // ⛔ The claim is about the COMBINATION — that it PARSES and REACHES the
+    // derivation — so it must not be hostage to whether the tree this run
+    // happens to stand in has a diff. The first spelling demanded
+    // `status === 0`, which made the verdict a property of the caller's tree:
+    // where HEAD equals origin/main the derivation refuses BY DESIGN (exit 2,
+    // the NO_DIFF_REFUSAL sentence) and the case went red with nothing wrong
+    // with the tool. That is not only the fresh-worktree baseline it was found
+    // on. `main`'s own `push` run of lint.yml has exactly that shape — the
+    // pushed head IS origin/main — so every push to main was red at this
+    // file's gate step from the commit that added this case until this one,
+    // while the `merge_group` run of the same head stayed green because a
+    // queue branch HAS a diff (#15278).
+    //
+    // Both outcomes prove the claim, and nothing else does: exit 0 with a
+    // command list, or the exit-2 refusal that ONLY the derivation reaches. An
+    // illegal combination never gets that far — argv refuses it first, with
+    // its own sentence at the same exit code — which is why the predicate
+    // matches on the sentence and never on the code alone, and why the
+    // POSITIVE CONTROL below puts an illegal run through the SAME predicate
+    // and requires it to FAIL. A case widened to accept a second outcome is
+    // one reading away from accepting every outcome; that reading is made
+    // here, mechanically, instead of being left to the next author's eye.
+    const reachedDerivation = (run) =>
+      (run.status === 0 && (run.stdout ?? '').length > 0)
+      || (run.status === 2 && (run.stderr ?? '').includes(NO_DIFF_REFUSAL));
     const changedCommandsRun = runCli(['--changed', '--commands']);
     t(
-      'CONTROL: --changed --commands is legal and answers, so the moved usage line describes a real combination',
-      changedCommandsRun.status === 0 && (changedCommandsRun.stdout ?? '').length > 0,
+      'CONTROL: --changed --commands parses and REACHES the derivation, so the moved usage line describes a real combination'
+        + ' — exit 0 with commands, or the exit-2 no-diff refusal on a tree that has nothing to derive (#15278)',
+      reachedDerivation(changedCommandsRun),
+    );
+    // POSITIVE CONTROL: the predicate above still REJECTS a combination the
+    // argv chain refuses before any derivation runs. `--changed` with a path is
+    // that combination — the two input modes answer different questions — and
+    // its refusal carries a different sentence at the same exit 2, which is
+    // exactly the confusion the predicate has to survive.
+    const changedPathRun = runCli(['--changed', '--commands', seamCard]);
+    t(
+      '…and that same predicate REJECTS the illegal --changed-with-a-path combination, so no parse failure can satisfy the control above',
+      !reachedDerivation(changedPathRun)
+        && changedPathRun.status === 2
+        && (changedPathRun.stderr ?? '').includes('--changed derives the paths itself')
+        && !(changedPathRun.stderr ?? '').includes(NO_DIFF_REFUSAL),
     );
   }
 
@@ -18770,15 +21424,50 @@ function selfTest() {
     t('the malformed line is reported against its line number too', unexplained.malformed.length === 1 && unexplained.malformed[0].line === 1);
 
     // ── What the TOOL classifies, so no prose has to ────────────────────────
+    // ⭐ The value-bearing spelling is the LIVE one — `pr-automation.yml`
+    // really passes `--base "$MERGE_BASE"` to this script — for the reason the
+    // neighbouring cases take theirs from the live workflows: a fixture
+    // invented here would keep passing after the renderer that produces the
+    // real one changed shape, which is the failure this whole file is about.
+    const valueBearing = 'node scripts/check-empty-changeset.mjs --base "$MERGE_BASE"';
     const explained = runReconciliation({
       derived: ['pnpm check:a'],
       ciOnlyCommands: new Set(['node scripts/check-payload-guard.mjs']),
+      notRunnableCommands: new Set([valueBearing]),
       pendingCommands: new Set(['pnpm check:changeset-shape']),
-      record: parseRunRecord(['pnpm check:a', 'node scripts/check-payload-guard.mjs', 'pnpm check:changeset-shape'].join('\n')),
+      record: parseRunRecord(['pnpm check:a', 'node scripts/check-payload-guard.mjs', valueBearing, 'pnpm check:changeset-shape'].join('\n')),
     });
     t(
       'a CI-measured-only entry and a pending-changeset entry are classified by the tool, not dumped into the remainder',
       explained.ok && explained.explainedCiOnly.length === 1 && explained.explainedPending.length === 1 && explained.extra.length === 0,
+    );
+    // ⭐ #15115: the THIRD class `commandsFor` withholds gets the same
+    // courtesy. Recorded, derived by this run, classified out of the union —
+    // so `extra`'s caption ("named by nothing this run derived") would be the
+    // one sentence that is false about it.
+    t(
+      'a recorded VALUE-BEARING family is classified by the tool too, never folded into the remainder',
+      explained.explainedNotRunnable.length === 1 && explained.explainedNotRunnable[0] === valueBearing && !explained.extra.includes(valueBearing),
+    );
+    // CONTROL, and it is the load-bearing half: the bucket explains the class
+    // it was given and nothing else. A command named by no set is still
+    // `extra` — a third bucket that swallowed unknowns would have deleted the
+    // remainder rather than shrunk it.
+    const unknownBeside = runReconciliation({
+      derived: ['pnpm check:a'],
+      notRunnableCommands: new Set([valueBearing]),
+      record: parseRunRecord(['pnpm check:a', valueBearing, 'pnpm check:not-a-family'].join('\n')),
+    });
+    t(
+      'and an unknown command beside it still reads `extra` — the new bucket explains its class only',
+      unknownBeside.explainedNotRunnable.length === 1 && unknownBeside.extra.length === 1 && unknownBeside.extra[0] === 'pnpm check:not-a-family',
+    );
+    // The bucket is DIAGNOSTIC, exactly like the two beside it: the verdict
+    // reads `unrun` and nothing else, so classifying an entry can never move
+    // it in either direction (#15115).
+    t(
+      'the new bucket cannot move the verdict — it is diagnostic, like the two beside it',
+      unknownBeside.ok && unknownBeside.unrun.length === 0 && unknownBeside.ran.length === 1,
     );
 
     // ── Bookkeeping the classes cannot lose ─────────────────────────────────
@@ -18822,6 +21511,21 @@ function selfTest() {
     t(
       'the near-miss line refuses the pairing out loud rather than quietly',
       runReconciliationLines(nearMiss).join('\n').includes('is NOT paired with it'),
+    );
+    // ⭐ #15115, in the rendering: a bucket that classified an entry and then
+    // printed nothing would leave the runner exactly where `extra` left them.
+    const explainedText = runReconciliationLines(explained).join('\n');
+    t(
+      'the value-bearing bucket gets its OWN labelled line, naming the reason and the command',
+      explainedText.includes('VALUE-BEARING famil(ies)')
+        && explainedText.includes("its argv or its step's `env:` takes a value from the workflow")
+        && explainedText.includes(valueBearing),
+    );
+    t(
+      'and the two buckets beside it keep their own lines, with the remainder heading absent entirely',
+      explainedText.includes('CI-MEASURED ONLY')
+        && explainedText.includes('pending-changeset famil(ies)')
+        && !explainedText.includes("Outside this card's derivation"),
     );
 
     // ── argv: a two-token flag's value must not become a path ───────────────
@@ -18891,6 +21595,163 @@ function selfTest() {
     }
   }
 
+  // The gate whose CI invocation takes a value from the workflow, spelled once
+  // for the two blocks below. It lives INSIDE the self-test on purpose: a path
+  // literal at module scope would be read by this tool's own extractor and
+  // become a ninth hint on this file — the fabrication `CHANGESET_PROBE_PATH`'s
+  // docblock measured and refused, one class over.
+  const VALUE_BEARING_PROBE_SCRIPT = 'scripts/pm/check-half-states.mjs';
+
+  // ── END TO END: the VALUE-BEARING bucket is WIRED, not merely present (#15115) ──
+  //
+  // Every unit case above stays green if the `--ran` call site never PASSES
+  // the value-bearing set — a parameter that defaults to empty is exactly the
+  // shape that keeps its own tests green while the live mode still dumps the
+  // class in the remainder, which is the state this card was filed about.
+  // Only a real run reads the wiring.
+  //
+  // The fixture is this tool's OWN answer on this tree, read from `--json`,
+  // rather than an invocation typed here: a hardcoded spelling would keep
+  // passing after the renderer that produces the real one changed shape, and
+  // the two sides of the comparison would stop being the same strings — the
+  // property the whole `--ran` design rests on.
+  {
+    const vbTmp = mkdtempSync(nodePath.join(tmpdir(), 'dg-ran-vb-'));
+    try {
+      // A changeset path AND the gate script whose value-bearing invocation the
+      // rows below are judged on. The changeset path alone used to reach that
+      // family, through the noise-floor literal #15753 stopped reading as a
+      // watch surface; the CONTROL beside the NOT MEASURED block pins that it
+      // no longer does, so the derivation this change removed is recorded as an
+      // assertion rather than lost along with the probe. The second path is the
+      // gate's own script, which is how a card honestly reaches this family.
+      const vbCard = [CHANGESET_PROBE_PATH, VALUE_BEARING_PROBE_SCRIPT];
+      const jsonRun = runCli(['--json', ...vbCard]);
+      const doc = jsonRun.status === 0 ? JSON.parse(jsonRun.stdout ?? '{}') : null;
+      const vbRows = [...(doc?.matched ?? []), ...(doc?.alwaysRunsPopulation ?? [])].filter((row) => row.notRunnable);
+      t('CONTROL: this tree still derives at least one VALUE-BEARING family for a changeset path', Boolean(doc) && vbRows.length >= 1);
+      if (doc && vbRows.length >= 1) {
+        const vbCommand = vbRows[0].command;
+        t('CONTROL: and the runnable union WITHHOLDS it — which is the whole reason the bucket exists', !doc.commands.includes(vbCommand));
+        const vbRecord = nodePath.join(vbTmp, 'ran-value-bearing.list');
+        writeFileSync(vbRecord, `${[...doc.commands, vbCommand].join('\n')}\n`);
+        const vbRun = runCli([RAN_FLAG, vbRecord, ...vbCard]);
+        const vbOut = vbRun.stdout ?? '';
+        t(
+          '⭐ a real run that RECORDS it lands it in the VALUE-BEARING bucket, with the remainder heading gone entirely',
+          vbRun.status === 0
+            && vbOut.includes('VALUE-BEARING famil(ies)')
+            && vbOut.includes(vbCommand)
+            && !vbOut.includes("Outside this card's derivation"),
+        );
+        t(
+          'and the reason travels with it, so the runner learns why this invocation is not one they could have derived',
+          vbOut.includes("its argv or its step's `env:` takes a value from the workflow"),
+        );
+        t(
+          'while the verdict is unmoved — the bucket is diagnostic, and every derived family is still accounted for',
+          vbOut.includes(`${doc.commands.length} derived famil(ies) accounted for`),
+        );
+      }
+    } finally {
+      rmSync(vbTmp, { recursive: true, force: true });
+    }
+  }
+
+  // ── NOT MEASURED is said out loud, in both renderings (#15441) ─────────────
+  //
+  // The half of the repair that is not about the three `--base` gates: a family
+  // this tool CANNOT run must not have a sibling invocation of the same script
+  // standing in for it unlabelled. A count of omissions does not say that the
+  // `--self-test` in the list above is not the thing that is missing, and that
+  // substitution is what the card was filed on.
+  {
+    // The probe card names the changeset path AND the gate script, for the
+    // reason the value-bearing block above states: this family was reached from
+    // a changeset path alone only through the gate's own exclusion constant,
+    // which #15753 stopped reading as a watch surface. The first case below is
+    // that removal, pinned; the second is the card as it must now be spelled.
+    const changesetOnlyRun = runCli([CHANGESET_PROBE_PATH]);
+    t(
+      '⭐ a changeset path alone reaches NO value-bearing family any more — the noise floor it used to be derived through is an exclusion, not a surface (#15753)',
+      changesetOnlyRun.status === 0 && !(changesetOnlyRun.stdout ?? '').includes('Value-bearing argv'),
+    );
+    const notMeasuredRun = runCli([CHANGESET_PROBE_PATH, VALUE_BEARING_PROBE_SCRIPT]);
+    const notMeasuredOut = notMeasuredRun.stdout ?? '';
+    t(
+      'CONTROL: this card still reaches a family this tool cannot run, so the wording below is judged on a live row',
+      notMeasuredRun.status === 0 && notMeasuredOut.includes('Value-bearing argv'),
+    );
+    t(
+      '⭐ the human rendering names the unanswered question NOT MEASURED, by the invocation CI runs',
+      /⊘ NOT MEASURED — nothing this card can run answers node scripts\/pm\/check-half-states\.mjs/.test(notMeasuredOut),
+    );
+    t(
+      '⭐ and the block a dev pastes carries the REAL --base checks, each stating the value CI pins in its place',
+      notMeasuredOut.includes('node scripts/check-adr-0087-registration.mjs --base origin/main')
+        && notMeasuredOut.includes("is this script's own documented default; CI pins it to $MERGE_BASE"),
+    );
+    const notMeasuredCommands = runCli(['--commands', CHANGESET_PROBE_PATH, VALUE_BEARING_PROBE_SCRIPT]);
+    t(
+      '⭐ --commands says it on stderr too, one line per family, where it cannot corrupt the harvest',
+      (notMeasuredCommands.stderr ?? '').includes('⊘ NOT MEASURED — scripts/pm/check-half-states.mjs')
+        && !(notMeasuredCommands.stdout ?? '').includes('NOT MEASURED'),
+    );
+    t(
+      '⭐ …and the real --base check IS in the union now, which is the whole finding',
+      (notMeasuredCommands.stdout ?? '').includes('node scripts/check-adr-0087-registration.mjs --base origin/main'),
+    );
+    t(
+      'CONTROL: stdout is still commands and nothing else — the NOT MEASURED lines never reach the stream a consumer executes',
+      (notMeasuredCommands.stdout ?? '').split('\n').filter(Boolean).every((l) => /^(pnpm|node) \S/.test(l)),
+    );
+  }
+
+  // ── The env-carried half of that bucket, on the LIVE tree (#15761) ─────────
+  //
+  // The fixture cases above judge the reader; this one judges the tree. The
+  // change set is the specimen workflow itself, so the card, the docblock and
+  // this pin all name one file. Before the env read, stdout carried
+  // `node scripts/check-partof-closing-keyword.mjs` under a caption promising
+  // a runnable command, and running it here exits 2 with the gate's own
+  // "NOT WIRED" refusal.
+  {
+    const envLive = runCli(['--commands', '.github/workflows/partof-closing-keyword-guard.yml']);
+    const envLiveOut = (envLive.stdout ?? '').split('\n');
+    const envLiveErr = envLive.stderr ?? '';
+    t(
+      'CONTROL: the specimen workflow really is a change set that derives this family, so the cases below judge a live row',
+      envLive.status === 0 && (envLiveOut.join('\n') + envLiveErr).includes('partof-closing-keyword'),
+    );
+    t(
+      '⭐ the bare invocation whose input arrives through `env:` is NO LONGER offered as runnable',
+      !envLiveOut.includes('node scripts/check-partof-closing-keyword.mjs'),
+    );
+    t(
+      '⭐ …it is NAMED as NOT MEASURED instead, on the stream that cannot corrupt the harvest',
+      envLiveErr.includes('⊘ NOT MEASURED — scripts/check-partof-closing-keyword.mjs'),
+    );
+    t(
+      '⭐ CONTROL: the `pnpm check:` form of the same gate takes nothing from the workflow and is still in the list',
+      envLiveOut.includes('pnpm check:partof-closing-keyword'),
+    );
+    t(
+      'CONTROL: the accounting line stays true of both carriers, so a reader is not told to look only at argv',
+      envLiveErr.includes("their argv or their step's `env:` carries a variable with no value outside a CI run"),
+    );
+  }
+
+
+  // The non-vacuity half of #15539, read at the tail because that is where
+  // every call site passing a reading has already run. The card named six; the
+  // assertion is a FLOOR rather than an equality, so adding a seventh is not a
+  // red and deleting the class is.
+  t(
+    `⭐ ${detailedCases} case(s) really handed this harness a diagnostic reading, and it now has a parameter to receive them`,
+    detailedCases >= 6,
+    JSON.stringify({ detailedCases, floor: 6 }),
+  );
+
   // The per-case line already printed inside `t()`, streamed as each verdict
   // was decided (#14281) — this tail is the summary only, unchanged in shape
   // and wording from the pre-streaming version.
@@ -18898,11 +21759,19 @@ function selfTest() {
   for (const [, cond] of cases) {
     if (!cond) failed++;
   }
+  // The NOT-MEASURED tally rides on BOTH verdicts (#15255). A reader who sees
+  // only the pass count cannot tell a run that measured everything from one
+  // that skipped a subject, and that indistinguishability is the whole failure
+  // mode a silent skip introduces — so the count is repeated here, next to the
+  // number it would otherwise be hiding inside. It never moves the exit code:
+  // "this tree cannot decide it" is not a defect in this tool, and a gate that
+  // reds for it is the release blocker this replaced.
+  const skipped = notMeasuredSuffix(notMeasured);
   if (failed) {
-    console.error(`✗ dispatch-gates self-test: ${failed} of ${cases.length} case(s) failed.`);
+    console.error(`✗ dispatch-gates self-test: ${failed} of ${cases.length} case(s) failed.${skipped}`);
     process.exit(1);
   }
-  console.log(`✓ dispatch-gates self-test: ${cases.length} cases pass.`);
+  console.log(`✓ dispatch-gates self-test: ${cases.length} cases pass.${skipped}`);
 
   return SELF_TEST_VERDICT;
 }
@@ -18955,6 +21824,18 @@ const invokedDirectly = isEntrypoint(import.meta.url);
  * where `changedPathsFromGit()` refuses, and a pin that cannot be run in the
  * self-test is not a pin.
  */
+/**
+ * The invariant half of the refusal `--changed` prints on a tree with NO diff.
+ *
+ * A CONSTANT for USAGE_LINE's reason and for one more that is this file's own
+ * subject. The self-test's `--changed --commands` CONTROL has to tell that
+ * refusal — which only the derivation can print — apart from an argv-parse
+ * refusal, and BOTH exit 2. Matching a retyped copy of the sentence would pin
+ * the case to a memory of the message rather than to the message, so the case
+ * and the print site read the same constant (#15278).
+ */
+const NO_DIFF_REFUSAL = 'changes nothing against';
+
 const USAGE_LINE =
   'usage: node scripts/pm/dispatch-gates.mjs'
   + ' [--tier | [--residue] [--commands | --json | --ran <file>]]'
@@ -19155,7 +22036,7 @@ if (invokedDirectly) {
         // and "no gates" is the most expensive thing this tool could say wrongly
         // (#4690: an unreadable input must never look like an empty answer).
         console.error(
-          `dispatch-gates: this branch changes nothing against '${derived.base}' (merge base ${derived.mergeBase.slice(0, 9)}) — ` +
+          `dispatch-gates: this branch ${NO_DIFF_REFUSAL} '${derived.base}' (merge base ${derived.mergeBase.slice(0, 9)}) — ` +
             'nothing to derive. On the base branch already, or in the wrong checkout? Pass explicit paths to ask about a hypothetical surface.',
         );
         process.exit(2);

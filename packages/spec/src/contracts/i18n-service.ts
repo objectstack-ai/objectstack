@@ -58,6 +58,35 @@ export interface II18nService {
     setDefaultLocale?(locale: string): void;
 
     /**
+     * The locale `t()` consults after the requested one — the deployment's
+     * DECLARED fallback (`i18n.fallbackLocale`, else `defaultLocale`, the
+     * collapse both boot paths perform before constructing the service:
+     * `os serve` and the dev plugin hand `I18nServicePlugin`
+     * `fallbackLocale || defaultLocale || 'en'`).
+     *
+     * [#14882] Declared so the serving layer can thread it into the
+     * metadata-document translators (`@objectstack/spec/system`'s
+     * `ResolveOptions.fallbackChain`). Those resolvers walk
+     * `requested locale → fallback chain → authored label`, and without this
+     * accessor no caller could tell them what the deployment declared, so the
+     * chain fell to the resolver's literal `['en']`: a `zh-CN` workspace that
+     * shipped a courtesy `en` bundle served ENGLISH bundle text to a `zh-CN`
+     * request, ahead of its own authored Chinese labels, because `en` was
+     * consulted before the authored label was ever reached.
+     *
+     * Contract for the value: it is the locale this service's own `t()` falls
+     * back to, so a label resolved from a bundle by the document translators
+     * and a message resolved by `t()` agree on which locale is consulted
+     * second. `undefined` means NOTHING was declared — a provider that has no
+     * fallback of its own omits the method or answers `undefined`, and the
+     * serving layer then leaves the resolver's own default in place rather
+     * than inventing a chain.
+     *
+     * @returns BCP-47 locale code, or `undefined` when no fallback is declared
+     */
+    getFallbackLocale?(): string | undefined;
+
+    /**
      * Narrow what `getLocales()` reports to the locales the APP declared
      * (`i18n.supportedLocales` on the stack artifact).
      *

@@ -20,7 +20,7 @@
 // claim untestable: green whether or not the option actually stands alone.
 
 import { describe, it, expect, afterEach } from 'vitest';
-import { bootStack } from './harness';
+import { bootStack } from './harness.js';
 
 const app = {
   manifest: {

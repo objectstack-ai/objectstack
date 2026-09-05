@@ -296,31 +296,31 @@ they declare scope and strategy, and the runtime does the rest.
 
 Metadata is the most cache-hot data in the system. Every read path —
 ObjectQL planning, REST routing, UI rendering, permission checks —
-touches it. Making it correct across a cluster requires two things the
-current protocol lacks: a **monotonic version per item** and a
-**well-defined invalidation event**.
+touches it. Making it correct across a cluster needs a well-defined
+invalidation signal per state owner — the three lanes of §6.2 — and, in this
+protocol, deliberately **no** per-item version on the wire (§6.1).
 
 ### 6.1 Monotonic version
 
 A `version` column is already present on every persisted metadata record in
 `system/metadata-persistence.zod.ts` (`version: z.number()`, used today for
-optimistic concurrency). This ADR proposes formalising it as a monotonic
-per-item version and **widening it to `bigint`** so caches can compare
-freshness across long-running clusters without overflow.
+optimistic concurrency). Earlier revisions of this page proposed formalising
+it as a monotonic per-item version, widening it to `bigint`, and having every
+cache compare it on receipt.
 
-> **Status: planned.** The column is still `version: number` in the schema;
-> the widening and the cache-comparison contract below describe the target
-> design, not current runtime behaviour.
-
-Once wired, caches store `{value, version}`. On any incoming change
-notification the cache compares the incoming version with the stored one:
-
-- Incoming version `>` stored → invalidate (apply new value or evict)
-- Incoming version `≤` stored → ignore (out-of-order notification, already
-  superseded)
-
-This eliminates a whole class of bugs where a slow-arriving "old"
-invalidation evicts a "newer" value the node has already learned about.
+> **Status: not declared.** The column is `version: number` in the schema,
+> and nothing in the protocol carries a version across nodes. The
+> version-compare invalidation this section once described as the target
+> design — caches storing `{value, version}` and ignoring a notification whose
+> version is not strictly greater than the cached one — went with the retired
+> `MetadataChangedEventPayloadSchema` (§6.2, lane 1; ADR-0049
+> enforce-or-remove, ADR-0087 entry `metadata-changed-event-payload-retired`).
+> The shipped lanes are address-only signals whose receiver re-reads its own
+> store, and a re-ordered or duplicated delivery converges to the same state as
+> a single one — which is what removes the "old invalidation evicts a newer
+> value" class of bug without a version to compare. A version-stamped protocol
+> returns only via the ENFORCE route of ADR-0049: the emitter and the reader
+> first, the declaration with them.
 
 ### 6.2 The cluster-invalidation family
 
@@ -394,30 +394,23 @@ the pre-write set (#5109). The registry entry is **deleted, never pre-filled**
 from the payload — the peer re-reads the shared store, which is the source of
 truth.
 
-At the payload's top level there is still **no** `version` / `name` /
-`tenantId` / `operation` field and **no** version comparison; the item's name
-is carried only inside the replayed `event`.
+At the payload's top level there is **no** `version` / `name` / `tenantId`
+/ `operation` field and **no** version comparison — by design, not by
+omission; the item's name is carried only inside the replayed `event`.
 
-**Target spec (planned).** The richer, version-stamped payload below is
-defined as `MetadataChangedEventPayloadSchema` in `kernel/cluster.zod.ts`
-but is **not yet wired** into the runtime:
-
-```ts
-// MetadataChangedEventPayloadSchema — target shape, not yet emitted
-{
-  type: 'object' | 'view' | 'flow' | …,
-  name: '<machine-name>',
-  tenantId?: '<tenant>',
-  version: <new-version>,
-  operation: 'create' | 'update' | 'delete' | 'publish',
-}
-```
-
-When wired with `scope: 'cluster'` + `deliverySemantics: 'at-least-once'`
-and a `partitionKey` of `` `${type}:${name}` ``, the partition key would
-guarantee that two rapid updates to the same item are applied to every
-node's cache in order, and the at-least-once guarantee would let a briefly
-partitioned node catch up on reconnect.
+**No richer payload is declared.** The spec once carried a version-stamped
+target shape for this lane — `MetadataChangedEventPayloadSchema` in
+`kernel/cluster.zod.ts` (`type` / `name` / `tenantId` / `version: bigint` /
+`operation` / `correlationId`), whose docblock said every persistence layer
+MUST emit it and every reader MUST compare `version` on receipt. Nothing ever
+emitted or subscribed to it, and its `bigint` version could not have crossed a
+JSON transport without a codec no driver ships, so it was retired under
+ADR-0049 enforce-or-remove (ADR-0087 entry
+`metadata-changed-event-payload-retired`, `RETIRED_DEFS_BY_MAJOR[18]`,
+together with the `MetadataChangeOperationSchema` enum that typed its
+`operation` field). The shape above **is** the lane-1 contract, and its
+receipt semantics are the family's: drop the cache entry, re-read the shared
+store, no version comparison.
 
 #### Lane 2 — `metadata.mutated` (the ObjectQL object registry)
 
@@ -485,16 +478,18 @@ all; the admin service publishes on the write doors it already owns.
 
 ### 6.3 Reader contract
 
-> **Status: planned.** Today readers are invalidated by the `metadata.changed`
-> PubSub fan-out described in §6.2, which replays watch events verbatim
-> without version comparison. The contract below is the target design that
-> goes with the version-stamped payload.
+The reader contract is the one §6.2 states for the family, and it is what
+ships — there is no version-stamped variant behind it (the payload that
+carried one was retired, §6.1). A metadata reader that keeps its own
+long-lived cache:
 
-All metadata readers (registry, loader, query engine) should:
-
-1. Subscribe to the metadata change channel on startup.
-2. Compare incoming `version` with cached `version` before evicting.
-3. Treat missing `version` as `0` (legacy compatibility).
+1. Subscribes to the lane whose state it mirrors — `metadata.changed` for a
+   mirror of the metadata service's own caches; lanes 2 and 3 already keep
+   ObjectQL's object and driver registries converged (§7.3).
+2. On receipt drops its own `originNode` messages, then evicts — never
+   pre-fills from the payload.
+3. Re-reads the shared store on the next access; a duplicate or re-ordered
+   delivery converges to the same state as a single one.
 
 ## 7. Plugin author guidance
 
@@ -572,8 +567,9 @@ cluster.pubsub.subscribe('metadata.changed', (msg) => {
 > already keep those registries converged across replicas, and a second
 > subscription would be redundant.
 
-A higher-level cache factory (with automatic version comparison) is part of
-the Phase 4 / §6 target design but is **not yet implemented**. No
+There is no higher-level cache factory and no version comparison to
+automate — the version-stamped payload was retired (§6.1) and the lanes are
+address-only, so the subscribe-and-evict shape above is the whole contract. No
 `if (cluster)` branches are needed either way — the `memory` driver makes
 the subscribe call a no-op-equivalent local fan-out on a single node.
 

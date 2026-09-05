@@ -7,9 +7,28 @@
 //   node scripts/measure-durability-swallow-family.mjs --sites     # every site
 //   node scripts/measure-durability-swallow-family.mjs --json      # machine
 //   node scripts/measure-durability-swallow-family.mjs --file <p>  # one file
-//   node scripts/measure-durability-swallow-family.mjs --self-test # all 4 control families
+//   node scripts/measure-durability-swallow-family.mjs --self-test # every control family
 //   node scripts/measure-durability-swallow-family.mjs --self-test=gated
-//                                                      # the 3 families CI runs
+//                                                      # every family but POSITIVE_CONTROLS
+//
+// THE CONTROL FAMILIES, NAMED rather than counted, so that the next one added
+// contradicts a LIST and not an integer -- which is exactly how the two bare integers
+// that stood here before went stale, unread, as further families landed:
+// `POSITIVE_CONTROLS`, `NEGATIVE_CONTROLS`, `REGRESSION_CONTROLS`, `RESOLUTION_CONTROLS`,
+// the `DETERMINED` register cross-check (#13886), the copied gate-vocabulary cross-check
+// (#15459), and `WORKLIST_READING_CONTROLS` (#15503).
+//
+// `--self-test=gated` asserts every one of them EXCEPT `POSITIVE_CONTROLS`, and that
+// asymmetry is the point of the split rather than a convenience: the single expression
+// `gated ? [] : POSITIVE_CONTROLS` is the ONLY thing either mode drops, and it drops
+// those controls because they pin MEMBERS of the #12981 worklist that the repair
+// programme exists to REMOVE -- a control a successful repair destroys cannot hold a
+// CI gate.
+//
+// ⛔ THIS PARAGRAPH IS NOT THE AUTHORITY: `SELF_TEST_MODES` is (with the next block,
+// for what CI runs and why), together with the verdict line each mode prints, which
+// NAMES the families it just asserted. A reader who finds either of them disagreeing
+// with this list should trust them and repair this list.
 //
 // THE CENSUS is NOT a gate: it exits 0 on any membership count, it prints "a
 // MEASUREMENT, not a gate" on every run of it, and the file is deliberately not
@@ -53,8 +72,9 @@
 //   > swallow-shaped file means NOT MEASURED for that site, never
 //   > "level approved."
 //
-// The gate matches callee NAMES from an 18-entry `DURABILITY_CRITICAL_CALLEES`
-// vocabulary. A seeder that reaches storage through `ql.insert(...)` is not in
+// The gate matches callee NAMES from a 20-entry `DURABILITY_CRITICAL_CALLEES`
+// vocabulary -- 18 until PR #15458 added the seeder wrappers `tryInsert` and
+// `tryUpdate`. A seeder that reaches storage through `ql.insert(...)` is not in
 // that vocabulary and never was, so the gate walks the file, finds no seam it
 // understands, and scores it clean. #12923 measured the cost: the RBAC catalog
 // seeders swallowed refused writes in `catch { return null; }`, and a boot
@@ -191,13 +211,26 @@
 // Picking a regex that happens to return 15 would have been the other option.
 // It would also have been a false green about false greens.
 //
-// ## The handover (the ruling's LAST step, not this one)
+// ## The handover (the ruling's LAST step) -- LANDED in PR #15458
 //
-// The programme ends by adding the seeder-helper names (`tryInsert`/`tryUpdate`)
+// The programme ended by adding the seeder-helper names (`tryInsert`/`tryUpdate`)
 // to the gate's `DURABILITY_CRITICAL_CALLEES` **with zero reds**, which is what
 // keeps `scripts/durability-degradation.baseline.json` at its designed empty
-// steady state. That step is gated on `outstanding == 0` for those wrappers in
-// this census. Until then:
+// steady state. PR #15458 performed that step and measured it: the gate's
+// verdict line was unchanged, the baseline stayed empty, and THIS census's
+// reading was byte-identical across it -- the vocabulary below is copied by
+// VALUE, so the gate's map growing moved nothing here. #12981 then closed with
+// PR #15472.
+//
+// Those two names are therefore labelled `gate-vocabulary` below (#15459): after
+// that PR they ARE declared in the gate, and the census's OVERLAP reading has to
+// say what the tree says. `tryDelete` is not in the gate and stays
+// `seed-wrapper`. The copy stays a copy, and is now cross-checked against the
+// gate's own declaration on every `--self-test` -- see `readGateVocabulary`.
+//
+// The prohibitions this step was held behind did NOT expire with it. Two of them
+// were re-affirmed by the ruling that closed the programme (#12981 comment
+// 5543738972, Q1 = A), and they are standing:
 //
 //   - ⛔ do NOT add an entry to `durability-degradation.baseline.json` (option B,
 //     refused by the ruling: filling the empty ledger teaches every seat that
@@ -223,11 +256,16 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import ts from 'typescript';
+import { requireDefaultExport } from './import-prerequisite.mjs';
+const ts = await requireDefaultExport('typescript', () => import('typescript'), import.meta.url);
 import { parseSourceFile } from './ts-parse.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const SCAN_ROOT = join(ROOT, 'packages');
+
+/** The sibling GATE, READ (never imported) so the copy below can be cross-checked. */
+const GATE_SCRIPT = 'scripts/check-durability-degradation-log-level.mjs';
+const GATE_VOCABULARY_IDENT = 'DURABILITY_CRITICAL_CALLEES';
 
 /**
  * Callees whose failure means "the bytes did not land".
@@ -240,14 +278,23 @@ const SCAN_ROOT = join(ROOT, 'packages');
  *   - `objectql`         -- the ObjectQL-level write surface the seeders use.
  *   - `seed-wrapper`     -- the `catch { return null; }` helpers this family IS
  *                           (`permission-set-projection.ts` and its per-file
- *                           copies). These are the names the ruling's last step
- *                           hands to the gate.
+ *                           copies) that the gate does NOT declare. `tryInsert`
+ *                           and `tryUpdate` sat here until the ruling's last step
+ *                           handed them over (PR #15458); they are
+ *                           `gate-vocabulary` now, because that is what the tree
+ *                           says. `tryDelete` was not part of that handover and
+ *                           is still this census's alone.
  *   - `gate-vocabulary`  -- already declared in
  *                           `check-durability-degradation-log-level.mjs`.
  *                           Carried here so the census can report the OVERLAP:
  *                           how many members the gate can already see. Copied by
  *                           value on purpose -- importing the gate's map would
  *                           couple a non-gate instrument to a merge-blocking one.
+ *                           A by-value copy's failure mode is SILENCE, so this
+ *                           subset is cross-checked against the gate's own
+ *                           declaration on every `--self-test` and reddens on
+ *                           drift -- see `readGateVocabulary`. It announces;
+ *                           it never absorbs.
  */
 const WRITE_SHAPED_CALLEES = new Map([
   ['insert', 'objectql'],
@@ -261,9 +308,9 @@ const WRITE_SHAPED_CALLEES = new Map([
   ['updateMany', 'driver-contract'],
   ['deleteMany', 'driver-contract'],
   ['dropTable', 'driver-contract'],
-  ['tryInsert', 'seed-wrapper'],
-  ['tryUpdate', 'seed-wrapper'],
   ['tryDelete', 'seed-wrapper'],
+  ['tryInsert', 'gate-vocabulary'],
+  ['tryUpdate', 'gate-vocabulary'],
   ['syncSchema', 'gate-vocabulary'],
   ['syncSchemasBatch', 'gate-vocabulary'],
   ['syncRegisteredSchemas', 'gate-vocabulary'],
@@ -457,8 +504,9 @@ const REGRESSION_CONTROLS = [
 /**
  * RESOLUTION controls: a (call site -> body) pair that must not move.
  *
- * The other three families all read MEMBERSHIP, and membership cannot see this
- * defect. Measured, on the tree the scope-aware index landed against: the flat
+ * The other membership-reading families -- POSITIVE, NEGATIVE, REGRESSION -- all
+ * read MEMBERSHIP, and membership cannot see this defect. Measured, on the tree
+ * the scope-aware index landed against: the flat
  * last-wins index misresolved 27 reached call sites, and the census printed
  * byte-identical output before and after the repair — 56 members, 98 quiet, the
  * same stats. A control that reads the census output is therefore GREEN against
@@ -568,6 +616,94 @@ const RESOLUTION_CONTROLS = [
 ];
 
 /**
+ * What the tier-1 worklist PRINTS, pinned against a declared population.
+ *
+ * ## Why a fixture, in an instrument that measures
+ *
+ * The worklist body has three readings and this tree can only reach one of
+ * them: it prints a row per file with an outstanding DARK member, and there is
+ * one outstanding member here (`auth-manager.ts::verifyMcpAccessToken`) beside
+ * three DETERMINED rows. So neither `(none …)` line has ever been printed by a
+ * run of this instrument, and an unreachable reading is a reading nobody
+ * proofreads.
+ *
+ * That is measured, not feared. The empty-worklist line said the ruling's gate
+ * handover step "is unblocked" — and went on saying it after PR #15458
+ * performed that step and PR #15472 closed #12981, and through the sweep that
+ * repaired the four stale statements around it (#15459, #15473, PR #15502),
+ * because a string no run can print is a string no run can contradict (#15503).
+ *
+ * ## What is asserted, and what is deliberately not
+ *
+ * `worklistLines` is handed a population this tree does not have, and what it
+ * returns is pinned BY VALUE below. The pin is a SECOND, INDEPENDENT spelling
+ * of each line on purpose: a control that compared the producer against a
+ * shared constant would pass whatever that constant said, which is the vacuous
+ * shape the rest of this file argues against.
+ *
+ * ⛔ No row here is a claim about the tree. Membership is measured from
+ * `packages/**` and is decided before this family is consulted; the only thing
+ * asserted is what the report SAYS about a population it is handed. The
+ * census's own reading is byte-identical across the change that added this
+ * family.
+ *
+ * The third row is the family's NEGATIVE leg and is not optional: without a
+ * population that must NOT print either `(none …)` line, the two pins above
+ * would stay green against a producer that had stopped consulting its
+ * population at all. It pins the row format and the by-file sort with the same
+ * stroke.
+ *
+ * Asserted in BOTH self-test modes, by the test `SELF_TEST_MODES` states: can a
+ * successful repair destroy it? No — the empty worklist it pins is the state
+ * the repair programme is trying to reach, so the day this family matters most
+ * is the day the programme succeeds.
+ */
+const WORKLIST_READING_CONTROLS = [
+  {
+    when: 'no outstanding member and no DETERMINED row — the programme has finished',
+    outstanding: [],
+    determined: [],
+    expect: [
+      '    (none — the family is repaired; the gate handover step landed in PR #15458, and #12981 closed with PR #15472)',
+    ],
+    why:
+      'The reading this family was added for (#15503). It must state the handover as LANDED: PR #15458 '
+      + 'declared `tryInsert`/`tryUpdate` in the gate\'s `DURABILITY_CRITICAL_CALLEES` and PR #15472 closed '
+      + '#12981. A future tense here would announce a step that already happened, on the one day this '
+      + 'instrument is finally read for its verdict rather than its worklist.',
+  },
+  {
+    when: 'no outstanding member, but the register still holds rows',
+    outstanding: [],
+    determined: [{ file: 'packages/fixture/src/register-only.ts' }],
+    expect: [
+      '    (none outstanding — every DARK member is DETERMINED below, and every one is still a member)',
+    ],
+    why:
+      'The other unreachable reading. It has to keep saying that a DETERMINED site is STILL A MEMBER — '
+      + 'the whole point of the #13886 register is that it partitions the printed worklist and moves no '
+      + 'count, and this is the one line a reader meets that claim in.',
+  },
+  {
+    when: 'two outstanding members in two files — the shape this tree actually prints',
+    outstanding: [
+      { file: 'packages/fixture/src/beta.ts' },
+      { file: 'packages/fixture/src/alpha.ts' },
+      { file: 'packages/fixture/src/alpha.ts' },
+    ],
+    determined: [],
+    expect: [
+      '    2×  packages/fixture/src/alpha.ts',
+      '    1×  packages/fixture/src/beta.ts',
+    ],
+    why:
+      'The NEGATIVE leg: a population with work in it must print the work and NEITHER `(none …)` line. '
+      + 'Without it the two pins above would also pass for a producer that ignored its population and '
+      + 'printed the empty reading unconditionally. It pins the count column and the by-file sort too.',
+  },
+];
+
+/**
  * The DETERMINED register (#13886) — DARK sites whose determination is settled.
  *
  * ## The defect it repairs, and the one thing it must NOT do
@@ -670,10 +806,13 @@ const DETERMINED = new Map([
         + 'several rounds and was listed under "the repair worklist" on every run, so batch 7 had to '
         + 'open the file to discover it was already settled. Nothing claims to have persisted and the '
         + 'request does not look normal from the outside — AGENTS.md\'s third legal ending. Its '
-        + 'delivery is pinned in `http-dispatcher.keys.test.ts`. ⛔ The declaration this site is '
-        + 'waiting for belongs to the programme\'s LAST step, the one that widens '
-        + '`DURABILITY_CRITICAL_CALLEES`; this row does not bring that step forward and must not be '
-        + 're-keyed by it.',
+        + 'delivery is pinned in `http-dispatcher.keys.test.ts`. ⛔ This site is waiting for '
+        + 'nothing: the #12981 ruling (comment 5543738972, Q1 = A) settled that no gate declaration is '
+        + 'owed here, ever. The widening that landed (PR #15458) added `tryInsert`/`tryUpdate`, and '
+        + 'neither matches a seam in this function; the only name that would is bare `insert`, which '
+        + 'this census refuses by design. An entry keyed here would be STALE on arrival, so THIS ROW '
+        + 'is the record -- which is what the ruling relies on. PR #15472 rewrote the in-file note to '
+        + 'say so and kept the anchor sentence byte-identical.',
     },
   ],
   [
@@ -825,9 +964,9 @@ function staleLines(stale) {
  *
  * ## Why there is a subset at all
  *
- * All four families were green only while somebody remembered to run them by
- * hand: measured on `origin/main`, nothing in `package.json` or `.github/**`
- * named this script. The same resolver was then repaired three times (#13459,
+ * The families that existed then (POSITIVE, NEGATIVE, REGRESSION, RESOLUTION)
+ * were green only while somebody remembered to run them by hand: measured on
+ * `origin/main`, nothing in `package.json` or `.github/**` named this script. The same resolver was then repaired three times (#13459,
  * #13474, PR #13915) with no gate holding any of the previous repairs, and the
  * census's numbers feed #12981's repair worklist, so a wrong denominator
  * propagates into that programme unwatched.
@@ -844,8 +983,10 @@ function staleLines(stale) {
  * repairs THAT file. ⛔ A gate that reddens on success is not a gate, and worse,
  * it teaches the fleet to route around gates.
  *
- * So `gated` is the families the repair programme CANNOT destroy — three at
- * #13919, joined by the `DETERMINED` register at #13886 (last section) — and the
+ * So `gated` is the families the repair programme CANNOT destroy — NEGATIVE,
+ * REGRESSION and RESOLUTION at #13919, joined by the `DETERMINED` register
+ * (#13886, last sections), the copied gate vocabulary (#15459) and the worklist
+ * readings (#15503, whose case is made at `WORKLIST_READING_CONTROLS`) — and the
  * exclusion is PERMANENT rather than pending (#13919 ruling of 2026-09-01,
  * boundary 1): repairs move a member from tier `dark` to tier `channelled` and
  * it stays a member, so neither the negative controls, the regression controls,
@@ -856,10 +997,10 @@ function staleLines(stale) {
  * asserts membership at a declared TIER lives in `all`, and `all` is what a
  * human or an agent touching this instrument runs.
  *
- * ⛔ This subset is also not, and must not be used to bring forward, the
- * ruling's reserved handover step (`tryInsert`/`tryUpdate` into the real gate's
- * `DURABILITY_CRITICAL_CALLEES`, still gated on `outstanding == 0`) -- see "The
- * handover" above.
+ * ⛔ This subset was also not, and must never be used as, a route to the
+ * ruling's handover step (`tryInsert`/`tryUpdate` into the real gate's
+ * `DURABILITY_CRITICAL_CALLEES`). That step landed on its own terms in PR
+ * #15458 -- see "The handover" above.
  *
  * ## The FIFTH family (#13886) is in BOTH modes, and that is the point
  *
@@ -878,6 +1019,37 @@ function staleLines(stale) {
  * (`FAILURE_PROPAGATION_SITES`), demanding a one-line deletion that lands with
  * the repair. That is categorically unlike `POSITIVE_CONTROLS`, where the
  * cheapest way to green is to WEAKEN the control.
+ *
+ * ## The COPIED gate vocabulary (#15459) is in both modes, for the same reason
+ *
+ * `WRITE_SHAPED_CALLEES` carries the gate's vocabulary BY VALUE, and the
+ * `--self-test` compares that copy against the gate's own declaration
+ * (`readGateVocabulary`). It passes the same test: a successful repair cannot
+ * destroy it, because it compares two DECLARATIONS and never touches membership.
+ * It is in `gated` because drift is exactly the failure a farm has to catch --
+ * PR #15458 grew the gate's map from 18 names to 20 and this file went stale in
+ * four places the same afternoon (#15459, #15473), under a green farm the whole
+ * time, which is the cost of an uncross-checked copy stated as a measurement.
+ *
+ * ## The WORKLIST READINGS (#15503) are in both modes, for the same reason
+ *
+ * `WORKLIST_READING_CONTROLS` pins what the tier-1 worklist PRINTS, and the
+ * `--self-test` exercises those readings against a DECLARED population rather
+ * than against this tree: neither `(none …)` line has ever been printed by a run
+ * of this instrument, and an unreachable reading is a reading nobody proofreads.
+ * That does not weaken its claim to `gated`, it is the claim. The family passes
+ * the test the two sections above apply, and its own declaration states the
+ * answer in those words: can a successful repair destroy it? "No — the empty
+ * worklist it pins is the state the repair programme is trying to reach", so the
+ * day this family matters most is the day the programme succeeds. The self-test
+ * body says the mechanical half: it "compares a producer against a declared
+ * population and never touches membership", so no repair can destroy it.
+ *
+ * ⛔ That is the pattern and not a courtesy: A FAMILY THAT JOINS `gated` OWES A
+ * SECTION HERE, arguing on those terms why a successful repair cannot destroy
+ * it. This block is where the self-test body sends a reader asking that
+ * question, and a pointer landing on a block that names every family but the one
+ * asked about is how the next author learns the obligation is optional.
  */
 const SELF_TEST_MODES = new Set(['all', 'gated']);
 
@@ -1165,7 +1337,7 @@ function isAwaited(node) {
  *
  * Only `foo(...)` and `this.foo(...)` may resolve to a same-file body. Measured
  * cost of the looser rule, which resolved any dotted path by its LAST segment:
- * `packages/services/service-job/src/db-job-adapter.ts:139` calls
+ * `packages/services/service-job/src/db-job-adapter.ts#cancel` calls
  * `this.cron.cancel(name)` — the CronJobAdapter's method — and the loose rule
  * walked into the file's OWN `cancel()` method, reached `setActive()`'s
  * `engine.update(...)` two frames down, and reported a cron-registry cleanup as
@@ -1547,6 +1719,35 @@ function formatSite(f) {
     + `${f.healthySummaryInFile ? '  healthySummary' : ''}\n      ${f.snippet}`;
 }
 
+/**
+ * The BODY of the tier-1 worklist: one row per file that still holds an
+ * outstanding DARK member, or the one line the report prints when it holds
+ * none.
+ *
+ * Split out of `report()` so the two `(none …)` readings can be exercised
+ * against a declared population instead of only against this tree — see
+ * `WORKLIST_READING_CONTROLS`, which is the reason this function exists as a
+ * function. It takes its population as arguments and reads nothing else, so a
+ * control can hand it a tree that does not exist without touching the census.
+ *
+ * @param outstanding tier-1 DARK members with no DETERMINED row honouring them.
+ * @param determined  tier-1 DARK members a DETERMINED row does honour. Only its
+ *                    LENGTH is read here: the rows themselves are printed by the
+ *                    register's own block below this one in `report()`.
+ */
+function worklistLines(outstanding, determined) {
+  const out = [];
+  const byFile = new Map();
+  for (const m of outstanding) byFile.set(m.file, (byFile.get(m.file) ?? 0) + 1);
+  for (const [file, count] of [...byFile.entries()].sort()) out.push(`    ${count}×  ${file}`);
+  if (byFile.size === 0 && determined.length === 0) {
+    out.push('    (none — the family is repaired; the gate handover step landed in PR #15458, and #12981 closed with PR #15472)');
+  } else if (byFile.size === 0) {
+    out.push('    (none outstanding — every DARK member is DETERMINED below, and every one is still a member)');
+  }
+  return out;
+}
+
 function report({ sites = false } = {}) {
   const { stats, members, quiet } = census();
   const dark = members.filter((m) => m.tier === 'dark');
@@ -1595,14 +1796,7 @@ function report({ sites = false } = {}) {
   const outstanding = dark.filter((m) => !excused.has(determinedKey(m)));
   const determined = dark.filter((m) => excused.has(determinedKey(m)));
   out.push('  [1] DARK members, by file — the repair worklist:');
-  const byFile = new Map();
-  for (const m of outstanding) byFile.set(m.file, (byFile.get(m.file) ?? 0) + 1);
-  for (const [file, count] of [...byFile.entries()].sort()) out.push(`    ${count}×  ${file}`);
-  if (byFile.size === 0 && determined.length === 0) {
-    out.push('    (none — the family is repaired; the gate handover step is unblocked)');
-  } else if (byFile.size === 0) {
-    out.push('    (none outstanding — every DARK member is DETERMINED below, and every one is still a member)');
-  }
+  for (const line of worklistLines(outstanding, determined)) out.push(line);
   if (determined.length > 0) {
     out.push('');
     out.push(`  DETERMINED, not outstanding                  ${determined.length} site(s) in ${memberFiles(determined).length} file(s)`);
@@ -1687,6 +1881,76 @@ function checkResolutionControl(control) {
     }
   });
   return { matched, wrong };
+}
+
+/**
+ * The gate's `DURABILITY_CRITICAL_CALLEES` names, read out of its SOURCE.
+ *
+ * `WRITE_SHAPED_CALLEES` copies that vocabulary by value on purpose (its header
+ * says why), and a by-value copy's failure mode is SILENCE: the gate grows a
+ * name, the copy does not, and this census keeps printing an OVERLAP reading
+ * that is simply wrong with nothing anywhere to say so. That is the lie-carrier
+ * shape the `DETERMINED` register closes one layer down, and it is not
+ * hypothetical here -- see the section above.
+ *
+ * So the copy is CROSS-CHECKED, not replaced. The gate is still never imported:
+ * a non-gate instrument that imports a merge-blocking one inherits its blocking,
+ * and the map is not exported in any case. It is PARSED, the way every other
+ * fact in this file is read -- through `parseSourceFile`, which refuses an
+ * unparseable source instead of scoring it empty.
+ *
+ * ⛔ Announce, never absorb. The census does not adopt the gate's names on the
+ * fly; drift reddens the self-test and a person decides which side moved.
+ *
+ * @returns the declared names in source order, or `null` when the declaration
+ *          cannot be read in the shape this cross-check understands -- which the
+ *          caller reports as a FAILURE, never as "no names".
+ */
+function readGateVocabulary() {
+  const file = join(ROOT, GATE_SCRIPT);
+  const sf = parseSourceFile(file, readFileSync(file, 'utf8'), scriptKindFor(file));
+  let names = null;
+  walkAll(sf, (node) => {
+    if (names !== null || !ts.isVariableDeclaration(node)) return;
+    if (!ts.isIdentifier(node.name) || node.name.text !== GATE_VOCABULARY_IDENT) return;
+    const init = node.initializer;
+    if (!init || !ts.isNewExpression(init) || init.arguments?.length !== 1) return;
+    const [entries] = init.arguments;
+    if (!ts.isArrayLiteralExpression(entries)) return;
+    const collected = [];
+    for (const entry of entries.elements) {
+      // A shape this reader does not understand must not degrade to a shorter
+      // list: that would green the comparison against a vocabulary nobody read.
+      if (!ts.isArrayLiteralExpression(entry) || entry.elements.length === 0) return;
+      const [key] = entry.elements;
+      if (!ts.isStringLiteralLike(key)) return;
+      collected.push(key.text);
+    }
+    names = collected;
+  });
+  return names;
+}
+
+/** The census's copy of that vocabulary: the `gate-vocabulary` origin subset. */
+function copiedGateVocabulary() {
+  return [...WRITE_SHAPED_CALLEES]
+    .filter(([, origin]) => origin === 'gate-vocabulary')
+    .map(([name]) => name);
+}
+
+/**
+ * @returns `{ missing, extra }` -- names the gate declares that the copy lacks,
+ *          and names labelled `gate-vocabulary` here that the gate does not
+ *          declare. Both directions matter: the first is a member the census
+ *          under-reports as overlap, the second is overlap it invents.
+ */
+function compareGateVocabulary(copied, declared) {
+  const copiedSet = new Set(copied);
+  const declaredSet = new Set(declared);
+  return {
+    missing: declared.filter((name) => !copiedSet.has(name)),
+    extra: copied.filter((name) => !declaredSet.has(name)),
+  };
 }
 
 function selfTest(mode = 'all') {
@@ -1801,6 +2065,74 @@ function selfTest(mode = 'all') {
     }
   }
 
+  // ── The COPIED gate vocabulary (#15459), asserted in BOTH modes ───────────
+  //
+  // See SELF_TEST_MODES for why this leg is gated. Two legs: the copy must equal
+  // the gate's own declaration, and the comparison must be able to say it does
+  // not.
+  const declaredGateNames = readGateVocabulary();
+  const copiedGateNames = copiedGateVocabulary();
+  if (declaredGateNames === null) {
+    problems.push(`the gate's \`${GATE_VOCABULARY_IDENT}\` could not be read out of ${GATE_SCRIPT} in the `
+      + 'shape this cross-check understands. Reported as a FAILURE and never as "no names": an '
+      + 'unreadable declaration compared silently would green this leg forever, which is the exact '
+      + 'defect the cross-check exists to close. Re-point `readGateVocabulary` at its new shape.');
+  } else {
+    const drift = compareGateVocabulary(copiedGateNames, declaredGateNames);
+    if (drift.missing.length > 0 || drift.extra.length > 0) {
+      problems.push('the `gate-vocabulary` copy in `WRITE_SHAPED_CALLEES` has DRIFTED from the gate\'s own '
+        + `\`${GATE_VOCABULARY_IDENT}\` (${copiedGateNames.length} copied, ${declaredGateNames.length} declared)`
+        + (drift.missing.length > 0
+          ? `\n    declared by the gate, missing from the copy: ${drift.missing.join(', ')}` : '')
+        + (drift.extra.length > 0
+          ? `\n    labelled \`gate-vocabulary\` here, NOT declared by the gate: ${drift.extra.join(', ')}` : '')
+        + '\n    The copy is deliberate and is NOT adopted automatically (see `WRITE_SHAPED_CALLEES`):'
+        + ' decide which side moved. A name the gate gained belongs in the copy; a name this census'
+        + ' wants that the gate does not declare belongs under a different `origin`.');
+    }
+    // NEGATIVE leg — the comparison must actually fire. A cross-check that
+    // cannot report drift is the by-value copy's own failure mode wearing a
+    // green tick, so perturb the copy in BOTH directions and require both back.
+    const probeAbsent = copiedGateNames[0];
+    const probeInvented = 'aNameNoGateWillEverDeclare';
+    const probe = compareGateVocabulary([...copiedGateNames.slice(1), probeInvented], declaredGateNames);
+    if (!probe.missing.includes(probeAbsent) || !probe.extra.includes(probeInvented)) {
+      problems.push('the gate-vocabulary cross-check did not fire: a copy with one declared name dropped '
+        + `and one undeclared name added was compared as ${probe.missing.length} missing / `
+        + `${probe.extra.length} extra. Without this leg the comparison can pass VACUOUSLY.`);
+    }
+  }
+
+  // ── What the WORKLIST PRINTS (#15503), asserted in BOTH modes ────────────
+  //
+  // See WORKLIST_READING_CONTROLS for why these readings are exercised against
+  // a declared population rather than against the tree — two of the three
+  // cannot be reached from `packages/**` today — and SELF_TEST_MODES for why
+  // this family is gated: it compares a producer against a declared population
+  // and never touches membership, so no repair can destroy it.
+  //
+  // The table is pinned to its own length first (#13799's floor recipe): a loop
+  // over an emptied table runs zero cases and prints nothing, which reads in a
+  // CI log exactly like a pass.
+  const WORKLIST_READING_CONTROL_COUNT = 3;
+  if (WORKLIST_READING_CONTROLS.length !== WORKLIST_READING_CONTROL_COUNT) {
+    problems.push(`the worklist reading table holds ${WORKLIST_READING_CONTROLS.length} control(s), not the `
+      + `${WORKLIST_READING_CONTROL_COUNT} it is pinned at. Both empty readings and the negative leg that `
+      + 'keeps them honest are declared there; a row deleted rather than re-pointed takes its reading out '
+      + 'of every run silently, which is the failure this family exists to close.');
+  }
+  for (const control of WORKLIST_READING_CONTROLS) {
+    const printed = worklistLines(control.outstanding, control.determined);
+    const same = printed.length === control.expect.length
+      && printed.every((line, i) => line === control.expect[i]);
+    if (!same) {
+      problems.push(`the worklist's reading moved: ${control.when}\n`
+        + `${control.expect.map((l) => `      declared: |${l}|`).join('\n')}\n`
+        + `${printed.map((l) => `      printed:  |${l}|`).join('\n') || '      printed:  (nothing)'}\n`
+        + `    ${control.why}`);
+    }
+  }
+
   // The durability filter must actually filter: the raw shape is ~3.5x this.
   if (members.length === 0) {
     problems.push('census found ZERO members — on this tree that is a broken matcher, not a clean repo.');
@@ -1818,6 +2150,8 @@ function selfTest(mode = 'all') {
       + `${REGRESSION_CONTROLS.length} regression control(s) stay clear, `
       + `${RESOLUTION_CONTROLS.length} resolution control(s) resolve as declared, `
       + `${DETERMINED.size} DETERMINED register row(s) cross-check clean, `
+      + `${copiedGateNames.length} copied gate-vocabulary name(s) match the gate's own declaration, `
+      + `${WORKLIST_READING_CONTROLS.length} worklist reading(s) print as declared over a fixture population, `
       + `${members.length} member site(s) total\n`
       + `   ${POSITIVE_CONTROLS.length} positive control(s) are NOT asserted here, permanently: they pin `
       + 'members of the #12981 worklist, which\n   that programme exists to remove — a control the repair '
@@ -1832,6 +2166,8 @@ function selfTest(mode = 'all') {
     + `${REGRESSION_CONTROLS.length} regression control(s) stay clear, `
     + `${RESOLUTION_CONTROLS.length} resolution control(s) resolve as declared, `
     + `${DETERMINED.size} DETERMINED register row(s) cross-check clean, `
+    + `${copiedGateNames.length} copied gate-vocabulary name(s) match the gate's own declaration, `
+    + `${WORKLIST_READING_CONTROLS.length} worklist reading(s) print as declared over a fixture population, `
     + `${members.length} member site(s) total\n`,
   );
   return 0;

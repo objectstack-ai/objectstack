@@ -417,6 +417,12 @@ export const ERROR_CODE_LEDGER = {
     'SSO_REGISTER_FAILED',
     'SSO_REGISTER_FORBIDDEN',
     'USER_ALREADY_EXISTS',        // pass-through from better-auth
+    // [#15587] Raised by US on `/sign-up/email` for an address that already
+    // carries a `sys_user` row, using better-auth's own BASE_ERROR_CODES entry
+    // so the refusal is byte-identical whichever lane produces it. Registered
+    // here because the platform now EMITS it rather than only passing it
+    // through: an emitted-but-unregistered code is the silent fourth state.
+    'USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL',
     'VALIDATION_FAILED',
   ],
   '@objectstack/plugin-sharing': [
@@ -1180,6 +1186,21 @@ export const PROVENANCE_WAIVERS: readonly ProvenanceWaiver[] = [
       '(kernel/metadata-protection.zod.ts) construct the structured refusal, and the ' +
       'protocol layer — the registered emitter — turns it into the 403 the wire carries ' +
       '(ADR-0010 §3.3). Spec ships schemas and pure helpers, never an HTTP door.',
+  },
+  {
+    package: '@objectstack/plugin-sharing',
+    code: 'ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED',
+    registeredUnder: '@objectstack/objectql',
+    reason: 'Matches the code, never emits it (#14754, adjudicated on #14937 — maintainer ' +
+      'ruling A, 2026-09-04): `ENGINE_ORGANIZATION_REFUSAL_CODE` in ' +
+      '`plugin-sharing/src/sharing-rule-service.ts` is a `constdef` the per-grant catch in BOTH ' +
+      'reconcile loops compares an incoming `err.code` against, so exactly one engine refusal is ' +
+      'absorbed and a refused grant no longer aborts the pass or its stale-row revocations. The ' +
+      'emitter is `@objectstack/objectql` (`SystemWriteOrganizationRequiredError`, ' +
+      'tenancy/system-write-organization.ts) and the objectql owner key already carries the row ' +
+      '(#8844). Recognising a code is not emitting it; the named constant is typed FROM the ' +
+      'engine\'s own declaration so it cannot drift from what the engine throws. Removed together ' +
+      'with the stamp site when #14936 lands and objectql publishes a recognizer.',
   },
   {
     package: '@objectstack/types',

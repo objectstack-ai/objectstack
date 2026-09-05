@@ -71,7 +71,7 @@
 // design.
 //
 // ⛔ One direction is deliberately NOT fatal: a module export that the
-// declaration omits. `check-regen-pending.mjs` exports seven functions and
+// declaration omits. `check-regen-pending.mjs` exports eight functions and
 // declares three, on purpose -- its declaration says "The surface is three
 // functions". That partial mirror cannot fail green: a consumer importing an
 // undeclared name gets `TS2305`, which is loud, red and immediate. Failing on
@@ -117,6 +117,61 @@ import { isEntrypoint } from './invoked-as.mjs';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '..');
 const SCRIPTS_DIR = join(REPO_ROOT, 'scripts');
+
+/**
+ * POPULATION DECLARATION -- the corpus this gate's verdict is ABOUT, in the
+ * subtree spelling `scripts/pm/dispatch-gates.mjs` compares in.
+ *
+ * Nothing here reads it; `mirrorFiles()` and `checkPair()` do. It is declared
+ * anyway, because the dispatch derivation reads SOURCE TEXT and this gate's
+ * population is discovered by EXTENSION with no path literal anywhere: the walk
+ * is rooted at `SCRIPTS_DIR`, whose only spelled component is the bare
+ * single-segment word `scripts` -- no separator, so `extractWatchHints`
+ * recovers nothing from it, and `hintCovers` would refuse a bare word anyway.
+ *
+ * Measured on `ca46f8f12` before this constant existed, on the exact change set
+ * the defect was filed from:
+ *
+ *   dispatch-gates --commands -- scripts/js-comment-mask.d.mts \
+ *                                scripts/js-comment-mask.mjs
+ *     -> 31 commands, ZERO of them this gate
+ *
+ * So the one class of change this gate exists for -- a hand-written `.d.mts`
+ * moving out of step with the module it mirrors -- was the class the derivation
+ * never sent here, and the red arrived in CI a cycle late (#15553; the specimen
+ * is PR #15532, whose 32 derived commands were all green while this gate went
+ * red on an arity mismatch).
+ *
+ * BOTH SIDES are declared, because either side moving breaks the mirror: the
+ * declaration side is what `mirrorFiles()` walks, and the module side is what
+ * `checkPair()` imports to read `Function.length` off. A change set naming only
+ * `js-comment-mask.mjs` can turn this gate red without touching a `.d.mts` at
+ * all.
+ *
+ * ⛔ NOT a hand list of the four mirror pairs: the corpus is DISCOVERED on
+ * purpose (see this file's header), and a hint list that enumerated today's
+ * pairs would go quiet on the fifth exactly as the walk would not.
+ *
+ * ## The precision this costs, measured rather than asserted
+ *
+ * `scripts/**\/*.d.mts` reaches 4 tracked files and this gate reads all 4 --
+ * 100% precise. `scripts/**\/*.mjs` reaches 214 and this gate reads 4 of them
+ * -- 1.9%. That second hint is the price of keeping the module side declared
+ * without a hand list, and it is small in the only currency that matters here:
+ * the pair of commands `lint.yml` runs costs ~0.18 s of wall clock, and over
+ * the 36 open PRs on the day this landed it newly named this gate on 10 of them
+ * (1 through the `.d.mts` hint, 9 through the `.mjs` one). ~1.6 s of fleet
+ * compute per 36 cards, against a defect class whose alternative is a CI red a
+ * cycle late. Under `hintCovers`' recorded ruling -- over-naming is loud and
+ * self-limiting, under-naming is silent -- that trade runs the right way.
+ *
+ * Spelled as a LITERAL array, never computed from the walk's extension test:
+ * the extractor reads SOURCE TEXT, so a built spelling keeps this value
+ * identical at runtime, keeps every assertion about it green, and contributes
+ * ZERO hints. `check-watch-hint-literal.mjs` holds that rule fleet-wide; the
+ * self-test below holds the own-source half.
+ */
+const ROOT_DIR_WATCH_HINTS = ['scripts/**/*.d.mts', 'scripts/**/*.mjs'];
 
 /**
  * The export spellings this parser recognises, in the words a declaration
@@ -406,9 +461,63 @@ async function main() {
 // as one that passed (#13798).
 const SELF_TEST_VERDICT = 'check-declaration-mirrors self-test reached its verdict';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `cases.filter((c) => !c.cond)` used to be this self-test's ONLY success
+// condition, so "every case
+// held" and "the cases never ran" printed the same line. Closed the way
+// PR #13487 validated on check-doc-authoring: what is pinned is the registered
+// NAMES, not a number. The floor requires the OPENED set to equal the DECLARED
+// set with each battery at or above its own count.
+//
+// This file declares ONE battery, opened at the top of the self-test body. Its
+// blocks are headed by unmarked prose comments, so it carries fewer than the two
+// named section banners the sectioning criterion needs, and ⛔ a comment is NOT
+// promoted to a section head — that is a judgement per comment this transplant
+// does not make. The hoisted single battery is the shape PR #14896, PR #15003
+// and PR #15217 landed for exactly this case.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The count is a FLOOR, not an equality — adding cases is ordinary work and must
+// not red. A battery BELOW its floor means cases stopped running; the remedy is
+// to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'check-declaration-mirrors self-test': 29,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 1;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 async function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const batterySeen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+  };
+  battery('check-declaration-mirrors self-test');
   const cases = [];
-  const ok = (label, cond) => cases.push({ label, cond });
+  // The concise arrow gains a BLOCK body so the case can be registered before
+  // it is recorded; `cases.push` is unchanged, so no assertion is rewritten.
+  const ok = (label, cond) => {
+    registerCase();
+    cases.push({ label, cond });
+  };
   const dir = mkdtempSync(join(tmpdir(), 'os-decl-mirror-'));
   let seq = 0;
 
@@ -548,6 +657,117 @@ async function selfTest() {
     'and it finds them under scripts/ by extension, not by a hand-kept list',
     mirrorFiles().every((f) => f.endsWith('.d.mts')),
   );
+
+  // ── the population this gate DECLARES to the dispatch derivation (#15553) ──
+  //
+  // The walk above is discovered by EXTENSION and spells no path, so before the
+  // declaration beside `SCRIPTS_DIR` existed a change set naming a mirror --
+  // either half of one -- derived every other `scripts/` family and not this
+  // one. Nothing in THIS file can ENFORCE the declaration: `extractWatchHints`
+  // and `hintCovers` live in another tool entirely, so a wrong or missing one
+  // runs green here forever. What CAN be held here are the properties a wrong
+  // one breaks -- it is a live literal the extractor can read, it is not the
+  // bare root the consumer refuses or over-names on, and its extensions still
+  // admit every file the walk really opens, on BOTH sides of a mirror.
+  const declaredRoots = ROOT_DIR_WATCH_HINTS.map((h) => h.split('/')[0]);
+  const declaredSuffixes = ROOT_DIR_WATCH_HINTS.map((h) => h.slice(h.lastIndexOf('*') + 1));
+  const admits = (repoRelative) =>
+    ROOT_DIR_WATCH_HINTS.some((h, i) =>
+      repoRelative.split('/')[0] === declaredRoots[i] && repoRelative.endsWith(declaredSuffixes[i]));
+  ok(
+    'the gate declares a population at all',
+    Array.isArray(ROOT_DIR_WATCH_HINTS) && ROOT_DIR_WATCH_HINTS.length > 0,
+  );
+  ok(
+    'every declared hint is multi-segment, so the consumer does not refuse it as a bare word',
+    ROOT_DIR_WATCH_HINTS.every((h) => h.split('/').filter(Boolean).length > 1),
+  );
+  ok(
+    'and none of them is the bare subtree or the repo root, which would name this gate for every '
+      + 'JSON, Markdown and text file the walk never opens',
+    ROOT_DIR_WATCH_HINTS.every((h) => !h.endsWith('/**') && h !== '.' && h !== '**'),
+  );
+  // The card's own point, held against the LIVE walk rather than a fixture: the
+  // declaration side of every mirror this tree really has is admitted by the
+  // extensions declared. A fifth pair added tomorrow is walked by `mirrorFiles`
+  // and covered by the same hint, which is the property a hand list would lose.
+  ok(
+    'every declaration the walk discovers is admitted by a declared hint',
+    mirrorFiles().length > 0
+      && mirrorFiles().every((f) => admits(relative(REPO_ROOT, f).split(sep).join('/'))),
+  );
+  // And the MODULE side, which `checkPair` imports to read `Function.length`
+  // off: an arity change there reds this gate with no `.d.mts` edited at all,
+  // so a declaration naming only the declarations would miss half the class.
+  ok(
+    'and so is the module each declaration mirrors, whose arity the gate reads',
+    mirrorFiles().length > 0
+      && mirrorFiles().every((f) =>
+        admits(relative(REPO_ROOT, f.replace(/\.d\.mts$/, '.mjs')).split(sep).join('/'))),
+  );
+  // Read from THIS file's own source, comment-masked and scoped to the
+  // declaration STATEMENT: a whole-file search finds the spellings the docblock
+  // above writes and passes on a computed declaration, which is the one
+  // spelling that keeps every case above green while contributing ZERO hints.
+  const ownDeclaration = (() => {
+    const code = maskComments(readFileSync(fileURLToPath(import.meta.url), 'utf8'));
+    const sites = [...code.matchAll(/\bconst\s+ROOT_DIR_WATCH_HINTS\s*=\s*([^;]*);/g)];
+    return sites.length === 1 ? sites[0][1] : null;
+  })();
+  ok(
+    'the declaration is ONE literal array of quoted strings — a computed spelling keeps this value '
+      + 'identical at runtime and contributes ZERO hints to the derivation',
+    ownDeclaration !== null
+      && ROOT_DIR_WATCH_HINTS.every((h) => ownDeclaration.includes(`'${h}'`))
+      && /^\s*\[\s*(?:'[^'\\]*'\s*,\s*)*'[^'\\]*'\s*,?\s*\]\s*$/.test(ownDeclaration),
+  );
+
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  // This file's sink IS the `cases` ledger, so the floor speaks its idiom: a
+  // breach is recorded as a failing case and reds through the existing verdict
+  // below. It bypasses `ok()` deliberately — a floor message is not a case.
+  const floorFailure = (message) => { cases.push({ label: message, cond: false }); };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned `
+        + `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in `
+        + 'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. `
+          + 'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of `
+          + `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the '
+        + 'number. Find what stopped registering (an early return, a deleted block, a guard that now '
+        + 'skips) and restore it.',
+    );
+  }
 
   const failed = cases.filter((c) => !c.cond);
   for (const c of cases) console.log(`${c.cond ? 'ok  ' : 'FAIL'} ${c.label}`);

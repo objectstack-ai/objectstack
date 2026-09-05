@@ -538,18 +538,99 @@ function cloneOf(root, source, name, { depth = 0 } = {}) {
 // and still exits 0 — a self-test that never finished, reported as one that
 // passed (#13798). The self-test's own exit code stays load-bearing, so the
 // handshake is a flag rather than a returned sentinel.
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed
+// the way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. The floor requires the OPENED set to
+// equal the DECLARED set with each battery at or above its own count.
+//
+// This file declares ONE battery, opened at the top of the self-test body. It
+// carries fewer than the two named section banners the sectioning criterion
+// needs, and ⛔ a comment is NOT promoted to a section head — that is a
+// judgement per comment this transplant does not make. The hoisted single
+// battery is the shape PR #14896, PR #15003 and PR #15217 landed for exactly
+// this case.
+//
+// ⚠️ What the floor deliberately does NOT count (#15317): C10's two wiring
+// cases, each guarded by an `existsSync` — the rehearsal doc and `lint.yml`.
+// They still assert exactly as they always did; they go through
+// `tConditional`, which reports into the same `failures` tally and registers
+// nothing. A floor over an ENVIRONMENT-CONDITIONAL case counts what the
+// checkout happens to contain, so it would red for the environment rather than
+// for a case that stopped running — and the remedy an author reaches for is
+// editing the floor down, the one habit these floors exist to prevent (#13797's
+// ruling, carried forward from the ALLOWLIST loops in
+// check-whole-set-label-write.mjs). A skipped guard names ITSELF on C10's
+// `cases skipped` line. The floor pins the part that does not move with the
+// checkout.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The count is a FLOOR, not an equality — adding cases is ordinary work and must
+// not red. A battery BELOW its floor means cases stopped running; the remedy is
+// to find what stopped registering.
+//
+// 30 = the cases that run in EVERY checkout, measured off a run (#15317), never
+// derived by subtracting the guarded cases by hand.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'release-rehearsal-clone self-test': 30,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 1;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 let selfTestReachedVerdict = false;
 
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const batterySeen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+  };
+  battery('release-rehearsal-clone self-test');
   const root = mkdtempSync(join(tmpdir(), 'rehearsal-clone-selftest-'));
   let failures = 0;
-  const t = (name, cond, extra = '') => {
+  const report = (name, cond, extra = '') => {
     if (cond) {
       process.stdout.write(`  ✓ ${name}\n`);
     } else {
       failures += 1;
       process.stdout.write(`  ✗ ${name}${extra ? `\n      ${extra.replace(/\n/g, '\n      ')}` : ''}\n`);
     }
+  };
+  const t = (name, cond, extra = '') => {
+    registerCase();
+    report(name, cond, extra);
+  };
+  // The sink for C10's two `existsSync`-guarded cases: it asserts and reports
+  // EXACTLY as `t` does — same condition, same message, same `failures` tally —
+  // and registers nothing, because those cases run only where the two wiring
+  // files are present. A floor over them would count what the CHECKOUT happens
+  // to contain (a sparse or partial tree carries neither), so it would red for
+  // the environment rather than for a case that stopped running, and the remedy
+  // an author reaches for is editing the floor down — the one habit these floors
+  // exist to prevent (#15317, applying #13797's ruling; the precedent is the
+  // ALLOWLIST loops in check-whole-set-label-write.mjs). A skipped guard NAMES
+  // ITSELF on the `cases skipped` line at C10 instead of going quiet.
+  const tConditional = (name, cond, extra = '') => {
+    report(name, cond, extra);
   };
 
   try {
@@ -586,7 +667,11 @@ function selfTest() {
     const healthyMs = Date.now() - startedAt;
     t('C2 full clone → exit 0 (fit)', healthyRun.status === 0, `exit=${healthyRun.status}\n${healthyRun.stdout}${healthyRun.stderr}`);
     t('C2 fit verdict is stated, not implied', /✓ FIT/.test(healthyRun.stdout), healthyRun.stdout);
-    t(`C2 a healthy tree is not slowed (${healthyMs} ms < 10000)`, healthyMs < 10_000);
+    // The measured figure prints in the FAILURE sink, never in the label: a green
+    // line carrying a wall-clock reading differs from run to run, so the
+    // `green lines are byte-identical` comparison this script is rehearsed with
+    // could never pass unnormalised. A red run still names the timing.
+    t('C2 a healthy tree is not slowed (< 10000 ms)', healthyMs < 10_000, `measured ${healthyMs} ms`);
 
     // ── C3: a SHALLOW clone whose changesets sit after the boundary is fit.
     // This is the no-crying-wolf half: `--is-shallow-repository` is true here.
@@ -656,18 +741,82 @@ function selfTest() {
     // to end, so the two places that invoke it are pinned here.
     const doc = join(REPO_ROOT, 'docs', 'releases-maintenance.md');
     const lint = join(REPO_ROOT, '.github', 'workflows', 'lint.yml');
+    // Both cases are ENVIRONMENT-CONDITIONAL and therefore outside the roster —
+    // see `tConditional` above. They assert unchanged.
+    const skippedWiring = [];
     if (existsSync(doc)) {
-      t('C10 the rehearsal doc names this script', readFileSync(doc, 'utf8').includes(SELF));
+      tConditional('C10 the rehearsal doc names this script', readFileSync(doc, 'utf8').includes(SELF));
+    } else {
+      skippedWiring.push(doc);
     }
     if (existsSync(lint)) {
       const body = readFileSync(lint, 'utf8');
-      t('C10 lint.yml still runs this self-test', body.includes(SELF) && body.includes('--self-test'));
+      tConditional('C10 lint.yml still runs this self-test', body.includes(SELF) && body.includes('--self-test'));
+    } else {
+      skippedWiring.push(lint);
+    }
+    if (skippedWiring.length) {
+      process.stdout.write(
+        `  (C10 wiring cases skipped: ${skippedWiring.join(', ')} not present)\n`,
+      );
     }
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 
-  process.stdout.write(failures === 0 ? '\n✓ self-test passed\n' : `\n✗ self-test: ${failures} failure(s)\n`);
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  // The floor's refusal joins the SAME sink the cases use — a `✗` line on stdout
+  // and the `failures` tally the verdict reads — so a breached floor cannot be
+  // printed over by the success line.
+  const floorFailure = (message) => {
+    failures += 1;
+    process.stdout.write(`  ✗ ${message}\n`);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned `
+        + `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in `
+        + 'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. `
+          + 'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of `
+          + `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the '
+        + 'number. Find what stopped registering (an early return, a deleted block, a guard that now '
+        + 'skips) and restore it.',
+    );
+  }
+
+  process.stdout.write(failures === 0
+    ? '\n✓ self-test passed\n'
+    : `\n✗ self-test: ${failures} failure(s) (cases and floor)\n`);
 
   selfTestReachedVerdict = true;
   return failures === 0 ? 0 : 1;

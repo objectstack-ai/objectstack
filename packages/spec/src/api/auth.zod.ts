@@ -15,6 +15,7 @@ import { BaseResponseSchema } from './contract.zod';
 // ==========================================
 
 import { lazySchema } from '../shared/lazy-schema';
+import { retiredKey } from '../shared/retired-key';
 export const AuthProvider = z.enum([
   'local',
   'google',
@@ -33,7 +34,33 @@ export const SessionUserSchema = lazySchema(() => z.object({
   username: z.string().optional().describe('Username (optional)'),
   roles: z.array(z.string()).optional().default([]).describe('Assigned role IDs'),
   tenantId: z.string().optional().describe('Current tenant ID'),
-  language: z.string().default('en').describe('Preferred language'),
+  /**
+   * `language` RETIRED (#14788, ADR-0049 enforce-or-remove; maintainer ruling
+   * 2026-09-03, option D). It was declared with a permanent default of `'en'`
+   * and had no producer and no consumer anywhere: no session endpoint ever
+   * wrote it, no client ever read it, so a reader trusting the contract got a
+   * constant that was not the user's language. The signed-in user's language
+   * has ONE read face — `GET /auth/me/localization`, whose `locale` projects
+   * the user's own `sys_user.locale` when set, then the request's
+   * `Accept-Language`, then the deployment default. No replacement field is
+   * added here until a session endpoint really produces one.
+   *
+   * Tombstoned, not deleted: this schema is a non-strict `z.object`, so a
+   * plain deletion would let a producer still writing `language` parse clean
+   * and lose the key silently (the ADR-0104 silent-strip shape). `retiredKey()`
+   * makes writing it a `tsc` error and a parse error carrying the fix.
+   * Registered as `api/SessionUser:language` under protocol major 18 plus the
+   * D3 semantic entry `session-user-language-retired`; a RESPONSE surface, so
+   * there is no authored source for a D2 conversion to rewrite.
+   */
+  language: retiredKey(
+    '`SessionUser.language` was removed in @objectstack/spec 17.4.0 (ADR-0049 enforce-or-remove) — ' +
+    'it was declared with a permanent default of `\'en\'` and never produced by any session ' +
+    'endpoint nor read by any client, so a reader keying on it saw a constant, not the ' +
+    "user's language. Delete the key. Read the signed-in user's language from " +
+    '`GET /auth/me/localization` (`locale`: the user\'s own `sys_user.locale` when set → ' +
+    "the request's `Accept-Language` → the deployment default).",
+  ),
   timezone: z.string().optional().describe('Preferred timezone'),
   createdAt: z.string().datetime().optional(),
   updatedAt: z.string().datetime().optional(),

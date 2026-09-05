@@ -55,6 +55,8 @@
 // `--self-test`, and a live file whose DDL it cannot parse at all is reported,
 // never skipped.
 
+// dispatch-gates: wide-population -- ROOTS is packages, apps and examples, each walked recursively for every .ts/.mts source that is not a .d.ts -- 5269 of 5837 tracked packages/ files (90.3%, base 2aa8456cf), recorded REFUSE-WIDE in CENSUS_REFUSE_WIDE in scripts/pm/bare-root-worklist.mjs. Whole-tree-adjacent across three top-level roots at once: the only spelling true of it is each bare root, which would name this gate on every card touching packages, apps or examples.
+
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';

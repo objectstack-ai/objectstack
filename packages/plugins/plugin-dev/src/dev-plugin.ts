@@ -4,6 +4,8 @@ import { Plugin, PluginContext } from '@objectstack/core';
 import { resolveAllowDegradedTenancy, resolveAllowDevPlugin, resolveTenancyPosture } from '@objectstack/types';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 
+import { devI18nPluginOptions, type DevI18nPluginOptions } from './dev-i18n.js';
+
 /**
  * Dev Plugin Options
  *
@@ -522,19 +524,55 @@ export class DevPlugin implements Plugin {
     //     file-based i18n. Falls back to the core in-memory i18n fallback
     //     (with locale resolution) if the package is not installed.
     if (enabled('i18n') && this.options.stack) {
-      const stack = this.options.stack;
-      const hasTranslations = Array.isArray(stack.translations) && stack.translations.length > 0;
-      const hasI18nConfig = !!(stack.i18n || (stack.manifest && stack.manifest.i18n));
-      const hasManifestTranslations = !!(stack.manifest && Array.isArray(stack.manifest.translations) && stack.manifest.translations.length > 0);
+      // [#15232] The detection AND the locales it derives are one decision,
+      // resolved in `dev-i18n.ts` — which reads `translations` at the flattened
+      // top level first and then through `resolveArtifactPackageOrder`, so a
+      // multi-package app under ADR-0130 D4's option-B shape is detected
+      // instead of silently falling back to the in-memory i18n. The dynamic
+      // import and its degradation stay HERE, because they are about the
+      // optional PACKAGE being installed, not about what the stack declares.
+      let i18nOptions: DevI18nPluginOptions | undefined;
+      try {
+        i18nOptions = devI18nPluginOptions(this.options.stack);
+      } catch (err) {
+        // [#15232] A metadata-SHAPE defect, degraded — deliberately, and NOT
+        // through `reportOptionalLoadFailure`.
+        //
+        // Two things are wrong with refusing here, and both were measured. The
+        // reach: this is not exotic input. A stack carrying `packages[]` that
+        // declares no i18n at all walks the whole package list on every boot,
+        // so an artifact the ADR-0130 D4 gate refuses — a package body still
+        // carrying authoring-time glob `objects`, for instance, which
+        // `ArtifactPackageSchema` rejects by design — arrives here on the
+        // ordinary path. The inversion: twenty lines above, `new AppPlugin(...)`
+        // parses the SAME object and its refusal is degraded to a log line, so
+        // refusing here would make "should I register a translation service?"
+        // a harder gate than "should I register this app's metadata at all?".
+        // A project like that boots today; it must keep booting.
+        //
+        // ⛔ Not `reportOptionalLoadFailure`: its text says the PACKAGE is
+        // installed but failed to initialize, and naming a package for a
+        // metadata-shape defect is exactly the mis-attribution #7926 removed
+        // from this file. ⛔ And not a silent skip either — silence is the
+        // failure class this whole change exists to remove. Its own line, its
+        // own diagnosis, carrying the refusal verbatim.
+        const code = (err as { code?: unknown })?.code;
+        ctx.logger.error(
+          '  ✘ the i18n auto-detect could not read this stack\'s `packages[]` — skipping '
+          + 'I18nServicePlugin and continuing on the core in-memory i18n fallback. This is NOT '
+          + 'a missing-package problem and installing anything will not help: the stack\'s '
+          + 'PACKAGE LIST is malformed (ADR-0130 D4), and `os build` refuses the same project '
+          + 'with its own compile diagnostic. Translations this app declares will not be '
+          + 'served until it is fixed. The artifact reader reported (verbatim — the framework '
+          + `does not interpret it): ${typeof code === 'string' ? `${code}: ` : ''}`
+          + `${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
 
-      if (hasTranslations || hasI18nConfig || hasManifestTranslations) {
+      if (i18nOptions) {
         try {
           const { I18nServicePlugin } = await import('@objectstack/service-i18n') as any;
-          const i18nConfig = stack.i18n || (stack.manifest || stack)?.i18n || {};
-          const i18nPlugin = new I18nServicePlugin({
-            defaultLocale: i18nConfig.defaultLocale,
-            fallbackLocale: i18nConfig.fallbackLocale || i18nConfig.defaultLocale || 'en',
-          });
+          const i18nPlugin = new I18nServicePlugin(i18nOptions);
           this.childPlugins.push(i18nPlugin);
           ctx.logger.info('  ✔ I18nServicePlugin auto-registered (translations detected in stack)');
         } catch (err) {

@@ -39,11 +39,17 @@
 //
 // --- SCOPE - deliberately narrow, so a finding is worth gating on ----------
 //
-//   - Only `update` / `updateById`. INSERT is engine-exempt from the
-//     author-declared static-`readonly` strip (`stripReadonlyForInsert`'s note
-//     in rule-validator.ts, #3043/#3413: "a create may legitimately seed
-//     read-only columns"), so `insert`/`create` are not no-ops and are never
-//     flagged. Exactly the reason the flow sibling skips `create_record`.
+//   - Only `update` / `updateById`, and ⚠️ this bullet's REASON is spent. It
+//     used to be that INSERT was engine-exempt from the author-declared
+//     static-`readonly` strip (#3043/#3413: "a create may legitimately seed
+//     read-only columns"). The maintainer ruling of 2026-09-03 (option C,
+//     #14147) SUPERSEDED that row: `engine.insert` runs the static strip for a
+//     non-system caller, and a hook body's `ctx.api` under a non-system trigger
+//     is exactly that. So a hook `insert` of a static-`readonly` column IS a
+//     silent no-op now, and this rule does not yet report it — a scan gap, not
+//     a decision, recorded here and filed rather than widened inside #14147's
+//     PR (a new error-severity finding class is its own change). The flow
+//     sibling's `create_record` gap rests on the same superseded premise.
 //
 //   - Only a NON-ELEVATED `ctx.api`. `ScopedContext.sudo()` returns a context
 //     with `isSystem: true`, which the strip skips entirely. A `.sudo()` chain
@@ -141,6 +147,7 @@ import {
   type BodyWritePatternExclusion,
 } from './validate-hook-body-writes.js';
 import { buildReadonlyIndex } from './validate-readonly-flow-writes.js';
+import { recordsOf } from './object-graph.js';
 
 export type ReadonlyHookWriteSeverity = 'error' | 'warning';
 
@@ -198,12 +205,18 @@ export const READONLY_HOOK_WRITE_EXCLUSIONS: readonly BodyWritePatternExclusion[
 const APPLICABLE_PATTERN_IDS: ReadonlySet<string> = new Set(READONLY_HOOK_WRITE_PATTERN_IDS);
 
 /**
- * `ctx.api` write methods whose payload is subject to the update-path strip.
+ * `ctx.api` write methods whose payload this rule judges against the strip.
  *
- * `insert` / `create` are absent BY DECISION, not by omission: the engine
- * exempts INSERT from the author-declared static-`readonly` strip so a create
- * may legitimately seed read-only columns (#3043/#3413), which is the same
- * reason the flow sibling never looks at a `create_record` node.
+ * `insert` / `create` are absent as a SCAN GAP, not by decision. This docblock
+ * used to say the opposite — that the engine exempts INSERT from the
+ * author-declared static-`readonly` strip so a create may legitimately seed
+ * read-only columns (#3043/#3413). The maintainer ruling of 2026-09-03
+ * (option C, #14147) superseded that row — the header above carries the full
+ * reading: `engine.insert` now runs the same strip under the same `isSystem`
+ * gate, so a non-system hook `insert` of a static-`readonly` column is a
+ * silent no-op this rule does not yet report. Widening the set is filed as its
+ * own change rather than ridden in here, and the flow sibling's `create_record`
+ * gap is the same finding one surface over.
  */
 const STRIP_SUBJECT_METHODS: ReadonlySet<string> = new Set(['update', 'updateById']);
 
@@ -223,18 +236,6 @@ function isRec(v: unknown): v is AnyRec {
   return !!v && typeof v === 'object' && !Array.isArray(v);
 }
 
-/** Coerce an array-or-name-keyed-map collection to an array (name injected). */
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v as AnyRec[];
-  if (v && typeof v === 'object') {
-    return Object.entries(v as AnyRec).map(([name, def]) => ({
-      name,
-      ...(def as AnyRec),
-    }));
-  }
-  return [];
-}
-
 /**
  * Validate L2 hook-body `ctx.api` writes against target-object readonly
  * declarations. Pure `(stack) => Finding[]` (ADR-0019); safe on pre- or
@@ -242,7 +243,7 @@ function asArray(v: unknown): AnyRec[] {
  */
 export function validateReadonlyHookWrites(stack: AnyRec): ReadonlyHookWriteFinding[] {
   const findings: ReadonlyHookWriteFinding[] = [];
-  const hooks = asArray(stack.hooks);
+  const hooks = recordsOf(stack.hooks);
   if (hooks.length === 0) return findings;
 
   // Built lazily: a stack whose hooks are all L1/handler-based never pays it.
@@ -282,7 +283,7 @@ export function validateReadonlyHookWrites(stack: AnyRec): ReadonlyHookWriteFind
     );
     if (writes.length === 0) return;
 
-    roIndex ??= buildReadonlyIndex(asArray(stack.objects));
+    roIndex ??= buildReadonlyIndex(recordsOf(stack.objects));
 
     const hookName = typeof hook.name === 'string' && hook.name ? hook.name : `#${hookIndex}`;
     const where = `hook "${hookName}" > body`;

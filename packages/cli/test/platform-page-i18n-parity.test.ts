@@ -28,6 +28,7 @@ import {
 } from '@objectstack/cloud-connection';
 import { CONNECT_AGENT_UI_BUNDLE } from '@objectstack/mcp';
 import { SetupAppTranslations } from '@objectstack/platform-objects';
+import * as PlatformPages from '@objectstack/platform-objects/pages';
 import { PAGE_COMPONENT_COPY_KEYS, translatePage } from '@objectstack/spec/system';
 import { collectExpectedEntries } from '../src/utils/i18n-extract.js';
 
@@ -470,5 +471,180 @@ describe('i18n-extract ↔ translatePage walk parity (#13109)', () => {
     } as any;
     const translated = translatePage(page as any, bundle, { locale: 'en' }) as any;
     expect(translated.regions[0].components[0].properties.title).toEqual('L');
+  });
+});
+
+
+// --- The three shipped platform RECORD pages (#14817) ----------------------
+//
+// The guard at the top of this file owns the plugin-carried Setup pages whose
+// copy lives in the BUNDLE. This block owns the other three pages the platform
+// ships -- `sys_user_detail`, `sys_organization_detail`, `sys_position_detail`,
+// contributed by plugin-auth and plugin-security -- whose copy is almost
+// entirely authored INLINE, and which were in no `os i18n extract` config and
+// under no gate at all.
+//
+// ## The measurement this block was written from
+//
+// Fed through the real `collectExpectedEntries`, the three pages together
+// offer exactly THREE keys -- one page-level `label` each. Nothing else. All
+// three author `regions: []` and put every component under `slots.*`, and the
+// shared walk (`walkAddressedPageComponents`, `@objectstack/spec/system`) roots
+// at `regions[].components[]` only. So 45 further authored copy sites, every
+// one of them an inline `{ en, 'zh-CN', ... }` locale map, are not reachable
+// from the bundle face at all. A control page authored under `regions` with a
+// `component.id` DOES get its component copy offered, which is how we know the
+// extractor is working and the absence is the pages' SHAPE.
+//
+// ## Why that is not a defect this block tries to fix
+//
+// The inline map is the RULED route for page copy, not a workaround: the
+// maintainer ruled (2026-08-06) that it is a delivered capability, which is why
+// `I18nLabelSchema` is a union of a plain string and an inline map, and why
+// `translation.zod.ts` declines `content` on the bundle face for the identical
+// shape. Whether the EXTRACTOR should also see those maps is an open question
+// (#14749) and a maintainer decision. This block therefore does not widen
+// anything -- it makes the boundary measurable and puts the surface under a
+// gate for the first time.
+//
+// ## What each assertion buys
+//
+// The harm recorded on #14817 is not today's debt (there is none) -- it is that
+// `check:i18n-coverage`'s `0` for `platform-objects` reads as "checked, clean"
+// over a population that never contained these pages, so "a fourth plugin page,
+// or one new untranslated section heading, lands green". The population below
+// is read from the `@objectstack/platform-objects/pages` BARREL rather than
+// listed here, so a fourth page joins this gate by existing; and the inline-map
+// assertion judges the authoring site, which is the half the bundle face
+// cannot see. Both directions of that sentence now red instead of shipping.
+//
+// ## What this block deliberately does NOT assert, and the measurement why
+//
+// It does not require a `pages.*` BUNDLE entry for these three. That was tried
+// and measured: the three page-level `label`s are the only keys the extractor
+// offers, so translating them is the one piece of real debt here (`User` /
+// `Organization` / `Position` render in English in every locale). Adding those
+// entries turns `check:app-nav-i18n` RED on two of the three --
+// `pages.sys_user_detail` and `pages.sys_organization_detail` are reported as
+// keys "the booted composition contains no page by that name", its phantom-key
+// verdict. That gate's `CONTRIBUTORS` roster is deliberately explicit and
+// deliberately a NAV roster: `@objectstack/plugin-auth`, which contributes
+// those two pages, is not in it, and adding it is not a one-line edit --
+// `new AuthPlugin({})` refuses to boot ("secret is required"), and the roster
+// separately requires every entry to land at least one nav id, which
+// plugin-auth's conditional `nav_sso_providers` cannot promise. Only
+// `sys_position_detail` (plugin-security, which IS in the roster) verifies
+// clean. Splitting that roster into a nav population and a page population is a
+// change to a gate's composition contract, so it is escalated rather than taken
+// here. Until it is ruled, a `pages.*` entry for the plugin-auth pages would be
+// exactly the unverifiable key `check:app-nav-i18n` exists to refuse.
+
+/** Every page the platform's own `pages` barrel exports, as the plugins take them. */
+const RECORD_PAGES: Array<Record<string, any>> = Object.values(
+  PlatformPages as unknown as Record<string, unknown>,
+).filter(
+  (v): v is Record<string, any> =>
+    Boolean(v) && typeof v === 'object' && typeof (v as any).name === 'string',
+);
+
+/** The locales the shipped bundle actually carries -- never a hard-coded list. */
+const SHIPPED_LOCALES = Object.keys(SetupAppTranslations as Record<string, unknown>);
+
+/**
+ * A key is a locale code (`en`, `zh-CN`). Deliberately a shape test rather than
+ * a membership test against `SHIPPED_LOCALES`: a map carrying a locale the
+ * bundle does not ship is still an inline map, and must still be judged.
+ */
+const LOCALE_KEY = /^[a-z]{2}(-[A-Z]{2})?$/;
+
+/** An inline `I18nLabel` map: every key a locale code, every value a string. */
+const isInlineLocaleMap = (value: unknown): value is Record<string, string> => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const keys = Object.keys(value as object);
+  return keys.length > 0
+    && keys.every((k) => LOCALE_KEY.test(k))
+    && Object.values(value as Record<string, unknown>).every((v) => typeof v === 'string');
+};
+
+/**
+ * Every inline locale map anywhere in a page document, by authored path. A
+ * generic JSON walk with its own cycle guard, deliberately NOT a copy of either
+ * the resolver's or the extractor's traversal -- the whole point is to reach
+ * what those two do not.
+ */
+const inlineLocaleMaps = (
+  node: unknown,
+  path: string,
+  out: Array<{ path: string; locales: string[] }> = [],
+  seen = new Set<object>(),
+): Array<{ path: string; locales: string[] }> => {
+  if (!node || typeof node !== 'object') return out;
+  if (seen.has(node)) return out;
+  seen.add(node);
+  if (Array.isArray(node)) {
+    node.forEach((item, i) => inlineLocaleMaps(item, `${path}[${i}]`, out, seen));
+    return out;
+  }
+  for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+    const here = path ? `${path}.${key}` : key;
+    if (isInlineLocaleMap(value)) {
+      out.push({ path: here, locales: Object.keys(value) });
+      continue;
+    }
+    inlineLocaleMaps(value, here, out, seen);
+  }
+  return out;
+};
+
+describe('shipped platform record pages -- i18n ownership (#14817)', () => {
+  it('reads a non-empty population from the pages barrel', () => {
+    // A floor, not an equality: adding a page is ordinary work and must not
+    // red here. What this refuses is the scan that finds NOTHING -- an empty
+    // population would satisfy every `for` loop below and report success over
+    // zero pages, which is the exact shape of the `0` that reads as "clean".
+    expect(RECORD_PAGES.length).toBeGreaterThanOrEqual(3);
+    expect(RECORD_PAGES.map((p) => p.name).sort()).toEqual(
+      expect.arrayContaining(['sys_organization_detail', 'sys_position_detail', 'sys_user_detail']),
+    );
+    expect(SHIPPED_LOCALES).toContain(EN);
+    expect(SHIPPED_LOCALES.length).toBeGreaterThan(1);
+  });
+
+  it('records that the extractor reaches the page label and nothing under `slots`', () => {
+    // A BOUNDARY PIN, not an endorsement. It states the measured fact that the
+    // shared walk roots at `regions[].components[]` and these pages author
+    // `regions: []`, so the 45 inline sites under `slots.*` have no bundle
+    // face. If the walk is ever widened -- a maintainer decision open on
+    // #14749 -- this reds, and the person widening it is told, at the exact
+    // moment they can act on it, that these three pages gain a bundle surface
+    // that needs entries and a coverage home. That notice is the whole value:
+    // today the same change would land green over an unmeasured population.
+    for (const page of RECORD_PAGES) {
+      const offered = collectExpectedEntries({ pages: [page] } as any)
+        .filter((e) => e.path[0] === 'pages' && e.path[1] === page.name)
+        .map((e) => e.path.slice(2).join('.'))
+        .sort();
+      expect({ page: page.name, regions: page.regions, offered })
+        .toEqual({ page: page.name, regions: [], offered: ['label'] });
+    }
+  });
+
+  it('holds every inline locale map on those pages complete in every shipped locale', () => {
+    // The recurrence guard, and the answer to "nobody would learn if it stopped
+    // being zero". These maps are invisible to `os i18n extract` and therefore
+    // to `check:i18n-coverage`; before this assertion a new section heading
+    // authored with `en` alone shipped green and rendered English to every
+    // reader. The population is measured off the documents, so it grows with
+    // the pages instead of needing a list here.
+    const maps = RECORD_PAGES.flatMap((page) => inlineLocaleMaps(page, page.name));
+
+    // Same refusal as the population floor: zero maps means the walk broke, not
+    // that the pages went monolingual.
+    expect(maps.length).toBeGreaterThanOrEqual(45);
+
+    const incomplete = maps
+      .filter((m) => SHIPPED_LOCALES.some((locale) => !m.locales.includes(locale)))
+      .map((m) => ({ path: m.path, missing: SHIPPED_LOCALES.filter((l) => !m.locales.includes(l)) }));
+    expect(incomplete).toEqual([]);
   });
 });

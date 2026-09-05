@@ -7,6 +7,9 @@ import {
 } from './reference-integrity-suite.js';
 import { validateObjectReferences } from './validate-object-references.js';
 import { validateTranslationReferences } from './validate-translation-references.js';
+import { validateObjectFieldRefs } from './validate-object-field-refs.js';
+import { validateListViewFieldRefs } from './validate-list-view-field-refs.js';
+import { validateDatasetReferences } from './validate-dataset-references.js';
 
 describe('reference-integrity suite — membership', () => {
   // Deliberately a written-out list: adding a rule to the suite should be a
@@ -22,6 +25,12 @@ describe('reference-integrity suite — membership', () => {
       // field-naming position the two members above do not own. Placed beside
       // them because the three walk the identical rungs.
       'validateListViewFieldRefs',
+      // [#15254] The object-level half of the same sweep: the field-name lists
+      // an object writes about its OWN fields. Placed beside the list-view
+      // members because it completes the object's field surface — and because
+      // Studio's app builder mints no `view` items, which is what left those
+      // members with nothing to inspect on the click path.
+      'validateObjectFieldRefs',
       'validateActionNameRefs',
       'validatePageFieldBindings',
       // [#14073] The same page, one question out: the BINDING behind each
@@ -405,4 +414,74 @@ describe('reference-integrity suite — every member actually runs', () => {
   it('returns nothing for an empty stack', () => {
     expect(validateReferenceIntegrity({})).toEqual([]);
   });
+});
+
+describe('reference-integrity — a non-record entry in `stack.objects` (#15494)', () => {
+  /**
+   * One case per rule that resolves through the shared `indexObjectGraph`
+   * seam. Enumerated from the source rather than written from memory —
+   * `git grep -l indexObjectGraph packages/lint/src` names four rules:
+   * `validateObjectFieldRefs`, `validateListViewFieldRefs`,
+   * `validateDatasetReferences` and `validateWidgetBindings`. The first three
+   * are the suite members and are the table below.
+   *
+   * ⛔ `validateWidgetBindings` is deliberately ABSENT, and not because it is
+   * fixed. It is not a suite member (it runs on `os doctor` via
+   * `AUTHORING_RULES`), and it carries a SECOND, independent null dereference
+   * of its own — `validate-widget-bindings.ts:465`, in the aggregate-coherence
+   * pass that runs BEFORE it ever reaches this seam — so the seam guard cannot
+   * reach it. Measured after this change:
+   *   THROW validateWidgetBindings { objects: [null] }
+   *     TypeError: Cannot read properties of null (reading 'name')
+   *       at validateWidgetBindings (src/validate-widget-bindings.ts:465:18)
+   * That file is held by another in-flight change, so the repair is filed as
+   * #15552 rather than ridden here — together with the wider inventory the same
+   * measurement turned up: 13 of 42 `AUTHORING_RULES` entries throw on this
+   * input through five more unguarded readers of `stack.objects`, three of them
+   * inside this very suite (`validate-object-references.ts`,
+   * `indexObjectSearchTargets`, `indexObjectFields`). So the suite ENTRY POINT
+   * still throws on `{ objects: [null] }` after this change; what this file
+   * pins is the seam, per member, and no more than that.
+   *
+   * Each case asserts BOTH halves: the junk entry is not a crash, and the
+   * valid object beside it is still judged — a guard that returned early would
+   * satisfy the first half while silently deleting the rule.
+   */
+  const validObject = {
+    name: 'crm_lead',
+    fields: { name: { type: 'text', label: 'Name' }, amount: { type: 'currency', label: 'Amount' } },
+    // `nope` exists nowhere on the object — one dangling name per position, so
+    // each member below has something of its own to report.
+    highlightFields: ['name', 'nope'],
+    listViews: { all: { type: 'grid', columns: ['name', 'nope'] } },
+  };
+  // `validateDatasetReferences` returns before the seam when a stack declares
+  // no datasets, so the table's stack carries one — without it that member's
+  // case would pass without ever reaching the code under test.
+  const datasets = [
+    { name: 'lead_ds', object: 'crm_lead', dimensions: [{ field: 'nope' }], measures: [] },
+  ];
+
+  const members: ReadonlyArray<[string, (s: Record<string, unknown>) => Array<{ rule: string; path: string }>, string, string]> = [
+    ['validateObjectFieldRefs', validateObjectFieldRefs, 'object-field-ref-unknown', 'objects[1].highlightFields[1]'],
+    ['validateListViewFieldRefs', validateListViewFieldRefs, 'list-view-field-unknown', 'objects[1].listViews.all.columns[1]'],
+    ['validateDatasetReferences', validateDatasetReferences, 'dataset-field-unknown', 'datasets[0].dimensions[0].field'],
+  ];
+
+  for (const [name, run, rule, path] of members) {
+    it(`${name}: a lone junk entry is skipped, not thrown`, () => {
+      expect(() => run({ objects: [null], datasets })).not.toThrow();
+      expect(() => run({ objects: [undefined, 'junk', 7], datasets })).not.toThrow();
+    });
+
+    it(`${name}: the valid object beside a junk entry is still judged`, () => {
+      const findings = run({ objects: [null, validObject], datasets });
+      const hit = findings.find((f) => f.rule === rule);
+      expect(hit, `${name} kept judging past the junk entry`).toBeDefined();
+      // The path still counts the junk entry: the guard drops it from the
+      // GRAPH, while each member's own loop keeps walking the raw array, so
+      // reported positions stay stable against the author's file.
+      expect(hit!.path).toBe(path);
+    });
+  }
 });

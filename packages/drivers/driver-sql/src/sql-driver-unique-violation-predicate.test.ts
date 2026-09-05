@@ -1,10 +1,16 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * `syncDeclaredIndexes` judges "did existing rows violate the NULL-safe unique
- * I just tried to create?" — the #5030 branch that keeps a dirty database
- * BOOTING (the constraint is logged as not-enforced and reported by the
- * ADR-0120 D4 drift pre-flight) instead of taking the process down.
+ * `syncDeclaredIndexes` judges "did existing rows violate the unique index I
+ * just tried to create?" — the #5030 branch that keeps a dirty database BOOTING
+ * (the constraint is logged as not-enforced and reported by the ADR-0120 D4
+ * drift pre-flight) instead of taking the process down.
+ *
+ * ⚠️ Since #14902 that branch has two arms, not one: the NULL-safe organization
+ * composite AND the plain unique (`tenancy: { enabled: false }`, or an explicit
+ * `unique: 'global'`), which used to fall through to `throw e`. The
+ * discriminator below is what BOTH arms judge with, so its blind spots are now
+ * twice as expensive.
  *
  * It used to judge that with a private inline regex over the stringified
  * message — `unique constraint failed|duplicate entry|duplicate key value` —
@@ -80,11 +86,17 @@ const NULL_SAFE_INDEX: DeclaredIndexInput = {
   nullSafeColumns: ['organization_id'],
 };
 
-/** The same index with no NULL-safe key part — the `nullSafe.size > 0` guard's false arm. */
+/** The same index with no NULL-safe key part — the plain single-column unique. */
 const PLAIN_INDEX: DeclaredIndexInput = {
   name: 'uniq_product_code',
   fields: ['code'],
   unique: true,
+};
+
+/** Not unique at all — an ACCESS PATH. Its failures are nobody's #5030. */
+const NON_UNIQUE_INDEX: DeclaredIndexInput = {
+  name: 'idx_product_code',
+  fields: ['code'],
 };
 
 const PHYSICAL_COLUMNS = new Set(['id', 'organization_id', 'code']);
@@ -222,11 +234,64 @@ describe('syncDeclaredIndexes unique-violation discriminator (#6543)', () => {
 
   // ── The site's own business logic, untouched by the migration ─────────────
 
-  it('leaves the `nullSafe.size > 0` guard intact — a plain unique still fails the sync', async () => {
+  /**
+   * ⚠️ RETIRED PIN, re-authored — #14902.
+   *
+   * This block used to assert the opposite: 「leaves the `nullSafe.size > 0`
+   * guard intact — a plain unique still fails the sync」, on the reasoning that
+   * absorbing it 「would silently ship an unenforced constraint **the drift
+   * pre-flight was never told about**」. That reasoning was right, and its
+   * premise is exactly what #14902 removed: the ADR-0120 D4 pre-flight now
+   * probes the plain unique too, so the drift pass IS told, and `os migrate
+   * plan` reports the blocked op `destructive` with the offending rows instead
+   * of calling it `safe`.
+   *
+   * So the invariant the old pin was defending survives verbatim — a plain
+   * unique violation must never be absorbed SILENTLY — and only its
+   * disposition moved: from `throw` (the boot dies carrying the database's own
+   * error, naming no rows and no remedy) to the same loud, non-fatal posture
+   * the NULL-safe arm has had since #5030. What follows asserts the LOUD half,
+   * which is the half that was actually load-bearing.
+   */
+  it('absorbs the plain arm too — but only LOUDLY, naming the rows and the remedy (#14902)', async () => {
     arm(postgresIndexBuildConflict());
+    await realKnex('product').insert([
+      { id: 'r1', organization_id: 'org_a', code: 'DUP' },
+      { id: 'r2', organization_id: 'org_b', code: 'DUP' },
+    ]);
     // The plain arm goes through knex's schema builder rather than the
     // overridden method, and `knex.schema` is a fresh builder on every access
-    // — so the failure is injected by standing in for `knex` itself.
+    // — so the failure is injected by standing in for `knex` itself. Only
+    // `schema` is stood in for: `ref`/`raw` and the query builder stay REAL, so
+    // the duplicate probe in the branch under test runs against the real table
+    // and the row report below is a measurement, not a fixture.
+    (driver as any).getExistingIndexNames = async () => new Set<string>();
+    (driver as any).knex = Object.assign((...args: any[]) => (realKnex as any)(...args), {
+      ref: (id: string) => realKnex.ref(id),
+      raw: (...args: any[]) => realKnex.raw(...args),
+      schema: {
+        alterTable: () => Promise.reject(postgresIndexBuildConflict()),
+      },
+    });
+
+    await expect(sync([PLAIN_INDEX])).resolves.toBeUndefined();
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatch(/cannot create unique index/);
+    expect(errors[0]).toMatch(/uniq_product_code/);
+    expect(errors[0]).toMatch(/NOT enforced/);
+    expect(errors[0]).toMatch(/os migrate plan/);
+    // The rows the database's own error never named.
+    expect(errors[0]).toContain('code="DUP"');
+    expect(errors[0]).toMatch(/× 2 rows/);
+    // ⛔ And it does not borrow the NULL-safe arm's story: no earlier index
+    // admitted these rows, so #5030 is not what happened here.
+    expect(errors[0]).not.toMatch(/#5030/);
+    expect(errors[0]).not.toMatch(/NULL-safe/);
+  });
+
+  it('never absorbs a NON-unique index failure, however much the error reads like a conflict', async () => {
+    arm(postgresIndexBuildConflict());
     (driver as any).getExistingIndexNames = async () => new Set<string>();
     (driver as any).knex = {
       schema: {
@@ -234,10 +299,12 @@ describe('syncDeclaredIndexes unique-violation discriminator (#6543)', () => {
       },
     };
 
-    // A unique violation on a NON-NULL-safe index is not the #5030 case and
-    // must still surface: absorbing it would silently ship an unenforced
-    // constraint the drift pre-flight was never told about.
-    const rejected: any = await sync([PLAIN_INDEX]).then(
+    // A non-unique index exists for an ACCESS PATH — it cannot raise a
+    // uniqueness violation, so a failure that reads as one while creating it is
+    // something else entirely. #14902's `unique` limb is what keeps that
+    // failing loudly instead of being logged away as an unenforced constraint
+    // that was never declared in the first place.
+    const rejected: any = await sync([NON_UNIQUE_INDEX]).then(
       () => undefined,
       (e: unknown) => e,
     );

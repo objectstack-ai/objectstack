@@ -78,7 +78,7 @@
       "traps": ["automation-input", "wrong-persona"],
       "source": [
         "#3358 §1", "#3409", "#3411",
-        "examples/app-showcase/src/automation/flows/index.ts (ExpenseSignoffFlow, behavior per_group)",
+        "examples/app-showcase/src/automation/flows/index.ts#ExpenseSignoffFlow (ExpenseSignoffFlow, behavior per_group)",
         "examples/app-showcase/src/security/seed-approval-demo.ts (distinct-holder wiring + submitter stamping)",
         "packages/spec/src/automation/approval.zod.ts (behavior enum + group labels, #3266)"
       ],
@@ -157,9 +157,9 @@
       "traps": ["seed-data-thin", "wrong-persona"],
       "source": [
         "#3358 §1",
-        "examples/app-showcase/src/automation/flows/index.ts (CommitteeQuorumFlow, #3266)",
-        "packages/spec/src/automation/approval.zod.ts (behavior 'quorum' + minApprovals clamp: 'Clamped at runtime so it can never exceed the resolvable approver count')",
-        "examples/app-showcase/src/security/seed-approval-demo.ts (EXP-DEMO launch + admin position grants)"
+        "examples/app-showcase/src/automation/flows/index.ts#CommitteeQuorumFlow (CommitteeQuorumFlow, #3266)",
+        "packages/spec/src/automation/approval.zod.ts#minApprovals (behavior 'quorum' + minApprovals clamp: 'Clamped at runtime so it can never exceed the resolvable approver count')",
+        "examples/app-showcase/src/security/seed-approval-demo.ts#admin (EXP-DEMO launch + admin position grants)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "initial import from #3358; carried the fixture blocker forward explicitly", "ref": "#3358" },
@@ -377,7 +377,7 @@
         "#3358 §1",
         "#7213", "#7233",
         "objectui apps/console/src/pages/system/ApprovalsInboxPage.tsx (#2678 P1.5 — 'notifications carry /system/approvals?request=<id>')",
-        "packages/plugins/plugin-approvals/src/approval-service.ts (ApprovalService.notify — the central /system/approvals → ?request=<id> rewrite; the emitting topic set, which has no approval.opened member)"
+        "packages/plugins/plugin-approvals/src/approval-service.ts#ApprovalService (ApprovalService.notify — the central /system/approvals → ?request=<id> rewrite; the emitting topic set, which has no approval.opened member)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "initial import from #3358 (verified twice on fresh loads)", "ref": "#3358" },
@@ -491,12 +491,12 @@
       "source": [
         "#3358 §1 (the action-table evidence this matrix grounds in)",
         "packages/rest/src/rest-route-ledger.ts (approve/reject/recall/revise/resubmit/reassign/remind/request-info/comment + GET /:id/actions)",
-        "packages/rest/src/rest-server.ts (flowMoveRoute: revise=pending approver, resubmit=submitter; threadRoute access per action; recall submitter-only)",
-        "packages/plugins/plugin-approvals/src/approval-service.ts (ApprovalService.resubmit — 'traversal walks the declared back-edge into the approval node, whose executor opens the round-N+1 request'; the resubmitted row's status is never rewritten. sendBack counts prior rounds as returned siblings on flow_run_id + flow_node_id)",
-        "packages/spec/src/contracts/approval-service.ts (APPROVAL_STATUSES: pending|approved|rejected|recalled|returned)",
-        "examples/app-showcase/src/automation/flows/index.ts (BudgetApprovalFlow — ADR-0044 revise loop, maxRevisions 2, exec step without a revise edge, lockRecord pair)",
-        "packages/plugins/plugin-approvals/src/approval-service.ts (readBackRequest — the write path's post-mutation echo; #12769 docblock: org-less rows are a live state, the null echo used to escape behind the callers' fresh! non-null assertions, now it refuses loudly; landed as PR #13181)",
-        "packages/rest/src/rest-server.ts (handleApprovalError prefix map — READ_BACK_FAILED deliberately unmapped, so it reaches the wire as the generic 500 APPROVAL_<action>_FAILED envelope carrying the named text)"
+        "packages/rest/src/rest-server.ts#flowMoveRoute (flowMoveRoute: revise=pending approver, resubmit=submitter; threadRoute access per action; recall submitter-only)",
+        "packages/plugins/plugin-approvals/src/approval-service.ts#ApprovalService (ApprovalService.resubmit — 'traversal walks the declared back-edge into the approval node, whose executor opens the round-N+1 request'; the resubmitted row's status is never rewritten. sendBack counts prior rounds as returned siblings on flow_run_id + flow_node_id)",
+        "packages/spec/src/contracts/approval-service.ts#APPROVAL_STATUSES (APPROVAL_STATUSES: pending|approved|rejected|recalled|returned)",
+        "examples/app-showcase/src/automation/flows/index.ts#BudgetApprovalFlow (BudgetApprovalFlow — ADR-0044 revise loop, maxRevisions 2, exec step without a revise edge, lockRecord pair)",
+        "packages/plugins/plugin-approvals/src/approval-service.ts#readBackRequest (readBackRequest — the write path's post-mutation echo; #12769 docblock: org-less rows are a live state, the null echo used to escape behind the callers' fresh! non-null assertions, now it refuses loudly; landed as PR #13181)",
+        "packages/rest/src/rest-server.ts#handleApprovalError (handleApprovalError prefix map — READ_BACK_FAILED deliberately unmapped, so it reaches the wire as the generic 500 APPROVAL_<action>_FAILED envelope carrying the named text)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "initial — decision-action matrix derived from the approvals REST route ledger and the ADR-0044 revise/resubmit flow shape", "ref": "claude/platform-test-checklist-ocwugl" },
@@ -557,9 +557,9 @@
       "traps": ["dispatcher-vs-hono-route"],
       "automated": { "kind": "test", "ref": "packages/services/service-automation/src/resume-authority-gate.test.ts" },
       "source": [
-        "packages/runtime/src/route-ledger.ts (the resume route's #3801 note: resumeAuthority 'service' → 403, decisions via ApprovalService.decide)",
-        "examples/app-showcase/src/automation/flows/index.ts (InvoiceDualSignoffFlow — documents the exact 403 + approvals-API sequence)",
-        "packages/spec/src/automation/approval.zod.ts (APPROVAL_NODE_TYPE; ADR-0039 Track A aggregating node)"
+        "packages/runtime/src/route-ledger.ts#resumeAuthority (the resume route's #3801 note: resumeAuthority 'service' → 403, decisions via ApprovalService.decide)",
+        "examples/app-showcase/src/automation/flows/index.ts#InvoiceDualSignoffFlow (InvoiceDualSignoffFlow — documents the exact 403 + approvals-API sequence)",
+        "packages/spec/src/automation/approval.zod.ts#APPROVAL_NODE_TYPE (APPROVAL_NODE_TYPE; ADR-0039 Track A aggregating node)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "initial — pins the #3801 resume-authority gate as a both-sides item (approval 403 + screen 2xx contrast)", "ref": "claude/platform-test-checklist-ocwugl" }
@@ -633,9 +633,9 @@
       "traps": ["automation-input", "stale-console-bundle"],
       "source": [
         "examples/app-showcase/src/automation/flows/dynamic-approval.flow.ts (#3447 P2)",
-        "packages/spec/src/automation/approval.zod.ts (DecisionOutputDefSchema — typed pickers, required-to-approve objectui#2955; expression approvers + resolveAs)",
+        "packages/spec/src/automation/approval.zod.ts#DecisionOutputDefSchema (DecisionOutputDefSchema — typed pickers, required-to-approve objectui#2955; expression approvers + resolveAs)",
         "examples/app-showcase/src/automation/flows/approver-bindings.flow.ts (#3508 — the degraded-to-free-text failure the typed control fixes)",
-        "packages/services/service-automation/src/engine.ts (the two `status: 'paused'` recordLog calls — the suspend path records no variables, which is why the vars clause needs a functional oracle)"
+        "packages/services/service-automation/src/engine.ts#recordLog (the two `status: 'paused'` recordLog calls — the suspend path records no variables, which is why the vars clause needs a functional oracle)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "initial — covers the #3447 dynamic-routing chain (typed decision outputs → vars → expression approvers) with the required-output gate", "ref": "claude/platform-test-checklist-ocwugl" },
@@ -715,11 +715,11 @@
       "traps": ["wrong-persona", "seed-data-thin"],
       "source": [
         "packages/plugins/plugin-approvals/src/sys-approval-delegation.object.ts (#1322 M1 — self-service OOO rule, half-open UTC window, resolution-time enforcement)",
-        "packages/plugins/plugin-approvals/src/approval-service.ts (applyOooDelegation + lookupActiveDelegation — individually-routed only; M4 ooo_substitute audit row + approval.ooo_substituted / approval.ooo_skipped notifications)",
+        "packages/plugins/plugin-approvals/src/approval-service.ts#applyOooDelegation (applyOooDelegation + lookupActiveDelegation — individually-routed only; M4 ooo_substitute audit row + approval.ooo_substituted / approval.ooo_skipped notifications)",
         "@objectstack/core isGrantActive (ADR-0091 D2 half-open validity predicate)",
         "examples/app-showcase/src/automation/flows/approver-bindings.flow.ts (the {type:'user'|'manager'|'field'} approver specimens the scratch flow is shaped after)",
-        "packages/plugins/plugin-approvals/src/lifecycle-hooks.ts (bindDelegationWriteGuard — self-service-only, no admin exemption since #4839; the reason the old third-party persona shape was unconstructible)",
-        "examples/app-showcase/src/security/seed-approval-demo.ts (AUDITOR_DEMO_USER — the second real persona B is provisioned from)"
+        "packages/plugins/plugin-approvals/src/lifecycle-hooks.ts#bindDelegationWriteGuard (bindDelegationWriteGuard — self-service-only, no admin exemption since #4839; the reason the old third-party persona shape was unconstructible)",
+        "examples/app-showcase/src/security/seed-approval-demo.ts#AUDITOR_DEMO_USER (AUDITOR_DEMO_USER — the second real persona B is provisioned from)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-08", "change": "initial — pins the #1322 OOO delegation reroute: active A→B window reroutes an individually-routed slot to B (audited + notified, decided under B's own identity); expiry hands it back to A at resolution time", "ref": "claude/platform-test-checklist-ocwugl" },
@@ -796,7 +796,7 @@
         "objectui packages/app-shell/src/views/RecordDetailView.tsx (buildApprovalDecisionActions — record_header Approve/Reject, single-dialog Reject #3126, actionParams comment #2955; approvalLocked/canEdit gating #2902)",
         "objectui packages/app-shell/src/hooks/useRecordApprovals.ts (recordLockedByApproval, canDecide, /approvals/requests decide routes)",
         "objectui packages/app-shell/src/views/RecordDetailView.approvalDecisionActions.test.tsx (the param-contract pin)",
-        "examples/app-showcase/src/automation/flows/index.ts (BudgetApprovalFlow — manager_review lockRecord:false / exec_review lockRecord:true on showcase_project)"
+        "examples/app-showcase/src/automation/flows/index.ts#BudgetApprovalFlow (BudgetApprovalFlow — manager_review lockRecord:false / exec_review lockRecord:true on showcase_project)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-08", "change": "initial — the record-page approval surface (distinct from the inbox-drawer items): header Approve/Reject, one-dialog Reject (#3126), decision round-trip, and the lockRecord-driven inline-edit hide (#2902)", "ref": "claude/platform-test-checklist-ocwugl" }
@@ -873,8 +873,8 @@
       ],
       "traps": ["seed-data-thin", "stale-dist"],
       "source": [
-        "packages/spec/src/automation/approval.zod.ts (ApprovalEscalationSchema — enabled/timeoutHours(min 1)/action(reassign|auto_approve|auto_reject|notify)/escalateTo/notifySubmitter, strict, #4001; carried on the approval node as config.escalation)",
-        "packages/plugins/plugin-approvals/src/approval-service.ts (runEscalations sweep + escalateRequest — audit-first escalate row, per-action effects, notifySubmitter; slaDueAt; ESCALATION_JOB_NAME ADR-0042; this.clock)",
+        "packages/spec/src/automation/approval.zod.ts#ApprovalEscalationSchema (ApprovalEscalationSchema — enabled/timeoutHours(min 1)/action(reassign|auto_approve|auto_reject|notify)/escalateTo/notifySubmitter, strict, #4001; carried on the approval node as config.escalation)",
+        "packages/plugins/plugin-approvals/src/approval-service.ts#runEscalations (runEscalations sweep + escalateRequest — audit-first escalate row, per-action effects, notifySubmitter; slaDueAt; ESCALATION_JOB_NAME ADR-0042; this.clock)",
         "packages/plugins/plugin-approvals/src/sys-approval-request.object.ts (sla_due_at surfaced on the request)"
       ],
       "history": [
@@ -959,8 +959,8 @@
       "traps": ["stale-console-bundle", "hydration-race", "wrong-persona"],
       "source": [
         "#7213 (entry convergence epic)", "#7231", "#7234", "#7331 (this item's browser run)",
-        "packages/platform-objects/src/apps/account.app.ts (the Approvals nav entry, type component / componentRef approvals:inbox)",
-        "packages/platform-objects/src/apps/account-approvals-nav.test.ts (pins the entry shape; explicitly does NOT assert main.tsx's side-effect import)",
+        "packages/platform-objects/src/apps/account.app.ts#componentRef (the Approvals nav entry, type component / componentRef approvals:inbox)",
+        "packages/platform-objects/src/apps/account-approvals-nav.test.ts#entry (pins the entry shape; explicitly does NOT assert main.tsx's side-effect import)",
         "objectui apps/console/src/main.tsx + the approvals:inbox registration (objectui#4071)"
       ],
       "history": [
@@ -1016,7 +1016,7 @@
       "traps": ["hydration-race", "stale-console-bundle"],
       "source": [
         "#7213", "#7268", "#7331 (this item's browser run)",
-        "packages/plugins/plugin-approvals/src/approvals-plugin.ts (navigationContributions → setup group_approvals)",
+        "packages/plugins/plugin-approvals/src/approvals-plugin.ts#navigationContributions (navigationContributions → setup group_approvals)",
         "packages/plugins/plugin-approvals/src/nav-contribution.test.ts"
       ],
       "history": [
@@ -1161,11 +1161,11 @@
       ],
       "traps": ["dispatcher-vs-hono-route", "auth-state-leak"],
       "source": [
-        "packages/plugins/plugin-approvals/src/approvals-plugin.ts (the raw Hono mount at /api/v1/approvals/act — GET renders via peekActionToken, POST redeems; mounted on kernel:ready off the canonical http.server handle, #4251 B5)",
-        "packages/plugins/plugin-approvals/src/approval-service.ts (actionLinkUrl · issueActionTokens: hashed-at-rest + FORBIDDEN for non-pending approvers · resolveActionToken: invalid/consumed/expired/not_pending/not_approver chain · peekActionToken 'validate WITHOUT consuming' · redeemActionToken 'consume the token FIRST … then decide as the bound approver', #3783 the-token-IS-the-authentication attribution); ACTION_TOKEN_TTL_MS = 72h",
-        "packages/plugins/plugin-approvals/src/approval-service.ts (the remind fan-out is the mint path: per-approver Approve/Reject action links on topic approval.reminder; literal slots fall back to a tokenless nudge)",
-        "packages/plugins/plugin-approvals/src/action-link-pages.ts (ADR-0043 session-less bilingual pages; 'The GET page NEVER mutates'; RESULT_COPY — which refusal shapes carry summaryRows and which do not)",
-        "packages/services/service-messaging/src/messaging-service.ts + (writeEvent persists the payload on sys_notification — the stock-boot token-capture seam this item's fixtures rest on)",
+        "packages/plugins/plugin-approvals/src/approvals-plugin.ts#http (the raw Hono mount at /api/v1/approvals/act — GET renders via peekActionToken, POST redeems; mounted on kernel:ready off the canonical http.server handle, #4251 B5)",
+        "packages/plugins/plugin-approvals/src/approval-service.ts#actionLinkUrl (actionLinkUrl · issueActionTokens: hashed-at-rest + FORBIDDEN for non-pending approvers · resolveActionToken: invalid/consumed/expired/not_pending/not_approver chain · peekActionToken 'validate WITHOUT consuming' · redeemActionToken 'consume the token FIRST … then decide as the bound approver', #3783 the-token-IS-the-authentication attribution); ACTION_TOKEN_TTL_MS = 72h",
+        "packages/plugins/plugin-approvals/src/approval-service.ts#approver (the remind fan-out is the mint path: per-approver Approve/Reject action links on topic approval.reminder; literal slots fall back to a tokenless nudge)",
+        "packages/plugins/plugin-approvals/src/action-link-pages.ts#RESULT_COPY (ADR-0043 session-less bilingual pages; 'The GET page NEVER mutates'; RESULT_COPY — which refusal shapes carry summaryRows and which do not)",
+        "packages/services/service-messaging/src/messaging-service.ts#writeEvent + (writeEvent persists the payload on sys_notification — the stock-boot token-capture seam this item's fixtures rest on)",
         "packages/plugins/plugin-approvals/src/sys-approval-token.object.ts (the token store)"
       ],
       "history": [
@@ -1253,8 +1253,8 @@
       ],
       "traps": ["seed-data-thin", "wrong-persona"],
       "source": [
-        "packages/spec/src/automation/approval.zod.ts (ApproverType, 10 members incl. deprecated role + dead queue), (DEPRECATED_APPROVER_TYPES role→org_membership_level + canonicalApproverType), (NON_AUTHORABLE_APPROVER_TYPES), (onEmptyApprovers admin_rescue|fail|auto_approve, default admin_rescue)",
-        "packages/plugins/plugin-approvals/src/approval-service.ts (expandApprovers — per-spec group tagging; expression resolved outside the flat contract), (resolveApproverSpec — role warn, per-type branches, queue warn, #3807 expanded-to-nobody warn, literal type:value fallback), (expandBusinessUnitUsers — active-descendant BFS + membership union), (the empty-slate fork: 'empty' = no concrete person, NO_APPROVERS / autoApproved / admin_rescue warn)",
+        "packages/spec/src/automation/approval.zod.ts#ApproverType (ApproverType, 10 members incl. deprecated role + dead queue), (DEPRECATED_APPROVER_TYPES role→org_membership_level + canonicalApproverType), (NON_AUTHORABLE_APPROVER_TYPES), (onEmptyApprovers admin_rescue|fail|auto_approve, default admin_rescue)",
+        "packages/plugins/plugin-approvals/src/approval-service.ts#expandApprovers (expandApprovers — per-spec group tagging; expression resolved outside the flat contract), (resolveApproverSpec — role warn, per-type branches, queue warn, #3807 expanded-to-nobody warn, literal type:value fallback), (expandBusinessUnitUsers — active-descendant BFS + membership union), (the empty-slate fork: 'empty' = no concrete person, NO_APPROVERS / autoApproved / admin_rescue warn)",
         "examples/app-showcase/src/automation/flows/approver-bindings.flow.ts (the #3508 DESIGNER specimen — draft, empty values, its docblock is the evidence the runtime legs need scratch flows)",
         "examples/app-showcase/src/data/seed/index.ts (BU tree seeded; membership is a runtime admin action by design)",
         "#3424 (privileged override — the admin_rescue escape hatch), #3447 P2, #3508, #3807, ADR-0090 D3"
@@ -1333,10 +1333,10 @@
       "traps": ["seed-data-thin", "eventual-consistency"],
       "automated": { "kind": "test", "ref": "packages/plugins/plugin-approvals/src/status-mirror-cascade.integration.test.ts" },
       "source": [
-        "packages/spec/src/automation/approval.zod.ts (approvalStatusField — 'Should be readonly on the object. Omitted ⇒ status is exposed only via sys_approval_request'; the docblock's four-value list, which the service's fifth value 'returned' outgrew)",
-        "packages/plugins/plugin-approvals/src/approval-service.ts (mirrorStatusField — elevated but not anonymous #3783: system write carrying the actor's userId; actorId null only for machine transitions; warn-not-throw on failure) + the six call sites (dead-run sweep, deliberately user-less)",
-        "packages/plugins/plugin-approvals/src/lifecycle-hooks.ts (the record lock's whitelist: 'block, EXCEPT when the only changed field is the configured approvalStatusField — so the status mirror is never blocked')",
-        "packages/plugins/plugin-approvals/src/status-mirror-cascade.integration.test.ts (the cascade-identity pin: real kernel + real SQL store, positive decider-identity case and the load-bearing user-less negative)"
+        "packages/spec/src/automation/approval.zod.ts#approvalStatusField (approvalStatusField — 'Should be readonly on the object. Omitted ⇒ status is exposed only via sys_approval_request'; the docblock's four-value list, which the service's fifth value 'returned' outgrew)",
+        "packages/plugins/plugin-approvals/src/approval-service.ts#mirrorStatusField (mirrorStatusField — elevated but not anonymous #3783: system write carrying the actor's userId; actorId null only for machine transitions; warn-not-throw on failure) + the six call sites (dead-run sweep, deliberately user-less)",
+        "packages/plugins/plugin-approvals/src/lifecycle-hooks.ts#mirror (the record lock's whitelist: 'block, EXCEPT when the only changed field is the configured approvalStatusField — so the status mirror is never blocked')",
+        "packages/plugins/plugin-approvals/src/status-mirror-cascade.integration.test.ts#kernel (the cascade-identity pin: real kernel + real SQL store, positive decider-identity case and the load-bearing user-less negative)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-30", "change": "initial — the opt-in status mirror had no coverage. Grounded in the six service write sites (including 'returned', which the spec docblock omits — recorded so a run asserts actual behavior), the lock hook's mirror-field-only whitelist, and the #3783 acting-user attribution the existing integration test pins; no showcase flow declares the key, so the fixture rides the scratch-flow route (knownGaps)", "ref": "#sweep-2026-08-30" }
@@ -1409,7 +1409,7 @@
       "traps": ["automation-input", "hydration-race"],
       "source": [
         "objectui apps/console/src/pages/system/ApprovalsInboxPage.tsx (the list keyboard effect — j/k/arrows/Enter/x/space/a/r; ownership guards: selectedId/dialog yield, INPUT/TEXTAREA/SELECT/contentEditable, [role=alertdialog]), (drawer ←/→ walk), (quickDecidable = isActionable AND no declared decision outputs, #2829), (inlineApprove/inlineReject → approvalsApi.approve/reject — the same routes as the buttons), (the focus ring classes), (the hint bar copy), (the file's own keyboard contract docblock)",
-        "examples/app-showcase/src/automation/flows/dynamic-approval.flow.ts (the stock decisionOutputs row the gating contrast rides)"
+        "examples/app-showcase/src/automation/flows/dynamic-approval.flow.ts#decisionOutputs (the stock decisionOutputs row the gating contrast rides)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-30", "change": "initial — the inbox's keyboard surface (documented in the page's own header and advertised by its hint bar) had no checklist coverage; the load-bearing halves are that r/a land the same server transition as the buttons and that quick-decidability gates hotkeys off rows whose decisions require typed outputs", "ref": "#sweep-2026-08-30" }

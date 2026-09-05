@@ -1,0 +1,88 @@
+// The TEST-layer type-check program (#15048 — the `packages/services/**`
+// instance of the class #14062 settled for `packages/plugins/**` and #14181
+// carried to `service-cluster` (PR #15032), itself adopting the mechanism
+// #5286 set for `packages/spec`, #5449 generalised, #12542 carried to
+// `packages/rest` and #13176 to `packages/plugins/plugin-security`).
+// `tsconfig.json` beside this one stays exactly as it is: it is the BUILD
+// config. This sibling puts the test layer in front of tsc under the module
+// semantics vitest really executes it with, and `package.json`'s `typecheck`
+// script NAMES it (via `check:test-typecheck --project`), because a config no
+// script invokes is exactly the phantom this whole change is about.
+//
+// ⚠️ WHY THIS PACKAGE COPIES `plugin-webhooks` / `service-cluster` RATHER THAN
+// `plugin-auth` / `plugin-sharing` / `core`: the deciding property is what the
+// BUILD config does with tests. `service-automation`'s `tsconfig.json` does
+// NOT exclude `src/**/*.test.ts` and never did — its `include` is `["src"]`
+// with no test exclusion — so the program that would have read them already
+// existed; it was simply never invoked (no `typecheck` script at all, only
+// `build` and `test`). That is the `plugin-webhooks`/`service-cluster` shape,
+// not the `exclude`-and-compensate shape the other three packages carry, and
+// AGENTS.md forbids ADDING such an exclusion, so their route does not
+// transfer here.
+//
+// What differs from the build config, and what deliberately does NOT:
+//   - MODULE SEMANTICS ONLY, plus `lib`. The tests are written and executed as
+//     ESM by vitest (esbuild/vite). Matching that is FIDELITY, not laxity: it
+//     is the same subtraction `packages/spec`, `packages/rest`,
+//     `plugin-security`, `plugin-webhooks` and `service-cluster` each made.
+//   - ⛔ STRICTNESS IS UNTOUCHED. `strict`, `noUnusedLocals`,
+//     `noUnusedParameters`, `noImplicitReturns`, `noFallthroughCasesInSwitch`,
+//     `rootDir`, `paths` and `types` are all INHERITED from `tsconfig.json`
+//     (and through it the root config), and none of them is re-declared here.
+//     ⚠️ A child that declared its own `paths` would REPLACE the parent map
+//     rather than merge into it, silently sending a source-resolved specifier
+//     back to `dist/` — a BUILD ARTIFACT — so this file declares none.
+//     Nothing here may loosen a type rule; if a test does not compile, that is
+//     the finding.
+//   - `lib: ["ES2022"]`, for the same reason `packages/rest` states: the root
+//     config's `lib` is ES2020 and vitest runs on a Node that has es2022
+//     builtins, so the gap is reported as TS2550 about the CHECK. No `DOM`:
+//     nothing in this layer touches a browser global.
+//
+// MEASURED at 2cc4610304 (origin/main), workspace closure built first
+// (`pnpm --filter '@objectstack/service-automation^...' build`, then
+// `tsc --noEmit --pretty false --listFiles -p tsconfig.test.json`, and the
+// same command without `--listFiles`), BEFORE any fix:
+//
+//   files in this program        555
+//   own `src/**/*.test.ts` in it 103
+//   errors under BUILD semantics (tsc -p tsconfig.json, which already
+//     included the tests)        3
+//   errors under THIS config     3
+//
+// The two readings AGREE, so this package carried no config-tier pile at all
+// — unlike `@objectstack/core` (#14916: 98 undivided -> 4 after the split,
+// nearly all TS7006 cascading from one unresolved import) — and the 3 were
+// genuinely code-tier from the start: all TS2341 ("Property 'flows' is
+// private…"), all in `src/nested-region-parity.test.ts` (lines 95/151/180),
+// where three tests dot-read the PRIVATE `AutomationEngine#flows` map
+// directly instead of going through the class's own public accessor. That
+// accessor already exists and is already the idiom every other test file in
+// this package uses — `await engine.getFlow(name)` (defined at
+// `src/engine.ts`, returns `this.flows.get(name) ?? null`) — so the fix is
+// not a workaround: it replaces three private-internals reads with the public
+// surface the class was already offering, exactly as the rest of the suite
+// does. AFTER: 0 and 0, across a 555-file program covering all 103 of this
+// package's `src/**/*.test.ts`.
+//
+// There is NO `test-typecheck-debt.json` beside this config, and its ABSENCE
+// is the zero: `check:test-typecheck` reads a missing ledger as
+// `{ entries: {} }`, under which ANY error in ANY file here is red
+// immediately, with no entry to be added to. That is strictly stronger than a
+// ledger holding nothing, and it is the same call `plugin-webhooks`,
+// `plugin-security` (#13176) and `service-cluster` (#14181) each recorded for
+// themselves. If this package ever acquires residue that cannot be fixed in
+// the PR that causes it, THAT is when a ledger and a `gen:test-typecheck-debt`
+// script are owed — and adding one is maintainer-only (#5286), exactly as the
+// gate says when it refuses.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"]
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}

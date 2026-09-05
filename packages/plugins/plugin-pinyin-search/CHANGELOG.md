@@ -1,5 +1,151 @@
 # @objectstack/plugin-pinyin-search
 
+## 17.3.0
+
+### Patch Changes
+
+- ad54eb3: feat(tooling): onboard all 14 `packages/plugins/**` packages into `check:test-typecheck` (#14062)
+  
+  Every plugin package now has a `tsconfig.test.json` compiled by the shared
+  `check:test-typecheck` gate, and its `typecheck` script names it. Before this,
+  the shrink-only `test-typecheck-debt.json` ratchet said **nothing** about a
+  third of the repo's runtime surface: 14 packages, 1 `tsconfig.test.json`
+  (`plugin-security`, wired directly to `tsc` rather than to the instrument), and
+  0 `check:test-typecheck` scripts.
+  
+  Onboarded as a family by the director ruling of 2026-09-01 on #14062
+  (maintainer verbatim: 「同意」), which also carries the #5286 maintainer
+  authority the starting ledgers need. The smaller branch triage recommended —
+  declare the instrument's scope and re-site the two compile-time pins — was
+  recorded as considered and not taken: an instrument silent over a third of the
+  runtime surface is a hole readers generalise across, and that costs more than
+  fourteen tsconfigs.
+  
+  **Measured, not assumed** (at `e80889095`, workspace closure built first). Four
+  packages carry residue and therefore a starting ledger — plugin-approvals 324
+  over 8 files, plugin-auth 94 over 10, plugin-sharing 3 over 2,
+  knowledge-ragflow 3 over 1. The other ten measure **zero** and deliberately get
+  no ledger file at all: the gate reads a missing ledger as `{ entries: {} }`, so
+  any error there is red immediately with no entry to be added to — strictly
+  stronger than a ledger holding nothing, and the call `plugin-security` had
+  already recorded for itself.
+  
+  ⛔ **This does not repair 345 type errors.** Per ruling item 3 it makes the
+  ratchet able to *see* them; paydown follows the ratchet's own shrink-only
+  discipline on its own cards. No test file is edited here.
+  
+  Two corrections to the finding's own prose, both measured: the exclusion is
+  narrower than "no plugin package compiles its tests" — 9 of the 14 already
+  compiled their tests inside the `typecheck`-invoked build config, at zero
+  errors — and `exec-context-annotation.pin.ts` is a `.pin.ts`, which
+  `**/*.test.ts` never excluded, so its directives were already live. The pin
+  this change genuinely makes real is
+  `plugin-approvals/src/manager-org-screen-parity.contract.test.ts`, which no tsc
+  program had ever read.
+- Updated dependencies [bd8795e]
+- Updated dependencies [efb3513]
+- Updated dependencies [1dcb995]
+- Updated dependencies [655b106]
+- Updated dependencies [101ad2c]
+- Updated dependencies [c5a9a43]
+- Updated dependencies [e27583e]
+- Updated dependencies [4bd6faa]
+- Updated dependencies [86cbe37]
+- Updated dependencies [6a180e4]
+- Updated dependencies [983edf1]
+- Updated dependencies [f6fa22c]
+- Updated dependencies [bbbac0f]
+- Updated dependencies [dc7c226]
+- Updated dependencies [d8024f0]
+- Updated dependencies [8120808]
+- Updated dependencies [0010797]
+- Updated dependencies [c393b56]
+- Updated dependencies [0db5520]
+- Updated dependencies [fa5d137]
+- Updated dependencies [3b4c56c]
+- Updated dependencies [a81aa9d]
+- Updated dependencies [56c093c]
+- Updated dependencies [ba64877]
+- Updated dependencies [30d96ab]
+- Updated dependencies [f658793]
+- Updated dependencies [b1b7d60]
+- Updated dependencies [0fd4899]
+- Updated dependencies [9a71af3]
+- Updated dependencies [c3c72a4]
+- Updated dependencies [7bd6447]
+- Updated dependencies [86df0c9]
+- Updated dependencies [5a22dd7]
+- Updated dependencies [0a8ebf3]
+- Updated dependencies [34ce8e7]
+- Updated dependencies [8542bd4]
+- Updated dependencies [2af5eac]
+- Updated dependencies [c34f693]
+- Updated dependencies [00ff228]
+- Updated dependencies [33681ea]
+- Updated dependencies [bfe13c8]
+- Updated dependencies [0fb3044]
+- Updated dependencies [4635f3e]
+- Updated dependencies [fd289be]
+- Updated dependencies [ee3595c]
+- Updated dependencies [b2eab95]
+- Updated dependencies [6aea1f5]
+- Updated dependencies [d395692]
+- Updated dependencies [2d5cee3]
+- Updated dependencies [af56546]
+- Updated dependencies [bd0c5cc]
+- Updated dependencies [a17da05]
+- Updated dependencies [a8c00e2]
+- Updated dependencies [a8fac3a]
+- Updated dependencies [22e5236]
+- Updated dependencies [e5ce2ed]
+- Updated dependencies [aaa4e65]
+- Updated dependencies [b8562ff]
+- Updated dependencies [3a86a65]
+- Updated dependencies [4cda78c]
+- Updated dependencies [7085f90]
+- Updated dependencies [dee4dd4]
+- Updated dependencies [c351a84]
+- Updated dependencies [9086761]
+- Updated dependencies [c5b9ccc]
+- Updated dependencies [7131f12]
+- Updated dependencies [159e05e]
+- Updated dependencies [2cf5a96]
+- Updated dependencies [8ce628a]
+- Updated dependencies [33184fd]
+- Updated dependencies [7c41693]
+- Updated dependencies [b72db01]
+- Updated dependencies [9688f58]
+- Updated dependencies [556ebc1]
+- Updated dependencies [b003cf2]
+- Updated dependencies [356bd71]
+- Updated dependencies [878aa2e]
+- Updated dependencies [3f64fe6]
+- Updated dependencies [fe72aa5]
+- Updated dependencies [bc5156f]
+- Updated dependencies [5700d83]
+- Updated dependencies [df657d9]
+- Updated dependencies [9c7d9d4]
+- Updated dependencies [21196cf]
+- Updated dependencies [a548550]
+- Updated dependencies [49f0dcf]
+- Updated dependencies [90ff957]
+- Updated dependencies [db8c288]
+- Updated dependencies [0e5fe7f]
+- Updated dependencies [add4360]
+- Updated dependencies [a11c1a5]
+- Updated dependencies [f7b25c5]
+- Updated dependencies [e49d988]
+- Updated dependencies [87ad30c]
+- Updated dependencies [9d7f725]
+- Updated dependencies [3c1bbd2]
+- Updated dependencies [9735662]
+- Updated dependencies [4d5b4f8]
+- Updated dependencies [5d16379]
+- Updated dependencies [aa0688a]
+  - @objectstack/objectql@17.3.0
+  - @objectstack/core@17.3.0
+  - @objectstack/types@17.3.0
+
 ## 17.2.0
 
 ### Patch Changes

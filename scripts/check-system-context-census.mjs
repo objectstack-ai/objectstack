@@ -320,27 +320,27 @@ export const NON_READ_ANCHORS = [
   {
     file: 'packages/objectql/src/engine.ts',
     needle: 'if (!hasTx && !hasTenant && !isSystem && !hasTz && !preserveAudit) return base;',
-    why: 'row 24 -- the early return the tenant-audit read feeds',
+    why: 'row 23 -- the early return the tenant-audit read feeds',
   },
   {
     file: 'packages/objectql/src/engine.ts',
     needle: 'if (isSystem && opts.bypassTenantAudit === undefined && !isTenantAuditInScope) {',
-    why: 'row 24 -- where `bypassTenantAudit` is threaded to the driver',
+    why: 'row 23 -- where `bypassTenantAudit` is threaded to the driver',
   },
   {
     file: 'packages/objectql/src/engine.ts',
     needle: 'if (options?.strictReadonlyWrites === true) {',
-    why: 'row 22 -- the strict-drop refusal that never fires under elevation',
+    why: 'row 21 -- the strict-drop refusal that never fires under elevation',
   },
   {
     file: 'packages/objectql/src/readonly-strict-errors.ts',
     needle: 'const READONLY_CLASS_REASONS',
-    why: 'row 22 -- the reason set the silent refusal would have used',
+    why: 'row 21 -- the reason set the silent refusal would have used',
   },
   {
     file: 'packages/plugins/plugin-security/src/system-write-guard.ts',
     needle: 'if (!isUserContextWrite(context)) return;',
-    why: 'row 25 -- the bypass expressed through a helper rather than a direct read',
+    why: 'row 24 -- the bypass expressed through a helper rather than a direct read',
   },
   {
     file: 'packages/plugins/plugin-sharing/src/sharing-service.ts',

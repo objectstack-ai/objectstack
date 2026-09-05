@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/driver-mongodb",
-  "version": "17.2.0",
+  "version": "17.3.0",
   "license": "Apache-2.0",
   "description": "MongoDB Driver for ObjectStack - Native document database driver via official mongodb client",
   "main": "dist/index.js",
@@ -16,7 +16,8 @@
     "build": "tsup --config ../../../tsup.config.ts && node ../../../scripts/check-dts-emitted.mjs",
     "dev": "tsc -w",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && pnpm check:test-typecheck",
+    "check:test-typecheck": "tsx ../../../scripts/check-test-typecheck.mts --self-test && tsx ../../../scripts/check-test-typecheck.mts --package packages/drivers/driver-mongodb --project tsconfig.test.json"
   },
   "dependencies": {
     "@objectstack/core": "workspace:*",
@@ -29,6 +30,7 @@
     "@objectstack/objectql": "workspace:*",
     "@types/node": "^26.2.0",
     "mongodb-memory-server": "^11.2.0",
+    "tsx": "^4.23.12",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"
   },

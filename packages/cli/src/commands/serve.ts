@@ -63,7 +63,19 @@ import {
 } from '../utils/port-contract.js';
 import { BootLogCapture, isVerboseBootLevel } from '../utils/boot-log-capture.js';
 import { graftAuthoredRuntimeMembers, isAppPluginLike } from '../utils/graft-runtime-hooks.js';
-import { redactConnectionUrl, describeDriverConnection } from '../utils/connection-display.js';
+// [ADR-0130 D4 / option B, #15006] Every read below that keys off a
+// PACKAGE-OWNED collection goes through this seam, so an option-B artifact
+// (flattened top level gone, `packages[]` carrying everything once) reaches
+// the same decision — and so the acceptance probe can CALL the decision
+// instead of re-implementing it.
+import {
+  shouldAutoRegisterObjectQL,
+  shouldAutoRegisterStorageDriver,
+  stackDeclaresMetadata,
+  bundleDeclaresTranslations,
+} from '../utils/stack-collections.js';
+import { redactConnectionUrl, describeDriverConnection, describeDriverSqliteFile } from '../utils/connection-display.js';
+import { captureServedDatabaseFile, watchServedDatabaseFile } from '../utils/served-database-file.js';
 // The posture prose `os serve` and `os doctor` BOTH print, declared once
 // (#12492) — and, since #12579, the multi-org runtime SPELLING those two
 // commands put in front of the same operator, declared once with it.
@@ -2088,6 +2100,11 @@ export default class Serve extends Command {
     // is idempotent, so the second pass over an already-clean URL is a no-op.
     let resolvedDriverLabel: string | undefined;
     let resolvedDatabaseUrl: string | undefined;
+    // The on-disk SQLite file this boot serves, when it serves one. Kept apart
+    // from `resolvedDatabaseUrl` on purpose: that value is a string for a
+    // human and may be redacted or labelled, while this one is handed to
+    // `stat` — see `describeDriverSqliteFile`.
+    let servedSqliteFilePath: string | undefined;
 
     // Resolve the kernel logger level up front. It decides more than the
     // logger's own threshold: it decides whether the boot-quiet window below
@@ -2628,8 +2645,12 @@ export default class Serve extends Command {
       }
 
       // 1. Auto-register ObjectQL Plugin if objects define but plugins missing
-      const hasObjectQL = plugins.some((p: any) => p.name?.includes('objectql') || p.constructor?.name?.includes('ObjectQL'));
-      if (config.objects && !hasObjectQL) {
+      // [#15006] The whole gate — the `objects` read AND the already-composed
+      // check — is `shouldAutoRegisterObjectQL`. It answers exactly as the two
+      // inline expressions did for every stack that boots today, and resolves
+      // `packages[]` when the flattened top level is absent, which is the shape
+      // that used to boot with NO QUERY ENGINE and throw nothing.
+      if (shouldAutoRegisterObjectQL(config, plugins)) {
          try {
            const { ObjectQLPlugin } = await import('@objectstack/objectql');
            await kernel.use(new ObjectQLPlugin());
@@ -2661,12 +2682,9 @@ export default class Serve extends Command {
       // at boot through the datasource connection service, so building a
       // storage driver here would construct a duplicate pool the engine then
       // discards as already-registered.
-      const hasDriver = plugins.some((p: any) =>
-        p.name?.includes('driver') ||
-        p.constructor?.name?.includes('Driver') ||
-        p.name === 'com.objectstack.runtime.default-datasource' ||
-        p.constructor?.name === 'DefaultDatasourcePlugin');
-      if (!hasDriver && config.objects) {
+      // [#15006] Same seam, same reason — see the ObjectQL gate above. The
+      // driver-provider duck-typing moved into it with the read it guards.
+      if (shouldAutoRegisterStorageDriver(config, plugins)) {
          const databaseUrl = process.env.OS_DATABASE_URL;
          const driverType = resolveDriverType(process.env.OS_DATABASE_DRIVER, databaseUrl);
          // libSQL/Turso's credential is the only one that does NOT ride inside the
@@ -2706,6 +2724,7 @@ export default class Serve extends Command {
              trackPlugin(resolution.trackName);
              resolvedDriverLabel = resolution.label;
              resolvedDatabaseUrl = resolution.displayUrl;
+             servedSqliteFilePath = resolution.sqliteFilePath;
 
              // ADR-0057 §3.6 (#2834 ②): provision the dedicated `telemetry`
              // datasource — a sibling SQLite file the engine routes every
@@ -2799,9 +2818,10 @@ export default class Serve extends Command {
       // already holds an AppPlugin instance — and never on a named app, so it
       // is checked structurally below.
       const hasAppPluginAlready = plugins.some(isAppPluginLike);
-      const configHasMetadata = !!(
-        config.objects || config.manifest || config.apps || config.flows || config.apis
-      );
+      // [#15006] The same predicate `schema-migration-plugins.ts` runs after its
+      // own second `loadConfig` (B4) — folded into one seam rather than left as
+      // two copies whose comment already said they were the same.
+      const configHasMetadata = stackDeclaresMetadata(config);
 
       // ── Decide the dev-only artifact door BEFORE the wrap (#14397) ────
       // On a HOST config `os dev` composes TWO writers over ONE stack: the
@@ -2973,24 +2993,19 @@ export default class Serve extends Command {
       // `plugins` array — a host/aggregator config may define no translations
       // of its own and instead compose several `new AppPlugin(...)` entries,
       // each carrying its own. Keyed on that shape, not on a named app.
-      const pluginBundleHasTranslations = (bundle: any): boolean => {
-        if (!bundle || typeof bundle !== 'object') return false;
-        if (Array.isArray(bundle.translations) && bundle.translations.length > 0) return true;
-        if (bundle.i18n) return true;
-        if (bundle.manifest && (
-          (Array.isArray(bundle.manifest.translations) && bundle.manifest.translations.length > 0)
-          || bundle.manifest.i18n
-        )) return true;
-        return false;
-      };
+      // [#15006] `bundleDeclaresTranslations` is that same shape-keyed check plus
+      // the `packages[]` leg: `translations` is package-owned and `i18n` is an
+      // envelope key a translations-only stack never sets, so an option-B artifact
+      // reached this gate with neither and the REST i18n routes silently did not
+      // exist. MEASURED on the acceptance probe, not inferred.
       const anyAppPluginHasTranslations = plugins.some((p: any) => {
         if (!p) return false;
         // AppPlugin instances expose their bundle on `.bundle`
-        if (p.bundle && pluginBundleHasTranslations(p.bundle)) return true;
+        if (p.bundle && bundleDeclaresTranslations(p.bundle)) return true;
         return false;
       });
       const configHasTranslations = (
-        pluginBundleHasTranslations(config)
+        bundleDeclaresTranslations(config)
         || anyAppPluginHasTranslations
       );
       if (!hasI18nPlugin && configHasTranslations && tierEnabled('i18n')) {
@@ -4063,9 +4078,9 @@ export default class Serve extends Command {
         //   • `requires: ['ai-studio']` ⇒ required → fail-fast if the private package
         //     is absent (an app that advertises Studio must ship it).
         //   • package declared but not required ⇒ auto (best-effort).
-        //   • otherwise ⇒ skip — this is the control-plane host path (apps/cloud ships
-        //     no Studio and MUST boot clean, cloud#107): not declared + not required
-        //     ⇒ no import, no error.
+        //   • otherwise ⇒ skip — this is the control-plane host path (such a host
+        //     ships no Studio and MUST boot clean, cloud#107): not declared + not
+        //     required ⇒ no import, no error.
         if (aiLoaded) {
           const hasAIStudio = plugins.some(
             (p: any) => p.name === 'com.objectstack.service-ai-studio'
@@ -4397,9 +4412,9 @@ export default class Serve extends Command {
 
       if (enableUI) {
         // Pre-detect Console availability. The `--no-console` flag (or
-        // OS_DISABLE_CONSOLE=1 env var) lets a host (e.g. apps/cloud)
-        // opt out of the Console entirely — useful for control-plane
-        // deployments where the runtime Console is meaningless.
+        // OS_DISABLE_CONSOLE=1 env var) lets a host opt out of the Console
+        // entirely — useful for control-plane deployments where the
+        // runtime Console is meaningless.
         const consoleEnabled = flags.console && process.env.OS_DISABLE_CONSOLE !== '1';
         // Resolution reports objectui-SHA drift instead of warning about it
         // itself, so the decision below owns the single message about it.
@@ -4546,12 +4561,13 @@ export default class Serve extends Command {
 
       // ── Migrate-and-exit short-circuit ─────────────────────────────
       // Out-of-band migration mode: the caller (e.g.
-      // `apps/cloud/scripts/migrate.ts`) just wants the kernel
-      // bootstrap (ObjectQLPlugin → schema sync → metadata hydration)
-      // to run once against the configured database, then exit. The
-      // HTTP server has already bound `port` at this point but we
-      // never accept a request — shutdown immediately so the deploy
-      // pipeline can move on.
+      // `apps/cloud/scripts/migrate.ts`, which lives in the separate
+      // `objectstack-ai/cloud` repo and is NOT a path in this one) just
+      // wants the kernel bootstrap (ObjectQLPlugin → schema sync →
+      // metadata hydration) to run once against the configured database,
+      // then exit. The HTTP server has already bound `port` at this point
+      // but we never accept a request — shutdown immediately so the
+      // deploy pipeline can move on.
       if (process.env.OS_MIGRATE_AND_EXIT === '1') {
         // This path exits before the banner, so it has to replay the boot
         // diagnostics itself — a deploy pipeline is precisely where a
@@ -4579,6 +4595,7 @@ export default class Serve extends Command {
           if (probe) {
             resolvedDriverLabel = probe.label;
             resolvedDatabaseUrl = probe.url;
+            servedSqliteFilePath = probe.sqliteFile;
           }
         } catch {
           // best-effort only
@@ -4746,6 +4763,35 @@ export default class Serve extends Command {
       // sends a consumer to it. {@link publishBoundPort} carries the race the
       // old order lost, and the reason the repair is not reader-side polling.
       publishBoundPort(boundPort, runtimeBoundPortChannels(printBanner));
+
+      // ── Watch the served database file's identity ──────────────────
+      // Deleting the data directory under a running server (`rm -rf
+      // .objectstack/data`, what `demo:reset` does) unlinks the inode without
+      // touching this process: SQLite keeps serving the now-invisible file,
+      // health keeps answering 200, and a later boot creates a brand-new
+      // database at the same path. From then on every filesystem inspection of
+      // that path describes a DIFFERENT file than this server answers from —
+      // which is how "the row I edited had no effect" and "the user who just
+      // authenticated is not in the database" become simultaneously true
+      // readings of a healthy deployment.
+      //
+      // Started only once the boot is otherwise complete, so a failure here
+      // can never be mistaken for a boot problem, and only when an on-disk
+      // SQLite file is actually being served. It refuses nothing and reports
+      // once — see `served-database-file.ts` for why both.
+      if (servedSqliteFilePath) {
+        const openedDatabaseFile = captureServedDatabaseFile(servedSqliteFilePath);
+        if (openedDatabaseFile) {
+          watchServedDatabaseFile({
+            opened: openedDatabaseFile,
+            // `error`, and to stderr: by the degradation-log-level rule this is
+            // the durability/consistency class — the system keeps looking
+            // normal while what it claims is persisted is not at the path it
+            // names.
+            onDiverged: (message) => { console.error(chalk.red(message)); },
+          });
+        }
+      }
 
       // Kernel already registers SIGINT/SIGTERM handlers during bootstrap.
       // No duplicate handler needed here — just keep the process alive.
@@ -5225,13 +5271,39 @@ export function formatI18nLoadDiagnostic(pkg: string, err: unknown): string {
  */
 
 /**
- * The install remedy bullet for a multi-org runtime that would not load — two
- * absences, two remedies (#4719).
+ * The install remedy bullet for a multi-org runtime that would not load — one
+ * bullet per ABSENCE, and the absences are what the branch reads (#4719).
  *
- * `declared-unresolvable` means the app's `package.json` DOES name the package
- * and the install is what is broken; anything else means the app never declared
- * it. Telling the first operator to re-read a file that is already correct is
- * the defect this branch exists to avoid.
+ * ## What the branch is ON, and why it is not a kind list
+ *
+ * The question each arm answers is **"is the declaration the problem?"**:
+ *
+ *   - `declared-unresolvable` — the app's `package.json` DOES name the package
+ *     and the INSTALL is what is broken. Telling that operator to re-read a
+ *     file that is already correct is the defect this branch exists to avoid.
+ *   - `declared-no-loadable-entry` (#14041) — the app declares it, the install
+ *     DELIVERED it, and the package's own `exports` names no runtime entry
+ *     Node can load. Neither absence applies: there is nothing to declare and
+ *     nothing to install, so this arm prescribes NOTHING and defers to the
+ *     importer's own message, which `formatOrganizationsAbsentFatal` prints
+ *     verbatim as the `cause:` line of the same refusal (#14270).
+ *   - anything else — the app never declared it, so the declare-and-install
+ *     remedy is the one that works.
+ *
+ * ⚠️ This was a TWO-WAY branch written when only two kinds existed, so the
+ * third fell into the else leg and told an operator whose app already declares
+ * AND installs the package to declare and install it — the
+ * confidently-wrong-verdict class #14041 removed one layer down, reintroduced
+ * by its consumer. ⛔ The third arm deliberately does NOT mint a fourth remedy
+ * sentence: the importer already words the package-shape case, and a local
+ * re-wording here would be a second copy to drift (the same reason
+ * {@link formatI18nLoadDiagnostic} interpolates only the kind TOKEN, and the
+ * same shape as {@link formatOrganizationsMountFatal}'s "its message is the
+ * authority on the remedy").
+ *
+ * An error carrying NO kind never came from the host importer at all and keeps
+ * the declare-and-install arm it has always had — narrowing that one is a
+ * different question, about a different fact, and is not this branch's.
  */
 export function formatOrganizationsInstallRemedy(
   kind: HostImportFailureKind | undefined,
@@ -5239,20 +5311,29 @@ export function formatOrganizationsInstallRemedy(
   hostRoot: string,
 ): string {
   const pkg = Serve.ORGANIZATIONS_RUNTIME_PKG;
-  return kind === 'declared-unresolvable'
-    ? `      • this app DECLARES ${pkg} ` +
+  if (kind === 'declared-unresolvable') {
+    return `      • this app DECLARES ${pkg} ` +
       `(${declaration.field}: ${JSON.stringify(declaration.specifier)}) — the\n` +
       '        declaration is NOT the problem and re-reading package.json will not help.\n' +
       `        Repair the INSTALL in ${hostRoot}: run \`pnpm install\`, check that a\n` +
-      '        production prune did not drop it, and that its dist is actually built — or\n'
-    : `      • add ${pkg} (the enterprise multi-org runtime) to THIS APP\n` +
-      "        — declare it in the app's package.json and install; the CLI resolves it from the\n" +
-      '          app, not from the framework it is linked out of. Being merely reachable\n' +
-      '          through NODE_PATH / a hoisted workspace store is deliberately not enough\n' +
-      '          (#4719) — that made this wall depend on how the process was launched.\n' +
-      '          NOTE: this runtime is closed-source and is NOT on the public npm registry —\n' +
-      '          it is distributed with an enterprise / cloud subscription. Without one this\n' +
-      '          bullet is not followable, and one of the two below is your path — or\n';
+      '        production prune did not drop it, and that its dist is actually built — or\n';
+  }
+  if (kind === 'declared-no-loadable-entry') {
+    return `      • this app DECLARES ${pkg} ` +
+      `(${declaration.field}: ${JSON.stringify(declaration.specifier)}) and it IS\n` +
+      '        INSTALLED — neither the declaration nor the install is the problem, and no change\n' +
+      '        you make in this app can fix it. The package publishes no entry Node can load;\n' +
+      '        the remedy is in the package, and the cause below is the authority on what it\n' +
+      '        has to publish — or\n';
+  }
+  return `      • add ${pkg} (the enterprise multi-org runtime) to THIS APP\n` +
+    "        — declare it in the app's package.json and install; the CLI resolves it from the\n" +
+    '          app, not from the framework it is linked out of. Being merely reachable\n' +
+    '          through NODE_PATH / a hoisted workspace store is deliberately not enough\n' +
+    '          (#4719) — that made this wall depend on how the process was launched.\n' +
+    '          NOTE: this runtime is closed-source and is NOT on the public npm registry —\n' +
+    '          it is distributed with an enterprise / cloud subscription. Without one this\n' +
+    '          bullet is not followable, and one of the two below is your path — or\n';
 }
 
 /**
@@ -6077,7 +6158,9 @@ function emitMultiNodeCapTelemetry(
  * arrives in, so a DSN-declared datasource no longer falls through to
  * `(unknown)`, and no shape prints credentials.
  */
-export function describeRegisteredDriver(kernel: any): { label: string; url: string } | null {
+export function describeRegisteredDriver(
+  kernel: any,
+): { label: string; url: string; sqliteFile?: string } | null {
   const candidates = [
     'driver.com.objectstack.driver.sql',
     'driver.com.objectstack.driver.mongodb',
@@ -6109,7 +6192,16 @@ export function describeRegisteredDriver(kernel: any): { label: string; url: str
 
     // A memory driver has no address to show — say so, rather than
     // `(unknown)`, which reads as "we looked for one and failed".
-    return { label, url: url ?? (name.endsWith('.memory') ? '(in-memory)' : '(unknown)') };
+    //
+    // `sqliteFile` is the same config read a second time asking a DIFFERENT
+    // question: not "what do I print" but "which file on this filesystem", so
+    // a caller can `stat` it. Absent for every driver that serves no on-disk
+    // SQLite file, which is the majority of them.
+    return {
+      label,
+      url: url ?? (name.endsWith('.memory') ? '(in-memory)' : '(unknown)'),
+      sqliteFile: describeDriverSqliteFile(cfg),
+    };
   }
   return null;
 }

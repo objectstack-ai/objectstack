@@ -125,10 +125,12 @@
 
 // dispatch-gates: whole-tree-population -- `collectSources` walks every authored JS/TS file from the repo root, so the corpus is the whole tree; the one literal below names the masker this gate exercises, not the files it reads.
 
-import { readdirSync, readFileSync } from 'node:fs';
-import { dirname, extname, join, relative, resolve } from 'node:path';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, extname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isEntrypoint } from './invoked-as.mjs';
+import { requireDependency } from './import-prerequisite.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '..');
@@ -137,11 +139,24 @@ const REPO_ROOT = resolve(HERE, '..');
 export const SOURCE_EXTENSIONS = new Set(['.ts', '.tsx', '.mts', '.cts', '.js', '.mjs', '.cjs', '.jsx']);
 
 /**
- * Directories that hold dependencies or build output rather than source. Same
- * list `js-comment-mask.mjs`'s header states, so the prose and the instrument
- * cannot drift apart. Every package in this tree builds to `dist`.
+ * Directories that hold dependencies or build output rather than source -- plus
+ * one that holds ANOTHER REPOSITORY. Every package in this tree builds to
+ * `dist`. `js-comment-mask.mjs`'s header quotes the six this walk started from
+ * as part of the 2026-08-21 measurement it records; the set below is the
+ * instrument and has grown past that sentence since (`.git`, and now `.cache`),
+ * so this declaration is the list, and the header is the history.
+ *
+ * `.cache` is where `scripts/build-console.sh` materialises objectui at the
+ * pinned SHA: a whole foreign checkout, gitignored, that every console pin bump
+ * MUST create because the console cannot be built without it. Walked, it put
+ * ~4,300 files this repo does not author into the corpus and reported one of
+ * them as a disagreement -- against a masker objectui's pages have no stake in.
+ * The failure text below is correct for OUR sources and wrong for those: it
+ * sends the reader to pin a shape in `js-comment-mask.mjs`, which is the last
+ * thing a pin bump should be editing. CI never saw it, because the lint job
+ * does not build the console; every instance landed on a person instead.
  */
-export const SKIPPED_DIRECTORIES = new Set(['node_modules', 'dist', '.next', 'build', '.turbo', 'coverage', '.git']);
+export const SKIPPED_DIRECTORIES = new Set(['node_modules', 'dist', '.next', 'build', '.turbo', 'coverage', '.git', '.cache']);
 
 /** Below this, the corpus is not a corpus -- see the header. */
 export const CORPUS_FLOOR = 1000;
@@ -287,9 +302,25 @@ export async function loadMasker(maskerPath) {
   return module.scanSource;
 }
 
-/** The parser is loaded lazily so importing this module stays cheap. */
+/**
+ * The parser is loaded lazily so importing this module stays cheap — and through
+ * the prerequisite thunk, so an uninstalled tree gets a NAMED prerequisite and
+ * exit 3 instead of a raw `ERR_MODULE_NOT_FOUND` stack and exit 1. A dynamic
+ * import defers the resolution failure past linking, but it does not change what
+ * the failure LOOKS like: the rejection reaches the top level unhandled and node
+ * prints the same node-internals stack with the same exit 1 a finding uses.
+ *
+ * ⛔ `requireDependency`, not `requireDefaultExport`: this module wants the
+ * NAMESPACE (`parser.parse`). `@typescript-eslint/parser` has no default export
+ * worth reading, and the default-export helper reads `.default` strictly.
+ */
 async function loadParser() {
-  const parser = await import('@typescript-eslint/parser');
+  const parser = await requireDependency(
+    '@typescript-eslint/parser',
+    () => import('@typescript-eslint/parser'),
+    import.meta.url,
+    { measures: "`js-comment-mask.mjs` and an independent parser agree on every comment range in the tree" },
+  );
   return (source, options) => parser.parse(source, options);
 }
 
@@ -400,6 +431,138 @@ async function main(argv) {
 // Self-test -- the comparator, not the corpus
 // ---------------------------------------------------------------------------
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition,
+// so "every case held" and "the cases never ran" printed the same line — and
+// the `SELF_TEST_CASE_COUNT` the sweep's green line prints is DERIVED from the
+// same array, so a deleted case shrinks the printed number with it and the gate
+// stays green. Closed the way PR #13487 validated on check-doc-authoring: what
+// is pinned is the registered NAMES, not a number.
+//
+// This file declares ONE battery, opened at the top of `runSelfTestCases()`'s
+// body. It carries ZERO named section banners — fewer than the two the
+// sectioning criterion needs — and ⛔ a comment is NOT promoted to a section
+// head: that is a judgement per comment this transplant does not make. The
+// hoisted single battery is the shape PRs #14896, #15003 and #15217 landed for
+// this case.
+//
+// ── Why the LEDGER is module-level and the CHECK sits at the verdict site ──
+//
+// This gate splits its self-test in two: `runSelfTestCases()` REGISTERS and
+// returns its cases, and `selfTest()` DECIDES — it prints the per-case lines,
+// the red line or the green one. There is no verdict site inside the
+// registering body, so the floor is evaluated where the green line already is
+// (inside `selfTest()`, reached only from the `--self-test` branch of the
+// dispatch). The ledger it reads therefore has to outlive
+// `runSelfTestCases()`'s frame — hence module scope rather than the local map
+// the single-body recipe closes over. Only the CHECK's location moves;
+// attribution and scope are untouched. This is the class-3 placement PR #15309
+// settled.
+//
+// ⚠️ `main()` — the PRODUCTION path — also calls `runSelfTestCases()`, on every
+// sweep, so the registrations happen there too. The floor is deliberately NOT
+// evaluated on that path: it lives in `selfTest()`, which the sweep never
+// calls. Scoping it that way is what keeps a corpus sweep from acquiring a
+// refusal that belongs to the `--self-test` verdict.
+//
+// ⛔ The floor is NOT placed at the end of `runSelfTestCases()` before its
+// `return`: an early return anywhere above that line would skip the check
+// entirely — the exact defect the #13798 verdict handshake exists to catch —
+// coupling hole 1 to hole 2 after the card ruled them orthogonal. It would also
+// fire on every production sweep. Evaluated at the verdict site, the same early
+// return lands as a count BELOW the floor and reds, in `--self-test` alone.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The count is a FLOOR, not an equality — adding cases is ordinary work and must
+// not red. A battery BELOW its floor means cases stopped running; the remedy is
+// to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'check-comment-mask-corpus self-test': 17,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 1;
+
+// The key a case is filed under when no battery is open. It is not a declared
+// battery, so it reds by the same set difference rather than silently inflating
+// whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
+// The battery ledger, read by `batteryFloorFailures()` below from the OTHER
+// function.
+//
+// ⚠️ Named for the roster's role, deliberately NOT with a self-test spelling:
+// `check:pm-dispatch-gates` anchors on a top-level declaration whose NAME spells
+// self-test and every such name owes a row in its COMPOUND_ANCHOR_LEDGER. This
+// machinery holds no fixtures to mask and reads no path literal, so the accurate
+// name is the one that says `battery`.
+const batterySeen = new Map();
+let openBattery = null;
+
+/** Open a battery. Every case registered after this line is attributed to it. */
+function battery(name) {
+  openBattery = name;
+}
+
+/** Called by `runSelfTestCases()`'s own case sink, once per case. */
+function registerCase() {
+  const name = openBattery ?? UNATTRIBUTED_BATTERY;
+  batterySeen.set(name, (batterySeen.get(name) ?? 0) + 1);
+}
+
+/**
+ * The floor: every declared battery RAN, and ran its cases (#13489).
+ *
+ * Guards the registrations made by **`runSelfTestCases()`** — the body whose
+ * case sink `ok()` routes through `registerCase()`. It is called from
+ * `selfTest()` immediately before the success line, so that line can only be
+ * printed by a run in which the set of batteries that registered cases EQUALS
+ * the set declared, each at or above its own count. A set difference says WHICH
+ * battery stopped; a count says only that something did.
+ *
+ * @returns {string[]} floor breaches; empty means the floor held
+ */
+function batteryFloorFailures() {
+  const declared = Object.keys(SELF_TEST_BATTERIES);
+  const problems = [];
+  if (declared.length < SELF_TEST_BATTERY_FLOOR) {
+    problems.push(
+      `SELF_TEST_BATTERIES declares ${declared.length} batteries, below the pinned `
+        + `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declared.includes(name)) continue;
+    problems.push(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in `
+        + 'SELF_TEST_BATTERIES — a case attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declared) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    problems.push(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. `
+          + 'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of `
+          + `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (problems.length) {
+    problems.push(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the '
+        + 'number. Find what stopped registering (an early return, a deleted block, a guard that now '
+        + 'skips) and restore it.',
+    );
+  }
+  return problems;
+}
+
 /**
  * What these cases hold: that a disagreement is REPORTED, in both directions,
  * and that the shebang reconciliation is applied. They run against the real
@@ -411,10 +574,16 @@ async function main(argv) {
 export let SELF_TEST_CASE_COUNT = 0;
 
 async function runSelfTestCases(parse) {
+  // The single hoisted battery this body's cases are attributed to. The floor
+  // that reads them is evaluated at the verdict site in `selfTest()`.
+  battery('check-comment-mask-corpus self-test');
   const { scanSource } = await import('./js-comment-mask.mjs');
   const failures = [];
   const cases = [];
-  const ok = (label, condition) => cases.push({ label, condition: Boolean(condition) });
+  const ok = (label, condition) => {
+    registerCase();
+    cases.push({ label, condition: Boolean(condition) });
+  };
 
   const flagNothing = (source) => ({ comment: new Uint8Array(source.length) });
   const flagEverything = (source) => ({ comment: new Uint8Array(source.length).fill(1) });
@@ -473,6 +642,47 @@ async function runSelfTestCases(parse) {
   ok(`the corpus walk finds at least ${CORPUS_FLOOR} files in this tree`, collectSources().length >= CORPUS_FLOOR);
   ok('...and every path it returns carries a known source extension', collectSources().every((file) => SOURCE_EXTENSIONS.has(extname(file))));
 
+  // ── The walk's exclusions, on a REAL tree, in both directions ─────────────
+  //
+  // `SKIPPED_DIRECTORIES` is the kind of declaration that reads as obviously
+  // correct and is measured by nothing: for `.cache` it was wrong for as long
+  // as `scripts/build-console.sh` has existed, and the only reader who ever
+  // found out was an operator staring at a red gate over someone else's file.
+  // So the exclusion is proven the way the corpus is judged -- by walking a
+  // directory on disk. The SAME BYTES are planted twice, inside `.cache` and
+  // outside it, against a masker that disagrees with the parser on them: the
+  // copy outside reds, the copy inside never enters the corpus at all, and the
+  // only variable between the two is location.
+  //
+  // ⚠️ These cases run on the production sweep path too (`main()` calls this
+  // body on every sweep), which is deliberate: what they hold is a property of
+  // the corpus that sweep is about to report on. The fixture is two files in a
+  // temp dir, removed in `finally`.
+  const plantedSource = 'export const Probe = () => null;\n';
+  const fixtureRoot = mkdtempSync(join(tmpdir(), 'comment-mask-corpus-'));
+  try {
+    const outsidePath = join('src', 'probe.tsx');
+    const insidePath = join('.cache', 'objectui-pin', 'src', 'probe.tsx');
+    for (const relPath of [outsidePath, insidePath]) {
+      mkdirSync(dirname(join(fixtureRoot, relPath)), { recursive: true });
+      writeFileSync(join(fixtureRoot, relPath), plantedSource, 'utf8');
+    }
+
+    const collected = collectSources(fixtureRoot).map((file) => relative(fixtureRoot, file));
+    ok('the walk collects a planted source that sits outside .cache', collected.includes(outsidePath));
+    ok('...and collects NOTHING under .cache', collected.every((file) => !file.split(sep).includes('.cache')));
+
+    const swept = sweep({ root: fixtureRoot, parse, scan: flagEverything });
+    ok('the copy outside .cache DISAGREES -- the plant is genuinely red', swept.disagreements.length === 1 && swept.disagreements[0].file === outsidePath);
+    ok('...and the sweep judged exactly the one file it walked', swept.files.length === 1);
+    // Excluded by LOCATION, not because those bytes happen to agree: compared
+    // directly, the identical copy under `.cache` disagrees just as loudly.
+    const wouldDisagree = compareFile(join(fixtureRoot, insidePath), plantedSource, { scan: flagEverything, parse });
+    ok('...while the identical bytes under .cache would have disagreed if walked', wouldDisagree.overMasks > 0);
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+
   SELF_TEST_CASE_COUNT = cases.length;
   for (const testCase of cases) if (!testCase.condition) failures.push(testCase.label);
   return { failures, cases };
@@ -492,6 +702,24 @@ export async function selfTest() {
     console.error(`\n${failures.length}/${cases.length} self-test case(s) failed.`);
     process.exit(EXIT_DISAGREEMENT);
   }
+
+  // ── The assertion floor, at the verdict site (#13489) ─────────────────────
+  // `runSelfTestCases()` registers but does not decide, so the floor over ITS
+  // registrations is evaluated here, after every case has had its chance and
+  // immediately before the success line — the only place a run that registered
+  // nothing can still be stopped from reporting that every case held. It sits
+  // in `selfTest()`, not in the registering body, so the production sweep in
+  // `main()` — which calls `runSelfTestCases()` too — never reaches it.
+  const floorProblems = batteryFloorFailures();
+  if (floorProblems.length) {
+    console.error(
+      `\n✗ check-comment-mask-corpus self-test: the assertion floor over runSelfTestCases()'s `
+        + `registrations was breached (${floorProblems.length} problem(s)); every case that DID run passed.`,
+    );
+    for (const problem of floorProblems) console.error(`  - ${problem}`);
+    process.exit(EXIT_DISAGREEMENT);
+  }
+
   console.log(`\nAll ${cases.length} self-test cases passed.`);
 
   return SELF_TEST_VERDICT;

@@ -305,6 +305,41 @@ function assert(condition, message) {
     }
 }
 
+// -- The self-test's own battery roster and floor (#13489) ------------------
+//
+// A pass used to be this self-test's ONLY success condition, so "every case
+// held" and "the cases never ran" printed the same line. Closed the way
+// PR #13487 validated on check-doc-authoring: what is pinned is the registered
+// NAMES, not a number. Every section opens with `battery('<name>')`, every
+// assertion is attributed to the battery most recently opened, and the floor
+// requires the OPENED set to equal the DECLARED set with each battery at or
+// above its own count.
+//
+// The counts are a FLOOR, not an equality -- adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'A hook pinned on both sides passes.': 1,
+  'Pinned on neither side ⇒ one problem naming BOTH files.': 5,
+  'Pinned on ONE side ⇒ still red, naming only the side that lacks it.': 3,
+  'Every dispatch flavour is recognised, including the shared module': 1,
+  'Subscription is NOT dispatch. A plugin consuming `kernel:ready` owes': 1,
+  'A `get(…)` that is not a `hooks.get(…)` is not a dispatch — the': 1,
+  'Non-`kernel:` hooks are out of scope: `data:beforeInsert` and friends': 1,
+  'A dynamic hook name cannot be resolved statically and is not guessed —': 1,
+  'Any title form carries the pin: `describe` counts, and so does a': 1,
+  'The name must appear in a TITLE. A hook that only shows up in a test': 1,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 10;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 // Returned by `selfTest()` only after its verdict is printed. The dispatch
 // refuses anything else: a `return` that leaves the function above that line
 // prints nothing and still exits 0 — a self-test that never finished, reported
@@ -312,6 +347,26 @@ function assert(condition, message) {
 const SELF_TEST_VERDICT = 'check-kernel-hook-pairs self-test reached its verdict';
 
 function selfTest() {
+    // The battery ledger this self-test's floor is evaluated against (#13489).
+    // `battery()` opens a battery; every assertion below is attributed to the one
+    // most recently opened, so a section that stops running stops registering and
+    // names ITSELF at the floor rather than going quiet.
+    const batterySeen = new Map();
+    let openBattery = null;
+    const battery = (name) => {
+      openBattery = name;
+    };
+    const registerCase = () => {
+      const b = openBattery ?? UNATTRIBUTED_BATTERY;
+      batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+    };
+    // A thin in-body wrapper over the module-level `assert`: it attributes the
+    // case to the open battery and then defers to the existing assertion, whose
+    // semantics (print and exit 1 on the first failure) are unchanged.
+    const check = (cond, message) => {
+      registerCase();
+      assert(cond, message);
+    };
     const PINNED = (hook) => `
         describe('Kernel', () => {
             it('fails the boot when a ${hook} handler throws', async () => {});
@@ -319,43 +374,47 @@ function selfTest() {
     `;
 
     // 1. A hook pinned on both sides passes.
+    battery('A hook pinned on both sides passes.');
     {
         const { problems } = audit({
             sources: { 'kernel.ts': `await this.context.trigger('kernel:ready');` },
             tests: { 'kernel.test.ts': PINNED('kernel:ready'), 'lite-kernel.test.ts': PINNED('kernel:ready') },
         });
-        assert(problems.length === 0, `a hook pinned on both sides passes (got ${problems.length})`);
+        check(problems.length === 0, `a hook pinned on both sides passes (got ${problems.length})`);
     }
 
     // 2. Pinned on neither side ⇒ one problem naming BOTH files.
+    battery('Pinned on neither side ⇒ one problem naming BOTH files.');
     {
         const { problems } = audit({
             sources: { 'kernel.ts': `await this.context.trigger('kernel:probe');` },
             tests: { 'kernel.test.ts': PINNED('kernel:ready'), 'lite-kernel.test.ts': PINNED('kernel:ready') },
         });
-        assert(problems.length === 1, `an unpinned hook is one problem (got ${problems.length})`);
-        assert(problems[0].includes('kernel:probe'), 'the problem names the hook');
-        assert(problems[0].includes('kernel.test.ts'), 'the problem names kernel.test.ts as missing');
-        assert(problems[0].includes('lite-kernel.test.ts'), 'the problem names lite-kernel.test.ts as missing');
-        assert(problems[0].includes('kernel.ts:1 (trigger)'), 'the problem quotes the dispatch site');
+        check(problems.length === 1, `an unpinned hook is one problem (got ${problems.length})`);
+        check(problems[0].includes('kernel:probe'), 'the problem names the hook');
+        check(problems[0].includes('kernel.test.ts'), 'the problem names kernel.test.ts as missing');
+        check(problems[0].includes('lite-kernel.test.ts'), 'the problem names lite-kernel.test.ts as missing');
+        check(problems[0].includes('kernel.ts:1 (trigger)'), 'the problem quotes the dispatch site');
     }
 
     // 3. Pinned on ONE side ⇒ still red, naming only the side that lacks it.
+    battery('Pinned on ONE side ⇒ still red, naming only the side that lacks it.');
     //    This is the whole point: the pair is the unit, not the presence.
     {
         const { problems } = audit({
             sources: { 'kernel.ts': `await this.context.trigger('kernel:probe');` },
             tests: { 'kernel.test.ts': PINNED('kernel:probe'), 'lite-kernel.test.ts': PINNED('kernel:ready') },
         });
-        assert(problems.length === 1, `a half-pinned hook is still a problem (got ${problems.length})`);
-        assert(problems[0].includes('lite-kernel.test.ts'), 'the missing side is named');
-        assert(
+        check(problems.length === 1, `a half-pinned hook is still a problem (got ${problems.length})`);
+        check(problems[0].includes('lite-kernel.test.ts'), 'the missing side is named');
+        check(
             !problems[0].includes('in: kernel.test.ts'),
             'the side that DOES pin it is not reported as missing',
         );
     }
 
     // 4. Every dispatch flavour is recognised, including the shared module
+    battery('Every dispatch flavour is recognised, including the shared module');
     //    #5282 introduced — a callee missing from the vocabulary is a hook the
     //    gate cannot see at all, which is worse than a false positive.
     {
@@ -374,53 +433,58 @@ function selfTest() {
             },
             tests: { 'kernel.test.ts': '', 'lite-kernel.test.ts': '' },
         });
-        assert(
+        check(
             [...dispatches.keys()].sort().join(',') === 'kernel:a,kernel:b,kernel:c,kernel:d,kernel:e,kernel:f',
             `every dispatch flavour is seen (got: ${[...dispatches.keys()].sort().join(',')})`,
         );
     }
 
     // 5. Subscription is NOT dispatch. A plugin consuming `kernel:ready` owes
+    battery('Subscription is NOT dispatch. A plugin consuming `kernel:ready` owes');
     //    no pin — the kernels decide what a hook means, plugins only listen.
     {
         const { dispatches } = audit({
             sources: { 'fallbacks/x.ts': `ctx.hook('kernel:ready', async () => {});` },
             tests: { 'kernel.test.ts': '', 'lite-kernel.test.ts': '' },
         });
-        assert(dispatches.size === 0, `ctx.hook() is a subscription, not a dispatch (got ${dispatches.size})`);
+        check(dispatches.size === 0, `ctx.hook() is a subscription, not a dispatch (got ${dispatches.size})`);
     }
 
     // 6. A `get(…)` that is not a `hooks.get(…)` is not a dispatch — the
+    battery('A `get(…)` that is not a `hooks.get(…)` is not a dispatch — the');
     //    vocabulary's most collision-prone name stays scoped to its receiver.
     {
         const { dispatches } = audit({
             sources: { 'kernel.ts': `const svc = this.services.get('kernel:ready');` },
             tests: { 'kernel.test.ts': '', 'lite-kernel.test.ts': '' },
         });
-        assert(dispatches.size === 0, `services.get() is not a hook dispatch (got ${dispatches.size})`);
+        check(dispatches.size === 0, `services.get() is not a hook dispatch (got ${dispatches.size})`);
     }
 
     // 7. Non-`kernel:` hooks are out of scope: `data:beforeInsert` and friends
+    battery('Non-`kernel:` hooks are out of scope: `data:beforeInsert` and friends');
     //    are per-plugin vocabularies with no cross-kernel meaning to keep equal.
     {
         const { dispatches } = audit({
             sources: { 'kernel.ts': `await this.context.trigger('data:beforeInsert', doc);` },
             tests: { 'kernel.test.ts': '', 'lite-kernel.test.ts': '' },
         });
-        assert(dispatches.size === 0, `only kernel:* hooks are paired (got ${dispatches.size})`);
+        check(dispatches.size === 0, `only kernel:* hooks are paired (got ${dispatches.size})`);
     }
 
     // 8. A dynamic hook name cannot be resolved statically and is not guessed —
+    battery('A dynamic hook name cannot be resolved statically and is not guessed —');
     //    that is the generic `trigger(name)` seam every hook flows through.
     {
         const { dispatches } = audit({
             sources: { 'kernel-base.ts': `await dispatchHookPropagating(name, this.hooks.get(name) || [], undefined, args);` },
             tests: { 'kernel.test.ts': '', 'lite-kernel.test.ts': '' },
         });
-        assert(dispatches.size === 0, `a variable hook name is not invented (got ${dispatches.size})`);
+        check(dispatches.size === 0, `a variable hook name is not invented (got ${dispatches.size})`);
     }
 
     // 9. Any title form carries the pin: `describe` counts, and so does a
+    battery('Any title form carries the pin: `describe` counts, and so does a');
     //    modified `it.each(…)`. The gate judges pairing, never title style.
     {
         const { problems } = audit({
@@ -430,10 +494,11 @@ function selfTest() {
                 'lite-kernel.test.ts': `it.each([1])('kernel:probe propagates (%i)', () => {});`,
             },
         });
-        assert(problems.length === 0, `describe() and it.each() titles both pin (got: ${problems[0] ?? ''})`);
+        check(problems.length === 0, `describe() and it.each() titles both pin (got: ${problems[0] ?? ''})`);
     }
 
     // 10. The name must appear in a TITLE. A hook that only shows up in a test
+    battery('The name must appear in a TITLE. A hook that only shows up in a test');
     //     BODY is incidental setup for some other assertion, not a pin.
     {
         const { problems } = audit({
@@ -443,8 +508,54 @@ function selfTest() {
                 'lite-kernel.test.ts': `it('boots', () => { ctx.hook('kernel:probe', fn); });`,
             },
         });
-        assert(problems.length === 1, `a body mention is not a named pin (got ${problems.length})`);
+        check(problems.length === 1, `a body mention is not a named pin (got ${problems.length})`);
     }
+
+    // -- The floor: every declared battery RAN, and ran its cases (#13489) -----
+    //
+    // Evaluated after every battery has had its chance and BEFORE the verdict, so
+    // the success line below can only be printed by a run in which the set of
+    // batteries that registered assertions EQUALS the set declared. A set
+    // difference names WHICH battery stopped; a count says only that something did.
+    const floorMessages = [];
+    const floorFailure = (message) => { floorMessages.push(message); };
+    const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+    let floorBreached = false;
+    if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+      floorBreached = true;
+      floorFailure(
+        `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned `
+          + `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+      );
+    }
+    for (const [name, count] of batterySeen) {
+      if (declaredBatteries.includes(name)) continue;
+      floorBreached = true;
+      floorFailure(
+        `self-test battery "${name}" registered ${count} case(s) but is not declared in `
+          + 'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+      );
+    }
+    for (const name of declaredBatteries) {
+      const count = batterySeen.get(name) ?? 0;
+      if (count >= SELF_TEST_BATTERIES[name]) continue;
+      floorBreached = true;
+      floorFailure(
+        count === 0
+          ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. `
+            + 'The verdict below would have claimed those cases hold.'
+          : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of `
+            + `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+      );
+    }
+    if (floorBreached) {
+      floorFailure(
+        'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the '
+          + 'number. Find what stopped registering (an early return, a deleted block, a guard that now '
+          + 'skips) and restore it.',
+      );
+    }
+    assert(!floorBreached, floorMessages.join('\n     '));
 
     console.log('✓ self-test: 10 cases');
 

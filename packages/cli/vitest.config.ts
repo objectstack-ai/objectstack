@@ -618,6 +618,23 @@ export default defineConfig({
         find: /^@objectstack\/plugin-auth$/,
         replacement: path.resolve(__dirname, '../plugins/plugin-auth/src/index.ts'),
       },
+      // `test/fixtures/option-b-reader-probe.ts` (#15232) calls
+      // `@objectstack/plugin-dev`'s shipped i18n auto-detect decision — the
+      // option-B acceptance pin (#15004) measures readers by CALLING them, and
+      // a reader resolved through `exports` to plugin-dev's **dist** would make
+      // that row a verdict about the last build rather than about the reader
+      // this card changes. The registry in `check-test-source-alias.mjs` is
+      // SHRINK-ONLY, so widening `KNOWN_UNALIASED_TEST_IMPORTS` was never an
+      // option; this entry is the sanctioned remedy, in the same anchored form
+      // as its neighbours (plugin-dev publishes only `"."`, and the anchor is
+      // what keeps that true if a subpath is ever added). Measured before and
+      // after: the gate reports the same required set for this package in both
+      // directions — crossing into `plugin-dev/src` adds no unaliased artifact
+      // import it did not already carry.
+      {
+        find: /^@objectstack\/plugin-dev$/,
+        replacement: path.resolve(__dirname, '../plugins/plugin-dev/src/index.ts'),
+      },
       // `src/utils/protocol-version-gap.test.ts` (#13860) exercises the upgrade
       // advisory, whose verdict comes from `checkProtocolCompat` — the platform's
       // single reader of `engines.protocol`. The advisory is a thin direction

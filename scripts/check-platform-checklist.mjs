@@ -46,6 +46,12 @@
 //     `use`. A recipe nobody opts into is dead text a runner may still replay.
 //     Both directions together are what the trap vocabulary beside them has
 //     always had — used implies documented, documented implies used.
+//   - every SYMBOL ANCHOR (`<dir>/<file>.ts#<symbol>`, the spelling
+//     `scripts/symbol-anchors.mjs#ANCHOR_GRAMMAR` defines) resolves: the cited
+//     file is in the tree and the cited symbol is still in it, comments masked
+//     — a symbol surviving only in a docblock is ABSENT. A shrink-never floor
+//     per family file keeps the population from being emptied one deleted
+//     `#symbol` at a time (see the symbol-anchor block below);
 //   - and no `call` string — the one field in this ledger a runner REPLAYS —
 //     instructs a `/meta/<plural>` URL spelling the boundary merely folds.
 //     `call` ONLY: the fields beside it legitimately quote plural spellings to
@@ -726,6 +732,73 @@ let provisioningReachedVerdict = false;
 let unreferencedReachedVerdict = false;
 let metaCallReachedVerdict = false;
 let citationsReachedVerdict = false;
+let symbolAnchorsReachedVerdict = false;
+
+// ── The self-test's own battery roster and floor (#13489, adopted here) ────
+//
+// The handshake flags above answer "did this battery reach its verdict?". They
+// cannot answer the other half: a battery that reaches its verdict having run
+// FEWER assertions than it used to reports a smaller number, and every leg
+// below reads the smaller number as a pass. This file already measured that
+// exact shape — 141 assertions down to 119, exit 0 — and fixed only the
+// early-return half of it.
+//
+// So the counts are pinned, per battery, as a FLOOR. Adding assertions is
+// ordinary work and must not red; a battery BELOW its floor means cases
+// stopped running and the remedy is to find what stopped registering.
+//
+// ⛔ A pinned TOTAL is not the repair: one battery dropping from 20 rows to 3
+// keeps a total "right" the moment a sibling grows. And DELETING an entry
+// silences that battery exactly as effectively as zeroing it, so the roster's
+// own size is pinned beside it.
+//
+// The attribution differs from `scripts/pm/ci-failure.mjs`, whose rows open a
+// battery by name so a stray assertion lands in a declared bucket: here each
+// battery is a FUNCTION returning its own `checked`, so a row cannot be filed
+// under the wrong battery in the first place, and the roster's job is the
+// floor alone.
+const BATTERY_TRAP_VOCABULARY = 'selfTestTrapVocabulary: the trap table, read and refused';
+const BATTERY_PROVISIONING_USE = 'selfTestProvisioningUse: both `use` spellings and all three dangling shapes';
+const BATTERY_UNREFERENCED_RECIPES = 'selfTestUnreferencedRecipes: the reverse direction';
+const BATTERY_META_CALL_SPELLING = 'selfTestMetaCallSpelling: the folded `/meta` plural, read from the live contract';
+const BATTERY_SOURCE_LINE_CITATIONS = 'selfTestSourceLineCitations: the `:NNN` refusal and its silent neighbours';
+const BATTERY_SYMBOL_ANCHORS = 'selfTestSymbolAnchors: the anchor detector, the resolver and the floor';
+
+const SELF_TEST_BATTERIES = Object.freeze({
+  [BATTERY_TRAP_VOCABULARY]: 22,
+  [BATTERY_PROVISIONING_USE]: 34,
+  [BATTERY_UNREFERENCED_RECIPES]: 19,
+  [BATTERY_META_CALL_SPELLING]: 53,
+  [BATTERY_SOURCE_LINE_CITATIONS]: 19,
+  [BATTERY_SYMBOL_ANCHORS]: 29,
+});
+const SELF_TEST_BATTERY_FLOOR = 6;
+
+/**
+ * @param {Record<string, number>} ran battery name -> assertions it reported
+ * @returns {string[]}
+ */
+function batteryRosterFailures(ran) {
+  const failures = [];
+  const declared = Object.keys(SELF_TEST_BATTERIES);
+  if (declared.length < SELF_TEST_BATTERY_FLOOR) {
+    failures.push(`the battery roster declares ${declared.length} batteries but the floor is ${SELF_TEST_BATTERY_FLOOR} — deleting an entry silences its floor exactly as effectively as zeroing it`);
+  }
+  for (const name of declared) {
+    if (!(name in ran)) failures.push(`declared battery "${name}" did not run`);
+  }
+  for (const name of Object.keys(ran)) {
+    if (!(name in SELF_TEST_BATTERIES)) failures.push(`battery "${name}" ran but is not declared in SELF_TEST_BATTERIES`);
+  }
+  for (const [name, floor] of Object.entries(SELF_TEST_BATTERIES)) {
+    const n = ran[name];
+    if (typeof n === 'number' && n < floor) {
+      failures.push(`battery "${name}" reported ${n} assertions but its floor is ${floor} — cases stopped running; find what stopped registering (⛔ MAINTAINER-ONLY: lowering a floor is not the repair)`);
+    }
+  }
+  return failures;
+}
+
 
 /**
  * One wording, ten call sites — five batteries across the two legs that run
@@ -1211,8 +1284,17 @@ export const NEIGHBOURING_MAP: Readonly<Record<string, string>> = Object.freeze(
 // silent — HTTP status (`status:409`), config literals (`{maxRetries:3}`),
 // ports (`http://localhost:3000`), clock times (`08:00`, `...T00:00:00Z`) and
 // JSON quoted in prose (`{"scannedTypes":1}`). Each is pinned below.
+//
+// A THIRD branch was added by #13788, measured rather than reasoned: sweeping
+// the ledger for anchorable citations turned up four line pins the two
+// branches above do not reach — `AiChatPage.tsx:~605-615` (the tilde INSIDE
+// the colon form, where the battery only ever pinned `~:`) and the `~L7246-7331`
+// spelling, which carries no colon at all. Both read exactly like the class
+// step (1) removed, and both sat green through it. The `L` form needs its own
+// left boundary so an identifier ending in a capital L before digits
+// (`SQL2019`) is not read as a line pin.
 const SOURCE_LINE_CITATION =
-  /(?:\.(?:ts|tsx|mts|cts|js|mjs|cjs|json|jsonc|md|mdx|ya?ml|sql|css|html|sh|py|toml)|(?<![A-Za-z0-9_"])):\d+(?:-\d+)?/g;
+  /(?:\.(?:ts|tsx|mts|cts|js|mjs|cjs|json|jsonc|md|mdx|ya?ml|sql|css|html|sh|py|toml)|(?<![A-Za-z0-9_"])):~?\d+(?:-\d+)?|(?<![A-Za-z0-9_])~?L\d{2,}(?:-\d+)?(?![A-Za-z0-9_])/g;
 
 /**
  * @param {string} text
@@ -1250,6 +1332,11 @@ function selfTestSourceLineCitations() {
   t('C5 an approximate `~:` citation is caught', n('computeAuthGate ~:5084-5160') === 1);
   t('C6 a comma/slash-chained run is caught in full', n('storage-routes.ts:241-243,:255,:267') === 3);
 
+  // FIRES — the two spellings #13788 measured still in the ledger after step (1).
+  t('C7 a colon-TILDE citation is caught — the tilde inside the colon form', n('AiChatPage.tsx:~605-615') === 1);
+  t('C8 a `~L` line pin is caught, colon or no colon', n('registerRecordShareEndpoints ~L7246-7331') === 1);
+  t('C9 a bare `L` line pin is caught', n('the evaluate leg L7477-7493') === 1);
+
   // STAYS SILENT — the neighbours that share the colon-then-digit shape.
   t('S1 an HTTP status in prose is not a citation', n("thrown {code:'DELETE_RESTRICTED', status:409}") === 0);
   t('S2 a config literal is not a citation', n('retry {maxRetries:3, backoffMs:1000}') === 0);
@@ -1258,9 +1345,253 @@ function selfTestSourceLineCitations() {
   t('S5 JSON quoted in prose is not a citation', n('a 200 {"scannedTypes":1,"stats":{}}') === 0);
   t('S6 an ADR section reference is not a citation', n('ADR-0025 §3.3 and #13479') === 0);
   t('S7 the README placeholder spelling of the ban is not itself a citation', n('never pin `file.ts:NNN` or a bare `:NNN`') === 0);
+  t('S8 a capital L ending an identifier before digits is not a line pin', n('SQL2019 and a TTL3600 budget') === 0);
+  t('S9 an i18n-style token is not a line pin', n('the L10n bundle') === 0);
+  t('S10 a one-digit `L` reference is not a line pin — the floor is two digits', n('lane L1 of the queue') === 0);
 
   citationsReachedVerdict = true;
   return { failures, checked };
+}
+
+// ── Symbol anchors ──────────────────────────────────────────────────────────
+//
+// The other half of the citation story, and the half the `:NNN` strip
+// deliberately deferred (#13482 → step (1) PR #13786 → this, #13788).
+//
+// After step (1) a citation is `file` plus the symbol it lands in — a pointer
+// that does not rot on an unrelated edit. But nothing RESOLVED it: a symbol
+// renamed or deleted out of the cited file left the citation reading exactly
+// as it did the day it was verified. That is the same exit-0-by-construction
+// shape the line numbers had, one level up — a pointer that says "verified
+// against source" while naming something the source no longer contains.
+//
+// The mechanism is the one already in this gate. `enumSource {file, export,
+// expect}` resolves a structured pin against real source (file exists, export
+// present, member count current). A symbol anchor is that pin's cheap sibling,
+// spelled INLINE so it can live where the citations already live:
+//
+//     packages/core/src/security/platform-admin.ts#parsePlatformAdminEmails
+//
+// i.e. a repo-relative path, `#`, and the symbol. The prose around it is
+// untouched — a citation carries its reason, and a rewrite into a bare object
+// per citation would have thrown that away across the whole ledger.
+//
+// ## What "the symbol is there" means here — deliberately dumb, again
+//
+// PRESENCE IN CODE, at identifier boundaries, with comments masked. NOT a
+// declaration analysis: a symbol this file imports and merely calls counts as
+// present, and this check will never tell you the citation names the wrong
+// KIND of thing. What it catches is the rot the ruling named — the rename or
+// the deletion that leaves the anchor pointing at nothing. Two consequences
+// worth stating rather than discovering:
+//
+//   - a symbol surviving only in a COMMENT is ABSENT. Comments are masked
+//     before the scan (the house `maskComments`, for the reason its own header
+//     gives), so a deleted export whose name lingers in a docblock still reds.
+//     This is the direction that matters: prose about a symbol is not a symbol.
+//   - a symbol inside a STRING literal counts as present. That is deliberate —
+//     a large share of what this ledger cites IS a string (capability names,
+//     error codes, route literals, `sys_*` machine names) and a rule that
+//     refused them would push the ledger back to unanchored prose.
+//
+// ## Why anchors are not authored on every citation
+//
+// Only extensions this gate can read are anchorable (`ANCHORABLE_EXTENSIONS`);
+// an anchor on anything else is an ERROR rather than a silent skip, because a
+// spelling that resolves nowhere is exactly the false pointer above. Citations
+// that name a sibling repo (`objectui …`), a document, or a file with no symbol
+// worth naming stay BARE — a bare citation is honest, and this check is not the
+// place to force one into a shape it does not have. The floor below is what
+// keeps that door from swinging the other way.
+const ANCHORABLE_EXTENSIONS = new Set(['ts', 'tsx', 'mts', 'cts', 'js', 'mjs', 'cjs', 'json']);
+
+// The path half is required — that is what separates an anchor from the two
+// `#` shapes this ledger is full of and must never read as one: a GitHub issue
+// reference (`#13788`, `objectui#2563`) and a URL fragment. A path here must
+// carry a slash and an extension, and the symbol half must open with an
+// identifier character, so `schema.json#/$defs/x` is a fragment, not an anchor.
+const SYMBOL_ANCHOR =
+  /(?<![A-Za-z0-9_$@\-/])((?:[A-Za-z0-9_.\-]+\/)+[A-Za-z0-9_.\-]+\.([A-Za-z]{1,4}))#([A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*)/g;
+
+/**
+ * @param {string} text
+ * @returns {Array<{file: string, ext: string, symbol: string, anchor: string}>}
+ */
+function findSymbolAnchors(text) {
+  const out = [];
+  for (const m of text.matchAll(SYMBOL_ANCHOR)) {
+    out.push({ file: m[1], ext: m[2].toLowerCase(), symbol: m[3], anchor: m[0] });
+  }
+  return out;
+}
+
+/**
+ * Which segments of a (possibly dotted) anchor symbol are NOT in the source.
+ * Every segment must be present: `Foo.bar` naming a member that was dropped is
+ * the same rot as `Foo` being dropped, and reporting the whole anchor as
+ * present because its first half survived is the fail-open one level down.
+ *
+ * @param {string} source raw file text
+ * @param {string} symbol the anchor's symbol, dots allowed
+ * @param {string} ext lower-cased extension of the cited file
+ * @returns {string[]}
+ */
+function absentAnchorSegments(source, symbol, ext) {
+  // JSON has no comment syntax, and masking a `.json` would blank whatever a
+  // `//`-carrying string value holds — a route literal, a URL. Every other
+  // anchorable extension is JS-family and goes through the house masker.
+  const src = ext === 'json' ? source : maskComments(source);
+  const absent = [];
+  for (const seg of symbol.split('.')) {
+    const esc = seg.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (!new RegExp(`(?<![A-Za-z0-9_$])${esc}(?![A-Za-z0-9_$])`).test(src)) absent.push(seg);
+  }
+  return absent;
+}
+
+// ── The anchor floor ────────────────────────────────────────────────────────
+//
+// A resolver nobody can dodge is a resolver whose subject population cannot be
+// emptied. Every red this check prints has a second, silent remedy: delete the
+// `#symbol` half and the citation drops back to prose this gate does not read.
+// The floor closes that door — per family file, the count of anchors that
+// RESOLVED, shrink-never. Adding anchors is ordinary work and must not red.
+//
+// It is also the answer to the failure this whole file is built around: a
+// check whose population reaches zero prints the same green it printed before
+// it existed. The floor makes the green say a number.
+const ANCHOR_FLOOR_FILE = join(ROOT, 'scripts/checklist-symbol-anchor-baseline.json');
+
+// DELETING a floor entry silences that file exactly as effectively as zeroing
+// it, so the roster's own size is pinned too — the `SELF_TEST_BATTERY_FLOOR`
+// reasoning, applied to the other registry in this gate.
+const ANCHOR_FLOOR_ROSTER_FLOOR = 15;
+
+/**
+ * @param {Map<string, number>} counts family file -> anchors that resolved
+ * @param {Record<string, number>} floors the baseline's `floors` block
+ * @returns {Array<{file: string, message: string}>}
+ */
+function anchorFloorProblems(counts, floors) {
+  const problems = [];
+  for (const [rel, n] of counts) {
+    if (n === 0) continue;
+    if (!(rel in floors)) {
+      problems.push({
+        file: rel,
+        message:
+          `${n} symbol anchor(s) resolve here but scripts/checklist-symbol-anchor-baseline.json declares no floor for this file.`
+          + ' Add the entry at the count measured now — an undeclared file can be emptied of anchors without this gate noticing, which is the dodge the floor exists to close.',
+      });
+    }
+  }
+  for (const [rel, floor] of Object.entries(floors)) {
+    const n = counts.get(rel);
+    if (n === undefined) {
+      problems.push({
+        file: rel,
+        message:
+          `scripts/checklist-symbol-anchor-baseline.json declares a floor of ${floor} for this file, but it is not in the checklist family any more.`
+          + ' A floor on a file nobody reads is a floor nothing can breach — drop the entry in the same edit that removed the file.',
+      });
+      continue;
+    }
+    if (n < floor) {
+      problems.push({
+        file: rel,
+        message:
+          `SYMBOL ANCHORS LOST — ${n} anchor(s) resolve here but the floor is ${floor}.`
+          + ' A citation that gives up its `#symbol` half stops being resolvable by anything, so the count is shrink-never: restore the anchor, or re-author the citation with a symbol this gate can resolve.'
+          + ' ⛔ MAINTAINER-ONLY: lowering a floor in scripts/checklist-symbol-anchor-baseline.json is a maintainer\'s call, never the author\'s way past a red.',
+      });
+    }
+  }
+  return problems;
+}
+
+/**
+ * Both directions for all three limbs — the detector, the resolver and the
+ * floor. The detector's whole value is the boundary (this ledger is dense with
+ * `#`-shaped text that is NOT an anchor), and the resolver's whole value is
+ * that it can still fire once the ledger is clean, which is precisely when its
+ * live output goes empty and its green stops meaning anything by itself.
+ */
+function selfTestSymbolAnchors() {
+  const failures = [];
+  let checked = 0;
+  const t = (what, ok, note = '') => {
+    checked++;
+    if (!ok) failures.push(`${what}${note ? ` — ${note}` : ''}`);
+  };
+  const a = (s) => findSymbolAnchors(s);
+
+  // ── the detector FIRES on every spelling an author will write ─────────────
+  const one = a('see packages/core/src/security/platform-admin.ts#parsePlatformAdminEmails for the refusal');
+  t('A1 a bare anchor is found, split into file and symbol',
+    one.length === 1 && one[0].file === 'packages/core/src/security/platform-admin.ts' && one[0].symbol === 'parsePlatformAdminEmails');
+  t('A2 trailing punctuation is not part of the symbol',
+    a('(packages/rest/src/rest-server.ts#buildRouter).').length === 1 && a('(packages/rest/src/rest-server.ts#buildRouter).')[0].symbol === 'buildRouter');
+  const dotted = a('packages/spec/src/data/object.zod.ts#ObjectSchema.shape');
+  t('A3 a dotted member anchor keeps both segments', dotted.length === 1 && dotted[0].symbol === 'ObjectSchema.shape');
+  t('A4 two anchors in one citation are both found',
+    a('a/b/x.ts#alpha + a/b/y.tsx#beta').length === 2);
+  t('A5 every anchorable extension is recognised',
+    ['ts', 'tsx', 'mts', 'cts', 'js', 'mjs', 'cjs', 'json'].every((e) => a(`p/q/f.${e}#sym`).length === 1));
+  t('A6 the extension is reported lower-cased, so the anchorable test cannot be dodged by case', a('p/q/F.TS#sym')[0]?.ext === 'ts');
+
+  // ── and STAYS SILENT on the `#` shapes this ledger is full of ─────────────
+  t('S1 a cross-repo issue reference is not an anchor', a('the objectui#2563 regression').length === 0);
+  t('S2 a bare issue reference is not an anchor', a('closed by #13786 and #13482').length === 0);
+  t('S3 a JSON-pointer URL fragment is not an anchor', a('https://example.com/schema.json#/$defs/Item').length === 0);
+  t('S4 an ADR section reference is not an anchor', a('ADR-0025 §3.3, ADR-0090 D4').length === 0);
+  t('S5 a BARE citation — the shape most of this ledger still carries — is not an anchor',
+    a('packages/objectql/src/search-filter.ts (each latin term ORs $contains)').length === 0);
+  t('S6 a dotted machine name with no path is not an anchor', a('sys_user.name and showcase.export_data').length === 0);
+  t('S7 an anchor-shaped tail on a word with no slash is not an anchor', a('release-15.1#B2').length === 0);
+  t('S8 an email-ish `@`-prefixed path is not read as an anchor', a('@objectstack/spec/src/x.ts#Y').length === 0);
+
+  // ── the resolver FIRES ────────────────────────────────────────────────────
+  const src = [
+    '// parsePlatformAdminEmails used to live here; renamed in #9999.',
+    "export const RESOLVED = { mode: 'strict' };",
+    "const ROUTE = '/api/v1/meta/object';",
+    'export function hasPlatformAdminStanding(x) { return RESOLVED.mode === x; }',
+  ].join('\n');
+  t('R1 a symbol that is gone from the file is reported absent',
+    absentAnchorSegments(src, 'parsePlatformAdminEmails', 'ts').length === 1);
+  t('R2 a symbol surviving ONLY in a comment is ABSENT — prose about a symbol is not a symbol',
+    absentAnchorSegments(src, 'renamed', 'ts').length === 1);
+  t('R3 a dotted anchor whose SECOND segment is gone is reported, not passed on the first',
+    absentAnchorSegments(src, 'RESOLVED.strictness', 'ts').join(',') === 'strictness');
+  t('R4 a substring of a present identifier does not count as present',
+    absentAnchorSegments(src, 'PlatformAdmin', 'ts').length === 1);
+
+  // ── and STAYS SILENT ──────────────────────────────────────────────────────
+  t('P1 a declared export resolves', absentAnchorSegments(src, 'hasPlatformAdminStanding', 'ts').length === 0);
+  t('P2 a const resolves', absentAnchorSegments(src, 'RESOLVED', 'ts').length === 0);
+  t('P3 both segments of a live dotted anchor resolve', absentAnchorSegments(src, 'RESOLVED.mode', 'ts').length === 0);
+  t('P4 a symbol inside a STRING literal counts as present — this ledger cites machine names, not only exports',
+    absentAnchorSegments(src, 'strict', 'ts').length === 0);
+  t('P5 `.json` is scanned unmasked, so a `//`-carrying string value is never blanked away',
+    absentAnchorSegments('{ "route": "https://x/y", "kind": "live" }', 'live', 'json').length === 0);
+
+  // ── the floor, both directions ────────────────────────────────────────────
+  const floors = { 'areas/a.json': 10, 'areas/b.json': 4 };
+  t('B1 a file below its floor is reported',
+    anchorFloorProblems(new Map([['areas/a.json', 9], ['areas/b.json', 4]]), floors).length === 1);
+  t('B2 the report names the shrink-never rule and the authority for lowering a floor',
+    anchorFloorProblems(new Map([['areas/a.json', 0], ['areas/b.json', 4]]), floors)[0]?.message.includes('⛔ MAINTAINER-ONLY'));
+  t('B3 a file carrying anchors with no floor entry is reported — an undeclared file could be emptied silently',
+    anchorFloorProblems(new Map([['areas/a.json', 10], ['areas/b.json', 4], ['areas/c.json', 3]]), floors).length === 1);
+  t('B4 a floor whose file left the family is reported',
+    anchorFloorProblems(new Map([['areas/a.json', 10]]), floors).length === 1);
+  t('B5 counts ABOVE the floor are silent — adding anchors is ordinary work',
+    anchorFloorProblems(new Map([['areas/a.json', 99], ['areas/b.json', 4]]), floors).length === 0);
+  t('B6 a family file with zero anchors needs no entry — a document that cites nothing is not a regression',
+    anchorFloorProblems(new Map([['areas/a.json', 10], ['areas/b.json', 4], ['RUNNER.md', 0]]), floors).length === 0);
+
+  symbolAnchorsReachedVerdict = true;
+  return { checked, failures };
 }
 
 if (process.argv.slice(2).includes('--self-test')) {
@@ -1269,19 +1600,30 @@ if (process.argv.slice(2).includes('--self-test')) {
   const unref = selfTestUnreferencedRecipes();
   const metaCall = selfTestMetaCallSpelling();
   const cites = selfTestSourceLineCitations();
+  const anchors = selfTestSymbolAnchors();
   requireReachedVerdict('selfTestTrapVocabulary', trapReachedVerdict);
   requireReachedVerdict('selfTestProvisioningUse', provisioningReachedVerdict);
   requireReachedVerdict('selfTestUnreferencedRecipes', unreferencedReachedVerdict);
   requireReachedVerdict('selfTestMetaCallSpelling', metaCallReachedVerdict);
   requireReachedVerdict('selfTestSourceLineCitations', citationsReachedVerdict);
-  const failures = [...trap.failures, ...prov.failures, ...unref.failures, ...metaCall.failures, ...cites.failures];
+  requireReachedVerdict('selfTestSymbolAnchors', symbolAnchorsReachedVerdict);
+  const rosterFailures = batteryRosterFailures({
+    [BATTERY_TRAP_VOCABULARY]: trap.checked,
+    [BATTERY_PROVISIONING_USE]: prov.checked,
+    [BATTERY_UNREFERENCED_RECIPES]: unref.checked,
+    [BATTERY_META_CALL_SPELLING]: metaCall.checked,
+    [BATTERY_SOURCE_LINE_CITATIONS]: cites.checked,
+    [BATTERY_SYMBOL_ANCHORS]: anchors.checked,
+  });
+  const failures = [...trap.failures, ...prov.failures, ...unref.failures, ...metaCall.failures, ...cites.failures, ...anchors.failures, ...rosterFailures];
   if (failures.length === 0) {
     console.log(
-      `✓ check-platform-checklist --self-test: ${trap.checked + prov.checked + unref.checked + metaCall.checked + cites.checked} assertions — the trap-table extractor reads a good table and REFUSES an empty/renamed/reshaped one;` +
+      `✓ check-platform-checklist --self-test: ${trap.checked + prov.checked + unref.checked + metaCall.checked + cites.checked + anchors.checked} assertions — the trap-table extractor reads a good table and REFUSES an empty/renamed/reshaped one;` +
         ' `fixtures.provisioning.use` resolves both spellings (own-area key and `<area>:<recipe>`) and fires on all three dangling shapes;' +
         ' the unreferenced-recipe direction fires on a recipe nobody uses while leaving a cross-area consumer, a retired consumer and a `$`-annotation alone;' +
         ' and the `/meta` call-spelling refusal reads its vocabulary out of the live generated contract, fires on every folded spelling a `call` can instruct, and stays silent on the canonical singular, on parameter placeholders, and on the `why`/`expect`/`source`/`requires` prose that narrates the fold;' +
-        ' and the source-line-citation refusal fires on every spelling this ledger carried (file-anchored, range, bare continuation, parenthesised, `~:`, comma/slash-chained) while staying silent on HTTP status, config literals, URL ports, clock times, JSON quoted in prose and the README placeholder that documents the ban.',
+        ' and the source-line-citation refusal fires on every spelling this ledger carried (file-anchored, range, bare continuation, parenthesised, `~:`, comma/slash-chained) while staying silent on HTTP status, config literals, URL ports, clock times, JSON quoted in prose and the README placeholder that documents the ban;' +
+        ' and the symbol-anchor resolver finds every anchor spelling an author writes while reading no issue reference, URL fragment, ADR section or bare citation as one, reports a symbol that survives only in a comment as ABSENT, resolves both segments of a dotted anchor, and holds the per-file anchor floor in both directions.',
     );
     process.exit(0);
   }
@@ -1345,6 +1687,32 @@ requireReachedVerdict('selfTestSourceLineCitations', citationsReachedVerdict);
 if (citationControl.failures.length) {
   console.error('check-platform-checklist: the source-line-citation refusal\'s own positive control FAILED — a rotting `file:line` pointer would pass unreported, and because the ledger is clean nothing else here would ever notice.\n');
   for (const f of citationControl.failures) console.error(`  ✗ ${f}`);
+  process.exit(1);
+}
+
+// And for the symbol-anchor resolver. Same reasoning as the two above, plus
+// one this file has not had before: this check's subject population is
+// AUTHORED, so it can be emptied. Its control proves the detector still finds
+// anchors and the resolver still refuses an absent symbol; the floor beside it
+// proves the ledger still carries anchors for them to be found in.
+const symbolAnchorControl = selfTestSymbolAnchors();
+requireReachedVerdict('selfTestSymbolAnchors', symbolAnchorsReachedVerdict);
+if (symbolAnchorControl.failures.length) {
+  console.error("check-platform-checklist: the symbol-anchor resolver's own positive control FAILED — an anchor naming a symbol its file no longer contains would pass unreported, which is the rot this resolver was added to end.\n");
+  for (const f of symbolAnchorControl.failures) console.error(`  ✗ ${f}`);
+  process.exit(1);
+}
+const inlineRosterFailures = batteryRosterFailures({
+  [BATTERY_TRAP_VOCABULARY]: trapControl.checked,
+  [BATTERY_PROVISIONING_USE]: provisioningControl.checked,
+  [BATTERY_UNREFERENCED_RECIPES]: unreferencedControl.checked,
+  [BATTERY_META_CALL_SPELLING]: metaCallControl.checked,
+  [BATTERY_SOURCE_LINE_CITATIONS]: citationControl.checked,
+  [BATTERY_SYMBOL_ANCHORS]: symbolAnchorControl.checked,
+});
+if (inlineRosterFailures.length) {
+  console.error('check-platform-checklist: the self-test battery roster FAILED — assertions stopped running, and every leg below would read the smaller count as a pass.\n');
+  for (const f of inlineRosterFailures) console.error(`  ✗ ${f}`);
   process.exit(1);
 }
 
@@ -1702,6 +2070,79 @@ for (const rel of familyFiles(CHECKLIST_DIR)) {
   }
 }
 
+// ── The symbol-anchor sweep, over the same family the citation sweep reads ──
+// Cached per cited file: the ledger points many citations at the same hot
+// sources, and re-reading + re-masking each one per anchor is the difference
+// between a gate that costs milliseconds and one nobody runs.
+const anchorSourceCache = new Map();
+function anchorSource(absPath) {
+  if (!anchorSourceCache.has(absPath)) anchorSourceCache.set(absPath, readFileSync(absPath, 'utf8'));
+  return anchorSourceCache.get(absPath);
+}
+
+const anchorCounts = new Map();
+let anchorsScanned = 0;
+let anchorsResolved = 0;
+for (const rel of familyFiles(CHECKLIST_DIR)) {
+  const text = readFileSync(join(CHECKLIST_DIR, rel), 'utf8');
+  let resolved = 0;
+  for (const anchor of findSymbolAnchors(text)) {
+    anchorsScanned++;
+    if (!ANCHORABLE_EXTENSIONS.has(anchor.ext)) {
+      err(rel, null, `UNRESOLVABLE ANCHOR — \`${anchor.anchor}\`: this gate reads symbols out of ${[...ANCHORABLE_EXTENSIONS].join('/')} only, so a \`#symbol\` on a .${anchor.ext} resolves nowhere and would read as verified while pointing at nothing. Cite that file BARE (path, no \`#\`) and put the symbol in the prose beside it.`);
+      continue;
+    }
+    const abs = join(ROOT, anchor.file);
+    if (!existsSync(abs)) {
+      err(rel, null, `ANCHOR FILE NOT FOUND — \`${anchor.anchor}\`: ${anchor.file} is not in this repo. A path this gate cannot open is not an anchor; a sibling-repo citation (objectui/cloud) stays BARE, and a moved file needs the pin re-pointed.`);
+      continue;
+    }
+    const absent = absentAnchorSegments(anchorSource(abs), anchor.symbol, anchor.ext);
+    if (absent.length) {
+      err(rel, null, `ABSENT SYMBOL — \`${anchor.anchor}\`: ${absent.map((s) => `\`${s}\``).join(' and ')} ${absent.length > 1 ? 'are' : 'is'} not in ${anchor.file} outside its comments. The symbol was renamed or removed and the citation kept reading as "verified against source" — re-point it at what the file carries now, or drop the \`#symbol\` half and cite the file bare.`);
+      continue;
+    }
+    resolved++;
+    anchorsResolved++;
+  }
+  anchorCounts.set(rel, resolved);
+}
+
+// The census mode: how the baseline beside this gate is authored, and the one
+// answer to "what would the floor be if I measured it now". Read-only and
+// explicitly NOT a verdict — a gate that regenerated its own ratchet would
+// edit the tree and report nothing (the house rule the spec wrapper states).
+if (process.argv.slice(2).includes('--anchor-census')) {
+  const census = {};
+  for (const [rel, n] of [...anchorCounts].sort(([a], [b]) => a.localeCompare(b))) if (n > 0) census[rel] = n;
+  console.log(JSON.stringify(census, null, 2));
+  console.error(`\ncheck-platform-checklist --anchor-census: ${anchorsResolved}/${anchorsScanned} anchors resolved across ${Object.keys(census).length} family files. This is a CENSUS, not a verdict — run the gate with no flags for that.`);
+  process.exit(0);
+}
+
+// The floor. Read as a REFUSAL when it is missing: with no baseline every
+// count validates against nothing and this limb prints the same green it
+// printed before it existed.
+if (!existsSync(ANCHOR_FLOOR_FILE)) {
+  console.error('check-platform-checklist: missing scripts/checklist-symbol-anchor-baseline.json — the per-file symbol-anchor floor.');
+  console.error('\nThis is a REFUSAL, not a pass: with no floor, a ledger emptied of every anchor would validate against nothing and report zero problems.');
+  process.exit(1);
+}
+let anchorFloors;
+try {
+  const baseline = JSON.parse(readFileSync(ANCHOR_FLOOR_FILE, 'utf8'));
+  anchorFloors = baseline?.floors;
+  if (!anchorFloors || typeof anchorFloors !== 'object' || Array.isArray(anchorFloors)) throw new Error('no "floors" object');
+  if (Object.keys(anchorFloors).length < ANCHOR_FLOOR_ROSTER_FLOOR) {
+    throw new Error(`"floors" declares ${Object.keys(anchorFloors).length} files but the roster floor is ${ANCHOR_FLOOR_ROSTER_FLOOR}`);
+  }
+} catch (e) {
+  console.error(`check-platform-checklist: cannot read the symbol-anchor floor — ${e.message}`);
+  console.error('\nThis is a REFUSAL, not a pass: an unreadable or gutted floor is indistinguishable from a ledger that legitimately shrank.');
+  process.exit(1);
+}
+for (const problem of anchorFloorProblems(anchorCounts, anchorFloors)) err(problem.file, null, problem.message);
+
 if (errors.length) {
   console.error(`check-platform-checklist: ${errors.length} problem(s)\n`);
   for (const e of errors) console.error(`  ✗ ${e}`);
@@ -1722,5 +2163,6 @@ console.log(
     ` provisioning: ${recipeTotal} area recipes, ${recipeRefs} item references resolved (${qualifiedRefs} area-qualified), ${recipesReferenced}/${recipeTotal} recipes referenced;` +
     ` meta-URL spelling: ${metaCallsScanned} \`call\` strings scanned against ${FOLDED_META_SPELLINGS.size} folded spellings;` +
     ` source citations: ${citationsScanned} family files carry no \`file:line\` pin;` +
-    ` (self-checks: ${trapControl.checked} trap-vocabulary + ${provisioningControl.checked} provisioning-resolve + ${unreferencedControl.checked} unreferenced-recipe + ${metaCallControl.checked} meta-call-spelling + ${citationControl.checked} source-line-citation assertions).`,
+    ` symbol anchors: ${anchorsResolved}/${anchorsScanned} resolved against ${anchorSourceCache.size} cited sources, ${Object.keys(anchorFloors).length} file floors held;` +
+    ` (self-checks: ${trapControl.checked} trap-vocabulary + ${provisioningControl.checked} provisioning-resolve + ${unreferencedControl.checked} unreferenced-recipe + ${metaCallControl.checked} meta-call-spelling + ${citationControl.checked} source-line-citation + ${symbolAnchorControl.checked} symbol-anchor assertions).`,
 );

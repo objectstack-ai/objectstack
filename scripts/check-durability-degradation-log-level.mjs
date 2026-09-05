@@ -263,8 +263,44 @@ const READ_INVENTION_BASELINE_PATH = join(
  *
  * Each entry names WHY it is durability-critical — the note is printed in the
  * violation message, so the author reads the consequence rather than a rule id.
+ *
+ * ## The raw ObjectQL verbs are still NOT here — measured, not assumed (#12981)
+ *
+ * `insert` / `update` sit in the same excluded class as the read rule's
+ * `find` / `findOne` / `count`: names too generic to declare repo-wide. #12981
+ * closed by declaring the SEEDER WRAPPERS instead — `tryInsert` / `tryUpdate`
+ * are the `catch { return null; }` helpers that whole family is made of, so
+ * naming them puts the family in the vocabulary without dragging every write in
+ * the monorepo in with it. That order was deliberate: the wrappers could only be
+ * declared once the family had been REPAIRED, which is what the census
+ * (`scripts/measure-durability-swallow-family.mjs`) exists to prove, and it is
+ * what keeps `durability-degradation.baseline.json` at its designed empty
+ * steady state rather than filling it with transitional debt.
+ *
+ * Both halves measured on `origin/main@f01adfa5c` while landing the wrappers,
+ * so the next author reads a number rather than re-deriving one:
+ *
+ *   - the two wrappers   → 0 findings (this file, unchanged verdict)
+ *   - bare `insert`      → 36 quiet degradations in 30 files
+ *
+ * ⇒ The second is a repair programme wearing the costume of a vocabulary edit,
+ * and it is the thing #12981 was filed to NOT do by accident. If a future card
+ * needs one specific `ql.insert(...)` seam visible — `keys.ts::handleKeysRequest`
+ * is the standing example, whose catch answers the caller a 500 envelope on
+ * every path and is waiting to say so in `FAILURE_PROPAGATION_SITES` — the
+ * choice is between paying for those 36 and giving this map a per-site scope
+ * the way `FAILURE_PROPAGATION_SITES` already scopes the other vocabulary. That
+ * is a design call, and it is deliberately not taken here.
  */
 const DURABILITY_CRITICAL_CALLEES = new Map([
+    [
+        'tryInsert',
+        "A seeder's insert was refused and the helper answered `null` — the row is simply absent while the seeding pass moves on and its per-boot summary still reads clean. This is the shape #12981 was filed over: the RBAC catalog seeders swallowed refused writes in `catch { return null; }`, and a boot logged \"RBAC catalog seeded\" at `info` over zero landed rows, on a deployed plane, for weeks (#12923). The helper answers its CALLER, which reports the refusal through the #12923 accumulator; what this entry holds is that no caller may re-swallow that answer in a quiet `catch`.",
+    ],
+    [
+        'tryUpdate',
+        "A seeder's update was refused and the helper answered `false` — the row keeps its pre-seed contents while the pass counts it as reconciled, so a catalog that never converged reports the same bytes as one that had nothing to do (#12923, #12970). The helper answers its CALLER, which reports the refusal through the #12923 accumulator; what this entry holds is that no caller may re-swallow that answer in a quiet `catch`.",
+    ],
     [
         'syncSchema',
         'DDL for the object never ran — the table/columns do not exist, yet the object stays registered and served.',
@@ -4165,12 +4201,318 @@ function reportDepthCost() {
 // fixtures pin both directions: it must FLAG the #4420 shape and must NOT flag
 // the shapes that are legitimately `warn`.
 
-// Set by `selfTest()` only after its verdict is printed, and read at the
-// dispatch: a `return` that leaves the function above that line prints nothing
-// and still exits 0 — a self-test that never finished, reported as one that
-// passed (#13798). The self-test's own exit code stays load-bearing, so the
-// handshake is a flag rather than a returned sentinel.
+// Set by `selfTest()` at BOTH its verdict sites — the green line and the red
+// one — and read at the dispatch AFTER both batteries have run. What it asserts
+// is "ran to the end", pass or fail: a `return` that leaves the function above
+// both verdict lines prints nothing and still exits 0 — a self-test that never
+// finished, reported as one that passed (#13798). The self-test's own exit code
+// stays load-bearing, so the handshake is a flag rather than a returned sentinel.
+//
+// ⛔ Not the sibling gates' shape, deliberately (#14962). Those set the flag on
+// the success path alone, which is sound THERE because their failure path calls
+// `process.exit(1)` inside the self-test, so the flag is never consulted on a
+// red. Here the failure path `return`s and the dispatch keeps running, so a
+// success-only flag reads a genuine red as "never reached its verdict" — a false
+// diagnostic that sends a maintainer hunting for a truncated run that did not
+// happen, and, when the flag was read between the two calls, stopped the second
+// battery from running at all.
 let selfTestReachedVerdict = false;
+
+// ── The two self-tests' battery roster and floors (#13489, batch 10c) ────────
+//
+// `failures === 0` used to be each entry's ONLY success condition, so "every
+// case held" and "the cases never ran" printed the same line. Closed the #13487
+// way: what is pinned is the registered row LABELS, not a number.
+//
+// This file is TWO recipe-A self-tests sharing a module. `selfTest()` and
+// `selfTestReadSeams()` each own a literal `cases` table, a driving loop and a
+// verdict, and one `--self-test` dispatch runs both. So the roster is
+// PARTITIONED — one object per entry, keyed by that entry's own row labels —
+// and each entry's verdict checks ONLY its own partition.
+//
+// Why an object per entry, rather than one flat label→floor map plus a literal
+// partition list:
+//
+//   • the flat shape needs all 120 labels written TWICE (once as a key, once in
+//     the partition list), two literals that drift apart silently — and the
+//     drift's failure mode is a row floored in neither partition;
+//   • the flat shape COLLAPSES a label that appears in BOTH tables into one
+//     key: the roster would hold 119 batteries for 120 rows, and the second
+//     row's floor would be met by the first row running. That collision is not
+//     hypothetical here — the two tables had one (see the namespacing note on
+//     `selfTestReadSeams`'s nesting row). Nested partitions keep both keys, so
+//     the cross-partition refusal below can name it instead of absorbing it.
+//
+// The ROW is the battery, not the banner. The 16 `// ──` banners inside the two
+// tables group rows for a reader and register nothing; promoting them would
+// floor 16 sections in place of 120 cases, and a section stays "run" while
+// every row under it stops. They stay comments — none is promoted.
+//
+// ⛔ A pinned TOTAL of cases is not the repair, and neither is a roster DERIVED
+// from either table: `cases.length` moves with its table, so a deleted row
+// would delete its own floor. Each partition below is a LITERAL its table is
+// cross-checked against BOTH ways, which is what lets a deleted or renamed row
+// name ITSELF — and the entry it belongs to — in the refusal.
+//
+// The counts are a FLOOR, not an equality — a row that grows into several
+// registrations must not red. 1 is the honest floor for a table row: the loop
+// reaches it exactly once per run.
+const SELF_TEST_BATTERIES = Object.freeze({
+    // Partition 1 — the log-level rule's table, driven by `selfTest()`.
+    selfTest: Object.freeze({
+        'flags: catch around syncSchema logging warn': 1,
+        'flags: catch around syncSchema swallowing silently': 1,
+        'passes: catch around syncSchema logging error': 1,
+        'passes: catch around syncSchema that rethrows': 1,
+        'flags: catch that recovers on one branch (rethrowing on the other) and logs warn': 1,
+        'passes: the same partial-recovery shape logging error': 1,
+        'passes: catch that rethrows from inside a conditional and never recovers': 1,
+        'passes: functional degradation (no critical callee) may warn': 1,
+        'passes: critical call inside a LATER callback is not guarded by this catch': 1,
+        'passes: console.error is as loud as logger.error': 1,
+        'passes: catch delegating to a LOUD same-file helper': 1,
+        'flags: catch delegating to a QUIET same-file helper': 1,
+        'flags: renamed logger local is still seen': 1,
+        'passes: catch delegating to a loud CONCISE-ARROW helper (expression body)': 1,
+        'flags: catch delegating to a QUIET concise-arrow helper (expression body)': 1,
+        'passes: enclosing catch is not accused when an inner RECOVERING catch already consumed the call': 1,
+        'flags: the inner catch itself is still judged (no coverage lost to shadowing)': 1,
+        'flags: enclosing catch IS accused when the inner catch rethrows on every path': 1,
+        'flags: a critical call in an inner CATCH body still reaches the enclosing catch': 1,
+        'passes: catch answers the caller an error envelope on every path (#5241)': 1,
+        'flags: envelope on one branch, a normal value on the other (partial propagation)': 1,
+        'flags: envelope on one branch, falls off the end on the other': 1,
+        'flags: an error envelope BUILT but never returned': 1,
+        'passes: site-declared per-item outcome report (#5241 second shape)': 1,
+        'flags: the same report shape with NO site declaration (declared, not guessed)': 1,
+        'flags: a site declaration for a DIFFERENT function does not license this one': 1,
+        'passes: site-declared DOTTED sink (failed.push) — the receiver is what carries the meaning': 1,
+        'flags: a DIFFERENT array than the declared sink does not deliver': 1,
+        'flags: the declared report is written on only ONE branch': 1,
+        'passes: report written, then `continue` — the loop moves on AFTER delivering': 1,
+        'flags: `continue` BEFORE the declared report leaves a path undelivered': 1,
+        'flags: the delivery sits in a callback that runs LATER': 1,
+        'passes: BOTH branches of an if/else answer the caller an envelope': 1,
+        'flags: a delivery the analysis cannot prove reaches every path (conservative fallback)': 1,
+        'passes: (logger.error ?? logger.warn)(…) — the parenthesized fallback': 1,
+        'passes: (logger.error ?? logger.warn).call(logger, …) — driver-turso spelling': 1,
+        'passes: (logger.error || logger.warn)(…) — the || spelling of the same idiom': 1,
+        'passes: (cond ? logger.error : logger.warn)(…) — ternary callee': 1,
+        'passes: logger[\'error\'](…) — a level named by a string literal': 1,
+        'passes: a fallback stored in a same-file const and called through it': 1,
+        'passes: the #9665 named-helper shape (guarded error, warn fallback)': 1,
+        'passes: logger?.error(…) — optionality on the RECEIVER is not judged': 1,
+        'flags: logger.error?.(…) alone — an optional call may print nothing': 1,
+        'flags: (logger.error ?? logger.warn)?.(…) — the fallback itself called optionally': 1,
+        'flags: a conditional error next to an unconditional debug is still conditional': 1,
+        'flags: (logger.warn ?? logger.info)(…) — a fallback between two QUIET levels': 1,
+        'flags: an unreadable report is `unreadable-report`, NOT `silent-swallow`': 1,
+        'flags: logger[level](…) with a computed level is unreadable, not silent': 1,
+        'passes: a bare warn(…) naming a same-file helper that logs error': 1,
+        'flags: a truly empty catch is still `silent-swallow`': 1,
+        'census: an UNREADABLE call inside an otherwise LOUD catch is counted, and stays green': 1,
+        'census: a catch whose only answer is unreadable is BOTH a finding and a census row': 1,
+        'census: a truly SILENT catch is NOT counted as unrecognised': 1,
+        'census: an ordinary loud catch contributes nothing to the census': 1,
+        'summary limb: flags a counter-guarded summary spelled logger.error?.(…) outside the catch': 1,
+        'summary limb: passes the same summary repaired with the if/else fallback': 1,
+        'summary limb: passes the same summary repaired with the ?? fallback': 1,
+        'summary limb: a counter-guarded branch that reports at info is COUNTED, never judged': 1,
+        'summary limb: a boolean latch is not an accumulator — the branch is not in the population': 1,
+        'summary limb: an unrelated condition is not a summary of the catch': 1,
+        'summary limb: a counter-guarded if INSIDE the catch stays the catch rule\'s finding': 1,
+        'summary limb: a counter-guarded branch that logs nothing is not a report': 1,
+        'passes: a propagating catch is still counted as a seam (not made invisible)': 1,
+    }),
+    // Partition 2 — the read-seam invention rule's table, driven by
+    // `selfTestReadSeams()`.
+    selfTestReadSeams: Object.freeze({
+        'flags: #4825 pre-fix — catch around a read returns an invented `1`': 1,
+        'flags: #5108 pre-fix — catch around a read returns `[]`': 1,
+        'flags: #5108 pre-fix — `exists()` answers `false` for an unreadable store': 1,
+        'flags: #5108 pre-fix — `stat()` answers `null` for an unreadable store': 1,
+        'flags: a counter seeded from an invented `0` after a failed read': 1,
+        'passes: #4825 post-fix — `isMissingTableError` gates the invented value, everything else rethrows': 1,
+        'passes: #5108 post-fix — the catch delegates to a rethrowing type-discriminating guard': 1,
+        'passes: the same guard in front of `false` (exists) and `null` (stat)': 1,
+        'passes: the NEGATED spelling — `if (!isMissingTableError(e)) throw e;` then the empty value': 1,
+        'flags: a HAND-ROLLED error test is not the declared discriminator': 1,
+        'flags: a driver code compared by hand is not the declared discriminator either': 1,
+        'flags: discriminated, but the empty value is returned on the NON-benign branch too': 1,
+        'flags: a guard that discriminates but does NOT rethrow licenses nothing': 1,
+        'flags: a same-file helper that never asks the error TYPE is not a guard, however it ends': 1,
+        'flags: guarded on one branch, unguarded on a second return': 1,
+        'flags: a return inside an unmodelled construct (loop) is judged, not excused': 1,
+        'passes (not this rule): a read seam that logs is the log-level rule\'s question': 1,
+        'passes: no read in the try block — out of this rule\'s vocabulary entirely': 1,
+        'passes: the catch returns a REAL answer it built, not an invented empty one': 1,
+        'passes: a bare `return;` is not an invented answer (documented exclusion)': 1,
+        'passes: the read runs in a LATER callback, so this catch does not guard it': 1,
+        'passes: the catch rethrows on every path': 1,
+        'flags: the read reached through a same-file wrapper is still a read': 1,
+        'flags: `undefined` / `{}` / empty string are the same invention under other spellings': 1,
+        'passes: the enclosing catch is not accused when an inner RECOVERING catch consumed the read': 1,
+        'flags: the inner catch itself is still judged for a READ seam (no coverage lost to shadowing)': 1,
+        'flags: #6116 pre-fix — the catch hands back its own `records` parameter, silently': 1,
+        'passes: #6116 post-fix — the same pass-through, now reported once (log-level rule\'s question)': 1,
+        'passes: the pass-through is reached only on a type-discriminated benign branch': 1,
+        'flags: discriminated, but the input is passed through on the non-benign branch too': 1,
+        'flags: a caller-supplied fallback parameter returned silently is a pass-through too': 1,
+        'flags: a DESTRUCTURED parameter is the same value under another spelling': 1,
+        'flags: `as` / `!` are spellings of the pass-through, not answers': 1,
+        'flags: a catch inside a callback answers with the CALLBACK\'s own parameter': 1,
+        'flags: #9261 pre-fix — catch WRITES `[]` into a variable declared before the try': 1,
+        'passes: #9261 post-fix — the same assignment, reached only through isMissingTableError': 1,
+        'passes: a name the CATCH itself declares is not an answer': 1,
+        'passes: the catch assigns a computed value / raises a flag, not an invented empty one': 1,
+        'passes: #8845 accumulation (`push`) is deliberately still not judged': 1,
+        'passes: a partial result the catch ACCUMULATED is not a pass-through': 1,
+        'passes: #11921 — `Array.prototype.find` on a local array is not a storage read': 1,
+        'passes: #11921 — an array `find` inside a same-file helper does not make its CALLER a read seam': 1,
+        'flags: #11921 — a vocabulary name taking a callback is still followed as a same-file wrapper': 1,
+        'flags: #11921 — the shape test reads the FIRST argument, so a function in a query option changes nothing': 1,
+        'flags (documented limitation): #11921 — an array `find` with a NAMED predicate is still counted': 1,
+        'passes: #12358 — a compound receiver does not resolve to the same-file method it collides with': 1,
+        'passes: #12358 — a call that cannot satisfy the resolved declaration is not that declaration': 1,
+        'flags: #12358 — a `this`-rooted chain into the real method is still a read seam': 1,
+        'flags (documented limitation): #12358 — a spread call is exempt from the arity clause': 1,
+        'flags: #12358 — a bare-identifier receiver is admitted, not refused': 1,
+        'flags: #12358 — an optional parameter is not a required one': 1,
+        'BOUND (#12360): the THIRD wrapper hop is refused — a raise must fail here before it moves the denominator': 1,
+        'BOUND (#12360): the same ladder IS a seam one hop deeper — the pin above is not vacuous': 1,
+        'flags: #13474 — the enclosing same-named body is the one resolved (a later twin must not drop the seam)': 1,
+        'passes: #13474 — a later same-named body that reads must not INVENT a seam at a call it does not enclose': 1,
+        'flags: #13474 — three same-named bodies, resolved from inside the first (the live `lookup` shape)': 1,
+        'flags: #13474 — a name declared ONCE still resolves from outside its scope (the fix must not narrow the census)': 1,
+    }),
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so each partition's own size is pinned — measured on a run (pin
+// 9999, read the breach line), not transcribed from the source. Two constants
+// in one frozen map rather than two bare `const`s, so a new partition cannot be
+// added to the roster with no size pin at all: the lookup below reads
+// `undefined` and the comparison fails loudly.
+const SELF_TEST_BATTERY_FLOOR = Object.freeze({
+    selfTest: 63,
+    selfTestReadSeams: 57,
+});
+
+// The roster's TOTAL, checked from BOTH verdict sites. Each entry checks only
+// its own partition, so nothing inside `selfTest()`'s verdict would notice
+// `selfTestReadSeams`'s partition being deleted from the roster wholesale — the
+// deleted partition's own size pin is not evaluated by anyone once its entry
+// stops reaching it. This is the one assertion that survives that deletion.
+const SELF_TEST_BATTERY_TOTAL_FLOOR = 120;
+
+/**
+ * The floor for ONE partition of the roster, run from that partition's own
+ * entry (#13799 batch 10c). Returns the number of floor failures, which the
+ * caller folds into its own `failures` count so the floor and the cases refuse
+ * through the same sink and the same exit code.
+ *
+ * Shared by both entries rather than copied into each, so the two refusals
+ * cannot drift apart in wording; `partition` is what makes every line say WHICH
+ * entry was short. It reads no state but the module-level roster and the
+ * ledger it is handed, so partition 1's verdict cannot be affected by anything
+ * partition 2 did or failed to do.
+ */
+function checkSelfTestFloor(partition, rowLabels, batterySeen) {
+    let floorFailures = 0;
+    const floorFailure = (message) => {
+        console.error(`  ✗ self-test floor (${partition}): ${message}`);
+        floorFailures++;
+    };
+    const partitionRoster = SELF_TEST_BATTERIES[partition];
+    if (partitionRoster === undefined) {
+        floorFailure(
+            `SELF_TEST_BATTERIES declares no partition named "${partition}", so this entry's rows are ` +
+                'floored by nothing at all. Restore the partition — an entry whose partition is gone ' +
+                'would otherwise print its success line with every case silently unfloored.',
+        );
+        return floorFailures;
+    }
+    const declaredBatteries = Object.keys(partitionRoster);
+    const pinnedSize = SELF_TEST_BATTERY_FLOOR[partition];
+    let floorBreached = false;
+    if (!(declaredBatteries.length >= pinnedSize)) {
+        floorBreached = true;
+        floorFailure(
+            `SELF_TEST_BATTERIES.${partition} declares ${declaredBatteries.length} batteries, below the ` +
+                `pinned ${pinnedSize} — a battery deleted from the roster takes its own floor with it.`,
+        );
+    }
+    const rosterTotal = Object.values(SELF_TEST_BATTERIES).reduce(
+        (n, part) => n + Object.keys(part).length,
+        0,
+    );
+    if (rosterTotal < SELF_TEST_BATTERY_TOTAL_FLOOR) {
+        floorBreached = true;
+        floorFailure(
+            `the roster declares ${rosterTotal} batteries across all partitions, below the pinned ` +
+                `${SELF_TEST_BATTERY_TOTAL_FLOOR} — a partition deleted whole is invisible to every ` +
+                'per-partition size pin, because the deleted partition is exactly the one nobody checks.',
+        );
+    }
+    const duplicated = [...new Set(rowLabels.filter((name, i) => rowLabels.indexOf(name) !== i))];
+    if (duplicated.length > 0) {
+        floorBreached = true;
+        floorFailure(
+            `the "${partition}" cases table uses ${duplicated.map((n) => JSON.stringify(n)).join(', ')} ` +
+                'as a row label more than once — two rows sharing a label are ONE battery, so the second ' +
+                'can stop running while the first keeps the floor met.',
+        );
+    }
+    for (const [other, otherRoster] of Object.entries(SELF_TEST_BATTERIES)) {
+        if (other === partition) continue;
+        const shared = declaredBatteries.filter((name) => Object.hasOwn(otherRoster, name));
+        if (shared.length === 0) continue;
+        floorBreached = true;
+        floorFailure(
+            `${shared.map((n) => JSON.stringify(n)).join(', ')} is declared in BOTH partition ` +
+                `"${partition}" and partition "${other}". One label naming two entries' rows makes every ` +
+                'refusal here ambiguous to read, and collapses to a single battery the moment the roster ' +
+                'is flattened. Namespace one of the two labels.',
+        );
+    }
+    for (const [name, count] of batterySeen) {
+        if (declaredBatteries.includes(name)) continue;
+        floorBreached = true;
+        const elsewhere = Object.keys(SELF_TEST_BATTERIES).filter(
+            (other) => other !== partition && Object.hasOwn(SELF_TEST_BATTERIES[other], name),
+        );
+        floorFailure(
+            `self-test battery ${JSON.stringify(name)} registered ${count} case(s) in partition ` +
+                `"${partition}" but is not declared there` +
+                (elsewhere.length > 0
+                    ? ` — it IS declared in partition "${elsewhere.join('", "')}", so this row is either ` +
+                      'duplicated across the two tables or attributed to the wrong entry.'
+                    : ' — a case attributed to no declared battery is one nothing floors.'),
+        );
+    }
+    for (const name of declaredBatteries) {
+        const count = batterySeen.get(name) ?? 0;
+        if (count >= partitionRoster[name]) continue;
+        floorBreached = true;
+        floorFailure(
+            count === 0
+                ? `self-test battery ${JSON.stringify(name)} DID NOT RUN in partition "${partition}" — ` +
+                  `0 cases registered, ${partitionRoster[name]} pinned. The verdict below would have ` +
+                  'claimed that case holds.'
+                : `self-test battery ${JSON.stringify(name)} registered ${count} case(s) in partition ` +
+                  `"${partition}", below its pinned floor of ${partitionRoster[name]} — cases that used ` +
+                  'to run no longer do.',
+        );
+    }
+    if (floorBreached) {
+        floorFailure(
+            'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not ' +
+                'the number. Find what stopped registering (a deleted row, a renamed label, a loop that ' +
+                'no longer reaches it) and restore it.',
+        );
+    }
+    return floorFailures;
+}
 
 function selfTest() {
     const cases = [
@@ -5075,8 +5417,21 @@ function selfTest() {
         },
     ];
 
+    // The ledger this entry's partition of the floor is evaluated against
+    // (#13799 batch 10c). Local to `selfTest`, so the two entries cannot
+    // borrow each other's registrations.
+    const batterySeen = new Map();
+    const registerCase = (name) => {
+        batterySeen.set(name, (batterySeen.get(name) ?? 0) + 1);
+    };
+
     let failures = 0;
     for (const c of cases) {
+        // FIRST in the loop body, before anything a case can skip past: the row
+        // is attributed to the row actually being run, whatever it asserts
+        // afterwards. There is no `battery()` opener — for a table-driven
+        // self-test the ROW is the battery, so attribution is the loop variable.
+        registerCase(c.name);
         const sf = parseSourceFile('t.ts', c.code, ts.ScriptKind.TS);
         const findings = [];
         const seams = [];
@@ -5156,8 +5511,37 @@ function selfTest() {
             console.log(`  ✓ ${c.name}`);
         }
     }
+    // ── The floor: every declared row of THIS partition RAN (#13799) ────────
+    //
+    // Evaluated after every row has had its chance and BEFORE the verdict, so
+    // the success line below can only be printed by a run whose registered rows
+    // EQUAL the rows declared for `selfTest`. A set difference names WHICH
+    // row stopped; a count says only that something did.
+    //
+    // ONLY this entry's partition is read. `selfTestReadSeams` has its own
+    // table, its own ledger and its own floor at its own verdict site: a row
+    // that stopped running there must neither be reported here nor be hidden by
+    // a green line here.
+    //
+    // The ROWS are the batteries — the `// ──` banners inside the table above
+    // are comments that register nothing, and none is promoted.
+    //
+    // Orthogonal to the verdict handshake: the handshake catches a `return`
+    // that skips this line entirely, the floor catches a run that REACHES this
+    // line having stopped running cases.
+    failures += checkSelfTestFloor(
+        'selfTest',
+        cases.map((c) => c.name),
+        batterySeen,
+    );
     if (failures > 0) {
-        console.error(`\n✗ self-test (log-level rule): ${failures} case(s) failed\n`);
+        console.error(`\n✗ self-test (log-level rule): ${failures} failure(s) (cases and floor)\n`);
+        // A printed red verdict IS a reached verdict (#14962). The handshake
+        // asserts "ran to the end", pass or FAIL; the returned 1 keeps carrying
+        // the verdict, so the dispatch still exits 1. Set HERE, adjacent to the
+        // line it certifies, rather than once before the branch: the flag can
+        // then only be true if one of the two verdict lines was really printed.
+        selfTestReachedVerdict = true;
         return 1;
     }
     console.log(`\n✓ self-test (log-level rule): ${cases.length} case(s) passed\n`);
@@ -5175,7 +5559,9 @@ function selfTest() {
 // three instances, in both directions, or the fourth recurrence lands green.
 // The dispatch calls TWO self-test entries and combines their statuses, so each
 // one needs its own handshake: a `return` above either verdict prints nothing and
-// leaves `undefined`, which the `||` below reads as a pass (#13798).
+// leaves `undefined`, which the `||` below reads as a pass (#13798). Set at both
+// of this battery's verdict sites, green and red, for the reason spelled out at
+// `selfTestReachedVerdict` (#14962).
 let readSeamsReachedVerdict = false;
 
 function selfTestReadSeams() {
@@ -5565,7 +5951,10 @@ function selfTestReadSeams() {
             expectCount: 0,
         },
         {
-            name: 'flags: the inner catch itself is still judged (no coverage lost to shadowing)',
+            name: 'flags: the inner catch itself is still judged for a READ seam (no coverage lost to shadowing)',
+            // Namespaced (#13799 batch 10c): the log-level table above had a row under this
+            // exact label, and one label naming two entries' rows is refused by the roster's
+            // cross-partition check. Same fixture intent, different rule — the `READ` says which.
             code: `
                 class L {
                     async list(type: string) {
@@ -6268,8 +6657,21 @@ function selfTestReadSeams() {
         },
     ];
 
+    // The ledger this entry's partition of the floor is evaluated against
+    // (#13799 batch 10c). Local to `selfTestReadSeams`, so the two entries cannot
+    // borrow each other's registrations.
+    const batterySeen = new Map();
+    const registerCase = (name) => {
+        batterySeen.set(name, (batterySeen.get(name) ?? 0) + 1);
+    };
+
     let failures = 0;
     for (const c of cases) {
+        // FIRST in the loop body, before anything a case can skip past: the row
+        // is attributed to the row actually being run, whatever it asserts
+        // afterwards. There is no `battery()` opener — for a table-driven
+        // self-test the ROW is the battery, so attribution is the loop variable.
+        registerCase(c.name);
         const sf = parseSourceFile('t.ts', c.code, ts.ScriptKind.TS);
         const findings = [];
         const seams = [];
@@ -6384,8 +6786,34 @@ function selfTestReadSeams() {
         }
     }
 
+    // ── The floor: every declared row of THIS partition RAN (#13799) ────────
+    //
+    // Evaluated after every row has had its chance and BEFORE the verdict, so
+    // the success line below can only be printed by a run whose registered rows
+    // EQUAL the rows declared for `selfTestReadSeams`. A set difference names WHICH
+    // row stopped; a count says only that something did.
+    //
+    // ONLY this entry's partition is read. `selfTest` has its own
+    // table, its own ledger and its own floor at its own verdict site: a row
+    // that stopped running there must neither be reported here nor be hidden by
+    // a green line here.
+    //
+    // The ROWS are the batteries — the `// ──` banners inside the table above
+    // are comments that register nothing, and none is promoted.
+    //
+    // Orthogonal to the verdict handshake: the handshake catches a `return`
+    // that skips this line entirely, the floor catches a run that REACHES this
+    // line having stopped running cases.
+    failures += checkSelfTestFloor(
+        'selfTestReadSeams',
+        cases.map((c) => c.name),
+        batterySeen,
+    );
     if (failures > 0) {
-        console.error(`\n✗ self-test (read-seam invention rule): ${failures} case(s) failed\n`);
+        console.error(`\n✗ self-test (read-seam invention rule): ${failures} failure(s) (cases and floor)\n`);
+        // Its own handshake, same reading as `selfTest`'s red path (#14962): a
+        // printed red verdict is a reached verdict, and the returned 1 carries it.
+        readSeamsReachedVerdict = true;
         return 1;
     }
     console.log(
@@ -6398,26 +6826,35 @@ function selfTestReadSeams() {
 
 const args = process.argv.slice(2);
 if (args.includes('--self-test')) {
-    // Both rules' fixtures always run — a red one must not hide the other.
+    // Both rules' fixtures always run — a red one must not hide the other. That
+    // is why BOTH batteries run BEFORE either handshake is read (#14962): reading
+    // the first handshake between the two calls exited the process on a red
+    // battery 1, so battery 2 never ran — the very thing this comment forbids —
+    // and it did so under a message saying no verdict had been reached, while the
+    // red verdict line sat directly above it in the same output.
     const logLevelStatus = selfTest();
+    const readSeamStatus = selfTestReadSeams();
+    // Read AFTER both have reported. An early `return` from either one still
+    // trips its own named diagnostic here; a genuine red does not, because a
+    // printed verdict sets the flag.
+    let handshakeMissing = false;
     if (!selfTestReachedVerdict) {
         console.error(
             '\n✗ check-durability-degradation-log-level self-test: selfTest() returned without reaching its verdict,\n'
                 + 'so no success line was printed. Exiting 0 here would report a self-test\n'
                 + 'that never finished as a self-test that passed.\n',
         );
-        process.exit(1);
+        handshakeMissing = true;
     }
-    const readSeamStatus = selfTestReadSeams();
     if (!readSeamsReachedVerdict) {
         console.error(
             '\n✗ check-durability-degradation-log-level self-test: selfTestReadSeams() returned without\n'
                 + 'reaching its verdict, so no success line was printed. Exiting 0 here would report a\n'
                 + 'self-test that never finished as a self-test that passed.\n',
         );
-        process.exit(1);
+        handshakeMissing = true;
     }
-    process.exit(logLevelStatus || readSeamStatus ? 1 : 0);
+    process.exit(handshakeMissing || logLevelStatus || readSeamStatus ? 1 : 0);
 } else if (args.includes('--depth-cost')) {
     // A diagnostic, deliberately not part of any verdict — see `reportDepthCost`.
     process.exit(reportDepthCost());

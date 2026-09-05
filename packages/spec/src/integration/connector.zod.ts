@@ -455,64 +455,54 @@ export type RetryConfig = z.input<typeof RetryConfigSchema>;
 export type RetryConfigParsed = z.infer<typeof RetryConfigSchema>;
 
 // ============================================================================
-// Error Mapping Configuration
+// Error Mapping Configuration — RETIRED (ADR-0049 enforce-or-remove)
 // ============================================================================
+//
+// This section declared `ConnectorErrorCategorySchema` (an 8-value enum),
+// `ErrorMappingRuleSchema` (7 keys: `sourceCode`, `sourceMessage`, `targetCode`,
+// `targetCategory`, `severity`, `retryable`, `userMessage`) and
+// `ErrorMappingConfigSchema` (4 keys: `rules`, `defaultCategory`,
+// `unmappedBehavior`, `logUnmapped`), authorable through
+// `ConnectorSchema.errorMapping` below. Measured on `origin/main` before the
+// removal: outside this file and its unit test, the only reference in the tree
+// was a type-identity pin — no provider, dispatcher or materializer ever mapped
+// an external error through the rules, so `unmappedBehavior` configured nothing
+// and a rule's `userMessage` was never shown to anyone. That last spelling is
+// what made the surface worse than ordinary dead metadata: it is the name of the
+// LIVE API-error channel (`ApiError.userMessage`, read off a thrown HTTP error),
+// so an author who had read that documentation and wrote a rule here reasonably
+// believed they were marking a refusal for an end user, and the failure was
+// silent in both directions (it validated, it published, nothing was shown).
+//
+// Removal resolved the collision by deletion. The three defs left whole
+// (`integration/ErrorMappingConfig`, `integration/ErrorMappingRule`,
+// `integration/ConnectorErrorCategory` in `RETIRED_DEFS_BY_MAJOR[18]` — the
+// enum's only consumers were the two removed shapes, and an exported value
+// schema with no consumer reads as a capability); the carrier key is a
+// `retiredKey()` tombstone (`ERROR_MAPPING_RETIRED`, on `ConnectorSchema`), and
+// the D2 conversion `connector-error-mapping-removed` strips the block from
+// existing sources. `api/errors.zod.ts`'s `ErrorCategory` — the HTTP-response
+// vocabulary the retired enum was deliberately NOT allowed to share a name
+// with (ADR-0112 D9a) — is unaffected.
 
 /**
- * Error Category — connector-side: what an external system's failure maps TO
- * when a connector normalises it.
- *
- * `Connector`-prefixed because `api/errors.zod.ts` exports a different
- * `ErrorCategory` for HTTP error responses. They overlap but disagree
- * (`server_error`/`integration_error`/`timeout` here vs
- * `server`/`external`/`maintenance`/`authentication` there), so a value valid
- * for one is invalid for the other — they may not share a name (ADR-0112 D9a).
+ * The prescription an author meets when they write `errorMapping` — in `tsc`
+ * (the key's input type is `never`) and at parse (this string is the issue
+ * message). It IS the migration doc for whoever hits it; the closing sentence
+ * is the house `os migrate meta` form pinned by
+ * `shared/retired-key-migrate-sentence.test.ts`.
  */
-export const ConnectorErrorCategorySchema = lazySchema(() => z.enum([
-  'validation',
-  'authorization',
-  'not_found',
-  'conflict',
-  'rate_limit',
-  'timeout',
-  'server_error',
-  'integration_error',
-]).describe('Standard error category'));
-
-export type ConnectorErrorCategory = z.input<typeof ConnectorErrorCategorySchema>;
-
-/**
- * Error Mapping Rule
- * 
- * Maps an external system error code to an ObjectStack standard error.
- */
-export const ErrorMappingRuleSchema = lazySchema(() => z.object({
-  sourceCode: z.union([z.string(), z.number()]).describe('External system error code'),
-  sourceMessage: z.string().optional().describe('Pattern to match against error message'),
-  targetCode: z.string().describe('ObjectStack standard error code'),
-  targetCategory: ConnectorErrorCategorySchema.describe('Error category'),
-  severity: z.enum(['low', 'medium', 'high', 'critical']).describe('Error severity level'),
-  retryable: z.boolean().describe('Whether the error is retryable'),
-  userMessage: z.string().optional().describe('Human-readable message to show users'),
-}).describe('Error mapping rule'));
-
-export type ErrorMappingRule = z.input<typeof ErrorMappingRuleSchema>;
-
-/**
- * Error Mapping Configuration
- * 
- * Configures how external system errors are mapped to ObjectStack standard errors.
- */
-export const ErrorMappingConfigSchema = lazySchema(() => z.object({
-  rules: z.array(ErrorMappingRuleSchema).describe('Error mapping rules'),
-  defaultCategory: ConnectorErrorCategorySchema.optional().default('integration_error').describe('Default category for unmapped errors'),
-  unmappedBehavior: z.enum(['passthrough', 'generic_error', 'throw']).describe('What to do with unmapped errors'),
-  logUnmapped: z.boolean().optional().default(true).describe('Log unmapped errors'),
-}).describe('Error mapping configuration'));
-
-export type ErrorMappingConfig = z.input<typeof ErrorMappingConfigSchema>;
-/** Post-parse shape of {@link ErrorMappingConfig} — defaults applied, transforms run (ADR-0122). */
-export type ErrorMappingConfigParsed = z.infer<typeof ErrorMappingConfigSchema>;
+const ERROR_MAPPING_RETIRED =
+  '`connector.errorMapping` was removed in @objectstack/spec 17 (ADR-0049 '
+  + 'enforce-or-remove) — nothing ever read it: no provider, dispatcher or materializer '
+  + 'mapped an external error through the rules, so `unmappedBehavior` configured nothing '
+  + "and a rule's `userMessage` was never shown to anyone (that spelling is the live "
+  + 'API-error channel, `ApiError.userMessage`, which a thrown HTTP error declares — not '
+  + 'connector metadata). Delete the key; the whole shape leaves with it (`ErrorMappingConfig`, '
+  + '`ErrorMappingRule` and the `ConnectorErrorCategory` enum). There is no replacement, '
+  + "because no error-mapping engine exists: a connector's failures reach callers as the "
+  + "provider's own errors (ADR-0097). "
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
 
 // ============================================================================
 // Health Check & Circuit Breaker Configuration
@@ -843,9 +833,22 @@ export const ConnectorSchema = lazySchema(() => z.object({
   ),
   
   /**
-   * Error mapping configuration
+   * `errorMapping` — RETIRED (ADR-0049 enforce-or-remove). Eleven authorable
+   * keys (`ErrorMappingConfig` x4, `ErrorMappingRule` x7) that nothing in the
+   * tree ever read, one of them spelled `userMessage` — the name of the LIVE
+   * API-error channel — so writing a rule here validated, published and showed
+   * nobody anything. `ConnectorSchema` is NOT `.strict()`, so a plain delete
+   * would be a silent strip (ADR-0104); the tombstone makes the removal audible
+   * in the two channels an upgrading author actually hits — `tsc` and the
+   * parse — and `DeclarativeConnectorEntrySchema` (`ConnectorSchema.superRefine`)
+   * inherits it, so `stack.connectors[]` and the `/meta/connector` door refuse
+   * it too. Registered as `integration/Connector:errorMapping` and
+   * `integration/DeclarativeConnectorEntry:errorMapping` in
+   * `RETIRED_KEYS_BY_MAJOR[18]`; sources are rewritten by the D2 conversion
+   * `connector-error-mapping-removed`. The section comment above
+   * `ERROR_MAPPING_RETIRED` records what the shape was.
    */
-  errorMapping: ErrorMappingConfigSchema.optional().describe('Error mapping configuration'),
+  errorMapping: retiredKey(ERROR_MAPPING_RETIRED),
   
   /**
    * Health check and circuit breaker configuration

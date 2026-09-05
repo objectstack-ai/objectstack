@@ -29,9 +29,36 @@
 // runner would make every log reading in tests a reading of something other
 // than production. The request lives HERE, in the harness, where the test
 // author can see it.
+// ── Why there is now a `resolve.alias` (#15229) ────────────────────────────
+//
+// `artifact-collections.ts` reads the app's collections through
+// `resolveArtifactPackageOrder` — `@objectstack/core`'s ADR-0130 D4+D5 package
+// ordering — and `derive.ts` / `rls.ts` reach it from every test in this
+// package. Without an anchored alias that specifier resolves through core's
+// `exports` to its **dist**, which makes each of those tests a verdict about
+// build state rather than about the source in this checkout, and the dangerous
+// half of that is not a loud error but a suite that passes GREEN over a stale
+// artifact with nothing in the output saying so.
+// `scripts/check-test-source-alias.mjs` names it; that script's registry is
+// SHRINK-ONLY, so widening `KNOWN_UNALIASED_TEST_IMPORTS['@objectstack/verify']`
+// was never the fix. ANCHORED (`/^…$/`, array form) so the entry cannot swallow
+// core's published subpaths and resolve `@objectstack/core/logger` to
+// `…/core/src/index.ts/logger` — the ENOTDIR shape that gate's rule 5 exists
+// for. The 14 other entries in this package's ledger are real and untouched:
+// this adds nothing to it and removes nothing from it.
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { defineConfig } from 'vitest/config';
 
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+
 export default defineConfig({
+  resolve: {
+    alias: [
+      { find: /^@objectstack\/core$/, replacement: path.resolve(HERE, '../core/src/index.ts') },
+    ],
+  },
   test: {
     // A late console.* must not redden a green suite (#10374): vitest's worker
     // forwards console output over RPC and discards the promise, and a write

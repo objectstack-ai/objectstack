@@ -454,14 +454,15 @@ describe('#14541 · structured arms are consulted by BOTH doors', () => {
             expect(single.status).toBe(400);
             expect(single.body.code).toBe('ERR_DATASOURCE_UNAVAILABLE');
             expect(bulk.body.code).toBe('ERR_DATASOURCE_UNAVAILABLE');
-            // ⚠️ The bodies still differ by ONE key, and it is not this card's
-            // defect: `classifyDataError`'s GENERIC declared-status passthrough
-            // appends `object` from the door's argument and
-            // `resolveErrorResponse`'s does not. Same door-disagreement class,
-            // one arm over, untouched here and filed as #14725 — pinned so the
-            // residue is visible rather than implied.
+            // [#14725] The bodies used to differ by ONE key here — the residue
+            // this case pinned so it was visible rather than implied:
+            // `classifyDataError`'s GENERIC declared-status passthrough
+            // appended `object` from the door's argument and
+            // `resolveErrorResponse`'s did not. That card added the limb, so
+            // the verdict this case is labelled with now holds for the BODY
+            // too, and the pin says so rather than describing a closed gap.
             expect(single.body).toHaveProperty('object', 'account');
-            expect(bulk.body).not.toHaveProperty('object');
+            expect(bulk.body).toEqual(single.body);
         });
 
         it('CONVERGED: the arm still answers 503 when the producer declared NO status', () => {
@@ -659,16 +660,20 @@ describe('#14541 · structured arms are consulted by BOTH doors', () => {
             },
             {
                 code: 'RECORD_NOT_FOUND',
-                kind: 'known-gap',
-                card: 14725,
-                why: 'a REAL instance of this card\'s defect, found by this very guard: '
-                    + '`recordNotFoundError` (@objectstack/core) declares code, `status = 404` '
-                    + 'and `object`, so the bulk doors take the passthrough and drop `object` '
-                    + 'while the single door reaches the arm. Not lifted here because (a) its '
-                    + 'second limb is a message-TEXT gate, outside the declared-code boundary, '
-                    + 'and (b) this PR\'s wire delta was measured and contract-reviewed over a '
-                    + 'fixed set of codes — an eleventh body change after that verdict would be '
-                    + 'an unreviewed delta. #14725 carries it.',
+                kind: 'by-design',
+                why: 'its second limb is a message-TEXT gate '
+                    + '(`/^Record \\S+ not found in \\S+/i`) and the shared classification is '
+                    + 'declared-code only — lifting a text sniff above the passthrough is what '
+                    + '`resolveErrorResponse` argues against. It does not NEED lifting: #14725 '
+                    + 'closed the divergence at the generic passthrough instead, and both limbs '
+                    + 'now converge measurably — the declared-status limb because that '
+                    + 'passthrough answers it identically at both doors (`recordNotFoundError`, '
+                    + '@objectstack/core, declares code + `status = 404` + `object`, so its '
+                    + 'declared status carries it there rather than to this arm), and the '
+                    + 'text-sniff limb because an error declaring no status falls through to '
+                    + '`mapDataError` from both doors. Pinned end to end in '
+                    + '`error-response-generic-passthrough-object-parity.test.ts` §2/§3, which '
+                    + 'is also where the boundary this entry names is held.',
             },
         ];
 

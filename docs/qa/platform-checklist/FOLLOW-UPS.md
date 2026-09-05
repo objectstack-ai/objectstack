@@ -531,3 +531,89 @@ Nothing withheld from this PR. The three new auth-adjacent items
 access-security.me-permissions-aggregation-parity) assert **shipped guards** already
 public in their issues/ADRs; K1–K6 are UX/correctness/discipline findings; no unfixed
 privilege escalation is disclosed anywhere in this sweep.
+
+## 10. Scoped sweep 2026-09-04 — the REST-config coverage kinds (#14961)
+
+A **scoped** sweep, not a full one: `check:platform-checklist` was red on `main` with
+five capability ledgers UNCLASSIFIED, and the question was "does the checklist cover
+these?" rather than "what else is missing?". SWEEP.md permits the scoped shape — run the
+relevant angle only — and this run used **angle 3 (routes & runtime)** against
+`packages/rest`, `packages/spec/src/api/rest-server.zod.ts` and the five liveness
+ledgers. ⚠️ **It was executed SEQUENTIALLY by one reader** (no sub-agent tool in the
+session), which SWEEP.md allows as a degraded path with a declaration: the items authored
+below stand on their own evidence, but this run supports **no** claim that nothing else
+is missing in these areas.
+
+Ledger **260 → 264 items**; `coverage.json` 31 → **35 kinds mapped, 1 waived** (the first
+waiver since the 2026-08-17 re-audit reached zero — see §10d for why it is not a
+regression to zero-waiver discipline). What follows is what is NOT a checklist item.
+
+### 10a. The kind set had already drifted when the card was dispatched
+
+The card (#14961) names four kinds, measured at `ca3fd4b1` on 2026-09-03. On
+`6f944589` (2026-09-04) the gate reported **five**: `realtime_subscription` was enrolled
+the same morning. The card's own triage anticipated exactly this ("re-run the gate on
+today's `origin/main`: the four kinds may have moved"), and the gap between filing and
+dispatch was under 24 hours. ⭐ That is the sharpest available argument for **#11730**
+(this gate has no reporting channel): the population it audits drifts faster than a
+maintainer-triggered run observes it, and here it drifted *inside the lifetime of the
+card filed against it*. Recorded, not acted on — the channel question is #11730's.
+
+### 10b. Product / design findings (decide handling)
+
+| # | finding | evidence | captured in | handling |
+|---|---|---|---|---|
+| E1 | **`metadata.endpoints.items` gates four routes, three of which its declared meaning does not cover** — its `describe()` says "GET /meta/:type — List items of type", and it also gates `GET {prefix}/diagnostics`, `GET {prefix}/_drafts` and the **`POST {prefix}/_migrate-stored` write door**. An operator switching off a listing read silently disarms a migration door and the cross-type spec-validation sweep. `endpoints.item` is milder but the same shape: it also takes `{prefix}/book/:name/tree`. | `packages/rest/src/rest-server.ts#registerMetadataEndpointsInner` (four `endpoints.items` gates, four `endpoints.item` gates) vs `packages/spec/src/api/rest-server.zod.ts#MetadataEndpointsConfigSchema` (one route named per switch) | api-backend.rest-metadata-config-contract (a clause requires the run to ENUMERATE each switch's real radius) | design/docs — filed as #15542 |
+| E2 | **No shipped boot path authors `RestServerConfig` at all.** `os serve` constructs the REST plugin with a fixed config (only `enableProjectScoping` / `projectResolution` are threaded) and the dev plugin calls `createRestApiPlugin()` with none, so `crud` / `metadata` / `batch` / `routes` are reachable only from embedder code (`createRestApiPlugin({ api })`, `createHonoServerPlugin({ restConfig })`). A deployment cannot set `batch.maxBatchSize`, move `crud.dataPrefix`, or opt out of ADR-0106 D8 masking without embedding. | `packages/cli/src/commands/serve.ts` (the fixed construction) · `packages/plugins/plugin-dev/src/dev-plugin.ts` (no config) | the three config items' `knownGaps` — every non-default clause is scored `oracle: test` in a harness, and the run record must say so instead of claiming a reconfigured deployment | capability gap — filed as #15543 |
+| E3 | **The MOUNT half of every sub-config switch is unpinned.** `packages/rest/src/rest-sub-config-parse-not-cast.test.ts` pins what a switch normalizes to, and `rest-batch-size-cap.test.ts` pins the cap's effect; nothing asserts that a `false` switch removes its route from the table `getRoutes()` returns. The declared-not-enforced direction — a switch that normalizes correctly and gates nothing — is exactly what no current test would catch. ⚠️ The card said **nine** switches; re-measured on `cc5b3dd0c27` the mount-gating population is **nineteen** — the twelve sub-config switches the card enumerates (its own list adds to twelve, not nine) plus the seven `api.enable*` gates in `registerRoutes`, which are the same seam and were equally unpinned. | the two test files above; the gates live in `registerCrudEndpoints` / `registerBatchEndpoints` / `registerMetadataEndpointsInner` / `registerRoutes` | the three config items (the mount clauses, each with the gap named in `knownGaps`) | test gap — filed as #15544, **closed by `packages/rest/src/rest-config-mount-table.pin.test.ts`**: all nineteen gates pinned as a set difference against the all-true baseline, each with its presence twin. ⚠️ The three config items' `knownGaps` still say the harness is the only observation — stale in the good direction, refresh pending (`areas/api-backend.json` was held by another branch when this landed). |
+
+### 10c. Checked and CLEAN (so the next sweep does not re-derive)
+
+- The **cross-object `POST {basePath}/batch` is deliberately NOT under
+  `batch.enableBatchEndpoint`** — the switch gates only the per-object
+  `POST {dataPrefix}/:object/batch`. Reading the cross-object door as evidence about the
+  switch is the trap; recorded as a `negative` on the batch item rather than as a defect.
+- **All four per-object bulk gates are ANDs with a protocol member**
+  (`operations.createMany && this.protocol.createManyData`, and so on), so an absent
+  mount has two possible causes and the route table alone cannot tell them apart. Correct
+  as designed; the item drives both legs separately.
+- **`operations.list` gates two mounts** (the collection GET and `POST /:object/query`);
+  the query door has no switch of its own. Deliberate, not drift.
+- **`crud.dataPrefix` and `metadata.prefix` each move their mounts AND their `/discovery`
+  advertisement together** (`registerDiscoveryEndpoints` builds `routes.data` /
+  `routes.metadata` from the same values) — ADR-0076 D12 holds here; asserted positively
+  on both items rather than left as an assumption.
+- **`routes: {}` still constructs** and an unknown key inside a sub-object is stripped —
+  the non-strict parse that is the whole reason the retired keys are tombstones rather
+  than deletions. Both are controls on the route-generation item.
+
+### 10d. The one waiver, and what retires it
+
+`realtime_subscription` is **waived**, and the reason is written out in `coverage.json`
+rather than summarized here. The short form: `SubscriptionSchema` is a transport-protocol
+declaration with zero runtime readers (its ledger records every property `dead` at a
+same-day census, and the shipped in-memory adapter reads a different type entirely), and
+there is nothing to connect to — `GET /api/v1/discovery` advertises realtime
+`enabled: true` with `handlerReady: false` and no realtime route, which is the open
+decision **#14646**. An item authored today could only assert absence.
+
+⚠️ **This does not reopen waiver-as-exemption.** SWEEP.md's running total is 6 of 6
+waivers ever written turned out stale, and every one of those claimed "no independent
+runtime behaviour" about a surface that had some. This one claims the opposite kind of
+thing — that the *reader* is missing, measured by a census that names its method and
+scope — and it names both of its exits: #14646 mounting a transport (author items, flip
+to `items`), or ADR-0049 retiring the schema (the ledger goes, and the ratchet reports
+this entry as an ORPHAN to delete). **Re-audit it next sweep like any other waiver.**
+
+### 10e. Note on the gate's own self-test
+
+The card and its triage quote `--self-test: 141 assertions` (from `ca3fd4b1`). On
+`6f944589` the same command reports **176** and exits 0. Nothing in this sweep touches
+the gate script; the growth is the gate's own, between the two dates. Quote the count
+from the run you actually made — this ledger's own history is the argument for that.
+
+(The one `scripts/` edit this sweep does make is additive and the gate asked for it: §10
+is the first FOLLOW-UPS section to carry symbol anchors, so
+`scripts/checklist-symbol-anchor-baseline.json` gains a `FOLLOW-UPS.md` floor at the
+count `--anchor-census` measured. Adding a floor for a newly-anchored file is not
+lowering one — that stays maintainer-only.)

@@ -62,6 +62,32 @@
  *     still gates this package's STATIC declared surface and its 0 is real for
  *     that; it simply is not the owner of the runtime half.
  *
+ *     The SAME `0` carries the same ambiguity for a SECOND runtime-composed
+ *     surface, and this config is why: it declares no `pages` key at all. The
+ *     three shipped record pages -- `sys_user_detail`,
+ *     `sys_organization_detail` (plugin-auth) and `sys_position_detail`
+ *     (plugin-security) -- reach the platform through those plugins, so they
+ *     are in no extract config's population and the ratchet never looked at
+ *     them either. Declaring them here would not by itself fix that, which is
+ *     the part worth writing down: measured through the real
+ *     `collectExpectedEntries`, the three offer exactly THREE keys between
+ *     them (one page-level `label` each). All three author `regions: []` and
+ *     put every component under `slots.*`, and the shared walk
+ *     (`walkAddressedPageComponents`, `@objectstack/spec/system`) roots at
+ *     `regions[].components[]` -- so 45 further authored copy sites, every one
+ *     an inline `{ en, 'zh-CN', ... }` locale map, have no bundle face to be
+ *     counted against. A config-only change would declare pages the walk still
+ *     cannot see: it would look like a fix and measure nothing.
+ *
+ *     Their gate is `packages/cli/test/platform-page-i18n-parity.test.ts`,
+ *     which owns both halves from the other side -- a `pages.*` bundle entry
+ *     per shipped locale for every page the
+ *     `@objectstack/platform-objects/pages` barrel exports, and a completeness
+ *     check over every inline locale map on those documents, which is the half
+ *     no extractor can reach. Whether the extractor SHOULD reach inline maps is
+ *     a maintainer decision open on #14749; the inline map itself is the ruled
+ *     authoring route (2026-08-06), not a workaround.
+ *
  * Omitting the hand-authored half was a measurable bug, not a style choice:
  * this config declares SETUP_APP / STUDIO_APP / ACCOUNT_APP and
  * SystemOverviewDashboard, so coverage counted all 77 `apps.*`/`dashboards.*`

@@ -42,6 +42,17 @@ import { applyProtection } from '@objectstack/spec/shared';
 // same string the artifact loader ordered them by, or a co-owner would be
 // admitted — or refused — under a key nothing else in the path uses.
 import { artifactPackageId } from '@objectstack/core';
+// [#14553] The ONE resolution of "does this nav group id exist?" and the ONE
+// wording of the diagnostic when it does not. `os build` calls the same two
+// (`checkNavContributionGroups`), so the compile-time door and this read-time
+// fold cannot disagree about what a missing group is — the drift that would
+// make the build's silence indistinguishable from the silence being fixed.
+import {
+  findNavGroup as resolveNavGroup,
+  navContributionGroupDiagnostic,
+  formatNavContributionGroupDiagnostic,
+  type NavContributionGroupDiagnostic,
+} from './nav-contribution-diagnostics.js';
 
 /**
  * Reserved namespaces that do not get FQN prefix applied.
@@ -890,8 +901,21 @@ function provisionTenantScopeIndex(
  * the write path for the mirrored reason: on exactly those rows the plan also
  * strips nothing (`plan.names` is `{ id }`), so the author's declared column is
  * still present when the re-stamp asks.
+ *
+ * [#15225] Exported at MODULE level for the engine's bulk-event producer
+ * (`bulkEventOrganizationId`, engine.ts), which must answer "is this object
+ * walled?" in the wall's own terms and ⛔ not re-spell them a third time: the
+ * R1 contract review measured a re-spelling (`resolveTenantFieldName(schema)
+ * !== DEFAULT_TENANT_FIELD`) that mirrored ONE of the wall's object clauses
+ * and stamped a batch Layer 0 had never constrained. ⚠️ Deliberately NOT
+ * added to the package entries — `index.ts` and `core.ts` re-export NAMED
+ * members of this module, never `export *` — so the published surface of
+ * `@objectstack/objectql` is unchanged (measured on `dist/*.d.ts`, not
+ * assumed): this is the registry's binding of plugin-security's predicate,
+ * not a contract for consumers to build on; the single exported predicate
+ * (option C above) remains the follow-up.
  */
-function carriesTenantScopeColumn(schema: ServiceObject): boolean {
+export function carriesTenantScopeColumn(schema: ServiceObject): boolean {
   // Clause 1 — the wall's own two clauses, spelled here because
   // plugin-security spells them there (option C, the single exported
   // predicate, is bounded to no new `@objectstack/spec` export and no
@@ -1642,6 +1666,23 @@ export class SchemaRegistry {
   private log(msg: string): void {
     if (this._logLevel === 'silent' || this._logLevel === 'error' || this._logLevel === 'warn') return;
     console.log(msg);
+  }
+
+  /**
+   * [#14553] A diagnostic an operator filters FOR — emitted at every level down
+   * to `warn`, silent only where the deployment has asked for silence
+   * (`error`, `silent`).
+   *
+   * The level ladder is `debug < info < warn < error < silent`, so this is the
+   * mirror of {@link log}: that one speaks only ABOVE `warn` and is therefore
+   * the wrong channel for anything a `warn`-level deployment must not miss.
+   * `OS_REGISTRY_LOG=warn` is what the objectql vitest config selects and what
+   * a quiet production boot selects, and a relocation nobody can see there was
+   * the defect this method exists to end.
+   */
+  private warn(msg: string): void {
+    if (this._logLevel === 'silent' || this._logLevel === 'error') return;
+    console.warn(msg);
   }
 
   /**
@@ -4226,10 +4267,14 @@ export class SchemaRegistry {
           if (!Array.isArray(group.children)) group.children = [];
           group.children.push(...c.items);
         } else {
-          this.log(
-            `[Registry] Navigation contribution from "${c.packageId ?? '(unknown)'}" targets ` +
-              `missing group "${c.group}" in app "${app.name}" — appending at top level.`,
-          );
+          // [#14553] The relocation itself is UNCHANGED — the fold stays
+          // order-independent and contributions into optional groups keep
+          // working (option A, a refusal plus a registration-order rule, was
+          // weighed and not taken). What changed is that it is no longer
+          // silent: this used to be one `this.log(...)` gated at `info`, so a
+          // deployment at `OS_REGISTRY_LOG=warn` watched its information
+          // architecture change with nothing in the log at all.
+          this.recordNavGroupMiss(String(app.name), c);
           nav.push(...c.items);
         }
       } else {
@@ -4239,16 +4284,77 @@ export class SchemaRegistry {
     return cloned;
   }
 
-  /** Depth-first search for a `type: 'group'` nav item by id. */
+  /**
+   * Depth-first search for a `type: 'group'` nav item by id.
+   *
+   * [#14553] Delegates rather than implements: `os build` asks the identical
+   * question at compile time over a composed artifact, and two copies of this
+   * walk is exactly the drift that would let the build call an authoring error
+   * fine while this fold relocates it.
+   */
   private findNavGroup(items: any[], groupId: string): any | undefined {
-    for (const item of items) {
-      if (item && item.id === groupId && item.type === 'group') return item;
-      if (item && Array.isArray(item.children)) {
-        const found = this.findNavGroup(item.children, groupId);
-        if (found) return found;
-      }
-    }
-    return undefined;
+    return resolveNavGroup(items, groupId);
+  }
+
+  // ==========================================
+  // Navigation-contribution diagnostics (#14553)
+  // ==========================================
+
+  /**
+   * Diagnostics raised by the fold, keyed `app` → `packageId|group` → entry.
+   *
+   * ⚠️ PER REGISTRY and DE-DUPLICATED, both deliberate. `applyNavContributions`
+   * runs on EVERY read of an app (that is what makes it a fold rather than a
+   * mutation), so an undeduplicated list would grow without bound and an
+   * undeduplicated `console.warn` would print once per request — which is the
+   * #12015 discipline's other failure: a diagnostic that fires on every read is
+   * as unreadable as one that never fires. Keyed on the triple the author has
+   * to act on, the line is emitted once per process per distinct mis-aim.
+   *
+   * ⛔ Not a module-level `Set` (the shape `warnStrippedLegacyApiMethods`
+   * uses): registries are constructed per kernel and per test, and a
+   * process-global memo would make the SECOND registry that hits the same
+   * mis-aim silent — including, measurably, the pin that reads this
+   * diagnostic at two log levels in a row.
+   */
+  private navGroupDiagnostics = new Map<string, Map<string, NavContributionGroupDiagnostic>>();
+
+  /**
+   * Record — and, the first time, announce — one relocated contribution.
+   *
+   * The entry is kept so a caller that is not reading the log
+   * ({@link getAppNavDiagnostics}: `os doctor`, a boot report, a test) can ask
+   * the app what happened to it.
+   */
+  private recordNavGroupMiss(
+    appName: string,
+    c: { packageId?: string; group?: string; items: any[] },
+  ): void {
+    const diagnostic = navContributionGroupDiagnostic({
+      app: appName,
+      group: String(c.group),
+      ...(c.packageId === undefined ? {} : { packageId: c.packageId }),
+      items: c.items,
+    });
+    const perApp = this.navGroupDiagnostics.get(appName) ?? new Map<string, NavContributionGroupDiagnostic>();
+    const key = `${c.packageId ?? ''}|${c.group}`;
+    if (perApp.has(key)) return;
+    perApp.set(key, diagnostic);
+    this.navGroupDiagnostics.set(appName, perApp);
+    this.warn(formatNavContributionGroupDiagnostic(diagnostic));
+  }
+
+  /**
+   * Navigation-contribution diagnostics raised for `appName` so far, in the
+   * order they were first raised (empty when the app's contributions all
+   * resolved, or when nothing has read the app yet).
+   *
+   * ⚠️ Populated BY the read-time fold, so it answers for the reads that have
+   * happened — call `getApp(appName)` first if you need the app's own verdict
+   * rather than the process's history.
+   */
+  getAppNavDiagnostics(appName: string): NavContributionGroupDiagnostic[] {
+    return [...(this.navGroupDiagnostics.get(appName)?.values() ?? [])];
   }
 
   // ==========================================

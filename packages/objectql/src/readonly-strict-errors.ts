@@ -167,9 +167,12 @@ export class ReadonlyFieldRejectedError extends Error {
      * Which verb refused (#5503). Defaults to `'update'` so the UPDATE message
      * — and every caller written against it — is byte-identical to #5126's.
      * The remedies genuinely differ per operation, so they are not shared: an
-     * INSERT refusal can only ever be about a runtime-owned value, whose exempt
-     * writers are `isSystem` and the `preserveAudit` historical import, while
-     * `readonlyWhen` cannot lock anything on a create at all.
+     * INSERT refusal is about a runtime-owned value (a caller-supplied record
+     * number), whose exempt writers are `isSystem` and the `preserveAudit`
+     * historical import — or, since the 2026-09-03 ruling (#14147), about a
+     * static `readonly` value from a non-system caller, whose only exempt
+     * writer is `isSystem` (`preserveAudit` is UPDATE-only for that strip) —
+     * while `readonlyWhen` cannot lock anything on a create at all.
      */
     public readonly operation: 'insert' | 'update' = 'update',
   ) {

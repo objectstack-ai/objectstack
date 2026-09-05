@@ -27,6 +27,18 @@ export default defineConfig({
     // Mechanism + measured costs: examples/app-showcase/vitest.config.ts.
     // Enforced repo-wide by scripts/check-console-intercept-disarm.mjs.
     disableConsoleIntercept: true,
+    // #13517 / #15425: quiet the SchemaRegistry's per-item registration
+    // chatter — the engine's OWN `OS_REGISTRY_LOG` seam
+    // (`SchemaRegistryOptions.logLevel` / `REGISTRY_LOG_LEVELS`, objectql's
+    // registry.ts), not a change to its shipped 'info' default and not a
+    // library that sniffs `process.env.VITEST`. This suite constructs bare
+    // registries in `connector-reload-reingest.test.ts` and
+    // `flow-name-shadowing.test.ts` and registers items into them per case.
+    // ⚠️ `flow-name-shadowing.test.ts` asserts on shadowing warnings, which
+    // ride a bare `console.warn` this level never gates — measured green with
+    // the declaration in place. Enforced by
+    // scripts/check-registry-log-declared.mjs.
+    env: { OS_REGISTRY_LOG: 'warn' },
   },
   resolve: {
     alias: [

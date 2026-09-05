@@ -26,7 +26,7 @@ npm create objectstack@latest my-app
 cd my-app
 ```
 
-This scaffolds a working project with `objectstack.config.ts`, a sample object, and all dependencies installed — plus the AI skills bundle and an `AGENTS.md` for coding agents. (`os init` is the CLI's own scaffolder for plugin skeletons and bare configs — see [below](#os-init).)
+This scaffolds a working project with `objectstack.config.ts`, a sample object, and all dependencies installed — plus the AI skills bundle and an `AGENTS.md` for coding agents. (`os init` is the CLI's own scaffolder for metadata-plugin skeletons and bare configs — see [below](#os-init).)
 
 ### Add more metadata
 
@@ -83,11 +83,35 @@ Scaffolds a new ObjectStack project with configuration, TypeScript setup, and in
 > **Which scaffolder?** For a new app, prefer **`npm create objectstack@latest`** — it
 > also derives your namespace, pins the framework packages to the current release, and
 > installs the AI skills bundle + `AGENTS.md`. Reach for `os init` when you want a
-> **plugin** skeleton or a **bare config** in an existing directory.
+> **bare config** in an existing directory — or a **metadata plugin**, which is only one
+> of the two different artifacts the word `plugin` names in this CLI.
+
+**`plugin` names two artifacts. Route by the artifact you want, not by the word.**
+
+| You want | Command | What it emits | Built by | Publishable? | Read next |
+|:---------|:--------|:--------------|:---------|:-------------|:----------|
+| A **metadata plugin** — declarative objects another stack loads, no kernel code | `os init <name> -t plugin` | `objectstack.config.ts` whose manifest declares `type: 'plugin'`, plus `src/objects/*.object.ts` | `objectstack compile` (its `build` script) | **No** — the emitted `package.json` is `private: true` | [`os init`](#os-init) below, and [Object Metadata](/docs/data-modeling/objects) for the objects it holds |
+| A **kernel code plugin** — TypeScript implementing the kernel `Plugin` contract | `os create plugin <name>` | `src/index.ts` exporting a `Plugin` with `init` / `destroy` | `tsc` (its `build` script) | **Yes** — a publishable `@objectstack/plugin-<name>` package | [`os create`](#os-create) below, then [Plugin Anatomy](/docs/plugins/anatomy) and [Plugin Development](/docs/plugins/development) |
+
+Every page under [Plugins & Packages](/docs/plugins) teaches the **kernel code** plugin, so
+`os create plugin` is the scaffolder those pages mean — `os init -t plugin` will not give
+you a `Plugin` to implement, and `os create plugin` will not give you declarative objects
+to compile.
+
+<Callout type="info">
+**Why the two scaffolders are deliberately separate.** Merging the `os init` and
+`os create` command families was measured and ruled against in
+[#15531](https://github.com/objectstack-ai/objectstack/issues/15531): the two commands
+emit two different artifacts, so collapsing a metadata plugin and a kernel code plugin
+under one command word would make this collision **structural** instead of merely
+documented — teaching the wrong artifact to everyone, human or agent, who generates a
+plugin from the CLI. The collision, and the misdirection this table replaces, are recorded
+in [#15817](https://github.com/objectstack-ai/objectstack/issues/15817).
+</Callout>
 
 ```bash
 os init my-app                    # Create with default "app" template
-os init my-plugin -t plugin       # Create a plugin project
+os init my-plugin -t plugin       # Create a metadata plugin project
 os init blank -t empty            # Minimal config only
 os init my-app --no-install       # Skip dependency installation
 ```
@@ -102,7 +126,7 @@ os init my-app --no-install       # Skip dependency installation
 | Template | What it creates |
 |----------|-----------------|
 | `app` | Full application with objects, barrel imports |
-| `plugin` | Reusable plugin package with objects |
+| `plugin` | **Metadata** plugin: declarative objects, built by `objectstack compile`, `private` — *not* the kernel code plugin `os create plugin` emits |
 | `empty` | Minimal project with just `objectstack.config.ts` |
 
 #### `os dev`
@@ -444,7 +468,7 @@ os compile --json                    # JSON output for CI pipelines
 - `--json` — Output compile result as JSON (for CI)
 
 **Output example:**
-```
+```text transcript=os-build
 ◆ Compile
 ────────────────────────────────────────
   → Loading configuration...
@@ -453,7 +477,7 @@ os compile --json                    # JSON output for CI pipelines
   → Normalizing stack definition...
   → Lowering inline handlers...
   → Validating protocol compliance...
-  → Running author-time rules (41)...
+  → Running author-time rules (42)...
   → Checking capability providers (#3366)...
   → Collecting package docs (ADR-0046)...
   → Writing artifact...
@@ -680,9 +704,9 @@ occupancy on its own.
 
 | Category | Examples | Applied by |
 |----------|----------|------------|
-| `safe` | relax `NOT NULL` → nullable, widen a `varchar`, create a declared index, replace a legacy installation-wide unique with its per-organization composite | `os migrate apply` (and dev auto-reconcile) |
+| `safe` | relax `NOT NULL` → nullable, widen a `varchar`, create a declared index (a `UNIQUE` one only when its duplicate pre-flight comes back clean), replace a legacy installation-wide unique with its per-organization composite | `os migrate apply` (and dev auto-reconcile) |
 | `needs_confirm` | non-narrowing type change, rebuild a non-unique index whose columns changed | `os migrate apply` — except `manual_widen_varchar_to_text`, which nothing applies |
-| `destructive` | drop an orphaned column or index, tighten `NOT NULL`, narrow a type, rebuild an index as `UNIQUE` | `os migrate apply --allow-destructive` |
+| `destructive` | drop an orphaned column or index, tighten `NOT NULL`, narrow a type, rebuild an index as `UNIQUE`, create a `UNIQUE` index existing rows already violate | `os migrate apply --allow-destructive` |
 
 #### Index drift
 
@@ -690,7 +714,7 @@ occupancy on its own.
 
 | Op | What it means |
 |----|---------------|
-| `create_index` | Metadata declares an index the database does not have |
+| `create_index` | Metadata declares an index the database does not have. A `UNIQUE` one runs the same duplicate pre-flight probe `recreate_index` does: rows that already violate it **block** the op with a report naming the conflicting key groups and their row counts, instead of failing a boot on the database's own error, and the declared constraint stays unenforced until they are resolved |
 | `replace_unique_index` | A field's `unique` used to be enforced installation-wide, but metadata now scopes it per organization — the legacy single-column index is swapped for the NULL-safe `(COALESCE(organization_id, '__global__'), field)` composite. A pure relaxation: it creates before it drops, and cannot fail |
 | `recreate_index` | An index exists under the declared name but with different columns/uniqueness. The additive sync skips it by name, so it must be dropped and rebuilt. This is also how a per-organization unique becomes NULL-safe: a **tightening**, so it runs a duplicate pre-flight probe first — rows the old NULL-distinct index wrongly admitted **block** the op with a report instead of failing a boot, and the old index stays in place until they are resolved |
 | `drop_index` | An index carrying ObjectStack's generated naming (`uniq_…` / `idx_…`) that metadata no longer declares |
@@ -912,6 +936,8 @@ os migrate summary-nulls                    # Dry run: full report, writes nothi
 os migrate summary-nulls --apply            # Recompute and write (prompts)
 os migrate summary-nulls --apply --yes --json   # CI / scripts
 os migrate summary-nulls --object project       # Restrict to one object (repeatable)
+os migrate summary-nulls --apply --recompute-undefined-on-empty customer.last_follow_up_at
+                                                # Also fill a min/max/avg column you know was never computed
 ```
 
 **Each affected row is recomputed, not set to 0.** A pre-upgrade parent that
@@ -920,9 +946,25 @@ them — writing 0 there would replace a missing value with a wrong one, and the
 next child write would change it back. The report separates the two: `N NULL
 row(s), M with real child data`.
 
-`min` / `max` / `avg` are **never touched**. They are undefined on an empty set,
-so a `null` there is the correct reading of "no child rows"; the report lists
-them as deliberately skipped.
+`min` / `max` / `avg` are **never touched by default**. They are undefined on an
+empty set, so a `null` there is the correct reading of "no child rows"; the
+report lists them as deliberately skipped.
+
+The one case that reading gets wrong is a summary field **declared after its
+parent rows already existed**: nothing has ever computed it — the insert-time
+seed is create-time, the recompute runs only on a child write — so every
+pre-existing parent reads `NULL` whether or not it has children, and a flow
+built on the column matches nothing. The migration cannot tell that `NULL`
+from a legitimate one; the operator (or the publish path) who just declared
+the column can. Name it with `--recompute-undefined-on-empty object.field`
+(repeatable) and it is walked like a `count`: every `NULL` parent is recomputed
+through the same aggregate the engine writes, a parent with no child rows keeps
+`NULL` (that is the aggregate's own value, and it is neither counted nor
+written), and the report lists the column under "recomputed on request". A
+name that is not a roll-up this run walks — a typo, a plain field, or an object
+`--object` left out — is refused before any row is read. Naming a `count` /
+`sum` is accepted and changes nothing, so a caller can pass every column it
+just declared.
 
 Idempotent — every write turns a `NULL` into a number, so a second run finds
 nothing and writes nothing. Re-running until the report says zero *is* the
@@ -1190,7 +1232,7 @@ only.
 | Command | Alias | Description |
 |---------|-------|-------------|
 | `os generate <type> <name>` | `os g` | Generate metadata files |
-| `os create <type> [name]` | | Create a new package from template |
+| `os create <type> [name]` | | Scaffold a standalone plugin or example project |
 
 #### `os generate` (alias: `os g`)
 
@@ -1263,12 +1305,32 @@ third-party extension primitive, authored as `src/skills/<name>.skill.ts` with
 
 #### `os create`
 
-Creates new packages from built-in templates (for monorepo-level scaffolding):
+Scaffolds a **standalone** project — a **kernel code** plugin (the `Plugin` contract,
+built by `tsc`, publishable; *not* the metadata plugin `os init -t plugin` emits — see
+[Which scaffolder?](#os-init)), or an example application — into the current directory:
 
 ```bash
-os create plugin analytics    # Create packages/plugins/plugin-analytics
-os create example my-app      # Create examples/my-app
+os create plugin analytics    # Create ./plugin-analytics
+os create example my-app      # Create ./my-app
+
+cd plugin-analytics
+pnpm install
+pnpm build
 ```
+
+The emitted `package.json` declares its `@objectstack/*` dependencies as
+published semver ranges pinned to the version of the CLI that generated it, and
+the emitted `tsconfig.json` is self-contained, so the project installs and
+builds anywhere — a workspace around it is neither needed nor assumed.
+
+**Options:**
+- `-d, --dir <directory>` — Write the project here instead of `./<name>`
+- `--in-repo` — Scaffold **inside an ObjectStack monorepo checkout** instead
+  (`packages/plugins/<name>` for a plugin, `examples/<name>` for an example),
+  with `workspace:*` dependencies and a `tsconfig.json` that extends the
+  repository root config. For ObjectStack platform work only: the project it
+  writes installs nowhere else, and the command refuses the flag when the
+  current directory is not a pnpm workspace root.
 
 ### Quality
 

@@ -72,6 +72,12 @@ import { fileURLToPath } from 'node:url';
 
 import { PENDING_MARKER, entryForPath, ownerDir, ownerOf, ownerRunCommand } from './regen-artifacts.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
+import {
+  EXIT_PREREQUISITE_NOT_MET,
+  INSTALL_FIX,
+  classifyImportFailure,
+  reportPrerequisiteNotMet,
+} from './import-prerequisite.mjs';
 import { workspacePackages } from './workspace-enumerator.mjs';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -286,17 +292,216 @@ export function decide({ blocked, merging, deferral, allowDefer = true }) {
   return 'refuse-stale';
 }
 
+/**
+ * A gate that could not RUN is not a verdict about the artifact (#15722).
+ *
+ * This check does not regenerate and does not compare bytes: it SPAWNS the
+ * artifact's `check:` gate and reads its exit status. So every reason that gate
+ * has for exiting non-zero arrives here wearing the same clothes, and until this
+ * function existed they were all printed as one word — `stale` — with three
+ * lines of whatever the child said underneath. On a checkout with no
+ * `node_modules` that produced a verdict about a file nothing read: measured on
+ * #15722, `content/docs/permissions/system-context.mdx` byte-identical to main's
+ * copy, reported `stale` over a raw `ERR_MODULE_NOT_FOUND` stack.
+ *
+ * That is the class #11557 closed for the derived gates, at this site. The frame,
+ * the wording and the exit code are #11824's — `reportPrerequisiteNotMet` and
+ * `EXIT_PREREQUISITE_NOT_MET`, imported, never restated — because a second
+ * spelling of "nothing was measured" is the defect one level up.
+ *
+ * ## Three shapes, all live, measured on an uninstalled tree
+ *
+ * Fourteen registered paths / thirteen gates, `pnpm install` never run:
+ *
+ *   - **10** — `sh: 1: tsx: not found`. Six of the eight distinct `check:` scripts
+ *     run through `tsx`, which lives in `node_modules/.bin`. The RUNNER is the
+ *     missing piece; the gate's own module graph never got as far as being linked.
+ *   - **1** — a raw `ERR_MODULE_NOT_FOUND` stack (`check:system-context-census`,
+ *     via `scripts/isystem-census.mjs`'s bare `import ts from 'typescript'`). node
+ *     links the whole graph before any body runs, so a gate cannot preflight its
+ *     own missing dependency — #11824's thunks are what make that reportable, and
+ *     this gate has not adopted them.
+ *   - **1** — the child ALREADY refused in #11557's landed frame and exited
+ *     `EXIT_PREREQUISITE_NOT_MET` (`check:platform-object-tenancy-census`, whose
+ *     `ts-parse` dependency is thunked). A gate that says `PREREQUISITE NOT MET`
+ *     in so many words was still being relabelled `stale` by its caller — the
+ *     landed fix undone one process boundary out.
+ *
+ * The remaining 2 are this file's OWN prerequisite refusals (`readsDist`,
+ * `readsSchemaTree`), which never spawn anything and are deliberately untouched
+ * here: they already print what is unmet and what clears it.
+ *
+ * ⚠️ The dangerous direction is unchanged. Nothing here makes a push cheaper: a
+ * refusal is still a refusal (`.githooks/pre-push` maps every non-zero to 1), the
+ * marker is NOT cleared, and the debt is still owed. What changes is the reading
+ * a human gets — an unmet prerequisite with a command that clears it, instead of
+ * a false claim about a generated file.
+ *
+ * @param {string} output the child's combined stdout+stderr
+ * @param {number} exitCode the child's exit status
+ * @param {string} fromDir where to resolve from when the child named no importer
+ * @returns {null | { headline: string, detail: string[], fix: string, kind: string }}
+ *   `null` when the gate RAN and reached a verdict of its own — the caller must
+ *   keep reporting that as `stale`, which is what it is.
+ */
+export function gateCouldNotRun(output, exitCode, fromDir) {
+  const text = String(output ?? '');
+
+  // -- Shape 3: the child already answered in this exact frame --
+  // Propagated rather than re-derived. The child knows which package it wanted
+  // and why; re-classifying from here would be a second opinion about a fact
+  // already reported, and the two could disagree.
+  const refused = text.match(/^\s*(\S+): PREREQUISITE NOT MET(?: — (.+))?$/m);
+  if (exitCode === EXIT_PREREQUISITE_NOT_MET || refused) {
+    return {
+      kind: 'gate-refused',
+      headline: refused?.[2]
+        ? `the gate refused to measure — ${refused[2]}`
+        : `the gate refused to measure, reporting an unmet prerequisite of its own`,
+      detail: [
+        `\`${refused?.[1] ?? 'the gate'}\` exited ${exitCode} — ${EXIT_PREREQUISITE_NOT_MET} is`,
+        `\`EXIT_PREREQUISITE_NOT_MET\`, the code #11557 gave "nothing was measured". It said so`,
+        `in its own words:`,
+        ``,
+        ...text.split('\n').filter(Boolean).slice(0, 6).map((l) => `  ${l.trim()}`),
+      ],
+      fix: INSTALL_FIX,
+    };
+  }
+
+  // -- Shape 1: the runner is not on PATH --
+  // Anchored on the shell's own line rather than on the words "not found", which
+  // a gate's prose may legitimately contain. `sh` (dash) writes `sh: 1: tsx: not
+  // found`; bash writes `bash: line 1: tsx: command not found`.
+  const runner = text.match(/^(?:sh|bash|dash|zsh): (?:line )?\d+: ([^:\n]+): (?:command )?not found$/m);
+  if (runner || exitCode === 127) {
+    const cmd = runner?.[1] ?? '';
+    return {
+      kind: 'runner-missing',
+      headline: cmd
+        ? `the gate's runner \`${cmd}\` is not installed`
+        : 'the gate\'s runner is not installed',
+      detail: [
+        cmd
+          ? `The gate's script starts with \`${cmd}\`, and the shell could not find it. Runners`
+          : 'The shell could not find the command the gate\'s script starts with. Runners',
+        `like \`tsx\` live in \`node_modules/.bin\`, so a checkout with no \`node_modules\` has none`,
+        `of them and the gate's own code was never reached.`,
+      ],
+      fix: INSTALL_FIX,
+    };
+  }
+
+  // -- Shape 2: node could not link the gate's module graph --
+  // Reconstructed as an error for `classifyImportFailure`, so the FOUR-way
+  // diagnosis #11824 measured (uninstalled / unbuilt workspace package / broken
+  // install / a dependency of a whole package) is the one reported here too,
+  // rather than a fourth-hand "run pnpm install" that is wrong for two of them.
+  const link = text.match(/Error \[(ERR_MODULE_NOT_FOUND|ERR_PACKAGE_PATH_NOT_EXPORTED)\]: ([^\n]+)/);
+  if (link) {
+    const message = link[2];
+    const pkg = message.match(/Cannot find package '([^']+)'/)?.[1] ?? '';
+    const importer = message.match(/imported from (\S+)/)?.[1] ?? '';
+    const verdict = classifyImportFailure(
+      pkg || message,
+      { code: link[1], message },
+      importer ? dirname(importer) : fromDir,
+    );
+    // `broken` with no headline is `classifyImportFailure`'s "not my story" — it
+    // means the package RESOLVED and then threw, which is a real gate failure.
+    if (verdict.kind === 'broken' && !verdict.headline) return null;
+    return {
+      kind: verdict.kind,
+      headline: verdict.headline,
+      detail: [
+        `The gate never ran a check: node could not LINK its module graph, which it does`,
+        `for the whole graph before any module body executes. node reported:`,
+        ``,
+        `  ${message}`,
+        ``,
+        ...verdict.detail,
+      ],
+      fix: verdict.fix,
+    };
+  }
+
+  return null;
+}
+
 function runCheck(script, cwd) {
   try {
     execSync(`pnpm -s ${script}`, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
-    return { ok: true, output: '' };
+    return { ok: true, output: '', code: 0 };
   } catch (err) {
-    return { ok: false, output: `${err?.stdout?.toString() ?? ''}${err?.stderr?.toString() ?? ''}`.trim() };
+    return {
+      ok: false,
+      code: typeof err?.status === 'number' ? err.status : 1,
+      output: `${err?.stdout?.toString() ?? ''}${err?.stderr?.toString() ?? ''}`.trim(),
+    };
   }
+}
+
+/**
+ * One refusal for a run in which one or more gates could not run.
+ *
+ * The FRAME is `reportPrerequisiteNotMet`'s — what is unmet, why, the command
+ * that clears it, and the load-bearing half, that nothing was measured. Only the
+ * `detail` is written here, because that is the half #11824's header reserves for
+ * the gate: the reason this site could not measure is that it SPAWNS its gates,
+ * which is a fact about this file and about no other importer of that frame.
+ *
+ * When several gates could not run the first one carries the diagnosis and the
+ * rest are named. They share a cause in every measured case (no `node_modules`),
+ * and printing four near-identical `pnpm install` paragraphs buries the one line
+ * a reader needs.
+ */
+function prerequisiteVerdict(unmeasured) {
+  const [{ prereq: first }] = unmeasured;
+  const rest = unmeasured.slice(1).map((u) => `\`${u.check}\``);
+  return {
+    kind: first.kind,
+    pkg: '',
+    headline: unmeasured.length === 1
+      ? `\`${unmeasured[0].check}\` could not run: ${first.headline}`
+      : `${unmeasured.length} of this run's gates could not run: ${first.headline}`,
+    detail: [
+      'This check neither regenerates nor compares bytes: for each deferred artifact it',
+      'SPAWNS the `check:` gate that proves the artifact current, and reads the verdict.',
+      `${unmeasured.length === 1 ? 'That gate' : 'Those gates'} never reached one.`,
+      '',
+      ...first.detail,
+      ...(rest.length ? ['', `Also unmeasured, same run: ${rest.join(', ')}.`] : []),
+      '',
+      '⚠️ The debt is NOT cleared and this is still a refusal: the marker keeps every',
+      'deferred path, and the next commit or push meets it again. What is withheld is',
+      'the VERDICT — that these artifacts are stale — not the obligation to check them.',
+    ],
+    fix: first.fix,
+  };
 }
 
 function main({ prePush = false } = {}) {
   const gitDir = gitDirPath();
+  // -- What "pending" is, and what it is NOT (#15722) --
+  //
+  // The pending set is READ FROM THE MARKER. It is not derived from a diff, and
+  // in particular it is not "every `merge=os-regen` path that changed between the
+  // previous and the new HEAD". The only writer of a path line is `markPending`
+  // in `scripts/git-merge-regen.mjs`, which git calls only when it actually runs
+  // the merge driver on a path — i.e. only when a text merge was attempted and
+  // declined.
+  //
+  // So a FAST-FORWARD records nothing: git moves the ref and checks out the
+  // upstream tree without invoking a single merge driver. #15722 reported the
+  // opposite as a second defect and it was measured and WITHDRAWN — from a branch
+  // at `e13ede817^`, `git pull --ff-only origin main` across a commit that changed
+  // `content/docs/permissions/system-context.mdx` leaves no marker and this check
+  // exits 0 with no output, deps installed or not. What the reporting seat hit was
+  // a marker from an EARLIER real merge that half 1 had made impossible to clear:
+  // the gate could never pass without `node_modules`, so the marker was never
+  // removed and every later push in that worktree met it, fast-forward or not.
+  // The fixture below pins the fast-forward reading so a "fix" cannot re-derive
+  // the predicate from a diff.
   const marker = join(gitDir, PENDING_MARKER);
   const { paths: pending, deferral } = readMarker(marker);
   if (!pending.length) {
@@ -327,6 +532,8 @@ function main({ prePush = false } = {}) {
   }
 
   let blocked = 0;
+  /** Artifacts whose gate could not RUN — blocked, but with no verdict behind it. */
+  const unmeasured = [];
   for (const [check, { entry, paths }] of byCheck) {
     if (entry.readsDist && distIsStale()) {
       blocked++;
@@ -352,13 +559,26 @@ function main({ prePush = false } = {}) {
       );
       continue;
     }
-    const { ok, output } = runCheck(check, gateCwd(entry, workspace));
+    const cwd = gateCwd(entry, workspace);
+    const { ok, output, code } = runCheck(check, cwd);
     if (ok) {
       console.error(`  ✓ ${paths.join(', ')} — current`);
       continue;
     }
     blocked++;
     const detail = output.split('\n').filter(Boolean).slice(0, 3).map((l) => `        ${l}`).join('\n');
+    // A gate that could not RUN answered nothing (#15722). It still counts as
+    // BLOCKED — the artifact is not proven current, so the marker keeps it and the
+    // refusal stands — but the line says what happened rather than naming the file.
+    const prereq = gateCouldNotRun(output, code, cwd);
+    if (prereq) {
+      unmeasured.push({ check, paths, prereq });
+      console.error(
+        `  ⚠ ${paths.join(', ')} — NOT MEASURED (\`${check}\` could not run)\n`
+          + `${detail ? `${detail}\n` : ''}      Fix:  ${prereq.fix}`,
+      );
+      continue;
+    }
     console.error(`  ✗ ${paths.join(', ')} — stale\n${detail ? `${detail}\n` : ''}`
       + `      ${ownerRunCommand(ownerOf(entry), entry.gen)}`);
   }
@@ -383,6 +603,35 @@ function main({ prePush = false } = {}) {
         + '  commit is refused, a second merge cannot defer on top, and `git push` is refused too.\n',
     );
     return 0;
+  }
+
+  // -- An unmet prerequisite is not a verdict about the artifact (#15722) --
+  //
+  // Placed BELOW `defer` on purpose. Deferring is not a claim that anything is
+  // stale — it is "this merge owes a check, collect it at the next commit" — and
+  // a merge commit that cannot run its gates owes exactly that. Refusing here
+  // instead would put back the #8047 defect this file's header is about: a merge
+  // commit refused by one in-repo authority for doing what another one
+  // prescribes, whose learned workaround was skipping the whole hook.
+  //
+  // Every REMAINING action is a verdict, and a verdict is what this run does not
+  // have. So the refusal is reported in #11557's landed frame and exits
+  // `EXIT_PREREQUISITE_NOT_MET` — distinct from a finding's 1, and non-zero, so
+  // `.githooks/pre-push` still refuses the push and the marker still keeps its
+  // debt. Nothing is cleared here: `reportPrerequisiteNotMet` exits before the
+  // `rmSync` at the bottom of this function can be reached.
+  if (unmeasured.length) {
+    const subjects = unmeasured.flatMap((u) => u.paths);
+    reportPrerequisiteNotMet(
+      import.meta.url,
+      prerequisiteVerdict(unmeasured),
+      // Named while there are few enough to read; counted past that. The frame
+      // inlines this into a sentence it does not wrap, and a fourteen-path list
+      // there buries the clause that carries the whole reading.
+      subjects.length <= 3
+        ? `${subjects.join(', ')} ${subjects.length === 1 ? 'is' : 'are'} stale`
+        : `the ${subjects.length} artifacts marked NOT MEASURED above are stale`,
+    );
   }
 
   if (action === 'refuse-second-deferral') {
@@ -441,6 +690,184 @@ function main({ prePush = false } = {}) {
 // import — only when this file IS the entry point.
 const invokedDirectly = isEntrypoint(import.meta.url);
 
+/* ------------------------------------------------ self-test: battery roster */
+
+// The self-test's own battery roster and floor (#13799).
+//
+// `noDist && noTree && armed && table && fixture` was this self-test's ONLY
+// success condition, so "every sub-check held" and "the sub-checks never ran"
+// printed the same line. A callee whose body stops doing its work still returns
+// whatever its last surviving statement produces, and the green verdict below
+// then claims this file's whole deferred-merge wiring is sound. Closed the way
+// the Tier C pilot closed it (PR #15326, `git-merge-regen.mjs`): what is pinned
+// is the registered NAMES, not a number.
+//
+// -- Why the CALLEE NAME is the battery --
+//
+// This file has no `selfTest()` entry function: the `--self-test` dispatch at
+// the bottom invokes THREE named callees, each printing its own section and
+// returning a boolean. So the roster's unit is the CALLEE, and its label is the
+// one the SOURCE ALREADY CARRIES -- the function's own name. Nothing is invented
+// and nothing is judged per comment, and a set difference names WHICH sub-check
+// stopped rather than saying only that something did.
+// `registerCase('<calleeName>')` is the FIRST statement of every callee, above
+// any early return, so what the ledger records is that the callee RAN -- which
+// is why each floor is 1 rather than the number of assertions the callee
+// happens to contain.
+//
+// STOP -- the three callees' own inner sinks are NOT batteries here, and they
+// are worth naming because all three are different shapes: `fixtureSelfTest`'s
+// `check()` helper (14 calls), `decisionTableSelfTest`'s literal 8-row table
+// with its driving loop, and `prePushIsArmedSelfTest`'s bare boolean. Recipe A
+// (PR #15271, `check-sdui-manifest`) does make a table row a battery -- for a
+// file whose SELF-TEST *is* the table: one literal table, one driving loop over
+// it, one sink. Here the table is a local of ONE callee among three, and that
+// callee already reduces its rows to a single returned verdict of its own.
+// Flooring those rows would floor one callee's internals while the other two
+// stayed at callee granularity -- a roster whose unit changes per entry. The
+// rule: the battery is the unit the DISPATCH names.
+//
+// STOP -- the TWO assertions written INLINE in the dispatch block (`noDist`,
+// `noTree`) are deliberately OUTSIDE this roster, and that is a DECLARED GAP,
+// not an oversight (ruled Q1 = A on #13799; the pilot and batches 7a/7b set the
+// precedent). They are not callees: the dispatch names no unit for them, so
+// there is no name the source already carries. Inventing a label would put a
+// hand-written string into a roster whose entire property is that every entry
+// is read off a declaration, and hoisting them into named callees is a reshape
+// with its own card, never a rider here. What the gap costs, stated plainly:
+// those two lines can stop running and this floor will not say so.
+//
+// STOP -- a pinned TOTAL is not the repair: one callee dropping all its work
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality -- a callee that grows a second
+// registration must not red. 1 is the honest floor for a callee: the dispatch
+// reaches it exactly once per run.
+const SELF_TEST_BATTERIES = Object.freeze({
+  prePushIsArmedSelfTest: 1,
+  decisionTableSelfTest: 1,
+  fixtureSelfTest: 1,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too. This pin is also half of
+// the duplicate refusal: two dispatch entries naming ONE callee collapse to one
+// key in the literal above, so the roster falls below this number; the
+// roster/dispatch cross-check in `batteryFloorFailures()` is the other half, and
+// it names WHICH callee was listed twice.
+const SELF_TEST_BATTERY_FLOOR = 3;
+
+// The key a registration is filed under when a callee registers no name at all.
+// It is not a declared battery, so it reds by the same set difference rather
+// than silently inflating whichever battery registered last.
+const UNATTRIBUTED_BATTERY = '(no callee named)';
+
+// The battery ledger, read by `batteryFloorFailures()` from the dispatch block
+// at the very bottom of this file. It is MODULE-level rather than local to a
+// self-test body because this file HAS no self-test body: the registrations
+// happen inside three separate callees and the floor is read at the dispatch's
+// verdict site, so the ledger has to outlive every one of those frames.
+//
+// Named for the roster's role, deliberately WITHOUT a self-test spelling:
+// `check:pm-dispatch-gates` anchors on a top-level declaration whose NAME spells
+// self-test, and every such name owes a row in its COMPOUND_ANCHOR_LEDGER. The
+// three callee names above already spell self-test and already carry their rows;
+// an object KEY is not a column-0 declaration, so the roster owes no new row.
+// `battery` is also the accurate word.
+const batterySeen = new Map();
+
+/**
+ * Record that a self-test callee RAN.
+ *
+ * Called as the FIRST statement of each of the three callees the `--self-test`
+ * dispatch invokes -- above any early return, so a callee that bails out early
+ * still reports that it ran, and the floor is never met by a frame that returned
+ * before doing anything.
+ */
+function registerCase(name) {
+  const key = name ?? UNATTRIBUTED_BATTERY;
+  batterySeen.set(key, (batterySeen.get(key) ?? 0) + 1);
+}
+
+/**
+ * The floor: every declared callee RAN (#13799).
+ *
+ * Evaluated at the dispatch's verdict site -- after all three callees have had
+ * their chance and immediately before the success line -- and reached only from
+ * the `--self-test` branch, so a production `pre-commit` / `pre-push` run never
+ * reads the ledger at all.
+ *
+ * @param {string[]} invoked the callee names the dispatch block actually invokes
+ * @returns {string[]} floor breaches; empty means the floor held
+ */
+function batteryFloorFailures(invoked) {
+  const declared = Object.keys(SELF_TEST_BATTERIES);
+  const problems = [];
+  if (declared.length < SELF_TEST_BATTERY_FLOOR) {
+    problems.push(
+      `SELF_TEST_BATTERIES declares ${declared.length} batteries, below the pinned `
+        + `${SELF_TEST_BATTERY_FLOOR} -- a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+
+  // -- Roster vs dispatch, both directions --
+  // `invoked` is read off the dispatch's own list of callees, so this pair says
+  // WHICH name lost its counterpart. A declared name nothing invokes would also
+  // read DID NOT RUN below; naming it here reports the cause (nothing calls it)
+  // rather than only the symptom (nothing registered).
+  const duplicated = [...new Set(invoked.filter((name, i) => invoked.indexOf(name) !== i))];
+  if (duplicated.length) {
+    problems.push(
+      `the dispatch invokes ${duplicated.map((n) => JSON.stringify(n)).join(', ')} more than once -- `
+        + 'two entries naming one callee are ONE battery, so the second can stop running while the '
+        + 'first keeps the floor met.',
+    );
+  }
+  for (const name of invoked) {
+    if (declared.includes(name)) continue;
+    problems.push(
+      `the dispatch invokes "${name}", which is not declared in SELF_TEST_BATTERIES -- a callee `
+        + 'nothing declares is a sub-check nothing floors.',
+    );
+  }
+  for (const name of declared) {
+    if (invoked.includes(name)) continue;
+    problems.push(
+      `SELF_TEST_BATTERIES declares "${name}", which the dispatch block does not invoke -- a floor `
+        + 'over a battery nothing can reach.',
+    );
+  }
+
+  // -- Roster vs ledger, both directions --
+  for (const [name, count] of batterySeen) {
+    if (declared.includes(name)) continue;
+    problems.push(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in `
+        + 'SELF_TEST_BATTERIES -- a case attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declared) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    problems.push(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN -- 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. `
+          + 'The verdict below would have claimed that sub-check holds.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of `
+          + `${SELF_TEST_BATTERIES[name]} -- cases that used to run no longer do.`,
+    );
+  }
+
+  if (problems.length) {
+    problems.push(
+      'A battery at or below its floor means a sub-check STOPPED RUNNING -- the battery is the bug, '
+        + 'not the number. Find what stopped registering (a deleted invocation, a renamed callee, a '
+        + '`registerCase()` moved below an early return) and restore it.',
+    );
+  }
+  return problems;
+}
+
 /**
  * Replay the deferred-merge sequence against a THROWAWAY git repo (#8047).
  *
@@ -456,6 +883,7 @@ const invokedDirectly = isEntrypoint(import.meta.url);
  * a full spec build.
  */
 function fixtureSelfTest() {
+  registerCase('fixtureSelfTest');
   const dir = mkdtempSync(join(tmpdir(), 'os-regen-defer-'));
   const git = (args, opts = {}) =>
     execFileSync('git', args, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], ...opts });
@@ -473,10 +901,37 @@ function fixtureSelfTest() {
    * index — see the `info/exclude` note below, and #9258 for what it cost when it
    * was not.
    */
+  /**
+   * What the stub gate DOES, per state.
+   *
+   * The two prerequisite states are REAL failures, not printed imitations of one.
+   * `unloadable` makes node fail to resolve a package that does not exist, which
+   * is the same `ERR_MODULE_NOT_FOUND` a gate takes in a checkout with no
+   * `node_modules` — node links the whole graph before any body runs, so this
+   * cannot be faked by a script that prints a stack and exits. `runner-missing`
+   * hands the shell a command that is not on PATH, the shape 10 of the 13
+   * registered gates take without `node_modules` (`sh: 1: tsx: not found`). A
+   * fixture that echoed the text instead would pass against an implementation
+   * that matched on the text and nothing else — which is the whole risk here.
+   */
+  const GATE_STUBS = {
+    clean: 'exit 0',
+    // A gate that RAN and found the artifact stale. The control for every case
+    // below: this one must keep today's verdict exactly.
+    stale: 'exit 1',
+    unloadable: `node --input-type=module -e "import 'os-regen-fixture-absent-pkg';"`,
+    'runner-missing': 'os-regen-fixture-absent-runner --check',
+    // A gate that already refused in #11557's landed frame, exiting 3.
+    // ⛔ No backticks in the message: this string is a package.json script, run by
+    // the shell, and a backtick inside its double quotes is command substitution.
+    'gate-refused':
+      'node -e "console.error(\'stub-gate: PREREQUISITE NOT MET — the dependency yaml is not installed\'); process.exit(3)"',
+  };
+
   const runHook = (gate, args = []) => {
     writeFileSync(
       join(dir, 'package.json'),
-      `${JSON.stringify({ name: 'os-regen-fixture', scripts: { 'check:spec-changes': gate === 'clean' ? 'exit 0' : 'exit 1' } }, null, 2)}\n`,
+      `${JSON.stringify({ name: 'os-regen-fixture', scripts: { 'check:spec-changes': GATE_STUBS[gate] } }, null, 2)}\n`,
     );
     // `spawnSync`, not `execFileSync`: every message this script prints goes to
     // STDERR, which execFileSync returns only on the failure path — capturing the
@@ -590,6 +1045,69 @@ function fixtureSelfTest() {
     check('regeneration DISCHARGES the deferral and clears the marker', discharged.code === 0);
     check('  …saying which of the two clearing paths ran', /discharged/.test(discharged.out));
     check('  …and the marker is gone, so nothing can get stuck', !existsSync(marker));
+
+    // ── #15722, half 1: a gate that could not RUN is not a verdict ───────────
+    // The marker is rewritten with the same path and no deferral record, so the
+    // action below is `refuse-stale` — the ordinary pre-push refusal, the one the
+    // card was filed against.
+    writeFileSync(marker, `${pendingPath}\n`);
+    const unloadable = runHook('unloadable', ['--pre-push']);
+    check('a gate that cannot LOAD is PREREQUISITE NOT MET, not `stale`',
+      unloadable.code === EXIT_PREREQUISITE_NOT_MET && /PREREQUISITE NOT MET/.test(unloadable.out));
+    check('  …and never calls the artifact stale, which is the false claim',
+      !/— stale/.test(unloadable.out) && /NOT MEASURED/.test(unloadable.out));
+    check('  …carrying the load-bearing half: that nothing was measured',
+      /Nothing was measured/.test(unloadable.out));
+    check('  …naming the package node could not find, not the artifact',
+      /os-regen-fixture-absent-pkg/.test(unloadable.out));
+    check('  …and the marker still holds the debt — a refusal clears nothing',
+      existsSync(marker) && readMarker(marker).paths.includes(pendingPath));
+
+    const runnerMissing = runHook('runner-missing', ['--pre-push']);
+    check('a gate whose RUNNER is not installed refuses the same way',
+      runnerMissing.code === EXIT_PREREQUISITE_NOT_MET && !/— stale/.test(runnerMissing.out));
+    // ⛔ Not a bare name match: the raw child output is echoed under the old `stale`
+    // line too, so `/os-regen-fixture-absent-runner/` alone passes against the
+    // pre-fix code. Assert the DIAGNOSIS, which only the refusal produces.
+    check('  …naming the command the shell could not find, in the diagnosis',
+      /the gate's runner `os-regen-fixture-absent-runner` is not installed/.test(runnerMissing.out));
+
+    const gateRefused = runHook('gate-refused', ['--pre-push']);
+    check('a gate that ALREADY refused with an unmet prerequisite is propagated, not relabelled',
+      gateRefused.code === EXIT_PREREQUISITE_NOT_MET && !/— stale/.test(gateRefused.out));
+    // Same trap, same repair: the child's line is echoed either way, so what is
+    // asserted is that this file PROPAGATED it as its own headline.
+    check('  …quoting the gate\'s own words rather than a second opinion',
+      /refused to measure — the dependency yaml is not installed/.test(gateRefused.out));
+
+    // THE CONTROL. Everything above must leave this reading untouched: a gate that
+    // RAN and exited non-zero for its own reason is a finding about the artifact,
+    // and it keeps today's verdict and today's exit code.
+    const genuine = runHook('stale', ['--pre-push']);
+    check('a gate that RAN and failed is still `stale`, exit 1 — the grading is not a blanket pass',
+      genuine.code === 1 && /— stale/.test(genuine.out) && !/PREREQUISITE NOT MET/.test(genuine.out));
+
+    // ── #15722, half 2 (WITHDRAWN, pinned): a fast-forward is not a merge ────
+    // The card's second half read the refusal as a predicate over paths changed
+    // between the previous and the new HEAD. Measured, it is not: the pending set
+    // is the marker, and git runs no merge driver for a fast-forward, so nothing
+    // is recorded. This pins the reading that withdrew that half — and it fails
+    // against exactly the "fix" the card proposed, a predicate derived from a diff.
+    rmSync(marker, { force: true });
+    git(['checkout', '-qb', 'ff-behind', 'main~1']);
+    git(['checkout', '-q', 'main']);
+    mkdirSync(join(dir, 'packages/spec'), { recursive: true });
+    write(pendingPath, 'upstream moved the generated artifact\n');
+    git(['add', '-A']);
+    git(['commit', '-qm', 'main regenerates the artifact']);
+    git(['checkout', '-q', 'ff-behind']);
+    const ff = git(['merge', '--ff-only', 'main']);
+    const fastForwarded = /Fast-forward/.test(ff) && git(['rev-parse', 'HEAD']).trim() === git(['rev-parse', 'main']).trim();
+    check('a --ff-only pull across a changed merge=os-regen artifact IS a fast-forward', fastForwarded);
+    check('  …and writes no marker, so there is nothing pending', !existsSync(marker));
+    const afterFf = runHook('stale', ['--pre-push']);
+    check('  …so the push is ACCEPTED — a fast-forward is not a merge without a text merge',
+      afterFf.code === 0 && afterFf.out.trim() === '');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -606,6 +1124,7 @@ function fixtureSelfTest() {
  * undischarged deferral leaves the machine in silence.
  */
 function prePushIsArmedSelfTest() {
+  registerCase('prePushIsArmedSelfTest');
   let mode = '';
   try {
     mode = execFileSync('git', ['ls-files', '-s', '.githooks/pre-push'], {
@@ -630,6 +1149,7 @@ function prePushIsArmedSelfTest() {
 
 /** The five `decide` cases, including the ones a fixture cannot reach. */
 function decisionTableSelfTest() {
+  registerCase('decisionTableSelfTest');
   const cases = [
     [{ blocked: 0, merging: null, deferral: null }, 'clear'],
     [{ blocked: 0, merging: null, deferral: { head: 'a' } }, 'discharged'],
@@ -658,19 +1178,67 @@ if (invokedDirectly) {
   if (process.argv.includes('--self-test')) {
     // Touches no repo state: the interesting logic is the staleness rules, and
     // their dangerous direction is "says fresh when stale".
+    //
+    // STOP -- these TWO assertions are written INLINE here rather than inside a
+    // named callee, so they are outside SELF_TEST_BATTERIES and the floor below
+    // cannot see them stop running (ruled Q1 = A on #13799). The gap, and why
+    // labelling or hoisting them is not this card's business, is stated at the
+    // roster declaration above.
     const noDist = distIsStale(join(REPO_ROOT, 'scripts')) === true;
     console.log(`${noDist ? '✓' : '✗'} a directory with no dist/ reads as STALE (conservative default)`);
     const noTree = schemaTreeIsStale(join(REPO_ROOT, 'scripts')) === true;
     console.log(`${noTree ? '✓' : '✗'} a directory with no json-schema/ reads as STALE (conservative default)`);
-    console.log('\ndeferred-merge collection point:');
-    const armed = prePushIsArmedSelfTest();
-    console.log('\ndeferred-merge decision table:');
-    const table = decisionTableSelfTest();
-    console.log('\ndeferred-merge sequence, replayed on a throwaway repo:');
-    const fixture = fixtureSelfTest();
-    const ok = noDist && noTree && armed && table && fixture;
-    console.log(ok ? '\n✓ check-regen-pending self-test passed.' : '\n✗ self-test failed.');
-    process.exit(ok ? 0 : 1);
+
+    // The three callees as a literal LIST rather than three bare calls, so the
+    // names this block invokes are data the floor below can cross-check the
+    // roster against, in both directions. The names are read off the function
+    // declarations themselves (`fn.name`), so a renamed callee moves this list
+    // with it and cannot drift from the roster in silence. Each entry carries
+    // the section banner that already sat immediately above its call, so what is
+    // printed is byte-identical to the three banner + `const ... = callee()`
+    // pairs this replaces.
+    //
+    // EVALUATION ORDER AND COMPLETENESS ARE UNCHANGED, on the red path too. The
+    // original invoked all three eagerly -- one `const` per callee, executed
+    // unconditionally -- and only THEN reduced the five booleans with `&&`, so
+    // the short-circuit was always over VALUES, never over calls. `.map()` runs
+    // the same three in the same order: nothing that used to run stops, and
+    // nothing that used to be skipped now runs.
+    const callees = [
+      ['\ndeferred-merge collection point:', prePushIsArmedSelfTest],
+      ['\ndeferred-merge decision table:', decisionTableSelfTest],
+      ['\ndeferred-merge sequence, replayed on a throwaway repo:', fixtureSelfTest],
+    ];
+    const results = callees.map(([banner, run]) => {
+      console.log(banner);
+      return run();
+    });
+
+    // -- The assertion floor, at the verdict site --
+    // There is no verdict site inside a self-test body here, because there is no
+    // self-test body: this dispatch IS the verdict site, and the reduction below
+    // is the verdict. So the floor is evaluated here, after every callee has had
+    // its chance and immediately before the success line -- the only place a run
+    // in which a callee never ran can still be stopped from reporting that the
+    // self-test passed. It sits inside the `--self-test` branch, so the
+    // production path (`main()`, which `pre-commit` and `pre-push` spawn) never
+    // reads the ledger.
+    const floorBreaches = batteryFloorFailures(callees.map(([, run]) => run.name));
+    for (const breach of floorBreaches) console.error(`✗ self-test floor: ${breach}`);
+
+    // The verdict is an explicit BRANCH rather than a ternary over
+    // `process.exit`, so the failure path literally IS a `process.exit(1)`.
+    // That is what `measure-self-test-floor.mjs` reads as a floor that PRODUCES
+    // A FAILURE rather than one that merely names a roster: this file's previous
+    // `process.exit(ok ? 0 : 1)` classified NONE on that instrument even with a
+    // sound floor above it. The success line's text is unchanged.
+    const failures = [noDist, noTree, ...results].filter((ok) => !ok).length + floorBreaches.length;
+    if (failures > 0) {
+      console.log(`\n✗ self-test failed -- ${failures} failure(s) (cases and floor).`);
+      process.exit(1);
+    }
+    console.log('\n✓ check-regen-pending self-test passed.');
+    process.exit(0);
   }
   process.exit(main({ prePush: process.argv.includes('--pre-push') }));
 }

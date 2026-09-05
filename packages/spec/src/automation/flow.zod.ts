@@ -880,6 +880,33 @@ export const FlowSchema = lazySchema(() => strictObject(
   // ADR-0010 — runtime protection envelope (internal — set by loader).
   ...MetadataProtectionFields,
 
+}).superRefine((flow, ctx) => {
+  // Every reader of `edges[].id` assumes the ids are unique — a designer, a
+  // BPMN export, a flow diff, any traversal that dedupes by id — while nothing
+  // enforced it: two edges carrying one id parsed, shipped through green CI
+  // twice, and were inert only because the engine keys out-edges by `source`
+  // (#14964). The id space is hand-authored, so the next author picking a
+  // "free" id from the sequence cannot tell it is taken. Refuse the collision
+  // here, at parse time, naming the id and BOTH positions; the issue is
+  // anchored on the later occurrence so the formatted error points at the
+  // edge to renumber.
+  const firstIndexById = new Map<string, number>();
+  flow.edges.forEach((edge, index) => {
+    const first = firstIndexById.get(edge.id);
+    if (first === undefined) {
+      firstIndexById.set(edge.id, index);
+      return;
+    }
+    ctx.addIssue({
+      code: 'custom',
+      path: ['edges', index, 'id'],
+      message:
+        `Duplicate edge id \`${edge.id}\` — \`edges[${index}]\` reuses the id already declared by ` +
+        `\`edges[${first}]\`; every edge id in a flow must be unique. Renumber one of them: an ` +
+        'edge id is the handle a designer, a BPMN export or a flow diff keys on, so a collision ' +
+        'is silently wrong there rather than loudly broken.',
+    });
+  });
 }));
 
 /**

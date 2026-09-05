@@ -33,6 +33,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { AUTHORING_RULES } from './authoring-rules.js';
+import { REFERENCE_INTEGRITY_RULES } from './reference-integrity-suite.js';
 import {
   runRuntimeAuthoringRules,
   runtimeAuthoringRulesFor,
@@ -113,6 +114,20 @@ describe('the object write door dispatches at the adjudicated scope (#4716)', ()
       'validateFunctionalCompleteness',
       'validateManagedApiMethods',
       'validatePresetComparands', // #8793 — at this door before #4716
+      // [#15254] The reference-integrity suite, dispatched here so its
+      // object-judging members run. The entry arrives; the suite's per-member
+      // `runtimeTypes` decides who judges the snapshot, and every member that
+      // does not name `object` keeps `['flow','view']` or the frozen `['flow']`
+      // default. Before this, the only door a Studio tenant has ran no
+      // reference-integrity rule at all on an object write.
+      //
+      // [#15495] The roster line is UNCHANGED by the two field-existence
+      // crossings that card added — the entry was already here, and which
+      // MEMBERS judge an object snapshot is the suite's own finer axis. That
+      // axis is pinned by name in its own case below, so a member joining or
+      // leaving the object door is caught by something even though this exact
+      // list cannot move.
+      'validateReferenceIntegrity',
       'lintAutonumberFormats',
       'validateSecurityPosture', // #8310 — at this door before #4716
       'validateRuleCompilability',
@@ -142,6 +157,104 @@ describe('the object write door dispatches at the adjudicated scope (#4716)', ()
         + `rules; a tier change moves it out of that ruling`).toBe('gating');
       expect(entry.runtimeTypes ?? []).toContain('object');
     }
+  });
+
+  // ── [#15495] The MEMBER surface of the reference-integrity suite ──
+  //
+  // The roster case above pins which AUTHORING_RULES entries reach this door.
+  // The suite is ONE of those entries, so that list cannot say which of its
+  // members judge an object snapshot — and that is the axis this card moved.
+  // Written out rather than derived, exactly as the `view` twin in
+  // `runtime-gate.view-writes.test.ts` is, so a fourth crossing has to be
+  // argued here instead of arriving by drift.
+
+  it('pins the member surface: exactly the crossed members declare `object`', () => {
+    const crossed = REFERENCE_INTEGRITY_RULES
+      .filter((r) => (r.runtimeTypes ?? ['flow']).includes('object'))
+      .map((r) => r.name);
+    // In registry order. `validateObjectFieldRefs` is #15254's crossing (the
+    // object's OWN field-name lists); the two above it are this card's, and
+    // they are the same KIND — a field name written in metadata, resolved
+    // against `stack.objects`, the one collection every per-write snapshot
+    // carries, so neither opens a missing-collection false-positive channel.
+    // Each was measured over the shipped object corpus before crossing (116
+    // objects, 0 findings, precision 1.0); the comments on the members carry
+    // the populations, and the four controls below are the non-vacuity half.
+    expect(crossed).toEqual([
+      'validateSearchableFields',
+      'validateListViewFieldRefs',
+      'validateObjectFieldRefs',
+    ]);
+    // `validateSortableFields` measured equally clean but was NOT crossed:
+    // that is its own adjudication, and this pin is where it has to be made.
+    expect(crossed).not.toContain('validateSortableFields');
+    // Every crossed member still judges flow snapshots — the #4463 P1 surface
+    // is not narrowed by the member axis existing.
+    const offFlow = REFERENCE_INTEGRITY_RULES
+      .filter((r) => !(r.runtimeTypes ?? ['flow']).includes('flow'))
+      .map((r) => r.name);
+    expect(offFlow).toEqual([]);
+  });
+
+  it('REFUSES an object whose searchableFields names a field it does not have', () => {
+    // The ADR-0061 canonical set, on the object itself. Before this card the
+    // door read it with nothing: `searchable-field-unknown` existed and was
+    // `error`, but only a CLI ran it, and a Studio tenant has no CLI.
+    const result = expectSingleRefusal(
+      cleanObject({ searchableFields: ['owner', 'gone_field'] }),
+      'searchable-field-unknown',
+    );
+    const f = result.errors.find((e) => e.rule === 'searchable-field-unknown')!;
+    // Name-keyed on the wire (#10064), and the author reads back what they typed.
+    expect(f.path).toBe('objects.leave_request.searchableFields[1]');
+    expect(f.message).toContain('gone_field');
+  });
+
+  it('REFUSES an object whose built-in list view names a column it does not have', () => {
+    const result = expectSingleRefusal(
+      cleanObject({ listViews: { all: { label: 'All', columns: ['owner', 'gone_column'] } } }),
+      'list-view-field-unknown',
+    );
+    const f = result.errors.find((e) => e.rule === 'list-view-field-unknown')!;
+    expect(f.path).toBe('objects.leave_request.listViews.all.columns[1]');
+    expect(f.message).toContain('gone_column');
+  });
+
+  it('a clean object carrying BOTH declarations publishes — the refusal is about the reference', () => {
+    // The other half of each control above: the same two keys, every name
+    // resolving, and the door adds nothing. Without this, "refuses a dangling
+    // name" and "refuses the key" are indistinguishable.
+    const result = gateObject(
+      cleanObject({
+        fields: { owner: { type: 'text' }, subject: { type: 'text' } },
+        searchableFields: ['owner', 'subject'],
+        listViews: { all: { label: 'All', columns: ['owner', 'subject'] } },
+      }),
+    );
+    expect(result.errors, JSON.stringify(result.errors)).toEqual([]);
+    // The suite RAN — the zero is a clean verdict, not a dead gate.
+    expect(result.rulesRun).toContain('validateReferenceIntegrity');
+  });
+
+  it('a `view` write still dispatches both members exactly as before — the crossing is additive', () => {
+    // The control the #9313 surface owes this card: adding `object` to a
+    // member's `runtimeTypes` must not disturb the type it already judged. A
+    // flattened list overlay is the shape `PUT /api/v1/meta/view` carries.
+    const overlay = {
+      name: 'case_backlog',
+      viewKind: 'list',
+      data: { provider: 'object', object: 'leave_request' },
+      columns: ['owner', 'gone_column'],
+      searchableFields: ['owner', 'gone_field'],
+    };
+    const result = runRuntimeAuthoringRules({
+      type: 'view',
+      item: overlay,
+      context: { objects: STORED },
+    });
+    const rules = result.errors.map((e) => e.rule);
+    expect(rules, JSON.stringify(result.errors)).toContain('list-view-field-unknown');
+    expect(rules, JSON.stringify(result.errors)).toContain('searchable-field-unknown');
   });
 
   // ── The six refusal controls — the exemption's non-vacuity evidence ──
@@ -240,6 +353,7 @@ describe('the object write door dispatches at the adjudicated scope (#4716)', ()
       'validateFunctionalCompleteness',
       'validateManagedApiMethods',
       'validatePresetComparands',
+      'validateReferenceIntegrity', // [#15254]
       'lintAutonumberFormats',
       'validateSecurityPosture',
       'validateRuleCompilability',

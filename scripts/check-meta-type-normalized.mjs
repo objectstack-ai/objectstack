@@ -78,6 +78,8 @@
  * A new entry needs a reason a reader can check, not a name.
  */
 
+// dispatch-gates: wide-population -- SCAN_DIRS is packages/rest/src, walked for non-test TypeScript sources only. The DIRECTORY is narrow enough to name and the glob would still be false six times in seven: that tree is 133 test files to 21 sources -- 21 of 154 (14%). What cannot be spelled here is the file-KIND filter, not the subtree, which is why the recorded verdict in scripts/pm/bare-root-worklist.mjs is REFUSE-UNSPELLABLE rather than REFUSE-WIDE.
+
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -194,7 +196,65 @@ function findViolations(file) {
 // as one that passed (#13798).
 const SELF_TEST_VERDICT = 'check-meta-type-normalized self-test reached its verdict';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `problems.length` used to be this self-test's ONLY success condition, so
+// "every case
+// held" and "the cases never ran" printed the same line. Closed the way
+// PR #13487 validated on check-doc-authoring: what is pinned is the registered
+// NAMES, not a number. The floor requires the OPENED set to equal the DECLARED
+// set with each battery at or above its own count.
+//
+// This file declares ONE battery, opened at the top of the self-test body. It
+// carries exactly ONE named section banner, which is fewer than the two the
+// sectioning criterion needs, and ⛔ a single banner is NOT split on — nor is
+// any comment promoted to a section head, which is a judgement per comment this
+// transplant does not make. The hoisted single battery is the shape PR #14896,
+// PR #15003 and PR #15217 landed for exactly this case.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The count is a FLOOR, not an equality — adding cases is ordinary work and must
+// not red. A battery BELOW its floor means cases stopped running; the remedy is
+// to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'check-meta-type-normalized self-test': 4,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 1;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 function selfTest() {
+    // The battery ledger this self-test's floor is evaluated against (#13489).
+    // `battery()` opens a battery; every assertion below is attributed to the one
+    // most recently opened, so a section that stops running stops registering and
+    // names ITSELF at the floor rather than going quiet.
+    const batterySeen = new Map();
+    let openBattery = null;
+    const battery = (name) => {
+        openBattery = name;
+    };
+    const registerCase = () => {
+        const b = openBattery ?? UNATTRIBUTED_BATTERY;
+        batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+    };
+    battery('check-meta-type-normalized self-test');
+    // The thunk PR #15198 measured: it registers the case and then runs the
+    // existing site VERBATIM, so no assertion condition is inverted or rewritten
+    // and the sink keeps its own semantics. Registration happens whether or not
+    // the site fires, which is what makes the count a floor on cases RUN rather
+    // than a count of failures.
+    const check = (fn) => {
+        registerCase();
+        fn();
+    };
     const fixture = `
         // if (req.params.type === 'doc') {} -- quoted in a line comment
         /** JSDoc quoting req.params.type !== 'book' for the post-mortem. */
@@ -224,10 +284,64 @@ function selfTest() {
     const problems = [];
     // Three comparisons: a, b, c. NOT ok2 — its left side is the normalizer's
     // return value, not the raw param, which is the whole distinction.
-    if (comparisons !== 3) problems.push(`expected 3 comparisons, saw ${comparisons}`);
-    if (!hits.includes('switch')) problems.push('missed the switch discriminant');
-    if (!hits.includes('membership')) problems.push('missed the membership test');
-    if (hits.length !== 5) problems.push(`expected 5 findings total, saw ${hits.length} — a pass-through or a comment was flagged`);
+    check(() => {
+        if (comparisons !== 3) problems.push(`expected 3 comparisons, saw ${comparisons}`);
+    });
+    check(() => {
+        if (!hits.includes('switch')) problems.push('missed the switch discriminant');
+    });
+    check(() => {
+        if (!hits.includes('membership')) problems.push('missed the membership test');
+    });
+    check(() => {
+        if (hits.length !== 5) problems.push(`expected 5 findings total, saw ${hits.length} — a pass-through or a comment was flagged`);
+    });
+
+    // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
+    //
+    // Evaluated after every battery has had its chance and BEFORE the verdict, so
+    // the success line below can only be printed by a run in which the set of
+    // batteries that registered assertions EQUALS the set declared. A set
+    // difference names WHICH battery stopped; a count says only that something did.
+    // This file's sink IS the `problems` ledger, so the floor speaks its idiom: a
+    // breach is recorded as a problem and reds through the existing verdict below.
+    const floorFailure = (message) => { problems.push(message); };
+    const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+    let floorBreached = false;
+    if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+        floorBreached = true;
+        floorFailure(
+            `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned `
+                + `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+        );
+    }
+    for (const [name, count] of batterySeen) {
+        if (declaredBatteries.includes(name)) continue;
+        floorBreached = true;
+        floorFailure(
+            `self-test battery "${name}" registered ${count} case(s) but is not declared in `
+                + 'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+        );
+    }
+    for (const name of declaredBatteries) {
+        const count = batterySeen.get(name) ?? 0;
+        if (count >= SELF_TEST_BATTERIES[name]) continue;
+        floorBreached = true;
+        floorFailure(
+            count === 0
+                ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. `
+                    + 'The verdict below would have claimed those cases hold.'
+                : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of `
+                    + `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+        );
+    }
+    if (floorBreached) {
+        floorFailure(
+            'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the '
+                + 'number. Find what stopped registering (an early return, a deleted block, a guard that now '
+                + 'skips) and restore it.',
+        );
+    }
 
     if (problems.length) {
         console.error('check:meta-type-normalized --self-test FAILED');

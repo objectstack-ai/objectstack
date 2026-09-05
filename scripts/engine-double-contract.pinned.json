@@ -92,6 +92,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/mcp/src/stdio-tenancy-posture-api-key-matrix.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/mcp/src/stdio-tenancy-posture-api-key-matrix.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/mcp/src/stdio-tenancy-posture-api-key-matrix.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/migrations/recorded-by-sentinel.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -158,6 +173,21 @@
     },
     {
       "file": "packages/metadata-protocol/src/protocol-publish-drafts-endpoint-gate.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol-publish-drafts-object-field-refs.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol-publish-drafts-object-field-refs.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol-publish-drafts-object-field-refs.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -1028,6 +1058,11 @@
     },
     {
       "file": "packages/metadata-protocol/src/protocol.read-verb-canonical-fold.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.readonly-insert.test.ts",
       "verb": "findOne",
       "pinned": 1
     },
@@ -2097,6 +2132,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-approvals/src/decision-strand-envelope.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-approvals/src/decision-strand-envelope.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-approvals/src/manager-approver-org-screen.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -3047,6 +3092,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/runtime/src/action-declarative-update.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/runtime/src/action-execution-calldata-batch-retired.test.ts",
       "verb": "findOne",
       "pinned": 1
@@ -3093,6 +3143,21 @@
     },
     {
       "file": "packages/runtime/src/domains/meta-save-destructive-remedy.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/domains/packages-seed-apply-org-scope.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/domains/packages-seed-apply-org-scope.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/domains/packages-seed-apply-org-scope.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -3254,6 +3319,16 @@
     {
       "file": "packages/services/service-automation/src/runas-grant-resolution.integration.test.ts",
       "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-automation/src/stranded-run-object-store.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-automation/src/stranded-run-object-store.test.ts",
+      "verb": "update",
       "pinned": 1
     },
     {

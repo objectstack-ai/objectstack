@@ -270,7 +270,7 @@ import type * as M183 from './api/sortability.zod.js';
 import type * as M184 from './shared/value-domain.zod.js';
 
 // ---------------------------------------------------------------------------
-// 830 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 825 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -834,8 +834,6 @@ export type Iso377 = Assert<Eq< z.input< typeof M78.ConnectorConflictResolutionS
 export type Iso378 = Assert<Eq< z.input< typeof M78.WebhookEventSchema >, z.infer< typeof M78.WebhookEventSchema > >>;
 export type Iso379 = Assert<Eq< z.input< typeof M78.WebhookSignatureAlgorithmSchema >, z.infer< typeof M78.WebhookSignatureAlgorithmSchema > >>;
 export type Iso380 = Assert<Eq< z.input< typeof M78.ConnectorRetryStrategySchema >, z.infer< typeof M78.ConnectorRetryStrategySchema > >>;
-export type Iso381 = Assert<Eq< z.input< typeof M78.ConnectorErrorCategorySchema >, z.infer< typeof M78.ConnectorErrorCategorySchema > >>;
-export type Iso382 = Assert<Eq< z.input< typeof M78.ErrorMappingRuleSchema >, z.infer< typeof M78.ErrorMappingRuleSchema > >>;
 export type Iso383 = Assert<Eq< z.input< typeof M78.ConnectorTypeSchema >, z.infer< typeof M78.ConnectorTypeSchema > >>;
 export type Iso384 = Assert<Eq< z.input< typeof M78.ConnectorStatusSchema >, z.infer< typeof M78.ConnectorStatusSchema > >>;
 // [#4395] Added after the generated corpus, so its number continues from the
@@ -860,8 +858,6 @@ export type Iso389 = Assert<Eq< z.input< typeof M80.ServiceClusterScopeSchema >,
 export type Iso390 = Assert<Eq< z.input< typeof M80.ServiceLeaderStrategySchema >, z.infer< typeof M80.ServiceLeaderStrategySchema > >>;
 export type Iso391 = Assert<Eq< z.input< typeof M80.ClusterDriverSchema >, z.infer< typeof M80.ClusterDriverSchema > >>;
 export type Iso392 = Assert<Eq< z.input< typeof M80.ClusterTenantIsolationSchema >, z.infer< typeof M80.ClusterTenantIsolationSchema > >>;
-export type Iso393 = Assert<Eq< z.input< typeof M80.MetadataChangeOperationSchema >, z.infer< typeof M80.MetadataChangeOperationSchema > >>;
-export type Iso394 = Assert<Eq< z.input< typeof M80.MetadataChangedEventPayloadSchema >, z.infer< typeof M80.MetadataChangedEventPayloadSchema > >>;
 
 // kernel/context.zod.ts
 export type Iso395 = Assert<Eq< z.input< typeof M81.RuntimeMode >, z.infer< typeof M81.RuntimeMode > >>;
@@ -1561,7 +1557,10 @@ export type Iso817 = Assert<Eq< z.input< typeof M155.ActionType >, z.infer< type
 // own input ≠ infer (`operator` is normalized on parse — `ViewFilterRuleParsed`
 // exists for exactly that reason), so `ElementNumberPropsParsed` is declared
 // and the pin deleted.
-export type Iso819 = Assert<Eq< z.input< typeof M170.ElementRecordPickerPropsSchema >, z.infer< typeof M170.ElementRecordPickerPropsSchema > >>;
+// `ElementRecordPickerPropsSchema` (Iso819) left the family the same way on
+// #14406 — the LAST record-form `filter` in `ComponentPropsMap`: its `filter`
+// now carries `z.array(ViewFilterRuleSchema)` too, so `ElementRecordPickerPropsParsed`
+// is declared and this pin deleted.
 export type Iso820 = Assert<Eq< z.input< typeof M170.RecordHighlightsField >, z.infer< typeof M170.RecordHighlightsField > >>;
 export type Iso821 = Assert<Eq< z.input< typeof M170.RecordPathProps >, z.infer< typeof M170.RecordPathProps > >>;
 // `record:reference_rail` (#8691) — deliberately default-free on the same
@@ -1686,7 +1685,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 830 isomorphic pins', () => {
+  it('still declares all 825 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2116,9 +2115,38 @@ describe('ADR-0122 type-alias convention', () => {
     // default or transform: the (RISE) case, one new pin (`Iso867`).
     // `SpecifierValueDomainSchema` became an alias of it, so its own pin
     // (`Iso758`) stays and the two hold or fall together. +1 added.
+    //
+    // 830 -> 828 is #14180's ADR-0049 retirement of the `metadata:changed`
+    // event payload (kernel/cluster.zod.ts): `MetadataChangedEventPayloadSchema`
+    // — a MUST-emit contract nothing ever produced or consumed, whose
+    // `z.bigint()` version could not cross a JSON transport — and the
+    // `MetadataChangeOperationSchema` enum that existed only to type its
+    // `operation` field left the module whole (RETIRED_DEFS_BY_MAJOR[18]
+    // `kernel/MetadataChangedEventPayload` + `kernel/MetadataChangeOperation`),
+    // so their pins `Iso393` / `Iso394` left with them — the aliases no longer
+    // exist, so there is nothing to be isomorphic. `kernel/cluster.test.ts`
+    // asserts the absence of both names on the module and the `./kernel`
+    // entry. -2 removed; the Iso numbers stay vacant (ids are claims about
+    // pins, not positions). (Authored as 829 -> 827; restated from the
+    // post-merge base after #14168's +1 landed first — the two changes touch
+    // disjoint pins.)
     const self = readFileSync(fileURLToPath(import.meta.url), 'utf8');
     const pins = self.match(/^export type Iso\d+ = Assert</gm) ?? [];
-    expect(pins).toHaveLength(830);
+    // 828 -> 826 is #14676's ADR-0049 retirement of `connector.errorMapping`:
+    // `ErrorMappingRuleSchema` and `ConnectorErrorCategorySchema` left whole
+    // with the key (whole-def removal, `RETIRED_DEFS_BY_MAJOR[18]`), so the
+    // two pins that named them (`Iso381` / `Iso382`) leave with the schemas.
+    //
+    // 826 -> 825 is #14406's ui#6206-B convergence of the LAST record-form
+    // `filter` in `ComponentPropsMap`: `ElementRecordPickerPropsSchema.filter`
+    // now carries `z.array(ViewFilterRuleSchema)`, whose own input ≠ infer
+    // (`operator` is normalized on parse — `ViewFilterRuleParsed` exists for
+    // exactly that reason), so `element:record_picker` left the isomorphic
+    // family the way ADR-0122 prescribes and `element:number` did one entry
+    // earlier: `ElementRecordPickerPropsParsed` declared, the Iso819 pin
+    // deleted. -1 converted to an `XParsed` pair; the Iso number stays vacant
+    // (ids are claims about pins, not positions).
+    expect(pins).toHaveLength(825);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until #6605 nothing read either

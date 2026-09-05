@@ -324,25 +324,52 @@ export const REGEN_ARTIFACTS = Object.freeze([
   //
   // No `readsDist`/`readsSchemaTree`: the generator walks `src/` directly.
   { path: 'skills/*/references/_index.md', gen: 'gen:skill-refs', check: 'check:skill-refs' },
-  // #13731. The ADR-0081 react-tier contract, both halves. Generated WHOLE — the
-  // markdown's frontmatter and its "do not edit by hand" banner are emitted by the
-  // generator too, so there is no hand-written region for a deferral to launder,
-  // which is the question this table exists to ask. A projection of the
-  // `REACT_BLOCKS` definition in `@objectstack/spec/ui`, one section per block: two
-  // PRs adding different blocks are a set union that git reports as a conflict.
+  // #13731. The ADR-0081 react-tier contract — ONE artifact since #14296 item 3
+  // retired its machine-readable JSON twin (the same table rendered twice, with
+  // zero consumers). Generated WHOLE — the markdown's frontmatter and its "do not
+  // edit by hand" banner are emitted by the generator too, so there is no
+  // hand-written region for a deferral to launder, which is the question this
+  // table exists to ask. A projection of the `REACT_BLOCKS` definition in
+  // `@objectstack/spec/ui`, one section per block: two PRs adding different blocks
+  // are a set union that git reports as a conflict.
   //
   // Same cheap-half caveat as its neighbour above, same answer: `check:react-blocks`
   // runs in `lint.yml` on `pull_request` and `merge_group`, re-deriving from the
   // definition, so the driver removes hand-merge rounds and is never the only signal.
   {
-    path: 'skills/objectstack-ui/contracts/react-blocks.contract.json',
-    gen: 'gen:react-blocks',
-    check: 'check:react-blocks',
-  },
-  {
     path: 'skills/objectstack-ui/references/react-blocks.md',
     gen: 'gen:react-blocks',
     check: 'check:react-blocks',
+  },
+  // #14957. The platform-object tenancy census — which platform-namespace objects
+  // the tenancy machinery can reach, and the declaration on each excluded object's
+  // own schema that puts it outside. Generated WHOLE: `renderArtefact` renders the
+  // entire file in memory, its `$comment` preamble included, so nothing on disk
+  // survives into the output and there is no hand-written region for a deferral to
+  // launder — which is the question this table exists to ask. ⇒ `REGEN_ARTIFACTS`
+  // rather than `NOT_DRIVER_MANAGED`, and no `mixed`.
+  //
+  // Two PRs that each add an object land disjoint row sets; the merged tree's
+  // census equals NEITHER side, and its `totals` / `reasonTotals` equal neither
+  // either — the same "no text merge can reach the answer" property as its
+  // neighbours above, sharpened by the aggregates, which a union of rows would
+  // leave arithmetically wrong while looking merged.
+  //
+  // Same cheap-half caveat as its neighbours, same answer: the driver is LOCAL and
+  // is never the protection. `check:platform-object-tenancy-census` runs in
+  // `lint.yml` on `pull_request` and `merge_group` with no `paths:` filter, and it
+  // RE-DERIVES the census from the tree rather than reading the file back, so it
+  // catches the silent case too — two branches whose rows do not overlap merging to
+  // exit 0 over a file describing neither side.
+  //
+  // No `readsDist`/`readsSchemaTree`: the generator loads its predicate and every
+  // object declaration from SOURCE (no build), so a merged tree is the whole
+  // prerequisite.
+  {
+    path: 'scripts/platform-object-tenancy-census.json',
+    gen: 'gen:platform-object-tenancy-census',
+    check: 'check:platform-object-tenancy-census',
+    owner: ROOT_OWNER,
   },
 ]);
 

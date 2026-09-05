@@ -77,6 +77,62 @@ import { blankAnchorLineNumbers } from './doc-line-anchors.mjs';
 import { workspacePackages } from './workspace-enumerator.mjs';
 
 /**
+ * The ROOT manifest, in the SUBTREE spelling `scripts/pm/dispatch-gates.mjs`
+ * can match (#15501).
+ *
+ * `reconcileGenerators` and `reconcileScripts` read `gen:` / `check:` rows out
+ * of the MANIFESTS -- the root one, plus every workspace member's -- and that
+ * population was declared nowhere. What this family DID declare is the artifact
+ * paths `scripts/regen-artifacts.mjs` carries, imported one level down as its
+ * hints: the artifacts ALREADY routed. A card that ADDS a generator touches a
+ * manifest and a new `scripts/*.mjs`, and neither is in that population until
+ * the card lands the very row it is being asked to add. So the one class of
+ * change the "no recorded merge disposition" refusal exists to catch was the
+ * one class the dispatch derivation could not name, and the gate fired a cycle
+ * late, in CI, on every card of that shape. Measured on `615fac3a0`, before
+ * this declaration existed:
+ *
+ *     node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack -- package.json
+ *     -> 0 lines naming check:merge-driver
+ *
+ * ⛔ The fix is the POPULATION, never a hand list of generator names: that
+ * ledger is `scripts/regen-artifacts.mjs`'s and this gate already owns the
+ * two-way reconciliation over it.
+ *
+ * A bare `package.json` carries no path separator and `hintCovers` refuses it
+ * as too generic; the trailing `/` + `**` suffix collapses back to the literal
+ * filename and matches it exactly -- `check-workspace-manifest-cycles.mjs`'s
+ * idiom for `pnpm-workspace.yaml` and `check-turbo-task-graph.mjs`'s for
+ * `turbo.json`. `reconcileManifestPopulation` pins the exact string, because
+ * every other signal this gate emits stays green when it is reworded back.
+ */
+const ROOT_FILE_WATCH_HINTS = ['package.json/**'];
+
+/**
+ * The MEMBER manifests this gate opens -- one per workspace package, which is
+ * exactly the list `workspacePackages(REPO_ROOT)` hands `reconcileGenerators`
+ * -- spelled as full-path glob LITERALS, never built from a `SCAN_ROOT`-shaped
+ * constant (the bare-top-level-dir species `scripts/pm/bare-root-worklist.mjs`
+ * records as unjudged). The three roots and their spelling follow
+ * `check-workspace-manifest-cycles.mjs`, which declares the identical
+ * population for the identical reason, and they are held against the
+ * enumerator's LIVE answer in both directions by `reconcileManifestPopulation`
+ * below -- so a workspace root this repo grows cannot leave the declaration
+ * behind in silence.
+ *
+ * ⚠️ Each of these carries its glob in a NON-FINAL segment, so `hintCovers`
+ * judges it as a PATTERN: it reaches member manifests and nothing else, never
+ * the thousands of files under those roots. That is the distinction between
+ * this declaration and the whole-subtree widening
+ * `check-pnpm-filter-targets.mjs` refuses for its own population.
+ */
+const DECLARED_WATCH_HINTS = [
+  'packages/**/package.json',
+  'apps/**/package.json',
+  'examples/**/package.json',
+];
+
+/**
  * The comparators a row's `mixed` field may name (#14064).
  *
  * A comparator answers ONE question: *given two revisions of this file, is their
@@ -278,21 +334,233 @@ function drive(argv) {
 
 /* ------------------------------------------------------------------ self-test */
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `results.every(Boolean)` was this self-test's ONLY success condition, so
+// "every sub-check held" and "the sub-checks never ran" printed the same line.
+// Closed the PR #13487 way: what is pinned is the registered NAMES, not a
+// number.
+//
+// ── Why the CALLEE NAME is the battery ──
+//
+// This file has no `selfTest()` entry function and no named section banners:
+// the `--self-test` dispatch at the bottom invokes THIRTEEN named callees, each
+// printing its own line and returning a boolean. So the roster's unit is the
+// CALLEE, and its label is the one the SOURCE ALREADY CARRIES — the function's
+// own name. Nothing is invented and nothing is judged per comment, and a set
+// difference names WHICH sub-check stopped rather than saying only that
+// something did. `registerCase('<calleeName>')` is the FIRST statement of every
+// callee, above any early return, so what the ledger records is that the callee
+// RAN — which is why each floor is 1 rather than the number of assertions the
+// callee happens to contain.
+//
+// ⛔ The rows of the literal `[name, ok]` table inside `reconcileOwnership()`
+// are NOT batteries, and the boundary is worth stating because recipe A
+// (PR #15271, `check-sdui-manifest`) makes a table row a battery. It does so
+// for a file whose SELF-TEST *is* the table: one literal table, one driving
+// loop over it, and a sink that writes only when a row fails. Here the table is
+// a local of ONE callee among thirteen, its rows are evaluated eagerly into
+// booleans before anything loops, and the callee already reduces them to a
+// single printed verdict of its own. Flooring those rows would floor one
+// callee's internals while the other twelve stayed at callee granularity — a
+// roster whose unit changes per entry. The rule: the battery is the unit the
+// DISPATCH names.
+//
+// ⛔ A pinned TOTAL is not the repair: one callee dropping all its work keeps a
+// total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — a callee that grows a second
+// registration must not red. 1 is the honest floor for a callee: the dispatch
+// reaches it exactly once per run.
+const SELF_TEST_BATTERIES = Object.freeze({
+  reconcileAttributes: 1,
+  reconcileAttributeTokenAnchor: 1,
+  reconcileAttributeSemantics: 1,
+  reconcileScripts: 1,
+  reconcileGenerators: 1,
+  reconcileManifestPopulation: 1,
+  reconcileUntrackedDispositions: 1,
+  reconcileOwnership: 1,
+  hookIsExecutable: 1,
+  registeredDriverResolves: 1,
+  reconcileMixedComparators: 1,
+  endToEnd: 1,
+  endToEndMixed: 1,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too. This pin is also half of
+// the duplicate refusal: two dispatch entries naming ONE callee collapse to one
+// key in the literal above, so the roster falls below this number; the
+// roster ↔ dispatch cross-check in the floor block is the other half, and it
+// names WHICH callee was listed twice.
+const SELF_TEST_BATTERY_FLOOR = 13;
+
+// The key a registration is filed under when a callee registers no name at all.
+// It is not a declared battery, so it reds by the same set difference rather
+// than silently inflating whichever battery registered last.
+const UNATTRIBUTED_BATTERY = '(no callee named)';
+
+// The battery ledger, read by `batteryFloorFailures()` from the dispatch block
+// at the very bottom of this file. It is MODULE-level rather than local to a
+// self-test body because this file HAS no self-test body: the registrations
+// happen inside thirteen separate callees and the floor is read at the dispatch's
+// verdict site, so the ledger has to outlive every one of those frames.
+//
+// ⚠️ Named for the roster's role, deliberately NOT with a self-test spelling:
+// `check:pm-dispatch-gates` anchors on a top-level declaration whose NAME
+// spells self-test, and every such name owes a row in its
+// COMPOUND_ANCHOR_LEDGER. `battery` is also the accurate word.
+const batterySeen = new Map();
+
+/**
+ * Record that a self-test callee RAN.
+ *
+ * Called as the FIRST statement of each of the thirteen callees the `--self-test`
+ * dispatch invokes — above any early return, so a callee that bails out early
+ * still reports that it ran, and the floor is never met by a frame that
+ * returned before doing anything.
+ */
+function registerCase(name) {
+  const key = name ?? UNATTRIBUTED_BATTERY;
+  batterySeen.set(key, (batterySeen.get(key) ?? 0) + 1);
+}
+
+/**
+ * The floor: every declared callee RAN (#13489).
+ *
+ * Evaluated at the dispatch's verdict site — after all thirteen callees have had
+ * their chance and immediately before the success line — and reached only from
+ * the `--self-test` branch, so a production merge-driver run never reads the
+ * ledger at all.
+ *
+ * @param {string[]} invoked the callee names the dispatch block actually invokes
+ * @returns {string[]} floor breaches; empty means the floor held
+ */
+function batteryFloorFailures(invoked) {
+  const declared = Object.keys(SELF_TEST_BATTERIES);
+  const problems = [];
+  if (declared.length < SELF_TEST_BATTERY_FLOOR) {
+    problems.push(
+      `SELF_TEST_BATTERIES declares ${declared.length} batteries, below the pinned `
+        + `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+
+  // ── Roster ↔ dispatch, both directions ──
+  // `invoked` is read off the dispatch's own list of callees, so this pair says
+  // WHICH name lost its counterpart. A declared name nothing invokes would also
+  // read DID NOT RUN below; naming it here reports the cause (nothing calls it)
+  // rather than only the symptom (nothing registered).
+  const duplicated = [...new Set(invoked.filter((name, i) => invoked.indexOf(name) !== i))];
+  if (duplicated.length) {
+    problems.push(
+      `the dispatch invokes ${duplicated.map((n) => JSON.stringify(n)).join(', ')} more than once — `
+        + 'two entries naming one callee are ONE battery, so the second can stop running while the '
+        + 'first keeps the floor met.',
+    );
+  }
+  for (const name of invoked) {
+    if (declared.includes(name)) continue;
+    problems.push(
+      `the dispatch invokes "${name}", which is not declared in SELF_TEST_BATTERIES — a callee `
+        + 'nothing declares is a sub-check nothing floors.',
+    );
+  }
+  for (const name of declared) {
+    if (invoked.includes(name)) continue;
+    problems.push(
+      `SELF_TEST_BATTERIES declares "${name}", which the dispatch block does not invoke — a floor `
+        + 'over a battery nothing can reach.',
+    );
+  }
+
+  // ── Roster ↔ ledger, both directions ──
+  for (const [name, count] of batterySeen) {
+    if (declared.includes(name)) continue;
+    problems.push(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in `
+        + 'SELF_TEST_BATTERIES — a case attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declared) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    problems.push(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. `
+          + 'The verdict below would have claimed that sub-check holds.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of `
+          + `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+
+  if (problems.length) {
+    problems.push(
+      'A battery at or below its floor means a sub-check STOPPED RUNNING — the battery is the bug, '
+        + 'not the number. Find what stopped registering (a deleted invocation, a renamed callee, a '
+        + '`registerCase()` moved below an early return) and restore it.',
+    );
+  }
+  return problems;
+}
+
 function fail(msg) {
   console.error(`✗ ${msg}`);
   process.exitCode = 1;
   return false;
 }
 
-/** `.gitattributes` and the table must name the same paths — in both directions. */
-function reconcileAttributes() {
-  const file = join(REPO_ROOT, '.gitattributes');
-  if (!existsSync(file)) return fail('.gitattributes is missing — the driver is mapped to nothing.');
-  const mapped = readFileSync(file, 'utf8')
+/**
+ * A `.gitattributes` row routed to THIS driver, anchored on the WHITESPACE
+ * that delimits an attribute token (#15701).
+ *
+ * ⛔ NOT `/\bmerge=os-regen\b/`. `\b` sits between a word character and a
+ * non-word one, and `-` and `.` are both non-word, so the word-boundary
+ * spelling admitted rows git routes to a DIFFERENT driver:
+ *
+ *     x merge=os-regen      \b: true    token: true     git: os-regen
+ *     x merge=os-regen-v2   \b: TRUE    token: false    git: os-regen-v2
+ *     x merge=os-regen.2    \b: TRUE    token: false    git: os-regen.2
+ *     x merge=os-regenX     \b: false   token: false    git: os-regenX
+ *
+ * Latent rather than live: no sibling driver with this prefix exists today, so
+ * on the current file both spellings return the same 18 paths. It is worth
+ * anchoring anyway because `merge=os-regen-v2` is exactly how a second
+ * generation of this driver would be introduced beside the first — and that is
+ * the day `reconcileAttributes` reads the sibling's row as its own and reds
+ * with `mapped to merge=os-regen but not declared in regen-artifacts.mjs`: a
+ * rule the row does not break, on a path this driver does not own, whose
+ * suggested repair (declare it here) is the wrong one.
+ *
+ * An attribute value is a whitespace-delimited token, which is why whitespace
+ * is the thing to anchor on. `scripts/pm/os-regen-merge.sh`'s awk reader is
+ * the same predicate, character for character — the two readers are consulted
+ * about the same file and must not disagree about what it says.
+ */
+const DRIVER_ATTRIBUTE_ROW = /(^|[ \t])merge=os-regen([ \t]|$)/;
+
+/**
+ * The paths a `.gitattributes` TEXT routes to this driver.
+ *
+ * Text in, paths out — not a read of the live file — so `reconcileAttributeTokenAnchor`
+ * can hold the SAME code the live reader runs against a fixture. The live
+ * `.gitattributes` carries no sibling-driver row, so it cannot measure this.
+ */
+function routedPaths(text) {
+  return text
     .split('\n')
     .filter((l) => l.trim() && !l.trim().startsWith('#'))
-    .filter((l) => /\bmerge=os-regen\b/.test(l))
+    .filter((l) => DRIVER_ATTRIBUTE_ROW.test(l))
     .map((l) => l.trim().split(/\s+/)[0]);
+}
+
+/** `.gitattributes` and the table must name the same paths — in both directions. */
+function reconcileAttributes() {
+  registerCase('reconcileAttributes');
+  const file = join(REPO_ROOT, '.gitattributes');
+  if (!existsSync(file)) return fail('.gitattributes is missing — the driver is mapped to nothing.');
+  const mapped = routedPaths(readFileSync(file, 'utf8'));
 
   const declared = REGEN_ARTIFACTS.map((e) => e.path);
   const missing = declared.filter((p) => !mapped.includes(p));
@@ -311,6 +579,68 @@ function reconcileAttributes() {
   if (overlap.length) ok = fail(`listed as BOTH driver-managed and NOT_DRIVER_MANAGED: ${overlap.join(', ')}`);
   if (ok) console.log(`✓ .gitattributes ↔ regen-artifacts.mjs agree on ${declared.length} path(s)`);
   return ok;
+}
+
+/**
+ * The row filter itself, held against a fixture (#15701).
+ *
+ * `reconcileAttributes` above reads the LIVE `.gitattributes`, and no row in it
+ * is routed to a sibling driver — there is no such driver yet. So the loose
+ * predicate and the anchored one return the same 18 paths on this tree and
+ * every assertion up there passes either way: the case that DISCRIMINATES them
+ * cannot be built from the live file, only from a fixture. Same reason
+ * `reconcileOwnership` exists beside `reconcileScripts`.
+ *
+ * Both directions are pinned. An anchor tightened until it matched nothing
+ * would satisfy every negative case here and route no artifact at all, which is
+ * the failure the positive rows exist to catch.
+ */
+function reconcileAttributeTokenAnchor() {
+  registerCase('reconcileAttributeTokenAnchor');
+  // What git itself says the sibling row routes to, measured on a scratch repo
+  // (git 2.43.0) whose `.gitattributes` held exactly `x merge=os-regen-v2`:
+  //     $ git check-attr merge -- x
+  //     x: merge: os-regen-v2
+  // A different driver. This reader must not count it among ours.
+  const fixture = [
+    '# packages/spec/commented.json merge=os-regen',
+    '',
+    '   ',
+    'packages/spec/plain.json merge=os-regen',
+    '\tpackages/spec/indented.json\tmerge=os-regen',
+    'packages/spec/flanked.json text merge=os-regen -diff',
+    'packages/spec/sibling-dash.json merge=os-regen-v2',
+    'packages/spec/sibling-dot.json merge=os-regen.2',
+    'packages/spec/sibling-word.json merge=os-regenX',
+    'packages/spec/elsewhere.json merge=union',
+  ].join('\n');
+  const routed = routedPaths(fixture);
+  const has = (name) => routed.includes(`packages/spec/${name}`);
+
+  const cases = [
+    ['a plain row routes', has('plain.json')],
+    ['a tab-delimited row routes', has('indented.json')],
+    ['a row carrying other attributes on both sides routes', has('flanked.json')],
+    ['merge=os-regen-v2 does NOT route — it is a different driver', !has('sibling-dash.json')],
+    ['merge=os-regen.2 does NOT route — it is a different driver', !has('sibling-dot.json')],
+    ['merge=os-regenX does not route', !has('sibling-word.json')],
+    ['an unrelated merge driver does not route', !has('elsewhere.json')],
+    ['a comment line naming the driver does not route', !has('commented.json')],
+    // Exactness, not membership: a predicate that also admitted something this
+    // list forgot to name would still satisfy all eight cases above.
+    ['exactly the 3 routed rows come back', routed.length === 3],
+  ];
+
+  const failures = cases.filter(([, ok]) => !ok).map(([name]) => name);
+  if (failures.length) {
+    return fail(`.gitattributes row filter ${DRIVER_ATTRIBUTE_ROW}:\n  ${failures.join('\n  ')}\n`
+      + '  An attribute value is a WHITESPACE-delimited token, so whitespace is the anchor.\n'
+      + '  `\\b` is not: `-` and `.` are non-word characters, so it admits sibling drivers\n'
+      + '  and reports their paths as undeclared rows of THIS driver.');
+  }
+  console.log(`✓ .gitattributes row filter: ${cases.length} case(s) pinned,`
+    + ' sibling drivers (merge=os-regen-v2, merge=os-regen.2) refused');
+  return true;
 }
 
 /** Where an owner's manifest lives, repo-relative, given a resolved directory. */
@@ -338,6 +668,7 @@ function manifestFor(dir) {
  * command the driver prints for it is the command the `pre-commit` gate spawns.
  */
 function reconcileScripts() {
+  registerCase('reconcileScripts');
   const workspace = workspacePackages(REPO_ROOT);
   const byOwner = new Map();
   for (const e of REGEN_ARTIFACTS) {
@@ -444,6 +775,7 @@ function reconcileScripts() {
  * been born unable to see its own motivating case.
  */
 function reconcileGenerators() {
+  registerCase('reconcileGenerators');
   const workspace = workspacePackages(REPO_ROOT);
   const manifests = [
     { dir: '.', manifest: JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8')) },
@@ -506,6 +838,111 @@ function reconcileGenerators() {
 }
 
 /**
+ * The two watch-hint declarations above, held against the manifest population
+ * `reconcileGenerators` really reads (#15501).
+ *
+ * Nothing else in this repo can redden when they go wrong. They are read by
+ * ANOTHER tool entirely -- `extractWatchHints` in
+ * `scripts/pm/dispatch-gates.mjs` scans this file's SOURCE TEXT -- so a wrong,
+ * stale or re-computed declaration runs green here forever and pays itself out
+ * as a dev dispatched on a new-generator card with this gate missing from the
+ * brief, which is the whole failure this declaration was added to end. Same
+ * reason `check-pnpm-filter-targets.mjs` pins its own, and the same discipline
+ * `check-workspace-manifest-cycles.mjs` applies to the identical population.
+ *
+ * The population is derived through the SAME two functions the gate uses --
+ * `workspacePackages` and `manifestFor` -- never re-spelled here, so a moved
+ * read cannot leave this reconciliation agreeing with a list nobody opens.
+ */
+function reconcileManifestPopulation() {
+  registerCase('reconcileManifestPopulation');
+
+  // `**` crosses separators; every other glob character stays within one
+  // segment. Local rather than shared for the reason `check-watch-hint-literal`
+  // gives for not importing the files it judges: a gate that pulled in the
+  // derivation to borrow one predicate would import 20k lines of another tool's
+  // module body -- and, here, hand this family every path literal in it.
+  const patternMatches = (pattern, path) => {
+    const segs = pattern.split('/');
+    let rx = '';
+    for (let i = 0; i < segs.length; i++) {
+      if (segs[i] === '**') {
+        rx += '(?:[^/]+/)*';
+        continue;
+      }
+      rx += segs[i].replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*');
+      if (i < segs.length - 1) rx += '/';
+    }
+    return new RegExp(`^${rx}$`).test(path);
+  };
+
+  const problems = [];
+  const ok = (label, cond) => {
+    if (!cond) problems.push(label);
+  };
+
+  // ── The ROOT manifest, pinned as BYTES ──
+  // A reword back to the bare filename is invisible in every other signal:
+  // production green, CI green, and the only thing lost is that a card adding a
+  // `gen:` row to the root manifest can name this gate at all.
+  ok(
+    'the root manifest is declared in the SUBTREE spelling (hintCovers refuses the bare filename as too generic)',
+    ROOT_FILE_WATCH_HINTS.join(',') === 'package.json/**',
+  );
+  // …and the literal is tied to the real read rather than typed twice: the
+  // declaration's collapsed form must be the path `reconcileGenerators` opens
+  // for the root owner.
+  ok(
+    'the collapsed root literal is the path this gate actually opens for the root owner',
+    ROOT_FILE_WATCH_HINTS[0].replace(/\/\*+$/, '') === manifestFor('.'),
+  );
+  ok(
+    'every declared entry carries a path separator',
+    [...ROOT_FILE_WATCH_HINTS, ...DECLARED_WATCH_HINTS].every((h) => h.includes('/')),
+  );
+
+  // ── The MEMBER manifests, against the enumerator's LIVE answer ──
+  // Both directions, mirroring `check-workspace-manifest-cycles.mjs`: a pattern
+  // covering nothing is a fabricated lead on every card, and a manifest no
+  // pattern covers is the undeclared read this gate would otherwise ship with.
+  let memberManifests;
+  try {
+    memberManifests = workspacePackages(REPO_ROOT).map((p) => manifestFor(p.dir));
+  } catch (err) {
+    return fail(`the workspace could not be enumerated, so the declaration could not be reconciled: ${err?.message ?? err}`);
+  }
+  ok(`the enumerator finds member manifests to declare (${memberManifests.length})`, memberManifests.length > 0);
+  const undeclared = memberManifests.filter((m) => !DECLARED_WATCH_HINTS.some((h) => patternMatches(h, m)));
+  ok(
+    `every member manifest this gate opens is covered by a declared pattern (uncovered: ${undeclared.join(', ') || 'none'})`,
+    undeclared.length === 0,
+  );
+  const empty = DECLARED_WATCH_HINTS.filter((h) => !memberManifests.some((m) => patternMatches(h, m)));
+  ok(`and no declared pattern covers zero of them (empty: ${empty.join(', ') || 'none'})`, empty.length === 0);
+  // The other direction on the ROOT: it is not a workspace member, so a member
+  // pattern that reached it would mean the two declarations had collapsed into
+  // one over-wide glob.
+  ok(
+    'no member pattern reaches the root manifest — the root is declared separately because it is not a workspace member',
+    !DECLARED_WATCH_HINTS.some((h) => patternMatches(h, manifestFor('.'))),
+  );
+  ok(
+    'the pattern matcher crosses separators for `**` and does not run past the filename',
+    patternMatches('packages/**/package.json', 'packages/spec/package.json') &&
+      patternMatches('packages/**/package.json', 'packages/plugins/plugin-auth/package.json') &&
+      !patternMatches('packages/**/package.json', 'packages/spec/src/index.ts'),
+  );
+
+  if (problems.length) {
+    return fail(`watch-hint declaration(s) out of step with the manifest population:\n  ${problems.join('\n  ')}\n`
+      + '  ROOT_FILE_WATCH_HINTS / DECLARED_WATCH_HINTS at the top of this file declare the manifests\n'
+      + '  reconcileGenerators reads. Repair the DECLARATION, never this reconciliation.');
+  }
+  console.log(`✓ the declared manifest population covers the root manifest and all ${memberManifests.length} member manifest(s)`);
+  return true;
+}
+
+/**
  * The `untracked: true` dispositions, held against git rather than against their own
  * prose (#13731).
  *
@@ -516,6 +953,7 @@ function reconcileGenerators() {
  * later, as the merge conflict this whole file exists to pre-empt.
  */
 function reconcileUntrackedDispositions() {
+  registerCase('reconcileUntrackedDispositions');
   const claims = NOT_DRIVER_MANAGED.filter((e) => e.untracked);
   const wrong = [];
   for (const e of claims) {
@@ -551,6 +989,7 @@ function reconcileUntrackedDispositions() {
  * as "covered" until someone looks.
  */
 function reconcileAttributeSemantics() {
+  registerCase('reconcileAttributeSemantics');
   const tracked = execFileSync('git', ['ls-files', '-z'], {
     cwd: REPO_ROOT,
     encoding: 'utf8',
@@ -602,6 +1041,7 @@ function reconcileAttributeSemantics() {
 }
 
 function reconcileOwnership() {
+  registerCase('reconcileOwnership');
   const workspace = workspacePackages(REPO_ROOT);
   const rootScripts = JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8'));
   const specDir = ownerDir(DEFAULT_OWNER, workspace);
@@ -645,6 +1085,7 @@ function reconcileOwnership() {
  * commits went through with the hook installed and inert.
  */
 function hookIsExecutable() {
+  registerCase('hookIsExecutable');
   try {
     const mode = execFileSync('git', ['ls-files', '-s', '.githooks/pre-commit'], {
       cwd: REPO_ROOT,
@@ -681,6 +1122,7 @@ function hookIsExecutable() {
  *   - the value has drifted from what `setup-git-hooks.mjs` registers.
  */
 function registeredDriverResolves() {
+  registerCase('registeredDriverResolves');
   const { key, value: expected } = GIT_SETTINGS.find((s) => s.key === `merge.${DRIVER_NAME}.driver`);
 
   let actual = '';
@@ -780,6 +1222,7 @@ function realpath(p) {
  * (`%P` order, git-dir resolution in a worktree) is exactly what silently rots.
  */
 function endToEnd() {
+  registerCase('endToEnd');
   const dir = mkdtempSync(join(tmpdir(), 'os-regen-selftest-'));
   const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   try {
@@ -840,6 +1283,7 @@ function endToEnd() {
  * call different, which is the firing control the "safe" verdict rests on.
  */
 function reconcileMixedComparators() {
+  registerCase('reconcileMixedComparators');
   const rows = REGEN_ARTIFACTS.filter((e) => e.mixed);
   const unknown = rows.filter((e) => !MIXED_COMPARATORS[e.mixed]);
   if (unknown.length) {
@@ -889,6 +1333,7 @@ function reconcileMixedComparators() {
  * success unless something reads the resulting bytes.
  */
 function endToEndMixed() {
+  registerCase('endToEndMixed');
   const entry = REGEN_ARTIFACTS.find((e) => e.mixed);
   if (!entry) {
     console.log('✓ end-to-end (mixed): no mixed rows declared — nothing to prove');
@@ -960,23 +1405,44 @@ function endToEndMixed() {
 
 if (process.argv.includes('--self-test')) {
   console.log('git-merge-regen --self-test\n');
-  const results = [
-    reconcileAttributes(),
-    reconcileAttributeSemantics(),
-    reconcileScripts(),
-    reconcileGenerators(),
-    reconcileUntrackedDispositions(),
-    reconcileOwnership(),
-    hookIsExecutable(),
-    registeredDriverResolves(),
-    reconcileMixedComparators(),
-    endToEnd(),
-    endToEndMixed(),
+  // The thirteen callees as a literal LIST rather than thirteen bare calls, so the
+  // names this block invokes are data the floor below can cross-check the
+  // roster against, in both directions. The names are read off the function
+  // declarations themselves (`fn.name`), so a renamed callee moves this list
+  // with it and cannot drift from the roster in silence.
+  const callees = [
+    reconcileAttributes,
+    reconcileAttributeTokenAnchor,
+    reconcileAttributeSemantics,
+    reconcileScripts,
+    reconcileGenerators,
+    reconcileManifestPopulation,
+    reconcileUntrackedDispositions,
+    reconcileOwnership,
+    hookIsExecutable,
+    registeredDriverResolves,
+    reconcileMixedComparators,
+    endToEnd,
+    endToEndMixed,
   ];
+  const results = callees.map((run) => run());
+
+  // ── The assertion floor, at the verdict site ─────────────────────
+  // There is no verdict site inside a self-test body here, because there is no
+  // self-test body: this dispatch IS the verdict site, and the AND below is the
+  // verdict. So the floor is evaluated here, after every callee has had its
+  // chance and immediately before the success line — the only place a run in
+  // which a callee never ran can still be stopped from reporting that the
+  // wiring is consistent. It sits inside the `--self-test` branch, so the
+  // production merge-driver path (the `else` arm) never reads the ledger.
+  const floorBreaches = batteryFloorFailures(callees.map((run) => run.name));
+  for (const breach of floorBreaches) fail(`self-test floor: ${breach}`);
+
+  const failures = results.filter((ok) => !ok).length + floorBreaches.length;
   console.log(
-    results.every(Boolean)
+    failures === 0
       ? `\n✓ merge driver wiring is consistent (${NOT_DRIVER_MANAGED.length} path(s) deliberately excluded).`
-      : '\n✗ merge driver wiring is inconsistent — see above.',
+      : `\n✗ merge driver wiring is inconsistent — ${failures} failure(s) (cases and floor); see above.`,
   );
 } else {
   try {

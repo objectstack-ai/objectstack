@@ -102,6 +102,8 @@
 // JSON Schema, and it cannot tell which literal a match belongs to. Object
 // structure decides this, so the checker reads structure.
 
+// dispatch-gates: wide-population -- DEFAULT_SCAN_ROOTS is packages and examples, walked for every non-test TypeScript source -- 1898 of 4903 (39%) and 162 of 238 (68%), recorded REFUSE-WIDE in scripts/pm/bare-root-worklist.mjs on both halves. Refused together rather than split: declaring only the smaller root would read as a claim about where this gate bites, which is exactly what is not known.
+
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';

@@ -199,21 +199,30 @@ or missing-`required` violation (#4277). A node type that publishes no
 A value's **shape** selects its form — there is no mode key. A plain string is
 always `{token}` interpolation (a bare `a + b` is the literal text `a + b`, not
 CEL); an object that names a `dialect` is an expression envelope and must be a
-valid `cel` one — a missing or empty `source`, or a `template` / `cron`
-dialect, is refused at the variable's path. Numbers, booleans, arrays and plain
-objects are assigned as literals. A later `notify` node renders the variable as
-any other: `message: '{digest}'`.
+valid `cel` one — a missing, empty or non-string `source`, or a `template` /
+`cron` dialect, is refused at the variable's path. Numbers, booleans, arrays
+and plain objects are assigned as literals. A later `notify` node renders the
+variable as any other: `message: '{digest}'`, and it renders the **evaluated**
+value.
 
-<Callout type="warn" title="The contract landed first; the executor half follows">
+<Callout type="info" title="Where a malformed envelope is refused">
 
-The envelope form is what `@objectstack/spec` declares — the expression
-ledger's `value` entry and `AssignmentConfigSchema`, the half ruled in
-[#14149]. Until the matching `@objectstack/service-automation` change lands,
-the built-in `assignment` executor still writes an envelope object into the
-variable verbatim and `notify` renders it as JSON. For a digest body today,
-call a registered function from a `script` node.
+A malformed envelope never reaches run time silently: the same refusal runs at
+`objectstack validate` (a located finding naming the variable), at the runtime
+publish gate a Studio / REST / MCP flow write goes through, and at
+`registerFlow`, which refuses to register the flow. All three ask the same two
+questions in the same order — is it a valid `cel` envelope
+(`AssignmentValueSchema`), and does its source parse as CEL
+(`validateExpression`) — so a flow that registers is a flow whose envelopes
+those two validators accept.
 
-[#14149]: https://github.com/objectstack-ai/objectstack/issues/14149
+Two shapes sit outside what either validator can judge and fault loudly at run
+time instead of assigning a value: an `ast`-only envelope (no `source` — the
+CEL engine evaluates `source`), and a whitespace-only `source`, which passes
+`min(1)` and reads as "not authored" to the validator while the engine parses
+it untrimmed. Both are tracked in [#15430].
+
+[#15430]: https://github.com/objectstack-ai/objectstack/issues/15430
 
 </Callout>
 
@@ -863,7 +872,7 @@ terminal run therefore carries a **summary** — on the `AutomationResult`, on t
 run in `listRuns` / `getRun`, and in the log:
 
 ```
-[automation] run flow=stalled_deal_sweep run=run_a1b2 status=completed durationMs=142 selected=30 acted=0 skipped=30 gate=check_stalled->send_nudge:30
+[automation] run flow=stalled_deal_sweep run=run_a1b2 status=completed durationMs=142 selected=30 acted=0 skipped=30 failed=0 gate=check_stalled->send_nudge:30
 ```
 
 | Field | Meaning |
@@ -872,7 +881,7 @@ run in `listRuns` / `getRun`, and in the log:
 | `acted` | Records **created / updated / deleted**, plus effects dispatched (notifications delivered) |
 | `skipped` | Node executions a **closed gate** prevented — one per loop iteration whose conditional edge evaluated false |
 | `unmeasured` | Executions that reached something the platform **cannot count** — see below |
-| `failed` | Node executions that **failed and were contained** — caught by a `try_catch` or routed down a `fault` edge — so the run went on; the sum of `nodes[].failures`. Absent on a run that did not track it, which is not zero |
+| `failed` | Node executions **of this run** that failed — on a completed run every one of them was contained, caught by a `try_catch` or routed down a `fault` edge, so the run went on; the sum of `nodes[].failures`. `failed=0` therefore reads "no node execution of this run failed", which is narrower than "nothing failed anywhere": a `subflow` child's own contained failures are counted on the CHILD's summary, not folded up here the way `acted` is (that inconsistency in the declaration is [#15617](https://github.com/objectstack-ai/objectstack/issues/15617)). Absent on a run that did not track it, which is not zero |
 | `nodes[]` | Per-node terminal status with `runs` / `failures` / `skipped` and its own selected/acted |
 | `gates[]` | Which gates closed and how often, most-skipped first |
 

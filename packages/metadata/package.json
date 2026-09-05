@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/metadata",
-  "version": "17.2.0",
+  "version": "17.3.0",
   "license": "Apache-2.0",
   "description": "Metadata loading, saving, and persistence for ObjectStack",
   "type": "module",
@@ -45,6 +45,16 @@
       "require": {
         "types": "./dist/errors.d.cts",
         "default": "./dist/errors.cjs"
+      }
+    },
+    "./view-container": {
+      "import": {
+        "types": "./dist/view-container.d.ts",
+        "default": "./dist/view-container.js"
+      },
+      "require": {
+        "types": "./dist/view-container.d.cts",
+        "default": "./dist/view-container.cjs"
       }
     }
   },

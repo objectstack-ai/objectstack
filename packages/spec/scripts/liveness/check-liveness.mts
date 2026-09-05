@@ -157,6 +157,7 @@ import {
   MetadataEndpointsConfigSchema,
   RouteGenerationConfigSchema,
 } from '../../src/api/rest-server.zod';
+import { SubscriptionSchema } from '../../src/api/realtime.zod';
 import {
   BOUND_PROOF_PATHS,
   HIGH_RISK_CLASSES,
@@ -234,7 +235,7 @@ const ledgerRoot = ledgerRootArg
 
 // Governed metadata types, rolled out highest-frequency / highest-risk first.
 // (`query` is not a metadata type — see SPEC_ONLY_SCHEMAS below.)
-const GOVERNED = ['object', 'field', 'flow', 'action', 'hook', 'permission', 'position', 'agent', 'tool', 'skill', 'dataset', 'page', 'view', 'report', 'dashboard', 'webhook', 'query', 'datasource', 'app', 'book', 'doc', 'email_template', 'job', 'mapping', 'seed', 'translation', 'validation', 'api', 'capability', 'qa', 'manifest', 'crud_endpoints', 'metadata_endpoints', 'batch_endpoints', 'route_generation'];
+const GOVERNED = ['object', 'field', 'flow', 'action', 'hook', 'permission', 'position', 'agent', 'tool', 'skill', 'dataset', 'page', 'view', 'report', 'dashboard', 'webhook', 'query', 'datasource', 'app', 'book', 'doc', 'email_template', 'job', 'mapping', 'seed', 'translation', 'validation', 'api', 'capability', 'qa', 'manifest', 'crud_endpoints', 'metadata_endpoints', 'batch_endpoints', 'route_generation', 'realtime_subscription'];
 
 // Registered metadata types that are NOT yet governed — the coverage ratchet.
 //
@@ -360,6 +361,42 @@ const PENDING_GOVERNANCE: Record<string, string> = {
 // subject of its own card, so a census of it would be recording a half that is
 // about to move. Like `query`, `qa` and `manifest`, there is no registry to
 // fold any of these back onto — the override IS their governance.
+// `realtime_subscription` is the FIFTH category and the narrowest one yet: a
+// TRANSPORT-PROTOCOL surface. `SubscriptionSchema` (src/api/realtime.zod.ts) is
+// what a client sends to open a realtime subscription — the `subscriptions`
+// array of `RealtimeConfigSchema`, and the `Subscription` type the generated API
+// reference publishes. Like `query` it is a request surface rather than stored
+// metadata, and like `query` that is exactly why it went unasked: no registry
+// holds it, `RealtimeConfigSchema` is `.passthrough()` so nothing downstream
+// even refuses an unknown key, and the whole vocabulary sat outside the
+// denominator while the generated reference kept publishing it.
+//
+// The census filed with #14446 found the two members that make governing it
+// worth the row: `events[].type` accepts `RealtimeEventType`, whose four members
+// are spelled `record.created` / `record.updated` / `record.deleted` /
+// `field.changed` while the engine publishes `data.record.*` (DataEventType,
+// src/api/events.zod.ts) — DISJOINT vocabularies, so every member of the
+// published enum names an event nothing emits; and `events[].filters` is
+// `z.unknown().optional()`, a key with no shape and no reader. `field.changed`
+// is the sharper half: its sibling `DataEventType.data.field.changed` was
+// REMOVED in 17.0.0 (#4673, ADR-0049 enforce-or-remove) for having no producer,
+// and the same spelling survives here because this enum was never in a
+// ratchet's denominator.
+//
+// WHY THE SUBSCRIPTION AND NOT THE CONFIG. `RealtimeConfigSchema` is the
+// obvious root and it does not work, for the reason the four `RestServerConfig`
+// sub-objects above document: the walk drills exactly ONE level. With the config
+// as the root, `subscriptions` is the drilled level and a subscription's own
+// keys sit one deeper — `events[].type` and `events[].filters` would then have
+// no row of their own and would inherit a container verdict, which is #4956's
+// shape in the file written to end it. Rooting on `SubscriptionSchema` puts
+// `events` at the drillable level and both measured keys in rows of their own.
+// `RealtimeConfigSchema`'s own three keys (`enabled`, `transport`,
+// `subscriptions`) are deliberately NOT enrolled here: they are a different
+// question (does enabling realtime do anything?) with no census behind it yet,
+// and this override records what has been measured. There is no registry to
+// fold this one back onto either — like `query`, `qa` and `manifest`, the
+// override IS its governance.
 const SPEC_ONLY_SCHEMAS: Record<string, unknown> = {
   webhook: WebhookSchema,
   query: QuerySchema,
@@ -370,6 +407,7 @@ const SPEC_ONLY_SCHEMAS: Record<string, unknown> = {
   metadata_endpoints: MetadataEndpointsConfigSchema,
   batch_endpoints: BatchEndpointsConfigSchema,
   route_generation: RouteGenerationConfigSchema,
+  realtime_subscription: SubscriptionSchema,
 };
 
 // ADR-0010 provenance/lock overlay fields — system-stamped, on every type; auto-live.

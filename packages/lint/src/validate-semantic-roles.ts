@@ -10,15 +10,26 @@
  * inert" shape ADR-0078 prohibits — so the completeness lint flags it here,
  * uniformly for `os build`/`os validate`, MCP authoring and hand authors.
  *
- * All three rules are warnings, not errors: every consumer degrades
+ * Every rule here is a warning, not an error: every consumer degrades
  * gracefully (an unknown `Field.group` renders in the ungrouped bucket, an
- * unknown highlight name is skipped, an unknown `stageField` falls back to
- * heuristics), so nothing is fully broken — but the author almost certainly
- * typo'd a name and should be told at author time, not discover it by
- * staring at an unchanged page.
+ * unknown `stageField` falls back to heuristics), so nothing is fully broken
+ * — but the author almost certainly typo'd a name and should be told at
+ * author time, not discover it by staring at an unchanged page.
+ *
+ * [#15254] ⛔ ONE position left, and the boundary is worth stating because
+ * the key is still read below. `highlightFields` EXISTENCE — "the entry names
+ * no field on this object" — is `validate-object-field-refs.ts`' judgement
+ * (`object-field-ref-unknown`, `error`, on the runtime publish door as well
+ * as the three commands), because the measured state was that a warning on
+ * the CLI alone let the Studio click path publish a dangling reference green.
+ * This module keeps the PROVENANCE question at that position
+ * (`semantic-role-field-unprovisioned`): the entry resolves, and the column
+ * behind it is an injected anchor with no storage. Existence and provenance
+ * are different questions, and only one of them moved.
  */
 
 import { injectedColumnsFor, unprovisionedInjectedColumnsFor } from './system-fields.js';
+import { recordsOf } from './object-graph.js';
 
 export const FIELD_GROUP_UNDECLARED = 'field-group-undeclared';
 export const FIELD_GROUP_EMPTY = 'field-group-empty';
@@ -45,15 +56,6 @@ export interface SemanticRoleFinding {
 
 type AnyRec = Record<string, unknown>;
 
-/** Coerce a collection (array or name-keyed map) to an array of records. */
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v as AnyRec[];
-  if (v && typeof v === 'object') {
-    return Object.entries(v as AnyRec).map(([name, def]) => ({ name, ...(def as AnyRec) }));
-  }
-  return [];
-}
-
 /**
  * Validate every object's semantic-role pointers. Returns the list of
  * findings (empty = clean). Advisory only — the caller must never fail the
@@ -62,7 +64,7 @@ function asArray(v: unknown): AnyRec[] {
 export function validateSemanticRoles(stack: AnyRec): SemanticRoleFinding[] {
   const findings: SemanticRoleFinding[] = [];
 
-  const objects = asArray(stack.objects);
+  const objects = recordsOf(stack.objects);
   for (let i = 0; i < objects.length; i++) {
     const obj = objects[i];
     if (!obj || typeof obj !== 'object') continue; // tolerate junk entries
@@ -184,24 +186,17 @@ export function validateSemanticRoles(stack: AnyRec): SemanticRoleFinding[] {
       : Array.isArray(obj.compactLayout) // deprecated alias (pre-normalization input)
         ? obj.compactLayout
         : [];
+    // [#15254] The EXISTENCE half of this position moved to
+    // `validate-object-field-refs.ts` (`object-field-ref-unknown`, `error`,
+    // and on the runtime publish door as well as the CLI). It is not
+    // restated here: two findings on one path is noise, and the two tiers
+    // would disagree about the same fact. What stays is the PROVENANCE
+    // question, which is a different one — the entry resolves, and the
+    // column behind it is an unprovisioned injected anchor (#8116).
     for (const entry of highlights) {
       if (typeof entry !== 'string' || entry.length === 0) continue;
-      if (fieldNames.has(entry)) {
-        if (unprovisioned.has(entry)) findings.push(unprovisionedPointer('highlightFields', entry));
-        continue;
-      }
-      findings.push({
-        severity: 'warning',
-        rule: SEMANTIC_ROLE_FIELD_UNKNOWN,
-        where,
-        path: `${path}.highlightFields`,
-        message:
-          `${objName}: highlightFields entry "${entry}" is not a field on this ` +
-          `object — it is silently skipped by every consumer`,
-        hint:
-          `Fix the field name (highlightFields drives default columns, cards, ` +
-          `previews and the detail highlight strip, in order).`,
-      });
+      if (!fieldNames.has(entry)) continue;
+      if (unprovisioned.has(entry)) findings.push(unprovisionedPointer('highlightFields', entry));
     }
 
     // ── (d) declared group fully shadowed by the detail highlight strip ──

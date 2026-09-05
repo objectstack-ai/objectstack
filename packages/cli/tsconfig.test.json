@@ -125,7 +125,44 @@
     "module": "esnext",
     "moduleResolution": "bundler",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "types": ["node"]
+    "types": ["node"],
+    // [#15004, #15229] FOUR bare-name rules, no star, for the four workspace
+    // deps the option-B acceptance pin reaches
+    // (`test/option-b-reader-acceptance.pin.test.ts` and its two fixtures;
+    // `@objectstack/verify` joined them with card 5/4's probe rows). Without them tsc resolves those specifiers through
+    // each package's `exports` map to `dist/index.d.ts` — A BUILD ARTIFACT — so
+    // this suite's type verdict about the readers the reader program is about to
+    // CHANGE would be a verdict about the last `pnpm build` instead, which is
+    // exactly what `check:type-source-resolution` refuses. That gate's registry
+    // is shrink-only and widening it is not the fix; `paths` is, for a dep
+    // exposed through an EXISTING program, which `tsconfig.test.json` is.
+    //
+    // ⛔ No star and no directory target. A starred rule matches by PREFIX and
+    // would swallow subpath imports, resolving them THROUGH a file
+    // (`…/src/index.ts/core`, ENOTDIR at run time). A star-less rule matches
+    // the specifier EXACTLY, which is load-bearing here rather than incidental:
+    // `@objectstack/objectql` publishes a second subpath (`./core`), and that
+    // specifier deliberately keeps resolving through the package's own
+    // `exports` map, untouched by this table. `plugin-security`, `runtime` and
+    // `verify` each publish only `"."`. And a target matching nothing on disk is worse
+    // than absent, because tsc then falls back to node resolution — i.e. to
+    // `dist` — silently.
+    //
+    // `rootDir` above already spans the repo root, so pulling these source trees
+    // into this program needs no widening.
+    "paths": {
+      "@objectstack/objectql": ["../objectql/src/index.ts"],
+      // [#15232] The fourth, added for the same reason and under the same
+      // no-star rule: the option-B probe calls `@objectstack/plugin-dev`'s
+      // shipped i18n auto-detect decision, and this package's vitest config
+      // aliases that same bare specifier to the same source entry, so the type
+      // verdict and the run agree about which artifact is under test. The
+      // package publishes only `"."`.
+      "@objectstack/plugin-dev": ["../plugins/plugin-dev/src/index.ts"],
+      "@objectstack/plugin-security": ["../plugins/plugin-security/src/index.ts"],
+      "@objectstack/runtime": ["../runtime/src/index.ts"],
+      "@objectstack/verify": ["../verify/src/index.ts"]
+    }
   },
   "include": ["test/**/*", "vitest.config.ts", "vitest-tiers.ts", "vitest-tiers.fixtures.ts"],
   "exclude": ["node_modules", "dist"]

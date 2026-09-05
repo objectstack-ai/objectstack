@@ -106,6 +106,7 @@ import { join, posix, resolve } from 'node:path';
 import {
   readWorkspaceGlobs,
   selfTest as workspaceEnumeratorSelfTest,
+  workspaceEnumeratorFloorFailures,
   workspacePackageDirs,
 } from './workspace-enumerator.mjs';
 
@@ -424,6 +425,33 @@ function exportsVerdict(manifest) {
  * through. Both failures are silent, so they get asserted rather than assumed.
  */
 
+// -- The self-test's own battery roster and floor (#13489) ------------------
+//
+// A pass used to be this self-test's ONLY success condition, so "every case
+// held" and "the cases never ran" printed the same line. Closed the way
+// PR #13487 validated on check-doc-authoring: what is pinned is the registered
+// NAMES, not a number. Every section opens with `battery('<name>')`, every
+// assertion is attributed to the battery most recently opened, and the floor
+// requires the OPENED set to equal the DECLARED set with each battery at or
+// above its own count.
+//
+// The counts are a FLOOR, not an equality -- adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'the dispatch-gates declaration (#10542)': 37,
+  'GATED and its census floor (#12879)': 22,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 2;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 // Returned by `selfTest()` only after its verdict is printed. The dispatch
 // refuses anything else: a `return` that leaves the function above that line
 // prints nothing and still exits 0 — a self-test that never finished, reported
@@ -431,6 +459,32 @@ function exportsVerdict(manifest) {
 const SELF_TEST_VERDICT = 'check-published-files self-test reached its verdict';
 
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const batterySeen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+  };
+  // The one in-body assertion helper the 7 inline `failures.push(...)` sites
+  // now route through. The message is built the same way it always was; the
+  // only change is that a case is COUNTED whether it holds or not, which is
+  // what lets the floor below tell "held" from "never ran".
+  const expect = (ok, message) => {
+    registerCase();
+    if (!ok) failures.push(message);
+  };
+  // Cases run before the first banner, so the first battery is opened at the
+  // top of the body and that banner carries no second opener — PR #13487's own
+  // shape, as batches 1b and 2 landed it.
+  battery('the dispatch-gates declaration (#10542)');
+  const failures = [];
   const cases = [
     ['dist', 'dist/index.js', true],
     ['dist', 'dist/nested/deep/chunk.js', true],
@@ -474,18 +528,13 @@ function selfTest() {
     ['dist/index.js', null],
     ['README.md', null],
   ];
-  const failures = [];
   for (const [pattern, path, expected] of cases) {
     const actual = matcher(pattern)(path);
-    if (actual !== expected) {
-      failures.push(`matcher("${pattern}")("${path}") === ${actual}, expected ${expected}`);
-    }
+    expect(actual === expected, `matcher("${pattern}")("${path}") === ${actual}, expected ${expected}`);
   }
   for (const [path, expected] of forbidden) {
     const actual = FORBIDDEN.find((f) => f.test(path))?.label ?? null;
-    if (actual !== expected) {
-      failures.push(`FORBIDDEN("${path}") === ${actual}, expected ${expected}`);
-    }
+    expect(actual === expected, `FORBIDDEN("${path}") === ${actual}, expected ${expected}`);
   }
 
   // ── the dispatch-gates declaration (#10542) ───────────────────────────────
@@ -518,10 +567,11 @@ function selfTest() {
     ],
   ];
   for (const [name, ok] of declarationCases) {
-    if (!ok) failures.push(`ROOT_DIR_WATCH_HINTS: ${name}`);
+    expect(ok, `ROOT_DIR_WATCH_HINTS: ${name}`);
   }
 
   // ── GATED and its census floor (#12879) ───────────────────────────────────
+  battery('GATED and its census floor (#12879)');
   //
   // The verdict cases pin the two directions apart: a map that is merely ABSENT
   // leaves everything resolvable, a map that is present and EMPTY leaves nothing
@@ -545,16 +595,15 @@ function selfTest() {
   ];
   for (const [label, manifest, expected] of verdictCases) {
     const actual = exportsVerdict(manifest).ok;
-    if (actual !== expected) {
-      failures.push(`exportsVerdict(${label}).ok === ${actual}, expected ${expected}`);
-    }
+    expect(actual === expected, `exportsVerdict(${label}).ok === ${actual}, expected ${expected}`);
   }
   for (const [label, manifest, expected] of verdictCases) {
     if (expected) continue;
     const { lines } = exportsVerdict(manifest);
-    if (!Array.isArray(lines) || lines.length === 0 || !lines.some((l) => l.startsWith('Fix:'))) {
-      failures.push(`exportsVerdict(${label}) refuses without a Fix: line`);
-    }
+    expect(
+      Array.isArray(lines) && lines.length > 0 && lines.some((l) => l.startsWith('Fix:')),
+      `exportsVerdict(${label}) refuses without a Fix: line`,
+    );
   }
 
   // The floor is the control, so it is itself controlled -- against the live
@@ -593,7 +642,7 @@ function selfTest() {
     ],
   ];
   for (const [name, ok] of floorCases) {
-    if (!ok) failures.push(`GATED census: ${name}`);
+    expect(ok, `GATED census: ${name}`);
   }
 
   // The shared enumerator is a plain module, so no workflow invokes it and it
@@ -601,7 +650,58 @@ function selfTest() {
   // what it must not be). Its coverage is that every gate which consolidated
   // onto it folds these in, this one included.
   const enumeratorFailures = workspaceEnumeratorSelfTest({ root: ROOT });
+  // The enumerator returns a SET of failures rather than one assertion, so it
+  // registers as the single case it is here: that the shared enumerator's own
+  // self-test ran and returned nothing.
+  expect(enumeratorFailures.length === 0, `the shared workspace enumerator reported ${enumeratorFailures.length} failure(s)`);
   failures.push(...enumeratorFailures);
+  failures.push(...workspaceEnumeratorFloorFailures());
+
+  // -- The floor: every declared battery RAN, and ran its cases (#13489) -----
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorMessages = [];
+  const floorFailure = (message) => { floorMessages.push(message); };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned `
+        + `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in `
+        + 'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. `
+          + 'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of `
+          + `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the '
+        + 'number. Find what stopped registering (an early return, a deleted block, a guard that now '
+        + 'skips) and restore it.',
+    );
+  }
+  for (const m of floorMessages) failures.push(m);
 
   if (failures.length > 0) {
     console.error(`✗ check:published-files --self-test — ${failures.length} failure(s)\n`);

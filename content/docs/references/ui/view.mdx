@@ -106,7 +106,7 @@ Appearance and visualization configuration
 | **startDateField** | `string` | ✅ | Field providing the event start date/time |
 | **endDateField** | `string` | optional | Field providing the event end date/time (defaults to a single-day event) |
 | **titleField** | `string` | optional | Field displayed as the event title. Omit to fall back to the record display name (ADR-0079 resolver chain) |
-| **colorField** | `string` | optional | Field whose value determines the event color |
+| **colorField** | `string` | optional | Field to derive each event color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the calendar theme-aware palette color hashed from the value |
 
 
 ---
@@ -127,7 +127,7 @@ Compound-cell prefix configuration
 
 ## ColumnSummary
 
-Aggregation function for column footer summary
+Aggregation function for the column footer summary — and, on a grouped list view, the per-group header summary (server-side): count (COUNT(*), the group count), count_unique (count_distinct), sum, avg, min, max map onto the query AST's AggregationFunction; count_filled, count_empty, percent_filled, percent_empty derive from one COUNT(field) node (the non-null count) and the group count — count_filled = COUNT(field), count_empty = count − COUNT(field), percent_filled = COUNT(field) / count (0 when count is 0), percent_empty = 1 − percent_filled. Server-side "empty" is null on every face; the footer's client-side reading of empty strings and empty arrays as empty is the renderer's to converge
 
 ### Allowed Values
 
@@ -559,7 +559,7 @@ Gallery/card view configuration
 | **titleField** | `string` | ✅ | Field displayed as the task title |
 | **progressField** | `string` | optional | Field providing the task completion percentage |
 | **dependenciesField** | `string` | optional | Field listing the task's predecessor (dependency) record ids |
-| **colorField** | `string` | optional | Field that drives the bar color |
+| **colorField** | `string` | optional | Field to derive each bar color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else a semantic color token derived from the value |
 | **parentField** | `string` | optional | Field holding the parent task id (builds the summary → step tree) |
 | **typeField** | `string` | optional | Field whose value maps to task/summary/milestone |
 | **baselineStartField** | `string` | optional | Baseline (planned) start field |
@@ -600,21 +600,21 @@ Gallery/card view configuration
 
 ## GroupingConfig
 
-Record grouping configuration
+Record grouping configuration — SERVER-SIDE: the set of groups and every number in a group header (the count and the per-column summaries) are properties of the query, not of the fetched page, answered by one aggregate query (`groupBy` = the fields in nesting order, `count` + the mapped column summaries, the view filter); rows inside a group are paged by the existing find with the group key AND-ed into the view filter. Compiled by `compileListViewGroupQuery` / `compileListViewGroupRowsQuery`
 
 ### Properties
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **fields** | `{ field: string; order: Enum<'asc' \| 'desc'>; collapsed: boolean }[]` | ✅ | Fields to group by, in nesting order — the first entry is the outermost group and each later entry nests one level deeper (at least one field) |
+| **fields** | `{ field: string; order: Enum<'asc' \| 'desc'>; collapsed: boolean }[]` | ✅ | Fields to group by, in nesting order — the first entry is the outermost group and each later entry nests one level deeper (at least one field); the same order as the group header query's `groupBy` |
 
 ### Nested Shape: `GroupingConfig.fields[number]`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **field** | `string` | ✅ | Field name to group by |
-| **order** | `Enum<'asc' \| 'desc'>` | optional (default: `"asc"`) | Group sort order |
-| **collapsed** | `boolean` | optional (default: `false`) | Collapse groups by default |
+| **field** | `string` | ✅ | Field name to group by — one `groupBy` column of the group header query; the header row carries its raw stored value (null for the empty group) |
+| **order** | `Enum<'asc' \| 'desc'>` | optional (default: `"asc"`) | Group sort order — applied by the consumer over the header rows (the aggregate query carries no orderBy) |
+| **collapsed** | `boolean` | optional (default: `false`) | Collapse groups by default (presentation only) |
 
 
 ---
@@ -625,9 +625,9 @@ Record grouping configuration
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **field** | `string` | ✅ | Field name to group by |
-| **order** | `Enum<'asc' \| 'desc'>` | optional (default: `"asc"`) | Group sort order |
-| **collapsed** | `boolean` | optional (default: `false`) | Collapse groups by default |
+| **field** | `string` | ✅ | Field name to group by — one `groupBy` column of the group header query; the header row carries its raw stored value (null for the empty group) |
+| **order** | `Enum<'asc' \| 'desc'>` | optional (default: `"asc"`) | Group sort order — applied by the consumer over the header rows (the aggregate query carries no orderBy) |
+| **collapsed** | `boolean` | optional (default: `false`) | Collapse groups by default (presentation only) |
 
 
 ---
@@ -783,7 +783,7 @@ Map view configuration
 | **description** | `string \| Record<string, string>` | optional | View description for documentation/tooltips |
 | **sharing** | `{ type?: Enum<'personal' \| 'collaborative'>; lockedBy?: string }` | optional | View sharing and access configuration |
 | **rowHeight** | `Enum<'compact' \| 'short' \| 'medium' \| 'tall' \| 'extra_tall'>` | optional | Row height / density setting |
-| **grouping** | `{ fields: object[] }` | optional | Group records by one or more fields |
+| **grouping** | `{ fields: object[] }` | optional | Group records by one or more fields — server-side: the groups and their header numbers come from an aggregate query over the whole filtered set, rows within a group are paged (see GroupingConfigSchema) |
 | **rowColor** | `{ field: string; colors?: Record<string, string> }` | optional | Color rows based on field value |
 | **hiddenFields** | `string[]` | optional | Fields to hide in this specific view |
 | **fieldOrder** | `string[]` | optional | Explicit field display order for this view |
@@ -915,7 +915,7 @@ View filter rule
 | **startDateField** | `string` | ✅ | Field providing the event start date/time |
 | **endDateField** | `string` | optional | Field providing the event end date/time (defaults to a single-day event) |
 | **titleField** | `string` | optional | Field displayed as the event title. Omit to fall back to the record display name (ADR-0079 resolver chain) |
-| **colorField** | `string` | optional | Field whose value determines the event color |
+| **colorField** | `string` | optional | Field to derive each event color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the calendar theme-aware palette color hashed from the value |
 
 ### Nested Shape: `ListView.gantt`
 
@@ -926,7 +926,7 @@ View filter rule
 | **titleField** | `string` | ✅ | Field displayed as the task title |
 | **progressField** | `string` | optional | Field providing the task completion percentage |
 | **dependenciesField** | `string` | optional | Field listing the task's predecessor (dependency) record ids |
-| **colorField** | `string` | optional | Field that drives the bar color |
+| **colorField** | `string` | optional | Field to derive each bar color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else a semantic color token derived from the value |
 | **parentField** | `string` | optional | Field holding the parent task id (builds the summary → step tree) |
 | **typeField** | `string` | optional | Field whose value maps to task/summary/milestone |
 | **baselineStartField** | `string` | optional | Baseline (planned) start field |
@@ -959,7 +959,7 @@ View filter rule
 | **endDateField** | `string` | optional | Field for timeline item end date |
 | **titleField** | `string` | ✅ | Field to display as timeline item title |
 | **groupByField** | `string` | optional | Field to group timeline rows |
-| **colorField** | `string` | optional | Field to determine item color |
+| **colorField** | `string` | optional | Field to derive each item color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the timeline default marker color |
 | **scale** | `Enum<'hour' \| 'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>` | optional (default: `"week"`) | Default timeline scale |
 
 ### Nested Shape: `ListView.chart`
@@ -1003,7 +1003,7 @@ View filter rule
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **fields** | `{ field: string; order?: Enum<'asc' \| 'desc'>; collapsed?: boolean }[]` | ✅ | Fields to group by, in nesting order — the first entry is the outermost group and each later entry nests one level deeper (at least one field) |
+| **fields** | `{ field: string; order?: Enum<'asc' \| 'desc'>; collapsed?: boolean }[]` | ✅ | Fields to group by, in nesting order — the first entry is the outermost group and each later entry nests one level deeper (at least one field); the same order as the group header query's `groupBy` |
 
 ### Nested Shape: `ListView.rowColor`
 
@@ -1178,7 +1178,7 @@ Tab configuration for multi-tab view interface
 | **description** | `string \| Record<string, string>` | optional | View description for documentation/tooltips |
 | **sharing** | `{ type?: Enum<'personal' \| 'collaborative'>; lockedBy?: string }` | optional | View sharing and access configuration |
 | **rowHeight** | `Enum<'compact' \| 'short' \| 'medium' \| 'tall' \| 'extra_tall'>` | optional | Row height / density setting |
-| **grouping** | `{ fields: object[] }` | optional | Group records by one or more fields |
+| **grouping** | `{ fields: object[] }` | optional | Group records by one or more fields — server-side: the groups and their header numbers come from an aggregate query over the whole filtered set, rows within a group are paged (see GroupingConfigSchema) |
 | **rowColor** | `{ field: string; colors?: Record<string, string> }` | optional | Color rows based on field value |
 | **hiddenFields** | `string[]` | optional | Fields to hide in this specific view |
 | **fieldOrder** | `string[]` | optional | Explicit field display order for this view |
@@ -1301,7 +1301,7 @@ View filter rule
 | **startDateField** | `string` | ✅ | Field providing the event start date/time |
 | **endDateField** | `string` | optional | Field providing the event end date/time (defaults to a single-day event) |
 | **titleField** | `string` | optional | Field displayed as the event title. Omit to fall back to the record display name (ADR-0079 resolver chain) |
-| **colorField** | `string` | optional | Field whose value determines the event color |
+| **colorField** | `string` | optional | Field to derive each event color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the calendar theme-aware palette color hashed from the value |
 
 ### Nested Shape: `ObjectListView.gantt`
 
@@ -1312,7 +1312,7 @@ View filter rule
 | **titleField** | `string` | ✅ | Field displayed as the task title |
 | **progressField** | `string` | optional | Field providing the task completion percentage |
 | **dependenciesField** | `string` | optional | Field listing the task's predecessor (dependency) record ids |
-| **colorField** | `string` | optional | Field that drives the bar color |
+| **colorField** | `string` | optional | Field to derive each bar color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else a semantic color token derived from the value |
 | **parentField** | `string` | optional | Field holding the parent task id (builds the summary → step tree) |
 | **typeField** | `string` | optional | Field whose value maps to task/summary/milestone |
 | **baselineStartField** | `string` | optional | Baseline (planned) start field |
@@ -1345,7 +1345,7 @@ View filter rule
 | **endDateField** | `string` | optional | Field for timeline item end date |
 | **titleField** | `string` | ✅ | Field to display as timeline item title |
 | **groupByField** | `string` | optional | Field to group timeline rows |
-| **colorField** | `string` | optional | Field to determine item color |
+| **colorField** | `string` | optional | Field to derive each item color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the timeline default marker color |
 | **scale** | `Enum<'hour' \| 'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>` | optional (default: `"week"`) | Default timeline scale |
 
 ### Nested Shape: `ObjectListView.chart`
@@ -1389,7 +1389,7 @@ View filter rule
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **fields** | `{ field: string; order?: Enum<'asc' \| 'desc'>; collapsed?: boolean }[]` | ✅ | Fields to group by, in nesting order — the first entry is the outermost group and each later entry nests one level deeper (at least one field) |
+| **fields** | `{ field: string; order?: Enum<'asc' \| 'desc'>; collapsed?: boolean }[]` | ✅ | Fields to group by, in nesting order — the first entry is the outermost group and each later entry nests one level deeper (at least one field); the same order as the group header query's `groupBy` |
 
 ### Nested Shape: `ObjectListView.rowColor`
 
@@ -1597,7 +1597,7 @@ Timeline view configuration
 | **endDateField** | `string` | optional | Field for timeline item end date |
 | **titleField** | `string` | ✅ | Field to display as timeline item title |
 | **groupByField** | `string` | optional | Field to group timeline rows |
-| **colorField** | `string` | optional | Field to determine item color |
+| **colorField** | `string` | optional | Field to derive each item color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the timeline default marker color |
 | **scale** | `Enum<'hour' \| 'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>` | optional (default: `"week"`) | Default timeline scale |
 
 
@@ -1764,7 +1764,7 @@ Tab configuration for multi-tab view interface
 | **description** | `string \| Record<string, string>` | optional | View description for documentation/tooltips |
 | **sharing** | `{ type?: Enum<'personal' \| 'collaborative'>; lockedBy?: string }` | optional | View sharing and access configuration |
 | **rowHeight** | `Enum<'compact' \| 'short' \| 'medium' \| 'tall' \| 'extra_tall'>` | optional | Row height / density setting |
-| **grouping** | `{ fields: object[] }` | optional | Group records by one or more fields |
+| **grouping** | `{ fields: object[] }` | optional | Group records by one or more fields — server-side: the groups and their header numbers come from an aggregate query over the whole filtered set, rows within a group are paged (see GroupingConfigSchema) |
 | **rowColor** | `{ field: string; colors?: Record<string, string> }` | optional | Color rows based on field value |
 | **hiddenFields** | `string[]` | optional | Fields to hide in this specific view |
 | **fieldOrder** | `string[]` | optional | Explicit field display order for this view |
@@ -1849,7 +1849,7 @@ Tab configuration for multi-tab view interface
 | **description** | `string \| Record<string, string>` | optional | View description for documentation/tooltips |
 | **sharing** | `{ type?: Enum<'personal' \| 'collaborative'>; lockedBy?: string }` | optional | View sharing and access configuration |
 | **rowHeight** | `Enum<'compact' \| 'short' \| 'medium' \| 'tall' \| 'extra_tall'>` | optional | Row height / density setting |
-| **grouping** | `{ fields: object[] }` | optional | Group records by one or more fields |
+| **grouping** | `{ fields: object[] }` | optional | Group records by one or more fields — server-side: the groups and their header numbers come from an aggregate query over the whole filtered set, rows within a group are paged (see GroupingConfigSchema) |
 | **rowColor** | `{ field: string; colors?: Record<string, string> }` | optional | Color rows based on field value |
 | **hiddenFields** | `string[]` | optional | Fields to hide in this specific view |
 | **fieldOrder** | `string[]` | optional | Explicit field display order for this view |
@@ -2090,7 +2090,7 @@ This schema accepts one of the following structures:
 | **description** | `string \| Record<string, string>` | optional | View description for documentation/tooltips |
 | **sharing** | `{ type?: Enum<'personal' \| 'collaborative'>; lockedBy?: string }` | optional | View sharing and access configuration |
 | **rowHeight** | `Enum<'compact' \| 'short' \| 'medium' \| 'tall' \| 'extra_tall'>` | optional | Row height / density setting |
-| **grouping** | `{ fields: object[] }` | optional | Group records by one or more fields |
+| **grouping** | `{ fields: object[] }` | optional | Group records by one or more fields — server-side: the groups and their header numbers come from an aggregate query over the whole filtered set, rows within a group are paged (see GroupingConfigSchema) |
 | **rowColor** | `{ field: string; colors?: Record<string, string> }` | optional | Color rows based on field value |
 | **hiddenFields** | `string[]` | optional | Fields to hide in this specific view |
 | **fieldOrder** | `string[]` | optional | Explicit field display order for this view |
@@ -2266,7 +2266,7 @@ This schema accepts one of the following structures:
 | **description** | `string \| Record<string, string>` | optional | View description for documentation/tooltips |
 | **sharing** | `{ type?: Enum<'personal' \| 'collaborative'>; lockedBy?: string }` | optional | View sharing and access configuration |
 | **rowHeight** | `Enum<'compact' \| 'short' \| 'medium' \| 'tall' \| 'extra_tall'>` | optional | Row height / density setting |
-| **grouping** | `{ fields: object[] }` | optional | Group records by one or more fields |
+| **grouping** | `{ fields: object[] }` | optional | Group records by one or more fields — server-side: the groups and their header numbers come from an aggregate query over the whole filtered set, rows within a group are paged (see GroupingConfigSchema) |
 | **rowColor** | `{ field: string; colors?: Record<string, string> }` | optional | Color rows based on field value |
 | **hiddenFields** | `string[]` | optional | Fields to hide in this specific view |
 | **fieldOrder** | `string[]` | optional | Explicit field display order for this view |

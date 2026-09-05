@@ -21,6 +21,12 @@ export * from './responsive.zod';
 export * from './app.zod';
 export * from './bulk-action.zod';
 export * from './view.zod';
+// [#14556] List-view grouping is SERVER-SIDE (ruling A on objectui#7189): the
+// group header aggregate query and the per-group row page, compiled from the
+// view's `grouping` + column summaries + composed filter in the query AST's
+// own vocabulary — the checkable half of the contract `GroupingConfigSchema`
+// states in prose.
+export * from './view-grouping-query';
 // [#5320] The assembled-manifest channel for non-container view artifacts —
 // the `viewItems:` vocabulary and its producer-side partition helper.
 export * from './assembled-views.zod';
@@ -99,3 +105,8 @@ export * from './expression-bindable-text-keys.zod';
 // (maintainer ruling recorded on #11350), same repair: re-export from the
 // declaring module.
 export type { FilterCondition } from '../data/filter.zod';
+// [#14556] entry-nameability, the same shape one module over: the compiled
+// group queries are `/data`'s `EngineAggregateOptions` / `EngineQueryOptions`,
+// whose structural expansion mentions `QueryInput` (`expand` is a recursive
+// map of it), which `/ui` did not re-export. Same invariant, same repair.
+export type { QueryInput } from '../data/query.zod';

@@ -228,6 +228,8 @@
  * numbers in this header are stated with the tree they were measured on.
  */
 
+// dispatch-gates: wide-population -- SCAN_ROOTS is packages, walked for every non-test .ts source under it -- 1898 of 4903 (39%), recorded REFUSE-WIDE in scripts/pm/bare-root-worklist.mjs. The population is not a part of that root, it IS every non-test source in it, so a true declaration would name this gate on every card touching a package. This gate's own failure text already prints the subtree spelling, which is how close the shape sits to declaring itself by accident.
+
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -802,7 +804,65 @@ function run({ list = false } = {}) {
 // handshake is a flag rather than a returned sentinel.
 let selfTestReachedVerdict = false;
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures` used to be this self-test's ONLY success condition, so "every
+// case
+// held" and "the cases never ran" printed the same line. Closed the way
+// PR #13487 validated on check-doc-authoring: what is pinned is the registered
+// NAMES, not a number. The floor requires the OPENED set to equal the DECLARED
+// set with each battery at or above its own count.
+//
+// This file declares ONE battery, opened at the top of the self-test body. Its
+// blocks are headed by unmarked prose comments, so it carries fewer than the two
+// named section banners the sectioning criterion needs, and ⛔ a comment is NOT
+// promoted to a section head — that is a judgement per comment this transplant
+// does not make. The hoisted single battery is the shape PR #14896, PR #15003
+// and PR #15217 landed for exactly this case.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The count is a FLOOR, not an equality — adding cases is ordinary work and must
+// not red. A battery BELOW its floor means cases stopped running; the remedy is
+// to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'check-optional-error-sink-contract self-test': 66,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 1;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 function selfTest() {
+    // The battery ledger this self-test's floor is evaluated against (#13489).
+    // `battery()` opens a battery; every assertion below is attributed to the one
+    // most recently opened, so a section that stops running stops registering and
+    // names ITSELF at the floor rather than going quiet.
+    const batterySeen = new Map();
+    let openBattery = null;
+    const battery = (name) => {
+        openBattery = name;
+    };
+    const registerCase = () => {
+        const b = openBattery ?? UNATTRIBUTED_BATTERY;
+        batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+    };
+    battery('check-optional-error-sink-contract self-test');
+    // The thunk PR #15198 measured: it registers the case and then runs the
+    // existing site VERBATIM, so no assertion condition is inverted or rewritten
+    // and the sink keeps its own semantics. Registration happens whether or not
+    // the site fires, which is what makes the count a floor on cases RUN rather
+    // than a count of failures.
+    const check = (fn) => {
+        registerCase();
+        fn();
+    };
     const cases = [
         {
             name: 'no-fallback: an optional `error` alone — nothing to reach for',
@@ -982,10 +1042,12 @@ function selfTest() {
         ) {
             problems.push('unreadable-with-optional-error count mismatch');
         }
-        if (problems.length > 0) {
-            failures++;
-            console.error(`  ✗ ${c.name}\n      ${problems.join('\n      ')}`);
-        }
+check(() => {
+            if (problems.length > 0) {
+                failures++;
+                console.error(`  ✗ ${c.name}\n      ${problems.join('\n      ')}`);
+            }
+});
     }
 
     // ⭐ The file PREFILTER, pinned separately because the cases above call
@@ -1001,27 +1063,33 @@ function selfTest() {
             `interface L { ${channel}?(m: string): void }`, // optional method
         ];
         for (const code of spellings) {
-            if (!CHANNEL_PREFILTER.test(code)) {
-                failures++;
-                console.error(`  ✗ prefilter skips a file declaring \`${channel}\`: ${code}`);
-            }
+check(() => {
+                if (!CHANNEL_PREFILTER.test(code)) {
+                    failures++;
+                    console.error(`  ✗ prefilter skips a file declaring \`${channel}\`: ${code}`);
+                }
+});
         }
     }
     // The reject side of the prefilter, so "always true" is distinguishable from
     // "correctly derived". A module with no channel member is skipped, and that
     // is what keeps the scan cheap.
-    if (CHANNEL_PREFILTER.test('export const answer: number = 42;')) {
-        failures++;
-        console.error('  ✗ prefilter matches a file with no log-channel member — it is not filtering at all');
-    }
+check(() => {
+        if (CHANNEL_PREFILTER.test('export const answer: number = 42;')) {
+            failures++;
+            console.error('  ✗ prefilter matches a file with no log-channel member — it is not filtering at all');
+        }
+});
     // The derivation itself: a channel added to the vocabulary must widen the
     // prefilter automatically. A hand-written second copy of the vocabulary is
     // how the previous narrowing outlived its own reason.
     for (const channel of LOG_CHANNELS) {
-        if (!CHANNEL_PREFILTER.source.includes(channel)) {
-            failures++;
-            console.error(`  ✗ prefilter is not derived from LOG_CHANNELS — \`${channel}\` is missing from it`);
-        }
+check(() => {
+            if (!CHANNEL_PREFILTER.source.includes(channel)) {
+                failures++;
+                console.error(`  ✗ prefilter is not derived from LOG_CHANNELS — \`${channel}\` is missing from it`);
+            }
+});
     }
     // ⭐ And that `run` actually GOES THROUGH it. Found by ablation while
     // writing this: replacing the call site with a literal `/\berror…/` — the
@@ -1046,18 +1114,26 @@ function selfTest() {
         .toString()
         .replace(/\/\*[\s\S]*?\*\//g, ' ')
         .replace(/(^|[^:])\/\/[^\n]*/g, '$1 ');
-    if (!runBody.includes('CHANNEL_PREFILTER.test(')) {
-        failures++;
-        console.error(
-            '  ✗ `run` does not reference CHANNEL_PREFILTER — the scan is filtering files through some other\n' +
-                '      test. Every count this gate prints is bounded by that decision; route it through the\n' +
-                '      derived prefilter, or the `noErrorMember` tally silently stops being a count (#11069).',
-        );
-    }
+check(() => {
+        if (!runBody.includes('CHANNEL_PREFILTER.test(')) {
+            failures++;
+            console.error(
+                '  ✗ `run` does not reference CHANNEL_PREFILTER — the scan is filtering files through some other\n' +
+                    '      test. Every count this gate prints is bounded by that decision; route it through the\n' +
+                    '      derived prefilter, or the `noErrorMember` tally silently stops being a count (#11069).',
+            );
+        }
+});
 
     // The ledger's own shape is part of the contract: a hand-edited entry that
     // cannot key against a finding would silently excuse nothing (or, worse,
     // everything).
+    // ⛔ The two assertions in the loop below are deliberately NOT registered.
+    // They run one-per-row of a SHRINK-ONLY ledger, and a floor that moves with
+    // that list would red every legitimate removal — training the next author to
+    // edit the floor, which is the one habit these floors exist to prevent
+    // (#13797's ruling, carried forward by PR #15217). The structural cases above
+    // are what this battery floors.
     const baseline = loadBaseline();
     for (const e of baseline.entries ?? []) {
         for (const field of ['file', 'sink', 'verdict', 'note']) {
@@ -1070,6 +1146,53 @@ function selfTest() {
             failures++;
             console.error(`  ✗ baseline entry ${baselineKey(e)} carries a non-red verdict \`${e.verdict}\``);
         }
+    }
+
+    // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
+    //
+    // Evaluated after every battery has had its chance and BEFORE the verdict, so
+    // the success line below can only be printed by a run in which the set of
+    // batteries that registered assertions EQUALS the set declared. A set
+    // difference names WHICH battery stopped; a count says only that something did.
+    // This file's sink is the `failures` counter, so the floor speaks its idiom: a
+    // breach prints like any other case failure and reds through the existing
+    // verdict below.
+    const floorFailure = (message) => { console.error(message); failures++; };
+    const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+    let floorBreached = false;
+    if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+        floorBreached = true;
+        floorFailure(
+            `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned `
+                + `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+        );
+    }
+    for (const [name, count] of batterySeen) {
+        if (declaredBatteries.includes(name)) continue;
+        floorBreached = true;
+        floorFailure(
+            `self-test battery "${name}" registered ${count} case(s) but is not declared in `
+                + 'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+        );
+    }
+    for (const name of declaredBatteries) {
+        const count = batterySeen.get(name) ?? 0;
+        if (count >= SELF_TEST_BATTERIES[name]) continue;
+        floorBreached = true;
+        floorFailure(
+            count === 0
+                ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. `
+                    + 'The verdict below would have claimed those cases hold.'
+                : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of `
+                    + `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+        );
+    }
+    if (floorBreached) {
+        floorFailure(
+            'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the '
+                + 'number. Find what stopped registering (an early return, a deleted block, a guard that now '
+                + 'skips) and restore it.',
+        );
     }
 
     if (failures > 0) {

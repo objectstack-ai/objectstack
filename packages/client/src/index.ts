@@ -87,14 +87,13 @@ import {
   // [#11924] The GLOBAL cross-object search body — NOT the per-object
   // `SearchResult` in `@objectstack/spec/contracts` (the #8140 near-miss trap).
   SearchAllResponse,
-  // [#12104] The `{ success, data }` envelope SKELETON, plus the two analytics
-  // route response types that already transcribe their producer's declared
-  // return. The four `return res.json()` methods bound by that card resolve to
-  // the WHOLE body — `res.json()` strips nothing, unlike `unwrapResponse` — so
-  // the envelope IS the annotation, not the payload under it. `BaseResponse` is
-  // reused rather than hand-spelled so a field added to the envelope reaches
-  // these annotations with it.
-  BaseResponse,
+  // [#12104 → #13079] The two analytics route response types whose `data`
+  // member already transcribes the producer's declared return. Since #13079
+  // the methods resolve to that `data` member (post-`unwrapResponse`), so the
+  // annotations INDEX these envelope types — `AnalyticsMetadataResponse['data']`,
+  // `AnalyticsSqlResponse['data']` — rather than re-declaring the payload: a
+  // change to the route's declared `data` reaches the SDK with it, and no
+  // payload type has to be declared in `packages/spec` for the SDK's sake.
   AnalyticsMetadataResponse,
   AnalyticsSqlResponse,
   // [#12038] The meta history/diagnostics and package lifecycle response
@@ -885,6 +884,136 @@ function metaDeleteHeaders(options?: DeleteMetaItemOptions): Record<string, stri
     return { 'If-Match': String(options.ifMatch) };
 }
 
+/**
+ * An OAuth client application exactly as `@better-auth/oauth-provider` puts it
+ * on the wire: RFC 7591 §2 client metadata, snake_case, served BARE — these
+ * routes carry no ObjectStack envelope (`auth-route-ledger.ts` records all six
+ * `oauth2/*` client routes as `source: 'better-auth'`).
+ *
+ * ⚠️ **The two timestamps are RFC 7591 numbers — Unix epoch SECONDS — not
+ * `Date` and not ISO-8601 strings.** The provider converts its stored `Date`
+ * to seconds before serialising, so a `Date` never reaches the wire and there
+ * is nothing here to revive. `new Date(client_id_issued_at * 1000)` is the
+ * caller's own step.
+ *
+ * Only `client_id` and `redirect_uris` are always present: the serialiser
+ * emits every other column as `undefined` when the row does not carry it, and
+ * `JSON.stringify` then drops the key. `redirect_uris` is unconditional
+ * because the serialiser defaults it to `[]`.
+ *
+ * ⚠️ A row that carries provider `metadata` spreads those keys at the TOP
+ * level alongside the members below. They are deliberately not declared: an
+ * index signature here would erase every precise member it sits beside.
+ */
+export interface OAuthApplication {
+    /** RFC 7591 `client_id`. Always present. */
+    client_id: string;
+    /**
+     * Returned by registration ONLY. `get` strips it, and it is never on the
+     * public projection — store it at creation time or lose it.
+     */
+    client_secret?: string;
+    /**
+     * Unix epoch **seconds** at which the secret expires; `0` is RFC 7591's
+     * "never expires". Present whenever the client has a secret.
+     */
+    client_secret_expires_at?: number;
+    /** Unix epoch **seconds** at which the client was registered. */
+    client_id_issued_at?: number;
+    /** Space-delimited scope list (RFC 7591 §2), not an array. */
+    scope?: string;
+    /**
+     * Owning user. Declared `string` and not `string | null`: the serialiser
+     * folds a null column to `undefined`, so `null` is not reachable here even
+     * though the provider's own type admits it.
+     */
+    user_id?: string;
+    client_name?: string;
+    client_uri?: string;
+    logo_uri?: string;
+    contacts?: string[];
+    tos_uri?: string;
+    policy_uri?: string;
+    /** RFC 7517 JWK Set, already parsed out of its stored JSON text. */
+    jwks?: { keys: Record<string, unknown>[] };
+    jwks_uri?: string;
+    software_id?: string;
+    software_version?: string;
+    software_statement?: string;
+    /** Always present; the public projection answers an empty array. */
+    redirect_uris: string[];
+    post_logout_redirect_uris?: string[];
+    backchannel_logout_uri?: string;
+    backchannel_logout_session_required?: boolean;
+    /** Open union, as the provider declares it — the listed values autocomplete. */
+    token_endpoint_auth_method?: 'none' | 'client_secret_basic' | 'client_secret_post' | 'private_key_jwt' | (string & {});
+    /** Open union, as the provider declares it — the listed values autocomplete. */
+    grant_types?: ('authorization_code' | 'client_credentials' | 'refresh_token' | (string & {}))[];
+    response_types?: 'code'[];
+    /** Not `| null`: the serialiser folds a null column to `undefined`. */
+    application_type?: 'web' | 'native';
+    disabled?: boolean;
+    skip_consent?: boolean;
+    enable_end_session?: boolean;
+    require_pkce?: boolean;
+    dpop_bound_access_tokens?: boolean;
+    subject_type?: 'public' | 'pairwise';
+    reference_id?: string;
+}
+
+/**
+ * What dynamic registration answers (HTTP **201**): an {@link OAuthApplication}
+ * plus the server-owned resources linked to the new client, when there are any.
+ *
+ * This is the one shape that carries `client_secret`.
+ */
+export interface OAuthApplicationRegistration extends OAuthApplication {
+    /** Server-owned resources linked to the registered client, when present. */
+    resources?: string[];
+}
+
+/**
+ * The PUBLIC projection of an OAuth application — what the consent screen may
+ * read about a client before the user has agreed to anything.
+ *
+ * Deliberately derived from {@link OAuthApplication} rather than restated, so
+ * the two cannot drift, and deliberately NOT `OAuthApplication` itself: the
+ * provider hand-picks these seven columns, so every other member is provably
+ * absent rather than merely optional.
+ *
+ * ⚠️ `redirect_uris` is always `[]` here. The projection does not pass the
+ * stored redirect URIs through, and the serialiser defaults the missing value
+ * to an empty array — so this member carries no information on this route and
+ * must not be read as "the client has no redirect URIs".
+ */
+export type OAuthApplicationPublic = Pick<
+    OAuthApplication,
+    | 'client_id'
+    | 'client_name'
+    | 'client_uri'
+    | 'logo_uri'
+    | 'contacts'
+    | 'tos_uri'
+    | 'policy_uri'
+    | 'redirect_uris'
+>;
+
+/**
+ * What submitting a consent decision answers — for BOTH decisions.
+ *
+ * Accepting and denying return the same shape and the same HTTP 200; the
+ * outcome is carried inside `url`, which on a denial is the client's
+ * `redirect_uri` with RFC 6749 §4.1.2.1 `error=access_denied` appended. So
+ * `redirect` is `true` on every success and is not the accept/deny signal —
+ * read `url`.
+ */
+export interface OAuthConsentResult {
+    /** Always `true`; the provider's own type declares the literal. */
+    redirect: true;
+    /** Absolute URL the caller must navigate the user agent to. */
+    url: string;
+}
+
 export class ObjectStackClient {
   private baseUrl: string;
   private token?: string;
@@ -1498,24 +1627,31 @@ export class ObjectStackClient {
    * Analytics Services
    */
   /**
-   * [#12104] ⚠️ THE THREE DISPATCHER-SERVED METHODS HERE RESOLVE TO THE
-   * ENVELOPE, not to the payload — read `.data`.
+   * [#13079] EVERY method here resolves to the PAYLOAD — never to the
+   * dispatcher's `{ success, data }` envelope.
    *
-   * They end `return res.json()` rather than `return this.unwrapResponse(res)`,
-   * and `res.json()` strips nothing, so the caller receives the dispatcher's
-   * `{ success, data }` body whole. That was invisible while the methods were
-   * erased to `Promise< any >` (no annotation, and `Response.json()` is declared
-   * `Promise< any >` in `lib.dom`); it is stated by the declarations now.
-   * `queryDataset` below is the exception and says why.
+   * `query` / `meta` / `explain` are dispatcher-served and end
+   * `return this.unwrapResponse(res)`, which strips that envelope, exactly as
+   * every other dispatcher-served method of this class does. Until #13079
+   * they ended `return res.json()`, which strips nothing, and handed the
+   * envelope back whole — so their callers alone had to read `.data`
+   * (invisible while the methods were erased to `Promise< any >`, stated by
+   * the #12104 declarations, converged by the 2026-08-31 ruling on #13079).
+   * `queryDataset` is served by `@objectstack/rest` with no envelope at all
+   * and keeps `res.json()` — see its docblock; ⛔ it is PROTECTED, not a fifth
+   * instance. Either way the caller reads one shape: the producer's declared
+   * return.
    */
   analytics = {
     /**
      * Run an `AnalyticsQuery` (`POST /analytics/query`).
      *
-     * The `data` member is `IAnalyticsService.query`'s declared return, relayed
-     * verbatim by the domain (`deps.success(await analyticsService.query(…))`).
+     * Resolves to `IAnalyticsService.query`'s declared return — relayed
+     * verbatim by the domain (`deps.success(await analyticsService.query(…))`)
+     * and unwrapped here. **BREAKING since #13079**: read `result.rows`, not
+     * `result.data.rows`; the method used to resolve to the whole envelope.
      *
-     * Deliberately bound to the CONTRACT, not to `AnalyticsResultResponse`
+     * Deliberately bound to the CONTRACT, not to `AnalyticsResultResponse['data']`
      * (`@objectstack/spec/api`). When #12104 wrote this annotation the schema
      * was a stale projection — its `data.fields` declared `{ name, type }`
      * only, while the contract this route relays also carries `label` /
@@ -1529,49 +1665,53 @@ export class ObjectStackClient {
      * source rather than the copy is what keeps this method immune to the
      * transcription drifting again.
      */
-    query: async (payload: any): Promise<BaseResponse & { data: AnalyticsResult }> => {
+    query: async (payload: any): Promise<AnalyticsResult> => {
       const route = this.getRoute('analytics');
       const res = await this.fetch(`${this.baseUrl}${route}/query`, {
          method: 'POST',
          body: JSON.stringify(payload)
       });
-      return res.json();
+      return this.unwrapResponse<AnalyticsResult>(res);
     },
     /**
      * Cube metadata listing. Pass `cube` to filter to a single cube
      * (`?cube=` — [#3584] the dispatcher shape; the old `/meta/:cube` path
      * segment was served by nothing and 404ed everywhere).
      *
-     * [#12104] `AnalyticsMetadataResponse` is the route's own declared response
-     * type and it AGREES with the producer: its `data` is the bare `CubeMeta[]`
+     * Resolves to `AnalyticsMetadataResponse['data']` — the bare `CubeMeta[]`
      * discovery projection `IAnalyticsService.getMeta` returns (#6442 narrowed
-     * the schema to exactly that, and `spec`'s `analytics.test.ts` pins
+     * the route's schema to exactly that, and `spec`'s `analytics.test.ts` pins
      * `data[number]` ≡ `CubeMeta` at compile time). There is no `cubes`
-     * wrapper under `data`.
+     * wrapper and, **since #13079**, no envelope either:
+     * `(await client.analytics.meta())[0].name`, where the method used to
+     * resolve to `{ success, data }` and the caller read `.data[0].name`. The
+     * annotation INDEXES the route's declared response type rather than
+     * re-declaring the payload, so the schema and this method cannot drift
+     * into saying two things.
      */
-    meta: async (cube?: string): Promise<AnalyticsMetadataResponse> => {
+    meta: async (cube?: string): Promise<AnalyticsMetadataResponse['data']> => {
         const route = this.getRoute('analytics');
         const qs = cube ? `?cube=${encodeURIComponent(cube)}` : '';
         const res = await this.fetch(`${this.baseUrl}${route}/meta${qs}`);
-        return res.json();
+        return this.unwrapResponse<AnalyticsMetadataResponse['data']>(res);
     },
     /**
      * Dry-run a query to its generated SQL (`POST /analytics/sql` — [#3584]
      * the dispatcher route; the old `/explain` route name was served by
      * nothing and 404ed everywhere).
      *
-     * [#12104] `AnalyticsSqlResponse` is the route's own declared response type
-     * and its `data` — `{ sql, params }` — is exactly
+     * Resolves to `AnalyticsSqlResponse['data']` — `{ sql, params }`, exactly
      * `IAnalyticsService.generateSql`'s declared return, so the schema and the
-     * producer say one thing here.
+     * producer say one thing here. **Since #13079** the value is that payload
+     * itself: read `result.sql`, not `result.data.sql`.
      */
-    explain: async (payload: any): Promise<AnalyticsSqlResponse> => {
+    explain: async (payload: any): Promise<AnalyticsSqlResponse['data']> => {
         const route = this.getRoute('analytics');
         const res = await this.fetch(`${this.baseUrl}${route}/sql`, {
             method: 'POST',
             body: JSON.stringify(payload)
          });
-         return res.json();
+         return this.unwrapResponse<AnalyticsSqlResponse['data']>(res);
     },
     /**
      * ADR-0021 semantic-layer dataset query — the REST dialect
@@ -1580,10 +1720,13 @@ export class ObjectStackClient {
      * `datasetName` (saved), plus `selection.measures`; `previewDrafts`
      * runs over draft-overlaid definitions (ADR-0037 P3). (#3587 gap closure)
      *
-     * [#12104] ⚠️ The ONE method in this namespace that resolves to the BARE
-     * payload. It is served by `@objectstack/rest` (the dispatcher mounts no
-     * twin), and that route ends `res.json(result)` with no envelope around it
-     * — so unlike its three siblings above there is no `.data` to read. Both
+     * [#12104] ⚠️ The one method in this namespace served with NO envelope at
+     * all: `@objectstack/rest` mounts it (the dispatcher mounts no twin) and
+     * the route ends `res.json(result)`, so `res.json()` here IS the payload
+     * read — there is nothing for `unwrapResponse` to strip. ⛔ PROTECTED by
+     * the #13079 ruling: its three siblings above were converged on
+     * `unwrapResponse` because their routes answer the envelope; this one was
+     * correct as it stood and must not be "fixed" into their shape. Both
      * halves measured on the real route in
      * `analytics-automation-json-erasure.test.ts`; the shape is
      * `IAnalyticsService.queryDataset`'s declared return.
@@ -3020,7 +3163,7 @@ export class ObjectStackClient {
         tos_uri?: string;
         policy_uri?: string;
         metadata?: Record<string, unknown>;
-      }) => {
+      }): Promise<OAuthApplicationRegistration> => {
         const route = this.getRoute('auth');
         // The new oauth-provider package exposes `/oauth2/create-client`
         // (authenticated dynamic registration). The legacy `/oauth2/register`
@@ -3038,7 +3181,7 @@ export class ObjectStackClient {
        * Get a single OAuth application by its `client_id`.
        * GET /api/v1/auth/oauth2/get-client?client_id=...
        */
-      get: async (clientId: string) => {
+      get: async (clientId: string): Promise<OAuthApplication> => {
         const route = this.getRoute('auth');
         const res = await this.fetch(
           `${this.baseUrl}${route}/oauth2/get-client?client_id=${encodeURIComponent(clientId)}`,
@@ -3051,7 +3194,7 @@ export class ObjectStackClient {
        * once the user has signed in). Used by the consent screen.
        * GET /api/v1/auth/oauth2/public-client?client_id=...
        */
-      getPublic: async (clientId: string) => {
+      getPublic: async (clientId: string): Promise<OAuthApplicationPublic> => {
         const route = this.getRoute('auth');
         const res = await this.fetch(
           `${this.baseUrl}${route}/oauth2/public-client?client_id=${encodeURIComponent(clientId)}`,
@@ -3080,6 +3223,22 @@ export class ObjectStackClient {
        *
        * Tokens and consents referencing the client cascade-delete via the
        * better-auth schema's `onDelete: cascade` foreign keys.
+       *
+       * ⚠️ NOT YET BOUND, and deliberately so — this is the one method of the
+       * `oauth.*` family that #14312 left at `Promise<any>`, with its
+       * `exported-any-returns.json` entry still open.
+       *
+       * Measured against a real server: the route answers **HTTP 200 with a
+       * ZERO-BYTE body** (its handler returns nothing; the provider declares
+       * it `void`) under a `content-type: application/json` header. So the
+       * `res.json()` below rejects with `SyntaxError: Unexpected end of JSON
+       * input` on every successful delete — the delete itself has already
+       * committed server-side by then.
+       *
+       * No declared return type can be honest while that call stands: any
+       * annotation here would promise a value this method never resolves.
+       * Binding it therefore needs a behaviour change, which is a decision
+       * beyond the type-narrowing this family was scoped to — see #14312.
        */
       delete: async (clientId: string) => {
         const route = this.getRoute('auth');
@@ -3100,7 +3259,7 @@ export class ObjectStackClient {
      * carries the signed authorization request that the consent endpoint
      * verifies before issuing the authorization code.
      */
-    consent: async (req: { accept: boolean; scope?: string; oauth_query?: string }) => {
+    consent: async (req: { accept: boolean; scope?: string; oauth_query?: string }): Promise<OAuthConsentResult> => {
       const route = this.getRoute('auth');
       const res = await this.fetch(`${this.baseUrl}${route}/oauth2/consent`, {
         method: 'POST',
@@ -3860,14 +4019,20 @@ export class ObjectStackClient {
        * | `400` | `FLOW_FAILED` | the flow RAN and was rejected | read `err.details.summary` for the failing node |
        * | `404` | — | no such flow in this deployment | check the name |
        *
-       * [#12104] ⚠️ **This method resolves to the ENVELOPE — read `.data`.** It
-       * ends `return res.json()`, which strips nothing, so the value is the
-       * dispatcher's `{ success, data }` body; its sibling
-       * `automation.execute` calls the SAME door through `unwrapResponse` and
-       * therefore resolves to the `AutomationResult` alone. The two differ in
-       * the wrapper only, which is why the payload type is the same one.
+       * [#13079] **Resolves to the `AutomationResult` alone — the SAME value
+       * its sibling `automation.execute` resolves to**, because both reach one
+       * handler through `unwrapResponse`. **BREAKING since #13079**: read
+       * `result.status` / `result.runId` / `result.screen`, not
+       * `result.data.…` — until then this method ended `return res.json()`,
+       * which strips nothing, and handed the dispatcher's `{ success, data }`
+       * envelope back whole while `execute` unwrapped it (#12104 stated that
+       * split in the declarations; the 2026-08-31 ruling closed it). The
+       * rejection table above is untouched: every non-2xx throws out of the
+       * fetch layer BEFORE either reader runs, and a 2xx body without `data`
+       * (nothing on this door sends one) passes through `unwrapResponse`
+       * unchanged, as on every other unwrapped method.
        *
-       * Deliberately bound to the CONTRACT, not to `TriggerFlowResponse`
+       * Deliberately bound to the CONTRACT, not to `TriggerFlowResponse['data']`
        * (`@objectstack/spec/api`). When #12104 wrote this annotation the
        * schema was a stale projection — its `data` declared
        * `{ success, output?, error?, durationMs? }` while the door also
@@ -3883,13 +4048,13 @@ export class ObjectStackClient {
        * annotating the source rather than the copy is what keeps this method
        * immune to the transcription drifting again.
        */
-      trigger: async (triggerName: string, payload: any): Promise<BaseResponse & { data: AutomationResult }> => {
+      trigger: async (triggerName: string, payload: any): Promise<AutomationResult> => {
           const route = this.getRoute('automation');
           const res = await this.fetch(`${this.baseUrl}${route}/trigger/${triggerName}`, {
               method: 'POST',
               body: JSON.stringify(payload)
           });
-          return res.json();
+          return this.unwrapResponse<AutomationResult>(res);
       },
 
       /**

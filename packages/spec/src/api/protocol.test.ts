@@ -1310,7 +1310,7 @@ describe('PublishPackageDraftsResponseSchema (#9406 — declares the batch publi
 
   it('probes is opaque BY DECLARATION (#9406 ruling): any shape passes through unmodified, unstripped', () => {
     // The real `BuildProbeReport` shape of today…
-    const report = { issues: [], checked: { seeds: 1, views: 2, widgets: 0 } };
+    const report = { issues: [], checked: { seeds: 1, views: 2, widgets: 0, objects: 3 } };
     const parsed = PublishPackageDraftsResponseSchema.parse({ ...realResponse, probes: report });
     expect(parsed.probes).toEqual(report);
     // …and a future shape this contract deliberately does NOT constrain. If a

@@ -551,6 +551,34 @@ function run(argv) {
   if (!v.ok || !tv.ok) process.exit(1);
 }
 
+// -- The self-test's own battery roster and floor (#13489) ------------------
+//
+// A pass used to be this self-test's ONLY success condition, so "every case
+// held" and "the cases never ran" printed the same line. Closed the way
+// PR #13487 validated on check-doc-authoring: what is pinned is the registered
+// NAMES, not a number. Every section opens with `battery('<name>')`, every
+// assertion is attributed to the battery most recently opened, and the floor
+// requires the OPENED set to equal the DECLARED set with each battery at or
+// above its own count.
+//
+// The counts are a FLOOR, not an equality -- adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'whole-tree accounting: the pure table': 26,
+  'porcelain parsing': 3,
+  'whole-tree accounting: a real git tree': 7,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 3;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 // Returned by `selfTest()` only after its verdict is printed. The dispatch
 // refuses anything else: a `return` that leaves the function above that line
 // prints nothing and still exits 0 — a self-test that never finished, reported
@@ -558,6 +586,37 @@ function run(argv) {
 const SELF_TEST_VERDICT = 'ablation-dist-preflight self-test reached its verdict';
 
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const batterySeen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+  };
+  // The one in-body assertion helper the 6 inline `failed += 1` sites now route
+  // through. Each site already had a ✓ branch and a ✗ branch; both are kept
+  // verbatim, and the only change is that a case is COUNTED either way — which
+  // is what lets the floor below tell "held" from "never ran".
+  const check = (label, ok, detail = '') => {
+    registerCase();
+    if (ok) {
+      console.log(`  ✓ ${label}`);
+      return;
+    }
+    console.error(`  ✗ ${label}${detail}`);
+    failed += 1;
+  };
+  // Cases run before the first banner, so the first battery is opened at the
+  // top of the body and that banner carries no second opener — PR #13487's own
+  // shape, as batches 1b and 2 landed it.
+  battery('whole-tree accounting: the pure table');
+  let failed = 0;
   const cases = [
     ['missing dist is red', { mode: 'present', distExists: false, scanned: 0, codeHits: 0, mapHits: 0 }, false],
     ['empty dist is red, not a skip', { mode: 'present', distExists: true, scanned: 0, codeHits: 0, mapHits: 0 }, false],
@@ -570,15 +629,9 @@ function selfTest() {
     ['absent mode: still in code is red', { mode: 'absent', distExists: true, scanned: 9, codeHits: 3, mapHits: 0 }, false],
     ['absent mode: missing dist still red', { mode: 'absent', distExists: false, scanned: 0, codeHits: 0, mapHits: 0 }, false],
   ];
-  let failed = 0;
   for (const [label, input, expected] of cases) {
     const got = verdict(input).ok;
-    if (got !== expected) {
-      console.error(`  ✗ ${label}: expected ok=${expected}, got ok=${got}`);
-      failed += 1;
-    } else {
-      console.log(`  ✓ ${label}`);
-    }
+    check(label, got === expected, `: expected ok=${expected}, got ok=${got}`);
   }
 
   // Filesystem leg: a real dist tree where the marker lives only in a sourcemap
@@ -597,13 +650,7 @@ function selfTest() {
       ['scan classifies a map-only token as a map hit', mapOnly.codeHits.length === 0 && mapOnly.mapHits.length === 1],
       ['map-only scan is judged RED', verdict({ mode: 'present', distExists: true, scanned: mapOnly.scanned, codeHits: 0, mapHits: mapOnly.mapHits.length }).ok === false],
     ];
-    for (const [label, ok] of checks) {
-      if (ok) console.log(`  ✓ ${label}`);
-      else {
-        console.error(`  ✗ ${label}`);
-        failed += 1;
-      }
-    }
+    for (const [label, ok] of checks) check(label, ok);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
@@ -631,12 +678,11 @@ function selfTest() {
   ];
   for (const [label, input, expectedOk, expectedLeg] of treeCases) {
     const got = treeVerdict(input);
-    if (got.ok !== expectedOk || got.leg !== expectedLeg) {
-      console.error(`  ✗ ${label}: expected ok=${expectedOk} leg=${expectedLeg}, got ok=${got.ok} leg=${got.leg}`);
-      failed += 1;
-    } else {
-      console.log(`  ✓ ${label}`);
-    }
+    check(
+      label,
+      got.ok === expectedOk && got.leg === expectedLeg,
+      `: expected ok=${expectedOk} leg=${expectedLeg}, got ok=${got.ok} leg=${got.leg}`,
+    );
   }
 
   // A red restore leg must NAME the leaked path -- a refusal that does not say
@@ -645,14 +691,11 @@ function selfTest() {
   {
     const red = treeVerdict({ mode: 'absent', gitReadable: true, files: [f('packages/spec/authorable-surface/data.json', false, true)] });
     const named = red.paths.includes('packages/spec/authorable-surface/data.json');
-    if (named) console.log('  ✓ a red restore leg names the leaked path');
-    else {
-      console.error('  ✗ a red restore leg names the leaked path');
-      failed += 1;
-    }
+    check('a red restore leg names the leaked path', named);
   }
 
   // ---- porcelain parsing ---------------------------------------------------
+  battery('porcelain parsing');
   {
     const Z = String.fromCharCode(0);
     const parsed = parsePorcelainZ([' M packages/spec/authorable-surface/data.json', '?? scratch note.txt', 'R  new/name.ts', 'old/name.ts', ''].join(Z));
@@ -661,16 +704,11 @@ function selfTest() {
       ['parses an untracked path holding a space, unquoted', parsed[1]?.path === 'scratch note.txt' && parsed[1]?.untracked === true],
       ['consumes a rename origin record instead of listing it', parsed.length === 3 && parsed[2]?.path === 'new/name.ts'],
     ];
-    for (const [label, ok] of checks) {
-      if (ok) console.log(`  ✓ ${label}`);
-      else {
-        console.error(`  ✗ ${label}`);
-        failed += 1;
-      }
-    }
+    for (const [label, ok] of checks) check(label, ok);
   }
 
   // ---- whole-tree accounting: a real git tree -------------------------------
+  battery('whole-tree accounting: a real git tree');
   // The pure table cannot catch a broken `git status` read or a broken
   // HEAD-vs-worktree marker probe, and those are the wires that make the
   // verdict mean anything. This leg replays the measured incident end to end.
@@ -732,15 +770,58 @@ function selfTest() {
       ['git leg: a deleted guard is a mutate leg, not a restore leg', deleteLeg.ok === true && deleteLeg.leg === 'mutate'],
       ['git leg: an untracked path reds the restore leg', untrackedLeg.ok === false && untrackedLeg.paths.includes('scratch.txt')],
     ];
-    for (const [label, ok] of gitChecks) {
-      if (ok) console.log(`  ✓ ${label}`);
-      else {
-        console.error(`  ✗ ${label}`);
-        failed += 1;
-      }
-    }
+    for (const [label, ok] of gitChecks) check(label, ok);
   } finally {
     rmSync(repo, { recursive: true, force: true });
+  }
+
+  // -- The floor: every declared battery RAN, and ran its cases (#13489) -----
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorMessages = [];
+  const floorFailure = (message) => { floorMessages.push(message); };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned `
+        + `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in `
+        + 'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. `
+          + 'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of `
+          + `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the '
+        + 'number. Find what stopped registering (an early return, a deleted block, a guard that now '
+        + 'skips) and restore it.',
+    );
+  }
+  for (const m of floorMessages) {
+    console.error(`  ✗ ${m}`);
+    failed += 1;
   }
 
   if (failed > 0) {

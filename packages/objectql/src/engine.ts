@@ -138,7 +138,13 @@ import {
 // namespace exemption — the ONE reading both narrowed gates consult.
 import { isPlatformObjectOutOfTenantAuditScope } from './tenancy/platform-object-tenancy.js';
 import { resolveTenancyPosture } from '@objectstack/types';
-import { normalizeTenancyPosture, type TenancyPosture } from '@objectstack/spec/security';
+import {
+  AuthzPostureSchema,
+  normalizeTenancyPosture,
+  postureEnforcesWall,
+  postureUsesUnionScope,
+  type TenancyPosture,
+} from '@objectstack/spec/security';
 
 /**
  * Per-row outcome of {@link ObjectQL.insertMany} (framework#3172). One entry
@@ -170,7 +176,11 @@ import {
   SECRET_MASK,
 } from './secret-fields.js';
 import { pluralToSingular, ExternalWriteForbiddenError } from '@objectstack/spec/shared';
-import { SchemaRegistry, computeFQN, type ArtifactInstallScope } from './registry.js';
+// [#15225] `carriesTenantScopeColumn` is the wall's own object predicate —
+// "does Layer 0 key on this object?" — read from the registry's binding of it
+// rather than re-spelled here (the R1 re-spelling mirrored one clause of three
+// and mislabelled a batch; see `bulkEventOrganizationId`).
+import { SchemaRegistry, computeFQN, carriesTenantScopeColumn, type ArtifactInstallScope } from './registry.js';
 import { expandSearchToFilter } from './search-filter.js';
 import { isSearchCompanionRequested, stripSearchCompanion } from './search-companion.js';
 import { ExpressionEngine } from '@objectstack/formula';
@@ -186,14 +196,14 @@ import {
   isViewContainerShaped,
 } from '@objectstack/spec';
 // [#14399] The ONE spelling of "which object does an aggregated `defineView`
-// container bind to", imported rather than re-spelled. See
-// `resolveMetadataItemName` below for why this registrar had a fourth copy and
-// why it lost it.
-import { deriveViewContainerObject } from '@objectstack/metadata';
+// container bind to", imported rather than re-spelled — from the LEAF subpath,
+// for the reason the `/errors` import above states (#14680). See
+// `resolveMetadataItemName` below for why this registrar lost its fourth copy.
+import { deriveViewContainerObject } from '@objectstack/metadata/view-container';
 import { bindHooksToEngine } from './hook-binder.js';
 import { validateRecord, normalizeMultiValueFields, coerceBooleanFields, ValidationError, buildFieldError, resolveFieldLabel, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
 import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
-import { evaluateValidationRules, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields } from './validation/rule-validator.js';
+import { evaluateValidationRules, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields, staticReadonlyInsertSubject, preserveAuditIgnoredOnInsertWarning } from './validation/rule-validator.js';
 // [#14088] The before-phase write recorder — the provenance channel the static
 // `readonly` strip needs to tell a hook's write from a caller's echo of the
 // SAME value. Armed and sealed in `update()`; the module owns the argument for
@@ -2190,6 +2200,196 @@ function eventUserId(execCtx?: ExecutionContext): string | undefined {
 }
 
 /**
+ * `DataEvent.organizationId` — the organization the RECORD belongs to, read
+ * off that row's own tenant column (#14970).
+ *
+ * The spec declares this member as an obligation on the PRODUCER, and states
+ * it in terms this function exists to honour literally: *"Present = exactly
+ * that organization, never a guess. It names the organization the RECORD
+ * belongs to — not the caller's active organization standing in for the
+ * row's, which would mislabel an administrator's write into another
+ * organization."* Two consequences, neither negotiable:
+ *
+ *  - ⛔ **Never `execCtx.tenantId`.** That is the CALLER's active org — the
+ *    hook-context sense {@link ObjectQL.buildHookUser} publishes, where
+ *    `organizationId` is deliberately "the blessed developer-facing name for
+ *    the caller's". The two coincide on an ordinary tenant write and DIVERGE
+ *    on a system/unscoped one, which is exactly the write this key most needs
+ *    to label correctly. The row is the only truthful source, so this reads
+ *    the row and nothing else. Substituting the caller's org onto a
+ *    permission-boundary column is the defect PR #14726's blocking contract
+ *    review found on a different column.
+ *  - ⛔ **Never a per-event read.** Every call site already holds the row —
+ *    the written record, the post-state, or the delete's pre-image — so this
+ *    is a threading job, not a resolution job. A lookup here would put a query
+ *    on the fan-out path the event exists to keep O(1); triage ruled that out
+ *    for the consumer side on 2026-08-31 and it is equally out here.
+ *
+ * The column is resolved through {@link resolveTenantFieldName} — the write
+ * path's own precedence (`tenancy.enabled: false` opt-out, then a declared
+ * `tenancy.tenantField`, then the kernel-injected `organization_id`) — so an
+ * object the engine does not tenant-scope resolves NOTHING rather than being
+ * mined for a coincidentally-named column, and a disagreement between what the
+ * engine scopes by and what the event names cannot arise. ⚠️ The two spellings
+ * differ on purpose and are easy to conflate: the COLUMN is snake_case
+ * (`organization_id`, machine name), the published KEY is camelCase
+ * (`organizationId`, the blessed developer-facing name).
+ *
+ * Returns `undefined` for every "no organization" case — object not
+ * tenant-scoped, row absent, column absent, `null`, `''`, or a value no id
+ * can be read off — and the caller then OMITS the key. Omission is the
+ * schema's ONE spelling for absence (`z.string().min(1).optional()`): `''` is
+ * refused outright, which would make `parse` throw and drop the event
+ * entirely, and a key set to an explicit `undefined` survives `parse` as a
+ * PRESENT key. Hence the conditional spread at the publish site, not an
+ * assignment.
+ */
+function eventOrganizationId(objectSchema: unknown, row: unknown): string | undefined {
+  const tenantField = resolveTenantFieldName(objectSchema);
+  if (!tenantField) return undefined;
+  const body = eventRecordBody(row);
+  if (!body) return undefined;
+  return eventOrganizationValue(body[tenantField]);
+}
+
+/**
+ * The ONE coercion an organization value goes through before it becomes an
+ * event's `organizationId` — shared by the per-record producer
+ * ({@link eventOrganizationId}, which reads the row's column) and the bulk
+ * producer ({@link bulkEventOrganizationId}, which reads the wall's inputs
+ * off the execution context), so the two cannot disagree about what counts
+ * as an organization (#15225: one ladder, two readers — never two ladders).
+ *
+ * First the write path's own "actually supplied" predicate
+ * ({@link carriesOrganization}), so producer and consumer cannot disagree
+ * about what counts as an organization. Then the same coercion ladder
+ * `eventRecordId` uses for the other id on these events. Deliberately NOT a
+ * bare `String(value)`: `String(false)` is a perfectly valid `min(1)` string,
+ * and inventing an organization out of a malformed value is the "never
+ * fabricated" clause's exact failure mode. `undefined` means "omit the key".
+ */
+function eventOrganizationValue(value: unknown): string | undefined {
+  if (!carriesOrganization(value)) return undefined;
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'bigint') return String(value);
+  return undefined;
+}
+
+/**
+ * `BulkDataEvent.organizationId` — the ONE organization the tenant wall named
+ * for a predicate write, or `undefined` when the producer cannot assert one
+ * (#15225, the bulk half of the cross-tenant fan-out leak whose single-record
+ * half is {@link eventOrganizationId}).
+ *
+ * ⚠️ NOT the per-record helper's question. That one reads a ROW's column;
+ * a predicate write has no row in hand — `updateMany`/`deleteMany` resolve a
+ * count — so "which organization" is answered from the WALL the write was
+ * composed under, and `absent` means something different on this event:
+ * "the producer did not assert one organization for the batch" (a statement
+ * about producer knowledge), never "belongs to no organization" (a statement
+ * about a row). `packages/spec/src/api/events.zod.ts` records the divergence
+ * on the member itself.
+ *
+ * **Why the wall answers it with no second query.** The security layer
+ * AND-composes its Layer 0 tenant wall (ADR-0095 D1, `tenant-layer.ts`) onto
+ * the caller's filter before the driver, and Layer 1 cannot widen it: under
+ * `isolated` the wall is `organization_id = <caller's active organization>`,
+ * under `group` it is `organization_id IN <caller's membership set>`
+ * (ADR-0105 D2). So when the wall names exactly one organization, every
+ * affected row belongs to it — one comparison, never a partition of the
+ * batch — and the producer can state that from what it already holds: the
+ * execution context the wall was computed from, and the posture the
+ * enforcement layer told this engine it enforces.
+ *
+ * **What is read, and what the answer is** (the posture table on the card,
+ * read against `computeTenantLayer0Filter`'s inputs — an exact mirror on the
+ * POSTURE and CONTEXT inputs, a PARTIAL one on the OBJECT input; the object
+ * bullet below says which clauses are mirrored and which the seam carries):
+ *
+ *  - `enforcedPosture` is the SecurityPlugin-injected posture
+ *    ({@link ObjectQL.enforcedTenancyPosture}), ⛔ never the env fallback
+ *    `resolveEnginePosture()` also consults: no enforcement layer means no
+ *    Layer 0 wall was composed at all, and the memory driver reads no
+ *    `DriverOptions.tenantId` either, so a lean embedding has no wall
+ *    ANYWHERE to vouch for. `single` (no wall) ⇒ absent.
+ *  - `isSystem` short-circuits the whole security middleware ⇒ no wall ⇒
+ *    absent. Same for an absent context.
+ *  - The OBJECT exit. Layer 0 composes nothing when its `tenancyDisabled`
+ *    input is true or the object carries no `organization_id`
+ *    (`objectHasOrgIdField`), and `getObjectSecurityMeta`
+ *    (`security-plugin.ts`) folds THREE clauses into `tenancyDisabled`:
+ *    ① `tenancy.enabled === false`, ② `systemFields.tenant === false`,
+ *    ③ `orgScopingEnabled && platformGlobalObjects.has(object)` — the
+ *    deployment's #12699 carve-out. This producer reads
+ *    {@link carriesTenantScopeColumn}, the registry's binding of the wall's
+ *    predicate (2026-08-14 triage ruling: the wall's derivation is
+ *    authoritative) — clauses ① and ② plus the column clause — so an
+ *    object the wall does not key on answers absent, and a custom
+ *    `tenancy.tenantField` is NOT an exit by itself (the wall never reads
+ *    it; the object is walled iff it carries `organization_id`). ⛔ What is
+ *    NOT mirrored: clause ③ is deployment-declared and invisible to the
+ *    engine — no `platformGlobalObjects` reading exists here — so a
+ *    deployment-exempted object under an armed wall is still stamped with
+ *    the caller's organization while Layer 0 composed no wall. That
+ *    population is the seam #15706 rules on, and the reason this producer's
+ *    PR is Blocked-by it. The wall's fourth object input, the federated
+ *    phantom anchor (#7835: an `external` object's injected
+ *    `organization_id` is a column no storage carries, so
+ *    `objectHasOrgIdField` is false), is answered by the superset
+ *    `external != null` ⇒ absent — conservative for a federated object whose
+ *    author declared a real remote column (the wall stands there; this
+ *    under-delivers rather than re-spelling plugin-security's provenance
+ *    test).
+ *  - The Layer 0 EXEMPTION: a true `PLATFORM_ADMIN` crosses the wall where
+ *    the object's posture permits (ADR-0095 D3). The engine holds the carried
+ *    rung (`ExecutionContext.posture`) but not the superuser write-bypass bit
+ *    the exemption also requires, so it answers conservatively: a carried
+ *    `PLATFORM_ADMIN` rung ⇒ absent (the batch MAY have crossed). A context
+ *    carrying NO rung is one the plugin decides by a capability probe over
+ *    its resolved permission sets — invisible from here — so it is absent too:
+ *    the engine asserts only what it can vouch for. Session contexts assembled
+ *    by the authz resolver always carry the rung.
+ *  - `group`: the membership set, deduplicated — present only when it names
+ *    exactly one organization, and ⛔ never `tenantId` standing in for a
+ *    multi-membership sweep (the option-C mislabel PR #14635's open question 1
+ *    rejected). An unreadable member makes the set unvouchable ⇒ absent.
+ *  - `isolated`: the caller's active organization (`tenantId`), which IS the
+ *    wall's equality term; missing ⇒ the wall was the deny sentinel ⇒ absent
+ *    (and no row matched anyway).
+ *
+ * Returns `undefined` for every "not asserted" case and the caller OMITS the
+ * key — omission is the schema's one spelling for absence (`''` is refused,
+ * an explicit `undefined` survives `parse` as a present key), exactly as the
+ * per-record site does.
+ */
+function bulkEventOrganizationId(
+  objectSchema: unknown,
+  execCtx: ExecutionContext | undefined,
+  enforcedPosture: TenancyPosture | undefined,
+): string | undefined {
+  if (enforcedPosture === undefined || !postureEnforcesWall(enforcedPosture)) return undefined;
+  if (!execCtx || execCtx.isSystem === true) return undefined;
+  if (!objectSchema || typeof objectSchema !== 'object') return undefined;
+  if (!carriesTenantScopeColumn(objectSchema as ServiceObject)) return undefined;
+  if ((objectSchema as { external?: unknown }).external != null) return undefined;
+  const rung = AuthzPostureSchema.safeParse(execCtx.posture);
+  if (!rung.success || rung.data === 'PLATFORM_ADMIN') return undefined;
+  if (postureUsesUnionScope(enforcedPosture)) {
+    const memberships = execCtx.accessible_org_ids;
+    if (!Array.isArray(memberships) || memberships.length === 0) return undefined;
+    let named: string | undefined;
+    for (const member of memberships) {
+      const id = eventOrganizationValue(member);
+      if (id === undefined) return undefined;
+      if (named === undefined) named = id;
+      else if (named !== id) return undefined;
+    }
+    return named;
+  }
+  return eventOrganizationValue(execCtx.tenantId);
+}
+
+/**
  * Coerce a multi-row driver result into `BulkDataEvent.matched` (#4639).
  *
  * `IDataDriver.updateMany`/`deleteMany` are contracted to resolve the affected
@@ -3834,6 +4034,23 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
+   * [#15225] The tenancy posture the ENFORCEMENT layer told this engine it
+   * enforces — the SecurityPlugin-injected provider's answer and nothing
+   * else, `undefined` when no enforcement layer injected one.
+   *
+   * Deliberately NOT {@link resolveEnginePosture}: that accessor falls back to
+   * the env resolution, which is the right fact for #8844's write REFUSAL (a
+   * lean embedding should still refuse an org-less system write on a walled
+   * install) and the wrong fact for asserting what a wall named. No
+   * SecurityPlugin ⇒ no Layer 0 wall composed ⇒ nothing to vouch for, whatever
+   * the operator configured. Read live per call, never cached — the same
+   * "no frozen verdict" rule the sibling accessor keeps.
+   */
+  private enforcedTenancyPosture(): TenancyPosture | undefined {
+    return normalizeTenancyPosture(this.tenancyPostureProvider?.());
+  }
+
+  /**
    * [#8844] The install's organizations, capped at two — only "none / exactly
    * one / several" changes any decision.
    *
@@ -5232,6 +5449,83 @@ export class ObjectQL implements IObjectQLEngine {
                   this.logger.warn(`Skipping ${pluralToSingular(key)} without a derivable name`, { id: ownerId });
                   continue;
               }
+              // [#14666] The DIVERGENT-container refusal (maintainer ruling
+              // 2026-09-03, direction 2). This seam used to reconcile a
+              // container's own `name` to the derived key silently, one line
+              // below: the author's field discarded with no diagnostic, while
+              // the OTHER source registrar
+              // (`MetadataPlugin._parseAndRegisterArtifact` ->
+              // `assertMetadataRegisterContract`, #7378 row 1) hard-failed the
+              // whole artifact load on that very same document. One document,
+              // two SOURCE registrars, opposite outcomes, and which one an
+              // author got depended on how their package was loaded. #7378
+              // row 1 already rules that resolving a name/key disagreement
+              // silently "in either direction" files the item under a key the
+              // caller never wrote, so the boot loop converges onto the
+              // refusal; the artifact door was not moved onto the rewrite.
+              //
+              // MEASURED, and it is why only this site changed: the second
+              // `toRegister` ternary in this method (the assembled
+              // `viewItems:` channel below) cannot carry a container at all —
+              // `AssembledViewArtifactSchema` is the view vocabulary MINUS the
+              // container branch, and every body it admits is
+              // `isAggregatedViewContainer === false`. Its ternary can only
+              // MINT a `name` onto an overlay that has none; it can never
+              // discard an authored one, because `resolveMetadataItemName`
+              // reads a non-container's own `name` FIRST.
+              //
+              // Scope is the ruling's named main risk, so the gate is three
+              // independent narrowings and each one is load-bearing:
+              //   * `key === 'views'` — this is the GENERIC metadata loop; no
+              //     other kind changes behaviour and they all keep the
+              //     reconcile below;
+              //   * `isAggregatedViewContainer(item)` — the CONTAINER branch
+              //     only. A standalone ViewItem's `name` is its identity, not
+              //     a binding, and it has no disagreement to make;
+              //   * `name` present AND different. A container carrying no
+              //     `name` is untouched (the reconcile below still mints the
+              //     derived key onto it); so is one whose `name` already
+              //     equals the derived key; and so is one that declares no
+              //     binding anywhere else, because `deriveViewContainerObject`
+              //     then derives the key FROM that same `name` and it cannot
+              //     disagree with itself.
+              //
+              // The runtime string deliberately carries NO tracker id: it is read by
+              // authors and operators who cannot resolve `#NNNN`
+              // (`check:doc-authoring`, maintainer ruling 2026-08-12). The rule it
+              // enforces is #7378 row 1, named in this comment instead, where the
+              // reader who can resolve it is already looking.
+              //
+              // The ADR-0112 envelope is the artifact door's exactly —
+              // `VALIDATION_ERROR` / 400 — because a document refused at one
+              // SOURCE registrar must be refused the same way at the other,
+              // and that equality is asserted in
+              // `view-container-divergent-name-registrars.test.ts`. The prose
+              // is this seam's own on purpose: `assertMetadataRegisterContract`
+              // opens its message with `IMetadataService.register(...)`, an API
+              // this seam does not call, and a refusal that misnames its own
+              // door is the opposite of "locate the mismatch".
+              if (
+                  key === 'views'
+                  && isAggregatedViewContainer(item)
+                  && typeof item.name === 'string'
+                  && item.name
+                  && item.name !== itemName
+              ) {
+                  const err: Error & { code?: string; status?: number } = new Error(
+                      `Invalid \`views:\` container from ${sourceLabel} '${ownerId}': the container's own `
+                      + `\`name\` is '${item.name}', which disagrees with the object key it binds to, `
+                      + `'${itemName}' (derived from its own \`object\`, else \`list.data.object\` / `
+                      + '`form.data.object`). A disagreement is almost always an authoring bug, and resolving '
+                      + 'it silently in either direction can file the item under a key the caller never wrote '
+                      + '(refuse loudly, locate the mismatch) — the artifact/HMR loader refuses '
+                      + 'this same document. Register under one name: drop `name`, or set it to '
+                      + `'${itemName}'.`,
+                  );
+                  err.code = 'VALIDATION_ERROR';
+                  err.status = 400;
+                  throw err;
+              }
               const toRegister = item.name === itemName ? item : { ...item, name: itemName };
               // [#5320] The `views:` tighten — containers ONLY, the contract the
               // stack schema has always declared (`stack.zod.ts`,
@@ -5633,6 +5927,15 @@ export class ObjectQL implements IObjectQLEngine {
       recordId: unknown;
       changes?: unknown;
       after?: unknown;
+      /**
+       * The row whose tenant column names this event's `organizationId`
+       * (#14970) — the written record on `created`, the post-state on
+       * `updated`, the PRE-IMAGE on `deleted` (a delete has no post-state, and
+       * `previous` is what every other delete-side consumer already falls back
+       * to). Passed explicitly rather than inferred from `after` so the delete
+       * path, the one with no `after`, cannot silently publish the key absent.
+       */
+      organizationRow?: unknown;
       context?: ExecutionContext;
     },
   ): Promise<void> {
@@ -5655,6 +5958,14 @@ export class ObjectQL implements IObjectQLEngine {
       const changes = eventRecordBody(input.changes);
       const after = eventRecordBody(input.after);
       const userId = eventUserId(input.context);
+      // [#14970] The RECORD's organization, off the row itself — ⛔ never
+      // `input.context.tenantId`, which is the CALLER's. See
+      // {@link eventOrganizationId}; omitted, never `''`/`undefined`, because
+      // absence has exactly one spelling in the schema.
+      const organizationId = eventOrganizationId(
+        this._registry.getObject(object),
+        input.organizationRow,
+      );
       const event: DataEvent = DataEventSchema.parse({
         id: generateEventUuid(),
         type: `data.record.${action}`,
@@ -5663,6 +5974,7 @@ export class ObjectQL implements IObjectQLEngine {
         ...(changes !== undefined ? { changes } : {}),
         ...(after !== undefined ? { after } : {}),
         ...(userId !== undefined ? { userId } : {}),
+        ...(organizationId !== undefined ? { organizationId } : {}),
         timestamp,
       });
 
@@ -5702,6 +6014,14 @@ export class ObjectQL implements IObjectQLEngine {
    * internals to whatever external URL a webhook points at. See
    * `BulkDataEventSchema`'s TSDoc for the full reasoning.
    *
+   * [#15225] `organizationId` — the ONE organization the tenant wall named
+   * for this batch, stamped from the execution context and the enforced
+   * posture the producer already holds (⛔ no second query on the publish
+   * path), and OMITTED whenever the producer cannot assert one. See
+   * {@link bulkEventOrganizationId} for the derivation and for why `absent`
+   * here means "not asserted", not the per-record "belongs to no
+   * organization".
+   *
    * Same two disciplines as the per-record twin: validate before publish, and
    * never throw — a realtime transport problem must not roll back a committed
    * write.
@@ -5738,10 +6058,21 @@ export class ObjectQL implements IObjectQLEngine {
     try {
       const timestamp = new Date().toISOString();
       const userId = eventUserId(input.context);
+      // [#15225] The organization the WALL named for the whole batch — read
+      // off the context the wall was computed from, never off a row (there is
+      // none) and never `input.context.tenantId` on its own (under `group` the
+      // wall is the membership set). Omitted, never `''`/`undefined`, because
+      // absence has exactly one spelling in the schema.
+      const organizationId = bulkEventOrganizationId(
+        this._registry.getObject(object),
+        input.context,
+        this.enforcedTenancyPosture(),
+      );
       const event: BulkDataEvent = BulkDataEventSchema.parse({
         id: generateEventUuid(),
         type: `data.records.${action}`,
         object,
+        ...(organizationId !== undefined ? { organizationId } : {}),
         matched,
         ...(userId !== undefined ? { userId } : {}),
         timestamp,
@@ -5856,7 +6187,9 @@ export class ObjectQL implements IObjectQLEngine {
    *   written by hooks and middleware, not by the request, and re-validating
    *   them here would turn a platform stamp into a caller-facing rejection.
    * - **Non-system writes only**, like every other write-path guard in this
-   *   engine (`stripReadonlyFields`, `stripReadonlyForInsert`). Seed replay,
+   *   engine (`stripReadonlyFields` — which since #14147 runs on the create
+   *   path as well as the update one — and `stripRuntimeOwnedFields`). Seed
+   *   replay,
    *   package install and boot-time provisioning legitimately write rows in an
    *   order that resolves only once the batch completes; failing them closed
    *   would turn an ordering detail into a boot failure. This leaves a real
@@ -5900,8 +6233,9 @@ export class ObjectQL implements IObjectQLEngine {
       //
       // This check answers for exactly one thing: "the reference the CALLER
       // named". `stripReadonlyFields` removes a non-system caller's value from
-      // a readonly field before the write, and the create ingress does the same
-      // (`stripReadonlyForInsert`, #3043). So a value still sitting in one at
+      // a readonly field before the write — on BOTH write paths since #14147
+      // moved the create-side strip into this engine and deleted the boundary
+      // copy it used to live in. So a value still sitting in one at
       // this point was minted by the PLATFORM — outside this check's own stated
       // scope, whatever it happens to hold. That argument stands on its own and
       // depends on no particular field: deleting the `continue` would start
@@ -9453,21 +9787,28 @@ export class ObjectQL implements IObjectQLEngine {
    * (no number-range gaps from a rejected batch).
    */
   // [#3407 / #5126] BOTH members of `WriteObservabilityOptions` are live here,
-  // for exactly ONE strip: the runtime-owned (`autonumber`) strip added by
-  // #5503, wired at its strip site below. Each arrived carrying the same
+  // for TWO strips that share one report site (`insertDropped`, below): the
+  // runtime-owned (`autonumber`) strip added by #5503, and — since the
+  // maintainer ruling of 2026-09-03 (option C, #14147) — the AUTHOR-declared
+  // static-`readonly` strip, the same `stripReadonlyFields` the update path
+  // runs, under the same `isSystem` gate. Each member arrived carrying the same
   // standing condition — #3407's "if insert ever gains a silent strip, wire the
   // listener at that strip site", #5126's "it is inert here only because insert
   // strips nothing; if insert ever gains a strip, both members wire up together
-  // at that site". #5503 is that strip, so both are discharged together:
-  // quiet-and-observable by default (`onFieldsDropped`), refused outright under
-  // `strictReadonlyWrites` — the same one-per-call choice update offers.
+  // at that site". #5503 was the first such strip and #14147 the second; both
+  // discharge through the one site: quiet-and-observable by default
+  // (`onFieldsDropped`), refused outright under `strictReadonlyWrites` — the
+  // same one-per-call choice update offers.
   //
-  // INSERT remains deliberately exempt from the AUTHOR-declared
-  // readonly/readonlyWhen strips (a create may legitimately seed read-only
-  // columns; the #3043 ingress strip covers external callers instead), and the
-  // FLS write gate throws rather than stripping. So neither member reports on
-  // those here — only on what this path actually strips. Any FURTHER strip added
-  // here must wire both members at its own site too.
+  // What INSERT still does NOT strip: `readonlyWhen` (a conditional lock has no
+  // prior record to evaluate on a create — the update-path note below says
+  // "INSERT stays exempt" for exactly that strip), and the FLS write gate throws
+  // rather than stripping. So neither member reports on those here — only on
+  // what this path actually strips. The 2026-07-24 row "INSERT (all callers)
+  // exempt" this note used to rest on is SUPERSEDED, and the metadata-protocol
+  // ingress copy it pointed external callers at is deleted: there is one
+  // create-side enforcement point, and it is this one. Any FURTHER strip added
+  // here must feed `insertDropped` (or wire both members at its own site) too.
   /**
    * Validate-only (#6037, #4633 ruling D) — run the write path's own verdict
    * over candidate rows and report it, WITHOUT persisting anything.
@@ -10021,7 +10362,7 @@ export class ObjectQL implements IObjectQLEngine {
         // hook that RE-ISSUES the record number lost its write to any caller
         // that had also submitted the key, while the same hook's write survived
         // on a caller that had not. The update path's twin (#5591).
-        const autonumberDropped: string[] = [];
+        const insertDropped: string[] = [];
         if (!opCtx.context?.isSystem) {
           const preserveAudit = opCtx.context?.preserveAudit === true;
           for (let i = 0; i < rows.length; i++) {
@@ -10049,10 +10390,95 @@ export class ObjectQL implements IObjectQLEngine {
             ) as Record<string, unknown>;
             if (stripped === rows[i]) continue;
             for (const k of Object.keys(rows[i])) {
-              if (!(k in stripped) && !autonumberDropped.includes(k)) autonumberDropped.push(k);
+              if (!(k in stripped) && !insertDropped.includes(k)) insertDropped.push(k);
             }
             rows[i] = stripped;
             rowHookContexts[i].input.data = stripped;
+          }
+          // [#14147] STATIC author-declared `readonly`, enforced HERE — one
+          // semantics, one enforcement point, per the maintainer ruling of
+          // 2026-09-03 (option C) which SUPERSEDED the 2026-07-24 row "INSERT
+          // (all callers) exempt". Until it landed, a non-system caller
+          // reaching `engine.insert` DIRECTLY wrote a read-only column with no
+          // refusal, no WARN and no `onFieldsDropped` event, while the very
+          // same payload through the DataProtocol was stripped — and
+          // `create_record`'s listener (`@objectstack/service-automation`) was
+          // wired for a readonly drop it could never receive. The boundary copy
+          // that produced that asymmetry (`stripReadonlyForInsert`,
+          // metadata-protocol) is DELETED in the same change rather than kept
+          // as a second implementation.
+          //
+          // The strip is {@link stripReadonlyFields} — the SAME function
+          // `update` runs, under the SAME `isSystem` gate (the branch above),
+          // reporting through the SAME channels: `readonlyStripWarning` at
+          // `warn`, `onFieldsDropped` under reason `readonly`, and
+          // `strictReadonlyWrites` refusing before any driver dispatch. Its
+          // guards therefore come across too, and they are wider than the
+          // deleted ingress copy's: a hook stamp is not caller-supplied
+          // (`suppliedPerRow`), and a key a `beforeInsert` hook ASSIGNED is the
+          // hook's write, not a forgery (`rowHookWrittenKeys`, #14259). The
+          // ingress copy ran BEFORE the hooks and could judge neither.
+          //
+          // ⛔ `preserveAudit` is deliberately NOT forwarded — see
+          // {@link preserveAuditIgnoredOnInsertWarning}: the 2026-08-08 ruling
+          // narrowed that exemption to the UPDATE path and left `isSystem` as
+          // the create side's only one. Ruling C moved WHERE this strip runs;
+          // it did not widen WHAT exempts it.
+          //
+          // WHICH fields it may judge is {@link staticReadonlyInsertSubject}'s
+          // (runtime-owned types belong to the pass above, platform objects to
+          // their own 403 guards); `null` — no such field on this object — is
+          // the cheap exit every ordinary insert takes.
+          const readonlySubject = staticReadonlyInsertSubject(schemaForValidation as any);
+          if (readonlySubject) {
+            const preserveAuditIgnored: string[] = [];
+            for (let i = 0; i < rows.length; i++) {
+              if (rowErrors[i] !== undefined) continue;
+              const stripped = stripReadonlyFields(
+                readonlySubject as any, rows[i], suppliedPerRow[i] ?? {}, this.logger,
+                {
+                  strictReadonlyWrites: options?.strictReadonlyWrites === true,
+                  hookWrittenKeys: rowHookWrittenKeys[i],
+                  verb: 'insert',
+                },
+              ) as Record<string, unknown>;
+              if (stripped === rows[i]) continue;
+              const takenFromRow: string[] = [];
+              for (const k of Object.keys(rows[i])) {
+                if (k in stripped) continue;
+                takenFromRow.push(k);
+                if (!insertDropped.includes(k)) insertDropped.push(k);
+                if (preserveAudit && !preserveAuditIgnored.includes(k)) preserveAuditIgnored.push(k);
+              }
+              // The field's `defaultValue` is RE-DERIVED for every key this
+              // pass took, which is #3043's stated contract and a guarantee in
+              // its own right: a forged `approval_status` becomes `draft` — the
+              // enforced initial state — never NULL, so a stripped forgery
+              // cannot leave a row in a state the object's own rules
+              // (`requiredWhen`, the state machine) were written to exclude.
+              // The deleted ingress copy got this for free by running BEFORE
+              // `applyFieldDefaults`; a strip that runs after the hooks has to
+              // ask. Asked over the STRIPPED row, so a `defaultValue`
+              // expression reads the payload it will really be stored beside,
+              // and copied back key by key: `applyFieldDefaults` also fills
+              // every OTHER absent field, and a hook that deliberately wrote
+              // `null` must keep its null (the first defaults pass, ahead of
+              // the hooks, is the one that owns those keys).
+              if (takenFromRow.length > 0) {
+                const redefaulted = this.applyFieldDefaults(object, stripped, opCtx.context, nowSnap);
+                for (const k of takenFromRow) {
+                  if (redefaulted[k] !== undefined) stripped[k] = redefaulted[k];
+                }
+              }
+              rows[i] = stripped;
+              rowHookContexts[i].input.data = stripped;
+            }
+            // One line per CALL, not per row, and only when the exemption was
+            // ASKED FOR and something was actually removed — the union is
+            // faithful because the strip is schema-uniform.
+            if (preserveAuditIgnored.length > 0) {
+              this.logger.warn(preserveAuditIgnoredOnInsertWarning(object, preserveAuditIgnored));
+            }
           }
         }
         // [#3407 / #5126] This is the strip site both standing notes on
@@ -10068,14 +10494,14 @@ export class ObjectQL implements IObjectQLEngine {
         // an implicitly read-only field is dropped for exactly the reason a
         // declared one is, and inventing a parallel reason code would fork the
         // vocabulary (`packages/spec`) for a distinction no consumer acts on.
-        if (autonumberDropped.length > 0) {
-          const drop: DroppedFieldsEvent = { object, fields: autonumberDropped, reason: 'readonly' };
+        if (insertDropped.length > 0) {
+          const drop: DroppedFieldsEvent = { object, fields: insertDropped, reason: 'readonly' };
           if (options?.strictReadonlyWrites === true) {
             // Before the driver write and before validation — nothing is
             // written, and "you sent a runtime-owned field" should not depend on
             // whether some other field also failed a business rule (#5126's
             // ordering on the update path, mirrored).
-            throw new ReadonlyFieldRejectedError(object, autonumberDropped, [drop], 'insert');
+            throw new ReadonlyFieldRejectedError(object, insertDropped, [drop], 'insert');
           }
           if (typeof options?.onFieldsDropped === 'function') {
             // Under strict the listener deliberately does NOT fire (above):
@@ -10286,6 +10712,8 @@ export class ObjectQL implements IObjectQLEngine {
             await this.publishDataEvent('created', object, {
               recordId: record?.id,
               after: record,
+              // [#14970] The written row names its own organization.
+              organizationRow: record,
               context: opCtx.context,
             });
           }
@@ -11616,6 +12044,10 @@ export class ObjectQL implements IObjectQLEngine {
                  recordId: hookContext.input.id ?? resultId,
                  changes: hookContext.input.data,
                  after: result,
+                 // [#14970] The POST-state's organization, not the pre-image's:
+                 // an update that moves a row between organizations must label
+                 // the event with where the row is NOW.
+                 organizationRow: result,
                  context: opCtx.context,
                });
              }
@@ -13068,6 +13500,12 @@ export class ObjectQL implements IObjectQLEngine {
               const resultId = (typeof result === 'object' && result && 'id' in result) ? (result as any).id : undefined;
               await this.publishDataEvent('deleted', object, {
                 recordId: hookContext.input.id ?? resultId,
+                // [#14970] The pre-image — a delete has no post-state, and
+                // this branch is the by-id one, where `priorRecord` was read
+                // unconditionally by #7867's existence gate and proven
+                // non-null before `beforeDelete` ever fired. So the row is
+                // already in hand and NO new read is bought here.
+                organizationRow: priorRecord,
                 context: opCtx.context,
               });
             }

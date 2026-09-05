@@ -377,7 +377,153 @@ function validateLedger(text, today) {
   return { problems, count: entries.length };
 }
 
-/** @returns {{ passed: boolean, lines: string[] }} */
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `passed` used to be this self-test's ONLY success condition, so "every case
+// held" and "the cases never ran" printed the same line. Closed the way PR
+// #13487 validated on check-doc-authoring: what is pinned is the registered
+// NAMES, not a number.
+//
+// This self-test is TABLE-DRIVEN — one literal `cases` table, one loop over it,
+// and a sink that writes only when a case FAILS. Routing THAT sink through
+// `registerCase()` would register a case only when it fails: a fully green run
+// would register 0 and every battery would read DID NOT RUN, the floor inverted
+// rather than installed. So the roster is the table's own rows. Each row's
+// `name` is a declared battery, verbatim, with a floor of 1, and
+// `registerCase(name)` is the FIRST statement of the driving loop body — so the
+// case is attributed to the row actually being run, whatever that row asserts
+// afterwards. There is no `battery()` opener: for a table-driven self-test the
+// ROW is the battery, so attribution is the loop variable rather than a
+// most-recently-opened section.
+//
+// ⛔ A pinned TOTAL is not the repair, and neither is a roster DERIVED from the
+// table: `cases.length` moves with the table, so a deleted row would delete its
+// own floor. The roster below is a LITERAL the table is checked against, which
+// is what lets a deleted or renamed row name ITSELF in the refusal.
+//
+// The counts are a FLOOR, not an equality — a row that grows into several
+// registrations must not red. 1 is the honest floor for a table row: the loop
+// reaches it exactly once per run.
+//
+// ── Why the LEDGER is module-level and the CHECK sits at the verdict site ──
+//
+// This gate splits its self-test in two: `selfTest()` REGISTERS and returns its
+// failure count, and `main()` DECIDES — it prints the per-case lines, the red
+// line or the green one. There is no verdict site inside the registering body,
+// so the floor is evaluated where the green line already is (inside `main()`'s
+// `--self-test` branch, so it can never fire on a production run). The ledger it
+// reads therefore has to outlive `selfTest()`'s frame — hence module scope
+// rather than the local map the single-body recipe closes over. Only the CHECK's
+// location moves; attribution and scope are untouched. This is the class-3
+// placement PR #15309 settled.
+//
+// ⛔ The floor is NOT placed at the end of `selfTest()` before its `return`: an
+// early return anywhere above that line would skip the check entirely — the
+// exact defect the #13798 verdict handshake exists to catch — coupling hole 1
+// to hole 2 after the card ruled them orthogonal. Evaluated at the verdict site,
+// the same early return lands as a count BELOW the floor and reds.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'missing/empty ledger → green': 1,
+  'comments-only ledger (zero exemptions) → green': 1,
+  'well-formed exemption inside the window → green': 1,
+  'multi-line reason → green': 1,
+  'expired ignoreUntil → red': 1,
+  'ignoreUntil == today → red (the scanner already stopped ignoring it)': 1,
+  'missing ignoreUntil → red': 1,
+  'quoted ignoreUntil → red': 1,
+  'ignoreUntil beyond the ceiling → red': 1,
+  'reason without an advisory link → red': 1,
+  'reason that is only a link → red': 1,
+  'untouched template placeholders → red': 1,
+  'missing reason → red': 1,
+  'unknown key → red': 1,
+  'duplicate id → red': 1,
+  '[[PackageOverrides]] escape hatch → red': 1,
+  'top-level key outside a table → red': 1,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too. This pin is also half of
+// the duplicate-label refusal: two rows sharing a name collapse to ONE key in
+// the literal above, so the roster falls below this number; the table
+// cross-check in `batteryFloorFailures()` is the other half, and names WHICH
+// label collided.
+const SELF_TEST_BATTERY_FLOOR = 17;
+
+// The ledger `batteryFloorFailures()` reads from the OTHER function, and the
+// row labels the table actually presented on this run — both module-level
+// because the body that fills them is not the body that reads them.
+//
+// ⚠️ Named for the roster's role, deliberately NOT with a self-test spelling:
+// `check:pm-dispatch-gates` anchors on a top-level declaration whose NAME spells
+// self-test and every such name owes a row in its COMPOUND_ANCHOR_LEDGER. This
+// machinery holds no fixtures to mask and reads no path literal, so the accurate
+// name is the one that says `battery`.
+const batterySeen = new Map();
+let batteryRowLabels = [];
+
+/** Called by `selfTest()`'s driving loop, once per row, before the row runs. */
+function registerCase(name) {
+  batterySeen.set(name, (batterySeen.get(name) ?? 0) + 1);
+}
+
+/**
+ * The floor: every declared row RAN, and ran its case (#13489).
+ *
+ * Guards the registrations made by **`selfTest()`** — the body whose driving
+ * loop calls `registerCase()`. It is called from `main()`'s `--self-test`
+ * branch immediately before the success line, so that line can only be printed
+ * by a run in which the set of rows that registered EQUALS the set declared,
+ * each at or above its own count. A set difference says WHICH row stopped; a
+ * count says only that something did.
+ *
+ * @returns {string[]} floor breaches; empty means the floor held
+ */
+function batteryFloorFailures() {
+  const declared = Object.keys(SELF_TEST_BATTERIES);
+  const problems = [];
+  if (declared.length < SELF_TEST_BATTERY_FLOOR) {
+    problems.push(
+      `SELF_TEST_BATTERIES declares ${declared.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  const duplicated = [...new Set(batteryRowLabels.filter((name, i) => batteryRowLabels.indexOf(name) !== i))];
+  if (duplicated.length > 0) {
+    problems.push(
+      `the cases table uses ${duplicated.map((n) => JSON.stringify(n)).join(', ')} as a row label more than once — ` +
+        'two rows sharing a label are ONE battery, so the second can stop running while the first keeps the floor met.',
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declared.includes(name)) continue;
+    problems.push(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — a case attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declared) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    problems.push(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed that case holds.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (problems.length) {
+    problems.push(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (a deleted row, a renamed label, a loop that no longer ' +
+        'reaches it) and restore it.',
+    );
+  }
+  return problems;
+}
+
+/** @returns {{ failures: number, lines: string[] }} */
 // Set by `selfTest()` only after its verdict is printed, and read at the
 // dispatch: a `return` that leaves the function above that line prints nothing
 // and still exits 0 — a self-test that never finished, reported as one that
@@ -479,8 +625,12 @@ function selfTest() {
   ];
 
   const lines = [];
-  let passed = true;
+  // The row labels this run actually presented, for the floor's table
+  // cross-check at the verdict site (#13489).
+  batteryRowLabels = cases.map((testCase) => testCase.name);
+  let failures = 0;
   for (const testCase of cases) {
+    registerCase(testCase.name);
     const { problems } = validateLedger(testCase.text, today);
     let ok;
     if (testCase.expect === null) {
@@ -488,14 +638,14 @@ function selfTest() {
     } else {
       ok = problems.length > 0 && problems.some((p) => testCase.expect.test(p));
     }
-    if (!ok) passed = false;
+    if (!ok) failures++;
     lines.push(
       `${ok ? '  ✓' : '  ✗'} ${testCase.name}` +
         (ok ? '' : `\n      got: ${problems.length === 0 ? '(no problems)' : problems.join('\n           ')}`),
     );
   }
   selfTestReachedVerdict = true;
-  return { passed, lines };
+  return { failures, lines };
 }
 
 function main() {
@@ -512,11 +662,21 @@ function main() {
       );
       process.exit(1);
     }
-    const { passed, lines } = selfTestResult;
+    const { failures, lines } = selfTestResult;
     console.log('check-osv-exemptions self-test (both directions):');
     for (const line of lines) console.log(line);
-    if (!passed) {
-      console.error('\n✗ self-test failed — the ledger check does not do what it claims.');
+    // ── The assertion floor, at the verdict site (#13489) ─────────────────
+    // `selfTest()` registers but does not decide, so the floor over ITS
+    // registrations is evaluated here, after every row has had its chance and
+    // immediately before the success line — the only place a run that
+    // registered nothing can still be stopped from reporting that every case
+    // held. Its breaches share this branch's counted sink, so one red line
+    // covers cases and floor alike.
+    const floorProblems = batteryFloorFailures();
+    for (const problem of floorProblems) console.error(`✗ self-test floor: ${problem}`);
+    const total = failures + floorProblems.length;
+    if (total > 0) {
+      console.error(`\n✗ check-osv-exemptions self-test: ${total} failure(s) (cases and floor).`);
       process.exit(1);
     }
     console.log('\n✓ self-test passed: valid ledgers accepted, every convention breach rejected.');

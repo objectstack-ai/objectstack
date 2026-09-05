@@ -337,16 +337,26 @@ function checkCondition(value: any, condition: any): boolean {
         // same reason — a rule spelled over "the value is null" alone would
         // reach arms whose no-value answer is ruled elsewhere.
         //
-        // ⛔ A no-value COMPARAND is excluded from this guard, deliberately, so
-        // those cells keep TODAY's answer rather than being decided here.
-        // `$gt: null` is the one null-comparand position the contract still
-        // ACCEPTS (measured at `parseFilterAST`): the 2026-08-31 ruling refused
-        // the three siblings — `$in` / `$nin` null members and `$between`'s
-        // null endpoints (#13357) — and #5332's landing had already recorded
-        // this position in writing as one "no ruling covers". Deciding it in an
-        // operator arm would pick a camp the platform declined to pick, and its
-        // sibling was settled by REFUSING the shape rather than by answering
-        // it.
+        // ⛔ A no-value COMPARAND is excluded from this guard, deliberately.
+        // When #13553 landed, `$gt: null` was the one null-comparand position
+        // the contract still ACCEPTED (measured at `parseFilterAST`): the
+        // 2026-08-31 ruling had refused the three siblings — `$in` / `$nin`
+        // null members and `$between`'s null endpoints (#13357) — and #5332's
+        // landing had recorded this one in writing as "no ruling covers", so
+        // deciding it here would have picked a camp the platform declined to
+        // pick. That reason is gone: ruled 2026-09-01 (option A, #14080), the
+        // shape is REFUSED at the contract's validation entrance
+        // (`assertListComparandShapes`, inside `parseFilterAST` and at the
+        // engine seam), the same door and envelope as its siblings. These
+        // cells are now constructively unreachable through the compile face,
+        // and the exclusion stays for the ruling's own reason — ⛔「不单独修
+        // matcher(死代码)」— with no ordering-vs-null semantics defined
+        // anywhere. Negative pin:
+        // `memory-null-ordering-comparand-unreachable.test.ts`. A direct
+        // caller that skips the compile face meets only this package's own
+        // `assertFilterConditionShape`, which deliberately does not carry the
+        // rule (⛔ 不做跨后端对齐工程) — the honest boundary, not a cell for an
+        // arm to decide.
         if (value === null && ORDERING_OPERATORS.has(op)
             && target !== null && target !== undefined) {
             return false;
@@ -416,14 +426,30 @@ function checkCondition(value: any, condition: any): boolean {
                 // `typeof value !== 'string'` — the TYPE test, not the
                 // predicate. Answering it from {@link noValueSatisfiesNegation}
                 // states which question is being answered.
-                //
-                // A present, non-string value keeps the answer it had: the
-                // ruling moved the no-value cells, and only those.
                 if (value == null) {
                     if (noValueSatisfiesNegation(op)) break;
                     return false;
                 }
-                if (typeof value !== 'string' || value.includes(target)) return false;
+                // [#14079] A present value that is NOT a string satisfies this
+                // too. This line used to read `typeof value !== 'string' ||
+                // value.includes(target)` — a TYPE test standing in for the
+                // predicate, so `{ n: 5 }` failed `$contains: '5'` (correct:
+                // a number cannot contain a substring) AND `$notContains:
+                // '5'` (wrong: for the very same reason it cannot, it does not).
+                // Measured: this face answered `['3','4']` where this
+                // package's own live mingo path, `formula`, `having`,
+                // `driver-mongodb` and the analytics face answered all four
+                // rows. #13166's note that a non-string value "keeps the
+                // answer it had" recorded what that ruling chose to leave
+                // alone; the maintainer ruled the cell itself on 2026-09-05
+                // (option A, type-gate): a stored value that is not a string
+                // never satisfies a positive text operator and always
+                // satisfies `$notContains`. `FILTER_TEXT_CASES`' `score` rows
+                // are the pin, on every face. Now the arm answers the
+                // PREDICATE — "contains" is false of a non-string, so "does
+                // not contain" is true — which is `formula`'s shape
+                // (`!(typeof actual === 'string' && actual.includes(v))`).
+                if (typeof value === 'string' && value.includes(target)) return false;
                 break;
             case '$startsWith': 
                 if (typeof value !== 'string' || !value.startsWith(target)) return false; 

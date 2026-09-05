@@ -516,13 +516,62 @@ export function actionAiExposureError(_deps: ActionExecutionDeps, actionDef: any
 }
 
 /**
+ * [#15079] The one row-level `operation` the spec admits (`ActionSchema.
+ * operation`, `z.enum(['update'])` — #14092, maintainer ruling 2026-09-01).
+ * Named rather than inlined so the predicate below, the two doors and their
+ * pins all read ONE spelling.
+ */
+export const DECLARATIVE_UPDATE_OPERATION = 'update';
+
+/**
+ * [#15079] Is this the DECLARATIVE single-record field write?
+ *
+ * ## `operation` is read BEFORE `type` — everywhere, without exception
+ *
+ * This is contract point 1 of the executor contract pinned on the spec half
+ * (PR #15077), and it is a rule about ORDER, not just about a new branch. The
+ * declarative write is spelled as a key PARALLEL to `type`: `type` answers
+ * WHERE an action dispatches (`'script'` = the platform action route, which is
+ * where the write is performed) and `operation` answers WHAT the platform does
+ * there. Its parsed shape is therefore always `{ type: 'script', operation:
+ * 'update', patch }` — `type` carries no information at all for it, and the
+ * spec refuses every other explicit `type` beside it.
+ *
+ * So a `type`-keyed reader that runs first gets the RIGHT answer to the WRONG
+ * question: `isHeadlessInvokableAction` sees a `script` action with neither
+ * `target` nor `body` and says "not invokable"; `headlessActionTypeError` would
+ * hand a Studio-authored `type: 'flow'` + `operation: 'update'` row the flow
+ * prescription. Both are the same defect — the executor's own discriminator
+ * consulted second. Every reader below asks this function first.
+ *
+ * Deliberately a bare equality on the declared key, with no `type` clause: an
+ * action carrying `operation: 'update'` IS the declarative write, whatever
+ * `type` says. Data at rest that never went through `ActionSchema` (a Studio
+ * row, a `strict: false` bundle) is exactly the population where the two keys
+ * can contradict, and the ruling's answer for it is `operation`.
+ */
+export function isDeclarativeUpdateAction(action: any): boolean {
+    return action?.operation === DECLARATIVE_UPDATE_OPERATION;
+}
+
+/**
  * Whether an action has a headless invocation path (so MCP can run it).
  * Mirrors the supported-type set of the (now cloud-side) action-tools
  * bridge: `script` needs a handler binding (`target`) or an inline `body`;
  * `flow` needs a `target` and an automation service. UI-only types
  * (`url`, `modal`, `form`) and `api` have no server dispatch here.
+ *
+ * [#15079] …and the DECLARATIVE update is invokable with none of those: it
+ * carries no handler binding by construction (the spec refuses `target` and
+ * `body` beside `operation: 'update'`), because the platform performs the
+ * write. Read first, per {@link isDeclarativeUpdateAction} — the `script` arm
+ * below answers `false` for it, which would have hidden every declarative
+ * update action from the MCP `run_action` bridge's listing while the HTTP door
+ * ran it. That divergence is the failure the card names these predicates to
+ * prevent.
  */
 export function isHeadlessInvokableAction(_deps: ActionExecutionDeps, action: any, hasAutomation: boolean): boolean {
+    if (isDeclarativeUpdateAction(action)) return true;
     const type: string = action?.type ?? 'script';
     if (type === 'script') return Boolean(action?.target || action?.body);
     if (type === 'flow') return Boolean(action?.target) && hasAutomation;
@@ -533,6 +582,13 @@ export function isHeadlessInvokableAction(_deps: ActionExecutionDeps, action: an
  * The action types a headless caller can actually invoke through a server
  * dispatch — the two {@link isHeadlessInvokableAction} accepts. Kept next to
  * it so the predicate and the explanation below can never drift apart.
+ *
+ * [#15079] Deliberately still a set of TYPES, and deliberately not consulted
+ * for the declarative update: `operation` is not a type, and adding `'update'`
+ * here would be the member spelling the ruling rejected. What learned
+ * `operation` is the READER — {@link headlessActionTypeError} asks
+ * {@link isDeclarativeUpdateAction} before it reaches this set, so an update
+ * action never has its `type` classified at all.
  */
 const SERVER_DISPATCHED_ACTION_TYPES: ReadonlySet<string> = new Set(['script', 'flow']);
 
@@ -551,6 +607,12 @@ const SERVER_DISPATCHED_ACTION_TYPES: ReadonlySet<string> = new Set(['script', '
  * turns that dead end into an actionable 400.
  */
 export function headlessActionTypeError(_deps: ActionExecutionDeps, action: any, objectName?: string): string | null {
+    // [#15079] `operation` before `type`. The declarative update HAS a server
+    // dispatch — this file performs it — so classifying its `type` could only
+    // produce a wrong prescription. For the parsed shape (`type: 'script'`)
+    // the set below already answers `null`; this line is what keeps the answer
+    // right for data at rest whose `type` contradicts its `operation`.
+    if (isDeclarativeUpdateAction(action)) return null;
     const type: string = action?.type ?? 'script';
     if (SERVER_DISPATCHED_ACTION_TYPES.has(type)) return null;
     const name: string = action?.name ?? 'unknown';
@@ -787,20 +849,32 @@ export function isFlowActionRefusal(e: unknown): e is FlowActionRefusal {
  * flow ACTION and triggering its flow directly must land the same run, or
  * "the actions endpoint dispatches flows for you" is a claim the runtime
  * doesn't keep.
+ *
+ * [#15168] **The wiring takes the subject LOAD, not a bare record.** The flow
+ * face of #14143's signal (`AutomationContext.recordLoadDenied`, declared by
+ * #14244) is derived here, once, from {@link loadActionSubjectRecord}'s
+ * outcome — so a caller cannot hand this door a record while dropping the
+ * verdict that says the caller could not read it. Both call sites already held
+ * that outcome and were passing `subject.record` out of it; taking the whole
+ * `subject` removes the second de-facto source rather than adding a key beside
+ * it, and makes the omission a compile error instead of a silent inertness one
+ * door over (the shape #14143 was filed for).
  */
 export async function dispatchFlowAction(deps: ActionExecutionDeps,
     requestContext: HttpProtocolContext,
     action: any,
     wiring: {
         objectName: string;
-        record: Record<string, unknown>;
+        /** The caller-scope load outcome — `record` AND its verdict, from ONE producer. */
+        subject: ActionSubjectRecordLoad;
         params: Record<string, unknown>;
         recordId?: string;
         ec: any;
         envId?: string;
     },
 ): Promise<any> {
-    const { objectName, record, params, recordId, ec, envId } = wiring;
+    const { objectName, subject, params, recordId, ec, envId } = wiring;
+    const record = subject.record;
     const automation = await resolveAutomationService(deps, requestContext, envId);
     if (!automation) {
         throw new Error(flowActionUnavailableError(action));
@@ -819,6 +893,15 @@ export async function dispatchFlowAction(deps: ActionExecutionDeps,
     // `triggerData` envelope).
     const result: any = await automation.execute(action.target, {
         record,
+        // [#15168] The caller-scope load's verdict, a SIBLING of `record` —
+        // never a key on it, and spread so it is ABSENT rather than `false`
+        // when nothing was refused (`AutomationContext.recordLoadDenied` is
+        // `true | undefined`; a flow reads `recordLoadDenied === true`). The
+        // same producer, the same spelling and the same absence convention the
+        // handler face already carries at the two script-body call sites — the
+        // flow face is where the declared key had no populator at all, so a
+        // `runAs: 'system'` flow guarding on it was inert, never wrong.
+        ...actionRecordLoadSignal(subject),
         ...(isObjectLessActionKey(objectName) ? {} : { object: objectName }),
         userId: ec?.userId,
         ...(Array.isArray(ec?.positions) && ec.positions.length ? { positions: ec.positions } : {}),
@@ -899,12 +982,20 @@ export function actionLooksDestructive(_deps: ActionExecutionDeps, action: any):
 }
 
 export function summarizeAction(deps: ActionExecutionDeps, action: any, obj: any, objectName: string): any {
+    // [#15079] `operation` before `type`, on the LISTING face. A declarative
+    // update always requires a current record — that is contract point 7, and
+    // the executor refuses without one — so the answer cannot be left to
+    // `locations`, which is optional metadata an author may omit entirely. An
+    // agent told `requiresRecord: false` would invoke without a `recordId` and
+    // collect the refusal that this summary exists to prevent.
+    const declarativeUpdate = isDeclarativeUpdateAction(action);
     const requiresRecord =
-        Array.isArray(action?.locations) &&
+        declarativeUpdate ||
+        (Array.isArray(action?.locations) &&
         action.locations.some(
             (l: string) =>
                 l === 'list_item' || l === 'record_header' || l === 'record_more' || l === 'record_related',
-        );
+        ));
     const description =
         (typeof action?.ai?.description === 'string' ? action.ai.description : undefined) ??
         (typeof action?.label === 'string' ? action.label : undefined);
@@ -915,6 +1006,10 @@ export function summarizeAction(deps: ActionExecutionDeps, action: any, obj: any
         ...(typeof action?.label === 'string' ? { label: action.label } : {}),
         ...(description ? { description } : {}),
         type: action?.type ?? 'script',
+        // The verb, beside the route. Emitted only when declared, so an agent
+        // reading the listing can tell the platform-performed write from a
+        // handler-backed `script` action — the two share a `type`.
+        ...(declarativeUpdate ? { operation: DECLARATIVE_UPDATE_OPERATION } : {}),
         requiresRecord: Boolean(requiresRecord),
         requiresConfirmation: actionLooksDestructive(deps, action),
         ...(params.length > 0 ? { params } : {}),
@@ -1280,6 +1375,246 @@ export function actionRecordLoadSignal(load: ActionSubjectRecordLoad): { recordL
 }
 
 /**
+ * [#15079] The prior/next value pair a successful declarative update hands back
+ * when the action declares `undoable: true` — the anchor that key never had.
+ *
+ * The three keys objectui's `UndoableOperation` also needs (`id`, `timestamp`,
+ * `description`) are deliberately NOT here: they are the client's — a clock, a
+ * stack key and the action's own label, all of which the console already has
+ * where it builds the toast. What only the SERVER can answer is what the row
+ * held before the write, under the caller's own read scope, and that is exactly
+ * what this carries.
+ */
+export interface DeclarativeUpdateUndo {
+    /** The `UndoableOperation.type` this restores to — one verb, by ruling. */
+    type: typeof DECLARATIVE_UPDATE_OPERATION;
+    objectName: string;
+    recordId: string;
+    /**
+     * The prior value of EXACTLY the fields written, keyed identically to
+     * {@link redoData}. A field the row did not carry is `null`, never absent:
+     * "restore what was there" needs a value for every key it re-writes, and an
+     * absent key would silently leave the new value in place — the same
+     * half-restore the platform's serialisation would produce for `undefined`.
+     */
+    undoData: Record<string, unknown>;
+    /** The values written — the merged `{ ...patch, ...params }` bag. */
+    redoData: Record<string, unknown>;
+}
+
+/** [#15079] What a declarative `operation: 'update'` action returns. */
+export interface DeclarativeUpdateResult {
+    operation: typeof DECLARATIVE_UPDATE_OPERATION;
+    object: string;
+    id: string;
+    /** The row after the write, as the data plane answered it. */
+    record: Record<string, unknown>;
+    /** Present only when the action declares `undoable: true`. */
+    undo?: DeclarativeUpdateUndo;
+}
+
+/**
+ * [#15079] The write bag of a declarative update: `{ ...patch, ...params }`.
+ *
+ * Contract point 4, and the precedence is the whole content of it — the static
+ * `patch` sits UNDER the values the dialog collected, so a param of the same
+ * name WINS. That is the bulk def's own rule (`bulkActionDefs`), mirrored word
+ * for word; the spec's `patch` describe states it too. ⛔ Nothing else from the
+ * action is merged: not `bodyExtra` (refused beside `operation`), not
+ * `recordIdField`, not the route's own `objectName`/`recordId` stamps — those
+ * are handler plumbing, and a declarative update has no handler.
+ */
+export function declarativeUpdateWrite(action: any, params: Record<string, unknown> | undefined): Record<string, unknown> {
+    const patch = action?.patch;
+    const base: Record<string, unknown> =
+        patch && typeof patch === 'object' && !Array.isArray(patch) ? { ...patch } : {};
+    return { ...base, ...(params && typeof params === 'object' ? params : {}) };
+}
+
+/** A refusal from the declarative-update executor, carrying the ADR-0112 envelope. */
+function declarativeUpdateRefusal(message: string, status: number): Error {
+    // ⛔ No `code` literal is stamped here, deliberately. `resolveThrownHttpError`
+    // derives the STANDARD catalog member from the status
+    // (`standardErrorCodeForHttpStatus`: 400 → `VALIDATION_ERROR`), which is
+    // what ADR-0112 asks for when the condition is a generic one — and the
+    // ledger's own registration rule says so in as many words ("If the
+    // condition is generic … use the standard catalog instead of registering a
+    // synonym"). Both doors resolve the throw through that one function, so
+    // the REST envelope and the MCP bridge's tool-error agree by construction.
+    return Object.assign(new Error(message), { status });
+}
+
+/**
+ * [#15079] Execute the DECLARATIVE single-record field write — `operation:
+ * 'update'` + `patch` (#14092, maintainer ruling 2026-09-01, quoted on the
+ * card). ONE implementation, called by BOTH action doors.
+ *
+ * ## Shared on purpose, for the #14143 reason
+ *
+ * The REST `/actions` door and the MCP `run_action` bridge are two doors onto
+ * one action model, and this repo has now paid twice for a rule implemented at
+ * one of them: #14143 (a `recordLoadDenied` signal only one door set) and
+ * #15168 (a flow face with no populator at all). An authorization rule is the
+ * worst possible thing to fork, and contract point 3 is an authorization rule
+ * — so the branch each door owns is three lines, and everything that decides
+ * whether a row gets written lives here.
+ *
+ * ## The identity question, which is the whole card
+ *
+ * The write goes through the data plane under the CALLER's own
+ * `ExecutionContext` — `wiring.ec`, exactly the envelope
+ * `resolveExecutionContext` built for this request — and ⛔ NEVER through
+ * {@link buildActionExecutionContext}, which forces `isSystem: true`.
+ *
+ * That elevation is correct for a script BODY (settled design, #3914: a body
+ * is trusted code admitted by the invoke-time gates) and it is exactly wrong
+ * here, because a declarative update has no body to trust. There is no author
+ * code between the caller and the row — the platform performs the write — so
+ * the only authorization anywhere on this path is the data plane's own, and it
+ * only exists if the caller's identity is what reaches it. An `isSystem` write
+ * here would be an RLS/FLS-bypassing field write that any authenticated caller
+ * could trigger through a declaration, with no handler, no `ai.exposed` opt-in
+ * on the REST door, and nothing in the audit trail to distinguish it from a
+ * user edit. That is a privilege escalation, not a bug, which is why the
+ * identity lives at this ONE call site and is pinned directly.
+ *
+ * The direction is the one already ruled for hook `runAs: 'user'` (#14010),
+ * consumed here rather than reopened: no `runAs` key is added.
+ *
+ * ## Why the caller-scope load's VERDICT is consumed rather than re-derived
+ *
+ * `subject` is {@link loadActionSubjectRecord}'s outcome — the row AND whether
+ * the caller's own scope actually delivered it. A caller who cannot read the
+ * row is refused HERE, before any write is attempted, on
+ * `subject.recordLoadDenied`. Re-deriving that from `subject.record` is the
+ * #14143 defect verbatim: the door stamps `record.id = recordId` on a refused
+ * load, so `record.id` is truthy either way and `if (!record?.id)` is false on
+ * a row the caller cannot see. A swallowed load must never become an implicit
+ * grant.
+ *
+ * ⚠️ The refusal is the SHARED not-found envelope (`recordNotFoundError`, 404
+ * `RECORD_NOT_FOUND`) rather than a 403, and that is deliberate: the read path
+ * collapses "filtered out by RLS" and "this id names nothing" on purpose
+ * (existence non-disclosure), nothing in the caught error separates them, and
+ * inventing a 403 for the pair would answer a question the platform declines to
+ * answer everywhere else. See the note on `loadActionSubjectRecord`.
+ *
+ * ## What is NOT checked here
+ *
+ * `visible` — contract point 6. It is a per-record UI predicate the client
+ * evaluates with the record bound, and it is NOT authorization: point 3 is.
+ * Treating it as a gate here would put a display rule on the security path
+ * (and leave the real gate unimplemented for every caller that is not a
+ * browser). Deliberately unread; pinned as unread.
+ *
+ * A caller who can READ but not WRITE the row is refused by the data plane
+ * itself, for the same reason — the write carries the caller's identity, so
+ * the object's permissions, its hooks and its validations fire exactly as for a
+ * user edit, and their refusals propagate untouched to the door's catch.
+ */
+export async function executeDeclarativeUpdateAction(
+    _deps: ActionExecutionDeps,
+    action: any,
+    wiring: {
+        objectName: string;
+        actionName: string;
+        /** The caller-scope load outcome — record AND verdict, from ONE producer. */
+        subject: ActionSubjectRecordLoad;
+        recordId?: string;
+        /** The values the dialog collected. Merged OVER the static `patch`. */
+        params: Record<string, unknown>;
+        /** The CALLER's execution context. ⛔ Never `buildActionExecutionContext`. */
+        ec: any;
+        driver?: any;
+        envId?: string;
+        callData: (action: string, params: any, dataDriver?: any, scopeId?: string, ec?: ExecutionContext) => Promise<any>;
+    },
+): Promise<DeclarativeUpdateResult> {
+    const { objectName, actionName, subject, recordId, params, ec, driver, envId, callData } = wiring;
+
+    // ── contract point 7: no current record ⇒ a LOCATED refusal ──────────────
+    // ⛔ Never a silent no-op, and never a write to "whatever row" — a
+    // declarative update writes ONE record, the one it runs on. Two shapes
+    // reach this, and they get different prescriptions because they have
+    // different fixes.
+    if (isObjectLessActionKey(objectName)) {
+        throw declarativeUpdateRefusal(
+            `Action '${actionName}' declares \`operation: '${DECLARATIVE_UPDATE_OPERATION}'\` but is addressed at the ` +
+            `object-less action key '${objectName}' — a global action has no current record to write. ` +
+            `Give the action an \`objectName\`, or declare it on the object it updates, and invoke it at ` +
+            `\`/actions/<object>/${actionName}/<recordId>\`.`,
+            400,
+        );
+    }
+    if (!recordId) {
+        throw declarativeUpdateRefusal(
+            `Action '${actionName}' on '${objectName}' declares \`operation: '${DECLARATIVE_UPDATE_OPERATION}'\` and ` +
+            `writes the CURRENT record, but no \`recordId\` was supplied. Invoke it at ` +
+            `\`/actions/${objectName}/${actionName}/<recordId>\`, or pass \`{ "recordId": "…" }\` in the body.`,
+            400,
+        );
+    }
+
+    // ── contract point 4: the write bag, patch UNDER params ──────────────────
+    const data = declarativeUpdateWrite(action, params);
+    if (Object.keys(data).length === 0) {
+        // The spec refuses `operation: 'update'` with neither `patch` nor
+        // `params` at parse time, so this catches the runtime residual: a
+        // params-only action invoked with an empty bag. An update that writes
+        // no field is the silent no-op point 7 forbids one step over — it would
+        // answer 200 having touched nothing.
+        throw declarativeUpdateRefusal(
+            `Action '${actionName}' on '${objectName}' has nothing to write: its \`patch\` is empty and no ` +
+            `params were supplied. Declare a static \`patch\`, or send the values its \`params\` collect.`,
+            400,
+        );
+    }
+
+    // ── contract point 3: the caller-scope load's VERDICT, consumed ──────────
+    if (subject.recordLoadDenied) {
+        throw recordNotFoundError(objectName, recordId);
+    }
+
+    // ── contract point 2: ONE data-plane update, AS THE CALLER ───────────────
+    // ⛔ `ec`, never `buildActionExecutionContext(ec)`. See the docblock — this
+    // single argument is the difference between a user edit and a privilege
+    // escalation.
+    const written = await callData('update', { object: objectName, id: recordId, data }, driver, envId, ec);
+
+    const prior: Record<string, unknown> = subject.record ?? {};
+    const record: Record<string, unknown> =
+        written && typeof written === 'object' && (written as any).record && typeof (written as any).record === 'object'
+            ? (written as any).record
+            : { ...prior, ...data };
+
+    // ── contract point 5: `undoable` gets its anchor ─────────────────────────
+    let undo: DeclarativeUpdateUndo | undefined;
+    if (action?.undoable === true) {
+        const undoData: Record<string, unknown> = {};
+        // EXACTLY the fields written — the patch names them, which is the whole
+        // reason `undoable` has an anchor now. `?? null` rather than a
+        // presence test: every written key must carry a value, or the restore
+        // silently leaves that field at its new value.
+        for (const key of Object.keys(data)) undoData[key] = prior[key] ?? null;
+        undo = {
+            type: DECLARATIVE_UPDATE_OPERATION,
+            objectName,
+            recordId,
+            undoData,
+            redoData: { ...data },
+        };
+    }
+
+    return {
+        operation: DECLARATIVE_UPDATE_OPERATION,
+        object: objectName,
+        id: recordId,
+        record,
+        ...(undo ? { undo } : {}),
+    };
+}
+
+/**
  * Resolve + invoke a business action by its declarative name for the MCP
  * `run_action` tool. Enforces the AI-exposure gate (`ai.exposed`, #2849), the
  * ADR-0066 D4 capability gate, loads the subject record under the caller's
@@ -1384,6 +1719,19 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
         callData('get', { object: objectName, id: recordId }, driver, envId, ec));
     const record = subject.record;
 
+    // ── declarative update ── [#15079] BEFORE the `type` switch below, and
+    // before the trusted-mode plumbing: contract point 1 reads `operation`
+    // first, and an action with no handler has no body to elevate for. The
+    // shared executor the REST `/actions` door also calls, so the two doors
+    // cannot disagree about the identity the write carries — the failure class
+    // #14143 and #15168 each paid for once, on this exact seam.
+    if (isDeclarativeUpdateAction(action)) {
+        const result = await executeDeclarativeUpdateAction(deps, action, {
+            objectName, actionName: name, subject, recordId, params, ec, driver, envId, callData,
+        });
+        return { ok: true, action: action.name, objectName, ...(recordId ? { recordId } : {}), result };
+    }
+
     // [#5372] One shared producer for the user shape (`security/actor-user.ts`),
     // the same one the REST `/actions` route and the AI routes use. What stood
     // here was `name: ec.userName ?? ec.userDisplayName ?? ec.userId` — a `??`
@@ -1404,7 +1752,10 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
 
     // ── flow dispatch ── (shared with the REST /actions route, #3915)
     if (action.type === 'flow') {
-        const result = await dispatchFlowAction(deps, requestContext, action, { objectName, record, params, recordId, ec, envId });
+        // [#15168] `subject`, not `record`: the shared door derives the flow
+        // context's `record` AND its `recordLoadDenied` sibling from the one
+        // load outcome, so this door cannot forward the row without the verdict.
+        const result = await dispatchFlowAction(deps, requestContext, action, { objectName, subject, params, recordId, ec, envId });
         return { ok: true, action: action.name, objectName, ...(recordId ? { recordId } : {}), result };
     }
 

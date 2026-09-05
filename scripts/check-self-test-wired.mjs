@@ -152,14 +152,50 @@ const SCRIPT_EXT = /\.(mjs|mts|js|sh)$/;
 const ROOT_DIR_WATCH_HINTS = ['scripts/**/*.mjs', 'scripts/**/*.mts', 'scripts/**/*.sh'];
 
 /**
- * A `scripts/...` path, optionally followed by `--self-test`.
+ * A `scripts/...` path, optionally prefixed by the directories it lives under
+ * and optionally followed by `--self-test`.
  *
  * The trailing `(?![\w-])` is the right boundary: without it `--self-test-extra`
  * reads as an invocation of `--self-test`, which is #10534's defect wearing this
  * gate's hat.
+ *
+ * ## The LEFT boundary, and why the prefix is read rather than cut off (#15342)
+ *
+ * This repo has a package-local gate lane, and `lint.yml` really does run one
+ * of its gates by path: `node packages/lint/scripts/check-reference-carrier-
+ * shape.mjs --self-test`. The pattern used to open on the bare literal
+ * `scripts/` with nothing to its left, so it matched that path as a SUBSTRING
+ * and filed the gate under `scripts/check-reference-carrier-shape.mjs` — a key
+ * with no file behind it. Both directions of that were silent: the real file
+ * was never audited (it is not under the root walk, so it is in no population),
+ * and the phantom key could never be reconciled against a carrier either, so
+ * neither `auditPopulation` nor `auditLedger` had anything to say. A gate whose
+ * whole subject is "the self-test CI ships is the self-test CI runs" was
+ * answering about a different script than the one CI executes.
+ *
+ * So the directory prefix is CONSUMED into the key rather than cut away, and
+ * `(?<![\w.\-/])` is the left boundary that makes the key a whole path instead
+ * of a tail of one. Both halves are load-bearing and were measured on this
+ * tree's own corpus before landing:
+ *
+ *   - a leading `./` is stripped rather than kept, because it is the same file
+ *     under a different spelling and paths are compared by EXACT equality here.
+ *     `cut-rc.yml` and `release.yml` both import from `"./scripts/check-docs-
+ *     image-tag.mjs"`; keying those to `./scripts/…` would silently drop two
+ *     live invocations the old pattern did credit.
+ *   - a segment must START with an alphanumeric or `_`, so `..` is not a
+ *     prefix segment. A `../…` path cannot be resolved against this ROOT
+ *     without knowing what it is relative to, and inventing a key for it is how
+ *     the phantom above was minted in the first place. Zero occur in the
+ *     workflow corpus today; refusing to match is the safe direction, and the
+ *     population half below never admits a path it cannot read.
+ *
+ * Measured after this change over the live corpus: 186 named paths, ZERO of
+ * which lack a file on disk (before: exactly one, the phantom above). The
+ * `live corpus` battery holds both halves of that reading.
  */
 const INVOCATION_RE =
-  /(scripts\/[A-Za-z0-9_.\-/]+\.(?:mjs|mts|js|sh))(\s+--self-test(?![\w-]))?/g;
+  /(?<![\w.\-/])(?:\.\/)*((?:[A-Za-z0-9_][A-Za-z0-9_.\-]*\/)*scripts\/[A-Za-z0-9_.\-/]+\.(?:mjs|mts|js|sh))(\s+--self-test(?![\w-]))?/g;
 
 /**
  * ⛔ SHRINK-ONLY. Scripts CI runs whose self-test IS run by CI, but not through
@@ -364,76 +400,227 @@ export function auditLedger({ ledger, carriers, named, selfTested, sourceOf }) {
   return findings;
 }
 
-/** Walk `scripts/` for candidate entry points. */
-function walkScripts(dir, out = []) {
+/**
+ * Walk `scripts/` for candidate entry points, keyed relative to `root`.
+ *
+ * `root` is a parameter rather than the module constant so `collectPopulation`
+ * below can be driven at a tree that is NOT this repo — which is the only way
+ * the `#4690` refusals it applies can be exercised by a self-test instead of
+ * merely coded (#15414).
+ */
+function walkScripts(dir, root = ROOT, out = []) {
   for (const entry of readdirSync(dir)) {
     if (entry === 'node_modules') continue;
     const full = join(dir, entry);
-    if (statSync(full).isDirectory()) walkScripts(full, out);
-    else if (SCRIPT_EXT.test(entry)) out.push(relative(ROOT, full).split(sep).join('/'));
+    if (statSync(full).isDirectory()) walkScripts(full, root, out);
+    else if (SCRIPT_EXT.test(entry)) out.push(relative(root, full).split(sep).join('/'));
   }
   return out;
 }
 
-function main() {
-  const scriptsDir = join(ROOT, 'scripts');
-  const workflowDir = join(ROOT, WORKFLOW_DIR);
-  const refuse = (message) => {
-    console.error(`\ncheck-self-test-wired: REFUSED — ${message}\n`);
-    process.exit(1);
-  };
-  if (!existsSync(scriptsDir)) refuse('scripts/ does not exist, so nothing was read (#4690).');
-  if (!existsSync(workflowDir)) refuse(`${WORKFLOW_DIR} does not exist, so nothing was read (#4690).`);
+/**
+ * ⛔ THE `#4690` FLOORS, as a pure function over a COMPLETED reading (#15414).
+ *
+ * Held here, and applied by `collectPopulation` below, because TWO gates
+ * consume this population and "nothing to check" versus "the reader is broken"
+ * has to read the same way in both. Every arm is a REFUSAL naming what could
+ * not be read, never a quiet pass.
+ *
+ * `rootCarriers` is the ROOT WALK's own answer and deliberately not the
+ * combined set: a tree whose root walk stopped finding carriers has a broken
+ * reader even when the package-local lane still produced one, and the combined
+ * set is exactly what would hide that.
+ *
+ * The last arm — an empty POPULATION — is new to this file and was previously
+ * only in `check-self-test-workflow-commands.mjs`. Moving the population here
+ * moved that floor with it, which is the direction that costs nothing: it
+ * cannot fire on a tree where any script CI runs ships a `--self-test`, and on
+ * one where none does, a confident green was the old behaviour.
+ *
+ * @returns {string | null} the refusal message body, or null when the reading stands
+ */
+export function refusalFor({ files, rootCarriers, workflows, pkgScriptCount, named, population }) {
+  if (files.length === 0) return 'the walk over scripts/ found no files — a broken walk, not a clean tree (#4690).';
+  if (rootCarriers.size === 0) {
+    return 'no script under scripts/ carries a `--self-test` — this tree has dozens, so the reader is broken (#4690).';
+  }
+  if (workflows.length === 0) return `${WORKFLOW_DIR} holds no workflow files (#4690).`;
+  if (pkgScriptCount === 0) return 'the root package.json declares no scripts (#4690).';
+  if (named.size === 0) return 'no workflow names any scripts/ file — the workflow reader is broken (#4690).';
+  if (population.length === 0) {
+    return 'no script CI runs ships a `--self-test` — the population reader is broken, not the tree (#4690).';
+  }
+  return null;
+}
 
+/**
+ * THE POPULATION — one definition, two gates (#15414).
+ *
+ * "Which scripts does CI run that ship a `--self-test`" is one question, and it
+ * was answered twice: here, and again by a private root walk inside
+ * `check-self-test-workflow-commands.mjs`. The two answers were not the same
+ * one, and could not be: this file admits a SECOND population source (the
+ * package-local gate lane, below), that file did not, and the drift was silent
+ * in the direction that matters — the sibling gate's scope line read `168` to
+ * this one's `169`, refused nothing, and the missing script's self-test output
+ * was in no sweep. A gate whose `#4690` refusals all fire on an EMPTY
+ * population has nothing to say about a population that is complete-minus-one.
+ *
+ * So the whole read lives here and is EXPORTED: the walk, the sources, the
+ * workflow corpus, the alias expansion, the package-local admission and the
+ * floors. The sibling gate consumes it and adds no walk of its own — the same
+ * "one definition, two gates" its header already promised for the extraction
+ * half (`collectInvocations`, `carriesSelfTest`, `codeOf`).
+ *
+ * ⛔ Not a convenience wrapper: a consumer that re-derives ANY part of this is
+ * back in the drift this export exists to end, and the drift's whole signature
+ * is that both sides stay green while they disagree.
+ *
+ * @param {{root?: string}} [options] `root` defaults to this repo; a different
+ *   tree is how the refusals above are exercised rather than merely coded.
+ */
+export function collectPopulation({ root = ROOT } = {}) {
   const sourceOf = (relPath) => {
     try {
-      return readFileSync(join(ROOT, relPath), 'utf8');
+      return readFileSync(join(root, relPath), 'utf8');
     } catch {
       return null;
     }
   };
+  const blank = (refusal, over = {}) => ({
+    refusal,
+    files: [],
+    walked: new Set(),
+    sources: new Map(),
+    rootCarriers: new Set(),
+    carriers: new Set(),
+    named: new Map(),
+    selfTested: new Map(),
+    workflows: [],
+    population: [],
+    packageLocal: [],
+    workflowDir: WORKFLOW_DIR,
+    sourceOf,
+    ...over,
+  });
 
-  const files = walkScripts(scriptsDir);
-  if (files.length === 0) refuse('the walk over scripts/ found no files — a broken walk, not a clean tree (#4690).');
+  const scriptsDir = join(root, 'scripts');
+  const workflowDir = join(root, WORKFLOW_DIR);
+  if (!existsSync(scriptsDir)) return blank('scripts/ does not exist, so nothing was read (#4690).');
+  if (!existsSync(workflowDir)) return blank(`${WORKFLOW_DIR} does not exist, so nothing was read (#4690).`);
 
-  const carriers = new Set();
+  const files = walkScripts(scriptsDir, root);
+  const walked = new Set(files);
+  const sources = new Map();
+  const rootCarriers = new Set();
   for (const relPath of files) {
     const source = sourceOf(relPath);
-    if (source === null) refuse(`${relPath} could not be read.`);
-    if (carriesSelfTest(relPath, source)) carriers.add(relPath);
-  }
-  if (carriers.size === 0) {
-    refuse('no script under scripts/ carries a `--self-test` — this tree has dozens, so the reader is broken (#4690).');
+    if (source === null) return blank(`${relPath} could not be read.`, { files, walked });
+    sources.set(relPath, source);
+    if (carriesSelfTest(relPath, source)) rootCarriers.add(relPath);
   }
 
-  const workflowNames = readdirSync(workflowDir).filter((f) => /\.ya?ml$/.test(f)).sort();
-  if (workflowNames.length === 0) refuse(`${WORKFLOW_DIR} holds no workflow files (#4690).`);
-  const workflows = workflowNames.map((name) => ({
-    name,
-    text: readFileSync(join(workflowDir, name), 'utf8'),
-  }));
+  const workflows = readdirSync(workflowDir)
+    .filter((f) => /\.ya?ml$/.test(f))
+    .sort()
+    .map((name) => ({ name, text: readFileSync(join(workflowDir, name), 'utf8') }));
 
-  let pkgScripts = {};
+  let pkgScripts = null;
   try {
-    pkgScripts = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).scripts ?? {};
+    pkgScripts = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).scripts ?? {};
   } catch {
-    refuse('the root package.json could not be read or parsed.');
+    return blank('the root package.json could not be read or parsed.', { files, walked, sources, rootCarriers, workflows });
   }
-  if (Object.keys(pkgScripts).length === 0) refuse('the root package.json declares no scripts (#4690).');
 
   const { named, selfTested } = collectInvocations(workflows, pkgScripts);
-  if (named.size === 0) refuse('no workflow names any scripts/ file — the workflow reader is broken (#4690).');
+
+  // The population's SECOND source: the package-local gate lane (#15342).
+  //
+  // `walkScripts` is anchored at the repo-root `scripts/` dir, so a gate CI
+  // invokes by a package-local path is outside the walk's carriers no matter
+  // how the anchor keys it — and a script that is in no population is audited
+  // by neither `auditPopulation` (it iterates carriers) nor `auditLedger`.
+  // Fixing the key alone would have left that half exactly as silent as before.
+  //
+  // ⛔ NOT a second walk. The subject of this gate is "a script CI RUNS whose
+  // self-test CI must run too", so what CI names is the honest population
+  // boundary out here; a walk over every `packages/*/scripts` dir would admit
+  // files CI never runs, which `auditPopulation` discards on the next line
+  // anyway, and would owe `ROOT_DIR_WATCH_HINTS` a declaration that is no
+  // longer set-equal to the root walk it is documented to mirror. The root walk
+  // stays the ROOT half — it is what the `#4690` floors above are written
+  // against ("this tree has dozens"), and a naming-derived population could not
+  // carry those.
+  //
+  // Admitted on exactly the terms the root walk uses, and no looser: the file
+  // must EXIST and its CODE (comments masked) must carry the literal. A named
+  // path with nothing behind it is left OUT rather than admitted — that is the
+  // phantom #15342 was about, and admitting one would re-create it one layer
+  // down. It is not a refusal either: this gate does not own what a workflow is
+  // allowed to name, and the anchor already declines to invent keys.
+  //
+  // ⛔ The skip is membership in the WALK'S OWN OUTPUT, never `startsWith` on a
+  // re-spelling of its root. That spelling is a bare top-level word wearing a
+  // separator, so it reaches the dispatch derivation's hint set as the plain
+  // literal `scripts` and joins the SHRINK-ONLY escapable-literal species
+  // (#10705) -- a population no `hintCovers` can name, declared by a gate that
+  // already declares the nameable spelling. Measured when this landed: the
+  // `startsWith` form added exactly that row, FRESH, to both of this gate's
+  // families. The set form says what the predicate means -- "the root walk did
+  // not already produce this path" -- and declares nothing.
+  const carriers = new Set(rootCarriers);
+  for (const relPath of named.keys()) {
+    if (walked.has(relPath)) continue;
+    const source = sourceOf(relPath);
+    if (source === null) continue;
+    sources.set(relPath, source);
+    if (carriesSelfTest(relPath, source)) carriers.add(relPath);
+  }
+
+  // Sorted, so the two consumers iterate in one order and their scope lines are
+  // comparable line by line.
+  const population = [...carriers].filter((s) => named.has(s)).sort();
+  const packageLocal = population.filter((s) => !walked.has(s));
+  const reading = {
+    files,
+    walked,
+    sources,
+    rootCarriers,
+    carriers,
+    named,
+    selfTested,
+    workflows,
+    population,
+    packageLocal,
+    workflowDir: WORKFLOW_DIR,
+    sourceOf,
+  };
+  return { ...reading, refusal: refusalFor({ ...reading, pkgScriptCount: Object.keys(pkgScripts).length }) };
+}
+
+function main() {
+  const refuse = (message) => {
+    console.error(`\ncheck-self-test-wired: REFUSED — ${message}\n`);
+    process.exit(1);
+  };
+
+  // The whole read — walk, sources, workflow corpus, aliases, the package-local
+  // admission and the `#4690` floors — is `collectPopulation` above, so the
+  // sibling gate consumes the SAME answer rather than a second one (#15414).
+  const read = collectPopulation();
+  if (read.refusal) refuse(read.refusal);
+  const { files, carriers, named, selfTested, population, packageLocal, workflows, sourceOf } = read;
 
   const findings = [
     ...auditPopulation({ carriers, named, selfTested, ledger: SELF_TEST_RUN_OTHERWISE }),
     ...auditLedger({ ledger: SELF_TEST_RUN_OTHERWISE, carriers, named, selfTested, sourceOf }),
   ];
 
-  const members = [...carriers].filter((s) => named.has(s));
-  const wired = members.filter((s) => selfTested.has(s));
+  const wired = population.filter((s) => selfTested.has(s));
   const scope =
     `  scope: ${files.length} file(s) under scripts/, ${carriers.size} carrying \`--self-test\` in code ` +
-    `(comments masked); ${members.length} of those are run by ${workflows.length} workflow(s); ` +
+    `(comments masked, ${packageLocal.length} of them package-local gate(s) CI names by path); ` +
+    `${population.length} of those are run by ${workflows.length} workflow(s); ` +
     `${wired.length} have their self-test run through the flag, ${SELF_TEST_RUN_OTHERWISE.length} through a recorded route.`;
 
   if (findings.length > 0) {
@@ -444,7 +631,7 @@ function main() {
   }
 
   console.log(
-    `✓ check-self-test-wired: every one of the ${members.length} script(s) CI runs that ship a ` +
+    `✓ check-self-test-wired: every one of the ${population.length} script(s) CI runs that ship a ` +
       '`--self-test` has that self-test run by CI.',
   );
   console.log(scope);
@@ -496,17 +683,20 @@ function main() {
 const SELF_TEST_BATTERIES = Object.freeze({
   'comment mask': 7,
   'right boundary': 4,
+  'left boundary': 6,
   'alias resolution': 4,
   'population verdict': 4,
   'population declaration': 7,
+  'live corpus': 3,
   'ledger hygiene': 9,
   'live ledger': 4,
+  'the exported population': 8,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the registry's own size is pinned too. Adding a battery raises
 // this number; removing one is the same ⛔ deliberate edit as lowering a count.
-const SELF_TEST_BATTERY_FLOOR = 7;
+const SELF_TEST_BATTERY_FLOOR = 10;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -585,6 +775,60 @@ function selfTest() {
     ok(
       !got.selfTested.has('scripts/check-foo.mjs'),
       '`scripts/check-foo.mjs` was credited on the strength of its longer sibling (prefix match, not exact equality)',
+    );
+  }
+
+  // ── Left boundary: a path is keyed WHOLE, never as a tail of one (#15342) ─
+  //
+  // Every case here fails against the pre-#15342 anchor (`/(scripts\/…)/`, no
+  // left boundary, no prefix), which is what makes them an instrument rather
+  // than a restatement of the operators. Measured by applying this battery to
+  // the base tree's pattern in a scratch ablation: cases 1-4 red there, 5-6
+  // stay green — 5 and 6 are the controls that prove the widening did not buy
+  // its new answers by dropping the old ones.
+  battery('left boundary');
+  {
+    const PKG = 'packages/lint/scripts/check-reference-carrier-shape.mjs';
+    const got = collectInvocations(wf(`    - run: node ${PKG} --self-test\n`), {});
+    ok(
+      got.named.has(PKG),
+      'a gate CI invokes by a PACKAGE-LOCAL path was not keyed to its real path — it is then in no '
+        + 'population and its self-test wiring is audited for nobody (#15342)',
+    );
+    ok(
+      got.selfTested.has(PKG),
+      'the package-local path was named but its `--self-test` was not credited to it',
+    );
+    ok(
+      !got.named.has('scripts/check-reference-carrier-shape.mjs'),
+      'the package-local path was ALSO filed under a root path with no file behind it — the phantom key '
+        + 'a substring match mints, which no carrier can ever reconcile (#15342)',
+    );
+  }
+  {
+    // A path that is a tail of a longer one must not be minted on its own.
+    const got = collectInvocations(wf('    - run: node vendor/tools/scripts/g.mjs --self-test\n'), {});
+    ok(
+      !got.named.has('scripts/g.mjs'),
+      'a `scripts/…` SUBSTRING of a longer path was minted as a key in its own right',
+    );
+  }
+  {
+    // Control 1 — the plain root spelling is unchanged.
+    const got = collectInvocations(wf('    - run: node scripts/g.mjs --self-test\n'), {});
+    ok(got.selfTested.has('scripts/g.mjs'), 'the ordinary root spelling stopped being keyed to itself');
+  }
+  {
+    // Control 2 — `./scripts/…` still normalises onto the walk's key. Live
+    // spelling: `cut-rc.yml` and `release.yml` import from `"./scripts/…"`,
+    // and keying those anywhere else silently drops two real invocations.
+    const got = collectInvocations(
+      wf('    - run: node --input-type=module -e \'import { X } from "./scripts/g.mjs";\'\n'),
+      {},
+    );
+    ok(
+      got.named.has('scripts/g.mjs'),
+      'a leading `./` was kept in the key, so the same file under two spellings stopped comparing equal',
     );
   }
 
@@ -702,6 +946,41 @@ function selfTest() {
     );
   }
 
+  // ── The live corpus: the anchor is measured on specimens, not on fixtures ─
+  //
+  // A widening measured on zero specimens is not measured. The fixtures above
+  // prove the pattern; these three read the tree CI actually runs, so the day
+  // the package-local lane moves, this reds here instead of going quiet.
+  battery('live corpus');
+  {
+    let corpus = null;
+    try {
+      const dir = join(ROOT, WORKFLOW_DIR);
+      const workflows = readdirSync(dir)
+        .filter((f) => /\.ya?ml$/.test(f))
+        .sort()
+        .map((name) => ({ name, text: readFileSync(join(dir, name), 'utf8') }));
+      const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).scripts ?? {};
+      corpus = collectInvocations(workflows, pkg);
+    } catch {
+      corpus = null;
+    }
+    ok(corpus !== null && corpus.named.size > 0, 'the live workflow corpus could not be read — the pins below would prove nothing (#4690)');
+    const keys = corpus === null ? [] : [...corpus.named.keys()];
+    ok(
+      keys.length > 0 && keys.every((p) => existsSync(join(ROOT, p))),
+      'a path this gate keys an invocation to has NO file behind it. Every audit downstream then runs '
+        + 'against a script that does not exist, and passes for the wrong reason, in both directions (#15342)',
+    );
+    // Named BY NAME on purpose: it is this tree's only package-local gate
+    // invocation, so it is the whole specimen set for the widening above.
+    ok(
+      keys.includes('packages/lint/scripts/check-reference-carrier-shape.mjs'),
+      "lint.yml's package-local gate is not in the live population. Either the lane moved — re-point this "
+        + 'pin at the new specimen — or the anchor regressed to a root-only one and the widening is untested',
+    );
+  }
+
   // ── Ledger hygiene: every row must still be true, and still be needed ────
   battery('ledger hygiene');
   {
@@ -774,6 +1053,67 @@ function selfTest() {
         ok(driven !== null && carriesSelfTest(row.evidence, driven), `live ledger: ${row.evidence} no longer ships a --self-test`);
       }
     }
+  }
+
+  // ── The EXPORTED population: what the sibling gate now consumes (#15414) ──
+  //
+  // `check-self-test-workflow-commands.mjs` used to answer "which scripts does
+  // CI run that ship a `--self-test`" for itself, with a private root walk, and
+  // the two answers drifted apart by one file the moment this gate grew its
+  // package-local source. The export is the repair; these cases are what makes
+  // it an instrument rather than a refactor.
+  //
+  // The refusal arms are driven through `refusalFor` on HAND-BUILT readings,
+  // because that is the only way to reach them: on this tree every one of them
+  // is unreachable by construction, which is exactly the property that let the
+  // sibling gate's floors sit unexercised while its population was wrong.
+  battery('the exported population');
+  {
+    const healthy = {
+      files: ['scripts/g.mjs'],
+      rootCarriers: new Set(['scripts/g.mjs']),
+      workflows: [{ name: 'lint.yml', text: '' }],
+      pkgScriptCount: 1,
+      named: new Map([['scripts/g.mjs', new Set(['lint.yml'])]]),
+      population: ['scripts/g.mjs'],
+    };
+    ok(refusalFor(healthy) === null, 'control — a healthy reading was refused, so the arms below prove nothing');
+    ok(
+      (refusalFor({ ...healthy, files: [] }) ?? '').includes('broken walk'),
+      'an empty walk was not refused — "nothing to check" and "the walk found nothing" would read alike (#4690)',
+    );
+    ok(
+      (refusalFor({ ...healthy, rootCarriers: new Set() }) ?? '').includes('this tree has dozens'),
+      'a root walk that found no carrier was not refused — and the combined set must NOT rescue it, or a '
+        + 'broken root reader hides behind one package-local hit',
+    );
+    ok(
+      (refusalFor({ ...healthy, named: new Map() }) ?? '').includes('workflow reader is broken'),
+      'a workflow reader that named nothing was not refused',
+    );
+    ok(
+      (refusalFor({ ...healthy, population: [] }) ?? '').includes('population reader is broken'),
+      'an EMPTY population was not refused — this is the floor the sibling gate leans on now that it '
+        + 'no longer computes one of its own (#4690)',
+    );
+
+    // The live reading, which is what both gates actually run on.
+    const live = collectPopulation();
+    ok(
+      live.refusal === null && live.population.length > 0,
+      `the live population could not be read (${live.refusal ?? 'empty'}), so the cases below prove nothing (#4690)`,
+    );
+    ok(
+      live.packageLocal.length > 0
+        && live.population.includes('packages/lint/scripts/check-reference-carrier-shape.mjs'),
+      'the EXPORT dropped the package-local half. A consumer of it is then back in the root-walk-only '
+        + 'population this card exists to end, and nothing on either side would redden (#15414)',
+    );
+    ok(
+      live.population.every((s) => typeof live.sources.get(s) === 'string'),
+      'a population member has no entry in `sources` — the consumer indexes `sources` BY member to run '
+        + 'its prefilter, so a gap there is a crash or a silently unfiltered script',
+    );
   }
 
   // ── The floor: every declared battery RAN, and ran its cases ─────────────

@@ -85,9 +85,9 @@
       },
       "source": [
         "docs/plans/release-15.1-test-plan.md §B1 (#2994/#3062)",
-        "packages/spec/src/integration/connector.zod.ts (provider/providerConfig/auth keys + DeclarativeConnectorEntrySchema cross-field rejections, exact messages)",
+        "packages/spec/src/integration/connector.zod.ts#providerConfig (provider/providerConfig/auth keys + DeclarativeConnectorEntrySchema cross-field rejections, exact messages)",
         "packages/spec/src/integration/connector-provider.ts (factory contract; adopt-declared-name; throw ⇒ hard boot error)",
-        "packages/services/service-automation/src/engine.ts (registerConnector origin 'declarative'; getConnectorDescriptors shape)",
+        "packages/services/service-automation/src/engine.ts#registerConnector (registerConnector origin 'declarative'; getConnectorDescriptors shape)",
         "packages/runtime/src/route-ledger.ts (GET /automation/connectors, POST /automation/:name/trigger, GET /automation/:name/runs)",
         "examples/app-showcase/src/system/connectors/index.ts + src/automation/flows/index.ts (the fixtures)"
       ],
@@ -171,9 +171,9 @@
       ],
       "source": [
         "docs/plans/release-15.1-test-plan.md §B3 (#3049)",
-        "packages/spec/src/integration/connector-provider-errors.ts (CONNECTOR_UPSTREAM_UNAVAILABLE marker; structural isConnectorUpstreamUnavailable)",
-        "packages/services/service-automation/src/plugin.ts (DECLARATIVE_RETRY_BASE_MS=5000 / DECLARATIVE_RETRY_MAX_MS=300000; degradedInstances backoff + reload reconcile; boot fatal vs reload skip)",
-        "packages/services/service-automation/src/engine.ts (registerDegradedConnector; getConnectorDegradedReason feeding the dispatch refusal)",
+        "packages/spec/src/integration/connector-provider-errors.ts#CONNECTOR_UPSTREAM_UNAVAILABLE (CONNECTOR_UPSTREAM_UNAVAILABLE marker; structural isConnectorUpstreamUnavailable)",
+        "packages/services/service-automation/src/plugin.ts#DECLARATIVE_RETRY_BASE_MS (DECLARATIVE_RETRY_BASE_MS=5000 / DECLARATIVE_RETRY_MAX_MS=300000; degradedInstances backoff + reload reconcile; boot fatal vs reload skip)",
+        "packages/services/service-automation/src/engine.ts#registerDegradedConnector (registerDegradedConnector; getConnectorDegradedReason feeding the dispatch refusal)",
         "packages/services/service-automation/src/connector-degrade-cause.test.ts + degraded-register-cause.test.ts (unit pins)"
       ],
       "history": [
@@ -255,7 +255,7 @@
       "source": [
         "docs/plans/release-15.1-test-plan.md §B4 (#3059)",
         "packages/connectors/connector-mcp/src/mcp-provider.ts (#3055 policy: default deny, strict-equality allowlist, both messages)",
-        "examples/app-showcase/objectstack.config.ts (declarativeStdio: ['node'] opt-in) + src/system/connectors/index.ts (the 'remove that option and boot fails loudly — try it' fixture note)"
+        "examples/app-showcase/objectstack.config.ts#declarativeStdio (declarativeStdio: ['node'] opt-in) + src/system/connectors/index.ts (the 'remove that option and boot fails loudly — try it' fixture note)"
       ],
       "history": [
         {
@@ -333,9 +333,9 @@
       ],
       "source": [
         "docs/plans/release-15.1-test-plan.md §B5 (#3024)",
-        "packages/services/service-automation/src/plugin.ts (createPackageFileLoader — all three exact error strings, #3016)",
-        "packages/spec/src/integration/connector.zod.ts (providerConfig.spec three-form doc) + connector-provider.ts (loadPackageFile contract incl. host-without-fs behavior)",
-        "examples/app-showcase/src/system/connectors/index.ts (showcase_status_openapi — the shipped happy-path fixture)"
+        "packages/services/service-automation/src/plugin.ts#createPackageFileLoader (createPackageFileLoader — all three exact error strings, #3016)",
+        "packages/spec/src/integration/connector.zod.ts#providerConfig (providerConfig.spec three-form doc) + connector-provider.ts (loadPackageFile contract incl. host-without-fs behavior)",
+        "examples/app-showcase/src/system/connectors/index.ts#showcase_status_openapi (showcase_status_openapi — the shipped happy-path fixture)"
       ],
       "history": [
         {
@@ -403,9 +403,9 @@
       },
       "source": [
         "docs/plans/release-15.1-test-plan.md §B6 (#2985)",
-        "packages/services/service-automation/src/plugin.ts (auditDeclaredConnectors — exact warning text; boot + reload wiring)",
+        "packages/services/service-automation/src/plugin.ts#auditDeclaredConnectors (auditDeclaredConnectors — exact warning text; boot + reload wiring)",
         "packages/spec/src/integration/connector.zod.ts (enabled:false = deliberate catalog descriptor, #2612)",
-        "examples/app-showcase/src/system/connectors/index.ts (showcase_erp_catalog — the shipped quiet fixture)"
+        "examples/app-showcase/src/system/connectors/index.ts#showcase_erp_catalog (showcase_erp_catalog — the shipped quiet fixture)"
       ],
       "history": [
         {
@@ -480,7 +480,7 @@
       ],
       "source": [
         "docs/plans/release-15.1-test-plan.md §B2 (objectui#2563)",
-        "packages/services/service-automation/src/engine.ts (getConnectorDescriptors — the designer-facing shape incl. origin + actions[].inputSchema, ADR-0022)",
+        "packages/services/service-automation/src/engine.ts#getConnectorDescriptors (getConnectorDescriptors — the designer-facing shape incl. origin + actions[].inputSchema, ADR-0022)",
         "packages/runtime/src/route-ledger.ts (GET /automation/connectors)"
       ],
       "history": [
@@ -600,12 +600,12 @@
         "ref": "packages/qa/dogfood/test/webhook-materialization.dogfood.test.ts"
       },
       "source": [
-        "packages/spec/src/automation/webhook.zod.ts (WebhookTriggerType enum + why undelete/api are absent; materialization contract; strict shape #4001)",
+        "packages/spec/src/automation/webhook.zod.ts#WebhookTriggerType (WebhookTriggerType enum + why undelete/api are absent; materialization contract; strict shape #4001)",
         "packages/spec/liveness/webhook.json (all 11 props live via the #3489 bridge; per-prop line refs)",
         "packages/plugins/plugin-webhooks/src/bootstrap-declared-webhooks.ts + auto-enqueuer.ts (remaps; trigger→event mapping incl. the #4639 bulk pair; #3196 unknown-trigger warn; seed-not-clobber)",
-        "packages/services/service-messaging/src/http-outbox.ts (delivery statuses, attempts; HttpRedeliverError + assertHttpRedeliverable/assertRedeliverAllowed — terminal-only, the attempts===0 parked-row refusal, the fail-closed guard) + packages/services/service-messaging/src/http-signature-at-rest.integration.test.ts (redelivery replays the stored signature byte-for-byte)",
-        "packages/plugins/plugin-webhooks/src/webhook-outbox-plugin.ts (POST /api/v1/webhooks/redeliver — session auth with NO capability gate by design ('every authenticated user counts'), #10740 activeOrganizationId threading, the 401/400/404/409/500 arms) + (the #8069 redeliver-guard install; its ABSENCE is an error-level log, not a silent pass)",
-        "packages/rest/src/rest-server.ts (#3897 — the batch routes parse against the spec contract and Zod STRIPS unknown keys, so options.multi/options.where cannot ride in; deleteMany deletes per id. This is why the bulk clause must be driven from a flow node, not REST)",
+        "packages/services/service-messaging/src/http-outbox.ts#HttpRedeliverError (delivery statuses, attempts; HttpRedeliverError + assertHttpRedeliverable/assertRedeliverAllowed — terminal-only, the attempts===0 parked-row refusal, the fail-closed guard) + packages/services/service-messaging/src/http-signature-at-rest.integration.test.ts (redelivery replays the stored signature byte-for-byte)",
+        "packages/plugins/plugin-webhooks/src/webhook-outbox-plugin.ts#session (POST /api/v1/webhooks/redeliver — session auth with NO capability gate by design ('every authenticated user counts'), #10740 activeOrganizationId threading, the 401/400/404/409/500 arms) + (the #8069 redeliver-guard install; its ABSENCE is an error-level log, not a silent pass)",
+        "packages/rest/src/rest-server.ts#deleteMany (#3897 — the batch routes parse against the spec contract and Zod STRIPS unknown keys, so options.multi/options.where cannot ride in; deleteMany deletes per id. This is why the bulk clause must be driven from a flow node, not REST)",
         "examples/app-showcase/src/automation/webhooks/index.ts (the shipped inactive fixture and its activation story)",
         "#3358 §9 (webhook undelete/api trigger removal gate)"
       ],
@@ -727,11 +727,11 @@
         "seed-data-thin"
       ],
       "source": [
-        "packages/spec/src/system/job.zod.ts (ScheduleSchema discriminated union; JOB_ID_RETIRED; retryPolicy/timeout docs incl. the 17.0.0 maxRetries default flip #4661; JobExecutionStatus)",
+        "packages/spec/src/system/job.zod.ts#ScheduleSchema (ScheduleSchema discriminated union; JOB_ID_RETIRED; retryPolicy/timeout docs incl. the 17.0.0 maxRetries default flip #4661; JobExecutionStatus)",
         "packages/spec/liveness/job.json (per-prop verdicts + the #4509 closed-door rationale)",
-        "packages/runtime/src/app-plugin.ts (registration, enabled/handler skip lines)",
+        "packages/runtime/src/app-plugin.ts#handler (registration, enabled/handler skip lines)",
         "packages/services/service-job/src/cron-job-adapter.ts + db-job-adapter.ts (all three schedule shapes; sys_job/sys_job_run persistence) + run-with-policy.ts (retry/timeout enforcement, #3494)",
-        "examples/app-showcase/src/automation/jobs/index.ts (showcase_health_sweep fixture + its #4774/#4888 history)"
+        "examples/app-showcase/src/automation/jobs/index.ts#showcase_health_sweep (showcase_health_sweep fixture + its #4774/#4888 history)"
       ],
       "history": [
         {
@@ -852,14 +852,14 @@
         "ref": "packages/qa/dogfood/test/email-template-materialization.dogfood.test.ts"
       },
       "source": [
-        "packages/spec/src/system/email-template.zod.ts (requireds, dotted-name regex, aliases #5013, variables/required, fromOverride/replyTo/active)",
-        "packages/spec/liveness/email_template.json (the whole surface live via #4509; per-prop evidence incl. requireVars, TEMPLATE_INACTIVE, seed-not-clobber, runtime re-materialization)",
+        "packages/spec/src/system/email-template.zod.ts#fromOverride (requireds, dotted-name regex, aliases #5013, variables/required, fromOverride/replyTo/active)",
+        "packages/spec/liveness/email_template.json#requireVars (the whole surface live via #4509; per-prop evidence incl. requireVars, TEMPLATE_INACTIVE, seed-not-clobber, runtime re-materialization)",
         "packages/plugins/plugin-email/src/bootstrap-declared-email-templates.ts + email-service.ts (row mapping; (name,locale)+fallback; the gates)",
-        "examples/app-showcase/src/system/emails/index.ts (showcase_task_done_email fixture)",
-        "packages/rest/src/rest-server.ts (registerEmailEndpoints — POST /api/v1/email/send: enforceAuth 401 UNAUTHENTICATED #3963, non-object→400 INVALID_REQUEST, VALIDATION_FAILED passthrough, 501 no-provider, 500 EMAIL_SEND_FAILED)",
+        "examples/app-showcase/src/system/emails/index.ts#showcase_task_done_email (showcase_task_done_email fixture)",
+        "packages/rest/src/rest-server.ts#registerEmailEndpoints (registerEmailEndpoints — POST /api/v1/email/send: enforceAuth 401 UNAUTHENTICATED #3963, non-object→400 INVALID_REQUEST, VALIDATION_FAILED passthrough, 501 no-provider, 500 EMAIL_SEND_FAILED)",
         "packages/rest/src/rest-route-ledger.ts (email family — POST /api/v1/email/send → client email.send)",
-        "packages/spec/src/api/error-code-ledger.zod.ts (EMAIL_SEND_FAILED under @objectstack/rest)",
-        "packages/spec/src/contracts/email-service.ts (SendEmailInput — the WIRE shape of POST /api/v1/email/send: to, subject, text?, html?; 'at least one of text or html must be supplied') + packages/plugins/plugin-email/src/email-service.ts (normalizeMessage — where the VALIDATION_FAILED texts come from)"
+        "packages/spec/src/api/error-code-ledger.zod.ts#EMAIL_SEND_FAILED (EMAIL_SEND_FAILED under @objectstack/rest)",
+        "packages/spec/src/contracts/email-service.ts#SendEmailInput (SendEmailInput — the WIRE shape of POST /api/v1/email/send: to, subject, text?, html?; 'at least one of text or html must be supplied') + packages/plugins/plugin-email/src/email-service.ts#normalizeMessage (normalizeMessage — where the VALIDATION_FAILED texts come from)"
       ],
       "history": [
         {
@@ -973,7 +973,7 @@
         "packages/runtime/src/route-ledger.ts (GET /notifications, POST /notifications/read, POST /notifications/read/all)",
         "packages/spec/src/system/notification.zod.ts (channel enum + the #3197 implemented-vs-dead-letter note and 'in-app' vs 'inbox' drift)",
         "packages/services/service-messaging/src/inbox-channel.ts + channel.ts (inbox delivery writes; channels default ['inbox'])",
-        "examples/app-showcase/src/automation/flows/index.ts (showcase_task_assigned_notify — the worked ADR-0012 notify fixture)"
+        "examples/app-showcase/src/automation/flows/index.ts#showcase_task_assigned_notify (showcase_task_assigned_notify — the worked ADR-0012 notify fixture)"
       ],
       "history": [
         {
@@ -1164,13 +1164,13 @@
         "ref": "packages/services/service-datasource/src/__tests__/admin-routes.test.ts (+ __tests__/envelope.conformance.test.ts) — pins route behavior + envelope; the LIVE-mount half is not pinned, drive os dev for it"
       },
       "source": [
-        "packages/services/service-datasource/src/admin-routes.ts (the eleven routes; the uniform floor docblock + requireDatasourceAdmin + DATASOURCE_ADMIN_CAPABILITY #9391/#9593; splitSecret keeps the secret out of the persisted draft; resolve()/badRequest() per-service attribution #4225/#4249; getDatasource credential-stripped + hasSecret; POST /test draft probe; POST /:name/migrate-credential)",
-        "packages/services/service-datasource/src/driver-catalog.ts (static DRIVER_CATALOG, configSchema projected from spec #4410)",
-        "packages/services/service-datasource/src/datasource-route-ledger.ts (DATASOURCE_ROUTE_LEDGER — the family's own audited ledger, #7744; all rows server-only, SDK question filed as #7954) + datasource-route-ledger.conformance.test.ts (both directions derived from the registrar)",
-        "packages/services/service-datasource/src/datasource-credential-migration.ts (CredentialMigrationPlan: bind / drop-inline / none / refuse with reason+remedy, #8155) + __tests__/datasource-credential-migration.test.ts (the plan pins)",
-        "packages/spec/src/api/error-code-ledger.zod.ts (DATASOURCE_ADMIN_ERROR, EXTERNAL_DATASOURCE_ERROR under @objectstack/service-datasource)",
-        "packages/spec/src/api/errors.zod.ts (HttpStatusErrorCodeMap: 503 SERVICE_UNAVAILABLE, 404 RESOURCE_NOT_FOUND)",
-        "packages/cli/src/commands/serve.ts (mounts registerDatasourceAdminRoutes at /api/v1/datasources by default — a raw IHttpServer mount, which is WHY the family carries its own ledger rather than a rest-route-ledger row)"
+        "packages/services/service-datasource/src/admin-routes.ts#requireDatasourceAdmin (the eleven routes; the uniform floor docblock + requireDatasourceAdmin + DATASOURCE_ADMIN_CAPABILITY #9391/#9593; splitSecret keeps the secret out of the persisted draft; resolve()/badRequest() per-service attribution #4225/#4249; getDatasource credential-stripped + hasSecret; POST /test draft probe; POST /:name/migrate-credential)",
+        "packages/services/service-datasource/src/driver-catalog.ts#DRIVER_CATALOG (static DRIVER_CATALOG, configSchema projected from spec #4410)",
+        "packages/services/service-datasource/src/datasource-route-ledger.ts#DATASOURCE_ROUTE_LEDGER (DATASOURCE_ROUTE_LEDGER — the family's own audited ledger, #7744; all rows server-only, SDK question filed as #7954) + datasource-route-ledger.conformance.test.ts (both directions derived from the registrar)",
+        "packages/services/service-datasource/src/datasource-credential-migration.ts#CredentialMigrationPlan (CredentialMigrationPlan: bind / drop-inline / none / refuse with reason+remedy, #8155) + __tests__/datasource-credential-migration.test.ts (the plan pins)",
+        "packages/spec/src/api/error-code-ledger.zod.ts#DATASOURCE_ADMIN_ERROR (DATASOURCE_ADMIN_ERROR, EXTERNAL_DATASOURCE_ERROR under @objectstack/service-datasource)",
+        "packages/spec/src/api/errors.zod.ts#HttpStatusErrorCodeMap (HttpStatusErrorCodeMap: 503 SERVICE_UNAVAILABLE, 404 RESOURCE_NOT_FOUND)",
+        "packages/cli/src/commands/serve.ts#registerDatasourceAdminRoutes (mounts registerDatasourceAdminRoutes at /api/v1/datasources by default — a raw IHttpServer mount, which is WHY the family carries its own ledger rather than a rest-route-ledger row)"
       ],
       "history": [
         {
@@ -1273,12 +1273,12 @@
         "ref": "packages/rest/src/remote-tables-twin.equivalence.test.ts (#7955 request-shape + #9686/#9593 admission, driven through the real HonoHttpServer over the real ExternalDatasourceService) + packages/services/service-datasource/src/__tests__/admin-routes.test.ts — the LIVE-mount half (real showcase fixture, real sqlite introspection) is not pinned, drive os dev for it"
       },
       "source": [
-        "packages/services/service-datasource/src/admin-routes.ts (remote-tables + the #7955 coercion comment), (object-draft), + (requireDatasourceAdmin — 401 floor then manage_platform_settings 403, #9391/#9593)",
-        "packages/rest/src/external-datasource-routes.ts (the twin family GET /external/tables + POST.../draft), (refuseFederationRequest — the #9686 anonymous-deny floor, then the #9901/#10255 capability gate, both decided from one resolveExecutionContext call with anonymous first), (FEDERATION_READ_CAPABILITY = manage_platform_settings, what the two twin routes require) + (FEDERATION_WRITE_CAPABILITY = manage_metadata, the family's write half)",
-        "packages/services/service-datasource/src/external-datasource-service.ts (listRemoteTables schema filter + allowedSchemas), (generateObjectDraft), (renderObjectSource; the generated header)",
-        "packages/drivers/driver-sql/src/sql-driver.ts (introspectSchema; SQLite branch reads sqlite_master → bare unqualified table names)",
+        "packages/services/service-datasource/src/admin-routes.ts#requireDatasourceAdmin (remote-tables + the #7955 coercion comment), (object-draft), + (requireDatasourceAdmin — 401 floor then manage_platform_settings 403, #9391/#9593)",
+        "packages/rest/src/external-datasource-routes.ts#refuseFederationRequest (the twin family GET /external/tables + POST.../draft), (refuseFederationRequest — the #9686 anonymous-deny floor, then the #9901/#10255 capability gate, both decided from one resolveExecutionContext call with anonymous first), (FEDERATION_READ_CAPABILITY = manage_platform_settings, what the two twin routes require) + (FEDERATION_WRITE_CAPABILITY = manage_metadata, the family's write half)",
+        "packages/services/service-datasource/src/external-datasource-service.ts#listRemoteTables (listRemoteTables schema filter + allowedSchemas), (generateObjectDraft), (renderObjectSource; the generated header)",
+        "packages/drivers/driver-sql/src/sql-driver.ts#introspectSchema (introspectSchema; SQLite branch reads sqlite_master → bare unqualified table names)",
         "examples/app-showcase/src/system/datasources/ (showcase-external.datasource.ts + external-fixture.ts)",
-        "SURFACE NOTE (why api, not mixed): admin-routes.ts's comment names a Studio 'sync objects' consumer, but no such consumer was located — the only live callers found are the two CLI commands os datasource list-tables / os datasource introspect (packages/cli/src/commands/datasource/list-tables.ts, introspect.ts — both call the /external/tables spellings), covered by cli.datasource-introspect-codegen (authored in this same sweep). Same #9386/#9417 correction as external-datasource-federated-read rev 2"
+        "SURFACE NOTE (why api, not mixed): admin-routes.ts's comment names a Studio 'sync objects' consumer, but no such consumer was located — the only live callers found are the two CLI commands os datasource list-tables / os datasource introspect (packages/cli/src/commands/datasource/list-tables.ts#tables, introspect.ts — both call the /external/tables spellings), covered by cli.datasource-introspect-codegen (authored in this same sweep). Same #9386/#9417 correction as external-datasource-federated-read rev 2"
       ],
       "history": [
         {
@@ -1389,11 +1389,11 @@
         "ref": "packages/runtime/src/external-validation-plugin.test.ts (fail-default / warn / ignore / default-when-unreadable + drift-event emission) + packages/runtime/src/external-validation-checkonboot.test.ts (#13037/#13149 — the checkOnBoot gate, its scope, and the one-spelling rule) + packages/runtime/src/list-diagnosed-consumer-sweep.test.ts (#6504 withheld all-clear) — the LIVE boot-abort arm is not pinned; an induced-drift boot is required for it"
       },
       "source": [
-        "packages/runtime/src/external-validation-plugin.ts (Gate 2 kernel:ready runValidation; the #13149 checkOnBoot gate + skip info line; the #11166 unreachable carve-out — warn and continue, only measured diffs reach onMismatch; the fail throw), (bootCheckEnabled — explicit false only, safe direction), (resolveOnMismatch — `?? 'fail'`), (memoized def loader; a failed read answers undefined → strict defaults), (announceAllClear #6504; the INCOMPLETE-sweep warn), (background drift checks + external.schema.drift events; the boot-step-only ruling ⛔)",
-        "packages/spec/src/shared/external-errors.ts (renderDiffMessage + ExternalSchemaMismatchError — datasource, object, per-column diffs)",
-        "packages/cli/src/commands/serve.ts (ADR-0015 federation block — ExternalDatasourceServicePlugin + createExternalValidationPlugin wired unconditionally, best-effort dynamic import)",
-        "packages/spec/src/data/datasource.zod.ts (validation policy schema; checkOnBoot default true, the checkonboot/validateonboot alias rows are REJECTION-path did-you-means, not folds — enforced since #13149, so declared = enforced here now)",
-        "examples/app-showcase/src/system/datasources/showcase-external.datasource.ts (stock policy onMismatch:'warn' — deliberate, per its own comment)",
+        "packages/runtime/src/external-validation-plugin.ts#runValidation (Gate 2 kernel:ready runValidation; the #13149 checkOnBoot gate + skip info line; the #11166 unreachable carve-out — warn and continue, only measured diffs reach onMismatch; the fail throw), (bootCheckEnabled — explicit false only, safe direction), (resolveOnMismatch — `?? 'fail'`), (memoized def loader; a failed read answers undefined → strict defaults), (announceAllClear #6504; the INCOMPLETE-sweep warn), (background drift checks + external.schema.drift events; the boot-step-only ruling ⛔)",
+        "packages/spec/src/shared/external-errors.ts#renderDiffMessage (renderDiffMessage + ExternalSchemaMismatchError — datasource, object, per-column diffs)",
+        "packages/cli/src/commands/serve.ts#ExternalDatasourceServicePlugin (ADR-0015 federation block — ExternalDatasourceServicePlugin + createExternalValidationPlugin wired unconditionally, best-effort dynamic import)",
+        "packages/spec/src/data/datasource.zod.ts#checkOnBoot (validation policy schema; checkOnBoot default true, the checkonboot/validateonboot alias rows are REJECTION-path did-you-means, not folds — enforced since #13149, so declared = enforced here now)",
+        "examples/app-showcase/src/system/datasources/showcase-external.datasource.ts#onMismatch (stock policy onMismatch:'warn' — deliberate, per its own comment)",
         "docs/adr/0015-external-datasource-federation.md §5.2"
       ],
       "history": [
@@ -1485,12 +1485,12 @@
         "stale-dist"
       ],
       "source": [
-        "packages/services/service-messaging/src/objects/notification-preference.object.ts (sys_notification_preference: user_id × topic × channel × enabled; '*' wildcards + admin-global default; unique (user_id,topic,channel) index)",
-        "packages/services/service-messaging/src/preference-resolver.ts (PreferenceResolver.filter — most-specific-wins, mandatory-topic bypass, fail-open; drops recipients left with no accepted channel)",
-        "packages/services/service-messaging/src/messaging-service.ts (emit() consults the PreferenceResolver before fan-out)",
-        "packages/services/service-messaging/src/messaging-service-plugin.ts (email/sms channels render sys_notification_template; shared retry/dead-letter substrate)",
+        "packages/services/service-messaging/src/objects/notification-preference.object.ts#user_id (sys_notification_preference: user_id × topic × channel × enabled; '*' wildcards + admin-global default; unique (user_id,topic,channel) index)",
+        "packages/services/service-messaging/src/preference-resolver.ts#PreferenceResolver (PreferenceResolver.filter — most-specific-wins, mandatory-topic bypass, fail-open; drops recipients left with no accepted channel)",
+        "packages/services/service-messaging/src/messaging-service.ts#PreferenceResolver (emit() consults the PreferenceResolver before fan-out)",
+        "packages/services/service-messaging/src/messaging-service-plugin.ts#sys_notification_template (email/sms channels render sys_notification_template; shared retry/dead-letter substrate)",
         "packages/spec/src/system/notification.zod.ts (#3197 dead-letter for unimplemented channels; 'in-app' vs 'inbox' naming drift)",
-        "examples/app-showcase/src/automation/flows/index.ts (showcase_task_assigned_notify — topic 'task.assigned', channels ['inbox'])"
+        "examples/app-showcase/src/automation/flows/index.ts#showcase_task_assigned_notify (showcase_task_assigned_notify — topic 'task.assigned', channels ['inbox'])"
       ],
       "history": [
         {
@@ -1596,7 +1596,7 @@
         "ADR-0100 (credential read mask; §B3 echoed-mask write guard)",
         "ADR-0015 / ADR-0062 (credentials route through datasource config)",
         "packages/spec/src/data/secret-mask.ts (the one mask literal both readers import)",
-        "packages/spec/src/data/datasource-credential-redaction.ts (the ONE definition of 'what is a credential key' — schema-derived z.never() refusals, FORMER_CREDENTIAL_ALIASES, STILL_WRITABLE_CREDENTIAL_KEYS)",
+        "packages/spec/src/data/datasource-credential-redaction.ts#STILL_WRITABLE_CREDENTIAL_KEYS (the ONE definition of 'what is a credential key' — schema-derived z.never() refusals, FORMER_CREDENTIAL_ALIASES, STILL_WRITABLE_CREDENTIAL_KEYS)",
         "packages/spec/src/kernel/metadata-type-redaction.ts (the per-type redaction hook — the metadata read door)",
         "packages/services/service-datasource/src/datasource-config-redaction.ts + datasource-credential-migration.ts (the datasource-admin read door)",
         "packages/spec/src/migrations/entries/semantic/17.datasource-config-inline-credential-refused.ts · 17.datasource-config-placeholder-refused.ts · 17.datasource-config-url-userinfo-refused.ts · 17.connector-inline-authentication-publish-refused.ts",
@@ -1696,11 +1696,11 @@
         "ref": "packages/connectors/connector-rest/src/rest-connector.test.ts (per-kind wire shapes through a stubbed fetch) + packages/services/service-automation/src/connector-materialization.test.ts (credentialRef resolution incl. env fallback and the boot-fatal missing ref) — the LIVE echo-upstream leg is not pinned"
       },
       "source": [
-        "packages/spec/src/shared/connector-auth.zod.ts (ConnectorAuthConfigSchema — the runtime shape; ResolvedConnectorAuth = the static open tier, OAuth2 named as the enterprise tier), (ConnectorInstanceAuthSchema — the authored shape: credentialRef instead of inline secrets, four arms, no oauth2)",
-        "packages/spec/src/integration/connector.zod.ts (the #7990 inline-`authentication` publish refusal, both message variants)",
-        "packages/services/service-automation/src/plugin.ts (resolveInstanceAuth — credentialRef → ResolvedConnectorAuth; empty resolution throws with the env-var prescription; api-key headerName default applied)",
-        "packages/connectors/connector-rest/src/rest-connector.ts (applyAuth — the wire shapes per kind) + rest-provider.ts (the factory receives the RESOLVED static subset)",
-        "packages/connectors/connector-openapi/src/openapi-provider.ts (the openapi provider shares the same static-auth transport)",
+        "packages/spec/src/shared/connector-auth.zod.ts#ConnectorAuthConfigSchema (ConnectorAuthConfigSchema — the runtime shape; ResolvedConnectorAuth = the static open tier, OAuth2 named as the enterprise tier), (ConnectorInstanceAuthSchema — the authored shape: credentialRef instead of inline secrets, four arms, no oauth2)",
+        "packages/spec/src/integration/connector.zod.ts#authentication (the #7990 inline-`authentication` publish refusal, both message variants)",
+        "packages/services/service-automation/src/plugin.ts#resolveInstanceAuth (resolveInstanceAuth — credentialRef → ResolvedConnectorAuth; empty resolution throws with the env-var prescription; api-key headerName default applied)",
+        "packages/connectors/connector-rest/src/rest-connector.ts#applyAuth (applyAuth — the wire shapes per kind) + rest-provider.ts (the factory receives the RESOLVED static subset)",
+        "packages/connectors/connector-openapi/src/openapi-provider.ts#auth (the openapi provider shares the same static-auth transport)",
         "examples/app-showcase/src/system/connectors/index.ts,66,103,142 (all shipped instances auth none; the fixture's own pointer at bearer+credentialRef for real upstreams)"
       ],
       "history": [
@@ -1809,8 +1809,8 @@
         "objectui packages/app-shell/src/views/metadata-admin/external/api.ts (the five-route client; the retired-shape 503 detector; listRemoteTables/generateObjectDraft/refreshCatalog/validateDatasource/importObjectDraft — the import door is PUT /api/v1/meta/object/:name)",
         "objectui packages/app-shell/src/views/metadata-admin/external/{SchemaBrowser,ImportObjectDialog,ValidationPanel,ExternalDatasourcePanel}.tsx (the P5 surfaces; ValidationPanel.tsx DIFF_LABEL total over the imported spec union — the #4115 recurrence guard) + previews/DatasourcePreview.tsx (panel keyed off schemaMode !== 'managed')",
         "objectui packages/app-shell/src/views/metadata-admin/datasource/register.ts (Setup → Datasources = the engine route; left-nav names it directly, objectui#3660)",
-        "packages/rest/src/external-datasource-routes.ts (the five-route family), (import → 201 { object }, EXTERNAL_IMPORT_ERROR), (refresh-catalog), (validate, #10537 URL-scoped), (refuseFederationRequest — read=manage_platform_settings, write=manage_metadata, #9686 anonymous floor), (the 503 envelope)",
-        "packages/spec/src/shared/external-errors.ts (SchemaDiffEntryKind — 10 kinds at head incl. index_mismatch/unmapped_index/default_mismatch/unreachable)",
+        "packages/rest/src/external-datasource-routes.ts#refuseFederationRequest (the five-route family), (import → 201 { object }, EXTERNAL_IMPORT_ERROR), (refresh-catalog), (validate, #10537 URL-scoped), (refuseFederationRequest — read=manage_platform_settings, write=manage_metadata, #9686 anonymous floor), (the 503 envelope)",
+        "packages/spec/src/shared/external-errors.ts#SchemaDiffEntryKind (SchemaDiffEntryKind — 10 kinds at head incl. index_mismatch/unmapped_index/default_mismatch/unreachable)",
         "packages/services/service-datasource/src/external-datasource-service.ts (the 'unreachable' producer)",
         "sibling coverage this item deliberately does NOT duplicate: external-schema-introspection (tables/draft API contract + twin equivalence + auth-floor pins), external-datasource-federated-read (the query path), external-schema-drift-gate (boot gate; its induced-drift recipe notes are reused here for diff-label evidence)"
       ],

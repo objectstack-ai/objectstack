@@ -52,10 +52,12 @@
 #      the very predicate a seat runs before flipping ready. Exit 3 = governed,
 #      exit 0 = clear. Its register (`GOVERNED_SURFACES`) is repo-agnostic, so
 #      the same call answers for every repo configured in `GOVERNED_REPOS`.
-#   2. "is it approved, pinned?"  →  `pinnedApprovalVerdict` +
-#      `GOVERNED_APPROVERS` imported from `check-governed-queue-guard.mjs` —
+#   2. "is it approved by an authorized account?"  →  `authorizedApprovalVerdict`
+#      + `GOVERNED_APPROVERS` imported from `check-governed-queue-guard.mjs` —
 #      the same function the queue build decides on, applied to the same review
-#      list shape. The authorized set is never spelled out here.
+#      list shape. The authorized set is never spelled out here, and neither is
+#      the rule: the 2026-09-04 ruling (an authorized approval counts on ANY
+#      commit) reached this hook by changing that function and nothing in here.
 #
 # A register row or a ruling that moves either predicate reaches this guard for
 # free, and the two tools cannot answer differently about the same diff — the
@@ -475,7 +477,7 @@ fi
 
 hits="$(json_read "$work/test.json" hits)"
 
-# ── predicate 2: an authorized approval pinned to THIS head ──────────────────
+# ── predicate 2: an authorized APPROVED review, on any commit (2026-09-04) ───
 
 api_get "/repos/$owner/$repo/pulls/$pull/reviews?per_page=100" "$work/reviews.json" \
   || { warn "could not read the reviews of $pr_ref"; exit 0; }
@@ -492,14 +494,15 @@ const { OS_GUARD_MODULE: modPath, OS_GUARD_REVIEWS: reviewsPath, OS_GUARD_HEAD: 
 const { readFileSync } = await import("node:fs");
 const m = await import(modPath);
 const reviews = JSON.parse(readFileSync(reviewsPath, "utf8"));
-const v = m.pinnedApprovalVerdict(reviews, headSha);
+const v = m.authorizedApprovalVerdict(reviews, headSha);
 // Line 1 is the verdict word the shell branches on; line 2 is the human detail.
 // Rendered HERE rather than in the shell so there is one reading of this object.
+// ⚠️ `v.approvalsOnEarlierCommits` is deliberately NOT rendered here. Since
+// 2026-09-04 it can only be non-empty when the verdict is `approved`, and this
+// string is only ever printed on the blocking path below — so a line for it
+// would be dead code that reads like a live refusal reason.
 const detail = [
   `reviews read: ${v.reviewsRead}`,
-  v.staleApprovers.length
-    ? `STALE approval(s), pinned to an earlier head: ${v.staleApprovers.map((s) => `${s.login}@${String(s.commitId).slice(0, 9)}`).join(", ")}`
-    : null,
   v.unauthorizedApprovers.length
     ? `APPROVED by account(s) outside the authorized set (never counts): ${v.unauthorizedApprovers.join(", ")}`
     : null,
@@ -512,7 +515,7 @@ console.log(detail);
 verdict_rc=$?
 
 if [ "$verdict_rc" -ne 0 ] || [ -z "$verdict" ]; then
-  warn "the pinned-approval predicate did not run: $(tr '\n' ' ' < "$work/verdict.err" | cut -c1-200)"
+  warn "the authorized-approval predicate did not run: $(tr '\n' ' ' < "$work/verdict.err" | cut -c1-200)"
   exit 0
 fi
 
@@ -522,7 +525,7 @@ detail="$(printf '%s\n' "$verdict" | tail -n +2)"
 [ "$state" = "approved" ] && exit 0
 
 cat >&2 <<EOF
-⛔ Blocked: $pr_ref is GOVERNED and has no APPROVED review pinned to its current head —
+⛔ Blocked: $pr_ref is GOVERNED and has no APPROVED review from an authorized approver —
    approve BEFORE enqueue; a failed queue entry does NOT re-run on a later approval.
 
    tool:      $tool
@@ -539,8 +542,9 @@ blocked me". That exact sequence was measured on 2026-09-01.
 
 Do this instead:
   1. Leave the PR as a DRAFT and request review from an authorized approver.
-  2. Wait for the APPROVED review to land on THIS head sha ($head_sha).
-     A push after the approval unpins it — re-request, do not re-enqueue.
+  2. Wait for the APPROVED review to land. It does NOT have to sit on the
+     current head ($head_sha), and a later push does not expire it — maintainer,
+     2026-09-04: 只需要有人工批准记录就行，不需要卡最新的提交。
   3. Then enqueue. Or let the maintainer merge by hand: a human merge IS the
      review record for a governed PR, and it needs nothing from this guard.
   ⛔ Never approve a governed PR from an agent seat, under any account.
@@ -550,7 +554,7 @@ only governed paths byte-equal their own generator's output clears with zero
 approvals, decided by the register (check-governed-merges.mjs), not here.
 
 Verdict source: check-governed-merges.mjs --test (governed) +
-pinnedApprovalVerdict/GOVERNED_APPROVERS from check-governed-queue-guard.mjs.
+authorizedApprovalVerdict/GOVERNED_APPROVERS from check-governed-queue-guard.mjs.
 Deliberate exception (you know this one is right): OS_ALLOW_GOVERNED_ENQUEUE=1.
 EOF
 exit 2

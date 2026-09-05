@@ -5314,7 +5314,31 @@ const step18: MigrationStep = {
     '`reference` wins, a disagreeing pair is kept for the author), replays on every ' +
     'stored-row rehydration so the serve face only ever emits the canonical spelling, ' +
     'and `os migrate meta` rewrites old sources; the authoring-surface rejection with ' +
-    'its rename prescription is unchanged.',
+    'its rename prescription is unchanged. ' +
+    'It also retires `connector.errorMapping` (#14676, ADR-0049 enforce-or-remove; triage ' +
+    'ruling 2026-09-02): `ErrorMappingConfig` (4 keys) and its `ErrorMappingRule[]` (7 keys) ' +
+    'were authorable through `ConnectorSchema` — and, via `DeclarativeConnectorEntrySchema`, ' +
+    'through `stack.connectors[]` and the `/meta/connector` door — and read by nothing: no ' +
+    'provider, dispatcher or materializer ever mapped an external error through the rules, so ' +
+    '`unmappedBehavior` configured nothing and a rule\'s `userMessage` was never shown to ' +
+    'anyone. That spelling is the live API-error channel\'s (`ApiError.userMessage`), so an ' +
+    'author who wrote a rule here reasonably believed they were marking a refusal for an end ' +
+    'user; the failure was silent in both directions. The carrier key is a retiredKey ' +
+    'tombstone on the non-strict `ConnectorSchema` (a bare deletion would be a silent strip), ' +
+    'the three defs — `integration/ErrorMappingConfig`, `integration/ErrorMappingRule` and the ' +
+    'orphaned `integration/ConnectorErrorCategory` enum — leave via RETIRED_DEFS_BY_MAJOR, and ' +
+    'the mechanical conversion strips the block from `connectors[]` (pure lossless delete; ' +
+    'it never had an effect to lose). ' +
+    'It also retires the fourteen hour/minute/day-shaped deadline keys of the ' +
+    'incident-response, training and change-management families (#14477, ADR-0049 ' +
+    'enforce-or-remove; maintainer ruling 2026-09-02): six on the incident-response ' +
+    'schemas, five on the training schemas and three nested in the change-management ' +
+    'schemas, every one on the published surface and read by nothing — the schemas are ' +
+    'mounted by no stack key and registered as no metadata type — so a compliance author ' +
+    'who wrote `triageDeadlineHours: 4` held a deadline the platform never kept. All ' +
+    'fourteen are retiredKey tombstones (the schemas are not strict; a bare deletion ' +
+    'would be a silent strip) with no D2 conversion, for the additionalTypes reason: ' +
+    'none of these schemas is a stack collection member, so the chain has no seam.',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5331,6 +5355,7 @@ const step18: MigrationStep = {
     'permission-allow-restore-purge-removed',
     'form-view-option-default-removed',
     'field-reference-to-alias',
+    'connector-error-mapping-removed',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by
@@ -5522,6 +5547,53 @@ const step18: MigrationStep = {
         + 'every `/analytics/query` body\'s `timeDimensions[]` items carry only '
         + '`dimension`/`granularity`/`dateRange`. Declared keys parse byte-identically to before.',
     },
+    // #15219 — maintainer ruling A for both keys (2026-09-04, director relay,
+    // verbatim 「同意」): `plugins` and `devPlugins` are artifact ENVELOPE keys —
+    // top level only, never inside `packages[]`. Registered as D3 SEMANTIC and
+    // deliberately NOT as a D2 conversion, on the D2 scope guard (lossless only):
+    // a plugin declared inside an assembled package body has no lossless target.
+    // `plugins` is `z.array(z.unknown())` and may hold live instances that never
+    // survived JSON in the first place, and hoisting a serialisable entry to the
+    // artifact top level changes WHO loads it (the host, not a package) — a
+    // judgment the author makes. Nothing is retired: both keys stay declared on
+    // the stack schema at the top level, so no RETIRED_KEYS entry, and the
+    // refusal inside a body is the manifest's own strict close naming the key.
+    {
+      id: 'assembled-package-body-plugins-envelope',
+      surface:
+        'artifact `packages[].manifest.plugins` and `packages[].manifest.devPlugins` — the two '
+        + 'keys inside an ASSEMBLED package body (`AssembledPackageBodySchema`, ADR-0130 D4)',
+      replacement:
+        'Declare `plugins` / `devPlugins` at the stack TOP LEVEL only — the artifact envelope, '
+        + 'where `os serve` / `os migrate` / `os dev` read them and where `composeStacks` still '
+        + 'concatenates them (`concat` is unchanged for in-memory composition). Delete both keys '
+        + 'from every `packages[i].manifest` body: a multi-package artifact that carried them is '
+        + 'rebuilt from source (`os build` / `composeStacks(…, { manifest: \'preserve\' })` no '
+        + 'longer folds them into a body), and a hand-written `packages[]` entry drops them.',
+      reason:
+        'A classification error, not a new special case (#15219; epic #14122 / #14512). '
+        + '`plugins` and `devPlugins` were the only members of the assembled-body key set whose '
+        + 'values are runtime ASSEMBLY instructions rather than serialisable metadata: `plugins` '
+        + 'holds what a host hands to `kernel.use()` — live plugin instances, manifests or package '
+        + 'names — and `devPlugins` is the `os dev` load list. Inside an artifact a package body is '
+        + 'inert JSON, so a plugin written under `packages[i].manifest` could never be constructed '
+        + 'by any loader; every reader (`serve.ts`, `schema-migration-plugins.ts`) reads the top '
+        + 'level, and the "resolve `packages[]` when the top level is absent" repair every other '
+        + 'reader took would have turned a silent skip into a boot that registers garbage. Options '
+        + 'B (readers resolve JSON descriptions into live plugins) and C (the emitter special-cases '
+        + 'the two keys) were refused. After the ruling, "an artifact carries metadata, a host '
+        + 'assembles plugins" is one sentence every reader inherits. Not losslessly convertible: '
+        + 'hoisting a body-level plugin to the envelope changes who loads it, and a live instance '
+        + 'has no JSON form to move.',
+      acceptanceCriteria:
+        'No `packages[i].manifest` in any artifact carries `plugins` or `devPlugins`; the body '
+        + 'schema refuses either with `unrecognized_keys` naming the key (pinned in '
+        + '`assembled-package-body.test.ts`), and `artifact-packages.ts` refuses the entry at '
+        + 'load with that path. A stack declaring `plugins` / `devPlugins` at the top level '
+        + 'parses byte-identically to before, `composeStacks` still concatenates both in stack '
+        + 'order, and `manifest: \'preserve\'` emits package bodies without them. An existing '
+        + 'multi-package artifact that carried a body-level `plugins` is rebuilt from source.',
+    },
     {
       id: 'audience-posture-default-invite-only',
       surface: 'system.AuthConfig.audience',
@@ -5660,6 +5732,43 @@ const step18: MigrationStep = {
         + 'byte-identically (`safeParse` green, `required` unrewritten).',
     },
     {
+      id: 'change-management-duration-keys-retired',
+      surface:
+        'change-management duration keys: `ChangeImpact.downtime.durationMinutes`, '
+        + '`RollbackPlan.steps[].estimatedMinutes`, '
+        + '`ChangeRequest.implementation.steps[].estimatedMinutes`',
+      replacement:
+        'nothing to re-declare — delete the keys. No change-management engine exists on the '
+        + 'platform: nothing schedules a maintenance window, executes or times an implementation '
+        + 'or rollback step, or compares an estimate with what happened, so there is no live '
+        + 'mechanism to declare a duration to',
+      reason:
+        'ADR-0049 enforce-or-remove; maintainer ruling 2026-09-02 on #14477 (ruled A: retire per '
+        + 'family). Three minute-shaped keys, at three nested sites, sat in the exported '
+        + 'change-management schemas and in the generated reference docs — an author could write '
+        + '`estimatedMinutes: 15` on a rollback step and reasonably expect it to feed a schedule — '
+        + 'and read by NOTHING: the schemas are exported from `@objectstack/spec/system`, mounted '
+        + 'by no stack key, registered as no metadata type, absent from the 2026-06 liveness '
+        + 'ledgers, and the reader census over every package outside `packages/spec` (tests and '
+        + 'changelogs excluded) and over objectui at the pinned sha returned zero hits for every '
+        + 'key. All three sites are NESTED (`downtime.durationMinutes`, `steps[].estimatedMinutes` '
+        + 'twice), so the authorable-surface ratchet — which walks top-level def properties — never '
+        + 'listed them; their `RETIRED_KEYS_BY_MAJOR[18]` entries carry the nested spelling for the '
+        + 'spec-changes / upgrade-guide projection. Why D3 semantic and not a D2 conversion: the '
+        + 'chain walks a normalized STACK and `applyConversionsToStoredItem` maps a metadata type '
+        + 'onto one of its collections; none of these schemas is either, so a conversion would be '
+        + 'a transform with no seam that ever runs (the '
+        + '`kernel/MetadataPluginConfig:additionalTypes` precedent).',
+      acceptanceCriteria:
+        'No `ChangeImpact.downtime` block carries `durationMinutes`, and no implementation or '
+        + 'rollback step — in a `RollbackPlan` or inside a `ChangeRequest` — carries '
+        + '`estimatedMinutes`. TypeScript authors get the refusal at compile time (each key is '
+        + 'typed `never`); a value reaching the parse is refused with the prescription '
+        + '(`invalid_type` at the nested path of the key, e.g. `rollbackPlan.steps.0.estimatedMinutes`). '
+        + '⚠️ Runtime behaviour is deliberately UNCHANGED and must be verified as such: nothing '
+        + 'ever read the keys, so removing them removes no behaviour.',
+    },
+    {
       id: 'cli-command-contribution-retired',
       surface:
         'kernel.cliCommandContribution (the orphan exported schema of '
@@ -5705,6 +5814,86 @@ const step18: MigrationStep = {
         + '(same pin). ⚠️ Runtime behaviour is deliberately UNCHANGED: the CLI '
         + 'never resolved commands from this declaration — commands are '
         + 'oclif-auto-discovered, before and after.',
+    },
+    {
+      id: 'client-envelope-convergence-analytics-automation',
+      surface:
+        'client.analytics.query / client.analytics.meta / client.analytics.explain / '
+        + 'client.automation.trigger — the resolved value of four published '
+        + '`@objectstack/client` methods: the runtime dispatcher\'s '
+        + '`{ success, data }` envelope before, its `data` member after',
+      replacement:
+        'the payload — `r.data.X` → `r.X` on all four. `client.analytics.query`, called '
+        + 'with a query, now resolves to `AnalyticsResult`: `r.data.rows` → `r.rows`. '
+        + '`client.analytics.meta`, with or without a cube name, resolves to '
+        + '`AnalyticsMetadataResponse[\'data\']`, the bare cube list: `r.data[0].name` → '
+        + '`r[0].name`. `client.analytics.explain` resolves to '
+        + '`AnalyticsSqlResponse[\'data\']`, `{ sql, params }`: `r.data.sql` → `r.sql`. '
+        + '`client.automation.trigger`, given a trigger name and a payload, resolves to '
+        + '`AutomationResult`: `r.data.status` → `r.status` and `r.data.runId` → '
+        + '`r.runId` — the same value '
+        + '`client.automation.execute` already answered for the same handler. Same call, '
+        + 'same wire body, one SDK calling convention',
+      reason:
+        '`ObjectStackClient` had two response readers. `unwrapResponse` strips the runtime '
+        + 'dispatcher\'s `{ success, data }` envelope and hands back `data`; every other '
+        + 'dispatcher-served method already used it, and these four alone ended '
+        + '`return res.json()`, so their callers alone had to read `.data`. All four now end '
+        + '`return this.unwrapResponse(res)` and their return declarations are the payload '
+        + 'types. THE WIRE IS BYTE-IDENTICAL: every route answers exactly the body it '
+        + 'answered before, no Zod schema moves, no `packages/spec` declaration moves, no '
+        + 'authorable key and no stored representation is involved — the landing diff '
+        + 'touches no `packages/spec` path at all — so a raw-HTTP caller is unaffected and '
+        + '`objectstack migrate meta` has nothing to rewrite. This is registered rather than '
+        + 'exempted because the change is NOT wholly compiler-delivered, and the gap is '
+        + 'exact rather than theoretical. For the three analytics methods it is: every old '
+        + 'read is `error TS2339: Property \'data\' does not exist on type …`, so tsc names '
+        + 'each site. `client.automation.trigger` is the exception — `AutomationResult` '
+        + 'itself declares `success: boolean` and `error?: string` '
+        + '(`AutomationResult` in `packages/spec/src/contracts/automation-service.ts`, '
+        + 'byte-identical at the merge base and at this landing), so `r.success` and '
+        + '`r.error` COMPILE ON BOTH SIDES while their meaning moves: before, `r.success` '
+        + 'was the envelope\'s flag — always `true` on a resolved call — and `r.error` was '
+        + 'never set on a 2xx; now they are the run\'s own, and a refusal the door does not '
+        + 'classify as 400 / 409 / 422 is answered 200 carrying `success: false` with '
+        + '`error` set. A consumer branching on either reads a DIFFERENT QUESTION at the '
+        + 'same spelling, with no diagnostic anywhere. And there is no authored source for '
+        + 'the conversion chain to rewrite: this is a published TypeScript surface whose '
+        + 'enforced channel is tsc at the call site, and for an untyped JS caller there is '
+        + 'no constrained channel at all — `.data` simply reads `undefined` — which is why '
+        + 'the ledger entry is the only notification that reaches them. That is the same '
+        + 'argument the two sibling entries on this package make '
+        + '(`client-delete-result-success`, `client-meta-reset-result-reset`), and this one '
+        + 'is the stronger case of the three: those corrected declarations that were '
+        + 'UNINHABITED, revealing a defect rather than breaking working code, whereas this '
+        + 'moves reads that work today. ⛔ Do not write `r.rows ?? r.data.rows`: there is '
+        + 'one producer shape, and a consumer accepting two spellings is what contract-first '
+        + 'exists to prevent. The failure path is unchanged and deliberately so — '
+        + '`ObjectStackClient.fetch` rejects on every non-2xx BEFORE either reader runs, '
+        + 'carrying the ADR-0112 error envelope, and `unwrapResponse` itself never throws. '
+        + 'ADR-0087 D3.',
+      acceptanceCriteria:
+        'No code reads `.data` off a `client.analytics.query`, `client.analytics.meta`, '
+        + '`client.analytics.explain` or `client.automation.trigger` result. For the '
+        + 'three analytics methods `tsc` names every site for a typed caller (TS2339); an '
+        + 'untyped JS caller must be swept by hand for the four spellings, because nothing '
+        + 'will report it. ⚠️ `client.automation.trigger` needs the hand sweep even WITH a '
+        + 'type-checker: every branch on `r.success` or `r.error` off `trigger` has to be '
+        + 're-read one by one, because both compile before and after while their subject '
+        + 'moved from the envelope to the run. A branch that treated `r.success` as "the '
+        + 'call was accepted" now asks "the run succeeded" — the two differ on exactly the '
+        + '200-answered refusals — and a `catch`-only error path now has a resolved '
+        + '`success: false` sibling it never had to consider. Nothing about the request, the '
+        + 'route, the status codes or the thrown error shapes changes, and no server needs '
+        + 'upgrading: the value you may now read is the one that was already arriving, one '
+        + 'level in. `client.analytics.queryDataset` is NOT part of this move — it is served '
+        + 'with no envelope at all and resolved to the bare payload before and after. '
+        + 'Populations: in the ObjectStack repo, zero production call sites and the loud '
+        + 'test pins that ship with this change; in objectui, one production row-extraction '
+        + 'chain that tolerates both spellings today and is tightened to the post-unwrap '
+        + 'spelling once this lands; `objectstack-ai/cloud` is NOT MEASURED — a `.data` read '
+        + 'on any of the four there is a runtime break after this change, and this entry is '
+        + 'the only notice it gets.',
     },
     {
       id: 'client-meta-reset-result-reset',
@@ -6274,6 +6463,56 @@ const step18: MigrationStep = {
         + 'objectui#6206.',
     },
     {
+      id: 'element-record-picker-filter-rule-array',
+      surface:
+        "`element:record_picker` component props — `filter` (the FORM: the MongoDB-style "
+        + '`FilterConditionSchema` record vs the `ViewFilterRule` array)',
+      replacement:
+        '`z.array(ViewFilterRuleSchema)` — the rule array `[{ field, operator, value }, ...]` '
+        + "the map's array-declared `filter` doors already carry (`record:related_list`, its nested "
+        + 'Add-affordance picker, `element:number`; the four `object-*` blocks declare `filter` as '
+        + '`z.unknown()`, #15449). A record-form filter '
+        + "`{ status: 'active' }` becomes `[{ field: 'status', operator: 'equals', value: 'active' }]`; "
+        + "an operator object `{ amount: { $gt: 100 } }` becomes "
+        + "`[{ field: 'amount', operator: 'greater_than', value: 100 }]`; several keys become "
+        + 'several rules (they AND). Legacy operator shorthands (`eq`, `gt`, `notIn`, …) are '
+        + 'accepted and normalized on parse. The binding-level `dataSource.filter` on the same node '
+        + 'is a different key (`ElementDataSourceSchema`) and is not moved by this entry',
+      reason:
+        'One filter orthography platform-wide (objectui#6206, maintainer batch adjudication '
+        + "2026-08-25, verbatim 「同意」, Option B). `ComponentPropsMap['element:record_picker'].filter` "
+        + 'was the LAST `filter` input in the map still declared as the MongoDB-style record '
+        + '(`FilterConditionSchema`) after `element:number` converged (#12039 Key 2): the three '
+        + 'array-declared doors (`record:related_list`, its nested Add-affordance picker, '
+        + '`element:number`) carried the `ViewFilterRule` array and the four `object-*` doors '
+        + 'declare `z.unknown()` (#15449), so the filter a list view stores and renders was refused '
+        + 'by the picker beside them, and a lone holdout is the state where the next author copies '
+        + 'the wrong form. Sequenced measurement-first, as that convergence had to be (the 2026-08-25 '
+        + 'Option-A ordering ruling, #14406): at the objectui pin `00d3f09c` the renderer hands '
+        + '`filter` to `query.$filter` and calls `adapter.find()` '
+        + '(`components/src/renderers/basic/record-picker.tsx`); `ObjectStackAdapter.convertQueryParams` '
+        + 'lowers an ARRAY `$filter` through `translateFilterArray` into filter AST tuples '
+        + '(`data-objectstack/src/index.ts`), the same door every list view\'s stored rule array '
+        + 'already takes, and the engine lowers the tuples before the driver '
+        + '(`engine-filter-array-lowering.test.ts`); nothing on that path parses `properties` '
+        + 'against the installed spec. The pin and objectui `main` (`f7cf7e8`) are byte-identical on '
+        + 'every read-path file. The ruled migration check ran with the change: the sweep of '
+        + 'first-party corpora (examples/, skills/, content/docs/, docs/, packages/**, .changeset/) '
+        + 'found ONE `element:record_picker` author writing a record-form `filter` — a spec test '
+        + 'fixture, rewritten to the array form in the same change — and zero outside the spec '
+        + 'package; this entry carries the prescription for authors outside the repo.',
+      acceptanceCriteria:
+        "`ComponentPropsMap['element:record_picker'].safeParse({ object, filter: [{ field: "
+        + "'status', operator: 'equals', value: 'active' }] })` succeeds and the parsed `filter` is "
+        + "the same rule array; a record-form `filter: { status: 'active' }` is refused at the "
+        + '`filter` path (`invalid_type`, expected array). At runtime the picker offers exactly the '
+        + 'rows the array selects — the same filter a list view renders. Downstream (objectui, after '
+        + "a released spec version reaches the pin): the registry's `inputs.filter` entry for "
+        + "`element:record_picker` (`type: 'object'`, `record-picker.tsx`) flips to the array arm and "
+        + 'the `record-picker-inputs-spec-parity.test.ts` pins that assert the record form follow — '
+        + 'objectui#7663, filed from #14406 with a Blocked-by line.',
+    },
+    {
       id: 'engine-dotted-filter-refused',
       surface:
         'a `where` / filter whose KEY is a dotted path with a relation, virtual-`formula` or '
@@ -6389,6 +6628,62 @@ const step18: MigrationStep = {
         + 'the `shared/EventName` def key leaves '
         + '`json-schema.manifest/shared.json` in the same change that registers '
         + 'this entry.',
+    },
+    {
+      id: 'execution-step-iteration-single-valued',
+      surface:
+        '`ExecutionStepLog.iteration` on a step whose `regionKind` is '
+        + '`parallel-branch` — the per-step records under `ExecutionLog.steps`, as '
+        + 'the automation run endpoints return them — and the new optional '
+        + '`ExecutionStepLog.branch` key',
+      replacement:
+        'Read the parallel branch index from `branch`. `iteration` is now '
+        + 'single-valued: the zero-based iteration of the enclosing `loop`, carried '
+        + 'through any nesting, so a branch step of a `parallel` node that sits '
+        + 'inside a loop body carries BOTH keys — `iteration` for the row and '
+        + '`branch` for the branch. A consumer that grouped or labelled steps by '
+        + '`iteration` under `regionKind: parallel-branch` moves that read to '
+        + '`branch`; a consumer reading `iteration` on `loop-body`, `try` or '
+        + '`catch` steps changes nothing.',
+      reason:
+        'The key was declared as the zero-based loop iteration OR the parallel '
+        + 'branch index of the enclosing region — one field, two meanings, told '
+        + 'apart only by reading `regionKind` first. The engine tagged each step '
+        + 'with its innermost region only, so for a `parallel` node inside a `loop` '
+        + 'body every branch step recorded the branch index and no step of that '
+        + 'branch recorded the loop iteration: a per-row failure inside a branch '
+        + 'was attributable to a branch, never to the row the sweep was processing. '
+        + 'The sibling try/catch rule had already settled the containment case — a '
+        + 'try/catch region has no index of its own, so it carries the loop '
+        + 'iteration — and deliberately left `parallel` open, because there the '
+        + 'two indexes genuinely compete for one field. The maintainer ruling of '
+        + '2026-09-03 took option A: `iteration` always means the enclosing loop '
+        + 'iteration and the branch index moves to its own optional key, so a '
+        + 'reader no longer has to branch on `regionKind` to know which number it '
+        + 'holds, and getting that wrong no longer silently books a failure against '
+        + 'the wrong row. Option B — keep the overload and add a second index whose '
+        + 'presence depends on nesting shape — was not taken. This is not a '
+        + 'mechanical conversion: a step record written before this change carries '
+        + '`iteration` under `parallel-branch` with the branch-index meaning, and '
+        + 'only its producer knows whether the parallel node sat inside a loop. The '
+        + 'measured corpus held zero `loop { parallel }` nestings and one consumer '
+        + 'reading the key — a grouping key in the objectui flow-runs panel — so '
+        + 'the migration is a consumer-side read move, not a data rewrite. The '
+        + 'engine tagger that writes both keys follows this contract change as its '
+        + 'own card; until it lands, `branch` is declared and unwritten, and '
+        + '`iteration` on a `parallel-branch` step written by an older engine still '
+        + 'holds the branch index.',
+      acceptanceCriteria:
+        'No consumer reads `iteration` as a branch index: every read of a '
+        + '`parallel-branch` step\'s index goes through `branch`, and every read of '
+        + 'the enclosing loop iteration goes through `iteration` regardless of '
+        + '`regionKind`. A step record carrying `regionKind: parallel-branch`, '
+        + '`iteration: 3`, `branch: 1` parses under `ExecutionStepLogSchema` with '
+        + 'both numbers intact, and a negative or fractional `branch` is refused at '
+        + 'the `branch` path. A record written before the engine follow-on carries '
+        + 'no `branch` key; treat its `iteration` under `parallel-branch` as the '
+        + 'legacy branch index only when the record predates the engine build that '
+        + 'writes `branch`.',
     },
     {
       id: 'field-master-detail-set-null-refused',
@@ -6806,6 +7101,48 @@ const step18: MigrationStep = {
         + 'work byte-identically before and after.',
     },
     {
+      id: 'incident-response-deadline-keys-retired',
+      surface:
+        'incident-response deadline keys: `IncidentResponsePhase.targetHours`, '
+        + '`IncidentNotificationRule.withinMinutes` / `regulatorDeadlineHours`, '
+        + '`IncidentNotificationMatrix.escalationTimeoutMinutes`, '
+        + '`IncidentResponsePolicy.triageDeadlineHours` / `retentionDays`',
+      replacement:
+        'nothing to re-declare — delete the keys. No incident-response engine exists on the '
+        + 'platform: nothing tracks a phase against a clock, sends or times an incident '
+        + 'notification, notifies a regulator, walks the escalation chain on a timer or sweeps '
+        + 'incident records on a schedule, so there is no live mechanism to declare a deadline '
+        + 'to. Retention of stored records is the object-level `lifecycle` block (ADR-0057), '
+        + 'declared on the object that stores the records and enforced by the LifecycleService — '
+        + 'not a number on this policy document',
+      reason:
+        'ADR-0049 enforce-or-remove; maintainer ruling 2026-09-02 on #14477 (ruled A: retire per '
+        + 'family). Six hour/minute/day-shaped keys sat on the published authorable surface and '
+        + 'in the generated reference docs — an author could write `triageDeadlineHours: 4` and '
+        + 'reasonably expect the platform to escalate after four hours — and read by NOTHING: '
+        + 'the schemas are exported from `@objectstack/spec/system`, mounted by no stack key, '
+        + 'registered as no metadata type, absent from the 2026-06 liveness ledgers, and the '
+        + 'reader census over every package outside `packages/spec` (tests and changelogs '
+        + 'excluded) and over objectui at the pinned sha returned zero hits for every key. Three '
+        + 'of the six carried defaults (30 minutes, 1 hour, 2555 days) that were materialized '
+        + 'into every parsed document without ever being consulted. A compliance-shaped deadline '
+        + 'that fails silently is the worst form of the declared-but-unenforced shape ADR-0049 '
+        + 'names; tagging it `[EXPERIMENTAL — not enforced]` was the fallback the ruling did not '
+        + 'take. Why D3 semantic and not a D2 conversion: the chain walks a normalized STACK and '
+        + '`applyConversionsToStoredItem` maps a metadata type onto one of its collections; none '
+        + 'of these schemas is either, so a conversion would be a transform with no seam that '
+        + 'ever runs (the `kernel/MetadataPluginConfig:additionalTypes` precedent).',
+      acceptanceCriteria:
+        'No `IncidentResponsePhase`, `IncidentNotificationRule`, `IncidentNotificationMatrix` or '
+        + '`IncidentResponsePolicy` literal — standalone or nested in an `Incident` — carries '
+        + '`targetHours`, `withinMinutes`, `regulatorDeadlineHours`, `escalationTimeoutMinutes`, '
+        + '`triageDeadlineHours` or `retentionDays`. TypeScript authors get the refusal at compile '
+        + 'time (each key is typed `never`); a value reaching the parse is refused with the '
+        + 'prescription (`invalid_type` at the path of the key). Parsed documents no longer carry '
+        + 'the three former defaults. ⚠️ Runtime behaviour is deliberately UNCHANGED and must be '
+        + 'verified as such: nothing ever read the keys, so removing them removes no behaviour.',
+    },
+    {
       id: 'kernel-context-preview-mode-retired',
       // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
       // code span AND a table cell.
@@ -6907,6 +7244,64 @@ const step18: MigrationStep = {
         'Every memory datasource parses with no `${…}` span in `persistence.path` or ' +
         '`persistence.key`; `initialData` record values containing literal `${…}` keep parsing ' +
         'byte-identically.',
+    },
+    {
+      id: 'metadata-changed-event-payload-retired',
+      surface:
+        'kernel.cluster metadata change event payload (`MetadataChangedEventPayloadSchema` '
+        + 'in kernel/cluster.zod.ts — 2 defs, 4 exported names: '
+        + '`MetadataChangedEventPayloadSchema`, `MetadataChangedEventPayload`, '
+        + '`MetadataChangeOperationSchema`, `MetadataChangeOperation`)',
+      replacement:
+        'Nothing to migrate to, because nothing ever emitted or consumed it. The '
+        + 'cluster invalidation channels that actually run are the three lanes '
+        + 'documented in content/docs/kernel/cluster.mdx §6.2: `metadata.changed` '
+        + '(`ClusterMetadataChangedPayload` in `@objectstack/metadata` — the origin '
+        + 'node, the metadata type and the replayed watch event), `metadata.mutated` '
+        + '(`ClusterMetadataMutationPayload` in `@objectstack/metadata-protocol`) and '
+        + '`datasource.mutated` (`ClusterDatasourceMutationPayload` in '
+        + '`@objectstack/service-datasource`). A host that needs cross-node cache '
+        + 'invalidation subscribes to one of those; a host that held the retired type '
+        + 'for a transport of its own keeps a local type — the spec no longer declares '
+        + 'one.',
+      reason:
+        'ADR-0049 enforce-or-remove (triage ruling 2026-09-02 on the spec seat: '
+        + 'remove via the ADR-0087 route, not "make a consumer" — that is contract '
+        + 'growth with no pull). The docblock declared that all metadata persistence '
+        + 'layers MUST emit a `metadata:changed` event with this payload and that '
+        + 'every reader MUST subscribe and compare `version` before invalidating. '
+        + "Measured at the retirement's base commit with positive controls: zero "
+        + 'runtime producers, zero subscribers, zero imports outside packages/spec '
+        + '(its own unit test, the isomorphic alias pin and the generated artifacts) '
+        + 'in objectstack, and nothing in objectui at the pinned sha. It was '
+        + 'unenforceable by construction — the `version` field is `z.bigint()`, '
+        + 'which the standard JSON serializer refuses, so the payload as declared '
+        + 'could not cross any pubsub transport without a codec no driver ships: a '
+        + 'MUST-emit contract no conforming emitter could satisfy. The shipped '
+        + 'channels all carry an address-only signal whose receiver re-reads its own '
+        + 'store (the 2026-09-01 ruling for the registry lane), the opposite of the '
+        + 'declared version-compare receipt, so the one plausible future consumer was '
+        + 'decided against; the 2026-08-27 ruling on transitions removes a staged '
+        + "window. `MetadataChangeOperationSchema` existed only to type the payload's "
+        + '`operation` field and leaves with it as its orphan value schema (the '
+        + '`DistributedStateConfig` precedent). Route 3: not an authorable surface — '
+        + 'no metadata-type binding, stack collection or manifest embed ever carried '
+        + 'it, and nothing parsed it outside its own unit test — so no tombstone and '
+        + 'no D2 conversion; `RETIRED_DEFS_BY_MAJOR[18]` '
+        + '(`kernel/MetadataChangedEventPayload`, `kernel/MetadataChangeOperation`) '
+        + 'plus this entry ARE the declaration.',
+      acceptanceCriteria:
+        'No code imports `MetadataChangedEventPayloadSchema`, '
+        + '`MetadataChangedEventPayload`, `MetadataChangeOperationSchema` or '
+        + '`MetadataChangeOperation` from `@objectstack/spec` or '
+        + '`@objectstack/spec/kernel` — every one is TS2305 after upgrade (pinned by '
+        + 'runtime namespace probes in kernel/cluster.test.ts, with '
+        + '`ClusterCapabilityConfigSchema` as the positive control). No metadata '
+        + 'document needs editing: the schema was reachable from no metadata-type '
+        + 'binding, stack collection or /meta door. ⚠️ Runtime behaviour is '
+        + 'deliberately UNCHANGED: no emitter or subscriber ever existed, and the '
+        + 'three shipped cluster lanes publish the same bytes before and after — the '
+        + 'retirement removes a false declaration, not behaviour.',
     },
     {
       id: 'metadata-customization-protocol-retired',
@@ -7681,6 +8076,37 @@ const step18: MigrationStep = {
         + '`organizationId` still stamps `sys_email.organization_id` without acquiring any overlay '
         + 'semantics.',
     },
+    {
+      id: 'session-user-language-retired',
+      surface: 'api.session.user.language',
+      replacement:
+        '`GET /auth/me/localization` → `locale` (the user\'s own `sys_user.locale` when set → '
+        + 'the request\'s `Accept-Language` → the deployment default)',
+      reason:
+        '`SessionUserSchema.language` was declared with a permanent default of `\'en\'` and '
+        + 'described as "Preferred language", and had no producer and no consumer anywhere: no '
+        + 'session endpoint wrote it, no client read it (objectui measured zero readers at its '
+        + 'pinned sha), so a reader trusting the published contract received a constant that was '
+        + 'not the user\'s language. Meanwhile the user\'s real preference landed as the '
+        + 'first-class column `sys_user.locale` (#13881), which the session type could not see — '
+        + 'three spellings of one concept on the published surface, none of them right. The '
+        + 'maintainer ruled option D (2026-09-03, #14788): retire the dead key under ADR-0049 '
+        + 'enforce-or-remove and make `GET /auth/me/localization` the ONE read face, with its '
+        + '`locale` projecting the user column first. This is a RESPONSE surface — the server '
+        + 'mints a `SessionUser` and nobody authors or persists one — so there is no source for '
+        + 'the chain to rewrite; the schema tombstones the key via retiredKey() and consumers '
+        + 'move their read to the endpoint. No replacement field joins the session contract '
+        + 'until a session endpoint really produces one (no dual-spelling window, 不渐进). '
+        + 'ADR-0049, ADR-0087, #14788.',
+      acceptanceCriteria:
+        'No client reads `user.language` off a `SessionResponse` / `UserProfileResponse`; a '
+        + 'client that seeded its UI language from it now reads `locale` off '
+        + '`GET /auth/me/localization`, where a user who set `sys_user.locale` sees that value, '
+        + 'a user who did not sees the request\'s `Accept-Language` preference, and a request '
+        + 'expressing none sees the deployment default. Constructing a `SessionUser` with '
+        + '`language` fails to parse with its own prescription instead of being silently '
+        + 'stripped, and assigning it is a `tsc` error at the authoring site.',
+    },
     // Registered as D3 SEMANTIC and deliberately NOT as a D2 conversion, on the
     // D2 scope guard (lossless only — the `owd-legacy-read-aliases` / `'full'`
     // precedent): an authored theme has no lossless target. `app.branding` holds
@@ -7836,6 +8262,39 @@ const step18: MigrationStep = {
         + 'the contract. Runtime behaviour is unchanged: the bridge\'s #11833 '
         + 'parse-and-refuse accepts and rejects exactly the same sets before and after, '
         + 'and no stored metadata or document needs editing.',
+    },
+    {
+      id: 'training-deadline-keys-retired',
+      surface:
+        'training duration and deadline keys: `TrainingCourse.durationMinutes` / `validityDays`, '
+        + '`TrainingPlan.recertificationIntervalDays` / `gracePeriodDays` / `reminderDaysBefore`',
+      replacement:
+        'nothing to re-declare — delete the keys. No training-management engine exists on the '
+        + 'platform: nothing schedules or times a course, computes a certification expiry, '
+        + 're-assigns training on an interval, escalates an expired certification or sends a '
+        + 'reminder, so there is no live mechanism to declare a duration or deadline to',
+      reason:
+        'ADR-0049 enforce-or-remove; maintainer ruling 2026-09-02 on #14477 (ruled A: retire per '
+        + 'family). Five minute/day-shaped keys sat on the published authorable surface and in the '
+        + 'generated reference docs — an author could write `validityDays: 365` and reasonably '
+        + 'expect a certificate to expire — and read by NOTHING: the schemas are exported from '
+        + '`@objectstack/spec/system`, mounted by no stack key, registered as no metadata type, '
+        + 'absent from the 2026-06 liveness ledgers, and the reader census over every package '
+        + 'outside `packages/spec` (tests and changelogs excluded) and over objectui at the pinned '
+        + 'sha returned zero hits for every key. Three of the five carried defaults (365, 30 and 14 '
+        + 'days) that were materialized into every parsed plan without ever being consulted. Why '
+        + 'D3 semantic and not a D2 conversion: the chain walks a normalized STACK and '
+        + '`applyConversionsToStoredItem` maps a metadata type onto one of its collections; none of '
+        + 'these schemas is either, so a conversion would be a transform with no seam that ever '
+        + 'runs (the `kernel/MetadataPluginConfig:additionalTypes` precedent).',
+      acceptanceCriteria:
+        'No `TrainingCourse` or `TrainingPlan` literal — standalone or as a `courses[]` entry — '
+        + 'carries `durationMinutes`, `validityDays`, `recertificationIntervalDays`, '
+        + '`gracePeriodDays` or `reminderDaysBefore`. TypeScript authors get the refusal at compile '
+        + 'time (each key is typed `never`); a value reaching the parse is refused with the '
+        + 'prescription (`invalid_type` at the path of the key). Parsed plans no longer carry the '
+        + 'three former defaults. ⚠️ Runtime behaviour is deliberately UNCHANGED and must be '
+        + 'verified as such: nothing ever read the keys, so removing them removes no behaviour.',
     },
     {
       id: 'ui-cloud-connection-widgets-unknown-keys-refused',
@@ -8697,6 +9156,34 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // advertises. Its three ledger child rows collapse into the one `overrides`
     // row. Closes #14365's question about `overrides.*.operations` — no record left.
     'api/RouteGenerationConfig:overrides',
+    // #14788 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-03, option
+    // D). `SessionUserSchema.language` (`api/auth.zod.ts`) was declared with a
+    // permanent default of `'en'` and described as "Preferred language", and had
+    // no producer and no consumer anywhere: no session endpoint wrote it, no
+    // client read it (objectui measured at its pinned sha: zero readers of
+    // `SessionUser.language`; its only in-repo mentions were the schema's own
+    // unit test). A reader trusting the published contract received a constant
+    // that was not the user's language — the "declared ≠ honoured" shape, made
+    // worse by the fact that the user's real preference had just landed as a
+    // first-class column (`sys_user.locale`, #13881) the session type could not
+    // see. The ruling retires the dead key and makes `GET /auth/me/localization`
+    // the one read face for the signed-in user's language (`locale`: the user's
+    // own `sys_user.locale` when set → the request's `Accept-Language` → the
+    // deployment default); no replacement field joins the session contract until
+    // a session endpoint really produces one.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // removal ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
+    // The schema is a non-strict `z.object`, so the route is a `retiredKey()`
+    // tombstone (a bare delete would strip the key silently, ADR-0104). A RESPONSE
+    // surface — the server mints a `SessionUser` and nobody authors or persists
+    // one — so, like `api/AuthFeaturesConfig:passkeys`, there is no source for
+    // `os migrate meta` to rewrite and no D2 conversion; the prescription reaches
+    // consumers through this tombstone plus the D3 semantic entry
+    // `session-user-language-retired`.
+    'api/SessionUser:language',
     // #10414 — ADR-0049 enforce-or-remove (triage routed REMOVE; the #10298 shape
     // one level up). `filters` was a declared, authorable per-metric raw-SQL
     // filter (`filters: [{ sql: string }]`) with ZERO consumers, measured with a
@@ -8724,6 +9211,43 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // conversion `metric-filters-removed`, which strips the key from every metric
     // in `analyticsCubes[].measures`.
     'data/Metric:filters',
+    // #14676 — ADR-0049 enforce-or-remove on `ConnectorSchema.errorMapping` (triage
+    // ruling 2026-09-02: removal via the `spec-property-retirement` playbook; the
+    // split condition — a downstream consumer in objectui or a customer stack —
+    // measured empty at objectui `0d8fd7c`, hotcrm not measurable). The key carried
+    // `ErrorMappingConfig` (4 keys) and its `ErrorMappingRule[]` (7 keys), and
+    // NOTHING read them: outside the declaring file and its unit test the only
+    // reference in the tree was a type-identity pin. No provider, dispatcher or
+    // materializer ever mapped an external error through the rules, so
+    // `unmappedBehavior` configured nothing and a rule's `userMessage` was never
+    // shown to anyone — and that spelling is the name of the LIVE API-error channel
+    // (`ApiError.userMessage`), so an author who had read that documentation and
+    // wrote a rule here reasonably believed they were marking a refusal for an end
+    // user; the failure was silent in both directions (it validated, it published,
+    // nothing was shown). Removal resolves the collision by deletion. Tombstoned
+    // with `retiredKey()`: `ConnectorSchema` is a non-strict `z.object`, so a bare
+    // deletion would be a silent strip (#3733, ADR-0104). The def shapes leave
+    // whole — `integration/ErrorMappingConfig`, `integration/ErrorMappingRule` and
+    // the orphaned `integration/ConnectorErrorCategory` enum, all in
+    // `RETIRED_DEFS_BY_MAJOR[18]`. Sources are rewritten by the D2 conversion
+    // `connector-error-mapping-removed` (one strip per `connectors[]` entry; the
+    // eleven nested keys leave with the block).
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // removal ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look (the #12497 / #13823 grading).
+    'integration/Connector:errorMapping',
+    // #14676 — the same tombstone seen through the second carrier.
+    // `DeclarativeConnectorEntrySchema` is `ConnectorSchema.superRefine(...)`, so the
+    // `errorMapping` tombstone on the base is inherited by the shape that
+    // `stack.connectors[]` (`stack.zod.ts`) and the `PUT /meta/connector/:name` door
+    // (`kernel/metadata-type-schemas.ts`) actually parse, and the authorable-surface
+    // walk publishes the `[RETIRED]` row under this def key as well. One tombstone,
+    // two registered keys: gate (b) of `scripts/build-schemas.ts` reads EXACT
+    // `${defKey}:${name}` membership per def, never by radiating from a neighbour.
+    // See `18.integration__Connector__errorMapping.ts` for the retirement record.
+    'integration/DeclarativeConnectorEntry:errorMapping',
     // #12428 — ADR-0049 enforce-or-remove, one symbol over from #12340 (PR #12425)
     // in the same file and on the same per-key test. `HotReloadManager.startWatching`
     // contained NO watcher: a guard plus `logger.info('File watching started',
@@ -9380,6 +9904,321 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // D2 conversion `permission-allow-restore-purge-removed`, which strips the
     // key from every object grant in `permissions[].objects`.
     'security/ObjectPermission:allowRestore',
+    // #14477 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-02, ruled A:
+    // retire per family). One of the hour/minute/day-shaped deadline keys of the
+    // incident-response / training / change-management families: declared on the
+    // published authorable surface, read by NOTHING — the schemas are mounted by
+    // no stack key and registered as no metadata type, and the reader census over
+    // every package outside `packages/spec` (and objectui at the pinned sha)
+    // returned zero hits — so an author who wrote it held a deadline the platform
+    // never kept.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstone ships on the 17.x line (launch-window convention) and the
+    // prescription lives at the major boundary where `migrate meta` users look.
+    //
+    // Registered here but NOT in `src/conversions/registry.ts`, for the reason
+    // `kernel/MetadataPluginConfig:additionalTypes` gives: the conversion chain
+    // walks a normalized STACK and none of these schemas is a stack collection
+    // member, so a MetadataConversion would be a transform with no seam that ever
+    // runs. The prescription reaches authors through the tombstone (`tsc` + the
+    // parse) and the D3 semantic entry named below.
+    //
+    // A NESTED site: the authorable-surface ratchet walks top-level def
+    // properties only, so no `[RETIRED]` row exists for it and gate (b) of
+    // `build-schemas.ts` neither demands nor refuses this entry — it is here for
+    // the spec-changes / upgrade-guide projection, spelled the way
+    // `kernel/Manifest:contributes.actions` and
+    // `api/BatchEndpointsConfig:operations.upsertMany` are.
+    // D3 semantic entry: `change-management-duration-keys-retired`.
+    'system/ChangeImpact:downtime.durationMinutes',
+    // #14477 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-02, ruled A:
+    // retire per family). One of the hour/minute/day-shaped deadline keys of the
+    // incident-response / training / change-management families: declared on the
+    // published authorable surface, read by NOTHING — the schemas are mounted by
+    // no stack key and registered as no metadata type, and the reader census over
+    // every package outside `packages/spec` (and objectui at the pinned sha)
+    // returned zero hits — so an author who wrote it held a deadline the platform
+    // never kept.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstone ships on the 17.x line (launch-window convention) and the
+    // prescription lives at the major boundary where `migrate meta` users look.
+    //
+    // Registered here but NOT in `src/conversions/registry.ts`, for the reason
+    // `kernel/MetadataPluginConfig:additionalTypes` gives: the conversion chain
+    // walks a normalized STACK and none of these schemas is a stack collection
+    // member, so a MetadataConversion would be a transform with no seam that ever
+    // runs. The prescription reaches authors through the tombstone (`tsc` + the
+    // parse) and the D3 semantic entry named below.
+    //
+    // A NESTED site: the authorable-surface ratchet walks top-level def
+    // properties only, so no `[RETIRED]` row exists for it and gate (b) of
+    // `build-schemas.ts` neither demands nor refuses this entry — it is here for
+    // the spec-changes / upgrade-guide projection, spelled the way
+    // `kernel/Manifest:contributes.actions` and
+    // `api/BatchEndpointsConfig:operations.upsertMany` are.
+    // D3 semantic entry: `change-management-duration-keys-retired`.
+    'system/ChangeRequest:implementation.steps.estimatedMinutes',
+    // #14477 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-02, ruled A:
+    // retire per family). One of the hour/minute/day-shaped deadline keys of the
+    // incident-response / training / change-management families: declared on the
+    // published authorable surface, read by NOTHING — the schemas are mounted by
+    // no stack key and registered as no metadata type, and the reader census over
+    // every package outside `packages/spec` (and objectui at the pinned sha)
+    // returned zero hits — so an author who wrote it held a deadline the platform
+    // never kept.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstone ships on the 17.x line (launch-window convention) and the
+    // prescription lives at the major boundary where `migrate meta` users look.
+    //
+    // Registered here but NOT in `src/conversions/registry.ts`, for the reason
+    // `kernel/MetadataPluginConfig:additionalTypes` gives: the conversion chain
+    // walks a normalized STACK and none of these schemas is a stack collection
+    // member, so a MetadataConversion would be a transform with no seam that ever
+    // runs. The prescription reaches authors through the tombstone (`tsc` + the
+    // parse) and the D3 semantic entry named below.
+    // D3 semantic entry: `incident-response-deadline-keys-retired`.
+    'system/IncidentNotificationMatrix:escalationTimeoutMinutes',
+    // #14477 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-02, ruled A:
+    // retire per family). One of the hour/minute/day-shaped deadline keys of the
+    // incident-response / training / change-management families: declared on the
+    // published authorable surface, read by NOTHING — the schemas are mounted by
+    // no stack key and registered as no metadata type, and the reader census over
+    // every package outside `packages/spec` (and objectui at the pinned sha)
+    // returned zero hits — so an author who wrote it held a deadline the platform
+    // never kept.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstone ships on the 17.x line (launch-window convention) and the
+    // prescription lives at the major boundary where `migrate meta` users look.
+    //
+    // Registered here but NOT in `src/conversions/registry.ts`, for the reason
+    // `kernel/MetadataPluginConfig:additionalTypes` gives: the conversion chain
+    // walks a normalized STACK and none of these schemas is a stack collection
+    // member, so a MetadataConversion would be a transform with no seam that ever
+    // runs. The prescription reaches authors through the tombstone (`tsc` + the
+    // parse) and the D3 semantic entry named below.
+    // D3 semantic entry: `incident-response-deadline-keys-retired`.
+    'system/IncidentNotificationRule:regulatorDeadlineHours',
+    // #14477 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-02, ruled A:
+    // retire per family). One of the hour/minute/day-shaped deadline keys of the
+    // incident-response / training / change-management families: declared on the
+    // published authorable surface, read by NOTHING — the schemas are mounted by
+    // no stack key and registered as no metadata type, and the reader census over
+    // every package outside `packages/spec` (and objectui at the pinned sha)
+    // returned zero hits — so an author who wrote it held a deadline the platform
+    // never kept.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstone ships on the 17.x line (launch-window convention) and the
+    // prescription lives at the major boundary where `migrate meta` users look.
+    //
+    // Registered here but NOT in `src/conversions/registry.ts`, for the reason
+    // `kernel/MetadataPluginConfig:additionalTypes` gives: the conversion chain
+    // walks a normalized STACK and none of these schemas is a stack collection
+    // member, so a MetadataConversion would be a transform with no seam that ever
+    // runs. The prescription reaches authors through the tombstone (`tsc` + the
+    // parse) and the D3 semantic entry named below.
+    // D3 semantic entry: `incident-response-deadline-keys-retired`.
+    'system/IncidentNotificationRule:withinMinutes',
+    // #14477 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-02, ruled A:
+    // retire per family). One of the hour/minute/day-shaped deadline keys of the
+    // incident-response / training / change-management families: declared on the
+    // published authorable surface, read by NOTHING — the schemas are mounted by
+    // no stack key and registered as no metadata type, and the reader census over
+    // every package outside `packages/spec` (and objectui at the pinned sha)
+    // returned zero hits — so an author who wrote it held a deadline the platform
+    // never kept.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstone ships on the 17.x line (launch-window convention) and the
+    // prescription lives at the major boundary where `migrate meta` users look.
+    //
+    // Registered here but NOT in `src/conversions/registry.ts`, for the reason
+    // `kernel/MetadataPluginConfig:additionalTypes` gives: the conversion chain
+    // walks a normalized STACK and none of these schemas is a stack collection
+    // member, so a MetadataConversion would be a transform with no seam that ever
+    // runs. The prescription reaches authors through the tombstone (`tsc` + the
+    // parse) and the D3 semantic entry named below.
+    // D3 semantic entry: `incident-response-deadline-keys-retired`.
+    'system/IncidentResponsePhase:targetHours',
+    // #14477 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-02, ruled A:
+    // retire per family). One of the hour/minute/day-shaped deadline keys of the
+    // incident-response / training / change-management families: declared on the
+    // published authorable surface, read by NOTHING — the schemas are mounted by
+    // no stack key and registered as no metadata type, and the reader census over
+    // every package outside `packages/spec` (and objectui at the pinned sha)
+    // returned zero hits — so an author who wrote it held a deadline the platform
+    // never kept.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstone ships on the 17.x line (launch-window convention) and the
+    // prescription lives at the major boundary where `migrate meta` users look.
+    //
+    // Registered here but NOT in `src/conversions/registry.ts`, for the reason
+    // `kernel/MetadataPluginConfig:additionalTypes` gives: the conversion chain
+    // walks a normalized STACK and none of these schemas is a stack collection
+    // member, so a MetadataConversion would be a transform with no seam that ever
+    // runs. The prescription reaches authors through the tombstone (`tsc` + the
+    // parse) and the D3 semantic entry named below.
+    // D3 semantic entry: `incident-response-deadline-keys-retired`.
+    'system/IncidentResponsePolicy:retentionDays',
+    // #14477 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-02, ruled A:
+    // retire per family). One of the hour/minute/day-shaped deadline keys of the
+    // incident-response / training / change-management families: declared on the
+    // published authorable surface, read by NOTHING — the schemas are mounted by
+    // no stack key and registered as no metadata type, and the reader census over
+    // every package outside `packages/spec` (and objectui at the pinned sha)
+    // returned zero hits — so an author who wrote it held a deadline the platform
+    // never kept.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstone ships on the 17.x line (launch-window convention) and the
+    // prescription lives at the major boundary where `migrate meta` users look.
+    //
+    // Registered here but NOT in `src/conversions/registry.ts`, for the reason
+    // `kernel/MetadataPluginConfig:additionalTypes` gives: the conversion chain
+    // walks a normalized STACK and none of these schemas is a stack collection
+    // member, so a MetadataConversion would be a transform with no seam that ever
+    // runs. The prescription reaches authors through the tombstone (`tsc` + the
+    // parse) and the D3 semantic entry named below.
+    // D3 semantic entry: `incident-response-deadline-keys-retired`.
+    'system/IncidentResponsePolicy:triageDeadlineHours',
+    // #14477 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-02, ruled A:
+    // retire per family). One of the hour/minute/day-shaped deadline keys of the
+    // incident-response / training / change-management families: declared on the
+    // published authorable surface, read by NOTHING — the schemas are mounted by
+    // no stack key and registered as no metadata type, and the reader census over
+    // every package outside `packages/spec` (and objectui at the pinned sha)
+    // returned zero hits — so an author who wrote it held a deadline the platform
+    // never kept.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstone ships on the 17.x line (launch-window convention) and the
+    // prescription lives at the major boundary where `migrate meta` users look.
+    //
+    // Registered here but NOT in `src/conversions/registry.ts`, for the reason
+    // `kernel/MetadataPluginConfig:additionalTypes` gives: the conversion chain
+    // walks a normalized STACK and none of these schemas is a stack collection
+    // member, so a MetadataConversion would be a transform with no seam that ever
+    // runs. The prescription reaches authors through the tombstone (`tsc` + the
+    // parse) and the D3 semantic entry named below.
+    //
+    // A NESTED site: the authorable-surface ratchet walks top-level def
+    // properties only, so no `[RETIRED]` row exists for it and gate (b) of
+    // `build-schemas.ts` neither demands nor refuses this entry — it is here for
+    // the spec-changes / upgrade-guide projection, spelled the way
+    // `kernel/Manifest:contributes.actions` and
+    // `api/BatchEndpointsConfig:operations.upsertMany` are.
+    // D3 semantic entry: `change-management-duration-keys-retired`.
+    'system/RollbackPlan:steps.estimatedMinutes',
+    // #14477 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-02, ruled A:
+    // retire per family). One of the hour/minute/day-shaped deadline keys of the
+    // incident-response / training / change-management families: declared on the
+    // published authorable surface, read by NOTHING — the schemas are mounted by
+    // no stack key and registered as no metadata type, and the reader census over
+    // every package outside `packages/spec` (and objectui at the pinned sha)
+    // returned zero hits — so an author who wrote it held a deadline the platform
+    // never kept.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstone ships on the 17.x line (launch-window convention) and the
+    // prescription lives at the major boundary where `migrate meta` users look.
+    //
+    // Registered here but NOT in `src/conversions/registry.ts`, for the reason
+    // `kernel/MetadataPluginConfig:additionalTypes` gives: the conversion chain
+    // walks a normalized STACK and none of these schemas is a stack collection
+    // member, so a MetadataConversion would be a transform with no seam that ever
+    // runs. The prescription reaches authors through the tombstone (`tsc` + the
+    // parse) and the D3 semantic entry named below.
+    // D3 semantic entry: `training-deadline-keys-retired`.
+    'system/TrainingCourse:durationMinutes',
+    // #14477 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-02, ruled A:
+    // retire per family). One of the hour/minute/day-shaped deadline keys of the
+    // incident-response / training / change-management families: declared on the
+    // published authorable surface, read by NOTHING — the schemas are mounted by
+    // no stack key and registered as no metadata type, and the reader census over
+    // every package outside `packages/spec` (and objectui at the pinned sha)
+    // returned zero hits — so an author who wrote it held a deadline the platform
+    // never kept.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstone ships on the 17.x line (launch-window convention) and the
+    // prescription lives at the major boundary where `migrate meta` users look.
+    //
+    // Registered here but NOT in `src/conversions/registry.ts`, for the reason
+    // `kernel/MetadataPluginConfig:additionalTypes` gives: the conversion chain
+    // walks a normalized STACK and none of these schemas is a stack collection
+    // member, so a MetadataConversion would be a transform with no seam that ever
+    // runs. The prescription reaches authors through the tombstone (`tsc` + the
+    // parse) and the D3 semantic entry named below.
+    // D3 semantic entry: `training-deadline-keys-retired`.
+    'system/TrainingCourse:validityDays',
+    // #14477 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-02, ruled A:
+    // retire per family). One of the hour/minute/day-shaped deadline keys of the
+    // incident-response / training / change-management families: declared on the
+    // published authorable surface, read by NOTHING — the schemas are mounted by
+    // no stack key and registered as no metadata type, and the reader census over
+    // every package outside `packages/spec` (and objectui at the pinned sha)
+    // returned zero hits — so an author who wrote it held a deadline the platform
+    // never kept.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstone ships on the 17.x line (launch-window convention) and the
+    // prescription lives at the major boundary where `migrate meta` users look.
+    //
+    // Registered here but NOT in `src/conversions/registry.ts`, for the reason
+    // `kernel/MetadataPluginConfig:additionalTypes` gives: the conversion chain
+    // walks a normalized STACK and none of these schemas is a stack collection
+    // member, so a MetadataConversion would be a transform with no seam that ever
+    // runs. The prescription reaches authors through the tombstone (`tsc` + the
+    // parse) and the D3 semantic entry named below.
+    // D3 semantic entry: `training-deadline-keys-retired`.
+    'system/TrainingPlan:gracePeriodDays',
+    // #14477 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-02, ruled A:
+    // retire per family). One of the hour/minute/day-shaped deadline keys of the
+    // incident-response / training / change-management families: declared on the
+    // published authorable surface, read by NOTHING — the schemas are mounted by
+    // no stack key and registered as no metadata type, and the reader census over
+    // every package outside `packages/spec` (and objectui at the pinned sha)
+    // returned zero hits — so an author who wrote it held a deadline the platform
+    // never kept.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstone ships on the 17.x line (launch-window convention) and the
+    // prescription lives at the major boundary where `migrate meta` users look.
+    //
+    // Registered here but NOT in `src/conversions/registry.ts`, for the reason
+    // `kernel/MetadataPluginConfig:additionalTypes` gives: the conversion chain
+    // walks a normalized STACK and none of these schemas is a stack collection
+    // member, so a MetadataConversion would be a transform with no seam that ever
+    // runs. The prescription reaches authors through the tombstone (`tsc` + the
+    // parse) and the D3 semantic entry named below.
+    // D3 semantic entry: `training-deadline-keys-retired`.
+    'system/TrainingPlan:recertificationIntervalDays',
+    // #14477 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-02, ruled A:
+    // retire per family). One of the hour/minute/day-shaped deadline keys of the
+    // incident-response / training / change-management families: declared on the
+    // published authorable surface, read by NOTHING — the schemas are mounted by
+    // no stack key and registered as no metadata type, and the reader census over
+    // every package outside `packages/spec` (and objectui at the pinned sha)
+    // returned zero hits — so an author who wrote it held a deadline the platform
+    // never kept.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstone ships on the 17.x line (launch-window convention) and the
+    // prescription lives at the major boundary where `migrate meta` users look.
+    //
+    // Registered here but NOT in `src/conversions/registry.ts`, for the reason
+    // `kernel/MetadataPluginConfig:additionalTypes` gives: the conversion chain
+    // walks a normalized STACK and none of these schemas is a stack collection
+    // member, so a MetadataConversion would be a transform with no seam that ever
+    // runs. The prescription reaches authors through the tombstone (`tsc` + the
+    // parse) and the D3 semantic entry named below.
+    // D3 semantic entry: `training-deadline-keys-retired`.
+    'system/TrainingPlan:reminderDaysBefore',
     // #9220 — ADR-0049 enforce-or-remove at ELEMENT grain. `element:filter` never
     // had a renderer or reader anywhere: objectui registers none (its
     // renderers/basic/elements.tsx header deferred the element to "owning plugins"
@@ -10164,6 +11003,42 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // narrowings ride minor releases) and the prescription lives at the major
     // boundary where `migrate meta` users look (the #8586 / PR #8702 precedent).
     'identity/ApiKey',
+    // #14676 — `integration/ConnectorErrorCategory` (the 8-value connector-side
+    // error category enum) left with its two carriers: `ErrorMappingRule.targetCategory`
+    // and `ErrorMappingConfig.defaultCategory`, both retired in this same major
+    // (`RETIRED_DEFS_BY_MAJOR[18]`). Measured before removal: outside the declaring
+    // file its only references were a value round-trip in `connector.test.ts` and a
+    // type-identity pin — no runtime reader — so the enum had no remaining consumer,
+    // and an exported value schema with no consumer reads as a capability (#3950,
+    // the `api/HandlerStatus` precedent). `api/ErrorCategory` — the HTTP-response
+    // vocabulary this enum was deliberately kept from sharing a name with
+    // (ADR-0112 D9a) — is unaffected. See
+    // `retired-keys/18.integration__Connector__errorMapping.ts` for the retirement
+    // record.
+    'integration/ConnectorErrorCategory',
+    // #14676 — `integration/ErrorMappingConfig` (`rules`, `defaultCategory`,
+    // `unmappedBehavior`, `logUnmapped`) leaves with its only carrier:
+    // `ConnectorSchema.errorMapping`, tombstoned in this same major under ADR-0049
+    // enforce-or-remove (`RETIRED_KEYS_BY_MAJOR[18]`). Nothing outside the declaring
+    // file ever parsed or constructed one, and an exported value schema with no
+    // consumer reads as a capability (#3950). Its two `.default()`s
+    // (`defaultCategory: 'integration_error'`, `logUnmapped: true`) were only ever
+    // materialized INSIDE an authored `errorMapping` block, so there is no
+    // residue window on the carrier (#12840 does not apply: the key itself carried
+    // no default). See `retired-keys/18.integration__Connector__errorMapping.ts`
+    // for the retirement record.
+    'integration/ErrorMappingConfig',
+    // #14676 — `integration/ErrorMappingRule` (`sourceCode`, `sourceMessage`,
+    // `targetCode`, `targetCategory`, `severity`, `retryable`, `userMessage`) leaves
+    // with `integration/ErrorMappingConfig`, whose `rules[]` was its only carrier.
+    // The `userMessage` member is the reason the census filed the card: its
+    // `describe` read, to the letter, like the LIVE `ApiError.userMessage` channel
+    // (the user-facing refusal text a thrown HTTP error declares), while no code
+    // path ever read this one — two keys meaning different things under one
+    // spelling in the same spec package. Deletion resolves the collision without a
+    // rename. See `retired-keys/18.integration__Connector__errorMapping.ts` for the
+    // retirement record.
+    'integration/ErrorMappingRule',
     // #11825 — kernel/plugin-lifecycle-advanced.zod.ts
     // `AdvancedPluginLifecycleConfigSchema`, retired whole (ADR-0049
     // enforce-or-remove; maintainer ruling 2026-08-25, route 2). The aggregating
@@ -10411,6 +11286,61 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `metadata-customization-protocol-retired` ARE the declaration (the #8715
     // route-3 shape).
     'kernel/MergeStrategyConfig',
+    // #14180 — kernel/cluster.zod.ts `MetadataChangeOperationSchema` /
+    // `MetadataChangeOperation` (the `create` / `update` / `delete` / `publish`
+    // enum), the orphan value schema of the retired
+    // `kernel/MetadataChangedEventPayload` def registered beside it: it existed
+    // only to type that payload's `operation` field and had no other consumer
+    // anywhere — measured at the retirement's base commit 2cc461030, every hit
+    // was the payload itself, its own isomorphic alias pin and the generated
+    // artifacts; nothing in objectui at the pinned sha. An exported value schema
+    // with no consumer reads as a capability to whoever finds it (#3950), so it
+    // leaves with the payload (the playbook's orphan-value-schema rule, the
+    // `kernel/DistributedStateConfig` precedent). Unlike the payload this enum
+    // serializes, so it WAS in `json-schema.manifest/kernel.json` and the
+    // manifest deletion gate adjudicates its removal against this entry. Route 3,
+    // same declaration: this table plus the D3 semantic entry
+    // `metadata-changed-event-payload-retired`.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // removal ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look.
+    'kernel/MetadataChangeOperation',
+    // #14180 — kernel/cluster.zod.ts `MetadataChangedEventPayloadSchema` /
+    // `MetadataChangedEventPayload`, retired whole (ADR-0049 enforce-or-remove;
+    // triage ruling 2026-09-02: remove via the ADR-0087 route, ⛔ not "make a
+    // consumer" — that is contract growth with no pull). The docblock declared a
+    // MUST-emit / MUST-subscribe contract for a `metadata:changed` event — `type`
+    // / `name` / `tenantId` / `version: z.bigint()` / `operation` /
+    // `correlationId`, readers comparing `version` before invalidating — that
+    // nothing in the tree ever produced or consumed: zero runtime emitters, zero
+    // subscribers, zero imports outside `packages/spec` (its own unit test, the
+    // isomorphic alias pin and the generated artifacts), measured at the
+    // retirement's base commit 2cc461030 with positive controls in objectstack
+    // and objectui (pinned sha). It was unenforceable by construction: the
+    // `bigint` version field cannot cross a JSON transport (the standard
+    // serializer throws on it) without a codec no pubsub driver ships, so no
+    // conforming emitter could ever have existed. The three cluster channels that
+    // DO run — `metadata.changed` (`ClusterMetadataChangedPayload`,
+    // `@objectstack/metadata`), `metadata.mutated`
+    // (`ClusterMetadataMutationPayload`, `@objectstack/metadata-protocol`) and
+    // `datasource.mutated` — all carry an address-only signal whose receiver
+    // re-reads its own store (ruled 2026-09-01 for the registry lane), the
+    // opposite of the declared version-compare receipt, so the one plausible
+    // future consumer was decided against. Never in `json-schema.manifest/` (the
+    // JSON Schema build skips `bigint`), so the manifest deletion gate has nothing
+    // to adjudicate for this def; the entry is the declaration the retirement
+    // route requires. Route 3: not an authorable surface — no metadata-type
+    // binding, stack collection or manifest embed ever carried it — so no
+    // tombstone and no D2 conversion; this table plus the D3 semantic entry
+    // `metadata-changed-event-payload-retired` ARE the declaration.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // removal ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look.
+    'kernel/MetadataChangedEventPayload',
     // #13135 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
     // #12057: retirement adopted, re-scope rejected; re-charter #13135 executes
     // the widened surface). Part of the whole-module removal of
