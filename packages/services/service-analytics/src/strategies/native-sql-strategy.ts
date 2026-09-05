@@ -13,6 +13,7 @@ import {
 } from './filter-normalizer.js';
 import { findCrossFieldComparand, findUninterpretableTemporalMember } from '../comparand-shape.js';
 import { assertReadScopeCannotVacate, compileScopedFilterToSql } from '../read-scope-sql.js';
+import { nonTextColumnResolver, textOperatorPolarity } from '../non-text-column.js';
 import { datasetInvalidError, invalidMemberError } from '../dataset-refusal.js';
 import { likePattern, LIKE_ESCAPE_CHAR, asciiLowerSqlExpr, type LikeShape } from '../like-pattern.js';
 import { nextUtcCalendarDay } from '@objectstack/core';
@@ -616,7 +617,13 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     if (typeof ctx.getReadScope !== 'function') return;
     const filter = ctx.getReadScope(objectName);
     if (filter === undefined || filter === null) return;
-    const { sql, params: scopeParams } = compileScopedFilterToSql(filter, alias);
+    // [#14079] The declared-type rule rides along, so a policy's text operator
+    // over a numeric or boolean column compiles to the contract's constant
+    // rather than a `LIKE` Postgres refuses at query time (a 500 on a scope the
+    // platform accepted). `undefined` when the host wired no field metadata.
+    const { sql, params: scopeParams } = compileScopedFilterToSql(filter, alias, {
+      nonTextColumn: nonTextColumnResolver(ctx, objectName),
+    });
     // [#13926] The #13640 door guard, at THIS strategy's merge site. This is
     // not an echo: `execute()` runs this method's output through
     // `ctx.executeRawSql`, so a scope the compiler lowers to a boolean
@@ -1108,6 +1115,18 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // match is on the raw text — so it keeps the un-normalised reference.
     const shape = likeShape[operator];
     if (shape) {
+      // [#14079] …and when what is stored is never text (a declared numeric or
+      // boolean column), the contract's constant is the whole predicate:
+      // `1 = 0` for the positive operators, `1 = 1` for `notContains`. Asked
+      // of the same declared-type hook the read-scope lowering asks, so the
+      // query's own `where` and its RLS scope answer one cell one way; the
+      // `ObjectQLStrategy` echo of this statement carries the same test.
+      // AFTER the comparand fence (`assertCompilableComparand`, at lowering)
+      // and before anything binds, so `params` stays aligned.
+      const polarity = textOperatorPolarity(operator);
+      if (polarity && nonTextColumnResolver(ctx, target.object)?.(target.field)) {
+        return polarity === 'negative' ? SQL_CONST_TRUE : SQL_CONST_FALSE;
+      }
       // [#5567] Escaped pattern AND an explicit `ESCAPE`, bound together: the
       // escaping alone would search for a literal backslash on SQLite (no
       // default escape character there), the clause alone would change nothing.

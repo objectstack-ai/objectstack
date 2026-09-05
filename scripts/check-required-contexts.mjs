@@ -221,7 +221,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '(10) a `carries` string that embeds a step count': 3,
   'missing input is a failure, never a pass (#4690)': 6,
   'the `on:` key under both YAML schemas': 3,
-  'instruction surfaces (#9491): the stale-name scan': 28,
+  'instruction surfaces (#9491): the stale-name scan': 31,
   'the dispatch-gates declaration (#9979)': 6,
   'the wiring: this gate must actually run on every PR': 28,
   'the live mode stays OFF the required path': 3,
@@ -500,6 +500,12 @@ export const REQUIRED_CONTEXTS = [
  * them would demand exactly that), and this script + `.github/workflows/**`
  * (the ledger and the pinned half themselves — old names live here as
  * history by design).
+ *
+ * Re-derived 2026-09-05 with the same query: the pm-dispatch readings ledger
+ * names all six and nothing pinned it, so it joins the set; every other `*.md`
+ * in that population was already enrolled, and `references/true-green.md`
+ * names no registered context at all, so it stays out — a surface enters this
+ * set by naming one, never by sitting next to one that does.
  */
 export const INSTRUCTION_SURFACES = [
   {
@@ -527,6 +533,19 @@ export const INSTRUCTION_SURFACES = [
     mustName: ['Lint & Repo Gates', 'TypeScript Type Check'],
   },
   {
+    // The seat's readings ledger states the required set it reads before a PR
+    // may be enqueued, so it states the required set ⇒ mustName, all six.
+    file: '.claude/skills/pm-dispatch/references/platform-readings.md',
+    mustName: [
+      'Lint & Repo Gates',
+      'TypeScript Type Check',
+      'Test Core',
+      'Dogfood Regression Gate',
+      'Build Core',
+      'Temporal Conformance (live PG + MySQL)',
+    ],
+  },
+  {
     // Names the typecheck context as the job two generated-artifact gates run
     // in — operative, but does not state the required set ⇒ scan-only.
     file: '.claude/skills/spec-property-retirement/SKILL.md',
@@ -542,8 +561,8 @@ export const INSTRUCTION_SURFACES = [
  * (#9979, applying #9964's pattern).
  *
  * That tool derives a card's gate list from the path literals in each gate's
- * own source, and "looks like a path" there means "carries a separator". Four
- * of the five surfaces have one; `AGENTS.md` does not, because a repo-root FILE
+ * own source, and "looks like a path" there means "carries a separator". Five
+ * of the six surfaces have one; `AGENTS.md` does not, because a repo-root FILE
  * has no separator to be found by — so an AGENTS.md card derived this gate not
  * at all, while that surface is the one carrying `mustName` for all six
  * required contexts (widened 2→6 by the #9677 ruling). Editing the merge-queue
@@ -2214,6 +2233,43 @@ async function selfTest() {
   assert(
     judgeSurfaces({ surfaces: [] }).problems.some((p) => p.includes('scan set is empty')),
     'an empty scan set ⇒ red, never a silent tick (#4690)',
+  );
+
+  // The readings ledger, the copy a seat consults at the moment it decides
+  // whether a PR may be enqueued: enrolled, and carrying every required
+  // context rather than a subset.
+  const LEDGER_SURFACE = '.claude/skills/pm-dispatch/references/platform-readings.md';
+  const ledgerEntry = INSTRUCTION_SURFACES.find((s) => s.file === LEDGER_SURFACE);
+  assert(
+    ledgerEntry !== undefined &&
+      ledgerEntry.mustName.length === REQUIRED_CONTEXTS.length &&
+      REQUIRED_CONTEXTS.every((e) => ledgerEntry.mustName.includes(e.context)),
+    `the readings ledger is a scanned surface naming all ${REQUIRED_CONTEXTS.length} required contexts — got ${JSON.stringify(ledgerEntry)}`,
+  );
+  // A rename reaches it. Read from the file as it ships, with ONE of the six
+  // replaced by a name that never existed: the baseline above is green, so
+  // the literal is present and this substitution cannot be a no-op.
+  const ledgerRenamed = judgeSurfaces({
+    files: surfaceMap({
+      [LEDGER_SURFACE]: surfaceSources[LEDGER_SURFACE].replaceAll('Dogfood Regression Gate', 'Nonexistent Job Name'),
+    }),
+  });
+  assert(
+    ledgerRenamed.problems.some(
+      (p) => p.includes(LEDGER_SURFACE) && p.includes("'Dogfood Regression Gate'") && p.includes('no longer names'),
+    ),
+    'renaming a required context in the readings ledger ⇒ red on the ledger, naming the dropped literal',
+  );
+  // …and the standing ban arrives with the same entry: a retired name written
+  // fresh into the ledger is red on its budget of zero, as on the checklist.
+  const ledgerStale = judgeSurfaces({
+    files: surfaceMap({ [LEDGER_SURFACE]: surfaceSources[LEDGER_SURFACE] + '\n- 入队前亲核 ESLint job 是否已绿\n' }),
+  });
+  assert(
+    ledgerStale.problems.some(
+      (p) => p.includes(LEDGER_SURFACE) && p.includes("retired required context 'ESLint'") && p.includes('budgeted: 0'),
+    ),
+    'a retired name written fresh into the readings ledger ⇒ red (the standing ban reaches it through the same entry)',
   );
 
   // ── the dispatch-gates declaration (#9979) ───────────────────────────────

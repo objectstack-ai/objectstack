@@ -418,8 +418,22 @@ function checkCondition(
       // `typeof value !== 'string' ⇒ false` guard here (what this line used to
       // do) made a value-less column fail BOTH an operator and its negation,
       // the two-valued reading #5298 ruled out. This is `formula`'s shape
-      // (`matches-filter.ts`: `!(typeof actual === 'string' && …)`), which
-      // driver-sql's polarity table already follows for the same operator.
+      // (`matches-filter.ts`: `!(typeof actual === 'string' && …)`).
+      //
+      // [#14079] What the other faces answer for the NON-STRING half of that
+      // sentence is now a contract row, not this file's opinion. This
+      // paragraph used to end "which driver-sql's polarity table already
+      // follows for the same operator" — true of the NO-VALUE cell only
+      // (`nullValueSatisfiesOperator` there answers `$notContains: true` for a
+      // NULL column), and measured FALSE of a stored number: the SQLite
+      // dialects coerced it to text and searched that, live Postgres refused
+      // at query time (SQLSTATE 42883), and `driver-memory`'s reference
+      // matcher failed both polarities. The maintainer ruled the cell on
+      // 2026-09-05 (option A, type-gate) and `FILTER_TEXT_CASES`' `score` rows
+      // pin it on every face: the reference matcher answers the predicate, and
+      // the SQL compilers emit a type-gated constant for a column whose
+      // declared type is in `NON_TEXT_STORED_VALUE_TYPES`. This arm was already
+      // on the ruled side; nothing here moved.
       case '$notContains': if (typeof value === 'string' && value.includes(target)) return false; break;
       case '$startsWith': if (typeof value !== 'string' || !value.startsWith(target)) return false; break;
       case '$endsWith': if (typeof value !== 'string' || !value.endsWith(target)) return false; break;

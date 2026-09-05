@@ -4749,8 +4749,9 @@ export class RestServer {
                         const severityParam = (req.query?.severity as string | undefined) ?? 'error';
                         const severity = severityParam === 'warning' ? 'warning' : 'error';
                         const diagnosticsType = (req.query?.type as string | undefined) || undefined;
-                        // [#13753] STATE THE ORG PARTITION — but only on the
-                        // arm where ONE organization is the whole truth.
+                        // [#13753, #15622] STATE THE ORG PARTITION — on BOTH
+                        // arms. They differ only in whether the fold happens
+                        // HERE or is left entirely to the callee.
                         //
                         // `getMetaDiagnostics` reads each swept type through
                         // `getMetaItems({ type: t, organizationId })`.
@@ -4774,7 +4775,7 @@ export class RestServer {
                         // over that one type IS the request's whole scope and
                         // the answer is correct by construction. That is the
                         // arm Studio's per-type directory drill-down uses, and
-                        // it is the arm repaired here.
+                        // it is the arm #13753 repaired.
                         //
                         // ── WHY THE FOLD IS DOUBLED, AND STAYS DOUBLED (#15034) ──
                         //
@@ -4785,7 +4786,8 @@ export class RestServer {
                         // `canonicalMetaType` — so `f(t, f(t, o)) === f(t, o)` and the
                         // inner application is the algebraic no-op. MEASURED: replace
                         // this predicate with a raw `diagnosticsCtx?.tenantId` and
-                        // `rest-server-meta-read-org-scope.test.ts` stays 30/30 GREEN;
+                        // `rest-server-meta-read-org-scope.test.ts` stays GREEN IN FULL
+                        // (30/30 at that revision; the file has grown since);
                         // the inner gate re-folds it, phantom control included.
                         //
                         // ⭐ It is KEPT anyway, and the reason is TRUST DOMAIN rather
@@ -4801,55 +4803,84 @@ export class RestServer {
                         // bundled implementation. Defence in depth, on a seam the type
                         // system does not cover.
                         //
-                        // ⛔ The UNTYPED sweep is deliberately left env-wide,
-                        // and this is a recorded gap rather than an oversight
-                        // (#13753 reports the shape). `targetTypes` is then the
-                        // whole registry — five `allowOrgOverride: true` types
-                        // and every other declared type together — while the
-                        // request carries ONE `organizationId`. Naming the
-                        // tenant there does not merely over-reach: `getMetaItems`
-                        // UNIONs the env-wide rows with the named org's rows,
-                        // so a non-overridable type's org-scoped rows — the
-                        // pre-#6190 phantoms `reportUnhydratableOrgScopedRows`
-                        // warns about, which boot hydration walks past — would
-                        // be read back INTO the governance report as `stats`
-                        // counts and diagnostic entries. A dashboard whose job
-                        // is reporting what is wrong would report rows that do
-                        // not survive a restart.
+                        // ── [#15622] THE UNTYPED SWEEP FORWARDS THE
+                        // ORGANIZATION TOO, and passes it RAW ───────────────
                         //
-                        // ⚠️ #14683 MOVED THIS ARGUMENT and the gap outlived it, so
-                        // read the two apart. What used to hold the untyped arm shut
-                        // was that one org id could not express a per-type scope from
-                        // here without a fan-out per overridable type and a REST-side
-                        // re-aggregation of `total`/`stats`/`scannedTypes`. That is no
-                        // longer the obstacle: `getMetaDiagnostics` calls
-                        // `getMetaItems` once per `t` INSIDE its own loop, and the
-                        // inner gate folds each `t` separately, so a single
-                        // `organizationId` handed to the untyped arm would already be
-                        // narrowed per type — phantoms of non-overridable types
-                        // included. ⛔ The gap nevertheless stays OPEN and stays
-                        // PINNED: closing it moves observable behaviour and is a
-                        // decision somebody makes on a card, not a side effect of a
-                        // comment repair (#15034 files it). The pin that guards it is
-                        // `the untyped sweep is still env-wide` in
-                        // `rest-server-meta-read-org-scope.test.ts` — if it reddens,
-                        // read that card before making it green.
+                        // ⛔ This arm used to be a RECORDED GAP, left env-wide
+                        // on this argument: `targetTypes` is then the whole
+                        // registry — five `allowOrgOverride: true` types and
+                        // every other declared type together — while the
+                        // request carries ONE `organizationId`, and one org id
+                        // could not express a per-type scope from here without
+                        // a fan-out per overridable type plus a REST-side
+                        // re-aggregation of `total`/`stats`/`scannedTypes`.
+                        //
+                        // ⚠️ #14683 DISSOLVED THAT OBSTACLE (#15034 recorded
+                        // it, #15622 acted on it). `getMetaDiagnostics` does
+                        // not spend the organization once: it loops `for (const
+                        // t of targetTypes)` calling `getMetaItems({ type: t,
+                        // organizationId, … })`, and the FIRST thing
+                        // `getMetaItems` does with that organization is
+                        // `organizationIdForMetaRead(request.type, …)` on its
+                        // OWN folded type. So one `organizationId` handed to
+                        // this arm is already narrowed PER TYPE by the callee —
+                        // the org for the five overridable types, `undefined`
+                        // for every other, phantoms of non-overridable types
+                        // dropped. That is precisely the scope the paragraph
+                        // above said one id could not say. No fan-out, no
+                        // REST-side re-aggregation, no second owner of the
+                        // sweep's arithmetic: `stats` / `total` /
+                        // `scannedTypes` are untouched by the gate.
+                        //
+                        // ⭐ RULED that the gap CLOSES rather than being
+                        // re-recorded. A governance summary whose whole job is
+                        // surfacing problems, and which structurally cannot see
+                        // a class of them WHILE ITS OWN drill-down can, issues a
+                        // false all-clear — since #13753 repaired the `?type=`
+                        // arm, this summary undercounts relative to the screen
+                        // you reach by clicking into it. An org-scoped caller
+                        // now sees items THEIR OWN organization authored, on the
+                        // five overridable types only, which for a governance
+                        // report is the correct set.
+                        //
+                        // ⛔ RAW, and deliberately NOT pre-folded with
+                        // `organizationIdForMetaRead(...)` the way the `?type=`
+                        // arm folds above. There is no single type to fold on
+                        // here, and folding on any one of them would suppress
+                        // the organization for EVERY type at once. The per-type
+                        // decision belongs to the callee's loop. Identical in
+                        // shape to the `/references` door below, whose
+                        // narrowness control measured the same callee gate; both
+                        // halves are pinned in
+                        // `rest-server-meta-read-org-scope.test.ts`, where ONE
+                        // request shows an overridable type's org-authored row
+                        // present and a planted pre-#6190 phantom on a
+                        // NON-overridable type absent.
+                        //
+                        // ⚠️ ADR-0131 D6/D7 retires the per-organization
+                        // metadata partition in v18 (#15206, C5), so this
+                        // behaviour has ONE MAJOR to live and reverts to
+                        // environment-wide when the partition goes. An existing
+                        // value handed to an existing parameter: no new
+                        // parameter, response field, status code or contract
+                        // surface. ⛔ Nothing is to be built on it.
                         //
                         // ⚠️ NOT a new org-resolution seam: `resolveExecCtx` is
                         // memoised per request (WeakMap keyed by `req`), the
-                        // same result 40+ handlers here already share. It is
-                        // resolved only on the typed arm so the untyped sweep
-                        // keeps its exact behaviour today, authz-store failure
-                        // modes included — which is why this reads as a
+                        // same result 40+ handlers here already share. It is now
+                        // resolved for BOTH arms — which is why this reads as a
                         // statement rather than a ternary: the LOCALLY CAUGHT
                         // continuation-line spelling is the one the sibling
                         // doors use and the one `execctx-consumer-census`
                         // reads, and a third layout would be invisible to it.
-                        let diagnosticsOrganizationId: string | undefined;
-                        if (diagnosticsType) {
-                            const diagnosticsCtx = await this.resolveExecCtx(environmentId, req)
-                                .catch(rethrowAuthzStoreUnavailable);
-                            diagnosticsOrganizationId = organizationIdForMetaRead(
+                        // This door does not sit behind the shared anonymous
+                        // floor, so it decides an authz-store outage for itself
+                        // rather than laundering it into an org-unscoped 200 —
+                        // and the untyped arm now shares that, deliberately.
+                        const diagnosticsCtx = await this.resolveExecCtx(environmentId, req)
+                            .catch(rethrowAuthzStoreUnavailable);
+                        const diagnosticsOrganizationId: string | undefined = diagnosticsType
+                            ? organizationIdForMetaRead(
                                 // [#10340] FOLDED, not raw — see the PUT door's
                                 // org-scope comment for the measurement. The
                                 // protocol keeps receiving the caller's own
@@ -4857,8 +4888,9 @@ export class RestServer {
                                 // unrecognised one with its own 400); only the
                                 // scope decision reads the canonical singular.
                                 canonicalMetaUrlType(diagnosticsType), diagnosticsCtx?.tenantId,
-                            );
-                        }
+                            )
+                            // [#15622] The whole-registry arm — raw, per above.
+                            : diagnosticsCtx?.tenantId;
                         const result = await (p as any).getMetaDiagnostics({
                             type: diagnosticsType,
                             severity,
