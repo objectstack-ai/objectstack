@@ -26,10 +26,17 @@ import { P } from '@objectstack/spec';
  *    unbound (a system write) — the acting user is bound from the request on
  *    authenticated writes (engine `buildEvalUser`).
  *
- * `sharingModel: 'public_read_write'` so the seeded admin (and the live e2e,
- * objectui `e2e/live/cascading-options.spec.ts`) can create records without a
- * bespoke permission set; belonging to no permission set, it is intentionally
- * absent from the ADR-0090 access-matrix snapshot.
+ * `sharingModel: 'public_read_write'` is the RECORD baseline (gate ②) — no
+ * sharing rule is needed for one persona to see another's row. It is NOT what
+ * makes the object reachable: object-level CRUD (gate ①) comes only from a
+ * permission set and is checked first. This comment used to say the wide OWD let
+ * the seeded admin and the live e2e create records "without a bespoke permission
+ * set"; what actually carried them was the admin's built-in WILDCARD set, and
+ * every other member hit a 403 on the `nav_cascade` entry
+ * (`nav-object-ungranted`, warned on every build). `showcase_member_default` now
+ * grants read/create/edit, so the object is in the access-matrix snapshot and
+ * the e2e no longer depends on being admin. Note where the narrowing really
+ * lives: on one OPTION (`tier: 'restricted'`, admin-only), not on the object.
  *
  * The server verdict is unit-covered by objectql
  * `rule-validator.option-visibility.test.ts`; this object is the served fixture

@@ -31,10 +31,19 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  */
 export const ExpenseReport = ObjectSchema.create({
   name: 'showcase_expense_report',
-  // [ADR-0090 D1] grandfather stamp: world-writable demo object so any seeded
-  // persona (and the browser e2e) can create/edit reports without a bespoke
-  // permission set. Belonging to no permission set, it is intentionally absent
-  // from the access-matrix snapshot (cf. showcase_cascade).
+  // [ADR-0090 D1] grandfather stamp: the RECORD baseline is world-writable, so
+  // no sharing rule or scope depth is needed to see another persona's report.
+  //
+  // That is gate ② and it is the whole of what this dial buys. It does NOT make
+  // the object reachable: object-level CRUD is gate ①, it is granted only by a
+  // permission set, and it is checked FIRST. This comment used to claim the wide
+  // OWD let "any seeded persona create/edit reports without a bespoke permission
+  // set" — measurably false, and the app shipped the proof: the object sat in
+  // the shared navigation with no grant anywhere, so `nav-object-ungranted`
+  // warned on every build and every non-admin who clicked the entry got a 403.
+  // It worked for the seeded admin only, who holds the platform's wildcard set.
+  // The grants now live on `showcase_contributor` (file/edit) and
+  // `showcase_member_default` (read), and both appear in access-matrix.json.
   sharingModel: 'public_read_write',
   label: 'Expense Report',
   pluralLabel: 'Expense Reports',
