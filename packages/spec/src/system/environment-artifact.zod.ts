@@ -175,6 +175,8 @@ export const EnvironmentArtifactSchema = lazySchema(() => z.object({
    * silently. Sits beside `metadata`, outside the `checksum` digest (which
    * covers the `metadata` block only).
    */
+  // Internal anchor for the digest-coverage boundary stated in the describe below: it was
+  // recorded as accepted on the premise that the carrier is trusted end-to-end (#14993).
   grantedPermissions: z.record(z.string(), PluginPermissionsSchema).optional()
     .describe(
       'Install-time GRANTED permission set per plugin, keyed by the plugin manifest `id` '
@@ -184,8 +186,8 @@ export const EnvironmentArtifactSchema = lazySchema(() => z.object({
       + '`{}` = consent-bearing and consented to nothing — the two are never collapsed. '
       + 'Sits beside `metadata`, outside the `checksum` digest, which covers the `metadata` block '
       + 'only: integrity of the granted set rests on the carrier — the artifact is '
-      + 'environment-local and control-plane served (ADR-0003 / cloud ADR-0007) — accepted and '
-      + 'documented as such in #14993.',
+      + 'environment-local and control-plane served (ADR-0003 / cloud ADR-0007) — an accepted '
+      + 'boundary of this envelope, not an oversight.',
     ),
 
   // ── Retired v0 keys (#4740, ADR-0049) ──────────────────────────────
