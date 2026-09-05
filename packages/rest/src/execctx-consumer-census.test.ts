@@ -309,7 +309,22 @@ describe('[#13160] §1 the production supplier fulfils with `undefined` rather t
 // ---------------------------------------------------------------------------
 
 describe('[#13160] §2 the consumer surface, counted from the tree', () => {
-    it('77 invocation sites, 98 mentions — the thread\'s two control numbers hold', () => {
+    it('77 invocation sites, 99 mentions — the thread\'s two control numbers hold', () => {
+        // [#15866] 77 sites UNCHANGED / 98 → 99 mentions — the fourth pattern,
+        // and the first entry here that moves the mention count while adding no
+        // consumer at all. That card retired the `as any` casts on this file's
+        // protocol-dispatch sites, so each data door's request literal is now
+        // compiled against the declared spec contract through a typed envelope
+        // (`ServerScopedDataRequest`). The envelope's doc-comment has to say
+        // where its `context` member comes from — it is the SERVER-DERIVED
+        // execution context, which is the whole reason it may not join the
+        // published request schema — and naming {@link RestServer.resolveExecCtx}
+        // is how it says so. ⚠️ No call site was added, moved or removed: the
+        // repair is a type annotation, and `SITES.length` staying at 77 across
+        // it is the assertion that says so. A reader who sees only the mention
+        // count move should read it as documentation about the consumers, never
+        // as a consumer.
+        //
         // [#13753, the `/references` half] 76 → 77 sites / 97 → 98 mentions.
         // `GET /meta/:type/:name/references` resolved NO identity, so the
         // reference sweep behind the admin "Used by" panel read the env
@@ -378,7 +393,7 @@ describe('[#13160] §2 the consumer surface, counted from the tree', () => {
         // that tracked the site count exactly would be measuring one thing
         // twice.
         expect(SITES.length).toBe(77);
-        expect(SOURCE.split('resolveExecCtx').length - 1).toBe(98);
+        expect(SOURCE.split('resolveExecCtx').length - 1).toBe(99);
     });
 
     it('the split is 24 locally caught / 53 bare — NOT 16 / 53, which does not add to 77', () => {
