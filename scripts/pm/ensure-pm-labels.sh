@@ -269,7 +269,7 @@ for R in objectstack-ai/objectstack objectstack-ai/objectui objectstack-ai/cloud
   # objectstack, and absent entirely from objectui).
   gh label create pm:retriage         -R "$R" -c d4c5f9 -d "Awaiting triage re-judgement — coexists with the standing pm:* label; queued cards skip dispatch" 2>/dev/null || true
   gh label create finding             -R "$R" -c c2e0c6 -d "Recorded observation — held, not dispatchable until the findings triage round grades it" 2>/dev/null || true
-  gh label create pm:epic             -R "$R" -c 5319e7 -d "Parent delegated to a dedicated epic PM — other PMs never dispatch into its subtree" 2>/dev/null || true
+  gh label create pm:epic             -R "$R" -c 5319e7 -d "Reserved by a dedicated epic PM, parent or sub-issue; other PMs never take it; never with pm:queue" 2>/dev/null || true
 done
 
 # needs:contract-review — the clause-② enqueue gate's re-review chain (SKILL.md
