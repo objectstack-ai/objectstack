@@ -2,6 +2,8 @@
 
 import { describe, it, expect } from 'vitest';
 
+import { ObjectKernel, isAuthzStoreUnavailableError } from '@objectstack/core';
+
 import { resolveExecutionContext } from './resolve-execution-context.js';
 import { hashApiKey } from './api-key.js';
 
@@ -587,5 +589,154 @@ describe('#6216 — this face keeps the EXPLICIT GUEST entry, and its own named 
     expect(ctx.userId).toBe('u1');
     expect(ctx.principalKind).toBe('human');
     expect(ctx.accessToken).toBe('sess_tok_rt');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [#13906 decision 1 option A — at the RUNTIME door] The tenancy-posture seam
+// keeps "never registered" apart from "registered and FAILED to build".
+//
+// `resolveAuthzContext` gates BOTH posture-conditional API-key refusals
+// (`organization_required`, `organization_membership_ended`) on a PRESENT
+// posture. So `undefined` here is not neutral: it is "no wall". The REST seam
+// (`rest-server.ts`) already separates the two facts by the registry's own
+// brand; this file pins the same separation on the runtime resolver, fed by
+// the registry's own async accessor — branded on "never registered",
+// unbranded on "registered and could not be built" (#13905).
+//
+// Both keys are fixtures for the refusal the posture gates: one stamped with
+// an organization its owner has LEFT, one carrying no organization at all.
+// ---------------------------------------------------------------------------
+
+describe('[#13906 decision 1 A, runtime door] the tenancy posture seam tells "never registered" from "registered and failed"', () => {
+  const RAW_EXMEMBER = 'osk_exmember_runtime_door';
+  const RAW_ORGLESS = 'osk_orgless_runtime_door';
+
+  function qlWith() {
+    const tables: Record<string, any[]> = {
+      sys_api_key: [
+        // Stamped org_A; the owner's ONLY current membership is org_B.
+        { id: 'k_ex', key: hashApiKey(RAW_EXMEMBER), revoked: false, user_id: 'u_exmember', active_organization_id: 'org_A', expires_at: FUTURE },
+        // No organization at all.
+        { id: 'k_orgless', key: hashApiKey(RAW_ORGLESS), revoked: false, user_id: 'u_orgless', expires_at: FUTURE },
+      ],
+      sys_member: [
+        { user_id: 'u_exmember', organization_id: 'org_B' },
+        { user_id: 'u_orgless', organization_id: 'org_A' },
+      ],
+      sys_user_permission_set: [], sys_permission_set: [],
+      sys_position: [], sys_position_permission_set: [], sys_user_position: [],
+    };
+    return {
+      async find(object: string, opts: any) {
+        const rows = tables[object] ?? [];
+        const where = opts?.where ?? {};
+        return bounded(rows.filter((row) => {
+          for (const [k, v] of Object.entries(where)) {
+            if (v !== null && typeof v === 'object') {
+              if (Array.isArray((v as any).$in) && !(v as any).$in.includes(row[k])) return false;
+              continue;
+            }
+            if ((v ?? null) !== (row[k] ?? null)) return false;
+          }
+          return true;
+        }), opts);
+      },
+    };
+  }
+
+  /** A REAL kernel: the registry whose rejections are the facts under test. */
+  function kernelWith(tenancy: 'healthy-isolated' | 'factory-throws' | 'unregistered'): ObjectKernel {
+    // `gracefulShutdown: false` — a fixture kernel must not hook the test
+    // runner's process signals.
+    const kernel = new ObjectKernel({ skipSystemValidation: true, gracefulShutdown: false } as any);
+    if (tenancy === 'healthy-isolated') {
+      kernel.registerService('tenancy', { posture: 'isolated' });
+    } else if (tenancy === 'factory-throws') {
+      // The REAL failure class (#13905: "registered and FAILED to construct"):
+      // the registry's own unbranded rejection, not a stub thrown at the seam.
+      kernel.registerServiceFactory('tenancy', () => {
+        throw new Error('tenancy backend unavailable');
+      });
+    }
+    // 'unregistered' → nothing: the branded not-registered rejection.
+    return kernel;
+  }
+
+  /**
+   * The resolver fed straight by the registry's async accessor. `auth` and
+   * `settings` reject branded here too, and both of those seams already
+   * absorb (anonymous session; default localization) — only `tenancy` is an
+   * authorization INPUT.
+   */
+  const viaKernel = (kernel: ObjectKernel, headers: Record<string, string>) => ({
+    getService: (name: string) => kernel.getServiceAsync(name),
+    getQl: async () => qlWith(),
+    request: { headers },
+  });
+
+  /** Settle to the rejection, or to `undefined` when the call RESOLVED. */
+  const rejectionOf = (p: Promise<unknown>) => p.then(() => undefined, (e) => e);
+
+  it('POSITIVE CONTROL: a healthy `isolated` tenancy service reaches the resolver through this facade — both keys are refused (guest)', async () => {
+    const exMember = await resolveExecutionContext(viaKernel(kernelWith('healthy-isolated'), { 'x-api-key': RAW_EXMEMBER }));
+    expect(exMember.userId).toBeUndefined();
+    const orgLess = await resolveExecutionContext(viaKernel(kernelWith('healthy-isolated'), { 'x-api-key': RAW_ORGLESS }));
+    expect(orgLess.userId).toBeUndefined();
+  });
+
+  it('SUPPORTED, unchanged: tenancy NEVER registered → the branded rejection is absorbed, no posture, no refusal', async () => {
+    // The no-tenancy composition: no wall exists, and an org-stamped key
+    // working there is by design. A repair that made this loud too would
+    // break every single-organization embedder — the brand, not the catch,
+    // is the discriminator.
+    const ctx = await resolveExecutionContext(viaKernel(kernelWith('unregistered'), { 'x-api-key': RAW_EXMEMBER }));
+    expect(ctx.userId).toBe('u_exmember');
+    expect(ctx.tenantId).toBe('org_A');
+  });
+
+  it('REPAIRED: tenancy REGISTERED AND FAILING (factory throws) → AuthzStoreUnavailableError, 503 SERVICE_UNAVAILABLE — never an admitted principal', async () => {
+    // SUPERSEDED PIN, quoted — what origin/main answered at this seam:
+    //     expect(ctx.userId).toBe('u_exmember');
+    //     expect(ctx.tenantId).toBe('org_A');
+    // A tenancy service that could not be CONSTRUCTED resolved to "no
+    // posture", which skipped the Layer 0 membership refusal, so the ex-member
+    // was admitted with full grants. A posture that could not be READ is not a
+    // posture that is ABSENT.
+    const err: any = await rejectionOf(resolveExecutionContext(viaKernel(kernelWith('factory-throws'), { 'x-api-key': RAW_EXMEMBER })));
+    expect(err, 'the resolver RESOLVED — the failed build was admitted as "no wall"').toBeDefined();
+    expect(isAuthzStoreUnavailableError(err)).toBe(true);
+    // ADR-0112 envelope: the code and status a door answers with.
+    expect(err.code).toBe('SERVICE_UNAVAILABLE');
+    expect(err.status).toBe(503);
+    expect(err.object).toBe('tenancy');
+    // The registry's own diagnostic is kept, not replaced.
+    expect(err.cause?.message).toBe('tenancy backend unavailable');
+  });
+
+  it('SIBLING REFUSAL, same seam: the org-less key under a FAILED build is an outage (503), no longer admitted', async () => {
+    // SUPERSEDED PIN, quoted:  expect(ctx.userId).toBe('u_orgless');
+    const err: any = await rejectionOf(resolveExecutionContext(viaKernel(kernelWith('factory-throws'), { 'x-api-key': RAW_ORGLESS })));
+    expect(err, 'the resolver RESOLVED — the org-less key was admitted on an unreadable posture').toBeDefined();
+    expect(err.code).toBe('SERVICE_UNAVAILABLE');
+    expect(err.status).toBe(503);
+  });
+
+  it('THE COLLAPSE IS ENDED: "registered and failed" and "never registered" no longer answer alike', async () => {
+    const failed: any = await rejectionOf(resolveExecutionContext(viaKernel(kernelWith('factory-throws'), { 'x-api-key': RAW_EXMEMBER })));
+    const absent = await resolveExecutionContext(viaKernel(kernelWith('unregistered'), { 'x-api-key': RAW_EXMEMBER }));
+    expect(isAuthzStoreUnavailableError(failed)).toBe(true);
+    expect(absent.userId).toBe('u_exmember');
+  });
+
+  it('the dispatcher-shaped PROBE facade (resolves `undefined`, never rejects) is untouched — quiet, no posture', async () => {
+    // Every other test in this file feeds this shape; pinned here beside the
+    // loud cases so the two facades are read together.
+    const ctx = await resolveExecutionContext({
+      getService: async () => undefined,
+      getQl: async () => qlWith(),
+      request: { headers: { 'x-api-key': RAW_EXMEMBER } },
+    });
+    expect(ctx.userId).toBe('u_exmember');
   });
 });

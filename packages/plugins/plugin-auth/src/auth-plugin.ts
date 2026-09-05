@@ -58,6 +58,7 @@ import {
   type SecondaryStorageLike,
 } from './identity-write-guard.js';
 import { registerLastAdminGuard } from './last-admin-guard.js';
+import { registerMembershipEndedSessionTrigger } from './membership-ended-session.js';
 import { registerMemberRoleCanonicalization } from './member-role-canonical.js';
 import { SYS_USER_PROFILE_EDIT_FIELDS } from './sys-user-writable-fields.js';
 import { MANAGED_EXTENSION_EDITABLE_FIELDS } from './managed-extension-fields.js';
@@ -1395,6 +1396,20 @@ export class AuthPlugin implements Plugin {
         // callers. See last-admin-guard.ts.
         registerLastAdminGuard(engine, {
           packageId: 'com.objectstack.plugin-auth.last-admin-guard',
+          logger: ctx.logger,
+        });
+        // [#15784] The COURTESY half of #15409's ruling: when a membership
+        // ends, the session's claim on THAT organization ends with it —
+        // re-pointed if the user still belongs somewhere, revoked if not.
+        // Registered on `sys_member` for the same reason the guard above is:
+        // the census (posted on #15784) measured that better-auth's
+        // remove-member endpoint, a direct delete, a bulk delete, the cascade
+        // from a sys_user delete and an organization re-point ALL reach this
+        // seam, while an endpoint hook would have reached one of them.
+        // ⛔ This is never the enforcement — see the module header, and
+        // `resolve-authz-context.ts`, which stays untouched.
+        registerMembershipEndedSessionTrigger(engine, {
+          packageId: 'com.objectstack.plugin-auth.membership-ended-session',
           logger: ctx.logger,
         });
       } catch {
