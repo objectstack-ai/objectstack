@@ -3793,4 +3793,43 @@ describe('assignment value envelope — located findings (#15137)', () => {
     });
     expect(issues.filter((i) => i.where.includes('assignment value'))).toHaveLength(0);
   });
+
+  describe("a non-record entry in an object's `fields:` list (#15742)", () => {
+    // `buildFieldIndex` used to cast each member inline
+    // (`fields.map(f => (f as AnyRec).name)`), so an empty YAML list item —
+    // which deserialises to `null` — threw `Cannot read properties of null`
+    // out of the whole rule. It reads the list through `recordsOf` now, which
+    // is the one place that decision is made: an array member that is not a
+    // record carries no author-written name, so it is dropped WHOLE and in
+    // silence, the same disposition the file's two sibling field readers
+    // (`buildFieldTypeIndex`, `fieldEntries`) already had. The sweep in
+    // `non-record-object-entry.test.ts` pins the absence of the throw across
+    // every rule; these two arms pin what this rule does INSTEAD, which a
+    // crash-only sweep cannot say.
+    const stackWith = (fields: unknown[], condition: string): Record<string, unknown> => ({
+      objects: [{ name: 'crm_account', fields }],
+      flows: [{
+        name: 'account_flow',
+        nodes: [
+          { id: 'start', type: 'start', config: { objectName: 'crm_account' } },
+          { id: 'check', type: 'decision', config: { condition } },
+        ],
+        edges: [],
+      }],
+    });
+
+    it('is dropped in silence rather than thrown on, and invents no finding', () => {
+      expect(validateStackExpressions(stackWith([null, { name: 'amount', type: 'number' }], 'record.amount > 0'))).toHaveLength(0);
+      expect(validateStackExpressions(stackWith([undefined, { name: 'amount', type: 'number' }], 'record.amount > 0'))).toHaveLength(0);
+    });
+
+    it('still indexes the readable siblings — the junk member does not blank the index', () => {
+      // The failure mode a bare `try/catch` repair would have produced: no
+      // crash, and no field knowledge either, so every unknown-field finding
+      // on the object silently stops being reported.
+      const issues = validateStackExpressions(stackWith([null, { name: 'amount', type: 'number' }], 'record.amont > 0'));
+      expect(issues).toHaveLength(1);
+      expect(issues[0].message).toContain('amount');
+    });
+  });
 });
