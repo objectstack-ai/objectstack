@@ -986,7 +986,7 @@ describe('#13753 GET /meta/:type/:name/references states the org partition', () 
             // unanswerable-target refusal reaches the wire as the FLAT
             // `{ error: 'Internal server error', code }` — the prescriptive
             // "ask the owning object instead" message scrubbed. That is a
-            // finding of its own, filed separately; it is NOT this card's
+            // finding of its own, filed as #15685; it is NOT this card's
             // subject, and reading both keeps this pin measuring the thing it
             // is about.
             const refused = await b.references('field', 'account.owner');
