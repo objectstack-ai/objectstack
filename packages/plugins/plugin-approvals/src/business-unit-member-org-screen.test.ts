@@ -76,14 +76,17 @@ function makeFakeEngine() {
     }
     return true;
   }
+  /** Every `find` anyone made, with its options — pins the predicate SHAPE (B5). */
+  const finds: Array<{ object: string; options: any }> = [];
   return {
     _tables: tables,
-    /** Every `find` anyone made, with its options — pins the predicate SHAPE (B5). */
-    _finds: [] as Array<{ object: string; options: any }>,
+    _finds: finds,
     async find(object: string, options?: any) {
-      this._finds.push({ object, options });
+      finds.push({ object, options });
       const rows = ensure(object).filter(r => matches(r, options?.filter ?? options?.where));
-      return rows.slice(0, options?.limit ?? 1000);
+      // The caller's bound, applied AFTER the filter and by PRESENCE — the
+      // shape `check:objectql-double-limit` holds every ObjectQL double to.
+      return typeof options?.limit === 'number' ? rows.slice(0, options.limit) : rows;
     },
     async insert(object: string, data: any) { ensure(object).push({ ...data }); return { ...data }; },
     async update(object: string, data: any, options?: any) {
