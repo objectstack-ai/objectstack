@@ -441,7 +441,8 @@ let scratch: string;
 let packedFiles: string[];
 let installedRoot: string;
 let probe: ProbeResult;
-let conformance: { status: number; output: string };
+let typecheckDir: string;
+let conformance: { status: number; diagnostics: string; programFiles: string[] };
 
 beforeAll(() => {
   const rootEntry = MANIFEST.exports['.'];
@@ -503,7 +504,7 @@ beforeAll(() => {
   // fixture as ESM (this package IS ESM-only, and a CJS-classified fixture
   // would red with TS1479 — a fact about the fixture's own manifest, not about
   // the ratified surface). Nothing of the probe's environment changes.
-  const typecheckDir = join(consumer, 'typecheck');
+  typecheckDir = join(consumer, 'typecheck');
   mkdirSync(typecheckDir);
   writeFileSync(
     join(typecheckDir, 'package.json'),
@@ -515,13 +516,27 @@ beforeAll(() => {
   // the version question is not what this file pins), but it is spawned with
   // the consumer directory as cwd, so what it RESOLVES it resolves from there.
   const tscEntry = createRequire(import.meta.url).resolve('typescript/lib/tsc.js');
-  const tsc = spawnSync(process.execPath, [tscEntry, '--pretty', 'false', '-p', 'tsconfig.json'], {
+  // `--listFiles` is not decoration: a clean tsc run and a tsc run that
+  // compiled NOTHING both print nothing and both exit 0, so "no diagnostics"
+  // is only evidence once the program is known to contain the fixture AND the
+  // packed `.d.ts` it is supposed to be judging. The file list is what
+  // separates those two, and it is asserted below rather than assumed here.
+  const tsc = spawnSync(process.execPath, [tscEntry, '--pretty', 'false', '--listFiles', '-p', 'tsconfig.json'], {
     cwd: typecheckDir,
     encoding: 'utf8',
     env: childEnv(),
   });
   if (tsc.error) throw new Error(`tsc could not start: ${tsc.error.message}`);
-  conformance = { status: tsc.status ?? -1, output: `${tsc.stdout ?? ''}${tsc.stderr ?? ''}`.trim() };
+  // tsc interleaves the file list with the diagnostics on stdout. A listed
+  // file is a path that EXISTS; a diagnostic is `path(l,c): error TSxxxx: …`,
+  // which never does — so the split is by disk, not by a regex over prose.
+  const lines = `${tsc.stdout ?? ''}${tsc.stderr ?? ''}`.split('\n').map((l) => l.trim()).filter((l) => l !== '');
+  const listed = new Set(lines.filter((l) => existsSync(l)));
+  conformance = {
+    status: tsc.status ?? -1,
+    diagnostics: lines.filter((l) => !listed.has(l)).join('\n'),
+    programFiles: [...listed].map((p) => realpathSync(p)),
+  };
 }, 120_000);
 
 afterAll(() => {
@@ -594,9 +609,32 @@ describe('the ratified surface is exactly four names', () => {
 });
 
 describe('the ratified surface still has the SHAPES a consumer compiles against (#15630)', () => {
+  // ⛔ This assertion comes FIRST on purpose. Zero diagnostics is the verdict
+  // the next test reads, and zero diagnostics is also what a program that
+  // compiled nothing prints — so the population has to be established before
+  // the silence over it means anything.
+  it('put the fixture AND the packed .d.ts in the program — not the workspace source, not nothing', () => {
+    const real = (p: string): string => realpathSync(p);
+    expect(conformance.programFiles, 'the fixture itself was never compiled').toContain(
+      real(join(typecheckDir, 'conformance.ts')),
+    );
+    expect(
+      conformance.programFiles,
+      'the ratified entry was not reached — a `types` condition that stops resolving lands here',
+    ).toContain(real(join(installedRoot, 'dist', 'hook-body.d.ts')));
+    expect(
+      conformance.programFiles,
+      'the shapes were read from somewhere other than the PACKED tarball',
+    ).toContain(real(join(installedRoot, 'dist', 'utils', 'extract-hook-body.d.ts')));
+    // Nothing of this workspace may be in that program: a source-tree file
+    // would make every shape below a verdict about the checkout instead of
+    // about what ships.
+    expect(conformance.programFiles.filter((p) => p.startsWith(`${realpathSync(PACKAGE_ROOT)}/`))).toEqual([]);
+  });
+
   it('compiles a real consumer against the PACKED .d.ts, reached through the exports map', () => {
     expect(
-      conformance.output,
+      conformance.diagnostics,
       'tsc reported diagnostics compiling the conformance fixture against the packed .d.ts. Either the ratified ' +
         'shape moved — in which case this is a BREAKING change to a published surface and the fixture is updated ' +
         'deliberately, with a changeset — or a CONTROL stopped firing (TS2578), which says the same thing from the ' +
