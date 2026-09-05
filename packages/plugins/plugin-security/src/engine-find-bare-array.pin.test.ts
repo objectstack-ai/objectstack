@@ -47,6 +47,11 @@ import { SysUserPosition } from './objects/sys-user-position.object.js';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
 import { SysOrganization, SysUser, SysMember } from '@objectstack/platform-objects/identity';
 import { ORGANIZATION_ADMIN_NO_BYPASS } from '@objectstack/spec';
+import {
+  assertEngineUpdateDispatch,
+  assertEngineFindOnePredicate,
+  assertEngineDeleteDispatch,
+} from '@objectstack/metadata-core';
 
 import { buildExistingByName } from './seed-name-lookup.js';
 import { upsertPackagePermissionSet } from './bootstrap-declared-permissions.js';
@@ -113,6 +118,11 @@ type Seen = unknown[];
  * A recorder rather than a double, deliberately: the value under test is the one
  * the real engine produced, so anything that answered on its behalf would make
  * every case below a statement about the fixture instead of about `ObjectQL`.
+ *
+ * ⚠️ It is still a seam, and a seam that merely FORWARDS is exactly the shape
+ * that reads as "not a double" and then admits a call the real engine would
+ * refuse. So the three dispatch-shaped verbs open with the PRODUCER's own
+ * predicates (`check:engine-double-contract`) rather than a hand-mirrored guard.
  */
 function observed(engine: any, seen: Seen, extra: Record<string, any> = {}): any {
   return {
@@ -123,11 +133,20 @@ function observed(engine: any, seen: Seen, extra: Record<string, any> = {}): any
       seen.push(r);
       return r;
     },
-    findOne: (o: string, q?: any, opt?: any) => engine.findOne(o, q, opt),
+    findOne: (o: string, q?: any, opt?: any) => {
+      assertEngineFindOnePredicate(o, q);
+      return engine.findOne(o, q, opt);
+    },
     insert: (o: string, d: any, opt?: any) => engine.insert(o, d, opt),
     insertMany: (o: string, d: any, opt?: any) => engine.insertMany?.(o, d, opt),
-    update: (o: string, d: any, opt?: any) => engine.update(o, d, opt),
-    delete: (o: string, id: any, opt?: any) => engine.delete(o, id, opt),
+    update: (o: string, d: any, opt?: any) => {
+      assertEngineUpdateDispatch(d, opt);
+      return engine.update(o, d, opt);
+    },
+    delete: (o: string, id: any, opt?: any) => {
+      assertEngineDeleteDispatch(opt);
+      return engine.delete(o, id, opt);
+    },
     ...extra,
   };
 }
@@ -292,6 +311,7 @@ describe('[#15598] block 5 — claim-seed-ownership idsFrom (the PAGING fallback
     });
     const io = observed(engine, seen, {
       update: async (o: string, d: any, opt?: any) => {
+        assertEngineUpdateDispatch(d, opt);
         if (refuseOnce && opt?.multi && opt?.where) { refuseOnce = false; throw budgetRefusal; }
         return engine.update(o, d, opt);
       },
