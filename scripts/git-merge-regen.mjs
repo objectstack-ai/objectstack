@@ -344,7 +344,7 @@ function drive(argv) {
 // ── Why the CALLEE NAME is the battery ──
 //
 // This file has no `selfTest()` entry function and no named section banners:
-// the `--self-test` dispatch at the bottom invokes TWELVE named callees, each
+// the `--self-test` dispatch at the bottom invokes THIRTEEN named callees, each
 // printing its own line and returning a boolean. So the roster's unit is the
 // CALLEE, and its label is the one the SOURCE ALREADY CARRIES — the function's
 // own name. Nothing is invented and nothing is judged per comment, and a set
@@ -359,10 +359,10 @@ function drive(argv) {
 // (PR #15271, `check-sdui-manifest`) makes a table row a battery. It does so
 // for a file whose SELF-TEST *is* the table: one literal table, one driving
 // loop over it, and a sink that writes only when a row fails. Here the table is
-// a local of ONE callee among twelve, its rows are evaluated eagerly into
+// a local of ONE callee among thirteen, its rows are evaluated eagerly into
 // booleans before anything loops, and the callee already reduces them to a
 // single printed verdict of its own. Flooring those rows would floor one
-// callee's internals while the other eleven stayed at callee granularity — a
+// callee's internals while the other twelve stayed at callee granularity — a
 // roster whose unit changes per entry. The rule: the battery is the unit the
 // DISPATCH names.
 //
@@ -374,6 +374,7 @@ function drive(argv) {
 // reaches it exactly once per run.
 const SELF_TEST_BATTERIES = Object.freeze({
   reconcileAttributes: 1,
+  reconcileAttributeTokenAnchor: 1,
   reconcileAttributeSemantics: 1,
   reconcileScripts: 1,
   reconcileGenerators: 1,
@@ -393,7 +394,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // key in the literal above, so the roster falls below this number; the
 // roster ↔ dispatch cross-check in the floor block is the other half, and it
 // names WHICH callee was listed twice.
-const SELF_TEST_BATTERY_FLOOR = 12;
+const SELF_TEST_BATTERY_FLOOR = 13;
 
 // The key a registration is filed under when a callee registers no name at all.
 // It is not a declared battery, so it reds by the same set difference rather
@@ -403,7 +404,7 @@ const UNATTRIBUTED_BATTERY = '(no callee named)';
 // The battery ledger, read by `batteryFloorFailures()` from the dispatch block
 // at the very bottom of this file. It is MODULE-level rather than local to a
 // self-test body because this file HAS no self-test body: the registrations
-// happen inside twelve separate callees and the floor is read at the dispatch's
+// happen inside thirteen separate callees and the floor is read at the dispatch's
 // verdict site, so the ledger has to outlive every one of those frames.
 //
 // ⚠️ Named for the roster's role, deliberately NOT with a self-test spelling:
@@ -415,7 +416,7 @@ const batterySeen = new Map();
 /**
  * Record that a self-test callee RAN.
  *
- * Called as the FIRST statement of each of the twelve callees the `--self-test`
+ * Called as the FIRST statement of each of the thirteen callees the `--self-test`
  * dispatch invokes — above any early return, so a callee that bails out early
  * still reports that it ran, and the floor is never met by a frame that
  * returned before doing anything.
@@ -428,7 +429,7 @@ function registerCase(name) {
 /**
  * The floor: every declared callee RAN (#13489).
  *
- * Evaluated at the dispatch's verdict site — after all twelve callees have had
+ * Evaluated at the dispatch's verdict site — after all thirteen callees have had
  * their chance and immediately before the success line — and reached only from
  * the `--self-test` branch, so a production merge-driver run never reads the
  * ledger at all.
@@ -510,16 +511,56 @@ function fail(msg) {
   return false;
 }
 
+/**
+ * A `.gitattributes` row routed to THIS driver, anchored on the WHITESPACE
+ * that delimits an attribute token (#15701).
+ *
+ * ⛔ NOT `/\bmerge=os-regen\b/`. `\b` sits between a word character and a
+ * non-word one, and `-` and `.` are both non-word, so the word-boundary
+ * spelling admitted rows git routes to a DIFFERENT driver:
+ *
+ *     x merge=os-regen      \b: true    token: true     git: os-regen
+ *     x merge=os-regen-v2   \b: TRUE    token: false    git: os-regen-v2
+ *     x merge=os-regen.2    \b: TRUE    token: false    git: os-regen.2
+ *     x merge=os-regenX     \b: false   token: false    git: os-regenX
+ *
+ * Latent rather than live: no sibling driver with this prefix exists today, so
+ * on the current file both spellings return the same 18 paths. It is worth
+ * anchoring anyway because `merge=os-regen-v2` is exactly how a second
+ * generation of this driver would be introduced beside the first — and that is
+ * the day `reconcileAttributes` reads the sibling's row as its own and reds
+ * with `mapped to merge=os-regen but not declared in regen-artifacts.mjs`: a
+ * rule the row does not break, on a path this driver does not own, whose
+ * suggested repair (declare it here) is the wrong one.
+ *
+ * An attribute value is a whitespace-delimited token, which is why whitespace
+ * is the thing to anchor on. `scripts/pm/os-regen-merge.sh`'s awk reader is
+ * the same predicate, character for character — the two readers are consulted
+ * about the same file and must not disagree about what it says.
+ */
+const DRIVER_ATTRIBUTE_ROW = /(^|[ \t])merge=os-regen([ \t]|$)/;
+
+/**
+ * The paths a `.gitattributes` TEXT routes to this driver.
+ *
+ * Text in, paths out — not a read of the live file — so `reconcileAttributeTokenAnchor`
+ * can hold the SAME code the live reader runs against a fixture. The live
+ * `.gitattributes` carries no sibling-driver row, so it cannot measure this.
+ */
+function routedPaths(text) {
+  return text
+    .split('\n')
+    .filter((l) => l.trim() && !l.trim().startsWith('#'))
+    .filter((l) => DRIVER_ATTRIBUTE_ROW.test(l))
+    .map((l) => l.trim().split(/\s+/)[0]);
+}
+
 /** `.gitattributes` and the table must name the same paths — in both directions. */
 function reconcileAttributes() {
   registerCase('reconcileAttributes');
   const file = join(REPO_ROOT, '.gitattributes');
   if (!existsSync(file)) return fail('.gitattributes is missing — the driver is mapped to nothing.');
-  const mapped = readFileSync(file, 'utf8')
-    .split('\n')
-    .filter((l) => l.trim() && !l.trim().startsWith('#'))
-    .filter((l) => /\bmerge=os-regen\b/.test(l))
-    .map((l) => l.trim().split(/\s+/)[0]);
+  const mapped = routedPaths(readFileSync(file, 'utf8'));
 
   const declared = REGEN_ARTIFACTS.map((e) => e.path);
   const missing = declared.filter((p) => !mapped.includes(p));
@@ -538,6 +579,68 @@ function reconcileAttributes() {
   if (overlap.length) ok = fail(`listed as BOTH driver-managed and NOT_DRIVER_MANAGED: ${overlap.join(', ')}`);
   if (ok) console.log(`✓ .gitattributes ↔ regen-artifacts.mjs agree on ${declared.length} path(s)`);
   return ok;
+}
+
+/**
+ * The row filter itself, held against a fixture (#15701).
+ *
+ * `reconcileAttributes` above reads the LIVE `.gitattributes`, and no row in it
+ * is routed to a sibling driver — there is no such driver yet. So the loose
+ * predicate and the anchored one return the same 18 paths on this tree and
+ * every assertion up there passes either way: the case that DISCRIMINATES them
+ * cannot be built from the live file, only from a fixture. Same reason
+ * `reconcileOwnership` exists beside `reconcileScripts`.
+ *
+ * Both directions are pinned. An anchor tightened until it matched nothing
+ * would satisfy every negative case here and route no artifact at all, which is
+ * the failure the positive rows exist to catch.
+ */
+function reconcileAttributeTokenAnchor() {
+  registerCase('reconcileAttributeTokenAnchor');
+  // What git itself says the sibling row routes to, measured on a scratch repo
+  // (git 2.43.0) whose `.gitattributes` held exactly `x merge=os-regen-v2`:
+  //     $ git check-attr merge -- x
+  //     x: merge: os-regen-v2
+  // A different driver. This reader must not count it among ours.
+  const fixture = [
+    '# packages/spec/commented.json merge=os-regen',
+    '',
+    '   ',
+    'packages/spec/plain.json merge=os-regen',
+    '\tpackages/spec/indented.json\tmerge=os-regen',
+    'packages/spec/flanked.json text merge=os-regen -diff',
+    'packages/spec/sibling-dash.json merge=os-regen-v2',
+    'packages/spec/sibling-dot.json merge=os-regen.2',
+    'packages/spec/sibling-word.json merge=os-regenX',
+    'packages/spec/elsewhere.json merge=union',
+  ].join('\n');
+  const routed = routedPaths(fixture);
+  const has = (name) => routed.includes(`packages/spec/${name}`);
+
+  const cases = [
+    ['a plain row routes', has('plain.json')],
+    ['a tab-delimited row routes', has('indented.json')],
+    ['a row carrying other attributes on both sides routes', has('flanked.json')],
+    ['merge=os-regen-v2 does NOT route — it is a different driver', !has('sibling-dash.json')],
+    ['merge=os-regen.2 does NOT route — it is a different driver', !has('sibling-dot.json')],
+    ['merge=os-regenX does not route', !has('sibling-word.json')],
+    ['an unrelated merge driver does not route', !has('elsewhere.json')],
+    ['a comment line naming the driver does not route', !has('commented.json')],
+    // Exactness, not membership: a predicate that also admitted something this
+    // list forgot to name would still satisfy all eight cases above.
+    ['exactly the 3 routed rows come back', routed.length === 3],
+  ];
+
+  const failures = cases.filter(([, ok]) => !ok).map(([name]) => name);
+  if (failures.length) {
+    return fail(`.gitattributes row filter ${DRIVER_ATTRIBUTE_ROW}:\n  ${failures.join('\n  ')}\n`
+      + '  An attribute value is a WHITESPACE-delimited token, so whitespace is the anchor.\n'
+      + '  `\\b` is not: `-` and `.` are non-word characters, so it admits sibling drivers\n'
+      + '  and reports their paths as undeclared rows of THIS driver.');
+  }
+  console.log(`✓ .gitattributes row filter: ${cases.length} case(s) pinned,`
+    + ' sibling drivers (merge=os-regen-v2, merge=os-regen.2) refused');
+  return true;
 }
 
 /** Where an owner's manifest lives, repo-relative, given a resolved directory. */
@@ -1302,13 +1405,14 @@ function endToEndMixed() {
 
 if (process.argv.includes('--self-test')) {
   console.log('git-merge-regen --self-test\n');
-  // The twelve callees as a literal LIST rather than twelve bare calls, so the
+  // The thirteen callees as a literal LIST rather than thirteen bare calls, so the
   // names this block invokes are data the floor below can cross-check the
   // roster against, in both directions. The names are read off the function
   // declarations themselves (`fn.name`), so a renamed callee moves this list
   // with it and cannot drift from the roster in silence.
   const callees = [
     reconcileAttributes,
+    reconcileAttributeTokenAnchor,
     reconcileAttributeSemantics,
     reconcileScripts,
     reconcileGenerators,
