@@ -2059,6 +2059,57 @@ export class AuthManager {
                 message: refusal.errorDescription ?? refusal.error,
               });
             }
+
+            // ── [#15587] The UNIQUENESS refusal, raised here for the same
+            // reason the audience refusal above is — and STRICTLY after it.
+            //
+            // Same shield, its other arm. `shouldReturnGenericDuplicateResponse`
+            // (sign-up.mjs:163) is on whenever `requireEmailVerification` is on
+            // OR `autoSignIn === false`, and it guards TWO sites: the 403 catch
+            // at :235 (what the audience block above steps around) and the
+            // duplicate pre-check at :199. On the second, the vendor finds the
+            // existing row, logs it, and returns `buildGenericDuplicateResponse()`
+            // — a 200 carrying a freshly `generateId()`-ed user that is never
+            // written — INSTEAD of throwing USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL.
+            //
+            // We turn that shield on ourselves: a posture that permits
+            // self-registration FORCES `requireEmailVerification` on (see
+            // `createAuthInstance`), so `email_domain` and `open` sign-ups for an
+            // address that already exists answered 200 while `invite_only`
+            // answered 422 on the same population. Measured on a real ObjectQL
+            // engine with the posture held CONSTANT and only the verification flag
+            // moved, so the divergence is the flag's, not the posture's: zero
+            // inserts reach the engine, no `sys_account` appears, and the next
+            // sign-in is 401 with nothing anywhere explaining it. The silent
+            // success shape, on the recovery path a locked-out deployment walks.
+            //
+            // ORDER IS LOAD-BEARING: this runs only for a caller the posture
+            // ALREADY ADMITTED. Asking it first would hand an uninvited stranger
+            // an account-existence oracle under the `invite_only` DEFAULT (422 for
+            // a real address vs 403 for an unknown one) — inventing on the closed
+            // posture exactly what the vendor's shield exists to prevent. After
+            // the gate, `invite_only` is untouched: a stranger still gets
+            // SELF_REGISTRATION_CLOSED and learns nothing.
+            //
+            // UNCONDITIONAL, not a mirror of the vendor's predicate: the platform
+            // owns this refusal at one seam, so "an address that already has a
+            // `sys_user` row is refused" is one fact under every posture and every
+            // verification setting — rather than a contract that is a function of
+            // a vendor internal, and that a widened shield would silently reopen.
+            // Nothing is lost when the shield is off and the vendor would have
+            // answered: the code and message are the vendor's OWN constant, so the
+            // two lanes are byte-identical by construction rather than by copying.
+            // (The vendor's `onExistingUserSignUp` hook is not wired anywhere in
+            // this repo, and its timing-equalizing password hash equalizes against
+            // an oracle this 422 states outright.)
+            const signUpAddress = typeof ctx?.body?.email === 'string' ? ctx.body.email : '';
+            if (signUpAddress && (await this.hasExistingUserFor(signUpAddress))) {
+              const { APIError, BASE_ERROR_CODES } = await import('@better-auth/core/error');
+              throw APIError.from(
+                'UNPROCESSABLE_ENTITY',
+                BASE_ERROR_CODES.USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL,
+              );
+            }
             // fall through — the vendor still decides everything it owns
           }
 
@@ -3906,6 +3957,14 @@ export class AuthManager {
    * probe's read is narrowed to one address and its page chain is exhausted —
    * so the value only trades round trips against page size.
    */
+  /**
+   * [#15587] Page bound for the sign-up uniqueness probe
+   * ({@link hasExistingUserFor}). One matching row IS the answer, so this only
+   * has to be large enough that a store which folds case or accents cannot
+   * push the real row off the page behind near-misses.
+   */
+  private static readonly EXISTING_USER_PROBE_LIMIT = 50;
+
   private static readonly PENDING_INVITATION_PROBE_PAGE = 50;
 
   /**
@@ -4235,6 +4294,79 @@ export class AuthManager {
       );
       return false;
     } catch {
+      return false;
+    }
+  }
+
+  /**
+   * [#15587] Does a `sys_user` row already carry this address? Asked on the
+   * `/sign-up/email` before-hook so the uniqueness refusal is raised as an
+   * explicit 422 instead of being converted into a synthetic 200 by
+   * better-auth's anti-enumeration shield — see the call site for the
+   * mechanism and for why the question is asked AFTER the audience gate.
+   *
+   * ## Fail-open here is not fail-open overall
+   *
+   * An unanswerable probe returns `false` and the request FALLS THROUGH to the
+   * vendor, which runs its own `findUserByEmail` and decides. This pre-check
+   * only ever NARROWS an answer the vendor was going to give: it can turn a
+   * synthetic 200 into the honest 422, and it can never admit a creation the
+   * vendor would have refused. That is the opposite of
+   * {@link hasPendingInvitationFor}, whose `false` must fail CLOSED because it
+   * grants a carve-out — the two neighbours differ on purpose.
+   *
+   * ## Matching, and why the JS re-check narrows
+   *
+   * The address is pushed into the query (`sys_user.email` carries a declared
+   * index) with a bounded page, and every returned row is re-checked in JS
+   * against the normalized target. `=` folds case on some collations (MySQL's
+   * default) and folds ACCENTS with it, so the store alone could report a row
+   * for an address that is merely accent-adjacent — a refusal nothing
+   * justifies. Case-only differences still match, which is correct: the
+   * vendor lowercases `user.email` on `createUser`, so a case variant IS the
+   * same account. The re-check therefore only ever removes false positives —
+   * the safe direction for a rule whose output is a refusal.
+   *
+   * A page that comes back FULL is not evidence of anything beyond it, but it
+   * does not need to be: one matching row is the whole answer, and no row in
+   * a full page matching means the store answered a different question than
+   * we asked (a driver ignoring the predicate), which falls through to the
+   * vendor exactly like an unanswerable probe.
+   */
+  private async hasExistingUserFor(email: string): Promise<boolean> {
+    const engine = this.config.dataEngine;
+    if (!engine || typeof (engine as any).find !== 'function') return false;
+    const target = email.trim().toLowerCase();
+    if (!target) return false;
+    try {
+      const reader = withSystemReadContext(engine) as any;
+      const raw = await reader.find(SystemObjectName.USER, {
+        where: { email: target },
+        limit: AuthManager.EXISTING_USER_PROBE_LIMIT,
+      });
+      const rows: any[] = Array.isArray(raw) ? raw : Array.isArray(raw?.records) ? raw.records : [];
+      return rows.some(
+        (row) => typeof row?.email === 'string' && row.email.trim().toLowerCase() === target,
+      );
+    } catch (error) {
+      // The fall-through DIRECTION stays (see above): the vendor runs its own
+      // `findUserByEmail` and still decides. What must not stay is the
+      // SILENCE. A total engine outage is loud by itself — the vendor's read
+      // goes through the same engine and the request answers 500 — but a
+      // failure specific to THIS query shape, or a transient one, is answered
+      // by the duplicate shield with a synthetic 200, which is #15587 exactly:
+      // the defect re-opens with no other signal anywhere. Measured by driving
+      // a throw scoped to this probe's own signature: the pre-fix response came
+      // back, and nothing named the probe. So the refusal that did not happen
+      // says so here, at the same level and through the same facility the
+      // sibling probe uses at its page ceiling.
+      this.audienceLogError(
+        '[audience] the sign-up existing-user probe could not be answered, so the uniqueness '
+          + 'refusal was NOT raised for this request — falling through to better-auth, whose '
+          + 'duplicate shield answers a synthetic 200 when email verification is forced on. '
+          + 'A sign-up for an already-registered address may report success and write nothing.',
+        { error: error instanceof Error ? error.message : String(error) },
+      );
       return false;
     }
   }

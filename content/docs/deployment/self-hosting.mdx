@@ -557,11 +557,13 @@ this step.
 **Two remedies that look like they work, measured:**
 
 - **Opening the audience posture is not enough on its own.** With the posture
-  widened to `email_domain`, a seeded person's own registration answers `200`
-  and persists *nothing* — no new row, no account, and their sign-in is still
-  `401`. A fresh address does get an account, but every posture other than
-  `invite_only` forces email verification on, so its first sign-in is refused
-  `403 EMAIL_NOT_VERIFIED` until a mail transport delivers the link.
+  widened to `email_domain`, a seeded person's own registration is refused
+  `422 USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL` and nothing is written — the same
+  answer the `invite_only` default already gives for an address the directory
+  holds, so the widened posture buys that person no login and their sign-in
+  stays `401`. A fresh address does get an account, but every posture other
+  than `invite_only` forces email verification on, so its first sign-in is
+  refused `403 EMAIL_NOT_VERIFIED` until a mail transport delivers the link.
 - **A hand-written credential row authenticates nothing.** The `sys_account`
   row shape is public; the format of the secret stored in its `password`
   column is the platform's own. A row carrying a plaintext password is refused
