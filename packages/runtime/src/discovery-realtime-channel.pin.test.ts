@@ -47,13 +47,28 @@ const PREFIX = '/api/v1';
  * `tsconfig.test.json` states it will not widen — 13 `TS6059` billed to a
  * ledger `service-realtime` cannot see, the same shape PR #12570 measured.
  *
- * Nothing is lost by declaring it here, because the claim about the SHIPPED
- * occupant is not this file's to make: it is pinned against the real class, in
- * the package that owns it, by
- * `packages/services/service-realtime/src/no-channel-route.pin.test.ts`. That
- * pin plus these compose to the stock-boot reading — this file pins that the
- * PRODUCER derives its answer from whatever the occupant names, and that one
- * pins what the shipped occupant names.
+ * ⚠️ What this file therefore STOPPED proving, stated because a pin that still
+ * passes while proving less is a real cost: the first case below no longer
+ * evaluates the SHIPPED adapter. Measured, one mutation, two pins —
+ * `InMemoryRealtimeAdapter` given a `getChannelRoute()` returning
+ * `/api/v1/realtime`: `no-channel-route.pin.test.ts` goes RED (2 of its 3
+ * cases), and THIS file stays GREEN on all 4. So if the shipped occupant ever
+ * starts naming a channel, the red arrives next door and never here.
+ *
+ * That is the whole of the loss, and it is covered rather than merely moved:
+ * the claim about the SHIPPED occupant is not this file's to make. It is pinned
+ * against the real class, in the package that owns it, by
+ * `packages/services/service-realtime/src/no-channel-route.pin.test.ts` — the
+ * pin the mutation above proves has teeth. That one pins WHAT THE SHIPPED
+ * OCCUPANT NAMES; this one pins that the PRODUCER derives its answer from
+ * whatever an occupant names. Together they compose to the stock-boot reading,
+ * and neither can go green by accident of the other.
+ *
+ * The stand-in is equivalent to the real adapter only on the two reads either
+ * producer performs on an occupant — `readChannelRoute` and
+ * `readServiceSelfInfo` — and that equivalence was measured (both `undefined`
+ * on both objects) rather than assumed. It is a statement about today, which is
+ * exactly why the shipped-occupant claim lives next door instead of here.
  */
 const inProcessBus: IRealtimeService = {
     publish: async () => {},
