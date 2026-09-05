@@ -652,9 +652,18 @@ export async function requireDefaultExport(specifier, load, importerUrl, options
  * it was INCOMPLETE — a declared remedy that does not clear the refusal.
  *
  * The repair belongs HERE and not in one gate's await order, because the shape
- * is shared: measured on this tree, ten callers declare more than one
- * prerequisite through this frame. Reordering one gate's awaits fixes one of
- * them and leaves the rest untouched.
+ * belongs to the FRAME. Measured on this tree: ten callers make more than one
+ * call through it, six of those name more than one DISTINCT specifier, and two
+ * — `check-doc-formula-expressions` and `check-doc-security-posture` — declare
+ * prerequisites whose REMEDIES DIFFER, which is the population that can print a
+ * fix and then refuse again after it. The other four either repeat one package
+ * (`yaml` at two call sites, one fix covering both) or pair a package with a
+ * relative module this frame deliberately defers on.
+ *
+ * ⛔ That count is not the argument, and a bigger one would not have been a
+ * better one. Reordering one gate's awaits leaves every other caller standing
+ * on the same frame, and the next multi-prerequisite gate anyone writes arrives
+ * defective on the day it is written.
  *
  * ⚠️ This is a MESSAGE change, not a verdict change. WHEN a gate refuses,
  * WHETHER it refuses, the exit code and the "Nothing was measured" clause are
