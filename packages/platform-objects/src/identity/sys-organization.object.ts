@@ -220,6 +220,51 @@ export const SysOrganization = ObjectSchema.create({
       description: 'When true, every member of this organization must enroll an authenticator app to access data.',
     }),
 
+    // #14238 — maintainer ruling 2026-09-02, option A (verbatim 「同意」): the
+    // organization's IANA zone, the ROOT DEFAULT of the business-unit chain. A
+    // `sys_business_unit` whose `timezone` is null, and whose ancestors' are
+    // all null, resolves to this value; a null here resolves to `UTC`. So an
+    // existing deployment computes every date boundary in UTC until an
+    // administrator sets this column — exactly what it did before the column
+    // existed — and the changeset's migration note says so in those words.
+    //
+    // No `defaultValue`, deliberately: "UTC" has ONE spelling in this contract
+    // (unset), not two (unset on rows that predate the column, 'UTC' on rows
+    // minted after it). Not a limitation — better-auth's `organization/create`
+    // inserts through the ObjectQL engine (`objectql-adapter.ts`), so a schema
+    // default WOULD reach new rows; it is omitted so that a reader handles one
+    // shape instead of a pair that means the same thing.
+    //
+    // Nothing on the platform reads this column yet, and no resolver ships with
+    // it (the ruling: option B waits for a second consumer) — the documented
+    // resolution order lives on `sys_business_unit.timezone`. ⚠️ Distinct from
+    // the settings door's `localization.timezone` (service-settings, tenant
+    // scope, default `UTC`), the deployment-wide default analytics buckets
+    // dates in today; how the two relate is the resolver's question, not this
+    // column's, and this column does not read or write that setting.
+    //
+    // Owned by objectql, not better-auth: an ADR-0105 D7 extension field,
+    // registered in plugin-auth's `MANAGED_EXTENSION_FIELDS` (whose collision
+    // guard proves better-auth's organization schema owns no `timezone` at the
+    // pinned version) and generically editable under the ADR-0092 D2 whitelist
+    // (`MANAGED_EXTENSION_EDITABLE_FIELDS`) — the path `require_mfa` above and
+    // the D6 group-structure fields below take. ⚠️ Same shape as
+    // `sys_business_unit.timezone` by design (`text`, optional, `maxLength: 64`,
+    // `valueDomain: 'iana_time_zone'`, no default): the card's thesis is that
+    // every author invents this column differently, and the platform's own two
+    // precedents (`sys_job`, `sys_report_schedule`) already disagree on length,
+    // default and validation — the ruled pair is one spelling, pinned in
+    // `org-hierarchy-timezone.test.ts`.
+    timezone: Field.text({
+      label: 'Timezone',
+      required: false,
+      maxLength: 64,
+      valueDomain: 'iana_time_zone',
+      description:
+        'IANA time zone (e.g. UTC, Asia/Shanghai) date boundaries are computed in for this organization — the root default every business unit without a zone of its own inherits. Unset means UTC.',
+      group: 'Configuration',
+    }),
+
     // ── Group structure (ADR-0105 D6) ────────────────────────────
     //
     // ⛔ REPORTING DIMENSION ONLY. These fields describe how organizations roll
