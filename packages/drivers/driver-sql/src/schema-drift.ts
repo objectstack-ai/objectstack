@@ -1066,7 +1066,7 @@ export function diffManagedTable(args: {
             `into that textual column — a single-value \`file\` id lands as the quoted text ` +
             `'"file_01HXYZ"' — while on this dialect the read path decodes a json COLUMN rather than ` +
             `the text inside a textual one, so it comes back with its quotes and every consumer that ` +
-            `matches the raw stored form (file resolution, ownership claims) refuses it (#15771). ` +
+            `matches the raw stored form (file resolution, ownership claims) refuses it. ` +
             `The automated column migration ObjectStack ships is NOT offered for this column and will ` +
             `refuse it: it repairs a stale column by wrapping each value in a ONE-ELEMENT JSON ARRAY, ` +
             `which is right for a field declaring \`multiple: true\` and wrong here — it would leave ` +

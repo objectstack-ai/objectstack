@@ -409,7 +409,12 @@ describe('diffManagedTable — a SINGLE-VALUE JSON-class field over a stale text
     expect(entry.message).toContain('`file`');
     expect(entry.message).toContain('character varying');
     expect(entry.message).toContain('json');
-    expect(entry.message).toContain('#15771');
+    // ⛔ NOT the issue id — `check:doc-authoring` refuses a tracker id in
+    // runtime prose (maintainer ruling 2026-08-12: an operator can resolve
+    // neither the number nor the tracker). The anchor lives in the `//`
+    // comment beside the emission and in git history. What the operator DOES
+    // need is the cause, in words:
+    expect(entry.message).toMatch(/JSON-ENCODED/);
     expect(entry.message).toMatch(/backup/i);
     expect(entry.message).toMatch(/btree/i);
     // And it says WHY the automated route is withheld, rather than leaving the
