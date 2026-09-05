@@ -161,9 +161,9 @@ door:
 >
 > **1 — Tier 1 is `{name, image, locale}`.** The list above is the amended one; as
 > accepted 2026-07-11 it read "`name` — display name … `image` — avatar URL" and
-> nothing else. The enforced constant `SYS_USER_PROFILE_EDIT_FIELDS`
-> (`packages/plugins/plugin-auth/src/sys-user-writable-fields.ts`) has held three
-> members since that ruling shipped. This ADR — not the constant — was the record
+> nothing else. The enforced constant
+> `packages/plugins/plugin-auth/src/sys-user-writable-fields.ts#SYS_USER_PROFILE_EDIT_FIELDS`
+> has held three members since that ruling shipped. This ADR — not the constant — was the record
 > out of date, and Prime Directive #13 is why that is not a cosmetic gap: an
 > accepted ADR binds until it says otherwise, so a reader reaching the old table
 > first would read the third field as drift to be corrected. That is backwards, and
@@ -182,9 +182,8 @@ door:
 > **3 — D6's mirror set deliberately did NOT widen, and the two sets are no longer
 > the same set.** Tier 1 and the session-snapshot mirror coincided only while the
 > whitelist happened to match better-auth's user model. They no longer do:
-> `SESSION_SNAPSHOT_MIRRORED_FIELDS`
-> (`packages/plugins/plugin-auth/src/identity-write-guard.ts`) holds `{name, image}`
-> and is a separately named constant for that reason. Mirroring `locale` would
+> `packages/plugins/plugin-auth/src/identity-write-guard.ts#SESSION_SNAPSHOT_MIRRORED_FIELDS`
+> holds `{name, image}` and is a separately named constant for that reason. Mirroring `locale` would
 > manufacture an incoherence rather than repair one — see the D6 amendment note.
 >
 > **4 — D5 is unchanged by this amendment, and is restated because it is where
@@ -411,9 +410,9 @@ storage isn't wired (single-node memory cache TTLs it out).
 > **D6 Amendment note (2026-09-05, #14951).** The mirror set and D1's Tier-1
 > whitelist are **no longer the same set**, and the divergence is deliberate rather
 > than a deferral. D6 mirrors the columns better-auth itself keeps in its cached
-> `{session, user}` snapshots — `SESSION_SNAPSHOT_MIRRORED_FIELDS` in
-> `packages/plugins/plugin-auth/src/identity-write-guard.ts`, which holds
-> `{name, image}`. Tier 1 holds `{name, image, locale}`. `locale` is excluded on
+> `{session, user}` snapshots —
+> `packages/plugins/plugin-auth/src/identity-write-guard.ts#SESSION_SNAPSHOT_MIRRORED_FIELDS`,
+> which holds `{name, image}`. Tier 1 holds `{name, image, locale}`. `locale` is excluded on
 > purpose: better-auth carries no such field on its user model, so there is no
 > stale cached copy to repair, and merging one would MANUFACTURE an incoherence —
 > a `user.locale` key present only on sessions that happen to be cached, appearing
