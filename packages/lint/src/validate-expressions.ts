@@ -79,7 +79,7 @@
  */
 
 import { validateExpression, collectCelRootIdentifiers, parseCelToAst, SCOPE_ROOTS } from '@objectstack/formula';
-import { collectFlowGraphs, resolveFlowNodeExpressions } from '@objectstack/spec/automation';
+import { collectFlowGraphs, predicateSlotRefusal, resolveFlowNodeExpressions } from '@objectstack/spec/automation';
 // [#15137] The `value`-role half. Same two published primitives the engine
 // composes at `registerFlow` (`AutomationEngine.valueEnvelopeRefusals`), in the
 // same order: the SHAPE rule lives in the spec's `AssignmentValueSchema` (it
@@ -1057,11 +1057,22 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
    * bind the *screen's own* collected values, not the trigger record's fields, so
    * a field-existence pass would report every field name as unknown.
    */
-  const checkDeclaredPredicate = (where: string, raw: unknown): void => {
-    if (raw == null) return;
+  const checkDeclaredPredicate = (where: string, raw: unknown): { refused: boolean } => {
+    if (raw == null) return { refused: false };
+    // [#15572] The slot is declared bare CEL TEXT, so a non-string — the
+    // `{ dialect, source }` envelope above all — is refused on SHAPE before
+    // anything tries to read a source out of it. The refusal is the spec's,
+    // shared with the engine's `registerFlow` pass: `error`, because that pass
+    // throws, and a shape build refuses must not pass author time.
+    const shapeRefusal = predicateSlotRefusal(raw);
+    if (shapeRefusal) {
+      issues.push({ where, message: shapeRefusal.message, source: shapeRefusal.source, severity: 'error' });
+      return { refused: true };
+    }
     const res = validateExpression('predicate', raw as string | { dialect?: string; source?: string });
     for (const e of res.errors) issues.push({ where, message: e.message, source: e.source, severity: 'error' });
     for (const w of res.warnings) issues.push({ where, message: w.message, source: w.source, severity: 'warning' });
+    return { refused: false };
   };
 
   /**
@@ -1176,7 +1187,10 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
             continue;
           }
           if (found.entry.role !== 'predicate') continue;
-          checkDeclaredPredicate(slotWhere, found.value);
+          // [#15572] A slot refused on SHAPE gets no second diagnostic: the
+          // shadowing warning is about which scope a CEL source resolves in,
+          // and a value that is not CEL text has no source to resolve.
+          if (checkDeclaredPredicate(slotWhere, found.value).refused) continue;
           // [#14288] The shadowing warning is about the SCOPE an expression is
           // evaluated in, not about which key it was authored under — so it
           // belongs on every `predicate` slot the ledger declares, not just the
