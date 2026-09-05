@@ -534,7 +534,7 @@ describe('backfillSummaryNulls — pre-#6013 NULL roll-ups (#6063)', () => {
       expect(maxOutcome(report)).toBeUndefined();
     });
 
-    it('REFUSES a name it cannot resolve — INVALID_FIELD, 400, the code every axis naming a field answers — before any row is read, on a dry run as on apply', async () => {
+    it('REFUSES a name it cannot resolve — INVALID_FIELD, 400, the code the projection and write axes naming a field answer — before any row is read, on a dry run as on apply', async () => {
       busyAndQuiet();
 
       const refusals: Array<[string[], Record<string, unknown>]> = [

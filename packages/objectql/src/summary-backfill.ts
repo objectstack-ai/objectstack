@@ -190,9 +190,9 @@ export interface SummaryBackfillOptions {
    * those are in scope by default — so a caller can pass every column it just
    * declared without knowing the empty-set list. A name that resolves to no
    * roll-up owned by an object this run walks is refused (`INVALID_FIELD`,
-   * 400 — the code every other axis that names a field answers) before any
-   * row is read. Omitted, the run is exactly the `count`/`sum` backfill it
-   * always was.
+   * 400 — the code the projection and write axes that name a field answer;
+   * sorting keeps `INVALID_SORT`) before any row is read. Omitted, the run is
+   * exactly the `count`/`sum` backfill it always was.
    */
   recomputeUndefinedOnEmpty?: string[];
   /** Safety bound on parent rows read per object. */

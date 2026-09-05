@@ -30,10 +30,10 @@ the fact gets a way to say it; the predicate and the default run do not move.
 - A name that resolves to no roll-up owned by an object the run walks — a typo,
   a plain field, or an object `objects` left out — is **refused before any row
   is read**, dry run or apply, with an ADR-0112 envelope (`code:
-  'INVALID_FIELD'`, `status: 400` — the code every other axis that names a
-  field already answers; `field` names the first unresolved entry, `fields`
-  all of them). A silent no-op there would be the same false all-clear this
-  option exists to end.
+  'INVALID_FIELD'`, `status: 400` — the code the projection and write axes
+  that name a field already answer, while sorting keeps `INVALID_SORT`;
+  `field` names the first unresolved entry, `fields` all of them). A silent
+  no-op there would be the same false all-clear this option exists to end.
 - `SummaryBackfillReport.recomputedUndefinedOnEmpty: string[]` — the complement
   of `skippedUndefinedOnEmpty`, same `object.field (fn)` spelling; `[]` on an
   unscoped run. `SummaryBackfillFieldOutcome.fn` widens from `'count' | 'sum'`
