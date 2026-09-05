@@ -527,7 +527,7 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // the merge queue.
       //
       // Measured, not modelled: PR #13596 added a gate refusal MESSAGE containing
-      // two of the four SDK call shapes the census counts. It masks comments and
+      // two `client.analytics.query(` call shapes. It masks comments and
       // leaves string literals intact by design (#13874, suspended and NOT
       // reopened here -- what it counts is unchanged), so it counted them:
       // `expected 21 to be 19`. That PR touched `scripts/` and nothing else, so
