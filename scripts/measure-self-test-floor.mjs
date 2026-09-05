@@ -1498,14 +1498,21 @@ export function runControls() {
   // dropped the unmatched name would report a sweep the reader did not ask for.
   say(typeof selectRows(selRows, ['scripts/check-alpha.mjs', 'scripts/check-bet.mjs']).refusal === 'string',
     'SELECTOR CONTROL FAILED: one unmatched selector beside a matched one was dropped rather than refused; the reader would be shown a sweep missing a row they named');
+  // ... and the FIRST tier: a bare basename is not a match, but it names a real
+  // row and the refusal hands back the path the census prints.
+  const bareBase = selectRows(selRows, ['check-alpha.mjs']);
+  say(typeof bareBase.refusal === 'string' && bareBase.refusal.includes('scripts/check-alpha.mjs'),
+    'SELECTOR CONTROL FAILED: a bare basename neither matched nor was pointed at the full path it names; the reader is left to guess the census spelling');
   // ... and a selector with nothing near it still refuses -- with a reading, not
-  // a bare list. A part every row carries (`scripts`, `mjs`) distinguishes
-  // nothing, so it is not scored; without that rule every miss "matches" all 182.
+  // a bare list. The cut is the LONGEST shared basename prefix, not a per-part
+  // score: scored, every miss "matches" every row ending in `.mjs`.
   const nowhere = selectRows(selRows, ['scripts/zzz-nothing-alike.mjs']);
   say(typeof nowhere.refusal === 'string' && nowhere.refusal.includes('contains any part of it'),
     `SELECTOR CONTROL FAILED: a selector with no near row did not refuse (${JSON.stringify(nowhere.selected?.length ?? nowhere.refusal)})`);
   say(!nowhere.refusal?.includes('check-alpha'),
-    'SELECTOR CONTROL FAILED: a path part every row carries was scored, so every miss lists the same rows and the nearest-row diagnostic says nothing');
+    'SELECTOR CONTROL FAILED: a selector sharing nothing but its extension with the census still listed rows; a diagnostic that names everything names nothing');
+  say(!missed.refusal?.includes('check-alpha'),
+    'SELECTOR CONTROL FAILED: the nearest-row list reached past the rows sharing the LONGEST basename prefix; a cut that is not the maximum pads the list with the rest of the census');
 
   // The ARGV shapes that must refuse rather than widen. `--only --probe` read
   // permissively means "sweep everything": the outcome that takes hours and looks
@@ -2105,31 +2112,38 @@ export function normalizeSelector(selector, root = ROOT) {
 }
 
 /**
- * The rows a failed selector most likely meant, by PATH SUBSTRING -- the whole
- * selector first, then its word-shaped parts, longest part first.
+ * The rows a failed selector most likely meant, BY PATH -- read in two tiers,
+ * the second reached only when the first is empty.
  *
- * This is a diagnostic, never a match: nothing here can select a row. A "nearest"
- * rule that ran the row it guessed would answer a question nobody asked, under a
- * path the reader never typed.
+ *   CONTAINS  the whole selector appears in the path. A bare basename, a
+ *             directory (`scripts/pm`), a truncated prefix -- the reader named a
+ *             real part of a real row and needs the rest of the path.
+ *   PREFIX    otherwise, the rows sharing the LONGEST basename prefix with the
+ *             selector's basename, and only those: `invoked-a.mjs` reaches
+ *             `invoked-as.mjs` at 9 characters while every other row shares 0.
+ *
+ * ⛔ The cut is the MAXIMUM, never a threshold, and never a per-part score. A
+ * score summed over path parts ranks the right row first and then pads the list
+ * with every row that happens to end in `.mjs` -- measured, on this census: a
+ * miss "matched" 181 rows, and a diagnostic that names everything names nothing.
+ *
+ * This is a diagnostic and never a match: nothing here can select a row. A
+ * "nearest" rule that RAN the row it guessed would answer a question nobody
+ * asked, under a path the reader never typed.
  */
 export function nearestRows(rows, want, limit = 8) {
   const needle = want.toLowerCase();
-  // ⛔ A part EVERY row carries (`scripts`, `mjs`) distinguishes nothing: scored,
-  // it makes every miss "near" the whole census and the diagnostic says nothing.
-  const parts = needle
-    .split(/[^a-z0-9]+/)
-    .filter((t) => t.length >= 3)
-    .filter((t) => !(rows.length > 0 && rows.every((r) => r.file.toLowerCase().includes(t))));
-  const scored = [];
-  for (const r of rows) {
-    const file = r.file.toLowerCase();
-    let score = 0;
-    if (needle.length >= 3 && file.includes(needle)) score += 1000;
-    for (const t of parts) if (file.includes(t)) score += t.length;
-    if (score > 0) scored.push({ file: r.file, score });
+  if (needle.length >= 3) {
+    const contains = rows.filter((r) => r.file.toLowerCase().includes(needle)).map((r) => r.file);
+    if (contains.length > 0) return contains.slice(0, limit);
   }
-  scored.sort((a, b) => b.score - a.score || a.file.localeCompare(b.file));
-  return scored.slice(0, limit).map((x) => x.file);
+  const baseOf = (f) => f.slice(f.lastIndexOf('/') + 1);
+  const base = baseOf(needle);
+  const shared = (a, b) => { let i = 0; while (i < a.length && i < b.length && a[i] === b[i]) i += 1; return i; };
+  const scored = rows.map((r) => ({ file: r.file, n: shared(base, baseOf(r.file.toLowerCase())) }));
+  const best = Math.max(0, ...scored.map((x) => x.n));
+  if (best < 3) return [];
+  return scored.filter((x) => x.n === best).map((x) => x.file).slice(0, limit);
 }
 
 /**
