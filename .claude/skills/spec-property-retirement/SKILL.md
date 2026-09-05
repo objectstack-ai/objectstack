@@ -114,7 +114,7 @@ walk 看不见的属性就是 ratchet 管不到的属性。
 
 墓碑条目的 note 模板(house style 原文,如 `liveness/action.json`):
 
-> `REMOVED <date> (#<issue>) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error) and stripped from sources by the protocol-<N> conversion. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent); <what to do instead>.`
+> `REMOVED <date> — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error) and stripped from sources by the protocol-<N> conversion. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent); <what to do instead>.`
 
 ### ⚠ 四张 ratchet 的可见性,按路线是**相反**的 —— 拿错对照就会判错
 
@@ -151,7 +151,7 @@ ratchet(#2978)会先开火,要求你**有意删除**对应的 manifest key;删�
 五条惯例,树上每个墓碑都遵守 —— 逐点判定归下面那个 pin 测试,不归这段散文:
 
 1. 反引号包着的**全限定**键打头 —— `` `flow.errorHandling.fallbackNodeId` ``,不是裸尾段。
-2. `was removed in @objectstack/spec <version> (#issue[, ADR-XXXX Dn])`。
+2. `was removed in @objectstack/spec <version> (ADR-XXXX[ Dn])`;`#<n>` 归 schema 注释,`check:doc-authoring` 把门。
 3. 一个破折号从句讲**它为何惰性或错误** —— "it never had an effect"、"no renderer ever read it"。
 4. 祈使句修复:改名写 "use `<replacement>`" + "Rename the key; the value (…) is unchanged.";删除写 "Delete
    the key." + **真正生效的机制是什么**。
