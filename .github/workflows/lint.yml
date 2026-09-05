@@ -918,13 +918,40 @@ jobs:
       # Pointed straight at the script, with no gate file in between, unlike
       # `check:pm-dispatch-gates` next door — that one needs its own file because
       # the tool's fixtures are path strings that become watch hints and
-      # fabricate MATCHED leads across the tree. Measured here on the current
-      # tree, under the module-body masking that now blanks comments and
-      # self-tests before the scan: this script yields exactly ONE hint, the repo
-      # slug in its API base, which is not a repo path and covers no input path.
-      # The fixtures are issue-shaped objects and prose, and they sit inside the
-      # masked self-test. So the pollution that forced a separate file there does
-      # not exist here, and the direct entry is the same shape as the step above.
+      # fabricate MATCHED leads across the tree. RE-MEASURED for #15537: the
+      # reading this step used to cite ("exactly ONE hint, the repo slug in its
+      # API base") no longer describes the tree. Under the module-body masking
+      # that blanks comments and self-tests before the scan, `extractWatchHints`
+      # over this script yields FOUR:
+      #
+      #   ["objectstack-ai/objectstack", ".changeset",
+      #    "scripts/pm/check-half-states.mjs", "owner/name"]
+      #
+      # Three of the four are inert against this tree, counted over `git
+      # ls-files`: the two slug-shaped hints — `DEFAULT_SWEEP_REPO`, and the
+      # `owner/name` placeholder that survives masking because it is also a
+      # string in a refusal message — cover 0 tracked files each, and the
+      # script's own path covers exactly 1, itself, which is the gate script
+      # anyway. The FOURTH ROUTES. `.changeset` is the shared-file noise floor
+      # `H36_SHARED_PREFIX_NOISE`, where the spelling exists to EXCLUDE a path
+      # from pairing and is not a surface this patrol watches — but the hint
+      # reader cannot see that intent, so `hintCovers('.changeset',
+      # '.changeset/foo.md')` is `true`, it covers 84 tracked files, and
+      # `dispatch-gates .changeset/foo.md` derives this very step onto the card:
+      #   pnpm check:pm-half-states  [lint.yml]  matched via .changeset/foo.md
+      #                                          ⇢ gate source '.changeset'
+      # Every user-visible PR in this repo adds a `.changeset/*.md`, so that is
+      # essentially every card.
+      #
+      # ACCEPTED AS-IS, and the direct-entry argument is restated on that
+      # reading — the old one ("the pollution does not exist here") is
+      # WITHDRAWN, because one hint of it does. What the routing costs a card is
+      # ONE derived gate that is this script's own offline self-test: no
+      # network, no token, ~0.05s, and green. That is not the fan-out of MATCHED
+      # leads across unrelated gates that forced a gate file next door, so the
+      # gate file is still not worth its cost here. Stopping the noise-floor
+      # constant from being read as a hint, or giving this gate its own file
+      # like its neighbour, is a separate card and not a defect of this step.
       - name: PM half-state sweeper self-test
         run: pnpm check:pm-half-states
 
@@ -4131,11 +4158,11 @@ jobs:
       # The #12981 swallow census's own controls (#13919, maintainer ruling of
       # 2026-09-01). Same shape as the step above and for the same reason: a
       # `measure-*` instrument whose SELF-TEST is the only thing CI runs, never a
-      # bare invocation. `measure-durability-swallow-family.mjs` declares four
-      # control families and, measured on `origin/main` when #13919 was filed,
-      # NOTHING ran any of them -- zero references to the script anywhere in
-      # `package.json` or `.github/**`, against a control that must return
-      # non-zero (`measure-stall-guard-headroom`, 2 hits) so the zero was a
+      # bare invocation. `measure-durability-swallow-family.mjs` declares the
+      # control families named below and, measured on `origin/main` when #13919
+      # was filed, NOTHING ran any of them -- zero references to the script
+      # anywhere in `package.json` or `.github/**`, against a control that must
+      # return non-zero (`measure-stall-guard-headroom`, 2 hits) so the zero was a
       # reading and not a broken query. Meanwhile the resolver those controls pin
       # was repaired three times (#13459, #13474, PR #13915), each time with no
       # gate holding the previous repair, and the census's numbers feed #12981's
@@ -4143,16 +4170,32 @@ jobs:
       # with nobody watching.
       #
       # ONLY THE `gated` FAMILIES, and that asymmetry is the ruling's boundary 1
-      # rather than a convenience. `--self-test=gated` runs RESOLUTION + NEGATIVE
-      # + REGRESSION; it omits POSITIVE_CONTROLS, which pin members of the
+      # rather than a convenience. RE-COUNTED for #15569 — the count this block
+      # used to carry ("four control families", `gated` running "RESOLUTION +
+      # NEGATIVE + REGRESSION") was the reading when #13919 was filed, and three
+      # families have been added since. SEVEN are declared today and
+      # `--self-test=gated` runs SIX of them. Named rather than counted, so that
+      # the next family added contradicts a list instead of an integer:
+      #
+      #   NEGATIVE_CONTROLS  ·  REGRESSION_CONTROLS  ·  RESOLUTION_CONTROLS
+      #   the DETERMINED register cross-check (#13886)
+      #   the copied gate-vocabulary cross-check (#15459, PR #15502)
+      #   WORKLIST_READING_CONTROLS (#15503)
+      #
+      # The gated run's own verdict line names all six with their counts on
+      # every CI run, which is what makes a stale count here legible at all.
+      # It omits the seventh, POSITIVE_CONTROLS, which pin members of the
       # #12981 worklist that the repair programme exists to REMOVE. That is
       # recorded, not forecast: batch 2 repaired the file the dark control then
       # named and turned the self-test red for doing exactly what the ruling
       # asked. ⛔ A gate that reddens when the programme succeeds is not a gate,
       # and it trains the fleet to route around gates -- so ⛔ never "tidy" this
-      # step into a bare `--self-test`. The three wired families cannot be
+      # step into a bare `--self-test`. None of the six wired families can be
       # destroyed by a successful repair: a repair moves a member from tier
-      # `dark` to tier `channelled` and it stays a member.
+      # `dark` to tier `channelled` and it stays a member, and the three
+      # cross-checks never touch membership at all — they compare the register,
+      # the copied vocabulary and the printed worklist against declarations of
+      # their own.
       #
       # The census itself stays a MEASUREMENT: no membership count can redden
       # this step, and the gated run prints the instrument's own "a MEASUREMENT,
