@@ -29,17 +29,17 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 219 |
+| Write call sites | 221 |
 | Object name statically decidable | 147 |
-| Object name chosen at run time | 72 |
+| Object name chosen at run time | 74 |
 | Against a tenancy-enabled object | 147 |
 | Against an object declaring tenancy off | 0 |
-| Threading a tenant context | 135 |
+| Threading a tenant context | 137 |
 | Provably carrying none | 17 |
 | …and decidably tenancy-enabled | 9 |
 | Options argument unreadable | 67 |
 | …and decidably tenancy-enabled | 32 |
-| Threading a decidably elevated context | 101 |
+| Threading a decidably elevated context | 103 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 101 |
 
@@ -52,14 +52,14 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-09-03 at `631038b03`.
+Measured on 2026-09-05 at `8a7446de8`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 542 |
-| engine-shaped types recognised | 57 |
+| tracked non-test sources scanned | 547 |
+| engine-shaped types recognised | 58 |
 | declared objects in the registry | 298 |
-| same-named calls subtracted as non-engine | 130 |
+| same-named calls subtracted as non-engine | 134 |
 
 ## Every site
 
@@ -92,6 +92,7 @@ Measured on 2026-09-03 at `631038b03`.
 | `packages/plugins/plugin-auth/src/backfill-account-issuer.ts` | `update` | `sys_account` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/ensure-default-organization.ts` | `insert` | `object` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-auth/src/member-role-canonical.ts` | `update` | `MEMBER_OBJECT` | undecidable | elevated | 1 |
+| `packages/plugins/plugin-auth/src/membership-ended-session.ts` | `update` | `SystemObjectName.SESSION` | undecidable | elevated | 2 |
 | `packages/plugins/plugin-auth/src/objectql-adapter.ts` | `delete` | `m` | undecidable | options unreadable | 1 |
 | `packages/plugins/plugin-auth/src/objectql-adapter.ts` | `insert` | `m` | undecidable | options unreadable | 1 |
 | `packages/plugins/plugin-auth/src/objectql-adapter.ts` | `update` | `m` | undecidable | options unreadable | 1 |

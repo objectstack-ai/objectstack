@@ -52,6 +52,8 @@
     "DecisionOutputDefSchema": "automation/DecisionOutputDef",
     "DeleteRecordConfig": "automation/DeleteRecordConfig",
     "DeleteRecordConfigSchema": "automation/DeleteRecordConfig",
+    "EndConfig": "automation/EndConfig",
+    "EndConfigSchema": "automation/EndConfig",
     "ExecutionError": "automation/ExecutionError",
     "ExecutionErrorSchema": "automation/ExecutionError",
     "ExecutionErrorSeverity": "automation/ExecutionErrorSeverity",

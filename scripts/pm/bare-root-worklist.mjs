@@ -326,6 +326,27 @@ const POPULATION_CONSTANT = /^(?:[A-Z0-9_]*_ROOTS?|[A-Z0-9_]*_DIRS?|ROOTS|DIRS|P
  * at a time. ⛔ The gate is not edited from here either: it is correct, and what
  * went stale is the MAP, which recorded less than it judged.
  *
+ * ⭐ A TWENTIETH row was re-decided on 2026-09-05 (#15602) under that same
+ * authorisation sentence and no wider one: `check:declaration-mirrors
+ * SCRIPTS_DIR scripts`. Its refusal named the EXTENSION filter as the thing no
+ * spelling of the idiom describes, which is the identical collapse #12300
+ * retired, and the GATE had already acted on it before this map did: #15601
+ * declared both sides of the mirror beside the constant. So the row went on
+ * asserting that nothing honest was declarable while its own gate declared, and
+ * that pairing is one NO pin in this file reads — the declaration is read back
+ * out of a gate's source only for DECLARED-NARROWER rows, and `contradicted`
+ * fires only on a row the sweep finds REACHABLE, which this one is not, because
+ * neither declared hint reaches an arbitrary file at the top of the root. Green
+ * everywhere, therefore, and correctly so per assertion; the class is caught by
+ * re-measuring and by nothing else, which is what this docblock says of it.
+ * ⛔ Its numbers are re-measured on the 2026-09-05 tree in EVERY term at one
+ * commit and NOT carried from the row they replace — nor from the card that
+ * filed it, nor from that card's triage: the mirror count read 2, then 4, then 5
+ * and the module-side reach 214, then 216, then 218 across the filing, the
+ * triage and this fix in under two days. Three readings of three trees is the
+ * drift this docblock permits; pairing any one of those numerators with another
+ * reading's denominator is the defect it forbids, and the spread is why.
+ *
  * ⚠️ One row of that seventeen was re-measured into a DIFFERENT population, not
  * merely fresher digits: #12392 (PR #12423, `69d0e18`) made
  * `check-skills-token-ratchet`'s walk RECURSIVE over whole skill directories, so
@@ -489,6 +510,22 @@ const SPELLINGS = new Map([
     holds: (s) => s[0] === 'scripts'
       && ((s.length === 2 && (s[1].endsWith('.mjs') || s[1].endsWith('.mts')))
         || (s.length === 3 && s[1] === 'pm' && s[2].endsWith('.mjs'))),
+  }],
+  ['scripts declaration mirrors and their modules', {
+    // BOTH sides of the mirror, because that is what the gate DECLARES: its walk
+    // discovers the declaration side by extension, and the pair check imports the
+    // module sitting beside each one, so either side moving breaks the mirror.
+    // The module-side hint over-names heavily and the row records by how much --
+    // recording anything narrower HERE would be a claim about a declaration
+    // nobody made, which the declaration pin below refuses in both directions,
+    // and the same reason the driver entry above records a whole subtree.
+    segments: [
+      ['scripts', '**', '*.d.mts'],
+      ['scripts', '**', '*.mjs'],
+    ],
+    claim: 'every hand-written declaration file or ESM module at any depth under the scripts root',
+    holds: (s) => s[0] === 'scripts' && s.length >= 2
+      && (s[s.length - 1].endsWith('.d.mts') || s[s.length - 1].endsWith('.mjs')),
   }],
 ]);
 
@@ -694,6 +731,48 @@ const TRIAGE = new Map([
       + 'nested script at any depth" this row carried until 2026-09-04 was true of the walk it '
       + 'was written about and false of this one',
   }],
+  ['scripts/check-declaration-mirrors.mjs SCRIPTS_DIR scripts', {
+    verdict: 'DECLARED-NARROWER',
+    spelling: 'scripts declaration mirrors and their modules',
+    why: 'RE-DECIDED 2026-09-05 (#15602) from REFUSE-UNSPELLABLE, whose stated reason — "what '
+      + 'cannot be spelled here is the EXTENSION filter" — was TRUE when written and is FALSE of '
+      + 'this tree. It rested on the collapse #12300 retired: judgedAsPattern routes a glob in a '
+      + 'non-final segment to triggerCovers now, so a population admitted BY EXTENSION under a '
+      + 'root became expressible and precise. That is the same retired collapse the seventeen '
+      + 'rows of 2026-08-26, the eighteenth of 2026-08-29 and the nineteenth of 2026-09-01 were '
+      + 'each re-decided under, and this row is re-decided under that authorisation sentence and '
+      + 'no wider one. ⛔ The verdict is NOT kept for having been the one recorded, and the three '
+      + 'alternatives were read off this map own vocabulary rather than inherited: '
+      + 'REFUSE-UNSPELLABLE asserts NO spelling of the idiom describes the population, and the '
+      + 'gate itself now spells one in its own source, so that refusal is false at the one place '
+      + 'it is checkable; SPELLABLE-UNDECLARED is the row whose gate declares NOTHING for the '
+      + 'population and nothing here is deferred; REFUSE-WIDE would need the population to BE the '
+      + 'root, and it is not. What is left is the verdict this shape is defined as — the gate '
+      + 'took the escape at a strictly narrower subtree — which #15601 landed beside SCRIPTS_DIR '
+      + 'under the ROOT_DIR_WATCH_HINTS idiom, ⛔ and this row does NOT edit that gate: the gate '
+      + 'is correct and the MAP is what went stale. RE-MEASURED 2026-09-05 at commit e581457b, '
+      + 'every term taken in ONE call on ONE tree and never refreshed apart: the walk discovers 5 '
+      + 'declaration files by extension and the pair check imports the 5 modules beside them, so '
+      + 'the gate opens 10 of the 336 tracked files under the bare root, 3.0%. The declared '
+      + 'mirror-side hint reaches 5 and the gate reads all 5, 100% precise; the module-side hint '
+      + 'reaches 218 and the gate reads 5 of them, 2.3%. That second figure is the price of '
+      + 'keeping the module side declared without a hand list of today pairs — the gate own '
+      + 'docblock prices it at ~1.6 s of fleet compute per 36 cards and takes the over-naming '
+      + 'trade deliberately — and it is RECORDED here rather than refused, the same direction the '
+      + 'driver package files entry records for its subtree. ⚠️ It is not what the PRECISION pin '
+      + 'below measures: that pin asks whether the recorded claim and hintCovers admit the SAME '
+      + 'files, and they do — 0 over-named, 0 missed, 223 of 336 covered, so the union is LIVE, '
+      + 'PRECISE and COMPLETE and a real narrowing rather than the bare root wearing a glob. The '
+      + 'recorded set is SET-EQUAL in BOTH directions to the array the gate declares at this '
+      + 'root, so no hint is passed over and this row carries no omits. ⛔ The previous reading, '
+      + '2 of 261, is superseded WHOLE and neither term is carried forward, which this docblock '
+      + 'forbids by name — nor are the filing card 4 of 214 or its triage 4 of 216: all three '
+      + 'readings are of trees that are gone, a FIFTH mirror pair having landed since, and the '
+      + 'spread is the argument for taking them together rather than a discrepancy. The row STAYS '
+      + 'in the sweep because the bare root is still not covered — a top-level script carrying '
+      + 'any other extension satisfies neither hint, so no arbitrary file at the top of the root '
+      + 'is reached — which is what this verdict says and is correct, not outstanding debt',
+  }],
   // ── Refused: the population is the whole root, and the root is saturated ──
   ['scripts/check-skill-identifier-liveness.mjs IMPL_ROOTS packages', {
     verdict: 'REFUSE-WIDE',
@@ -807,20 +886,6 @@ const TRIAGE = new Map([
     why: '162 of 238 (68%), refused with its packages half for the reason above',
   }],
   // ── Refused: the population is a filter the idiom cannot spell ────────────
-  ['scripts/check-declaration-mirrors.mjs SCRIPTS_DIR scripts', {
-    verdict: 'REFUSE-UNSPELLABLE',
-    why: 'a RECURSIVE walk admitted by EXTENSION — every `scripts/**/*.d.mts`, 2 of 261 (0.77%), '
-      + 'read from the gate own mirrorFiles(). NOT the shape of the row above it, and measured '
-      + 'here rather than inherited from it: mirrorFiles() descends into every nested directory '
-      + 'and its own docblock says so. What cannot be spelled here is the EXTENSION filter, not a '
-      + 'non-recursive walk — `scripts/**` is spellable and TRUE of this walk, and refused anyway '
-      + 'because it would name this gate for 261 files to reach 2. Same class as the '
-      + 'check:driver-conformance CASE_SETS_DIR row below, so lifting the row-above non-recursive '
-      + 'limit would leave this one exactly as refused. ⚠️ Its former third neighbour, the '
-      + 'check:skills-token-ratchet SKILLS_DIR row, LEFT this class on 2026-08-26 and is no '
-      + 'longer the company it was cited as: #12392 made that walk recursive over whole skill '
-      + 'directories, which is a subtree and not an extension filter',
-  }],
   ['scripts/check-driver-conformance.mjs CASE_SETS_DIR packages', {
     verdict: 'REFUSE-UNSPELLABLE',
     why: 'a filename pattern inside one directory — 7 of 143 files (4.9%). Its sibling constant '

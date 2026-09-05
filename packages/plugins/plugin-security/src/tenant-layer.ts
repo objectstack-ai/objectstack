@@ -4,6 +4,7 @@ import {
   postureEnforcesWall,
   postureUsesUnionScope,
   type TenancyPosture,
+  type TenantLayer0Verdict,
 } from '@objectstack/spec/security';
 
 import { RLS_DENY_FILTER } from './rls-compiler.js';
@@ -93,6 +94,92 @@ export interface TenantLayer0Input {
   isPlatformAdmin: boolean;
 }
 
+/** The two verdicts that carry no organization — shared, frozen, safe to hand out. */
+const LAYER0_NONE: TenantLayer0Verdict = Object.freeze({ kind: 'none' as const });
+const LAYER0_DENY: TenantLayer0Verdict = Object.freeze({ kind: 'deny' as const });
+
+/**
+ * [#15813 / ADR-0131 D8] Compute the Layer 0 VERDICT — what the wall decides
+ * for this operation, as a value another package can read without re-deriving
+ * it (`TenantLayer0VerdictSchema`, `@objectstack/spec/security`).
+ * {@link computeTenantLayer0Filter} is this verdict PROJECTED onto a `where`
+ * predicate ({@link tenantLayer0FilterOf}); the two cannot disagree because
+ * the filter is derived from the verdict, never computed beside it.
+ *
+ * The decision ladder is the wall's own, in the wall's own order: every exit
+ * that answers `null` as a filter answers `none` here, every fail-closed exit
+ * answers `deny`, and the two walled shapes answer the organization(s) they
+ * name. The `group` set is DEDUPLICATED here (`accessible_org_ids` is a
+ * membership list; a repeated membership names one organization once), so a
+ * reader may test `organizationIds.length === 1` and read no further.
+ *
+ * - `none` → Layer 0 contributes nothing (`single` posture; non-tenant object;
+ *   or an exempt platform admin). The caller applies only Layer 1.
+ * - `organization` → the `isolated` wall, `organization_id = <id>`.
+ * - `organizations` → the `group` union wall, `organization_id IN <set>`
+ *   (ADR-0105 D2).
+ * - `deny` → a walled posture on a tenant object, but the context carries no
+ *   organization scope to enforce with (no active org under `isolated`, empty
+ *   access set under `group`) → fail closed (zero rows / write denied).
+ */
+export function computeTenantLayer0Verdict(input: TenantLayer0Input): TenantLayer0Verdict {
+  // `single` posture (incl. a degraded deployment, which resolves to `single`)
+  // → parity with today's policy stripping.
+  if (!postureEnforcesWall(input.tenancyPosture)) return LAYER0_NONE;
+
+  // Not a tenant object: platform-global (tenancy disabled) or simply carries no
+  // `organization_id` column (e.g. better-auth identity tables like `sys_user`).
+  // Layer 0 contributes nothing — the object's own business RLS (Layer 1, e.g.
+  // `_self` carve-outs) is its only scoping.
+  if (input.tenancyDisabled) return LAYER0_NONE;
+  if (input.objectHasOrgIdField === false) return LAYER0_NONE;
+
+  // Exemption is a Layer 0 rule (W2 fix): only a TRUE PLATFORM_ADMIN caller on an
+  // object whose posture permits it crosses the wall — NOT a tenant `org_admin`
+  // that merely holds the superuser bit (Finding 2 / #2937). Layer 1's superuser
+  // bypass no longer implies Layer 0's.
+  if (input.isPlatformAdmin && input.posturePermitsCrossTenant) return LAYER0_NONE;
+
+  // [ADR-0105 D2] `group`: union access over the caller's memberships (MOAC).
+  // The ACTIVE organization no longer bounds reads here — membership does — so
+  // a group-HQ analyst sees every plant they belong to on one screen without
+  // context switching, and a plant admin still sees only their own plants.
+  // An empty access set is the fail-closed case: no membership, no reach.
+  if (postureUsesUnionScope(input.tenancyPosture)) {
+    const orgIds = input.accessibleOrgIds;
+    if (!orgIds || orgIds.length === 0) return LAYER0_DENY;
+    return { kind: 'organizations', organizationIds: [...new Set(orgIds)] };
+  }
+
+  // `isolated`: the hard wall. Missing active org → fail closed.
+  if (!input.organizationId) return LAYER0_DENY;
+  return { kind: 'organization', organizationId: input.organizationId };
+}
+
+/**
+ * Project a Layer 0 verdict onto the `where` predicate the wall AND-composes —
+ * the ONE spelling of each verdict as a filter. `computeTenantLayer0Filter`
+ * is `tenantLayer0FilterOf(computeTenantLayer0Verdict(input))` and nothing
+ * else.
+ *
+ * `deny` SPREADS {@link RLS_DENY_FILTER} rather than returning the frozen
+ * object (`isTenantWallDenial` in `security-plugin.ts` compares by value for
+ * exactly this reason); `organizations` copies the set so a later mutation of
+ * the verdict cannot reach a compiled filter.
+ */
+export function tenantLayer0FilterOf(verdict: TenantLayer0Verdict): Record<string, unknown> | null {
+  switch (verdict.kind) {
+    case 'none':
+      return null;
+    case 'deny':
+      return { ...RLS_DENY_FILTER };
+    case 'organization':
+      return { organization_id: verdict.organizationId };
+    case 'organizations':
+      return { organization_id: { $in: [...verdict.organizationIds] } };
+  }
+}
+
 /**
  * Compute the Layer 0 (tenant) filter to AND onto a read/write.
  *
@@ -110,41 +197,46 @@ export interface TenantLayer0Input {
  * still AND-composed first, and still crossable only by a true `PLATFORM_ADMIN`
  * — so ADR-0095's W1 (business RLS cannot weaken the wall) and W2 (the
  * superuser bypass cannot cross it) hold in every posture (ADR-0105 D2/D4).
+ *
+ * [#15813] A projection of {@link computeTenantLayer0Verdict} — one predicate,
+ * computed once (ADR-0131 D8); the middleware records the verdict on the
+ * operation and injects this projection, from the same computation.
  */
 export function computeTenantLayer0Filter(
   input: TenantLayer0Input,
 ): Record<string, unknown> | null {
-  // `single` posture (incl. a degraded deployment, which resolves to `single`)
-  // → parity with today's policy stripping.
-  if (!postureEnforcesWall(input.tenancyPosture)) return null;
+  return tenantLayer0FilterOf(computeTenantLayer0Verdict(input));
+}
 
-  // Not a tenant object: platform-global (tenancy disabled) or simply carries no
-  // `organization_id` column (e.g. better-auth identity tables like `sys_user`).
-  // Layer 0 contributes nothing — the object's own business RLS (Layer 1, e.g.
-  // `_self` carve-outs) is its only scoping.
-  if (input.tenancyDisabled) return null;
-  if (input.objectHasOrgIdField === false) return null;
-
-  // Exemption is a Layer 0 rule (W2 fix): only a TRUE PLATFORM_ADMIN caller on an
-  // object whose posture permits it crosses the wall — NOT a tenant `org_admin`
-  // that merely holds the superuser bit (Finding 2 / #2937). Layer 1's superuser
-  // bypass no longer implies Layer 0's.
-  if (input.isPlatformAdmin && input.posturePermitsCrossTenant) return null;
-
-  // [ADR-0105 D2] `group`: union access over the caller's memberships (MOAC).
-  // The ACTIVE organization no longer bounds reads here — membership does — so
-  // a group-HQ analyst sees every plant they belong to on one screen without
-  // context switching, and a plant admin still sees only their own plants.
-  // An empty access set is the fail-closed case: no membership, no reach.
-  if (postureUsesUnionScope(input.tenancyPosture)) {
-    const orgIds = input.accessibleOrgIds;
-    if (!orgIds || orgIds.length === 0) return { ...RLS_DENY_FILTER };
-    return { organization_id: { $in: [...orgIds] } };
+/**
+ * [#15813 / ADR-0090 D10] The verdict of TWO Layer 0 walls AND-composed onto
+ * one operation — the on-behalf-of shape, where the caller's wall and the
+ * delegator's wall are both injected and a row must satisfy both.
+ *
+ * Set intersection, in the wall's own terms: `deny` on either side denies (no
+ * row clears an empty scope); `none` on one side yields the other (it
+ * contributed no predicate); two named scopes intersect, an empty intersection
+ * is `deny`, and a one-organization intersection that either side spelled as
+ * the `isolated` equality is reported as `organization` — the AND of `= X`
+ * with any set containing X IS `= X`. Pure, so the middleware records the
+ * composed verdict without recomputing either wall.
+ */
+export function intersectTenantLayer0Verdicts(
+  a: TenantLayer0Verdict,
+  b: TenantLayer0Verdict,
+): TenantLayer0Verdict {
+  if (a.kind === 'deny' || b.kind === 'deny') return LAYER0_DENY;
+  if (a.kind === 'none') return b;
+  if (b.kind === 'none') return a;
+  const idsOf = (v: TenantLayer0Verdict): readonly string[] =>
+    v.kind === 'organization' ? [v.organizationId] : v.kind === 'organizations' ? v.organizationIds : [];
+  const right = new Set(idsOf(b));
+  const both = idsOf(a).filter((id) => right.has(id));
+  if (both.length === 0) return LAYER0_DENY;
+  if (both.length === 1 && (a.kind === 'organization' || b.kind === 'organization')) {
+    return { kind: 'organization', organizationId: both[0] };
   }
-
-  // `isolated`: the hard wall. Missing active org → fail closed.
-  if (!input.organizationId) return { ...RLS_DENY_FILTER };
-  return { organization_id: input.organizationId };
+  return { kind: 'organizations', organizationIds: both };
 }
 
 /**

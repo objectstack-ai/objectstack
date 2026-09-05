@@ -6,6 +6,7 @@ import type { ScreenConfigParsed, ScriptConfigParsed } from '@objectstack/spec/a
 import type { AutomationEngine } from '../engine.js';
 import { interpolate } from './template.js';
 import { parseNodeConfig } from './parse-config.js';
+import { judgeHeadlessScreen } from '../screen-input-contract.js';
 
 /**
  * Screen / Script built-in nodes — 'screen' and 'script' executors.
@@ -18,7 +19,13 @@ import { parseNodeConfig } from './parse-config.js';
  *   to render; the run continues via `resume()` with the collected values (set
  *   as bare flow variables). A field-less screen — or one with
  *   `waitForInput === false` — stays a server pass-through (input vars, if any,
- *   are already injected from `context.params`).
+ *   are already injected from `context.params`). Since #15705 a screen the
+ *   RUN'S CALLER already answered is a fourth pass-through: when the caller
+ *   supplied this screen's own fields and every `required` one is bound, there
+ *   is nothing left to collect, so the run continues rather than parking on a
+ *   form a headless invoker cannot submit. `judgeHeadlessScreen` owns that
+ *   verdict and refuses on every uncertainty, so an interactive run is
+ *   untouched.
  * - 'script' nodes call a registered function (#1870): `config.function` names
  *   it, `engine.resolveFunction()` resolves it, and the host bridges that to
  *   `bundle.functions` / `defineStack({ functions })`. A name that resolves to
@@ -162,7 +169,34 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
         const hasFields = rawFields.length > 0;
         // Suspend to collect input when the screen declares fields, or opts in
         // explicitly. `waitForInput === false` forces a server pass-through.
-        const shouldPause = cfg.waitForInput === true || (hasFields && cfg.waitForInput !== false);
+        const wantsPause = cfg.waitForInput === true || (hasFields && cfg.waitForInput !== false);
+        // #15705 — a screen whose inputs the CALLER already supplied is
+        // answered, so the run continues instead of parking on a form nobody
+        // will ever submit. A headless invoker (`run_action` over MCP) seeds
+        // the flow's `isInput` variables and then has no resume verb; before
+        // this, every screen-typed flow action was a dead end for it.
+        //
+        // Three deliberate narrowings, each keeping an existing behaviour whole:
+        //
+        //  - `waitForInput === true` is NOT overridden. That flag is the
+        //    author's explicit "show this", and its documented job is the
+        //    field-less message / confirmation screen — a screen that collects
+        //    nothing and would therefore be VACUOUSLY satisfiable. Honouring it
+        //    keeps a confirmation step from being skipped by a bag it never
+        //    asked for.
+        //  - `hasFields` is required, for the same vacuity reason stated from
+        //    the other side: no declared fields means no contract to satisfy.
+        //  - the verdict itself refuses on every uncertainty
+        //    (`judgeHeadlessScreen`), so an interactive run — which supplies
+        //    none of the screen's own fields — takes the untouched path.
+        //
+        // ⛔ This does NOT make every screen flow completable over MCP: a call
+        // that omits the inputs still parks, and nothing on that surface can
+        // continue it. That half is a resume verb, and it is not this change.
+        const headless = wantsPause && hasFields && cfg.waitForInput !== true
+          ? judgeHeadlessScreen(rawFields, variables, context)
+          : undefined;
+        const shouldPause = wantsPause && headless?.satisfied !== true;
         if (!shouldPause) {
           return { success: true };
         }

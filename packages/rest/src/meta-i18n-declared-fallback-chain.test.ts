@@ -2,17 +2,23 @@
 
 /**
  * #14882 — the metadata reads hand the document translators the DECLARED
- * fallback chain, not the resolver's literal `['en']`.
+ * fallback chain, not a literal `en`; #15711 — and the DECLARED default
+ * locale, so a request for it answers with the authored label.
  *
  * The RULE lives in `@objectstack/spec/system`: the label resolvers walk
- * `requested locale → fallbackChain → authored label`, and honour whatever
- * chain they are handed (pinned in `i18n-resolver.test.ts`). What can only be
- * tested here is the PLUMBING — that every seam translating a metadata
- * document passes `fallbackChain: [i18n.getFallbackLocale()]`, the locale the
- * i18n service's own `t()` falls back to, which `I18nServicePlugin` receives
- * from the stack's `i18n` config as `fallbackLocale || defaultLocale || 'en'`.
- * Before this, every seam passed NO chain, so the declared `fallbackLocale`
- * never reached the resolver and `en` was consulted before the authored label.
+ * `requested locale → fallbackChain → authored label` for a non-default
+ * request, skip the chain for a request that names `defaultLocale` (the
+ * authored label IS the default locale's text, ruled on #15711), and invent
+ * no chain for a caller that declares none (pinned in
+ * `i18n-resolver.test.ts`). What can only be tested here is the PLUMBING —
+ * that every seam translating a metadata document passes
+ * `fallbackChain: [i18n.getFallbackLocale()]`, the locale the i18n service's
+ * own `t()` falls back to, which `I18nServicePlugin` receives from the
+ * stack's `i18n` config as `fallbackLocale || defaultLocale || 'en'`, and
+ * `defaultLocale: i18n.getDefaultLocale()`, the same accessor a header-less
+ * request already resolves its locale from. Before #14882, every seam passed
+ * NO chain, so the declared `fallbackLocale` never reached the resolver and
+ * `en` was consulted before the authored label.
  *
  * The fixture is the card's workspace: labels authored in the default locale
  * (`zh-CN`), a courtesy `en` bundle for English users, and NO `zh-CN` bundle
@@ -23,7 +29,7 @@
  *
  * Seams covered: `GET /meta/:type/:name` (object and app), `GET /meta/:type`
  * (list), `GET /meta` (the types listing) — and the feature-detection
- * contract for a service that declares no fallback.
+ * contract for a service that declares no fallback, or no default.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -286,36 +292,83 @@ describe('#14882 §3 — controls', () => {
 // §4 — the feature-detection contract: no declaration, no invented chain
 // ---------------------------------------------------------------------------
 
-describe('#14882 §4 — a service that declares no fallback keeps the resolver default', () => {
-    // The serving layer threads a DECLARATION; it does not derive one. An
-    // i18n provider without the accessor (or answering `undefined`) gets no
-    // chain, so the resolver's own `['en']` default applies exactly as it did
-    // before this card — the pre-#14882 answer, pinned so a later "helpful"
-    // derivation from `getDefaultLocale()` cannot land unnoticed (it would
-    // decide the contract question §5 leaves open).
-    it('a provider without getFallbackLocale answers as before (en consulted)', async () => {
+describe('#14882 §4 / #15711 — a service that declares no fallback gets no chain, and no en is invented', () => {
+    // The serving layer threads DECLARATIONS; it derives nothing. An i18n
+    // provider without `getFallbackLocale` (or answering `undefined`) gets no
+    // chain, and since #15711 the resolver's own default is `[]`: a request
+    // walks `requested locale → authored label`, and `en` is consulted only
+    // when it is requested or declared. `getDefaultLocale()` IS threaded now
+    // (#15711 ruled the question §5 used to leave open), so the `zh-CN`
+    // request below answers authored for two independent reasons; the `fr`
+    // request isolates the second facet, where only the `[]` default applies.
+    it('a provider without getFallbackLocale: zh-CN (the default) and fr (not) both answer authored', async () => {
         const legacy = i18nFor({ bundles: { 'zh-CN': {}, en: EN_DATA }, defaultLocale: 'zh-CN', fallbackLocale: null });
-        expect((await readItem(makeRest(legacy), 'object', 'kpi_entry_sheet', 'zh-CN')).label).toBe('Entry Sheet');
+        expect(labelsOf(await readItem(makeRest(legacy), 'object', 'kpi_entry_sheet', 'zh-CN'))).toEqual(AUTHORED);
+        expect(labelsOf(await readItem(makeRest(legacy), 'object', 'kpi_entry_sheet', 'fr'))).toEqual(AUTHORED);
+        // Control — an `en` request still finds its own bundle.
+        expect((await readItem(makeRest(legacy), 'object', 'kpi_entry_sheet', 'en')).label).toBe('Entry Sheet');
     });
 
-    it('a provider answering undefined answers as before (en consulted)', async () => {
+    it('a provider answering undefined answers the same', async () => {
         const undeclared = i18nFor({ bundles: { 'zh-CN': {}, en: EN_DATA }, defaultLocale: 'zh-CN', fallbackLocale: undefined });
-        expect((await readItem(makeRest(undeclared), 'object', 'kpi_entry_sheet', 'zh-CN')).label).toBe('Entry Sheet');
+        expect((await readItem(makeRest(undeclared), 'object', 'kpi_entry_sheet', 'zh-CN')).label).toBe('填报单');
+        expect((await readItem(makeRest(undeclared), 'object', 'kpi_entry_sheet', 'fr')).label).toBe('填报单');
+    });
+
+    it('a provider without getDefaultLocale gets no default: nothing is the default, the chain is all there is', async () => {
+        // No `defaultLocale` is threaded (the seam passes nothing, never
+        // `'en'`), so the default-locale rule is off and the DECLARED `en`
+        // chain is walked for a `zh-CN` request exactly as #14882 pinned it.
+        const noDefault = i18nFor({ bundles: { 'zh-CN': {}, en: EN_DATA }, defaultLocale: 'zh-CN', fallbackLocale: 'en' });
+        delete noDefault.getDefaultLocale;
+        expect((await readItem(makeRest(noDefault), 'object', 'kpi_entry_sheet', 'zh-CN')).label).toBe('Entry Sheet');
     });
 });
 
 // ---------------------------------------------------------------------------
-// §5 — a stack that DECLARES en as its fallback is honoured as it reads
+// §5 — a stack that DECLARES en as its fallback: honoured for every request
+//      but the default-locale one (#15711)
 // ---------------------------------------------------------------------------
 
-describe('#14882 §5 — a declared en fallback still consults en before the authored label', () => {
-    // `defaultLocale: 'zh-CN'`, `fallbackLocale: 'en'`, no zh-CN bundle.
-    // Pinned as it answers today — the `en` bundle — because whether the
-    // authored label is the default-locale source (and so should outrank a
-    // declared fallback's bundle) is a CONTRACT question this card does not
-    // decide. #14882 changes which chain reaches the resolver, nothing else.
-    it('GET /meta/object/:name serves the en bundle for a zh-CN request', async () => {
-        const enFallback = i18nFor({ bundles: { 'zh-CN': {}, en: EN_DATA }, defaultLocale: 'zh-CN', fallbackLocale: 'en' });
-        expect((await readItem(makeRest(enFallback), 'object', 'kpi_entry_sheet', 'zh-CN')).label).toBe('Entry Sheet');
+describe('#15711 §5 — a declared en fallback never outranks the authored label for a default-locale request', () => {
+    // `defaultLocale: 'zh-CN'`, `fallbackLocale: 'en'`, no zh-CN bundle — the
+    // reflexive AI-authored config. #14882 pinned this as it answered then
+    // (`Entry Sheet`) because whether the authored label is the default-locale
+    // source was a CONTRACT question that card did not decide. #15711 ruled
+    // it: the authored label IS the default locale's text.
+    const enFallback = () =>
+        i18nFor({ bundles: { 'zh-CN': {}, en: EN_DATA }, defaultLocale: 'zh-CN', fallbackLocale: 'en' });
+
+    it('GET /meta/object/:name serves the authored 填报单 for a zh-CN request', async () => {
+        expect(labelsOf(await readItem(makeRest(enFallback()), 'object', 'kpi_entry_sheet', 'zh-CN'))).toEqual(AUTHORED);
+    });
+
+    it('GET /meta/app/:name, the list read and the types listing agree', async () => {
+        expect((await readItem(makeRest(enFallback()), 'app', 'kpi_app', 'zh-CN')).label).toBe('KPI 考核管理');
+        const [sheet] = await readList(makeRest(enFallback()), 'object', 'zh-CN');
+        expect(labelsOf(sheet)).toEqual(AUTHORED);
+        const body = await readTypes(makeRest(enFallback()), 'zh-CN');
+        expect(body.entries.find((e: any) => e.type === 'object').label).toBe('对象');
+    });
+
+    it('with NO Accept-Language the request falls to the default locale and answers authored', async () => {
+        expect(labelsOf(await readItem(makeRest(enFallback()), 'object', 'kpi_entry_sheet', undefined))).toEqual(AUTHORED);
+    });
+
+    it('a NON-default request still walks fr → en bundle → authored', async () => {
+        // `fallbackLocale` keeps its full meaning for every other locale.
+        expect(labelsOf(await readItem(makeRest(enFallback()), 'object', 'kpi_entry_sheet', 'fr'))).toEqual(ENGLISH);
+        expect((await readItem(makeRest(enFallback()), 'app', 'kpi_app', 'fr')).label).toBe('KPI Assessment');
+    });
+
+    it('an en request on the same stack still gets the en bundle', async () => {
+        expect(labelsOf(await readItem(makeRest(enFallback()), 'object', 'kpi_entry_sheet', 'en'))).toEqual(ENGLISH);
+    });
+
+    it('a shipped zh-CN bundle still wins; a key it omits is authored, never en', async () => {
+        const withZh = i18nFor({ bundles: { 'zh-CN': ZH_DATA, en: EN_DATA }, defaultLocale: 'zh-CN', fallbackLocale: 'en' });
+        const item = await readItem(makeRest(withZh), 'object', 'kpi_entry_sheet', 'zh-CN');
+        expect(item.label).toBe('填报单（bundle）');
+        expect(item.fields.name.label).toBe('填报单名称');
     });
 });
