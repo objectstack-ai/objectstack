@@ -143,7 +143,7 @@ const HISTORY_SEMANTIC_IDS = [
  */
 const MUST_SURVIVE_KERNEL = ['MetadataChangeTypeSchema', 'MetadataChangeType'] as const;
 /** System-entry neighbours that stay — the ones the retired files imported from. */
-const MUST_SURVIVE_SYSTEM = ['DataClassificationSchema', 'SecurityContextSchema', 'ChangeSetSchema'] as const;
+const MUST_SURVIVE_SYSTEM = ['DataClassificationSchema', 'ComplianceFrameworkSchema', 'ChangeSetSchema'] as const;
 
 const SPEC_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const SRC_ROOT = path.join(SPEC_ROOT, 'src');
@@ -191,11 +191,14 @@ describe('[#15513] system/ compliance families retirement — the public surface
     expect(fs.existsSync(path.join(SRC_ROOT, 'system', 'security-context.zod.ts'))).toBe(true);
 
     const importers: string[] = [];
+    const self = fileURLToPath(import.meta.url);
     const walk = (dir: string) => {
       for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
         const full = path.join(dir, entry.name);
         if (entry.isDirectory()) walk(full);
-        else if (entry.name.endsWith('.ts')) {
+        // This file quotes a resurrected import as its matcher's anti-vacuity
+        // fixture below, so it is the one file the importer walk must skip.
+        else if (entry.name.endsWith('.ts') && full !== self) {
           const src = fs.readFileSync(full, 'utf-8');
           if (/(?:import|export)[^;]*['"][^'"]*\/(?:incident-response|training|change-management)\.zod(?:\.js)?['"]/.test(src)) {
             importers.push(path.relative(SRC_ROOT, full));
@@ -215,7 +218,10 @@ describe('[#15513] system/ compliance families retirement — the public surface
     }
     // Anti-vacuity: a surviving neighbour is still there.
     expect(manifest.schemas).toContain('system/ChangeSet');
-    const exact = (name: string) => new RegExp(`"${name}"`);
+    // Word-bounded rather than quoted: the three shards spell a row three ways
+    // (`"Name (kind)"`, `"Name": "…"`, a nested origin record), and a retired
+    // name must be absent under every spelling.
+    const exact = (name: string) => new RegExp(`\\b${name}\\b`);
     for (const dir of ['api-surface', 'declaration-map', 'export-origins']) {
       const text = shard(dir);
       for (const name of RETIRED_NAMES) {
