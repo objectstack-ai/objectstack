@@ -66,6 +66,7 @@ export default defineStack({
 | Field labels, help text, placeholders | `objects.<name>.fields.<field>.label` / `help` / `placeholder` |
 | Picklist option labels | `objects.<name>.fields.<field>.options.<value>` |
 | View titles, descriptions, empty states | `objects.<name>._views.<view>` |
+| Bulk-action copy on a list view (button, confirm prompt, dialog fields) | `objects.<name>._views.<view>.bulkActions.<def>.label` / `.confirmText` / `.confirmLabel` / `.params.<param>.label` / `.help` / `.placeholder` — a bulk param's hint is `help`, not `helpText` |
 | Action labels, confirm text, success messages | `objects.<name>._actions.<action>` |
 | Action result dialogs (title / description / acknowledge / field labels) | `objects.<name>._actions.<action>.resultDialog` |
 | Form sections | `objects.<name>._sections.<section>` |
@@ -73,13 +74,16 @@ export default defineStack({
 | App navigation | `apps.<app>.navigation.<id>.label` |
 | Dashboard label / description | `dashboards.<name>.label` / `description` |
 | Dashboard widget title / description / sub-caption | `dashboards.<name>.widgets.<widgetId>.title` / `description` / `subCaption` |
+| Analytics dataset label / description | `datasets.<name>.label` / `description` |
+| Dataset dimension and measure labels | `datasets.<name>.dimensions.<dimension>.label` / `datasets.<name>.measures.<measure>.label` |
 | Page labels and `page:header` copy | `pages.<name>.label` / `description` / `title` / `subtitle` |
 | Screen-flow wizards (flow label, screen headings, screen field copy) | `flows.<flow>.label` / `flows.<flow>.screens.<node_id>.title` / `.fields.<field>.label` / `.placeholder` — see the boundary note below |
 | Global actions, settings, messages | `globalActions`, `settings`, `messages` |
 
 The metadata types resolved per request are **object, view, action, app,
-dashboard, and page** — a field's labels are translated as part of its object
-document, and so are the labels of any actions the object declares inline
+dashboard, dataset, and page** — a field's labels are translated as part of
+its object document, and so are the labels of any actions the object declares
+inline
 (#3370). Before that, an object document went out with its authored action
 labels untouched: `sys_approval_request`'s Approve / Reject rendered in English
 in a zh-CN workspace for every consumer except the Console, which happened to
@@ -93,6 +97,21 @@ authored field from `widget.description` (the copy under the card header).
 Two authored fields get two keys (「两个作者字段两个 key」): `description`
 translates `widget.description`, `subCaption` translates
 `widget.options.description`, and neither reaches the other's field.
+</Callout>
+
+<Callout type="info">
+**Dataset copy is keyed at the top level, not under the dashboard
+(#14253).** A dataset is the analytics definition — its dimensions and its
+measures — that widgets bind to by reference, and a measure's label is drawn
+*on the dashboard*: under every metric tile and on every chart axis. It gets
+its own `datasets.<name>` group rather than a slot under `dashboards.<name>`
+because the same measure is drawn by many widgets across many dashboards —
+keying it per presentation would ask for the same string once per widget, and
+would leave a dataset no dashboard references unaddressable. Below the
+dataset the copy is `label` and nothing else: a dimension and a measure each
+declare exactly one display string, so `description` belongs to the dataset
+itself and writing one on a dimension or measure is rejected with a message
+saying so.
 </Callout>
 
 <Callout type="info">
