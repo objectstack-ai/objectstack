@@ -99,7 +99,7 @@ Each node performs a specific action in the flow.
 | Type | Description |
 | :--- | :--- |
 | `start` | Flow entry point |
-| `end` | Flow termination — `config.outcome` says how: `completed` (default) or `refused` with an interpolated `message` ([below](#end-refuse-the-run-with-per-record-text)) |
+| `end` | Flow termination — `config.outcome` says how: `completed` (default) or `refused` with an interpolated `message` ([below](#end-node-outcome)) |
 | `decision` | Conditional branching (if/else) |
 | `assignment` | Set variable values |
 | `loop` | Structured iteration **container** — runs a body region once per item (ADR-0031) |
@@ -426,7 +426,7 @@ bound to `config.idVariable` so a later step can reference it.
 This is how a single flow walks the user through several full object forms in
 sequence (e.g. lead → account → opportunity), each step saving its own record.
 
-**End (refuse the run with per-record text):** [#end-refuse-the-run-with-per-record-text]
+### Ending a run — `completed` or `refused` [#end-node-outcome]
 
 Every `end` used to mean "completed". The terminal node now declares its
 **outcome**, so a flow can say *refuse this, and here is why, for this record*

@@ -7,7 +7,9 @@ description: Builtin Node Config protocol schemas
 
 Config contracts for the remaining flat builtins — the CRUD quartet
 (`get_record` / `create_record` / `update_record` / `delete_record`),
-`screen`, `map` (#4045) and, since #14149, `assignment`'s value contract.
+`screen`, `map` (#4045), since #14149 `assignment`'s value contract and,
+since #14945, the structural `end` node's outcome (`EndConfigSchema`, the
+one contract here the FLOW PARSE applies rather than an executor).
 Sibling of `io-node-config.zod.ts` (notify / http) and `control-flow.zod.ts`
 (loop / parallel / try_catch).
 
@@ -84,8 +86,8 @@ Deliberately absent:
 ## TypeScript Usage
 
 ```typescript
-import { AssignmentConfigSchema, AssignmentExpressionValueSchema, AssignmentValueSchema, CreateRecordConfigSchema, DeleteRecordConfigSchema, GetRecordConfigSchema, MapConfigSchema, ScreenConfigSchema, ScreenFieldConfigSchema, UpdateRecordConfigSchema } from '@objectstack/spec/automation';
-import type { AssignmentConfig, AssignmentExpressionValue, AssignmentValue, CreateRecordConfig, DeleteRecordConfig, GetRecordConfig, MapConfig, ScreenConfig, ScreenFieldConfig, UpdateRecordConfig } from '@objectstack/spec/automation';
+import { AssignmentConfigSchema, AssignmentExpressionValueSchema, AssignmentValueSchema, CreateRecordConfigSchema, DeleteRecordConfigSchema, EndConfigSchema, GetRecordConfigSchema, MapConfigSchema, ScreenConfigSchema, ScreenFieldConfigSchema, UpdateRecordConfigSchema } from '@objectstack/spec/automation';
+import type { AssignmentConfig, AssignmentExpressionValue, AssignmentValue, CreateRecordConfig, DeleteRecordConfig, EndConfig, GetRecordConfig, MapConfig, ScreenConfig, ScreenFieldConfig, UpdateRecordConfig } from '@objectstack/spec/automation';
 
 // Validate data
 const result = AssignmentConfigSchema.parse(data);
@@ -149,6 +151,18 @@ Value the variable takes: a string (`{token}` flow interpolation — a sole toke
 | **objectName** | `string` | ✅ | Object to delete from |
 | **filter** | `Record<string, any>` | optional | Field/value pairs identifying the record(s) to delete |
 | **multi** | `boolean` | optional | Declare bulk intent: delete every row the filter matches (default false — a predicate delete without it is refused by the engine) |
+
+
+---
+
+## EndConfig
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **outcome** | `Enum<'completed' \| 'refused'>` | optional (default: `"completed"`) | How the run ends when it reaches this node. `completed` (the default) is the ordinary terminal. `refused` is a first-class refusal: the run records `refused` — distinct from `failed`, a refusal is a successful evaluation that says no — carries the rendered `message`, is never resumed, and a runner shows the message with Close only: no Submit, no completion toast. |
+| **message** | `string` | optional | Why the run was refused, as a `{token}` template interpolated at run time exactly like a screen `description` (`{record.name}` etc.), so the text names the record. Required when `outcome` is `refused`; refused when it is `completed` — a completion renders nothing, so the key would be a silent no-op. |
 
 
 ---
