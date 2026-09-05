@@ -853,6 +853,13 @@ function serializeSummaryBounded(summary: NonNullable<RunRecord['summary']>): st
     acted: summary.acted,
     skipped: summary.skipped,
     unmeasured: summary.unmeasured,
+    // #14456 — a TOTAL, so it survives the detail drop with the others. It is
+    // also the one this branch would hurt most by losing: the per-node
+    // `failures` it folds are exactly what gets dropped here, so a summary
+    // over the cap would otherwise go from "two rows failed" to silence.
+    // `undefined` (an older summary that never tracked it) stringifies away,
+    // which keeps absent meaning "not tracked" on the compacted row too.
+    failed: summary.failed,
     nodes: [],
     gates: [],
     detailOmitted: true,

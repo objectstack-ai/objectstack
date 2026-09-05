@@ -1,44 +1,42 @@
-# 状态机细则(references —— 按需加载)
+# 状态机细则
 
-出处:主文件「状态模型」表,做对应转换、放行或巡查的那一刻查阅;⛔ 不引用 issue 编号。
+见 SKILL.md 〈状态模型〉;本文只放各状态的行契约、双通道与巡查判据。
 
-## 通则 —— 跨状态不变量(判定以 `check-half-states.mjs` H29/H30/H31 为权威)
+## 跨状态通则
 
-- **六态 ONE-OF**:`pm:{queue,dispatched,blocked,on-hold,awaiting-maintainer}` +
-  `needs-user-decision` 互斥;成因恒是半写的转换,故**一笔 replace**、⛔ 不 add。
-- **`pm:queue` 腐化视界 3 天**:队列是唯一「等待不是一种状态」的态,越界即欠**一次显
-  式转换**(派发 / 转 `needs-user-decision` / 停放 / 撤单 / 改写前提),⛔ 不是排期。
-- **生成物不分叉**:`skills/**` 生成器产物跑 `check-governed-merges.mjs --test`,⛔ 不按路径手判。
-- **`needs:contract-review` 双载体**:卡与交付 PR 两边都挂好、
-  挂与清各一笔、两向都读回(被剥不是红灯是放行);卡侧先挂而 PR 尚不存在是合法中间态,
-  不是半写;**交接即标签** —— 只写交接评论而不同笔挂标 = 空交接,收件箱只认标签。
+- 六态 = `pm:{queue,dispatched,blocked,on-hold,awaiting-maintainer}` 加 `needs-user-decision`。
+- 六态 ONE-OF 的成因恒是半写的转换;判定以 `check-half-states.mjs` 的 H29/H30/H31 为权威。
+- 生成物不分叉:`skills/**` 生成器产物跑 `check-governed-merges.mjs --test`,⛔ 不按路径手判。
+- `needs:contract-review` 卡侧先挂而 PR 尚不存在是合法中间态,⛔ 不读作半写。
+- 交接即标签:只写交接评论而不同笔挂标 = 空交接,收件箱只认标签。
 
-## `pm:on-hold` —— 重启条件、触发文件与放行双查
+## `pm:on-hold`
 
-- **合法性**:仅当正文或评论带机器可读行 `Restart-when: closed <owner/repo>#N`(由
-  `Blocked-by:` 的同一遍解锁扫描点火)或 `Restart-when: <一行可执行判据>` 时才合法;
-  hold 评论带日期、理由、出处(维护者裁或座位定级,⛔ 不设第二个标签区分)。
-- **机会主义重启的触发文件**走同族正典行 **`Restart-touch: <仓内相对路径>`**(一行一路径,
-  大小写敏感、行锚定,与 `Blocked-by:`/`Restart-when:` 同双通道;
-  值须为 tracked 文件)—— 喂巡查 H17 的触发文件索引;存量 hold ⛔ 不迁移、不产 finding。
-- **放行双查(两查皆机械、零判断)**:① 只对**最近一次** `pm:on-hold`/`pm:blocked` 转换评论的条
-  件放行,⛔ 永不对更早的 blocker;② 该评论之后卡上有**更新的 merged PR** ⇒ 拒绝放行。
+- 合法性:正文或评论带 `Restart-when: closed <owner/repo>#N`,由 `Blocked-by:` 同遍解锁扫描点火。
+- 或带 `Restart-when: <一行可执行判据>`;两种拼写之外的 hold ⛔ 不合法。
+- hold 评论写明日期、理由与出处(维护者裁或座位定级),⛔ 不设第二个标签区分两者。
+- 机会主义重启的触发文件走 `Restart-touch: <仓内相对路径>`,一行一路径,值须为 tracked 文件。
+- 该行大小写敏感、行锚定,与另两行同双通道,喂 H17 触发文件索引;存量 hold ⛔ 不迁移。
+- 放行双查两查皆机械零判断:① 只放最近一次 `pm:on-hold`/`pm:blocked` 转换评论的条件。
+- ② 该评论之后卡上有更新的 merged PR ⇒ 拒绝放行;⛔ 永不对更早的 blocker 放行。
 
-## `pm:blocked` —— 正典标记、完工停放(`Unlock-action:`)、上游已关
+## `pm:blocked`
 
-- **正典标记 = 行首 `Blocked-by: #N`(跨仓 `owner/repo#N`)、无装饰**;句中提及**刻意拒收** —— 指
-  令是行,提及是散文。等「PR 合并」或「发布且 pin 覆盖」的卡同理:指一张在该刻关闭的
-  卡(等发布 = pin-bump 杂事卡),⛔ 不扩词表;`Part of` 型 PR 的跟踪卡不在该刻关闭,不可用。
-- **工已完、PR 被外部门禁缺陷卡住者同用本态,⛔ 不设新标签**:`Blocked-by:` 指向门禁卡,正文
-  加机器可读行 `Unlock-action: re-check PR #M`(**只认此一值**,别的静默回落重派,散文另起行),解
-  锁扫描改出口为「重查该 PR 落地」,⛔ 永不给完工卡重派 dev;停放 PR 正文须点名门禁卡。
-- **上游已关 ⇒ 先重新推导再决定**:改判是否有**新**阻塞并改写该行,⛔ 不反射式放行;
-  正文是正典家 —— 新 blocker 停评论、正文留已关旧目标,巡查报 stale 并要求迁回。
+- 正典标记 = 行首 `Blocked-by: #N`(跨仓 `owner/repo#N`)、无装饰;指令是行,句中提及是散文。
+- 句中提及刻意拒收;等 PR 合并或等发布且 pin 覆盖的卡同理,指一张在该刻关闭的卡。
+- ⛔ 不扩词表;等发布的目标 = pin-bump 杂事卡,`Part of` 型 PR 的跟踪卡 ⛔ 不可用作目标。
+- 工已完、PR 被外部门禁缺陷卡住者同用本态,⛔ 不设新标签;`Blocked-by:` 指向那张门禁卡。
+- 正文加机器可读行 `Unlock-action: re-check PR #M`,把解锁出口改为重查该 PR 落地。
+- 只认此一值,别的拼写静默回落重派,散文另起行;停放的 PR 正文须点名那张门禁卡。
+- ⛔ 永不给完工卡重派 dev。
+- 上游已关 ⇒ 先重新推导是否有新阻塞并改写该行,⛔ 不反射式放行。
+- 正文是正典家:新 blocker 停在评论、正文留已关旧目标 ⇒ 巡查报 stale 并要求迁回正文。
 
-## `pm:awaiting-maintainer` 与 `pm:retriage` —— 出口、挂/摘两方
+## `pm:awaiting-maintainer` 与 `pm:retriage`
 
-- **awaiting 出口**(无机器出口,by construction)= 维护者完成该操作、**项目总监席**核验摘标 +
-  证据评论同笔(2026-08-27 裁:跨仓台账与出口归总监,各席只入态),在飞视图计停放库存。
-- **retriage 挂/摘分属两方**:原定级在改判前仍是权威;挂标者 = 提出异议的席位,挂标与
-  **异议评论同笔**(证据 + 建议定级),无证据评论的裸挂标不合法;摘标者 = 分诊 Routine,
-  每 fire 高优先重判、重判后摘标;标签须五仓存在(首次应用时创建);老化兜底归 H18。
+- awaiting 无机器出口:维护者完成该操作后,由项目总监席核验摘标 + 证据评论同笔。
+- awaiting 卡在在飞视图里计停放库存。
+- retriage 挂/摘分属两方:原定级在改判前仍是权威。
+- 挂标者 = 提出异议的席位,挂标与异议评论(证据 + 所求的答案)同笔;⛔ 裸挂标不合法。
+- 摘标者 = 分诊 Routine,每 fire 先答异议评论所求、答后同笔摘标;老化兜底归巡查 H18。
+- 标签须五仓存在,首次应用时创建。

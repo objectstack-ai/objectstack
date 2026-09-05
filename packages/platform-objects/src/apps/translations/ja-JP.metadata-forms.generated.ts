@@ -120,6 +120,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "最小長",
         helpText: "最小文字数"
       },
+      "fields.valueDomain": {
+        label: "Value Domain",
+        helpText: "Standard the written value must belong to; a write carrying a non-member is refused"
+      },
       "fields.rows": {
         label: "Rows",
         helpText: "Inline editor height (text rows)"
@@ -383,6 +387,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       maxLength: {
         label: "最大長",
         helpText: "最大文字数"
+      },
+      valueDomain: {
+        label: "Value Domain",
+        helpText: "Standard the written value must belong to: iana_time_zone, iso_4217_currency or iso_3166_alpha2. A write carrying a non-member is refused"
       },
       rows: {
         label: "Rows",

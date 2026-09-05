@@ -23,6 +23,18 @@
       "outputs": ["dist/**", "json-schema/**", ".next/**", "!.next/cache/**"],
       "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/content/**"]
     },
+    "@objectstack/service-settings#test": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
+        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts"
+      ]
+    },
     "@objectstack/metadata#test": {
       "dependsOn": ["build"],
       "outputs": [],
@@ -138,7 +150,8 @@
         "$TURBO_ROOT$/packages/plugins/plugin-auth/src/auth-route-ledger.conformance.test.ts",
         "$TURBO_ROOT$/scripts/check-route-envelope.mjs",
         "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
-        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts"
+        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts",
+        "$TURBO_ROOT$/scripts/**"
       ]
     },
     "@objectstack/lint#test": {

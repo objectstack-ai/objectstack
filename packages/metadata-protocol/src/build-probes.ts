@@ -23,7 +23,17 @@ export interface RuntimeBuildIssue {
     artifact: { type: string; name: string };
     /** What it exercised, when narrower than the artifact (e.g. a widget). */
     ref?: { type: string; name: string; member?: string };
-    /** 'seed_not_applied' | 'view_read_failed' | 'empty_query' | 'widget_query_failed' | 'probes_unavailable' */
+    /**
+     * 'seed_not_applied' | 'view_read_failed' | 'object_field_ref_unknown'
+     * | 'object_field_ref_rule_failed' | 'empty_query' | 'widget_query_failed'
+     * | 'probes_unavailable'
+     *
+     * [#15494] `object_field_ref_rule_failed` is the odd one out and belongs
+     * here anyway: it reports that a PROBE could not run, not that an artifact
+     * is broken. A probe plane that can only ever emit findings has no way to
+     * say "I was unable to judge this", and the absence of that vocabulary is
+     * what let a thrown rule read as a clean object.
+     */
     code: string;
     message: string;
     fix?: string;
@@ -251,7 +261,40 @@ export async function runBuildProbes(opts: RunBuildProbesOptions): Promise<Build
             let findings: Array<{ path: string; message: string; hint: string }> = [];
             try {
                 findings = validateObjectFieldRefs({ objects: [{ ...body, name: p.name }] }) ?? [];
-            } catch {
+            } catch (e) {
+                // [#15494] A rule that THREW is not an object that came back
+                // clean — but `findings = []` made the two indistinguishable
+                // on the receipt, and `checked.objects` had already counted
+                // this object, so the reading was "inspected, nothing wrong":
+                // the exact shape a genuinely clean publish produces. This
+                // plane exists to be the second, non-differential reading of
+                // the ACTIVE body; a silent catch turned it into the very
+                // false clean it was added to prevent.
+                //
+                // The crash that motivated this — a non-record entry in
+                // `stack.objects` dereferenced in the shared
+                // `indexObjectGraph` seam — is repaired in `@objectstack/lint`
+                // in the same change. This half is the standing guarantee that
+                // outlives that one bug: whatever the NEXT rule failure is,
+                // the receipt says the object was not checked and why. Error
+                // severity, because an unverified object on a publish receipt
+                // is a gap in the verification contract (ADR-0038), not a
+                // property of the artifact — the `fix` says so, so nobody
+                // hunts the object for a defect it may not have.
+                //
+                // Probes still never fail the publish they verify
+                // (`protocol.ts`), so this is louder reporting, not a new
+                // refusal.
+                issues.push({
+                    layer: 'runtime',
+                    severity: 'error',
+                    artifact: { type: 'object', name: p.name },
+                    code: 'object_field_ref_rule_failed',
+                    message:
+                        `Object "${p.name}" was NOT checked: the object field-reference rule threw — ` +
+                        `${String((e as Error)?.message ?? e)}. Its field-name lists are unverified.`,
+                    fix: `This is a defect in the lint rule, not necessarily in object "${p.name}". Report it with the message above; the object published, but nothing judged its field-name lists.`,
+                });
                 findings = [];
             }
             for (const f of findings) {

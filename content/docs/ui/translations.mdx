@@ -69,6 +69,7 @@ export default defineStack({
 | Action labels, confirm text, success messages | `objects.<name>._actions.<action>` |
 | Action result dialogs (title / description / acknowledge / field labels) | `objects.<name>._actions.<action>.resultDialog` |
 | Form sections | `objects.<name>._sections.<section>` |
+| Custom validation-rule messages | `objects.<name>._validations.<rule>.message` |
 | App navigation | `apps.<app>.navigation.<id>.label` |
 | Dashboard label / description | `dashboards.<name>.label` / `description` |
 | Dashboard widget title / description / sub-caption | `dashboards.<name>.widgets.<widgetId>.title` / `description` / `subCaption` |
@@ -245,11 +246,22 @@ up-to-date bundle re-extracts byte-identically.
 
 Honest limits worth knowing before you plan around them:
 
-- **Validation messages are not translated through bundles.** The
-  `validationMessages` group was removed in 17.0.0 (#4667): it had no runtime
-  consumer, so a translated rule message was stored and never shown. Author the
-  message on the rule itself (`object.validations[].message`), which the engine
-  returns on every rejected write.
+- **Validation messages are translatable, but substituted whole — there is no
+  interpolation.** Author the message on the rule
+  (`object.validations[].message`), which the engine returns on every rejected
+  write, and translate it under `objects.<name>._validations.<rule>.message`
+  (the row in the table above) — live since 17.3.0. The write path swaps the
+  whole sentence for the bundle's, so only the language changes: an authored
+  message has no parameter contract, so `{variable}` placeholders in it are not
+  filled, and a key the bundle does not carry falls back to the authored
+  literal.
+
+  The retired top-level `validationMessages` group is **not** what came back.
+  It was removed in 17.0.0 (#4667) because nothing read it — a translated rule
+  message was stored and never shown — and that retirement stands. It was keyed
+  by rule name alone and so could not tell two objects' rules apart; the route
+  above is object-scoped and shipped with its reader. ADR-0049's 2026-09-04
+  amendment carries that record.
 - **The `flows` group is declared, not yet applied.** A screen flow's copy has
   somewhere to live (#7646) and the keys are addressed the way the runner
   resolves them — flow name, screen node id, screen field name — but no shipped

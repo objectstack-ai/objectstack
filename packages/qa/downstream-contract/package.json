@@ -13,6 +13,7 @@
     "@objectstack/spec": "workspace:*"
   },
   "devDependencies": {
+    "@objectstack/cli": "workspace:*",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"
   }

@@ -213,11 +213,51 @@ mode_run() {
   #   the form #12142 standardised; its own note attributes the trap to the empty
   #   list, which measures clean — an all-empty read leaves the body unexecuted
   #   and the `while` at status 0.)
+  #
+  # The READER admits only what git itself routes, and .gitattributes' grammar
+  # was MEASURED for this rather than assumed (git 2.43.0, scratch repos):
+  #
+  #   a leading-`#` line is a COMMENT, and leading whitespace does not undo
+  #   that — `  # foo bar` assigns nothing to a file named `#`, while the
+  #   escaped-pattern control `\# foo bar` on that same file assigns `foo` and
+  #   `bar`. So comment lines must be dropped BEFORE the field split.
+  #
+  #   there is NO inline trailing comment. `x merge=os-regen # note` does not
+  #   route x with a note on the end; git rejects the LINE — `# is not a valid
+  #   attribute name: .gitattributes:1` on stderr, and `git check-attr merge --
+  #   x` then answers `unspecified`. Nothing to strip, because no such row can
+  #   ever be live. Pinned in the self-test against real git, so the day git
+  #   grows one this decision reddens instead of rotting.
+  #
+  #   attributes are WHITESPACE-delimited tokens, so `merge=os-regenX` is a
+  #   different driver and not this one — hence the token anchor below rather
+  #   than a bare substring.
+  #
+  # The spelling this replaced was `grep 'merge=os-regen' .gitattributes | awk
+  # '{print $1}'`, which also matched the header comment that quotes the
+  # literal in prose and took ITS first field, so the list carried a pathspec
+  # that was literally `#`. Harmless by luck — `#` matches no tracked path, so
+  # both `git diff`s below ignored it — but the COUNT printed just below is the
+  # operator's only check that this script is looking at the right surface, and
+  # it was off by one in the one place the design deliberately keeps no second
+  # copy to compare against. Measured at the repair on origin/main: 19 entries
+  # produced, 1 of them literally `#`, 18 real patterns. It had already been
+  # wrong at two different values (18 then 19) across an intervening edit, so
+  # the impurity is in the construction, not in one snapshot of the file.
+  #
+  # `scripts/git-merge-regen.mjs`'s own reader (`reconcileAttributes`) already
+  # skipped comment lines; this is that same rule, in awk.
+  #
+  # `[ \t]` rather than `[[:space:]]`: the bash 3.2 floor above is a macOS
+  # floor, and that host's awk is not gawk.
   regen_paths=()
   regen_line=''
   while IFS= read -r regen_line; do
     if [[ -n "$regen_line" ]]; then regen_paths+=("$regen_line"); fi
-  done < <(grep 'merge=os-regen' .gitattributes | awk '{print $1}')
+  done < <(awk '
+    /^[ \t]*#/ { next }
+    /(^|[ \t])merge=os-regen([ \t]|$)/ { print $1 }
+  ' .gitattributes)
   if [ "${#regen_paths[@]}" -eq 0 ]; then
     echo "✗ no merge=os-regen entries found in .gitattributes — refusing to guess" >&2
     exit 1
@@ -558,6 +598,32 @@ DRIVER
   git fetch -q origin main
 }
 
+# Build the standard fixture in $1, then replace its .gitattributes with one
+# shaped like the REAL file: prose that quotes the literal `merge=os-regen`,
+# and exactly THREE real rows. Leaves the cwd in the clone, on `feature`, with
+# the new routing committed.
+#
+# Two prose shapes, on purpose, because they fail the reader differently:
+#   the header line quotes the literal in BACKTICKS — caught by the token
+#   anchor even with comment-skipping off;
+#   the indented line mentions it whitespace-delimited — caught ONLY by
+#   comment-skipping, which is what makes it the discriminator for 8b.
+# The real .gitattributes carries the backticked shape (its line 36); the
+# indented one is the near neighbour that a future edit can add for free.
+st_fixture_list_bait() {
+  st_fixture "$1" >/dev/null 2>&1
+  cat > .gitattributes <<'ATTRS'
+# Routed generated artifacts. `merge=os-regen` hands these to the driver.
+#
+  #   an indented comment that also mentions merge=os-regen in prose
+gen/**                    merge=os-regen
+docs/generated-guide.md   merge=os-regen
+data/*.json               merge=os-regen
+ATTRS
+  git add -A
+  git commit -qm 'route three paths, with prose that quotes the literal'
+}
+
 mode_self_test() {
   tmp="$(mktemp -d "${TMPDIR:-/tmp}/os-regen-merge-selftest.XXXXXX")"
   trap 'rm -rf "$tmp"' EXIT INT TERM
@@ -735,6 +801,71 @@ mode_self_test() {
     "$(printf '%s' "$out" | grep -q 'gen/mixed.txt' && echo present || echo absent)" present
   st_case 'and the suppressed line is absent here too' \
     "$(printf '%s' "$out" | grep -c 'Do not resolve generated files textually' || true)" 0
+  cd "$here"
+
+  # --- 8. THE LIST ITSELF. The printed pattern count is the operator's ONLY
+  #        check that this script is reading the right surface — the header
+  #        says so, and says why there is deliberately no second copy to check
+  #        it against. So it is pinned here, against a fixture .gitattributes
+  #        carrying the prose shape that used to enter the list as a pathspec
+  #        literally `#`.
+  #
+  #        The assertion is an EXACT COUNT, never "no entry equals `#`": a
+  #        count also reds the day the read silently matches ZERO lines, which
+  #        an absence assertion passes with flying colours.
+  st_fixture_list_bait "$tmp/h"
+  out="$(bash "$SELF" 2>&1)" && rc=0 || rc=$?
+  st_case 'a run over the bait .gitattributes exits 0' "$rc" 0
+  st_case 'the pattern count counts ROWS, not prose that quotes the literal' \
+    "$(printf '%s' "$out" | sed -n 's/^→ os-regen paths (from .gitattributes, \([0-9]*\) patterns):$/\1/p')" 3
+  st_case 'and no phantom # pathspec is listed' \
+    "$(printf '%s' "$out" | grep -c '^    #$' || true)" 0
+  st_case 'and the three real rows all are' \
+    "$(printf '%s' "$out" | grep -cE '^    (gen/[*][*]|docs/generated-guide[.]md|data/[*][.]json)$' || true)" 3
+  # The fixture really is bait: the pre-repair spelling over-counts it by two.
+  st_case 'the pre-repair spelling over-counts the same file (fixture is bait)' \
+    "$(grep 'merge=os-regen' .gitattributes | awk '{print $1}' | wc -l | tr -d ' ')" 5
+  cd "$here"
+
+  # --- 8a. THE GRAMMAR the reader was decided against, pinned against REAL git
+  #         rather than assumed. .gitattributes has no inline trailing comment:
+  #         git rejects the whole row and routes nothing. That measurement is
+  #         why the reader strips comment LINES only and does not try to trim a
+  #         trailing `#`. If git ever grows one, this reddens and the decision
+  #         gets revisited instead of rotting.
+  st_fixture "$tmp/i" >/dev/null 2>&1
+  printf 'inline.txt merge=os-regen # trailing note\n' > .gitattributes
+  : > inline.txt
+  st_case 'git does NOT admit an inline trailing comment — the row routes nothing' \
+    "$(git check-attr merge -- inline.txt 2>/dev/null)" 'inline.txt: merge: unspecified'
+  st_case 'and names # as the invalid attribute name' \
+    "$(git check-attr merge -- inline.txt 2>&1 >/dev/null | grep -c 'is not a valid attribute name' || true)" 1
+  # Firing control for the two absences above: the same row WITHOUT the trailing
+  # comment does route. Without it, a git that stopped reading .gitattributes at
+  # all would pass both cases above.
+  printf 'inline.txt merge=os-regen\n' > .gitattributes
+  st_case 'control: the same row without the note DOES route' \
+    "$(git check-attr merge -- inline.txt 2>/dev/null)" 'inline.txt: merge: os-regen'
+  cd "$here"
+
+  # --- 8b. THE DISCRIMINATING MUTATION for case 8. Disable the reader's
+  #         comment-line skip and watch the count come back one too high — the
+  #         phantom is exactly what that rule removes. Same perl/\Q..\E literal
+  #         replacement 6b uses, keyed off the awk rule rather than a message.
+  mutated_list="$tmp/mutated-list-os-regen-merge.sh"
+  MUT_ANCHOR='    /^[ \t]*#/ { next }' \
+  MUT_INSERT='    /^[ \t]*#ZZ-NEVER-MATCHES-ZZ/ { next }' \
+    perl -0777 -pe 's/\Q$ENV{MUT_ANCHOR}\E/$ENV{MUT_INSERT}/' "$SELF" > "$mutated_list"
+  st_case 'the list mutation actually changed the script text' \
+    "$(diff -q "$SELF" "$mutated_list" >/dev/null 2>&1; echo $?)" 1
+  st_case 'and the mutated script still parses' \
+    "$(bash -n "$mutated_list" >/dev/null 2>&1; echo $?)" 0
+  st_fixture_list_bait "$tmp/h-mutated"
+  mut_out="$(bash "$mutated_list" 2>&1)" && mut_rc=0 || mut_rc=$?
+  st_case 'mutated: the phantom # is back in the list (proves case 8 bites)' \
+    "$(printf '%s' "$mut_out" | grep -c '^    #$' || true)" 1
+  st_case 'mutated: and the count is one too high' \
+    "$(printf '%s' "$mut_out" | sed -n 's/^→ os-regen paths (from .gitattributes, \([0-9]*\) patterns):$/\1/p')" 4
   cd "$here"
 
   if [ "$st_fail" -ne 0 ]; then

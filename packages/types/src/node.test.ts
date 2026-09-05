@@ -1514,3 +1514,318 @@ describe('an aliased install is verified against the name its DECLARATION names 
     expect(hostImportFailureKind(err)).toBe('declared-unresolvable');
   });
 });
+
+/**
+ * ── #15044: the SUCCEEDING leg recognised the package by the DECLARATION KEY ──
+ *
+ * #14278 taught the #14041 FALLBACK finder that `{"foo": "npm:bar@1"}` installs
+ * a package named `bar`. The same blindness survived one leg over, on the path
+ * where the CJS resolve SUCCEEDS — #13330's condition re-decision:
+ * `packageRootOf` walked up from the resolved entry looking for a manifest
+ * named `foo`, and an aliased install's manifest is named `bar`. The walk
+ * therefore never matched, `esmEntryForDeclared` returned `undefined`, and
+ * `?? resolved` handed back the entry the CJS resolver had answered — the
+ * `require` condition.
+ *
+ * ⇒ For an aliased DUAL-PUBLISHED package the host importer silently kept
+ * pre-#13330 behaviour: the CommonJS build loads while the caller's own ESM
+ * chain loads the `import` build. That is the two-instances-of-one-package
+ * split #13330 exists to remove, so what these cases assert is the SHARED
+ * INSTANCE, not the file name — a test that only checked which path was
+ * imported would pass on a fix that loaded the right file into the wrong
+ * instance.
+ *
+ * This leg is NOT #14278's: that one fired only inside `hostRequire.resolve`'s
+ * catch, a hard failure before #14041, so it could not move a working load.
+ * This one moves a load that SUCCEEDS today, which is why the non-aliased
+ * controls below matter more than another aliased assertion — the risk in the
+ * change is a regression in the ordinary case, not the aliased case it fixes.
+ */
+describe('an aliased dual-published package loads its `import` build too (#15044)', () => {
+  /** Keys the HOST writes; none of them is the name of the package installed there. */
+  const REGISTRY_KEY = 'aliased-registry';
+  const DRIVER_KEY = 'aliased-driver';
+  const SUBPATH_KEY = 'aliased-subpaths';
+  /** Manifest names the ALIAS values promise. */
+  const REGISTRY_NAME = '@fixture/alias-dual-registry';
+  const DRIVER_NAME = '@fixture/alias-dual-driver';
+  const SUBPATH_NAME = '@fixture/alias-dual-subpaths';
+  /** An ordinary, NON-aliased dual publish living in the same app. */
+  const PLAIN = '@fixture/plain-dual';
+
+  /** Module-scope state, published as both builds — the `tsup` dual-build shape. */
+  const REGISTRY_ESM = `export const BUILD = 'esm';
+const registered = [];
+export function register(name) { registered.push(name); }
+export function listRegistered() { return [...registered]; }
+`;
+  const REGISTRY_CJS = `const registered = [];
+exports.BUILD = 'cjs';
+exports.register = (name) => { registered.push(name); };
+exports.listRegistered = () => [...registered];
+`;
+  /**
+   * A driver package whose entire contract is the load-time side effect. It
+   * imports the registry by the ALIAS KEY, which is the only spelling an
+   * aliased install makes importable — the alias target's own name resolves
+   * nowhere.
+   */
+  const DRIVER_ESM = `import { register } from '${REGISTRY_KEY}';
+register('probe');
+export const BUILD = 'esm';
+`;
+  const DRIVER_CJS = `const { register } = require('${REGISTRY_KEY}');
+register('probe');
+exports.BUILD = 'cjs';
+`;
+
+  /** Nested, `types` first — the map `tsup` emits, so the walk cannot match a flat string. */
+  const DUAL: unknown = {
+    '.': {
+      import: { types: './dist/index.d.ts', default: './dist/index.js' },
+      require: { types: './dist/index.d.cts', default: './dist/index.cjs' },
+    },
+  };
+
+  const roots: string[] = [];
+
+  afterAll(() => {
+    for (const dir of roots) rmSync(dir, { recursive: true, force: true });
+  });
+
+  /**
+   * Install a package NAMED `manifestName` at `node_modules/<key>` — the
+   * on-disk shape every aliasing package manager produces.
+   */
+  function installAs(
+    root: string,
+    key: string,
+    manifestName: string,
+    exportsField: unknown,
+    files: Record<string, string>,
+  ): void {
+    const dir = join(root, 'node_modules', ...key.split('/'));
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, 'package.json'),
+      JSON.stringify({
+        name: manifestName,
+        version: '0.0.0-fixture',
+        type: 'module',
+        main: 'dist/index.cjs',
+        exports: exportsField,
+      }),
+      'utf8',
+    );
+    for (const rel of Object.keys(files)) {
+      const target = join(dir, rel);
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, files[rel] as string, 'utf8');
+    }
+  }
+
+  /**
+   * A fresh app per case. The ESM module cache is keyed by absolute URL, so a
+   * shared fixture directory would let one case's load answer the next one's
+   * question — the failure mode this whole suite exists to detect.
+   */
+  function app(tag: string, extraDependencies: Record<string, string> = {}): string {
+    const root = mkdtempSync(join(tmpdir(), `os-aliased-dual-${tag}-`));
+    roots.push(root);
+    writeFileSync(
+      join(root, 'package.json'),
+      JSON.stringify({
+        name: 'aliased-dual-host-fixture',
+        type: 'module',
+        dependencies: {
+          [REGISTRY_KEY]: `npm:${REGISTRY_NAME}@1`,
+          [DRIVER_KEY]: `npm:${DRIVER_NAME}@1`,
+          [SUBPATH_KEY]: `npm:${SUBPATH_NAME}@^2.0.0`,
+          [PLAIN]: '^1.0.0',
+          ...extraDependencies,
+        },
+      }),
+      'utf8',
+    );
+    installAs(root, REGISTRY_KEY, REGISTRY_NAME, DUAL, {
+      'dist/index.js': REGISTRY_ESM,
+      'dist/index.cjs': REGISTRY_CJS,
+    });
+    installAs(root, DRIVER_KEY, DRIVER_NAME, DUAL, {
+      'dist/index.js': DRIVER_ESM,
+      'dist/index.cjs': DRIVER_CJS,
+    });
+    installAs(
+      root,
+      SUBPATH_KEY,
+      SUBPATH_NAME,
+      {
+        '.': { import: './dist/index.js', require: './dist/index.cjs' },
+        './plugin': { import: './dist/plugin.js', require: './dist/plugin.cjs' },
+      },
+      {
+        'dist/index.js': "export const WHERE = 'root-esm';\n",
+        'dist/index.cjs': "exports.WHERE = 'root-cjs';\n",
+        'dist/plugin.js': "export const WHERE = 'plugin-esm';\n",
+        'dist/plugin.cjs': "exports.WHERE = 'plugin-cjs';\n",
+      },
+    );
+    // NON-aliased, installed under its own name: the ordinary case, in the very
+    // same app, so a change that moved it would redden here.
+    installAs(root, PLAIN, PLAIN, DUAL, {
+      'dist/index.js': "export const BUILD = 'plain-esm';\n",
+      'dist/index.cjs': "exports.BUILD = 'plain-cjs';\n",
+    });
+    return root;
+  }
+
+  /** The instance an ESM consumer chain holds — what the Runtime reads. */
+  function esmInstance(root: string): Promise<{ BUILD: string; listRegistered: () => string[] }> {
+    return import(pathToFileURL(join(root, 'node_modules', REGISTRY_KEY, 'dist', 'index.js')).href);
+  }
+
+  /** The instance a CommonJS load lands in — where the registration used to go. */
+  function cjsInstance(root: string): Promise<{ BUILD: string; listRegistered: () => string[] }> {
+    return import(pathToFileURL(join(root, 'node_modules', REGISTRY_KEY, 'dist', 'index.cjs')).href);
+  }
+
+  // No `fallbackImport`: every fixture here is DECLARED, so the undeclared leg
+  // (the only consumer of that base) is never reached.
+  const importer = (root: string) => createHostImporter(root);
+
+  it('CONTROL: the reader can see BOTH answers, so an empty registry is a reading', async () => {
+    // Every assertion below rests on `listRegistered()` being able to come back
+    // non-empty. A probe that could only ever return `[]` would make the whole
+    // describe pass on a broken fix — so it is proved here, on the same
+    // instrument, before anything is measured with it.
+    const root = app('control');
+    const esm = await esmInstance(root);
+    const cjs = await cjsInstance(root);
+
+    expect(esm.BUILD).toBe('esm');
+    expect(cjs.BUILD).toBe('cjs');
+    expect(esm.listRegistered()).toEqual([]);
+    expect(cjs.listRegistered()).toEqual([]);
+  });
+
+  it('PRECONDITION: the CJS resolve SUCCEEDS here — this is #13330\'s leg, not #14041\'s', () => {
+    // What separates this card from #14278: nothing throws, so the fallback
+    // finder never runs and the load being corrected is one that works today.
+    // If a future Node stopped answering the `require` condition here, this
+    // says so rather than leaving the fix looking like a no-op.
+    const root = app('precondition');
+    expect(createHostRequire(root).resolve(DRIVER_KEY)).toMatch(/dist[/\\]index\.cjs$/);
+  });
+
+  it('THE CARD: an aliased dual publish loads the `import` build, not the `require` one', async () => {
+    const root = app('import-condition');
+    expect((await importer(root)(DRIVER_KEY)).BUILD).toBe('esm');
+  });
+
+  it("a driver's load-time registration lands in the instance an ESM caller reads", async () => {
+    // The defect stated as its consequence — the two-instances split. Before
+    // the fix this stayed `[]`.
+    const root = app('visible');
+    expect((await esmInstance(root)).listRegistered()).toEqual([]);
+    await importer(root)(DRIVER_KEY);
+    expect((await esmInstance(root)).listRegistered()).toEqual(['probe']);
+  });
+
+  it('and no longer lands in the CommonJS instance nothing reads', async () => {
+    // The other direction: the registration MOVED, it was not duplicated.
+    const root = app('cjs-empty');
+    await importer(root)(DRIVER_KEY);
+    expect((await cjsInstance(root)).listRegistered()).toEqual([]);
+    expect((await esmInstance(root)).listRegistered()).toEqual(['probe']);
+  });
+
+  it('the exports SUBPATH is still cut from the KEY, not from the aliased name', async () => {
+    // The two names are different questions (see `esmEntryForDeclared`). The
+    // package ROOT is recognised by the name the declaration promises; the
+    // SUBPATH is what the specifier spells after the key. Using the aliased
+    // name for both would compute a nonsense subpath here.
+    const root = app('subpath');
+    expect((await importer(root)(SUBPATH_KEY)).WHERE).toBe('root-esm');
+    expect((await importer(root)(`${SUBPATH_KEY}/plugin`)).WHERE).toBe('plugin-esm');
+  });
+
+  it('a `workspace:` ALIAS is recognised too; a plain `workspace:` range is a RANGE', async () => {
+    const aliased = app('workspace-alias', { 'ws-dual': 'workspace:@fixture/ws-dual-target@*' });
+    installAs(aliased, 'ws-dual', '@fixture/ws-dual-target', DUAL, {
+      'dist/index.js': "export const BUILD = 'ws-esm';\n",
+      'dist/index.cjs': "exports.BUILD = 'ws-cjs';\n",
+    });
+    expect((await importer(aliased)('ws-dual')).BUILD).toBe('ws-esm');
+
+    // `workspace:*` carries no name, so the key stays the expectation and the
+    // package installed under its own name is recognised exactly as before.
+    const plain = app('workspace-range', { '@fixture/ws-plain-dual': 'workspace:*' });
+    installAs(plain, '@fixture/ws-plain-dual', '@fixture/ws-plain-dual', DUAL, {
+      'dist/index.js': "export const BUILD = 'ws-plain-esm';\n",
+      'dist/index.cjs': "exports.BUILD = 'ws-plain-cjs';\n",
+    });
+    expect((await importer(plain)('@fixture/ws-plain-dual')).BUILD).toBe('ws-plain-esm');
+  });
+
+  it('CONTROL (non-aliased): an ordinary install\'s selected entry does not move', async () => {
+    // The control worth more than another aliased assertion: the risk in this
+    // change is a regression in the ordinary case, which already works. Same
+    // app, same importer, plain range, installed under its own name.
+    const root = app('plain-unmoved');
+    expect((await importer(root)(PLAIN)).BUILD).toBe('plain-esm');
+  });
+
+  it('CONTROL (non-aliased): a package publishing only `require` still loads', async () => {
+    // Narrowness, on the ordinary path: there is no `import` entry to prefer,
+    // so the resolved CJS path is used exactly as before. The fix may not turn
+    // a working load into a failure.
+    const root = app('require-only', { '@fixture/plain-require-only': '^1.0.0' });
+    installAs(root, '@fixture/plain-require-only', '@fixture/plain-require-only', {
+      '.': { require: './dist/index.cjs' },
+    }, { 'dist/index.cjs': "exports.BUILD = 'require-only';\n" });
+    expect((await importer(root)('@fixture/plain-require-only')).BUILD).toBe('require-only');
+  });
+
+  it('TIGHTNESS: an alias naming one package does not license a directory holding another', async () => {
+    // The expectation moved; the comparison did not. The declaration says this
+    // directory holds `@fixture/alias-declared`; it holds something else, so
+    // the walk must NOT recognise it as the declared package's root and the
+    // load stays on the CJS resolver's own answer — today's behaviour for an
+    // unrecognised root, unchanged.
+    const root = app('alias-mismatch', { 'aliased-wrong': 'npm:@fixture/alias-declared@1' });
+    installAs(root, 'aliased-wrong', '@fixture/alias-installed', DUAL, {
+      'dist/index.js': "export const BUILD = 'imposter-esm';\n",
+      'dist/index.cjs': "exports.BUILD = 'imposter-cjs';\n",
+    });
+    expect((await importer(root)('aliased-wrong')).BUILD).toBe('imposter-cjs');
+  });
+
+  it('TIGHTNESS: a NON-aliased declaration is still verified against the KEY', async () => {
+    // The other half of the same property: a plain range declares no alias, so
+    // a directory holding a different package is still not recognised. An
+    // aliased-install green that also greened this one would mean the walk got
+    // looser, not smarter.
+    const root = app('plain-mismatch', { '@fixture/plain-range': '^1.0.0' });
+    installAs(root, '@fixture/plain-range', '@fixture/somebody-else', DUAL, {
+      'dist/index.js': "export const BUILD = 'somebody-else-esm';\n",
+      'dist/index.cjs': "exports.BUILD = 'somebody-else-cjs';\n",
+    });
+    expect((await importer(root)('@fixture/plain-range')).BUILD).toBe('somebody-else-cjs');
+  });
+
+  it('BOUNDARY: a `link:` target whose manifest names something else keeps today\'s load', async () => {
+    // Declared residue, pinned rather than left silent. `link:` / `file:` name
+    // a LOCATION, so no package name can be parsed out of them and the key
+    // stays the expectation — exactly as #14278 ruled for the sibling leg. On
+    // THIS leg the consequence is a load rather than a refusal: the `require`
+    // build keeps loading. Widening it would mean recognising a package root
+    // the host never named, which is the direction the manifest-name check
+    // exists to refuse.
+    const root = app('link-mismatch', { 'linked-other': 'link:../elsewhere' });
+    installAs(root, 'linked-other', '@fixture/some-other-name', DUAL, {
+      'dist/index.js': "export const BUILD = 'linked-esm';\n",
+      'dist/index.cjs': "exports.BUILD = 'linked-cjs';\n",
+    });
+    expect((await importer(root)('linked-other')).BUILD).toBe('linked-cjs');
+  });
+});

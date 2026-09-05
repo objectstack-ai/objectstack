@@ -119,6 +119,61 @@ const REPO_ROOT = resolve(HERE, '..');
 const SCRIPTS_DIR = join(REPO_ROOT, 'scripts');
 
 /**
+ * POPULATION DECLARATION -- the corpus this gate's verdict is ABOUT, in the
+ * subtree spelling `scripts/pm/dispatch-gates.mjs` compares in.
+ *
+ * Nothing here reads it; `mirrorFiles()` and `checkPair()` do. It is declared
+ * anyway, because the dispatch derivation reads SOURCE TEXT and this gate's
+ * population is discovered by EXTENSION with no path literal anywhere: the walk
+ * is rooted at `SCRIPTS_DIR`, whose only spelled component is the bare
+ * single-segment word `scripts` -- no separator, so `extractWatchHints`
+ * recovers nothing from it, and `hintCovers` would refuse a bare word anyway.
+ *
+ * Measured on `ca46f8f12` before this constant existed, on the exact change set
+ * the defect was filed from:
+ *
+ *   dispatch-gates --commands -- scripts/js-comment-mask.d.mts \
+ *                                scripts/js-comment-mask.mjs
+ *     -> 31 commands, ZERO of them this gate
+ *
+ * So the one class of change this gate exists for -- a hand-written `.d.mts`
+ * moving out of step with the module it mirrors -- was the class the derivation
+ * never sent here, and the red arrived in CI a cycle late (#15553; the specimen
+ * is PR #15532, whose 32 derived commands were all green while this gate went
+ * red on an arity mismatch).
+ *
+ * BOTH SIDES are declared, because either side moving breaks the mirror: the
+ * declaration side is what `mirrorFiles()` walks, and the module side is what
+ * `checkPair()` imports to read `Function.length` off. A change set naming only
+ * `js-comment-mask.mjs` can turn this gate red without touching a `.d.mts` at
+ * all.
+ *
+ * ⛔ NOT a hand list of the four mirror pairs: the corpus is DISCOVERED on
+ * purpose (see this file's header), and a hint list that enumerated today's
+ * pairs would go quiet on the fifth exactly as the walk would not.
+ *
+ * ## The precision this costs, measured rather than asserted
+ *
+ * `scripts/**\/*.d.mts` reaches 4 tracked files and this gate reads all 4 --
+ * 100% precise. `scripts/**\/*.mjs` reaches 214 and this gate reads 4 of them
+ * -- 1.9%. That second hint is the price of keeping the module side declared
+ * without a hand list, and it is small in the only currency that matters here:
+ * the pair of commands `lint.yml` runs costs ~0.18 s of wall clock, and over
+ * the 36 open PRs on the day this landed it newly named this gate on 10 of them
+ * (1 through the `.d.mts` hint, 9 through the `.mjs` one). ~1.6 s of fleet
+ * compute per 36 cards, against a defect class whose alternative is a CI red a
+ * cycle late. Under `hintCovers`' recorded ruling -- over-naming is loud and
+ * self-limiting, under-naming is silent -- that trade runs the right way.
+ *
+ * Spelled as a LITERAL array, never computed from the walk's extension test:
+ * the extractor reads SOURCE TEXT, so a built spelling keeps this value
+ * identical at runtime, keeps every assertion about it green, and contributes
+ * ZERO hints. `check-watch-hint-literal.mjs` holds that rule fleet-wide; the
+ * self-test below holds the own-source half.
+ */
+const ROOT_DIR_WATCH_HINTS = ['scripts/**/*.d.mts', 'scripts/**/*.mjs'];
+
+/**
  * The export spellings this parser recognises, in the words a declaration
  * author would write them. Published for the same reason the cross-package
  * gate publishes its path spellings: an unrecognised spelling must be a red
@@ -429,7 +484,7 @@ const SELF_TEST_VERDICT = 'check-declaration-mirrors self-test reached its verdi
 // not red. A battery BELOW its floor means cases stopped running; the remedy is
 // to find what stopped registering.
 const SELF_TEST_BATTERIES = Object.freeze({
-  'check-declaration-mirrors self-test': 23,
+  'check-declaration-mirrors self-test': 29,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -601,6 +656,70 @@ async function selfTest() {
   ok(
     'and it finds them under scripts/ by extension, not by a hand-kept list',
     mirrorFiles().every((f) => f.endsWith('.d.mts')),
+  );
+
+  // ── the population this gate DECLARES to the dispatch derivation (#15553) ──
+  //
+  // The walk above is discovered by EXTENSION and spells no path, so before the
+  // declaration beside `SCRIPTS_DIR` existed a change set naming a mirror --
+  // either half of one -- derived every other `scripts/` family and not this
+  // one. Nothing in THIS file can ENFORCE the declaration: `extractWatchHints`
+  // and `hintCovers` live in another tool entirely, so a wrong or missing one
+  // runs green here forever. What CAN be held here are the properties a wrong
+  // one breaks -- it is a live literal the extractor can read, it is not the
+  // bare root the consumer refuses or over-names on, and its extensions still
+  // admit every file the walk really opens, on BOTH sides of a mirror.
+  const declaredRoots = ROOT_DIR_WATCH_HINTS.map((h) => h.split('/')[0]);
+  const declaredSuffixes = ROOT_DIR_WATCH_HINTS.map((h) => h.slice(h.lastIndexOf('*') + 1));
+  const admits = (repoRelative) =>
+    ROOT_DIR_WATCH_HINTS.some((h, i) =>
+      repoRelative.split('/')[0] === declaredRoots[i] && repoRelative.endsWith(declaredSuffixes[i]));
+  ok(
+    'the gate declares a population at all',
+    Array.isArray(ROOT_DIR_WATCH_HINTS) && ROOT_DIR_WATCH_HINTS.length > 0,
+  );
+  ok(
+    'every declared hint is multi-segment, so the consumer does not refuse it as a bare word',
+    ROOT_DIR_WATCH_HINTS.every((h) => h.split('/').filter(Boolean).length > 1),
+  );
+  ok(
+    'and none of them is the bare subtree or the repo root, which would name this gate for every '
+      + 'JSON, Markdown and text file the walk never opens',
+    ROOT_DIR_WATCH_HINTS.every((h) => !h.endsWith('/**') && h !== '.' && h !== '**'),
+  );
+  // The card's own point, held against the LIVE walk rather than a fixture: the
+  // declaration side of every mirror this tree really has is admitted by the
+  // extensions declared. A fifth pair added tomorrow is walked by `mirrorFiles`
+  // and covered by the same hint, which is the property a hand list would lose.
+  ok(
+    'every declaration the walk discovers is admitted by a declared hint',
+    mirrorFiles().length > 0
+      && mirrorFiles().every((f) => admits(relative(REPO_ROOT, f).split(sep).join('/'))),
+  );
+  // And the MODULE side, which `checkPair` imports to read `Function.length`
+  // off: an arity change there reds this gate with no `.d.mts` edited at all,
+  // so a declaration naming only the declarations would miss half the class.
+  ok(
+    'and so is the module each declaration mirrors, whose arity the gate reads',
+    mirrorFiles().length > 0
+      && mirrorFiles().every((f) =>
+        admits(relative(REPO_ROOT, f.replace(/\.d\.mts$/, '.mjs')).split(sep).join('/'))),
+  );
+  // Read from THIS file's own source, comment-masked and scoped to the
+  // declaration STATEMENT: a whole-file search finds the spellings the docblock
+  // above writes and passes on a computed declaration, which is the one
+  // spelling that keeps every case above green while contributing ZERO hints.
+  const ownDeclaration = (() => {
+    const code = maskComments(readFileSync(fileURLToPath(import.meta.url), 'utf8'));
+    const sites = [...code.matchAll(/\bconst\s+ROOT_DIR_WATCH_HINTS\s*=\s*([^;]*);/g)];
+    return sites.length === 1 ? sites[0][1] : null;
+  })();
+  ok(
+    'the declaration is ONE literal array of quoted strings — a computed spelling keeps this value '
+      + 'identical at runtime and contributes ZERO hints to the derivation',
+    ownDeclaration !== null
+      && ROOT_DIR_WATCH_HINTS.every((h) => ownDeclaration.includes(`'${h}'`))
+      && /^\s*\[\s*(?:'[^'\\]*'\s*,\s*)*'[^'\\]*'\s*,?\s*\]\s*$/.test(ownDeclaration),
   );
 
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ────

@@ -101,14 +101,14 @@
  * roster had been removed. The control caught it; nothing else would have.
  */
 
-import { readFileSync, writeFileSync, rmSync, readdirSync, existsSync, mkdtempSync } from 'node:fs';
+import { readFileSync, writeFileSync, rmSync, readdirSync, existsSync, mkdirSync, mkdtempSync, symlinkSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join, dirname, basename, sep } from 'node:path';
 import { tmpdir } from 'node:os';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { isEntrypoint } from './invoked-as.mjs';
-import { maskComments } from './js-comment-mask.mjs';
+import { blank, maskComments, scanSource } from './js-comment-mask.mjs';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 
@@ -244,14 +244,62 @@ export function selfTestDefs(src) {
   return [...names];
 }
 
-/** Insert `return;` as the first statement of `name`. Returns null when absent. */
+/**
+ * The source a DEFINITION may be anchored in: comments AND the content of every
+ * string, template and regex literal blanked, every other byte -- and every
+ * offset and line number -- left exactly where it was, so a match found here
+ * slices the ORIGINAL text.
+ *
+ * ⛔ NOT for the population criterion above, which must keep reading
+ * `maskComments`. Every `--self-test` dispatch names the flag with a string
+ * literal, so this mask blanks the dispatch out of every file in the tree; a
+ * control below pins the two masks to their opposite answers.
+ */
+export function maskCommentsAndLiterals(source) {
+  const { comment, literal } = scanSource(source);
+  const both = new Uint8Array(source.length);
+  for (let i = 0; i < both.length; i++) both[i] = comment[i] | literal[i];
+  return blank(source, both);
+}
+
+/**
+ * Insert `return;` as the first statement of `name`. Returns null when absent.
+ *
+ * TWO rules make the anchor the DEFINITION rather than the first text that reads
+ * like one, and NEITHER is redundant -- the control fixture below carries one
+ * decoy of each kind, in this order, ahead of its real definition:
+ *
+ *   MASKED     the match is taken over `maskCommentsAndLiterals(src)`. Read raw,
+ *              the first `function selfTest() {` in `scripts/pm/dispatch-gates.mjs`
+ *              is a sentence in a docblock and the next is a FIXTURE STRING.
+ *   LINE-START the match must BEGIN a line, `export` / `async` being the only
+ *              prefixes a definition in this tree carries. Masking alone still
+ *              prefers a mid-line named function expression -- a value in an
+ *              object literal is not the function the dispatch calls.
+ *
+ * What the first rule costs when it is missing is not an absence: injecting into
+ * a template literal makes the copy a SyntaxError, and a copy that dies in the
+ * parser exits non-zero and prints a stack, so `mutatedSpoke` is true and the
+ * verdict above reads HELD -- a hold awarded to a gate for the probe having
+ * broken its own copy of it. `scripts/pm/dispatch-gates.mjs` carried an
+ * `ENTRY_BY_HAND` null for months over exactly this, a limit of the INSTRUMENT
+ * recorded as a property of the FILE (#14963). Anchored on the definition its
+ * copy parses and runs -- measured by hand, exit 1 and `selfTest() returned
+ * without reaching its verdict`. The row it leaves is still NOT MEASURED, but
+ * for a reason the probe now states itself: see that row.
+ */
 export function injectEarlyReturn(src, name) {
+  const code = maskCommentsAndLiterals(src);
   const pats = [
-    new RegExp(`(?:async\\s+)?function\\s+${name}\\s*\\([^)]*\\)\\s*(?::\\s*[A-Za-z_$][\\w$<>\\[\\]|. ]*\\s*)?\\{`),
-    new RegExp(`const\\s+${name}\\s*=\\s*(?:async\\s*)?\\([^)]*\\)\\s*(?::[^=]*)?=>\\s*\\{`),
+    new RegExp(
+      `^[ \\t]*(?:export\\s+(?:default\\s+)?)?(?:async\\s+)?function\\s+${name}\\s*\\([^)]*\\)` +
+        `\\s*(?::\\s*[A-Za-z_$][\\w$<>\\[\\]|. ]*\\s*)?\\{`,
+      'm',
+    ),
+    new RegExp(`^[ \\t]*(?:export\\s+)?const\\s+${name}\\s*=\\s*(?:async\\s*)?\\([^)]*\\)\\s*(?::[^=]*)?=>\\s*\\{`, 'm'),
   ];
   for (const re of pats) {
-    const m = src.match(re);
+    const m = code.match(re);
     if (!m) continue;
     const at = m.index + m[0].length;
     return `${src.slice(0, at)}\n  return; /*${PROBE_MARKER}*/\n${src.slice(at)}`;
@@ -260,12 +308,141 @@ export function injectEarlyReturn(src, name) {
 }
 
 /**
+ * Where the mutated copy is written, and what its placement has to answer.
+ *
+ * The copy used to be written BESIDE the original, which answered "do relative
+ * imports and repo-root resolution still resolve?" by construction -- and broke
+ * a different question nobody had asked it: a near-duplicate of a gate, sitting
+ * under `scripts/`, is a FINDING for any gate whose own work is to walk that
+ * tree. That gate's BASELINE then exits non-zero, the precondition ends the
+ * probe, and the row reads NOT MEASURED `baseline run failed (exit 1)` -- a
+ * limit of the INSTRUMENT recorded as a property of the FILE, which is the
+ * mistake this whole file exists to stop making. Measured on
+ * `check-pnpm-filter-targets.mjs`: `--self-test` exits 0 alone and exits 1 with
+ * a copy of itself beside it, over its own "the checked-in tree is clean" sweep
+ * (#15515). Naming the copy so the walking gates skip it is the same mistake
+ * from the other side -- it weakens the gates to suit the instrument.
+ *
+ * So the copy goes OUTSIDE every walked tree, into a fresh temp directory, and
+ * the three things the old placement answered implicitly are answered here
+ * explicitly. Every rewrite below is applied ONLY where `scanSource` says the
+ * text is real CODE: several gates in this tree feed themselves fixture STRINGS
+ * containing import statements and the word `import.meta.url`, and rewriting one
+ * of those would change what the gate scans rather than where the copy resolves.
+ *
+ *   1. RELATIVE SPECIFIERS -- `from './x.mjs'`, `import('../y.mjs')` and the
+ *      bare `import './z.mjs'` -- become absolute `file://` URLs of the
+ *      ORIGINAL's neighbours, so the copy imports the very modules the original
+ *      imports (measured over the census: 320 `from` and 5 dynamic).
+ *   2. `import.meta.url` becomes a literal naming the ORIGINAL (and
+ *      `import.meta.dirname` / `.filename` likewise), so `new URL('..',
+ *      import.meta.url)` ROOT resolution, `createRequire`, and the `importerUrl`
+ *      that `requireDependency` turns into its `fromDir` all answer as they did.
+ *      The ONE exception is the argument of `isEntrypoint(...)`, which asks "was
+ *      THIS file run?" -- 145 of the census's dispatches sit behind that call,
+ *      and answering it about the original would leave every one of those copies
+ *      parsing, running NOTHING, printing nothing and exiting 0: a whole-census
+ *      false DEFEATED, the loudest wrong answer available here.
+ *   3. BARE specifiers resolve by walking up from the file, so the temp
+ *      directory is given a `node_modules` symlink to the nearest one above the
+ *      ORIGINAL. Without it `import 'typescript'` (4 members) and the dynamic
+ *      `import('yaml')` inside `requireDependency` (51 call sites) die in module
+ *      resolution -- non-zero AND speaking, which this file scores HELD. That is
+ *      the FLATTERING direction, so it is closed rather than accepted.
+ *
+ * `cwd` stays `ROOT`, so nothing resolved from `process.cwd()` moves at all.
+ *
+ * A member this cannot serve keeps the OLD placement, per row and never
+ * silently -- the row publishes `placement: 'beside'` and the reason.
+ */
+const RELATIVE_SPECIFIER = /^\.\.?\//;
+
+/** `from '<spec>'` -- the static import and re-export form. */
+const SPEC_FROM = /(?<![.\w$])from(\s*)(['"])([^'"\n]*)\2/g;
+/** `import('<spec>')` -- the dynamic form. */
+const SPEC_DYNAMIC = /(?<![.\w$])import(\s*\(\s*)(['"])([^'"\n]*)\2/g;
+/** `import '<spec>'` -- the side-effect-only form. */
+const SPEC_BARE = /(?<![.\w$])import(\s+)(['"])([^'"\n]*)\2/g;
+/**
+ * A specifier written as a TEMPLATE literal. Not rewritable to a literal URL --
+ * it is an expression -- so a member carrying one keeps the old placement rather
+ * than being relocated with a specifier that would resolve against the temp dir.
+ */
+const SPEC_TEMPLATE = /(?<![.\w$])(?:from|import)\s*\(?\s*`\.\.?\//g;
+
+/** A match is CODE only where it is neither comment nor string/template content. */
+const isCode = (flags, at) => flags.comment[at] === 0 && flags.literal[at] === 0;
+
+/** The nearest existing `node_modules` at or above `fromDir`, or `null`. */
+export function nearestNodeModules(fromDir) {
+  for (let dir = fromDir; ; ) {
+    const candidate = join(dir, 'node_modules');
+    if (existsSync(candidate)) return candidate;
+    const up = dirname(dir);
+    if (up === dir) return null;
+    dir = up;
+  }
+}
+
+/**
+ * Rewrite `source` so that, run from anywhere, it resolves what `absFile` would.
+ *
+ * @returns `{ source, blocked }` -- `blocked` non-empty means DO NOT relocate
+ * this file, and each entry is the reason, published on the row.
+ */
+export function relocateSource(source, absFile) {
+  const flags = scanSource(source);
+  const selfUrl = pathToFileURL(absFile).href;
+  const edits = [];
+  const blocked = [];
+
+  for (const m of source.matchAll(/import\.meta\.(\w+)/g)) {
+    if (!isCode(flags, m.index)) continue;
+    const span = { at: m.index, end: m.index + m[0].length };
+    if (m[1] === 'url') {
+      // The entry guard must keep asking about the RUNNING file -- see rule 2.
+      if (/isEntrypoint\(\s*$/.test(source.slice(Math.max(0, span.at - 40), span.at))) continue;
+      edits.push({ ...span, text: JSON.stringify(selfUrl) });
+    } else if (m[1] === 'dirname') {
+      edits.push({ ...span, text: JSON.stringify(dirname(absFile)) });
+    } else if (m[1] === 'filename') {
+      edits.push({ ...span, text: JSON.stringify(absFile) });
+    } else {
+      blocked.push(`import.meta.${m[1]} resolves from the running file's own url, which is not a literal to rewrite`);
+    }
+  }
+
+  for (const re of [SPEC_FROM, SPEC_DYNAMIC, SPEC_BARE]) {
+    for (const m of source.matchAll(re)) {
+      if (!isCode(flags, m.index)) continue;
+      if (!RELATIVE_SPECIFIER.test(m[3])) continue;
+      const end = m.index + m[0].length;
+      edits.push({ at: end - (m[3].length + 2), end, text: JSON.stringify(new URL(m[3], selfUrl).href) });
+    }
+  }
+  for (const m of source.matchAll(SPEC_TEMPLATE)) {
+    if (!isCode(flags, m.index)) continue;
+    blocked.push('a relative import specifier written as a template literal is an expression, not a literal to rewrite');
+  }
+
+  if (blocked.length > 0) return { source, blocked };
+  let out = source;
+  for (const e of edits.sort((a, b) => b.at - a.at)) out = out.slice(0, e.at) + e.text + out.slice(e.end);
+  return { source: out, blocked };
+}
+
+/**
  * Run one gate's `--self-test` with an early `return` at the top of `entry`.
  *
- * The copy is written BESIDE the original so relative imports and repo-root
- * resolution still answer the same, and the marker is re-read FROM DISK before
- * the run: an editor step that matched nothing exits 0 just as happily as one
- * that landed, and an unmutated file would report "held" for no reason at all.
+ * The copy is written OUTSIDE every walked tree and rewritten to resolve what
+ * the original resolves -- see the placement docblock above -- and the marker is
+ * re-read FROM DISK before the run: an editor step that matched nothing exits 0
+ * just as happily as one that landed, and an unmutated file would report "held"
+ * for no reason at all.
+ *
+ * `placement: 'beside'` forces the OLD placement, next to the original. It is
+ * the control's way of reproducing the defect above on a fixture; nothing in the
+ * census passes it.
  *
  * THE BASELINE IS A PRECONDITION, NOT A DATA POINT. It is read BEFORE any
  * reading of the mutated run, and a non-zero one ends the probe as NOT MEASURED
@@ -276,23 +453,47 @@ export function injectEarlyReturn(src, name) {
  * row still publishes what the baseline said, because `baselineHead` is usually
  * the whole diagnosis (`Cannot find package ...` reads as "run pnpm install").
  */
-export function probeEarlyReturn(absFile, entry, { timeout = 120000 } = {}) {
+export function probeEarlyReturn(absFile, entry, { timeout = 120000, placement = 'relocated' } = {}) {
   const src = readFileSync(absFile, 'utf8');
   const mutated = injectEarlyReturn(src, entry);
   if (mutated === null) return { verdict: 'NOT MEASURED', why: `no injectable definition of ${entry}` };
   if (src.includes(PROBE_MARKER)) return { verdict: 'NOT MEASURED', why: 'marker already present in source' };
 
-  const probePath = join(dirname(absFile), `.self-test-floor-probe-${basename(absFile)}`);
+  const relocation = placement === 'beside' ? { source: mutated, blocked: [] } : relocateSource(mutated, absFile);
+  const probeName = `.self-test-floor-probe-${basename(absFile)}`;
+  let probeDir = null;
+  let probePath = join(dirname(absFile), probeName);
+  let text = mutated;
+  let besideWhy = relocation.blocked.length > 0 ? relocation.blocked.join('; ') : null;
+  if (placement !== 'beside' && relocation.blocked.length === 0) {
+    try {
+      probeDir = mkdtempSync(join(tmpdir(), 'self-test-floor-probe-'));
+      const modules = nearestNodeModules(dirname(absFile));
+      if (modules) symlinkSync(modules, join(probeDir, 'node_modules'));
+      probePath = join(probeDir, probeName);
+      text = relocation.source;
+    } catch (err) {
+      // Relocation is the better placement, not a required one: a temp dir that
+      // cannot be made or linked falls back to the original placement, saying so.
+      if (probeDir) rmSync(probeDir, { recursive: true, force: true });
+      probeDir = null;
+      probePath = join(dirname(absFile), probeName);
+      text = mutated;
+      besideWhy = `relocation failed (${err?.code ?? err?.message ?? 'unknown'})`;
+    }
+  }
+  const beside = probeDir === null && placement !== 'beside' ? { placement: 'beside', placementWhy: besideWhy } : {};
+
   const isTs = /\.(mts|ts)$/.test(absFile);
   const cmd = isTs ? join(ROOT, 'node_modules/.bin/tsx') : process.execPath;
   try {
-    writeFileSync(probePath, mutated);
+    writeFileSync(probePath, text);
     const onDisk = (readFileSync(probePath, 'utf8').match(new RegExp(PROBE_MARKER, 'g')) ?? []).length;
-    if (onDisk !== 1) return { verdict: 'NOT MEASURED', why: `mutation not on disk (marker x${onDisk})` };
+    if (onDisk !== 1) return { verdict: 'NOT MEASURED', why: `mutation not on disk (marker x${onDisk})`, ...beside };
 
     const base = spawnSync(cmd, [absFile, '--self-test'], { cwd: ROOT, timeout, encoding: 'utf8' });
     const baseOut = (base.stdout ?? '') + (base.stderr ?? '');
-    if (base.signal) return { verdict: 'NOT MEASURED', why: `killed by ${base.signal}` };
+    if (base.signal) return { verdict: 'NOT MEASURED', why: `killed by ${base.signal}`, ...beside };
     // PRECONDITION. A file the tree cannot run offered the mutation nothing to
     // defeat, so no verdict below is available -- however loudly the mutated run
     // would have exited and spoken. Read before the mutated run is spawned.
@@ -307,16 +508,17 @@ export function probeEarlyReturn(absFile, entry, { timeout = 120000 } = {}) {
         baselineExit: base.status,
         baselineBytes: baseOut.length,
         baselineHead: firstNonBlankLine(baseOut),
+        ...beside,
       };
     }
 
     const mut = spawnSync(cmd, [probePath, '--self-test'], { cwd: ROOT, timeout, encoding: 'utf8' });
     const mutOut = (mut.stdout ?? '') + (mut.stderr ?? '');
-    if (mut.signal) return { verdict: 'NOT MEASURED', why: `killed by ${mut.signal}` };
+    if (mut.signal) return { verdict: 'NOT MEASURED', why: `killed by ${mut.signal}`, ...beside };
     // A mutation that changed nothing observable did not reach the executed
     // path, whatever its exit code says.
     if (baseOut === mutOut && base.status === mut.status) {
-      return { verdict: 'NOT MEASURED', why: 'mutation had no observable effect' };
+      return { verdict: 'NOT MEASURED', why: 'mutation had no observable effect', ...beside };
     }
     // Did the mutated run SAY anything? Read as "printed a non-blank line", the
     // same reading `mutatedHead` already publishes and quotes -- a run whose whole
@@ -332,9 +534,11 @@ export function probeEarlyReturn(absFile, entry, { timeout = 120000 } = {}) {
       mutatedBytes: mutOut.length,
       mutatedHead,
       mutatedSpoke,
+      ...beside,
     };
   } finally {
     rmSync(probePath, { force: true });
+    if (probeDir) rmSync(probeDir, { recursive: true, force: true });
   }
 }
 
@@ -436,7 +640,7 @@ const UNRUNNABLE_GATE = [
  * The HELPER handshake spelling, reduced: the third of the three landed
  * handshake shapes, and the one the probe had never read in either direction.
  * Its only carrier under `scripts/` is `check-platform-checklist.mjs`, whose
- * `ENTRY_BY_HAND` row is a deliberate `null` (its dispatch calls four self-test
+ * `ENTRY_BY_HAND` row is a deliberate `null` (its dispatch calls six self-test
  * functions and combines their statuses), so every probe run recorded NOT
  * MEASURED for it and the sweep said nothing at all about this shape -- not
  * held, not defeated (#15371). The other two spellings each have dozens of live
@@ -568,6 +772,154 @@ const NON_DISPATCH_MENTION_GATE = [
 ].join('\n');
 
 /**
+ * The DECOY shape, reduced: three texts that read like `function selfTest() {`
+ * standing AHEAD of the real definition, one for each way the anchor could take
+ * the wrong one, in the order they occur in `scripts/pm/dispatch-gates.mjs`.
+ *
+ *   1. a docblock sentence naming the convention -- a COMMENT;
+ *   2. a fixture the gate feeds its own scanner -- a TEMPLATE LITERAL;
+ *   3. a named function expression held as a value -- real CODE, MID-LINE.
+ *
+ * Each defeats a different half of the rule, and each fails DIFFERENTLY, which
+ * is why one fixture carries all three rather than three carrying one:
+ *
+ *   into (1) the `return;` lands in a comment, the copy behaves exactly as the
+ *     original, and the probe reads `mutation had no observable effect`;
+ *   into (2) it lands inside a template literal, so the copy is a SyntaxError --
+ *     which exits non-zero AND prints a stack, and is therefore scored HELD. The
+ *     flattering direction: a hold awarded to a gate for the probe breaking its
+ *     own copy of it (#14963);
+ *   into (3) it lands in a function nothing calls, and the probe again reads no
+ *     observable effect.
+ *
+ * The real definition below them is HOLED -- its dispatch discards the result --
+ * so the one reading that can only come from anchoring on it is DEFEATED with
+ * ZERO bytes printed. The fixture is spawned, so that verdict also says the
+ * mutated copy PARSED and RAN.
+ */
+const DECOY_ANCHOR_GATE = [
+  '#!/usr/bin/env node',
+  '// The convention this tree writes: `function selfTest() {` at column 0.',
+  'const FIXTURE = `',
+  'function selfTest() {',
+  "  console.log('a fixture the gate scans, not a definition');",
+  '}',
+  '`;',
+  'const holder = { run: function selfTest() { return FIXTURE.length; } };',
+  'function selfTest() {',
+  '  const failures = [];',
+  "  if (holder.run() < 1) failures.push('the fixture text went missing');",
+  "  if (failures.length) { console.error(failures.join(String.fromCharCode(10))); process.exit(1); }",
+  "  console.log('fixture self-test: 1 case passes');",
+  '}',
+  "if (process.argv.includes('--self-test')) selfTest();",
+  '',
+].join('\n');
+
+/** The definition-shaped text the three decoys and the real definition share. */
+const DECOY_ANCHOR_TEXT = 'function selfTest() {';
+
+/**
+ * The WALKING gate, reduced: a gate whose own self-test sweeps the directory it
+ * lives in and refuses anything it did not expect to find there. That is not a
+ * defect -- `check-pnpm-filter-targets` does exactly this over `scripts/` and is
+ * right to -- but under the OLD placement the probe's own copy was the stray, so
+ * the gate's BASELINE exited non-zero and the row read NOT MEASURED for a reason
+ * belonging entirely to the instrument (#15515).
+ *
+ * The fixture is deliberately the WHOLE relocation contract in one spawn. Its
+ * module-level line prints three readings, all of which the mutated copy must
+ * still answer the way the original does:
+ *
+ *   dir=   `basename(dirname(fileURLToPath(import.meta.url)))` -- the
+ *          `import.meta.url` rewrite. Unrewritten, the copy names its temp dir.
+ *   help=  a value imported RELATIVELY from `./helper.mjs` -- the specifier
+ *          rewrite. Unrewritten, the copy dies in module resolution.
+ *   dep=   a value imported by BARE specifier from a `node_modules` beside the
+ *          original -- the `node_modules` link. Unlinked, likewise.
+ *
+ * ...and it dispatches behind `isEntrypoint(import.meta.url)`, the one
+ * `import.meta.url` the relocation must NOT rewrite: answered about the
+ * original, the copy would run nothing, print nothing and exit 0 -- DEFEATED
+ * rather than the HELD its handshake earns. So the verdict reads that exception
+ * and the printed line reads the three rewrites, in the same run.
+ */
+const WALKING_GATE_DIR = 'walked';
+const WALKING_GATE_DEP = 'os-probe-fixture-dep';
+
+const WALKING_GATE_HELPER = [
+  '// `isEntrypoint` is RE-EXPORTED from the tree\'s one entry predicate rather',
+  '// than respelled here -- a twelfth spelling is the defect check-entry-guard',
+  '// exists to stop. By absolute URL, which the relocation leaves alone.',
+  `export { isEntrypoint } from ${JSON.stringify(new URL('./invoked-as.mjs', import.meta.url).href)};`,
+  "export const HELP = 'helped';",
+  '',
+].join('\n');
+
+const WALKING_GATE = [
+  '#!/usr/bin/env node',
+  "import { readdirSync } from 'node:fs';",
+  "import { basename, dirname } from 'node:path';",
+  "import { fileURLToPath } from 'node:url';",
+  `import { DEP } from '${WALKING_GATE_DEP}';`,
+  "import { HELP, isEntrypoint } from './helper.mjs';",
+  'const HERE = dirname(fileURLToPath(import.meta.url));',
+  "const EXPECTED = ['gate.mjs', 'helper.mjs', 'node_modules'];",
+  'let selfTestReachedVerdict = false;',
+  "console.log('fixture: dir=' + basename(HERE) + ' help=' + HELP + ' dep=' + DEP);",
+  'function selfTest() {',
+  '  const failures = [];',
+  '  const strays = readdirSync(HERE).filter((n) => !EXPECTED.includes(n));',
+  "  if (strays.length) failures.push('the walked tree is not clean: ' + strays.join(','));",
+  "  if (failures.length) { console.error(failures.join(String.fromCharCode(10))); process.exit(1); }",
+  "  console.log('fixture self-test: 1 case passes');",
+  '  selfTestReachedVerdict = true;',
+  '}',
+  'if (isEntrypoint(import.meta.url)) {',
+  "  if (process.argv.includes('--self-test')) {",
+  '    selfTest();',
+  '    if (!selfTestReachedVerdict) {',
+  "      console.error('fixture self-test: selfTest() returned without reaching its verdict');",
+  '      process.exit(1);',
+  '    }',
+  '  }',
+  '}',
+  '',
+].join('\n');
+
+/** What the walking fixture prints before it dispatches, when ALL THREE rewrites landed. */
+const WALKING_GATE_LINE = `fixture: dir=${WALKING_GATE_DIR} help=helped dep=linked`;
+
+/**
+ * The rewrite specimen, READ rather than run: every shape `relocateSource`
+ * touches and every shape it must leave alone, in one text. The last two lines
+ * are the ones that make this a control rather than a demonstration -- a fixture
+ * STRING carrying an import statement, and prose naming `import.meta.url`. Both
+ * are what several gates in this tree feed their own scanners, and rewriting
+ * either would change what the gate SCANS instead of where the copy resolves.
+ */
+const RELOCATION_SPECIMEN = [
+  "import { a } from './sib.mjs';",
+  "import { b } from '../up.mjs';",
+  "import './side-effect.mjs';",
+  "import { c } from 'node:path';",
+  'const HERE = fileURLToPath(import.meta.url);',
+  "const ROOT_URL = new URL('..', import.meta.url);",
+  'if (isEntrypoint(import.meta.url)) {}',
+  "const load = () => import('./dyn.mjs');",
+  "const FIXTURE = `import { z } from './fixture-only.mjs';`;",
+  "const PROSE = 'import.meta.url';",
+  '',
+].join('\n');
+
+/**
+ * The anchor an UNMASKED, UNANCHORED first match takes -- the pre-#14963 rule,
+ * kept here as the thing the controls below measure against rather than as a
+ * second implementation of anything: `injectEarlyReturn` never uses it.
+ */
+const NAIVE_ANCHOR = /(?:async\s+)?function\s+selfTest\s*\([^)]*\)\s*\{/;
+
+/**
  * Both instruments, against both directions. Returns the failures; the caller
  * refuses on any. Nothing here reads the repo, so a control failure is always
  * the instrument and never the tree.
@@ -598,6 +950,41 @@ export function runControls() {
     'POSITIVE CONTROL FAILED: a file that only MENTIONS the flag -- in prose, in a comparison against a call result, and as a literal handed to a child -- entered the population; the census would then be seeded with the very tools that reason about self-tests');
   say(DISPATCH.test(NON_DISPATCH_MENTION_GATE),
     'CONTROL FIXTURE INVALID: the mention fixture does not match even UNMASKED, so the verdict above says nothing about comments being masked away');
+
+  // ⛔ ... and the population criterion must keep reading COMMENT-masked source.
+  // The mask the injection ANCHOR needs blanks literals too, and every dispatch
+  // in this tree names the flag with a string literal -- so reading the census
+  // through that one would not classify a single file generously, it would empty
+  // the population, taking this instrument's own control fixtures (deliberately
+  // strings) with it. The two masks are required to answer this OPPOSITELY.
+  say(!DISPATCH.test(maskCommentsAndLiterals(HOLED_GATE)),
+    'CONTROL FAILED: the code-only mask that the injection anchor reads still admits a dispatch to the population; the two masks no longer answer differently, and whichever of them the census ends up reading, one of the two questions is being answered with the wrong text');
+
+  // The ANCHOR, against every text that reads like a definition without being
+  // one. What is at stake is not a classification but a WRONG READING: an
+  // injection into a fixture string makes the copy a SyntaxError, whose non-zero
+  // exit and stack trace this file's verdict scores HELD (#14963).
+  const decoyFlags = scanSource(DECOY_ANCHOR_GATE);
+  const commentDecoy = DECOY_ANCHOR_GATE.indexOf(DECOY_ANCHOR_TEXT);
+  const literalDecoy = DECOY_ANCHOR_GATE.indexOf(DECOY_ANCHOR_TEXT, commentDecoy + 1);
+  const midLineDecoy = DECOY_ANCHOR_GATE.indexOf('function selfTest() { return FIXTURE.length');
+  const realDef = DECOY_ANCHOR_GATE.indexOf('\nfunction selfTest() {\n  const failures') + 1;
+  say(commentDecoy >= 0 && literalDecoy > commentDecoy && midLineDecoy > literalDecoy && realDef > midLineDecoy,
+    'CONTROL FIXTURE INVALID: the three decoys no longer all stand AHEAD of the real definition, so a first-match anchor would reach the definition however it was spelled and every verdict below passes for the wrong reason');
+  say(decoyFlags.comment[commentDecoy] === 1,
+    'CONTROL FIXTURE INVALID: the first decoy is not comment content, so it no longer tests the comment half of the mask');
+  say(decoyFlags.literal[literalDecoy] === 1,
+    'CONTROL FIXTURE INVALID: the second decoy is not literal content, so it no longer tests the string/template half of the mask -- the half whose failure produces a SyntaxError and a false HELD');
+  say(decoyFlags.comment[midLineDecoy] === 0 && decoyFlags.literal[midLineDecoy] === 0,
+    'CONTROL FIXTURE INVALID: the third decoy is masked away as comment or literal, so it tests the mask a second time instead of the LINE-START rule it is there for');
+  say(DECOY_ANCHOR_GATE.search(NAIVE_ANCHOR) === commentDecoy,
+    'CONTROL FIXTURE INVALID: an unmasked first-match anchor no longer lands on a decoy, so the MASK is not what the anchor verdict below is reading');
+  say(maskCommentsAndLiterals(DECOY_ANCHOR_GATE).search(NAIVE_ANCHOR) === midLineDecoy,
+    'CONTROL FIXTURE INVALID: masking alone no longer lands on the mid-line decoy, so the LINE-START rule is not what the anchor verdict below is reading -- masking would be carrying it on its own');
+  const decoyInjected = injectEarlyReturn(DECOY_ANCHOR_GATE, 'selfTest');
+  say(decoyInjected !== null
+    && decoyInjected.includes(`function selfTest() {\n  return; /*${PROBE_MARKER}*/\n\n  const failures = [];`),
+    'ANCHOR CONTROL FAILED: the early return was not injected at the REAL definition; a text that merely READS like one -- in a comment, in a fixture string, or mid-line in code -- was preferred over the function the dispatch calls');
 
   // Instrument 1, both directions.
   say(classifyFloor(maskComments(HOLED_GATE)) === 'NONE',
@@ -630,6 +1017,42 @@ export function runControls() {
   say(PRODUCES_FAILURE_TERNARY_EXIT.test(ACCIDENT_GATE.split('\n').find((l) => l.includes('process.exit(')) ?? ''),
     'CONTROL FAILED: the accident fixture no longer dispatches with the ternary exit this criterion was extended to read; the two have drifted apart');
 
+  // The RELOCATION rewrite, read as a pure function: every shape it touches and
+  // every shape it must leave alone. What is at stake in the last two is not a
+  // classification but WHAT THE COPY SCANS -- rewriting a fixture string would
+  // change the gate's own input (#15515).
+  const specimenFile = join(ROOT, 'scripts', 'not-on-disk-relocation-specimen.mjs');
+  const specimenUrl = pathToFileURL(specimenFile).href;
+  const relocated = relocateSource(RELOCATION_SPECIMEN, specimenFile);
+  const sibling = (rel) => JSON.stringify(new URL(rel, specimenUrl).href);
+  say(relocated.blocked.length === 0,
+    `RELOCATION CONTROL FAILED: the specimen carries only rewritable shapes but was refused (${relocated.blocked.join('; ')})`);
+  say(relocated.source.includes(`import { a } from ${sibling('./sib.mjs')};`),
+    'RELOCATION CONTROL FAILED: a `./` static specifier was not rewritten to the ORIGINAL neighbour it names');
+  say(relocated.source.includes(`import { b } from ${sibling('../up.mjs')};`),
+    'RELOCATION CONTROL FAILED: a `../` static specifier was not rewritten to the ORIGINAL neighbour it names');
+  say(relocated.source.includes(`import ${sibling('./side-effect.mjs')};`),
+    'RELOCATION CONTROL FAILED: the side-effect-only `import <spec>` form was not rewritten');
+  say(relocated.source.includes(`import(${sibling('./dyn.mjs')})`),
+    'RELOCATION CONTROL FAILED: a DYNAMIC relative specifier was not rewritten; `requireDependency` loads its optional deps through exactly that form');
+  say(relocated.source.includes("import { c } from 'node:path';"),
+    'CONTROL FIXTURE INVALID: a `node:` builtin specifier was rewritten; only RELATIVE specifiers name a neighbour to follow');
+  say(relocated.source.includes(`fileURLToPath(${JSON.stringify(specimenUrl)})`)
+    && relocated.source.includes(`new URL('..', ${JSON.stringify(specimenUrl)})`),
+    "RELOCATION CONTROL FAILED: `import.meta.url` in a PATH-deriving position was not rewritten to the original's url; ROOT would then resolve to the temp directory");
+  // ⛔ ... and the one that must NOT be rewritten. 145 of the census's dispatches
+  // sit behind this call; answered about the original, every one of those copies
+  // runs nothing, prints nothing and exits 0 -- a whole-census false DEFEATED.
+  say(relocated.source.includes('if (isEntrypoint(import.meta.url)) {}'),
+    'RELOCATION CONTROL FAILED: the `isEntrypoint(import.meta.url)` argument was rewritten; the copy would then ask whether the ORIGINAL was run, dispatch nothing, and be scored DEFEATED');
+  say(relocated.source.includes("const FIXTURE = `import { z } from './fixture-only.mjs';`;")
+    && relocated.source.includes("const PROSE = 'import.meta.url';"),
+    'RELOCATION CONTROL FAILED: an import statement inside a fixture STRING, or the word `import.meta.url` inside prose, was rewritten -- that changes what the gate SCANS, not where the copy resolves');
+  say(relocateSource("const t = import.meta.resolve('x');", specimenFile).blocked.length === 1,
+    'RELOCATION CONTROL FAILED: a shape that resolves from the running file\'s OWN url was not refused; a member it cannot serve must keep the old placement and SAY so, never be relocated with resolution it cannot honour');
+  say(relocateSource('const m = await import(`./x-${n}.mjs`);', specimenFile).blocked.length === 1,
+    'RELOCATION CONTROL FAILED: a relative specifier written as a TEMPLATE literal was not refused; it is an expression, so no literal rewrite can follow it to the original');
+
   // Instrument 2, both directions, against real processes on disk.
   const dir = mkdtempSync(join(tmpdir(), 'self-test-floor-control-'));
   try {
@@ -637,18 +1060,21 @@ export function runControls() {
     const sound = join(dir, 'sound-gate.mjs');
     const accident = join(dir, 'accident-gate.mjs');
     const unrunnable = join(dir, 'unrunnable-gate.mjs');
+    const decoy = join(dir, 'decoy-anchor-gate.mjs');
     const helper = join(dir, 'helper-handshake-gate.mjs');
     const helperHoled = join(dir, 'helper-handshake-gate-holed.mjs');
     writeFileSync(holed, HOLED_GATE);
     writeFileSync(sound, SOUND_GATE);
     writeFileSync(accident, ACCIDENT_GATE);
     writeFileSync(unrunnable, UNRUNNABLE_GATE);
+    writeFileSync(decoy, DECOY_ANCHOR_GATE);
     writeFileSync(helper, HELPER_HANDSHAKE_GATE);
     writeFileSync(helperHoled, HELPER_HANDSHAKE_GATE_HOLED);
     const h = probeEarlyReturn(holed, 'selfTest');
     const s = probeEarlyReturn(sound, 'selfTest');
     const a = probeEarlyReturn(accident, 'runSelfTest');
     const u = probeEarlyReturn(unrunnable, 'selfTest');
+    const dc = probeEarlyReturn(decoy, 'selfTest');
     const hh = probeEarlyReturn(helper, 'selfTest');
     const hhHoled = probeEarlyReturn(helperHoled, 'selfTest');
     say(h.verdict === 'DEFEATED',
@@ -676,6 +1102,14 @@ export function runControls() {
     // being red, would satisfy the verdict above while testing nothing.
     say(u.baselineExit !== 0 && u.baselineBytes > 0 && u.baselineHead !== '',
       `POSITIVE CONTROL FAILED: the unrunnable fixture no longer produces the measured shape (baseline exit ${u.baselineExit}, ${u.baselineBytes} byte(s)); the NOT MEASURED verdict above would then be passing for the wrong reason`);
+    // The anchor, ON DISK. The static assertions above read WHERE the injection
+    // went; this one reads what the copy then DID -- so it also says the copy
+    // parsed and ran. Anchored on the fixture string instead, the copy dies in
+    // the parser: non-zero exit, a stack trace on stderr, verdict HELD.
+    say(dc.verdict === 'DEFEATED',
+      `POSITIVE CONTROL FAILED: a known-holed gate whose real definition is preceded by three definition-shaped decoys was read as ${dc.verdict} (${dc.why ?? ''}); anchored on the fixture string this reads HELD, a hold awarded for the probe breaking its own copy`);
+    say(dc.mutatedBytes === 0,
+      `POSITIVE CONTROL FAILED: the decoy gate printed ${dc.mutatedBytes} byte(s) when defeated; the copy anchored on the real definition returns before its verdict line and says NOTHING, so anything printed here is the copy failing rather than the gate being silent`);
     // The HELPER handshake spelling, both directions, differing by ONE line: the
     // dispatch asking `requireReachedVerdict`. Until this fixture the probe had
     // read that shape in NEITHER direction -- its single carrier in the tree is
@@ -696,6 +1130,36 @@ export function runControls() {
       `POSITIVE CONTROL FAILED: the SAME fixture with only the \`requireReachedVerdict\` call deleted was read as ${hhHoled.verdict} (${hhHoled.why ?? ''}); the handshake call is the whole difference`);
     say(hhHoled.mutatedBytes === 0,
       'POSITIVE CONTROL FAILED: the helper-handshake gate with its handshake deleted printed something; without the call there is nothing left to notice the early return, so the run says NOTHING and exits 0');
+
+    // The WALKING gate, in both PLACEMENTS. This is the pair that pins the
+    // repair: the same fixture, the same mutation, differing only in where the
+    // copy was written. Its own directory is separate from the fixtures above,
+    // because what it asserts is that NOTHING it did not expect is in there.
+    const walkedDir = join(dir, WALKING_GATE_DIR);
+    const depDir = join(walkedDir, 'node_modules', WALKING_GATE_DEP);
+    mkdirSync(depDir, { recursive: true });
+    writeFileSync(join(depDir, 'package.json'), '{"name":"' + WALKING_GATE_DEP + '","type":"module","main":"index.mjs"}\n');
+    writeFileSync(join(depDir, 'index.mjs'), "export const DEP = 'linked';\n");
+    writeFileSync(join(walkedDir, 'helper.mjs'), WALKING_GATE_HELPER);
+    const walkingGate = join(walkedDir, 'gate.mjs');
+    writeFileSync(walkingGate, WALKING_GATE);
+    const wk = probeEarlyReturn(walkingGate, 'selfTest');
+    const wkBeside = probeEarlyReturn(walkingGate, 'selfTest', { placement: 'beside' });
+    say(wk.verdict === 'HELD',
+      `RELOCATION CONTROL FAILED: a gate whose self-test walks its own directory read ${wk.verdict} (${wk.why ?? ''}); with the copy written outside that tree its baseline is clean, so a verdict is available at all`);
+    // One line, three rewrites: see the fixture's docblock. A copy that resolved
+    // any of them against the temp directory cannot print it.
+    say(wk.mutatedHead === WALKING_GATE_LINE,
+      `RELOCATION CONTROL FAILED: the relocated copy did not resolve what the original resolves -- it printed ${JSON.stringify(wk.mutatedHead ?? '')}, not ${JSON.stringify(WALKING_GATE_LINE)}`);
+    // ... and the direction. The SAME fixture, the copy beside the original: the
+    // gate finds the stray, refuses, and its own baseline ends the probe.
+    say(wkBeside.verdict === 'NOT MEASURED' && /^baseline run failed \(exit /.test(wkBeside.why ?? ''),
+      `DIRECTION CONTROL FAILED: with the copy written BESIDE the original the walking gate read ${wkBeside.verdict} (${wkBeside.why ?? ''}); that placement is what made this class of row NOT MEASURED, so the verdict above would be passing for no reason`);
+    // ... and it is the PLACEMENT that reds it, not the fixture. Same file, same
+    // mutation, same spawn: the relocated leg's baseline exits 0 (its HELD above
+    // is only reachable through a green baseline) and this one exits 1.
+    say(wk.baselineExit === 0 && wkBeside.baselineExit === 1,
+      `CONTROL FIXTURE INVALID: the two placements did not separate the fixture's own baseline (relocated exit ${wk.baselineExit}, beside exit ${wkBeside.baselineExit}); with both alike, the verdicts above say nothing about WHERE the copy was written`);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -707,7 +1171,7 @@ export function runControls() {
 // ---------------------------------------------------------------------------
 
 /**
- * ⛔ SHRINK-ONLY. The nine files whose entry cannot be resolved mechanically,
+ * ⛔ SHRINK-ONLY. The ten files whose entry cannot be resolved mechanically,
  * resolved by READING the dispatch site (the ruling's A2.1: the grep is an
  * entry point, not the criterion). A `null` entry is NOT MEASURED with the
  * stated reason -- never a quiet pass, and never a guess.
@@ -726,15 +1190,29 @@ export const ENTRY_BY_HAND = Object.freeze({
   // `runSelfTest()` is what the dispatch calls. Probing the inner one records a
   // TypeError as a handshake; probing `runSelfTest` reads the real one (#14842).
   'scripts/check-workspace-manifest-cycles.mjs': 'runSelfTest',
-  // The dispatch calls FOUR self-test functions and combines their statuses;
+  // The dispatch calls SIX self-test functions and combines their statuses;
   // there is no single entry an early return leaves, so a one-function probe
   // measures a sub-battery and reads a downstream crash as a handshake.
   'scripts/check-platform-checklist.mjs': null,
   // The self-test is an inline top-level block calling several helpers.
   'scripts/check-regen-pending.mjs': null,
-  // Injecting into this file produces a SyntaxError (the anchor lands inside a
-  // template literal), so no run of it measures anything.
-  'scripts/pm/dispatch-gates.mjs': null,
+  // Four self-test-shaped names in raw source (`selfTest`, `selfTestOnlyCallables`
+  // and two inside fixtures), so the entry is hand-read -- but for THIS FILE's
+  // reason. The row was a `null` until #14963, on the claim that injecting here
+  // can only produce a SyntaxError: the anchor read raw source, where a docblock
+  // sentence and then a FIXTURE STRING stand ahead of the real definition. That
+  // was the INSTRUMENT's limit recorded as this file's property. Anchored on the
+  // definition the copy parses and runs (measured: exit 1, `selfTest() returned
+  // without reaching its verdict`). It then read NOT MEASURED `baseline run
+  // failed (exit 1)` for as long as the copy was written under `scripts/`, where
+  // this gate's own single-site sweep found the near-duplicate and refused: the
+  // copy now lands outside that tree and this gate's baseline is clean (#15515).
+  // What is left is the BUDGET: at the default 120 s the self-test does not
+  // finish and the row reads `killed by SIGTERM` (#15573, not folded in here).
+  // Measured at 900 s on a shared box: baseline exit 0 after ~7 minutes, mutated
+  // exit 1 in 200 bytes, verdict HELD -- so the row is a budget away, not a
+  // property of the file.
+  'scripts/pm/dispatch-gates.mjs': 'selfTest',
 });
 
 /**
