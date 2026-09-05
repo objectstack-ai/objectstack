@@ -17,6 +17,7 @@ import {
 } from './filter-normalizer.js';
 import { findCrossFieldComparand, isFieldReference } from '../comparand-shape.js';
 import { assertReadScopeCannotVacate, compileScopedFilterToSql } from '../read-scope-sql.js';
+import { nonTextColumnResolver, textOperatorPolarity } from '../non-text-column.js';
 import { invalidMemberError } from '../dataset-refusal.js';
 import { likePattern, LIKE_ESCAPE_CHAR, asciiLowerSqlExpr, type LikeShape } from '../like-pattern.js';
 import { nextUtcCalendarDay } from '@objectstack/core';
@@ -459,7 +460,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
         const { field, method } = this.resolveMeasureAggregation(cube, m);
         const measureFilter = datasetScope?.measureFilters?.[m];
         const predicate = measureFilter
-          ? this.renderFilterNodeSql(normalizeAnalyticsFilterTree({ where: measureFilter }), cube, params)
+          ? this.renderFilterNodeSql(normalizeAnalyticsFilterTree({ where: measureFilter }), cube, params, ctx)
           : null;
         const aggSql = predicate
           ? this.conditionalAggregateSql(method, field, predicate)
@@ -501,6 +502,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       normalizeAnalyticsFilterTree(query),
       cube,
       params,
+      ctx,
     );
     if (filterClause) whereParts.push(filterClause);
     // [#10413] The dataset's own scope renders too, for the reason the read
@@ -513,6 +515,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
         normalizeAnalyticsFilterTree({ where: datasetScope.filter }),
         cube,
         params,
+        ctx,
       );
       if (scopeSql) whereParts.push(scopeSql);
     }
@@ -535,7 +538,12 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // silently omitting the scope is exactly the misleading output being fixed.
     const scope = ctx.getReadScope?.(tableName);
     if (scope != null) {
-      const { sql: scopeSql, params: scopeParams } = compileScopedFilterToSql(scope, tableName);
+      // [#14079] The same declared-type rule `NativeSQLStrategy.applyReadScope`
+      // hands the compiler, so the echo prints the constant the executed
+      // statement runs for a text operator over a numeric or boolean column.
+      const { sql: scopeSql, params: scopeParams } = compileScopedFilterToSql(scope, tableName, {
+        nonTextColumn: nonTextColumnResolver(ctx, tableName),
+      });
       // [#13926] The same door guard `execute()` trusts (`withReadScope`,
       // #13640), at the ECHO's own merge — so one read scope gets ONE verdict
       // on this strategy, whichever face the caller asked for. Without it the
@@ -1181,6 +1189,8 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     operator: string,
     values: unknown[] | undefined,
     params: unknown[],
+    target: { object: string; field: string },
+    ctx: StrategyContext,
   ): string | null {
     if (operator === 'set') return `${col} IS NOT NULL`;
     if (operator === 'notSet') return `${col} IS NULL`;
@@ -1199,6 +1209,14 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // these: a prefix/suffix/substring match reads the column as stored.
     const like = LIKE_SQL_OPS[operator];
     if (like) {
+      // [#14079] A text operator over a column whose stored value is never
+      // text renders the contract's constant — the same test, on the same
+      // declared-type hook, as `NativeSQLStrategy.buildFilterClause`, so the
+      // echoed statement is the executed one. Before anything binds.
+      const polarity = textOperatorPolarity(operator);
+      if (polarity && nonTextColumnResolver(ctx, target.object)?.(target.field)) {
+        return polarity === 'negative' ? SQL_CONST_TRUE : SQL_CONST_FALSE;
+      }
       // [#5567] Escaped pattern + an explicit `ESCAPE`, matching what
       // `driver-sql`'s `applyLike` binds for the same operator — so an author
       // who copies this statement out runs the predicate that ran.
@@ -1278,6 +1296,30 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       return bag[member];
     }
     return undefined;
+  }
+
+  /**
+   * [#14079] The (object, field) a filter member binds against — the echo's
+   * copy of `NativeSQLStrategy.resolveStorageTarget`, kept beside the
+   * `LIKE_SQL_OPS` table for the same reason that table is a copy: this file
+   * renders a description of the statement THAT compiler produces, and the
+   * declared-type test both apply is keyed by object and field. A dotted
+   * `sql` is a relationship path (ADR-0071): every segment but the last is a
+   * hop whose join alias is the dot-to-`__` spelling the dataset compiler keys
+   * `cube.joins` by, the last is the column.
+   */
+  private resolveStorageTarget(cube: Cube, member: string, baseObject: string): { object: string; field: string } {
+    const dim = this.lookupMember(cube, member, 'dimension');
+    const measure = dim ? undefined : this.lookupMember(cube, member, 'measure');
+    const rawSql = dim?.sql ?? measure?.sql ?? (member.includes('.') ? member.split('.').slice(1).join('.') : member);
+    if (rawSql.includes('.')) {
+      const segments = rawSql.split('.');
+      const field = segments[segments.length - 1];
+      const relPath = segments.slice(0, -1).join('.');
+      const object = cube.joins?.[relPath.replace(/\./g, '__')]?.name ?? relPath;
+      return { object, field };
+    }
+    return { object: baseObject, field: rawSql.replace(/^\$/, '') };
   }
 
   private resolveFieldName(cube: Cube, member: string, kind: 'dimension' | 'measure' | 'any'): string {
@@ -1489,6 +1531,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     node: NormalizedFilterNode | null,
     cube: Cube,
     params: unknown[],
+    ctx: StrategyContext,
   ): string | null {
     if (!node) return null;
 
@@ -1502,18 +1545,24 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
         node.operator,
         node.values,
         params,
+        // [#14079] The (object, field) this member binds against, resolved the
+        // way `NativeSQLStrategy.resolveStorageTarget` resolves it, so the echo
+        // asks the declared-type hook the same question the executed statement
+        // asked and prints the same constant for a non-text column.
+        this.resolveStorageTarget(cube, node.member, this.extractObjectName(cube)),
+        ctx,
       );
     }
 
     if (node.kind === 'not') {
-      const inner = this.renderFilterNodeSql(node.child, cube, params);
+      const inner = this.renderFilterNodeSql(node.child, cube, params, ctx);
       return inner ? `NOT (${inner})` : SQL_CONST_FALSE;
     }
 
     const paramBase = params.length;
     const parts: string[] = [];
     for (const child of node.children) {
-      const clause = this.renderFilterNodeSql(child, cube, params);
+      const clause = this.renderFilterNodeSql(child, cube, params, ctx);
       if (clause === null) {
         if (node.kind !== 'or') continue;
         params.length = paramBase;
