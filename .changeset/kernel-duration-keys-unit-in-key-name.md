@@ -91,10 +91,15 @@ registered by exact key in `RETIRED_KEYS_BY_MAJOR`.
 `EventSourcingConfig.snapshotRetention` is a COUNT of snapshots and
 `MultiVersionSupport.rollout.percentage` is a proportion — neither is a
 duration, so neither has a unit to carry and both keep their names.
-`RuntimeConfig.resourceLimits.timeout` names no unit anywhere in its prose, so
-it is outside the gate's population and outside this rename; a pin test asserts
-that, so a later sweep cannot read the four security renames as "every timeout
-on that file".
+`RuntimeConfig.resourceLimits.timeout` names its unit only in the JSDoc above
+the key ("Execution timeout in milliseconds"), a channel
+`check:duration-unit-keys` does not read: it reads `.describe()` and
+`.meta({ description })`, and this key's describe ("Maximum execution time")
+names none. The gate therefore lists it among the duration-shaped keys but
+deliberately does not judge it — neither an offender nor an exemption — so it is
+outside this rename; that JSDoc-channel gap is filed as #15939. A pin test
+asserts the key still parses bare, so a later sweep cannot read the four
+security renames as "every timeout on that file".
 
 ## Readers moved in the same PR, at the same magnitude
 

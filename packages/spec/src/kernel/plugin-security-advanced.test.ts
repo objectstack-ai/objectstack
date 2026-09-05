@@ -393,8 +393,10 @@ describe('Plugin security durations carry their unit (#15678)', () => {
     expect(parsed.vulnerabilityDisclosure?.bugBounty).toBe(true);
   });
 
-  // A NEGATIVE control on the same file: this key names no unit anywhere, so it
-  // is outside the gate's population and outside this rename. Without it, a
+  // A NEGATIVE control on the same file: this key names its unit only in the
+  // JSDoc above it, a channel the gate does not read (it reads `.describe()` and
+  // `.meta({ description })`) — so the gate lists it without judging it, and it
+  // is outside this rename. The JSDoc-channel gap is #15939. Without this test, a
   // later sweep reads the four renames above as "every timeout on this file".
   it('leaves `RuntimeConfig.resourceLimits.timeout` bare — its describe names no unit', () => {
     const parsed = RuntimeConfigSchema.parse({

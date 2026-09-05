@@ -471,7 +471,7 @@ export type WebSocketConfigParsed = z.infer<typeof WebSocketConfigSchema>;
  *   type: 'subscribe',
  *   channel: 'record.account.123',
  *   payload: { events: ['created', 'updated'] },
- *   timestamp: Date.now()
+ *   occurredAt: Date.now()
  * }
  * ```
  * 
@@ -481,7 +481,7 @@ export type WebSocketConfigParsed = z.infer<typeof WebSocketConfigSchema>;
  *   type: 'data-change',
  *   channel: 'record.account.123',
  *   payload: { id: '123', action: 'updated', data: {...} },
- *   timestamp: Date.now()
+ *   occurredAt: Date.now()
  * }
  * ```
  */
