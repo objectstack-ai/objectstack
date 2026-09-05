@@ -15,7 +15,13 @@ import { describe, it, expect } from 'vitest';
 
 import { SysApiKey } from '@objectstack/platform-objects';
 
-import { computeTenantLayer0Filter, andComposeLayers } from './tenant-layer.js';
+import {
+  computeTenantLayer0Filter,
+  computeTenantLayer0Verdict,
+  tenantLayer0FilterOf,
+  intersectTenantLayer0Verdicts,
+  andComposeLayers,
+} from './tenant-layer.js';
 import { RLS_DENY_FILTER } from './rls-compiler.js';
 
 /** A plain tenant business object with a member caller — the common case. */
@@ -264,5 +270,124 @@ describe('sys_api_key is not org-walled (#8287)', () => {
       .toEqual({ organization_id: 'org-a' });
     expect(computeTenantLayer0Filter({ ...base, tenancyPosture: 'group', objectHasOrgIdField: true }))
       .toEqual({ organization_id: { $in: ['org-a', 'org-b'] } });
+  });
+});
+
+/**
+ * [#15813] The verdict is the wall's ONE computation; the filter is its
+ * projection. Pinned as values per exit (not as "filter equals projection",
+ * which the implementation makes true by construction), so a later edit that
+ * moves an exit — say, teaching `deny` to fall through to `none` — is caught
+ * on the verdict a downstream reader consumes.
+ */
+describe('computeTenantLayer0Verdict — what the wall decided, per exit (#15813)', () => {
+  it('single → none', () => {
+    expect(computeTenantLayer0Verdict({ ...base, tenancyPosture: 'single' })).toEqual({ kind: 'none' });
+  });
+
+  it('isolated → organization (the active organization, never the membership set)', () => {
+    expect(computeTenantLayer0Verdict({ ...base, tenancyPosture: 'isolated' })).toEqual({
+      kind: 'organization',
+      organizationId: 'org-a',
+    });
+  });
+
+  it('isolated with no active organization → deny', () => {
+    expect(computeTenantLayer0Verdict({ ...base, tenancyPosture: 'isolated', organizationId: undefined })).toEqual({ kind: 'deny' });
+  });
+
+  it('group → organizations (the membership set, DEDUPLICATED)', () => {
+    expect(
+      computeTenantLayer0Verdict({ ...base, tenancyPosture: 'group', accessibleOrgIds: ['org-a', 'org-b', 'org-a'] }),
+    ).toEqual({ kind: 'organizations', organizationIds: ['org-a', 'org-b'] });
+  });
+
+  it('group with an empty or absent membership set → deny', () => {
+    expect(computeTenantLayer0Verdict({ ...base, tenancyPosture: 'group', accessibleOrgIds: [] })).toEqual({ kind: 'deny' });
+    expect(computeTenantLayer0Verdict({ ...base, tenancyPosture: 'group', accessibleOrgIds: undefined })).toEqual({ kind: 'deny' });
+  });
+
+  it.each(['group', 'isolated'] as const)('%s: a tenancy-disabled object → none', (tenancyPosture) => {
+    expect(computeTenantLayer0Verdict({ ...base, tenancyPosture, tenancyDisabled: true })).toEqual({ kind: 'none' });
+  });
+
+  it.each(['group', 'isolated'] as const)('%s: an object with no organization_id → none', (tenancyPosture) => {
+    expect(computeTenantLayer0Verdict({ ...base, tenancyPosture, objectHasOrgIdField: false })).toEqual({ kind: 'none' });
+  });
+
+  it.each(['group', 'isolated'] as const)('%s: a platform admin on a posture-permitting object → none; on a public object the wall stands', (tenancyPosture) => {
+    expect(
+      computeTenantLayer0Verdict({ ...base, tenancyPosture, isPlatformAdmin: true, posturePermitsCrossTenant: true }),
+    ).toEqual({ kind: 'none' });
+    expect(
+      computeTenantLayer0Verdict({ ...base, tenancyPosture, isPlatformAdmin: true, posturePermitsCrossTenant: false }).kind,
+    ).not.toBe('none');
+  });
+
+  it('the filter IS the projection of the verdict, on every exit', () => {
+    const inputs = [
+      { ...base, tenancyPosture: 'single' as const },
+      { ...base, tenancyPosture: 'isolated' as const },
+      { ...base, tenancyPosture: 'isolated' as const, organizationId: undefined },
+      { ...base, tenancyPosture: 'group' as const },
+      { ...base, tenancyPosture: 'group' as const, accessibleOrgIds: [] },
+      { ...base, tenancyPosture: 'group' as const, tenancyDisabled: true },
+      { ...base, tenancyPosture: 'isolated' as const, isPlatformAdmin: true, posturePermitsCrossTenant: true },
+    ];
+    for (const input of inputs) {
+      expect(computeTenantLayer0Filter(input)).toEqual(tenantLayer0FilterOf(computeTenantLayer0Verdict(input)));
+    }
+  });
+
+  it('projecting `deny` spreads the sentinel — equal by value, never the frozen object itself', () => {
+    const projected = tenantLayer0FilterOf({ kind: 'deny' });
+    expect(projected).toEqual(RLS_DENY_FILTER);
+    expect(projected).not.toBe(RLS_DENY_FILTER);
+  });
+
+  it('projecting `organizations` copies the set (a later mutation cannot reach the compiled filter)', () => {
+    const ids = ['org-a'];
+    const projected = tenantLayer0FilterOf({ kind: 'organizations', organizationIds: ids }) as { organization_id: { $in: string[] } };
+    ids.push('org-victim');
+    expect(projected.organization_id.$in).toEqual(['org-a']);
+  });
+});
+
+/**
+ * [#15813 / ADR-0090 D10] Two walls on one operation: the recorded verdict is
+ * their intersection — what the composed predicate decided.
+ */
+describe('intersectTenantLayer0Verdicts — the on-behalf-of composition (#15813)', () => {
+  const org = (organizationId: string) => ({ kind: 'organization' as const, organizationId });
+  const orgs = (...organizationIds: string[]) => ({ kind: 'organizations' as const, organizationIds });
+  const NONE = { kind: 'none' as const };
+  const DENY = { kind: 'deny' as const };
+
+  it('`none` on one side yields the other — it contributed no predicate', () => {
+    expect(intersectTenantLayer0Verdicts(NONE, org('a'))).toEqual(org('a'));
+    expect(intersectTenantLayer0Verdicts(orgs('a', 'b'), NONE)).toEqual(orgs('a', 'b'));
+    expect(intersectTenantLayer0Verdicts(NONE, NONE)).toEqual(NONE);
+  });
+
+  it('`deny` on either side denies — no row clears an empty scope', () => {
+    expect(intersectTenantLayer0Verdicts(DENY, org('a'))).toEqual(DENY);
+    expect(intersectTenantLayer0Verdicts(NONE, DENY)).toEqual(DENY);
+  });
+
+  it('two equalities: the same organization stays; different organizations deny', () => {
+    expect(intersectTenantLayer0Verdicts(org('a'), org('a'))).toEqual(org('a'));
+    expect(intersectTenantLayer0Verdicts(org('a'), org('b'))).toEqual(DENY);
+  });
+
+  it('an equality against a set containing it IS the equality; outside the set it denies', () => {
+    expect(intersectTenantLayer0Verdicts(org('a'), orgs('a', 'b'))).toEqual(org('a'));
+    expect(intersectTenantLayer0Verdicts(orgs('a', 'b'), org('b'))).toEqual(org('b'));
+    expect(intersectTenantLayer0Verdicts(org('c'), orgs('a', 'b'))).toEqual(DENY);
+  });
+
+  it('two sets intersect; a one-member intersection stays a set (both walls were unions); empty denies', () => {
+    expect(intersectTenantLayer0Verdicts(orgs('a', 'b'), orgs('b', 'c'))).toEqual(orgs('b'));
+    expect(intersectTenantLayer0Verdicts(orgs('a', 'b', 'c'), orgs('c', 'a'))).toEqual(orgs('a', 'c'));
+    expect(intersectTenantLayer0Verdicts(orgs('a', 'b'), orgs('c'))).toEqual(DENY);
   });
 });
