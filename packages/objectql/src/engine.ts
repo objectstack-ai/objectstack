@@ -198,7 +198,7 @@ import { deriveViewContainerObject } from '@objectstack/metadata/view-container'
 import { bindHooksToEngine } from './hook-binder.js';
 import { validateRecord, normalizeMultiValueFields, coerceBooleanFields, ValidationError, buildFieldError, resolveFieldLabel, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
 import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
-import { evaluateValidationRules, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields } from './validation/rule-validator.js';
+import { evaluateValidationRules, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields, staticReadonlyInsertSubject, preserveAuditIgnoredOnInsertWarning } from './validation/rule-validator.js';
 // [#14088] The before-phase write recorder — the provenance channel the static
 // `readonly` strip needs to tell a hook's write from a caller's echo of the
 // SAME value. Armed and sealed in `update()`; the module owns the argument for
@@ -6144,7 +6144,9 @@ export class ObjectQL implements IObjectQLEngine {
    *   written by hooks and middleware, not by the request, and re-validating
    *   them here would turn a platform stamp into a caller-facing rejection.
    * - **Non-system writes only**, like every other write-path guard in this
-   *   engine (`stripReadonlyFields`, `stripReadonlyForInsert`). Seed replay,
+   *   engine (`stripReadonlyFields` — which since #14147 runs on the create
+   *   path as well as the update one — and `stripRuntimeOwnedFields`). Seed
+   *   replay,
    *   package install and boot-time provisioning legitimately write rows in an
    *   order that resolves only once the batch completes; failing them closed
    *   would turn an ordering detail into a boot failure. This leaves a real
@@ -6188,8 +6190,9 @@ export class ObjectQL implements IObjectQLEngine {
       //
       // This check answers for exactly one thing: "the reference the CALLER
       // named". `stripReadonlyFields` removes a non-system caller's value from
-      // a readonly field before the write, and the create ingress does the same
-      // (`stripReadonlyForInsert`, #3043). So a value still sitting in one at
+      // a readonly field before the write — on BOTH write paths since #14147
+      // moved the create-side strip into this engine and deleted the boundary
+      // copy it used to live in. So a value still sitting in one at
       // this point was minted by the PLATFORM — outside this check's own stated
       // scope, whatever it happens to hold. That argument stands on its own and
       // depends on no particular field: deleting the `continue` would start
@@ -9741,21 +9744,28 @@ export class ObjectQL implements IObjectQLEngine {
    * (no number-range gaps from a rejected batch).
    */
   // [#3407 / #5126] BOTH members of `WriteObservabilityOptions` are live here,
-  // for exactly ONE strip: the runtime-owned (`autonumber`) strip added by
-  // #5503, wired at its strip site below. Each arrived carrying the same
+  // for TWO strips that share one report site (`insertDropped`, below): the
+  // runtime-owned (`autonumber`) strip added by #5503, and — since the
+  // maintainer ruling of 2026-09-03 (option C, #14147) — the AUTHOR-declared
+  // static-`readonly` strip, the same `stripReadonlyFields` the update path
+  // runs, under the same `isSystem` gate. Each member arrived carrying the same
   // standing condition — #3407's "if insert ever gains a silent strip, wire the
   // listener at that strip site", #5126's "it is inert here only because insert
   // strips nothing; if insert ever gains a strip, both members wire up together
-  // at that site". #5503 is that strip, so both are discharged together:
-  // quiet-and-observable by default (`onFieldsDropped`), refused outright under
-  // `strictReadonlyWrites` — the same one-per-call choice update offers.
+  // at that site". #5503 was the first such strip and #14147 the second; both
+  // discharge through the one site: quiet-and-observable by default
+  // (`onFieldsDropped`), refused outright under `strictReadonlyWrites` — the
+  // same one-per-call choice update offers.
   //
-  // INSERT remains deliberately exempt from the AUTHOR-declared
-  // readonly/readonlyWhen strips (a create may legitimately seed read-only
-  // columns; the #3043 ingress strip covers external callers instead), and the
-  // FLS write gate throws rather than stripping. So neither member reports on
-  // those here — only on what this path actually strips. Any FURTHER strip added
-  // here must wire both members at its own site too.
+  // What INSERT still does NOT strip: `readonlyWhen` (a conditional lock has no
+  // prior record to evaluate on a create — the update-path note below says
+  // "INSERT stays exempt" for exactly that strip), and the FLS write gate throws
+  // rather than stripping. So neither member reports on those here — only on
+  // what this path actually strips. The 2026-07-24 row "INSERT (all callers)
+  // exempt" this note used to rest on is SUPERSEDED, and the metadata-protocol
+  // ingress copy it pointed external callers at is deleted: there is one
+  // create-side enforcement point, and it is this one. Any FURTHER strip added
+  // here must feed `insertDropped` (or wire both members at its own site) too.
   /**
    * Validate-only (#6037, #4633 ruling D) — run the write path's own verdict
    * over candidate rows and report it, WITHOUT persisting anything.
@@ -10309,7 +10319,7 @@ export class ObjectQL implements IObjectQLEngine {
         // hook that RE-ISSUES the record number lost its write to any caller
         // that had also submitted the key, while the same hook's write survived
         // on a caller that had not. The update path's twin (#5591).
-        const autonumberDropped: string[] = [];
+        const insertDropped: string[] = [];
         if (!opCtx.context?.isSystem) {
           const preserveAudit = opCtx.context?.preserveAudit === true;
           for (let i = 0; i < rows.length; i++) {
@@ -10337,10 +10347,95 @@ export class ObjectQL implements IObjectQLEngine {
             ) as Record<string, unknown>;
             if (stripped === rows[i]) continue;
             for (const k of Object.keys(rows[i])) {
-              if (!(k in stripped) && !autonumberDropped.includes(k)) autonumberDropped.push(k);
+              if (!(k in stripped) && !insertDropped.includes(k)) insertDropped.push(k);
             }
             rows[i] = stripped;
             rowHookContexts[i].input.data = stripped;
+          }
+          // [#14147] STATIC author-declared `readonly`, enforced HERE — one
+          // semantics, one enforcement point, per the maintainer ruling of
+          // 2026-09-03 (option C) which SUPERSEDED the 2026-07-24 row "INSERT
+          // (all callers) exempt". Until it landed, a non-system caller
+          // reaching `engine.insert` DIRECTLY wrote a read-only column with no
+          // refusal, no WARN and no `onFieldsDropped` event, while the very
+          // same payload through the DataProtocol was stripped — and
+          // `create_record`'s listener (`@objectstack/service-automation`) was
+          // wired for a readonly drop it could never receive. The boundary copy
+          // that produced that asymmetry (`stripReadonlyForInsert`,
+          // metadata-protocol) is DELETED in the same change rather than kept
+          // as a second implementation.
+          //
+          // The strip is {@link stripReadonlyFields} — the SAME function
+          // `update` runs, under the SAME `isSystem` gate (the branch above),
+          // reporting through the SAME channels: `readonlyStripWarning` at
+          // `warn`, `onFieldsDropped` under reason `readonly`, and
+          // `strictReadonlyWrites` refusing before any driver dispatch. Its
+          // guards therefore come across too, and they are wider than the
+          // deleted ingress copy's: a hook stamp is not caller-supplied
+          // (`suppliedPerRow`), and a key a `beforeInsert` hook ASSIGNED is the
+          // hook's write, not a forgery (`rowHookWrittenKeys`, #14259). The
+          // ingress copy ran BEFORE the hooks and could judge neither.
+          //
+          // ⛔ `preserveAudit` is deliberately NOT forwarded — see
+          // {@link preserveAuditIgnoredOnInsertWarning}: the 2026-08-08 ruling
+          // narrowed that exemption to the UPDATE path and left `isSystem` as
+          // the create side's only one. Ruling C moved WHERE this strip runs;
+          // it did not widen WHAT exempts it.
+          //
+          // WHICH fields it may judge is {@link staticReadonlyInsertSubject}'s
+          // (runtime-owned types belong to the pass above, platform objects to
+          // their own 403 guards); `null` — no such field on this object — is
+          // the cheap exit every ordinary insert takes.
+          const readonlySubject = staticReadonlyInsertSubject(schemaForValidation as any);
+          if (readonlySubject) {
+            const preserveAuditIgnored: string[] = [];
+            for (let i = 0; i < rows.length; i++) {
+              if (rowErrors[i] !== undefined) continue;
+              const stripped = stripReadonlyFields(
+                readonlySubject as any, rows[i], suppliedPerRow[i] ?? {}, this.logger,
+                {
+                  strictReadonlyWrites: options?.strictReadonlyWrites === true,
+                  hookWrittenKeys: rowHookWrittenKeys[i],
+                  verb: 'insert',
+                },
+              ) as Record<string, unknown>;
+              if (stripped === rows[i]) continue;
+              const takenFromRow: string[] = [];
+              for (const k of Object.keys(rows[i])) {
+                if (k in stripped) continue;
+                takenFromRow.push(k);
+                if (!insertDropped.includes(k)) insertDropped.push(k);
+                if (preserveAudit && !preserveAuditIgnored.includes(k)) preserveAuditIgnored.push(k);
+              }
+              // The field's `defaultValue` is RE-DERIVED for every key this
+              // pass took, which is #3043's stated contract and a guarantee in
+              // its own right: a forged `approval_status` becomes `draft` — the
+              // enforced initial state — never NULL, so a stripped forgery
+              // cannot leave a row in a state the object's own rules
+              // (`requiredWhen`, the state machine) were written to exclude.
+              // The deleted ingress copy got this for free by running BEFORE
+              // `applyFieldDefaults`; a strip that runs after the hooks has to
+              // ask. Asked over the STRIPPED row, so a `defaultValue`
+              // expression reads the payload it will really be stored beside,
+              // and copied back key by key: `applyFieldDefaults` also fills
+              // every OTHER absent field, and a hook that deliberately wrote
+              // `null` must keep its null (the first defaults pass, ahead of
+              // the hooks, is the one that owns those keys).
+              if (takenFromRow.length > 0) {
+                const redefaulted = this.applyFieldDefaults(object, stripped, opCtx.context, nowSnap);
+                for (const k of takenFromRow) {
+                  if (redefaulted[k] !== undefined) stripped[k] = redefaulted[k];
+                }
+              }
+              rows[i] = stripped;
+              rowHookContexts[i].input.data = stripped;
+            }
+            // One line per CALL, not per row, and only when the exemption was
+            // ASKED FOR and something was actually removed — the union is
+            // faithful because the strip is schema-uniform.
+            if (preserveAuditIgnored.length > 0) {
+              this.logger.warn(preserveAuditIgnoredOnInsertWarning(object, preserveAuditIgnored));
+            }
           }
         }
         // [#3407 / #5126] This is the strip site both standing notes on
@@ -10356,14 +10451,14 @@ export class ObjectQL implements IObjectQLEngine {
         // an implicitly read-only field is dropped for exactly the reason a
         // declared one is, and inventing a parallel reason code would fork the
         // vocabulary (`packages/spec`) for a distinction no consumer acts on.
-        if (autonumberDropped.length > 0) {
-          const drop: DroppedFieldsEvent = { object, fields: autonumberDropped, reason: 'readonly' };
+        if (insertDropped.length > 0) {
+          const drop: DroppedFieldsEvent = { object, fields: insertDropped, reason: 'readonly' };
           if (options?.strictReadonlyWrites === true) {
             // Before the driver write and before validation — nothing is
             // written, and "you sent a runtime-owned field" should not depend on
             // whether some other field also failed a business rule (#5126's
             // ordering on the update path, mirrored).
-            throw new ReadonlyFieldRejectedError(object, autonumberDropped, [drop], 'insert');
+            throw new ReadonlyFieldRejectedError(object, insertDropped, [drop], 'insert');
           }
           if (typeof options?.onFieldsDropped === 'function') {
             // Under strict the listener deliberately does NOT fire (above):
