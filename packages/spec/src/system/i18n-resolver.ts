@@ -32,9 +32,11 @@
  *     .successMessage / .params.<param_name>.*
  *
  * Lookup order: requested locale → each entry of `fallbackChain` → literal
- * `label` from the metadata. Helpers never throw — they
- * always return at minimum the metadata literal so unconfigured languages
- * gracefully degrade.
+ * `label` from the metadata — except that a request for the deployment's
+ * `defaultLocale` never walks the chain: the authored label IS the default
+ * locale's text (#15711), so it answers right after the requested locale's
+ * own bundle. Helpers never throw — they always return at minimum the
+ * metadata literal so unconfigured languages gracefully degrade.
  *
  * ## The OTHER half of `I18nLabel`, and where it lives
  *
@@ -203,13 +205,37 @@ export interface ResolveOptions {
    * here, so a `zh-CN` workspace resolves `zh-CN → zh-CN → authored label`
    * and a courtesy `en` bundle is consulted only when `en` is requested.
    * Every entry is consulted BEFORE the authored label, so an entry the
-   * deployment did not declare is a locale that can outrank the author.
+   * deployment did not declare is a locale that can outrank the author —
+   * for every NON-default request. A request for {@link defaultLocale} never
+   * reaches the chain (#15711).
    *
-   * Defaults to `['en']` only when the caller declares nothing at all
-   * (no `fallbackChain` key); an explicit `[]` means "requested locale, then
-   * the authored label".
+   * [#15711] Defaults to `[]` — "requested locale, then the authored label"
+   * — when the caller declares nothing at all (no `fallbackChain` key), and
+   * an explicit `[]` reads the same. Nothing falls to `en` because a literal
+   * said so: a chain is consulted only when someone declared it. (Before
+   * #15711 a chain-less caller got a literal `['en']`.)
    */
   fallbackChain?: string[];
+  /**
+   * [#15711] The deployment's DEFAULT locale — the language its metadata
+   * labels are authored in (`i18n.defaultLocale`). When `locale` names it
+   * (BCP-47 tags compare case-insensitively, the same rule
+   * {@link resolveBundleLocale} applies), the resolvers consult the requested
+   * locale's own bundle and then answer with the authored label: the chain
+   * is NOT walked, because the authored label IS the default locale's text.
+   * That is what `os i18n check` already claims when it reports the default
+   * locale as fully covered by authored text, and what a stack declaring
+   * `defaultLocale: 'zh-CN'` with a reflexive `fallbackLocale: 'en'` needs so
+   * its courtesy `en` bundle cannot outrank the author for a `zh-CN` request
+   * (ruled on #15711 — the contract question #14882 left open).
+   *
+   * Supplied by the caller that can see the declaration: the serving layer
+   * reads `II18nService.getDefaultLocale()`. Absent, no request is the
+   * default one and every request walks `locale → fallbackChain → authored`.
+   * A bundle entry for the default locale still wins when one is shipped
+   * (`os i18n extract --locales=<default>` keeps working; it is optional).
+   */
+  defaultLocale?: string;
 }
 
 /**
@@ -293,9 +319,30 @@ function pickData(
   return resolved !== undefined ? bundle[resolved] : undefined;
 }
 
+/**
+ * [#15711] Whether `locale` names the deployment's default locale. BCP-47
+ * tags are case-insensitive (`zh-cn` names `zh-CN`), the same rule
+ * {@link resolveBundleLocale} applies; a different tag (`zh` against
+ * `zh-CN`) is a different locale.
+ */
+function isDefaultLocale(locale: string, defaultLocale: string | undefined): boolean {
+  return typeof defaultLocale === 'string'
+    && defaultLocale.length > 0
+    && locale.toLowerCase() === defaultLocale.toLowerCase();
+}
+
+/**
+ * The locales a lookup consults, in order: the requested locale, then the
+ * DECLARED `fallbackChain` — unless the requested locale is the deployment's
+ * `defaultLocale`, in which case the chain is skipped and the authored label
+ * answers right after the requested locale's own bundle (#15711: the
+ * authored label is the default locale's text). A caller that declares no
+ * chain gets the requested locale alone — nothing is invented (#15711's
+ * second facet; the default used to be a literal `['en']`).
+ */
 function localeChain(opts?: ResolveOptions): string[] {
   const locale = opts?.locale ?? 'en';
-  const fallbacks = opts?.fallbackChain ?? ['en'];
+  const fallbacks = isDefaultLocale(locale, opts?.defaultLocale) ? [] : (opts?.fallbackChain ?? []);
   // Preserve order, drop duplicates.
   const seen = new Set<string>();
   const chain: string[] = [];

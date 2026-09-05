@@ -3589,26 +3589,73 @@ describe('#14882 — a declared fallback chain, at the resolver', () => {
     expect(translateMetadataDocument('object', SHEET, withZh, ZH_WORKSPACE).label).toBe('填报单（bundle）');
   });
 
-  it('a chain that DECLARES en still consults en before the authored label', () => {
-    // A stack declaring `defaultLocale: 'zh-CN'` with `fallbackLocale: 'en'`
-    // and no zh-CN bundle. Pinned as it answers today — `en` bundle text —
-    // because whether the authored label is the default-locale source (and
-    // so should outrank a declared fallback's bundle) is a CONTRACT question
-    // this card does not decide. #14882 changes only which chain the serving
-    // layer hands in; a declared `en` is honoured exactly as it reads.
+  // -------------------------------------------------------------------------
+  // #15711 — ruled A: the authored label IS the default-locale text
+  // -------------------------------------------------------------------------
+
+  it('[#15711] a chain that DECLARES en does not outrank the authored label for a default-locale request', () => {
+    // A stack declaring `defaultLocale: 'zh-CN'` with a reflexive
+    // `fallbackLocale: 'en'` and no zh-CN bundle — the trap #14882 pinned as
+    // it answered then (`Entry Sheet`, the declared `en` outranking the
+    // author). Ruled on #15711: the authored label is the default locale's
+    // text, so a `zh-CN` request never reaches the declared `en`. The chain
+    // is untouched; what changed is that the request names the default.
+    const ruled = { locale: 'zh-CN', fallbackChain: ['en'], defaultLocale: 'zh-CN' };
+    expect(labelsOf(translateMetadataDocument('object', SHEET, EN_ONLY, ruled))).toEqual(AUTHORED);
+    expect(translateMetadataDocument('app', KPI_APP, EN_ONLY, ruled).label).toBe('KPI 考核管理');
+    // Control — the same options WITHOUT `defaultLocale` still walk the
+    // chain: the rule is keyed on the declaration, not on the tag's spelling.
     expect(translateMetadataDocument('object', SHEET, EN_ONLY, { locale: 'zh-CN', fallbackChain: ['en'] }).label)
       .toBe('Entry Sheet');
   });
 
-  it("a caller that declares NO chain keeps the resolver's literal en default", () => {
-    // The pre-#14882 shape every zh-CN request walked, kept green on purpose:
-    // the resolver's default is unchanged by this card (its only production
-    // caller now declares a chain), so a caller passing nothing still gets
-    // `['en']`. Whether that default should become "no fallback" is singled
-    // out for contract review, not decided here.
-    expect(translateMetadataDocument('object', SHEET, EN_ONLY, { locale: 'zh-CN' }).label).toBe('Entry Sheet');
-    // An explicit empty chain is "requested locale, then the authored label".
+  it('[#15711] a NON-default request still walks the declared chain: fr → en bundle → authored', () => {
+    // `fallbackLocale` keeps its full meaning for every non-default request.
+    const fr = { locale: 'fr', fallbackChain: ['en'], defaultLocale: 'zh-CN' };
+    expect(labelsOf(translateMetadataDocument('object', SHEET, EN_ONLY, fr))).toEqual(ENGLISH);
+    expect(translateMetadataDocument('app', KPI_APP, EN_ONLY, fr).label).toBe('KPI Assessment');
+    // and an `en` request on the same stack still gets the courtesy `en` bundle.
+    const en = { locale: 'en', fallbackChain: ['en'], defaultLocale: 'zh-CN' };
+    expect(labelsOf(translateMetadataDocument('object', SHEET, EN_ONLY, en))).toEqual(ENGLISH);
+  });
+
+  it('[#15711] a default-locale bundle, when shipped, still wins over the authored label', () => {
+    // Only the CHAIN is skipped: the requested locale's own bundle is
+    // consulted first, so the reporter's `os i18n extract --locales=zh-CN`
+    // layout keeps working — optional now, not dead.
+    const withZh: TranslationBundle = {
+      ...EN_ONLY,
+      'zh-CN': { objects: { kpi_entry_sheet: { label: '填报单（bundle）' } } },
+    };
+    const ruled = { locale: 'zh-CN', fallbackChain: ['en'], defaultLocale: 'zh-CN' };
+    const out = translateMetadataDocument('object', SHEET, withZh, ruled);
+    expect(out.label).toBe('填报单（bundle）');
+    // A key the zh-CN bundle omits resolves to the AUTHORED text, never to `en`.
+    expect(out.fields.name.label).toBe('填报单名称');
+  });
+
+  it('[#15711] the default-locale match is a BCP-47 comparison: zh-cn names zh-CN', () => {
+    const lower = { locale: 'zh-cn', fallbackChain: ['en'], defaultLocale: 'zh-CN' };
+    expect(translateMetadataDocument('object', SHEET, EN_ONLY, lower).label).toBe('填报单');
+  });
+
+  it("[#15711] a caller that declares NO chain gets 'requested locale, then the authored label' — no literal en", () => {
+    // The ruling's second facet: `fallbackChain ?? ['en']` became
+    // `fallbackChain ?? []`. A chain-less caller (a host outside this repo;
+    // the core in-memory i18n fallback, #15694) no longer has `en` consulted
+    // because a literal said so — the `en` bundle answers only when `en` is
+    // requested or DECLARED. Pinned on a NON-default request too, where the
+    // default-locale rule cannot be the reason.
+    expect(translateMetadataDocument('object', SHEET, EN_ONLY, { locale: 'zh-CN' }).label).toBe('填报单');
+    expect(labelsOf(translateMetadataDocument('object', SHEET, EN_ONLY, { locale: 'fr' }))).toEqual(AUTHORED);
+    expect(translateMetadataDocument('app', KPI_APP, EN_ONLY, { locale: 'fr' }).label).toBe('KPI 考核管理');
+    // An explicit empty chain reads the same.
     expect(translateMetadataDocument('object', SHEET, EN_ONLY, { locale: 'zh-CN', fallbackChain: [] }).label)
       .toBe('填报单');
+    // Controls — an `en` request still finds its own bundle with no chain at
+    // all, and a DECLARED `en` is still consulted for a non-default request.
+    expect(translateMetadataDocument('object', SHEET, EN_ONLY, { locale: 'en' }).label).toBe('Entry Sheet');
+    expect(translateMetadataDocument('object', SHEET, EN_ONLY, { locale: 'fr', fallbackChain: ['en'] }).label)
+      .toBe('Entry Sheet');
   });
 });
