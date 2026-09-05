@@ -249,6 +249,17 @@ const TERMINAL_RUN_STATUSES: ReadonlySet<string> = new Set([
 const STRANDABLE_REQUEST_STATUSES = ['approved', 'rejected', 'returned'] as const;
 
 /**
+ * Where {@link ApprovalService.journalStrandedContinuation} keeps the signal a
+ * stranded resume carried (#15389), inside `node_config_json`.
+ *
+ * A private side-channel on an existing JSON column, exactly like
+ * `__decisionOutputs` beside it — not a new column and not authored node
+ * config. `parseJson` is a plain parse with no schema, and every reader of that
+ * JSON reads named fields, so an extra underscore key is inert for all of them.
+ */
+const STRANDED_CONTINUATION_KEY = '__strandedContinuation';
+
+/**
  * The second oracle's verdict: which unrecoverable shape this run is in, or
  * `undefined` for every run that must NOT be reported (#13909).
  *
@@ -317,6 +328,59 @@ function classifyStrandedRunState(run: { status?: string } | null | undefined): 
  * Giving the condition a platform-level name is #13909's own deliverable.
  */
 export type StrandedRunState = 'missing' | 'failed';
+
+/**
+ * The continuation an approvals door already issued once, kept so it can be
+ * issued AGAIN after an operator re-arms the pause it was refused on (#15389).
+ *
+ * Stashed under `__strandedContinuation` in `sys_approval_request`
+ * `node_config_json` — the same private side-channel `__decisionOutputs`
+ * already uses, rather than a new column: this is recovery bookkeeping for a
+ * rare failure path, not part of the authored node config, and every reader of
+ * that JSON reads named fields.
+ */
+export interface StrandedContinuationSignal {
+  /** The `approve` / `reject` / `revise` / `resubmit` edge the outcome walks. */
+  branchLabel?: string;
+  /** The exact flow-variable payload the original resume carried. */
+  output?: Record<string, unknown>;
+  /** Outcome label for the {@link strandedDecisionFailure} envelope. */
+  decision: string;
+  /** How the original door described the outcome in prose, e.g. `the reject decision`. */
+  what: string;
+}
+
+/**
+ * Outcome of {@link ApprovalService.continueRestoredRun} (#15389).
+ *
+ * ⚠️ Deliberately its own shape rather than a reuse of `ApprovalDecisionResult`:
+ * that contract is the subject of an OPEN maintainer ruling on #15556, and this
+ * card must not pre-empt it. Nothing here changes what `decide` answers.
+ */
+export interface ApprovalContinuationResult {
+  /** True when the restored pause was consumed and the flow moved on. */
+  resumed: boolean;
+  /** The run this continued — the one the request has always named. */
+  runId: string;
+  /** The outcome that was replayed, exactly as it was first recorded. */
+  decision: string;
+  /** The edge it walked. */
+  branchLabel?: string;
+  /**
+   * Where the replayed signal came from, so a caller can tell an EXACT replay
+   * from an inferred one:
+   *
+   * - `journal` — the failing door stashed the literal signal it sent, so this
+   *   is a byte-for-byte re-issue.
+   * - `reconstructed` — no stash (the strand predates that journalling, or its
+   *   write failed), so the signal was rebuilt from the row's recorded outcome.
+   *   Exact for every status this verb accepts; the one shape it CANNOT rebuild
+   *   is refused rather than guessed (see the method's `AMBIGUOUS_RECORDED_OUTCOME`).
+   */
+  source: 'journal' | 'reconstructed';
+  /** Set only on the tolerated non-failure: a concurrent resume already had it. */
+  resumeError?: string;
+}
 
 /**
  * One terminal request whose owning flow run is unrecoverable (#4469) — the
@@ -2920,6 +2984,18 @@ export class ApprovalService implements IApprovalService {
       this.logger?.error?.('[approvals] resume failed — the run is stranded', {
         request: requestId, run: runId, outcome: what, error: reason, status, repairable,
       });
+      // #15389: keep the continuation this resume was carrying, so
+      // `continueRestoredRun` can re-issue it EXACTLY once an operator re-arms
+      // the pause. Only on the repairable exit — the one whose suspension the
+      // engine journalled a snapshot for; on any other failure there is no
+      // pause to put back and a stash would be recovery bookkeeping for a
+      // repair that cannot happen. Awaited (the row must carry it before the
+      // caller can act on the throw) but never allowed to replace the throw.
+      if (repairable) {
+        await this.journalStrandedContinuation(requestId, {
+          branchLabel: signal.branchLabel, output: signal.output, decision, what,
+        });
+      }
       throw strandedDecisionFailure(
         `RESUME_FAILED: ${what} was recorded on request ${requestId}, but its flow run '${runId}' ` +
         `could not be resumed and is now stranded: ${reason}`,
@@ -3124,6 +3200,17 @@ export class ApprovalService implements IApprovalService {
           this.logger?.error?.('[approvals] resume after recall failed — the run may be stranded', {
             request: requestId, run: runId, error: resumeError,
           });
+          // #15389: recall resumes directly rather than through
+          // `resumeRecordedOutcome`, so its stranded exit needs the same stash
+          // — otherwise a recalled run is the one outcome whose re-issue would
+          // have to be rebuilt from the row instead of replayed.
+          if (ApprovalService.resumeStatusOf(err) === 'stranded') {
+            await this.journalStrandedContinuation(requestId, {
+              branchLabel: APPROVAL_BRANCH_LABELS.reject,
+              output: { decision: 'recall', requestId },
+              decision: 'recall', what: 'the recall',
+            });
+          }
         }
       }
     }
@@ -4217,6 +4304,290 @@ export class ApprovalService implements IApprovalService {
       });
     }
     return { scanned: rows.length, stranded, undetermined };
+  }
+
+  /**
+   * Stash the continuation a door just failed to deliver, so it can be issued
+   * again after the pause is re-armed (#15389).
+   *
+   * `AutomationEngine.restoreConsumedSuspension` puts a stranded approval run
+   * back on its pause and tells the operator to *re-issue the continuation* —
+   * but for an `approval` node the only issuers are this service's doors, and
+   * every one of them guards on a `pending` request that the stranding call
+   * itself just made terminal. Re-opening the row is excluded (it would let a
+   * decided request be decided again), so what is kept instead is the SIGNAL:
+   * the exact `branchLabel` + `output` the failed resume carried.
+   *
+   * ⚠️ Best-effort by construction, and it must stay that way: the decision is
+   * already durable and its caller is already owed a `RESUME_FAILED` throw. A
+   * failure to write recovery bookkeeping must not replace that throw with a
+   * storage error — {@link ApprovalService.continueRestoredRun} rebuilds the
+   * signal from the row when the stash is absent, so this failing costs
+   * fidelity on one shape, not the repair path.
+   */
+  private async journalStrandedContinuation(
+    requestId: string,
+    signal: StrandedContinuationSignal,
+  ): Promise<void> {
+    try {
+      const rows = await this.engine.find('sys_approval_request', {
+        where: { id: requestId }, limit: 1, context: SYSTEM_CTX,
+      });
+      const raw: any = Array.isArray(rows) ? rows[0] : null;
+      if (!raw) return;
+      const config = parseJson<Record<string, unknown>>(raw.node_config_json, {});
+      await this.engine.update('sys_approval_request', {
+        id: requestId,
+        node_config_json: JSON.stringify({ ...config, [STRANDED_CONTINUATION_KEY]: signal }),
+      }, { context: SYSTEM_CTX });
+    } catch (err: any) {
+      this.logger?.warn?.(
+        '[approvals] could not journal the stranded continuation — the repair path falls back to rebuilding it from the row',
+        { request: requestId, error: err?.message ?? String(err) },
+      );
+    }
+  }
+
+  /**
+   * The continuation to re-issue for a request whose recorded outcome stranded
+   * its run — the journalled one when there is one, otherwise rebuilt from the
+   * row (#15389).
+   *
+   * ## Why a rebuild path exists at all
+   *
+   * The journal only covers runs stranded by a build that HAS it. The card is
+   * explicitly about *"the runs already in this state"*, and one of those can
+   * still be restored whenever the durable run-history row carried its
+   * suspension snapshot — so a repair verb that only served future strands
+   * would miss the population the card was filed for.
+   *
+   * ## Why the rebuild is exact, and where it refuses instead
+   *
+   * Each accepted status is written by exactly ONE door, which always resumes
+   * with one signal, so the rebuild is a lookup and not a guess:
+   *
+   * | status | door | branch | output |
+   * |---|---|---|---|
+   * | `approved` | `decide` | `approve` | accumulated decision outputs + `decision` |
+   * | `rejected` | `decide` | `reject` | accumulated decision outputs + `decision` |
+   * | `returned` | `sendBack` | `revise` | `decision: 'revise'` |
+   * | `recalled` | `recall` | `reject` | `decision: 'recall'` |
+   *
+   * ⚠️ **The one shape it refuses.** `rejected` has a SECOND writer: ADR-0044's
+   * revision-limit auto-rejection, which resumes down the same `reject` edge
+   * but carries `autoRejected: true` in the output. Replaying it as a plain
+   * rejection would hand the flow a payload it never had. The two are
+   * distinguishable in the audit trail and only there — the auto-reject arm
+   * inserts its `revise` action row unconditionally BEFORE it can reach the
+   * limit check, so a `rejected` request with no `revise` action row cannot
+   * have taken it. With one, this refuses rather than guessing; the journal is
+   * what makes that shape recoverable going forward.
+   *
+   * ⛔ `pending` and `cancelled` are refused outright: neither names a recorded
+   * outcome to replay. A `pending` request's continuation is an ordinary
+   * decision through the front door, which is exactly the guard this verb
+   * exists to avoid weakening.
+   */
+  private async resolveRecordedContinuation(
+    raw: any,
+    requestId: string,
+  ): Promise<{ signal: StrandedContinuationSignal; source: 'journal' | 'reconstructed' }> {
+    const config = parseJson<Record<string, any>>(raw.node_config_json, {});
+    const stashed = config?.[STRANDED_CONTINUATION_KEY];
+    if (stashed && typeof stashed === 'object' && typeof stashed.decision === 'string') {
+      return { signal: stashed as StrandedContinuationSignal, source: 'journal' };
+    }
+
+    const outputs: Record<string, unknown> = { ...(config?.__decisionOutputs ?? {}) };
+    const status = String(raw.status ?? '');
+
+    if (status === 'approved' || status === 'rejected') {
+      if (status === 'rejected') {
+        // The ADR-0044 auto-rejection is the second writer of this status, and
+        // its `revise` row is the only thing that tells them apart.
+        const priorRevise = await this.engine.find('sys_approval_action', {
+          where: { request_id: requestId, action: 'revise' }, limit: 1, context: SYSTEM_CTX,
+        });
+        if (Array.isArray(priorRevise) && priorRevise.length) {
+          throw new Error(
+            `INVALID_STATE: request ${requestId} is 'rejected' and also carries a 'revise' action, so this ` +
+            `service cannot tell a decided rejection from an ADR-0044 revision-limit auto-rejection — and the ` +
+            `two resume the same edge with different flow output (\`autoRejected\`). Refusing to guess: replay ` +
+            `it by hand with the signal the flow expects, or cancel the run.`,
+          );
+        }
+      }
+      const decision = status === 'approved' ? 'approve' : 'reject';
+      return {
+        source: 'reconstructed',
+        signal: {
+          branchLabel: status === 'approved'
+            ? APPROVAL_BRANCH_LABELS.approve
+            : APPROVAL_BRANCH_LABELS.reject,
+          output: { ...outputs, decision, requestId },
+          decision,
+          what: `the ${decision} decision`,
+        },
+      };
+    }
+
+    if (status === 'returned') {
+      return {
+        source: 'reconstructed',
+        signal: {
+          branchLabel: APPROVAL_BRANCH_LABELS.revise,
+          output: { decision: 'revise', requestId },
+          decision: 'revise',
+          what: 'the send-back',
+        },
+      };
+    }
+
+    if (status === 'recalled') {
+      return {
+        source: 'reconstructed',
+        signal: {
+          branchLabel: APPROVAL_BRANCH_LABELS.reject,
+          output: { decision: 'recall', requestId },
+          decision: 'recall',
+          what: 'the recall',
+        },
+      };
+    }
+
+    throw new Error(
+      `INVALID_STATE: request is ${status || 'unknown'} — only a request whose recorded outcome already ` +
+      `resumed its run can have that continuation re-issued (approved, rejected, returned, recalled)`,
+    );
+  }
+
+  /**
+   * Re-issue the continuation for a run an operator has re-armed with
+   * `AutomationEngine.restoreConsumedSuspension` — the missing half of that
+   * repair verb, for approvals (#15389).
+   *
+   * ## The dead end this exits
+   *
+   * A decision whose downstream node throws strands the run: the suspension is
+   * consumed, the decision is durable, and the caller gets `RESUME_FAILED`
+   * carrying `repairable: true`. `restoreConsumedSuspension` then genuinely
+   * re-arms the pause — measured `restored: true`, `hasSuspendedRun` back to
+   * `true` — and its own reason string tells the operator to *re-issue the
+   * continuation*. For an `approval` node there was then nobody who could:
+   *
+   *  - `decide` / `recall` / `sendBack` / `resubmit` all guard on a `pending`
+   *    request, and the row is terminal — written by the very call that
+   *    stranded the run;
+   *  - the generic `engine.resume` refuses, because the `approval` node
+   *    declares `resumeAuthority: 'service'` and the #3801 gate turns away any
+   *    resume that is not the tail of a decision this service authorized.
+   *
+   * So the only verb left was `cancelRun`, which discards the branch's
+   * downstream work. Measured on the real engine and the real door: the
+   * restored pause IS resumable, and a `resumeAuthority`-marked resume walks
+   * the reject branch to completion. Nothing was missing in the engine — what
+   * was missing was an ISSUER on this side. This is that issuer.
+   *
+   * ## What it deliberately does NOT do
+   *
+   * ⛔ It does not re-open, re-decide, or rewrite the request row: all four
+   * `pending` guards stay exactly as they are, and no status, mirror field or
+   * audit row is written. A person decided this once; this replays what they
+   * decided onto the pause that was put back, and replays nothing else.
+   * ⛔ It does not relax `resumeAuthority: 'service'` — the resume goes through
+   * {@link ApprovalService.serviceResume} like every other, so the marker is
+   * still stamped in exactly one place.
+   * ⛔ It grants no capability that in-process code did not already have:
+   * `RESUME_AUTHORITY_SERVICE` is importable by anything in the host, so the
+   * raw form of this call was always available. What this adds is the guarded
+   * form — the one that checks the pause is actually re-armed and that the
+   * signal matches what was recorded.
+   *
+   * ## Posture, and why it takes no `ExecutionContext`
+   *
+   * Deliberately shaped like the engine verb it completes: an in-process
+   * operator repair, reachable from a host or a console script, with no REST
+   * route and no entry in the spec `ApprovalService` contract — exactly as
+   * `restoreConsumedSuspension` is a class method on `AutomationEngine` and
+   * appears in no contract. It authorizes nothing new: the decision it replays
+   * was authorized and recorded when it was made, and re-authorizing it here
+   * against a present-day actor would be a different and wrong question (the
+   * original approver may be long gone). `requestedBy` / `reason` ride the log
+   * for the same reason they do on the restore.
+   *
+   * @returns what was replayed and whether the run moved — never a silent
+   *   `false`. A resume that fails again throws the same `RESUME_FAILED`
+   *   envelope the original decision did, `repairable` and all, so a second
+   *   restore-and-continue is possible.
+   */
+  async continueRestoredRun(
+    requestId: string,
+    options?: { requestedBy?: string; reason?: string },
+  ): Promise<ApprovalContinuationResult> {
+    if (!requestId) throw new Error('VALIDATION_FAILED: requestId is required');
+
+    const rows = await this.engine.find('sys_approval_request', {
+      where: { id: requestId }, limit: 1, context: SYSTEM_CTX,
+    });
+    const raw: any = Array.isArray(rows) ? rows[0] : null;
+    if (!raw) throw new Error(`REQUEST_NOT_FOUND: ${requestId}`);
+
+    const runId: string | null = raw.flow_run_id ?? null;
+    if (!runId) {
+      throw new Error(
+        `INVALID_STATE: request ${requestId} names no flow run — there is no continuation to re-issue`,
+      );
+    }
+
+    // The signal FIRST, so a request this verb cannot serve is refused before
+    // it asks the suspension store anything.
+    const { signal, source } = await this.resolveRecordedContinuation(raw, requestId);
+
+    // The pause must actually be back. This is what separates a continuation
+    // from a second resume of a live decision: without a re-armed suspension
+    // there is nothing to continue, and the operator's missing step is the
+    // restore itself. `hasSuspendedRun` THROWS on an unreadable store, and that
+    // throw is deliberately not caught — a caller about to resume a run must
+    // not read an outage as "not suspended".
+    if (typeof this.automation?.hasSuspendedRun === 'function') {
+      const parked = await this.automation.hasSuspendedRun(runId);
+      if (!parked) {
+        throw new Error(
+          `INVALID_STATE: run '${runId}' behind request ${requestId} is not suspended, so there is no ` +
+          `re-armed pause to continue — restore it first with the automation engine's ` +
+          `restoreConsumedSuspension('${runId}'), which is what re-arms a consumed approval suspension`,
+        );
+      }
+    }
+
+    this.logger?.warn?.(
+      '[approvals] re-issuing the continuation for a restored approval suspension',
+      {
+        request: requestId, run: runId, decision: signal.decision,
+        branchLabel: signal.branchLabel, source,
+        requestedBy: options?.requestedBy ?? 'not recorded',
+        reason: options?.reason ?? 'not recorded',
+      },
+    );
+
+    // Reuses the door every other recorded outcome resumes through: the same
+    // `RESUME_IN_PROGRESS` tolerance, the same stranded envelope with the
+    // engine's own `repairable` discriminator, and the same re-journalling —
+    // so a continuation that strands AGAIN is repairable exactly like the first.
+    const outcome = await this.resumeRecordedOutcome(
+      runId, requestId, signal.what,
+      { branchLabel: signal.branchLabel, output: signal.output },
+      signal.decision,
+    );
+
+    return {
+      resumed: outcome.resumed,
+      runId,
+      decision: signal.decision,
+      branchLabel: signal.branchLabel,
+      source,
+      ...(outcome.resumeError ? { resumeError: outcome.resumeError } : {}),
+    };
   }
 
   async releaseDeadRunRequests(): Promise<{ scanned: number; released: number }> {
