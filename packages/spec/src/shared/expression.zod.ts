@@ -19,8 +19,14 @@ import { z } from 'zod';
  * | dialect | engine | use |
  * |:---|:---|:---|
  * | `cel`      | `@objectstack/formula` (cel-js + ObjectStack stdlib) | formulas, predicates, seed dynamic values |
- * | `cron`     | `cron-parser` | job schedules |
+ * | `cron`     | none at parse time — `croner` fires it at schedule time, on the one wired slot | job schedules |
  * | `template` | `{{var}}` interpolation at evaluate time (same variable scope as CEL) | notification subjects/bodies, `titleFormat`, prompt templates |
+ *
+ * No cron syntax is judged at parse time: `croner` evaluates a cron slot only
+ * when `CronSchedule.expression` is scheduled (`toBoundaryJobSchedule` →
+ * `CronJobAdapter`, where an invalid pattern is refused); every other
+ * cron-typed slot is parsed and reaches no engine, and `@objectstack/formula`'s
+ * registered `cron` engine has no caller outside that package.
  *
  * Those three are the whole list — it is exactly the `ExpressionDialect` enum
  * below. Procedural JavaScript is **not** a dialect: it is the L2 authoring
@@ -88,6 +94,65 @@ export const ExpressionSchema = z.object({
   message: 'Expression requires at least one of `source` or `ast`',
 });
 export type Expression = z.input<typeof ExpressionSchema>;
+
+/**
+ * The one sentence an EVALUATED slot refuses a non-evaluable envelope with —
+ * the same words for both spellings of the seam (an `ast`-only envelope, a
+ * `source` that is blank after trimming), so an author learns the rule before
+ * the detail. Names what the engine needs and why, so the prescription travels
+ * with the refusal.
+ */
+export const EVALUATED_EXPRESSION_SOURCE_REQUIRED =
+  'An expression in an evaluated slot needs a non-blank `source`: the expression engine evaluates `source` '
+  + '(the canonical persisted form of phase M9.1) and cannot evaluate `ast` alone, so an envelope carrying only '
+  + '`ast`, or a `source` that is blank after trimming, would validate and register and then fault at run time. '
+  + 'Write `{ dialect: \'cel\', source: \'…\' }`.';
+
+/**
+ * An {@link ExpressionSchema} envelope in an EVALUATED slot — a slot whose
+ * value the expression engine runs (a flow `value` slot, a predicate the
+ * engine gates on), as opposed to a slot that only PERSISTS the envelope.
+ *
+ * The rule is "an evaluated slot requires whatever the engine can actually
+ * evaluate", and this schema spells out what that is TODAY: the CEL engine
+ * evaluates `source` and refuses an envelope without one (`cel-engine.ts`
+ * `evaluate`: "AST-only evaluation not yet supported; persist `source`" — its
+ * own note revisits AST execution when the spec persistence cuts over). So
+ * `source` is required here, and required to be non-blank after trimming —
+ * the notion of blank the engine's own helpers apply (`source.trim()`), not a
+ * third one. Two spellings of one seam are refused by this ONE rule, with one
+ * message at `source`: `{ dialect: 'cel', ast }` (a valid Expression that no
+ * engine runs) and `{ dialect: 'cel', source: '   ' }` (passes `min(1)`;
+ * reads as "not authored" to `validateExpression`, which trims; the engine
+ * parses it untrimmed and faults).
+ *
+ * `ExpressionSchema` itself is NOT narrowed: it is the persistence contract,
+ * and its docblock declares that `ast` becomes required in build output at
+ * phase M9.2. When AST-only evaluation lands, this schema is the one place to
+ * revisit — relax `source` and require "`source` or `ast`, whichever the
+ * engine evaluates" — and every evaluated slot composes it, so that flip is
+ * one edit rather than a per-slot unwinding.
+ *
+ * Spelled as a property override rather than an object-level `.refine`, for a
+ * measured reason: Zod runs an object's refinements even after a property has
+ * failed (a `.refine` sibling reports `source: ''` twice — `min(1)` and the
+ * refinement — and `{ dialect: 'cel' }` twice — the source-or-ast rule and the
+ * refinement), while an aborting property issue skips them. This spelling
+ * yields exactly one issue, this message, at `source`, for every refused
+ * shape, and narrows the TYPE too (`source: string`) — the same move
+ * `AssignmentExpressionValueSchema` makes for `dialect`, so an `ast`-only
+ * envelope is a compile error before it is a parse error.
+ */
+export const EvaluatedExpressionSchema = ExpressionSchema.safeExtend({
+  /**
+   * Surface syntax — required and non-blank in an evaluated slot: it is what
+   * the engine evaluates (M9.1), and `ast` alone cannot be run.
+   */
+  source: z.string({ error: () => EVALUATED_EXPRESSION_SOURCE_REQUIRED })
+    .refine((source) => source.trim().length > 0, { message: EVALUATED_EXPRESSION_SOURCE_REQUIRED }),
+});
+export type EvaluatedExpression = z.input<typeof EvaluatedExpressionSchema>;
+export type EvaluatedExpressionParsed = z.infer<typeof EvaluatedExpressionSchema>;
 
 /**
  * Author-time input shape: a bare string is shorthand for `{ dialect: 'cel',

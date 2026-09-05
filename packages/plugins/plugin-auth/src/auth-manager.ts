@@ -4180,10 +4180,9 @@ export class AuthManager {
     if (!engine || typeof (engine as any).find !== 'function') return false;
     try {
       const reader = withSystemReadContext(engine) as any;
-      const raw = await reader.find(SystemObjectName.USER, {
+      const rows: any[] = await reader.find(SystemObjectName.USER, {
         limit: AuthManager.BOOTSTRAP_USER_PROBE_LIMIT,
       });
-      const rows: any[] = Array.isArray(raw) ? raw : Array.isArray(raw?.records) ? raw.records : [];
       if (rows.some(isHumanUserRow)) return false;
       // A page that came back FULL of non-human rows cannot prove there is no
       // human on the next page — fail closed rather than guess.
@@ -4256,14 +4255,13 @@ export class AuthManager {
       const seenIds = new Set<unknown>();
       for (let pageIndex = 0; pageIndex < AuthManager.PENDING_INVITATION_PROBE_MAX_PAGES; pageIndex++) {
         const offset = pageIndex * page;
-        const raw = await reader.find('sys_invitation', {
+        const rows: any[] = await reader.find('sys_invitation', {
           where: { status: 'pending', email: target },
           limit: page,
           // Omitted on the first page so the ordinary single-page read sends
           // exactly the option shape every driver already answers.
           ...(offset > 0 ? { offset } : {}),
         });
-        const rows: any[] = Array.isArray(raw) ? raw : Array.isArray(raw?.records) ? raw.records : [];
         const idsBefore = seenIds.size;
         for (const row of rows) {
           if (row?.id != null) seenIds.add(row.id);
@@ -4340,11 +4338,10 @@ export class AuthManager {
     if (!target) return false;
     try {
       const reader = withSystemReadContext(engine) as any;
-      const raw = await reader.find(SystemObjectName.USER, {
+      const rows: any[] = await reader.find(SystemObjectName.USER, {
         where: { email: target },
         limit: AuthManager.EXISTING_USER_PROBE_LIMIT,
       });
-      const rows: any[] = Array.isArray(raw) ? raw : Array.isArray(raw?.records) ? raw.records : [];
       return rows.some(
         (row) => typeof row?.email === 'string' && row.email.trim().toLowerCase() === target,
       );
@@ -4382,8 +4379,7 @@ export class AuthManager {
     if (!engine || typeof (engine as any).find !== 'function') return [];
     try {
       const reader = withSystemReadContext(engine) as any;
-      const raw = await reader.find('sys_permission_set', { where: { name: setName }, limit: 50 });
-      return Array.isArray(raw) ? raw : Array.isArray(raw?.records) ? raw.records : [];
+      return await reader.find('sys_permission_set', { where: { name: setName }, limit: 50 });
     } catch {
       return [];
     }
@@ -4606,9 +4602,36 @@ export class AuthManager {
       } catch {
         organizationId = null;
       }
-      const rows = (await this.findPermissionSetRows(staged.setName)).filter(
-        (r) => r?.active !== false && typeof r?.id === 'string' && r.id,
+      // ACTIVE is a selection predicate — a deactivated set legitimately does
+      // not resolve, so it stays a filter. A missing or blank `id` is NOT a
+      // selection: it is a MALFORMED row, and dropping it silently is the
+      // opposite defect from a dead limb, wrong in two ways that both look
+      // normal from outside. (1) The family narrows to nothing and the report
+      // below blames "no active row named X" while an active row named X is
+      // sitting right there — and that report is the only signal, because
+      // nothing retries this. (2) Worse, when the malformed row is the
+      // ORG-SCOPED one, the `organization_id == null` arm below then resolves
+      // the GLOBAL set and grants a permission set the organization never
+      // declared, and the `rows.length === 1` arm can fire on a family that
+      // was never singular — both computed AFTER the silent removal, so the
+      // "unambiguous single row" this code believes it selected is not that.
+      // So a malformed candidate REFUSES the grant and names itself, which is
+      // the same gap-not-empty-answer direction the rest of this method takes.
+      const candidates = (await this.findPermissionSetRows(staged.setName)).filter(
+        (r) => r?.active !== false,
       );
+      const malformed = candidates.filter((r) => !(typeof r?.id === 'string' && r.id));
+      if (malformed.length > 0) {
+        this.reportUngrantedSelfRegistrant(
+          userId,
+          staged.setName,
+          `${malformed.length} active sys_permission_set row(s) named '${staged.setName}' carry no usable id, ` +
+            'so which row this grant would resolve to cannot be decided — refusing rather than ' +
+            'silently dropping them and granting whichever row is left',
+        );
+        return;
+      }
+      const rows = candidates;
       const row =
         (organizationId ? rows.find((r) => r?.organization_id === organizationId) : undefined) ??
         rows.find((r) => r?.organization_id == null) ??
@@ -4623,15 +4646,10 @@ export class AuthManager {
         );
         return;
       }
-      const existingRaw = await sys.find('sys_user_permission_set', {
+      const existing: any[] = await sys.find('sys_user_permission_set', {
         where: { user_id: userId, permission_set_id: row.id },
         limit: 1,
       });
-      const existing: any[] = Array.isArray(existingRaw)
-        ? existingRaw
-        : Array.isArray(existingRaw?.records)
-          ? existingRaw.records
-          : [];
       if (existing.length > 0) return;
       const id = `ups_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
       await sys.insert('sys_user_permission_set', {

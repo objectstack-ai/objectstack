@@ -205,9 +205,10 @@ const MULTILINE_EDITOR_FIELD_TYPES: ReadonlySet<string> = new Set([
  * This is the PROTOCOL's statement of that ownership, so the consumers that act
  * on it read one vocabulary instead of each carrying its own literal: objectql's
  * write-path strips (`isRuntimeOwnedField` / `stripRuntimeOwnedFields`, which
- * treat these types as implicitly read-only), and the DataProtocol create
- * ingress, which defers to those strips rather than pre-empting them with its
- * own narrower exemption set (`stripReadonlyForInsert`, #5628).
+ * treat these types as implicitly read-only), and the create-side static
+ * `readonly` strip, which EXCLUDES these types rather than pre-empting a
+ * whitelist it does not implement (`staticReadonlyInsertSubject`, #5628/#14147
+ * — the exclusion the deleted DataProtocol ingress copy used to carry).
  *
  * Keep the set to types whose value is (a) persisted, (b) issued by the runtime,
  * and (c) never legitimately supplied by a caller. `formula` and `summary` are

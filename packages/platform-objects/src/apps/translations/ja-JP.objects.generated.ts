@@ -534,6 +534,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "多要素認証を必須化",
         help: "true の場合、この組織のすべてのメンバーはデータにアクセスするために認証アプリの登録が必要になります。"
       },
+      timezone: {
+        label: "タイムゾーン",
+        help: "この組織で日付の境界を計算する IANA タイムゾーン（例: UTC、Asia/Shanghai）。独自のタイムゾーンを持たないすべてのビジネスユニットが継承するルートの既定値です。未設定の場合は UTC です。"
+      },
       parent_organization_id: {
         label: "Parent Organization",
         help: "Reporting/grouping parent. Grants NOTHING — visibility across organizations comes from membership, never from this reference (ADR-0105 D6)."
@@ -856,6 +860,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       parent_business_unit_id: {
         label: "親ビジネスユニット",
         help: "組織ツリーの自己参照。null = テナントのルート。"
+      },
+      timezone: {
+        label: "タイムゾーン",
+        help: "このユニットで日付の境界を計算する IANA タイムゾーン（例: Asia/Shanghai）。未設定の場合は親ビジネスユニット、次に組織のタイムゾーン、最後に UTC を継承します。"
       },
       organization_id: {
         label: "組織",

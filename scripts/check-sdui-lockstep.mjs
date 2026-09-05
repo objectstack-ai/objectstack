@@ -109,7 +109,8 @@ import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from './invoked-as.mjs';
 import { parseSourceFile } from './ts-parse.mjs';
-import ts from 'typescript';
+import { requireDefaultExport } from './import-prerequisite.mjs';
+const ts = await requireDefaultExport('typescript', () => import('typescript'), import.meta.url);
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 

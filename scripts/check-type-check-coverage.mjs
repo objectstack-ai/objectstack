@@ -522,7 +522,7 @@
 // the exclusion from tsconfig.json and delete the entry here in the same PR.
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, posix, resolve } from 'node:path';
 import { getHeapStatistics } from 'node:v8';
@@ -1661,6 +1661,136 @@ function gitIgnoredPaths(rels) {
 }
 
 /**
+ * Every repo-relative path this tree's own ignore rules exclude, in the two
+ * shapes a directory walk needs: whole directories to skip, and single files
+ * to drop.
+ *
+ * This is SOURCES_COVERED's (and TESTS_COVERED's, and PINS_CHECKED's) population
+ * filter since #15731. The rule those invariants apply is unchanged -- what
+ * changed is who they apply it to. A gate run while `pnpm --filter
+ * @objectstack/cli exec vitest run` was in flight reported `packages/cli/tmp: 1
+ * non-test source file(s) here sit outside every tsc program`, with the ledger's
+ * "closed to new entries" line beside it, over a scratch file a test wrote and
+ * removed again: the same text a real ratchet break produces, naming a repair
+ * (add a `tsconfig.scripts.json`, or widen `include`) that would have widened a
+ * config to cover a scratch directory. `.gitignore:53` excludes `tmp/`, and a
+ * path the repo excludes is by the repo's own declaration not a source of the
+ * package -- never committed, never published, and never seen at all by the
+ * clean checkout CI type-checks. The gate has no claim on it.
+ *
+ * ONE `ls-files` for the whole repo, memoised across the two walk sites
+ * (`workspacePackages` for the 79, `observed` for the root), for the reason
+ * `gitIgnoredPaths` gives above: the structural pass is the sub-second half of
+ * this gate, and a spawn per package -- let alone per file -- would end that.
+ * Measured on main @ 2dec9576d: 41ms for the whole repo.
+ *
+ * `--exclude-per-directory=.gitignore` rather than `--exclude-standard` is the
+ * load-bearing flag, and it draws the line `exposedScratchDirs` in
+ * `scripts/pm/dispatch-gates.mjs` already draws for this repo: a rule that lives
+ * only in `.git/info/exclude` -- or in a developer's `core.excludesFile`,
+ * emptied here as it is emptied ten lines up -- covers the clone it lives in and
+ * nothing else. What licenses dropping a path from this gate's subject is the
+ * REPO's declaration that the path is not part of the tree; a per-clone rule is
+ * one machine's opinion, and honouring it would let a developer quietly shrink
+ * the gate's population locally while CI, whose checkout has no such file, still
+ * judges the directory. A gate must conclude the same thing in both places.
+ *
+ * Two further properties come from the instrument rather than from a flag:
+ *
+ *   * TRACKED paths are never listed (`--others` is the whole point), so a
+ *     force-added file under an ignored directory keeps being judged -- it IS
+ *     present in a clean checkout. That is the same answer `gitIgnoredPaths`
+ *     reaches by consulting the index.
+ *   * `--directory` collapses a wholly-ignored directory to its own name, so
+ *     `node_modules/` costs one entry rather than a hundred thousand, while a
+ *     directory that still holds tracked files stays open and only its ignored
+ *     files are listed.
+ *
+ * A git that cannot answer is a THROW, never an empty set: reading a failed
+ * spawn as "this tree ignores nothing" would silently restore the phantom
+ * findings this filter exists to remove, which is the posture `gitIgnoredPaths`
+ * takes for its own question.
+ *
+ * @param {string} cwd repository to ask about -- ROOT in production, a fixture
+ *   repo in the self-test, which is the only way the tracked-vs-per-clone line
+ *   above can be pinned by an assertion rather than by this paragraph.
+ * @returns {{dirs: Set<string>, files: Set<string>}}
+ */
+function readIgnoredPaths(cwd) {
+  const res = spawnSync(
+    'git',
+    [
+      '-c',
+      'core.excludesFile=',
+      'ls-files',
+      '--others',
+      '--ignored',
+      '--exclude-per-directory=.gitignore',
+      '--directory',
+      '-z',
+    ],
+    { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
+  );
+  if (res.error) {
+    refusePrerequisite(
+      `git ls-files could not run, so the ignored paths cannot be told from source: ${res.error.message}`,
+    );
+  }
+  if (res.status !== 0) {
+    refusePrerequisite(
+      `git ls-files exited ${res.status}, so the ignored paths cannot be told from source: `
+        + String(res.stderr).trim(),
+    );
+  }
+  return ignoreIndex(res.stdout);
+}
+
+/**
+ * The `-z` listing above, split into the two lookups the walk performs.
+ *
+ * A trailing `/` is git's mark for a directory it collapsed whole; everything
+ * else is a single file. Parsed by a named function rather than inline so the
+ * self-test asserts the shape this gate actually reads out of git, and so the
+ * `--directory` contract above is stated in one place instead of two.
+ *
+ * @param {string} stdout NUL-separated `ls-files -z` output
+ * @returns {{dirs: Set<string>, files: Set<string>}}
+ */
+function ignoreIndex(stdout) {
+  const dirs = new Set();
+  const files = new Set();
+  for (const entry of stdout.split('\0')) {
+    if (entry === '') continue;
+    if (entry.endsWith('/')) dirs.add(entry.slice(0, -1));
+    else files.add(entry);
+  }
+  return { dirs, files };
+}
+
+/** ROOT's index, read once per run and shared by both walk sites. */
+let ignoredPathsMemo = null;
+function workspaceIgnoredPaths() {
+  ignoredPathsMemo ??= readIgnoredPaths(ROOT);
+  return ignoredPathsMemo;
+}
+
+/**
+ * Does the walk step over this path?
+ *
+ * Named rather than inlined for `isBuildSource`'s reason: the self-test then
+ * asserts the predicate the walk applies instead of a copy of it. Asked of
+ * directories and files alike -- a wholly-ignored directory is one entry, and
+ * skipping it there is what keeps this cheap.
+ *
+ * @param {{dirs: Set<string>, files: Set<string>}} index
+ * @param {string} rel REPO-relative posix path (the walk's package-relative
+ *   path joined onto the package directory), naming a file or a directory
+ */
+function isIgnoredPath(index, rel) {
+  return index.dirs.has(rel) || index.files.has(rel);
+}
+
+/**
  * Which tsc programs ACCOUNT for a package's test files -- the ones whose error
  * count somebody actually reads.
  *
@@ -1765,6 +1895,62 @@ function isUncheckedSourceCandidate(name, depth) {
 }
 
 /**
+ * One walk of a whole package: its test files, its non-test source files, and
+ * which of the tests carry a `@ts-expect-error` in directive position.
+ *
+ * Both halves need the same list: the hidden-file count is no longer confined
+ * to the include roots, because a file outside them is precisely the case
+ * TESTS_COVERED had been missing (#7353).
+ *
+ * Extracted from `testCoverage` and given the ignore index as an ARGUMENT
+ * (#15731) so the self-test drives the walk this gate runs -- over a fixture
+ * tree, against a stated index -- instead of asserting a copy of it. That is
+ * the whole of the population question: the same fixture walked with an empty
+ * index yields the file, and walked with the index git produces does not.
+ *
+ * @param {string} absDir absolute path of the package directory
+ * @param {string} dir the same directory, repo-relative posix (`.` for the root)
+ * @param {{dirs: Set<string>, files: Set<string>}} ignored `readIgnoredPaths`
+ * @returns {{testRels: string[], sourceRels: string[], pinned: Set<string>}}
+ *   package-relative posix paths, in walk order
+ */
+function walkPackageFiles(absDir, dir, ignored) {
+  const testRels = [];
+  const sourceRels = [];
+  const pinned = new Set();
+  const walk = (abs, rel, depth) => {
+    let entries = [];
+    try {
+      entries = readdirSync(abs, { withFileTypes: true });
+    } catch {
+      return; // no such root, or unreadable -- nothing to hide either way
+    }
+    for (const entry of entries) {
+      const child = join(abs, entry.name);
+      const childRel = rel ? `${rel}/${entry.name}` : entry.name;
+      // #15731. A path this repo IGNORES is not this package's source by the
+      // repo's own declaration, so no invariant below has a claim on it --
+      // asked before the `isDirectory` fork, because a wholly-ignored
+      // directory is a single entry in the index and stepping over it there
+      // is what keeps one git call per run enough.
+      if (isIgnoredPath(ignored, posix.join(dir, childRel))) continue;
+      if (entry.isDirectory()) {
+        if (entry.name === 'node_modules' || entry.name === 'dist' || entry.name.startsWith('.')) continue;
+        if (depth > 0 && existsSync(join(child, 'package.json'))) continue; // another package's problem
+        walk(child, childRel, depth + 1);
+      } else if (TEST_FILE.test(entry.name)) {
+        testRels.push(childRel);
+        if (PIN_DIRECTIVE.test(readFileSync(child, 'utf8'))) pinned.add(childRel);
+      } else if (isUncheckedSourceCandidate(entry.name, depth)) {
+        sourceRels.push(childRel);
+      }
+    }
+  };
+  walk(absDir, '', 0);
+  return { testRels, sourceRels, pinned };
+}
+
+/**
  * What this package's tsc programs read, and what they leave out.
  *
  * `hidesTests` is the TESTS_COVERED trigger and means "at least one of this
@@ -1795,35 +1981,13 @@ function testCoverage(dir, scripts) {
   const named = configsNamedByTypecheck(scripts);
   const invoked = configs.filter((c) => named.has(c.file));
 
-  // One walk of the whole package. Both halves need the same list now: the
-  // hidden-file count is no longer confined to the include roots, because a
-  // file outside them is precisely the case this invariant had been missing.
-  const testRels = [];
-  const sourceRels = [];
-  const pinned = new Set();
-  const walk = (abs, rel, depth) => {
-    let entries = [];
-    try {
-      entries = readdirSync(abs, { withFileTypes: true });
-    } catch {
-      return; // no such root, or unreadable -- nothing to hide either way
-    }
-    for (const entry of entries) {
-      const child = join(abs, entry.name);
-      const childRel = rel ? `${rel}/${entry.name}` : entry.name;
-      if (entry.isDirectory()) {
-        if (entry.name === 'node_modules' || entry.name === 'dist' || entry.name.startsWith('.')) continue;
-        if (depth > 0 && existsSync(join(child, 'package.json'))) continue; // another package's problem
-        walk(child, childRel, depth + 1);
-      } else if (TEST_FILE.test(entry.name)) {
-        testRels.push(childRel);
-        if (PIN_DIRECTIVE.test(readFileSync(child, 'utf8'))) pinned.add(childRel);
-      } else if (isUncheckedSourceCandidate(entry.name, depth)) {
-        sourceRels.push(childRel);
-      }
-    }
-  };
-  walk(join(ROOT, dir), '', 0);
+  // One walk of the whole package, minus whatever this repo declares is not
+  // in it (#15731 -- `walkPackageFiles` above carries both halves).
+  const { testRels, sourceRels, pinned } = walkPackageFiles(
+    join(ROOT, dir),
+    dir,
+    workspaceIgnoredPaths(),
+  );
 
   const hiddenTests = unreadFiles(testRels, accountedPrograms(configs, invoked));
   // PINS_CHECKED stays anchored to the INVOKED programs, not the accounted
@@ -4308,10 +4472,13 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'an ungenerated `include` root at the workspace ROOT fails GENERATED_COVERED (#15483)': 1,
   'a PHANTOM_PIN_DEBT row for a ROOT pin is covered, not reported stale (#15483)': 1,
   // The five families the green line names, one battery each, at their measured
-  // counts. ⚠️ `observation cases` is 64 here and 75 on the printed line: the
+  // counts. ⚠️ `observation cases` is 86 here and 97 on the printed line: the
   // line adds `typecheck-configs`' 11 folded-in cases, which are floored in that
-  // module and register nowhere in this one.
-  'observation cases': 64,
+  // module and register nowhere in this one. The 22 that #15731 added are the
+  // population filter's four batteries -- how git's listing is read, the
+  // predicate the walk applies, the walk's own output, and what git is asked of
+  // a real repository.
+  'observation cases': 86,
   're-measure cases': 45,
   'built-closure cases': 28,
   'auto-lowering cases': 19,
@@ -5156,6 +5323,194 @@ function selfTest() {
     if (got !== c.expect) {
       failures.push(`isUncheckedSourceCandidate — ${c.label}: expected ${c.expect}, got ${got}`);
     }
+  }
+
+  // #15731. The population filter -- which paths this gate declines to judge
+  // because the repo itself declares they are not in the tree. Four batteries,
+  // one per joint: how git's answer is READ, the predicate the walk APPLIES,
+  // the walk's own OUTPUT, and what git is actually ASKED. A wrong answer at
+  // any of them is silent in both directions: too wide and a scratch file
+  // manufactures a ratchet finding (the card), too narrow and a real unread
+  // source directory stops being counted at all.
+  const ignoreIndexCases = [
+    {
+      label: 'a collapsed directory lands in `dirs`, stripped of the trailing slash git marks it with',
+      stdout: 'packages/cli/tmp/\0',
+      dirs: ['packages/cli/tmp'],
+      files: [],
+    },
+    {
+      label: 'an ignored file inside an otherwise tracked directory lands in `files`',
+      stdout: 'packages/cli/src/schema.gen.ts\0',
+      dirs: [],
+      files: ['packages/cli/src/schema.gen.ts'],
+    },
+    {
+      label: 'both shapes arrive in one listing and stay apart',
+      stdout: 'node_modules/\0packages/cli/src/schema.gen.ts\0',
+      dirs: ['node_modules'],
+      files: ['packages/cli/src/schema.gen.ts'],
+    },
+    {
+      // The empty listing is the common case (a tree with nothing ignored but
+      // node_modules), and it must be an index that answers "no" -- reading it
+      // as a missing index is the failure mode `readIgnoredPaths` refuses.
+      label: 'a listing with nothing in it is an EMPTY index, not a missing one',
+      stdout: '',
+      dirs: [],
+      files: [],
+    },
+  ];
+  for (const c of ignoreIndexCases) {
+    registerCase('observation cases');
+    const got = ignoreIndex(c.stdout);
+    const want = JSON.stringify({ dirs: c.dirs, files: c.files });
+    const have = JSON.stringify({ dirs: [...got.dirs], files: [...got.files] });
+    if (have !== want) failures.push(`ignoreIndex — ${c.label}: expected ${want}, got ${have}`);
+  }
+
+  const ignoreFixture = ignoreIndex('packages/cli/tmp/\0packages/cli/src/schema.gen.ts\0');
+  const ignoredPathCases = [
+    { label: 'the ignored scratch directory itself is stepped over', rel: 'packages/cli/tmp', expect: true },
+    { label: 'the tracked source directory beside it is NOT (the positive control)', rel: 'packages/cli/src', expect: false },
+    { label: 'a single ignored file is stepped over by name', rel: 'packages/cli/src/schema.gen.ts', expect: true },
+    { label: 'the tracked file beside THAT one is not', rel: 'packages/cli/src/schema.ts', expect: false },
+    // A prefix match here would take a whole tracked directory out of the
+    // gate's subject on the strength of a scratch directory's name.
+    { label: 'a path matches WHOLE -- `tmp` does not swallow the sibling `tmpl`', rel: 'packages/cli/tmpl', expect: false },
+    { label: 'and it is repo-relative -- the same basename under another package is a different path', rel: 'packages/spec/tmp', expect: false },
+  ];
+  for (const c of ignoredPathCases) {
+    registerCase('observation cases');
+    const got = isIgnoredPath(ignoreFixture, c.rel);
+    if (got !== c.expect) failures.push(`isIgnoredPath — ${c.label}: expected ${c.expect}, got ${got}`);
+  }
+
+  // The walk itself, over a fixture package -- the same tree walked twice, once
+  // with an index that ignores nothing (which is what this gate did before
+  // #15731, and reproduces the card's finding) and once with the index the real
+  // tree produces. This is the red and the green of that card as an assertion.
+  const walkFixture = mkdtempSync(join(tmpdir(), 'objectstack-type-check-walk-'));
+  let ignoreWalkCases = [];
+  try {
+    mkdirSync(join(walkFixture, 'src'), { recursive: true });
+    mkdirSync(join(walkFixture, 'tmp'), { recursive: true });
+    writeFileSync(join(walkFixture, 'src', 'engine.ts'), 'export const engine = 1;\n');
+    writeFileSync(join(walkFixture, 'src', 'engine.test.ts'), '// @ts-expect-error a real pin\nexport {};\n');
+    writeFileSync(join(walkFixture, 'tmp', 'probe.ts'), 'export const probe = 1;\n');
+    writeFileSync(join(walkFixture, 'tmp', 'probe.test.ts'), '// @ts-expect-error a scratch pin\nexport {};\n');
+    const counted = walkPackageFiles(walkFixture, 'packages/cli', ignoreIndex(''));
+    const filtered = walkPackageFiles(walkFixture, 'packages/cli', ignoreIndex('packages/cli/tmp/\0'));
+    ignoreWalkCases = [
+      {
+        label: 'CONTROL: with nothing ignored, the scratch file IS counted as source -- the finding the card reported',
+        got: counted.sourceRels,
+        expect: ['src/engine.ts', 'tmp/probe.ts'],
+      },
+      {
+        label: 'with the scratch directory ignored, only the tracked source survives',
+        got: filtered.sourceRels,
+        expect: ['src/engine.ts'],
+      },
+      {
+        label: 'CONTROL: a scratch TEST file is counted too, so TESTS_COVERED had the same exposure',
+        got: counted.testRels,
+        expect: ['src/engine.test.ts', 'tmp/probe.test.ts'],
+      },
+      {
+        label: 'and it goes with the directory, leaving the package\'s own tests judged as before',
+        got: filtered.testRels,
+        expect: ['src/engine.test.ts'],
+      },
+      {
+        label: 'CONTROL: a `@ts-expect-error` in a scratch file was a phantom pin PINS_CHECKED would report',
+        got: [...counted.pinned].sort(),
+        expect: ['src/engine.test.ts', 'tmp/probe.test.ts'],
+      },
+      {
+        label: 'the real pin in the tracked tree is untouched by the filter',
+        got: [...filtered.pinned].sort(),
+        expect: ['src/engine.test.ts'],
+      },
+    ];
+  } finally {
+    rmSync(walkFixture, { recursive: true, force: true });
+  }
+  for (const c of ignoreWalkCases) {
+    registerCase('observation cases');
+    const want = JSON.stringify(c.expect);
+    const have = JSON.stringify(c.got);
+    if (have !== want) failures.push(`walkPackageFiles — ${c.label}: expected ${want}, got ${have}`);
+  }
+
+  // What git is ASKED, against a real repository -- the one battery here that
+  // spawns, because the distinction it pins cannot be observed any other way:
+  // `git check-ignore` answers the same for a tracked `.gitignore` and for a
+  // `.git/info/exclude`, and this gate must not. `exposedScratchDirs` in
+  // scripts/pm/dispatch-gates.mjs draws the same line for the same reason and
+  // pins it the same way.
+  const ignoreRepo = mkdtempSync(join(tmpdir(), 'objectstack-type-check-ignore-'));
+  let ignoreSourceCases = [];
+  try {
+    const g = (args) => spawnSync('git', args, { cwd: ignoreRepo, encoding: 'utf8' });
+    g(['init', '-q', '.']);
+    g(['config', 'user.email', 'self-test@objectstack.invalid']);
+    g(['config', 'user.name', 'check-type-check-coverage self-test']);
+    mkdirSync(join(ignoreRepo, 'pkg', 'src'), { recursive: true });
+    mkdirSync(join(ignoreRepo, 'pkg', 'tmp'), { recursive: true });
+    mkdirSync(join(ignoreRepo, 'pkg', 'scratch'), { recursive: true });
+    writeFileSync(join(ignoreRepo, '.gitignore'), 'tmp/\n');
+    writeFileSync(join(ignoreRepo, 'pkg', 'src', 'engine.ts'), 'export const engine = 1;\n');
+    g(['add', '-A']);
+    g(['commit', '-qm', 'the fixture tree, with tmp/ ignored by a TRACKED rule']);
+    writeFileSync(join(ignoreRepo, 'pkg', 'tmp', 'probe.ts'), 'export const probe = 1;\n');
+    writeFileSync(join(ignoreRepo, 'pkg', 'scratch', 'probe.ts'), 'export const probe = 1;\n');
+    writeFileSync(join(ignoreRepo, '.git', 'info', 'exclude'), 'scratch/\n');
+    const index = readIgnoredPaths(ignoreRepo);
+    // ... and now force-add a file INTO the ignored directory, which is what
+    // makes that directory present in a clean checkout after all.
+    writeFileSync(join(ignoreRepo, 'pkg', 'tmp', 'kept.ts'), 'export const kept = 1;\n');
+    g(['add', '-f', 'pkg/tmp/kept.ts']);
+    g(['commit', '-qm', 'force-add a file inside the ignored directory']);
+    const forced = readIgnoredPaths(ignoreRepo);
+    ignoreSourceCases = [
+      {
+        label: 'a directory a TRACKED .gitignore covers is out of the gate\'s subject -- the scratch tree of the card',
+        got: isIgnoredPath(index, 'pkg/tmp'),
+        expect: true,
+      },
+      {
+        label: 'the tracked source directory beside it is judged exactly as before (the positive control)',
+        got: isIgnoredPath(index, 'pkg/src'),
+        expect: false,
+      },
+      {
+        label: 'a rule living ONLY in .git/info/exclude declares nothing about the repo -- CI\'s checkout has no such file',
+        got: isIgnoredPath(index, 'pkg/scratch'),
+        expect: false,
+      },
+      {
+        label: 'force-adding a file re-opens the directory: it IS in a clean checkout, so the gate judges it again',
+        got: isIgnoredPath(forced, 'pkg/tmp'),
+        expect: false,
+      },
+      {
+        label: 'the tracked file inside it is source like any other',
+        got: isIgnoredPath(forced, 'pkg/tmp/kept.ts'),
+        expect: false,
+      },
+      {
+        label: 'while the untracked file beside THAT one is still stepped over, by name this time',
+        got: isIgnoredPath(forced, 'pkg/tmp/probe.ts'),
+        expect: true,
+      },
+    ];
+  } finally {
+    rmSync(ignoreRepo, { recursive: true, force: true });
+  }
+  for (const c of ignoreSourceCases) {
+    registerCase('observation cases');
+    if (c.got !== c.expect) failures.push(`readIgnoredPaths — ${c.label}: expected ${c.expect}, got ${c.got}`);
   }
 
   const accountedCases = [
@@ -6502,7 +6857,8 @@ function selfTest() {
   console.log(
     `✓ check:type-check-coverage --self-test — ${cases.length} semantic case(s) + ` +
       `${TYPECHECK_CONFIGS_CASES + coverCases.length + unreadCases.length + accountedCases.length
-        + derivedCases.length + sourceCandidateCases.length + includeRootCases.length
+        + derivedCases.length + sourceCandidateCases.length + ignoreIndexCases.length
+        + ignoredPathCases.length + ignoreWalkCases.length + ignoreSourceCases.length + includeRootCases.length
         + chainCases.length + generatorCases.length + layerCases.length + scopeCases.length
         + scopeLineCases.length} observation case(s) + ` +
       `${driftCases.length + countCases.length + projectCases.length + setupErrorCases.length
