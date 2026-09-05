@@ -2386,6 +2386,23 @@ jobs:
       - name: CLI command-id literals resolve
         run: pnpm check:cli-command-ids
 
+      # #15393. `os package publish` ships its example set TWICE — the oclif
+      # `examples` array in packages/cli/src/commands/package/publish.ts, printed
+      # verbatim under `EXAMPLES`, and a fenced block under
+      # `#### os package publish` in content/docs/deployment/cli.mdx. Two
+      # hand-maintained copies, and they drifted: the CLI line pointed at a
+      # directory deleted from this repo while the docs line for the same example
+      # was correct, for as long as it took a customer-simulation run to notice.
+      # ⛔ NOT an extension of check:cli-command-ids above — that gate's recorded
+      # refusal to reach into prose stands, and its population is 811 `os ...`
+      # mentions with no delimiter. This one's population is a TABLE: one fenced
+      # block under one exact heading against one named `examples` array. It
+      # compares the SET of invocations modulo the `$ ` prompt, trailing comments,
+      # whitespace and ORDER — the two voices may differ, the invocations may not.
+      # Reads two source files; no build, no install.
+      - name: CLI examples match the documented block
+        run: pnpm check:cli-examples-parity
+
       # #4093 follow-up. Discovery tells a consumer an absent capability is
       # absent AND what to install. The first half has been carefully honest
       # since #2462/#4000; the second was invented from the slot name, so ten

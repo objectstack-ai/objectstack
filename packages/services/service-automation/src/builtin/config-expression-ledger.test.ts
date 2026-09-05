@@ -281,15 +281,24 @@ describe('resolveFlowNodeExpressions — path resolution (#4027)', () => {
     expect(found[0].entry.role).toBe('flow-template');
   });
 
-  it('skips absent, empty and non-string values rather than inventing findings', () => {
+  it('skips absent and empty values rather than inventing findings', () => {
     expect(resolveFlowNodeExpressions('screen', {})).toEqual([]);
     expect(resolveFlowNodeExpressions('screen', { fields: [] })).toEqual([]);
     expect(resolveFlowNodeExpressions('screen', { fields: [{ visibleWhen: '   ' }] })).toEqual([]);
-    // A non-string in an expression slot is a type violation for the schema pass
-    // to report — not something to hand to a parser.
-    expect(resolveFlowNodeExpressions('screen', { fields: [{ visibleWhen: true }] })).toEqual([]);
     // A repeater authored as a non-array must not throw.
     expect(resolveFlowNodeExpressions('screen', { fields: 'nope' })).toEqual([]);
+  });
+
+  // [#15572] A NON-string in a predicate slot is no longer skipped. It was
+  // skipped as "a type violation for the schema pass to report", and for the
+  // schemaless node types — `decision` publishes no descriptor `configSchema`,
+  // so `validateNodeConfigKeys` exempts it and nothing parses its config
+  // against `DecisionConfigSchema` — that schema pass does not exist. The value
+  // is emitted so `registerFlow` and `objectstack validate` can refuse it.
+  it('emits a non-string in a predicate slot for the consumer to refuse (#15572)', () => {
+    expect(resolveFlowNodeExpressions('screen', { fields: [{ visibleWhen: true }] })
+      .map((f) => [f.path, f.value, f.entry.role]))
+      .toEqual([['fields[0].visibleWhen', true, 'predicate']]);
   });
 
   it('resolves each decision branch predicate, with its index (#4439)', () => {

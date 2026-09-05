@@ -211,3 +211,126 @@ describe('runMetadataEval — a stack that cannot be scored is a FAILED case, no
     expect(report.ok).toBe(false);
   });
 });
+
+/**
+ * ⛔ A generator that THREW must not be scored as an empty stack.
+ *
+ * The measured before-shape, driven on this tree through the CLI's source
+ * entry with a generator that throws for every prompt:
+ *
+ *     os lint --eval --json --generator ./throws.mjs
+ *     exit 1 · ok: false · passed: 0 · failed: 5 · meanScore: 100
+ *     every case: score 100, grade A, valid true, generationError 'model unavailable'
+ *
+ * ⇒ the eval's headline number read PERFECT precisely when the model under
+ * test produced nothing, and `meanScore` is the first number a human reads.
+ *
+ * ## What was wrong, and what was NOT
+ *
+ * ⛔ Not `passed`. `passed: !generationError && …` already excluded the case,
+ * and `ok: passed === results.length` followed it, so the report DID say
+ * `ok: false`. The wrong value was the `score` stamped on the failed case —
+ * the throwing path substituted `stack = {}` and scored that, and the empty
+ * stack is 100 / A / `valid: true`. `meanScore` then summed it.
+ *
+ * ## Why one verdict for both failure paths
+ *
+ * The sibling path — a generator that RETURNS a value nobody can walk —
+ * already answered `unscorableScore()` (0 / F / `valid: false`), with the
+ * reason written into the module: a stack that cannot be walked is not an
+ * empty stack. A stack that was never produced is not an empty stack either.
+ * Same outcome class, so the same verdict; one rule in the file, not two that
+ * disagree.
+ *
+ * ## The denominator is pinned here on purpose
+ *
+ * The alternative repair — drop failed cases from `meanScore`'s denominator —
+ * gives DIFFERENT numbers on a run where only some generations threw, and it
+ * silently changes what the metric means (a mean over scored cases, not over
+ * attempted ones). `the failed case is counted in the denominator` fails if
+ * anyone later makes that switch without saying so.
+ */
+describe('runMetadataEval — a generator that THREW scores 0, not 100', () => {
+  const oneCase: MetadataEvalCase[] = [
+    { id: 'c1', prompt: 'invoice with lines', fixture: { manifest: { id: 'a', namespace: 'aa', version: '1.0.0', name: 'A', type: 'app' } } },
+  ];
+  const throwingGen = () => {
+    throw new Error('model unavailable');
+  };
+
+  it('⛔ the failed case is NOT scored as an empty stack', async () => {
+    // The control that makes the assertion below mean something: this is the
+    // exact verdict the old `stack = {}` substitution produced.
+    expect(scoreMetadata({}).score).toBe(100);
+    expect(scoreMetadata({}).grade).toBe('A');
+    expect(scoreMetadata({}).valid).toBe(true);
+
+    const report = await runMetadataEval(oneCase, { generate: throwingGen });
+    const only = report.results[0];
+
+    expect(only.generationError).toBe('model unavailable');
+    expect(only.passed).toBe(false);
+    expect(only.score.score).toBe(0);
+    expect(only.score.grade).toBe('F');
+    expect(only.score.valid).toBe(false);
+  });
+
+  it('⭐ an eval whose every generation threw reports meanScore 0, not 100', async () => {
+    const cases: MetadataEvalCase[] = [
+      { ...oneCase[0], id: 'a' },
+      { ...oneCase[0], id: 'b' },
+      { ...oneCase[0], id: 'c' },
+    ];
+    const report = await runMetadataEval(cases, { generate: throwingGen });
+
+    expect(report.meanScore).toBe(0);
+    // The half that was always right, asserted so a future "fix" to it is red.
+    expect(report.ok).toBe(false);
+    expect(report.passed).toBe(0);
+    expect(report.failed).toBe(3);
+  });
+
+  it('both failure paths now agree — thrown and unwalkable score the same', async () => {
+    const poison = () => ({
+      name: 'poison',
+      get objects(): never {
+        throw new Error('poison getter');
+      },
+    });
+
+    const thrown = (await runMetadataEval(oneCase, { generate: throwingGen })).results[0].score;
+    const unwalkable = (await runMetadataEval(oneCase, { generate: poison })).results[0].score;
+
+    expect(thrown.score).toBe(unwalkable.score);
+    expect(thrown.grade).toBe(unwalkable.grade);
+    expect(thrown.valid).toBe(unwalkable.valid);
+  });
+
+  it('the failed case is COUNTED in the denominator, not dropped from it', async () => {
+    const cases: MetadataEvalCase[] = [
+      { ...oneCase[0], id: 'threw' },
+      { ...oneCase[0], id: 'clean' },
+    ];
+    const cleanStack = {
+      objects: [
+        { name: 'invoice', label: 'Invoice', sharingModel: 'private', fields: { name: { type: 'text', label: 'Name', required: true } } },
+      ],
+    };
+    const generate = (_prompt: string, id: string) => {
+      if (id === 'threw') throw new Error('model unavailable');
+      return cleanStack;
+    };
+
+    const report = await runMetadataEval(cases, { generate });
+    const clean = report.results[1].score.score;
+
+    expect(report.results[0].score.score).toBe(0);
+    expect(clean).toBeGreaterThan(0);
+    // Mean over cases ATTEMPTED: the failure is a 0 in the numerator and a 1
+    // in the denominator.
+    expect(report.meanScore).toBe(Math.round(clean / 2));
+    // ⛔ …and NOT a mean over the scorable subset, which would report the
+    // clean case's own score and say nothing about the one that never ran.
+    expect(report.meanScore).not.toBe(clean);
+  });
+});

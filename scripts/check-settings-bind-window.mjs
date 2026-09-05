@@ -104,6 +104,8 @@
  *     node scripts/check-settings-bind-window.mjs --self-test # verify the checker
  */
 
+// dispatch-gates: wide-population -- walk(join(ROOT, 'packages')) admits every non-test .ts source under the packages root -- 2182 of 5837 tracked files (37.4%, base 2aa8456cf), recorded REFUSE-WIDE in CENSUS_REFUSE_WIDE in scripts/pm/bare-root-worklist.mjs, the identical corpus its three census siblings walk. The population is every source in that root, so the only true subtree spelling is the bare root and it would name this gate on every card touching a package.
+
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -727,6 +729,15 @@ function list() {
 
 // ── Self-test ────────────────────────────────────────────────────────────────
 
+// Set by `selfTest()` only after a verdict is printed -- either verdict -- and
+// read at the dispatch below: a `return` that leaves the function above those
+// lines prints nothing and still exits 0, so a self-test that never finished
+// reports as one that passed. The self-test's own exit code stays load-bearing,
+// so the handshake is a flag rather than a returned sentinel. The failure path
+// sets it too: the refusal below must fire only when NEITHER verdict was
+// printed, never on a genuine red that already said what failed.
+let selfTestReachedVerdict = false;
+
 function selfTest() {
   const assert = (cond, msg) => { if (!cond) { console.error('✗ self-test: ' + msg); process.exit(1); } };
 
@@ -1039,11 +1050,21 @@ function selfTest() {
   }
 
   console.log(`✓ settings bind-window guard self-test: all cases pass.`);
+  selfTestReachedVerdict = true;
 }
 
 // ── Entry ────────────────────────────────────────────────────────────────────
 
 const arg = process.argv[2];
-if (arg === '--self-test') selfTest();
-else if (arg === '--list') list();
+if (arg === '--self-test') {
+  selfTest();
+  if (!selfTestReachedVerdict) {
+    console.error(
+      '\n✗ check-settings-bind-window self-test: selfTest() returned without reaching its verdict,\n'
+      + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+      + 'that never finished as a self-test that passed.\n',
+    );
+    process.exit(1);
+  }
+} else if (arg === '--list') list();
 else audit();

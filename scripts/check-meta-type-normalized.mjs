@@ -78,6 +78,8 @@
  * A new entry needs a reason a reader can check, not a name.
  */
 
+// dispatch-gates: wide-population -- SCAN_DIRS is packages/rest/src, walked for non-test TypeScript sources only. The DIRECTORY is narrow enough to name and the glob would still be false six times in seven: that tree is 133 test files to 21 sources -- 21 of 154 (14%). What cannot be spelled here is the file-KIND filter, not the subtree, which is why the recorded verdict in scripts/pm/bare-root-worklist.mjs is REFUSE-UNSPELLABLE rather than REFUSE-WIDE.
+
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';

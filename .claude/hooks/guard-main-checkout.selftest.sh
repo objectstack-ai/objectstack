@@ -11,8 +11,9 @@
 #
 # Companion to guard-main-checkout-bash.selftest.sh, which covers the Bash half of the same
 # worktree-first pair. That matrix is mostly SHELL SPLITTING; this hook parses no shell at
-# all — it reads .tool_input.file_path and makes a PATH-AND-WORKTREE decision — so these
-# cases are derived from what this hook actually decides, not ported from the sibling.
+# all — it picks the payload's path key from the tool that sent it and makes a
+# PATH-AND-WORKTREE decision — so these cases are derived from what this hook actually
+# decides, not ported from the sibling.
 #
 # Fail-open by default, on purpose: the process cwd AND CLAUDE_PROJECT_DIR both default to a
 # directory in no repo at all, which is the input on which this hook allows everything. A
@@ -109,6 +110,14 @@ payload() { # payload <file_path> [tool_name] -> the Edit/Write payload shape
       tool_input:{file_path:$f,old_string:"a",new_string:"b"}}'
 }
 
+nbpay() { # nbpay <notebook_path> [tool_name] -> the NotebookEdit payload shape
+  # Matches the tool's documented input schema: notebook_path (absolute, required) and
+  # new_source, with no file_path key anywhere in the payload.
+  jq -nc --arg f "$1" --arg t "${2:-NotebookEdit}" \
+    '{session_id:"selftest",cwd:"/payload-cwd-must-be-ignored",tool_name:$t,
+      tool_input:{notebook_path:$f,new_source:"x",edit_mode:"replace"}}'
+}
+
 expect() { # expect <block|allow> <file_path> [env…] — the common case
   local want="$1" f="$2"; shift 2
   check "$want" "$f" "$(payload "$f")" "$@"
@@ -155,13 +164,21 @@ expect block "$MAIN/pkg/x.ts"
 expect allow "$WT/pkg/x.ts"
 PROJ="$PLAIN"
 
-echo "== tool_name is never consulted — scoping lives in the settings.json matcher =="
-# The hook decides on the path alone. Which tools reach it is the matcher's job, asserted
-# in the wiring section below; these cases pin that the hook itself does not second-guess it.
-for t in Edit Write NotebookEdit MultiEdit AnythingElse; do
-  check block "tool_name=$t into \$MAIN"  "$(payload "$MAIN/pkg/x.ts" "$t")"
-  check allow "tool_name=$t into \$WT"    "$(payload "$WT/pkg/x.ts" "$t")"
+echo "== tool_name selects the path key — one row per tool, and the matcher is its pair =="
+# tool_name is consulted for exactly one thing: which key of tool_input holds the path. The
+# verdict itself still comes from the path alone. Tools the table names are read for their
+# own key; a tool it does not name is not routed here by the matcher, and keeps the
+# permissive read — any known key it happens to carry, else the session's dir.
+for t in Edit Write MultiEdit; do
+  check block "tool_name=$t (file_path) into \$MAIN"  "$(payload "$MAIN/pkg/x.ts" "$t")"
+  check allow "tool_name=$t (file_path) into \$WT"    "$(payload "$WT/pkg/x.ts" "$t")"
 done
+check block 'tool_name=NotebookEdit (notebook_path) into $MAIN' "$(nbpay "$MAIN/pkg/x.ipynb")"
+check allow 'tool_name=NotebookEdit (notebook_path) into $WT'   "$(nbpay "$WT/pkg/x.ipynb")"
+check block 'unrouted tool carrying file_path, into $MAIN'      "$(payload "$MAIN/pkg/x.ts" AnythingElse)"
+check allow 'unrouted tool carrying file_path, into $WT'        "$(payload "$WT/pkg/x.ts" AnythingElse)"
+check block 'unrouted tool carrying notebook_path, into $MAIN'  "$(nbpay "$MAIN/pkg/x.ipynb" AnythingElse)"
+check allow 'unrouted tool carrying notebook_path, into $WT'    "$(nbpay "$WT/pkg/x.ipynb" AnythingElse)"
 
 echo "== escape hatch: OS_ALLOW_MAIN_EDITS must be exactly 1 =="
 check allow 'OS_ALLOW_MAIN_EDITS=1  into $MAIN'    "$(payload "$MAIN/pkg/x.ts")" OS_ALLOW_MAIN_EDITS=1
@@ -173,19 +190,41 @@ check block 'OS_ALLOW_MAIN_EDITS=yes'              "$(payload "$MAIN/pkg/x.ts")"
 check block 'OS_ALLOW_MAIN_EDITS=11'               "$(payload "$MAIN/pkg/x.ts")" OS_ALLOW_MAIN_EDITS=11
 check block 'OS_ALLOW_MAIN_EDITS=" 1" (padded)'    "$(payload "$MAIN/pkg/x.ts")" OS_ALLOW_MAIN_EDITS=" 1"
 
-echo "== a payload carrying no usable path is judged by CLAUDE_PROJECT_DIR — fails CLOSED =="
-# This is the branch the hook takes when it learns nothing from the payload. It is the
-# opposite posture from the Bash sibling (which fails open on an unparseable command): here
-# an unreadable payload on the shared checkout still BLOCKS. Safe direction, and deliberate
-# — it is an explicit `else` in the hook, not a fall-through.
-for probe in '{"tool_name":"Edit","tool_input":{}}' '{}' 'not json at all' '' '{"tool_input":{"file_path":""}}'; do
+echo "== a ROUTED tool whose payload lacks its own path key is drift — it blocks, never guesses =="
+# The dangerous branch is the one that turns an unreadable payload into a confident verdict.
+# For a tool this guard is routed, an absent path key is not "no path given", it is the
+# tool's schema moving under the guard — and judging the session's dir instead would answer
+# the same way all session long, right or wrong by where that session is rooted. Every row
+# here is run with CLAUDE_PROJECT_DIR pointed somewhere that would ALLOW under a fallback,
+# except the first of each trio, so a passing `block` can only have come from the drift arm.
+for probe in \
+  '{"tool_name":"Edit","tool_input":{}}' \
+  '{"tool_name":"Write","tool_input":{"content":"x"}}' \
+  '{"tool_name":"NotebookEdit","tool_input":{"new_source":"x","edit_mode":"replace"}}'
+do
+  PROJ="$MAIN";  check block "routed tool, no path key, CLAUDE_PROJECT_DIR=\$MAIN  [$probe]"  "$probe"
+  PROJ="$WT";    check block "routed tool, no path key, CLAUDE_PROJECT_DIR=\$WT    [$probe]"  "$probe"
+  PROJ="$PLAIN"; check block "routed tool, no path key, CLAUDE_PROJECT_DIR=\$PLAIN [$probe]"  "$probe"
+done
+PROJ="$PLAIN"
+# the cross-key pair: the right tool, the other tool's key. Drift in both directions.
+check block 'NotebookEdit carrying file_path (the wrong key), into $WT' "$(payload "$WT/pkg/x.ipynb" NotebookEdit)"
+check block 'Edit carrying notebook_path (the wrong key), into $WT'     "$(nbpay "$WT/pkg/x.ipynb" Edit)"
+
+echo "== an UNROUTED payload carrying no usable path is judged by CLAUDE_PROJECT_DIR — fails CLOSED =="
+# The remaining no-path branch: nothing in the payload names a tool this guard knows, so
+# there is no contract to have drifted. It is the opposite posture from the Bash sibling
+# (which fails open on an unparseable command): here an unreadable payload on the shared
+# checkout still BLOCKS. Safe direction, and deliberate — an explicit `else`, not a
+# fall-through.
+for probe in '{}' 'not json at all' '' '{"tool_input":{"file_path":""}}' '{"tool_name":"AnythingElse","tool_input":{}}'; do
   PROJ="$MAIN"; check block "no usable path, CLAUDE_PROJECT_DIR=\$MAIN  [$probe]" "$probe"
   PROJ="$WT";   check allow "no usable path, CLAUDE_PROJECT_DIR=\$WT    [$probe]" "$probe"
   PROJ="$PLAIN"; check allow "no usable path, CLAUDE_PROJECT_DIR=\$PLAIN [$probe]" "$probe"
 done
 
 echo "== with CLAUDE_PROJECT_DIR unset the no-path branch falls back to the PROCESS cwd =="
-nopath='{"tool_name":"Edit","tool_input":{}}'
+nopath='{"tool_name":"AnythingElse","tool_input":{}}'
 for pair in "$MAIN:block" "$WT:allow" "$PLAIN:allow"; do
   CWD="${pair%:*}"
   ( cd "$CWD" && printf '%s' "$nopath" | env -u CLAUDE_PROJECT_DIR "$hook" >/dev/null 2>&1 )
@@ -237,11 +276,26 @@ decoy="$(jq -nc --arg f "$MAIN/pkg/x.ts" --arg c "see \"file_path\": \"$PLAIN/de
   '{tool_name:"Write",tool_input:{content:$c,file_path:$f}}')"
 check block 'no jq: escaped decoy file_path in content loses to the real key' "$decoy" PATH="$nojq"
 check block 'with jq: same decoy payload'                                     "$decoy"
+# the fallback mirrors the whole table, not just one key: it must read tool_name and the
+# notebook key too, or notebook edits silently rejoin the no-path branch whenever jq is away
+check block 'no jq: NotebookEdit into $MAIN'   "$(nbpay "$MAIN/pkg/x.ipynb")"  PATH="$nojq"
+check allow 'no jq: NotebookEdit into $WT'     "$(nbpay "$WT/pkg/x.ipynb")"    PATH="$nojq"
+check allow 'no jq: NotebookEdit into $PLAIN'  "$(nbpay "$PLAIN/x.ipynb")"     PATH="$nojq"
+check block 'no jq: NotebookEdit with no notebook_path is drift' \
+  '{"tool_name":"NotebookEdit","tool_input":{"new_source":"x"}}' PATH="$nojq"
+# tool_name gets the same decoy treatment as the path keys: quoted inside a string value its
+# quotes are escaped, so prose about a tool cannot re-key the scan
+decoy2="$(jq -nc --arg f "$MAIN/pkg/x.ts" --arg c 'prose mentioning "tool_name": "NotebookEdit" verbatim' \
+  '{tool_name:"Write",tool_input:{content:$c,file_path:$f}}')"
+check block 'no jq: escaped decoy tool_name in content loses to the real one' "$decoy2" PATH="$nojq"
+check block 'with jq: same tool_name decoy payload'                           "$decoy2"
 
-echo "== wiring: settings.json must route Edit, Write and NotebookEdit to this hook =="
-# The hook is deliberately tool-agnostic, so the matcher is the ONLY thing that decides which
-# tools it sees. Nothing else in the repo checks that. Additions to the matcher are fine;
-# a removal is what this pins.
+echo "== wiring: the matcher routes Edit, Write and NotebookEdit, and every routed tool has a row =="
+# The matcher is the ONLY thing that decides which tools this hook sees, and the hook's
+# known_path_keys table is the only thing that decides what it reads out of each one.
+# Nothing else in the repo checks either half, so both are pinned here: a removal from the
+# matcher, and a tool routed with no row to read it by. Additions to the matcher are fine
+# — provided they bring their row.
 if [ -f "$settings" ]; then
   matcher="$(jq -r '[.hooks.PreToolUse[]? | select([.hooks[]?.command] | join(" ") | contains("guard-main-checkout.sh"))
                      | .matcher] | join(" ")' "$settings" 2>/dev/null || printf '')"
@@ -251,9 +305,63 @@ if [ -f "$settings" ]; then
       *) fail=$((fail + 1)); printf '  FAIL %s is not routed to guard-main-checkout.sh (matcher: %s)\n' "$tool" "$matcher" ;;
     esac
   done
+
+  # ── the pairing ───────────────────────────────────────────────────────────────────────
+  # "a tool the matcher routes here" and "a path key this hook knows" must be a CHECKABLE
+  # relation, not a convention: a tool routed here with no row is read for a key its payload
+  # never carries, and the guard silently goes back to judging the session. So: every name
+  # in the matcher must have a row in the hook's table. A row with no matcher entry is the
+  # harmless direction — a tool the hook is ready for that nothing routes yet — so it prints
+  # a note, not a failure.
+  table="$(sed -n "s/^known_path_keys='\(.*\)'\$/\1/p" "$hook" | head -1)"
+  if [ -z "$table" ]; then
+    fail=$((fail + 1)); printf '  FAIL the hook has no known_path_keys table for the matcher to pair with\n'
+  else
+    routed="$(printf '%s' "$matcher" | tr '|' ' ')"
+    for tool in $routed; do
+      row=""
+      for r in $table; do case "$r" in "$tool="*) row="${r#*=}" ;; esac; done
+      if [ -n "$row" ]; then
+        pass=$((pass + 1)); printf '  ok   pair   %-13s -> .tool_input.%s\n' "$tool" "$row"
+      else
+        fail=$((fail + 1)); printf '  FAIL %s is routed to this hook but has no row in known_path_keys (%s)\n' "$tool" "$table"
+      fi
+    done
+    for r in $table; do
+      t="${r%%=*}"
+      case " $routed " in
+        *" $t "*) ;;
+        *) printf '  note       %s has a row in known_path_keys; the matcher does not route it\n' "$t" ;;
+      esac
+    done
+  fi
 else
   fail=$((fail + 1)); printf '  FAIL settings.json not found at %s\n' "$(short "$settings")"
 fi
+
+echo "== a notebook is judged by the NOTEBOOK's own path, exactly as a file edit is =="
+# The verdict must depend on where the notebook lives, never on where the session happens to
+# be rooted, so CLAUDE_PROJECT_DIR points at the WRONG place in every row here: a guard that
+# judged the session would answer the same way down each column instead of following the
+# path. The three `expect` rows are the same three notebooks through the Edit payload shape
+# — the two shapes must reach the same verdict, or the guard has one rule per tool.
+PROJ="$MAIN"
+check block 'NotebookEdit into $MAIN,  CLAUDE_PROJECT_DIR=$MAIN'  "$(nbpay "$MAIN/pkg/x.ipynb")"
+check allow 'NotebookEdit into $WT,    CLAUDE_PROJECT_DIR=$MAIN'  "$(nbpay "$WT/pkg/x.ipynb")"
+check allow 'NotebookEdit into $PLAIN, CLAUDE_PROJECT_DIR=$MAIN'  "$(nbpay "$PLAIN/x.ipynb")"
+PROJ="$WT"
+check block 'NotebookEdit into $MAIN,  CLAUDE_PROJECT_DIR=$WT'    "$(nbpay "$MAIN/pkg/x.ipynb")"
+check allow 'NotebookEdit into $WT,    CLAUDE_PROJECT_DIR=$WT'    "$(nbpay "$WT/pkg/x.ipynb")"
+PROJ="$PLAIN"
+check block 'NotebookEdit into $MAIN,  CLAUDE_PROJECT_DIR=$PLAIN' "$(nbpay "$MAIN/pkg/x.ipynb")"
+check allow 'NotebookEdit into $WT,    CLAUDE_PROJECT_DIR=$PLAIN' "$(nbpay "$WT/pkg/x.ipynb")"
+PROJ="$WT";   expect block "$MAIN/pkg/x.ipynb"
+PROJ="$MAIN"; expect allow "$WT/pkg/x.ipynb"
+PROJ="$MAIN"; expect allow "$PLAIN/x.ipynb"
+PROJ="$PLAIN"
+# and the ancestor walk reaches notebooks too: a new notebook in a not-yet-created directory
+check block 'NotebookEdit, new file in a new dir under $MAIN' "$(nbpay "$MAIN/brand/new/nb.ipynb")"
+check allow 'NotebookEdit, new file in a new dir under $WT'   "$(nbpay "$WT/brand/new/nb.ipynb")"
 
 # ── KNOWN HOLES ─────────────────────────────────────────────────────────────────────────
 # The cases below pin what the hook does TODAY, and what it does today is WRONG. They are
@@ -274,21 +382,6 @@ expect block "$ODD/README.md"          # correct today, but only because git-dir
 expect block "$ODD/brand/new/f.ts"     # ditto — resolves up to the toplevel
 expect allow "$ODD/pkg/x.ts"           # ⛔ WRONG — an unguarded edit into a PRIMARY checkout
 expect allow "$ODD/pkg/brand/new/f.ts" # ⛔ WRONG — same hole, reached through the ancestor walk
-
-echo "== KNOWN HOLE #11810: NotebookEdit's path key is notebook_path, which this hook never reads =="
-# The matcher routes NotebookEdit here, but the hook extracts only .tool_input.file_path, so
-# every notebook edit takes the no-path branch and is judged by CLAUDE_PROJECT_DIR instead of
-# by the file. The verdict below is a constant per session and is wrong in both directions.
-# When #11810 is fixed, these become block / allow / allow by the notebook's own path.
-nbpay() { jq -nc --arg f "$1" '{tool_name:"NotebookEdit",tool_input:{notebook_path:$f,new_source:"x",edit_mode:"replace"}}'; }
-PROJ="$MAIN"
-check block 'NotebookEdit into $MAIN,  CLAUDE_PROJECT_DIR=$MAIN'  "$(nbpay "$MAIN/pkg/x.ipynb")"
-check block 'NotebookEdit into $WT,    CLAUDE_PROJECT_DIR=$MAIN'  "$(nbpay "$WT/pkg/x.ipynb")"   # ⛔ WRONG — refuses the mandated location
-check block 'NotebookEdit into $PLAIN, CLAUDE_PROJECT_DIR=$MAIN'  "$(nbpay "$PLAIN/x.ipynb")"    # ⛔ WRONG — refuses a file in no repo
-PROJ="$WT"
-check allow 'NotebookEdit into $MAIN,  CLAUDE_PROJECT_DIR=$WT'    "$(nbpay "$MAIN/pkg/x.ipynb")" # ⛔ WRONG — unguarded edit into the shared checkout
-PROJ="$PLAIN"
-check allow 'NotebookEdit into $MAIN,  CLAUDE_PROJECT_DIR=$PLAIN' "$(nbpay "$MAIN/pkg/x.ipynb")" # ⛔ WRONG — same, from a session rooted outside any repo
 
 echo "== BOUNDARY: the jq-less fallback is a text scan, not a JSON parser =="
 # Not filed as a defect: jq is present wherever this hook runs, and Claude Code emits plain
@@ -317,4 +410,7 @@ printf '\n'
 # nearest-existing-ancestor walk (new-file class) · replace dirname "$file" with
 # CLAUDE_PROJECT_DIR (the file's-own-repo class) · drop the OS_ALLOW_MAIN_EDITS line (escape
 # hatch) · turn the no-path else branch into exit 0 (the fails-closed class) · rename the key
-# in the grep fallback (the jq-less class) · change the final exit 2 to exit 0 (every block).
+# in the grep fallback (the jq-less class) · change the final exit 2 to exit 0 (every block) ·
+# point NotebookEdit's row at file_path (the notebook class) · delete NotebookEdit's row
+# altogether (the wiring pair, which reds on the matcher relation and not on a verdict) ·
+# replace the drift block with the project-dir fallback (the schema-drift class).
