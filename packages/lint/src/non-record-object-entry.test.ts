@@ -342,15 +342,17 @@ const SWEPT_COLLECTIONS: readonly SweptCollection[] = [
  *
  * Every entry names a reader OUTSIDE what #15636 could touch:
  *
- *  - `stack.datasets` — `indexDatasets` in `validate-chart-bindings.ts`, which
- *    was another change's file when this landed. Re-pointed by #15575.
  *  - `objects[].fields` — `buildFieldIndex` in `validate-expressions.ts:137`,
  *    which casts inline instead of through a helper, so the `asArray` sweeps
  *    that produced #15552 and #15636 never saw it. Filed as #15742.
+ *
+ * `stack.datasets` was here too, for `indexDatasets` in
+ * `validate-chart-bindings.ts`. #15741 re-pointed that reader and these
+ * assertions went red demanding a throw that no longer happens, which is the
+ * both-directions half earning its keep: the rows came out because the sweep
+ * failed, not because anyone went looking for them.
  */
 const RESIDUAL_THROWS: Readonly<Record<string, readonly string[]>> = {
-  'stack.datasets · null': ['validateReferenceIntegrity'],
-  'stack.datasets · undefined': ['validateReferenceIntegrity'],
   'objects[].fields · null': ['validateStackExpressions'],
   'objects[].fields · undefined': ['validateStackExpressions'],
 };
