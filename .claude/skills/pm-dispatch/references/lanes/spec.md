@@ -1,46 +1,43 @@
-# 车道岗位说明:domain:spec(references/lanes —— 座位贴指针指向本文件)
+# 车道岗位说明:domain:spec
 
-岗位说明版本化于此,升级走技能 PR;现值状态恒在座位贴,⛔ 不迁入本文件。
+见 SKILL.md 〈座位贴协议〉;本文是本车道岗位说明,现值状态恒在座位贴,⛔ 不迁入本文。
 
 ## 范围
 
-- `packages/spec` 整包唯一契约,语义/文本/机器三面同席:schema 形状、
-  `contracts/**`、退役行为半边、strictness 台账;describe/JSDoc/墓碑散文/错误
-  guidance 与 alias 表;`packages/spec/scripts/**`、`packages/spec/docs/**` 及围着
-  spec 契约转的工具链(门禁/生成器/lint 规则/报错散文/references 管线)。
-- 一般开发工具面留 devx(维护者 2026-08-09 裁决);`packages/spec` 恒归本席,不论谁需要它。
-- objectui 的契约面同辖:`packages/types`、schema/`$schema` 语料、`@objectstack/spec` pin 耦合与契约决策
-  卡(objectui 卡三流分流,判据见 SKILL.md 多仓协调)。
+- `packages/spec` 整包唯一契约,语义、文本、机器三面同席。
+- 含 schema 形状、`contracts/**`、退役行为半边、strictness 台账。
+- 含 describe 与 JSDoc、墓碑散文、错误 guidance 与 alias 表。
+- 含 `packages/spec/scripts/**`、`packages/spec/docs/**`。
+- 同含围着 spec 契约转的工具链:门禁、生成器、lint 规则、报错散文、references 管线。
+- 一般开发工具面留 devx;`packages/spec` 恒归本席,不论谁需要它。
+- objectui 的契约面同辖:`packages/types`、schema 与 `$schema` 语料、spec pin 耦合与契约决策卡。
 
 ## 席内分派参考
 
-(维护者 2026-08-16 裁定合并车道;以下判据降为席内分派与定价依据。)
-
-- 语义/文本按「合法元数据集合变没变」分 —— 改动前能过校验的输入,改动后逐字节同
-  判 ⇒ 文本面(changeset 恒 patch,默认 sweep-first),否则语义面;**任何改变接
-  受/拒绝行为的卡,不论多小,按语义面处理**(条款②)。
-- 机器面改「围着契约转的机器」,与文本面无交集,⛔ 不碰
-  `packages/spec/src/**/*.zod.ts` 与 strictness 台账。
-- 产物随源走:describe/JSDoc 改动重生成的 references 产物归触发它的源 PR(生成物
-  门禁重生成提交,⛔ 手改)。
-- 改元数据**格式/接受面**的照旧归 `domain:spec`,`/meta` 路由本体在
-  `packages/rest` 归 `domain:cli`;拿不准 FLAG 回分诊,⛔ 不自设第二套判据。
-- 档位随面走的现行表在 SKILL.md 模型分档(单源,⛔ 不另抄)。
+- 语义与文本按合法元数据集合变没变分:改动前过校验的输入改动后同判 ⇒ 文本面。
+- 文本面的 changeset 恒 patch,默认 sweep-first;否则语义面。
+- 任何改变接受或拒绝行为的卡,不论多小,按语义面处理,即条款②。
+- 机器面改围契约的机器,与文本面不交,⛔ 不碰 `packages/spec/src/**/*.zod.ts` 与 strictness 台账。
+- 产物随源走:describe 与 JSDoc 改动重生成的 references 产物归触发它的源 PR。
+- 生成物门禁重生成提交,⛔ 手改。
+- 改元数据格式或接受面的照旧归 `domain:spec`;`/meta` 路由本体在 `packages/rest` 归 `domain:cli`。
+- 拿不准 FLAG 回分诊,⛔ 不自设第二套判据。
+- 档位随面走的现行表在 SKILL.md 模型分档,单源,⛔ 不另抄。
 
 ## 常设承诺
 
 - findings 首触定级归分诊席,本席只供证据。
-- **门禁强制的跨车道 ledger 追加整类预批**(`error-code-ledger.zod.ts`):三条全中即免本席签字
-  —— ① 码的存在已在归属卡裁过(ADR-0112 令注册强制);② 纯增量:不动 schema 形状/既有条
-  目/ledger 机制,只落追加方自己的包分节;③ 兜底不变:条款②路径肢照命中,入队前仍过契约
-  复核。出类(新 ledger 字段、重构、别道条目、准入/拒收语义)⇒ 本席卡,不论谁需要它。
-- **分支信息测试**(2026-08-26 裁决原文不译):"Does this defect give a consumer a branch it could act on
-  differently? No ⇒ widen the existing member's comment/message; yes ⇒ new code under the pre-approved class."
-- **待命巡逻每次做整车道全交集读**(delta 扫描有尾隙:扫描后、波次边界前入队的卡
-  谁都看不见;全交集读是安全网)。
-- **契约面卡的 fixture triage 必须跑消费包测试**(A 包的改动可让 B 包的 fixture 反着断言,spec
-  范围内任何 sweep 都看不见)—— 派发令点名消费包测试清单,报告要有各消费包真实读数。
+- 门禁强制的跨车道 ledger 追加整类预批(`error-code-ledger.zod.ts`),三条全中即免本席签字。
+- ①:码的存在已在归属卡裁过。
+- ②:纯增量 —— 不动 schema 形状、既有条目与 ledger 机制,只落追加方自己的包分节。
+- ③:兜底不变 —— 条款②路径肢照命中,入队前仍过契约复核。
+- 出类(新 ledger 字段、重构、别道条目、准入或拒收语义)⇒ 本席卡,不论谁需要它。
+- 分支信息测试(原文不译):Does this defect give a consumer a branch it could act on differently?
+  No ⇒ widen the existing member's comment/message; yes ⇒ new code under the pre-approved class.
+- 待命巡逻每次做整车道全交集读:delta 有尾隙,扫描后至波次边界入队的卡谁都看不见。
+- 契约面卡的 fixture triage 必须跑消费包测试:A 包的改动可让 B 包的 fixture 反着断言。
+- spec 内任何 sweep 都看不见它 ⇒ 派发令点名消费包测试清单,报告要有各消费包真实读数。
 
 ## 席内判断
 
-- 候选卡评论必读(SKILL.md 候选与批次);裁决与撤销住在评论里,即使正文已是决策形状。
+- 候选卡评论必读,见 SKILL.md 候选与批次;裁决与撤销住在评论里,即使正文已是决策形状。
