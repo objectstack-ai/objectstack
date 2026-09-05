@@ -9,7 +9,10 @@ import { describe, it, expect, vi } from 'vitest';
 // why this file's `update` entry sat in the gate's DEBT ledger until #5619 sank
 // the predicate into a package that depends on neither side.
 import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
-import { CREATION_ATTESTED_MIGRATION_IDS } from '@objectstack/spec/system';
+import {
+  CREATION_ATTESTED_MIGRATION_IDS,
+  NOTIFICATION_EVENT_MIGRATION_ID,
+} from '@objectstack/spec/system';
 import {
   readDataMigrationFlag,
   isDataMigrationVerified,
@@ -159,6 +162,29 @@ describe('fresh-datastore attestation (ADR-0104, 2026-07-30 addendum)', () => {
     expect(JSON.parse(String(engine.tables.sys_migration[0].details))).toEqual(
       CREATION_ATTESTATION_DETAIL,
     );
+  });
+
+  /**
+   * #15710 ruling 3. The ADR-0030 cut-over id is attested at birth like the
+   * two ADR-0104 ids — a store created after the cut-over never held a legacy
+   * inbox row — and in the SAME uniform shape: `applied_at: null`,
+   * `blocking: 0`, `details.attested`, `verified_at` set for the birth fact.
+   * What a RUN of that migration may claim (never `verified_at`) lives on the
+   * id's docblock in `@objectstack/spec`; this pins that the writer treats it
+   * as one more member and invents no per-id shape. Named by symbol, not by
+   * iterating the array: the loop above would stay green with the member gone.
+   */
+  it('attests the ADR-0030 notification-event id at birth, in the uniform shape', async () => {
+    const engine = fakeEngine();
+
+    const attested = await attestFreshDatastore(engine);
+
+    expect(attested).toContain(NOTIFICATION_EVENT_MIGRATION_ID);
+    const row = engine.tables.sys_migration.find((r) => r.id === NOTIFICATION_EVENT_MIGRATION_ID)!;
+    expect(row).toMatchObject({ applied_at: null, blocking: 0, advisory: 0 });
+    expect(row.verified_at).toBeTruthy();
+    expect(JSON.parse(String(row.details))).toEqual(CREATION_ATTESTATION_DETAIL);
+    expect(await isDataMigrationVerified(engine, NOTIFICATION_EVENT_MIGRATION_ID)).toBe(true);
   });
 
   /**

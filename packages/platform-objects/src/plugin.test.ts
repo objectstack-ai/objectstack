@@ -186,6 +186,7 @@ describe('PlatformObjectsPlugin: fresh-datastore attestation (#3438, ADR-0104)',
     await boot(engine);
 
     expect(engine.rows.map((r: any) => r.id).sort()).toEqual([
+      'adr-0030-notification-event', // #15710 ruling 3 — creation-attested
       'adr-0104-file-references',
       'adr-0104-value-shapes',
     ]);
@@ -264,6 +265,7 @@ describe('PlatformObjectsPlugin: fresh-datastore attestation (#3438, ADR-0104)',
       await ctx._flush('app:seeded');
 
       expect(engine.rows.map((r: any) => r.id).sort()).toEqual([
+        'adr-0030-notification-event',
         'adr-0104-file-references',
         'adr-0104-value-shapes',
       ]);
@@ -280,7 +282,7 @@ describe('PlatformObjectsPlugin: fresh-datastore attestation (#3438, ADR-0104)',
       await ctx._flush('app:seeded');
       await ctx._flushReady();
 
-      expect(engine.rows).toHaveLength(2);
+      expect(engine.rows).toHaveLength(3);
     });
 
     /**
@@ -306,7 +308,10 @@ describe('PlatformObjectsPlugin: fresh-datastore attestation (#3438, ADR-0104)',
       await ctx._flush('app:seeded');
       await ctx._flushReady();
 
-      expect(engine.rows.map((r: any) => r.id)).toEqual(['adr-0104-value-shapes']);
+      expect(engine.rows.map((r: any) => r.id)).toEqual([
+        'adr-0104-value-shapes',
+        'adr-0030-notification-event',
+      ]);
     });
   });
 
@@ -368,6 +373,7 @@ describe('PlatformObjectsPlugin: fresh-datastore attestation (#3438, ADR-0104)',
       await ctx._flush('app:seeded');
 
       expect(engine.rows.map((r: any) => r.id).sort()).toEqual([
+        'adr-0030-notification-event',
         'adr-0104-file-references',
         'adr-0104-value-shapes',
       ]);
@@ -390,7 +396,7 @@ describe('PlatformObjectsPlugin: fresh-datastore attestation (#3438, ADR-0104)',
 
       state.inFlight = 0; // app B settled
       await ctx._flush('app:seeded');
-      expect(engine.rows).toHaveLength(2);
+      expect(engine.rows).toHaveLength(3);
     });
 
     /**
@@ -446,6 +452,7 @@ describe('PlatformObjectsPlugin: fresh-datastore attestation (#3438, ADR-0104)',
       await ctx._flushReady();
 
       expect(engine.rows.map((r: any) => r.id).sort()).toEqual([
+        'adr-0030-notification-event',
         'adr-0104-file-references',
         'adr-0104-value-shapes',
       ]);
@@ -461,7 +468,7 @@ describe('PlatformObjectsPlugin: fresh-datastore attestation (#3438, ADR-0104)',
 
       await ctx._flushReady();
 
-      expect(engine.rows).toHaveLength(2);
+      expect(engine.rows).toHaveLength(3);
     });
 
     /**
