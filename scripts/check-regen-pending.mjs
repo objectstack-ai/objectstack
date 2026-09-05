@@ -67,7 +67,7 @@
 import { execFileSync, execSync, spawnSync } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { delimiter, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { PENDING_MARKER, entryForPath, ownerDir, ownerOf, ownerRunCommand } from './regen-artifacts.mjs';
@@ -89,6 +89,39 @@ const SPEC_DIR = join(REPO_ROOT, 'packages/spec');
  * spawning the real spec gates; nothing else sets it.
  */
 const GATE_CWD_OVERRIDE = process.env.OS_REGEN_GATE_CWD || null;
+
+/**
+ * The launcher the gates are spawned THROUGH. Production leaves this unset and
+ * every gate runs as `pnpm -s <script>`, which resolves the script in the
+ * manifest at `gateCwd()` and puts that workspace's `node_modules/.bin` on PATH.
+ * Nothing in the repo sets it; `--self-test` does, and only `--self-test`.
+ *
+ * ## Why the fixture may not inherit an ambient one
+ *
+ * The stubs run in a `mkdtemp` directory under `tmpdir()`. That directory is
+ * OUTSIDE the repo, so no parent manifest supplies a `packageManager` pin, and a
+ * launcher asked to resolve there answers with whatever the ambient toolchain
+ * decides — which is not a fact about this script, and was measured deciding its
+ * verdict outright.
+ *
+ * Measured 2026-09-05, on CI's own Corepack store: `.github/actions/setup-pnpm`
+ * materialises the pinned pnpm and writes NO `lastKnownGood.json`, so in a
+ * directory with no pin Corepack ignores the pin and resolves pnpm's `latest`
+ * dist-tag instead — pnpm 12, whose CLI rejects `-s` outright (`error: unexpected
+ * argument '-s' found`, exit 2). Every stub then collapsed to "the gate exited
+ * non-zero", which this script correctly grades as `stale`, so exactly the cases
+ * whose expected outcome was NOT stale went red. The verdict was a pure function
+ * of the runner: byte-identical on an innocent PR and on `origin/main`'s own push
+ * build (run 33981169123), which is what made it read as one PR's fault.
+ *
+ * The remedy is the one AGENTS.md already states for `check:cross-package-test-inputs`
+ * — a detector with no dependencies cannot itself fail to resolve in CI. The
+ * fixture supplies its own launcher, so the self-test asserts this script's
+ * GRADING of an exit code, which is all those cases were ever about, without
+ * importing an ambient toolchain into the assertion. `hostile pnpm` cases in
+ * `fixtureSelfTest` pin that both ways.
+ */
+const GATE_LAUNCHER = process.env.OS_REGEN_GATE_LAUNCHER || 'pnpm -s';
 
 /**
  * Where ONE artifact's gate is spawned: the directory of the package that declares
@@ -430,7 +463,7 @@ export function gateCouldNotRun(output, exitCode, fromDir) {
 
 function runCheck(script, cwd) {
   try {
-    execSync(`pnpm -s ${script}`, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+    execSync(`${GATE_LAUNCHER} ${script}`, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
     return { ok: true, output: '', code: 0 };
   } catch (err) {
     return {
@@ -881,10 +914,52 @@ function batteryFloorFailures(invoked) {
  * flips from failing to passing — the two-commit shape is what is under test, not
  * the spec gates, and spawning the real ones here would make the self-test cost
  * a full spec build.
+ *
+ * They are also spawned through the fixture's OWN launcher via
+ * `OS_REGEN_GATE_LAUNCHER` (see that constant), because this directory has no
+ * `packageManager` in scope and an ambient package manager resolving here decided
+ * the verdict — the defect the `hostile pnpm` cases below now pin.
  */
 function fixtureSelfTest() {
   registerCase('fixtureSelfTest');
   const dir = mkdtempSync(join(tmpdir(), 'os-regen-defer-'));
+
+  // The launcher the fixture supplies for itself. `runCheck` spawns
+  // `<launcher> <script>` in the gate directory; production leaves that `pnpm -s`,
+  // and the fixture points it here so that no ambient package manager is asked to
+  // resolve in a directory which pins none (see `GATE_LAUNCHER` for the measured
+  // defect). It does what `pnpm <script>` does for a stub that needs no
+  // `node_modules/.bin`: read the named script out of the manifest at `cwd` and run
+  // its body in the same `/bin/sh` that `execSync` would have used anyway.
+  //
+  // It lives in a SEPARATE temp dir, outside the fixture repo, deliberately: a file
+  // written into `dir` would be swept into the index by the `git add -A` on `side2`
+  // below and re-open the stat-dirty `merge --abort` crash of #9258 — the hazard the
+  // `info/exclude` note guards `package.json` against.
+  const launcherDir = mkdtempSync(join(tmpdir(), 'os-regen-launcher-'));
+  const launcherPath = join(launcherDir, 'pm-stub.mjs');
+  writeFileSync(launcherPath, `// The fixture launcher named by OS_REGEN_GATE_LAUNCHER.
+import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+
+const script = process.argv[2];
+const manifest = JSON.parse(readFileSync('package.json', 'utf8'));
+const body = manifest.scripts?.[script];
+if (body === undefined) {
+  console.error("pm-stub: no such script: " + script);
+  process.exit(1);
+}
+// /bin/sh by ABSOLUTE path, so no PATH lookup decides anything here — but argv0
+// "sh", because dash prefixes its diagnostics with argv0 and gateCouldNotRun()
+// anchors on the bare shell name a package manager produces. Measured: the same
+// body under execSync says "/bin/sh: 1: x: not found", which that regex does not
+// match, and the runner name drops out of the diagnosis while exit 127 still
+// classifies. The fixture owes production shape, not a widened matcher.
+// stdio inherit hands the body the pipes the caller opened, so the shell own
+// not-found line and node ERR_MODULE_NOT_FOUND reach the classifier unchanged.
+const r = spawnSync('/bin/sh', ['-c', body], { argv0: 'sh', stdio: 'inherit' });
+process.exit(r.status ?? 1);
+`);
   const git = (args, opts = {}) =>
     execFileSync('git', args, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], ...opts });
   const results = [];
@@ -928,7 +1003,7 @@ function fixtureSelfTest() {
       'node -e "console.error(\'stub-gate: PREREQUISITE NOT MET — the dependency yaml is not installed\'); process.exit(3)"',
   };
 
-  const runHook = (gate, args = []) => {
+  const runHook = (gate, args = [], extraEnv = {}) => {
     writeFileSync(
       join(dir, 'package.json'),
       `${JSON.stringify({ name: 'os-regen-fixture', scripts: { 'check:spec-changes': GATE_STUBS[gate] } }, null, 2)}\n`,
@@ -939,7 +1014,12 @@ function fixtureSelfTest() {
     const r = spawnSync(process.execPath, [fileURLToPath(import.meta.url), ...args], {
       cwd: dir,
       encoding: 'utf8',
-      env: { ...process.env, OS_REGEN_GATE_CWD: dir },
+      env: {
+        ...process.env,
+        OS_REGEN_GATE_CWD: dir,
+        OS_REGEN_GATE_LAUNCHER: `"${process.execPath}" "${launcherPath}"`,
+        ...extraEnv,
+      },
     });
     return { code: r.status ?? 1, out: `${r.stdout ?? ''}${r.stderr ?? ''}` };
   };
@@ -1087,6 +1167,47 @@ function fixtureSelfTest() {
     check('a gate that RAN and failed is still `stale`, exit 1 — the grading is not a blanket pass',
       genuine.code === 1 && /— stale/.test(genuine.out) && !/PREREQUISITE NOT MET/.test(genuine.out));
 
+    // ── #15990: the grading may not be a function of the ambient launcher ───
+    // These stubs used to be spawned as `pnpm -s check:spec-changes` in a
+    // `mkdtemp` directory with no `packageManager` in scope, so the verdict was
+    // decided by whatever launcher happened to resolve there. Measured against
+    // CI own Corepack store: that is pnpm `latest` rather than the repo pin —
+    // pnpm 12, which rejects `-s` and exits 2 — so every stub collapsed to "the
+    // gate exited non-zero", which this script correctly grades `stale`. Every
+    // case above whose expected outcome is NOT stale went red, identically on an
+    // innocent PR and on `origin/main` push build 33981169123.
+    //
+    // The control is the diagnosis technique itself: a hostile `pnpm` FIRST on
+    // PATH, refusing the way pnpm 12 refuses. Each reading below is asserted
+    // EQUAL to the same call made without it — a launcher that is present and
+    // refuses has to be exactly as irrelevant as one that is absent. ⛔ Not a
+    // skip and not a retry: should a launcher ever re-enter this path, these go
+    // red and name the cause.
+    const hostileBin = join(launcherDir, 'hostile-bin');
+    mkdirSync(hostileBin, { recursive: true });
+    writeFileSync(join(hostileBin, 'pnpm'), [
+      '#!/bin/sh',
+      `echo "error: unexpected argument '-s' found" >&2`,
+      'exit 2',
+      '',
+    ].join('\n'), { mode: 0o755 });
+    const hostilePath = { PATH: `${hostileBin}${delimiter}${process.env.PATH ?? ''}` };
+
+    // `genuine` immediately above is the reference reading for this one.
+    const hostileStale = runHook('stale', ['--pre-push'], hostilePath);
+    check('a hostile `pnpm` first on PATH leaves the `stale` reading identical',
+      hostileStale.code === genuine.code && hostileStale.out === genuine.out);
+
+    // The half a broken launcher actually erased: `clean` is the verdict it can
+    // never produce. Reference taken first, then the marker restored so both
+    // calls see the same input state.
+    const cleanRef = runHook('clean', ['--pre-push']);
+    const cleanRefCleared = !existsSync(marker);
+    writeFileSync(marker, `${pendingPath}\n`);
+    const hostileClean = runHook('clean', ['--pre-push'], hostilePath);
+    check('  …and a CLEAN gate still clears — the reading a broken launcher erased',
+      hostileClean.code === 0 && hostileClean.code === cleanRef.code
+        && hostileClean.out === cleanRef.out && cleanRefCleared && !existsSync(marker));
     // ── #15722, half 2 (WITHDRAWN, pinned): a fast-forward is not a merge ────
     // The card's second half read the refusal as a predicate over paths changed
     // between the previous and the new HEAD. Measured, it is not: the pending set
@@ -1110,6 +1231,7 @@ function fixtureSelfTest() {
       afterFf.code === 0 && afterFf.out.trim() === '');
   } finally {
     rmSync(dir, { recursive: true, force: true });
+    rmSync(launcherDir, { recursive: true, force: true });
   }
   return results.every(Boolean);
 }
