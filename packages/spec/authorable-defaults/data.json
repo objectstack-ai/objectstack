@@ -27,8 +27,6 @@
     "data/DocumentSchemaValidation:enabled = false",
     "data/DocumentVersion:isLatest = false",
     "data/ESignatureConfig:enabled = false",
-    "data/ESignatureConfig:expirationDays = 30",
-    "data/ESignatureConfig:reminderDays = 7",
     "data/EngineDeleteOptions:multi = false",
     "data/EngineUpdateOptions:multi = false",
     "data/EngineUpdateOptions:returning = false",
