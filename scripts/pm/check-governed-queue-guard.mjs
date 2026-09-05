@@ -302,11 +302,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the PR-head reader: throws, and the caller no longer refuses on it': 3,
   'the WIRING pin: the workflow still spells this context name': 8,
   '⭐ #14063: the environment the exemption needs, pinned to the YAML': 7,
+  '⭐ #15406: a CLEAR reached through a lift is not a clear that saw nothing': 10,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 17;
+const SELF_TEST_BATTERY_FLOOR = 18;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -559,12 +560,12 @@ export function unreadableApproval(reason) {
  * The verdict, as data. Pure — every branch of the decision is here, and the
  * renderer and the exit code both read it rather than re-deriving it.
  */
-export function guardVerdict({ event, governed = [], unattributed = [], approvals = new Map(), apiCalls = 0, headNotes = [] }) {
+export function guardVerdict({ event, governed = [], unattributed = [], approvals = new Map(), apiCalls = 0, headNotes = [], lifted = [] }) {
   const entries = governed.map((entry) => ({
     ...entry,
     approval: approvals.get(entry.pr) ?? unreadableApproval('no review reading was recorded for this pull request'),
   }));
-  const base = { event, entries, unattributed, apiCalls, headNotes, contextName: CHECK_CONTEXT_NAME };
+  const base = { event, entries, unattributed, apiCalls, headNotes, lifted, contextName: CHECK_CONTEXT_NAME };
 
   if (entries.length === 0 && unattributed.length === 0) {
     return { ...base, conclusion: 'clear', exitCode: EXIT_CLEAR, refusalKind: null };
@@ -611,11 +612,36 @@ export function renderGuardVerdict(verdict) {
   );
 
   if (verdict.conclusion === 'clear') {
+    // ⭐ TWO DIFFERENT CLEARS, and #15406 is what conflating them costs. The
+    // wording below used to be unconditional, so a run in which the register
+    // LIFTED a governed path printed "the diff touches no governed surface"
+    // immediately under its own LIFTED line — and "the path test runs first and
+    // returns", when the path test had matched and the register's recompute had
+    // run. A landing read back from that log looks like a guard that never saw
+    // the file, which is exactly the reading the post-merge audit was filed on.
+    // A verdict may not deny its own evidence: the zero-cost clear keeps its
+    // wording BYTE-FOR-BYTE (both legs, so the pull_request leg's byte-identity
+    // constraint is untouched), and a clear reached THROUGH a lift says so.
+    const lifted = verdict.lifted ?? [];
+    if (lifted.length === 0) {
+      lines.push(
+        '  ✅  CLEAR — the diff touches no governed surface, so this guard has nothing to judge.',
+        `      Derived from GOVERNED_SURFACES in scripts/pm/check-governed-merges.mjs (${GOVERNED_SURFACES.length} surfaces),`,
+        '      never from a restated list. ⛔ ZERO review lookups were made: the path test runs first and returns,',
+        '      so a GitHub API outage can never block a diff that touches nothing governed.',
+      );
+      return lines.join('\n');
+    }
     lines.push(
-      '  ✅  CLEAR — the diff touches no governed surface, so this guard has nothing to judge.',
+      '  ✅  CLEAR — this diff DID touch a governed surface, and every hit was LIFTED by the generated-artifact',
+      '      register; nothing hand-authored is left for this guard to judge. ⚠️ This is NOT the "no governed',
+      '      path in the diff" clear: the path test MATCHED, the register recomputed provenance on this tree,',
+      '      and the lift line(s) printed above are that recompute\'s record. Lifted here:',
+      ...lifted.slice(0, 12).map((p) => `        - ${p}`),
+      ...(lifted.length > 12 ? [`        … and ${lifted.length - 12} more`] : []),
       `      Derived from GOVERNED_SURFACES in scripts/pm/check-governed-merges.mjs (${GOVERNED_SURFACES.length} surfaces),`,
-      '      never from a restated list. ⛔ ZERO review lookups were made: the path test runs first and returns,',
-      '      so a GitHub API outage can never block a diff that touches nothing governed.',
+      '      never from a restated list. ⛔ ZERO review lookups were made: the approval predicate is reached only',
+      '      by a governed path the register did not lift, and there was none.',
     );
     return lines.join('\n');
   }
@@ -773,10 +799,10 @@ export function renderGuardVerdict(verdict) {
  * still governs everything the verdict is derived FROM; it never governed
  * things the verdict merely mentions.
  */
-export async function runGuard({ event, rows, fetchReviews, fetchPullHead }) {
+export async function runGuard({ event, rows, fetchReviews, fetchPullHead, lifted = [] }) {
   const { governed, unattributed } = decomposeGovernedWork(rows);
   if (governed.length === 0 && unattributed.length === 0) {
-    return guardVerdict({ event, governed, unattributed, apiCalls: 0 });
+    return guardVerdict({ event, governed, unattributed, apiCalls: 0, lifted });
   }
   const approvals = new Map();
   const headNotes = [];
@@ -812,7 +838,7 @@ export async function runGuard({ event, rows, fetchReviews, fetchPullHead }) {
       approvals.set(entry.pr, unreadableApproval(String(error?.message ?? error).split('\n')[0]));
     }
   }
-  return guardVerdict({ event, governed, unattributed, approvals, apiCalls, headNotes });
+  return guardVerdict({ event, governed, unattributed, approvals, apiCalls, headNotes, lifted });
 }
 
 // ── git (diff decomposition; zero API) ──────────────────────────────────────
@@ -910,6 +936,34 @@ export async function liftGeneratedExceptions(root, baseSha, rows, notes, recomp
     }
     const stillGoverned = new Set(lifted.hitPaths);
     out.push({ ...row, paths: row.paths.filter((p) => generatedExceptionFor(p) === null || stillGoverned.has(p)) });
+  }
+  return out;
+}
+
+/**
+ * Which registered paths `liftGeneratedExceptions` actually LIFTED, derived
+ * from the row lists on either side of it. Pure, so the rendering that depends
+ * on it is pinned offline.
+ *
+ * Read from the rows rather than from the notes: the notes are prose for a
+ * human, and a verdict that parsed them back would be deriving a decision from
+ * a rendering. Membership is still the register's own `generatedExceptionFor` —
+ * a path that vanished for any other reason is not reported as a lift.
+ *
+ * ⚠️ Deliberately conservative across rows: a path kept by ANY row is not
+ * listed, because the #11084 fence is per-row and one row's co-edit can keep a
+ * path governed that another row's recompute certified. Under-reporting a lift
+ * only ever costs a line of log; over-reporting one would put "we lifted it"
+ * next to a verdict that did not.
+ */
+export function liftedPathsBetween(before, after) {
+  const kept = new Set((Array.isArray(after) ? after : []).flatMap((r) => r?.paths ?? []));
+  const out = [];
+  for (const row of Array.isArray(before) ? before : []) {
+    for (const p of row?.paths ?? []) {
+      if (kept.has(p) || generatedExceptionFor(p) === null || out.includes(p)) continue;
+      out.push(p);
+    }
   }
   return out;
 }
@@ -1048,10 +1102,13 @@ async function main() {
 
   const notes = [];
   let rows;
+  let lifted = [];
   try {
     const mergeBase = git(repoRoot, ['merge-base', context.baseSha, context.headSha]).trim();
     rows = enumerateRows(repoRoot, mergeBase, context.headSha, context.namedPull);
+    const beforeLift = rows;
     rows = await liftGeneratedExceptions(repoRoot, mergeBase, rows, notes);
+    lifted = liftedPathsBetween(beforeLift, rows);
   } catch (error) {
     console.error(`⛔ ${CHECK_CONTEXT_NAME}: could not read the diff (${String(error?.message ?? error).split('\n')[0]}).`);
     return EXIT_CANNOT_RUN;
@@ -1066,7 +1123,7 @@ async function main() {
   const fetchReviews = makeReviewReader(reader);
   const fetchPullHead = makePullHeadReader(reader);
 
-  const verdict = await runGuard({ event: context.event, rows, fetchReviews, fetchPullHead });
+  const verdict = await runGuard({ event: context.event, rows, fetchReviews, fetchPullHead, lifted });
   const report = [`${context.label} — ${rows.length} commit(s) in range`, ...notes, renderGuardVerdict(verdict)].join('\n');
   console.log(report);
 
@@ -1708,6 +1765,141 @@ export async function selfTest() {
   }
   assert('a-recompute-that-THROWS-never-lifts-it-propagates-into-CANNOT-RUN', liftThrew !== null && /EACCES/.test(liftThrew), String(liftThrew));
 
+  // ── ⭐ #15406: a CLEAR reached through a lift is not a clear that saw nothing ─
+  //
+  // Replays the real diff shape of objectstack#15284 — the landing that was
+  // filed as "the mixed-diff diversion did not fire". It had NOT failed: the
+  // diff's single governed path was the register's own `spec-react-blocks`
+  // row, the recompute certified it byte-exact, and the queue leg cleared with
+  // zero approvals exactly as the 2026-09-01 ruling provides for. What failed
+  // was the LOG. Its verdict line read, directly under its own LIFTED line:
+  //
+  //     ✅  CLEAR — the diff touches no governed surface, so this guard has
+  //         nothing to judge.
+  //     … ⛔ ZERO review lookups were made: the path test runs first and returns
+  //
+  // Both sentences are false for that run: the path test MATCHED, and the
+  // register's recompute ran. Read back from the merge queue log, that landing
+  // is indistinguishable from a guard that never saw the file — which is the
+  // reading the post-merge audit row was filed on. ⛔ The predicate is NOT what
+  // these cases pin: the verdict, the exit code and the API cost are asserted
+  // to be the SAME as before, and only the words change.
+  battery('⭐ #15406: a CLEAR reached through a lift is not a clear that saw nothing');
+  // #15284's real file list, in its merged order.
+  const pr15284Paths = [
+    '.changeset/list-view-grouping-server-side-contract.md',
+    'content/docs/references/api/protocol.mdx',
+    'content/docs/references/data/object.mdx',
+    'content/docs/references/ui/view.mdx',
+    'packages/spec/api-surface/ui.json',
+    'packages/spec/export-origins/ui.json',
+    'packages/spec/src/ui/index.ts',
+    'packages/spec/src/ui/view-grouping-query.test.ts',
+    'packages/spec/src/ui/view-grouping-query.ts',
+    'packages/spec/src/ui/view.zod.ts',
+    'skills/objectstack-ui/references/react-blocks.md',
+  ];
+  const pr15284ReactBlocks = 'skills/objectstack-ui/references/react-blocks.md';
+  const pr15284Row = (paths = pr15284Paths) => ({
+    sha: 'f502898a49530a1c85e58f3c4d2b340c0e1cb909',
+    subject: 'feat(spec): list-view grouping is server-side (#15284)',
+    pr: 15284,
+    paths,
+  });
+  // main()'s own wiring, reproduced: lift, derive what was lifted, then judge.
+  // ⛔ Not the `endToEnd` helper above — the defect lived in the step BETWEEN
+  // those two, so a helper that skips it cannot see it.
+  const asMainDoes = async (recompute, rows, io = {}) => {
+    const notes = [];
+    const after = await liftGeneratedExceptions('/w', 'base', rows, notes, recompute);
+    const lifted = liftedPathsBetween(rows, after);
+    const verdict = await runGuard({
+      event: 'merge_group',
+      rows: after,
+      fetchPullHead: io.head ?? (() => HEAD),
+      fetchReviews: io.reviews ?? (() => []),
+      lifted,
+    });
+    return { verdict, notes, lifted, text: renderGuardVerdict(verdict) };
+  };
+  const noApi = () => {
+    throw new Error('the API must not be reached — the only governed path was lifted');
+  };
+  // The classification leg first: the file IS on the register, and the diff DID
+  // hit a governed surface before anything was lifted. Both are facts the old
+  // verdict line denied.
+  assert(
+    'the-one-skills-path-in-15284-is-a-register-CANDIDATE-not-hand-authored-content',
+    generatedExceptionFor(pr15284ReactBlocks)?.id === 'spec-react-blocks',
+    JSON.stringify(generatedExceptionFor(pr15284ReactBlocks)),
+  );
+  assert(
+    '⭐ the-mixed-diff-rule-DID-match-15284-before-the-lift-one-hit-out-of-eleven-paths',
+    governedPathsIn(pr15284Paths).flatMap((s) => s.files).join() === pr15284ReactBlocks,
+    JSON.stringify(governedPathsIn(pr15284Paths)),
+  );
+  const certified15284 = await asMainDoes(
+    verified('byte-equal to the react-blocks generator recomputed on this tree (fixture)'),
+    [pr15284Row()],
+    { head: noApi, reviews: noApi },
+  );
+  // The verdict itself is UNCHANGED — the 2026-09-01 ruling working, with an
+  // approver set that does not contain the merging account and no review of any
+  // kind on the pull request.
+  assert(
+    'a-certified-regeneration-still-CLEARS-with-zero-reviews-and-zero-api-calls',
+    certified15284.verdict.conclusion === 'clear' && certified15284.verdict.exitCode === EXIT_CLEAR && certified15284.verdict.apiCalls === 0,
+    JSON.stringify({ c: certified15284.verdict.conclusion, e: certified15284.verdict.exitCode, api: certified15284.verdict.apiCalls }),
+  );
+  assert(
+    'liftedPathsBetween-names-exactly-the-path-the-register-lifted',
+    certified15284.lifted.join() === pr15284ReactBlocks,
+    JSON.stringify(certified15284.lifted),
+  );
+  assert(
+    '⭐ the-CLEAR-line-does-NOT-claim-the-diff-touched-no-governed-surface',
+    !certified15284.text.includes('the diff touches no governed surface'),
+    certified15284.text,
+  );
+  assert(
+    '⭐ the-CLEAR-line-does-NOT-claim-the-path-test-returned-before-matching',
+    !certified15284.text.includes('the path test runs first and returns'),
+    certified15284.text,
+  );
+  assert(
+    'the-CLEAR-line-names-the-lifted-path-and-says-the-recompute-ran',
+    certified15284.text.includes(pr15284ReactBlocks) &&
+      /LIFTED/.test(certified15284.text) &&
+      /recomputed provenance on this tree/.test(certified15284.text),
+    certified15284.text,
+  );
+  assert(
+    'and-it-still-reports-the-zero-lookup-cost-a-reader-checks-for',
+    /ZERO review lookups/.test(certified15284.text),
+    certified15284.text,
+  );
+  // The other direction, on the SAME path: a hand edit to that file is not
+  // lifted, so the identical file list refuses. The shape is not an exemption
+  // for `references/react-blocks.md`; it is an exemption for a recompute.
+  const handEdited15284 = await asMainDoes(refused('the generator does not certify this tree (fixture)'), [pr15284Row()]);
+  assert(
+    'a-hand-edit-to-the-SAME-path-still-REFUSES-the-same-file-list',
+    handEdited15284.verdict.exitCode === EXIT_REFUSED_UNAPPROVED && handEdited15284.lifted.length === 0,
+    JSON.stringify({ e: handEdited15284.verdict.exitCode, lifted: handEdited15284.lifted }),
+  );
+  // And the zero-cost clear is untouched, to the byte, on BOTH legs — the
+  // 2026-08-27 byte-identity constraint on the pull_request leg included.
+  for (const event of [EVENT_MERGE_GROUP, EVENT_PULL_REQUEST]) {
+    const nothing = renderGuardVerdict(guardVerdict({ event, governed: [], unattributed: [], apiCalls: 0 }));
+    assert(
+      `a-clear-with-nothing-lifted-keeps-its-pre-15406-wording-byte-for-byte: ${event}`,
+      nothing.includes('  ✅  CLEAR — the diff touches no governed surface, so this guard has nothing to judge.') &&
+        nothing.includes('      never from a restated list. ⛔ ZERO review lookups were made: the path test runs first and returns,') &&
+        nothing.includes('      so a GitHub API outage can never block a diff that touches nothing governed.'),
+      nothing,
+    );
+  }
+
   // ── the PR-head reader: throws, and the caller no longer refuses on it ───
   //
   // The READER's own contract is unchanged — a non-2xx or an unparseable body
@@ -1855,7 +2047,8 @@ export async function selfTest() {
       'regeneration (clears with zero approvals and zero API calls; still refuses on an uncertified recompute, on ' +
       'drift, on a hand-authored sibling, and on a recompute that throws), and the workflow wiring pin including the ' +
       'dependency install the recompute needs, its register-agnostic filter-free form, and its continue-on-error ' +
-      'degradation).',
+      'degradation), and the #15406 replay of PR #15284 — a clear reached THROUGH a lift no longer reports itself as a ' +
+      'clear that matched nothing, while the zero-cost clear keeps its wording byte-for-byte on both legs.',
   );
 
   selfTestReachedVerdict = true;
