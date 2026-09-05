@@ -1,7 +1,7 @@
 # ADR-0092: Identity-table write guard — engine-enforced `managedBy: 'better-auth'`, with sys_user profile fields as the first whitelist
 
 - **Status:** Accepted
-- **Date:** 2026-07-10 (proposed) · 2026-07-11 (revised: D2 generalized from a sys_user-only hook to a registry-driven guard over every better-auth-managed object, per review) · 2026-07-11 (accepted) · **2026-09-03 (amended: D5 — self-service edits of the whitelisted columns route through the generic data path; see the D5 Amendment)**
+- **Date:** 2026-07-10 (proposed) · 2026-07-11 (revised: D2 generalized from a sys_user-only hook to a registry-driven guard over every better-auth-managed object, per review) · 2026-07-11 (accepted) · **2026-09-03 (amended: D5 — self-service edits of the whitelisted columns route through the generic data path; see the D5 Amendment)** · **2026-09-05 (amended: D1 — Tier 1 becomes `{name, image, locale}`, carrying the 2026-09-03 ruling on #14787; see the D1 Amendment)**
 - **Implementation:** #2816 (generic identity write guard — D2/D3/D6) → #2817 (sys_user edit affordance + form field gating — D4, gated on #2816)
 - **Deciders:** ObjectStack Protocol Architects
 - **Relates to:** [ADR-0010](./0010-metadata-protection-model.md) (identity tables managed by better-auth), [ADR-0049](./0049-no-unenforced-security-properties.md) (no unenforced security properties), [ADR-0068](./0068-unified-user-context-and-built-in-identity-roles.md) (platform-admin gate), [ADR-0069](./0069-enterprise-authentication-hardening.md) (system-managed auth stamps), #2766 / PR #2771 (admin user management + identity import), #2784 (originating RFC)
@@ -21,13 +21,17 @@ not a bigger lock.
 
 Decision — one mechanism serves both:
 
-- **D1** — classify `sys_user` columns into three tiers; only `name` and `image` are
-  profile-editable through the generic path.
+- **D1** — classify `sys_user` columns into three tiers; only `name`, `image` and
+  `locale` are profile-editable through the generic path.
+  ⚠️ **Amended 2026-09-05** — this bullet read "only `name` and `image`" as
+  originally accepted; `locale` was admitted to Tier 1 by the maintainer ruling of
+  2026-09-03 on #14787. Read the D1 Amendment below.
 - **D2** — plugin-auth installs a **generic identity write guard**: engine
   `before{Insert,Update,Delete}` hooks that fail-closed reject **user-context**
   writes to *every* object whose schema declares `managedBy: 'better-auth'`
   (registry-driven, no hardcoded table list). A per-object **update whitelist**
-  is the only opening; `sys_user → {name, image}` is its first entry. Internal
+  is the only opening; `sys_user → {name, image, locale}` is its first entry
+  (`{name, image}` as originally shipped — see the D1 Amendment). Internal
   writes (better-auth adapter, `isSystem` plugin/system contexts) bypass untouched.
 - **D3** — one whitelist module; the import upsert's `UPDATE_ALLOWED_FIELDS`
   (PR #2771) becomes a superset-by-construction of the sys_user entry.
@@ -107,10 +111,20 @@ whitelist" is how drift ships — coherence is handled explicitly (D6).
 
 ### D1 — sys_user field tiers
 
+*(Tier 1 as amended 2026-09-05 — see the D1 Amendment below. This list is rewritten
+in place rather than kept verbatim-plus-note, unlike D5: it is the set the D2 guard
+is read against, and a reader who took the pre-amendment list as current would
+delete an enforced member in good faith. The superseded wording is quoted inside
+the Amendment so nothing is lost.)*
+
 **Tier 1: profile-editable** (standard form / data API, guarded by D2):
 
 - `name` — display name. No auth semantics (`displayNameField`, not a login key).
 - `image` — avatar URL. No auth semantics.
+- `locale` — preferred BCP-47 language tag. No auth semantics: not a login key, not
+  authorization state, and better-auth is oblivious to it. Admitted 2026-09-03 by
+  maintainer ruling on #14787; shape-checked at the write by the column's own
+  `locale_bcp47_shape` rule. See the D1 Amendment.
 
 **Tier 2: admin-surface-only** — legitimate admin writes exist, but each has a
 dedicated surface with its own semantics; the generic form must not become a second
@@ -141,6 +155,55 @@ door:
   `locked_until`, `failed_login_count`, `mfa_required_at`, `last_login_at`,
   `last_login_ip`, `source`, `id`, `created_at`, `updated_at`.
 
+> **D1 Amendment (2026-09-05, #14951)** — carrying the maintainer ruling of
+> 2026-09-03 on #14787 (option B, adopted verbatim 「同意」). The *vehicle* was itself
+> ruled on #14951: amend ADR-0092 in place, no superseding ADR.
+>
+> **1 — Tier 1 is `{name, image, locale}`.** The list above is the amended one; as
+> accepted 2026-07-11 it read "`name` — display name … `image` — avatar URL" and
+> nothing else. The enforced constant `SYS_USER_PROFILE_EDIT_FIELDS`
+> (`packages/plugins/plugin-auth/src/sys-user-writable-fields.ts`) has held three
+> members since that ruling shipped. This ADR — not the constant — was the record
+> out of date, and Prime Directive #13 is why that is not a cosmetic gap: an
+> accepted ADR binds until it says otherwise, so a reader reaching the old table
+> first would read the third field as drift to be corrected. That is backwards, and
+> it is the condition under which a later PR "restores" the old behaviour in good
+> faith.
+>
+> **2 — `locale` qualifies on D1's own test, unchanged.** It has no auth semantics:
+> not a login key (unlike `phone_number`, Tier 2), not authorization state (unlike
+> `role` and the ban columns, Tier 2), not credential-adjacent (Tier 3). better-auth
+> is oblivious to it — neither one of its own user fields nor a declared
+> `additionalFields` entry, the latter deliberately, because declaring it there
+> would make `getSession` SELECT a column an environment that has not run
+> schema-sync does not have. That is exactly the argument that put `name` and
+> `image` in Tier 1, applied to a third column without weakening it.
+>
+> **3 — D6's mirror set deliberately did NOT widen, and the two sets are no longer
+> the same set.** Tier 1 and the session-snapshot mirror coincided only while the
+> whitelist happened to match better-auth's user model. They no longer do:
+> `SESSION_SNAPSHOT_MIRRORED_FIELDS`
+> (`packages/plugins/plugin-auth/src/identity-write-guard.ts`) holds `{name, image}`
+> and is a separately named constant for that reason. Mirroring `locale` would
+> manufacture an incoherence rather than repair one — see the D6 amendment note.
+>
+> **4 — D5 is unchanged by this amendment, and is restated because it is where
+> readers go next.** Two independent answers from two layers: the **whitelist
+> decides which columns** any permitted actor may touch (D2's guard), and
+> **permission sets decide who** may update at all (D5). Widening Tier 1 does not
+> widen who; widening a permission set does not widen which columns.
+>
+> ⚠️ **On member self-service, read the D5 Amendment rather than this paragraph.**
+> The #14787 ruling that admitted `locale` opened *columns*, not *principals*; it
+> did not decide whether an ordinary member reaches their own row. That question
+> was taken separately by the 2026-09-03 ruling on #14959 (decision batch #22,
+> verbatim 「同意」) and is already recorded below as the D5 Amendment:
+> `member_default` now names `sys_user` explicitly with `allowEdit: true`,
+> row-scoped to the caller by the `sys_user_self` RLS carve-out. Anything past that
+> one row — an org admin editing a colleague's profile — **remains open**:
+> `sys_user_org_members` stays `select`-only precisely so it cannot compose into
+> that write, and no ruling has taken it. This amendment does not take it either.
+
 ### D2 — A generic, registry-driven identity write guard
 
 `plugin-auth` registers (at `kernel:ready`, same pattern as the existing SCIM
@@ -166,7 +229,10 @@ Behaviour:
   registry — `registerManagedUpdateWhitelist(object, fields)` — consulted by the
   `beforeUpdate` guard. Non-whitelisted keys are stripped; if the payload becomes
   empty the hook throws (loud failure, not a silent no-op). First and only entry
-  shipped by this ADR: `sys_user → SYS_USER_PROFILE_EDIT_FIELDS` (D1 Tier 1).
+  shipped by this ADR: `sys_user → SYS_USER_PROFILE_EDIT_FIELDS` (D1 Tier 1 —
+  `{name, image, locale}` since the 2026-09-05 amendment, `{name, image}` as
+  originally shipped). Still the only entry: what the amendment widened is that
+  entry's field set, not the number of registered objects.
   Unknown/new columns are non-whitelisted by construction — adding a field to any
   identity table never silently opens it.
 - **Covers both update shapes**: single-id updates and `options.multi` bulk updates
@@ -213,6 +279,11 @@ export const SYS_USER_IMPORT_UPDATE_FIELDS = new Set([
   ...SYS_USER_PROFILE_EDIT_FIELDS, 'phone_number', 'role',
 ]);
 ```
+
+⚠️ **As amended 2026-09-05:** the sketch above is the 2026-07-10 design text and is
+left verbatim; the shipped `SYS_USER_PROFILE_EDIT_FIELDS` holds
+`{name, image, locale}`. D1's tier list is the current statement of the set — do
+not read the illustrative `new Set(['name', 'image'])` above as the live value.
 
 `admin-import-users.ts` replaces its private `UPDATE_ALLOWED_FIELDS` with
 `SYS_USER_IMPORT_UPDATE_FIELDS`. The relationship is subset-by-construction
@@ -324,9 +395,10 @@ name"), that is a permission-set + RLS decision (`sys_user_org_members` is curre
 > a shape check is most easily skipped; and `locale` as a better-auth
 > `additionalFields` entry, refused on #13881's measurement above.
 >
-> **Not amended by this:** D1's tier *table* still lists two Tier-1 members. The
-> whitelist constant is the enforced one and holds three; reconciling the table
-> is tracked separately (#14951).
+> **Not amended by this, and since reconciled:** when this amendment was written
+> D1's tier *table* still listed two Tier-1 members while the enforced whitelist
+> constant held three. #14951 closed that gap on 2026-09-05 — the table now holds
+> `{name, image, locale}` too. See the D1 Amendment.
 
 ### D6 — Session-cache invalidation companion hook
 
@@ -335,6 +407,27 @@ affected user's cached session entries in secondary storage when a user-context 
 changed a Tier-1 field. Implementation detail delegated to the auth manager (it owns
 the storage keys); the hook only reports "user X changed". No-op when secondary
 storage isn't wired (single-node memory cache TTLs it out).
+
+> **D6 Amendment note (2026-09-05, #14951).** The mirror set and D1's Tier-1
+> whitelist are **no longer the same set**, and the divergence is deliberate rather
+> than a deferral. D6 mirrors the columns better-auth itself keeps in its cached
+> `{session, user}` snapshots — `SESSION_SNAPSHOT_MIRRORED_FIELDS` in
+> `packages/plugins/plugin-auth/src/identity-write-guard.ts`, which holds
+> `{name, image}`. Tier 1 holds `{name, image, locale}`. `locale` is excluded on
+> purpose: better-auth carries no such field on its user model, so there is no
+> stale cached copy to repair, and merging one would MANUFACTURE an incoherence —
+> a `user.locale` key present only on sessions that happen to be cached, appearing
+> only after a profile edit and differing per session between two callers of the
+> same endpoint. The Context note above — "for the D1 whitelist (`name`, `image`)
+> staleness is cosmetic, but 'cosmetic until someone widens the whitelist' is how
+> drift ships" — is **answered here rather than rewritten**: the whitelist was
+> widened, and D6 correctly did not follow.
+>
+> ⚠️ Widening Tier 1 again does not widen this set. Add a column to the mirror only
+> when better-auth actually carries it on its user model (its own field, or a
+> declared `additionalFields` entry), and then only under the name better-auth
+> uses — a snake_case ObjectStack column whose better-auth spelling is camelCase
+> needs a translation, not an entry.
 
 ### Audit (RFC evaluation item 4 — no decision needed)
 
