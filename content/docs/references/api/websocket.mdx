@@ -363,7 +363,7 @@ Event pattern (supports wildcards like "record.*" or "*.created")
 | **userName** | `string` | ✅ | User display name |
 | **status** | `Enum<'online' \| 'away' \| 'offline'>` | ✅ | User presence status |
 | **lastSeenAt** | `integer` | ✅ | Unix timestamp of last activity in milliseconds |
-| **lastSeen** | `never` | optional | [REMOVED] `SimplePresenceState.lastSeen` was renamed to `lastSeenAt` in @objectstack/spec 17 (#14478 ruling B) — the last-activity INSTANT now carries the shared `EpochMs` schema, which declares the epoch-millisecond unit. Rename the key to `lastSeenAt`; the value is unchanged (`Date.now()`). Note the neighbouring `PresenceState.lastSeen` (api/realtime-shared.zod.ts) is a different key with a different type — an ISO-8601 datetime STRING — and is untouched. |
+| **lastSeen** | `never` | optional | [REMOVED] `SimplePresenceState.lastSeen` was renamed to `lastSeenAt` in @objectstack/spec 17 — the last-activity INSTANT now carries the shared `EpochMs` schema, which declares the epoch-millisecond unit. Rename the key to `lastSeenAt`; the value is unchanged (`Date.now()`). Note the neighbouring `PresenceState.lastSeen` (api/realtime-shared.zod.ts) is a different key with a different type — an ISO-8601 datetime STRING — and is untouched. |
 | **metadata** | `Record<string, any>` | optional | Additional presence metadata (e.g., current page, custom status) |
 
 
@@ -455,7 +455,7 @@ Event pattern (supports wildcards like "record.*" or "*.created")
 | **channel** | `string` | ✅ | Channel identifier (e.g., "record.account.123", "user.456") |
 | **payload** | `any` | ✅ | Event payload data |
 | **occurredAt** | `integer` | ✅ | Unix timestamp in milliseconds when the event occurred |
-| **timestamp** | `never` | optional | [REMOVED] `WebSocketEvent.timestamp` was renamed to `occurredAt` in @objectstack/spec 17 (#14478 ruling B) — the event INSTANT now carries the shared `EpochMs` schema, which declares the epoch-millisecond unit the bare key name left to the describe prose. Rename the key to `occurredAt`; the value is unchanged (`Date.now()`). |
+| **timestamp** | `never` | optional | [REMOVED] `WebSocketEvent.timestamp` was renamed to `occurredAt` in @objectstack/spec 17 — the event INSTANT now carries the shared `EpochMs` schema, which declares the epoch-millisecond unit the bare key name left to the describe prose. Rename the key to `occurredAt`; the value is unchanged (`Date.now()`). |
 
 
 ---
