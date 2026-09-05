@@ -50,7 +50,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { projectStateKey, runtimeStateFileName } from '../src/commands/serve.js';
-import { TSX } from './helpers/serve-process.js';
+import { childEnv, TSX } from './helpers/serve-process.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CHILD = resolve(HERE, 'helpers/runtime-state-child.ts');
@@ -99,12 +99,16 @@ function publishFrom(projectRoot: string, home: string, port: number): Promise<C
     const child: ChildProcess = spawn(TSX, [CHILD, String(port), NAMING_CONTROL_ROOT], {
       cwd: projectRoot,
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: {
-        ...process.env,
+      // ⛔ `childEnv`, never a bare `...process.env`: vitest sets `TEST`,
+      // `VITEST` and the `VITEST_*` family on its worker, and a child that
+      // inherits them boots with a different auth and crypto posture than the
+      // one under test (`check:cli-test-child-env` is the gate that keeps this
+      // directory on the choke point).
+      env: childEnv({
         OS_HOME: home,
         // UNSET, so the environment half of the name is serve's own default.
         OS_ENVIRONMENT_ID: undefined,
-      },
+      }),
     });
     childrenSpawned += 1;
 
