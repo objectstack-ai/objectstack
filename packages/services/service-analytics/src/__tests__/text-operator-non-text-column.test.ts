@@ -260,7 +260,11 @@ describe('[#14079] the two strategies, on a real SQLite engine over a REAL colum
   it('$not over the constant composes: every row for !contains, no row for !notContains', async () => {
     expect(await executedIds({ $not: { score: { $contains: '5' } } }, nativeCtx)).toEqual(ALL_IDS);
     expect(await executedIds({ $not: { score: { $notContains: '5' } } }, nativeCtx)).toEqual([]);
-    expect(await executedIds({ $or: [{ score: { $contains: '5' } }, { name: { $contains: 'acme' } }] }, nativeCtx)).toEqual(['2']);
+    // The constant is one disjunct among ordinary ones: the text column's own
+    // LIKE still decides the rest. (`a.b`, not `acme`: this compiler emits a
+    // plain `LIKE`, which folds ASCII case on SQLite — a known property of
+    // this face, not this card's subject — so the control must not turn on case.)
+    expect(await executedIds({ $or: [{ score: { $contains: '5' } }, { name: { $contains: 'a.b' } }] }, nativeCtx)).toEqual(['9']);
   });
 
   it('the read scope takes the same rule through the same hook', async () => {

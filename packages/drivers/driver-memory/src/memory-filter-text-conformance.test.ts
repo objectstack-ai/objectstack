@@ -140,7 +140,17 @@ describe('[#5374] the two general-purpose faces agree, case by case', () => {
    * this card are about.
    */
   it('no case answers every row — a dropped predicate WIDENS', async () => {
+    // [#14079] ONE case legitimately selects the whole fixture: `$notContains`
+    // over the non-string column, whose declared answer IS every row (a number
+    // never contains the substring, so every number "does not contain" it).
+    // It is named here so the property stays a property, not a loophole — a
+    // second whole-set answer is the widening this pin exists to catch, and a
+    // dropped predicate on THAT case is caught by its positive twins (whose
+    // declared answer is NO rows) and by the face-agreement row above.
+    const WHOLE_SET = '$notContains is satisfied by every stored value that is not a string — complementarity holds';
+    expect(rowCases.filter((c) => c.expected.length === ROWS.length).map((c) => c.name)).toEqual([WHOLE_SET]);
     for (const c of rowCases) {
+      if (c.name === WHOLE_SET) continue;
       expect((await queryIds(driver, c.filter)).length, c.name).toBeLessThan(ROWS.length);
       expect(matcherIds(c.filter).length, c.name).toBeLessThan(ROWS.length);
     }

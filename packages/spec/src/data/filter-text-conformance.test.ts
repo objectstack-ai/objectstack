@@ -56,20 +56,20 @@ function evaluate(
   fold: (s: string) => string,
   coerce = false,
 ): boolean {
+  // The declared reading: a non-string stored value is never text to match
+  // against. The coercing reading stringifies it first — the wrong answer.
+  const text: string | null = typeof value === 'string' ? value : coerce ? String(value) : null;
   return Object.entries(ops).every(([op, comparand]) => {
     const c = String(comparand);
-    if (typeof value !== 'string') {
-      if (!coerce) return op === '$notContains';
-      value = String(value);
-    }
+    if (text === null) return op === '$notContains';
     switch (op) {
       // Case-insensitive containment folds BOTH sides.
-      case '$icontains': return fold(value).includes(fold(c));
+      case '$icontains': return fold(text).includes(fold(c));
       // The rest compare literally — no fold, no wildcards, no regex.
-      case '$contains': return value.includes(c);
-      case '$notContains': return !value.includes(c);
-      case '$startsWith': return value.startsWith(c);
-      case '$endsWith': return value.endsWith(c);
+      case '$contains': return text.includes(c);
+      case '$notContains': return !text.includes(c);
+      case '$startsWith': return text.startsWith(c);
+      case '$endsWith': return text.endsWith(c);
       default: throw new Error(`reference evaluator has no arm for ${op}`);
     }
   });
