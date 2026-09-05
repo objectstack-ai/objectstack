@@ -13628,11 +13628,16 @@ function selfTest() {
   // says "never look here", must not become a lead — and under any other name
   // must still be one. Both halves are asserted on ONE literal so the pair
   // cannot drift, and the positive control is what makes the negative a
-  // measurement rather than a scan that stopped working. Every fixture below is
-  // assembled from `NOISE_SUFFIX` rather than spelled out, for the reason
-  // `check-watch-hint-literal.mjs` records about its own fixtures: a
-  // declaration written verbatim here is a real declaration site in this file,
-  // and this one would silence THIS module's own hints.
+  // measurement rather than a scan that stopped working.
+  //
+  // Every fixture NAME that would MATCH the predicate is assembled at run time
+  // rather than written after a `const`. `maskSelfTests` already blanks this
+  // body before the module scans itself, so no fixture here reaches the live
+  // hint set today; the assembly is what keeps that true if the block is ever
+  // moved out of the masked region, where a verbatim declaration would be a
+  // real declaration site silencing THIS module's own hints. It is the fixture
+  // hazard `check-watch-hint-literal.mjs` records about its own, one class over
+  // — there with no mask standing in the way.
   const NOISE_SUFFIX = ['NO', 'ISE'].join('');
   const excluded = `export const SHARED_PREFIX_${NOISE_SUFFIX} = Object.freeze(['.changeset/']);`;
   const included = "export const SHARED_PREFIX_ROOTS = Object.freeze(['.changeset/']);";
