@@ -60,7 +60,14 @@ async function mountCatchAll(owned: Record<string, () => Response>) {
             headers: { 'Content-Type': 'application/json' },
         });
     });
-    (plugin as any).authManager = { handleRequest };
+    // [#15417] The catch-all now asks the auth manager whether better-auth owns
+    // the path before it yields, so this stand-in has to answer that too — the
+    // fixture is a fake `AuthManager`, and this is part of the contract it
+    // stands in for. Ownership is derived from the SAME `owned` table above, so
+    // the file keeps meaning exactly what its title says: the paths better-auth
+    // does not own are the ones that get yielded.
+    const ownsRoute = async (req: Request) => Object.hasOwn(owned, new URL(req.url).pathname);
+    (plugin as any).authManager = { handleRequest, ownsRoute };
 
     const httpServer: any = { getRawApp: () => app, getPort: () => 0 };
     (plugin as any).registerAuthRoutes(httpServer, ctx);

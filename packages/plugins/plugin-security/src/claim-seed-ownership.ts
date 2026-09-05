@@ -173,13 +173,18 @@ function affectedRowCount(value: unknown): number | undefined {
   return value;
 }
 
-/** Ids from a `find` result, tolerating both the array and `{ records }` shapes. */
+/**
+ * Ids from a `find` result.
+ *
+ * `ObjectQL.find` resolves a BARE array — driven against a real engine over a
+ * real `SqlDriver` through this module's own paging fallback, the only path that
+ * reaches here (`engine-find-bare-array.pin.test.ts`). It is driven rather than
+ * read off `IDataEngine.find`'s declared `Promise<any[]>` because a declared
+ * type is not proof: this repo also has a `find()` that resolves an envelope.
+ * The `{ records }` limb this carried was dead.
+ */
 function idsFrom(rows: any): string[] {
-  const list: any[] = Array.isArray(rows)
-    ? rows
-    : Array.isArray(rows?.records)
-      ? rows.records
-      : [];
+  const list: any[] = Array.isArray(rows) ? rows : [];
   const out: string[] = [];
   for (const r of list) if (r?.id) out.push(String(r.id));
   return out;

@@ -2983,7 +2983,20 @@ export class AuthPlugin implements Plugin {
         // Forward the original request to better-auth handler
         const response = await this.authManager!.handleRequest(c.req.raw);
 
-        if (response.status === 404) {
+        // [#15417] Yield only a 404 that DISCLAIMS OWNERSHIP. `ownsRoute` asks
+        // better-auth's live `auth.api` — the same seam the route ledger and the
+        // `/admin/` dogfood sweep read — whether its own router serves this
+        // path; see `better-auth-route-ownership.ts` for the mechanism and the
+        // measurement. A 404 from a path it DOES serve is its answer (a
+        // switched-off capability such as `delete-user`, a bad token, an
+        // unknown id) and must reach the caller, exactly like the
+        // 401/403 the block below already refuses to yield. Measured with the
+        // shipped handler on a real Hono app: with one broad downstream mount
+        // in the chain — the shape a composition adds — such an answer used to
+        // come back `200 {}`, which is the silent-success shape #15417 is
+        // about. ⛔ The mount is untouched and still claims `${basePath}/*`;
+        // what narrowed is which 404 may be handed on.
+        if (response.status === 404 && !(await this.authManager!.ownsRoute(c.req.raw))) {
           await next();
           // A non-404 downstream means something else answered — hand that back.
           // NOT `c.finalized`: reaching the end of the chain with nothing
