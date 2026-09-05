@@ -16,6 +16,7 @@ import { assertReadScopeCannotVacate, compileScopedFilterToSql } from '../read-s
 import { nonTextColumnResolver, textOperatorPolarity } from '../non-text-column.js';
 import { datasetInvalidError, invalidMemberError } from '../dataset-refusal.js';
 import { likePattern, LIKE_ESCAPE_CHAR, asciiLowerSqlExpr, type LikeShape } from '../like-pattern.js';
+import { textMatchPredicateSql, sqlDialectFor } from '../text-match-sql.js';
 import { nextUtcCalendarDay } from '@objectstack/core';
 
 /**
@@ -621,8 +622,14 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // over a numeric or boolean column compiles to the contract's constant
     // rather than a `LIKE` Postgres refuses at query time (a 500 on a scope the
     // platform accepted). `undefined` when the host wired no field metadata.
+    // [#15684] …and so does the dialect, so a policy's case-SENSITIVE
+    // `$contains` compiles to a construct that IS case-exact on the engine that
+    // will run it. A read scope admitting rows the predicate excludes is
+    // over-reach (#3948), not a loose filter — and this is the merge site where
+    // that scope becomes an executed statement.
     const { sql, params: scopeParams } = compileScopedFilterToSql(filter, alias, {
       nonTextColumn: nonTextColumnResolver(ctx, objectName),
+      dialect: sqlDialectFor(ctx, objectName),
     });
     // [#13926] The #13640 door guard, at THIS strategy's merge site. This is
     // not an echo: `execute()` runs this method's output through
@@ -1071,6 +1078,9 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
   ): string | null {
     const opMap: Record<string, string> = {
       equals: '=', notEquals: '!=', gt: '>', gte: '>=', lt: '<', lte: '<=',
+      // [#15684] For the case-EXACT four these entries are the OPERATOR GATE,
+      // not the emitted keyword: `text-match-sql.ts` picks `LIKE` or `GLOB`
+      // per dialect below. `$icontains` still emits the `LIKE` written here.
       contains: 'LIKE', notContains: 'NOT LIKE',
       startsWith: 'LIKE', endsWith: 'LIKE',
       // [#6520] `$icontains` — `LIKE` like its neighbours; what separates it is
@@ -1127,20 +1137,36 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
       if (polarity && nonTextColumnResolver(ctx, target.object)?.(target.field)) {
         return polarity === 'negative' ? SQL_CONST_TRUE : SQL_CONST_FALSE;
       }
-      // [#5567] Escaped pattern AND an explicit `ESCAPE`, bound together: the
-      // escaping alone would search for a literal backslash on SQLite (no
-      // default escape character there), the clause alone would change nothing.
-      params.push(likePattern(shape, values[0]));
-      const patternRef = `$${params.length}`;
-      params.push(LIKE_ESCAPE_CHAR);
       // [#6520] `$icontains` folds ASCII case on BOTH sides. Only this operator
       // folds: the rest of the family is case-EXACT by ruling (#4706 Q2 = A),
       // and `objectql-strategy.ts`'s echo of this statement carries the same
       // `fold` flag on the same single row so the two keep describing one query.
+      //
+      // [#5567] Escaped pattern AND an explicit `ESCAPE`, bound together: the
+      // escaping alone would search for a literal backslash on SQLite (no
+      // default escape character there), the clause alone would change nothing.
       if (operator === 'icontains') {
+        params.push(likePattern(shape, values[0]));
+        const patternRef = `$${params.length}`;
+        params.push(LIKE_ESCAPE_CHAR);
         return `${asciiLowerSqlExpr(rawCol)} ${sqlOp} ${asciiLowerSqlExpr(patternRef)} ESCAPE $${params.length}`;
       }
-      return `${rawCol} ${sqlOp} ${patternRef} ESCAPE $${params.length}`;
+      // [#15684] …and the case-EXACT family picks its construct per DIALECT,
+      // because a plain `LIKE` folds ASCII case on SQLite and follows the
+      // collation on MySQL — admitting rows #4706 Q2 = A excludes. `sqlOp`
+      // above still gates the operator into this branch; which KEYWORD it
+      // becomes is `text-match-sql.ts`'s answer, not this table's, and the
+      // escaping travels with it (the GLOB arm escapes a different character
+      // class and binds no `ESCAPE`). A host that wired no dialect hook
+      // answers `'unknown'` and keeps the `LIKE` this line always emitted.
+      return textMatchPredicateSql({
+        dialect: sqlDialectFor(ctx, target.object),
+        column: rawCol,
+        shape,
+        value: values[0],
+        negate: operator === 'notContains',
+        bind: (v) => { params.push(v); return `$${params.length}`; },
+      });
     }
 
     // A bare-day `lte` bound means "through that whole day" (#3777): compile
