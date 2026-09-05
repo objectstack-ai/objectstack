@@ -211,7 +211,13 @@ function makeMemoryDriver() {
     async connect() {}, async disconnect() {}, async checkHealth() { return true; },
     async execute() { return null; },
     async find(object: string, ast: any) {
-      return [...rowsOf(object).values()].filter((r) => matches(r, ast?.where)).map(copy);
+      const rows = [...rowsOf(object).values()].filter((r) => matches(r, ast?.where));
+      // The caller's bound, applied AFTER the filter and held BY PRESENCE, and
+      // BEFORE the copy — a limit-blind double answers more rows than the
+      // caller asked for, and one that touches rows outside the bound reads
+      // work the engine it stands in for would never have done.
+      const page = typeof ast?.limit === 'number' ? rows.slice(0, ast.limit) : rows;
+      return page.map(copy);
     },
     async findOne(object: string, ast: any) {
       for (const r of rowsOf(object).values()) if (matches(r, ast?.where)) return copy(r);
@@ -237,7 +243,10 @@ function makeMemoryDriver() {
       return id && rowsOf(object).has(id) ? this.update(object, id, data) : this.create(object, data);
     },
     async delete(object: string, id: string) { return rowsOf(object).delete(id); },
-    async count(object: string, ast: any) { return (await this.find(object, ast)).length; },
+    // ⛔ Not `find().length`: a bound is a page size, never a population size.
+    async count(object: string, ast: any) {
+      return [...rowsOf(object).values()].filter((r) => matches(r, ast?.where)).length;
+    },
     async bulkCreate(object: string, rows: Record<string, unknown>[]) {
       return Promise.all(rows.map((r) => this.create(object, r)));
     },
