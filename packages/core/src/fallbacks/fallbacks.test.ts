@@ -431,3 +431,145 @@ describe('createMemoryI18n supportedLocales narrowing (#7679)', () => {
         expect(i18n.getLocales()).toEqual(['en', 'zh-CN']);
     });
 });
+
+describe('createMemoryI18n declared fallbackLocale (#15694)', () => {
+    // WHAT WENT WRONG
+    //
+    // `i18n.fallbackLocale` is authorable (`TranslationConfigSchema`) and
+    // `FileI18nAdapter` has always honoured it — `os serve` and the dev plugin
+    // construct it with `fallbackLocale || defaultLocale || 'en'`. The kernel's
+    // in-memory fallback is constructed with nothing and had no setter, so on a
+    // stack running it the declaration was INERT: `t()` consulted the requested
+    // locale and, only if that locale had NO bundle at all, `defaultLocale`.
+    //
+    // A stack declaring `defaultLocale: 'zh-CN'` with `fallbackLocale: 'en'`
+    // therefore answered a missing `zh-CN` key from `en` under
+    // `I18nServicePlugin` and from `zh-CN` — i.e. not at all — under the
+    // fallback. One declaration, two providers, two answers. The provider
+    // self-declaring `degraded` licenses FEWER capabilities, not a different
+    // answer to the same declared key.
+    //
+    // The contrast surface (`FileI18nAdapter.t()`'s second leg) is pinned in
+    // service-i18n's own suite and is deliberately untouched here.
+
+    /** The card's scenario: `en` carries a key the `zh-CN` bundle never got. */
+    function bootDeclaredStack() {
+        const i18n = createMemoryI18n();
+        i18n.loadTranslations('en', { objects: { property: { label: 'Property', tip: 'Only in English' } } });
+        i18n.loadTranslations('zh-CN', { objects: { property: { label: '房源' } } });
+        i18n.setDefaultLocale('zh-CN');
+        i18n.setFallbackLocale('en');
+        return i18n;
+    }
+
+    it('a key missing in the requested locale is answered from the DECLARED fallback', () => {
+        // The whole card in one assertion. Pre-fix this returned the key
+        // itself: the `zh-CN` bundle exists, so the old whole-bundle swap never
+        // fired, and nothing else was ever consulted.
+        expect(bootDeclaredStack().t('objects.property.tip', 'zh-CN')).toBe('Only in English');
+    });
+
+    it('the requested locale still wins where it HAS the key', () => {
+        // The fallback is a second leg, never a preference: a translated key
+        // must not start answering in English because a fallback was declared.
+        expect(bootDeclaredStack().t('objects.property.label', 'zh-CN')).toBe('房源');
+    });
+
+    it('a key in NEITHER locale is still the key itself', () => {
+        expect(bootDeclaredStack().t('objects.property.missing', 'zh-CN')).toBe('objects.property.missing');
+    });
+
+    it('per KEY, not per bundle — a bundle that exists but lacks the key still reaches the fallback', () => {
+        // Stated separately because this is the exact shape the old code got
+        // wrong. `resolveTranslations(locale) ?? mergedLocale(defaultLocale)`
+        // picks ONE bundle and then looks the key up in it, so the fallback
+        // could only ever fire for a locale with no bundle at all — which is
+        // never the interesting case.
+        const i18n = createMemoryI18n();
+        i18n.loadTranslations('en', { greeting: 'Hello' });
+        i18n.loadTranslations('ja-JP', { farewell: 'さようなら' });
+        i18n.setFallbackLocale('en');
+
+        expect(i18n.t('farewell', 'ja-JP')).toBe('さようなら');
+        expect(i18n.t('greeting', 'ja-JP')).toBe('Hello');
+    });
+
+    it('DECISION — an app that declared no fallbackLocale keeps today\'s behaviour exactly', () => {
+        // The compatibility half, and the reason the setter is guarded rather
+        // than defaulted: every stack written before this declared nothing, and
+        // a fallback nobody asked for is a new chain, not a fix.
+        const i18n = createMemoryI18n();
+        i18n.loadTranslations('en', { objects: { property: { tip: 'Only in English' } } });
+        i18n.loadTranslations('zh-CN', { objects: { property: { label: '房源' } } });
+        i18n.setDefaultLocale('zh-CN');
+
+        expect(i18n.t('objects.property.tip', 'zh-CN')).toBe('objects.property.tip');
+    });
+
+    it('the pre-existing whole-bundle fall to defaultLocale is untouched', () => {
+        // A requested locale with NO bundle still lands on `defaultLocale`,
+        // declared fallback or not — that leg is older than this card.
+        const i18n = createMemoryI18n();
+        i18n.loadTranslations('zh-CN', { objects: { property: { label: '房源' } } });
+        i18n.setDefaultLocale('zh-CN');
+        i18n.setFallbackLocale('en');
+
+        expect(i18n.t('objects.property.label', 'fr-FR')).toBe('房源');
+    });
+
+    it('a fallback equal to the requested locale does not re-ask the lookup that just failed', () => {
+        const i18n = createMemoryI18n();
+        i18n.loadTranslations('en', { greeting: 'Hello' });
+        i18n.setFallbackLocale('en');
+
+        expect(i18n.t('greeting', 'en')).toBe('Hello');
+        expect(i18n.t('missing', 'en')).toBe('missing');
+    });
+
+    it('interpolation applies to a value resolved from the fallback', () => {
+        const i18n = createMemoryI18n();
+        i18n.loadTranslations('en', { welcome: 'Welcome, {{name}}' });
+        i18n.loadTranslations('zh-CN', {});
+        i18n.setFallbackLocale('en');
+
+        expect(i18n.t('welcome', 'zh-CN', { name: 'Ada' })).toBe('Welcome, Ada');
+    });
+
+    it('the fallback leg sees the AUTHORED overlay, not just the static bundle', () => {
+        // #2591's authored layer wins on read for the requested locale, so it
+        // must win on the fallback leg too — otherwise a key authored at
+        // runtime resolves for one locale and not for the locale that falls
+        // back to it.
+        const i18n = createMemoryI18n();
+        i18n.loadTranslations('en', { greeting: 'Hello' });
+        i18n.loadTranslations('zh-CN', { other: '其他' });
+        i18n.replaceAuthoredTranslations({ en: { greeting: 'Hi there' } });
+        i18n.setFallbackLocale('en');
+
+        expect(i18n.t('greeting', 'zh-CN')).toBe('Hi there');
+    });
+
+    it('the fallback leg resolves a locale CODE the way the requested leg does', () => {
+        const i18n = createMemoryI18n();
+        i18n.loadTranslations('en-US', { greeting: 'Hello' });
+        i18n.loadTranslations('zh-CN', { other: '其他' });
+        i18n.setFallbackLocale('en');
+
+        expect(i18n.t('greeting', 'zh-CN')).toBe('Hello');
+    });
+
+    it('⛔ the SETTER exists and the ACCESSOR deliberately does not (#14882)', () => {
+        // The fence, pinned so the next reader does not "complete" this by
+        // adding the accessor. `setFallbackLocale` is what the provider is
+        // TOLD; `getFallbackLocale` is what the serving layer ASKS it when it
+        // builds the metadata-document translators' fallback chain. Answering
+        // the second from `defaultLocale` — the only value always available
+        // here — would settle the default-locale contract question #14882
+        // leaves deliberately open, from a degraded provider. Those reads keep
+        // the resolvers' own default instead, which is known and intentional.
+        const i18n = createMemoryI18n() as Record<string, unknown>;
+
+        expect(typeof i18n.setFallbackLocale).toBe('function');
+        expect(i18n.getFallbackLocale).toBeUndefined();
+    });
+});
