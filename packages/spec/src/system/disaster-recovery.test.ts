@@ -174,7 +174,7 @@ describe('DisasterRecoveryPlanSchema', () => {
       failover: {
         mode: 'active_passive',
         autoFailover: true,
-        healthCheckInterval: 30,
+        healthCheckIntervalSeconds: 30,
         failureThreshold: 3,
         regions: [
           { name: 'us-east-1', role: 'primary', endpoint: 'https://primary.example.com' },
@@ -226,3 +226,41 @@ describe('DisasterRecoveryPlanSchema', () => {
 
 // Need z import for z.input type usage in tests
 import { z } from 'zod';
+
+// #15679 (stack card 4/6 of #14478) — ruling B. The old spelling is a
+// `retiredKey()` tombstone; asserted on the issue CODE and the prescription,
+// never on a bare `toThrow()`. The second case is the load-bearing half: the
+// neighbouring `dns.ttl` is a DECLARED `externalVocabulary` mirror and must
+// survive this rename untouched, and no gate can catch its loss (the marker
+// exempts the key either way), so the pin is the only guard.
+describe('FailoverConfig.healthCheckInterval carries its unit (#15679)', () => {
+  const regions = [
+    { name: 'us-east-1', role: 'primary' as const },
+    { name: 'eu-west-1', role: 'secondary' as const },
+  ];
+
+  it('REFUSES the retired `healthCheckInterval` with the rename in the message', () => {
+    const result = FailoverConfigSchema.safeParse({ regions, healthCheckInterval: 30 });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'healthCheckInterval');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toContain(
+      '`FailoverConfig.healthCheckInterval` was renamed to `healthCheckIntervalSeconds`',
+    );
+  });
+
+  it('accepts `healthCheckIntervalSeconds` and keeps the 30 default', () => {
+    expect(FailoverConfigSchema.parse({ regions, healthCheckIntervalSeconds: 15 })
+      .healthCheckIntervalSeconds).toBe(15);
+    expect(FailoverConfigSchema.parse({ regions }).healthCheckIntervalSeconds).toBe(30);
+  });
+
+  it('leaves the sibling `dns.ttl` bare — it is a declared externalVocabulary mirror', () => {
+    const parsed = FailoverConfigSchema.parse({
+      regions,
+      dns: { ttl: 60, provider: 'route53' },
+    });
+    expect(parsed.dns?.ttl).toBe(60);
+  });
+});
