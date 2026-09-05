@@ -333,7 +333,7 @@ describe('[#15444] a declarative `operation: \'update\'` action is not an unboun
         await runActionGovernanceInventory({ registered: [], objects, logger });
 
         const unbound = logger.warn.mock.calls.filter(
-            ([message]: [string]) => /declared script actions with NO handler/.test(message),
+            (call: any[]) => /declared script actions with NO handler/.test(String(call[0])),
         );
         expect(unbound).toHaveLength(1);
         expect(unbound[0][1]).toEqual(expect.objectContaining({
