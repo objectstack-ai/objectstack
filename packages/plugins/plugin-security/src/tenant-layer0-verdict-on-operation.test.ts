@@ -44,6 +44,19 @@ const PLAIN_MEMBER: PermissionSet = {
 const ADMIN_SET = defaultPermissionSets.find((s) => s.name === ADMIN_FULL_ACCESS);
 if (!ADMIN_SET) throw new Error(`fixture: '${ADMIN_FULL_ACCESS}' is not among the default permission sets`);
 
+/**
+ * An explicit per-object grant on the PRIVATE object: a wildcard `'*'` grant
+ * does not reach a private object (ADR-0066), so a plain member holding only
+ * `member_default` is refused at the CRUD gate before any wall is composed.
+ * This set lets the rungless-member half of the probe pin REACH the wall,
+ * carrying no superuser bit and no platform capability.
+ */
+const SECRET_EDITOR: PermissionSet = {
+  name: 'secret_editor',
+  label: 'Secret editor',
+  objects: { crm_secret: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },
+} as unknown as PermissionSet;
+
 /** An ordinary member of `org-1`, rung carried as the authz resolver would. */
 const MEMBER_CTX = { userId: 'u1', tenantId: 'org-1', positions: [], permissions: [], posture: 'MEMBER' };
 
@@ -213,12 +226,14 @@ describe('[#15813] the populations the engine could never answer are answered wh
   });
 
   it('a hand-built context carrying NO rung is decided by the capability probe: platform caps cross a private object, a plain member does not', async () => {
-    const { middleware } = await boot({ sets: [PLAIN_MEMBER, ADMIN_SET as PermissionSet] });
+    const { middleware } = await boot({ sets: [PLAIN_MEMBER, ADMIN_SET as PermissionSet, SECRET_EDITOR] });
     const { posture: _drop, ...rungless } = MEMBER_CTX;
     const admin = sweep('crm_secret', 'update', { ...rungless, permissions: [ADMIN_FULL_ACCESS] });
     await middleware(admin, async () => {});
     expect(admin.tenantLayer0Verdict).toEqual({ kind: 'none' });
-    const member = sweep('crm_secret', 'update', { ...rungless });
+    // Same private object, same absent rung, an explicit grant instead of the
+    // platform set: the probe finds no platform capability and the wall stands.
+    const member = sweep('crm_secret', 'update', { ...rungless, permissions: ['secret_editor'] });
     await middleware(member, async () => {});
     expect(member.tenantLayer0Verdict).toEqual({ kind: 'organization', organizationId: 'org-1' });
   });

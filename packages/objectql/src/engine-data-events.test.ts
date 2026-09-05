@@ -960,14 +960,13 @@ describe('#15225 / #15813 — a published BulkDataEvent names the organization t
     expect(body).not.toContain('eventOrganizationId(');
 
     // [#15813] The reader composes NOTHING: its body names the verdict schema
-    // and none of the wall's inputs. Comments stripped first — the docblock
-    // is allowed to NAME what is not read.
+    // and none of the wall's inputs. The slice starts at the `function`
+    // keyword, so the docblock above it (which is allowed to NAME what is not
+    // read) is outside the window; keep the body itself free of prose that
+    // names an input — the sentence belongs in the docblock.
     const fnStart = src.indexOf('\nfunction bulkEventOrganizationId(');
     expect(fnStart).toBeGreaterThan(-1);
-    const fnBody = src
-      .slice(fnStart, src.indexOf('\n}\n', fnStart))
-      .replace(/\/\*[\s\S]*?\*\//g, '')
-      .replace(/\/\/[^\n]*/g, '');
+    const fnBody = src.slice(fnStart, src.indexOf('\n}\n', fnStart));
     expect(fnBody).toContain('TenantLayer0VerdictSchema.safeParse(');
     for (const input of ['tenantId', 'accessible_org_ids', 'posture', 'isSystem', 'carriesTenantScopeColumn', 'getObject(', 'enforcedTenancyPosture', 'resolveEnginePosture']) {
       expect(fnBody, `bulkEventOrganizationId reads '${input}' — the mirror is back`).not.toContain(input);
