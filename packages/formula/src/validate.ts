@@ -197,11 +197,58 @@ export function expectedDialect(role: FieldRole): 'cel' | 'template' {
   return role === 'template' ? 'template' : 'cel';
 }
 
-function toSource(input: ExprInput): { dialect?: string; source: string } {
+/** `an array` / `an object` / `a number` — never called with a string or nullish. */
+function describeNonStringSource(value: unknown): string {
+  if (Array.isArray(value)) return 'an array';
+  if (typeof value === 'object') return 'an object';
+  return `a ${typeof value}`;
+}
+
+/**
+ * Normalize the three authorable spellings — bare text, an envelope, absent —
+ * into the dialect and the source text the checks below read.
+ *
+ * `nonStringSource` is the fourth population, which is not authorable at all: an
+ * envelope whose `source` is present but is NOT a string. `ExprInput` declares
+ * `source?: string`, so this cannot arrive through a typed call — but every
+ * production call site casts, because the value comes out of METADATA, where the
+ * declaration is a claim and not a guarantee. Read unguarded it reached
+ * `source.trim()` and threw a bare `TypeError: source.trim is not a function`
+ * out of a validator whose whole contract is that it never throws: callers that
+ * exist to collect LOCATED findings (`AutomationEngine.validateFlowExpressions`,
+ * `@objectstack/lint`'s stack walk) were bypassed entirely, so `registerFlow`
+ * died on an internal message naming neither the flow nor the node, and
+ * `objectstack validate` died naming neither the hook nor the sharing rule.
+ *
+ * The refusal is reported HERE, once, at the entry every predicate/value slot in
+ * the platform shares — never by each caller wrapping the call in a try/catch,
+ * which is the tolerant-consumer shape Prime Directive #12 forbids.
+ *
+ * ⚠️ Only a PRESENT non-string qualifies. `null` / `undefined` / a missing
+ * `source` still normalize to `''` and still read as "not authored" (`ok: true`),
+ * unchanged — including the `{ ast }` envelope, which carries no `source` at all
+ * and whose admission is `ExpressionSchema`'s rule, not this function's.
+ */
+function toSource(input: ExprInput): { dialect?: string; source: string; nonStringSource?: string } {
   if (input == null) return { source: '' };
   if (typeof input === 'string') return { source: input };
-  return { dialect: input.dialect, source: input.source ?? '' };
+  const raw = (input as { source?: unknown }).source;
+  if (raw == null) return { dialect: input.dialect, source: '' };
+  if (typeof raw !== 'string') {
+    return { dialect: input.dialect, source: '', nonStringSource: describeNonStringSource(raw) };
+  }
+  return { dialect: input.dialect, source: raw };
 }
+
+/**
+ * The refusal text for a non-string envelope `source`, shared by the message
+ * every role composes. Deliberately NOT exported: the published surface of
+ * `@objectstack/formula` does not move for this fix — the refusal travels the
+ * `errors[]` channel that already exists, so no consumer needs a new symbol to
+ * read it.
+ */
+const NON_STRING_SOURCE_REFUSAL =
+  'an expression envelope carries its expression as a string `source`';
 
 function bracesHint(source: string): string | null {
   const m = SINGLE_BRACE_RE.exec(source);
@@ -549,15 +596,34 @@ function checkRoleCatalog(
  * Validate one expression for a given field role. Never throws — returns a
  * structured result. Call sites decide whether to throw (build/registration)
  * or report (agent tool).
+ *
+ * "Never throws" is the contract, and it now holds for the one input that used
+ * to break it: an envelope whose `source` is not a string is refused through
+ * `errors[]` like any other malformed expression, so the caller's located
+ * reporting survives to the author. See {@link toSource}.
  */
 export function validateExpression(
   role: FieldRole,
   input: ExprInput,
   schema?: ExprSchemaHint,
 ): ExprValidationResult {
-  const { dialect, source } = toSource(input);
+  const { dialect, source, nonStringSource } = toSource(input);
   const errors: ExprValidationError[] = [];
   const warnings: ExprValidationError[] = [];
+  if (nonStringSource !== undefined) {
+    // Attributed to the empty string, deliberately: the value that would be the
+    // location IS the value being refused, so echoing it would put a non-string
+    // into a `source: string` slot every caller renders.
+    errors.push({
+      source: '',
+      message:
+        `invalid ${role} envelope: ${NON_STRING_SOURCE_REFUSAL} — found ${nonStringSource}. ` +
+        `Write the expression as bare text (e.g. ${role === 'template' ? '`Hi {{ record.name }}`' : '`record.rating >= 4`'}), ` +
+        `or as an envelope whose \`source\` is that text ` +
+        `(e.g. \`{ dialect: '${expectedDialect(role)}', source: '…' }\`).`,
+    });
+    return { ok: false, errors, warnings };
+  }
   if (!source.trim()) return { ok: true, errors, warnings };
 
   if (role === 'template') {
@@ -735,7 +801,12 @@ function celTypeToValueType(celType: string | null): InferredValueType {
  * construction — see {@link inferCelType}.
  */
 export function inferExpressionType(input: ExprInput, schema?: ExprSchemaHint): InferredValueType {
-  const { source } = toSource(input);
+  const { source, nonStringSource } = toSource(input);
+  // The second consumer of the shared entry, and it crashed identically. There
+  // is no `errors[]` here to route a refusal through, and this function is
+  // conservative by construction: a source it cannot read is a type it cannot
+  // prove, which is exactly what `'unknown'` already means.
+  if (nonStringSource !== undefined) return 'unknown';
   if (!source.trim()) return 'unknown';
   return celTypeToValueType(inferCelType(source, schema?.fields));
 }
