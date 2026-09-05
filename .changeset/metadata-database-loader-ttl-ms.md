@@ -4,7 +4,7 @@
 
 feat(metadata)!: `DatabaseLoaderOptions.cache.ttl` → `cache.ttlMs` — the read-through cache TTL carries its unit in the key name (#14478)
 
-<!-- adr-0087: not-required (already-registered metadata-manager-config-cache-ttl-unit-in-key) The authorable key this option mirrors — `MetadataManagerConfig.cache.databaseLoader.ttl` → `ttlMs` — is registered by the `@objectstack/spec` changeset of the same change; this package's exported `DatabaseLoaderCacheOptions` interface follows that key one-to-one and has no separate metadata surface to register. -->
+<!-- adr-0087: registered metadata-manager-config-cache-ttl-unit-in-key -->
 
 **BREAKING** rename on the exported `DatabaseLoaderOptions.cache` shape
 (`DatabaseLoaderCacheOptions.ttl` → `ttlMs`), shipped as `minor` under the

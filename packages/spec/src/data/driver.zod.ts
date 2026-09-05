@@ -26,7 +26,7 @@ export const DriverOptionsSchema = lazySchema(() => z.object({
    */
   timeoutMs: z.number().optional().describe('Operation timeout in milliseconds'),
   timeout: retiredKey(
-    '`DriverOptions.timeout` was removed in @objectstack/spec 17 (#14478) — its unit (milliseconds) ' +
+    '`DriverOptions.timeout` was removed in @objectstack/spec 17 — its unit (milliseconds) ' +
     'lived only in the description. Rename the key to `timeoutMs`; the value (milliseconds) is unchanged.',
   ),
 

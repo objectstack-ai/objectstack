@@ -133,7 +133,7 @@ const JOB_ID_RETIRED =
  * got a limit 1000× too short with no error anywhere.
  */
 const JOB_TIMEOUT_RETIRED =
-  '`job.timeout` was removed in @objectstack/spec 17 (#14478) — its unit (milliseconds) lived only '
+  '`job.timeout` was removed in @objectstack/spec 17 — its unit (milliseconds) lived only '
   + 'in the description while the sibling `retryPolicy.backoffMs` spells its own, so the same number '
   + 'read as two conventions on one surface. Rename the key to `timeoutMs`; the value (milliseconds) '
   + 'is unchanged. '

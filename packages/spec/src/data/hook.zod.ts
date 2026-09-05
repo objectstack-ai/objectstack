@@ -330,7 +330,7 @@ export const HookSchema = lazySchema(() => strictObject(
    */
   timeoutMs: z.number().optional().describe('Maximum execution time in milliseconds before the hook is aborted'),
   timeout: retiredKey(
-    '`hook.timeout` was removed in @objectstack/spec 17 (#14478) — its unit (milliseconds) lived ' +
+    '`hook.timeout` was removed in @objectstack/spec 17 — its unit (milliseconds) lived ' +
     'only in the description, beside a body-level `timeoutMs` and a `retryPolicy.backoffMs` that ' +
     'spell theirs, so the same number read as two conventions on one surface. ' +
     'Rename the key to `timeoutMs`; the value (milliseconds) is unchanged. ' +

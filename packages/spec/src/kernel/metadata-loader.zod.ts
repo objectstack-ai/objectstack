@@ -88,7 +88,7 @@ export const MetadataManagerConfigSchema = lazySchema(() => z.object({
      */
     ttlSeconds: z.number().int().min(0).default(3600).describe('Cache TTL in seconds'),
     ttl: retiredKey(
-      '`cache.ttl` was removed from `MetadataManagerConfig` in @objectstack/spec 17 (#14478) — ' +
+      '`cache.ttl` was removed from `MetadataManagerConfig` in @objectstack/spec 17 — ' +
       'its unit (seconds) lived only in the description, while the nested `cache.databaseLoader.ttl` ' +
       'spelled the same word in milliseconds, so one key name meant two magnitudes 1000× apart. ' +
       'Rename the key to `ttlSeconds`; the value (seconds) is unchanged.',
@@ -109,7 +109,7 @@ export const MetadataManagerConfigSchema = lazySchema(() => z.object({
       ttlMs: z.number().int().min(0).default(60_000).describe('Cache TTL in milliseconds'),
       ttl: retiredKey(
         '`cache.databaseLoader.ttl` was removed from `MetadataManagerConfig` in @objectstack/spec 17 ' +
-        '(#14478) — its unit (milliseconds) lived only in the description, while the outer `cache.ttl` ' +
+        '— its unit (milliseconds) lived only in the description, while the outer `cache.ttl` ' +
         'spelled the same word in seconds, so one key name meant two magnitudes 1000× apart. ' +
         'Rename the key to `ttlMs`; the value (milliseconds) is unchanged.',
       ),

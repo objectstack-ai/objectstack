@@ -107,6 +107,18 @@ import ts from 'typescript';
 const pkgRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SRC_ROOT = join(pkgRoot, 'src');
 
+/**
+ * The dispatch-gates declaration — the `ROOT_DIR_WATCH_HINTS` idiom (#12310).
+ * `scripts/pm/dispatch-gates.mjs` derives which gates a card must run from the
+ * path literals in each gate's source, and `check:declared-population-live`
+ * refuses a gate whose only path-shaped literal names nothing in the tree.
+ * This gate walks exactly one subtree — `packages/spec/src/`, tests excluded —
+ * so that is what it declares, as a LITERAL (the extractor reads source text;
+ * a value computed from `SRC_ROOT` would produce no hint). The self-test holds
+ * the literal against the constant the scan actually reads from.
+ */
+export const ROOT_DIR_WATCH_HINTS = ['packages/spec/src/**'];
+
 /** Canonical unit → every spelling the describe prose or a key token may use. */
 const UNIT_SPELLINGS: Readonly<Record<string, readonly string[]>> = {
   ms: ['ms', 'msec', 'msecs', 'millis', 'millisecond', 'milliseconds'],
@@ -437,6 +449,13 @@ function selfTest(): number {
   expect('counted singular/short forms ARE units: "1 second", "15-minute", "5 min", "30 ms"',
     rulesOf(`const S = z.object({ a: z.number().describe('Wait 1 second'), b: z.number().describe('A 15-minute window'), c: z.number().describe('Poll every 5 min'), d: z.number().describe('Debounce of 30 ms') });`)
       .join() === 'unit-in-prose-not-in-name,unit-in-prose-not-in-name,unit-in-prose-not-in-name,unit-in-prose-not-in-name');
+
+  // The declared population must be the population the scan reads (the
+  // ROOT_DIR_WATCH_HINTS idiom's coupling, held from this side).
+  const repoRoot = join(pkgRoot, '..', '..');
+  const declared = `${relative(repoRoot, SRC_ROOT).split('\\').join('/')}/**`;
+  expect(`declared population \`${ROOT_DIR_WATCH_HINTS.join(', ')}\` is the subtree the scan walks (\`${declared}\`)`,
+    ROOT_DIR_WATCH_HINTS.length === 1 && ROOT_DIR_WATCH_HINTS[0] === declared);
 
   console.log(failures === 0 ? '\nself-test: all cases pass' : `\nself-test: ${failures} case(s) FAILED`);
   return failures === 0 ? 0 : 1;

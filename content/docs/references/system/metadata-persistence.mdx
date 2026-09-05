@@ -255,7 +255,7 @@ Metadata file format
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | optional (default: `true`) | Enable caching |
 | **ttlSeconds** | `integer` | optional (default: `3600`) | Cache TTL in seconds |
-| **ttl** | `never` | optional | [REMOVED] `cache.ttl` was removed from `MetadataManagerConfig` in @objectstack/spec 17 (#14478) — its unit (seconds) lived only in the description, while the nested `cache.databaseLoader.ttl` spelled the same word in milliseconds, so one key name meant two magnitudes 1000× apart. Rename the key to `ttlSeconds`; the value (seconds) is unchanged. |
+| **ttl** | `never` | optional | [REMOVED] `cache.ttl` was removed from `MetadataManagerConfig` in @objectstack/spec 17 — its unit (seconds) lived only in the description, while the nested `cache.databaseLoader.ttl` spelled the same word in milliseconds, so one key name meant two magnitudes 1000× apart. Rename the key to `ttlSeconds`; the value (seconds) is unchanged. |
 | **maxSize** | `integer` | optional | Max cache size in bytes |
 | **databaseLoader** | `{ enabled: boolean; maxSize: integer; ttlMs: integer }` | optional | DatabaseLoader read-through cache |
 

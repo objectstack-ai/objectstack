@@ -558,7 +558,7 @@ export const DatabaseLevelIsolationStrategySchema = lazySchema(() => z.object({
     idleTimeoutSeconds: z.number().int().positive().default(300).describe('Idle pool timeout in seconds'),
     idleTimeout: retiredKey(
       '`connectionPool.idleTimeout` was removed from `DatabaseLevelIsolationStrategy` in ' +
-      '@objectstack/spec 17 (#14478) — its unit (seconds) lived in a source comment only and the ' +
+      '@objectstack/spec 17 — its unit (seconds) lived in a source comment only and the ' +
       'published description named none, so a reader of the reference page could not tell 300 seconds ' +
       'from 300 milliseconds. Rename the key to `idleTimeoutSeconds`; the value (seconds) is unchanged.',
     ),
@@ -689,7 +689,7 @@ export const TenantSecurityPolicySchema = lazySchema(() => z.object({
     sessionTimeoutSeconds: z.number().int().positive().default(3600).describe('Session timeout in seconds'),
     sessionTimeout: retiredKey(
       '`accessControl.sessionTimeout` was removed from `TenantSecurityPolicy` in @objectstack/spec 17 ' +
-      '(#14478) — its unit (seconds) lived in a source comment only and the published description ' +
+      '— its unit (seconds) lived in a source comment only and the published description ' +
       'named none, so a reader of the reference page could not tell 3600 seconds from 3600 ' +
       'milliseconds. Rename the key to `sessionTimeoutSeconds`; the value (seconds) is unchanged.',
     ),
