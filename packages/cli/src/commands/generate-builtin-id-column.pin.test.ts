@@ -44,11 +44,24 @@
  * That pin covers the FIELDS; this one covers the builtin column itself, which
  * is not a vocabulary entry and so had no rule anywhere.
  *
- * ## ⚠️ Recorded divergence, NOT a ruling: the audit-stamp columns (#15040)
+ * ## The audit-stamp columns: one half ruled (#15521), one half still recorded
  *
- * The last `it` below records — and deliberately does not correct — a THIRD
- * disagreement measured in the same pass. It is recorded so it cannot change
- * shape unnoticed, and so no reader mistakes this file for having decided it.
+ * #15040 measured a THIRD disagreement in the same pass and recorded it here
+ * without correcting it. #15521 split that record in two and ruled only the
+ * half that was decidable:
+ *
+ *   TYPE — RULED. The sql format spelled both columns bare `TIMESTAMP`
+ *   (`timestamp WITHOUT time zone`) while the driver and the typescript format
+ *   both build them with knex's `table.timestamp` = `timestamptz`. Driven on a
+ *   live PostgreSQL 16.13: two defaulted rows inserted 6 ms apart under
+ *   different session timezones landed NINE HOURS apart in the zone-naive
+ *   column and 3 ms apart in the aware one. One producer of three was wrong and
+ *   nothing had to be decided, so the sql format moved.
+ *
+ *   NULLABILITY (and the `now()` / `CURRENT_TIMESTAMP` default spelling) —
+ *   STILL RECORDED, still not ruled: the driver leaves both columns nullable
+ *   and both generators say NOT NULL. Nothing fails either way, so which side
+ *   moves is a ruling #15521 holds open.
  */
 
 import fs from 'node:fs';
@@ -173,40 +186,79 @@ describe('the builtin id column both migration generators emit (#15040)', () => 
     }
   });
 
-  // ── Recorded divergence, NOT coverage, and NOT a ruling ──────────────────
+  // ── #15521, the TYPE half: ruled, and now asserted as agreement ────────
   //
-  // Measured in the same pass as the id column, on the same two generators.
-  // The audit-stamp columns disagree with the driver too, in a way the id
-  // column did not, and the disagreement is NULLABILITY rather than type:
+  // Bare `TIMESTAMP` is `timestamp WITHOUT time zone`. Both knex producers of
+  // these same two columns — `driver-sql`'s `createAuditTimestampColumn` and
+  // `generateMigrationTs`'s `table.timestamps(true, true)` — yield
+  // `timestamptz`. Read back out of `information_schema.columns` on a live
+  // PostgreSQL 16.13, all three producers driven:
   //
-  //   driver-sql   `table.timestamp(name).defaultTo(knex.fn.now())`  (nullable)
-  //   sql gen      `"created_at" TIMESTAMP NOT NULL DEFAULT now()`
-  //   ts gen       `table.timestamps(true, true)` — knex 3.3.0 compiles this
-  //                to `.notNullable().defaultTo(CURRENT_TIMESTAMP)` on both
-  //                columns (`knex/lib/schema/tablebuilder.js`).
+  //   driver   created_at  timestamp with time zone     null=YES  default=CURRENT_TIMESTAMP
+  //   ts gen   created_at  timestamp with time zone     null=NO   default=CURRENT_TIMESTAMP
+  //   sql gen  created_at  timestamp without time zone  null=NO   default=now()
   //
-  // Compiled offline against knex's pg dialect, the two shapes are:
-  //
-  //   driver  "created_at" timestamptz default CURRENT_TIMESTAMP
-  //   ts gen  "created_at" timestamptz not null default CURRENT_TIMESTAMP
-  //
-  // Unlike the id column this is not obviously a wrong value: the driver stamps
-  // both columns on every write, so NOT NULL is arguably the truer constraint —
-  // and the driver's own DDL is dialect-branched (`datetime(3)` on MySQL, a
-  // canonical ISO default on SQLite) in a way a Postgres-flavoured generated
-  // migration does not try to reproduce. Which side moves is not this card's to
-  // decide, so nothing here changes those lines. Asserted only so the
-  // divergence cannot change shape unnoticed.
-  it('#15040 record — the audit-stamp columns diverge from the driver, deliberately unresolved', () => {
+  // Asserted as AGREEMENT with the driver rather than as the literal
+  // `TIMESTAMPTZ` alone: the driver's builder is read where it lives, so the day
+  // it stops emitting a knex `table.timestamp` this fails here instead of
+  // leaving the generators quietly wrong again — the same discipline the id
+  // column above already uses for its width.
+  it('#15521 — the audit columns take the driver\'s zone-AWARE type in both generators', () => {
     const sql = generateMigrationSql(CONFIG as Record<string, unknown>);
-    expect(sql).toContain('"created_at" TIMESTAMP NOT NULL DEFAULT now()');
-    expect(sql).toContain('"updated_at" TIMESTAMP NOT NULL DEFAULT now()');
+    for (const col of ['created_at', 'updated_at']) {
+      expect(sql).toContain(`"${col}" TIMESTAMPTZ NOT NULL DEFAULT now()`);
+      // `\b` discriminates: `TIMESTAMPTZ` is not a match for `TIMESTAMP\b`.
+      expect(
+        sql,
+        `the sql format spells ${col} zone-NAIVE again — a defaulted row then records the ` +
+        'wall clock of whatever session wrote it, with nothing left to recover the offset from',
+      ).not.toMatch(new RegExp(`"${col}" TIMESTAMP\\b`));
+    }
+    // Anti-vacuity: the predicate really does fire on the shape this replaced.
+    expect('  "created_at" TIMESTAMP NOT NULL DEFAULT now()').toMatch(/"created_at" TIMESTAMP\b/);
+    // The authority, read where it lives — both knex paths, neither transcribed.
+    expect(
+      SQL_DRIVER_SOURCE,
+      'driver-sql no longer builds the audit columns with knex\'s `table.timestamp`, which is ' +
+      'what makes them `timestamptz` on Postgres. Re-read #15521 before trusting the ' +
+      'generators\' TIMESTAMPTZ.',
+    ).toContain('table.timestamp(name).defaultTo(this.knex.fn.now());');
+    expect(generateMigrationTs(CONFIG as Record<string, unknown>)).toContain('table.timestamps(true, true);');
+  });
+
+  // ── #15521, the NULLABILITY half: recorded, NOT coverage, and NOT a ruling ──
+  //
+  // The driver leaves both columns nullable; both generators say NOT NULL:
+  //
+  //   driver-sql   `table.timestamp(name).defaultTo(knex.fn.now())`   (nullable)
+  //   sql gen      `"created_at" TIMESTAMPTZ NOT NULL DEFAULT now()`
+  //   ts gen       `table.timestamps(true, true)` — knex 3.3.0 compiles this to
+  //                `.notNullable().defaultTo(CURRENT_TIMESTAMP)` on both columns
+  //                (`knex/lib/schema/tablebuilder.js`), which the live-Postgres
+  //                catalog read above confirms as `null=NO`.
+  //
+  // Unlike the type half this is not a wrong value: the driver stamps both
+  // columns on every write, so NOT NULL is arguably the truer constraint, and
+  // the driver's own audit DDL is dialect-branched (`datetime(3)` on MySQL, a
+  // canonical ISO default on SQLite) in a way a Postgres-flavoured generated
+  // migration does not try to reproduce — so "match the driver byte for byte"
+  // is not even well-defined across dialects. Which side moves is #15521's to
+  // decide; nothing here changes those lines.
+  //
+  // The DEFAULT spelling rides with it: this generator's `now()` and the
+  // driver's `CURRENT_TIMESTAMP` are the same instant (both are
+  // `transaction_timestamp()`), but Postgres keeps them textually apart in the
+  // catalog, so they are two rows of the same schema-diff noise.
+  it('#15521 record — the audit columns\' NULLABILITY diverges, deliberately unresolved', () => {
+    const sql = generateMigrationSql(CONFIG as Record<string, unknown>);
+    expect(sql).toContain('"created_at" TIMESTAMPTZ NOT NULL DEFAULT now()');
+    expect(sql).toContain('"updated_at" TIMESTAMPTZ NOT NULL DEFAULT now()');
     expect(generateMigrationTs(CONFIG as Record<string, unknown>)).toContain('table.timestamps(true, true);');
     // The driver side, read where it lives: one audit-column builder, and its
     // default arm carries no `.notNullable()`.
     expect(
       SQL_DRIVER_SOURCE,
-      'driver-sql\'s audit-column DDL moved — re-read the #15040 record above before trusting it.',
+      'driver-sql\'s audit-column DDL moved — re-read the #15521 record above before trusting it.',
     ).toContain('table.timestamp(name).defaultTo(this.knex.fn.now());');
     const auditArm = SQL_DRIVER_SOURCE.slice(
       SQL_DRIVER_SOURCE.indexOf('protected createAuditTimestampColumn('),
