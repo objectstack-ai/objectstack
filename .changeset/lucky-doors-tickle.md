@@ -1,6 +1,6 @@
 ---
-'@objectstack/objectql': minor
-'@objectstack/lint': minor
+'@objectstack/objectql': patch
+'@objectstack/lint': patch
 ---
 
 Stop reporting a declarative `operation: 'update'` action as "a button wired to nothing"
