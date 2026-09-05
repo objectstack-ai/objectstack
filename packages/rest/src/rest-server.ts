@@ -80,7 +80,7 @@ import { refuseRepeatedQueryParams, assertFilterParamSuppliedOnce } from './quer
 // ignored filter is the one wrong answer a caller cannot detect.
 import { refuseUnknownQueryParams } from './query-allowlist.js';
 import type { DirectMountedRoute, MountedRouteSource } from './direct-mount.js';
-import { RestServerConfig, RestApiConfig } from '@objectstack/spec/api';
+import { RestServerConfig, RestApiConfigParsed } from '@objectstack/spec/api';
 // [#11683] The catalog's own floor for "a required `code` and no more specific
 // one" — see its use in `registerSharingEndpoints`, where the nested ADR-0112
 // envelope declares `code` REQUIRED while the flat classification it re-dresses
@@ -88,7 +88,7 @@ import { RestServerConfig, RestApiConfig } from '@objectstack/spec/api';
 import { standardErrorCodeForHttpStatus } from '@objectstack/spec/api';
 // [#11637] The DECLARED contract for `config.api`, imported as a VALUE rather
 // than a type. Both hops into this package were casts, so this schema had
-// never run on any deployment path — see `assertDeclaredApiConfig` below.
+// never run on any deployment path — see `parseDeclaredApiConfig` below.
 import {
     RestApiConfigSchema,
     CrudEndpointsConfigSchema,
@@ -743,8 +743,13 @@ type NormalizedRestServerConfig = {
         enableSearch: boolean;
         enableProjectScoping: boolean;
         projectResolution: 'required' | 'optional' | 'auto';
-        documentation: RestApiConfig['documentation'];
-        responseFormat: RestApiConfig['responseFormat'];
+        // [#14366] The PARSED shape, not the authored one: this block is
+        // built from `RestApiConfigSchema`'s output, so a `documentation` or
+        // `responseFormat` the caller wrote arrives with its OWN declared
+        // inner defaults applied (`documentation.enabled`, `.title`;
+        // `responseFormat.envelope`, `.includeMetadata`, `.includePagination`).
+        documentation: RestApiConfigParsed['documentation'];
+        responseFormat: RestApiConfigParsed['responseFormat'];
     };
     crud: {
         operations: {
@@ -799,7 +804,7 @@ type NormalizedRestServerConfig = {
  *
  * `api` is the one entry with a subtraction: its retired `requireAuth`
  * tombstone is `.omit()`ed because this seam does not own that key's posture
- * (see {@link RestServer.assertDeclaredApiConfig}). The four siblings carry no
+ * (see {@link RestServer.parseDeclaredApiConfig}). The four siblings carry no
  * tombstone of their own and are taken whole. ⛔ `RestServerConfigSchema` — the
  * whole-config schema — is deliberately NOT in this table: its `openApi31`
  * tombstone (#4579) is a `retiredKey()` whose parse REFUSES the key, while
@@ -824,6 +829,13 @@ function buildDeclaredSubConfigSchemas() {
 }
 type DeclaredSubConfigSchemas = ReturnType<typeof buildDeclaredSubConfigSchemas>;
 type DeclaredSubConfigName = keyof DeclaredSubConfigSchemas;
+/**
+ * [#14366] The parsed `api` sub-object, which `normalizeConfig` now BUILDS
+ * FROM. Taken off the table's own entry rather than off `RestApiConfigParsed`,
+ * so it is the post-`.omit()` shape: the retired `requireAuth` tombstone is
+ * absent here exactly as it is absent from the schema this seam runs.
+ */
+type DeclaredApiConfigParsed = z.output<DeclaredSubConfigSchemas['api']>;
 let declaredSubConfigSchemasCache: DeclaredSubConfigSchemas | undefined;
 function declaredSubConfigSchemas(): DeclaredSubConfigSchemas {
     return (declaredSubConfigSchemasCache ??= buildDeclaredSubConfigSchemas());
@@ -3616,8 +3628,9 @@ export class RestServer {
      * walked straight past it and mounted the whole API at `/api//`, and
      * `'v1/beta'` spliced an extra path segment into every route.
      *
-     * VALIDATION ONLY — the parsed output is deliberately discarded and the
-     * normalization below keeps reading the raw input. Two measured reasons:
+     * [#14366] The parsed output is CONSUMED — `normalizeConfig` builds the
+     * `api` block from what this returns. It was VALIDATE-ONLY from #11637
+     * until then, for two measured reasons that have both since expired:
      *
      *  - `enableSearch` USED to be the silent-strip trap here: it was read
      *    below through `as any` and declared nowhere in `packages/spec`, so
@@ -3626,9 +3639,27 @@ export class RestServer {
      *    it off (the ADR-0104 class `shared/retired-key.ts` exists to
      *    prevent). #11983 gave it a declared seat
      *    (`RestApiConfigSchema.enableSearch`, default `true`), so the parse
-     *    now preserves it — but the discard stays, for the omitted keys:
+     *    preserves it.
      *
-     *  - the retired `api.requireAuth` key is `.omit()`ed rather than enforced.
+     *  - `api.projectResolution` was `.omit()`ed until #12450 withdrew it.
+     *
+     *    ⇒ Re-measured at #14366 on the landed tree, because the discard is
+     *    only safe to remove if the key diff is EMPTY: the 14 keys
+     *    `normalizeConfig` reads and the 14 `RestApiConfigSchema` declares
+     *    after the `.omit()` are the same 14, in both directions. So the
+     *    non-strict parse cannot strip anything the runtime honours, and the
+     *    schema's `.default()`s ARE the defaults — one source, not the two
+     *    that a `??` chain here duplicated key for key.
+     *
+     *    The one measured behaviour delta is bounded and named: a
+     *    `documentation` or `responseFormat` object the caller WRITES now
+     *    arrives carrying its own declared inner defaults, where the `??`
+     *    chain copied the authored object through untouched. Both keys have
+     *    zero read sites outside this block (the #14369 census), so nothing
+     *    observes it today — but it is a real change to this structure's
+     *    contents and belongs in the record rather than in a reader's surprise.
+     *
+     *  - the retired `api.requireAuth` key is STILL `.omit()`ed rather than enforced.
      *    #3963 retired it with a deliberate warn-and-ignore posture
      *    (`rest-api-plugin.ts`: "is IGNORED"), chosen in a world where nothing
      *    parsed this config; converting that into a boot failure is that
@@ -3676,8 +3707,8 @@ export class RestServer {
      * schema's defaults key for key today, and folding it onto the parse is a
      * separate, separately-measured change — not a rider on the siblings.
      */
-    private assertDeclaredApiConfig(api: unknown): void {
-        parseDeclaredSubConfig('api', declaredSubConfigSchemas().api, api, (issues) => (
+    private parseDeclaredApiConfig(api: unknown): DeclaredApiConfigParsed {
+        return parseDeclaredSubConfig('api', declaredSubConfigSchemas().api, api, (issues) => (
             // The `version` rationale is appended only when `version` is what
             // failed. Measured during #11637's own ablation: a
             // `projectResolution` refusal printed the whole "an empty version
@@ -3697,12 +3728,20 @@ export class RestServer {
      * Normalize configuration with defaults
      */
     private normalizeConfig(config: RestServerConfig): NormalizedRestServerConfig {
-        // [#11637] `api`: parse BEFORE the cast, not instead of it — the cast
-        // is what makes the `api` block below type-check, and it is only sound
-        // once the declared contract has actually been run. Validate-only; see
-        // `assertDeclaredApiConfig` for why its parsed output is discarded.
-        this.assertDeclaredApiConfig(config.api);
-        const api = (config.api ?? {}) as Partial<RestApiConfig>;
+        // [#11637 / #14366] `api`: parsed AND consumed. #11637 ran the declared
+        // contract here but discarded its output, leaving the block below to be
+        // built from a cast over the raw input through a `??` chain that
+        // duplicated `RestApiConfigSchema`'s defaults key for key — ELEVEN
+        // literals in `packages/rest` restating the eleven top-level
+        // `z.default(...)`s in `packages/spec`, with nothing pinning that the
+        // two stayed equal. (Eleven, measured on both sides at #14366; the
+        // filing card said twelve, having counted the `config.api ?? {}` that
+        // guards the whole object rather than a per-key default.)
+        // #14366 folded the chain onto the parse after re-measuring the key
+        // diff empty in both directions (see `parseDeclaredApiConfig`), so the
+        // schema is now the single source of these defaults. The cast is gone
+        // with it: the parsed output is already typed.
+        const api = this.parseDeclaredApiConfig(config.api);
         // [#11984] The four siblings: parsed AND consumed. Each used to be
         // `(config.<sub> ?? {}) as Partial<...>`, so `batch.maxBatchSize: 0`
         // was the live batch cap (`0` is not nullish) and
@@ -3719,19 +3758,24 @@ export class RestServer {
         const routes = parseDeclaredSubConfig('routes', schemas.routes, config.routes);
 
         return {
+            // Keys listed rather than spread: `NormalizedRestServerConfig`
+            // declares `documentation` / `responseFormat` as REQUIRED (possibly
+            // `undefined`) while the schema declares them `.optional()`, so a
+            // spread would not satisfy this type — and listing them is also
+            // what makes the empty key diff readable at the seam it protects.
             api: {
-                version: api.version ?? 'v1',
-                basePath: api.basePath ?? '/api',
+                version: api.version,
+                basePath: api.basePath,
                 apiPath: api.apiPath,
-                enableCrud: api.enableCrud ?? true,
-                enableMetadata: api.enableMetadata ?? true,
-                enableUi: api.enableUi ?? true,
-                enableBatch: api.enableBatch ?? true,
-                enableDiscovery: api.enableDiscovery ?? true,
-                enableOpenApi: api.enableOpenApi ?? true,
-                enableSearch: api.enableSearch ?? true,
-                enableProjectScoping: api.enableProjectScoping ?? false,
-                projectResolution: api.projectResolution ?? 'auto',
+                enableCrud: api.enableCrud,
+                enableMetadata: api.enableMetadata,
+                enableUi: api.enableUi,
+                enableBatch: api.enableBatch,
+                enableDiscovery: api.enableDiscovery,
+                enableOpenApi: api.enableOpenApi,
+                enableSearch: api.enableSearch,
+                enableProjectScoping: api.enableProjectScoping,
+                projectResolution: api.projectResolution,
                 documentation: api.documentation,
                 responseFormat: api.responseFormat,
             },
