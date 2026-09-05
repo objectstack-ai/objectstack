@@ -834,8 +834,9 @@ function selfTest(): number {
   // 150098 source file(s)". A `SKIP_DIRS.has('node_modules')` assertion cannot
   // catch that coming back — the trap is that the WALK DESCENDS, so this builds
   // a tree containing every excluded shape, each carrying the same offender the
-  // first case of this self-test uses, and asserts the walk finds ONE file.
-  // Seven offenders on disk, one in the verdict.
+  // first case of this self-test uses, plus two real source files, and asserts
+  // the walk finds TWO files. Ten copies of the offender on disk — eight of
+  // them behind an exclusion — two in the verdict.
   const fixtureRoot = mkdtempSync(join(tmpdir(), 'duration-unit-keys-'));
   try {
     const offender = "const S = z.object({ ttl: z.number().describe('Cache TTL in seconds') });\n";
