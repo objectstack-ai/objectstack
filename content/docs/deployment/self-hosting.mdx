@@ -574,6 +574,50 @@ logins too, or leave the directory empty until the first administrator exists.
 A deployment that boots with zero human rows is the case both paths above
 describe, and it needs none of this.
 
+## Who may sign up — and what each posture tells a stranger
+
+`auth.audience.posture` is the one declaration answering who may become a user
+of this deployment: `invite_only` (the default), `email_domain`, or `open`
+(schema: [Auth Config](/docs/references/system/auth-config)). It also decides
+what the sign-up endpoint tells someone who is **not** a user yet. Measured on
+a populated deployment, posting to `/api/v1/auth/sign-up/email`:
+
+| Posture | What a stranger learns |
+|:---|:---|
+| `invite_only` (default) | **Nothing.** A registered address and an unknown one both answer `403 SELF_REGISTRATION_CLOSED` — same body bytes, same headers. |
+| `email_domain` | **Only inside a domain you allowlisted.** Any address outside the list answers `403 EMAIL_DOMAIN_NOT_ALLOWED`, registered or not, so a caller must already hold an address on an allowlisted domain before they learn anything. |
+| `open` | **Whether any address is already registered.** A registered address answers `422 USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL`; an unregistered one answers `200`. |
+
+**On `open`, that disclosure is by design.** Anyone who can reach the endpoint
+can test an address and learn whether it belongs to a user of this deployment,
+one address per request, holding no account of their own. On an
+internet-facing deployment that is an address-enumeration oracle. It is a cost
+of the posture rather than an oversight: the endpoint refuses **honestly**, and
+what that refusal replaced was worse for everyone except the enumerator. A duplicate
+sign-up used to answer `200` carrying a freshly minted user id for a row that
+was never written — no account, no verification mail, and the person's next
+sign-in `401` with nothing anywhere explaining it.
+
+**That silence was never a real secret, either.** The auth engine hashed the
+password on both lanes to level the timing and stopped there: a genuine
+registration also writes rows and dispatches a verification mail, so the mail
+that never arrives — and the account that can never sign in — already told a
+patient caller what the `422` now states outright. The explicit refusal made an
+existing disclosure legible; it did not create it. `invite_only` and
+`email_domain` are untouched by it: the uniqueness refusal is reached only for
+a caller the posture has already admitted, so a stranger on the default still
+gets `403 SELF_REGISTRATION_CLOSED` and learns nothing.
+
+**If you need `open` without the disclosure, ask for it.** better-auth, the
+auth engine underneath, ships the designed alternative: `onExistingUserSignUp`,
+a hook that pairs a generic sign-up response with a notification to the
+address's real holder — "someone tried to register with your email". It is
+deliberately **not wired** here, because turning it on trades the honest
+refusal above for a silent success, which is the shape that behaviour exists to
+remove. If you run a real internet-facing `open` deployment and want that
+trade, open an issue saying so: it is a per-deployment decision, waiting on a
+deployment that needs it.
+
 ## Go-live
 
 Before pointing real users at the deployment, walk the
