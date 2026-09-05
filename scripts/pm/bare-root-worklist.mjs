@@ -70,12 +70,14 @@ import { isEntrypoint } from '../invoked-as.mjs';
 import { auditSource } from '../check-watch-hint-literal.mjs';
 import {
   collapseHint,
+  declaredWidePopulation,
   discoverFamilies,
   extractWatchHints,
   hintCovers,
   maskComments,
   maskSelfTests,
   trackedFiles,
+  widePopulationRefusal,
 } from './dispatch-gates.mjs';
 
 const ROOT = new URL('../..', import.meta.url).pathname;
@@ -1345,7 +1347,14 @@ export function sweep(families, files, { restrict = true } = {}) {
     for (const file of entry.files ?? []) {
       const abs = join(ROOT, file);
       if (!existsSync(abs)) continue;
-      const body = maskSelfTests(maskComments(readFileSync(abs, 'utf8')));
+      // The RAW source, read once and used twice. The literal sweep below needs
+      // it masked; the `wide-population` marker (#15341) is a COMMENT, so it
+      // only exists in the unmasked text -- reading it off `body` would find
+      // nothing, every row would read as undeclared, and the acceptance below
+      // would be silently vacuous rather than measurably so.
+      const raw = readFileSync(abs, 'utf8');
+      const wideDeclared = declaredWidePopulation(raw) !== null;
+      const body = maskSelfTests(maskComments(raw));
       const spans = restrict ? populationSpans(body) : [];
       for (const { word, index } of bareRootLiterals(body, dirs)) {
         let constant = null;
@@ -1355,7 +1364,7 @@ export function sweep(families, files, { restrict = true } = {}) {
           constant = span.name;
         }
         const key = restrict ? rowKey({ file, constant, word }) : `${file} ${word}`;
-        if (!byKey.has(key)) byKey.set(key, { file, constant, word, checks: [], coveringChecks: 0, key });
+        if (!byKey.has(key)) byKey.set(key, { file, constant, word, checks: [], coveringChecks: 0, key, wideDeclared });
         const row = byKey.get(key);
         if (row.checks.includes(check)) continue;
         row.checks.push(check);
@@ -1366,6 +1375,47 @@ export function sweep(families, files, { restrict = true } = {}) {
   return [...byKey.values()]
     .map((r) => ({ ...r, checks: r.checks.sort(), covered: r.coveringChecks === r.checks.length }))
     .sort((a, b) => a.key.localeCompare(b.key));
+}
+
+/**
+ * The rows a recorded verdict CONTRADICTS — pure, so the live sweep and the
+ * fixture cases beside it cannot disagree about what a contradiction IS.
+ *
+ * A row is contradicted when the sweep now finds it REACHABLE and a verdict is
+ * still recorded for it: the row then asserts both that the population is
+ * reachable by declaration and, in its own recorded reason, that it is not.
+ *
+ * ## The `wide-population` marker is the deliberate-declaration form (#15341)
+ *
+ * The message below has always offered two honest resolutions, and the second
+ * is "withdraw the VERDICT, if the declaration is deliberate". That resolution
+ * cost the row: withdrawing a verdict on a shrink-only map leaves the row
+ * printing REACHABLE with no reason under it, and a refusal that was measured
+ * per row stops being readable anywhere. Maintainer ruling, 2026-09-05
+ * (decision batch #43, verbatim reply 「同意」): `dispatch-gates.mjs` gains a
+ * third derivation channel, `wide-population`, the refused families move onto
+ * it, and ⛔ this file's rows are NOT deleted.
+ *
+ * So the marker IS that deliberate-declaration form, and it resolves the
+ * contradiction without withdrawing anything: a gate carrying it has declared,
+ * in its own source, the very fact the verdict records — that CI runs it over a
+ * population no subtree glob places. The two halves stop contradicting because
+ * they are now the same statement said twice, in the two places that need it,
+ * and the row keeps its measured reason where a reader can still find it.
+ *
+ * ⛔ What it is NOT is an escape from the refusal it accompanies. A gate that
+ * declares a real subtree hint reaching an arbitrary file at the top of the
+ * root is contradicted exactly as before, marker or no marker — that gate has
+ * taken the declaration the verdict refused, which is the FIRST resolution and
+ * a different decision. The marker resolves the pair only by agreeing with the
+ * verdict; a hint disagrees with it, and disagreement is what this assertion is
+ * for.
+ */
+export function contradictedRows(rows, triage = TRIAGE) {
+  return rows
+    .filter((r) => r.covered && triage.has(r.key) && !r.wideDeclared)
+    .map((r) => `${r.key} [recorded ${triage.get(r.key).verdict}]`)
+    .sort();
 }
 
 function report({ wide = false } = {}) {
@@ -1757,10 +1807,7 @@ function selfTest() {
   // can honestly wear any of the three, and choosing between the two honest
   // resolutions RE-DECIDES a verdict on a shrink-only map — not something this
   // assertion may do quietly, so it names both and picks neither.
-  const contradicted = rows
-    .filter((r) => r.covered && TRIAGE.has(r.key))
-    .map((r) => `${r.key} [recorded ${TRIAGE.get(r.key).verdict}]`)
-    .sort();
+  const contradicted = contradictedRows(rows);
   t(`no recorded verdict sits on a row the sweep now finds REACHABLE${contradicted.length
     ? ` — CONTRADICTED: ${contradicted.join(' · ')}. That gate now declares a hint reaching an `
       + 'arbitrary file at the top of the root, so the row claims BOTH that the population is '
@@ -1773,8 +1820,61 @@ function selfTest() {
       + 'REACHABLE with no reason beneath it: that is the shrink this map already permits, and the '
       + 'seven reachable rows carrying no verdict today are its live shape. ⛔ Do NOT re-point the '
       + 'row at DECLARED-NARROWER: that verdict is defined for a row that stays UNCOVERED, and a '
-      + 'covered row is the bare root wearing a glob, not a narrower subtree.'
+      + 'covered row is the bare root wearing a glob, not a narrower subtree. A THIRD resolution '
+      + 'exists since 2026-09-05 and costs the row nothing: the gate declares `dispatch-gates: '
+      + 'wide-population -- REASON` in its own source, which AGREES with the refusal instead of '
+      + 'overriding it, and `contradictedRows` excuses the pair without any verdict being withdrawn.'
     : ''}`, contradicted.length === 0);
+
+  // The `wide-population` acceptance (#15341), both directions, on fixtures —
+  // because the live direction is VACUOUS on this tree and saying so is the
+  // point: no covered row carries the marker today, so a live-only pin would be
+  // an assertion over an empty set that reads exactly like a pass. The fixtures
+  // are what make the rule falsifiable, and the control under them names the
+  // gate that owns the shape this one excuses.
+  t('a covered row whose gate DECLARES a wide population is accepted — the deliberate-declaration form, '
+    + 'agreeing with the recorded refusal rather than withdrawing it',
+    contradictedRows(
+      [{ key: 'k', covered: true, wideDeclared: true }],
+      new Map([['k', { verdict: 'REFUSE-WIDE' }]]),
+    ).length === 0);
+  t('…and a covered row with NO such declaration is still CONTRADICTED — the refusal this assertion '
+    + 'has always made, unmoved by the acceptance above',
+    (() => {
+      const out = contradictedRows(
+        [{ key: 'k', covered: true, wideDeclared: false }],
+        new Map([['k', { verdict: 'REFUSE-WIDE' }]]),
+      );
+      return out.length === 1 && out[0].includes('REFUSE-WIDE');
+    })());
+  t('an UNCOVERED row is contradicted by neither — the marker changes nothing about a row that was '
+    + 'never reachable, which is every row this map actually holds today',
+    contradictedRows(
+      [{ key: 'k', covered: false, wideDeclared: false }, { key: 'j', covered: false, wideDeclared: true }],
+      new Map([['k', { verdict: 'REFUSE-WIDE' }], ['j', { verdict: 'REFUSE-UNSPELLABLE' }]]),
+    ).length === 0);
+  // The handoff. The shape excused above — a marker sitting above a hint that
+  // reaches the top of the root — is not unowned: `dispatch-gates` REFUSES it,
+  // in the file that owns markers, as a gate claiming two population shapes at
+  // once. This assertion excuses it HERE only because naming it here would name
+  // it wrongly, as a verdict problem rather than a declaration problem.
+  t('the excused shape is refused by the gate that owns markers, so no configuration is excused by both',
+    (widePopulationRefusal({ widePopulationReason: 'walks packages entire', hints: ['packages/**'] }) ?? '')
+      .includes('NAMES paths'));
+  t('CONTROL: and that refusal really can come back null, so the pin above is discriminating',
+    widePopulationRefusal({ widePopulationReason: 'walks packages entire', hints: [] }) === null);
+  // The live direction, stated as the measurement it is rather than left to
+  // read as a silent pass: this tree has no covered row carrying the marker, so
+  // the acceptance above is currently doing nothing to the report — which is
+  // exactly what "the rows are not deleted" was ruled to mean.
+  const wideCovered = rows.filter((r) => r.wideDeclared && r.covered).map((r) => r.key).sort();
+  const wideRows = rows.filter((r) => r.wideDeclared).map((r) => r.key).sort();
+  t(`the ten declaring gates reach ${wideRows.length} row(s) here and ${wideCovered.length} of them is covered, so the `
+    + 'acceptance withdraws no verdict on this tree — every recorded refusal still prints against its row'
+    + (wideCovered.length ? ` — covered-and-declared: ${wideCovered.join(' · ')}` : ''),
+    wideCovered.length === 0);
+  t(`control: the marker IS being read off the live sweep (${wideRows.length} row(s) carry it), so the case above is `
+    + 'measuring something rather than reporting a field nothing ever sets', wideRows.length > 0);
 
   // The spelling rule the triage docblock states, held mechanically: a key
   // spelled as a bare path would enter this file's own declared population.
@@ -2073,7 +2173,10 @@ function selfTest() {
   }
   console.log(
     `OK  self-test: ${rows.length} live row(s), ${open.length} unreachable as spelled, `
-      + `${TRIAGE.size} recorded verdict(s) — none stale, none missing, none contradicted. `
+      + `${TRIAGE.size} recorded verdict(s) — none stale, none missing, none contradicted `
+      + `(${rows.filter((r) => r.wideDeclared).length} row(s) whose gate carries the dispatch-gates `
+      + 'wide-population declaration, the deliberate-declaration form this file accepts without '
+      + 'withdrawing a verdict; none of them is covered, so none is excused by it today). '
       + `Each row is one literal in one gate source file: ${perInvocation.size} invocation(s) of `
       + `those literals fold onto them, ${twins} of them as twins of a row that already existed, `
       + "and no folded row's invocations disagree about reachability. "

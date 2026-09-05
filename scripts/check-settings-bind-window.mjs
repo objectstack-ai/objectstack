@@ -104,6 +104,8 @@
  *     node scripts/check-settings-bind-window.mjs --self-test # verify the checker
  */
 
+// dispatch-gates: wide-population -- walk(join(ROOT, 'packages')) admits every non-test .ts source under the packages root -- 2182 of 5837 tracked files (37.4%, base 2aa8456cf), recorded REFUSE-WIDE in CENSUS_REFUSE_WIDE in scripts/pm/bare-root-worklist.mjs, the identical corpus its three census siblings walk. The population is every source in that root, so the only true subtree spelling is the bare root and it would name this gate on every card touching a package.
+
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
