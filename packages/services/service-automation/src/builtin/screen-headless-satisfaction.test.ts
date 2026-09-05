@@ -327,6 +327,62 @@ describe('screen headless satisfaction (#15705)', () => {
         expect(res.screen?.nodeId).toBe('screen_1');
     });
 
+    /**
+     * The row-id VALUE leg reads three candidates, and the `token` pin above is
+     * satisfied by any of them — so on its own it pins the leg but not its
+     * parts, and a future edit could delete one candidate and stay green
+     * (measured: dropping `params.recordId` alone left all 21 green).
+     *
+     * These three fixtures give each candidate a case only it can answer, by
+     * letting a record COLUMN shadow the other seed keys — which is the only
+     * way a seeded key stops carrying the row id, since `seedFlowActionParams`
+     * writes a key only `if (seeded[key] === undefined)` and the record spread
+     * came first.
+     */
+    it('only `params.recordId` can refuse this one — the record shadows the alias key', async () => {
+        const flow: any = followupFlow();
+        flow.nodes[1].config.fields = [{ name: 'sessionToken', label: 'Session', type: 'text', required: true }];
+        flow.variables = [{ name: 'sessionToken', type: 'text', isInput: true, isOutput: true }];
+        register({}, flow);
+        // recordIdField 'token' -> row id 'tok_9'; the record's own `crmLeadId`
+        // column survives the alias seed, so that candidate reads 'other_1'.
+        const record = { id: 'sess_1', token: 'tok_9', crmLeadId: 'other_1' };
+        const res = await engine.execute('schedule_followup', {
+            record, object: 'crm_lead',
+            params: { ...record, recordId: 'tok_9', sessionToken: 'tok_9' },
+        } as AutomationContext);
+        expect(res.status).toBe('paused');
+    });
+
+    it('only the alias VALUE can refuse this one — the record shadows `recordId`', async () => {
+        const flow: any = followupFlow();
+        flow.nodes[1].config.fields = [{ name: 'sessionToken', label: 'Session', type: 'text', required: true }];
+        flow.variables = [{ name: 'sessionToken', type: 'text', isInput: true, isOutput: true }];
+        register({}, flow);
+        const record = { id: 'sess_1', token: 'tok_9', recordId: 'shadow_1' };
+        const res = await engine.execute('schedule_followup', {
+            record, object: 'crm_lead',
+            params: { ...record, crmLeadId: 'tok_9', sessionToken: 'tok_9' },
+        } as AutomationContext);
+        expect(res.status).toBe('paused');
+    });
+
+    it('only `record.id` can refuse this one — object-less action, and the record shadows `recordId`', async () => {
+        const flow: any = followupFlow();
+        flow.nodes[1].config.fields = [{ name: 'subjectRef', label: 'Subject', type: 'text', required: true }];
+        flow.variables = [{ name: 'subjectRef', type: 'text', isInput: true, isOutput: true }];
+        register({}, flow);
+        // No `object` on the context (an object-less action), so no alias key
+        // is derivable at all; the record's own `recordId` column shadows the
+        // other seed. The default `recordIdField` leaves the row id at `id`.
+        const record = { id: 'lead_1', recordId: 'shadow_1' };
+        const res = await engine.execute('schedule_followup', {
+            record,
+            params: { ...record, subjectRef: 'lead_1' },
+        } as AutomationContext);
+        expect(res.status).toBe('paused');
+    });
+
     it('trigger door: a genuine caller param still satisfies the screen', async () => {
         register();
         const res = await engine.execute('schedule_followup', triggerDoorContext('lead_1', {
