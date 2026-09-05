@@ -567,28 +567,40 @@ describe('#13764 the history seams of this harness honour the org partition', ()
 //
 // ⭐ WHY ONLY THE `?type=` ARM IS REPAIRED, and why the untyped sweep is
 // PINNED AS-IS rather than left unmentioned. `getMetaDiagnostics` reads each
-// swept type through `getMetaItems({ type: t, organizationId })`, and
-// `getMetaItems` applies NO registry gate of its own — the organization it is
-// handed is used for whatever type it is handed. So the scope is per TYPE
-// while the request carries ONE `organizationId`:
+// swept type through `getMetaItems({ type: t, organizationId })`.
+//
+// ⚠️ [#14683, recorded by #15034] `getMetaItems` NOW APPLIES THE REGISTRY GATE
+// ITSELF, after folding the request type. This header used to say it applied
+// none and that the scope was therefore the caller's to decide per type; that
+// sentence is FALSE on today's tree. What survives it is the arm split below,
+// which is about how many types ONE `organizationId` is asked to cover:
 //
 //   • `?type=` ⇒ `targetTypes` is exactly that one type, so
 //     `organizationIdForMetaRead` over it IS the request's whole scope. Correct
 //     by construction, and repaired here.
 //   • no `?type=` ⇒ `targetTypes` is the whole registry, five
-//     `allowOrgOverride: true` types beside every other declared type. One org
-//     id cannot say "org-scoped for those five, env-wide for the rest", and
-//     `getMetaItems` UNIONS the named org's rows onto the env-wide ones — so a
-//     tenant named there would union pre-#6190 phantom rows (org-scoped rows on
-//     types with no per-org read channel, which boot hydration walks past) back
-//     into a governance report. The gap is reported on the card and pinned
-//     below so it cannot widen by accident in either direction.
+//     `allowOrgOverride: true` types beside every other declared type. The arm
+//     names no organization at all, so nothing is folded and nothing is
+//     unioned. ⚠️ The reason it stays that way is no longer "one org id cannot
+//     say org-scoped for those five, env-wide for the rest" — since #14683 the
+//     inner gate folds each `t` separately inside the sweep's own loop, so it
+//     could. It stays because closing it MOVES BEHAVIOUR and is somebody's
+//     decision on a card. The gap is pinned below so it cannot widen by
+//     accident in either direction.
 //
-// The controls are the load-bearing half. `?type=object` proves the predicate
-// is the REGISTRY-GATED one: a phantom org-scoped `object` row is planted
-// directly in the store — the write door cannot produce one, by #6190 — and
-// the sweep must not see it. Swap `organizationIdForMetaRead` for a raw
-// `ctx?.tenantId` at the call site and that assertion, and only it, turns red.
+// ── ⛔ WHAT THIS FILE NO LONGER DISCRIMINATES (#15034, MEASURED) ───────────
+//
+// This header used to end: "Swap `organizationIdForMetaRead` for a raw
+// `ctx?.tenantId` at the call site and that assertion, and only it, turns red."
+// MEASURED on the merged tree, that ablation now leaves this file 30/30 GREEN
+// — `getMetaItems`' own gate re-folds the raw tenant id, phantom control
+// included. Same fate as #14677's ablation B, and for the same reason.
+//
+// ⇒ What this file DOES still discriminate is the organization being DROPPED:
+// remove the `organizationId` the `?type=` arm passes and the six repair cases
+// above turn red (measured: 6 failed / 24 passed). Read the two apart before
+// citing this file as a pin on the door-side predicate — it pins that the arm
+// still FOLDS, never that the fold happens at the door.
 
 /** Rows in the backing store for one `(type, name, org)` slot. */
 function storedRowsFor<T extends { type: string; name: string; organization_id: string | null }>(
@@ -660,9 +672,12 @@ describe('#13753 GET /meta/diagnostics states the org partition on the ?type= ar
             // than written through the door. Rows like it exist in deployments
             // that ran before that ruling; boot hydration walks past them, so
             // they are dead, and a read door that named the org for every type
-            // would serve them again. PREDICTED DIRECTION: replace the
-            // predicate with `ctx?.tenantId` at the call site and the count
-            // below becomes 2.
+            // would serve them again. ⚠️ [#15034] PREDICTED DIRECTION,
+            // CORRECTED: replacing the predicate with `ctx?.tenantId` at the
+            // call site no longer moves this count — `getMetaItems`' own gate
+            // (#14683) re-folds it. What still drives it to 2 is a read door
+            // that reaches the store with the org unfolded, which is why the
+            // control stays.
             const written = await b.put(NON_OVERRIDABLE, 'accounts');
             expect(written.status, 'the control never wrote').toBe(200);
             expect(
