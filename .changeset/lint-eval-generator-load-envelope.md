@@ -1,5 +1,5 @@
 ---
-"@objectstack/cli": patch
+"@objectstack/cli": minor
 ---
 
 `os lint --eval --json` now carries the ADR-0112 error carriers on its generator-load failure, instead of a bare `{error}`.
