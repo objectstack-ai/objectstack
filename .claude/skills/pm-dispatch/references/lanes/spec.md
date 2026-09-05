@@ -17,7 +17,7 @@
 - 语义与文本按合法元数据集合变没变分:改动前过校验的输入改动后同判 ⇒ 文本面。
 - 文本面的 changeset 恒 patch,默认 sweep-first;否则语义面。
 - 任何改变接受或拒绝行为的卡,不论多小,按语义面处理,即条款②。
-- 机器面改围着契约转的机器,与文本面无交集,⛔ 不碰 `src/**/*.zod.ts` 与 strictness 台账。
+- 机器面改围契约的机器,与文本面不交,⛔ 不碰 `packages/spec/src/**/*.zod.ts` 与 strictness 台账。
 - 产物随源走:describe 与 JSDoc 改动重生成的 references 产物归触发它的源 PR。
 - 生成物门禁重生成提交,⛔ 手改。
 - 改元数据格式或接受面的照旧归 `domain:spec`;`/meta` 路由本体在 `packages/rest` 归 `domain:cli`。

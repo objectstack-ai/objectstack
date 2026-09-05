@@ -79,4 +79,4 @@
 - 其余三个:`Build & E2E` · `Build Docs` · `Changeset Declaration`。
 - ⛔ required 选择只 gate 等待、不 gate 触发:未列入的检查照跑、算力相同,红了不再挡队列。
 - 配 required 集先排掉 push-only job:`if: github.event_name == 'push'` 的 job 在 `merge_group` 上不报到。
-- 列为 required 即挂死队列;未展开的矩阵名是被跳过的占位符,不是真 context。
+- 列为 required 即挂死队列;未展开的矩阵名(带字面 `${{ }}` 的串)是占位符,不是真 context。

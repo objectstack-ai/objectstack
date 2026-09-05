@@ -43,7 +43,7 @@
 - 裸 REST `PATCH /pulls/{n}` 传 `draft: false` 回 200 而无操作 ⇒ 接口性质,池 0 只能等重置。
 - `enable_pr_auto_merge` 恒显式传 `mergeMethod: "SQUASH"`;不传静默退回被禁的 merge-commit = 无操作。
 - 它存的方法恒为 `merge`,不论请求了什么;REST `auto_merge.merge_method` 读回 `merge`。
-- 仓库禁 merge 提交时同样读回 `merge`;无 REST 端点设该方法。
+- 仓库 `allow_merge_commit:false` 时同样读回 `merge`;无 REST 端点设该方法。
 - 设方法的 GraphQL mutation 不服务 agent 会话 ⇒ 席位既设不了也纠不了。
 - 它在本仓无实效:`main` 的合并队列规则带 `merge_method: SQUASH`,合并由队列执行。
 - ⇒ 落地方法读分支规则,⛔ 永不读 auto-merge 请求;树上每 PR 一个 squash 提交。
@@ -162,7 +162,7 @@
 - 后果是重复卡照开、空车道照停;控制词回 0 ⇒ 本会话 search 已坏,立刻换通道,⛔ 不重试。
 - 换道:探针绿走 REST 列表端点 `GET /repos/{o}/{r}/issues?state=open&labels=a,b&per_page=N`。
 - 它走 core 桶且 `labels` 是真 AND;⛔ 完整性自证靠 `&page=N` 加总数核对。
-- 页码翻页在偏移 ~9,900 硬拒:`page=100` 回 422 Pagination with the page parameter is not supported。
+- 翻页在偏移 ~9,900 硬拒:422 Pagination with the page parameter is not supported for large datasets。
 - 该拒绝与规模、`per_page` 无关:小结果集同样在 `page=100` 拒,`per_page=1` 拒在 `page=9000`。
 - ⇒ 总体超过它就按 `sort=created` 拆成 `asc` 加 `desc` 两趟、各 ≤99 页。
 - `created` 序承重:新卡只追加到尾,页不在脚下重排。
@@ -237,7 +237,7 @@
 - 读数:带链接与管道的 `git push` 被拒,裸 `git push origin <分支>` 放行,拒绝文案不点名元素。
 - 判定跨天翻面 ⇒ ⛔ 一次拒绝不是能力边界;`permissions.allow` 条目才是仓库侧确定性通道。
 - `rerun_failed_jobs` 复用原 run 的提交与合并 ref,不拿新 main 重算。
-- ⇒ 基上缺已合修复时重跑无效,只能推提交;判别:修复合并时间晚于 run 创建时间。
+- ⇒ 基上缺已合修复时重跑无效,只能 `git merge origin/main` 推提交;判别看修复合并时间。
 - 同一 head 上轻量兄弟 workflow `success` 加重量级载体 `cancelled` 是普通取代的预期签名。
 - cancel-in-progress 窗口只罩得住慢载体 ⇒ 先比对 run `head_sha` 与 PR 当前 head,不开调查。
 - CI 红了先取完整日志归档再下结论:断言文本只在归档里,直读工具拿不到。
@@ -297,7 +297,7 @@
 - 续作序:build,整链 regen,生成物门禁全绿,提交推送;恢复 commit 带 `Recovery commit:` 前缀。
 - 有的现场 regen 一件没跑,推送前先跑生成物门禁别赌。
 - ③:死在源码编辑中途 ⇒ 先读 diff 判完整性:docblock 写全动机与判据的可代跑终验后提交。
-- 写一半意图不明的 ⛔ 不代提交,记交接;dev 临时目录是工作物非交付物,清掉,⛔ 不进 PR。
+- 写一半意图不明的 ⛔ 不代提交,记交接;dev 临时目录(`.os-scratch/` 一类)清掉,⛔ 不进 PR。
 - 零提交的探针分支不是在飞工作:容器发不出分支删除 refspec。
 - `git push origin --delete <b>` 回 send-pack: unexpected disconnect,三次退避全败,同会话普通 push 正常。
 - ⇒ 测量型派发留下的探针分支永久堆在 origin 上。
