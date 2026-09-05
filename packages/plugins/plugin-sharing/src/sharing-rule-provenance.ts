@@ -22,21 +22,40 @@
  *    run — so a caller can never forge/clear `customized`, while this hook's
  *    stamp survives.
  *
- * Known boundary (recorded in the ADR): multi-row updates (no single
- * `input.id`) are not stamped — every rule-editing UI path updates by id.
+ * Multi-row updates ARE stamped, once per matched row. [#15302] Since #5574
+ * the engine dispatches `beforeUpdate` PER MATCHED ROW of a predicate
+ * (`multi: true`) write, each context carrying that row's `id` and `previous`
+ * (the `HookContext` contract; ADR-0058 Addendum II D1-D7). The inference this
+ * hook used to draw - "no single `input.id` means a bulk write, decline" -
+ * therefore answered "single write" on every row of a batch and guarded
+ * nothing. It is deleted rather than re-expressed against the engine's
+ * `dispatch` marker: taking part in EVERY write shape is the intent, so there
+ * is no decision left for the marker to gate (#6966 asks it in
+ * `file-reference-lifecycle.ts` because that guard REFUSES; this one stamps).
+ *
+ * What an operator's bulk edit does, measured on the real engine rather than
+ * assumed: the payload is BATCH-scoped (D3 - `driver.updateMany` takes ONE
+ * `SET` clause for N rows). Matched rows that AGREE are all stamped in that one
+ * clause and the write lands. Matched rows that DISAGREE would stamp some and
+ * not others, and the engine refuses the whole batch
+ * (`MULTI_UPDATE_HOOK_KEY_DIVERGENCE`, 400) rather than widening one row's
+ * stamp to the rest - which is what makes a row-conditioned rewrite safe to
+ * leave here.
+ *
+ * Declining on a predicate write was weighed and REJECTED (#15302): the seeder
+ * skips only rows marked `customized`, so the rows left unstamped would be
+ * exactly the ones the next boot clobbers - discarding the operator edit this
+ * stamp exists to remember.
  */
 
 import type { OptionalSharingLogger } from './logger-shapes.js';
 
 interface MinimalEngine {
-  find(object: string, opts?: any): Promise<any[]>;
   registerHook(event: string, handler: (ctx: any) => any, options?: Record<string, any>): void;
   unregisterHooksByPackage(packageId: string): number;
 }
 
 export const SHARING_RULE_PROVENANCE_PACKAGE = 'plugin-sharing:rule-provenance';
-
-const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
 
 export function bindRuleProvenanceStamp(engine: MinimalEngine, logger?: OptionalSharingLogger): void {
   engine.registerHook(
@@ -45,30 +64,20 @@ export function bindRuleProvenanceStamp(engine: MinimalEngine, logger?: Optional
       // Seeder / defineRule / boot reconcilers write with isSystem — those
       // are the package door, not an admin customization.
       if ((ctx?.session as any)?.isSystem) return;
-      const id = ctx?.input?.id ?? (ctx?.input?.data as any)?.id;
-      if (!id) return; // multi-row update — see boundary note above
       const data = ctx?.input?.data;
       if (!data || typeof data !== 'object') return;
-      try {
-        // `previous` is not resolved before beforeUpdate hooks run — read the
-        // current row ourselves (system ctx: this is a provenance check, not
-        // an authorization decision).
-        const rows = await engine.find('sys_sharing_rule', {
-          where: { id },
-          fields: ['id', 'managed_by', 'customized'],
-          limit: 1,
-          context: SYSTEM_CTX,
-        });
-        const row = Array.isArray(rows) ? rows[0] : undefined;
-        if (!row) return;
-        if ((row.managed_by === 'package' || row.managed_by === 'platform') && row.customized !== true) {
-          (data as any).customized = true;
-        }
-      } catch (err: any) {
-        logger?.warn?.('[sharing-rule] provenance stamp failed (edit proceeds unstamped)', {
-          id,
-          error: err?.message,
-        });
+      // [#15302] The engine has ALREADY read this row. `ctx.previous` is
+      // its pre-image, bound before `beforeUpdate` runs on BOTH write shapes
+      // (#5574 / #5846: the by-id path reads it ahead of the dispatch, and
+      // every per-row context of a predicate write carries its own), and it
+      // is the published `HookContext` contract rather than an engine
+      // internal. This hook used to issue its own `engine.find` here - on a
+      // predicate write, one extra read PER MATCHED ROW of a row the engine
+      // had just read.
+      const previous = ctx?.previous as Record<string, any> | undefined;
+      if (!previous || typeof previous !== 'object') return;
+      if ((previous.managed_by === 'package' || previous.managed_by === 'platform') && previous.customized !== true) {
+        (data as any).customized = true;
       }
     },
     { object: 'sys_sharing_rule', packageId: SHARING_RULE_PROVENANCE_PACKAGE, priority: 150 },
