@@ -45,10 +45,12 @@ assignments:
   pass refuses the same set — all through the spec schema, so none of them
   grew a rule of its own.
 
-**FROM → TO.** An assignment value that carried only `ast` has no evaluable
-form to migrate to under M9.1: author its `source`. A whitespace-only `source`
-was never an expression: delete the entry, or write the expression. Every
-envelope with a non-blank `source` is unchanged.
+**What an author does with a refused envelope.** An assignment value that
+carried only `ast` has no evaluable form under M9.1: author its `source`. A
+whitespace-only `source` was never an expression: delete the entry, or write
+the expression. Every envelope with a non-blank `source` is unchanged, and
+nothing is renamed, retired or rewritten — the refusal itself carries the
+prescription.
 
 Not touched here: the `predicate` half of the same seam — `evaluateCondition`'s
 silent `false` on an envelope without a `source` — is a behaviour change on a
