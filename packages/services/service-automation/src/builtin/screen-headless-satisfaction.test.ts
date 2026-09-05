@@ -293,6 +293,40 @@ describe('screen headless satisfaction (#15705)', () => {
         expect(res.status).toBe('paused');
     });
 
+    /**
+     * The shape review round 2 drove, and the one this file's author had
+     * characterised as pause-only when it in fact SKIPPED.
+     *
+     * `recordIdField: 'token'` makes the seeded row id the record's `token`
+     * column rather than its `id`, and `recordIdParam: 'sessionToken'` gives
+     * that value a THIRD key the record does not carry. So: not a column (the
+     * record leg cannot see it), not `record.id` (the row-id value leg, as
+     * first written, could not see it either), and not a derivable name. It
+     * read as caller-supplied on a launch that supplied nothing, and the run
+     * completed with `{ sessionToken: 'tok_9' }`.
+     *
+     * What closes it: the dispatcher seeds the SAME row id under every one of
+     * its id keys, so `params.recordId` still carries it and the value is
+     * recoverable from the bag itself, without knowing the action-level name.
+     */
+    it('CONTROL — a non-id `recordIdField` seeded under a third `recordIdParam` name does not satisfy it', async () => {
+        const flow: any = followupFlow();
+        flow.nodes[1].config.fields = [{ name: 'sessionToken', label: 'Session', type: 'text', required: true }];
+        flow.variables = [{ name: 'sessionToken', type: 'text', isInput: true, isOutput: true }];
+        register({}, flow);
+        // The authentic `seedFlowActionParams` bag for
+        // `recordIdField: 'token'` + `recordIdParam: 'sessionToken'`: the row
+        // id is `record.token`, seeded under all three id keys.
+        const session = { id: 'sess_1', token: 'tok_9', label: 'Web session' };
+        const res = await engine.execute('schedule_followup', {
+            record: session,
+            object: 'crm_lead',
+            params: { ...session, recordId: 'tok_9', crmLeadId: 'tok_9', sessionToken: 'tok_9' },
+        } as AutomationContext);
+        expect(res.status).toBe('paused');
+        expect(res.screen?.nodeId).toBe('screen_1');
+    });
+
     it('trigger door: a genuine caller param still satisfies the screen', async () => {
         register();
         const res = await engine.execute('schedule_followup', triggerDoorContext('lead_1', {

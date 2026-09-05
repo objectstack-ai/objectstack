@@ -221,20 +221,37 @@ function callerSupplied(
   if (!params || params[name] === undefined) return false;
   // Row-id seeds first: neither leg below can disprove them, because the
   // trigger door sets no record and none of these names is a column.
-  if (name === 'recordId') return false;
   const objectName = typeof context?.object === 'string' ? context.object.trim() : '';
   // The camelCase alias both doors seed, derived the same way they derive it.
-  if (objectName && name === `${objectName.replace(/_([a-z])/g, (_m: string, c: string) => c.toUpperCase())}Id`) {
-    return false;
-  }
+  const aliasKey = objectName
+    ? `${objectName.replace(/_([a-z])/g, (_m: string, c: string) => c.toUpperCase())}Id`
+    : undefined;
+  if (name === 'recordId' || (aliasKey !== undefined && name === aliasKey)) return false;
+
   const record = context?.record;
-  // The action's declared `recordIdParam` may seed a THIRD name this executor
-  // cannot know, always with the row id as its value — so the value is what
-  // refuses it. A caller who genuinely sends the row id as a screen value only
-  // loses the skip, which is this module's standing failure direction.
-  if (record?.id !== undefined && Object.is(params[name], record.id)) return false;
+  const value = params[name];
+  // The action's declared `recordIdParam` seeds a THIRD name this executor
+  // cannot know — action-level metadata is not on the context — so its VALUE
+  // is what refuses it. The dispatcher seeds the SAME row id under every id
+  // key it knows, which makes the id recoverable from the bag itself:
+  //
+  //  - `params.recordId`, always seeded, and the only candidate that survives
+  //    a NON-DEFAULT `recordIdField`. That case is why this leg exists: with
+  //    `recordIdField: 'token'` the row id is `record.token`, so comparing
+  //    against `record.id` alone missed it and the screen was SKIPPED, not
+  //    paused — measured, then pinned.
+  //  - the camelCase alias's value, seeded the same way, as a second reading
+  //    of the same id for the case where a record column shadows `recordId`;
+  //  - `record.id`, which covers the record-bearing doors directly.
+  //
+  // A caller who genuinely sends the row id as a screen value only loses the
+  // skip, which is this module's standing failure direction.
+  const seededRowIds: unknown[] = [params.recordId, record?.id];
+  if (aliasKey !== undefined) seededRowIds.push(params[aliasKey]);
+  if (seededRowIds.some((id) => id !== undefined && Object.is(value, id))) return false;
+
   if (!record || !Object.prototype.hasOwnProperty.call(record, name)) return true;
-  return !Object.is(params[name], record[name]);
+  return !Object.is(value, record[name]);
 }
 
 /**
