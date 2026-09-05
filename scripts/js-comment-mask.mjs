@@ -541,6 +541,39 @@ export function maskComments(source) {
   return blank(source, scanSource(source).comment);
 }
 
+/**
+ * The source with its COMMENT spans AND its LITERAL content both blanked --
+ * offsets and line numbers both survive, exactly as under `maskComments`.
+ *
+ * The THIRD projection, and the one to reach for when the signal is a bare
+ * CODE position: `new SchemaRegistry(`, a property key, a call to a named
+ * member. `maskComments` deliberately leaves strings, templates and regex
+ * literals intact, so under it a spelling inside quoted text still satisfies
+ * such a signal and the gate FABRICATES a finding out of a string. Only the
+ * position the language would EXECUTE survives this one.
+ *
+ * ## Picking between the two, which is the same question `stripComments` asks
+ *
+ * Ask what the signal IS, not what the source contains. The signal is itself
+ * quoted text -- an import specifier, an error code, a level name -- ->
+ * `maskComments`, which MUST leave literals intact or it erases the thing
+ * being looked for. The signal is a code position -> this one.
+ *
+ * A caller that needs both at once gets them for free: both preserve offsets,
+ * so a range brace-matched on this mask indexes `maskComments`'s output
+ * identically (`check-registry-log-declared.mjs` reads a level VALUE -- a
+ * string, blanked here -- out of a block it located with this mask).
+ *
+ * Literal DELIMITERS are not literal content (see `scanSource`), so the quotes
+ * themselves survive and a caller can still pair them.
+ */
+export function maskCommentsAndLiterals(source) {
+  const { comment, literal } = scanSource(source);
+  const flags = new Uint8Array(comment.length);
+  for (let k = 0; k < flags.length; k++) flags[k] = comment[k] | literal[k];
+  return blank(source, flags);
+}
+
 // ---------------------------------------------------------------------------
 // Self-test -- the shapes, not the corpus
 // ---------------------------------------------------------------------------
@@ -653,6 +686,32 @@ const SELF_TEST_RECOGNISER_BATTERIES = Object.freeze({
   'omitting mayBeginAt throws instead of defaulting to a failure direction': 1,
 });
 const SELF_TEST_RECOGNISER_FLOOR = 9;
+
+// -- The COMMENTS+LITERALS PROJECTION's own roster and floor (#15594) -------
+//
+// Declared as a LITERAL for the same reason as the two rosters above: a
+// deleted or renamed row must name ITSELF in the refusal rather than quietly
+// lowering a count it also supplies.
+//
+// This section exists instead of rows in the `cases` table because the table
+// asserts the OPPOSITE property for quoted text. There `REAL` code inside a
+// string MUST survive -- `maskComments` and `stripComments` leave literals
+// intact by design, and a row that removed one would be reporting a bug. Under
+// `maskCommentsAndLiterals` that same spelling must NOT survive. One table
+// cannot state both directions about the same fixture, so the projection is
+// driven here, against a fixture whose signal is a bare CODE position.
+const SELF_TEST_PROJECTION_BATTERIES = Object.freeze({
+  'the fixture spells one bare-code signal four times': 1,
+  'a code signal inside a COMMENT does not survive the projection': 1,
+  '...nor one inside a STRING': 1,
+  '...nor one inside a TEMPLATE': 1,
+  '...while the REAL code position DOES survive': 1,
+  'the control: under maskComments the string and template spellings both survive': 1,
+  'the projection IS blank(source, comment OR literal), recomputed independently here': 1,
+  '...and that equality holds on every row of the corpus table too': 1,
+  'offsets and line count survive, so a caller can index the original text': 1,
+});
+const SELF_TEST_PROJECTION_FLOOR = 9;
 
 export function selfTest() {
   const BT = String.fromCharCode(96); // backtick, kept out of the literal below
@@ -901,7 +960,70 @@ export function selfTest() {
     console.log(`  ${ok ? '\u2713' : '\u2717'} ${name}${ok ? '' : ' -- ' + JSON.stringify(detail)}`);
   }
 
-  const total = cases.length + extra.length + recog.length;
+  // -- the COMMENTS+LITERALS projection (#15594) ----------------------------
+  //
+  // The fixture spells ONE bare-code signal four times -- in prose, in a
+  // string, in a template, and once for real -- and every row is asserted at
+  // the signal's own OFFSET rather than by counting occurrences, so a mask that
+  // moved bytes could not be read as one that removed the right ones.
+  const proj = [];
+  const xp = (name, ok, detail) => proj.push([name, Boolean(ok), detail]);
+
+  const SIG = 'new SchemaRegistry(';
+  const projSrc = [
+    '// ' + SIG + 'ghostInProse);',
+    "const HINT = '" + SIG + "ghostInString)';",
+    'const TPL = ' + BT + SIG + 'ghostInTemplate)' + BT + ';',
+    'const registry = ' + SIG + 'realCode);',
+  ].join('\n');
+  const sigOffsets = [];
+  for (let k = projSrc.indexOf(SIG); k !== -1; k = projSrc.indexOf(SIG, k + 1)) sigOffsets.push(k);
+  const projMasked = maskCommentsAndLiterals(projSrc);
+  const survives = sigOffsets.map((k) => projMasked.startsWith(SIG, k));
+
+  xp('the fixture spells one bare-code signal four times', sigOffsets.length === 4, sigOffsets);
+  xp('a code signal inside a COMMENT does not survive the projection', survives[0] === false, projMasked);
+  xp('...nor one inside a STRING', survives[1] === false, projMasked);
+  xp('...nor one inside a TEMPLATE', survives[2] === false, projMasked);
+  xp('...while the REAL code position DOES survive', survives[3] === true, projMasked);
+
+  // The CONTROL, and the reason this fixture can fail: under the
+  // comments-only projection the string and template spellings DO survive.
+  // Without it every row above would also pass on a mask that blanked the
+  // whole file, and the corpus table's own rows would not notice -- none of
+  // them puts a bare-code signal inside a literal.
+  const projComments = maskComments(projSrc);
+  const survivesComments = sigOffsets.map((k) => projComments.startsWith(SIG, k));
+  xp('the control: under maskComments the string and template spellings both survive',
+    survivesComments[0] === false && survivesComments[1] === true
+      && survivesComments[2] === true && survivesComments[3] === true,
+    survivesComments);
+
+  // The projection RESTATED, computed here from the two flag arrays with the
+  // other spelling (`||` over a plain array, which is how one of the two
+  // converted callers wrote it). An oracle re-derived on purpose: pinning the
+  // export against itself would pin nothing.
+  const orView = (src) => {
+    const { comment, literal } = scanSource(src);
+    return blank(src, comment.map((c, i) => c || literal[i]));
+  };
+  xp('the projection IS blank(source, comment OR literal), recomputed independently here',
+    maskCommentsAndLiterals(projSrc) === orView(projSrc), [projMasked, orView(projSrc)]);
+  const corpusDisagreement = cases.find(([, src]) => maskCommentsAndLiterals(src) !== orView(src));
+  xp('...and that equality holds on every row of the corpus table too',
+    corpusDisagreement === undefined, corpusDisagreement && corpusDisagreement[0]);
+
+  xp('offsets and line count survive, so a caller can index the original text',
+    projMasked.length === projSrc.length
+      && projMasked.split('\n').length === projSrc.split('\n').length,
+    [projSrc.length, projMasked.length]);
+
+  for (const [name, ok, detail] of proj) {
+    if (!ok) failed++;
+    console.log(`  ${ok ? '\u2713' : '\u2717'} ${name}${ok ? '' : ' -- ' + JSON.stringify(detail)}`);
+  }
+
+  const total = cases.length + extra.length + recog.length + proj.length;
 
   // ── The floor: every declared row RAN, and ran its case (#13489) ───────
   //
@@ -978,6 +1100,33 @@ export function selfTest() {
     );
   }
 
+  // The same treatment for the comments+literals projection section (#15594).
+  const declaredProjection = Object.keys(SELF_TEST_PROJECTION_BATTERIES);
+  if (declaredProjection.length < SELF_TEST_PROJECTION_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_PROJECTION_BATTERIES declares ${declaredProjection.length} assertions, below the pinned ` +
+        `${SELF_TEST_PROJECTION_FLOOR} — an assertion deleted from the roster takes its own floor with it.`,
+    );
+  }
+  const projectionRan = proj.map(([name]) => name);
+  for (const name of projectionRan) {
+    if (declaredProjection.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `comments+literals assertion "${name}" ran but is not declared in ` +
+        'SELF_TEST_PROJECTION_BATTERIES — an assertion attributed to no declared row is one nothing floors.',
+    );
+  }
+  for (const name of declaredProjection) {
+    if (projectionRan.filter((n) => n === name).length >= SELF_TEST_PROJECTION_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      `comments+literals assertion "${name}" DID NOT RUN — the verdict below would have claimed that a ` +
+        'code signal inside prose and inside a string are both masked when one of them is not.',
+    );
+  }
+
   if (floorBreached) {
     floorFailure(
       'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
@@ -992,7 +1141,8 @@ export function selfTest() {
   }
   console.log(
     `\u2713 js-comment-mask self-test: ${total} cases pass (${cases.length} mask/strip corpus, `
-      + `${extra.length} interpolation view, ${recog.length} shared recogniser).`,
+      + `${extra.length} interpolation view, ${recog.length} shared recogniser, `
+      + `${proj.length} comments+literals projection).`,
   );
 
   return SELF_TEST_VERDICT;

@@ -354,7 +354,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from './invoked-as.mjs';
-import { blank, maskComments, scanSource } from './js-comment-mask.mjs';
+import { maskComments, maskCommentsAndLiterals } from './js-comment-mask.mjs';
 
 // ── The self-test's own battery roster and floor (#13489) ──────────────────
 //
@@ -2408,13 +2408,6 @@ export function isErasedType(text) {
     s = inner;
   }
   return /^(?:any|unknown)$/.test(s);
-}
-
-/** Comment AND string spans blanked -- offsets preserved. The house scanner, not a private one. */
-function maskCommentsAndLiterals(source) {
-  const { comment, literal } = scanSource(source);
-  const flags = comment.map((c, i) => c || literal[i]);
-  return blank(source, flags);
 }
 
 /**
