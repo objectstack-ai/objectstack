@@ -168,6 +168,32 @@ describe('the map is still never extracted (#14749 C3)', () => {
     }
   });
 
+  it('never seeds a bundle with the MAP OBJECT itself', () => {
+    // The derived-seed sites read `x.label ?? fallback`, which is truthy for a
+    // map — so the seed handed to `setDeep` was the map OBJECT, and a bundle
+    // written from it carried a nested locale record where a translator
+    // expects a string. Same defect class, one expression over: a map used
+    // where only a plain string was ever meant.
+    const config: any = {
+      i18n: { defaultLocale: 'en', supportedLocales: LOCALES },
+      objects: [{ name: 'member', label: 'Member', fields: {} }],
+      views: [{
+        name: 'all_members',
+        objectName: 'member',
+        label: { en: 'All members', 'zh-CN': '全部成员', 'ja-JP': '全メンバー' },
+      }],
+    };
+    const seed = collectExpectedEntries(config)
+      .find((e) => e.path.join('.') === 'objects.member._views.all_members.label')?.sourceValue;
+    expect(typeof seed === 'string' || seed === undefined, `seed was ${typeof seed}`).toBe(true);
+
+    const bundle: any = extractTranslations(config, { defaultLocale: 'en', locales: LOCALES })
+      .bundles.en;
+    const written = bundle?.objects?.member?._views?.all_members?.label;
+    expect(written === undefined || typeof written === 'string', `bundle held ${typeof written}`)
+      .toBe(true);
+  });
+
   it('invents no node-path key — every emitted key is name- or id-addressed', () => {
     for (const key of walkedKeys(pageLocalisedInlineOnly())) {
       // A node-path scheme is what an array index in a key looks like
