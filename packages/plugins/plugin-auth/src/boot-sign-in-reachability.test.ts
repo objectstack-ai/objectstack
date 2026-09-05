@@ -29,6 +29,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   AUDIENCE_POSTURES,
   SystemObjectName,
+  audiencePermitsSelfRegistration,
   type AudiencePosture,
 } from '@objectstack/spec/system';
 import { AuthPlugin } from './auth-plugin';
@@ -146,6 +147,27 @@ describe('#14353 — the dead-end shape reports, by name, with consequence AND r
     expect(msg).toContain("'email_domain'");
   });
 
+  it('[#15588/F1] the no-mail-transport rider is SCOPED to the default posture', () => {
+    // ⛔ This rider was WRONG in the first version of this line, stated for
+    // EVERY posture. The carve-out is an ADMISSION verdict, not a verification
+    // bypass, so on `open`/`email_domain` the INVITED login is created and
+    // then refused EMAIL_NOT_VERIFIED — and creating it SILENCES this report
+    // on the way past. That is the loud-dead-end-to-quiet-dead-end transition
+    // remedy (b) warns about, delivered by the primary remedy. The exact
+    // scoped phrasing is asserted so no future edit can re-generalise it.
+    const msg = resolveNoSignInAccountReport(DEAD_END)!;
+    expect(msg).toContain('ADMISSION verdict, not a verification bypass');
+    expect(msg).toContain(
+      "under the default 'invite_only' posture no mail transport is needed either",
+    );
+    // the rider must name the invited login as the thing verification hits …
+    expect(msg).toContain('forces email verification on the INVITED login too');
+    // … and give the operator the ORDER, which is the actionable half
+    expect(msg).toContain("close the posture back to 'invite_only' BEFORE that person registers");
+    // [#15588/N2] the lookup lowercases, so a mixed-case row is never found
+    expect(msg).toContain('LOWERCASE address');
+  });
+
   it('[#15588] says NOTHING about what a SEEDED person\u2019s own re-registration answers', () => {
     // That response is #15587's surface and is being changed (a sign-up for an
     // address that already carries a `sys_user` row currently answers 200 and
@@ -209,22 +231,39 @@ describe('#14353 — the controls: every other shape is SILENT', () => {
 // pure decision function and the existing probe, and assert.
 // ---------------------------------------------------------------------------
 
-describe('#15588 — the named remedy WORKS: a pending invitation is admitted under EVERY posture', () => {
-  /**
-   * A self-serve sign-up by the invited address, judged by the real gate.
-   * The `email_domain` allowlist deliberately holds a DIFFERENT domain, so an
-   * admission under that posture can only have come from the invitation
-   * carve-out and never from the domain list.
-   */
-  const invitedSignUp = (posture: AudiencePosture, hasPendingInvitation: boolean) =>
-    decideAudienceAdmission({
-      audience: { posture, allowedEmailDomains: ['not-the-invitee.example'] },
-      creationClass: 'self-serve',
-      email: 'recovery@example.com',
-      hasPendingInvitation,
-      isBootstrap: false,
-    });
+/**
+ * A self-serve sign-up by the invited address, judged by the real gate.
+ * The `email_domain` allowlist deliberately holds a DIFFERENT domain, so an
+ * admission under that posture can only have come from the invitation
+ * carve-out and never from the domain list.
+ */
+const invitedSignUp = (posture: AudiencePosture, hasPendingInvitation: boolean) =>
+  decideAudienceAdmission({
+    audience: { posture, allowedEmailDomains: ['not-the-invitee.example'] },
+    creationClass: 'self-serve',
+    email: 'recovery@example.com',
+    hasPendingInvitation,
+    isBootstrap: false,
+  });
 
+/** A manager carrying one audience declaration, for the wiring mirror. */
+const AUDIENCE_TEST_SECRET = 'test-secret-at-least-32-chars-long!!';
+const managerWith = (audience?: Record<string, unknown>) =>
+  new AuthManager({
+    secret: AUDIENCE_TEST_SECRET,
+    baseUrl: 'http://localhost:3000',
+    dataEngine: engineOver({}).engine,
+    ...(audience ? { audience } : {}),
+  } as never);
+
+/** The declaration a widening posture needs to pass entry validation. */
+const wideningAudience = (posture: AudiencePosture) => ({
+  posture,
+  ...(posture === 'email_domain' ? { allowedEmailDomains: ['acme.example'] } : {}),
+  selfRegistrationPermissionSet: 'member_default',
+});
+
+describe('#15588 — the named remedy WORKS: a pending invitation is admitted under EVERY posture', () => {
   it('every posture in the vocabulary admits it — the message says "under EVERY audience posture"', () => {
     // Reading the vocabulary rather than listing it: a posture added later is
     // covered on the day it is added, and the message's "EVERY" stays honest.
@@ -290,28 +329,15 @@ describe('#15588 — the WARNING is true: ANY hand-written `sys_account` row sil
 });
 
 describe('#15588 — the WARNING is true: widening the posture FORCES email verification on', () => {
-  const SECRET = 'test-secret-at-least-32-chars-long!!';
-  const managerWith = (audience?: Record<string, unknown>) =>
-    new AuthManager({
-      secret: SECRET,
-      baseUrl: 'http://localhost:3000',
-      dataEngine: engineOver({}).engine,
-      ...(audience ? { audience } : {}),
-    } as never);
-
   it('`email_domain` and `open` both wire requireEmailVerification ON', () => {
     // The manager forces it from `audiencePermitsSelfRegistration(posture)` and
     // `getPublicConfig()` mirrors the wired flag, so this is the same fact the
     // message reports: a login registered under a widened posture cannot sign
     // in until a mail transport delivers the link.
     for (const posture of ['email_domain', 'open'] as const) {
-      const manager = managerWith({
-        posture,
-        ...(posture === 'email_domain' ? { allowedEmailDomains: ['acme.example'] } : {}),
-        selfRegistrationPermissionSet: 'member_default',
-      });
       expect(
-        manager.getPublicConfig().emailPassword.requireEmailVerification,
+        managerWith(wideningAudience(posture)).getPublicConfig().emailPassword
+          .requireEmailVerification,
         `posture ${posture}`,
       ).toBe(true);
     }
@@ -329,18 +355,67 @@ describe('#15588 — the WARNING is true: widening the posture FORCES email veri
     // wrong, and this is where that is caught.
     for (const posture of AUDIENCE_POSTURES) {
       expect(
-        (managerWith(
-          posture === 'invite_only'
-            ? undefined
-            : {
-                posture,
-                ...(posture === 'email_domain' ? { allowedEmailDomains: ['acme.example'] } : {}),
-                selfRegistrationPermissionSet: 'member_default',
-              },
-        ).getPublicConfig().emailPassword.requireEmailVerification),
+        managerWith(
+          posture === 'invite_only' ? undefined : wideningAudience(posture),
+        ).getPublicConfig().emailPassword.requireEmailVerification,
         `posture ${posture}`,
       ).toBe(posture !== 'invite_only');
     }
+  });
+});
+
+describe('#15588/F1 — the carve-out ADMITS, it does not EXEMPT: the rider\u2019s scope, pinned', () => {
+  // The clause that was wrong is the one nothing guarded. These drive the two
+  // mechanisms together — the carve-out and the verification wiring — because
+  // the false claim was precisely that the first cancels the second.
+
+  it('a widened posture admits the INVITED creation AND still forces verification on it', () => {
+    for (const posture of AUDIENCE_POSTURES.filter(audiencePermitsSelfRegistration)) {
+      // admitted by the carve-out …
+      expect(invitedSignUp(posture, true), `posture ${posture}`).toMatchObject({ admit: true });
+      // … into a runtime that will refuse its first sign-in EMAIL_NOT_VERIFIED.
+      expect(
+        managerWith(wideningAudience(posture)).getPublicConfig().emailPassword
+          .requireEmailVerification,
+        `posture ${posture}`,
+      ).toBe(true);
+    }
+  });
+
+  it('ONLY the default posture is mail-transport-free — the half the message still promises', () => {
+    expect(invitedSignUp('invite_only', true)).toMatchObject({ admit: true });
+    expect(managerWith().getPublicConfig().emailPassword.requireEmailVerification).toBe(false);
+  });
+
+  it('an admission verdict CANNOT express a verification exemption', () => {
+    // Structural, and the reason the two mechanisms can never cancel: the
+    // carve-out's verdict carries no field that could turn verification off
+    // for the invited login. If one is ever added, the rider's scope changes
+    // and this is where that gets noticed.
+    expect(Object.keys(invitedSignUp('open', true)).sort()).toEqual([
+      'admit',
+      'grantPermissionSet',
+    ]);
+  });
+});
+
+describe('#15588/N5 — the message NAMES every posture that widens, read off the vocabulary', () => {
+  it('every self-registration-permitting posture appears in the message by name', () => {
+    // The message's quantifier ("every posture other than 'invite_only'") is
+    // pinned elsewhere against the WIRING. This pins the spellings the message
+    // hands the operator, read off the vocabulary rather than hardcoded, so a
+    // posture added to `AUDIENCE_POSTURES` cannot leave this line silently
+    // stale — it is named nowhere in the message and this goes red.
+    const msg = resolveNoSignInAccountReport(DEAD_END)!;
+    const widening = AUDIENCE_POSTURES.filter(audiencePermitsSelfRegistration);
+    expect(widening.length).toBeGreaterThan(0);
+    for (const posture of widening) {
+      expect(msg, `posture ${posture} must be named in the message`).toContain(`'${posture}'`);
+    }
+    // and the one that does NOT widen is named as the exception it is
+    expect(AUDIENCE_POSTURES.filter((p) => !audiencePermitsSelfRegistration(p))).toEqual([
+      'invite_only',
+    ]);
   });
 });
 

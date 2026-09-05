@@ -42,9 +42,18 @@
  *    circuits on `hasPendingInvitation` BEFORE the posture switch, so a
  *    self-serve creation holding a pending, unexpired `sys_invitation`
  *    (`audience-posture.ts`, "The invitation carve-out") is admitted under
- *    every posture in `AUDIENCE_POSTURES`. No door is widened and no mail
- *    transport is involved. Pinned across the whole posture vocabulary, with
- *    the un-invited `invite_only` refusal as its control.
+ *    every posture in `AUDIENCE_POSTURES`. No door needs widening. ⚠️ But the
+ *    carve-out is an ADMISSION verdict and NOT a verification bypass, so the
+ *    third bullet below applies to the INVITED login too: only under the
+ *    default `invite_only` posture is the recovery mail-transport-free, and on
+ *    `open`/`email_domain` the invited login is created and then refused
+ *    `EMAIL_NOT_VERIFIED` — which also SILENCES this report, the very
+ *    transition the second bullet warns about, delivered by the primary
+ *    remedy. The message therefore scopes the no-mail-transport rider and
+ *    tells the operator to close the posture first; ⛔ never re-state that
+ *    rider for EVERY posture. Pinned across the whole posture vocabulary, with
+ *    the un-invited `invite_only` refusal as its control, and the scope itself
+ *    pinned beside it.
  *  - **A hand-written credential row blinds this very check.**
  *    {@link probeSignInAccountsPresence} asks only whether ANY
  *    `sys_account` row exists, so the operator's first attempt at "provision
@@ -259,16 +268,21 @@ export function resolveNoSignInAccountReport(facts: SignInReachabilityFacts): st
     'exists who could send an invitation. Boot continues and this deployment will keep LOOKING healthy — ' +
     'its only symptom is a 401 on credentials nobody holds. RECOVER IT FROM OUTSIDE THE RUNNING ' +
     'PRODUCT, and the path that works is ONE ROW: INVITE ONE ADDRESS — write a pending ' +
-    `'${SystemObjectName.INVITATION}' row directly against the store ('email' an address this ` +
-    `directory does NOT already hold, 'status' 'pending', a future 'expires_at', 'inviter_id' the id ` +
-    `of any existing '${SystemObjectName.USER}' row), then have that person register through the ` +
-    'ordinary sign-up endpoint. The invitation carve-out admits that ONE creation under EVERY ' +
-    'audience posture, so no door is widened and no mail transport is needed; on the ' +
-    "'single' tenancy posture the next boot then promotes that account holder to platform admin. " +
-    'Afterwards, re-run the provisioning job that seeded these people so it seeds their logins too. ' +
-    'TWO THINGS THAT LOOK LIKE REMEDIES AND ARE NOT: (a) HAND-WRITING A CREDENTIAL ROW — a ' +
-    `'${SystemObjectName.ACCOUNT}' row's 'password' column must carry a secret in the platform's own ` +
-    'hash format, so a plaintext password authenticates nothing (INVALID_EMAIL_OR_PASSWORD), and ' +
+    `'${SystemObjectName.INVITATION}' row directly against the store ('email' a LOWERCASE address ` +
+    `this directory does NOT already hold, 'status' 'pending', a future 'expires_at', 'inviter_id' ` +
+    `the id of any existing '${SystemObjectName.USER}' row — the pending-invitation lookup ` +
+    'lowercases the address it searches for, so a mixed-case row is never found), then have that ' +
+    'person register through the ordinary sign-up endpoint. The invitation carve-out admits that ' +
+    'ONE creation under EVERY audience posture, so no door needs widening — but it is an ADMISSION ' +
+    "verdict, not a verification bypass: under the default 'invite_only' posture no mail transport " +
+    "is needed either, whereas an 'open' or 'email_domain' posture forces email verification on the " +
+    "INVITED login too (see (b)), so close the posture back to 'invite_only' BEFORE that person " +
+    "registers. On the 'single' tenancy posture that account holder is then promoted to platform " +
+    'admin. Afterwards, re-run the provisioning job that seeded these people so it seeds their ' +
+    'logins too. TWO THINGS THAT LOOK LIKE REMEDIES AND ARE NOT: (a) HAND-WRITING A CREDENTIAL ' +
+    `ROW — a '${SystemObjectName.ACCOUNT}' row's 'password' column must carry a secret in the ` +
+    "platform's own hash format, so a plaintext password authenticates nothing — a 401 or a 500 " +
+    'depending on the row shape, never a session — and ' +
     `writing ANY '${SystemObjectName.ACCOUNT}' row SILENCES THIS REPORT, which asks only whether such ` +
     'a row EXISTS — the deployment stops being loudly broken and becomes quietly broken; and (b) ' +
     "OPENING THE AUDIENCE POSTURE — every posture other than 'invite_only' ('open', 'email_domain') " +
