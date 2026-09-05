@@ -45,6 +45,33 @@ import { assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objec
 import { AuthManager } from './auth-manager';
 import { AuthPlugin } from './auth-plugin';
 import type { PluginContext } from '@objectstack/core';
+// [#14998] The two admin endpoint module graphs are loaded HERE, at module top,
+// and NOT with an `await import(...)` inside each case — which is how batch 6's
+// seven cases used to reach them.
+//
+// Why that mattered: vitest wraps test bodies and hooks in `withTimeout(...)`,
+// and offers exactly three timeout knobs (`testTimeout`, `hookTimeout`,
+// `teardownTimeout`) — none of which covers module loading. So an
+// `await import()` written inside an `it()` charges that module graph's cold
+// transform-and-import to the CASE's budget. Of N structurally identical
+// siblings only the FIRST pays it; the rest hit the warm module cache. This
+// package's `vitest.config.ts` sets `testTimeout: 10_000`, and
+// `admin-import-users.ts` pulls in `@objectstack/rest` (`prepareImportRequest`,
+// `runImport`) — so under a loaded CI shard the first sibling's cold load ate
+// the 10 s and the case failed with `Test timed out in 10000ms`, reddening PRs
+// that touch nothing this file reads (#14998, #15603).
+//
+// Loading at module top is not a widened budget, it removes the clock: vitest's
+// `collectTests()` awaits `runner.importFile(filepath, 'collect')` bare and only
+// RECORDS the duration for reporters. This is the repo-wide convention —
+// AGENTS.md § Build & Test, "clocked windows measure behaviour, never loading",
+// enforced for cross-package specifiers by `pnpm check:test-source-alias`.
+//
+// No case body changed apart from dropping its import line: there is no
+// `vi.mock`/`vi.resetModules` in this file, so every case already shared one
+// module instance through the module cache. Coverage is identical.
+import { runAdminCreateUser } from './admin-user-endpoints.js';
+import { runAdminImportUsers } from './admin-import-users.js';
 
 const SECRET = 'test-secret-at-least-32-chars-long';
 
@@ -576,7 +603,6 @@ describe('#12981 batch 6 — the plugin-auth admin-audit swallows report instead
     it('a refused audit row is reported, and names the action that still succeeded', async () => {
       const logger = createLogger();
       const engine = createAuditEngine({ registered: true, refuseAudit: true });
-      const { runAdminCreateUser } = await import('./admin-user-endpoints.js');
 
       const res = await runAdminCreateUser(makeDeps(engine, logger) as never, createUserRequest(), ACTOR as never);
 
@@ -603,7 +629,6 @@ describe('#12981 batch 6 — the plugin-auth admin-audit swallows report instead
     it('plugin-audit UNINSTALLED stays silent, and does not attempt the write', async () => {
       const logger = createLogger();
       const engine = createAuditEngine({ registered: false });
-      const { runAdminCreateUser } = await import('./admin-user-endpoints.js');
 
       const res = await runAdminCreateUser(makeDeps(engine, logger) as never, createUserRequest(), ACTOR as never);
 
@@ -619,7 +644,6 @@ describe('#12981 batch 6 — the plugin-auth admin-audit swallows report instead
     it('a healthy audit write reports nothing on this channel', async () => {
       const logger = createLogger();
       const engine = createAuditEngine({ registered: true });
-      const { runAdminCreateUser } = await import('./admin-user-endpoints.js');
 
       const res = await runAdminCreateUser(makeDeps(engine, logger) as never, createUserRequest(), ACTOR as never);
 
@@ -634,7 +658,6 @@ describe('#12981 batch 6 — the plugin-auth admin-audit swallows report instead
       // A lean host/mock: the probe is optional, and its absence must fail
       // toward the loud answer, never toward the silent one.
       const lean = { insert: engine.insert, update: engine.update, find: engine.find };
-      const { runAdminCreateUser } = await import('./admin-user-endpoints.js');
 
       const res = await runAdminCreateUser(makeDeps(lean as never, logger) as never, createUserRequest(), ACTOR as never);
 
@@ -673,7 +696,6 @@ describe('#12981 batch 6 — the plugin-auth admin-audit swallows report instead
     it('a refused run-level row is reported, and says the per-row trail survived', async () => {
       const logger = createLogger();
       const engine = createAuditEngine({ registered: true, refuseAudit: true });
-      const { runAdminImportUsers } = await import('./admin-import-users.js');
 
       const res = await runAdminImportUsers(makeDeps(engine, logger) as never, importRequest(), ACTOR as never);
 
@@ -693,7 +715,6 @@ describe('#12981 batch 6 — the plugin-auth admin-audit swallows report instead
     it('plugin-audit UNINSTALLED stays silent, and does not attempt the write', async () => {
       const logger = createLogger();
       const engine = createAuditEngine({ registered: false });
-      const { runAdminImportUsers } = await import('./admin-import-users.js');
 
       const res = await runAdminImportUsers(makeDeps(engine, logger) as never, importRequest(), ACTOR as never);
 
@@ -706,7 +727,6 @@ describe('#12981 batch 6 — the plugin-auth admin-audit swallows report instead
     it('a healthy run reports nothing on this channel', async () => {
       const logger = createLogger();
       const engine = createAuditEngine({ registered: true });
-      const { runAdminImportUsers } = await import('./admin-import-users.js');
 
       const res = await runAdminImportUsers(makeDeps(engine, logger) as never, importRequest(), ACTOR as never);
 
