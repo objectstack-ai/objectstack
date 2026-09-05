@@ -1549,6 +1549,45 @@ const UNKNOWN_KEY_GUIDANCE: Record<string, string> = {
     'got a table and was instantiable. Remove the key.',
 };
 
+/**
+ * [#14892 — maintainer ruling 2026-09-05, option A] A `tree` field's
+ * `reference`, when present, must name the object that declares it.
+ *
+ * A hierarchy is parent/child WITHIN one object, and that is what every reader
+ * of the type assumes: the tree renderer's parent-pointer auto-detection takes
+ * the first `type: 'tree'` field as this object's own parent column, and
+ * `deleteBehavior` materialises on `tree` beside `lookup` because a
+ * self-referential hierarchy is a relation whose cascade is exactly the
+ * intended semantics. `reference` stays OPTIONAL on a `tree` — under this rule
+ * it is a redundant self-annotation — so absence is accepted; a value naming
+ * any OTHER object is refused here, where the declaring object's name is known
+ * (`FieldSchema` never sees it), rather than parsing green and rendering as a
+ * parent pointer into a table it does not point at. A link to a different
+ * object is a `lookup`. Applied at both doors that carry a field map —
+ * `ObjectSchema` (own name = `name`) and `ObjectExtensionSchema` (own name =
+ * `extend`) — so an extension cannot merge the shape the object refuses.
+ * Pinned in `tree-reference-self-only.test.ts`; the kernel predicate that
+ * reads the same rule is `hasDetectableParentField`
+ * (`kernel/functional-completeness.ts`).
+ */
+function refuseForeignTreeReference(ownName: unknown, fields: unknown, ctx: z.RefinementCtx): void {
+  if (typeof ownName !== 'string' || fields === null || typeof fields !== 'object') return;
+  for (const [fieldName, def] of Object.entries(fields as Record<string, unknown>)) {
+    if (def === null || typeof def !== 'object') continue;
+    const { type, reference } = def as { type?: unknown; reference?: unknown };
+    if (type !== 'tree' || reference === undefined || reference === ownName) continue;
+    ctx.addIssue({
+      code: 'custom',
+      path: ['fields', fieldName, 'reference'],
+      message:
+        `tree field \`${fieldName}\` on object \`${ownName}\` references \`${String(reference)}\`, `
+        + 'but a `tree` field\'s `reference` must name the declaring object itself — a hierarchy is '
+        + 'parent/child within one object. Drop `reference` (it is optional on a `tree`), set it to '
+        + `'${ownName}', or declare a \`lookup\` if a link to a different object was meant.`,
+    });
+  }
+}
+
 // ⚠️ ORDER IS LOAD-BEARING (#5593). This map used to live ~700 lines BELOW
 // `ObjectSchemaBase`, and the error map that reads it was built lazily
 // (`objectUnknownKeyErrorImpl ??= …`) purely to step around the temporal dead
@@ -2321,6 +2360,12 @@ const ObjectSchemaBase = strictObject(
 
   // ADR-0010 — runtime protection envelope (internal — set by loader).
   ...MetadataProtectionFields,
+}).superRefine((object, ctx) => {
+  // [#14892] A `tree` field's `reference`, when present, must be this object's
+  // own name — judged here because only the object knows its name. `.superRefine`
+  // keeps this a `ZodObject` (zod 4 attaches checks in place), so `.shape` and
+  // `create()`'s unknown-key walk are untouched; see the helper's docblock.
+  refuseForeignTreeReference(object.name, object.fields, ctx);
 });
 
 /**
@@ -3082,6 +3127,10 @@ export const ObjectExtensionSchema = lazySchema(() => strictObject({
   
   /** Merge priority. Higher number applied later (wins on conflict). Default: 200 */
   priority: z.number().int().min(0).max(999).default(200).describe('Merge priority (higher = applied later)'),
+}).superRefine((extension, ctx) => {
+  // [#14892] The same rule as on `ObjectSchema`: the fields merge into
+  // `extend`, so that is the object a `tree` field's `reference` must name.
+  refuseForeignTreeReference(extension.extend, extension.fields, ctx);
 }));
 
 export type ObjectExtension = z.input<typeof ObjectExtensionSchema>;

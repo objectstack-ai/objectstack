@@ -223,7 +223,11 @@ export const objectForm = defineForm({
             },
 
             // Relational
-            { field: 'reference', type: 'text', helpText: 'Target object name', visibleWhen: "data.type in ['lookup','master_detail','tree']" },
+            // ONE shared row for the three reference-carrying types (#14892):
+            // the text carries the `tree` rule the schema enforces — optional,
+            // and if given this object — so the designer never invites the
+            // foreign target `ObjectSchema` refuses at publish.
+            { field: 'reference', type: 'text', helpText: 'Target object name. For a tree field it is optional and, if given, must be this object (a tree is a hierarchy within its own object — link a different object with a lookup)', visibleWhen: "data.type in ['lookup','master_detail','tree']" },
             // `lookupFilters`, not `referenceFilter`: an array of
             // {field, operator, value} rules, not a CEL string.
             { field: 'lookupFilters', widget: 'json', helpText: 'Filter rules applied to the picker ({field, operator, value})', visibleWhen: "data.type in ['lookup','master_detail']" },
