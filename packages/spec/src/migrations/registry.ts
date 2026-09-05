@@ -5367,6 +5367,7 @@ const step18: MigrationStep = {
     'connector-error-mapping-removed',
     'hook-timeout-to-timeout-ms',
     'job-timeout-to-timeout-ms',
+    'api-endpoint-cache-ttl-to-cache-ttl-seconds',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by
@@ -5557,6 +5558,69 @@ const step18: MigrationStep = {
         + 'keys at every level (cube, refreshKey, measures, dimensions, joins); '
         + 'every `/analytics/query` body\'s `timeDimensions[]` items carry only '
         + '`dimension`/`granularity`/`dateRange`. Declared keys parse byte-identically to before.',
+    },
+    {
+      id: 'api-error-retry-after-unit-in-key',
+      surface: 'EnhancedApiError.retryAfter (api/errors.zod.ts) — the ADR-0112 error envelope on the wire',
+      replacement: 'retryAfterSeconds — rename the key; the value (seconds) is unchanged',
+      reason:
+        'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+        + 'BREAKING ON THE WIRE, and ruled in deliberately: the ruling puts the ~16 runtime-emitted '
+        + 'measurements in scope because they are read by humans and agents even if nobody authors '
+        + 'them, and names ApiError.retryAfter explicitly, with its own BREAKING note. The ambiguity '
+        + 'here is sharper than the usual bare duration. A consumer meets TWO retry-after values on '
+        + 'the same 429 response: this envelope field, which has always been delta-seconds, and the '
+        + 'HTTP Retry-After header, which per RFC 9110 section 10.2.3 may carry EITHER delta-seconds '
+        + 'OR an HTTP-date. Spelled identically, they read as one value in two places; spelled '
+        + 'retryAfterSeconds, the envelope states its own unit and the header keeps its own rules. '
+        + 'THE HTTP HEADER IS A SEPARATE, UNCHANGED SURFACE — its name is fixed outside this repo and '
+        + 'nothing in this rename touches it. Do not "fix" the header to match, and do not read a '
+        + 'green grep for `retry-after` in transport code as leftover work. A SEMANTIC entry rather '
+        + 'than a D2 conversion because an error envelope is emitted, never stored: it is not a stack '
+        + 'collection member and never a sys_metadata row, so the conversion chain has no seam that '
+        + 'would see one. #15677, #14478, ADR-0087, ADR-0112.',
+      acceptanceCriteria:
+        'No producer emits `retryAfter` on an ApiError envelope and no consumer reads it; the old '
+        + 'spelling is a retiredKey() tombstone that fails tsc at the construction site and fails the '
+        + 'parse with the rename prescription. Concretely, check three things. (1) Code building a '
+        + 'rate-limit error body: rename the key to `retryAfterSeconds`, value unchanged. (2) Client '
+        + 'code backing off on a 429: read `error.retryAfterSeconds`. (3) The transport layer is NOT '
+        + 'part of this change — a handler setting the `Retry-After` response header, and a client '
+        + 'reading it (including the HTTP-date branch), keep the RFC 9110 spelling and are correct as '
+        + 'they stand. A local rate-limiter decision object of the shape { allowed, retryAfter } is '
+        + 'not this key either: it is not an ApiError envelope and is untouched.',
+    },
+    {
+      id: 'api-runtime-config-durations-unit-in-key',
+      surface: 'two api-layer runtime configuration durations whose name carried no unit: '
+        + 'DataLoaderConfig.cacheTtl (api/contract.zod.ts) and RouteDefinition.timeout '
+        + '(api/router.zod.ts)',
+      replacement: 'cacheTtlSeconds (seconds) and timeoutMs (milliseconds) — rename each key; both '
+        + 'values are unchanged',
+      reason:
+        'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+        + 'Two keys on two shapes, in one entry because they share a disposition and an audience: '
+        + 'both are api-layer runtime configuration a host or plugin builds in code, and neither is '
+        + 'part of a published metadata document. DataLoaderConfig.cacheTtl named seconds only in its '
+        + 'describe on a batching config whose other numbers are counts (maxBatchSize, '
+        + 'maxConcurrency); RouteDefinition.timeout said "Execution timeout in ms" in prose and '
+        + 'nothing else. Both are retiredKey() tombstones — neither shape is strict, so a bare '
+        + 'deletion would strip the old key in silence and an unknown-key error could not carry the '
+        + 'rename. Why a semantic entry and not a D2 conversion: a DataLoaderConfig is a per-request '
+        + 'batch-loader construction argument and a RouteDefinition is a router registration built by '
+        + 'a plugin at start — neither is a stack collection member and neither is ever stored, so the '
+        + 'chain has no seam that would run on them (the kernel/Manifest:loading precedent). Worth '
+        + 'knowing while grepping: packages/runtime declares its OWN local RouteDefinition interface '
+        + 'for the ai:routes hook payload — a different type with no duration key at all, untouched by '
+        + 'this rename. #15677, #14478, ADR-0087.',
+      acceptanceCriteria:
+        'Every DataLoaderConfigSchema.parse(…) and RouteDefinitionSchema.parse(…) site spells '
+        + '`cacheTtlSeconds` / `timeoutMs`; authoring either old spelling fails to compile (input type '
+        + '`never`) and fails to parse with the rename prescription naming the suffixed key. A '
+        + 'DataLoader configured with `cacheTtlSeconds: 60` expires per-request cache entries after 60 '
+        + 'seconds exactly as `cacheTtl: 60` did, and its `min(0)` bound rides along, so a negative '
+        + 'TTL is still refused. A route declared with `timeoutMs: 30000` aborts after 30 seconds '
+        + 'exactly as `timeout: 30000` did.',
     },
     // #15219 — maintainer ruling A for both keys (2026-09-04, director relay,
     // verbatim 「同意」): `plugins` and `devPlugins` are artifact ENVELOPE keys —
@@ -6275,6 +6339,36 @@ const step18: MigrationStep = {
         'has a username in that URL\'s userinfo and connects authenticated as that user; every ' +
         'datasource meant to connect anonymously carries no `credentialsRef`; no datasource ' +
         'parse reports the #9041 refusal.',
+    },
+    {
+      id: 'device-request-response-interval-unit-in-key',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface: 'DeviceRequestResponse.interval (api/auth-endpoints.zod.ts) — the polling cadence '
+        + 'in the device-flow response body',
+      replacement: 'intervalSeconds — rename the key; the value (seconds, default 2) is unchanged',
+      reason:
+        'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+        + 'This key was ATTRIBUTED to RFC 8628 by the campaign card and reached this card only after '
+        + 'the attribution failed verification, so the evidence is recorded here rather than left in a '
+        + 'PR body. Ruling B exempts a key that mirrors a name fixed outside this repo, declared on the '
+        + 'schema as .meta({ externalVocabulary }) — and DeviceRequestResponseSchema does not mirror '
+        + 'RFC 8628 as a SET: `code` is not `device_code`, `verificationUrl` is not '
+        + '`verification_uri`, and `expiresAt` is not `expires_in` — a different name AND a different '
+        + 'type, an ISO-8601 instant where the RFC carries a relative lifetime. A schema that has '
+        + 'already renamed every RFC field it carries into house style cannot claim the standard fixes '
+        + 'the one name it left bare. So it is a rename, and deliberately NOT a marker: a wrongly '
+        + 'marked key is exempted permanently and silently, while a wrongly renamed one is visible. '
+        + 'A SEMANTIC entry rather than a D2 conversion because the shape is RUNTIME-EMITTED — the '
+        + 'body of POST /api/v1/auth/device/request, never a stack collection member and never a '
+        + 'sys_metadata row, so the conversion chain has no seam that would see one. #15677, #14478, '
+        + 'ADR-0087.',
+      acceptanceCriteria:
+        'No producer emits `interval` and no consumer reads it. The old spelling is a retiredKey() '
+        + 'tombstone, so authoring it fails tsc (the key types never) and fails the parse with the '
+        + 'rename prescription. Concretely: a CLI or client polling the device-token endpoint reads '
+        + '`intervalSeconds` off the request response and waits that many seconds between polls, '
+        + 'exactly as `interval` did — the value and its unit are unchanged, only the key name moves.',
     },
     {
       id: 'driver-options-timeout-to-timeout-ms',
@@ -8075,6 +8169,41 @@ const step18: MigrationStep = {
         + 'key and still parse.',
     },
     {
+      id: 'rest-api-plugin-durations-unit-in-key',
+      surface: 'the three REST-plugin durations whose name carried no unit: RestApiEndpoint.timeout, '
+        + 'RestApiEndpoint.cacheTtl and RestApiPluginConfig.performance.defaultCacheTtl '
+        + '(api/plugin-rest-api.zod.ts)',
+      replacement: 'timeoutMs (milliseconds), cacheTtlSeconds (seconds) and defaultCacheTtlSeconds '
+        + '(seconds, default 300) — rename each key; every value is unchanged',
+      reason:
+        'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+        + 'RestApiEndpoint is this rule\'s clearest specimen after the founding one: `timeout` in '
+        + 'MILLISECONDS and `cacheTtl` in SECONDS sat three lines apart on one shape, each unit named '
+        + 'only in its describe, so the two numbers were indistinguishable at the authoring site and a '
+        + 'value copied from one to the other was off by 1000x with no error anywhere. '
+        + 'performance.defaultCacheTtl travels with them rather than in its own entry because it is '
+        + 'the plugin-wide DEFAULT behind the per-endpoint override: renaming the override and leaving '
+        + 'the default bare would have spelled one value two ways across one config. All three are '
+        + 'retiredKey() tombstones — these shapes are not strict, so a bare deletion would strip the '
+        + 'old key in silence, and defaultCacheTtl is a tombstone INSIDE the live `performance` block, '
+        + 'whose siblings must keep parsing. Why a semantic entry and not a D2 conversion: a '
+        + 'RestApiPluginConfig is the REST plugin\'s construction argument and a RestApiEndpoint is a '
+        + 'route registration inside it — neither is a stack collection member or a stored row, so the '
+        + 'chain has no seam that ever runs on them. That is the disposition '
+        + 'api/RestApiEndpoint:handlerStatus already carries on this very shape '
+        + '(rest-api-endpoint-handler-status-retired), and what ruling B prescribes for a key that is '
+        + 'not authorable metadata. #15677, #14478, ADR-0087.',
+      acceptanceCriteria:
+        'Every RestApiEndpointSchema.parse(…) and RestApiPluginConfigSchema.parse(…) site spells '
+        + '`timeoutMs`, `cacheTtlSeconds` and `performance.defaultCacheTtlSeconds`; authoring any old '
+        + 'spelling fails to compile (input type `never`) and fails to parse with the rename '
+        + 'prescription naming the suffixed key. The built-in route tables shipped from this module '
+        + '(DEFAULT_METADATA_ROUTES, DEFAULT_BATCH_ROUTES, DEFAULT_I18N_ROUTES, '
+        + 'DEFAULT_ANALYTICS_ROUTES, DEFAULT_AUTOMATION_ROUTES, DEFAULT_DISCOVERY_ROUTES) author the '
+        + 'new spellings at the same magnitudes they authored the old ones — a batch endpoint still '
+        + 'gets 60000 ms and a discovery response is still cached for 3600 s.',
+    },
+    {
       id: 'rest-server-config-dead-keys-retired',
       surface: 'restServer.crud.patterns / restServer.crud.objectParamStyle / restServer.metadata.cacheTtl / '
         + 'restServer.metadata.endpoints.schema / restServer.batch.operations.upsertMany / '
@@ -8682,6 +8811,36 @@ const step18: MigrationStep = {
         + 'reports no `component-props-unknown-key` / `component-props-invalid` finding for the '
         + 'rail.',
     },
+    {
+      id: 'websocket-durations-unit-in-key',
+      surface: 'the four WebSocket configuration durations whose name carried no unit: '
+        + 'WebSocketConfig.reconnectInterval, WebSocketConfig.pingInterval, WebSocketConfig.timeout '
+        + 'and WebSocketServerConfig.heartbeatInterval (api/websocket.zod.ts)',
+      replacement: 'reconnectIntervalMs, pingIntervalMs, timeoutMs and heartbeatIntervalMs — rename '
+        + 'each key; every value is unchanged, and so is every default (1000, 30000, 5000, 30000)',
+      reason:
+        'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+        + 'What makes this shape worth one entry rather than four is the neighbour: on both configs a '
+        + 'bare duration sits directly beside a bare COUNT — maxReconnectAttempts on the client, '
+        + 'reconnectAttempts on the server — so `reconnectInterval: 5` and `maxReconnectAttempts: 5` '
+        + 'read as the same kind of number and are not. Suffixing the durations separates the two '
+        + 'families at the authoring site; the counts keep their names, because a count has no unit to '
+        + 'carry. All four are retiredKey() tombstones (neither shape is strict, so a bare deletion '
+        + 'would strip in silence). Why a semantic entry and not a D2 conversion: a WebSocketConfig is '
+        + 'a client CONNECTION argument and a WebSocketServerConfig is a server CONSTRUCTION argument '
+        + '— neither is a stack collection member and neither is ever stored as a sys_metadata row, so '
+        + 'the conversion chain has no seam that would see one. The same disposition the '
+        + 'epoch-instant renames on this file took (epoch-instant-keys-renamed), and what ruling B '
+        + 'prescribes for a key that is not authorable metadata. #15677, #14478, ADR-0087.',
+      acceptanceCriteria:
+        'Every WebSocketConfigSchema.parse(…) / WebSocketServerConfigSchema.parse(…) site and every '
+        + 'literal handed to a WebSocket client or server spells the suffixed keys; authoring any old '
+        + 'spelling fails to compile (input type `never`) and fails to parse with the rename '
+        + 'prescription. Behaviour is unchanged in every case: a client configured with '
+        + '`reconnectIntervalMs: 2000` retries after two seconds exactly as `reconnectInterval: 2000` '
+        + 'did, and a config that omits the keys still gets the same defaults. The positive-integer '
+        + 'bounds ride along with the renamed keys, so a zero or negative interval is still refused.',
+    },
     // </os-generated semantic:18>
   ],
 };
@@ -9043,6 +9202,22 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // entry id by `gen:migration-registry` (#7297). Add an entry by adding a
     // FILE — never by editing between the markers, which is generated.
     // <os-generated retired-key:18>
+    // #15677 (stack card 2/6 of #14478) — maintainer ruling 2026-09-02 ("ruled B"):
+    // a duration-shaped `z.number()` key carries its unit in its NAME, and no
+    // existing offender is grandfathered. `ApiEndpoint.cacheTtl` said "Response
+    // cache TTL in seconds" in prose and nothing else, on the same authorable
+    // surface where `rateLimit.windowMs` spells its unit. Renamed to
+    // `cacheTtlSeconds`; the value is unchanged and the key stays GET-only.
+    // Tombstoned with `retiredKey()` — the shape is not `.strict()`, so a bare
+    // deletion would strip the old key in silence, and the unknown-key error could
+    // not carry the rename. This is the ONE key of this card's twelve that gets a
+    // D2 CONVERSION rather than a semantic entry: `apis:` is a stack collection
+    // (`stack.zod.ts` — `apis: z.array(ApiEndpointSchema)`) and an `api` is a
+    // registered metadata kind stored as a row, so the conversion chain has a seam
+    // that sees it. `api-endpoint-cache-ttl-to-cache-ttl-seconds` rewrites it,
+    // retired from the load path (no alias window). Registered under 18 for the
+    // launch-window reason its neighbours state.
+    'api/ApiEndpoint:cacheTtl',
     // #14691 — ADR-0049 enforce-or-remove on the `RestServerConfig` sub-objects,
     // executing the #14369 liveness census (15 `dead` rows across the `crud` /
     // `metadata` / `batch` / `routes` sub-schemas; 0 read sites in `packages/rest`
@@ -9135,6 +9310,42 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // four ledger child rows collapse into the one `patterns` row. Closes #14365's
     // question about the record's input type — there is no record left to reshape.
     'api/CrudEndpointsConfig:patterns',
+    // #15677 (stack card 2/6 of #14478) — ruling B: the unit lives in the key NAME.
+    // `DataLoaderConfig.cacheTtl` named seconds only in its describe. Renamed to
+    // `cacheTtlSeconds`; the value is unchanged. Tombstoned with `retiredKey()`
+    // because the shape is not `.strict()`. No D2 conversion: a `DataLoaderConfig`
+    // is a per-request batch-loader construction argument, never a stack collection
+    // member or a stored row, so the chain has no seam (the `kernel/Manifest:loading`
+    // precedent); the semantic entry `api-runtime-config-durations-unit-in-key`
+    // carries the prescription.
+    'api/DataLoaderConfig:cacheTtl',
+    // #15677 (stack card 2/6 of #14478) — ruling B: the unit lives in the key NAME.
+    // `DeviceRequestResponse.interval` named seconds only in its describe. Renamed
+    // to `intervalSeconds`; the value is unchanged. Checked against ruling B's
+    // SECOND exemption before renaming — a key mirroring a name fixed outside this
+    // repo carries `.meta({ externalVocabulary })` — and it does not qualify:
+    // `DeviceRequestResponseSchema` does not mirror RFC 8628 as a set (`code` is
+    // not `device_code`, `verificationUrl` is not `verification_uri`, `expiresAt`
+    // is not `expires_in` and holds an ISO-8601 string where the RFC has a relative
+    // lifetime), so a schema that already renames every RFC field it carries cannot
+    // claim the standard fixes this one. Tombstoned with `retiredKey()`. No D2
+    // conversion: this is a RUNTIME-EMITTED device-flow response body, never a
+    // stored row; the semantic entry `device-request-response-interval-unit-in-key`
+    // carries the prescription.
+    'api/DeviceRequestResponse:interval',
+    // #15677 (stack card 2/6 of #14478) — ruling B, which put this key explicitly
+    // IN scope with its own BREAKING note: the ~16 runtime-emitted measurements are
+    // read by humans and agents even if nobody authors them, `ApiError.retryAfter`
+    // on the wire envelope included. `retryAfter` bare, beside an HTTP `Retry-After`
+    // header that may carry EITHER delta-seconds OR an HTTP-date, is precisely the
+    // ambiguity the rule removes. Renamed to `retryAfterSeconds`; the value is
+    // unchanged. ⚠️ The HTTP `Retry-After` RESPONSE HEADER is a SEPARATE, UNCHANGED
+    // surface — its name is fixed by RFC 9110 §10.2.3 and nothing here touches it.
+    // Tombstoned with `retiredKey()`. No D2 conversion: an ADR-0112 error envelope
+    // is emitted on the wire, never stored as a metadata row, so the chain has no
+    // seam; the semantic entry `api-error-retry-after-unit-in-key` carries the
+    // prescription.
+    'api/EnhancedApiError:retryAfter',
     // #14691 — ADR-0049 enforce-or-remove on the `RestServerConfig` sub-objects,
     // executing the #14369 liveness census (15 `dead` rows across the `crud` /
     // `metadata` / `batch` / `routes` sub-schemas; 0 read sites in `packages/rest`
@@ -9179,6 +9390,12 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // A nested key of an inline block, so it has no line of its own in
     // `authorable-surface/` (the `kernel/Manifest:contributes.routes` shape).
     'api/MetadataEndpointsConfig:endpoints.schema',
+    // #15677 (stack card 2/6 of #14478) — ruling B; the seconds half of the pair
+    // documented on `api/RestApiEndpoint:timeout`. Renamed to `cacheTtlSeconds`;
+    // the value is unchanged. Tombstoned with `retiredKey()`; disposition and
+    // reasoning are that entry's, and the prescription travels in the semantic
+    // entry `rest-api-plugin-durations-unit-in-key`.
+    'api/RestApiEndpoint:cacheTtl',
     // #13823 — ADR-0049 enforce-or-remove on `RestApiEndpointSchema.handlerStatus`
     // (maintainer ruling 2026-09-01, director decision batch #27, verbatim
     // 「同意」: remove). The key (`implemented` / `stub` / `planned`) was declared
@@ -9215,6 +9432,36 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // narrowings ride minor releases) and the prescription lives at the major
     // boundary where `migrate meta` users look (the #11846 / #12428 grading).
     'api/RestApiEndpoint:handlerStatus',
+    // #15677 (stack card 2/6 of #14478) — ruling B. `RestApiEndpoint.timeout`
+    // (milliseconds) sat THREE LINES above `cacheTtl` (seconds), each unit named
+    // only in its describe: one shape, two units, no way to tell them apart at the
+    // authoring site. Renamed to `timeoutMs`; the value is unchanged. Tombstoned
+    // with `retiredKey()` on this non-strict shape, beside the `handlerStatus`
+    // tombstone already there. No D2 conversion: a `RestApiEndpoint` is REST-plugin
+    // route-registration configuration, never a stack collection member (the
+    // `rest-api-endpoint-handler-status-retired` precedent on this very shape); the
+    // semantic entry `rest-api-plugin-durations-unit-in-key` carries the
+    // prescription.
+    'api/RestApiEndpoint:timeout',
+    // #15677 (stack card 2/6 of #14478) — ruling B. The plugin-wide default behind
+    // the per-endpoint `cacheTtl` this card also renames; leaving it bare would have
+    // left the DEFAULT spelled one way and the OVERRIDE another. Renamed to
+    // `defaultCacheTtlSeconds`; the value is unchanged. Tombstoned with
+    // `retiredKey()` inside the live `performance` block — a tombstone whose
+    // siblings must keep parsing. No D2 conversion: `RestApiPluginConfig` is the
+    // REST plugin's construction argument, never a stored row; the semantic entry
+    // `rest-api-plugin-durations-unit-in-key` carries the prescription.
+    'api/RestApiPluginConfig:performance.defaultCacheTtl',
+    // #15677 (stack card 2/6 of #14478) — ruling B. `RouteDefinition.timeout` said
+    // "Execution timeout in ms" in prose and nothing else. Renamed to `timeoutMs`;
+    // the value is unchanged. Tombstoned with `retiredKey()`. No D2 conversion: a
+    // `RouteDefinition` is a router registration a host or plugin builds in code,
+    // never a stack collection member or a stored row; the semantic entry
+    // `api-runtime-config-durations-unit-in-key` carries the prescription. Note for
+    // anyone grepping: `packages/runtime/src/dispatcher-plugin.ts` declares its OWN
+    // local `RouteDefinition` interface for the `ai:routes` hook payload — a
+    // different type, with no duration key at all, and untouched by this rename.
+    'api/RouteDefinition:timeout',
     // #14691 — ADR-0049 enforce-or-remove on the `RestServerConfig` sub-objects,
     // executing the #14369 liveness census (15 `dead` rows across the `crud` /
     // `metadata` / `batch` / `routes` sub-schemas; 0 read sites in `packages/rest`
@@ -9344,6 +9591,24 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // than 17, for the reasons the sibling `api/WebSocketEvent:timestamp` entry
     // records: a presence payload is runtime-emitted, never a stored metadata row.
     'api/SimplePresenceState:lastSeen',
+    // #15677 (stack card 2/6 of #14478) — ruling B; documented with its two
+    // siblings on `api/WebSocketConfig:reconnectInterval`. Renamed to
+    // `pingIntervalMs`; the value is unchanged. Semantic entry
+    // `websocket-durations-unit-in-key`.
+    'api/WebSocketConfig:pingInterval',
+    // #15677 (stack card 2/6 of #14478) — ruling B. Three durations on
+    // `WebSocketConfig` named their unit only in prose, interleaved with a
+    // `maxReconnectAttempts` that is a COUNT — so `reconnectInterval: 5` beside
+    // `maxReconnectAttempts: 5` read as one kind of number and was two. Renamed to
+    // `reconnectIntervalMs`; the value is unchanged. Tombstoned with `retiredKey()`.
+    // No D2 conversion: a `WebSocketConfig` is a client connection argument, never a
+    // stored row; the semantic entry `websocket-durations-unit-in-key` carries the
+    // prescription for all four of this shape's renames.
+    'api/WebSocketConfig:reconnectInterval',
+    // #15677 (stack card 2/6 of #14478) — ruling B; documented with its two
+    // siblings on `api/WebSocketConfig:reconnectInterval`. Renamed to `timeoutMs`;
+    // the value is unchanged. Semantic entry `websocket-durations-unit-in-key`.
+    'api/WebSocketConfig:timeout',
     // #15676 — the epoch-instant half of #14478 ruling B. `WebSocketEvent.timestamp`
     // is an epoch INSTANT, not a duration: it moved onto the shared `EpochMs` schema
     // (which declares the millisecond unit) and was renamed `occurredAt`, because
@@ -9362,6 +9627,13 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // v17.0.0 was cut before this landed, so the change ships on the 17.x line and
     // the prescription lives at the major boundary `migrate meta` users look at.
     'api/WebSocketEvent:timestamp',
+    // #15677 (stack card 2/6 of #14478) — ruling B. The server-side counterpart of
+    // the `WebSocketConfig` trio, with the same COUNT neighbour problem
+    // (`reconnectAttempts`). Renamed to `heartbeatIntervalMs`; the value is
+    // unchanged. Tombstoned with `retiredKey()`. No D2 conversion: server
+    // construction configuration, never a stored row; the semantic entry
+    // `websocket-durations-unit-in-key` carries the prescription.
+    'api/WebSocketServerConfig:heartbeatInterval',
     // #14478 — maintainer ruling 2026-09-02 ("ruled B"): the unit of a
     // duration-shaped `z.number()` key lives in the key name, and no existing
     // offender is grandfathered. `DriverOptions.timeout` said "Timeout in ms" in

@@ -499,7 +499,7 @@ describe('DataLoaderConfigSchema', () => {
       batchScheduleFn: 'timeout',
       cacheEnabled: false,
       cacheKeyFn: 'customKeyFn',
-      cacheTtl: 60,
+      cacheTtlSeconds: 60,
       coalesceRequests: false,
       maxConcurrency: 4,
     });
@@ -508,7 +508,7 @@ describe('DataLoaderConfigSchema', () => {
     expect(config.batchScheduleFn).toBe('timeout');
     expect(config.cacheEnabled).toBe(false);
     expect(config.cacheKeyFn).toBe('customKeyFn');
-    expect(config.cacheTtl).toBe(60);
+    expect(config.cacheTtlSeconds).toBe(60);
     expect(config.maxConcurrency).toBe(4);
   });
 
@@ -520,8 +520,8 @@ describe('DataLoaderConfigSchema', () => {
     });
   });
 
-  it('should reject negative cacheTtl', () => {
-    expect(() => DataLoaderConfigSchema.parse({ cacheTtl: -1 })).toThrow();
+  it('should reject negative cacheTtlSeconds', () => {
+    expect(() => DataLoaderConfigSchema.parse({ cacheTtlSeconds: -1 })).toThrow();
   });
 });
 

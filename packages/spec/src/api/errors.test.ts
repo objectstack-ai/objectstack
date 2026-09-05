@@ -169,7 +169,7 @@ describe('EnhancedApiErrorSchema', () => {
       httpStatus: 429,
       retryable: true,
       retryStrategy: 'retry_after',
-      retryAfter: 60,
+      retryAfterSeconds: 60,
       details: {
         limit: 1000,
         remaining: 0,
@@ -178,7 +178,7 @@ describe('EnhancedApiErrorSchema', () => {
     });
 
     expect(error.retryable).toBe(true);
-    expect(error.retryAfter).toBe(60);
+    expect(error.retryAfterSeconds).toBe(60);
     expect(error.details.limit).toBe(1000);
   });
 

@@ -64,7 +64,7 @@ describe('plugin-rest-api.zod', () => {
         tags: ['Data', 'CRUD'],
         requestSchema: 'CreateRequestSchema',
         responseSchema: 'SingleRecordResponseSchema',
-        timeout: 30000,
+        timeoutMs: 30000,
         rateLimit: 'standard',
         cacheable: false,
       });
@@ -72,7 +72,7 @@ describe('plugin-rest-api.zod', () => {
       expect(endpoint.permissions).toEqual(['data.create']);
       expect(endpoint.summary).toBe('Create a record');
       expect(endpoint.tags).toEqual(['Data', 'CRUD']);
-      expect(endpoint.timeout).toBe(30000);
+      expect(endpoint.timeoutMs).toBe(30000);
     });
 
     it('should default public to false', () => {
@@ -443,7 +443,7 @@ describe('plugin-rest-api.zod', () => {
           enableCompression: true,
           enableETag: true,
           enableCaching: true,
-          defaultCacheTtl: 600,
+          defaultCacheTtlSeconds: 600,
         },
       });
 
@@ -452,7 +452,7 @@ describe('plugin-rest-api.zod', () => {
       expect(config.validation?.mode).toBe('strict');
       expect(config.openApi?.title).toBe('My API');
       expect(config.cors?.origins).toContain('http://localhost:3000');
-      expect(config.performance?.defaultCacheTtl).toBe(600);
+      expect(config.performance?.defaultCacheTtlSeconds).toBe(600);
     });
   });
 
@@ -520,7 +520,7 @@ describe('plugin-rest-api.zod', () => {
       
       // Verify batch endpoints have longer timeouts
       DEFAULT_BATCH_ROUTES.endpoints?.forEach(endpoint => {
-        expect(endpoint.timeout).toBe(60000);
+        expect(endpoint.timeoutMs).toBe(60000);
       });
     });
 
@@ -578,7 +578,7 @@ describe('plugin-rest-api.zod', () => {
       expect(DEFAULT_ANALYTICS_ROUTES.endpoints).toHaveLength(2);
       // Analytics query should have extended timeout
       const queryEndpoint = DEFAULT_ANALYTICS_ROUTES.endpoints?.find(e => e.handler === 'analyticsQuery');
-      expect(queryEndpoint?.timeout).toBe(120000);
+      expect(queryEndpoint?.timeoutMs).toBe(120000);
     });
 
     it('should validate DEFAULT_AUTOMATION_ROUTES', () => {
@@ -591,7 +591,7 @@ describe('plugin-rest-api.zod', () => {
       expect(DEFAULT_AUTOMATION_ROUTES.endpoints).toHaveLength(2);
       expect(DEFAULT_AUTOMATION_ROUTES.endpoints?.[0].path).toBe('/trigger/:name');
       // Automation trigger should have extended timeout
-      expect(DEFAULT_AUTOMATION_ROUTES.endpoints?.[0].timeout).toBe(120000);
+      expect(DEFAULT_AUTOMATION_ROUTES.endpoints?.[0].timeoutMs).toBe(120000);
       // The actions endpoint exposes the live registry and is cacheable.
       const actionsEndpoint = DEFAULT_AUTOMATION_ROUTES.endpoints?.find(e => e.path === '/actions');
       expect(actionsEndpoint?.method).toBe('GET');

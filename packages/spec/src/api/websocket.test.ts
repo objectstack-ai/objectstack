@@ -650,10 +650,10 @@ describe('WebSocketConfigSchema', () => {
       url: 'wss://example.com/ws',
       protocols: ['objectstack-v1', 'json'],
       reconnect: true,
-      reconnectInterval: 2000,
+      reconnectIntervalMs: 2000,
       maxReconnectAttempts: 10,
-      pingInterval: 60000,
-      timeout: 10000,
+      pingIntervalMs: 60000,
+      timeoutMs: 10000,
       headers: {
         'Authorization': 'Bearer token123',
         'X-Custom-Header': 'value',
@@ -662,7 +662,7 @@ describe('WebSocketConfigSchema', () => {
 
     const parsed = WebSocketConfigSchema.parse(config);
     expect(parsed.reconnect).toBe(true);
-    expect(parsed.reconnectInterval).toBe(2000);
+    expect(parsed.reconnectIntervalMs).toBe(2000);
     expect(parsed.maxReconnectAttempts).toBe(10);
   });
 
@@ -673,10 +673,10 @@ describe('WebSocketConfigSchema', () => {
 
     const parsed = WebSocketConfigSchema.parse(config);
     expect(parsed.reconnect).toBe(true);
-    expect(parsed.reconnectInterval).toBe(1000);
+    expect(parsed.reconnectIntervalMs).toBe(1000);
     expect(parsed.maxReconnectAttempts).toBe(5);
-    expect(parsed.pingInterval).toBe(30000);
-    expect(parsed.timeout).toBe(5000);
+    expect(parsed.pingIntervalMs).toBe(30000);
+    expect(parsed.timeoutMs).toBe(5000);
   });
 
   it('should validate URL format', () => {
@@ -692,12 +692,12 @@ describe('WebSocketConfigSchema', () => {
   it('should reject negative intervals', () => {
     expect(() => WebSocketConfigSchema.parse({
       url: 'wss://example.com/ws',
-      reconnectInterval: -1000,
+      reconnectIntervalMs: -1000,
     })).toThrow();
 
     expect(() => WebSocketConfigSchema.parse({
       url: 'wss://example.com/ws',
-      pingInterval: 0,
+      pingIntervalMs: 0,
     })).toThrow();
   });
 });
