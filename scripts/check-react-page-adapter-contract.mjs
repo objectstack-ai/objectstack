@@ -134,8 +134,9 @@
 // when it was written; the #15094 census found that declaration at `:392` and
 // triage read `:390` the same day -- a cross-file line citation that rotted
 // twice inside one day, which is an argument against citing a line at all
-// rather than for repointing it. The second read `client-sdk.mdx:659`; the
-// `data?.records.map(...)` sample it means is at `:808` today. `scripts/**` is
+// rather than for repointing it. The second read `client-sdk.mdx:659`; that
+// sample had drifted off the cited line too. ⛔ Every number in this paragraph
+// is a DATED rot record, not a pointer -- do not repair one. `scripts/**` is
 // outside `check-adr-symbol-anchors`'s corpus (`docs/adr/**`, `.md` only), so
 // nothing resolves these two for you -- but the form is this repo's own
 // declared grammar, whose last line reads
