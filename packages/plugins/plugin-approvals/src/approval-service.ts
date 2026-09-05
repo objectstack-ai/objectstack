@@ -1734,7 +1734,60 @@ export class ApprovalService implements IApprovalService {
     return { ...filter, $or: [{ organization_id: organizationId }, { organization_id: null }] };
   }
 
-  /** Recursive department — walks `sys_business_unit.parent_business_unit_id`. */
+  /**
+   * Tenant scope for the `sys_business_unit_member` read — a STRICT equality,
+   * deliberately NOT {@link businessUnitOrgScope} (#14946).
+   *
+   * The two screens answer different questions. The UNIT is the anchor the
+   * approver NAMES, and a seeded unit carries `organization_id = null` by
+   * construction (a seed cannot know the id the runtime mints at boot), so
+   * #3807 admits the null there on purpose. The MEMBER rows are the SET BEING
+   * ROUTED TO — enumerated by the platform, never named by anyone — and a
+   * seeded unit id exists identically in every tenant. Before this screen the
+   * member read carried no organization predicate at all, under
+   * {@link SYSTEM_CTX} which carries no tenant either, so tenant A's request
+   * resolved the shared unit and then collected EVERY tenant's membership rows
+   * hanging off it: approval authority over A's record, routed to B's users.
+   *
+   * Why the null arm is NOT copied here — measured on this tree:
+   *   - `sys_business_unit_member` declares no `organization_id`; the column
+   *     is injected (`applySystemFields`) and the tenancy census lists it in;
+   *   - REST / session writes fill it (`SqlDriver.injectTenantOnInsert`);
+   *   - seed replay does NOT (`seed-loader.ts` withholds its `fallbackOrgId`
+   *     from every `sys_` object), and elevated system-context writes do NOT
+   *     (`unclassified` in `PLATFORM_OBJECT_TENANCY`, tracked as #14570).
+   * So a NULL on a member row means UNKNOWN tenancy, not "platform-global",
+   * and unknown tenancy is not a member of this organization. This is the
+   * ruling `plugin-sharing`'s `memberScope` already applies to the same rows
+   * (#14547 / #14949), and the posture this file already takes for
+   * `sys_team_member` and `sys_user_position`.
+   *
+   * The cost is declared, not hidden: an organization whose MEMBERSHIP rows
+   * were seeded or system-written expands to nobody even on a unit it can
+   * see. That is not silent — the graph-type fallback in `expandApprover`
+   * warns `expanded to nobody` (#3807) and `onEmptyApprovers` governs the
+   * request as for any unstaffed target — and the repair is to stamp the
+   * membership rows, never to widen this screen. ⛔ Do not "unify" the two
+   * screens: one method serving both re-opens whichever half it does not
+   * implement.
+   */
+  private businessUnitMemberScope(
+    filter: Record<string, unknown>,
+    organizationId?: string | null,
+  ): Record<string, unknown> {
+    if (!organizationId) return filter;
+    return { ...filter, organization_id: organizationId };
+  }
+
+  /**
+   * Recursive department — walks `sys_business_unit.parent_business_unit_id`.
+   *
+   * Two tenant screens, and they are different on purpose: the UNIT rows
+   * (seed check and descent) go through the null-inclusive
+   * {@link businessUnitOrgScope}; the MEMBER read goes through the strict
+   * {@link businessUnitMemberScope}. `organizationId` is the DIRECTORY
+   * organization the approver resolves in (ADR-0105 D9), for both.
+   */
   private async expandBusinessUnitUsers(businessUnitId: string, organizationId?: string | null): Promise<string[]> {
     if (!businessUnitId) return [];
     // Seed sanity check: skip if dept doesn't exist or is inactive within tenant.
@@ -1769,7 +1822,11 @@ export class ApprovalService implements IApprovalService {
     let rows: any[] = [];
     try {
       rows = await this.engine.find('sys_business_unit_member', {
-        where: { business_unit_id: { $in: Array.from(seen) } },
+        // #14946: tenant-screened — {@link businessUnitMemberScope} is STRICT
+        // on purpose and is not {@link businessUnitOrgScope}. The units above
+        // proved their tenancy (or are seeded); these rows have not, and the
+        // shared seeded unit id is exactly where other tenants' rows sit.
+        where: this.businessUnitMemberScope({ business_unit_id: { $in: Array.from(seen) } }, organizationId),
         fields: ['user_id'],
         limit: 10000,
         context: SYSTEM_CTX,

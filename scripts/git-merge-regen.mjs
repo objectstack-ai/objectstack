@@ -54,7 +54,7 @@
  *   node scripts/git-merge-regen.mjs --self-test   # reconcile + end-to-end merge proof
  */
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
@@ -163,8 +163,76 @@ function gitDir(cwd = process.cwd()) {
   return execFileSync('git', ['rev-parse', '--absolute-git-dir'], { cwd, encoding: 'utf8' }).trim();
 }
 
-/** Record `path` as needing regeneration. Idempotent — a path is listed once. */
+/**
+ * Is this invocation a `git merge-tree` PROBE rather than a merge that is writing
+ * this worktree? (#15815)
+ *
+ * `git merge-tree --write-tree` runs the same merge-ort machinery as `git merge`,
+ * so it invokes this driver too — and the deferral's marker then records a
+ * regeneration nobody owes, because a probe writes neither the index nor the
+ * worktree. Measured cost: a seat probing mergeability from the shared primary
+ * checkout left `os-regen-pending` behind, and the next ORDINARY commit in that
+ * checkout was refused by `pre-commit` with a staleness report for a merge that
+ * never happened. Self-healing (the artifact checks clean, because nothing was
+ * merged) but it reads as a real red to whoever hits it.
+ *
+ * ⚠️ The signal is the INDEX LOCK, and the two candidates a reader reaches for
+ * first are both WRONG. MEASURED (git 2.43.0; one path routed to this driver and
+ * conflicting on both sides; the driver replaced by a shim that dumped argv, env
+ * and git state; every invocation shape rebuilt from a fresh fixture):
+ *
+ *   shape               GITHEAD_*  GIT_REFLOG_ACTION  $(git-path index).lock
+ *   merge-tree              0        <unset>            no
+ *   merge-tree (old mode)   0        <unset>            no
+ *   merge                   1        merge other        YES
+ *   merge --squash          1        merge other        YES
+ *   merge --no-commit       ·        ·                  YES
+ *   pull                    1        pull … other       YES
+ *   cherry-pick             0        <unset>            YES
+ *   rebase                  0        <unset>            YES
+ *   am -3                   ·        ·                  YES
+ *   checkout -m             ·        ·                  YES
+ *
+ * ⛔ `GITHEAD_*` and `GIT_REFLOG_ACTION` are absent for CHERRY-PICK and REBASE —
+ * real merges that DO write this worktree and DO owe the marker. Gating on either
+ * would drop the marker there: silent, and in the dangerous direction.
+ *
+ * The lock is not an accident of this git version, it is the mechanism: `git
+ * merge-tree` is the low-level command that does not touch the index or the
+ * working tree, and every merge that DOES touch them holds the index lock across
+ * the driver call. Read through `git rev-parse --git-path index`, never
+ * `$GIT_DIR/index` — a linked worktree has its own index (verified from one:
+ * probe `no`, real merge `YES`), and `GIT_INDEX_FILE` moves it again.
+ *
+ * ⚠️ The two failure directions are NOT symmetric, which is why anything
+ * unmeasurable falls back to MARKING. Reading "real merge" when it was a probe
+ * costs one stale marker that clears the moment the artifact checks clean — i.e.
+ * today's behaviour. Reading "probe" when it was a real merge drops the
+ * deferral's own record and leaves `pre-commit` nothing to refuse. Even then it
+ * is not silent — the `check:*` gates over every generated artifact run on every
+ * PR and do not depend on this file — but it moves a red from the seat's terminal
+ * to CI, so the default has to be the other way.
+ */
+function isProbeInvocation(cwd = process.cwd()) {
+  try {
+    const index = resolve(
+      cwd,
+      execFileSync('git', ['rev-parse', '--git-path', 'index'], { cwd, encoding: 'utf8' }).trim(),
+    );
+    return !existsSync(`${index}.lock`);
+  } catch {
+    // No answer is not a probe. See the asymmetry above.
+    return false;
+  }
+}
+
+/**
+ * Record `path` as needing regeneration. Idempotent — a path is listed once.
+ *
+ * A `merge-tree` probe records NOTHING: it wrote no tree anyone has to regenerate.
+ */
 function markPending(path, cwd = process.cwd()) {
+  if (isProbeInvocation(cwd)) return null;
   const marker = join(gitDir(cwd), PENDING_MARKER);
   const existing = existsSync(marker) ? readFileSync(marker, 'utf8').split('\n').filter(Boolean) : [];
   if (existing.includes(path)) return marker;
@@ -344,7 +412,7 @@ function drive(argv) {
 // ── Why the CALLEE NAME is the battery ──
 //
 // This file has no `selfTest()` entry function and no named section banners:
-// the `--self-test` dispatch at the bottom invokes THIRTEEN named callees, each
+// the `--self-test` dispatch at the bottom invokes FOURTEEN named callees, each
 // printing its own line and returning a boolean. So the roster's unit is the
 // CALLEE, and its label is the one the SOURCE ALREADY CARRIES — the function's
 // own name. Nothing is invented and nothing is judged per comment, and a set
@@ -359,7 +427,7 @@ function drive(argv) {
 // (PR #15271, `check-sdui-manifest`) makes a table row a battery. It does so
 // for a file whose SELF-TEST *is* the table: one literal table, one driving
 // loop over it, and a sink that writes only when a row fails. Here the table is
-// a local of ONE callee among thirteen, its rows are evaluated eagerly into
+// a local of ONE callee among fourteen, its rows are evaluated eagerly into
 // booleans before anything loops, and the callee already reduces them to a
 // single printed verdict of its own. Flooring those rows would floor one
 // callee's internals while the other twelve stayed at callee granularity — a
@@ -386,6 +454,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   reconcileMixedComparators: 1,
   endToEnd: 1,
   endToEndMixed: 1,
+  probeLeavesNoMarker: 1,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -394,7 +463,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // key in the literal above, so the roster falls below this number; the
 // roster ↔ dispatch cross-check in the floor block is the other half, and it
 // names WHICH callee was listed twice.
-const SELF_TEST_BATTERY_FLOOR = 13;
+const SELF_TEST_BATTERY_FLOOR = 14;
 
 // The key a registration is filed under when a callee registers no name at all.
 // It is not a declared battery, so it reds by the same set difference rather
@@ -404,7 +473,7 @@ const UNATTRIBUTED_BATTERY = '(no callee named)';
 // The battery ledger, read by `batteryFloorFailures()` from the dispatch block
 // at the very bottom of this file. It is MODULE-level rather than local to a
 // self-test body because this file HAS no self-test body: the registrations
-// happen inside thirteen separate callees and the floor is read at the dispatch's
+// happen inside fourteen separate callees and the floor is read at the dispatch's
 // verdict site, so the ledger has to outlive every one of those frames.
 //
 // ⚠️ Named for the roster's role, deliberately NOT with a self-test spelling:
@@ -416,7 +485,7 @@ const batterySeen = new Map();
 /**
  * Record that a self-test callee RAN.
  *
- * Called as the FIRST statement of each of the thirteen callees the `--self-test`
+ * Called as the FIRST statement of each of the fourteen callees the `--self-test`
  * dispatch invokes — above any early return, so a callee that bails out early
  * still reports that it ran, and the floor is never met by a frame that
  * returned before doing anything.
@@ -429,7 +498,7 @@ function registerCase(name) {
 /**
  * The floor: every declared callee RAN (#13489).
  *
- * Evaluated at the dispatch's verdict site — after all thirteen callees have had
+ * Evaluated at the dispatch's verdict site — after all fourteen callees have had
  * their chance and immediately before the success line — and reached only from
  * the `--self-test` branch, so a production merge-driver run never reads the
  * ledger at all.
@@ -1403,9 +1472,93 @@ function endToEndMixed() {
   return true;
 }
 
+/**
+ * The probe gate, BOTH directions, in ONE fixture repo (#15815).
+ *
+ * Leg 1 is the fix: `git merge-tree --write-tree` reaches this driver and must
+ * leave no pending marker, because it wrote no tree anyone owes a regeneration
+ * for. Leg 2 is the control WITHOUT WHICH LEG 1 IS FREE — `markPending` replaced
+ * by `return null` passes leg 1 perfectly, and takes the deferral's whole
+ * enforcement with it. The same repo's real merge must still record.
+ *
+ * ⚠️ Leg 1 also carries its own firing control, and it is the one that matters
+ * most: "no marker" is exactly what a probe that NEVER REACHED THE DRIVER also
+ * produces (a broken fixture, a `.gitattributes` that stopped routing, a git
+ * whose merge-tree skips custom drivers — which is the very thing this whole
+ * card would be moot under). So the driver's own deferral notice must appear on
+ * the probe's stderr before the absent marker is allowed to mean anything.
+ */
+function probeLeavesNoMarker() {
+  registerCase('probeLeavesNoMarker');
+  const dir = mkdtempSync(join(tmpdir(), 'os-regen-probe-'));
+  const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  try {
+    git('init', '-q', '--initial-branch=main', '.');
+    git('config', 'user.email', 'selftest@objectstack.ai');
+    git('config', 'user.name', 'self-test');
+    git('config', 'merge.os-regen.name', 'regenerate instead of text-merging');
+    // Absolute, and the driver under test — same reasoning as `endToEnd()`.
+    git('config', 'merge.os-regen.driver', `node "${join(REPO_ROOT, 'scripts/git-merge-regen.mjs')}" %O %A %B %P`);
+
+    const target = REGEN_ARTIFACTS[0].path;
+    mkdirSync(join(dir, dirname(target)), { recursive: true });
+    writeFileSync(join(dir, '.gitattributes'), `${target} merge=os-regen\n`);
+    writeFileSync(join(dir, target), '["base"]\n');
+    git('add', '-A');
+    git('commit', '-qm', 'base');
+
+    git('checkout', '-qb', 'incoming');
+    writeFileSync(join(dir, target), '["base","theirs"]\n');
+    git('commit', '-qam', 'theirs');
+
+    git('checkout', '-q', 'main');
+    writeFileSync(join(dir, target), '["base","ours"]\n');
+    git('commit', '-qam', 'ours');
+
+    const marker = join(gitDir(dir), PENDING_MARKER);
+
+    // ── Leg 1: the probe ──
+    // `spawnSync`, not `execFileSync`: the driver's notice goes to stderr, and it
+    // is wanted on the SUCCESS path (merge-tree exits 0 when the driver resolves),
+    // where `execFileSync` discards it.
+    const probe = spawnSync('git', ['merge-tree', '--write-tree', 'main', 'incoming'], { cwd: dir, encoding: 'utf8' });
+    if (!`${probe.stderr ?? ''}`.includes('not text-merged — it is generated')) {
+      return fail(
+        'self-test: the merge-tree probe never reached the driver, so "no marker" proves nothing.\n'
+          + `  merge-tree exit ${probe.status}, stderr: ${`${probe.stderr ?? ''}`.trim() || '<empty>'}`,
+      );
+    }
+    if (existsSync(marker)) {
+      return fail(
+        `self-test: a \`git merge-tree\` probe wrote ${PENDING_MARKER} — the probe gate is not firing.\n`
+          + '  A probe writes neither index nor worktree, so it owes no regeneration; the marker it leaves\n'
+          + '  refuses an unrelated commit in that checkout with a staleness report for a merge that never happened.',
+      );
+    }
+
+    // ── Leg 2: the control, same repo ──
+    git('merge', 'incoming', '-m', 'merge');
+    if (!existsSync(marker)) {
+      return fail(
+        'self-test: a REAL merge left no pending marker — the probe gate is OVER-firing.\n'
+          + '  This is the direction that costs something: the deferral kept one side, and nothing now\n'
+          + '  refuses the commit until the artifact is regenerated.',
+      );
+    }
+    if (!readFileSync(marker, 'utf8').includes(target)) return fail(`self-test: ${target} absent from the pending marker`);
+
+    console.log('✓ probe gate: `git merge-tree` reaches the driver and records nothing; the same repo\'s real merge still records');
+    return true;
+  } catch (err) {
+    return fail(`self-test: ${err?.stderr?.toString() || err?.message || err}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 if (process.argv.includes('--self-test')) {
   console.log('git-merge-regen --self-test\n');
-  // The thirteen callees as a literal LIST rather than thirteen bare calls, so the
+  // The fourteen callees as a literal LIST rather than fourteen bare calls, so the
   // names this block invokes are data the floor below can cross-check the
   // roster against, in both directions. The names are read off the function
   // declarations themselves (`fn.name`), so a renamed callee moves this list
@@ -1424,6 +1577,7 @@ if (process.argv.includes('--self-test')) {
     reconcileMixedComparators,
     endToEnd,
     endToEndMixed,
+    probeLeavesNoMarker,
   ];
   const results = callees.map((run) => run());
 

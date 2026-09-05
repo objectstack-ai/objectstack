@@ -406,10 +406,12 @@ describe('validateFlowNodeWrites', () => {
     ).toEqual([]);
   });
 
-  it('does NOT flag a readonly field on create_record — INSERT is engine-exempt from that strip', () => {
-    // The readonly rule skips create_record entirely (a create may legitimately
-    // seed readonly columns). This rule asks a different question, so a DECLARED
-    // readonly field is clean here for its own reason: it resolves to a column.
+  it('does NOT flag a readonly field on create_record — this rule asks whether the column EXISTS, not whether the write lands', () => {
+    // The readonly sibling does not scan create_record today — a scan gap
+    // (#15394) since the 2026-09-03 ruling put the static-`readonly` strip
+    // inside `engine.insert` (#14147), not an exemption. This rule asks a
+    // different question either way, so a DECLARED readonly field is clean here
+    // for its own reason: it resolves to a column.
     const withReadonly = {
       name: 'deal',
       fields: { stage: { type: 'text' }, approval_status: { type: 'text', readonly: true } },

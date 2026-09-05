@@ -3250,9 +3250,8 @@ export class RestServer {
         if (!item || typeof item !== 'object') return item;
         // [#6349] Normalize HERE, not at the call sites. `isTranslatableMetaType`
         // reads `TRANSLATABLE_METADATA_TYPES`, which is DERIVED from
-        // `METADATA_DOCUMENT_TRANSLATORS`' keys — and those are singular-only
-        // (`view`/`action`/`object`/`app`/`dashboard`/`page`), matching
-        // `translateMetadataDocument`'s "Canonical metadata type string". The
+        // `METADATA_DOCUMENT_TRANSLATORS`' keys — and those are singular-only,
+        // matching `translateMetadataDocument`'s "Canonical metadata type string". The
         // `/meta` handlers hand this helper the RAW `:type` path segment, and
         // Prime Directive #3 makes PLURAL the canonical REST spelling, so the
         // documented spelling missed the set and the whole localization was
@@ -8134,9 +8133,10 @@ export class RestServer {
                             ...(environmentId ? { environmentId } : {}),
                             ...(context ? { context } : {}),
                         } as any);
-                        // [#3431] Advertise fields the #3043 create ingress strip
-                        // dropped via the response header (body also carries
-                        // `droppedFields`). Status stays 201.
+                        // [#3431] Advertise fields the engine's create-side static-
+                        // `readonly` strip dropped (`engine.insert`, relayed by
+                        // `createData` as `droppedFields`) via the response header
+                        // (body also carries `droppedFields`). Status stays 201.
                         applyDroppedFieldsHeader(res, result);
                         res.status(201).json(result);
                     } catch (error: any) {
@@ -12511,22 +12511,25 @@ export class RestServer {
                             if (op.action === 'create') {
                                 // [#3835] Go through the protocol's create ingress —
                                 // the SAME one `POST /data/:object` uses — rather than
-                                // calling `ql.insert` directly. The engine's INSERT path
-                                // is static-`readonly`-exempt by design (#3413), so the
-                                // #3043 strip that stops a non-system caller from seeding
-                                // a read-only column lives at that ingress. Bypassing it
-                                // here made `readonly` mean two different things on two
-                                // create paths: rejected on the single route, written
-                                // through the batch. `createData` also owns the platform-
-                                // object carve-out (a `sys_`/`managedBy` object's own
-                                // guard must REJECT a forged value, not silently swallow
-                                // it), which is why this routes to the ingress instead of
-                                // re-implementing the strip here — one create ingress,
-                                // and a future change to its policy covers the batch for
-                                // free. `trxCtx` carries the caller's context (including
-                                // `isSystem`) plus the open transaction, so the strip
-                                // decides exactly as it does on the single route and the
-                                // insert still joins this transaction.
+                                // calling `ql.insert` directly. When this was written the
+                                // #3043 static-`readonly` strip lived at that ingress and
+                                // a direct `ql.insert` bypassed it, so `readonly` meant
+                                // two different things on two create paths. Since the
+                                // maintainer ruling of 2026-09-03 (option C, #14147) the
+                                // strip runs inside `engine.insert` for every non-system
+                                // caller, so both routes are stripped identically, and the
+                                // platform-object carve-out (a `sys_`/`managedBy` object's
+                                // own guard must REJECT a forged value, not silently
+                                // swallow it) is the engine's as well. The routing stands
+                                // on what the ingress still owns: the #3770 object-
+                                // existence gate, the #7823 `internal: true` response
+                                // strip and the `droppedFields` relay — one create
+                                // ingress, one response contract, and a future change to
+                                // its policy covers the batch for free. `trxCtx` carries
+                                // the caller's context (including `isSystem`) plus the
+                                // open transaction, so the engine's strip decides exactly
+                                // as it does on the single route and the insert still
+                                // joins this transaction.
                                 const created: any = await p.createData({ object: op.object, data, context: trxCtx } as any);
                                 for (const e of (created?.droppedFields ?? []) as DroppedFieldsEvent[]) {
                                     dropped.push({ ...e, index });

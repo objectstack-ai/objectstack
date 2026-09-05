@@ -2,7 +2,8 @@
 //
 // [#3455] Extends the single-write drop-observability of #3431 to the BULK
 // write paths. Each bulk method must (a) surface the same LEGAL strips
-// (static `readonly` #2948 / `readonlyWhen` #3042 / #3043 create ingress) that
+// (static `readonly` #2948 / `readonlyWhen` #3042 / the create-side static
+// strip, in the engine since #14147) that
 // single-write now reports, and (b) thread the caller's execution `context` to
 // the engine so RLS/FLS/`readonlyWhen` run under the caller — a gap the
 // pre-#3455 `updateManyData`/`batchData` loops had. Channels:
@@ -70,12 +71,23 @@ describe('createManyData — aggregated top-level droppedFields (#3455)', () => 
   function makeProtocol() {
     const engine = {
       registry: { getObject: (n: string) => (n === 'approval_case' ? SCHEMA : undefined) },
-      insert: vi.fn(async (_object: string, rows: any[]) => rows.map((r, i) => ({ id: `rec-${i + 1}`, ...r }))),
+      // [#14147] The strip is the ENGINE's, and its event is the batch UNION —
+      // one call, one listener invocation, however many rows forged.
+      insert: vi.fn(async (object: string, rows: any[], options?: any) => {
+        const system = options?.context?.isSystem === true;
+        const dropped = !system && rows.some((r) => r && 'approval_status' in r);
+        if (dropped) options?.onFieldsDropped?.({ object, fields: ['approval_status'], reason: 'readonly' });
+        return rows.map((r, i) => {
+          if (system || !(r && 'approval_status' in r)) return { id: `rec-${i + 1}`, ...r };
+          const { approval_status: _forged, ...kept } = r;
+          return { id: `rec-${i + 1}`, ...kept };
+        });
+      }),
     };
     return { p: new ObjectStackProtocolImplementation(engine as any), engine };
   }
 
-  it('aggregates the schema-uniform ingress strip across rows into one event', async () => {
+  it('aggregates the schema-uniform create strip across rows into one event', async () => {
     const { p } = makeProtocol();
     const res: any = await p.createManyData({
       object: 'approval_case',
@@ -116,10 +128,19 @@ describe('createManyData — aggregated top-level droppedFields (#3455)', () => 
 });
 
 describe('insertManyData — per-row droppedFields on outcomes (#3455)', () => {
-  it('attaches the ingress strip to the matching outcome row only', async () => {
-    const insertMany = vi.fn(async (_object: string, rows: any[]) =>
-      rows.map((r, i) => ({ ok: true, record: { id: `rec-${i + 1}`, ...r } })),
-    );
+  it('attaches the create strip to the matching outcome row only', async () => {
+    // [#14147] The engine's listener carries no row index — it reports the
+    // batch UNION — so row precision here is recovered by asking which row
+    // SUPPLIED each dropped name. That recovery is what this case pins.
+    const insertMany = vi.fn(async (object: string, rows: any[], options?: any) => {
+      if (rows.some((r) => r && 'approval_status' in r)) {
+        options?.onFieldsDropped?.({ object, fields: ['approval_status'], reason: 'readonly' });
+      }
+      return rows.map((r, i) => {
+        const { approval_status: _forged, ...kept } = r ?? {};
+        return { ok: true, record: { id: `rec-${i + 1}`, ...kept } };
+      });
+    });
     const engine = { registry: { getObject: () => SCHEMA }, insertMany };
     const p = new ObjectStackProtocolImplementation(engine as any);
 
@@ -136,14 +157,21 @@ describe('insertManyData — per-row droppedFields on outcomes (#3455)', () => {
     expect(res.outcomes[1].droppedFields).toEqual([
       { object: 'approval_case', fields: ['approval_status'], reason: 'readonly' },
     ]);
-    // The strip really removed the field from what the engine inserted.
-    expect(insertMany.mock.calls[0][1][1]).not.toHaveProperty('approval_status');
+    // [#14147] The ingress hands the caller's row over WHOLE — judging it is
+    // the engine's job now, and this assertion is what would catch a
+    // reintroduced second strip at this seam.
+    expect(insertMany.mock.calls[0][1][1]).toHaveProperty('approval_status');
   });
 });
 
 describe('batchData — per-row droppedFields + context threading (#3455)', () => {
-  it('create rows surface the ingress strip and honour a system context', async () => {
-    const insert = vi.fn(async (_object: string, data: any, _options?: any) => ({ id: 'rec-1', ...data }));
+  it('create rows surface the engine strip and honour a system context', async () => {
+    const insert = vi.fn(async (object: string, data: any, options?: any) => {
+      if (options?.context?.isSystem || !(data && 'approval_status' in data)) return { id: 'rec-1', ...data };
+      const { approval_status: _forged, ...kept } = data;
+      options?.onFieldsDropped?.({ object, fields: ['approval_status'], reason: 'readonly' });
+      return { id: 'rec-1', ...kept };
+    });
     const engine = { registry: { getObject: () => SCHEMA }, insert, update: vi.fn(), findOne: vi.fn() };
     const p = new ObjectStackProtocolImplementation(engine as any);
 
@@ -165,7 +193,11 @@ describe('batchData — per-row droppedFields + context threading (#3455)', () =
   });
 
   it('a system-context batch create is exempt from the strip (context now threaded to it)', async () => {
-    const insert = vi.fn(async (_object: string, data: any) => ({ id: 'rec-1', ...data }));
+    const insert = vi.fn(async (_object: string, data: any, options?: any) => {
+      if (options?.context?.isSystem) return { id: 'rec-1', ...data };
+      const { approval_status: _forged, ...kept } = data ?? {};
+      return { id: 'rec-1', ...kept };
+    });
     const engine = { registry: { getObject: () => SCHEMA }, insert, update: vi.fn(), findOne: vi.fn() };
     const p = new ObjectStackProtocolImplementation(engine as any);
 

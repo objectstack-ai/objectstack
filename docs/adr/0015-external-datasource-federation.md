@@ -5,6 +5,16 @@
 **Builds on**: [ADR-0005](./0005-metadata-customization-overlay.md) (one Zod source of truth per metadata type)
 **Consumers**: `@objectstack/spec`, `@objectstack/runtime`, `@objectstack/objectql`, `@objectstack/plugins/driver-sql`, `@objectstack/services/service-ai`, `@objectstack/cli`, `../objectui`
 
+> **Path note (2026-09), paths only — no decision changes.** Five paths this record cites are
+> historical and deliberately unlinked: `packages/spec/src/data/external-lookup.zod.ts` (retired
+> under ADR-0049 enforce-or-remove, `29488ccae`, 2026-08-12), `packages/spec/src/automation/sync.zod.ts`
+> (the L1 "Simple Sync" layer was retired whole, `891d345a7`, 2026-08-03), and
+> `packages/services/service-ai/src/tools/query-data.tool.ts` +
+> `packages/services/service-ai/src/schema-retriever.ts` (`service-ai` removed under ADR-0025 S2,
+> `21d4f8901`, 2026-06-25). `packages/spec/src/shared/error-map.ts` is a **proposed** path — no file
+> has ever existed there. Each is kept as written because it records this decision's surface at the
+> time it was taken.
+
 ---
 
 ## 0. Context

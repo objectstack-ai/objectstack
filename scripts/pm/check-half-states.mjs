@@ -85,8 +85,13 @@
  *
  * ## The invariants (each names its protocol source)
  *
- *   H1  `pm:dispatched` with no assignee — dispatch marks a claim; a claim is
- *       assign + claim comment (state model / step 4).
+ *   H1  `pm:dispatched` with no assignee — the state model DEFINES the label
+ *       rather than describing a habit: 「`pm:dispatched` … 恒带 assignee」
+ *       (SKILL.md line 109), and the one lawful way for that field to empty is
+ *       the release act, which clears it and posts a `Release:` line in the
+ *       SAME write (line 465). So an empty field under this label is the label
+ *       contradicting its own definition, not a step somebody forgot — and the
+ *       release half of the same rule is H47's row.
  *   H2  assignee set on a pm-tracked card, but no claim comment on the thread
  *       (a comment whose body carries a "Claim:" line) — the assignee field
  *       alone cannot say WHICH session owns it (step 4; #4588). The marker is
@@ -1054,6 +1059,37 @@ export function h1DispatchedNoAssignee(issue) {
  * non-canonical separator.
  */
 export const CLAIM_COMMENT_MARKER = /^\s*>?\s*Claim(?:ed)?\s*:/mi;
+
+/**
+ * The release-comment marker — `CLAIM_COMMENT_MARKER`'s counterpart, and
+ * deliberately its MIRROR rather than a wider net.
+ *
+ * Release became an explicit ACT in the protocol on 2026-09-05 — the quoted line
+ * is kept UNBROKEN here so it stays greppable against its source:
+ *
+ *   「释放是显式动作:让卡离手者同笔清 assignee + `Release:` 行(会话/因/去向);下一任重新认领。」
+ *
+ * (`.claude/skills/pm-dispatch/SKILL.md` line 465), and the dead-claim route
+ * returns a card the same way — 「释放回队(`Release:` 行载因)」 (line 493). So
+ * the record lives as a LINE in a comment, exactly as a claim does, and H47 is
+ * the row that reads it.
+ *
+ * The strictness is the claim marker's, on purpose: the line must BEGIN with
+ * the word, an optional leading blockquote `>` is allowed because a seat that
+ * quotes its own release writes one, and nothing else is. No `g` flag, for
+ * `CLAIM_COMMENT_MARKER`'s reason — a shared regex carrying `lastIndex`
+ * between callers is a state bug waiting for its second reader.
+ *
+ * ⚠️ The one asymmetry with the claim marker, stated so the next reader does
+ * not take it for an oversight: `CLAIM_COMMENT_MARKER` also accepts
+ * `Claimed:`, an accommodation for a spelling the fleet had already shipped.
+ * The release rule landed with no dialect behind it, so this marker starts at
+ * the canonical spelling and NOTHING wider — a `Released:` line, or a
+ * fullwidth colon, is a MALFORMED release rather than an unrecognised dialect,
+ * and the repair direction is the WRITE side (the 2026-08-11 ruling quoted at
+ * `CLAIM_COMMENT_MARKER`, applied to the newer half of the same protocol).
+ */
+export const RELEASE_COMMENT_MARKER = /^\s*>?\s*Release\s*:/mi;
 
 export function h2AssigneeNoClaimComment(issue, commentBodies) {
   const labels = labelNames(issue);
@@ -4423,20 +4459,21 @@ export function h24QueuedWithAssignee(issue) {
     .filter(Boolean);
   if (logins.length === 0) return null;
   return (
-    `\`pm:queue\` while ASSIGNED to ${logins.map((l) => `\`${l}\``).join(', ')} — the board makes ` +
-    'two contradictory claims about this one card: the queue view reads `pm:queue` as ' +
-    'dispatchable NOW, and the claim protocol reads a non-empty assignee as TAKEN (⛔ never ' +
-    'reassign). Both readers are right about what they read, so the card is available to everyone ' +
-    'and forbidden to everyone at once — not a race, a card nobody can legally move. The measured ' +
-    'origin is a state ROLLBACK that swapped the label and left the field: the landing re-label ' +
-    'and the unlock scan both owe 「同笔摘 assignee」 and only dead-claim reclamation ever said ' +
-    'so (17 carriers across three repos at the 2026-08-23 census). Remedy: whichever write set ' +
-    '`pm:queue` owes the assignee drop in the SAME stroke — do it now. ⚠️ Asymmetric: an agent ' +
-    'identity in that field is dead-claim residue and may be cleared on its evidence; a HUMAN ' +
-    'assignment may be real ownership and ⛔ must never be cleared by an agent — take it to the ' +
-    'maintainer. This row fires either way and states the login so the reader can tell them ' +
-    'apart: the rule lands first and an ownership exemption is an explicit marker later, never ' +
-    'the other way round (ruling 2026-08-23).'
+    `\`pm:queue\` while ASSIGNED to ${logins.map((l) => `\`${l}\``).join(', ')} — the state model ` +
+    'defines this pair out of existence: 「`pm:queue` 卡恒无 assignee,有即半态」. The two readers ' +
+    'are why it cannot stand: the queue view reads `pm:queue` as dispatchable NOW, the claim ' +
+    'protocol reads a non-empty assignee as TAKEN (⛔ never reassign), and both are right about ' +
+    'the field they read — so the card is available to everyone and forbidden to everyone at ' +
+    'once, not a race but a card nobody can legally move. Remedy: letting a card go is one act ' +
+    'with two halves — 「释放是显式动作:让卡离手者同笔清 assignee + `Release:` 行(会话/因/去向);' +
+    '下一任重新认领。」 — so either FINISH the release (post the `Release:` line and clear the ' +
+    'field in the same write) or RE-CLAIM the card (assignee + `Claim:` comment + ' +
+    '`pm:dispatched`) if it is really still in flight. ⚠️ Asymmetric: an agent identity in that ' +
+    'field is dead-claim residue and may be cleared on its evidence; a HUMAN assignment may be ' +
+    'real ownership and ⛔ must never be cleared by an agent — take it to the maintainer. This ' +
+    'row fires either way and states the login so the reader can tell them apart: the rule lands ' +
+    'first and an ownership exemption is an explicit marker later, never the other way round ' +
+    '(ruling 2026-08-23).'
   );
 }
 
@@ -8602,6 +8639,204 @@ export function h46ImplementedWithoutClaim(pr, cards) {
 }
 
 // ---------------------------------------------------------------------------
+// H47 — the RELEASE RECORD and the assignee field disagreeing (#15884).
+//
+// The rule this row reads landed on 2026-09-05 and is a DEFINITION rather than
+// a habit — one act, two halves, ONE write:
+//
+//   「释放是显式动作:让卡离手者同笔清 assignee + `Release:` 行(会话/因/去向);下一任重新认领。」
+//
+// (SKILL.md line 465; the dead-claim route returns a card the same way, 「释放回
+// 队(`Release:` 行载因)」, line 493.) Two halves written in one stroke means
+// exactly two ways for the stroke to come apart, and this row is both of them:
+//
+//   (a) the record without the field — a `Release:` line NEWER than the last
+//       `Claim:` while the assignee is STILL SET. The seat wrote the record and
+//       the field did not follow, so every reader of the board still sees TAKEN
+//       (⛔ never reassign) on a card whose own thread says its owner has left.
+//   (b) the field without the record — an OPEN `pm:queue` card with NO assignee
+//       whose thread carries a `Claim:` that no later `Release:` answers. Here
+//       the board looks CLEAN: 「`pm:queue` 卡恒无 assignee,有即半态」 (line
+//       107) makes the empty field the LAWFUL shape, so nothing on the card
+//       contradicts anything, and the only trace of the exit is a claim with no
+//       answer — nobody can tell whether the card was released, re-taken by the
+//       same seat, or simply dropped.
+//
+// ## Why (b) is a LOWER BOUND and never a census — twice over
+//
+// Both reasons ride in the row's own sentence, because a reader of the anchor
+// issue never sees this comment:
+//
+//   1. this row FETCHES NOTHING. Its corpus is whatever thread another row
+//      already bought — H2's claim read, H4's `Blocked-by:` fallback, H9's
+//      `Restart-when:` read, H17's hold pass, H32's seat markers — so a card
+//      whose thread nobody read is UNJUDGED, never clean (#4690). The `pm:queue`
+//      half is the THIN half of that by construction: H2 buys a thread only for
+//      an ASSIGNED card, which is precisely leg (b)'s complement. Stated
+//      plainly rather than fixed here, because fixing it means buying a fetch
+//      class this row was ruled not to have.
+//   2. a card that was NEVER claimed is CLEAN, and indistinguishable from an
+//      exit whose release nobody wrote down. Silence on this leg is an unread
+//      surface, not a quiet board.
+//
+// ## Why it is not a widening of H1, H2 or H24
+//
+// Each of those reads ONE instant of the board; this one reads the ORDER of two
+// records on a thread, which is a question none of them can ask. H1 wants
+// `pm:dispatched` with no assignee (leg (a)'s carriers HAVE one; leg (b)'s
+// carry `pm:queue`). H2 wants NO claim comment at all (both legs here have
+// one — that is the whole point). H24 wants `pm:queue` AND assigned (leg (b) is
+// the EMPTY field, and leg (a) needs no label at all). None of them can see a
+// `Release:` line, because none of them compares two comments.
+//
+// ⛔ Leg (b) declines a card that also carries `pm:dispatched`: that pair is
+// H3's contradiction, and a card the board still reads as in flight has not
+// exited anything. Inventing an exit for it would manufacture a second finding
+// out of the first.
+//
+// ## Recency is `created_at` with a THREAD-ORDER fallback
+//
+// `governingClaim`'s and `latestSeatMarker`'s resolution, reused rather than
+// re-derived, and for their reason: an unparseable stamp must not silently
+// promote an older comment to "latest". Comment IDs were the alternative and
+// are NOT used — they are monotonic in practice but nothing in the protocol or
+// the API documents them as an ordering, and a second ordering rule in a file
+// that already has one is a drift waiting to happen. Where both stamps read,
+// the timestamps decide; where either does not, or where they are EQUAL (two
+// comments in the same second is exactly the shape a hurried release makes),
+// thread order decides.
+// ---------------------------------------------------------------------------
+
+/**
+ * The NEWEST comment on a thread whose body carries `marker`.
+ *
+ * Shared by both of H47's legs so the claim side and the release side can never
+ * be resolved by two different rules — the failure `CLAIM_COMMENT_MARKER`'s own
+ * note names, one level up.
+ *
+ * @param {{ body?: string, created_at?: string }[]} commentRows — REST rows,
+ *   NOT bodies: this row compares two comments and needs their stamps.
+ * @param {RegExp} marker — `CLAIM_COMMENT_MARKER` or `RELEASE_COMMENT_MARKER`.
+ *   Both are `g`-less on purpose, so `.test` here carries no `lastIndex`.
+ * @returns {{ createdAt: string|null, stamp: number|null, index: number } | null}
+ */
+export function latestMarkedComment(commentRows, marker) {
+  const rows = Array.isArray(commentRows) ? commentRows : [];
+  let best = null;
+  rows.forEach((row, index) => {
+    if (!marker.test(String(row?.body ?? ''))) return;
+    const parsed = Date.parse(row?.created_at ?? '');
+    const stamp = Number.isFinite(parsed) ? parsed : null;
+    const candidate = { createdAt: row?.created_at ?? null, stamp, index };
+    if (best === null) {
+      best = candidate;
+      return;
+    }
+    const newer = stamp === null || best.stamp === null ? index > best.index : stamp >= best.stamp;
+    if (newer) best = candidate;
+  });
+  return best;
+}
+
+/**
+ * Does `release` ANSWER `claim` — i.e. is the release the later record?
+ *
+ * Three-way, deliberately: no release at all is `false` (leg (b)'s shape), and
+ * a release with no claim before it is `true` (the record says the card was let
+ * go and the thread never says it was taken — a release still stands as the
+ * newest word on ownership, and leg (a) is right to fire on it while the field
+ * is set).
+ */
+export function releaseAnswersClaim(release, claim) {
+  if (!release) return false;
+  if (!claim) return true;
+  if (release.stamp !== null && claim.stamp !== null && release.stamp !== claim.stamp) {
+    return release.stamp > claim.stamp;
+  }
+  return release.index > claim.index;
+}
+
+/**
+ * Which cards this row can speak about AT ALL — exported for the reason every
+ * gathering policy here is: the predicate that decides what is even counted is
+ * where a silent hole would live.
+ *
+ * It buys nothing (this row has no fetch), so it is a COUNTING policy rather
+ * than a fetching one, and that is exactly what makes it worth exporting: the
+ * summary's coverage pair is `judged of these`, and a population that quietly
+ * shrank would make a thinning corpus read as a clean board.
+ */
+export function h47SpeaksAbout(issue) {
+  if (issue?.state === 'closed') return false;
+  const labels = labelNames(issue ?? {});
+  const assigned =
+    (issue?.assignees ?? []).map((a) => (typeof a === 'string' ? a : a?.login)).filter(Boolean)
+      .length > 0;
+  if (assigned) return true;
+  return labels.includes('pm:queue') && !labels.includes('pm:dispatched');
+}
+
+/**
+ * H47 — null when clean OR unjudged, else the finding sentence.
+ *
+ * Three input states, never two (#4690), and they are the H4 contract verbatim:
+ *
+ *   undefined  the thread was never consulted — no row bought it. UNJUDGED.
+ *   null       the thread was consulted and could not be read. UNJUDGED.
+ *   rows       judged.
+ *
+ * The two UNJUDGED states return `null` like a clean card because the sweep has
+ * exactly one channel for "no row here"; what keeps them apart from clean is
+ * the coverage pair on the summary line, which counts the cards this row could
+ * speak about against the ones it actually had a thread for.
+ */
+export function h47ReleaseRecordDesync(issue, commentRows) {
+  if (commentRows === undefined || commentRows === null) return null;
+  if (!h47SpeaksAbout(issue)) return null;
+  const rows = Array.isArray(commentRows) ? commentRows : [];
+  const logins = (issue?.assignees ?? [])
+    .map((a) => (typeof a === 'string' ? a : a?.login))
+    .filter(Boolean);
+  const claim = latestMarkedComment(rows, CLAIM_COMMENT_MARKER);
+  const release = latestMarkedComment(rows, RELEASE_COMMENT_MARKER);
+  const released = releaseAnswersClaim(release, claim);
+
+  if (logins.length > 0) {
+    if (!released) return null;
+    return (
+      `a \`Release:\` line posted AFTER the last \`Claim:\` while the card is STILL ASSIGNED to ` +
+      `${logins.map((l) => `\`${l}\``).join(', ')} — a half-done release: the record was written ` +
+      'and the field was not cleared. The protocol makes the two ONE write — 「释放是显式动作:让卡' +
+      '离手者同笔清 assignee + `Release:` 行(会话/因/去向);下一任重新认领。」 — so the board still ' +
+      'reads TAKEN (⛔ never reassign) on a card whose own thread says its owner has left, and the ' +
+      'next seat has no lawful way to pick it up. Remedy: FINISH the release by clearing the ' +
+      'assignee, or, if the card was re-taken after that line, post a fresh `Claim:` so the newest ' +
+      'record and the field agree. ⚠️ Asymmetric, as H24: an agent identity may be cleared on the ' +
+      'evidence of its own `Release:` line; a HUMAN assignment may be real ownership and ⛔ must ' +
+      'never be cleared by an agent — take it to the maintainer. Report-only patrol INPUT: nothing ' +
+      'here is blocked and no label is written.'
+    );
+  }
+
+  if (!claim || released) return null;
+  return (
+    '`pm:queue` with NO assignee and a `Claim:` that no later `Release:` answers — an exit that ' +
+    'left no record. Nothing on the card contradicts anything, which is the difficulty: ' +
+    '「`pm:queue` 卡恒无 assignee,有即半态」 makes the empty field the LAWFUL shape, so the board ' +
+    "reads clean while the thread's last word on ownership is still a claim — and no reader can " +
+    'tell whether the card was released, re-taken by the same seat, or dropped. The protocol asks ' +
+    'for the record in the same stroke as the field — 「释放是显式动作:让卡离手者同笔清 assignee ' +
+    '+ `Release:` 行(会话/因/去向);下一任重新认领。」 — and the dead-claim route says it again on ' +
+    'the way back to the queue: 「释放回队(`Release:` 行载因)」. Remedy: the session that let the ' +
+    'card go posts the missing `Release:` line (会话/因/去向). ⚠️ LOWER BOUND, twice over, and ' +
+    'neither half is fixable from here: this row fetches NOTHING, so a card whose thread no other ' +
+    'row bought is UNJUDGED rather than clean, and a card that was NEVER claimed is clean and ' +
+    'looks identical to an exit nobody wrote down. Silence on this leg is an unread surface, not ' +
+    'a quiet board. Report-only patrol INPUT: nothing here is blocked and no label is written.'
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Report rendering — pure over (findings, counts), so `--self-test` pins both
 // media offline. The live sweep below picks a renderer and prints it; nothing
 // about WHAT is swept or WHICH predicates fire depends on the format.
@@ -8754,6 +8989,13 @@ export const SWEEP_COUNT_KEYS = [
   // with nothing to judge.
   'epicParentCandidates',
   'epicParentProbed',
+  // H47's coverage pair (#15884). `releaseCandidates` is how many open cards
+  // the row could speak about at all (`h47SpeaksAbout`) and `releaseJudged` how
+  // many of those had a comment thread ALREADY in hand — this row buys none, so
+  // the pair is the ONLY thing separating "no half-done release on the board"
+  // from "almost nothing was read".
+  'releaseCandidates',
+  'releaseJudged',
   'commits',
   'commitBindings',
   'commitBindingMessages',
@@ -9116,6 +9358,16 @@ export function summaryLine(counts, findingCount) {
     'That index is enumerated as its own population and kept OUT of the label pages every other row is ' +
     'judged over (`SEEN_LABEL_PAGES`), so this row buys one page plus one read per carrier and moves no ' +
     "other row's input. A carrier whose parent read did not answer is UNJUDGED rather than clean. " +
+    // H47's coverage pair. UNCONDITIONAL like every other window's, and it
+    // carries the disclosure this row owes above its own count: it buys NO
+    // fetch, so its corpus is whatever other rows already read, and the
+    // `pm:queue` leg is the thin half of that by construction.
+    `Release records (H47): ${counts.releaseJudged ?? 0} of ${counts.releaseCandidates ?? 0} ` +
+    'card(s) this row can speak about had a comment thread ALREADY in hand to judge. It fetches ' +
+    'NOTHING of its own, so a card whose thread no other row bought is UNJUDGED rather than clean, ' +
+    'and the no-assignee `pm:queue` leg is the thinnest half of that corpus — H2 buys a thread ' +
+    'only for an ASSIGNED card. A card that was never claimed is clean and indistinguishable from ' +
+    'an exit nobody recorded, so this count is a LOWER BOUND. ' +
     `Report-only: findings are patrol input, not a gate verdict.`
   );
 }
@@ -9166,6 +9418,7 @@ export const SUMMARY_CLAUSE_ANCHORS = [
   ['h44Readings', 'Untimestamped readings (H44): '],
   ['h46Claimless', 'Claim-less implementations (H46): '],
   ['h45EpicParents', 'Epic parent reads (H45): '],
+  ['h47Release', 'Release records (H47): '],
   ['reportOnly', 'Report-only: '],
 ];
 
@@ -9531,6 +9784,7 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   H44: 'state',
   H45: 'state',
   H46: 'state',
+  H47: 'state',
 
   H5: 'inventory',
   H6: 'inventory',
@@ -12235,6 +12489,31 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
         lastHoldError = err;
       }
     }
+
+    // H47 (#15884) — the release record against the assignee field. A card-level
+    // row like H1 and H24 above, and judged over the SAME cards, but it lands at
+    // the FOOT of this iteration on purpose: it reads the thread out of
+    // `commentCache`, which is where H2's claim fetch (and H4's, H9's, H17's,
+    // H32's) lands its rows, and every one of those gates runs above this line.
+    // Judged beside H1/H24 at the top instead, the cache would be empty for this
+    // card on every iteration and the row would report UNJUDGED forever while
+    // looking perfectly healthy — the #4690 shape, self-inflicted by placement.
+    //
+    // ⛔ It buys NOTHING: `commentCache.get` never fetches, so a card no other
+    // row needed a thread for stays UNJUDGED (`undefined`) rather than clean.
+    // That is the whole cost story, and the coverage pair below is what makes it
+    // legible — without it a corpus of two cards and a clean board render the
+    // same way. ⚠️ `releaseCandidates` counts the cards this row COULD speak
+    // about, not the cards it did: the gap between the two numbers is the
+    // report, and the `pm:queue` leg lives almost entirely inside that gap
+    // (H2 buys a thread only for an ASSIGNED card, leg (b)'s exact complement).
+    if (h47SpeaksAbout(issue)) {
+      stats.releaseCandidates = (stats.releaseCandidates ?? 0) + 1;
+      const releaseRows = commentCache.get(issue.number);
+      if (releaseRows !== undefined) stats.releaseJudged = (stats.releaseJudged ?? 0) + 1;
+      const releaseDesync = h47ReleaseRecordDesync(issue, releaseRows);
+      if (releaseDesync) findings.push([issue, 'H47', releaseDesync]);
+    }
   }
 
   // …but if NO hold comment could be read at all, the index would render as
@@ -13134,6 +13413,13 @@ function selfTest() {
     body,
     title,
   });
+  // `.claude/skills/pm-dispatch/SKILL.md` line 465, VERBATIM — one constant so
+  // the two rows that quote it (H24's remedy, H47's both legs) are pinned
+  // against the SAME bytes. Rewriting a maintainer's line is rewriting the
+  // ruling, and a quote that drifts from its source in one row while the other
+  // holds is exactly the drift a shared constant cannot express.
+  const RELEASE_RULE_LINE =
+    '释放是显式动作:让卡离手者同笔清 assignee + `Release:` 行(会话/因/去向);下一任重新认领。';
 
   // -- Row-text wrappers: every message assertion goes through one -----------
   //
@@ -16448,7 +16734,10 @@ function selfTest() {
   // the sentence carries the asymmetric remedy rather than an exemption.
   t('H24: a human assignment still fires (exemption is a later explicit marker)', typeof h24QueuedWithAssignee(queued(['pm:queue'], ['yinlianghui'])), 'string');
   t('H24: …and the row refuses the human-clearing write', h24row(queued(['pm:queue'], ['yinlianghui'])).includes('never be cleared by an agent'), true);
-  t('H24: …and names the paired write it is owed', h24row(queued(['pm:queue'], ['os-elon'])).includes('同笔摘 assignee'), true);
+  t('H24: …and names the release act it is owed, in the spelling that LANDED', h24row(queued(['pm:queue'], ['os-elon'])).includes('同笔清 assignee'), true);
+  t('H24: …quoting the rule line unbroken, so the quote stays checkable against SKILL.md', h24row(queued(['pm:queue'], ['os-elon'])).includes(RELEASE_RULE_LINE), true);
+  t('H24: …and names the OTHER lawful exit, so the remedy is not one-way', h24row(queued(['pm:queue'], ['os-elon'])).includes('RE-CLAIM'), true);
+  t('H24: …and reads the state model as a DEFINITION, not a habit', h24row(queued(['pm:queue'], ['os-elon'])).includes('`pm:queue` 卡恒无 assignee,有即半态'), true);
   t('H24: …and names both contradicting readers', h24row(queued(['pm:queue'], ['os-elon'])).includes('dispatchable NOW'), true);
   // The closed gate, in mirror image to H22's open gate: one card, one row.
   t('H24: a CLOSED queued+assigned card is H22 residue, not this row', h24QueuedWithAssignee(queued(['pm:queue'], ['os-elon'], { state: 'closed' })), null);
@@ -18628,6 +18917,121 @@ Mutual exclusion: \`get_comments\` page 747 → \`[]\`, page 746 = my own R+117 
   t('H46 summary: the clause is rendered on EVERY run, not just interesting ones', saidBy('h46Claimless', summaryLine({}, 0)).includes('0 of 0'), true);
   t('H46 summary: …and says an unresolvable binding is unjudged, not clean', saidBy('h46Claimless', summaryLine({}, 0)).includes('UNJUDGED rather than clean'), true);
   t('H46 summary: a bare line renders numbers, never `undefined`', saidBy('h46Claimless', summaryLine({}, 0)).includes('undefined'), false);
+
+  // -- H47 — the release record against the assignee field (#15884) ----------
+  // The rule landed on 2026-09-05 and NO card on any board carries a
+  // `Release:` line yet, so the live sweep reads 0 findings on both legs. These
+  // cases are therefore the ONLY thing that pins the row's behaviour, and they
+  // are written to carry the shapes a live board will eventually produce rather
+  // than the shapes it has today.
+  const REL_CLAIM = 'Claim: PM loop round R7\nSession: `session_x`\nBranch: `claude/issue-15884-x`';
+  const REL_RELEASE = 'Release: session `session_x` — premise falsified; back to `pm:queue`';
+  const cm47 = (body, at) => ({ body, created_at: at });
+  const card47 = (labels, assignees = [], extra = {}) => ({
+    number: 15884,
+    state: 'open',
+    labels: labels.map((name) => ({ name })),
+    assignees: assignees.map((login) => ({ login })),
+    body: '',
+    title: '',
+    ...extra,
+  });
+  const h47row = (...args) => String(h47ReleaseRecordDesync(...args) ?? '');
+  const T1 = '2026-09-05T10:00:00Z';
+  const T2 = '2026-09-05T11:00:00Z';
+  const CLAIM_THEN_RELEASE = [cm47(REL_CLAIM, T1), cm47(REL_RELEASE, T2)];
+  const RELEASE_THEN_CLAIM = [cm47(REL_RELEASE, T1), cm47(REL_CLAIM, T2)];
+
+  // Leg (a) — the record without the field: released on the thread, still assigned.
+  t('H47 (a): a `Release:` newer than the last `Claim:` while assigned -> finding', typeof h47ReleaseRecordDesync(card47(['pm:dispatched'], ['os-elon']), CLAIM_THEN_RELEASE), 'string');
+  t('H47 (a): …and the row names the login still holding the field', h47row(card47(['pm:dispatched'], ['os-elon']), CLAIM_THEN_RELEASE).includes('`os-elon`'), true);
+  t('H47 (a): …every assignee, not just the first', h47row(card47(['pm:dispatched'], ['os-elon', 'qq9340100']), CLAIM_THEN_RELEASE).includes('`qq9340100`'), true);
+  t('H47 (a): …and quotes the landed rule line UNBROKEN', h47row(card47(['pm:dispatched'], ['os-elon']), CLAIM_THEN_RELEASE).includes(RELEASE_RULE_LINE), true);
+  t('H47 (a): …and states its report-only posture', h47row(card47(['pm:dispatched'], ['os-elon']), CLAIM_THEN_RELEASE).includes('Report-only patrol INPUT'), true);
+  t('H47 (a): …and refuses the human-clearing write, as H24 does', h47row(card47(['pm:dispatched'], ['yinlianghui']), CLAIM_THEN_RELEASE).includes('never be cleared by an agent'), true);
+  t('H47 (a): …and names re-claiming as the other lawful repair', h47row(card47(['pm:dispatched'], ['os-elon']), CLAIM_THEN_RELEASE).includes('post a fresh `Claim:`'), true);
+  t('H47 (a): a release with NO claim before it is still the newest word on ownership', typeof h47ReleaseRecordDesync(card47(['pm:dispatched'], ['os-elon']), [cm47(REL_RELEASE, T1)]), 'string');
+  t('H47 (a): the documented blockquote spelling reads the same', typeof h47ReleaseRecordDesync(card47(['pm:dispatched'], ['os-elon']), [cm47(REL_CLAIM, T1), cm47(`> ${REL_RELEASE}`, T2)]), 'string');
+  t('H47 (a): the label is irrelevant — an assigned card with no pm label fires too', typeof h47ReleaseRecordDesync(card47([], ['os-elon']), CLAIM_THEN_RELEASE), 'string');
+  t('H47 (a): assignees given as plain logins are read too', typeof h47ReleaseRecordDesync({ ...card47(['pm:dispatched']), assignees: ['os-elon'] }, CLAIM_THEN_RELEASE), 'string');
+
+  // The clean shapes, pinned as cases — each is a lawful board state.
+  t('H47 clean: a `Release:` OLDER than the last `Claim:` is a RE-CLAIM after release', h47ReleaseRecordDesync(card47(['pm:dispatched'], ['os-elon']), RELEASE_THEN_CLAIM), null);
+  t('H47 clean: released AND the field cleared is the whole act, done', h47ReleaseRecordDesync(card47(['pm:queue'], []), CLAIM_THEN_RELEASE), null);
+  t('H47 clean: a `pm:dispatched` card with a `Claim:` and no `Release:` is in flight', h47ReleaseRecordDesync(card47(['pm:dispatched'], ['os-elon']), [cm47(REL_CLAIM, T1)]), null);
+  t('H47 clean: …and so is the same card with no assignee — that is H1\'s row, not this one', h47ReleaseRecordDesync(card47(['pm:dispatched'], []), [cm47(REL_CLAIM, T1)]), null);
+  t('H47 clean: an unassigned `pm:queue` card that was NEVER claimed', h47ReleaseRecordDesync(card47(['pm:queue'], []), [cm47('looks good to me', T1)]), null);
+  t('H47 clean: …and an empty thread, likewise', h47ReleaseRecordDesync(card47(['pm:queue'], []), []), null);
+
+  // Leg (b) — the field without the record: the exit that left nothing behind.
+  t('H47 (b): `pm:queue`, no assignee, a `Claim:` and no later `Release:` -> finding', typeof h47ReleaseRecordDesync(card47(['pm:queue'], []), [cm47(REL_CLAIM, T1)]), 'string');
+  t('H47 (b): …stated as the LOWER BOUND it is', h47row(card47(['pm:queue'], []), [cm47(REL_CLAIM, T1)]).includes('LOWER BOUND'), true);
+  t('H47 (b): …naming BOTH reasons it is one, not just the unread corpus', h47row(card47(['pm:queue'], []), [cm47(REL_CLAIM, T1)]).includes('NEVER claimed is clean'), true);
+  t('H47 (b): …and quotes the definition that makes the empty field look lawful', h47row(card47(['pm:queue'], []), [cm47(REL_CLAIM, T1)]).includes('`pm:queue` 卡恒无 assignee,有即半态'), true);
+  t('H47 (b): …and quotes the dead-claim route saying it again', h47row(card47(['pm:queue'], []), [cm47(REL_CLAIM, T1)]).includes('释放回队(`Release:` 行载因)'), true);
+  t('H47 (b): a `Release:` older than the last `Claim:` leaves the claim as the last word', typeof h47ReleaseRecordDesync(card47(['pm:queue'], []), RELEASE_THEN_CLAIM), 'string');
+  t('H47 (b): ⛔ a card ALSO carrying `pm:dispatched` is H3\'s contradiction, not an exit', h47ReleaseRecordDesync(card47(['pm:queue', 'pm:dispatched'], []), [cm47(REL_CLAIM, T1)]), null);
+  t('H47 (b): …and H3 does fire on that same card, so nothing goes unreported', h3QueueAndDispatched(card47(['pm:queue', 'pm:dispatched'], [])), true);
+
+  // Three input states, never two (#4690) — the H4 contract, unchanged here.
+  t('H47: an unconsulted thread is UNJUDGED, never clean', h47ReleaseRecordDesync(card47(['pm:queue'], []), undefined), null);
+  t('H47: an UNREADABLE thread is UNJUDGED too', h47ReleaseRecordDesync(card47(['pm:dispatched'], ['os-elon']), null), null);
+  t('H47: a CLOSED card is beyond this report\'s reach (H22 residue)', h47ReleaseRecordDesync(card47(['pm:queue'], [], { state: 'closed' }), [cm47(REL_CLAIM, T1)]), null);
+  t('H47: an absent state field is judged, not exempted', typeof h47ReleaseRecordDesync({ ...card47(['pm:queue'], []), state: undefined }, [cm47(REL_CLAIM, T1)]), 'string');
+  t('H47: a missing issue does not crash', h47ReleaseRecordDesync(undefined, [cm47(REL_CLAIM, T1)]), null);
+
+  // The marker. Same strictness as the claim marker, and no wider.
+  t('release marker: the canonical spelling matches', RELEASE_COMMENT_MARKER.test('Release: session `session_x` — 因/去向'), true);
+  t('release marker: a blockquoted release matches, as a claim does', RELEASE_COMMENT_MARKER.test('> Release: session `session_x`'), true);
+  t('release marker: whitespace before the colon is tolerated, as at the claim marker', RELEASE_COMMENT_MARKER.test('Release : session `session_x`'), true);
+  t('release marker: it must BEGIN the line — prose about releasing is not a record', RELEASE_COMMENT_MARKER.test('We will release: tomorrow'), false);
+  t('release marker: ⛔ `Released:` is a MALFORMED release, not a dialect', RELEASE_COMMENT_MARKER.test('Released: session `session_x`'), false);
+  t('release marker: ⛔ the FULLWIDTH colon does not match, exactly as at the claim marker', RELEASE_COMMENT_MARKER.test('Release：session `session_x`'), false);
+  t('release marker: no `g` flag, so two reads of one body agree', [RELEASE_COMMENT_MARKER.test(REL_RELEASE), RELEASE_COMMENT_MARKER.test(REL_RELEASE)].join(','), 'true,true');
+  t('release marker: a `Claim:` line is not a release', RELEASE_COMMENT_MARKER.test(REL_CLAIM), false);
+  t('release marker: …and a `Release:` line is not a claim', CLAIM_COMMENT_MARKER.test(REL_RELEASE), false);
+
+  // Ordering: `created_at` first, THREAD ORDER as the fallback — `governingClaim`'s
+  // resolution, reused so the two readers can never disagree about "latest".
+  t('H47 order: the timestamp decides when both stamps read', releaseAnswersClaim({ stamp: 2, index: 0 }, { stamp: 1, index: 9 }), true);
+  t('H47 order: …in the other direction too', releaseAnswersClaim({ stamp: 1, index: 9 }, { stamp: 2, index: 0 }), false);
+  t('H47 order: an unreadable stamp falls back to thread order, never to "newest"', releaseAnswersClaim({ stamp: null, index: 1 }, { stamp: 5, index: 0 }), true);
+  t('H47 order: …and the fallback can decline as well as fire', releaseAnswersClaim({ stamp: null, index: 0 }, { stamp: 5, index: 1 }), false);
+  t('H47 order: EQUAL stamps (one second, two writes) fall back to thread order', releaseAnswersClaim({ stamp: 7, index: 1 }, { stamp: 7, index: 0 }), true);
+  t('H47 order: no release at all never answers a claim', releaseAnswersClaim(null, { stamp: 1, index: 0 }), false);
+  t('H47 order: a release with no claim behind it does', releaseAnswersClaim({ stamp: 1, index: 0 }, null), true);
+  t('H47 order: an unreadable release stamp is judged by thread order end to end', typeof h47ReleaseRecordDesync(card47(['pm:dispatched'], ['os-elon']), [cm47(REL_CLAIM, 'not-a-date'), cm47(REL_RELEASE, 'not-a-date')]), 'string');
+  t('H47 order: …and the reverse thread order goes clean', h47ReleaseRecordDesync(card47(['pm:dispatched'], ['os-elon']), [cm47(REL_RELEASE, 'not-a-date'), cm47(REL_CLAIM, 'not-a-date')]), null);
+  t('H47 latest: the NEWEST claim governs, not the first', latestMarkedComment(RELEASE_THEN_CLAIM, CLAIM_COMMENT_MARKER).index, 1);
+  t('H47 latest: a thread with no marker at all yields null', latestMarkedComment([cm47('looks good', T1)], RELEASE_COMMENT_MARKER), null);
+  t('H47 latest: a non-array input is not a crash', latestMarkedComment(undefined, RELEASE_COMMENT_MARKER), null);
+
+  // The counting policy — exported because a population that quietly shrinks
+  // makes a thinning corpus read as a clean board.
+  t('H47 population: an assigned card is always in scope', h47SpeaksAbout(card47(['pm:dispatched'], ['os-elon'])), true);
+  t('H47 population: …and an unassigned `pm:queue` card is, for leg (b)', h47SpeaksAbout(card47(['pm:queue'], [])), true);
+  t('H47 population: ⛔ an unassigned `pm:queue` + `pm:dispatched` card is not', h47SpeaksAbout(card47(['pm:queue', 'pm:dispatched'], [])), false);
+  t('H47 population: ⛔ an unassigned `pm:dispatched` card is H1\'s, not this row\'s', h47SpeaksAbout(card47(['pm:dispatched'], [])), false);
+  t('H47 population: ⛔ a closed card is out of scope', h47SpeaksAbout(card47(['pm:queue'], ['os-elon'], { state: 'closed' })), false);
+
+  // Adjacency: the neighbours stay silent on leg (a)'s carrier, which is why it
+  // needed a row of its own.
+  t('H47 adjacency: H1 is silent (the card HAS an assignee)', h1DispatchedNoAssignee(card47(['pm:dispatched'], ['os-elon'])), false);
+  t('H47 adjacency: H2 is silent (the claim comment is complete)', h2AssigneeNoClaimComment(card47(['pm:dispatched'], ['os-elon']), [REL_CLAIM, REL_RELEASE]), false);
+  t('H47 adjacency: H24 is silent (the card is not `pm:queue`)', h24QueuedWithAssignee(card47(['pm:dispatched'], ['os-elon'])), null);
+  t('H47 adjacency: …and on leg (b)\'s carrier H24 is silent too (the field is empty)', h24QueuedWithAssignee(card47(['pm:queue'], [])), null);
+
+  // Registry, counters and the clause.
+  t('H47 band: registered as a state row', familyBand('H47'), 'state');
+  t('H47 band: …and the sweep really pushes it, so the registry sees it', familyRegistryCoverage().emitted.includes('H47'), true);
+  t('H47 band: no code is left unregistered by this change', familyRegistryCoverage().missing.length, 0);
+  t('H47: both count keys ride the enumerated forwarding contract', ['releaseCandidates', 'releaseJudged'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
+  t('H47 summary: the coverage pair is reported', saidBy('h47Release', summaryLine({ releaseJudged: 3, releaseCandidates: 40 }, 0)).includes('3 of 40 '), true);
+  t('H47 summary: the clause is rendered on EVERY run, not just interesting ones', saidBy('h47Release', summaryLine({}, 0)).includes('0 of 0'), true);
+  t('H47 summary: …and says an unread thread is UNJUDGED, not clean', saidBy('h47Release', summaryLine({}, 0)).includes('UNJUDGED rather than clean'), true);
+  t('H47 summary: …and names the thin half of its own corpus', saidBy('h47Release', summaryLine({}, 0)).includes('only for an ASSIGNED card'), true);
+  t('H47 summary: …and says the count is a LOWER BOUND', saidBy('h47Release', summaryLine({}, 0)).includes('LOWER BOUND'), true);
+  t('H47 summary: a bare line renders numbers, never `undefined`', saidBy('h47Release', summaryLine({}, 0)).includes('undefined'), false);
 
   // -- The `[::]` collapse (#12090): behaviour-preserving, asserted as such ---
   // The class held U+003A TWICE, never the fullwidth U+FF1A its shape implied.

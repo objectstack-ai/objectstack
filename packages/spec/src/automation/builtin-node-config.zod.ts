@@ -79,7 +79,7 @@
  */
 
 import { z } from 'zod';
-import { ExpressionSchema } from '../shared/expression.zod';
+import { EvaluatedExpressionSchema } from '../shared/expression.zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
 import { isExpressionEnvelopeShaped } from './flow-node-expression-paths';
@@ -654,15 +654,20 @@ export const ASSIGNMENT_VALUE_ENVELOPE_REFUSAL =
  *
  * The envelope is the spelling `shared/expression.zod.ts` already defines and
  * `validateExpression` already reads — not a second one: `ExpressionSchema`
- * itself, `safeExtend`ed (the form Zod reserves for a refined object, keeping
- * its `source`-or-`ast` rule) with the one key narrowed, at the type level too
- * (`dialect: 'cel'`, so a `template` envelope is a compile error before it is
- * a parse error). `validateExpression('value', …)` refuses a `template` or
- * `cron` envelope in a value slot ("expected a CEL expression but got a …
- * dialect"), so the contract refuses it here, at authoring, with the same
- * verdict — and refuses the one shape that validator lets through: an envelope
- * with no `source` reads as "not authored" there (`ok: true`), so this parse
- * is the only gate that catches `{ dialect: 'cel' }` before it is stored.
+ * in its EVALUATED form (`EvaluatedExpressionSchema` — this slot's value is
+ * run by the expression engine, so `source` is required and non-blank, the
+ * one rule both spellings of that seam are refused by), `safeExtend`ed (the
+ * form Zod reserves for a refined object, keeping its rules) with the one
+ * further key narrowed, at the type level too (`dialect: 'cel'`, so a
+ * `template` envelope is a compile error before it is a parse error).
+ * `validateExpression('value', …)` refuses a `template` or `cron` envelope in
+ * a value slot ("expected a CEL expression but got a … dialect"), so the
+ * contract refuses it here, at authoring, with the same verdict — and refuses
+ * the shapes that validator lets through: an envelope with no `source`
+ * (`{ dialect: 'cel' }` and the `ast`-only envelope alike) reads as "not
+ * authored" there (`ok: true`), and a whitespace-only `source` trims to the
+ * same answer while the engine parses it untrimmed and faults. This parse is
+ * the gate that catches every one of them before it is stored.
  *
  * A bare string is deliberately NOT accepted as CEL shorthand the way
  * `ExpressionInputSchema` accepts it elsewhere: in an assignment value a plain
@@ -670,7 +675,7 @@ export const ASSIGNMENT_VALUE_ENVELOPE_REFUSAL =
  * kept. The envelope is the only CEL spelling in this slot — which is exactly
  * what lets the two forms coexist without a mode switch.
  */
-export const AssignmentExpressionValueSchema = ExpressionSchema
+export const AssignmentExpressionValueSchema = EvaluatedExpressionSchema
   .safeExtend({
     dialect: z.literal('cel', {
       error: () =>
@@ -706,9 +711,10 @@ export type AssignmentExpressionValueParsed = z.infer<typeof AssignmentExpressio
  * a `dialect` is an envelope ({@link isExpressionEnvelopeShaped}) and must be a
  * valid one, everything else is what it always was. That is the preservation
  * half of the contract — every value that parsed before #14149 still parses,
- * and the only newly refused shape is a malformed envelope (`{ dialect: 'cel' }`
- * with no `source`, an empty `source`, a non-`cel` dialect), which used to be
- * stored verbatim as a literal object and then rendered by `notify` as JSON.
+ * and the only newly refused shape is a malformed envelope (no `source` —
+ * `{ dialect: 'cel' }` and an `ast`-only envelope alike — a blank `source`, a
+ * non-`cel` dialect), which used to be stored verbatim as a literal object and
+ * then rendered by `notify` as JSON.
  *
  * `.meta({ xExpression: 'value' })` is the declaration channel the expression
  * ledger reads for this slot (`FLOW_NODE_EXPRESSION_PATHS`'s `assignment`

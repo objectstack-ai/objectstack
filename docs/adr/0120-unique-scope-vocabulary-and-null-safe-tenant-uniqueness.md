@@ -443,7 +443,7 @@ split this ADR exists to close (PD #10):
    enforcement — the #5030 probe graduates into this suite), and for D2 (nine-key
    inventory unchanged). The *"`'global'` is a synonym of `true`"* pin retires at 18
    together with bare `true`.
-7. ADR anchors: `scripts/adr-anchors.json` entries for `normalizeDeclaredIndex`,
+7. ADR anchors: `scripts/adr-anchors/` entries for `normalizeDeclaredIndex`,
    `uniqueIndexesFromFields`, the conversion entry, and R10/R-new (PD #13 corollary —
    leave the id in the code).
 
