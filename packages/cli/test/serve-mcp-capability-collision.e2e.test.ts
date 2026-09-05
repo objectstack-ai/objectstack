@@ -52,6 +52,7 @@ import {
   E2E_SECRET_KEY,
   RUN_JS_RESOLVES_FROM_DIST,
   childEnv,
+  probeThroughChild,
   randomPort,
   requireBuiltCli,
 } from './helpers/serve-process.js';
@@ -141,6 +142,15 @@ let apiKey: string;
  * assertions below look for arrives on stderr.
  */
 let bootOutput = '';
+/**
+ * The boot's stdout. Kept alongside {@link bootOutput} for #15653's transcript:
+ * `serve` keeps stdout clear for the MCP stdio transport, so it is normally
+ * empty — and that is exactly why a crash that DOES land on it must not be the
+ * one thing a failure message cannot show.
+ */
+let bootStdout = '';
+/** The serving child every probe below is addressed to, for #15653's fate read. */
+let serveChild: ChildProcessWithoutNullStreams | undefined;
 const children: ChildProcessWithoutNullStreams[] = [];
 
 function boot(env: Record<string, string | undefined>, waitFor: RegExp): Promise<ChildProcessWithoutNullStreams> {
@@ -214,6 +224,7 @@ function boot(env: Record<string, string | undefined>, waitFor: RegExp): Promise
 
     const onOutput = () => {
       bootOutput = err;
+      bootStdout = out;
       if (settled) return;
       // ⭐ #12526: the child is the authority on which port it bound, so read it
       // back before handing this boot to assertions that will use `port`.
@@ -333,17 +344,61 @@ async function stop(child: ChildProcessWithoutNullStreams): Promise<void> {
   });
 }
 
-/** POST a JSON-RPC frame to the HTTP MCP transport with the minted key. */
-async function rpc(method: string, params: unknown, id: number): Promise<Response> {
-  return fetch(`${base}/mcp`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      // The transport negotiates both; SSE is what an MCP client sends.
-      accept: 'application/json, text/event-stream',
-      authorization: `Bearer ${apiKey}`,
+/**
+ * ⭐ #15653. `boot()`'s `child.on('exit')` handler feeds the READINESS promise
+ * ONLY — it returns early once `settled` — so a death AFTER readiness is
+ * invisible to it, and every request in this file used to reach vitest as a bare
+ * `TypeError: fetch failed` with no exit code, no stdout and no stderr.
+ * `probeThroughChild()` is where the child's fate is read instead; its own
+ * section in `helpers/serve-process.ts` carries the measurement, the bound and
+ * the fences (⛔ no skip, no quarantine, no timeout bump).
+ *
+ * The transcript is read at THROW time, so a failure carries what the child
+ * printed on its way down rather than the buffer as it stood at ready.
+ *
+ * ⛔ An ASSERTION must never go inside `request`: the guard reads any throw as a
+ * transport failure, so a wrong answer would be reported as a dropped socket.
+ */
+function probe<T>(what: string, request: () => Promise<T>): Promise<T> {
+  if (!serveChild) throw new Error('probe() called before the serving child was booted');
+  return probeThroughChild(
+    {
+      child: serveChild,
+      transcript: () =>
+        `\n--- child stdout ---\n${bootStdout}\n--- child stderr ---\n${bootOutput}`,
+      label: 'serve-mcp-capability-collision',
+      what: `${what} on port ${port}`,
     },
-    body: JSON.stringify({ jsonrpc: '2.0', id, method, params }),
+    request,
+  );
+}
+
+/**
+ * POST a JSON-RPC frame to the HTTP MCP transport with the minted key, and read
+ * its answer back.
+ *
+ * ⛔ The frame read is INSIDE the guard on purpose: an SSE stream torn down
+ * mid-body rejects out of `res.text()` rather than out of `fetch()`, and a
+ * helper that returned the bare `Response` would leave that half unattributed.
+ * `readFrame()` itself cannot throw — it swallows parse errors by design.
+ */
+async function rpc(
+  method: string,
+  params: unknown,
+  id: number,
+): Promise<{ status: number; frame: Record<string, unknown> | undefined }> {
+  return probe(`the JSON-RPC \`${method}\` probe`, async () => {
+    const res = await fetch(`${base}/mcp`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        // The transport negotiates both; SSE is what an MCP client sends.
+        accept: 'application/json, text/event-stream',
+        authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({ jsonrpc: '2.0', id, method, params }),
+    });
+    return { status: res.status, frame: await readFrame(res, id) };
   });
 }
 
@@ -381,24 +436,34 @@ describe('#7652: an app loading the MCP client connector still gets the MCP serv
     port = randomPort();
     base = `http://localhost:${port}/api/v1`;
 
-    await boot({ OS_DATABASE_URL: join(dir, 'probe.db') }, /Server is ready/);
+    serveChild = await boot({ OS_DATABASE_URL: join(dir, 'probe.db') }, /Server is ready/);
 
-    const signIn = await fetch(`${base}/auth/sign-in/email`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ email: 'admin@objectos.ai', password: 'admin123' }),
+    const signIn = await probe('the sign-in probe', async () => {
+      const res = await fetch(`${base}/auth/sign-in/email`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: 'admin@objectos.ai', password: 'admin123' }),
+      });
+      let body: unknown = null;
+      try { body = await res.json(); } catch { /* non-JSON error body */ }
+      return { status: res.status, body };
     });
     expect(signIn.status).toBe(200);
-    const token = ((await signIn.json()) as { token?: string }).token;
+    const token = (signIn.body as { token?: string } | null)?.token;
     expect(token).toBeTruthy();
 
-    const minted = await fetch(`${base}/keys`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-      body: JSON.stringify({ name: 'mcp-collision-e2e' }),
+    const minted = await probe('the key-mint probe', async () => {
+      const res = await fetch(`${base}/keys`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+        body: JSON.stringify({ name: 'mcp-collision-e2e' }),
+      });
+      let body: unknown = null;
+      try { body = await res.json(); } catch { /* non-JSON error body */ }
+      return { status: res.status, body };
     });
     expect(minted.status).toBe(201);
-    apiKey = String(((await minted.json()) as { data: { key: string } }).data.key);
+    apiKey = String((minted.body as { data: { key: string } }).data.key);
     expect(apiKey.startsWith('osk_')).toBe(true);
   }, 240_000);
 
@@ -418,17 +483,19 @@ describe('#7652: an app loading the MCP client connector still gets the MCP serv
   });
 
   it('GET /api/v1/mcp/skill answers 200 — the card\'s repro', async () => {
-    const res = await fetch(`${base}/mcp/skill`);
+    const skill = await probe('the GET /mcp/skill probe', async () => {
+      const res = await fetch(`${base}/mcp/skill`);
+      return { status: res.status, body: await res.text() };
+    });
     expect(
-      res.status,
+      skill.status,
       'the boot banner advertises this endpoint; a 501 here is #7652 (the connector suppressed MCPServerPlugin)',
     ).toBe(200);
-    const body = await res.text();
-    expect(body.length).toBeGreaterThan(0);
+    expect(skill.body.length).toBeGreaterThan(0);
   }, 60_000);
 
   it('POST /api/v1/mcp answers `initialize` and `tools/list`', async () => {
-    const initRes = await rpc(
+    const init = await rpc(
       'initialize',
       {
         protocolVersion: '2024-11-05',
@@ -437,17 +504,17 @@ describe('#7652: an app loading the MCP client connector still gets the MCP serv
       },
       1,
     );
-    expect(initRes.status, 'a 501 here means the MCP service was never registered').toBe(200);
-    const initFrame = await readFrame(initRes, 1);
+    expect(init.status, 'a 501 here means the MCP service was never registered').toBe(200);
+    const initFrame = init.frame;
     expect(initFrame, 'no JSON-RPC frame for the initialize request').toBeTruthy();
     expect(initFrame!.error).toBeUndefined();
     const initResult = initFrame!.result as { protocolVersion?: string; serverInfo?: { name?: string } } | undefined;
     expect(initResult?.protocolVersion).toBeTruthy();
     expect(initResult?.serverInfo?.name).toBeTruthy();
 
-    const toolsRes = await rpc('tools/list', {}, 2);
-    expect(toolsRes.status).toBe(200);
-    const toolsFrame = await readFrame(toolsRes, 2);
+    const toolsRpc = await rpc('tools/list', {}, 2);
+    expect(toolsRpc.status).toBe(200);
+    const toolsFrame = toolsRpc.frame;
     expect(toolsFrame, 'no JSON-RPC frame for tools/list').toBeTruthy();
     expect(toolsFrame!.error).toBeUndefined();
     const tools = (toolsFrame!.result as { tools?: unknown[] } | undefined)?.tools;
