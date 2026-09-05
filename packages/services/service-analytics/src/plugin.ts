@@ -68,6 +68,23 @@ type TemporalDriverSurface = Pick<
 >;
 
 /**
+ * [#15684] The slice of a SQL driver that NAMES ITS OWN DIALECT — `'sqlite'` /
+ * `'postgres'` / `'mysql'` / `'unknown'`, `SqlDriver.dialectName`.
+ *
+ * Read STRUCTURALLY rather than through `IDataDriver`, unlike
+ * {@link TemporalDriverSurface} above, and the difference is deliberate: a
+ * dialect is a property of the SQL driver FAMILY (`SqlDriver` and the three
+ * drivers that extend it), not of every driver — the memory and mongo drivers
+ * have no dialect to name, and a contract member they can only answer
+ * `undefined` to declares a capability the platform does not have. The runtime
+ * `typeof` guard below is what makes the read safe either way, and the value
+ * is passed through verbatim: `text-match-sql.ts` normalises an unrecognised
+ * name to `'unknown'`, which compiles the `LIKE` these compilers always
+ * emitted.
+ */
+type DialectNamingDriver = { readonly dialectName?: unknown };
+
+/**
  * Re-parse a bridge-supplied aggregation `method` as the engine contract's
  * `AggregationFunction` before it is forwarded as `function`, refusing
  * anything else.
@@ -664,6 +681,32 @@ export class AnalyticsServicePlugin implements Plugin {
       return columnSql;
     };
 
+    /**
+     * [#15684] The dialect that will EXECUTE what the three SQL compilers emit.
+     *
+     * Asked of the DRIVER that owns the object, through the same
+     * `getDriverForObject` seam the two temporal hooks above use, because the
+     * driver is the single source of truth for its own dialect — recomputing
+     * it here from a datasource config would be a second implementation
+     * drifting one knex spelling behind the driver's own emission sets.
+     *
+     * `undefined` on every tier that cannot answer — no data engine, a driver
+     * that names no dialect (memory, mongo), a throw — and `undefined` keeps
+     * the plain `LIKE`, which is exactly the pre-#15684 behaviour.
+     */
+    const sqlDialect = (objectName: string): string | undefined => {
+      try {
+        const svc = ctx.getService<DataEngineLike>('data');
+        const driver = svc?.getDriverForObject?.(objectName) as DialectNamingDriver | undefined;
+        const named = driver?.dialectName;
+        return typeof named === 'string' ? named : undefined;
+      } catch {
+        // Same tiering as the temporal hooks: an unresolvable driver keeps the
+        // dialect-blind construct, which is today's behaviour.
+        return undefined;
+      }
+    };
+
     const config: AnalyticsServiceConfig = {
       cubes: this.options.cubes,
       logger: ctx.logger,
@@ -707,6 +750,8 @@ export class AnalyticsServicePlugin implements Plugin {
       // prevent: it drifts by one step, silently, and the drift only surfaces as
       // an error message pointing at the wrong database.
       getObjectDatasource: (objectName: string) => dataEngine()?.resolveEffectiveDatasource?.(objectName),
+      // [#15684] The executing driver's own dialect — see `sqlDialect` above.
+      sqlDialect,
       // ADR-0062 D6 — a federated object carries an `external` block (ADR-0015).
       // Reported so NativeSQLStrategy declines it (its hand-compiled FROM would
       // hit the wrong physical table) and the driver-correct ObjectQL path runs.
