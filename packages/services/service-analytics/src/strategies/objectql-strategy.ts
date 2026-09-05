@@ -1189,8 +1189,17 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     operator: string,
     values: unknown[] | undefined,
     params: unknown[],
-    target: { object: string; field: string },
-    ctx: StrategyContext,
+    // [#14079] OPTIONAL, both of them, on purpose. `renderFilterNodeSql` always
+    // passes them; the operator-coverage suite reaches this renderer DIRECTLY
+    // with the four-argument shape it has always had (its local mirror of the
+    // private signature), and a caller that hands no target cannot be asked
+    // the declared-type question — it keeps the `LIKE` it always got, the
+    // "cannot answer, do not block" posture `nonTextColumnResolver` takes for
+    // a context with no hook. Making them required turned that direct call
+    // into a `TypeError` on `target.object` (CI `Test Core (4/6)` and the
+    // live-dialect job, both red on one root cause).
+    target?: { object: string; field: string },
+    ctx?: StrategyContext,
   ): string | null {
     if (operator === 'set') return `${col} IS NOT NULL`;
     if (operator === 'notSet') return `${col} IS NULL`;
@@ -1212,9 +1221,11 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       // [#14079] A text operator over a column whose stored value is never
       // text renders the contract's constant — the same test, on the same
       // declared-type hook, as `NativeSQLStrategy.buildFilterClause`, so the
-      // echoed statement is the executed one. Before anything binds.
+      // echoed statement is the executed one. Before anything binds. Only
+      // when the caller handed BOTH a target and a context (see the parameter
+      // note above): without them there is no declared type to consult.
       const polarity = textOperatorPolarity(operator);
-      if (polarity && nonTextColumnResolver(ctx, target.object)?.(target.field)) {
+      if (polarity && target && ctx && nonTextColumnResolver(ctx, target.object)?.(target.field)) {
         return polarity === 'negative' ? SQL_CONST_TRUE : SQL_CONST_FALSE;
       }
       // [#5567] Escaped pattern + an explicit `ESCAPE`, matching what

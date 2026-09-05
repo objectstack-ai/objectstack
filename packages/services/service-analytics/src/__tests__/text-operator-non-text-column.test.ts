@@ -116,6 +116,24 @@ describe('[#14079] the shared classifier', () => {
     expect(resolver('name')).toBe(false);
     expect(resolver('unknown_column')).toBe(false);
   });
+
+  /**
+   * The echo's operator renderer reached DIRECTLY, with the four-argument shape
+   * `objectql-echo-operator-coverage.test.ts` has always used — no target, no
+   * context. That is the call that turned into a `TypeError` on
+   * `target.object` when the two were made required (CI `Test Core (4/6)` and
+   * the live-dialect job, one root cause): a caller that hands no target cannot
+   * be asked the declared-type question and keeps the `LIKE` it always got.
+   */
+  it('the echo renderer called without a target keeps its LIKE — a caller that cannot be asked is not gated', () => {
+    const strategy = new ObjectQLStrategy() as unknown as {
+      buildFilterClauseSql(col: string, operator: string, values: unknown[] | undefined, params: unknown[]): string | null;
+    };
+    const params: unknown[] = [];
+    expect(strategy.buildFilterClauseSql('score', 'contains', ['5'], params)).toMatch(/LIKE/);
+    expect(params).toEqual(['%5%', '\\']);
+    expect(strategy.buildFilterClauseSql('score', 'notContains', ['5'], [])).toMatch(/NOT LIKE/);
+  });
 });
 
 describe('[#14079] read-scope-sql compiles the contract\'s constant for a declared non-text column', () => {
