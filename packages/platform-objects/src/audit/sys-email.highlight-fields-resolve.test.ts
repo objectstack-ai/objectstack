@@ -49,10 +49,10 @@ import { SysEmail } from './sys-email.object.js';
  */
 describe('sys_email — highlightFields resolves at the object write door', () => {
   /** The audit module's other shipped objects, as the live resolution context. */
-  const siblings = Object.values(audit).filter(
-    (o): o is { name: string } =>
-      typeof (o as { name?: unknown })?.name === 'string' && (o as { name: string }).name !== 'sys_email',
-  );
+  const siblings: unknown[] = Object.values(audit as Record<string, unknown>).filter((o) => {
+    const name = (o as { name?: unknown } | null)?.name;
+    return typeof name === 'string' && name !== 'sys_email';
+  });
 
   const gate = (item: unknown) =>
     runRuntimeAuthoringRules({ type: 'object', item, context: { objects: siblings } });
