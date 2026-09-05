@@ -621,8 +621,12 @@ function selfTest() {
     invokesCommand('OS_CLOUD_URL=http://localhost:4000 os package publish', 'os package publish'));
   t('a flag suffix still invokes the command', invokesCommand('os package publish --install', 'os package publish'));
   t('a different command does not', !invokesCommand('os compile', 'os package publish'));
+  // ⚠️ Spelled with a NEUTRAL binary here, not `os`: `check-cli-command-ids`
+  // reads any quoted run opening with a real bin name as a command-id literal,
+  // and a deliberately-unresolvable fixture would red that gate. The property
+  // under test is the word boundary, which no particular bin name carries.
   t('a longer command name is not a match on its prefix',
-    !invokesCommand('os package publish-draft --now', 'os package publish'));
+    !invokesCommand('tool alpha beta-draft --now', 'tool alpha beta'));
 
   const source = [
     'export default class X extends Command {',
@@ -662,7 +666,7 @@ function selfTest() {
   const located = blockUnderHeading(page, '#### `os package publish`');
   t('the block under the heading is found', located.block?.line === 3, JSON.stringify(located.problem ?? located.block?.line));
   t('a `#` line inside the fence did not end the section', located.block?.body?.length === 3, String(located.block?.body?.length));
-  t('an absent heading is a problem', Boolean(blockUnderHeading(page, '#### `os nope`').problem));
+  t('an absent heading is a problem', Boolean(blockUnderHeading(page, '#### Nothing here').problem));
   t('a heading with no fence before the next heading is a problem',
     Boolean(blockUnderHeading('#### `os package publish`\n\ntext\n\n## Next\n', '#### `os package publish`').problem));
 
