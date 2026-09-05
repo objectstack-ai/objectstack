@@ -11,9 +11,12 @@
  * whether a scaffolded project type-checks at all — was written in SIX places
  * across three scaffolders and had split into THREE values (`^5.3.0` in
  * `init.ts`, `^5.8.0` in `create.ts`, `^6.0.0` in the bundled
- * `create-objectstack` template). vitest had split into two. The two CLI values
- * were written in the SAME commit and stayed apart for 211 days; the third
- * arrived 102 days before the measurement.
+ * `create-objectstack` template). vitest had split into two. Dated off `git
+ * log -G` as of 2026-09-05: the two CLI values were written in the SAME commit
+ * (338e68d2564, 2026-02-07) and stayed apart for 210 days; the bundled template
+ * landed at `^5.3.0` too (dbb54e12f0c, 2026-05-25) and only became the third
+ * value 53 days ago, when eaff01425b7 moved it to `^6.0.0` without recording
+ * any reasoning about TypeScript.
  *
  * The control for that reading sits in the same file as the defect:
  * `SCAFFOLD_PNPM_RANGE` and `renderPnpmWorkspaceYaml()` are IMPORTED by the

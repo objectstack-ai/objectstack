@@ -234,12 +234,24 @@ export const SCAFFOLD_PNPM_RANGE = '>=10.15';
 //   os create           `^5.8.0`   (two write points in create.ts)
 //   create-objectstack  `^6.0.0`   (its bundled template's package.json)
 //
-// The split is not recent and nobody caused it deliberately: `^5.3.0` and
-// `^5.8.0` were written in the same commit (2026-02-07), and the third value
-// arrived with the bundled template on 2026-05-25 — 102 days of three
-// scaffolders answering "which TypeScript does a new ObjectStack project
-// install?" three different ways, on the value that decides whether the
-// scaffold type-checks at all.
+// The split is not recent and nobody caused it deliberately. Read off `git
+// log -G` over the three files, as of 2026-09-05:
+//
+//   338e68d2564  2026-02-07  `^5.3.0` and `^5.8.0` written in the SAME commit
+//                            — 210 days apart and counting
+//   dbb54e12f0c  2026-05-25  the bundled template lands, also at `^5.3.0`
+//                            — so this is still a TWO-value tree
+//   eaff01425b7  2026-07-14  that template's line moves `^5.3.0` → `^6.0.0`
+//                            — the third value, 53 days old
+//
+// ⚠️ And the move that made the third value recorded no reasoning about
+// TypeScript at all. #2907's commit message documents the `@objectstack/*`
+// version sync and nothing else, and in that same one-file diff the five
+// `@objectstack/*` ranges move `^6.0.0` → `^14.0.0` while the `typescript`
+// line moves ONTO the `^6.0.0` those lines are vacating. Whatever the intent
+// was, no statement of it exists — which is the point: an unrecorded value is
+// what a restatement decays into, and it decayed on the value that decides
+// whether a new project type-checks at all.
 //
 // The control for that reading is in this same file: `SCAFFOLD_PNPM_RANGE`
 // and `renderPnpmWorkspaceYaml()` are IMPORTED by the other scaffolder rather

@@ -65,8 +65,9 @@
  * already been paid for twice in this repo: the build-approval block landed in
  * one scaffold path and not the other, and one of them shipped the pre-fix shape
  * for months; and the TypeScript range a scaffold installs was written in six
- * places and split into three values, the split surviving 102 days on the value
- * that decides whether the scaffold type-checks at all. The emission policy has
+ * places and split into three values — the two CLI values 210 days apart, the
+ * third 53 and recorded nowhere — on the value that decides whether the
+ * scaffold type-checks at all. The emission policy has
  * one home now — see the block above `renderScaffoldPackageJson` in `init.ts`
  * for the measurement and for which values survived.
  *
