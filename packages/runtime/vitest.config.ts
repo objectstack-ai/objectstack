@@ -143,6 +143,15 @@ export default defineConfig({
         find: '@objectstack/service-package',
         replacement: path.resolve(__dirname, '../services/service-package/src/index.ts'),
       },
+      // Dev-only: discovery-realtime-channel.pin.test.ts drives the REAL
+      // occupant `RealtimeServicePlugin` registers, so "the shipped realtime
+      // service names no channel route" (#14646) is proven against the actual
+      // adapter rather than against a stand-in written from this file's own
+      // assumption about it.
+      {
+        find: '@objectstack/service-realtime',
+        replacement: path.resolve(__dirname, '../services/service-realtime/src/index.ts'),
+      },
     ],
   },
   test: {

@@ -374,13 +374,19 @@ a self-declared stub answers as an empty one.
 
 <Callout type="warn">
 `service-realtime` is an **in-process pub/sub bus**, not an HTTP/WS surface. The
-dispatcher has no `/realtime` branch and no plugin mounts one, so `routes.realtime`
-is **never advertised** — an advertised route would 404 (ADR-0076 D12, #2462), and
-`features.websockets` is hardcoded `false` for the same reason. These six
-`RealtimeProtocol` members are declared and unrouted; when the service is registered
-both discovery builders report the slot `degraded` with a message saying the bus is
-in-process only and no HTTP/WS surface is mounted. Re-advertising waits on a real
-transport.
+dispatcher has no `/realtime` branch and no plugin in the open framework mounts one, so
+`routes.realtime` is **not advertised** — an advertised route would 404 (ADR-0076 D12,
+#2462). These six `RealtimeProtocol` members are declared and unrouted; when the service
+is registered both discovery builders report the slot `enabled: false` / `degraded`, with
+a message saying the bus is in-process only and no HTTP/WS surface is mounted.
+
+`enabled: false` for a slot that IS registered is deliberate (#14646): `realtime` is the
+one **channel slot**, so its `enabled` — and `capabilities.websockets` with it — is
+`isSubscribableChannel()` (`@objectstack/spec/api`): `handlerReady: true` **and** a
+connectable route. It used to read `true` beside that same "no surface is mounted"
+message, and a client keying on it subscribed to nothing. Advertising resumes by itself
+if an occupant ever names a mounted path (`IRealtimeService.getChannelRoute()`); under the
+2026-09-04 ruling nothing in the open framework does.
 </Callout>
 
 ### 8. notification — 7 methods · `@objectstack/service-messaging`
@@ -522,7 +528,7 @@ a package that cannot be installed is a dead end, which is why
 | **ui** | Nothing registers the slot. `ViewProtocol`'s five declared-and-unrouted methods were **retired in v17** (#6239); view CRUD runs through `/api/v1/meta`, and `/api/v1/ui/view/:object` is served by the `protocol` service. |
 | **search** | Nothing ships. Contract and engine enum exist in `@objectstack/spec` only. |
 | **ai** | Nothing in this repo — `service-ai` (chat, completion, models, conversations) is Cloud/EE. |
-| **realtime transport** | The service exists but no WebSocket/SSE route is mounted, so `routes.realtime` is deliberately never advertised. |
+| **realtime transport** | The service exists but no WebSocket/SSE route is mounted, so `routes.realtime` is not advertised and `services.realtime.enabled` / `capabilities.websockets` are `false` — the one definition of a subscribable channel (#14646). |
 
 The `workflow` slot used to sit in this table ("nothing ships, no consumer").
 It was retired outright in v17 (#4451, per ADR-0115 Evidence 5): the
