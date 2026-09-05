@@ -631,6 +631,109 @@ const BLOCK_SCALAR_HEADER = /^[|>][+-]?\d*$/;
  * right.
  */
 export function runCommandTexts(workflowText) {
+  return runCommandSteps(workflowText).map((step) => step.text);
+}
+
+/**
+ * An Actions EXPRESSION, which is the only thing a step's `env:` value can
+ * carry that is not a literal.
+ *
+ * ⚠️ Deliberately NOT `WORKFLOW_VALUE_SOURCE`, which the argv reader uses:
+ * that pattern also admits `$NAME` and `${NAME}`, because argv is read by a
+ * SHELL and a shell expands them. An `env:` value is not — Actions substitutes
+ * `${{ … }}` there and hands the rest through verbatim, so `FOO: $HOME` passes
+ * the four characters `$HOME`. Reading the shell forms here would score a
+ * literal env value as a workflow value and subtract a runnable command, which
+ * is the silent direction `payloadEnvDependence` refuses one screen down.
+ */
+const WORKFLOW_ENV_EXPRESSION = /\$\{\{[\s\S]*?\}\}/;
+
+/**
+ * The names in a step's `env:` block whose VALUE is an Actions expression —
+ * the values that step takes from the workflow and passes to its command
+ * through the ENVIRONMENT rather than through argv (#15761).
+ *
+ * `lines` is the whole workflow, and `[start, end)` the step this `run:` key
+ * belongs to; the caller derives both from the same indentation walk it uses
+ * for the body, so the two readings cannot disagree about where a step ends.
+ *
+ * ## The boundaries, each with the direction it fails in
+ *
+ *   - the `env:` key is read only at the step's OWN key column, exactly as
+ *     `extractStepBlocks` reads `if:` and for the same reason: a nested `with:`
+ *     or a `services:` mapping carries `env:` keys of its own, and reading one
+ *     of those would attribute another container's environment to this command;
+ *   - only the DIRECT children of that key are read (the first child column,
+ *     and lines deeper than it are the value of one of them, never a sibling);
+ *   - a flow mapping (`env: {A: …}`) is not parsed at all, and neither is a
+ *     job-level or workflow-level `env:`. Both under-report — a family keeps its
+ *     place in `--commands` — which is the loud direction: the status quo this
+ *     card names, a red the dev has to go read a gate to understand. Widening
+ *     either one SUBTRACTS a row, and a subtraction that fires wrongly is
+ *     silent. Neither form appears in this tree today.
+ */
+export function stepEnvExpressionVariables(lines, start, end, keyColumn) {
+  const names = [];
+  for (let i = start; i < end; i++) {
+    const key = /^([ \t]*)(-[ \t]+)?env:[ \t]*(.*)$/.exec(lines[i]);
+    if (!key) continue;
+    if (key[1].length + (key[2] ? key[2].length : 0) !== keyColumn) continue;
+    if (key[3].trim() !== '') continue;
+    let childColumn = -1;
+    for (let j = i + 1; j < end; j++) {
+      if (lines[j].trim() === '') continue;
+      const column = /^[ \t]*/.exec(lines[j])[0].length;
+      if (column <= keyColumn) break;
+      if (childColumn === -1) childColumn = column;
+      if (column !== childColumn) continue;
+      const pair = /^[ \t]*([A-Za-z_][\w.-]*):[ \t]*(.*)$/.exec(lines[j]);
+      if (!pair) continue;
+      let value = pair[2];
+      if (BLOCK_SCALAR_HEADER.test(value.trim())) {
+        const body = [];
+        for (let k = j + 1; k < end; k++) {
+          if (lines[k].trim() === '') {
+            body.push('');
+            continue;
+          }
+          if (/^[ \t]*/.exec(lines[k])[0].length <= column) break;
+          body.push(lines[k]);
+        }
+        value = body.join('\n');
+      }
+      if (WORKFLOW_ENV_EXPRESSION.test(value) && !names.includes(pair[1])) names.push(pair[1]);
+    }
+  }
+  return names;
+}
+
+/**
+ * Every `run:` step of a workflow as `{ text, envVariables }` — the command
+ * text `runCommandTexts` has always returned, plus the values the STEP passes
+ * to it through `env:` (#15761).
+ *
+ * ## Why the step and not the command text alone
+ *
+ * `runCommandTexts` reads a `run:` value and throws the rest of the step away,
+ * so a value the workflow hands the command through the ENVIRONMENT was
+ * invisible to every reader downstream. `.github/workflows/`
+ * `partof-closing-keyword-guard.yml` is the specimen: `PR_BODY` and
+ * `PR_NUMBER` arrive through `env:` and the argv is bare, so the argv-shaped
+ * classifier scored `node scripts/check-partof-closing-keyword.mjs` as a
+ * command a dev can paste — while the gate's own refusal says the opposite in
+ * its own words ("NOT WIRED — neither PR_BODY nor PR_NUMBER is set … This is a
+ * wiring or usage failure, NOT a verdict"). The step is therefore the unit
+ * this walk returns, and the command text stays exactly what it was.
+ *
+ * The step's extent is found with the SAME rule the body walk uses: the step's
+ * keys sit at the `run:` key column, so the step ends at the first non-blank
+ * line shallower than it — which is the next `- ` dash (a dash is indentation
+ * for the mapping it opens) or the dedent out of the steps list. A compact
+ * step (`- run: …`) opens its own mapping on the dash line, so the walk starts
+ * there; a named step's `env:` may sit either side of its `run:`, so the walk
+ * runs backwards from the key as well as forwards from the body.
+ */
+export function runCommandSteps(workflowText) {
   const lines = workflowText.split('\n');
   const out = [];
   for (let i = 0; i < lines.length; i++) {
@@ -641,27 +744,71 @@ export function runCommandTexts(workflowText) {
     // for the mapping it opens, so it counts. See the header block above for
     // the measurement that settles this.
     const keyColumn = lead.length + (dash ? dash.length : 0);
+    const runLine = i;
+    let text;
     if (!BLOCK_SCALAR_HEADER.test(inline.trim())) {
-      out.push(inline.trim());
-      continue;
-    }
-    // Block scalar: the body is every following line indented deeper than the
-    // key (blank lines belong to it too). Advancing `i` past the body is what
-    // keeps a `run:` MENTIONED inside a body from being parsed as a new key.
-    const body = [];
-    let j = i + 1;
-    for (; j < lines.length; j++) {
-      if (lines[j].trim() === '') {
-        body.push('');
-        continue;
+      text = inline.trim();
+    } else {
+      // Block scalar: the body is every following line indented deeper than the
+      // key (blank lines belong to it too). Advancing `i` past the body is what
+      // keeps a `run:` MENTIONED inside a body from being parsed as a new key.
+      const body = [];
+      let j = i + 1;
+      for (; j < lines.length; j++) {
+        if (lines[j].trim() === '') {
+          body.push('');
+          continue;
+        }
+        if (/^[ \t]*/.exec(lines[j])[0].length <= keyColumn) break;
+        body.push(lines[j]);
       }
-      if (/^[ \t]*/.exec(lines[j])[0].length <= keyColumn) break;
-      body.push(lines[j]);
+      text = body.filter((l) => !/^[ \t]*#/.test(l)).join('\n');
+      i = j - 1;
     }
-    out.push(body.filter((l) => !/^[ \t]*#/.test(l)).join('\n'));
-    i = j - 1;
+    let start = runLine;
+    if (!dash) {
+      let j = runLine - 1;
+      for (; j >= 0; j--) {
+        if (lines[j].trim() === '') continue;
+        if (/^[ \t]*/.exec(lines[j])[0].length >= keyColumn) continue;
+        break;
+      }
+      start = j + 1;
+    }
+    let end = i + 1;
+    for (; end < lines.length; end++) {
+      if (lines[end].trim() === '') continue;
+      if (/^[ \t]*/.exec(lines[end])[0].length >= keyColumn) continue;
+      break;
+    }
+    out.push({ text, envVariables: stepEnvExpressionVariables(lines, start, end, keyColumn) });
   }
   return out;
+}
+
+/**
+ * A step's `env:` names minus the ones its command line spells as a shell
+ * expansion — the split between the two CARRIERS of one workflow value
+ * (#15761).
+ *
+ * A name the command spells (`"$MERGE_BASE"`, `${OS_ATTEST_DIR}`) is read by
+ * the shell, so it is already in the command TEXT and `renderedArgv` has
+ * classified it. A name the command does not spell reaches the program only
+ * through `process.env`, and that is the carrier no reader of the command line
+ * can see — the whole defect this card names.
+ *
+ * Measured on this tree over the 13 `run:` steps that both carry an `env:`
+ * expression and invoke a check: 8 of them spell every one of their env names
+ * in the command (the `--base "$MERGE_BASE"` trio in `pr-automation.yml`, the
+ * two `check-shard-attestation --verify` steps and the affected-set step in
+ * `ci.yml`, `half-state-patrol.yml`'s `--provenance`, `required-set-patrol`'s
+ * `$RUNNER_TEMP` redirection), so this filter is what keeps the classification
+ * off eight invocations it must not touch.
+ */
+function envNamesNotSpelledInCommand(commandText, names) {
+  return (names ?? []).filter(
+    (name) => !new RegExp(String.raw`\$\{?${name.replace(/[^\w]/g, '\\$&')}\b`).test(commandText),
+  );
 }
 
 /** Strip one layer of YAML quoting from a scalar. */
@@ -1779,13 +1926,24 @@ function tailBeforeRedirection(tail, nextChar) {
  */
 export function extractCheckInvocations(workflowText, workflowFile) {
   const out = [];
-  for (const raw of runCommandTexts(workflowText)) {
+  for (const { text: raw, envVariables: stepEnv } of runCommandSteps(workflowText)) {
     // ONE joined text for all three matchers, so no two of them can disagree
     // about where a command ends — the discipline `discoverFamilies` follows
     // for the workflow reads it makes.
     const cmd = joinLineContinuations(raw);
+    // The step's `env:` values, MINUS the ones this command line spells for
+    // itself (#15761). `env: MERGE_BASE: ${{ … }}` beside
+    // `run: node scripts/check-changeset-no-major.mjs --base "$MERGE_BASE"` is
+    // one value with one carrier: the variable reaches the script through
+    // ARGV, the argv reader already sees it, and `declaredArgvDefaults` may
+    // already have repaired the invocation into a runnable one (#15441).
+    // Counting it a second time here would undo that repair and mark three
+    // live `--base` families NOT MEASURED again. What is left is the class
+    // this card is about: a value that reaches the program only through
+    // `process.env`, which no reader of the command line can see.
+    const carriedEnv = envNamesNotSpelledInCommand(cmd, stepEnv);
     for (const m of cmd.matchAll(/pnpm\s+(?:--filter\s+(\S+)\s+)?(?:run\s+)?(check:[\w:-]+)/g)) {
-      out.push({ check: m[2], filter: m[1] ?? null, workflow: workflowFile });
+      out.push({ check: m[2], filter: m[1] ?? null, workflow: workflowFile, envVariables: carriedEnv });
     }
     for (const m of cmd.matchAll(DIRECT_CHECK_INVOCATION)) {
       const script = m[1];
@@ -1804,6 +1962,13 @@ export function extractCheckInvocations(workflowText, workflowFile) {
         // travels on the invocation so every rendering downstream reads one
         // answer rather than re-deriving it (#15083).
         argvVariables: argv ? argv.variables : [],
+        // The same fact for the OTHER carrier (#15761): the values the step
+        // hands this command through `env:`. It rides the invocation for the
+        // same reason `argvVariables` does — so every rendering downstream
+        // reads one answer rather than re-deriving it — and it is a fact about
+        // the STEP, so it is attached to every matcher here and narrowed to the
+        // families it may classify in `workflowEnvValues`, never here.
+        envVariables: carriedEnv,
         // The same declaration the matcher below reads, on the same flag: this
         // invocation runs the script's SELF-TEST rather than its work, and two
         // narrowings downstream turn on knowing that (the import/spawn/manifest
@@ -1830,6 +1995,7 @@ export function extractCheckInvocations(workflowText, workflowFile) {
         workflow: workflowFile,
         direct: true,
         selfTest: true,
+        envVariables: carriedEnv,
       });
     }
   }
@@ -2860,6 +3026,86 @@ export function ciOnlyMeasurement(entry, rootScripts = {}) {
   );
   if (namedByManifest) return null;
   return { env };
+}
+
+/**
+ * The values a family takes from the workflow through its step's `env:` — the
+ * THIRD carrier, and the generalisation of #14004 rather than a second special
+ * case of it (#15761).
+ *
+ * ## The defect
+ *
+ * `.github/workflows/partof-closing-keyword-guard.yml` passes the pull request
+ * to `node scripts/check-partof-closing-keyword.mjs` through
+ * `env: PR_BODY: ${{ … }}` / `PR_NUMBER: ${{ … }}`, and its argv is BARE. The
+ * argv-shaped classifier one screen up therefore saw a command with no
+ * variable in it and put it in `--commands`, under a caption that promises a
+ * runnable command — while the gate's own refusal says the opposite in its own
+ * words: "NOT WIRED — neither PR_BODY nor PR_NUMBER is set, so this run was
+ * handed no pull request and judged nothing. This is a wiring or usage
+ * failure, NOT a verdict". A dev harvesting the family runs a command whose
+ * only possible outcome outside CI is exit 2.
+ *
+ * ⛔ The fix REFUSED: moving `PR_BODY` into the argv so the existing detector
+ * sees it. That `env:` spelling is a security decision the workflow states at
+ * length ("An expression interpolated into a shell line is substituted before
+ * bash ever sees it, so a PR body is arbitrary attacker-controlled text
+ * landing in a command; through `env:` it is inert data"), and reopening a
+ * deliberately closed injection surface to fix a DISPLAY bug trades the two
+ * the wrong way round. The repair is on the reader's side, which is where this
+ * one is.
+ *
+ * ## What it selects, measured rather than argued
+ *
+ * On this tree: 405 `run:` steps, 52 carrying an `env:` expression, 13 of
+ * those invoking a check. Eight spell every env name in the command itself and
+ * are filtered out before this function sees them (`envNamesNotSpelledInCommand`,
+ * which is what keeps #15441's three repaired `--base` families runnable). Of
+ * the five that reach the limbs below, the conjunction selects THREE — every
+ * one of which was verified by running it here, and every one of which refuses
+ * rather than judges:
+ *
+ *   `check-partof-closing-keyword.mjs`            exit 2, "NOT WIRED"
+ *   `check-single-claim-paths.mjs`                exit 2, "NOT WIRED — PR_NUMBER is not set"
+ *   `check-required-contexts.mjs --verify-required-set`
+ *                                                 exit 2, "NOT VERIFIED — … HTTP 401"
+ *
+ * so the class this card names is three families wide, not one. A fourth,
+ * `check-half-states.mjs --format=markdown --provenance="$PROVENANCE"`, is
+ * already NOT MEASURED through its argv and only gains the two env names it
+ * also carries.
+ *
+ * ## The limbs, each with a live case on this tree
+ *
+ *   selfTest  a `--self-test` invocation runs the script's own fixtures and
+ *             consumes no workflow value, exactly the argument `ciOnlyMeasurement`
+ *             makes one screen up. LIVE: `render-release-coverage-anchor.mjs
+ *             --self-test` sits in a step carrying three `${{ … }}` env values,
+ *             and it is runnable here — this limb is what keeps it in the list.
+ *   direct    a `check:*` family is invocable by name by construction (#14004's
+ *             limb 2), and its KEY drops the argv, so one key is produced by
+ *             steps in different environments and the env of one of them is not
+ *             a property of the key. LIVE: `check:console-injection`, run by
+ *             `ci.yml` and `release.yml` under `CONSOLE_DIST_CACHE_KEY` and by
+ *             the root manifest under nothing.
+ *   ciOnly    the family is ALREADY named in the CI-measured bucket, and one
+ *             family printed as two omissions tells a reader it owes two runs.
+ *             LIVE: `check-governed-queue-guard.mjs`, whose step also passes
+ *             `GITHUB_TOKEN: ${{ … }}` — #14004's own specimen.
+ *
+ * ⚠️ What this does NOT claim, and it is `payloadEnvDependence`'s caveat
+ * unchanged: that the gate READS the variable. It reads what the WORKFLOW
+ * passes, not what the program consumes, so the family stays NAMED with its
+ * variables printed beside it in every rendering — an annotation a reader can
+ * check against the gate, never a family this tool quietly disappears.
+ */
+export function workflowEnvValues(entry) {
+  const names = entry?.envVariables ?? [];
+  if (names.length === 0) return [];
+  if (entry.selfTest) return [];
+  if (!entry.direct) return [];
+  if (entry.ciOnly) return [];
+  return [...names];
 }
 
 /**
@@ -9224,7 +9470,7 @@ export function alwaysRunsPopulationLines(rows) {
     lines.push(
       `      ↳ liveness: its own source carries ${row.rootWalk}` +
         `${row.ciOnly ? ' · CI-MEASURED ONLY — no local run of it can produce a verdict, so it is NOT in --commands' : ''}` +
-        `${row.notRunnable ? ` · ⛔ NOT RUNNABLE LOCALLY — its argv takes ${row.notRunnable.variables.join(', ')} from the workflow, so it is NOT in --commands` : ''}`,
+        `${row.notRunnable ? ` · ⛔ NOT RUNNABLE LOCALLY — it takes ${row.notRunnable.variables.join(', ')} from the workflow, so it is NOT in --commands` : ''}`,
     );
   }
   lines.push(
@@ -9740,7 +9986,19 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
   for (const inv of invocations) {
     const key = inv.check;
     if (!byCheck.has(key)) byCheck.set(key, { ...inv, workflows: new Set(), files: [], hints: [] });
-    byCheck.get(key).workflows.add(inv.workflow);
+    const merged = byCheck.get(key);
+    merged.workflows.add(inv.workflow);
+    // INTERSECTION, not union (#15761). `argvVariables` needs no merge — argv
+    // is part of the KEY, so every invocation under one key spells the same
+    // one. `env:` is NOT part of the key, so two workflows can run the same
+    // command in different environments, and the classification this feeds
+    // SUBTRACTS a row from `--commands`: keeping only the names EVERY step
+    // passes means a command one workflow runs bare keeps its place in the
+    // list. A wrong subtraction is silent; a miss is loud (#14004's trade,
+    // same direction). Costs nothing measurable today — 14 of the 260 keys on
+    // this tree carry more than one invocation and NONE of them disagree about
+    // its env, so union and intersection classify identically here.
+    merged.envVariables = (merged.envVariables ?? []).filter((name) => (inv.envVariables ?? []).includes(name));
   }
   for (const entry of byCheck.values()) {
     // Only the workflows that DECLARE a filter become trigger keys. An
@@ -10059,8 +10317,20 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
         entry.localCheck = `${entry.script} ${substituted.args}`;
       }
     }
-    entry.notRunnable = (entry.argvVariables ?? []).length > 0
-      ? { variables: [...entry.argvVariables] }
+    // Both CARRIERS of one fact — a value that comes from the workflow and has
+    // none here (#15761). They are unioned into ONE classification rather than
+    // given a bucket each, because a reader asking "can I run this" is asking
+    // one question: the rendering, the `--json` key and the subtraction from
+    // `--commands` are all the argv one, unchanged. The env names are spelled
+    // `env NAME` so the two carriers stay legible in a single list — an argv
+    // variable always carries its `$`.
+    entry.envValues = workflowEnvValues(entry);
+    const workflowValues = [
+      ...(entry.argvVariables ?? []),
+      ...entry.envValues.map((name) => `env ${name}`),
+    ];
+    entry.notRunnable = workflowValues.length > 0
+      ? { variables: workflowValues, envVariables: [...entry.envValues] }
       : null;
   }
   return { byCheck, workflows, workflowEntries };
@@ -10337,7 +10607,7 @@ export function familyReconciliationLines(recon) {
   const notRunnableLine =
     (recon.notRunnable ?? 0) > 0
       ? `  + ${recon.notRunnable} famil(ies) this card's paths reach take a VALUE FROM THE WORKFLOW and sit OUTSIDE this total —` +
-        ' their argv carries a variable that has no value outside a CI run, so there is no local invocation to hand you.' +
+        " their argv, or their step's `env:`, carries a variable that has no value outside a CI run, so there is no local invocation to hand you." +
         ' Named under their own heading above with the variable in the value position, carried on their row in --json,' +
         ' and omitted from --commands by design.'
       : null;
@@ -10395,7 +10665,7 @@ export function familyReconciliationLines(recon) {
     // than about a family nobody can run here (#15083).
     const notRunnableConventionRows = recon.notRunnableConventionRows ?? 0;
     if (notRunnableConventionRows > 0) {
-      notes.push(`${notRunnableConventionRows} value-bearing argv, contributing no runnable command`);
+      notes.push(`${notRunnableConventionRows} value-bearing argv or env, contributing no runnable command`);
     }
     const accounted = recon.staleRows + ciOnlyConventionRows + notRunnableConventionRows;
     if (recon.conventionRows - accounted > recon.convention) {
@@ -10735,7 +11005,7 @@ export function runReconciliationLines(recon) {
   if (recon.explainedNotRunnable.length > 0) {
     lines.push(
       `  Classified by this tool, no explanation owed (${recon.explainedNotRunnable.length}) — VALUE-BEARING famil(ies):`
-        + ' its argv takes a value from the workflow, so it is recorded, not derived as runnable:',
+        + " its argv or its step's `env:` takes a value from the workflow, so it is recorded, not derived as runnable:",
     );
     for (const command of recon.explainedNotRunnable) lines.push(`    - ${command}`);
   }
@@ -10912,7 +11182,7 @@ function machineReadableOutput(mode, { paths, matchedRows, kindGroups, pending, 
   if (notRunnableRows.length) {
     console.error(
       `  + ${notRunnableRows.length} famil(ies) matched by path take a VALUE FROM THE WORKFLOW and are ${mode === 'json' ? 'flagged as notRunnable on their matched row, not in commands' : 'NOT above'} — ` +
-        'their argv carries a variable with no value outside a CI run. Run without --commands/--json to see each one printed as CI spells it.',
+        "their argv or their step's `env:` carries a variable with no value outside a CI run. Run without --commands/--json to see each one printed as CI spells it.",
     );
     // Named, one per line, and named as NOT MEASURED rather than as an omission
     // (#15441). A count says something is missing; it does not say that a
@@ -11236,7 +11506,7 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
   // labelled line of its own, never an ellipsis and never a truncated command.
   if (notRunnableRows.length) {
     console.log('');
-    console.log(`Value-bearing argv — matched by path, and NOT runnable here (${notRunnableRows.length} famil(ies)):`);
+    console.log(`Value-bearing argv or env — matched by path, and NOT runnable here (${notRunnableRows.length} famil(ies)):`);
     // A sibling of the SAME script that this card CAN run, matched on the
     // script path rather than on a name (#15441). It is what a reader reaches
     // for when the row below says the question is unanswered, and it is exactly
@@ -11254,9 +11524,17 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
         `      ⛔ NOT RUNNABLE LOCALLY — ${notRunnable.variables.length} value(s) come from the workflow:` +
           ` ${notRunnable.variables.join(', ')}`,
       );
+      // Two carriers, two reasons — and the argv sentence is FALSE for an
+      // env-carried row: there is no flag to document a default for (#15761).
+      // Printing it anyway would send a reader to a usage block that cannot
+      // hold the answer, which is the shape of advice this file refuses.
+      const envCarried = (notRunnable.envVariables ?? []).length === notRunnable.variables.length;
       console.log(
-        `      ⊘ NOT MEASURED — nothing this card can run answers ${command}. Its script documents no default for the flag` +
-          ' the workflow pins, so there is no local invocation of it, and this tool will ⛔ not invent one.',
+        `      ⊘ NOT MEASURED — nothing this card can run answers ${command}. `
+          + (envCarried
+            ? "The value reaches its script through the step's `env:` and not through a flag this tool could default"
+            : 'Its script documents no default for the flag the workflow pins')
+          + ', so there is no local invocation of it, and this tool will ⛔ not invent one.',
       );
       const sibling = siblingOf.get(script);
       if (sibling) {
@@ -20917,7 +21195,7 @@ function selfTest() {
     t(
       'the value-bearing bucket gets its OWN labelled line, naming the reason and the command',
       explainedText.includes('VALUE-BEARING famil(ies)')
-        && explainedText.includes('its argv takes a value from the workflow')
+        && explainedText.includes("its argv or its step's `env:` takes a value from the workflow")
         && explainedText.includes(valueBearing),
     );
     t(
@@ -21034,7 +21312,7 @@ function selfTest() {
         );
         t(
           'and the reason travels with it, so the runner learns why this invocation is not one they could have derived',
-          vbOut.includes('its argv takes a value from the workflow'),
+          vbOut.includes("its argv or its step's `env:` takes a value from the workflow"),
         );
         t(
           'while the verdict is unmoved — the bucket is diagnostic, and every derived family is still accounted for',
