@@ -647,5 +647,4 @@ describe('shipped platform record pages -- i18n ownership (#14817)', () => {
       .map((m) => ({ path: m.path, missing: SHIPPED_LOCALES.filter((l) => !m.locales.includes(l)) }));
     expect(incomplete).toEqual([]);
   });
-
 });
