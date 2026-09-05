@@ -231,6 +231,15 @@ export function checkSingleOwner(map: SkillCoreMap, shared: Record<string, strin
  * whose face someone has actually read should carry one.
  */
 export const TRANSITIVE_ALLOWLIST: Record<string, readonly string[]> = {
+  // Kept iff `skills/objectstack-platform/SKILL.md` names one of the module's
+  // exported names, as an exact word-bounded identifier.
+  'objectstack-platform': [
+    'data/field.zod.ts',
+    'data/hook.zod.ts',
+    'data/object.zod.ts',
+    'security/rls.zod.ts',
+    'ui/app.zod.ts',
+  ],
   // Everything else the closure reaches here is `strictObject()`'s error-message
   // machinery and what that drags behind it -- the Unified Query DSL among them,
   // a different skill's whole subject, shipped into every i18n session with an

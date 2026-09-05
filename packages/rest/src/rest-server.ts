@@ -3186,6 +3186,39 @@ export class RestServer {
     }
 
     /**
+     * [#14882] The `ResolveOptions` every metadata-document translation in
+     * this server hands `@objectstack/spec/system`: the request's locale plus
+     * the deployment's DECLARED fallback chain.
+     *
+     * The resolvers walk `requested locale → fallbackChain → authored label`,
+     * and default the chain to a literal `['en']` when a caller passes none.
+     * Every seam here used to pass none, so the stack's `i18n.fallbackLocale`
+     * never reached the chain: a `zh-CN` workspace that shipped a courtesy
+     * `en` bundle served `Entry Sheet` to a `zh-CN` request, ahead of its own
+     * authored `填报单`, because `en` was consulted before the authored label.
+     *
+     * The chain is read from the i18n service — `getFallbackLocale()`, the
+     * locale its own `t()` falls back to, which `I18nServicePlugin` receives
+     * as `fallbackLocale || defaultLocale || 'en'` from the stack config — so
+     * a bundle label and a `t()` message agree on which locale comes second.
+     * Feature-detected like `getPackagedObjectBase`: a service that does not
+     * declare a fallback (the method is optional on `II18nService`, and the
+     * core in-memory fallback has no declared one) gets NO chain, so the
+     * resolver's own default applies exactly as before — the serving layer
+     * threads a declaration, it does not invent one. ⛔ Not derived from
+     * `getDefaultLocale()`: that would decide, for a stack declaring
+     * `defaultLocale: 'zh-CN'` with `fallbackLocale: 'en'`, whether the
+     * authored label or the `en` bundle answers a `zh-CN` request — a
+     * contract question this seam must not answer on its own.
+     */
+    private static translateOptionsFor(i18n: any, locale: string): { locale: string; fallbackChain?: string[] } {
+        const fallback = i18n && typeof i18n.getFallbackLocale === 'function' ? i18n.getFallbackLocale() : undefined;
+        return typeof fallback === 'string' && fallback.length > 0
+            ? { locale, fallbackChain: [fallback] }
+            : { locale };
+    }
+
+    /**
      * An `II18nService.t`-compatible lookup for the request's environment, or
      * `undefined` when no i18n service is registered. Handed to the import
      * runner so its own messages resolve a deployment's `validation.field.*`
@@ -3261,7 +3294,10 @@ export class RestServer {
                 (item as any)?.name,
             )
             : undefined;
-        return translateMetadataDocument(metaType, item, bundle, { locale, packagedBase });
+        return translateMetadataDocument(metaType, item, bundle, {
+            ...RestServer.translateOptionsFor(i18n, locale),
+            packagedBase,
+        });
     }
 
     /**
@@ -3503,7 +3539,7 @@ export class RestServer {
         // the OUTER `{ type, items }`), so every element translates directly —
         // #5563 removed the per-element shape sniff that stood here.
         const translated = arr.map((item) => translateMetadataDocument(metaType, item, bundle, {
-            locale,
+            ...RestServer.translateOptionsFor(i18n, locale),
             packagedBase: this.packagedObjectBase(p, metaType, item?.name),
         }));
         return Array.isArray(items) ? translated : { ...items, items: translated };
@@ -3530,7 +3566,7 @@ export class RestServer {
             resolveMetadataTypeDescription,
             resolveMetadataFormLabels,
         } = await import('@objectstack/spec/system');
-        const opts = { locale } as const;
+        const opts = RestServer.translateOptionsFor(i18n, locale);
         const entries = payload.entries.map((entry: any) => {
             if (!entry || typeof entry !== 'object' || typeof entry.type !== 'string') return entry;
             const next: any = { ...entry };
@@ -4749,8 +4785,9 @@ export class RestServer {
                         const severityParam = (req.query?.severity as string | undefined) ?? 'error';
                         const severity = severityParam === 'warning' ? 'warning' : 'error';
                         const diagnosticsType = (req.query?.type as string | undefined) || undefined;
-                        // [#13753] STATE THE ORG PARTITION — but only on the
-                        // arm where ONE organization is the whole truth.
+                        // [#13753, #15622] STATE THE ORG PARTITION — on BOTH
+                        // arms. They differ only in whether the fold happens
+                        // HERE or is left entirely to the callee.
                         //
                         // `getMetaDiagnostics` reads each swept type through
                         // `getMetaItems({ type: t, organizationId })`.
@@ -4774,7 +4811,7 @@ export class RestServer {
                         // over that one type IS the request's whole scope and
                         // the answer is correct by construction. That is the
                         // arm Studio's per-type directory drill-down uses, and
-                        // it is the arm repaired here.
+                        // it is the arm #13753 repaired.
                         //
                         // ── WHY THE FOLD IS DOUBLED, AND STAYS DOUBLED (#15034) ──
                         //
@@ -4785,7 +4822,8 @@ export class RestServer {
                         // `canonicalMetaType` — so `f(t, f(t, o)) === f(t, o)` and the
                         // inner application is the algebraic no-op. MEASURED: replace
                         // this predicate with a raw `diagnosticsCtx?.tenantId` and
-                        // `rest-server-meta-read-org-scope.test.ts` stays 30/30 GREEN;
+                        // `rest-server-meta-read-org-scope.test.ts` stays GREEN IN FULL
+                        // (30/30 at that revision; the file has grown since);
                         // the inner gate re-folds it, phantom control included.
                         //
                         // ⭐ It is KEPT anyway, and the reason is TRUST DOMAIN rather
@@ -4801,55 +4839,84 @@ export class RestServer {
                         // bundled implementation. Defence in depth, on a seam the type
                         // system does not cover.
                         //
-                        // ⛔ The UNTYPED sweep is deliberately left env-wide,
-                        // and this is a recorded gap rather than an oversight
-                        // (#13753 reports the shape). `targetTypes` is then the
-                        // whole registry — five `allowOrgOverride: true` types
-                        // and every other declared type together — while the
-                        // request carries ONE `organizationId`. Naming the
-                        // tenant there does not merely over-reach: `getMetaItems`
-                        // UNIONs the env-wide rows with the named org's rows,
-                        // so a non-overridable type's org-scoped rows — the
-                        // pre-#6190 phantoms `reportUnhydratableOrgScopedRows`
-                        // warns about, which boot hydration walks past — would
-                        // be read back INTO the governance report as `stats`
-                        // counts and diagnostic entries. A dashboard whose job
-                        // is reporting what is wrong would report rows that do
-                        // not survive a restart.
+                        // ── [#15622] THE UNTYPED SWEEP FORWARDS THE
+                        // ORGANIZATION TOO, and passes it RAW ───────────────
                         //
-                        // ⚠️ #14683 MOVED THIS ARGUMENT and the gap outlived it, so
-                        // read the two apart. What used to hold the untyped arm shut
-                        // was that one org id could not express a per-type scope from
-                        // here without a fan-out per overridable type and a REST-side
-                        // re-aggregation of `total`/`stats`/`scannedTypes`. That is no
-                        // longer the obstacle: `getMetaDiagnostics` calls
-                        // `getMetaItems` once per `t` INSIDE its own loop, and the
-                        // inner gate folds each `t` separately, so a single
-                        // `organizationId` handed to the untyped arm would already be
-                        // narrowed per type — phantoms of non-overridable types
-                        // included. ⛔ The gap nevertheless stays OPEN and stays
-                        // PINNED: closing it moves observable behaviour and is a
-                        // decision somebody makes on a card, not a side effect of a
-                        // comment repair (#15034 files it). The pin that guards it is
-                        // `the untyped sweep is still env-wide` in
-                        // `rest-server-meta-read-org-scope.test.ts` — if it reddens,
-                        // read that card before making it green.
+                        // ⛔ This arm used to be a RECORDED GAP, left env-wide
+                        // on this argument: `targetTypes` is then the whole
+                        // registry — five `allowOrgOverride: true` types and
+                        // every other declared type together — while the
+                        // request carries ONE `organizationId`, and one org id
+                        // could not express a per-type scope from here without
+                        // a fan-out per overridable type plus a REST-side
+                        // re-aggregation of `total`/`stats`/`scannedTypes`.
+                        //
+                        // ⚠️ #14683 DISSOLVED THAT OBSTACLE (#15034 recorded
+                        // it, #15622 acted on it). `getMetaDiagnostics` does
+                        // not spend the organization once: it loops `for (const
+                        // t of targetTypes)` calling `getMetaItems({ type: t,
+                        // organizationId, … })`, and the FIRST thing
+                        // `getMetaItems` does with that organization is
+                        // `organizationIdForMetaRead(request.type, …)` on its
+                        // OWN folded type. So one `organizationId` handed to
+                        // this arm is already narrowed PER TYPE by the callee —
+                        // the org for the five overridable types, `undefined`
+                        // for every other, phantoms of non-overridable types
+                        // dropped. That is precisely the scope the paragraph
+                        // above said one id could not say. No fan-out, no
+                        // REST-side re-aggregation, no second owner of the
+                        // sweep's arithmetic: `stats` / `total` /
+                        // `scannedTypes` are untouched by the gate.
+                        //
+                        // ⭐ RULED that the gap CLOSES rather than being
+                        // re-recorded. A governance summary whose whole job is
+                        // surfacing problems, and which structurally cannot see
+                        // a class of them WHILE ITS OWN drill-down can, issues a
+                        // false all-clear — since #13753 repaired the `?type=`
+                        // arm, this summary undercounts relative to the screen
+                        // you reach by clicking into it. An org-scoped caller
+                        // now sees items THEIR OWN organization authored, on the
+                        // five overridable types only, which for a governance
+                        // report is the correct set.
+                        //
+                        // ⛔ RAW, and deliberately NOT pre-folded with
+                        // `organizationIdForMetaRead(...)` the way the `?type=`
+                        // arm folds above. There is no single type to fold on
+                        // here, and folding on any one of them would suppress
+                        // the organization for EVERY type at once. The per-type
+                        // decision belongs to the callee's loop. Identical in
+                        // shape to the `/references` door below, whose
+                        // narrowness control measured the same callee gate; both
+                        // halves are pinned in
+                        // `rest-server-meta-read-org-scope.test.ts`, where ONE
+                        // request shows an overridable type's org-authored row
+                        // present and a planted pre-#6190 phantom on a
+                        // NON-overridable type absent.
+                        //
+                        // ⚠️ ADR-0131 D6/D7 retires the per-organization
+                        // metadata partition in v18 (#15206, C5), so this
+                        // behaviour has ONE MAJOR to live and reverts to
+                        // environment-wide when the partition goes. An existing
+                        // value handed to an existing parameter: no new
+                        // parameter, response field, status code or contract
+                        // surface. ⛔ Nothing is to be built on it.
                         //
                         // ⚠️ NOT a new org-resolution seam: `resolveExecCtx` is
                         // memoised per request (WeakMap keyed by `req`), the
-                        // same result 40+ handlers here already share. It is
-                        // resolved only on the typed arm so the untyped sweep
-                        // keeps its exact behaviour today, authz-store failure
-                        // modes included — which is why this reads as a
+                        // same result 40+ handlers here already share. It is now
+                        // resolved for BOTH arms — which is why this reads as a
                         // statement rather than a ternary: the LOCALLY CAUGHT
                         // continuation-line spelling is the one the sibling
                         // doors use and the one `execctx-consumer-census`
                         // reads, and a third layout would be invisible to it.
-                        let diagnosticsOrganizationId: string | undefined;
-                        if (diagnosticsType) {
-                            const diagnosticsCtx = await this.resolveExecCtx(environmentId, req)
-                                .catch(rethrowAuthzStoreUnavailable);
-                            diagnosticsOrganizationId = organizationIdForMetaRead(
+                        // This door does not sit behind the shared anonymous
+                        // floor, so it decides an authz-store outage for itself
+                        // rather than laundering it into an org-unscoped 200 —
+                        // and the untyped arm now shares that, deliberately.
+                        const diagnosticsCtx = await this.resolveExecCtx(environmentId, req)
+                            .catch(rethrowAuthzStoreUnavailable);
+                        const diagnosticsOrganizationId: string | undefined = diagnosticsType
+                            ? organizationIdForMetaRead(
                                 // [#10340] FOLDED, not raw — see the PUT door's
                                 // org-scope comment for the measurement. The
                                 // protocol keeps receiving the caller's own
@@ -4857,8 +4924,9 @@ export class RestServer {
                                 // unrecognised one with its own 400); only the
                                 // scope decision reads the canonical singular.
                                 canonicalMetaUrlType(diagnosticsType), diagnosticsCtx?.tenantId,
-                            );
-                        }
+                            )
+                            // [#15622] The whole-registry arm — raw, per above.
+                            : diagnosticsCtx?.tenantId;
                         const result = await (p as any).getMetaDiagnostics({
                             type: diagnosticsType,
                             severity,
@@ -5571,60 +5639,72 @@ export class RestServer {
                             });
                             return;
                         }
-                        // [#13753] ⛔ STILL NO `organizationId`, and that is a
-                        // RECORDED GAP, not an omission nobody looked at. Read
-                        // this before adding the one-line repair that looks
-                        // obviously missing here.
+                        // ── [#13753] STATE THE ORG PARTITION — and pass it
+                        // RAW, which is the whole of the decision ───────────
                         //
-                        // The card prescribed the sibling call-site fix —
-                        // `organizationIdForMetaRead(canonicalMetaUrlType(
-                        // req.params.type), ctx?.tenantId)` — on the premise
-                        // that this door "takes one type". Measured on the
-                        // merged tree, it does not: `req.params.type` is the
-                        // TARGET, and `findReferencesToMeta` spends the
-                        // organization on the SOURCES. It resolves
+                        // The admin "Used by" panel renders its empty case as
+                        // "Nothing in the metadata graph points at this item.
+                        // Safe to delete." (objectui `metadata-admin/i18n.ts`),
+                        // shown to an operator about to delete something. With
+                        // no organization stated, the sweep read the env
+                        // partition only: an org-scoped `view` referencing the
+                        // item was invisible and the panel issued a false
+                        // clearance — the ADR-0110 D3 harm this route's own 501
+                        // refusal (#9326) exists to prevent, delivered by the
+                        // door after the protocol had refused to deliver it.
+                        //
+                        // ⛔ NOT pre-gated with `organizationIdForMetaRead(
+                        // canonicalMetaUrlType(req.params.type), ...)`, the way
+                        // the sibling `/meta` doors gate. Here `req.params.type`
+                        // is the TARGET, and `findReferencesToMeta` spends the
+                        // organization on the SOURCES: it resolves
                         // `REFERENCE_SITES.byTarget.get(target)`, groups the
-                        // sites by `fromType`, and reads each with
-                        // `getMetaItems({ type: matcher.fromType,
-                        // ...(organizationId ? { organizationId } : {}) })`. So
-                        // one request-level organization is applied to a SET of
-                        // types the target's own registry flag says nothing
-                        // about, and `getMetaItems` applies no gate of its own.
+                        // sites by `fromType` and reads each through
+                        // `getMetaItems({ type: matcher.fromType, ... })`. The
+                        // target's own registry flag therefore says nothing
+                        // about the types actually read, and gating on it would
+                        // suppress the organization for exactly the `object` /
+                        // `flow` / `app` deletes this card is about — the card's
+                        // own false clearance, left standing by a change that
+                        // looks like its repair.
                         //
-                        // Gating on the target would therefore answer a
-                        // question about the wrong type, in both directions:
+                        // ⭐ And RAW is not the unconditional tenant that
+                        // predicate exists to prevent, because since #14683
+                        // `getMetaItems` applies it ITSELF, to its OWN
+                        // `request.type`, after the fold. The per-SOURCE-type
+                        // decision is already the callee's: an overridable
+                        // source (`view`, `dashboard`, `report`, `translation`,
+                        // `email_template`) honours the organization, every
+                        // other source drops it and stays env-wide, so no
+                        // pre-#6190 phantom row is resurrected into a
+                        // destructive-action clearance. `request.organizationId`
+                        // has exactly ONE use inside `findReferencesToMeta` —
+                        // that `getMetaItems` spread — so passing it raw carries
+                        // no other consequence. Both halves are pinned in
+                        // `rest-server-meta-read-org-scope.test.ts`, the second
+                        // as the narrowness control.
                         //
-                        //  • target `allowOrgOverride: true` (`view`,
-                        //    `dashboard`, `report`, `translation`,
-                        //    `email_template`) ⇒ the org is named for EVERY
-                        //    source type, `object` / `flow` / `app` included —
-                        //    the unconditional tenant the read predicate exists
-                        //    to prevent, unioning pre-#6190 phantom rows back
-                        //    into a destructive-action clearance;
-                        //  • target `allowOrgOverride: false` (`object`,
-                        //    `flow`, `app`, `page`, …) ⇒ nothing is named, so
-                        //    an org-scoped `view` that references the object
-                        //    being deleted stays invisible and the "Used by"
-                        //    panel still renders "Nothing in the metadata graph
-                        //    points at this item. Safe to delete." That is the
-                        //    card's own false clearance, on the most common
-                        //    delete there is.
+                        // ⚠️ ADR-0131 D6/D7 retires the per-organization
+                        // metadata partition in v18 (#15206, C5), so this is a
+                        // repair inside a mechanism being removed: an existing
+                        // value handed to an existing parameter, no new contract
+                        // surface. ⛔ Nothing is to be built on it.
                         //
-                        // ⇒ The correct scope is per SOURCE type, and no value
-                        // this call site can pass expresses it. The repair
-                        // belongs where the type being read is known — the
-                        // predicate applied per `matcher.fromType` inside
-                        // `findReferencesToMeta`, or once inside `getMetaItems`
-                        // so read scope cannot drift from write scope for ANY
-                        // caller. Both are `metadata-protocol` changes that the
-                        // card fences off (⛔ "Do not change ... in
-                        // `protocol.ts`"), so this door is reported rather than
-                        // half-repaired: an org-awareness this door cannot
-                        // deliver must not be advertised by a gate that happens
-                        // to read `true` (Prime Directive #10).
+                        // The same memoised resolution the sibling read doors
+                        // share, in the same locally-caught spelling: this door
+                        // does not sit behind the shared anonymous floor, so it
+                        // decides an authz-store outage for itself rather than
+                        // laundering it into an org-unscoped 200.
+                        const referencesCtx = await this.resolveExecCtx(environmentId, req)
+                            .catch(rethrowAuthzStoreUnavailable);
                         const result = await (p as any).findReferencesToMeta({
                             type: req.params.type,
                             name: req.params.name,
+                            // SPREAD, never `organizationId: x ?? null` — the
+                            // implementation declares `organizationId?: string`
+                            // (optional plain string, not nullable), and it
+                            // forwards on truthiness.
+                            ...(referencesCtx?.tenantId ? { organizationId: referencesCtx.tenantId } : {}),
                             ...(environmentId ? { environmentId } : {}),
                         });
                         res.json(result);
@@ -9584,7 +9664,7 @@ export class RestServer {
                                         // one surface still serving the packaged
                                         // string back at a tenant who renamed it.
                                         objectSchema = translateMetadataDocument('object', objectSchema, bundle, {
-                                            locale,
+                                            ...RestServer.translateOptionsFor(i18n, locale),
                                             packagedBase: this.packagedObjectBase(p, 'object', objectSchema?.name),
                                         });
                                     }

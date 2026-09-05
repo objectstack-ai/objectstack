@@ -74,7 +74,8 @@ import {
   stackDeclaresMetadata,
   bundleDeclaresTranslations,
 } from '../utils/stack-collections.js';
-import { redactConnectionUrl, describeDriverConnection } from '../utils/connection-display.js';
+import { redactConnectionUrl, describeDriverConnection, describeDriverSqliteFile } from '../utils/connection-display.js';
+import { captureServedDatabaseFile, watchServedDatabaseFile } from '../utils/served-database-file.js';
 // The posture prose `os serve` and `os doctor` BOTH print, declared once
 // (#12492) — and, since #12579, the multi-org runtime SPELLING those two
 // commands put in front of the same operator, declared once with it.
@@ -2099,6 +2100,11 @@ export default class Serve extends Command {
     // is idempotent, so the second pass over an already-clean URL is a no-op.
     let resolvedDriverLabel: string | undefined;
     let resolvedDatabaseUrl: string | undefined;
+    // The on-disk SQLite file this boot serves, when it serves one. Kept apart
+    // from `resolvedDatabaseUrl` on purpose: that value is a string for a
+    // human and may be redacted or labelled, while this one is handed to
+    // `stat` — see `describeDriverSqliteFile`.
+    let servedSqliteFilePath: string | undefined;
 
     // Resolve the kernel logger level up front. It decides more than the
     // logger's own threshold: it decides whether the boot-quiet window below
@@ -2718,6 +2724,7 @@ export default class Serve extends Command {
              trackPlugin(resolution.trackName);
              resolvedDriverLabel = resolution.label;
              resolvedDatabaseUrl = resolution.displayUrl;
+             servedSqliteFilePath = resolution.sqliteFilePath;
 
              // ADR-0057 §3.6 (#2834 ②): provision the dedicated `telemetry`
              // datasource — a sibling SQLite file the engine routes every
@@ -4588,6 +4595,7 @@ export default class Serve extends Command {
           if (probe) {
             resolvedDriverLabel = probe.label;
             resolvedDatabaseUrl = probe.url;
+            servedSqliteFilePath = probe.sqliteFile;
           }
         } catch {
           // best-effort only
@@ -4755,6 +4763,35 @@ export default class Serve extends Command {
       // sends a consumer to it. {@link publishBoundPort} carries the race the
       // old order lost, and the reason the repair is not reader-side polling.
       publishBoundPort(boundPort, runtimeBoundPortChannels(printBanner));
+
+      // ── Watch the served database file's identity ──────────────────
+      // Deleting the data directory under a running server (`rm -rf
+      // .objectstack/data`, what `demo:reset` does) unlinks the inode without
+      // touching this process: SQLite keeps serving the now-invisible file,
+      // health keeps answering 200, and a later boot creates a brand-new
+      // database at the same path. From then on every filesystem inspection of
+      // that path describes a DIFFERENT file than this server answers from —
+      // which is how "the row I edited had no effect" and "the user who just
+      // authenticated is not in the database" become simultaneously true
+      // readings of a healthy deployment.
+      //
+      // Started only once the boot is otherwise complete, so a failure here
+      // can never be mistaken for a boot problem, and only when an on-disk
+      // SQLite file is actually being served. It refuses nothing and reports
+      // once — see `served-database-file.ts` for why both.
+      if (servedSqliteFilePath) {
+        const openedDatabaseFile = captureServedDatabaseFile(servedSqliteFilePath);
+        if (openedDatabaseFile) {
+          watchServedDatabaseFile({
+            opened: openedDatabaseFile,
+            // `error`, and to stderr: by the degradation-log-level rule this is
+            // the durability/consistency class — the system keeps looking
+            // normal while what it claims is persisted is not at the path it
+            // names.
+            onDiverged: (message) => { console.error(chalk.red(message)); },
+          });
+        }
+      }
 
       // Kernel already registers SIGINT/SIGTERM handlers during bootstrap.
       // No duplicate handler needed here — just keep the process alive.
@@ -6121,7 +6158,9 @@ function emitMultiNodeCapTelemetry(
  * arrives in, so a DSN-declared datasource no longer falls through to
  * `(unknown)`, and no shape prints credentials.
  */
-export function describeRegisteredDriver(kernel: any): { label: string; url: string } | null {
+export function describeRegisteredDriver(
+  kernel: any,
+): { label: string; url: string; sqliteFile?: string } | null {
   const candidates = [
     'driver.com.objectstack.driver.sql',
     'driver.com.objectstack.driver.mongodb',
@@ -6153,7 +6192,16 @@ export function describeRegisteredDriver(kernel: any): { label: string; url: str
 
     // A memory driver has no address to show — say so, rather than
     // `(unknown)`, which reads as "we looked for one and failed".
-    return { label, url: url ?? (name.endsWith('.memory') ? '(in-memory)' : '(unknown)') };
+    //
+    // `sqliteFile` is the same config read a second time asking a DIFFERENT
+    // question: not "what do I print" but "which file on this filesystem", so
+    // a caller can `stat` it. Absent for every driver that serves no on-disk
+    // SQLite file, which is the majority of them.
+    return {
+      label,
+      url: url ?? (name.endsWith('.memory') ? '(in-memory)' : '(unknown)'),
+      sqliteFile: describeDriverSqliteFile(cfg),
+    };
   }
   return null;
 }

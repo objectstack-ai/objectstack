@@ -116,7 +116,9 @@ describe('[#5702] SqlDriver — $icontains, and the retired $regex/$options', ()
     // that stood here — but a named cell is a STATED stance, which is the whole
     // distinction #12014 found the repo could not spell.
     driver = new CompilerProbeDriver(dialectCell('sqlite').config());
-    await driver.initObjects([{ name: 'txt', fields: { name: { type: 'string' } } }]);
+    // [#14079] `score` is the shared fixture's non-string column; declared as
+    // the number it is so the table's non-string rows run against a REAL column.
+    await driver.initObjects([{ name: 'txt', fields: { name: { type: 'string' }, score: { type: 'number' } } }]);
     for (const row of FILTER_TEXT_ROWS) {
       await driver.create('txt', { ...row }, BYPASS);
     }

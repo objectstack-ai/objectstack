@@ -2377,6 +2377,20 @@ const TEXT_PATTERN_OPERATORS: ReadonlySet<string> = new Set([
 const LIKE_PATTERN_OPERATORS: ReadonlySet<string> = new Set(['$like', '$ilike']);
 
 /**
+ * [#14079] Every operator that reads the column as TEXT — the union of
+ * {@link TEXT_PATTERN_OPERATORS} and {@link LIKE_PATTERN_OPERATORS}. The two
+ * families ask opposite things of their COMPARAND (the docblocks above), but
+ * they ask the same thing of the COLUMN: that its stored value be a string. The
+ * one place that question is answered at compile time is
+ * {@link SqlDriver.applyTextOperatorOverNonTextColumn}, and this set is what
+ * routes an operator there.
+ */
+const TEXT_OPERATORS: ReadonlySet<string> = new Set([
+  ...TEXT_PATTERN_OPERATORS,
+  ...LIKE_PATTERN_OPERATORS,
+]);
+
+/**
  * [#5234] Operators for which an ARRAY is the legitimate comparand, so it is
  * each MEMBER that must be individually compilable.
  *
@@ -12962,6 +12976,90 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
+   * [#14079] Is `localField` a column on `table` whose STORED value is never
+   * text — a declared numeric or boolean scalar?
+   *
+   * Reads the two registries `formatOutput`'s read-coercion already reads —
+   * `numericFields` (`NUMERIC_SCALAR_TYPES`, non-`multiple`) and
+   * `booleanFields` (`boolean` / `toggle`) — which `initObjects` and
+   * `registerExternalObject` both fill from the declared field type. Asking
+   * THOSE rather than growing a third list is the same discipline
+   * {@link isJsonColumn} states for `jsonFields`: one registry per column
+   * class, filled at the one place the declaration is read. Spec-side the
+   * same two classes are `NON_TEXT_STORED_VALUE_TYPES`; this driver's registries
+   * add its SQL aliases (`integer` / `int` / `float`) on top, as that
+   * constant's docblock says drivers do.
+   *
+   * A table with no entry answers `false`, exactly like {@link isJsonColumn}:
+   * a table this driver was never told about has no declared types, and the
+   * gate fires only where the column class is KNOWN — never from a guess.
+   *
+   * Temporal columns are deliberately NOT here. On SQLite a `Field.datetime` /
+   * `Field.date` / `Field.time` column's stored value IS text (canonical ISO,
+   * ADR-0053), so "the stored value is not a string" is a dialect question for
+   * them and the contract row this predicate serves declares nothing about
+   * them — `NON_TEXT_STORED_VALUE_TYPES`' docblock records the same boundary.
+   */
+  protected isNonTextColumn(table: string | null | undefined, localField: string): boolean {
+    if (!table) return false;
+    return (
+      this.numericFields[table]?.includes(localField) === true ||
+      this.booleanFields[table]?.includes(localField) === true
+    );
+  }
+
+  /**
+   * [#14079] Emit the DECLARED answer for a text operator aimed at a column
+   * whose stored value is never text ({@link isNonTextColumn}): the positive
+   * operators (`$contains` / `$startsWith` / `$endsWith` / `$icontains` /
+   * `$like` / `$ilike`) compile to the FALSE constant — no row's number
+   * contains a substring — and `$notContains` to the TRUE constant, its exact
+   * complement. `FILTER_TEXT_CASES`' `score` rows are the pin, on every face.
+   *
+   * # What compiled before, per dialect — three answers to one filter
+   *
+   * Measured on `origin/main` over a `Field.number` column holding `5`
+   * (#14079): the SQLite dialects compiled `col GLOB '*5*'` and COERCED the
+   * REAL to text in the storage class's own spelling (`'5.0'`, so
+   * `$contains: '.0'` matched and `$endsWith: '5'` did not); live Postgres
+   * compiled `col LIKE $1 ESCAPE $2` and REFUSED at query time with SQLSTATE
+   * 42883 (`operator does not exist: real ~~ text`) — a 500 for a filter the
+   * spec accepts; MySQL's `CAST(col AS BINARY) LIKE ?` reads as coercion (not
+   * executed — no server was provisionable). The maintainer ruled the cell on
+   * 2026-09-05 (option A, type-gate; coercion refused on the measurement) and
+   * the constants are that ruling compiled: the same row set on every dialect,
+   * decided by the DECLARED type at compile time because the stored value is
+   * not visible until run time.
+   *
+   * # Why constants compose with the NULL rules rather than fight them
+   *
+   * A row with no value already satisfies `$notContains` (#5298,
+   * {@link SqlDriver.applyNullSafeNegative}) and fails every positive
+   * operator, so `1 = 1` / `1 = 0` agree with the null polarity on every row —
+   * there is no cell where the two rules disagree. Under `$not` the leaf is
+   * totalised first ({@link nullSafeNegationOperand}): `NOT (col IS NOT NULL
+   * AND 1 = 0)` is TRUE for every row, which is what the JS faces answer for
+   * `!contains` on a number, and `NOT (col IS NULL OR 1 = 1)` is FALSE for
+   * every row, what they answer for `!notContains`. Complementarity holds
+   * through the negation too.
+   *
+   * Every refusal stays AHEAD of this: the comparand gates on the validating
+   * walk (`reduceFilterKey`: an empty or non-string `$icontains` comparand, a
+   * non-string or dangling `$like` pattern) and {@link assertCompilableComparand}
+   * all run before the caller reaches here, so a filter the contract refuses
+   * is still refused — the constant answers only a filter the contract
+   * accepts. `1 = 0` is {@link applyFalseConstant}'s spelling; `1 = 1` is its
+   * mirror, valid on every dialect this driver targets and free of bindings.
+   */
+  private applyTextOperatorOverNonTextColumn(builder: any, logicalOp: 'and' | 'or', op: string): void {
+    if (op === '$notContains') {
+      builder[logicalOp === 'or' ? 'orWhereRaw' : 'whereRaw']('1 = 1');
+      return;
+    }
+    this.applyFalseConstant(builder, logicalOp);
+  }
+
+  /**
    * [#7398] The column-type half of the filter gate: refuse a DECLARED operator
    * that the column it was aimed at cannot give a meaningful answer for.
    *
@@ -13558,6 +13656,15 @@ export class SqlDriver implements IDataDriver {
           // the plain `whereIn` arms below NOR the normalised `whereRaw` arms
           // an external multi-value datetime column is routed to.
           this.assertOperatorAppliesToColumn(table, localField, field, rawOp, false, value);
+          // [#14079] The type-gated answer for a text operator over a column
+          // whose stored value is never text — AFTER every refusal above (a
+          // filter the contract refuses is still refused) and BEFORE both
+          // emitters, so neither a `GLOB` nor a `LIKE` is ever built against a
+          // number. See {@link SqlDriver.applyTextOperatorOverNonTextColumn}.
+          if (TEXT_OPERATORS.has(rawOp) && this.isNonTextColumn(table, localField)) {
+            this.applyTextOperatorOverNonTextColumn(builder, logicalOp, rawOp);
+            continue;
+          }
           // Calendar-day upper bounds first (#3777): `$lte` on a bare
           // `YYYY-MM-DD` against a datetime column compiles half-open, and a
           // `$between` whose max is a bare day decomposes into the same pair —

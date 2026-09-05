@@ -43,6 +43,12 @@ export interface MetadataEvalCaseResult {
    * the string names the cause.
    */
   generationError?: string;
+  /**
+   * The rubric's verdict on the stack. When `generationError` is set there was
+   * no stack to judge, and this carries the unscorable sentinel — 0 / F /
+   * `valid: false` — for BOTH causes alike. ⛔ Never a score borrowed from the
+   * empty stack, which reads 100 / A / `valid: true`.
+   */
   score: MetadataScore;
   minScore: number;
   passed: boolean;
@@ -55,7 +61,17 @@ export interface MetadataEvalReport {
   total: number;
   passed: number;
   failed: number;
-  /** Mean score across all cases (0–100, rounded). */
+  /**
+   * Mean score across all cases (0–100, rounded).
+   *
+   * The denominator is every case ATTEMPTED, ⛔ not the subset that could be
+   * scored: a case whose generation failed contributes its 0, and is counted.
+   * Stated because the alternative is a real metric with a different meaning —
+   * a mean over scorable cases would report the quality of the generations
+   * that arrived while staying silent about how many never did, and a
+   * `meanScore` that silently switched denominators would be a worse defect
+   * than a wrong one. `total` / `passed` / `failed` carry the counts.
+   */
   meanScore: number;
   /** True when every case passed. */
   ok: boolean;
@@ -77,14 +93,21 @@ export interface RunMetadataEvalOptions {
 const DEFAULT_MIN_SCORE = 75;
 
 /**
- * The score attached to a case whose stack could not be scored AT ALL.
+ * The score attached to a case whose stack could not be scored AT ALL — the
+ * generator threw, or what it returned could not be walked. ONE verdict for
+ * the whole class, because the class is one: there is no stack to judge.
  *
- * ⛔ Deliberately NOT `scoreMetadata({})`, even though the throwing-generator
- * path above substitutes an empty stack: the empty stack scores 100 / A /
- * `valid: true` (pinned in `score.test.ts`), and stamping that on a stack
- * nobody could parse would put a benign-looking verdict next to a failure.
- * A stack that cannot be walked is not an empty stack, and `valid: true` for
- * one that was never parsed is simply false.
+ * ⛔ Deliberately NOT `scoreMetadata({})`. The empty stack scores 100 / A /
+ * `valid: true` (pinned in `score.test.ts`, re-driven on this tree), so
+ * substituting it stamps a benign-looking verdict on a failure. A stack that
+ * cannot be walked is not an empty stack, and `valid: true` for one that was
+ * never parsed is simply false.
+ *
+ * That substitution is exactly what the throwing-generator path below used to
+ * do, which is how a live eval whose every generation threw could report
+ * `meanScore: 100` beside `ok: false`, `passed: 0` — a clean number nothing
+ * earned, and the first number a human reads. `passed` was never wrong; the
+ * `score` under it was.
  *
  * ⛔ This is not a measurement and must never be read as one — the case is
  * already failed by its `generationError`. It exists so `MetadataScore` stays
@@ -138,7 +161,9 @@ export async function runMetadataEval(
         stack = await options.generate!(c.prompt, c.id);
       } catch (err: any) {
         generationError = err?.message || String(err);
-        stack = {};
+        // ⛔ No empty-stack substitution here. There is no stack: `stack`
+        // keeps the fixture and is never read below, because a case that
+        // reached this line is scored by `unscorableScore()` instead.
       }
     }
 
@@ -155,11 +180,19 @@ export async function runMetadataEval(
     // `ok: false`. Swallowing it into a passing case would be worse than the
     // crash it replaces.
     let score: MetadataScore;
-    try {
-      score = scoreMetadata(stack);
-    } catch (err: any) {
-      generationError = `Failed to score the ${source} stack: ${err?.message || String(err)}`;
+    if (generationError) {
+      // The generator threw — nothing was produced, so there is nothing to
+      // score. Same outcome class as a stack nobody can walk, therefore the
+      // same verdict: an unscorable case contributes 0 to `meanScore`, never
+      // the 100 an empty stack would have borrowed.
       score = unscorableScore();
+    } else {
+      try {
+        score = scoreMetadata(stack);
+      } catch (err: any) {
+        generationError = `Failed to score the ${source} stack: ${err?.message || String(err)}`;
+        score = unscorableScore();
+      }
     }
     results.push({
       id: c.id,

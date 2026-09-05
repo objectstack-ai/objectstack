@@ -8275,6 +8275,331 @@ export function h44UntimestampedReadingRow(hit, comment, total = 1) {
 }
 
 // ---------------------------------------------------------------------------
+// H45 — `pm:epic` and `pm:queue` on ONE card (reserved and handed over at once).
+//
+// H3's shape and H3's cost: a pure label intersection, no threshold, no
+// timestamp. `pm:epic` says a named epic PM has reserved the card and no domain
+// seat may take it; `pm:queue` says it has been handed over and any seat may.
+// Both at once and each reader is right about the label it read, which is the
+// shape that lets one card be implemented twice.
+//
+// The carriers are listed BY CONSTRUCTION: every card carrying `pm:queue` is on
+// the `pm:queue` label page this sweep already pages, so the row buys no
+// request and needs no gathering policy.
+//
+// ⚠️ This half's own silence is CLOSED, and the paragraph that stated it is
+// gone rather than merely amended: the reading it deferred — a `pm:epic` card
+// whose PARENT does not carry `pm:epic` — is the second half below, with the
+// two prices it named (the whole `label:pm:epic` index, and a sub-issues
+// `parent` read per carrier, an endpoint family nothing in this file called)
+// now paid and declared. Nothing about the pair above changes: same predicate,
+// same sentence, same free population.
+// ---------------------------------------------------------------------------
+
+/** H45 — true when one card is reserved by an epic and offered to the queue at once. */
+export function h45EpicAndQueued(issue) {
+  const labels = labelNames(issue);
+  return labels.includes('pm:epic') && labels.includes('pm:queue');
+}
+
+// ---------------------------------------------------------------------------
+// H45's SECOND HALF — a `pm:epic` card reserved under nothing delegated.
+//
+// `pm:epic` is a TWO-NODE fact, and the label alone cannot say which node it is
+// on. The epic lane in `.claude/skills/pm-dispatch/SKILL.md` puts it on the
+// delegated 父单 AND on every sub-issue beneath it — 「`label:pm:epic`
+// 即父子保留全集」 — so the index is parents and children together, and the
+// reservation it publishes (「已由 epic PM 保留;其它 PM 永不取」) is the SAME
+// sentence at both ends. A child is withheld from every domain seat because a
+// parent is being run by a named epic PM. When that parent is not delegated,
+// the child is withheld on the strength of nothing — and the label is
+// indistinguishable, to a reader and to every candidate query alike, from a
+// live reservation.
+//
+// ## What is judged, in the order the predicate asks it
+//
+//   1. the card carries `pm:epic`, or nothing is read at all;
+//   2. the parent read ANSWERED, or the card is UNJUDGED — never clean;
+//   3. a parent carrying `pm:epic` is the delegated node -> clean;
+//   4. a parent NOT carrying it -> FINDING, naming the parent;
+//   5. NO parent (the documented 404) -> the card must then be the delegated
+//      node itself, which `h45DelegationNodeSignals` is what decides;
+//   6. no parent AND the card's own payload names one -> the two channels
+//      DISAGREE, reported rather than silently read as parentless.
+//
+// ## Why a top-level carrier is usually CLEAN, and what makes one a finding
+//
+// A parent IS the delegated node by construction, so a top-level `pm:epic` card
+// is normally the epic itself and reporting it would be noise. Two free signals
+// say so and EITHER is enough:
+//
+//   sub-issues     `sub_issues_summary.total > 0` — it demonstrably heads a
+//                  subtree, which is what a 父单 is.
+//   registration   its body carries a `session_…` identifier — the machine
+//                  half of the paired delegation signal 「父单打 `pm:epic` +
+//                  正文写会话 ID 与声明的文件领地」, and the same registration
+//                  the zombie rule reads (「父单正文有登记」).
+//
+// The OR is deliberate, and it is what the live population forced: a chartered
+// epic whose legs live in its BODY rather than in filed sub-issues carries a
+// live owner registration and zero sub-issues, and a sub-issue-only reading
+// reports it as abandoned. The other direction occurs too — a parent heading
+// twenty sub-issues whose body names no session — so neither signal alone
+// covers the population, and an AND would report both halves of it.
+//
+// ⚠️ The body half is a LOOSE anchor on purpose, and its looseness is safe in
+// exactly ONE direction: it can only make this row go QUIET. It never fires a
+// finding, so a body that merely mentions a session id costs a silence — an
+// unread surface, stated here — and can never produce a phantom accusation,
+// which is the failure direction that keeps the seat-sticker BODY half out of
+// this file entirely.
+//
+// ## What it costs, and the population it deliberately is NOT
+//
+// One `label:pm:epic` page, plus one `GET /repos/{owner}/{repo}/issues/{n}/parent`
+// per carrier — a NEW fetch class in this file, declared here, used nowhere
+// else, and bounded by the size of the `pm:epic` index rather than by the
+// board. A 404 on it is the documented answer for a parentless card, not a
+// transport failure, and it is counted as an ANSWER by the coverage pair.
+//
+// ⛔ That page is enumerated SEPARATELY and its rows NEVER enter `seen`. `seen`
+// is the input every row judged in the main loop is drawn from — and it is
+// also, transitively, what the corpus rows read: the comment cache the
+// untimestamped-reading row scans and the referrer set the dangling-reference
+// row builds are both "whatever the rows above already fetched". Folding a
+// `pm:epic` page into `seen` would therefore not merely add carriers; it would
+// move what those rows report, which is a change to EXISTING rows wearing an
+// addition's uniform. `SEEN_LABEL_PAGES` is the pinned list, and `pm:epic` is
+// not in it.
+// ---------------------------------------------------------------------------
+
+/**
+ * The machine half of an epic delegation registration, read off a `pm:epic`
+ * carrier's OWN body.
+ *
+ * Deliberately loose — any `session_…` identifier, anywhere in the body, code
+ * span or prose. It is consulted ONLY to excuse a top-level carrier, so its
+ * error direction is silence and never accusation. See the banner.
+ */
+export const EPIC_REGISTRATION_MARKER = /session_[A-Za-z0-9]{4,}/;
+
+/**
+ * Which card buys the parent read: a `pm:epic` carrier, and nothing else.
+ *
+ * Exported for the reason every gathering policy in this file is — a policy
+ * that decides what gets READ AT ALL is where a silent hole would live.
+ */
+export function h45NeedsParentRead(issue) {
+  return labelNames(issue).includes('pm:epic');
+}
+
+/**
+ * The two free signals that a top-level `pm:epic` card is the DELEGATED NODE.
+ * Both are read off the listing row already in hand; neither costs a request.
+ *
+ * @returns {{ subIssues: boolean, registration: boolean }}
+ */
+export function h45DelegationNodeSignals(issue) {
+  const total = Number(issue?.sub_issues_summary?.total ?? 0);
+  return {
+    subIssues: Number.isFinite(total) && total > 0,
+    registration: EPIC_REGISTRATION_MARKER.test(String(issue?.body ?? '')),
+  };
+}
+
+/**
+ * Whether the CARD's own payload claims a parent — the second channel, and the
+ * only thing that can contradict a 404 from the parent read.
+ */
+function epicCardNamesParent(issue) {
+  return Boolean(issue?.parent) || Boolean(issue?.parent_issue_url);
+}
+
+/**
+ * H45's second half — null when the carrier is clean, else the finding
+ * sentence.
+ *
+ * `parent` carries THREE input states, never two:
+ *
+ *   an issue object   the parent read answered with the parent row, whose
+ *                     labels decide;
+ *   `null`            it answered 404 `No parent issue found` — parentless,
+ *                     which is a real answer and the documented one;
+ *   `undefined`       it was not read at all (not a carrier, or the request
+ *                     failed) — UNJUDGED, never clean, and the summary line's
+ *                     coverage pair is what says how many.
+ */
+export function h45EpicUnderUndelegatedParent(issue, parent) {
+  if (!h45NeedsParentRead(issue)) return null;
+  if (parent === undefined) return null;
+
+  if (parent === null) {
+    if (epicCardNamesParent(issue)) {
+      return (
+        'carries `pm:epic` and its OWN payload names a parent, while the sub-issues parent read answers ' +
+        '404 `No parent issue found` — the two channels DISAGREE about whether this card is a sub-issue, ' +
+        'so it is reported rather than read as parentless and quietly excused. ⛔ Nothing here asserts ' +
+        'which channel is right: a stale payload field and a parent relation removed between the two ' +
+        'reads are indistinguishable from this sweep, and 「could not tell」 must never render as clean. ' +
+        'Remedy is a re-read of the card — if the relation really is gone, this is a top-level carrier ' +
+        'and the next sweep judges it as one. Report-only patrol INPUT, not a verdict and not a gate.'
+      );
+    }
+    const signals = h45DelegationNodeSignals(issue);
+    if (signals.subIssues || signals.registration) return null;
+    return (
+      'carries `pm:epic` and has NO parent — reserved under nothing delegated. A top-level carrier is ' +
+      'normally the delegated 父单 itself and is clean, but this one declares NEITHER free signal that ' +
+      'would say so: `sub_issues_summary.total` is 0, so it heads no subtree, and its body carries no ' +
+      '`session_…` registration — the machine half of 「父单打 `pm:epic` + 正文写会话 ID ' +
+      '与声明的文件领地」. So the card is withheld from every domain seat ' +
+      '(「已由 epic PM 保留;其它 PM 永不取」) while nothing declares an epic session to be ' +
+      'running it. Remedy is whichever is TRUE: write the owner registration into the body if the ' +
+      'delegation is live, file the subtree it heads, or drop `pm:epic` and re-grade the card. ' +
+      '⚠️ The body read is deliberately loose and can only EXCUSE a carrier, never accuse one, so this ' +
+      'row is a LOWER BOUND on the shape. Report-only patrol INPUT, not a verdict and not a gate.'
+    );
+  }
+
+  if (labelNames(parent).includes('pm:epic')) return null;
+  const number = parent?.number ?? 'an unread number';
+  return (
+    `carries \`pm:epic\` while its PARENT #${number} does NOT — reserved under a parent that is not ` +
+    'delegated. The label withholds this card from every domain seat ' +
+    '(「已由 epic PM 保留;其它 PM 永不取」) on the strength of a delegation the parent ' +
+    'does not declare, and a candidate query reading the `pm:epic` index cannot tell this from a live ' +
+    'reservation. Remedy is ONE label write, whichever way the subtree really stands: put `pm:epic` on ' +
+    "the parent if the epic is live, or take it off this child and re-grade the card (`pm:queue` if it " +
+    'is anyone\'s to take now). ⛔ Never both on this card at once — `pm:epic` + `pm:queue` is this ' +
+    'row\'s FIRST half. Report-only patrol INPUT, not a verdict and not a gate.'
+  );
+}
+
+// ---------------------------------------------------------------------------
+// H46 — an OPEN pull request implementing a card that never became this
+// branch's to implement.
+//
+// The body binds a closing keyword to an open card, and the card is in one of
+// two states that say the work was never taken:
+//
+//   (a) it still carries `pm:queue` — published as available to every seat
+//       while this PR is already set to close it, so a second lawful claim
+//       produces a second implementation;
+//   (b) no comment on it is a `Claim:` whose `Branch:` line names this PR's
+//       head branch — the implementation is attributable to no claim on the
+//       card it closes.
+//
+// Both are fixable only while the PR is OPEN, because the merge is what closes
+// the card, so drafts are in scope exactly as they are for H7 and H21.
+//
+// `Part of #N` is NOT a closing keyword and never fires this row: a body that
+// declares itself part of a card is not telling GitHub to finish it.
+//
+// ## Everything here is READ, never re-spelled
+//
+// The keyword extraction is `closingKeywordTargets` — H7's and H21's, so the
+// three rows can never disagree about what GitHub will act on. The claim half
+// is `CLAIM_COMMENT_MARKER` and the branch half is `claimedBranches`, the same
+// pair `check-clause2-carriers.mjs` reads.
+//
+// ## What it costs, and the silences that buys
+//
+// The PR side is the open-PR listing already in hand; the card side is `seen` ∪
+// the unscoped open listing, every open card already paged. Only leg (b) buys
+// anything — one comment page per BOUND, non-`pm:queue` open card, on the same
+// shared cache every other comment reader here uses, so a card another row
+// already fetched costs nothing.
+//
+//   ⚠️ A bound number this sweep cannot see as an OPEN card is UNJUDGED, not
+//   clean: a closed card, a PR number and an open card beyond the listing
+//   ceiling are indistinguishable here and none of them is judged.
+//   ⚠️ A thread that could not be READ is unjudged too (#4690) — leg (b) is a
+//   statement about comments in hand, and the coverage pair on the summary line
+//   is what says how many that was.
+//   ⚠️ `claimedBranches` reads protocol-shaped refs (`claude/issue-<n>-<slug>`)
+//   only, so a PR whose head is any other shape can be named by no claim at all
+//   and leg (b) fires on it. That is the row working rather than a gap: an
+//   implementation on an unnameable branch is as unattributable as one with no
+//   claim written.
+// ---------------------------------------------------------------------------
+
+/** How many bound cards one row names before it counts the rest — H19's budget, same grounds. */
+export const H46_CARD_LIST_CAP = 4;
+
+/**
+ * Which bound card buys a comment page. Leg (a) is answered by labels alone, so
+ * a `pm:queue` carrier is judged without touching the network; everything else
+ * needs its thread. Exported for the reason every gathering policy here is: a
+ * policy that decides what gets READ AT ALL is where a silent hole would live.
+ */
+export function h46NeedsCardComments(issue) {
+  return !labelNames(issue ?? {}).includes('pm:queue');
+}
+
+/**
+ * Is any comment here a `Claim:` whose `Branch:` line names `branch`?
+ *
+ * Both halves are the shipped predicates and neither is re-spelled: the claim
+ * marker tolerates the documented blockquote and the `Branch:` line tolerates
+ * the decoration a line meant to be grepped attracts. An empty branch is
+ * unanswerable rather than unclaimed, and returns false only after the caller
+ * has declined to judge on it.
+ */
+export function h46ClaimNamesBranch(commentBodies, branch) {
+  const ref = String(branch ?? '');
+  if (!ref) return false;
+  return (Array.isArray(commentBodies) ? commentBodies : []).some(
+    (body) => CLAIM_COMMENT_MARKER.test(String(body ?? '')) && claimedBranches(body).includes(ref),
+  );
+}
+
+/**
+ * H46 — null when the PR is clean, else the finding sentence.
+ *
+ * Bound PER CARD NUMBER exactly as H7 binds: a PR that lawfully closes a
+ * claimed card and also names an unclaimed one reports only the second.
+ *
+ * @param {{ number?: number, body?: string, head?: { ref?: string } }} pr
+ * @param {Map<number, { issue: object, comments?: string[]|null }>} cards — the
+ *   OPEN cards this sweep holds. An absent number is UNJUDGED; `comments`
+ *   `undefined` is a thread unconsulted and `null` one unreadable, and leg (b)
+ *   declines on both (#4690).
+ */
+export function h46ImplementedWithoutClaim(pr, cards) {
+  const head = String(pr?.head?.ref ?? '');
+  const rows = [];
+  for (const [n, keyword] of closingKeywordTargets(pr?.body ?? '')) {
+    const entry = cards instanceof Map ? cards.get(Number(n)) : null;
+    if (!entry?.issue) continue;
+    if (labelNames(entry.issue).includes('pm:queue')) {
+      rows.push(
+        `body carries \`${keyword} #${n}\` while #${n} still carries \`pm:queue\` — the card is ` +
+          `published as available to every seat while this PR is already set to close it, so a ` +
+          `second lawful claim on it lands a second implementation. Take the card as the protocol ` +
+          `says (drop \`pm:queue\` in the write that claims it, then post the \`Claim:\` comment ` +
+          `naming this branch), or weaken this body to \`Part of #${n}\` so the merge does not ` +
+          `close it`,
+      );
+      continue;
+    }
+    if (!head) continue;
+    const comments = entry.comments;
+    if (!Array.isArray(comments)) continue;
+    if (h46ClaimNamesBranch(comments, head)) continue;
+    rows.push(
+      `body carries \`${keyword} #${n}\` but no comment on #${n} is a \`Claim:\` whose \`Branch:\` ` +
+        `line names \`${head}\` — merging attributes the card to a branch the card itself never ` +
+        `records as claimed, so nothing on the board stopped a second seat taking it. Post the ` +
+        `claim comment naming \`${head}\` on #${n}, or weaken this body to \`Part of #${n}\``,
+    );
+  }
+  if (rows.length === 0) return null;
+  const shown = rows.slice(0, H46_CARD_LIST_CAP);
+  const more = rows.length > shown.length ? `; +${rows.length - shown.length} further bound card(s)` : '';
+  return `${shown.join('; ')}${more}. Report-only patrol INPUT: nothing here is blocked and no label is written.`;
+}
+
+// ---------------------------------------------------------------------------
 // Report rendering — pure over (findings, counts), so `--self-test` pins both
 // media offline. The live sweep below picks a renderer and prints it; nothing
 // about WHAT is swept or WHICH predicates fire depends on the format.
@@ -8414,6 +8739,19 @@ export const SWEEP_COUNT_KEYS = [
   'readingComments',
   'readingSeatCandidates',
   'readingSeatRead',
+  // H46's coverage pair. `claimlessCandidates` is how many BOUND, non-`pm:queue`
+  // open cards leg (b) had to read a thread for, and `claimlessProbed` how many
+  // of them it got — the pair that keeps a row that judged nothing separable
+  // from a board with nothing to judge.
+  'claimlessCandidates',
+  'claimlessProbed',
+  // H45's second half. `epicParentCandidates` is the size of the SEPARATE
+  // `pm:epic` enumeration and `epicParentProbed` how many of those parent reads
+  // ANSWERED — a 404 counting as an answer, because parentless is what it
+  // means. The pair keeps a row that judged nothing separable from an index
+  // with nothing to judge.
+  'epicParentCandidates',
+  'epicParentProbed',
   'commits',
   'commitBindings',
   'commitBindingMessages',
@@ -8759,6 +9097,23 @@ export function summaryLine(counts, findingCount) {
     'PULL REQUEST is NOT in this corpus: no listing here fetches a PR comment page, so this row\'s ' +
     'silence about PRs is an unread surface and never a clean one, and every count above is a LOWER ' +
     'BOUND. ' +
+    // H46's coverage pair. UNCONDITIONAL like every other window's: a `0 of 0`
+    // reading is a run where no open PR bound a closing keyword to a
+    // non-`pm:queue` open card, never a row that went quiet.
+    `Claim-less implementations (H46): ${counts.claimlessProbed ?? 0} of ` +
+    `${counts.claimlessCandidates ?? 0} bound card thread(s) were read for a \`Claim:\` naming the ` +
+    "PR's head branch. A bound number this sweep cannot see as an OPEN card — closed, a PR, or " +
+    'beyond the listing ceiling — is UNJUDGED rather than clean, so this count is a LOWER BOUND. ' +
+    // H45's second half. UNCONDITIONAL like every other window's, and it
+    // carries the one disclosure this row owes beyond its own count: the
+    // population it reads is enumerated SEPARATELY, so a reader can check that
+    // no other row's input moved to buy it.
+    `Epic parent reads (H45): ${counts.epicParentProbed ?? 0} of ` +
+    `${counts.epicParentCandidates ?? 0} open \`pm:epic\` card(s) had their sub-issues parent read ` +
+    'answered — a 404 `No parent issue found` IS an answer here, because parentless is what it means. ' +
+    'That index is enumerated as its own population and kept OUT of the label pages every other row is ' +
+    'judged over (`SEEN_LABEL_PAGES`), so this row buys one page plus one read per carrier and moves no ' +
+    "other row's input. A carrier whose parent read did not answer is UNJUDGED rather than clean. " +
     `Report-only: findings are patrol input, not a gate verdict.`
   );
 }
@@ -8807,6 +9162,8 @@ export const SUMMARY_CLAUSE_ANCHORS = [
   ['h37Folds', 'Family folds (H37): '],
   ['h40References', 'Dangling references (H40): '],
   ['h44Readings', 'Untimestamped readings (H44): '],
+  ['h46Claimless', 'Claim-less implementations (H46): '],
+  ['h45EpicParents', 'Epic parent reads (H45): '],
   ['reportOnly', 'Report-only: '],
 ];
 
@@ -9170,6 +9527,8 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   H34: 'state',
   H37: 'state',
   H44: 'state',
+  H45: 'state',
+  H46: 'state',
 
   H5: 'inventory',
   H6: 'inventory',
@@ -9216,11 +9575,12 @@ export const FAMILY_LEDGER_CALLOUT_CAP = 12;
  *   table rows                    ≤ FAMILY_LEDGER_ROW_CAP (64) × ~48 B ≈ 3.1 KB
  *   trim callout                  ≤ FAMILY_LEDGER_CALLOUT_CAP (12) × ~26 B + prose
  *   unregistered callout          ≤ FAMILY_LEDGER_CALLOUT_CAP (12) × ~8 B + prose
- *   computed-0 line               ≤ registry size (36) × ~8 B + prose
+ *   computed-0 line               ≤ registry size (38) × ~8 B + prose
  *
  * Measured on the constructed worst case: 2,285 B with every one of the
- * registered families carrying 999 rows (37 of them when measured; 36 since
- * #14072 removed H22, so the measurement is an upper bound on today's set),
+ * registered families carrying 999 rows (37 of them when measured; 36 after
+ * #14072 removed H22, 38 with H45/H46 — the ROW CAP below, not the registry
+ * size, is what bounds the table, so the measured figure still stands),
  * 3,754 B with enough unregistered
  * codes on top to reach `FAMILY_LEDGER_ROW_CAP`. 6,000 is the declared ceiling
  * above both, and it is under an EIGHTH of `MARKDOWN_BODY_BUDGET` (60,000) —
@@ -10415,6 +10775,33 @@ export function pmLabelListingPath(repo, label, page) {
   return `/repos/${repo}/issues?state=open&labels=${encodeURIComponent(label)}&per_page=100&page=${page}`;
 }
 
+/**
+ * The path of the ONE new fetch class this file takes: the sub-issues PARENT
+ * read, one call per `pm:epic` carrier (H45's second half).
+ *
+ * Named and pinned for exactly the reason `pmLabelListingPath` above is — a
+ * request shape inlined in a loop body can be asserted only by re-typing it,
+ * and a re-typed assertion pins the copy rather than the call.
+ *
+ * ## What its 404 means, and why that is not an error path
+ *
+ * `No parent issue found` is the endpoint's DOCUMENTED answer for a card that
+ * is not a sub-issue. It is the reading the row needs most often, so the caller
+ * counts it as a probe that ANSWERED and hands the predicate `null`; only some
+ * OTHER failure leaves the carrier unjudged. Reading the 404 as a failed read
+ * would make every top-level epic look unreadable and the row would go quiet
+ * over the whole population.
+ *
+ * ⛔ No other member of the sub-issues family is called. The child listing
+ * (`/issues/{n}/sub_issues`) would be a SECOND fetch class and buys nothing
+ * this row asks: the carriers are already enumerated by the `pm:epic` index,
+ * and how many children a card has arrives free on its own listing row as
+ * `sub_issues_summary`.
+ */
+export function subIssueParentPath(repo, number) {
+  return `/repos/${repo}/issues/${number}/parent`;
+}
+
 async function listIssues(label, stats = {}) {
   const out = [];
   let exhausted = false;
@@ -11596,15 +11983,40 @@ async function listAllOpenIssues(stats = {}) {
   return out;
 }
 
+/**
+ * The label pages whose rows become `seen` — the input EVERY row judged in the
+ * main sweep loop is drawn from, and transitively the corpus the
+ * untimestamped-reading and dangling-reference rows read.
+ *
+ * `pm:awaiting-maintainer` is listed like every other state label (#11196
+ * fix 5). H25's exclusivity carriers would be reachable through the label
+ * they wrongly coexist with, but a card in the state ALONE would otherwise be
+ * swept by nothing at all — no H2 claim check, no H11 parked inventory — and
+ * "the patrol's input set is narrower than the states the board produces" is
+ * the defect this whole family is about. One label page per sweep, four
+ * sweeps a day, against a 15,000/h core quota.
+ *
+ * ⛔ `pm:epic` is deliberately NOT here, and the omission is load-bearing
+ * rather than an oversight. H45's second half reads that index as a population
+ * of its OWN (see its banner): adding it here would widen what every row above
+ * is judged over and what the corpus rows fetch, which is a change to existing
+ * rows rather than an addition beside them. The self-test pins the exclusion.
+ *
+ * Exported so that exclusion is checkable from outside this function — a list
+ * inlined in a loop body can only be asserted by re-typing it.
+ */
+export const SEEN_LABEL_PAGES = Object.freeze([
+  'pm:dispatched',
+  'pm:queue',
+  'pm:blocked',
+  'pm:seat',
+  'pm:on-hold',
+  AWAITING_MAINTAINER_LABEL,
+  'priority:p0',
+]);
+
 async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seenClosed, stats = {}, hold = null, references = null) {
-  // `pm:awaiting-maintainer` is listed like every other state label (#11196
-  // fix 5). H25's exclusivity carriers would be reachable through the label
-  // they wrongly coexist with, but a card in the state ALONE would otherwise be
-  // swept by nothing at all — no H2 claim check, no H11 parked inventory — and
-  // "the patrol's input set is narrower than the states the board produces" is
-  // the defect this whole family is about. One label page per sweep, four
-  // sweeps a day, against a 15,000/h core quota.
-  for (const label of ['pm:dispatched', 'pm:queue', 'pm:blocked', 'pm:seat', 'pm:on-hold', AWAITING_MAINTAINER_LABEL, 'priority:p0']) {
+  for (const label of SEEN_LABEL_PAGES) {
     for (const issue of await listIssues(label, stats)) seen.set(issue.number, issue);
   }
 
@@ -11690,6 +12102,19 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     }
     if (h3QueueAndDispatched(issue)) {
       findings.push([issue, 'H3', '`pm:queue` and `pm:dispatched` both present']);
+    }
+    // H45 — H3's neighbour and H3's cost. Its population is covered here BY
+    // CONSTRUCTION: a carrier holds `pm:queue`, and that label page is one this
+    // loop consumes, so the row can never be about a card the sweep did not list.
+    if (h45EpicAndQueued(issue)) {
+      findings.push([
+        issue,
+        'H45',
+        '`pm:epic` and `pm:queue` both present — reserved by a named epic PM and offered to every ' +
+          'seat at once, so a lawful claim on it lands a second implementation. Drop whichever half ' +
+          'is wrong in ONE write: `pm:epic` if the card really was handed over, `pm:queue` if it is ' +
+          "still the epic's.",
+      ]);
     }
     // H24 + H25 — two field/label intersections over cards this loop already
     // holds, so neither costs a request. H24's population is the `pm:queue`
@@ -12376,6 +12801,44 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   stats.readingThreads = commentCache.size;
   stats.readingComments = h44Read;
 
+  // H46 — the claim-less implementation. Placed HERE, AFTER H44, deliberately:
+  // leg (b) adds threads to `commentCache`, and H44's corpus is whatever the
+  // rows above it already fetched. Judging this row first would widen H44's
+  // input and change what an existing row reports, which this addition must not
+  // do. Everything else it reads is already in hand — the open-PR listing, and
+  // the open-card union H37 built for the same reason.
+  const h46OpenCards = new Map();
+  for (const [number, issue] of seenUnscoped) h46OpenCards.set(number, issue);
+  for (const [number, issue] of seen) h46OpenCards.set(number, issue);
+  const h46Bound = new Map();
+  for (const pr of seenPrs.values()) {
+    for (const bound of closingKeywordTargets(pr?.body ?? '').keys()) {
+      const number = Number(bound);
+      const issue = h46OpenCards.get(number);
+      // An unresolvable number is UNJUDGED here, never clean — H40 owns the
+      // question of whether it resolves at all.
+      if (!issue || h46Bound.has(number)) continue;
+      h46Bound.set(number, { issue, comments: undefined });
+    }
+  }
+  // The only request this row buys, and only for the cards leg (a) cannot
+  // answer. A failed page leaves `comments` null: that card drops out of leg
+  // (b) — a MISS, never an invention — and the coverage pair says so.
+  for (const entry of h46Bound.values()) {
+    if (!h46NeedsCardComments(entry.issue)) continue;
+    stats.claimlessCandidates = (stats.claimlessCandidates ?? 0) + 1;
+    try {
+      entry.comments = await commentsFor(entry.issue);
+      stats.claimlessProbed = (stats.claimlessProbed ?? 0) + 1;
+    } catch {
+      entry.comments = null;
+    }
+  }
+  for (const pr of seenPrs.values()) {
+    const claimless = h46ImplementedWithoutClaim(pr, h46Bound);
+    if (claimless) findings.push([pr, 'H46', claimless]);
+  }
+
   // H19 — blocker liveness. Last, because it is the only pass that reads a
   // card this sweep did not list: every other item answers from a listing
   // already in hand, while "is the target still open" is a fact about an
@@ -12600,6 +13063,37 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     stats.refDeferred = references.report.deferred;
     stats.refFloor = references.report.floor;
     stats.refBeyond = references.report.beyond;
+  }
+
+  // H45's second half — the `pm:epic` index, read as its own population.
+  //
+  // LAST in the sweep, and that placement is the mechanism rather than a
+  // preference: every row above has finished judging by the time this listing
+  // exists, so there is no path by which a `pm:epic` row could reach `seen`,
+  // the comment cache, or the reference corpus. The rows it produces are pushed
+  // straight into `findings` and nothing else is touched.
+  //
+  // The parent read is the one new fetch class in this file. Its 404 is the
+  // documented ANSWER for a parentless card — counted as a probe that answered
+  // — while any other failure leaves the carrier UNJUDGED, which the predicate
+  // reads off `undefined` and the coverage pair reports.
+  for (const issue of await listIssues('pm:epic', stats)) {
+    if (!h45NeedsParentRead(issue)) continue;
+    stats.epicParentCandidates = (stats.epicParentCandidates ?? 0) + 1;
+    let parent;
+    try {
+      parent = await rest(subIssueParentPath(OWNER_REPO, issue.number));
+      stats.epicParentProbed = (stats.epicParentProbed ?? 0) + 1;
+    } catch (err) {
+      if (err?.status === 404) {
+        parent = null;
+        stats.epicParentProbed = (stats.epicParentProbed ?? 0) + 1;
+      } else {
+        parent = undefined;
+      }
+    }
+    const undelegated = h45EpicUnderUndelegatedParent(issue, parent);
+    if (undelegated) findings.push([issue, 'H45', undelegated]);
   }
 }
 
@@ -17940,6 +18434,188 @@ Mutual exclusion: \`get_comments\` page 747 → \`[]\`, page 746 = my own R+117 
   t('H44 summary: the PR residual is declared on EVERY run, not just interesting ones', saidBy('h44Readings', summaryLine({}, 0)).includes('PULL REQUEST is NOT in this corpus'), true);
   t('H44 summary: …and says the counts are a lower bound', saidBy('h44Readings', summaryLine({}, 0)).includes('LOWER BOUND'), true);
   t('H44 summary: a bare line renders numbers, never `undefined`', saidBy('h44Readings', summaryLine({}, 0)).includes('undefined'), false);
+
+  // -- H45 — reserved and handed over at once (#15667, report-only) ----------
+  // Both directions of a pure label intersection. The neighbour cases pin that
+  // H45 takes the pair H3 cannot see and leaves H3's own pair alone.
+  t('H45: `pm:epic` alone -> clean', h45EpicAndQueued(issue(['pm:epic'])), false);
+  t('H45: `pm:epic` + `pm:dispatched` -> clean — a claimed epic card is the normal shape', h45EpicAndQueued(issue(['pm:epic', 'pm:dispatched'])), false);
+  t('H45: `pm:queue` alone -> clean', h45EpicAndQueued(issue(['pm:queue'])), false);
+  t('H45: a card with no pm label at all -> clean', h45EpicAndQueued(issue(['domain:skills'])), false);
+  t('H45: `pm:epic` + `pm:queue` -> finding', h45EpicAndQueued(issue(['pm:epic', 'pm:queue'])), true);
+  t('H45: …in either label order, since the read is a set', h45EpicAndQueued(issue(['pm:queue', 'pm:epic'])), true);
+  t('H45: …and a third state alongside does not excuse the pair', h45EpicAndQueued(issue(['pm:epic', 'pm:queue', 'pm:blocked'])), true);
+  t('H45 adjacency: ⛔ H3 stays silent on it — its pair is `pm:queue` + `pm:dispatched`', h3QueueAndDispatched(issue(['pm:epic', 'pm:queue'])), false);
+  t('H45 adjacency: …and H45 stays silent on H3\'s pair', h45EpicAndQueued(issue(['pm:queue', 'pm:dispatched'])), false);
+  t('H45 band: registered as a state row', familyBand('H45'), 'state');
+  t('H45 band: …and the sweep really pushes it, so the registry sees it', familyRegistryCoverage().emitted.includes('H45'), true);
+
+  // -- H45's SECOND HALF — reserved under nothing delegated (report-only) ----
+  //
+  // Fixtures carry the two payload members this half reads beyond labels: the
+  // free `sub_issues_summary` that rides every listing row, and the card's OWN
+  // parent field — the second channel, and the only thing that can contradict
+  // a 404 from the parent read.
+  const epicCard = (extra = {}) => ({
+    ...issue(['pm:epic']),
+    number: 700,
+    sub_issues_summary: { total: 0, completed: 0, percent_completed: 0 },
+    ...extra,
+  });
+  const epicParent = { number: 600, labels: [{ name: 'pm:epic' }, { name: 'tracking' }] };
+  const plainParent = { number: 601, labels: [{ name: 'tracking' }, { name: 'priority:p1' }] };
+  const REGISTERED_BODY = 'Owner: `domain:services` seat, session `session_0194kbQJxUvv2yvsGRtuXpP5`.';
+  const h45prow = (...args) => String(h45EpicUnderUndelegatedParent(...args) ?? '');
+
+  // The clean direction: a child under a parent that really is delegated.
+  t('H45 parent: a `pm:epic` child whose parent carries `pm:epic` -> clean', h45EpicUnderUndelegatedParent(epicCard(), epicParent), null);
+
+  // The finding direction the row exists for.
+  t('H45 parent: a `pm:epic` child whose parent LACKS `pm:epic` -> finding', typeof h45EpicUnderUndelegatedParent(epicCard(), plainParent), 'string');
+  t('H45 parent: …and the row names the parent a reader has to fix', h45prow(epicCard(), plainParent).includes('PARENT #601'), true);
+  t('H45 parent: …and says WHICH of the two shapes it is', h45prow(epicCard(), plainParent).includes('reserved under a parent that is not delegated'), true);
+  t('H45 parent: …and asks for ONE label write, not both', h45prow(epicCard(), plainParent).includes('ONE label write'), true);
+
+  // The parent itself. A 404 is parentless, and a top-level carrier is the
+  // delegated node when EITHER free signal says so — measured in both
+  // directions on the live index, which is why it is an OR and not an AND.
+  t('H45 parent: a top-level carrier HEADING a subtree is the delegated node -> clean', h45EpicUnderUndelegatedParent(epicCard({ sub_issues_summary: { total: 3, completed: 1 } }), null), null);
+  t('H45 parent: …and one whose BODY carries the owner registration, likewise', h45EpicUnderUndelegatedParent(epicCard({ body: REGISTERED_BODY }), null), null);
+  t('H45 parent: a top-level carrier with NEITHER signal -> finding', typeof h45EpicUnderUndelegatedParent(epicCard(), null), 'string');
+  t('H45 parent: …and the sentence says no parent, never a bad parent', h45prow(epicCard(), null).includes('has NO parent — reserved under nothing delegated'), true);
+  t('H45 parent: …and never claims a parent number it did not read', h45prow(epicCard(), null).includes('PARENT #'), false);
+  t('H45 parent: …and states that the loose body read makes the row a LOWER BOUND', h45prow(epicCard(), null).includes('LOWER BOUND'), true);
+
+  // The two signals are read independently — the pin that keeps the OR an OR.
+  t('H45 parent: the delegation signals read a subtree on its own', JSON.stringify(h45DelegationNodeSignals(epicCard({ sub_issues_summary: { total: 20 } }))), '{"subIssues":true,"registration":false}');
+  t('H45 parent: …a body registration on its own', JSON.stringify(h45DelegationNodeSignals(epicCard({ body: REGISTERED_BODY }))), '{"subIssues":false,"registration":true}');
+  t('H45 parent: …and neither, which is the only shape that fires', JSON.stringify(h45DelegationNodeSignals(epicCard())), '{"subIssues":false,"registration":false}');
+  t('H45 parent: ⛔ a body mentioning no session id is not a registration', h45DelegationNodeSignals(epicCard({ body: 'Owner: the services seat. Legs below.' })).registration, false);
+
+  // The contradiction: the parent read says parentless while the card's own
+  // payload says otherwise. Reported rather than excused, and no side taken.
+  t('H45 parent: a 404 against the card\'s own `parent` object -> finding', typeof h45EpicUnderUndelegatedParent(epicCard({ parent: { number: 600 } }), null), 'string');
+  t('H45 parent: …and `parent_issue_url` is the same channel', typeof h45EpicUnderUndelegatedParent(epicCard({ parent_issue_url: 'https://api.github.com/repos/o/r/issues/600' }), null), 'string');
+  t('H45 parent: …named as a DISAGREEMENT, with neither channel called right', h45prow(epicCard({ parent: { number: 600 } }), null).includes('DISAGREE'), true);
+  t('H45 parent: …and the contradiction OUTRANKS the delegation excuse', typeof h45EpicUnderUndelegatedParent(epicCard({ parent: { number: 600 }, sub_issues_summary: { total: 9 } }), null), 'string');
+
+  // A card without `pm:epic` is never read — the gathering policy and the
+  // predicate agree, so neither can quietly widen the population alone.
+  t('H45 parent: a card without `pm:epic` buys no parent read', h45NeedsParentRead(issue(['pm:queue', 'domain:skills'])), false);
+  t('H45 parent: …and this row declines to judge it even when handed a parent', h45EpicUnderUndelegatedParent(issue(['pm:queue']), plainParent), null);
+  t('H45 parent: a `pm:epic` carrier is the one shape that buys the read', h45NeedsParentRead(issue(['pm:epic'])), true);
+
+  // An unread parent files NO row — and the coverage pair is what keeps that
+  // separable from a clean carrier (#4690's duty, discharged on the line).
+  t('H45 parent: an unread parent files no row', h45EpicUnderUndelegatedParent(epicCard(), undefined), null);
+  t('H45 parent: …and the summary says such a carrier is UNJUDGED rather than clean', saidBy('h45EpicParents', summaryLine({}, 0)).includes('UNJUDGED rather than clean'), true);
+
+  // Adjacency with the first half: one row id, two sentences, no overlap.
+  t('H45 adjacency: the FIRST half stays silent on the parent relation', h45EpicAndQueued(epicCard()), false);
+  t('H45 adjacency: …and the SECOND stays silent on the first half\'s pair when the parent is delegated', h45EpicUnderUndelegatedParent({ ...epicCard(), labels: [{ name: 'pm:epic' }, { name: 'pm:queue' }] }, epicParent), null);
+  t('H45 adjacency: ⛔ no `H45b` row id is invented — every registry key is `H<digits>`', Object.keys(HALF_STATE_FAMILY_BAND).some((k) => !/^H\d+$/.test(k)), false);
+
+  // The fetch class, pinned at the shape that was measured live.
+  t('H45 parent: the new fetch class is the measured path', subIssueParentPath('objectstack-ai/objectstack', 13890), '/repos/objectstack-ai/objectstack/issues/13890/parent');
+
+  // The SEPARATION. `pm:epic` is not a page that feeds `seen`, and the seven
+  // that do are the seven that always did.
+  t('H45 population: ⛔ `pm:epic` is not a page that feeds `seen`', SEEN_LABEL_PAGES.includes('pm:epic'), false);
+  t('H45 population: …and `seen` is fed by exactly the pages it was fed by before', SEEN_LABEL_PAGES.join('|'), 'pm:dispatched|pm:queue|pm:blocked|pm:seat|pm:on-hold|pm:awaiting-maintainer|priority:p0');
+
+  // Ruling-2's proof as a fixture, in the only shape that can fail: the
+  // CONTROL says an epic carrier folded into the judged population really
+  // would fire an existing row, and the pin says the verdicts over the pages
+  // that DO feed `seen` are unchanged. Without the control the second line is
+  // satisfied by a population that could never have mattered.
+  const existingRowVerdicts = (cards) =>
+    cards
+      .map((c) => [h1DispatchedNoAssignee(c), h3QueueAndDispatched(c), h24QueuedWithAssignee(c) !== null, h29PmStateExclusivity(c) !== null].join(','))
+      .join(';');
+  const seenBoard45 = [issue(['pm:dispatched'], []), issue(['pm:queue'], ['os-x'])];
+  const epicPopulation45 = [epicCard(), epicCard({ labels: [{ name: 'pm:epic' }, { name: 'pm:dispatched' }] })];
+  t('H45 population control: an epic carrier folded INTO the judged population would fire an existing row', existingRowVerdicts(epicPopulation45).includes('true'), true);
+  t('H45 population: …while the verdicts over the pages that feed `seen` are untouched', existingRowVerdicts(seenBoard45), 'true,false,false,false;false,false,true,false');
+
+  // The count keys and the clause.
+  t('H45 parent: both count keys ride the enumerated forwarding contract', ['epicParentCandidates', 'epicParentProbed'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
+  t('H45 summary: the coverage pair is reported', saidBy('h45EpicParents', summaryLine({ epicParentProbed: 4, epicParentCandidates: 5 }, 0)).includes('4 of 5 open `pm:epic` card(s)'), true);
+  t('H45 summary: the clause is rendered on EVERY run, not just interesting ones', saidBy('h45EpicParents', summaryLine({}, 0)).includes('0 of 0'), true);
+  t('H45 summary: …and says a 404 is an ANSWER, not a failed read', saidBy('h45EpicParents', summaryLine({}, 0)).includes('IS an answer here'), true);
+  t('H45 summary: …and names the separation the row rests on', saidBy('h45EpicParents', summaryLine({}, 0)).includes('SEEN_LABEL_PAGES'), true);
+  t('H45 summary: a bare line renders numbers, never `undefined`', saidBy('h45EpicParents', summaryLine({}, 0)).includes('undefined'), false);
+
+  // -- H46 — implemented without a claim (#15667, report-only) ---------------
+  // Fixtures: one PR on a protocol branch, and a one-card map standing for the
+  // open-card union the sweep hands the predicate.
+  const HEAD46 = 'claude/issue-15667-half-states';
+  const pr46 = (body, ref = HEAD46) => ({ number: 900, body, head: { ref } });
+  const cards46 = (labels, comments) => new Map([[15667, { issue: issue(labels), comments }]]);
+  const CLAIM46 = [`Claim: PM loop round R1\nBranch: \`${HEAD46}\``];
+  const h46row = (...args) => String(h46ImplementedWithoutClaim(...args) ?? '');
+
+  // The clean direction: a dispatched card whose claim names this very branch.
+  t('H46: a claimed card whose `Claim:` names this branch -> clean', h46ImplementedWithoutClaim(pr46('Fixes #15667'), cards46(['pm:dispatched'], CLAIM46)), null);
+  t('H46: …and the documented blockquote claim reads the same', h46ImplementedWithoutClaim(pr46('Fixes #15667'), cards46(['pm:dispatched'], [`> Claim: PM loop wave 9\n> Branch: \`${HEAD46}\``])), null);
+  t('H46: …and `Claimed:` with `Branches:` reads too — the shipped spellings, unrespelled', h46ImplementedWithoutClaim(pr46('Fixes #15667'), cards46(['pm:dispatched'], [`Claimed: x\nBranches: \`${HEAD46}\``])), null);
+
+  // Leg (a): the card is still published as available.
+  t('H46: a `pm:queue` card -> finding', typeof h46ImplementedWithoutClaim(pr46('Fixes #15667'), cards46(['pm:queue'], CLAIM46)), 'string');
+  t('H46: …and it names the label that makes it one', h46row(pr46('Fixes #15667'), cards46(['pm:queue'], CLAIM46)).includes('still carries `pm:queue`'), true);
+  t('H46: …leg (a) fires WITHOUT reading the thread at all', typeof h46ImplementedWithoutClaim(pr46('Fixes #15667'), cards46(['pm:queue'], undefined)), 'string');
+
+  // Leg (b): a claim exists, but for someone else's branch.
+  t('H46: a card whose only `Claim:` names another branch -> finding', typeof h46ImplementedWithoutClaim(pr46('Fixes #15667'), cards46(['pm:dispatched'], ['Claim: x\nBranch: `claude/issue-15667-someone-else`'])), 'string');
+  t('H46: …and the row names the head branch the reader must post', h46row(pr46('Fixes #15667'), cards46(['pm:dispatched'], ['Claim: x\nBranch: `claude/issue-15667-someone-else`'])).includes(`\`${HEAD46}\``), true);
+  t('H46: a card with no claim comment at all -> finding', typeof h46ImplementedWithoutClaim(pr46('Fixes #15667'), cards46(['pm:dispatched'], ['looks good to me'])), 'string');
+  t('H46: ⛔ a `Branch:` line NOT on a `Claim:` comment is not a claim', typeof h46ImplementedWithoutClaim(pr46('Fixes #15667'), cards46(['pm:dispatched'], [`Rebased. Branch: \`${HEAD46}\``])), 'string');
+  t('H46: ⛔ a `Claim:` with no `Branch:` line is not a claim on THIS branch', typeof h46ImplementedWithoutClaim(pr46('Fixes #15667'), cards46(['pm:dispatched'], ['Claim: PM loop round R1'])), 'string');
+
+  // `Part of` is not a closing keyword, and the keyword grammar is H7's.
+  t('H46: a body with `Part of` only -> clean', h46ImplementedWithoutClaim(pr46('Part of #15667'), cards46(['pm:queue'], undefined)), null);
+  t('H46: …and every closing spelling fires, since the extractor is H7\'s', ['Closes #15667', 'closed #15667', 'Resolves: #15667'].every((b) => typeof h46ImplementedWithoutClaim(pr46(b), cards46(['pm:queue'], undefined)) === 'string'), true);
+  t('H46: a keyword in backticks is not a keyword — the code-stripped read', h46ImplementedWithoutClaim(pr46('`Fixes #15667` is deliberately not used here'), cards46(['pm:queue'], undefined)), null);
+
+  // The three unjudged states, each silent rather than clean.
+  t('H46: a bound number this sweep holds no OPEN card for is unjudged', h46ImplementedWithoutClaim(pr46('Fixes #15667'), new Map()), null);
+  t('H46: an unconsulted thread is unjudged, never "no claim"', h46ImplementedWithoutClaim(pr46('Fixes #15667'), cards46(['pm:dispatched'], undefined)), null);
+  t('H46: an UNREADABLE thread is unjudged too (#4690)', h46ImplementedWithoutClaim(pr46('Fixes #15667'), cards46(['pm:dispatched'], null)), null);
+  t('H46: a PR with no head ref cannot be judged on leg (b)', h46ImplementedWithoutClaim(pr46('Fixes #15667', ''), cards46(['pm:dispatched'], ['looks good'])), null);
+  t('H46: …but leg (a) still fires on it, because it needs no branch', typeof h46ImplementedWithoutClaim(pr46('Fixes #15667', ''), cards46(['pm:queue'], undefined)), 'string');
+
+  // Bound PER CARD NUMBER, exactly as H7 binds.
+  const twoCards46 = new Map([
+    [15667, { issue: issue(['pm:dispatched']), comments: CLAIM46 }],
+    [15666, { issue: issue(['pm:queue']), comments: undefined }],
+  ]);
+  t('H46: a lawful close beside an unlawful one reports only the second', h46row(pr46('Fixes #15667 and closes #15666'), twoCards46).includes('#15666'), true);
+  t('H46: …and never accuses the card that WAS claimed', h46row(pr46('Fixes #15667 and closes #15666'), twoCards46).includes('#15667'), false);
+
+  // The gathering policy — what decides which card buys a request.
+  t('H46 gate: a `pm:queue` card buys no thread — leg (a) answers from labels', h46NeedsCardComments(issue(['pm:queue'])), false);
+  t('H46 gate: every other bound card does', h46NeedsCardComments(issue(['pm:dispatched'])), true);
+  t('H46 gate: …including one with no pm label at all', h46NeedsCardComments(issue([])), true);
+
+  // The claim reader, asserted directly in both directions.
+  t('H46 claim: the pair must be on ONE comment', h46ClaimNamesBranch(['Claim: x', `Branch: \`${HEAD46}\``], HEAD46), false);
+  t('H46 claim: …and on one comment it reads', h46ClaimNamesBranch([`Claim: x\nBranch: \`${HEAD46}\``], HEAD46), true);
+  t('H46 claim: an empty branch is unanswerable, never claimed', h46ClaimNamesBranch([`Claim: x\nBranch: \`${HEAD46}\``], ''), false);
+  t('H46 claim: a prefix of the branch does not count as naming it', h46ClaimNamesBranch(['Claim: x\nBranch: `claude/issue-15667-half`'], HEAD46), false);
+
+  // The row's own contract.
+  t('H46 row: states its report-only posture', h46row(pr46('Fixes #15667'), cards46(['pm:queue'], undefined)).includes('Report-only patrol INPUT'), true);
+  t('H46 row: a clean PR renders nothing', h46ImplementedWithoutClaim(pr46('Refs #15667'), cards46(['pm:queue'], undefined)), null);
+  const many46 = new Map(Array.from({ length: H46_CARD_LIST_CAP + 2 }, (_, i) => [900 + i, { issue: issue(['pm:queue']), comments: undefined }]));
+  t('H46 row: past the list cap it counts the rest rather than growing', h46row(pr46(Array.from({ length: H46_CARD_LIST_CAP + 2 }, (_, i) => `Fixes #${900 + i}`).join('\n')), many46).includes('2 further bound card(s)'), true);
+
+  t('H46 band: registered as a state row', familyBand('H46'), 'state');
+  t('H46 band: …and the sweep really pushes it, so the registry sees it', familyRegistryCoverage().emitted.includes('H46'), true);
+  t('H45/H46: no code is left unregistered by this change', familyRegistryCoverage().missing.length, 0);
+  t('H46: both count keys ride the enumerated forwarding contract', ['claimlessCandidates', 'claimlessProbed'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
+  t('H46 summary: the coverage pair is reported', saidBy('h46Claimless', summaryLine({ claimlessProbed: 3, claimlessCandidates: 4 }, 0)).includes('3 of 4 bound card thread(s)'), true);
+  t('H46 summary: the clause is rendered on EVERY run, not just interesting ones', saidBy('h46Claimless', summaryLine({}, 0)).includes('0 of 0'), true);
+  t('H46 summary: …and says an unresolvable binding is unjudged, not clean', saidBy('h46Claimless', summaryLine({}, 0)).includes('UNJUDGED rather than clean'), true);
+  t('H46 summary: a bare line renders numbers, never `undefined`', saidBy('h46Claimless', summaryLine({}, 0)).includes('undefined'), false);
 
   // -- The `[::]` collapse (#12090): behaviour-preserving, asserted as such ---
   // The class held U+003A TWICE, never the fullwidth U+FF1A its shape implied.

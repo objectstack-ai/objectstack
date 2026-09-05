@@ -17,7 +17,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { FILTER_TEXT_ROWS } from '@objectstack/spec/data';
+import { FILTER_TEXT_CASES, FILTER_TEXT_ROWS } from '@objectstack/spec/data';
 import { matchesFilterCondition } from './matches-filter.js';
 
 const ids = (filter: unknown): string[] =>
@@ -77,6 +77,48 @@ describe('[#6520] matchesFilterCondition evaluates $icontains, ASCII fold only',
   it('DENIES a non-string comparand rather than coercing it', () => {
     expect(matchesFilterCondition({ name: '42' }, { name: { $icontains: 42 } } as any))
       .toBe(false);
+  });
+});
+
+/**
+ * [#14079] A text operator over a stored value that is NOT a string, on the
+ * RLS write-side `check`.
+ *
+ * Driven off the shared table's own `score` rows rather than restated, so this
+ * face is held to the same declared answer the driver faces are: a number never
+ * satisfies a positive text operator and always satisfies `$notContains`. This
+ * face already answered that way (`!(typeof actual === 'string' && …)`), and it
+ * is what the reference matcher was moved onto — so it is pinned here as the
+ * shape, not as a change. The `$like` / `$ilike` pair is pinned beside the
+ * table's rows because the table cannot carry them (its header says why).
+ */
+describe('[#14079] matchesFilterCondition over a stored value that is not a string', () => {
+  const nonStringRows = FILTER_TEXT_CASES.filter(
+    (c): c is Extract<typeof c, { expected: readonly string[] }> =>
+      c.expectRejection !== true && Object.keys(c.filter)[0] === 'score',
+  );
+
+  it('the shared table declares five non-string rows, and this face runs all five', () => {
+    expect(nonStringRows.map((c) => Object.keys((c.filter as Record<string, object>).score)[0]).sort())
+      .toEqual(['$contains', '$endsWith', '$icontains', '$notContains', '$startsWith']);
+  });
+
+  for (const c of nonStringRows) {
+    it(c.name, () => { expect(ids(c.filter), c.note).toEqual([...c.expected]); });
+  }
+
+  it('$like / $ilike follow the same rule — never a match, and $not admits every row', () => {
+    const ALL = FILTER_TEXT_ROWS.map((r) => r.id);
+    expect(ids({ score: { $like: '%5%' } })).toEqual([]);
+    expect(ids({ score: { $like: '%0' } })).toEqual([]);
+    expect(ids({ score: { $ilike: '%5%' } })).toEqual([]);
+    expect(ids({ $not: { score: { $like: '%5%' } } })).toEqual(ALL);
+  });
+
+  it('a boolean is the same class as a number: never text, so $notContains is satisfied', () => {
+    expect(matchesFilterCondition({ ok: true }, { ok: { $contains: 'true' } } as any)).toBe(false);
+    expect(matchesFilterCondition({ ok: true }, { ok: { $notContains: 'true' } } as any)).toBe(true);
+    expect(matchesFilterCondition({ n: 0 }, { n: { $notContains: '0' } } as any)).toBe(true);
   });
 });
 

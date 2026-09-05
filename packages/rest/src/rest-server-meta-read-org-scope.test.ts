@@ -341,6 +341,9 @@ function boot() {
         /** [#13753] The cross-type spec-validation sweep. */
         diagnostics: (query: Record<string, unknown> = {}) =>
             drive('GET', `${META}/diagnostics`, { query }),
+        /** [#13753] The "Used by" sweep an operator reads before a delete. */
+        references: (type: string, name: string) =>
+            drive('GET', `${META}/:type/:name/references`, { params: { type, name } }),
         history: (type: string, name: string) =>
             drive('GET', `${META}/:type/:name/history`, { params: { type, name }, query: {} }),
         /** The fixture proof every history assertion below is gated on. */
@@ -565,40 +568,50 @@ describe('#13764 the history seams of this harness honour the org partition', ()
 // named no organization, so an org's own overlays were absent from it: clean
 // tiles rendered over a partition the sweep never read.
 //
-// ⭐ WHY ONLY THE `?type=` ARM IS REPAIRED, and why the untyped sweep is
-// PINNED AS-IS rather than left unmentioned. `getMetaDiagnostics` reads each
+// ⭐ BOTH ARMS STATE THE ORGANIZATION — and the split below is about WHERE the
+// fold happens, not about whether one happens. `getMetaDiagnostics` reads each
 // swept type through `getMetaItems({ type: t, organizationId })`.
 //
 // ⚠️ [#14683, recorded by #15034] `getMetaItems` NOW APPLIES THE REGISTRY GATE
 // ITSELF, after folding the request type. This header used to say it applied
 // none and that the scope was therefore the caller's to decide per type; that
-// sentence is FALSE on today's tree. What survives it is the arm split below,
-// which is about how many types ONE `organizationId` is asked to cover:
+// sentence is FALSE on today's tree. What that dissolved is the obstacle the
+// untyped arm was held shut on:
 //
 //   • `?type=` ⇒ `targetTypes` is exactly that one type, so
 //     `organizationIdForMetaRead` over it IS the request's whole scope. Correct
-//     by construction, and repaired here.
+//     by construction; repaired by #13753 and untouched since.
 //   • no `?type=` ⇒ `targetTypes` is the whole registry, five
-//     `allowOrgOverride: true` types beside every other declared type. The arm
-//     names no organization at all, so nothing is folded and nothing is
-//     unioned. ⚠️ The reason it stays that way is no longer "one org id cannot
-//     say org-scoped for those five, env-wide for the rest" — since #14683 the
-//     inner gate folds each `t` separately inside the sweep's own loop, so it
-//     could. It stays because closing it MOVES BEHAVIOUR and is somebody's
-//     decision on a card. The gap is pinned below so it cannot widen by
-//     accident in either direction.
+//     `allowOrgOverride: true` types beside every other declared type. ⭐
+//     [#15622] This arm now forwards the caller's organization **RAW** and lets
+//     the callee's per-`t` gate narrow it: the org for those five, `undefined`
+//     for every other type, so no pre-#6190 phantom is unioned back in. ⛔ It
+//     must NOT be pre-folded at the door — there is no single type to fold on,
+//     and folding on any one of them would suppress the organization for every
+//     type at once.
+//
+// ⚠️ THE GAP THIS SECTION USED TO PIN OPEN IS CLOSED, and the pin was REPLACED
+// rather than deleted. `an org-scoped item is absent from the whole-registry
+// sweep` carried "if this reddens, read the card before making it green";
+// #15622 is that card, and it ruled the arm forwards. Its inverse now stands in
+// the same place, beside the narrowness control #15622 named as missing — an
+// overridable type's org-authored row PRESENT and a planted phantom on a
+// non-overridable type ABSENT, on ONE request. Read #15622 before touching
+// either half: alone, neither can tell a per-type gate from an unconditional
+// tenant.
 //
 // ── ⛔ WHAT THIS FILE NO LONGER DISCRIMINATES (#15034, MEASURED) ───────────
 //
 // This header used to end: "Swap `organizationIdForMetaRead` for a raw
 // `ctx?.tenantId` at the call site and that assertion, and only it, turns red."
-// MEASURED on the merged tree, that ablation now leaves this file 30/30 GREEN
-// — `getMetaItems`' own gate re-folds the raw tenant id, phantom control
-// included. Same fate as #14677's ablation B, and for the same reason.
+// MEASURED on the merged tree, that ablation now leaves this file GREEN IN FULL
+// (30/30 at that revision; the file has grown since) — `getMetaItems`' own gate
+// re-folds the raw tenant id, phantom control included. Same fate as #14677's
+// ablation B, and for the same reason.
 //
 // ⇒ What this file DOES still discriminate is the organization being DROPPED:
 // remove the `organizationId` the `?type=` arm passes and the six repair cases
-// above turn red (measured: 6 failed / 24 passed). Read the two apart before
+// above turn red (measured at #15034: 6 failed / 24 passed). Read the two apart before
 // citing this file as a pin on the door-side predicate — it pins that the arm
 // still FOLDS, never that the fold happens at the door.
 
@@ -754,27 +767,137 @@ describe('#13753 GET /meta/diagnostics states the org partition on the ?type= ar
         });
     });
 
-    describe('the RECORDED GAP — the untyped sweep is still env-wide', () => {
-        it('an org-scoped item is absent from the whole-registry sweep', async () => {
-            // ⚠️ This pins a KNOWN GAP, deliberately, so that closing it is a
-            // decision somebody makes rather than a side effect: one
-            // `organizationId` cannot express the per-type scope a
-            // whole-registry sweep needs, and the shape is reported on the card
-            // with a proposal. If this reddens, the untyped arm has started
-            // naming an organization — read the card before making it green.
+    describe('#15622 the whole-registry sweep states the org partition too', () => {
+        it('⭐ THE CARD: an org-authored item on an overridable type IS counted', async () => {
+            // ⚠️ THIS CASE REPLACES the pin `an org-scoped item is absent from
+            // the whole-registry sweep`, which asserted the OPPOSITE and
+            // carried "if this reddens, read the card before making it green".
+            // #15622 IS that card. It ruled the untyped arm forwards the
+            // caller's organization RAW, because since #14683 the callee folds
+            // per swept type inside its own loop — so one org id now expresses
+            // exactly the per-type scope the old pin said it could not. The
+            // assertion is INVERTED rather than deleted so the next reader sees
+            // the flip and its reason, and so the arm cannot drift back to
+            // env-wide unnoticed.
+            //
+            // ⭐ Fixture proof first, for the same reason as the `?type=` cases
+            // above: "the sweep is org-scoped" says nothing if the fixture never
+            // created an org-scoped row.
+            await b.put(CACHED_ARM, 'authored_at_runtime');
+            expect(
+                storedRowsFor(b.rows, CACHED_ARM, 'authored_at_runtime', ORG_A).length,
+                'nothing landed in the org partition',
+            ).toBe(1);
+            expect(
+                storedRowsFor(b.rows, CACHED_ARM, 'authored_at_runtime', null).length,
+                'the write also landed env-wide — the partition is not real',
+            ).toBe(0);
+
+            const swept = await b.diagnostics();
+            expect(swept.thrown, `GET /diagnostics threw: ${swept.thrown?.message}`).toBeUndefined();
+            expect(swept.status).toBe(200);
+            expect(
+                swept.body?.scannedTypes,
+                'the untyped arm did not sweep the registry; the assertion below would be vacuous',
+            ).toBeGreaterThan(1);
+            expect(
+                swept.body?.stats?.[CACHED_ARM]?.count,
+                'the governance summary reported a clean tile over a partition it never read, '
+                + 'while its own ?type= drill-down could see the item — the card',
+            ).toBe(1);
+        });
+
+        it('⛔ NARROWNESS CONTROL: a non-overridable type stays env-wide in the SAME sweep', async () => {
+            // ⭐ THE HALF #15622 NAMED AS MISSING. Without it the change is
+            // unmeasured: the case above passes just as well for a door that
+            // hands the callee an UNCONDITIONAL tenant, and that door would
+            // union a non-overridable type's org-scoped rows — the pre-#6190
+            // phantoms `reportUnhydratableOrgScopedRows` warns about, which boot
+            // hydration walks past — back INTO the governance report as `stats`
+            // counts. A dashboard whose job is reporting what is wrong would
+            // report rows that do not survive a restart. This control is what
+            // proves the CALLEE'S PER-TYPE GATE is doing the work.
+            //
+            // `object` is `allowOrgOverride: false` + `allowRuntimeCreate: true`,
+            // so its runtime writes land ENV-WIDE even under an active org
+            // (`organizationIdForMetaWrite`, #6190) — which is why the phantom
+            // has to be planted directly rather than written through the door.
+            const written = await b.put(NON_OVERRIDABLE, 'accounts');
+            expect(written.status, 'the control never wrote').toBe(200);
+            expect(
+                storedRowsFor(b.rows, NON_OVERRIDABLE, 'accounts', null).length,
+                'a non-overridable write went org-scoped; the control no longer controls anything',
+            ).toBe(1);
+
+            b.rows.set(
+                keyOf({ type: NON_OVERRIDABLE, name: 'phantom_orders', organization_id: ORG_A, state: 'active' }),
+                {
+                    id: 'phantom_sweep_1',
+                    type: NON_OVERRIDABLE,
+                    name: 'phantom_orders',
+                    organization_id: ORG_A,
+                    package_id: null,
+                    state: 'active',
+                    metadata: JSON.stringify(bodyFor(NON_OVERRIDABLE, 'phantom_orders')),
+                },
+            );
+            expect(
+                storedRowsFor(b.rows, NON_OVERRIDABLE, 'phantom_orders', ORG_A).length,
+                'the phantom was not planted; the control proves nothing',
+            ).toBe(1);
+
+            // ⭐ ONE REQUEST, BOTH TYPES — an org-authored `view` beside the two
+            // `object` rows, so the two opposite scopes are read on ONE sweep.
+            // That pairing is the fact neither assertion can state alone.
             await b.put(CACHED_ARM, 'authored_at_runtime');
             expect(storedRowsFor(b.rows, CACHED_ARM, 'authored_at_runtime', ORG_A).length).toBe(1);
 
             const swept = await b.diagnostics();
             expect(swept.status).toBe(200);
             expect(
-                swept.body?.scannedTypes,
-                'the untyped arm did not sweep the registry; the assertion below would be vacuous',
-            ).toBeGreaterThan(1);
-            expect(swept.body?.stats?.[CACHED_ARM]?.count).toBe(0);
+                swept.body?.stats?.[NON_OVERRIDABLE]?.count,
+                'the untyped sweep read the org partition of a type with no per-org read channel — '
+                + 'the pre-#6190 phantoms, resurrected inside the governance report. The door passed '
+                + 'an unconditional tenant, or the callee stopped gating per type',
+            ).toBe(1);
+            expect(
+                swept.body?.stats?.[CACHED_ARM]?.count,
+                'the overridable type lost its org scope on the same request — the gate is not per type',
+            ).toBe(1);
         });
 
-        it('and still sees env-wide items — the zero above is scope, not a broken sweep', async () => {
+        it('does not sweep org A\'s items for org B on the same boot', async () => {
+            await b.put(UNCACHED_ARM, 'tenant_bound');
+            expect(storedRowsFor(b.rows, UNCACHED_ARM, 'tenant_bound', ORG_A).length).toBe(1);
+
+            b.as(ORG_B);
+            const swept = await b.diagnostics();
+            expect(swept.status).toBe(200);
+            expect(
+                swept.body?.stats?.[UNCACHED_ARM]?.count,
+                'org B was swept over org A\'s items — forwarding became a cross-tenant read',
+            ).toBe(0);
+        });
+
+        it('an org-LESS caller reads exactly what it read before', async () => {
+            // ⛔ #15622 moves NO anonymous / organization-less read. This arm
+            // resolves an exec ctx it did not resolve before, so the case that
+            // names no org is the one that could regress silently.
+            await b.put(CACHED_ARM, 'org_a_only');
+            expect(storedRowsFor(b.rows, CACHED_ARM, 'org_a_only', ORG_A).length).toBe(1);
+
+            b.as(undefined);
+            const swept = await b.diagnostics();
+            expect(swept.status).toBe(200);
+            expect(
+                swept.body?.stats?.[CACHED_ARM]?.count,
+                'an org-less caller was swept over an org-scoped item',
+            ).toBe(0);
+        });
+
+        it('still sweeps env-wide items for an org-scoped caller', async () => {
+            // The other direction: naming the org must not NARROW what an org
+            // caller could already see.
             b.as(undefined);
             await b.put(CACHED_ARM, 'env_authored');
             expect(storedRowsFor(b.rows, CACHED_ARM, 'env_authored', null).length).toBe(1);
@@ -782,7 +905,238 @@ describe('#13753 GET /meta/diagnostics states the org partition on the ?type= ar
             b.as(ORG_A);
             const swept = await b.diagnostics();
             expect(swept.status).toBe(200);
-            expect(swept.body?.stats?.[CACHED_ARM]?.count).toBe(1);
+            expect(
+                swept.body?.stats?.[CACHED_ARM]?.count,
+                'an org session lost sight of an env-wide item it could read before',
+            ).toBe(1);
+        });
+
+        it('the response is the SAME wire shape — no new key, and 200 either way', async () => {
+            // #15622 forwards an EXISTING value to an EXISTING parameter: no new
+            // parameter, response field or status code. A repair that added a
+            // scope discriminator to the envelope would satisfy every assertion
+            // above and still be a contract change.
+            await b.put(CACHED_ARM, 'authored_at_runtime');
+            const swept = await b.diagnostics();
+            expect(swept.status).toBe(200);
+            expect(Object.keys(swept.body ?? {}).sort()).toEqual(
+                ['entries', 'scannedItems', 'scannedTypes', 'stats', 'total'],
+            );
+            // The `stats` ROW shape too — the arithmetic is unchanged in shape,
+            // only in what the sweep can now see.
+            expect(Object.keys(swept.body?.stats?.[CACHED_ARM] ?? {}).sort()).toEqual(
+                ['count', 'locked', 'packages'],
+            );
+            expect(typeof swept.body?.total).toBe('number');
+        });
+    });
+});
+
+// ── [#13753] `GET /meta/:type/:name/references` ───────────────────────────
+//
+// `findReferencesToMeta` backs the admin "Used by" panel, whose empty case
+// reads — verbatim, objectui `metadata-admin/i18n.ts` — "Nothing in the
+// metadata graph points at this item. Safe to delete.", shown to an operator
+// about to delete something. The door named no organization, so the sweep read
+// the env partition only: an org-scoped `view` pointing at the object being
+// deleted was invisible and the panel issued a FALSE CLEARANCE. That is the
+// ADR-0110 D3 harm this route's own 501 refusal (#9326) was added to prevent,
+// answered by the door after the protocol had refused to answer it.
+//
+// ⭐ WHY THE DOOR PASSES THE TENANT **RAW** — and why the two cases below are a
+// PAIR rather than a case and a decoration. `req.params.type` is the TARGET;
+// the organization is spent on the SOURCES (`getMetaItems({ type:
+// matcher.fromType, … })` per `matcher`). Pre-gating on the target the way the
+// sibling `/meta` doors do would answer a question about the wrong type, and
+// on a non-overridable target (`object`, `flow`, `app` — the most common
+// delete there is) it would suppress the organization altogether and leave the
+// false clearance exactly where it was. Raw is nevertheless not an
+// unconditional tenant: since #14683 `getMetaItems` applies
+// `organizationIdForMetaRead` to its OWN `request.type`, so the per-SOURCE
+// decision is the callee's.
+//
+// ⇒ The first case pins that an OVERRIDABLE source is now found; the second
+// that a NON-OVERRIDABLE source is still read env-wide, phantom row and all.
+// One request, two source types, opposite scopes — which is the fact that
+// makes "raw" correct and that no assertion on either case alone can state.
+
+/** An `object`-typed SOURCE: a lookup field naming `target`. */
+function objectReferencing(name: string, target: string): Record<string, unknown> {
+    return {
+        // [ADR-0090 D1] `sharingModel` is required at the write door; without
+        // it this fixture fails on the WRITE and never reaches the read.
+        name,
+        label: MARKER,
+        sharingModel: 'private',
+        fields: { task_ref: { type: 'lookup', label: 'Task', reference: target } },
+    };
+}
+
+/** The item an operator is about to delete — what `bodyFor('view', …)` binds to. */
+const TARGET_OBJECT = 'task';
+
+describe('#13753 GET /meta/:type/:name/references states the org partition', () => {
+    let b: ReturnType<typeof boot>;
+    beforeEach(() => { b = boot(); });
+
+    interface RefRow { type: string; name: string; label?: string; path: string; kind: string }
+    const rowsOf = (body: any): RefRow[] => (body?.references ?? []) as RefRow[];
+    const namesOf = (body: any, type: string) => rowsOf(body).filter((r) => r.type === type).map((r) => r.name);
+
+    it('⭐ THE CARD: an org-scoped `view` that references the object is FOUND', async () => {
+        // `view` is `allowOrgOverride: true`, so this PUT lands in the org
+        // partition — the fixture proof below is what makes the read
+        // assertion a statement about scope rather than about the store.
+        const written = await b.put(CACHED_ARM, 'task_list');
+        expect(written.status, 'the view was never written').toBe(200);
+        expect(
+            storedRowsFor(b.rows, CACHED_ARM, 'task_list', ORG_A).length,
+            'nothing landed in the org partition',
+        ).toBe(1);
+        expect(
+            storedRowsFor(b.rows, CACHED_ARM, 'task_list', null).length,
+            'the write also landed env-wide — the partition is not real',
+        ).toBe(0);
+
+        const used = await b.references(NON_OVERRIDABLE, TARGET_OBJECT);
+        expect(used.thrown, `the door threw: ${used.thrown?.message}`).toBeUndefined();
+        expect(used.status).toBe(200);
+        expect(
+            namesOf(used.body, CACHED_ARM),
+            'the sweep read a partition the caller does not live in, and the "Used by" panel '
+            + 'rendered "Safe to delete." over an org-scoped view that points straight at this object',
+        ).toContain('task_list');
+    });
+
+    it('⛔ NARROWNESS CONTROL: a non-overridable SOURCE stays env-wide — no phantom row is resurrected', async () => {
+        // The other half of the pair. `object` is `allowOrgOverride: false`, so
+        // its runtime writes land ENV-WIDE even under an active org
+        // (`organizationIdForMetaWrite`, #6190) — which is why the phantom has
+        // to be planted directly. Rows like it exist in deployments that ran
+        // before that ruling; boot hydration walks past them, so they are dead,
+        // and a door that named the org for EVERY source type would read them
+        // back into a destructive-action clearance — worse than an omission,
+        // because a resurrected row reads as evidence.
+        const written = await b.put(NON_OVERRIDABLE, 'env_orders');
+        expect(written.status, 'the control never wrote').toBe(200);
+        // Rewrite the stored document so this object actually REFERENCES the
+        // target; the write door validates, so the shape is a real one.
+        const envRow = storedRowsFor(b.rows, NON_OVERRIDABLE, 'env_orders', null);
+        expect(envRow.length, 'a non-overridable write went org-scoped; the control controls nothing').toBe(1);
+        envRow[0].metadata = JSON.stringify(objectReferencing('env_orders', TARGET_OBJECT));
+
+        b.rows.set(
+            keyOf({ type: NON_OVERRIDABLE, name: 'phantom_orders', organization_id: ORG_A, state: 'active' }),
+            {
+                id: 'phantom_ref_1',
+                type: NON_OVERRIDABLE,
+                name: 'phantom_orders',
+                organization_id: ORG_A,
+                package_id: null,
+                state: 'active',
+                metadata: JSON.stringify(objectReferencing('phantom_orders', TARGET_OBJECT)),
+            },
+        );
+        expect(
+            storedRowsFor(b.rows, NON_OVERRIDABLE, 'phantom_orders', ORG_A).length,
+            'the phantom was not planted; the control proves nothing',
+        ).toBe(1);
+
+        // ⭐ Same request, both source types — one org-scoped `view` beside the
+        // two `object` rows, so the two scopes are read on ONE sweep.
+        await b.put(CACHED_ARM, 'task_list');
+        const used = await b.references(NON_OVERRIDABLE, TARGET_OBJECT);
+        expect(used.status).toBe(200);
+
+        expect(
+            namesOf(used.body, NON_OVERRIDABLE),
+            'the env-wide `object` source was not swept at all — the exclusion below would be vacuous',
+        ).toContain('env_orders');
+        expect(
+            namesOf(used.body, NON_OVERRIDABLE),
+            'the door named the organization for a type with no per-org read channel — the pre-#6190 '
+            + 'phantoms, resurrected on the read side inside a delete clearance',
+        ).not.toContain('phantom_orders');
+        expect(
+            namesOf(used.body, CACHED_ARM),
+            'the overridable source lost its org scope on the same request — the gate is not per type',
+        ).toContain('task_list');
+    });
+
+    describe('⛔ controls — the scope is STATED, and nothing else moves', () => {
+        it('does not serve org A\'s source to org B on the same boot', async () => {
+            await b.put(CACHED_ARM, 'task_list');
+            expect(storedRowsFor(b.rows, CACHED_ARM, 'task_list', ORG_A).length).toBe(1);
+
+            b.as(ORG_B);
+            const used = await b.references(NON_OVERRIDABLE, TARGET_OBJECT);
+            expect(used.status).toBe(200);
+            expect(namesOf(used.body, CACHED_ARM), 'org B was served org A\'s view').not.toContain('task_list');
+        });
+
+        it('an org-LESS caller reads exactly what it read before', async () => {
+            await b.put(CACHED_ARM, 'task_list');
+            expect(storedRowsFor(b.rows, CACHED_ARM, 'task_list', ORG_A).length).toBe(1);
+
+            b.as(undefined);
+            const used = await b.references(NON_OVERRIDABLE, TARGET_OBJECT);
+            expect(used.status).toBe(200);
+            expect(
+                namesOf(used.body, CACHED_ARM),
+                'an anonymous / org-less read moved — this door must not change for a caller that names no org',
+            ).not.toContain('task_list');
+        });
+
+        it('and still serves ENV-WIDE sources to an org-scoped caller', async () => {
+            // The other direction: naming the org must not narrow the answer
+            // an org caller could already see.
+            b.as(undefined);
+            await b.put(CACHED_ARM, 'env_task_list');
+            expect(storedRowsFor(b.rows, CACHED_ARM, 'env_task_list', null).length).toBe(1);
+
+            b.as(ORG_A);
+            const used = await b.references(NON_OVERRIDABLE, TARGET_OBJECT);
+            expect(used.status).toBe(200);
+            expect(
+                namesOf(used.body, CACHED_ARM),
+                'an org session lost sight of an env-wide reference it could see before',
+            ).toContain('env_task_list');
+        });
+
+        it('the response is the SAME wire shape — one `references` key, no new field', async () => {
+            await b.put(CACHED_ARM, 'task_list');
+            const used = await b.references(NON_OVERRIDABLE, TARGET_OBJECT);
+            expect(used.status).toBe(200);
+            expect(Object.keys(used.body ?? {})).toEqual(['references']);
+            // The ROW shape too: a repair that added a scope discriminator per
+            // row would satisfy every assertion above.
+            expect(rowsOf(used.body).find((r) => r.name === 'task_list')).toEqual({
+                type: CACHED_ARM, name: 'task_list', label: MARKER, path: 'object', kind: 'view object',
+            });
+        });
+
+        it('the #9327 unanswerable-target refusal keeps its code and status', async () => {
+            // Asserted as `code` + `status` (ADR-0112) rather than as "it
+            // threw": this route's refusals are the one thing on it an operator
+            // reads as "the question was never asked", so a scope repair that
+            // moved either would be moving the destructive-action clearance.
+            //
+            // ⚠️ The code is read through BOTH refusal dialects on purpose.
+            // Measured on this boot, the two 501s this route can answer do not
+            // agree: the missing-method branch hand-builds the ADR-0112 NESTED
+            // `{ error: { code, message } }`, while the protocol-raised
+            // unanswerable-target refusal reaches the wire as the FLAT
+            // `{ error: 'Internal server error', code }` — the prescriptive
+            // "ask the owning object instead" message scrubbed. That is a
+            // finding of its own, filed as #15685; it is NOT this card's
+            // subject, and reading both keeps this pin measuring the thing it
+            // is about.
+            const refused = await b.references('field', 'account.owner');
+            const body = refused.body as any;
+            const observed = refused.thrown
+                ? { status: refused.thrown.status, code: refused.thrown.code }
+                : { status: refused.status, code: body?.error?.code ?? body?.code };
+            expect(observed).toEqual({ status: 501, code: 'NOT_IMPLEMENTED' });
         });
     });
 });

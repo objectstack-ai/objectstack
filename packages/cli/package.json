@@ -12,7 +12,12 @@
     "./console": {
       "types": "./dist/utils/console.d.ts",
       "default": "./dist/utils/console.js"
-    }
+    },
+    "./hook-body": {
+      "types": "./dist/hook-body.d.ts",
+      "default": "./dist/hook-body.js"
+    },
+    "./package.json": "./package.json"
   },
   "bin": {
     "objectstack": "./bin/run.js",

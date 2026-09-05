@@ -38,6 +38,7 @@
 
 import { isPlatformProvidedObjectName } from '@objectstack/spec/system';
 import { buildAccessMatrix } from './build-access-matrix.js';
+import { recordsOf } from './object-graph.js';
 
 export const NAV_OBJECT_UNGRANTED = 'nav-object-ungranted';
 
@@ -60,14 +61,6 @@ export interface NavAccessFinding {
 
 type AnyRec = Record<string, unknown>;
 
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v as AnyRec[];
-  if (v && typeof v === 'object') {
-    return Object.entries(v as AnyRec).map(([name, def]) => ({ name, ...(def as AnyRec) }));
-  }
-  return [];
-}
-
 function strName(v: unknown): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined;
 }
@@ -82,7 +75,7 @@ interface NavExposure {
 /** Collect every object a stack's navigation exposes, across areas and children. */
 function collectNavExposures(stack: AnyRec): NavExposure[] {
   const out: NavExposure[] = [];
-  const apps = asArray(stack.apps);
+  const apps = recordsOf(stack.apps);
 
   for (let ai = 0; ai < apps.length; ai++) {
     const app = apps[ai];
@@ -90,7 +83,7 @@ function collectNavExposures(stack: AnyRec): NavExposure[] {
     const appName = strName(app.name) ?? `#${ai}`;
 
     const walk = (items: unknown, basePath: string) => {
-      const navItems = asArray(items);
+      const navItems = recordsOf(items);
       for (let ni = 0; ni < navItems.length; ni++) {
         const nav = navItems[ni];
         if (!nav || typeof nav !== 'object') continue;
@@ -108,7 +101,7 @@ function collectNavExposures(stack: AnyRec): NavExposure[] {
     };
 
     walk(app.navigation, `apps[${ai}].navigation`);
-    const areas = asArray(app.areas);
+    const areas = recordsOf(app.areas);
     for (let ri = 0; ri < areas.length; ri++) {
       walk(areas[ri]?.navigation, `apps[${ai}].areas[${ri}].navigation`);
     }
@@ -126,7 +119,7 @@ export function validateNavAccess(stack: AnyRec): NavAccessFinding[] {
   if (!stack || typeof stack !== 'object') return findings;
 
   // No permission sets in this stack ⇒ permissions are managed elsewhere.
-  const permissionSets = asArray(stack.permissions);
+  const permissionSets = recordsOf(stack.permissions);
   if (permissionSets.length === 0) return findings;
 
   const exposures = collectNavExposures(stack);
@@ -136,7 +129,7 @@ export function validateNavAccess(stack: AnyRec): NavAccessFinding[] {
   // present here. A nav target that resolves nowhere is a different bug, owned
   // by `validate-object-references` / `defineStack`.
   const ownObjects = new Set<string>();
-  for (const obj of asArray(stack.objects)) {
+  for (const obj of recordsOf(stack.objects)) {
     const n = strName(obj.name);
     if (n) ownObjects.add(n);
   }

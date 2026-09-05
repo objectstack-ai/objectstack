@@ -395,6 +395,7 @@
     "MysqlConfig": "src/data/driver/mysql.zod.ts#MysqlConfig (type)",
     "MysqlConfigParsed": "src/data/driver/mysql.zod.ts#MysqlConfigParsed (type)",
     "MysqlConfigSchema": "src/data/driver/mysql.zod.ts#MysqlConfigSchema (const)",
+    "NON_TEXT_STORED_VALUE_TYPES": "src/data/field-value.zod.ts#NON_TEXT_STORED_VALUE_TYPES (const)",
     "NOW_DEFAULT_LEGAL_TYPES": "src/data/default-value-shape.ts#NOW_DEFAULT_LEGAL_TYPES (const)",
     "NUMERIC_VALUE_TYPES": "src/data/field-value.zod.ts#NUMERIC_VALUE_TYPES (const)",
     "NoSQLDataTypeMapping": "src/data/driver-nosql.zod.ts#NoSQLDataTypeMapping (type)",

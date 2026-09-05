@@ -346,26 +346,26 @@ deriving it from this page.
 - Check user has permission to see resource (row-level security)
 - Resource may have been deleted
 
-#### `DUPLICATE_RECORD`
+#### `UNIQUE_VIOLATION`
 **HTTP Status:** 409  
-**Meaning:** Resource with unique constraint already exists
+**Meaning:** The write collides with a unique constraint — a record already holds that value
 
 **Example:**
 ```json
 {
-  "success": false,
-  "error": {
-    "code": "DUPLICATE_RECORD",
-    "message": "Account with email 'john@acme.com' already exists",
-    "details": {
-      "resource": "account",
-      "constraint": "unique",
-      "field": "email",
-      "value": "john@acme.com"
-    }
-  }
+  "error": "A record with this email already exists",
+  "code": "UNIQUE_VIOLATION",
+  "field": "email",
+  "object": "account"
 }
 ```
+
+The engine throws `DuplicateRecordError`, whose in-process `code` is
+`DUPLICATE_RECORD`; the REST door translates that envelope at the boundary, so
+every route answers the wire code `UNIQUE_VIOLATION` and the in-process spelling
+never crosses HTTP. The refusal is emitted as the flat body shown above, and
+`field` is best-effort — see
+[HTTP API](/docs/protocol/kernel/http-protocol) for the degraded shape.
 
 **How to fix:**
 - Check for existing resource before creating
@@ -947,7 +947,7 @@ Even error responses can be abused:
 // Attacker tries to enumerate user emails
 for (let i = 0; i < 1000000; i++) {
   await register({ email: `user${i}@example.com` });
-  // Response: "DUPLICATE_RECORD" or "VALIDATION_ERROR"
+  // Response: "UNIQUE_VIOLATION" or "VALIDATION_ERROR"
 }
 ```
 
