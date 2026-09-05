@@ -203,10 +203,13 @@
 //   ... of them wrong today ............................................ 0
 //   the same literal in the SCANNED (non-test) population ............... 0
 //
-//     packages/spec/src/data/hook.test.ts:619                   #3290 absence pin
-//     packages/plugins/plugin-audit/src/audit-writers.test.ts:1666  absence pin
-//     packages/plugins/plugin-audit/src/comment-access-hooks.test.ts:529  #9691
-//     packages/services/service-storage/src/attachment-access-hooks.test.ts:750
+//   (the file, never a line in it — the recipe above re-derives the position on
+//   every run, and a `file:NNN` pointer written here would rot silently, #15765)
+//
+//     `packages/spec/src/data/hook.test.ts`                                  #3290 absence pin
+//     `packages/plugins/plugin-audit/src/audit-writers.test.ts`              absence pin
+//     `packages/plugins/plugin-audit/src/comment-access-hooks.test.ts`       #9691
+//     `packages/services/service-storage/src/attachment-access-hooks.test.ts`
 //
 // (The recipe reports 5 matches across those 4 files: `hook.test.ts` carries a
 // second one whose `tenantId` sits inside a COMMENT in the literal's body.)
