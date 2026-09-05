@@ -420,10 +420,34 @@ export const WebSocketConfigSchema = lazySchema(() => z.object({
   url: z.string().url().describe('WebSocket server URL'),
   protocols: z.array(z.string()).optional().describe('WebSocket sub-protocols'),
   reconnect: z.boolean().optional().default(true).describe('Enable automatic reconnection'),
-  reconnectInterval: z.number().int().positive().optional().default(1000).describe('Reconnection interval in milliseconds'),
+  // Renamed from `reconnectInterval` / `pingInterval` / `timeout` (#15677,
+  // #14478 ruling B): three durations on one shape whose unit lived only in
+  // the describe prose, beside a `maxReconnectAttempts` that is a COUNT — the
+  // adjacency the rule exists to disambiguate.
+  reconnectIntervalMs: z.number().int().positive().optional().default(1000).describe('Reconnection interval in milliseconds'),
   maxReconnectAttempts: z.number().int().positive().optional().default(5).describe('Maximum reconnection attempts'),
-  pingInterval: z.number().int().positive().optional().default(30000).describe('Ping interval in milliseconds'),
-  timeout: z.number().int().positive().optional().default(5000).describe('Message timeout in milliseconds'),
+  pingIntervalMs: z.number().int().positive().optional().default(30000).describe('Ping interval in milliseconds'),
+  timeoutMs: z.number().int().positive().optional().default(5000).describe('Message timeout in milliseconds'),
+
+  /** Tombstones for the three renames above (#15677, ruling B on #14478). */
+  reconnectInterval: retiredKey(
+    '`WebSocketConfig.reconnectInterval` was renamed to `reconnectIntervalMs` in '
+    + '@objectstack/spec 17 — the unit of a duration-shaped number lives in '
+    + 'the key name, not only in the describe prose. Rename the key to `reconnectIntervalMs`; '
+    + 'the value (milliseconds) is unchanged.',
+  ),
+  pingInterval: retiredKey(
+    '`WebSocketConfig.pingInterval` was renamed to `pingIntervalMs` in @objectstack/spec 17 — '
+    + 'the unit of a duration-shaped number lives in the key name, not only '
+    + 'in the describe prose. Rename the key to `pingIntervalMs`; the value (milliseconds) is '
+    + 'unchanged.',
+  ),
+  timeout: retiredKey(
+    '`WebSocketConfig.timeout` was renamed to `timeoutMs` in @objectstack/spec 17 — '
+    + 'the unit of a duration-shaped number lives in the key name, not only '
+    + 'in the describe prose. Rename the key to `timeoutMs`; the value (milliseconds) is '
+    + 'unchanged.',
+  ),
   headers: z.record(z.string(), z.string()).optional().describe('Custom headers for WebSocket handshake'),
 }));
 
@@ -575,7 +599,7 @@ export type SimpleCursorPosition = z.input<typeof SimpleCursorPositionSchema>;
  * {
  *   enabled: true,
  *   path: '/ws',
- *   heartbeatInterval: 30000,
+ *   heartbeatIntervalMs: 30000,
  *   reconnectAttempts: 5,
  *   presence: true,
  *   cursorSharing: true
@@ -585,10 +609,20 @@ export type SimpleCursorPosition = z.input<typeof SimpleCursorPositionSchema>;
 export const WebSocketServerConfigSchema = lazySchema(() => z.object({
   enabled: z.boolean().default(false).describe('Enable WebSocket server'),
   path: z.string().default('/ws').describe('WebSocket endpoint path'),
-  heartbeatInterval: z.number().default(30000).describe('Heartbeat interval in milliseconds'),
+  // Renamed from `heartbeatInterval` (#15677, #14478 ruling B): its unit lived
+  // only in the describe prose, beside a `reconnectAttempts` that is a COUNT.
+  heartbeatIntervalMs: z.number().default(30000).describe('Heartbeat interval in milliseconds'),
   reconnectAttempts: z.number().default(5).describe('Maximum reconnection attempts for clients'),
   presence: z.boolean().default(false).describe('Enable presence tracking'),
   cursorSharing: z.boolean().default(false).describe('Enable collaborative cursor sharing'),
+
+  /** Tombstone for the rename above (#15677, ruling B on #14478). */
+  heartbeatInterval: retiredKey(
+    '`WebSocketServerConfig.heartbeatInterval` was renamed to `heartbeatIntervalMs` in '
+    + '@objectstack/spec 17 — the unit of a duration-shaped number lives in '
+    + 'the key name, not only in the describe prose. Rename the key to `heartbeatIntervalMs`; '
+    + 'the value (milliseconds) is unchanged.',
+  ),
 }));
 
 export type WebSocketServerConfig = z.input<typeof WebSocketServerConfigSchema>;

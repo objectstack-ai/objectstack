@@ -497,7 +497,7 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
       + '`IHttpServer.setFallbackHandler` (Hono `app.notFound`) that runs only after every registered '
       + 'route has missed, and for paths under this prefix resolves the request\'s environment + '
       + 'identity, probes `metadata.matchEndpoint`, and on a match runs the full chain (#5040 E5b): '
-      + 'the policy keys authRequired / rateLimit / cacheTtl (E4), then target delegation (E5) — '
+      + 'the policy keys authRequired / rateLimit / cacheTtlSeconds (E4), then target delegation (E5) — '
       + '`object_operation` through the same `callData` as /data, `flow` through the automation '
       + 'service. `script` / `proxy` targets and the inputMapping / outputMapping keys are NOT '
       + 'executed and answer 501. A miss (or an occupant of the metadata slot with no matchEndpoint, '
