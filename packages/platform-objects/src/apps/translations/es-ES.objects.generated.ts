@@ -534,6 +534,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Exigir autenticación multifactor",
         help: "Si es true, todos los miembros de esta organización deben registrar una aplicación de autenticación para acceder a los datos."
       },
+      timezone: {
+        label: "Zona horaria",
+        help: "Zona horaria IANA (p. ej. UTC, Asia/Shanghai) en la que se calculan los límites de fecha de esta organización: el valor raíz que hereda toda unidad de negocio sin zona propia. Sin definir significa UTC."
+      },
       parent_organization_id: {
         label: "Parent Organization",
         help: "Reporting/grouping parent. Grants NOTHING — visibility across organizations comes from membership, never from this reference (ADR-0105 D6)."
@@ -856,6 +860,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       parent_business_unit_id: {
         label: "Unidad de negocio principal",
         help: "Autorreferencia para el árbol organizativo. Null = raíz del tenant."
+      },
+      timezone: {
+        label: "Zona horaria",
+        help: "Zona horaria IANA (p. ej. Asia/Shanghai) en la que se calculan los límites de fecha de esta unidad. Déjala sin definir para heredar la zona de la unidad de negocio principal, luego la de la organización y, por último, UTC."
       },
       organization_id: {
         label: "Organización",

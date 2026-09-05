@@ -118,7 +118,10 @@ describe('#14238 — sys_business_unit.timezone and sys_organization.timezone', 
     // path component at 14, so 64 is twice the domain's real ceiling. If a
     // future ICU ever enumerates a name the bound refuses, this goes red
     // instead of the column silently refusing a legal zone.
-    const longest = Math.max(...Intl.supportedValuesOf('timeZone').map((z) => z.length));
+    // `Intl.supportedValuesOf` is ES2022; the package's `lib` predates it, so
+    // the call is typed here rather than the whole program's lib widened.
+    const intl = Intl as unknown as { supportedValuesOf(key: 'timeZone'): string[] };
+    const longest = Math.max(...intl.supportedValuesOf('timeZone').map((z) => z.length));
     expect(longest).toBeLessThanOrEqual(unitColumn().maxLength as number);
     // The longest identifier in the tzdb itself is a backward link the
     // enumeration omits and the probe admits — 32 characters, still under half

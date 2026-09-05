@@ -534,6 +534,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Require Multi-Factor Auth",
         help: "When true, every member of this organization must enroll an authenticator app to access data."
       },
+      timezone: {
+        label: "Timezone",
+        help: "IANA time zone (e.g. UTC, Asia/Shanghai) date boundaries are computed in for this organization — the root default every business unit without a zone of its own inherits. Unset means UTC."
+      },
       parent_organization_id: {
         label: "Parent Organization",
         help: "Reporting/grouping parent. Grants NOTHING — visibility across organizations comes from membership, never from this reference (ADR-0105 D6)."
@@ -856,6 +860,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       parent_business_unit_id: {
         label: "Parent Business Unit",
         help: "Self-reference for the org tree. Null = root of tenant."
+      },
+      timezone: {
+        label: "Timezone",
+        help: "IANA time zone (e.g. Asia/Shanghai) date boundaries are computed in for this unit. Leave unset to inherit the parent unit's zone, then the organization's, then UTC."
       },
       organization_id: {
         label: "Organization",
