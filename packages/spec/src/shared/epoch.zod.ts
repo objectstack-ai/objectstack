@@ -49,3 +49,13 @@ import { z } from 'zod';
  * instant, and it is what keeps an instant out of the `*Ms` duration family.
  */
 export const EpochMs = z.number().int().describe('Unix timestamp in milliseconds (epoch)');
+/**
+ * The value an `EpochMs` key carries: milliseconds since the Unix epoch.
+ *
+ * Author state and parsed state coincide (`z.number().int()` has no default and
+ * no transform), so there is deliberately no `EpochMsParsed` — a permanent
+ * synonym is a name an author can only pick wrongly. The isomorphism is pinned
+ * in `type-alias-convention.pin.test.ts` (ADR-0122), so the day this schema
+ * gains a default or a transform the pin goes red with the alias named.
+ */
+export type EpochMs = z.input<typeof EpochMs>;
