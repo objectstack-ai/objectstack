@@ -9,7 +9,7 @@
  * (`runActionGovernanceInventory`, `collectEngineActionDeclarations`,
  * `reconcileActionRegistrations` — all exported from its public entry) and
  * drives it exactly as `ObjectQLPlugin.runGovernanceInventory`
- * (`packages/objectql/src/plugin.ts:2475`) does, over a controlled standalone
+ * (`packages/objectql/src/plugin.ts#runGovernanceInventory`) does, over a controlled standalone
  * source that isolates the ONE population the identity fix can move:
  * standalone `action` declarations whose BODY carries no `name` (the C2/C6
  * shape) and are otherwise `type: 'script'` with no `body` and no bound

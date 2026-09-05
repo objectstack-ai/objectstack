@@ -2704,8 +2704,9 @@ export const ROOT_WALK_RESIDUE_LEDGER = [
   [
     'scripts/symbol-anchors.mjs --self-test',
     'a shared grammar-and-extractor LIBRARY, invoked by CI only as its own self-test; its `git ls-files` runs over a '
-      + 'corpus its caller passes in. The corpus walk it lends is exercised by check-adr-symbol-anchors.mjs, which '
-      + 'declares ROOT_DIR_WATCH_HINTS = [docs/adr/**] and is placed by that.',
+      + 'corpus its caller passes in. The corpus walk it lends is exercised by its registrations — '
+      + 'check-adr-symbol-anchors.mjs, which declares ROOT_DIR_WATCH_HINTS = [docs/adr/**], and '
+      + 'check-scripts-symbol-anchors.mjs, which declares [scripts/**] — and each is placed by its own.',
   ],
 ];
 
@@ -3242,10 +3243,10 @@ const IDENTIFIER_TOKEN = /[A-Za-z_$][\w$]*/g;
  * once, THREE self-test ENTRY POINTS in the `scripts/` tree carry one TODAY, so
  * this repairs live files rather than guarding against a future spelling:
  *
- *   scripts/check-test-completeness.mjs:576
- *   scripts/measure-position-name-fold-census.mjs:689
+ *   `scripts/check-test-completeness.mjs#selfTest`
+ *   `scripts/measure-position-name-fold-census.mjs#selfTest`
  *       both `function selfTest({ quiet = false } = {})`
- *   scripts/workspace-enumerator.mjs:328
+ *   `scripts/workspace-enumerator.mjs#selfTest`
  *       `export function selfTest({ root = null } = {})`
  *
  * Measured at 6193e576d — bytes `maskSelfTests` changes in each file, this
@@ -3866,8 +3867,8 @@ export function resolveModuleRelativeHint(literal, scriptPath, { root = ROOT } =
  * no hint at all. That is right for `'./invoked-as.mjs'` and `'./package.json'`
  * and wrong for these two, which are unambiguous subtree declarations:
  *
- *   packages/spec/scripts/build-docs.ts:61             path.resolve(__dirname, '../src')
- *   packages/spec/scripts/build-skill-references.ts:35 path.resolve(__dirname, '../src')
+ *   `packages/spec/scripts/build-docs.ts#SRC_DIR`             path.resolve(__dirname, '../src')
+ *   `packages/spec/scripts/build-skill-references.ts#SPEC_SRC` path.resolve(__dirname, '../src')
  *
  * Checked at the declaration site rather than assumed, which is the provenance
  * criterion this file prices: `build-docs.ts` does `fs.readdirSync(SRC_DIR)`
@@ -5015,7 +5016,7 @@ export function collapseHint(hint) {
  * shape the idioms above use: `packages/**` → `packages`, `packages/spec/src/**`
  * → `packages/spec/src`, `packages/client*` → `packages/client`. Each names a
  * subtree root the tree really has, and `ROOT_DIR_WATCH_HINTS` depends on
- * exactly that reduction (`scripts/check-published-files.mjs:215-248` declares
+ * exactly that reduction (`scripts/check-published-files.mjs` declares
  * the workspace globs VERBATIM so "the glob collapse reduces each back to the
  * root it names", justified there at 91.3%).
  *
