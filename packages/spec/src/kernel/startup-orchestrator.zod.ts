@@ -103,11 +103,10 @@ export const HealthStatusSchema = lazySchema(() => z.object({
 
   /** Tombstone for the rename above (#15676, ruling B on #14478). */
   timestamp: retiredKey(
-    '`HealthStatus.timestamp` was renamed to `checkedAt` in @objectstack/spec 17 '
-    + '(#14478 ruling B) — the instant the check RAN now carries the shared `EpochMs` '
-    + 'schema, which declares the epoch-millisecond unit the bare key name left to the '
-    + 'describe prose. Rename the key to `checkedAt`; the value is unchanged '
-    + '(`Date.now()`).',
+    '`HealthStatus.timestamp` was renamed to `checkedAt` in @objectstack/spec 17 — the '
+    + 'instant the check RAN now carries the shared `EpochMs` schema, which declares the '
+    + 'epoch-millisecond unit the bare key name left to the describe prose. Rename the key '
+    + 'to `checkedAt`; the value is unchanged (`Date.now()`).',
   ),
   
   /**

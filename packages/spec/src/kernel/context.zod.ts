@@ -29,10 +29,10 @@ const RUNTIME_MODE_PREVIEW_RETIRED =
   + 'experience becomes a product capability it re-declares fresh, with the '
   + 'production-posture hard-refusal as the first-landed half.';
 const START_TIME_RENAMED =
-  '`context.startTime` was renamed to `context.startedAt` in @objectstack/spec 17 '
-  + '(#14478 ruling B) — the boot INSTANT now carries the shared `EpochMs` schema, which '
-  + 'declares the epoch-millisecond unit the key name used to leave to the describe prose. '
-  + 'Rename the key to `startedAt`; the value is unchanged (`Date.now()`). `*At` rather '
+  '`context.startTime` was renamed to `context.startedAt` in @objectstack/spec 17 — the '
+  + 'boot INSTANT now carries the shared `EpochMs` schema, which declares the '
+  + 'epoch-millisecond unit the key name used to leave to the describe prose. Rename the '
+  + 'key to `startedAt`; the value is unchanged (`Date.now()`). `*At` rather '
   + 'than `startTimeMs` deliberately: every `*Ms` key in this package is a DURATION, so '
   + 'spelling an instant that way would move it into the family the rule exists to '
   + 'separate it from.';
