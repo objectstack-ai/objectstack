@@ -102,13 +102,20 @@ describe('showcase navigation and detail objects are granted (#14453)', () => {
 
   it('CONTROL: dropping the grant on a nav object makes the nav rule fire on it', () => {
     const findings = navFindings(withoutGrant('showcase_cascade'));
+    // Matched by CONTENT, not by position: on a tree where more than one grant
+    // is missing this must still be a statement about `showcase_cascade`.
     expect(findings.map((f) => f.path)).toContain('apps[0].navigation[3].children[11].objectName');
-    expect(findings[0]?.message).toContain('showcase_cascade');
+    expect(findings.map((f) => f.message).join('\n')).toContain(
+      'navigation exposes object "showcase_cascade"',
+    );
   });
 
   it('CONTROL: dropping the grant on a detail child makes the master-detail rule fire on it', () => {
     const findings = detailFindings(withoutGrant('showcase_expense_line'));
     expect(findings.map((f) => f.where)).toContain('object "showcase_expense_line"');
-    expect(findings[0]?.message).toContain('has no object-level CRUD grant in any permission set');
+    expect(findings.map((f) => f.message).join('\n')).toContain(
+      'detail object "showcase_expense_line" (master_detail "expense_report" → ' +
+        '"showcase_expense_report") has no object-level CRUD grant',
+    );
   });
 });
