@@ -20,6 +20,8 @@ import {
   FLOW_NODE_EXPRESSION_PATHS,
   isExpressionEnvelopeShaped,
   resolveFlowNodeExpressions,
+  predicateSlotRefusal,
+  PREDICATE_SLOT_STRING_REFUSAL,
   type FlowNodeExpressionPath,
   type FlowNodeExpressionRole,
 } from './flow-node-expression-paths.js';
@@ -178,16 +180,66 @@ describe('every pre-#14149 entry resolves byte-identically (the ratchet\'s fixtu
     expect(found.every((f) => f.entry.role === 'predicate')).toBe(true);
   });
 
-  it('absent, empty and non-string values in a string-role slot are still skipped', () => {
+  it('absent and empty values in a string-role slot are skipped', () => {
     expect(resolveFlowNodeExpressions('screen', {})).toEqual([]);
     expect(resolveFlowNodeExpressions('screen', { fields: [] })).toEqual([]);
+    // A whitespace-only STRING is "not authored", on this side and at the
+    // evaluator alike — consistent on both sides, and deliberately left alone
+    // (#15572 changed the non-string rule, never the string one).
     expect(resolveFlowNodeExpressions('screen', { fields: [{ visibleWhen: '   ' }] })).toEqual([]);
-    expect(resolveFlowNodeExpressions('screen', { fields: [{ visibleWhen: true }] })).toEqual([]);
     expect(resolveFlowNodeExpressions('screen', { fields: 'nope' })).toEqual([]);
-    // An ENVELOPE in a predicate-role slot is a non-string — skipped here, a
-    // type violation for the schema pass, exactly as before: the value-role
-    // emission rule is scoped to `value` entries and leaks into no other role.
+    // A `flow-template` slot keeps the old rule: no validator implements that
+    // dialect, so emitting a non-string there would hand every consumer a
+    // finding none of them can judge.
     expect(resolveFlowNodeExpressions('loop', { collection: { dialect: 'cel', source: 'x' } })).toEqual([]);
     expect(resolveFlowNodeExpressions('decision', { condition: 'a == b' })).toEqual([]);
+  });
+
+  /**
+   * [#15572] A NON-string in a `predicate` slot is emitted, so a consumer can
+   * refuse it. It used to be skipped as "a type violation for the schema pass
+   * to report" — and for `decision`, a schemaless node type whose config is
+   * never parsed against any Zod schema, there is no schema pass, so the value
+   * reached the evaluator with no validator having ever seen it.
+   */
+  it('emits a non-string in a predicate slot, so a consumer can refuse it (#15572)', () => {
+    const envelope = { dialect: 'cel', source: '   ' };
+    const decision = resolveFlowNodeExpressions('decision', {
+      conditions: [{ label: 'Yes', expression: envelope }],
+    });
+    expect(decision.map((f) => [f.path, f.value, f.entry.role]))
+      .toEqual([['conditions[0].expression', envelope, 'predicate']]);
+    // Same rule on the other predicate slot — one class, not one node type.
+    expect(resolveFlowNodeExpressions('screen', { fields: [{ visibleWhen: true }] })
+      .map((f) => [f.path, f.value])).toEqual([['fields[0].visibleWhen', true]]);
+    // `null` / absent stay "not authored" — a refusal needs something authored.
+    expect(resolveFlowNodeExpressions('screen', { fields: [{ visibleWhen: null }] })).toEqual([]);
+  });
+
+  describe('predicateSlotRefusal (#15572)', () => {
+    it('says nothing about a string — what it SAYS is validateExpression\'s business', () => {
+      expect(predicateSlotRefusal('record.rating >= 4')).toBeUndefined();
+      // Including a string that is itself malformed: the shape is right, so
+      // this function is done and the CEL parse issues the verdict.
+      expect(predicateSlotRefusal('{record.rating} >= 4')).toBeUndefined();
+      expect(predicateSlotRefusal('')).toBeUndefined();
+    });
+
+    it('refuses an envelope and attributes it to the envelope\'s own source', () => {
+      const refusal = predicateSlotRefusal({ dialect: 'cel', source: 'rows.map(r,' });
+      expect(refusal?.message.startsWith(PREDICATE_SLOT_STRING_REFUSAL)).toBe(true);
+      expect(refusal?.message).toContain('an expression envelope');
+      expect(refusal?.source).toBe('rows.map(r,');
+    });
+
+    it('refuses every other non-string, naming what it found', () => {
+      expect(predicateSlotRefusal(42)?.message).toContain('a number');
+      expect(predicateSlotRefusal(true)?.message).toContain('a boolean');
+      expect(predicateSlotRefusal(['a'])?.message).toContain('an array');
+      expect(predicateSlotRefusal({ source: 'x' })?.message).toContain('an object');
+      // No `dialect` ⇒ not envelope-shaped, so no source is claimed from it.
+      expect(predicateSlotRefusal({ source: 'x' })?.source).toBe('x');
+      expect(predicateSlotRefusal(42)?.source).toBe('');
+    });
   });
 });

@@ -25,7 +25,7 @@ import { FlowSchema, FLOW_STRUCTURAL_NODE_TYPES, validateControlFlow, collectFlo
 // `validate-flow-trigger-readiness`, so the runtime cannot drift from what
 // authoring accepted. See `resolveTriggerBinding`.
 import { resolveFlowTriggerKind } from '@objectstack/spec/automation';
-import { resolveFlowNodeExpressions } from '@objectstack/spec/automation';
+import { predicateSlotRefusal, resolveFlowNodeExpressions } from '@objectstack/spec/automation';
 // [#15137] The `value`-role half of the ledger. Both halves of "is this envelope
 // well-formed?" are IMPORTED, never re-spelled here: the shape rule is
 // `AssignmentValueSchema` (spec, #14149 — it refuses a non-`cel` dialect and the
@@ -7152,6 +7152,24 @@ export class AutomationEngine implements IAutomationService {
                         continue;
                     }
                     if (found.entry.role !== 'predicate') continue;
+                    // [#15572] A predicate slot is declared bare CEL TEXT
+                    // (`z.string()`), and until now a NON-string there was seen
+                    // by nobody: the resolver skipped it for "the schema pass"
+                    // to report, `validateNodeConfigKeys` exempts the schemaless
+                    // types that own two of these slots, and `evaluateCondition`
+                    // accepted the `{ dialect, source }` envelope regardless —
+                    // so a `decision` branch predicate written as an envelope
+                    // registered clean and only the evaluator ever read it.
+                    // Same severity as a malformed predicate (this throw): the
+                    // reject set of registration and the reject set of
+                    // evaluation must be one set, and the refusal itself is the
+                    // spec's, shared with `objectstack validate` so build and
+                    // author time cannot disagree about the shape.
+                    const shapeRefusal = predicateSlotRefusal(found.value);
+                    if (shapeRefusal) {
+                        failures.push(`  • ${slotWhere}: ${shapeRefusal.message}\n      source: \`${shapeRefusal.source}\``);
+                        continue;
+                    }
                     // No schema hint: a screen's `visibleWhen` binds the screen's OWN
                     // collected values, not the trigger record's fields, so the
                     // field-existence pass would report every field name as unknown.
