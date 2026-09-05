@@ -34,7 +34,8 @@
  * ## The rule
  *
  * For every property whose value is a numeric Zod chain — a chain rooted at
- * `z.number()`, `z.int()` or `z.coerce.number()` — in `src/**` (tests excluded):
+ * `z.number()`, `z.int()` or `z.coerce.number()` — in every workspace package's
+ * `src/**` (tests, build output and installed dependencies excluded):
  * if its `.describe()` names a time unit (milliseconds, seconds, minutes,
  * hours, days — plus their short forms), the key NAME must carry a unit
  * token, and that token must be one the describe names. Two failure
@@ -114,6 +115,39 @@
  * `--update`, and no `gen:`. A red here is a rename (with its ADR-0087
  * conversion) or a describe to fix, never a command to run.
  *
+ * ## The population: every workspace package's `src/**` (#15682)
+ *
+ * The rule is about how a duration is DECLARED, and the declaration is the same
+ * defect wherever it is written: a `timeout` whose unit lives only in its
+ * describe misleads an author identically in `packages/spec` and in a driver
+ * package that publishes its own connection-config schema. This gate walked
+ * `packages/spec/src/**` alone until #15682 widened it to every workspace
+ * member's `src/` subtree. Measured across the widening on this tree: 2291
+ * source files against 838, and exactly one offender outside `packages/spec` —
+ * `@objectstack/driver-turso`'s published `config.timeout`, renamed in the same
+ * PR that widened the walk.
+ *
+ * Members are enumerated through the shared `workspace-enumerator` module (the
+ * ONE parse of `pnpm-workspace.yaml`) rather than a private copy of that parse,
+ * and {@link ROOT_DIR_WATCH_HINTS} is held against the live globs in BOTH
+ * directions by the self-test. `src/` is the whole boundary and that is
+ * measured rather than assumed: all 210 tracked `*.zod.ts` files in this repo
+ * live under some workspace member's `src/`.
+ *
+ * ⛔ THE WALK EXCLUDES `node_modules`, BUILD OUTPUT AND TEST FILES, AND THE
+ * SELF-TEST PINS IT BEHAVIOURALLY. Measured on #15642 before the exclusion
+ * existed: pointing `--root` at a package ROOT walked that package's installed
+ * dependencies and reported *"7151 offender(s) … in 150098 source file(s)"*.
+ * That is not a finding, it is a LOST POPULATION — a reading about this repo's
+ * dependencies wearing this gate's verdict line, and a widened gate reporting
+ * thousands of offenders has not found a problem, it has stopped describing
+ * this repo. A `dist/` tree is the same hazard one step on: it re-reports every
+ * offender its own source already carries, so one rename reads as two.
+ * {@link SKIP_DIRS} is applied to the WALK rather than to the roots, so an
+ * explicit `--root` cannot route around it. On this tree the exclusion removes
+ * nothing tracked: no tracked file under any member's `src/` sits below a
+ * skipped directory name.
+ *
  * ## Why here and not `packages/lint`
  *
  * `@objectstack/lint` validates a customer's METADATA GRAPH at build time —
@@ -135,26 +169,50 @@
  *   is outside the population. Widening it is a decision, not a bug fix.
  */
 
-import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { dirname, join, relative, resolve } from 'node:path';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import ts from 'typescript';
 
+import { isExclusionGlob, readWorkspaceGlobs, workspacePackageDirs } from '../../../scripts/workspace-enumerator.mjs';
+
 const pkgRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
-const SRC_ROOT = join(pkgRoot, 'src');
+const REPO_ROOT = join(pkgRoot, '..', '..');
 
 /**
  * The dispatch-gates declaration — the `ROOT_DIR_WATCH_HINTS` idiom (#12310).
  * `scripts/pm/dispatch-gates.mjs` derives which gates a card must run from the
  * path literals in each gate's source, and `check:declared-population-live`
  * refuses a gate whose only path-shaped literal names nothing in the tree.
- * This gate walks exactly one subtree — `packages/spec/src/`, tests excluded —
- * so that is what it declares, as a LITERAL (the extractor reads source text;
- * a value computed from `SRC_ROOT` would produce no hint). The self-test holds
- * the literal against the constant the scan actually reads from.
+ *
+ * Since #15682 this gate walks every workspace member's `src/` subtree, so that
+ * is what it declares — one entry per workspace glob, as LITERALS. The literal
+ * spelling is load-bearing rather than stylistic: the extractor reads SOURCE
+ * TEXT, so the same array computed from the workspace parse contributes no hint
+ * at all and the gate drops silently out of every dispatch brief
+ * (`check:watch-hint-literal` refuses that spelling for exactly this reason).
+ *
+ * The self-test holds these entries against the LIVE `pnpm-workspace.yaml`
+ * globs in both directions. Each direction has its own silent failure: a
+ * workspace root added there and not here leaves this gate walking a tree no
+ * card is ever dispatched for, and an entry here the workspace no longer
+ * declares announces a population nothing reads.
  */
-export const ROOT_DIR_WATCH_HINTS = ['packages/spec/src/**'];
+export const ROOT_DIR_WATCH_HINTS = [
+  'packages/*/src/**',
+  'packages/apps/*/src/**',
+  'packages/drivers/*/src/**',
+  'packages/plugins/*/src/**',
+  'packages/qa/*/src/**',
+  'packages/triggers/*/src/**',
+  'packages/services/*/src/**',
+  'packages/adapters/*/src/**',
+  'packages/connectors/*/src/**',
+  'apps/*/src/**',
+  'examples/*/src/**',
+];
 
 /** Canonical unit → every spelling the describe prose or a key token may use. */
 const UNIT_SPELLINGS: Readonly<Record<string, readonly string[]>> = {
@@ -519,24 +577,71 @@ function isSourceFile(rel: string): boolean {
   return true;
 }
 
+/**
+ * Directory names the walk never descends into — see the population section of
+ * this file's header for what each one costs when it is walked. Applied to the
+ * WALK rather than to the roots, so an explicit `--root` at a package root
+ * cannot route around it: that is the exact shape of the measured `node_modules`
+ * reading (#15642), and a root-level filter would have let it back in.
+ */
+const SKIP_DIRS: ReadonlySet<string> = new Set([
+  'node_modules', 'dist', 'build', 'coverage', '.turbo', '.next', '.cache',
+]);
+
+/**
+ * The `src/` subtree of every workspace member that has one — the population,
+ * enumerated live rather than listed. A member with no `src/` (the console
+ * bundle, the docs app, the dogfood suite) contributes nothing and is not an
+ * error: this gate reads declarations, and a package that declares none has
+ * none to get wrong.
+ */
+export function sourceRoots(repoRoot: string = REPO_ROOT): string[] {
+  const out: string[] = [];
+  for (const dir of workspacePackageDirs(repoRoot)) {
+    const src = join(repoRoot, dir, 'src');
+    if (existsSync(src) && statSync(src).isDirectory()) out.push(src);
+  }
+  return out;
+}
+
 function walk(dir: string, out: string[]): void {
   for (const name of readdirSync(dir)) {
+    if (SKIP_DIRS.has(name)) continue;
     const p = join(dir, name);
     if (statSync(p).isDirectory()) walk(p, out);
     else out.push(p);
   }
 }
 
-export function scanTree(root = SRC_ROOT): { sites: DurationKey[]; findings: Finding[]; files: number } {
-  const files: string[] = [];
-  walk(root, files);
+/**
+ * How a file is NAMED in a finding and in `--list`: repo-relative, so an
+ * offender in any package is a path a reader can open. A `--root` outside this
+ * repo (the self-test's fixture tree) falls back to root-relative rather than
+ * printing a `../../..` climb.
+ */
+function labelFor(root: string, file: string): string {
+  const fromRepo = relative(REPO_ROOT, file).split('\\').join('/');
+  if (fromRepo !== '' && !fromRepo.startsWith('../')) return fromRepo;
+  return relative(root, file).split('\\').join('/');
+}
+
+/**
+ * Scan the declared population, or one explicit tree when `root` is given
+ * (ablation / demo). The exclusions apply to both — see {@link SKIP_DIRS}.
+ */
+export function scanTree(root?: string): { sites: DurationKey[]; findings: Finding[]; files: number } {
+  const roots = root === undefined ? sourceRoots() : [root];
   const sites: DurationKey[] = [];
   let count = 0;
-  for (const f of files.sort()) {
-    const rel = relative(root, f).split('\\').join('/');
-    if (!isSourceFile(rel)) continue;
-    count++;
-    sites.push(...collectDurationKeys(`src/${rel}`, readFileSync(f, 'utf8')));
+  for (const r of roots) {
+    const files: string[] = [];
+    walk(r, files);
+    for (const f of files.sort()) {
+      const label = labelFor(r, f);
+      if (!isSourceFile(label)) continue;
+      count++;
+      sites.push(...collectDurationKeys(label, readFileSync(f, 'utf8')));
+    }
   }
   const findings = sites.map(judge).filter((x): x is Finding => x !== undefined);
   return { sites, findings, files: count };
@@ -689,12 +794,74 @@ function selfTest(): number {
       return new RegExp(`export const ${INSTANT_ROOT}\\b`).test(src);
     })());
 
-  // The declared population must be the population the scan reads (the
-  // ROOT_DIR_WATCH_HINTS idiom's coupling, held from this side).
-  const repoRoot = join(pkgRoot, '..', '..');
-  const declared = `${relative(repoRoot, SRC_ROOT).split('\\').join('/')}/**`;
-  expect(`declared population \`${ROOT_DIR_WATCH_HINTS.join(', ')}\` is the subtree the scan walks (\`${declared}\`)`,
-    ROOT_DIR_WATCH_HINTS.length === 1 && ROOT_DIR_WATCH_HINTS[0] === declared);
+  // ── the DECLARED population, held against the LIVE workspace (#15682) ────
+  //
+  // The literal is what `scripts/pm/dispatch-gates.mjs` reads; the workspace
+  // file is what `sourceRoots()` actually enumerates. Held in BOTH directions
+  // because each has its own silent failure — see ROOT_DIR_WATCH_HINTS' own
+  // docblock. The declaration is NOT replaced by the live parse: a parse spells
+  // no literal, and a gate that declares nothing is dispatched for nothing.
+  const liveHints = readWorkspaceGlobs(REPO_ROOT)
+    .filter((g) => !isExclusionGlob(g))
+    .map((g) => `${g}/src/**`);
+  for (const hint of liveHints) {
+    expect(`pnpm-workspace.yaml's \`${hint.replace('/src/**', '')}\` is declared here as \`${hint}\``,
+      ROOT_DIR_WATCH_HINTS.includes(hint));
+  }
+  for (const hint of ROOT_DIR_WATCH_HINTS) {
+    expect(`declared \`${hint}\` is still a workspace root pnpm-workspace.yaml names`,
+      liveHints.includes(hint));
+  }
+
+  // The population must REACH the tree, and reach PAST the one subtree this
+  // gate used to walk alone. "Exactly one offender outside packages/spec" is
+  // only news if the instrument fired outside packages/spec at all — the
+  // reading the widening exists to produce, and the one a silently-empty
+  // enumeration fakes perfectly (measured next door: a `packages/*/src`
+  // pathspec that returned zero and zeroed its positive control with it).
+  const roots = sourceRoots();
+  const specSrc = join(pkgRoot, 'src');
+  expect('the enumerated population contains `packages/spec/src`', roots.includes(specSrc));
+  expect(`the enumerated population reaches ${roots.length - 1} src tree(s) OUTSIDE packages/spec`,
+    roots.some((r) => r !== specSrc));
+  expect('no enumerated root is itself inside `node_modules`',
+    roots.every((r) => !r.split(sep).includes('node_modules')));
+
+  // ── the walk's exclusions, pinned BEHAVIOURALLY (#15682) ─────────────────
+  //
+  // Measured on #15642 before they existed: `--root` at a package ROOT walked
+  // that package's installed dependencies and reported "7151 offender(s) … in
+  // 150098 source file(s)". A `SKIP_DIRS.has('node_modules')` assertion cannot
+  // catch that coming back — the trap is that the WALK DESCENDS, so this builds
+  // a tree containing every excluded shape, each carrying the same offender the
+  // first case of this self-test uses, and asserts the walk finds ONE file.
+  // Seven offenders on disk, one in the verdict.
+  const fixtureRoot = mkdtempSync(join(tmpdir(), 'duration-unit-keys-'));
+  try {
+    const offender = "const S = z.object({ ttl: z.number().describe('Cache TTL in seconds') });\n";
+    const excluded = [
+      'node_modules/some-dep/index.ts',
+      'node_modules/@scope/dep/nested/schema.ts',
+      'dist/bundle.ts',
+      'build/out.ts',
+      'nested/__tests__/helper.ts',
+      'unit.test.ts',
+      'unit.spec.ts',
+      'generated.d.ts',
+    ];
+    for (const rel of [...excluded, 'real.ts', 'nested/also-real.ts']) {
+      const p = join(fixtureRoot, rel);
+      mkdirSync(dirname(p), { recursive: true });
+      writeFileSync(p, offender);
+    }
+    const walked = scanTree(fixtureRoot);
+    expect(`the walk skips node_modules/, dist/, build/ and test files — 2 source file(s) of ${excluded.length + 2}, 2 offender(s)`,
+      walked.files === 2 && walked.findings.length === 2);
+    expect('an excluded file is not merely unjudged, it is never read',
+      walked.sites.every((site) => !excluded.includes(site.file)));
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  }
 
   console.log(failures === 0 ? '\nself-test: all cases pass' : `\nself-test: ${failures} case(s) FAILED`);
   return failures === 0 ? 0 : 1;
