@@ -190,6 +190,13 @@ import { join, posix, resolve } from 'node:path';
 // all of them -- a fifth private copy here would be outside that assertion. The
 // module is entry-guarded, so importing it runs no gate (its own I1 case).
 import { parseChangeset } from './check-adr-0087-registration.mjs';
+
+// ⛔ Nothing in this file is `export`ed, deliberately. Its top level RUNS the
+// gate, and `check:entry-guard`'s second rule is that a `scripts/**` file which
+// exports a binding can be imported for it — whereupon this gate's `process.exit`
+// lands inside the importer. The self-test below is in the same module and calls
+// these helpers directly, so exporting them would buy nothing and owe an entry
+// guard around ~200 lines of top-level dispatch.
 import {
   readWorkspaceGlobs,
   selfTest as workspaceEnumeratorSelfTest,
@@ -522,7 +529,7 @@ function exportsVerdict(manifest) {
  * would read as "this map declared nothing", which is a different fact and one
  * `exportsVerdict` already refuses.
  */
-export function exportSubpaths(map) {
+function exportSubpaths(map) {
   if (typeof map === 'string' || Array.isArray(map)) return new Set(['.']);
   if (!map || typeof map !== 'object') return new Set();
   const declared = Object.keys(map).filter((k) => k === '.' || k.startsWith('./'));
@@ -536,7 +543,7 @@ export function exportSubpaths(map) {
  * WIDENING and must not read as a removal. One `*`, prefix + suffix, which is
  * what Node's subpath-patterns are.
  */
-export function mapResolves(map, subpath) {
+function mapResolves(map, subpath) {
   if (typeof map === 'string' || Array.isArray(map)) return subpath === '.';
   if (!map || typeof map !== 'object') return false;
   const declared = Object.keys(map).filter((k) => k === '.' || k.startsWith('./'));
@@ -561,7 +568,7 @@ export function mapResolves(map, subpath) {
  * @param {object} headManifest   the manifest as it reads now
  * @returns {{ kind: 'born'|'retrofit'|'removal'|'unchanged'|'ungated-head'|'unreadable-base', lost: string[] }}
  */
-export function narrowingVerdict(baseText, headManifest) {
+function narrowingVerdict(baseText, headManifest) {
   // Cell 1a: no manifest at the base -> the package is born with whatever it
   // declares. There is no published predecessor, so it seals nobody.
   if (baseText === null || baseText === undefined) return { kind: 'born', lost: [] };
@@ -607,7 +614,7 @@ const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
  * The body is prose, so the trailing punctuation a sentence puts after a
  * specifier (`...console.js`, `` `...` ``) is trimmed off the captured path.
  */
-export function deepSpecifiersNamed(body, pkg) {
+function deepSpecifiersNamed(body, pkg) {
   const found = new Set();
   const re = new RegExp(`${escapeRe(pkg)}\\/([A-Za-z0-9._*-]+(?:\\/[A-Za-z0-9._*-]+)*)`, 'g');
   let m;
@@ -629,7 +636,7 @@ export function deepSpecifiersNamed(body, pkg) {
  *
  * @returns {{ satisfied: boolean, reason: string, missing: string[] }}
  */
-export function announcementVerdict({ pkg, narrowing, headExports, changesets }) {
+function announcementVerdict({ pkg, narrowing, headExports, changesets }) {
   const bumped = changesets.filter((c) =>
     parseChangeset(c.text).bumps.some((b) => b.pkg === pkg && (b.bump === 'minor' || b.bump === 'major')),
   );
@@ -640,7 +647,12 @@ export function announcementVerdict({ pkg, narrowing, headExports, changesets })
     // reach for: the map key (`./console`) or the specifier (`<pkg>/console`).
     const missing = narrowing.lost.filter((sub) => {
       const asSpecifier = sub === '.' ? pkg : `${pkg}${sub.slice(1)}`;
-      return !bumped.some((c) => c.text.includes(sub) || c.text.includes(asSpecifier));
+      // The BODY, not the whole file: the frontmatter names the package on every
+      // changeset, so reading `c.text` would let the bump line answer the note.
+      return !bumped.some((c) => {
+        const body = parseChangeset(c.text).body;
+        return body.includes(sub) || body.includes(asSpecifier);
+      });
     });
     return missing.length > 0
       ? { satisfied: false, reason: 'unnamed-removal', missing }
@@ -711,6 +723,25 @@ function showManyOrNull(rev, paths) {
   return found;
 }
 
+/**
+ * Which of the pending changesets did THIS change introduce or edit?
+ *
+ * ⚠️ Measured, not assumed: an earlier draft of this clause accepted any pending
+ * changeset, and a real subpath removal went GREEN because an unrelated
+ * changeset already on main happened to contain the string `./console` in a
+ * sentence about a different release. The whole stock is ~1300 files of prose
+ * about this repo's own packages, so "some changeset somewhere mentions this
+ * path" is satisfied by accident constantly -- the boilerplate-answered gate
+ * #15715 exists to avoid, arrived at from the other direction.
+ *
+ * The announcement has to come from the change that does the narrowing, so the
+ * subject is the diff: a changeset absent at the merge base, or one whose text
+ * differs from its base copy.
+ */
+function introducedChangesets(all, baseTexts) {
+  return all.filter((c) => baseTexts.get(c.path) !== c.text);
+}
+
 /** Pending changesets in the working tree, or `null` when the directory is unreadable. */
 function pendingChangesets() {
   const dir = join(ROOT, '.changeset');
@@ -737,7 +768,7 @@ function pendingChangesets() {
  * publishable population, so a read that finds fewer than half of them at the
  * base did not fail to find new packages: it failed.
  */
-export function baseReadControl({ publishable, foundAtBase }) {
+function baseReadControl({ publishable, foundAtBase }) {
   if (publishable === 0) return { ok: true, lines: [] };
   if (foundAtBase >= Math.ceil(publishable / 2)) return { ok: true, lines: [] };
   return {
@@ -777,7 +808,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the dispatch-gates declaration (#10542)': 37,
   'GATED and its census floor (#12879)': 22,
   'ANNOUNCED: the four base-vs-HEAD cells (#15715)': 26,
-  'ANNOUNCED: what satisfies the announcement (#15715)': 28,
+  'ANNOUNCED: what satisfies the announcement (#15715)': 31,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -1178,6 +1209,33 @@ function selfTest() {
     expect(got === expected, `announcementVerdict — ${label}: got "${got}", expected "${expected}"`);
   }
 
+  // Only what THIS change wrote can announce what it narrows. The case below is
+  // the one that was measured going wrong: an untouched changeset already on
+  // main, containing the removed subpath in unrelated prose, satisfied a real
+  // subpath removal and the gate went green.
+  const stock = [
+    { path: '.changeset/untouched.md', text: 'mentions ./console in other prose' },
+    { path: '.changeset/edited.md', text: 'new text' },
+    { path: '.changeset/added.md', text: 'brand new' },
+  ];
+  const stockAtBase = new Map([
+    ['.changeset/untouched.md', 'mentions ./console in other prose'],
+    ['.changeset/edited.md', 'the text it had at the base'],
+  ]);
+  const introduced = introducedChangesets(stock, stockAtBase).map((c) => c.path).sort();
+  expect(
+    introduced.join(',') === '.changeset/added.md,.changeset/edited.md',
+    `introducedChangesets returns the ADDED and EDITED ones: got ${introduced.join(',')}`,
+  );
+  expect(
+    !introduced.includes('.changeset/untouched.md'),
+    'an untouched changeset already on main cannot announce this change — it was written about something else, and the stock is ~1300 files of prose about these same packages',
+  );
+  expect(
+    introducedChangesets([], new Map()).length === 0,
+    'introducedChangesets over an empty stock is empty, not everything',
+  );
+
   const namedCases = [
     ['a plain specifier', '@x/p/dist/a.js', './dist/a.js'],
     ['trailing sentence punctuation is trimmed', 'see @x/p/dist/a.js, and', './dist/a.js'],
@@ -1547,6 +1605,9 @@ let announcedRan = false;
   if (mergeBase && changesets !== null) {
     const basePaths = headManifests.map((h) => h.manifestPath);
     const baseTexts = showManyOrNull(mergeBase, basePaths);
+    // Only what this change wrote can announce what this change narrows.
+    const baseChangesets = showManyOrNull(mergeBase, changesets.map((c) => c.path));
+    const announcing = introducedChangesets(changesets, baseChangesets);
 
     const control = baseReadControl({ publishable, foundAtBase: baseTexts.size });
     if (!control.ok) {
@@ -1574,7 +1635,7 @@ let announcedRan = false;
           pkg: name,
           narrowing,
           headExports: manifest.exports,
-          changesets,
+          changesets: announcing,
         });
         if (announced.satisfied) continue;
 
