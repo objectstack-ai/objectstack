@@ -47,6 +47,7 @@ import { isEmailTransportProvider, emailProviderRequiresApiKey, unsupportedProvi
 // bare `import()` resolved against this CLI's own realpath, so its bundled
 // copy wins, never the host's (#10909).
 import { isSmsTransportProvider, SMS_TRANSPORT_PROVIDERS } from '@objectstack/service-sms';
+import { createHash } from 'node:crypto';
 import { resolveObjectStackHome } from '@objectstack/runtime';
 import { LOG_LEVELS, resolveLogLevel, readLogLevelEnv } from '../utils/log-level.js';
 // The ONE port contract — range, reader and refusal prose — shared with the two
@@ -522,6 +523,81 @@ export function publishBoundPort(boundPort: number, channels: BoundPortChannels)
 }
 
 /**
+ * The identity a runtime state file is keyed by: the ROOT OF THE PROJECT this
+ * process is serving, folded into one filename-safe component.
+ *
+ * ## The collision this ends, DRIVEN rather than reasoned (#15733)
+ *
+ * The state file used to be `runtime.<environment>.json`, and both halves of
+ * that name are machine-global. {@link resolveObjectStackHome} takes NO
+ * arguments — it reads `OS_HOME`, else `~/.objectstack` — and an environment
+ * id is not a project identity, so two different projects on one machine, both
+ * in the ordinary `local` environment, wrote ONE file. Two real boots, two
+ * project roots, one home:
+ *
+ * ```text
+ * project A boots  → runtime.env_local.json = { pid 9301, port 42693 }
+ * project B boots  → runtime.env_local.json = { pid 9345, port 46175 }
+ * A asks "is my server running, and where?"
+ *                  → answered pid 9345 on :46175 — which is B — while A's own
+ *                    server is still alive and still listening on 42693.
+ * A shuts down     → its exit handler deletes the file that by then described
+ *                    B, so B serves on with no supervision record at all.
+ * ```
+ *
+ * Those are one defect seen twice: the NAME carried no answer to *whose*
+ * server this is, so every project addressed the same file. Keying it by the
+ * served app's root gives each project its own — a reader that finds a file
+ * has found its own, and a process cleaning up on exit removes only its own.
+ *
+ * ⛔ NOT repaired by putting an identity in the PAYLOAD instead. #15374 ruled
+ * that one deliberately: the identity of the file a process is serving is a
+ * property of THAT PROCESS, and a payload key would turn a best-effort
+ * supervision file into an identity contract while STILL leaving two projects
+ * overwriting and deleting each other's records. The key is the defect; the
+ * payload is unchanged here.
+ *
+ * ## Why the name carries a readable half as well as a digest
+ *
+ * The digest is what makes the name unique; the slug is what makes a home
+ * directory legible to whoever is standing in front of it. A directory
+ * answering `runtime.env_local.<12 hex>.json` twice tells a reader nothing
+ * about which one is theirs, and answering that question is this file's whole
+ * job. The slug is DERIVED, never trusted: uniqueness rests on the digest
+ * alone, so a project root whose basename sanitises away to nothing is still
+ * keyed correctly — it just reads as the digest.
+ *
+ * ⚠️ Boundary, stated rather than fixed: the key is the resolved path, not the
+ * realpath, so two symlinked spellings of ONE project key differently (each
+ * spelling gets its own file, and each is internally consistent). Two boots of
+ * the SAME project also still share a file — that is the same-project case,
+ * which is #15374's in-process watch, not this one.
+ */
+export function projectStateKey(servedAppRoot: string): string {
+  const absolute = path.resolve(servedAppRoot);
+  const digest = createHash('sha256').update(absolute).digest('hex').slice(0, 12);
+  const slug = path.basename(absolute).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 24);
+  return slug.length > 0 ? `${slug}-${digest}` : digest;
+}
+
+/**
+ * The runtime state file's name: `runtime.<environment>.<project>.json`.
+ *
+ * Both components are identities the file has to carry, and neither is
+ * sufficient alone — the environment id keeps a staging boot from answering
+ * for a local one, and {@link projectStateKey} keeps ANOTHER PROJECT's local
+ * boot from answering for this one.
+ *
+ * ⚠️ A reader that hard-codes the old `runtime.<environment>.json` now gets
+ * ENOENT rather than a stale or foreign record. That is the intended trade: a
+ * missing file is a loud, correct answer to "is my server running", where the
+ * name it replaces could only give a confident wrong one.
+ */
+export function runtimeStateFileName(environmentId: string, servedAppRoot: string): string {
+  return `runtime.${environmentId}.${projectStateKey(servedAppRoot)}.json`;
+}
+
+/**
  * The real channels: the same three writes this command has always done, with
  * their failure handling unchanged.
  *
@@ -534,7 +610,15 @@ export function runtimeBoundPortChannels(printBanner: () => void): BoundPortChan
     writeRuntimeState: ({ port, url }) => {
       try {
         const environmentId = process.env.OS_ENVIRONMENT_ID ?? 'env_local';
-        const runtimeFile = path.join(resolveObjectStackHome(), `runtime.${environmentId}.json`);
+        // Keyed by the SERVED APP'S ROOT as well as the environment, so two
+        // projects on one machine stop addressing one file (#15733). The root
+        // is the one this command already anchored for host resolution; a
+        // caller reaching these channels outside a boot gets the CWD, which is
+        // what every path in that situation already resolves against.
+        const runtimeFile = path.join(
+          resolveObjectStackHome(),
+          runtimeStateFileName(environmentId, servedAppRootOrCwd()),
+        );
         fs.mkdirSync(path.dirname(runtimeFile), { recursive: true });
         fs.writeFileSync(runtimeFile, JSON.stringify({
           pid: process.pid,
