@@ -398,9 +398,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'The #8299 category: `runtime-interface-only`': 12,
   '#12881: a metadata surface that names the symbol only in PROSE': 30,
   'The #13080 category: `type-surface-only`': 26,
-  'TSO-6048: THE REGRESSION PIN -- the founding case must never admit': 7,
+  'TSO-6048: THE REGRESSION PIN -- the founding case must never admit': 8,
   'TSO-N: the predicate set is pinned BY NAME, never by count': 3,
-  'TSO-U: unit pins on predicate 4\'s readers': 19,
+  'TSO-U: unit pins on predicate 4\'s readers': 30,
   'G6: a changeset that was ALREADY breaking at base is inherited': 1,
   'R15: a changeset RENAMED AND turned breaking in the same commit': 5,
   'G10: a PURE rename of an ALREADY-breaking stock changeset': 3,
@@ -2022,7 +2022,12 @@ export function exportedTypeDeclaration(text, symbol) {
     'm',
   );
   const m = re.exec(text);
-  return m ? { kind: m[1], rest: m[2] } : null;
+  if (!m) return null;
+  // `restStart` is where `rest` BEGINS in `text`. A caller that walks the
+  // declaration's body needs an offset, and `text.indexOf(rest)` is not one: `rest`
+  // is the tail of a single LINE, so an identical tail anywhere earlier in the file
+  // wins that search and the walk starts inside someone else's declaration.
+  return { kind: m[1], rest: m[2], restStart: m.index + m[0].length - m[2].length };
 }
 
 /** Any declaration of the name at all, exported or not -- the homonym test. */
@@ -2485,6 +2490,180 @@ export function memberReturnAnnotation(text, symbol) {
   return null;
 }
 
+/** A declared surface as a message prints it: one line, comment spans collapsed. */
+const normaliseSurface = (text) => text.replace(/\s+/g, ' ').trim();
+
+/**
+ * The index of the bracket matching the one at `open`, or -1.
+ *
+ * ⚠️ `structural` MUST be the comment- AND literal-masked projection. A `}` inside
+ * a string literal is not a closer, and reading one as such is exactly how the
+ * lazy `([\s\S]*?);` this file used to carry truncated `type Sep = ';' | ',';`
+ * down to a single quote character (#15489).
+ */
+function matchBracket(structural, open) {
+  const CLOSES = { '{': '}', '[': ']', '(': ')', '<': '>' };
+  const opener = structural[open];
+  const closer = CLOSES[opener];
+  if (!closer) return -1;
+  let depth = 0;
+  for (let i = open; i < structural.length; i++) {
+    if (structural[i] === opener) depth++;
+    else if (structural[i] === closer && --depth === 0) return i;
+  }
+  return -1;
+}
+
+/**
+ * Where the BODY of an `interface` / `class` / `enum` opens at/after `from`, or -1.
+ *
+ * The first `{` is not the answer on its own: `class C implements I<{ a: 1 }>` opens
+ * one inside the type arguments. Only a `{` reached at angle/paren/bracket depth
+ * zero is the body, and a `;` at that depth ends a bodiless declaration first.
+ */
+function declarationBodyStart(structural, from) {
+  let angle = 0;
+  let paren = 0;
+  let square = 0;
+  for (let i = from; i < structural.length; i++) {
+    const c = structural[i];
+    if (c === '<') angle++;
+    else if (c === '>') { if (angle > 0) angle--; }
+    else if (c === '(') paren++;
+    else if (c === ')') { if (paren > 0) paren--; }
+    else if (c === '[') square++;
+    else if (c === ']') { if (square > 0) square--; }
+    else if (angle === 0 && paren === 0 && square === 0) {
+      if (c === '{') return i;
+      if (c === ';') return -1;
+    }
+  }
+  return -1;
+}
+
+/**
+ * The declared MEMBER surface of a brace-bodied declaration at/after `from`, or null.
+ *
+ * Structure is walked on `structural`; the answer is SLICED out of `masked`, so a
+ * string literal's own text survives into the surface while its brackets never
+ * steer the walk. The braces are kept: the result is a type text a reader can read.
+ */
+function declaredMemberSurface(masked, structural, from) {
+  const open = declarationBodyStart(structural, from);
+  if (open === -1) return null;
+  const close = matchBracket(structural, open);
+  if (close === -1) return null;
+  return normaliseSurface(masked.slice(open, close + 1));
+}
+
+/**
+ * The index of the `=` that opens a `type` alias's RHS at/after `from`, or -1.
+ *
+ * The type-parameter list is skipped by BRACKET MATCHING rather than by a regex:
+ * `type Box<T = string> = ...` carries an `=` inside its own parameter list, and
+ * the `(?:<[^=]*>)?` spelling this replaced could not see past it.
+ */
+function aliasEqualsIndex(structural, from) {
+  let i = from;
+  while (i < structural.length && /\s/.test(structural[i])) i++;
+  if (structural[i] === '<') {
+    const close = matchBracket(structural, i);
+    if (close === -1) return -1;
+    i = close + 1;
+    while (i < structural.length && /\s/.test(structural[i])) i++;
+  }
+  return structural[i] === '=' ? i : -1;
+}
+
+// A RHS line that ends on one of these is mid-expression, so the newline after it
+// is never the end of the declaration.
+const RHS_CONTINUES_RE = /(?:[|&,=:?<([{]|\b(?:extends|keyof|typeof|infer|in|readonly|new)|=>)[ \t]*$/;
+// ...and what a following line has to look like for that newline to END the alias.
+const NEXT_STATEMENT_RE =
+  /^[ \t]*(?:export|import|declare|interface|type|class|enum|const|let|var|function|abstract|async|@)/;
+
+/**
+ * The END of the alias RHS that starts just after `eq`.
+ *
+ * The first `;` at nesting depth ZERO -- never merely the first `;`, which sits
+ * inside the very first member of any multi-line object alias and truncated every
+ * one of them (#15489). When the alias carries no `;` at all (ASI), the end of the
+ * DECLARATION is used rather than the end of the file: a depth-0 newline whose next
+ * non-blank line opens a new top-level statement.
+ *
+ * ⚠️ Angle brackets are deliberately NOT counted. `<` is a type-argument opener but
+ * `>` is also the second half of `=>`, so counting them makes every function type in
+ * a RHS close a depth nothing opened. Nothing is lost: a `;` cannot reach depth 0
+ * inside type arguments without passing through a brace, bracket or paren first.
+ */
+function aliasRhsEnd(structural, eq) {
+  let depth = 0;
+  for (let i = eq + 1; i < structural.length; i++) {
+    const c = structural[i];
+    if (c === '{' || c === '[' || c === '(') depth++;
+    else if (c === '}' || c === ']' || c === ')') {
+      if (depth === 0) return i; // ran out of the declaration into an enclosing block
+      depth--;
+    } else if (depth === 0 && c === ';') return i;
+    else if (depth === 0 && c === '\n') {
+      const soFar = structural.slice(eq + 1, i);
+      if (soFar.trim() === '' || RHS_CONTINUES_RE.test(soFar)) continue;
+      const next = structural.slice(i + 1).split('\n').find((line) => line.trim() !== '');
+      if (next !== undefined && NEXT_STATEMENT_RE.test(next)) return i;
+    }
+  }
+  return structural.length;
+}
+
+/**
+ * How many top-level members a brace-delimited member surface declares.
+ *
+ * SEPARATOR-counted (`;` / `,` at depth 0), which is what a normalised surface has
+ * left to count: it is a figure for a truncation notice, not a contract. `null` when
+ * the surface is not a brace body at all.
+ */
+export function countSurfaceMembers(surface) {
+  const s = normaliseSurface(String(surface ?? ''));
+  if (!s.startsWith('{') || !s.endsWith('}')) return null;
+  const structural = maskCommentsAndLiterals(s);
+  let depth = 0;
+  let members = 0;
+  let pending = '';
+  for (let i = 1; i < s.length - 1; i++) {
+    const c = structural[i];
+    if (c === '{' || c === '[' || c === '(' || c === '<') depth++;
+    else if (c === '}' || c === ']' || c === ')' || c === '>') { if (depth > 0) depth--; }
+    else if (depth === 0 && (c === ';' || c === ',')) {
+      if (pending.trim() !== '') members++;
+      pending = '';
+      continue;
+    }
+    pending += s[i];
+  }
+  if (pending.trim() !== '') members++;
+  return members;
+}
+
+/** How much of a declared surface a refusal message prints before it truncates. */
+export const SURFACE_PRINT_LIMIT = 160;
+
+/**
+ * A declared surface, cut down to something a refusal can print on a few lines.
+ *
+ * A whole `interface` body is now the reading (it is the thing that narrowed), and
+ * the real specimen is over 1,500 characters — long enough to bury the sentence
+ * around it. Truncation is explicit rather than silent: an ellipsis, the member
+ * count, and the full length, so an author can tell "long" from "all of it".
+ */
+export function printableSurface(surface) {
+  if (surface === null || surface === undefined) return null;
+  const s = String(surface);
+  if (s.length <= SURFACE_PRINT_LIMIT) return s;
+  const members = countSurfaceMembers(s);
+  return `${s.slice(0, SURFACE_PRINT_LIMIT).trimEnd()} …` +
+    ` (${members === null ? '' : `${members} members, `}${s.length} chars, truncated at ${SURFACE_PRINT_LIMIT})`;
+}
+
 /**
  * What this gate can read about `symbol`'s declared type at one rev, from SOURCE.
  *
@@ -2493,19 +2672,33 @@ export function memberReturnAnnotation(text, symbol) {
  * is not readable here at all -- which predicate 4 treats as a REFUSAL on the base
  * side, never as "it must have been erased".
  *
+ * `type` is the DECLARED SURFACE, never the symbol's own name (#15489): the name is
+ * identical on both sides of every diff, so predicate 4's before/after reading of an
+ * `interface` used to print `ExportFieldMeta` -> `ExportFieldMeta` across a commit
+ * that removed eight of its members. What is compared, and what an author is shown,
+ * has to be the thing that can move.
+ *
  * @returns {{ shape: string, type: string|null, erased: boolean }|null}
  */
 export function readDeclaredTypeSurface(text, symbol) {
   const masked = maskComments(text);
   const exported = exportedTypeDeclaration(masked, symbol);
   if (exported) {
+    const structural = maskCommentsAndLiterals(text);
     if (exported.kind !== 'type') {
       // An `interface` / `class` / `enum` is a named STRUCTURAL declaration. It is
-      // never `any`, and #6048's symbol is exactly this shape at base.
-      return { shape: `an exported \`${exported.kind} ${symbol}\``, type: symbol, erased: false };
+      // never `any` -- #6048's symbol is exactly this shape at base -- so `erased`
+      // is false by construction here and no reading of the body can move it. The
+      // body is what predicate 4 REPORTS, and what a member removal changes.
+      return {
+        shape: `an exported \`${exported.kind} ${symbol}\``,
+        type: declaredMemberSurface(masked, structural, exported.restStart),
+        erased: false,
+      };
     }
-    const rhs = /^\s*(?:<[^=]*>)?\s*=\s*([\s\S]*?);/.exec(`${exported.rest}\n${masked.slice(masked.indexOf(exported.rest) + exported.rest.length)}`);
-    const rhsText = rhs ? rhs[1].replace(/\s+/g, ' ').trim() : null;
+    const eq = aliasEqualsIndex(structural, exported.restStart);
+    const rhs = eq === -1 ? '' : normaliseSurface(masked.slice(eq + 1, aliasRhsEnd(structural, eq)));
+    const rhsText = rhs === '' ? null : rhs;
     return {
       shape: `the exported \`type ${symbol}\` alias`,
       type: rhsText,
@@ -2679,7 +2872,7 @@ export function verifyTypeSurfaceOnly(refs, { base, head, cwd, bumps, packages, 
     if (at.erased) {
       problems.push(
         `\`type-surface-only ${ref}\` [predicate 4: narrowed-from-erased] is false at HEAD:\n` +
-        `      ${at.shape} is still ${at.type === null ? 'UNANNOTATED' : `\`${at.type}\``}.\n` +
+        `      ${at.shape} is still ${at.type === null ? 'UNANNOTATED' : `\`${printableSurface(at.type)}\``}.\n` +
         '      This category is for a surface that MOVED OFF an erased type. One that is still erased\n' +
         '      narrowed nothing, so nothing about it can be breaking in the way this category\n' +
         '      describes.',
@@ -2702,7 +2895,9 @@ export function verifyTypeSurfaceOnly(refs, { base, head, cwd, bumps, packages, 
     if (!before.erased) {
       problems.push(
         `\`type-surface-only ${ref}\` [predicate 4: narrowed-from-erased] is FALSE: at the merge base\n` +
-        `      ${before.shape} was already CONCRETE (\`${before.type}\`), not \`any\` / \`unknown\` /\n` +
+        `      ${before.shape} was already CONCRETE (${before.type === null
+          ? 'its declared surface is not readable here'
+          : `\`${printableSurface(before.type)}\``}), not \`any\` / \`unknown\` /\n` +
         '      unannotated.\n' +
         '      ⛔ This is the founding case of this whole gate. PR #6048 removed the `roles` member of\n' +
         '      a concretely typed exported interface and the ledger got nothing; the ONLY thing\n' +
@@ -2715,7 +2910,11 @@ export function verifyTypeSurfaceOnly(refs, { base, head, cwd, bumps, packages, 
       continue;
     }
 
-    verified.push({ ref, from: before.type === null ? 'unannotated' : before.type, to: at.type ?? at.shape });
+    verified.push({
+      ref,
+      from: before.type === null ? 'unannotated' : printableSurface(before.type),
+      to: at.type === null ? at.shape : printableSurface(at.type),
+    });
   }
 
   return { problems, verified, checked };
@@ -4170,6 +4369,19 @@ function selfTest() {
       'and #6048 removed a member from it -- exactly the class the ledger DOES serve. Reading it as ' +
       `erased would hand the founding case a green exit (got: ${JSON.stringify(realRead)}).`,
     );
+    // ...and it must read the MEMBERS. `#6048` removed a member; a reading that
+    // answers with the symbol's own NAME is identical on both sides of that diff,
+    // so predicate 4's before/after comparison and the message it prints would both
+    // be describing something that cannot move (#15489).
+    assert(
+      realRead !== null && realRead.type !== null &&
+        realRead.type.startsWith('{') && /\bpositions\b/.test(realRead.type) &&
+        realRead.type !== 'ActorUser',
+      'TSO-6048d: predicate 4 must read the REAL `ActorUser` as its declared MEMBER SURFACE -- the ' +
+      'brace-balanced body, naming `positions` -- never the string `ActorUser`. The symbol name is ' +
+      'the one part of an interface a member removal cannot change, so reading it is a comparison ' +
+      `that always says "unchanged" (got type: ${JSON.stringify(realRead && realRead.type)}).`,
+    );
   }
   // (b) the same fact, through the shipping scan(). The changeset is #6048's own
   // reconstructed body -- `迁移:FROM → TO` with a worked block -- claiming the one
@@ -4252,6 +4464,34 @@ function selfTest() {
   assert(readDeclaredTypeSurface('export type Row = any;\n', 'Row')?.erased === true, 'TSO-U17: an exported `type X = any` alias is erased');
   assert(readDeclaredTypeSurface('export type Row = { a: string };\n', 'Row')?.erased === false, 'TSO-U18: an exported alias of a real type is concrete');
   assert(readDeclaredTypeSurface('export interface Other { a: 1 }\n', 'Missing') === null, 'TSO-U19: a symbol that is not there reads as null -- never as "it must have been erased"');
+
+  // U20-U30 (#15489): the same readings asserted on `.type`. Until this row the
+  // battery asserted `.erased` and nothing else, and `.erased` is the ONE field
+  // both misreads left alone -- an `interface` is concrete whatever its body says,
+  // and a truncated alias RHS is concrete for the same reason the whole one is. So
+  // the gate reported `ExportFieldMeta` -> `ExportFieldMeta` across a commit that
+  // removed eight of its members, printed that to an author in a live refusal, and
+  // every case here stayed green.
+  assert(readDeclaredTypeSurface(ACTOR_BASE, 'ActorUser')?.type === '{ id: string; roles: string[]; positions: string[]; }', 'TSO-U20: an exported interface reads as its declared MEMBER SURFACE -- the brace-balanced body -- never as the symbol name, which is identical on both sides of every diff');
+  assert(readDeclaredTypeSurface('export class C {\n  a = 1;\n  b(): number { return 2; }\n}\n', 'C')?.type === '{ a = 1; b(): number { return 2; } }', 'TSO-U21: a `class` body is read the same way, nested braces included');
+  assert(readDeclaredTypeSurface('export enum E {\n  A = 1,\n  B = 2,\n}\n', 'E')?.type === '{ A = 1, B = 2, }', 'TSO-U22: an `enum` body is read the same way');
+  assert(readDeclaredTypeSurface('export type Row = {\n  a: string;\n  b: number;\n};\n', 'Row')?.type === '{ a: string; b: number; }', 'TSO-U23: a MULTI-LINE object alias survives the `;` that ends its FIRST member -- the lazy `([\\s\\S]*?);` this replaced stopped there and reported `{ a: string`');
+  assert(readDeclaredTypeSurface("export type Sep = ';' | ',';\n", 'Sep')?.type === "';' | ','", 'TSO-U24: a `;` INSIDE a string literal does not terminate the RHS -- the walk is string-aware, and the literal\'s own text still reaches the surface');
+  assert(readDeclaredTypeSurface('export type Box<T = string> = { value: T; tag: string };\n', 'Box')?.type === '{ value: T; tag: string }', 'TSO-U25: a GENERIC alias keeps its whole RHS, and the `=` of a type-parameter DEFAULT is not mistaken for the alias\'s own -- the parameter list is skipped by bracket matching, not by `(?:<[^=]*>)?`');
+  assert(readDeclaredTypeSurface('export type Row = { a: string }\n\nexport const x = 1;\n', 'Row')?.type === '{ a: string }', 'TSO-U26: an alias with NO `;` ends at the END OF THE DECLARATION, not at the next `;` anywhere in the file -- over-reading into the following statement is the same defect pointing the other way');
+  assert(readDeclaredTypeSurface('export interface Loose {\n  data: any;\n}\n', 'Loose')?.erased === false, 'TSO-U27: reading the BODY does not move `.erased` -- an interface whose members are `any` is still a CONCRETE declaration, the #6048 reading, and this category is about surfaces that moved OFF an erased type');
+  assert(countSurfaceMembers('{ a: string; b: Record<string, number>; c: { d: 1; e: 2 } }') === 3, 'TSO-U28: members are counted at the TOP level only -- the separators inside a member\'s own type are not members');
+  assert(countSurfaceMembers('AnalyticsResult') === null, 'TSO-U29: a surface that is not a brace body has no member count, and says so rather than guessing one');
+  {
+    const wide = `{ ${Array.from({ length: 40 }, (_, i) => `k${i}: string`).join('; ')} }`;
+    const shown = printableSurface(wide);
+    assert(
+      shown.length < wide.length && shown.includes('…') && shown.includes('40 members') && shown.includes(`${wide.length} chars`) &&
+      printableSurface('{ a: string }') === '{ a: string }',
+      'TSO-U30: a long surface is truncated EXPLICITLY -- an ellipsis, the member count and the full ' +
+      `length -- so an author can tell "long" from "all of it"; a short one is printed byte-identical. Got: ${JSON.stringify(shown)}`,
+    );
+  }
 
   // ---- G6: a changeset that was ALREADY breaking at base is inherited -------
   battery('G6: a changeset that was ALREADY breaking at base is inherited');
