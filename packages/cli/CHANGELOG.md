@@ -1,5 +1,414 @@
 # @objectstack/cli
 
+## 17.4.0
+
+### Minor Changes
+
+- 95d5cbb: Ratify `./hook-body` as a public subpath export — `extractHookBody`, `HookBodyExtractionError`, `HookBodyRefusalKind` and `ExtractedBody` were reachable as a deep `dist/utils/extract-hook-body.js` import until #13123 sealed the surface, and an app's hook-body fidelity harness (hotcrm's `test/helpers/action-sandbox.ts`) consumes them to run the SAME body-only lowering `os build` ships through the real QuickJS runner, so a test executes what production executes rather than a lookalike. The #13123 body names exactly this remedy for an out-of-repo consumer — ratify the subpath as public surface rather than read `dist/` paths — and 17.3.0 applied it to `./console` for cloud's `objectos-runtime`; this applies it to the second consumer (#15325). `@objectstack/cli/hook-body` is a dedicated entry that re-exports those four names and nothing else; the deep `dist/` path stays sealed. Also admits `./package.json`, so the ordinary tooling idiom of reading a dependency's own manifest resolves again.
+  
+  `minor`, not `patch`: a new subpath on a published package's `exports` map is a purely additive widening of its public surface — a new accepted key — which takes at least `minor` under the maintainer's 2026-09-04 rule (decision batch #35, on #15294) in the Check Changeset step's "WHICH LEVEL" prose; the commit type never lowers it.
+- cee3961: **BREAKING** `os create <type> <name>` now refuses a project name that npm refuses, and refuses it before it writes anything.
+  
+  `os create plugin "My App"` used to exit 0 having written `./plugin-My App/`, carrying a manifest that read `name: "@objectstack/plugin-My App"`. Nothing failed at scaffold time, so the invalid name surfaced later at `npm publish`, in the terminal of whoever ran it next. `os init` has always refused that same input before touching the disk. The rule set is now shared between the two scaffolders rather than restated in one of them, so they answer the same way.
+  
+  `os create` also refuses a name whose composed scoped package name exceeds npm's 214-character ceiling. `@objectstack/plugin-` spends 20 of those characters before the name begins, so a name that `os init` accepts can still compose to one npm rejects; that check sits next to the composition rather than in the shared rule set.
+  
+  A scripted invocation that passed an invalid name now exits 1 with the reason on stderr, where it previously exited 0 and produced a project that could not be published.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) The change narrows what a CLI argument accepts at invocation time. No metadata surface, stored row or spec declaration is touched, so `objectstack migrate meta` has nothing to carry and the ledger has nothing to record. -->
+- cf6b671: `os create` now emits a project that installs outside this monorepo.
+  
+  Every project the command scaffolded declared its `@objectstack/*` dependencies
+  with pnpm's `workspace:*` protocol, extended a `tsconfig.json` two directories
+  above itself, and was written into this repository's own `packages/plugins/` or
+  `examples/` by default — so a developer following the documented command got a
+  project `pnpm install` refuses. The default emission is now standalone:
+  
+  - `@objectstack/*` dependencies are published semver ranges pinned to the
+    version of the CLI that generated them;
+  - the emitted `tsconfig.json` is self-contained and extends nothing;
+  - the project is written to `./<name>` in the current directory (or `--dir`);
+  - a `pnpm-workspace.yaml` carries the build approvals a fresh `pnpm install`
+    needs on pnpm 11.
+  
+  The `plugin` template also emits `init` where it used to emit `initialize`.
+  `initialize` is not part of the `Plugin` contract, so the scaffold did not
+  type-check under its own `strict` config (TS7006 on the untyped `context`
+  parameter) and `kernel.use()` refused the plugin at load with
+  `Plugin init function is required` — a defect the kernel protocol docs
+  previously carried a warning about instead of a fix.
+  
+  The previous monorepo-internal placement is still available for ObjectStack
+  platform work as the explicit `--in-repo` flag, which keeps the `workspace:*`
+  specs and writes into `packages/plugins/` or `examples/`.
+- 984f1da: `scoreMetadata` no longer scores a stack whose linter crashed as a perfect one.
+  
+  The metadata rubric is two halves: a schema parse and the lint sweep. When `lintConfig` threw, the scorer caught the throw and continued with `issues = []` — so the penalty was 0 and a stack half of whose rubric never ran came back as **100 / grade `A` / `valid: true`, every count zero, `issues: []`** — byte-for-byte the verdict a genuinely clean stack gets. "The linter found nothing" and "the linter never ran" collapsed into the better-looking one.
+  
+  The crash is reachable on a schema-valid stack: a localized `label` (`{ en: 'Todos', 'zh-CN': '待办' }`) on an app, or on a view's `list`, parses clean and makes the label-case rule throw a `TypeError`. That rule's crash is a separate defect, filed on its own; what changes here is that the scorer stops publishing a clean verdict it did not earn.
+  
+  A crashed lint run is now recorded in every carrier a consumer might read, because reading any one of them has to be enough:
+  
+  - **`lintError`** — a new optional string on `MetadataScore`, carrying the thrown message. Set only when the linter could not run; absent when it ran and reported errors, which is a lint verdict rather than a missing one. It reaches the CLI's published payload through `os lint --eval --json`, on `results[].score`.
+  - **A synthetic `error` issue** (`rule: 'rubric/lint-crashed'`, exported as `LINT_CRASHED_RULE`) — so `issues`, `counts.errors` and `valid` carry the failure too. This is what makes the eval harness fail the case: its `passed` reads `counts.errors`, and would never have seen a new field. It still fails at `--eval-min 0`, where the score alone stops discriminating.
+  - **`score: 0` / grade `F`** — the only channel `os lint --score --json` publishes, and the same refusal `unscorableScore()` already gives an eval case there was nothing to judge.
+  
+  The schema half is untouched and still reported: `schemaErrors` and `counts.schemaErrors` say exactly what the parse found, which was the defensible half of the original intent.
+- ec0a6e7: feat(objectql,cli): `backfillSummaryNulls` accepts `recomputeUndefinedOnEmpty` — a caller who KNOWS a `min`/`max`/`avg` roll-up column was just declared can have it filled; `os migrate summary-nulls --recompute-undefined-on-empty object.field` surfaces it (#15064)
+  
+  A roll-up value has three producers — the insert-time seed, the child-write
+  recompute, and the one-off backfill — and **declaring a summary field on an
+  object that already has rows reaches none of them**. For `count`/`sum` the
+  backfill repairs that as a side effect (every `NULL` is a hole to it). For
+  `min`/`max`/`avg` it could not: `summaryNullIsBackfillable` decides on the
+  function alone, so "never computed" and "no child rows" were indistinguishable,
+  the column stayed `NULL` on every pre-existing parent, and the report said
+  `filled: 0` — a false all-clear that a timed flow built on the column then
+  turned into "matches nothing" (the customer case behind cloud#1908).
+  
+  **What changes** — maintainer ruling on #15064, option A: the caller who holds
+  the fact gets a way to say it; the predicate and the default run do not move.
+  
+  - `SummaryBackfillOptions.recomputeUndefinedOnEmpty?: string[]` — `object.field`
+    roll-ups the caller knows were never computed. A named `min`/`max`/`avg` is
+    walked like a `count`: every `NULL` parent is recomputed through the same
+    `aggregateSummaryValue` the engine writes. A parent whose aggregate is the
+    empty-set reading (`null` — no child rows) already holds the engine's own
+    value, so it is neither counted as a hole nor written; the scoped run is
+    therefore idempotent in the same "re-run until it reports zero" sense.
+    Naming a `count`/`sum` is accepted and changes nothing, so a publish path can
+    pass every column it just declared without knowing the empty-set list.
+  - A name that resolves to no roll-up owned by an object the run walks — a typo,
+    a plain field, or an object `objects` left out — is **refused before any row
+    is read**, dry run or apply, with an ADR-0112 envelope (`code:
+    'INVALID_FIELD'`, `status: 400` — the code the projection and write axes
+    that name a field already answer, while sorting keeps `INVALID_SORT`;
+    `field` names the first unresolved entry, `fields` all of them). A silent
+    no-op there would be the same false all-clear this option exists to end.
+  - `SummaryBackfillReport.recomputedUndefinedOnEmpty: string[]` — the complement
+    of `skippedUndefinedOnEmpty`, same `object.field (fn)` spelling; `[]` on an
+    unscoped run. `SummaryBackfillFieldOutcome.fn` widens from `'count' | 'sum'`
+    to every roll-up function, since a named `max` now appears in `fields`.
+  - `os migrate summary-nulls --recompute-undefined-on-empty object.field`
+    (repeatable) passes the scope through; the confirmation prompt names the
+    columns; `formatSummaryBackfillReport` lists them under "Recomputed on
+    request" and explains a `NULL` that remains.
+  
+  **What does not change:** without the option the walk, the writes, every
+  counter and the human-readable report are byte-for-byte what they were (pinned
+  against output captured on `main` before this change); `min`/`max`/`avg` stay
+  out of scope and keep being reported under `skippedUndefinedOnEmpty`; the
+  predicate `summaryNullIsBackfillable` is untouched, so `os migrate
+  summary-nulls` keeps its meaning on every deployment. The only visible delta on
+  an unscoped run is the one additive report key, `recomputedUndefinedOnEmpty: []`.
+  
+  `minor` for both packages: an optional parameter on a published exported
+  function, a new report key, and a new CLI flag are each a purely additive
+  widening of a published surface, which takes at least `minor` (bump-level rule,
+  2026-09-04); the `fix`-shaped motivation does not lower it.
+
+### Patch Changes
+
+- c0c07ef: `os package publish --help` no longer points its local-dev example at a directory this repo does not have.
+  
+  The last line of the command's `EXAMPLES` block read:
+  
+  ```
+  $ OS_CLOUD_URL=http://localhost:4000 os package publish    # local dev (apps/cloud)
+  ```
+  
+  `apps/cloud` was deleted from this repository — the reference cloud host now lives in `objectstack-ai/cloud` — so the parenthetical sent a reader to a path that is not in the tree they cloned. This is help text, not a source comment: it is printed verbatim to anyone who runs the command.
+  
+  The parenthetical is dropped rather than re-pointed at the other repo. The example is about `OS_CLOUD_URL` overriding the control-plane URL, which the `--server` flag already documents in the same output; which directory happens to serve `localhost:4000` was never part of what the example teaches, and a `--help` reader is not looking for a file in a monorepo. `# local dev` alone carries it, and it now matches how the CLI reference docs have long published the same example.
+  
+  No behaviour changes: `examples` is a static help string, and no flag, argument, default or exit code moves.
+- ee79099: `os validate|info|diff|lint|compile|build|verify|migrate meta|i18n check|i18n extract --json` no longer print human text on stdout when the config file is missing.
+  
+  `resolveConfigPath()` emitted both of its refusals — the explicit-path miss and the auto-detect miss — through `printError` and `console.log`, **both of which write to stdout**, and then called `process.exit(1)` directly. Ten published `--json` faces reach that helper, so a missing config file answered them with exit 1, an unparseable stdout and an **empty stderr**: 206 bytes of prose on the one stream `--json` reserves for the machine. And because the exit was called rather than thrown, every command's catch-all `--json` error exit — all of which sit downstream of a throw — never ran.
+  
+  The diagnostic now goes to stderr, where the rest of this CLI's diagnostics already go. Nothing else moves:
+  
+  - **the exit code is still 1**, so a consumer branching on exit status sees no change at all;
+  - **the wording is unchanged**, hints included, so a human reading a terminal sees the same three lines;
+  - **nothing is accepted or rejected differently** — no config that loaded before fails now, and none that failed now loads.
+  
+  ⚠️ **No error payload is invented on this path.** What a `--json` consumer should *receive* when the config file is missing is an envelope question that touches ten published faces at once, and it is deliberately left open here — this change settles only that the machine's channel no longer carries prose. `--json` on this path emits nothing on stdout; a consumer must still read the exit status, exactly as it must today.
+  
+  A new pin (`config-miss-stdout-purity.e2e.test.ts`) drives all ten faces on both branches of the helper. The existing purity pin could not: it discovers its family as the commands that call `bootSchemaStack`, and these fail before any kernel boots.
+- ad0b3e7: `os diff` with no path arguments no longer prints its usage error on stdout — in either face.
+  
+  The refusal sat **above** the command's first `if (!flags.json)`, so the face was still undecided when it ran and it fired in **both**. `printError` plus three `console.log` calls — all four writing to stdout — then `process.exit(1)`. Measured on the published entry `bin/run.js` with `NO_COLOR=1` and the streams captured separately, `os diff --json` and bare `os diff` answered byte-identically: exit 1, **141 bytes of prose on stdout, an empty stderr**, and `JSON.parse(stdout)` throwing on the one stream `--json` reserves for the machine.
+  
+  The diagnostic now goes to stderr, where the rest of this CLI's diagnostics already go. The 141 bytes moved intact — stdout 141 → 0, stderr 0 → 141. Nothing else moves:
+  
+  - **the exit code is still 1**, so a consumer branching on exit status sees no change at all;
+  - **the wording is unchanged**, both usage hints included, so a human reading a terminal sees the same four lines;
+  - **nothing is accepted or rejected differently** — no invocation that worked before fails now.
+  
+  ⚠️ **No error payload is invented on this path.** What a `--json` consumer should *receive* on a refusal is an open envelope question, entangled with `os lint --eval --json`'s bare `{ error }` (no `code`, no `httpStatus`), and it is deliberately left open here — this change settles only that the machine's channel no longer carries prose. `--json` on this path emits nothing on stdout; a consumer must still read the exit status, exactly as it must today.
+  
+  This is the sibling of the `resolveConfigPath` repair, and a genuinely different site: that one is reached through `loadConfig()`, this one is `diff.ts`'s own usage error, raised before any config work happens. The existing pin drives `os diff` with two paths precisely so the run gets *past* this check, so it could not see this path. A new pin (`diff-usage-error-stream.e2e.test.ts`) drives the bare form in both faces, and carries a structural tripwire: across 62 command modules, 27 of which offer `--json`, `diff` was the only one with a stdout write above its guard, and the tripwire goes red if another arrives.
+- 8644d1d: `os generate migration` gives a table's own `id` column the shape the platform actually creates.
+  
+  Both migration generators hardcoded the primary key as a UUID — `"id" UUID PRIMARY KEY DEFAULT gen_random_uuid()` in the SQL format, `table.uuid('id').primary().defaultTo(db.fn.uuid())` in the TypeScript one (the default format). The platform's SQL driver emits `table.string('id').primary()`, which is knex's `varchar(255)`. A platform id is a string, not a uuid, so on Postgres the generated table refused the platform's very first insert with `22P02 invalid input syntax for type uuid`.
+  
+  The quieter half is the `DEFAULT`, and it is why this was worth correcting rather than working around. The driver emits no database-side default at all — its insert path always supplies the id itself — so `gen_random_uuid()` never fired for a platform write, only for an out-of-band one, handing that row a 36-character uuid this platform's id generator would never mint. One table would then hold two incompatible id shapes, with nothing said.
+  
+  Both generators now emit the driver's own answer: `"id" VARCHAR(255) PRIMARY KEY` and `table.string('id').primary()`. The correction also closes a contradiction inside the generator file, whose prose already stated that a reference column takes the width of the target's `id` column *because* the driver emits `table.string('id').primary()` — a few hundred lines above the two lines that emitted `uuid`.
+  
+  `generate-builtin-id-column.pin.test.ts` reads the width from the driver's own `DEFAULT_STRING_VARCHAR_CHARS` rather than transcribing `255`, so the generators cannot drift away from the driver again without a named failure.
+- 095df7f: `os lint` and `os i18n extract` no longer count one translation key twice.
+  
+  A translation key is derived from *where a string is addressed*, not from *which declaration was being read* when the walk reached it — and two declarations can address one bundle slot. `collectExpectedEntries` emitted one entry per declaration, so a key reachable twice became two expected entries. Two families were measured, with different causes:
+  
+  - **Two carriers, one action.** The normalized config attaches an object's actions to `obj.actions` *and* to the top-level `actions` list — the same object reference, not a copy — so both action branches emitted `objects.OBJECT._actions.ACTION.*`. This is the family the coverage report shows: 70 of 691 baselined units across `app-todo` (40), `app-showcase` (29) and `app-crm` (1).
+  - **Two declarations, one form field.** `deleteBehavior` is declared twice in each of the `field` and `object` metadata forms, gated on `visibleWhen` (`lookup` vs `master_detail`); both render into one key. Config-independent — it duplicated six entries on every config, including an empty one.
+  
+  Neither is an authoring mistake, and neither is fixable where it originates: both are two correct declarations of one displayed string. So the walker now collapses entries that address the same path, keeping the first emission.
+  
+  What that corrects, in both directions:
+  
+  - **`os lint`'s i18n findings.** The same missing key was reported twice, byte-identically. `pnpm check:i18n-coverage` ratchets the finding *count* while its report calls the number "untranslated declared strings", so translating one key moved the ratchet by two and the frozen debt was ~11% larger than the work it described. The three coverage baselines are regenerated in this change and fall by exactly 70 (691 to 621): `app-crm` 102 to 101, `app-showcase` 443 to 414, `app-todo` 146 to 106. The ratchet's direction, monotonicity and failure text are unchanged — only the population it counts.
+  - **`os i18n extract`'s reported counts.** `totalExpected` and the per-locale `counts` counted emissions while the skeleton itself had already collapsed the duplicates on the way in, so extract over-reported what it wrote — 1632 claimed against 1531 keys written on `app-showcase`, 894 against 870 on `app-todo`, 930 against 925 on `app-crm`. Those numbers now match the skeleton.
+  
+  No generated bundle changes: every duplicate pair measured carries a byte-identical record, so de-duplication removes copies and never a demand. All nine `translations/*.generated.ts` packages stay in sync.
+- 54e2369: `os lint --eval` no longer scores a failed generation as a perfect one: a generator that throws now counts 0 toward `meanScore` instead of 100.
+  
+  The harness has always handled a throwing `--generator` by substituting an empty stack and scoring that. An empty stack is **100 / grade `A` / `valid: true`** — it has nothing wrong with it because it has nothing in it. So a live eval in which every single generation failed reported the best possible headline number:
+  
+  ```
+  os lint --eval --json --generator ./throws.mjs
+  exit 1 · ok: false · passed: 0 · failed: 5 · meanScore: 100
+  every case: score 100 · grade A · valid true · generationError "model unavailable"
+  ```
+  
+  `meanScore` is the first number a human scanning that report reads, and it read perfect precisely when the model under test produced nothing.
+  
+  **What was NOT wrong: `passed`.** It carries its own guard (`!generationError && …`), so the failed cases were reported as failed and `ok` was `false` throughout. A reader who cross-read `ok`/`passed` was safe; a reader who checked the mean and moved on got exactly the wrong impression. That is the whole defect, and nothing about `passed`, `ok`, `total`, `failed` or the exit code changes here.
+  
+  The repair is the verdict the sibling failure path already used. A generator that *returns* a value nobody can walk was already scored `0 / F / valid: false`, with the reason written into the module: a stack that cannot be walked is not an empty stack, and `valid: true` for one that was never parsed is simply false. A stack that was never produced is not an empty stack either — so both now answer the same:
+  
+  ```json
+  { "id": "invoice_with_line_items",
+    "generationError": "model unavailable",
+    "passed": false,
+    "score": { "score": 0, "grade": "F", "valid": false } }
+  ```
+  
+  and the run above now reports `meanScore: 0`.
+  
+  `meanScore`'s denominator is unchanged and is now stated in the payload's own documentation: the mean is over every case **attempted**, so a failed case contributes its 0 and is counted. The alternative — averaging only over cases that could be scored — is a different metric that would report the quality of the generations that arrived while staying silent about how many never did; a `meanScore` that switched denominators without saying so would be a worse defect than the one being fixed.
+  
+  No key is added to or removed from the `--json` payload, and nothing a generator can return is newly accepted or rejected: an off-shape stack is still a **scored** case whose schema errors are why it fails, never a generation error.
+- 17ec4b1: `os lint --eval --json` reports an unscorable generated stack as a failed case instead of crashing with no JSON at all.
+  
+  The eval harness promised totality in writing — *"Never throws — generation failures become failed cases"* — and the promise was false as written. Its `try` wrapped only the call to your `--generator` module; the `scoreMetadata(stack)` call that follows sat outside it. So a generator that **threw** became a failed case, exactly as documented, while a generator that **returned** a value nobody could walk took the whole process down:
+  
+  ```
+  os lint --eval --json --generator ./g.mjs
+  exit 1 · stdout 0 bytes · stderr "    Error: poison getter"
+  ```
+  
+  A caller that asked for `--json` got the framework's human error text on stderr and no document at all to parse. Eval mode dispatches above the project-lint `try`, so the catch-all JSON exit that mode has could never see it either.
+  
+  Scoring a stack means walking it, and there are two walks: the normalizer spreads the stack's top level, and the schema parse walks everything below it. A throw from **either** now becomes that case's `generationError` — the same per-case channel a throwing generator already used — so the report exit that was always there emits its JSON, names the cause, and still exits non-zero:
+  
+  ```json
+  { "id": "invoice_with_line_items",
+    "generationError": "Failed to score the generated stack: poison getter",
+    "passed": false,
+    "score": { "score": 0, "grade": "F", "valid": false } }
+  ```
+  
+  Nothing new appears on the `--json` face: no new key, no new payload shape. The failing exit was already reachable for a throwing generator; it is now reachable for a poisonous one too.
+  
+  The failed case is scored `0 / F / valid: false` rather than as an empty stack. An empty stack scores 100 / A / valid, and stamping that on a stack nobody could parse would have put a clean-looking verdict next to a failure — the crash replaced by a quiet wrong answer.
+  
+  Unchanged: offline mode, and every off-shape stack a generator can return. Bad metadata is still **scored**, with its schema errors as the reason it fails — it is not rerouted into the failure channel.
+- 5023630: The published `os` binary no longer freezes in the kernel when whatever is reading its output stops draining.
+  
+  Node puts the CLI's stderr on the non-blocking write path when it opens the pipe, so a write to a reader that has stopped is buffered rather than parking the thread. libuv clears that flag again in the pre-exec of every child spawned with **inherited** stdio — and inheriting is `dup2`, so the flag lives on an open file description the spawner shares. Clearing it for the child clears it for the CLI too.
+  
+  Measured on the built binary, `os dev --verbose` with its output piped to a reader that stopped draining: `os dev` spawns `os serve --dev` with inherited stdio at 2.8 s, that child spawns the esbuild service with inherited stderr at 5.2 s, and fd 2 stays blocking for the rest of the run. 3.1 s after the reader stopped, the main thread sat in `write(2)` (`wchan=sock_alloc_send_pskb`), 4 of 4 runs — parked 28.9 s, **ignoring SIGINT while parked**, and released only when the consumer resumed. Not a crash and not a timeout: alive, idle, unresponsive, with an empty log. Anything that pipes `os dev` and reads it slowly — a CI log collector, a backgrounded runner, a supervisor that stops draining while it does work — could park the CLI this way.
+  
+  `bin/run.js` now installs `keepStderrNonBlocking()` before oclif can write a byte. The guard re-asserts `O_NONBLOCK` immediately ahead of each write, which is what the measurement requires: the clearing that persisted was made by a **grandchild** the CLI does not spawn and cannot see, so a one-shot at startup would be undone silently and no change to the CLI's own spawn sites would have prevented it.
+  
+  The guard itself is not new — it shipped in no published install. It lived at `packages/cli/bin/stderr-nonblocking.mjs`, and `files` names only `dist`, `README.md` and `CHANGELOG.md`; npm packs a `bin` **target** regardless of `files`, which is why `bin/run.js` reached every install and the module beside it reached none. It now compiles from `src/utils/stderr-nonblocking.ts` into `dist/`, under the whitelist that was already there.
+  
+  Nothing about which arguments the CLI accepts, what it prints, or what it exits with changes. The refusal of `setBlocking(true)` in `src/utils/format.ts` stands and is untouched — this is its inverse, and what keeps its premise true.
+- 0c6c55e: `os serve` now says so when the SQLite file it is serving is no longer the file at its configured path.
+  
+  Deleting the data directory under a running server — `rm -rf .objectstack/data`, which is what a `demo:reset` script does and what a fresh-database repro starts with — unlinks the inode without touching the process. SQLite keeps reading and writing the now-invisible file, health keeps answering `200`, and a later boot creates a brand-new database at the same path. From that moment every filesystem inspection of that path describes a *different* database than the running server answers from, and nothing anywhere says so: a row edited there has no observable effect on the live server, and a user who authenticates against the live server is not in that file. Both readings are true, both look like a broken write path, and one investigation that reported them as evidence cost a full P0 cycle.
+  
+  A boot that serves an on-disk SQLite file now records that file's identity once the boot is complete and re-checks it on a 30-second interval. When the file is gone, or the path holds a different file, it reports **once** at `error` — naming the path, the consequence (every external observation of this deployment is now false, and it will keep looking healthy) and the fix (restart the server so it opens the file that is at that path now).
+  
+  It refuses nothing and retries nothing: the running server is still correct, merely invisible, and breaking a working dev loop to fix a reporting gap would trade a bad hour for a worse one. Nothing is added to any payload, endpoint or state file. Silence from the check is not a claim that the file is intact — every uncertainty in it resolves toward staying quiet, because a false report would send an operator to restart a server whose database is fine.
+- Updated dependencies [2ed6be6]
+- Updated dependencies [54bb2f1]
+- Updated dependencies [ceb4877]
+- Updated dependencies [98191d2]
+- Updated dependencies [ca326b5]
+- Updated dependencies [ea03c7c]
+- Updated dependencies [f1a1028]
+- Updated dependencies [8f404a5]
+- Updated dependencies [954cb0b]
+- Updated dependencies [a56baa2]
+- Updated dependencies [d4c2cb1]
+- Updated dependencies [65846bc]
+- Updated dependencies [3e3ecb0]
+- Updated dependencies [8e500f2]
+- Updated dependencies [4b3955e]
+- Updated dependencies [347b777]
+- Updated dependencies [36a16d0]
+- Updated dependencies [c01b3a6]
+- Updated dependencies [a51eb86]
+- Updated dependencies [e944fdb]
+- Updated dependencies [b548e43]
+- Updated dependencies [13c48c2]
+- Updated dependencies [236f2df]
+- Updated dependencies [d30ccb9]
+- Updated dependencies [6f94458]
+- Updated dependencies [6e67b86]
+- Updated dependencies [132742f]
+- Updated dependencies [85a2459]
+- Updated dependencies [e89fa92]
+- Updated dependencies [56fe8c2]
+- Updated dependencies [4bc9821]
+- Updated dependencies [da1cffb]
+- Updated dependencies [2003259]
+- Updated dependencies [a646120]
+- Updated dependencies [a06faeb]
+- Updated dependencies [a646120]
+- Updated dependencies [2200f8e]
+- Updated dependencies [a646120]
+- Updated dependencies [2200f8e]
+- Updated dependencies [65846bc]
+- Updated dependencies [ef3a138]
+- Updated dependencies [fa125f3]
+- Updated dependencies [a646120]
+- Updated dependencies [6f1ce7d]
+- Updated dependencies [2c753fe]
+- Updated dependencies [52804cd]
+- Updated dependencies [3f89967]
+- Updated dependencies [4f85e4d]
+- Updated dependencies [fa85759]
+- Updated dependencies [5f7fa1d]
+- Updated dependencies [088f761]
+- Updated dependencies [a84e1ce]
+- Updated dependencies [a84e1ce]
+- Updated dependencies [65846bc]
+- Updated dependencies [bf1054a]
+- Updated dependencies [d8d2776]
+- Updated dependencies [6b66ec7]
+- Updated dependencies [222dc0f]
+- Updated dependencies [f9a3c32]
+- Updated dependencies [7dafaae]
+- Updated dependencies [52b59d6]
+- Updated dependencies [f502898]
+- Updated dependencies [7bf96cf]
+- Updated dependencies [17f8604]
+- Updated dependencies [4ca358d]
+- Updated dependencies [3bd9b34]
+- Updated dependencies [b4b37e5]
+- Updated dependencies [ba426b0]
+- Updated dependencies [d0ee598]
+- Updated dependencies [6acb37e]
+- Updated dependencies [61821e5]
+- Updated dependencies [26144c2]
+- Updated dependencies [9e9f03a]
+- Updated dependencies [5eb24f8]
+- Updated dependencies [c64e65f]
+- Updated dependencies [cc00df2]
+- Updated dependencies [cc00df2]
+- Updated dependencies [06c762e]
+- Updated dependencies [414c1fc]
+- Updated dependencies [0db2947]
+- Updated dependencies [e13ede8]
+- Updated dependencies [89758ac]
+- Updated dependencies [f5cc78b]
+- Updated dependencies [46803fa]
+- Updated dependencies [8a12067]
+- Updated dependencies [401e50a]
+- Updated dependencies [ee32e1c]
+- Updated dependencies [b31ebfe]
+- Updated dependencies [8744de9]
+- Updated dependencies [a646120]
+- Updated dependencies [ebb5550]
+- Updated dependencies [d4f9b2a]
+- Updated dependencies [5f7fa1d]
+- Updated dependencies [6b8c677]
+- Updated dependencies [87f0ccc]
+- Updated dependencies [aedbaef]
+- Updated dependencies [a727043]
+- Updated dependencies [46803fa]
+- Updated dependencies [c2a336c]
+- Updated dependencies [f7db8f4]
+- Updated dependencies [0cf0867]
+- Updated dependencies [5964124]
+- Updated dependencies [9408b7f]
+- Updated dependencies [615fac3]
+- Updated dependencies [1375344]
+- Updated dependencies [ec0a6e7]
+- Updated dependencies [2bb0614]
+- Updated dependencies [b398ad2]
+- Updated dependencies [6c439f2]
+- Updated dependencies [3d3f60e]
+- Updated dependencies [581d8f8]
+- Updated dependencies [40a44b9]
+- Updated dependencies [c550baf]
+- Updated dependencies [cd55558]
+  - @objectstack/core@17.4.0
+  - @objectstack/objectql@17.4.0
+  - @objectstack/metadata-protocol@17.4.0
+  - @objectstack/service-analytics@17.4.0
+  - @objectstack/driver-sql@17.4.0
+  - @objectstack/spec@17.4.0
+  - @objectstack/runtime@17.4.0
+  - @objectstack/plugin-approvals@17.4.0
+  - @objectstack/service-automation@17.4.0
+  - @objectstack/lint@17.4.0
+  - @objectstack/metadata@17.4.0
+  - @objectstack/plugin-auth@17.4.0
+  - @objectstack/client@17.4.0
+  - @objectstack/console@17.4.0
+  - @objectstack/platform-objects@17.4.0
+  - @objectstack/rest@17.4.0
+  - @objectstack/driver-memory@17.4.0
+  - @objectstack/driver-mongodb@17.4.0
+  - @objectstack/driver-turso@17.4.0
+  - @objectstack/trigger-record-change@17.4.0
+  - @objectstack/plugin-hono-server@17.4.0
+  - @objectstack/types@17.4.0
+  - @objectstack/cloud-connection@17.4.0
+  - @objectstack/plugin-security@17.4.0
+  - @objectstack/mcp@17.4.0
+  - @objectstack/service-storage@17.4.0
+  - @objectstack/service-settings@17.4.0
+  - @objectstack/verify@17.4.0
+  - @objectstack/driver-sqlite-wasm@17.4.0
+  - @objectstack/plugin-audit@17.4.0
+  - @objectstack/plugin-email@17.4.0
+  - @objectstack/plugin-pinyin-search@17.4.0
+  - @objectstack/plugin-reports@17.4.0
+  - @objectstack/plugin-sharing@17.4.0
+  - @objectstack/plugin-webhooks@17.4.0
+  - @objectstack/service-cache@17.4.0
+  - @objectstack/service-datasource@17.4.0
+  - @objectstack/service-job@17.4.0
+  - @objectstack/service-messaging@17.4.0
+  - @objectstack/service-package@17.4.0
+  - @objectstack/service-queue@17.4.0
+  - @objectstack/service-realtime@17.4.0
+  - @objectstack/service-sms@17.4.0
+  - @objectstack/trigger-api@17.4.0
+  - @objectstack/trigger-schedule@17.4.0
+  - @objectstack/account@17.4.0
+  - @objectstack/setup@17.4.0
+  - @objectstack/formula@17.4.0
+  - @objectstack/metadata-core@17.4.0
+  - @objectstack/observability@17.4.0
+  - create-objectstack@17.4.0
+
 ## 17.3.0
 
 ### Minor Changes

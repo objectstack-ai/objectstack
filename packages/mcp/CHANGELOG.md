@@ -1,5 +1,70 @@
 # @objectstack/plugin-mcp-server
 
+## 17.4.0
+
+### Patch Changes
+
+- 17f8604: The MCP stdio transport now vets an API key's organization against the deployment's tenancy posture, instead of trusting the key's own stored claim.
+  
+  `resolveStdioExecutionContext` — the whole of this transport's authorization, since every caller on it is an API key by construction and there is no session path — built its own header map and called `resolveAuthzContext` with no `tenancyPosture`. Both posture-conditional API-key refusals are gated on the caller supplying one (`organization_required` at admission, `organization_membership_ended` after grants), so a door that supplied none ran neither: the key's `sys_api_key.active_organization_id`, never re-checked against current membership, became the request's tenant. Under a wall-enforcing posture a key stamped with an organization its owner had left read and wrote that organization's rows through this door.
+  
+  The posture is now derived in the plugin's `start()`, where the kernel is reachable, and threaded into the resolver. What changes for a deployment:
+  
+  - Under `isolated` or `group`, a stdio transport configured with a key whose owner is no longer a member of the organization the key names refuses to start, and a key already live is refused on its next call. Under `isolated`, an organization-less key is refused the same way. Both refusals are logged server-side naming the key, principal, organization and reason; nothing about them reaches the caller.
+  - A kernel that registers no `tenancy` service is unaffected: no organization wall exists there, so no posture-conditional refusal is made. That is the supported composition, not a degraded one.
+  - A `tenancy` service that is registered and **fails to build** now raises `SERVICE_UNAVAILABLE` (503) rather than reading as "no posture". A posture that could not be read is not a posture that is absent, and admitting on one is the permissive-on-failure shape this repair exists to avoid.
+  
+  The posture is re-read per call, on the same schedule as the identity beside it (ADR-0101 D1), so a wall that comes up or a membership that ends mid-session takes effect on the next call rather than at the next restart.
+- Updated dependencies [2ed6be6]
+- Updated dependencies [ceb4877]
+- Updated dependencies [ca326b5]
+- Updated dependencies [8f404a5]
+- Updated dependencies [3e3ecb0]
+- Updated dependencies [b548e43]
+- Updated dependencies [13c48c2]
+- Updated dependencies [6f94458]
+- Updated dependencies [6e67b86]
+- Updated dependencies [132742f]
+- Updated dependencies [85a2459]
+- Updated dependencies [e89fa92]
+- Updated dependencies [56fe8c2]
+- Updated dependencies [ef3a138]
+- Updated dependencies [fa125f3]
+- Updated dependencies [a646120]
+- Updated dependencies [6f1ce7d]
+- Updated dependencies [2c753fe]
+- Updated dependencies [52804cd]
+- Updated dependencies [3f89967]
+- Updated dependencies [088f761]
+- Updated dependencies [a84e1ce]
+- Updated dependencies [bf1054a]
+- Updated dependencies [d8d2776]
+- Updated dependencies [222dc0f]
+- Updated dependencies [f9a3c32]
+- Updated dependencies [f502898]
+- Updated dependencies [5eb24f8]
+- Updated dependencies [cc00df2]
+- Updated dependencies [cc00df2]
+- Updated dependencies [414c1fc]
+- Updated dependencies [0db2947]
+- Updated dependencies [d4f9b2a]
+- Updated dependencies [5f7fa1d]
+- Updated dependencies [87f0ccc]
+- Updated dependencies [aedbaef]
+- Updated dependencies [a727043]
+- Updated dependencies [46803fa]
+- Updated dependencies [c2a336c]
+- Updated dependencies [f7db8f4]
+- Updated dependencies [9408b7f]
+- Updated dependencies [b398ad2]
+- Updated dependencies [3d3f60e]
+- Updated dependencies [581d8f8]
+- Updated dependencies [40a44b9]
+  - @objectstack/core@17.4.0
+  - @objectstack/spec@17.4.0
+  - @objectstack/types@17.4.0
+  - @objectstack/formula@17.4.0
+
 ## 17.3.0
 
 ### Minor Changes

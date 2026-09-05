@@ -1,5 +1,178 @@
 # @objectstack/metadata
 
+## 17.4.0
+
+### Minor Changes
+
+- a56baa2: feat(metadata,objectql): a keyed plural read on `MetadataManager`, `listNames` fault parity, and an action audit that answers from the same identity and sources as the router
+  
+  Two plural reads of one metadata plane could disagree with a by-name read of
+  that same plane, and the ADR-0110 D5 action-governance audit stood on the
+  disagreement — reporting `registered handler with NO declaration … REFUSED at
+  dispatch` about a route the router was resolving and dispatching in the same
+  boot.
+  
+  **`MetadataManager.listNames` gains the per-loader `try`/`catch` that
+  `loadMany` and `list()` have carried since #5108.** One loader fault used to
+  produce two different facts depending only on which plural read a caller
+  reached for: `loadMany` swallowed it and answered short, `listNames` threw. It
+  now degrades the same way, through the same `reportLoaderReadFailure` /
+  `reportLoaderReadRecovered` helpers — one outage, one line, one vocabulary.
+  Callers that relied on `listNames` throwing to detect an outage should read
+  `listDiagnosed()`, which reports `degraded` explicitly.
+  
+  **New: `MetadataManager.loadManyKeyed(type, options?)`** — `loadMany` read under
+  the identity the STORE holds each item by, returning `{ name, data }` pairs. It
+  delegates to a loader's own `loadManyKeyed` where one is offered (on
+  `DatabaseLoader` that shares `loadMany`'s single query, so it costs nothing
+  extra) and otherwise falls back to that loader's `list()` + per-name `load()`.
+  ⛔ **`loadMany`'s published return shape does not change**, and no existing
+  consumer is touched: the key travels *beside* the body, never inside it, so a
+  body that deliberately carries no `name` stays byte-identical to what was
+  stored (#14205).
+  
+  **The action-governance audit now mirrors the router on both halves of the D5
+  bijection.** The declaration half enumerates the plane keyed
+  (`loadStandaloneActionsKeyed`), so a row whose body does not name itself — a
+  `sys_metadata` row keyed by its `name` column, or a `FilesystemLoader` file
+  whose identity is its path — is a declaration to the audit exactly as it is to
+  the router; the handler half also probes the plane BY NAME
+  (`lookupMetadataAction`, `loadDiagnosed`/`load`, injected like the existing
+  registry rung), so a loader fault a plural read swallows can no longer turn a
+  dispatchable handler into an accusation. Both probes stay conservative in one
+  direction only: a source that throws leaves the handler on the list.
+  
+  Additive on every published signature. `runActionGovernanceInventory` and
+  `collectEngineActionDeclarations` gain optional parameters and keep their old
+  ones working unchanged; declaration rows gain an optional `storeKey` (the new
+  exported `ActionDeclarationRow`).
+  
+  **Population change, reported:** `unboundDeclarations` now sees declarations
+  whose identity is the store key. Its BEFORE was **0, structurally rather than
+  by sampling** — a nameless row was dropped before reconciliation ran, so it
+  could never be reported however many a plane held. Its one deliberate
+  subtraction: a row with neither an own `name` nor a store key is no longer
+  reported as `actionName: undefined`, which read as a parse failure in the
+  warning rather than as a finding.
+  
+  Known boundary, stated in the audit's docblock rather than left to be
+  rediscovered: a boot-time audit runs outside any request scope, so if a
+  composition ever registered `metadata` as `SCOPED` the audit could not reach
+  that instance at all — before any read method runs. No shipped composition does
+  (`packages/metadata/src/plugin.ts` registers a static instance), and reaching a
+  request-scoped service from a boot-time audit is a separate change.
+- 3bd9b34: feat(metadata): `deriveViewContainerObject` gets a leaf `/view-container` subpath, so objectql's lean ADR-0076 entry stops loading the manager, chokidar, glob and js-yaml for a six-line pure function
+  
+  `packages/objectql/src/engine.ts` reached `deriveViewContainerObject` through
+  `@objectstack/metadata`'s ROOT entry. `core.ts` — the ADR-0076 lean entry —
+  re-exports `engine.ts`, so `@objectstack/objectql/core`'s module-init closure
+  inherited the whole root entry: `MetadataPlugin` -> `NodeMetadataManager` ->
+  `chokidar`, plus `glob`, `js-yaml` and `readdirp`.
+  
+  The same file already carried the answer 79 lines above, at its
+  `@objectstack/metadata/errors` import: that leaf subpath exists "precisely so a
+  cross-package consumer gets the predicate without the manager, the loaders or
+  the YAML/filesystem machinery behind the root entry". This is that pattern,
+  taken a second time.
+  
+  **Measured on the built artifacts, not asserted** — every module Node actually
+  evaluates when `@objectstack/objectql/core` is loaded in a fresh process,
+  recorded through a `module.registerHooks` load hook (ESM and CJS) plus
+  `require.cache`, byte sizes from `statSync`:
+  
+  | `@objectstack/objectql/core` | modules | bytes |
+  |:---|---:|---:|
+  | before (ESM `dist/core.mjs`) | 190 | 12,348,424 |
+  | after (ESM `dist/core.mjs`) | 185 | 11,849,808 |
+  | **delta** | **-5** | **-498,616 (-486.9 KiB)** |
+  | before (CJS `dist/core.js`) | 188 | 12,654,238 |
+  | after (CJS `dist/core.js`) | 183 | 12,141,034 |
+  | **delta** | **-5** | **-513,204 (-501.2 KiB)** |
+  
+  Six modules stop loading — `packages/metadata/dist/index.js` (237,747 B),
+  `js-yaml` (114,610 B), `glob` (82,749 B), `chokidar` (2 files, 54,220 B) and
+  `readdirp` (9,836 B) — and one 469-byte module takes their place. Marginal
+  module-init time for that root entry, measured on a warm lean closure, was
+  ~22 ms (median of 7; 20.4-27.5 ms) out of ~630 ms.
+  
+  ⚠️ The figure the finding was argued on — "~3.6 KB to ~450 KB" — is right about
+  the delta and wrong about the baseline: the lean entry's closure was already
+  ~11.5 MiB before this import existed, dominated by `@objectstack/spec`
+  (9,587,914 B) and `zod` (567,918 B), neither of which the metadata root entry
+  contributes. What the root import cost was ~487 KiB *on top of* that, not a
+  closure of 450 KB.
+  
+  The derivation itself moves to `packages/metadata/src/view-container.ts`, a
+  module with **no imports at all**, and `view-container-expansion.ts` imports
+  and re-exports it, so `index.ts`'s root export and `plugin.ts` keep their
+  spelling and the symbol stays on the root entry — this subpath is an additional
+  door, not a relocation. A re-export shim onto `view-container-expansion.ts` was
+  tried first and rejected on measurement: esbuild tree-shakes the unused
+  `expandRuntimeViewContainer` but keeps its two `@objectstack/spec` import
+  statements, so that shim's own closure was 84 modules / 3,035 KiB. The real
+  leaf's is 1 module / 469 B.
+  
+  `expandRuntimeViewContainer` is deliberately not exported from the new subpath:
+  `metadata-manager.ts` is its only caller, the root entry does not export it
+  either, and it is the half that carries the spec machinery.
+
+### Patch Changes
+
+- Updated dependencies [2ed6be6]
+- Updated dependencies [ceb4877]
+- Updated dependencies [ca326b5]
+- Updated dependencies [8f404a5]
+- Updated dependencies [3e3ecb0]
+- Updated dependencies [b548e43]
+- Updated dependencies [13c48c2]
+- Updated dependencies [6f94458]
+- Updated dependencies [6e67b86]
+- Updated dependencies [132742f]
+- Updated dependencies [85a2459]
+- Updated dependencies [e89fa92]
+- Updated dependencies [56fe8c2]
+- Updated dependencies [ef3a138]
+- Updated dependencies [fa125f3]
+- Updated dependencies [a646120]
+- Updated dependencies [6f1ce7d]
+- Updated dependencies [2c753fe]
+- Updated dependencies [52804cd]
+- Updated dependencies [3f89967]
+- Updated dependencies [088f761]
+- Updated dependencies [a84e1ce]
+- Updated dependencies [bf1054a]
+- Updated dependencies [d8d2776]
+- Updated dependencies [222dc0f]
+- Updated dependencies [f9a3c32]
+- Updated dependencies [f502898]
+- Updated dependencies [4ca358d]
+- Updated dependencies [6acb37e]
+- Updated dependencies [5eb24f8]
+- Updated dependencies [cc00df2]
+- Updated dependencies [cc00df2]
+- Updated dependencies [414c1fc]
+- Updated dependencies [0db2947]
+- Updated dependencies [d4f9b2a]
+- Updated dependencies [5f7fa1d]
+- Updated dependencies [87f0ccc]
+- Updated dependencies [aedbaef]
+- Updated dependencies [a727043]
+- Updated dependencies [46803fa]
+- Updated dependencies [c2a336c]
+- Updated dependencies [f7db8f4]
+- Updated dependencies [9408b7f]
+- Updated dependencies [2bb0614]
+- Updated dependencies [b398ad2]
+- Updated dependencies [3d3f60e]
+- Updated dependencies [581d8f8]
+- Updated dependencies [40a44b9]
+  - @objectstack/core@17.4.0
+  - @objectstack/spec@17.4.0
+  - @objectstack/platform-objects@17.4.0
+  - @objectstack/types@17.4.0
+  - @objectstack/metadata-core@17.4.0
+  - @objectstack/metadata-fs@17.4.0
+
 ## 17.3.0
 
 ### Minor Changes

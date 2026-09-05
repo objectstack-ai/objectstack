@@ -1,5 +1,69 @@
 # @objectstack/example-showcase
 
+## 0.3.18
+
+### Patch Changes
+
+- Updated dependencies [54bb2f1]
+- Updated dependencies [ceb4877]
+- Updated dependencies [98191d2]
+- Updated dependencies [ca326b5]
+- Updated dependencies [f1a1028]
+- Updated dependencies [8f404a5]
+- Updated dependencies [3e3ecb0]
+- Updated dependencies [b548e43]
+- Updated dependencies [13c48c2]
+- Updated dependencies [132742f]
+- Updated dependencies [85a2459]
+- Updated dependencies [e89fa92]
+- Updated dependencies [56fe8c2]
+- Updated dependencies [da1cffb]
+- Updated dependencies [a646120]
+- Updated dependencies [2200f8e]
+- Updated dependencies [ef3a138]
+- Updated dependencies [fa125f3]
+- Updated dependencies [a646120]
+- Updated dependencies [6f1ce7d]
+- Updated dependencies [2c753fe]
+- Updated dependencies [52804cd]
+- Updated dependencies [3f89967]
+- Updated dependencies [a84e1ce]
+- Updated dependencies [bf1054a]
+- Updated dependencies [d8d2776]
+- Updated dependencies [6b66ec7]
+- Updated dependencies [222dc0f]
+- Updated dependencies [f9a3c32]
+- Updated dependencies [f502898]
+- Updated dependencies [61821e5]
+- Updated dependencies [5eb24f8]
+- Updated dependencies [cc00df2]
+- Updated dependencies [414c1fc]
+- Updated dependencies [0db2947]
+- Updated dependencies [8a12067]
+- Updated dependencies [401e50a]
+- Updated dependencies [ee32e1c]
+- Updated dependencies [b31ebfe]
+- Updated dependencies [8744de9]
+- Updated dependencies [5f7fa1d]
+- Updated dependencies [87f0ccc]
+- Updated dependencies [aedbaef]
+- Updated dependencies [46803fa]
+- Updated dependencies [c2a336c]
+- Updated dependencies [f7db8f4]
+- Updated dependencies [9408b7f]
+- Updated dependencies [b398ad2]
+- Updated dependencies [581d8f8]
+- Updated dependencies [40a44b9]
+  - @objectstack/driver-sql@17.4.0
+  - @objectstack/spec@17.4.0
+  - @objectstack/runtime@17.4.0
+  - @objectstack/cloud-connection@17.4.0
+  - @objectstack/connector-mcp@17.4.0
+  - @objectstack/connector-openapi@17.4.0
+  - @objectstack/connector-rest@17.4.0
+  - @objectstack/connector-slack@17.4.0
+  - @objectstack/service-datasource@17.4.0
+
 ## 0.3.17
 
 ### Patch Changes

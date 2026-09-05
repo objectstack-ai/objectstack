@@ -1,5 +1,363 @@
 # @objectstack/runtime
 
+## 17.4.0
+
+### Minor Changes
+
+- 2c753fe: feat(runtime): a flow action's run context now carries `recordLoadDenied` (#15168)
+  
+  The previous release declared `AutomationContext.recordLoadDenied?: true` and
+  said so plainly: **declared, not yet populated on the flow face.** The
+  script/body face of both action doors emitted the signal, but
+  `dispatchFlowAction` handed `automation.execute` a context without it, so a
+  `runAs: 'system'` flow that guarded on the documented key was inert — never
+  `true`, never wrong, and indistinguishable from a flow whose caller could read
+  the row.
+  
+  **This release populates it, on both doors in one stroke** — REST
+  `POST /api/v1/actions/...` and the MCP `run_action` bridge:
+  
+  ```js
+  // a runAs:'system' flow, guarding before it acts on the subject row
+  if (context.recordLoadDenied === true) { /* the invoker cannot read this row */ }
+  ```
+  
+  - **The exact producer shape, unchanged.** The one shared producer
+    (`loadActionSubjectRecord` → `actionRecordLoadSignal`) already returns
+    `{ recordLoadDenied?: true }`, and the flow door now spreads it as a
+    **sibling of `record`** — never a key on the record, and **absent**, never
+    `false`, when nothing was refused. So a flow reads it exactly as a handler
+    does, `recordLoadDenied === true`.
+  - **Both doors, structurally.** `dispatchFlowAction`'s wiring now takes the
+    load OUTCOME (`subject`) instead of a bare `record`, and derives both the
+    record and the signal from it. A caller can no longer forward the row while
+    dropping the verdict that says the caller could not read it — the omission is
+    a compile error rather than a guard silently inert one door over, which is
+    the defect the handler-face signal was filed for.
+  - **Purely additive.** Nothing is refused that was not refused before, no
+    existing key changes value, and the `recordId` stamp is deliberately kept:
+    `record.id` still arrives exactly as it did, which is why the flag — and not
+    `record.id` — is the authorization predicate. Whether the automation engine
+    *acts* on the key (a flow-level refusal, a step condition) is a separate
+    decision and is deliberately not part of this change.
+  - **`@objectstack/spec` (docs only).** The contract's "not yet populated on the
+    flow face" sentence is retired; no type changes.
+- 8a12067: feat(runtime): the platform action route executes the declarative row-level `operation: 'update'` action (#14092)
+  
+  The spec half (#15077) made `operation: 'update'` + `patch` parse; nothing performed the
+  write, so an authored update action reached the action route with no handler and collected
+  the registry's loud not-registered answer. It now performs the write.
+  
+  `POST /api/v1/actions/<object>/<action>/<recordId>` — and the MCP `run_action` bridge, through
+  the same shared executor — performs exactly ONE data-plane update of the current record:
+  
+  - **As the caller.** The write carries the caller's own `ExecutionContext`, never the
+    `isSystem`-elevated context a `type: 'script'` BODY runs under. There is no author body here
+    to trust, so the data plane's own gate is the only gate — the object's permissions, its hooks
+    and its validations fire exactly as for a user edit, and their refusals reach the caller with
+    their own `code` and `status`. This consumes the `runAs: 'user'` direction ruled on #14010; no
+    `runAs` key is added.
+  - **A caller who cannot read the row is refused before anything is written** (404
+    `RECORD_NOT_FOUND`, the platform's one existence-non-disclosing envelope), by consuming the
+    caller-scope load's verdict rather than re-deriving it from the stamped `record.id` — the
+    #14143 class: a swallowed load must never become an implicit grant.
+  - **The write is `{ ...patch, ...collectedParams }`** — static values under the dialog's, so a
+    param of the same name wins. Nothing else from the action is merged, and the ADR-0104 D2 param
+    contract still bounds what the wire can add.
+  - **No current record ⇒ a located refusal**, never a silent no-op: no `recordId` on the route or
+    in the body, an action addressed at the object-less key, or an empty write bag each answer 400
+    naming the action and the fix.
+  - **`undoable: true`** returns `undo: { type, objectName, recordId, undoData, redoData }` — the
+    prior values of exactly the fields written, `null` for a field the row did not carry, so the
+    existing Undo readers can restore. The three remaining `UndoableOperation` keys (`id`,
+    `timestamp`, `description`) stay the client's.
+  - `visible` is deliberately unread here: it is a per-record renderer predicate, and the
+    authorization is the point above.
+  
+  `operation` is read BEFORE `type` at every reader, so the HTTP door and the MCP bridge agree:
+  `isHeadlessInvokableAction` now accepts a declarative update (it has neither `target` nor `body`
+  by construction), `headlessActionTypeError` hands it no client-side-type prescription, and
+  `summarizeAction` reports `operation` and `requiresRecord: true`.
+  
+  Unchanged: a handler-less `type: 'script'` action WITHOUT `operation` still gets today's
+  not-registered 404 — the script path is not widened.
+- b31ebfe: A screen flow can now be completed by a headless caller, and `list_actions` publishes its input names.
+  
+  An `ai.exposed` action whose target is a **screen flow** could be started over MCP and never finished. `run_action` seeded the flow's `isInput` variables from the caller's `params` — correctly — and the screen node suspended anyway, because the only inputs to that decision were "does the node declare fields" and the author's `waitForInput` flag. The MCP tool set has no verb to resume a parked run, so `ai.exposed` meant "the agent can invoke this", not "the agent can complete this". The fallback an agent took instead — re-implementing the flow's tail with `create_record` + `update_record` — bypasses whatever business rules the flow encapsulated.
+  
+  Two independent halves:
+  
+  - **A screen the caller already answered no longer pauses.** When the caller named at least one of the screen's own fields and every `required` one has a value from that caller, there is nothing left to collect and the run continues. Optional fields may come from anywhere (including a declared `defaultValue`).
+  - **`list_actions` publishes a flow action's inputs.** A `type: 'flow'` action's contract is its target flow's `isInput` variables, not `action.params`; those are now surfaced in declaration order with the `label`, `type`, `required` and select `options` of the screen field that collects each one. An action that declares its own `params[]` keeps them — the flow is read only where the action declared nothing.
+  
+  **Interactive runs are unchanged.** A console launch carries the record it was launched from and that record's id — never a value for the screen's own fields — so the form renders exactly as before. That covers both shapes a launch actually supplies: a subject-record column named like one of the screen's fields, and a field named like one of the row-id keys the dispatch doors seed (`recordId`, the camelCase `<object>Id` alias, an action's declared `recordIdParam`), none of which counts as the caller answering the screen.
+  
+  **Accepted cost, precisely:** a field is never treated as caller-supplied when it is named `recordId` or `<object>Id`, or when its value equals what the bag carries under `recordId`, `<object>Id`, or `record.id` (normally the launched row's id); a required such field is therefore always collected interactively, an optional one simply does not count as answering the screen. Two screens never take the new path, because they declare nothing to satisfy and must not be answered vacuously: a message-only screen (no fields), and any screen whose author wrote `waitForInput: true`. `waitForInput: false` remains the wrong tool for the headless case — it skips the form for interactive users too.
+  
+  ⚠️ One known gap, on the trigger-record leg only: a run continued from the **durable** suspended-run store judges against a JSON copy of its context, so a later wizard screen whose field collides with a **non-scalar** column (an array or object) of the trigger record can read as caller-supplied and be skipped. Scalar columns are unaffected, as is any run that has not been through a pause.
+  
+  ⚠️ This does **not** make every screen flow completable over MCP. A call that omits the inputs still parks, and nothing on that surface can resume it; that half is a resume verb and is not this change.
+
+### Patch Changes
+
+- 98191d2: fix(runtime): a flat-manifest bundle no longer collects every seed dataset twice
+  
+  `AppPlugin.start()` collects seed data from two locations — the top-level
+  `data` field, then the legacy `manifest.data` for backward compatibility. The
+  legacy read resolves its base as `this.bundle.manifest || this.bundle`, so on a
+  FLAT bundle — manifest fields written directly on the bundle rather than nested
+  under `manifest:`, a shape `AppPlugin` supports by design and this repo's own
+  tests construct — it re-read the very array the top-level read had just
+  contributed. Every dataset landed in the collection twice.
+  
+  `mergeSeedDatasets` is a plain `push` with no de-duplication, so both copies
+  reached the shared `seed-datasets` registry, the inline boot seed, and every
+  later per-org replay. For an `upsert` dataset with an `externalId` the second
+  pass is idempotent and the cost is doubled work; for a `mode: 'insert'` dataset
+  it is the dataset APPLIED TWICE per boot — measured here as two `insert` calls
+  for one record.
+  
+  The legacy read now carries the same reference guard its sibling collector has
+  always carried: `loadTranslations()` performs the identical two-location read
+  and skips the legacy half when `manifest.translations` IS the array the top
+  level already contributed. That asymmetry between the two collectors was the
+  whole defect, so the repair is the sibling's guard rather than a third spelling
+  of the same idea.
+  
+  ⛔ Not a removal of the legacy read: a bundle whose `manifest.data` is a
+  genuinely different array from its top-level `data` still contributes both, and
+  a bundle that nests its manifest is unaffected either way. Nothing is added to
+  or removed from any published surface.
+- f1a1028: fix(runtime): a multi-package artifact's collections are read from `packages[]`, not only from the flattened top level
+  
+  A release artifact composed with `manifest: 'preserve'` carries every
+  definition twice — flattened at its top level, and again under
+  `packages[]` (ADR-0130 D4). Only two readers had ever learned the second
+  half: `ObjectQLPlugin`'s manifest service and the metadata artifact door.
+  Every other reader said `artifact.<collection>` and nothing else, so an
+  artifact that carried a collection under `packages[]` alone reached them
+  EMPTY — and nothing threw. The app booted clean having lost its
+  declarative actions, its scheduled jobs, its seed data, its object routing
+  or its default permission set.
+  
+  `resolveArtifactCollections` — new, and PACKAGE-PRIVATE to
+  `@objectstack/runtime` — is now the one way this package reads a top-level
+  collection out of an artifact in either shape. It takes the artifact's own
+  top-level value first and whole, then adds from each package body — in
+  `resolveArtifactPackageOrder`'s dependency order — the items the top level
+  did not already claim. A bundle that carries no `packages[]` is returned
+  unchanged, by identity: every single-package artifact and every
+  `defineStack()` config reads exactly as before. Nothing is added to any
+  package's published surface: `@objectstack/core` is untouched by this
+  change, and the new module is not named by
+  `packages/runtime/src/index.ts`.
+  
+  Where one collection key is spelled two ways inside one artifact —
+  `functions` is `z.union([z.record(…), z.array(…)])`, so two packages can
+  each be schema-valid and disagree — the read is REFUSED with an ADR-0112
+  envelope (`MIXED_ARTIFACT_COLLECTION_SHAPE`, 422) rather than one spelling
+  being skipped. `composeStacks` already refuses the same mix at compose
+  time for the same reason.
+  
+  Taught to use it, in `@objectstack/runtime`:
+  
+  - `AppPlugin` — declared datasources and their auto-connect, the
+    `datasourceMapping` object routing, the objects handed to the connection
+    service and to the hot-reload seeder, scheduled jobs, seed datasets,
+    translation bundles, and the ADR-0057 security collections
+    (`positions` / `permissions` / `capabilities` / `sharingRules`). A job
+    handler's `ctx.bundle` is now the resolved view too, so
+    `ctx.bundle.objects` answers on a multi-package artifact.
+  - `collectBundleActions`, `collectBundleHooks` and
+    `collectBundleFunctionEntries` — including the object-EMBEDDED actions
+    that ride on `objects[]` and disappeared with it.
+  - `mergeRuntimeModule` — the declaration half. The sibling ESM module
+    re-supplies every callable regardless of shape, so `functions` was not
+    absent: a function declared `effect: 'writes'` simply came back as a bare
+    callable and defaulted to `'pure'`. It registered, it ran, and its writes
+    were counted as none.
+  - `createStandaloneStack`'s surfaced `requires` / `objects` /
+    `permissions` / `positions`, which drive the CLI's tier resolution, its
+    engine and storage-driver auto-registration, and the ADR-0056 D7 default
+    permission set.
+  - `resolve-project-database`'s project-database tier, which opens the
+    artifact itself and runs before any stack exists (`os dev`, `os start`,
+    `os db clean`). Without this a multi-package project silently fell
+    through to the unified default database instead of the datasource it
+    declared.
+  
+  Nothing about what the platform EMITS changes: `composeStacks` and the
+  artifact format are untouched, and the flattened top level is still
+  written. This is the reader half of the option-B program (#14512).
+- da1cffb: An environment-scoped URL now reaches a dispatcher domain instead of answering 404.
+  
+  `HttpDispatcher.dispatch()` reads the scoped-URL prefix in three places — the environment-id hint parser, the OAuth-on-MCP gate, and the scope strip that lets `DomainHandlerRegistry` match the remainder. Only the first had been moved to the ADR-0006 `/environments/` spelling; the other two still matched the retired `/projects/` one. The strip therefore never fired on a real scoped URL, and since the registry matches from the head of the path, every environment-scoped request arriving through the `@objectstack/hono` catch-all — the entry cloud hosts mount, and the only one that hands `dispatch()` a still-scoped path — matched no domain at all:
+  
+  ```
+  GET /api/v1/environments/<id>/data/task   ->  404 ROUTE_NOT_FOUND   (now: reaches /data)
+  GET /api/v1/environments/<id>/health      ->  404 ROUTE_NOT_FOUND   (now: 200)
+  GET /api/v1/data/task          (control)  ->  reaches /data, unchanged
+  ```
+  
+  The dispatcher-plugin's own scoped mounts were never affected: they pass a pre-stripped subpath (`${prefix}/environments/:environmentId/automation` dispatches the literal `/automation`), which is why the standalone server showed nothing.
+  
+  The OAuth 2.1 gate moved with it. An access token is honoured only on the MCP surface, and that test runs against the still-scoped path — so `/api/v1/environments/<id>/mcp` would have reached the MCP domain with its token refused had the strip been repaired alone.
+  
+  **If you still emit the old spelling**: replace `/api/v1/projects/:projectId/...` with `/api/v1/environments/:environmentId/...`, as `content/docs/api/environment-routing.mdx` has instructed since ADR-0006 D2. That prefix is no longer stripped, and it was never a working alias in the first place: nothing parses `/projects/<id>`, so stripping it discarded the only place the request named an environment and served it from the host default instead. ADR-0006 D2 retired `project` on the API surface with no aliases, so the repair is one spelling in all three readings rather than a two-prefix alternation.
+- 401e50a: The runtime dispatcher door no longer admits a request on a tenancy posture it could not read.
+  
+  `resolveExecutionContext` reads the effective tenancy posture from the kernel's `tenancy` service, and both posture-conditional API-key refusals (`organization_required`, `organization_membership_ended`) run only when that posture is present. The read used to swallow every failure into "no posture", so a `tenancy` service that was **registered and failed to build** answered exactly like a deployment with no tenancy at all: the wall was skipped, and an API key stamped with an organization its owner had left — or carrying no organization — was admitted with full grants.
+  
+  The seam now carries the same discrimination the REST door already applies (#13906 decision 1, option A), by the registry's own brand rather than by message text:
+  
+  - **never registered** — the supported no-tenancy composition. Absorbed as before: no posture, no posture-conditional refusal, nothing changes for single-organization embedders.
+  - **registered and failed to build** — re-raised as `AuthzStoreUnavailableError`, so the door answers `503 SERVICE_UNAVAILABLE` ("the authorization store could not be read"), which is an existing member of the closed error vocabulary. A posture that could not be read is not a posture that is absent.
+  
+  Two nets between the resolver and the transport envelope are told the same thing, in the one shape `@objectstack/core` already prescribes for such seams (`rethrowAuthzStoreUnavailable`): the dispatcher's service facade hands the resolver the classified rejection for `tenancy` instead of collapsing it to `undefined`, and the identity step's catch re-raises only the branded outage while every other fault still degrades to an anonymous request. A consequence worth knowing: an authorization-store read failure (`AuthzStoreUnavailableError` from the permission tables) now also reaches this door as 503 instead of being served as an anonymous request.
+- ee32e1c: fix(runtime): a sandboxed hook body no longer launders an untouched `readonly` field onto the row
+  
+  A `beforeUpdate`/`beforeInsert` body running in the sandbox made the engine believe it had
+  written payload keys it never named, and a `readonly` field the caller supplied then survived
+  the readonly strip and landed. Measured end to end: with `locked_at` declared
+  `{ type: 'datetime', readonly: true }` and seeded to `2020-01-01`, a caller sending
+  `locked_at: new Date('2099-12-31…')` alongside a body whose whole source is
+  `ctx.input.touched_by = 'hook'` stored the caller's 2099 value — while the same object's
+  readonly `text` field was correctly stripped in the same request.
+  
+  The cause was a comparison of unlike things. The write-back decides whether a body wrote
+  *through* an object-valued key by comparing the host payload value against the VM's exit dump,
+  and the dump has been through `JSON.stringify`/`JSON.parse` while the host value has not. A
+  `Date` therefore never compared equal to its own ISO projection, took the documented
+  "cannot prove equal ⇒ carry it back" path, and was re-asserted onto the proxy that records
+  which keys a hook wrote. The class was every object-valued value a JSON round-trip cannot
+  prove equal — an object carrying an `undefined` member included, a `Date` being only its most
+  reachable member.
+  
+  The entry value is now normalised through the same round-trip the VM saw before it is
+  compared. The same change ends a fidelity loss on non-readonly fields: an untouched key is no
+  longer carried at all, so a host `Date` is no longer replaced by an ISO string on its way to
+  the driver.
+  
+  Fail-open behaviour is unchanged for values the round-trip genuinely cannot evaluate: a cyclic
+  or bigint-bearing payload value is still reported as changed and still carried, per key.
+- 8744de9: The package-publish seed read-back no longer runs a two-attempt org-then-env ladder whose rungs resolve the same row.
+  
+  `applyPublishedSeeds` — the route-level seed apply behind `POST /packages/:id/publish-drafts`, which runs for protocols that do not self-apply seeds inside `publishPackageDrafts` — read each just-published `seed` body twice when the session had an active organization: once naming the organization, then once env-wide. The comment above it said the first attempt tried the active org and the second fell back, "and resolving the wrong scope here is what silently produced `0 rows loaded`".
+  
+  That was true when it was written and is not true now. `seed` declares `allowOrgOverride: false`, and `getMetaItem` resolves `organizationIdForMetaRead(request.type, request.organizationId)` once at its top and spends that binding — never the raw argument — on every read beneath it. The predicate answers `undefined` for every non-overridable type, so both rungs asked the engine the same predicates and served the same answer. Measured rather than reasoned: against the shipping protocol over one store, the two requests produce byte-identical engine reads and byte-identical answers on both the hit and the miss branch, and neutering the second rung reddens nothing on a pinned publish-then-read path (a `view` control confirms the same comparison does separate the two rungs for an org-overridable type).
+  
+  The read is now a single call naming no organization, and the comment states that the scope is decided by the registry flag and the gate inside `getMetaItem` rather than by this call site — matching the sentence the `app` flip in the same file already carries.
+  
+  One observable changes, and only on the failure branch: `getMetaItem` answers a wrapper rather than a falsy value for a name it cannot resolve, so the second rung was in practice reached only when the read *threw* — where it repeated the identical failing read and appended the same sentence to the client-facing `seedApplied.errors[]` twice. A failed read-back is now reported once. Nothing about which row a publish resolves, or whether its rows load, moves.
+- f7db8f4: fix(spec): `defineStack`'s cross-reference refusal carries an ADR-0112 envelope, so the five REFUSED ADR-0130 item classes are machine-readable (#14552)
+  
+  `validateCrossReferences` — reached through `defineStack` — refuses a stack whose items name an object the stack does not define. That refusal was `new Error(message)` with `code` and `status` both `undefined`, so all five REFUSED item classes of the ADR-0130 matrix (action `objectName`, view `data.object`, permission-set `objects`, seed dataset `object`, import mapping `targetObject`) plus the `hooks[].object` rule (#14122 §4 rule R4) were distinguishable only by MESSAGE TEXT. It now throws `StackCrossReferenceError`, carrying `code: 'STACK_CROSS_REFERENCE_INVALID'`, `status: 422`, and one entry per finding in `issues`. The message text is byte-for-byte unchanged: this adds fields rather than rewriting a sentence, and five message-substring pins in the tree read that prose.
+  
+  ADR-0112 makes `code` / `status` the machine-readable half of every refusal. Without them `os validate`, `os build` and any AI author reading the refusal could only pattern-match prose — the fragile shape the envelope exists to remove, made worse here because the message had already become load-bearing for those pins.
+  
+  Why ONE code rather than five: there is exactly one raise site. `validateCrossReferences` returns every finding as a `string[]` and `defineStack` throws the collected set at once, so a single refusal can carry findings from several classes together and a per-class code would have to pick one of several true answers. The classes stay machine-readable in `issues`. The family is also wider than "undefined object" — the same aggregate carries the duplicate-action-key, global-`update`-action and mapping `javascript`-transform findings — so a `…_UNDEFINED_OBJECT` spelling would have been false for those.
+  
+  Not narrowed, not widened: no accept-set changes and no export changes. `defineStack` accepts and refuses exactly the inputs it did before, and `StackCrossReferenceError` is deliberately module-local — `packages/spec/src/index.ts` re-exports that module with `export *`, so exporting the class would widen the published api-surface of the contract package, and the ADR-0112 contract is the `code` / `status` fields, which every reader reads structurally rather than by `instanceof`. No ledger registration either, for the same reason its two precedents (`ObjectOwnershipConflictError` #14367, `NamespaceConflictError` #14474) carry none: no wire door raises it. `defineStack` runs at authoring and boot time, and no HTTP domain handler calls it.
+  
+  `@objectstack/runtime` carries the classification row for the new code in the dispatcher error-code vocabulary (verdict `boot-refusal`, door `none` — the measured verdict, not the expected one).
+- Updated dependencies [2ed6be6]
+- Updated dependencies [54bb2f1]
+- Updated dependencies [ceb4877]
+- Updated dependencies [ca326b5]
+- Updated dependencies [8f404a5]
+- Updated dependencies [a56baa2]
+- Updated dependencies [d4c2cb1]
+- Updated dependencies [65846bc]
+- Updated dependencies [3e3ecb0]
+- Updated dependencies [8e500f2]
+- Updated dependencies [4b3955e]
+- Updated dependencies [b548e43]
+- Updated dependencies [13c48c2]
+- Updated dependencies [6f94458]
+- Updated dependencies [6e67b86]
+- Updated dependencies [132742f]
+- Updated dependencies [85a2459]
+- Updated dependencies [e89fa92]
+- Updated dependencies [56fe8c2]
+- Updated dependencies [4bc9821]
+- Updated dependencies [2003259]
+- Updated dependencies [a646120]
+- Updated dependencies [a646120]
+- Updated dependencies [2200f8e]
+- Updated dependencies [a646120]
+- Updated dependencies [2200f8e]
+- Updated dependencies [65846bc]
+- Updated dependencies [ef3a138]
+- Updated dependencies [fa125f3]
+- Updated dependencies [a646120]
+- Updated dependencies [6f1ce7d]
+- Updated dependencies [2c753fe]
+- Updated dependencies [52804cd]
+- Updated dependencies [3f89967]
+- Updated dependencies [088f761]
+- Updated dependencies [a84e1ce]
+- Updated dependencies [a84e1ce]
+- Updated dependencies [a84e1ce]
+- Updated dependencies [65846bc]
+- Updated dependencies [bf1054a]
+- Updated dependencies [d8d2776]
+- Updated dependencies [222dc0f]
+- Updated dependencies [f9a3c32]
+- Updated dependencies [f502898]
+- Updated dependencies [4ca358d]
+- Updated dependencies [3bd9b34]
+- Updated dependencies [b4b37e5]
+- Updated dependencies [ba426b0]
+- Updated dependencies [d0ee598]
+- Updated dependencies [6acb37e]
+- Updated dependencies [61821e5]
+- Updated dependencies [26144c2]
+- Updated dependencies [9e9f03a]
+- Updated dependencies [5eb24f8]
+- Updated dependencies [c64e65f]
+- Updated dependencies [cc00df2]
+- Updated dependencies [cc00df2]
+- Updated dependencies [06c762e]
+- Updated dependencies [414c1fc]
+- Updated dependencies [0db2947]
+- Updated dependencies [e13ede8]
+- Updated dependencies [f5cc78b]
+- Updated dependencies [46803fa]
+- Updated dependencies [d4f9b2a]
+- Updated dependencies [5f7fa1d]
+- Updated dependencies [87f0ccc]
+- Updated dependencies [aedbaef]
+- Updated dependencies [a727043]
+- Updated dependencies [46803fa]
+- Updated dependencies [c2a336c]
+- Updated dependencies [f7db8f4]
+- Updated dependencies [9408b7f]
+- Updated dependencies [615fac3]
+- Updated dependencies [ec0a6e7]
+- Updated dependencies [b398ad2]
+- Updated dependencies [3d3f60e]
+- Updated dependencies [581d8f8]
+- Updated dependencies [40a44b9]
+  - @objectstack/core@17.4.0
+  - @objectstack/objectql@17.4.0
+  - @objectstack/metadata-protocol@17.4.0
+  - @objectstack/driver-sql@17.4.0
+  - @objectstack/spec@17.4.0
+  - @objectstack/metadata@17.4.0
+  - @objectstack/plugin-auth@17.4.0
+  - @objectstack/rest@17.4.0
+  - @objectstack/driver-memory@17.4.0
+  - @objectstack/driver-turso@17.4.0
+  - @objectstack/types@17.4.0
+  - @objectstack/service-i18n@17.4.0
+  - @objectstack/plugin-security@17.4.0
+  - @objectstack/driver-sqlite-wasm@17.4.0
+  - @objectstack/service-cluster@17.4.0
+  - @objectstack/service-datasource@17.4.0
+  - @objectstack/formula@17.4.0
+  - @objectstack/metadata-core@17.4.0
+  - @objectstack/observability@17.4.0
+
 ## 17.3.0
 
 ### Minor Changes
