@@ -41,7 +41,14 @@
  * resolved by a child `node` whose cwd is that directory and which has nothing
  * of this workspace on its resolution path — `createRequire().resolve()` for the
  * `require` condition and `import.meta.resolve()` for the `import` condition.
- * That is the shape #15325's own pin uses, for the same reason.
+ *
+ * That is the same technique as the pin PR #15611 adds under `packages/cli`,
+ * arrived at for the same reason. ⚠️ That file is NOT on this tree — #15611 is
+ * open and unmerged — so this suite reproduces the technique rather than reusing
+ * it, and the two are independent by construction: the pin asks "does the CLI's
+ * map still spell the subpaths this repo ratified", this asks "does every
+ * specifier a named out-of-repo consumer imports still resolve". A pin over one
+ * package's map cannot see the next package that gains one.
  *
  * ## SEALED_TODAY, and why the red is LEDGERED rather than simply asserted
  *
@@ -303,7 +310,15 @@ describe('the ledger itself', () => {
 
   it('records BARE specifiers — never the dist/ deep paths the seals closed', () => {
     for (const entry of ENTRIES) {
-      expect(entry.specifier, 'a ledgered specifier must be a subpath, not the bare package name').toContain('/');
+      // NOT `toContain('/')` — a SCOPED bare package name (`@objectstack/cli`)
+      // contains one too, so that spelling admits exactly the entry this rule
+      // exists to reject. The package name is what the ledger is silent about;
+      // a subpath is what it records.
+      expect(
+        entry.specifier,
+        `${entry.specifier} is a bare package name, not a subpath. The root entry of an exports ` +
+          'map is never at risk in the way a subpath is — ledger the subpath the consumer imports',
+      ).not.toBe(packageNameOf(entry.specifier));
       expect(
         entry.specifier,
         `${entry.specifier} is a dist/ deep path — those are what an exports map deliberately seals; ` +
