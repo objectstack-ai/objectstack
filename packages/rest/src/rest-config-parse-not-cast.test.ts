@@ -58,6 +58,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import { RestApiConfigSchema } from '@objectstack/spec/api';
 import { RestServer } from './rest-server.js';
 import { createRestApiPlugin } from './rest-api-plugin.js';
 
@@ -270,5 +271,119 @@ describe('[#11637] §C regression guards — the narrowing is exactly the declar
         // chose warn-and-ignore for this key, and converting that into a boot
         // failure is that decision's to make. 96 in-repo fixtures still pass it.
         expect(() => construct({ requireAuth: false, version: 'v1' })).not.toThrow();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// §D — [#14366] the parsed output is CONSUMED
+// ---------------------------------------------------------------------------
+
+/**
+ * #11637 ran the parse and threw its result away; the block was rebuilt from a
+ * `??` chain over the raw cast. #14366 folded the chain onto the parse after
+ * re-measuring both of #11637's reasons expired and the key diff empty in both
+ * directions (14 read, 14 declared after the `.omit()`).
+ *
+ * ⛔ These cases assert against `RestApiConfigSchema`'s OWN output, computed at
+ * run time — never against a literal. A literal here would restate in the test
+ * exactly the duplication the change deleted from the source, and would go
+ * green on both trees. The pin that DISCRIMINATES the two trees has to move the
+ * schema, which needs a module mock, so it lives in its own file:
+ * `rest-api-config-defaults-follow-spec.pin.test.ts`. §D is the unmocked half —
+ * the SHIPPED schema, the SHIPPED posture, and the one bounded behaviour delta.
+ */
+describe('[#14366] §D the `api` sub-object consumes the parsed output', () => {
+    const declaredApi = () => RestApiConfigSchema.omit({ requireAuth: true });
+
+    /** The normalized `api` block, read off the constructed server. */
+    const normalizedApi = (rest: unknown) =>
+        (rest as { config: { api: Record<string, unknown> } }).config.api;
+
+    it('every default in the normalized block is the SCHEMA\'s, key for key', () => {
+        const fromSchema = declaredApi().parse({}) as Record<string, unknown>;
+        const fromServer = normalizedApi(construct({}));
+        // Positive control: an empty `fromSchema` would make the loop vacuous.
+        expect(Object.keys(fromSchema).length, 'the schema must actually supply defaults').toBeGreaterThan(0);
+        for (const [key, value] of Object.entries(fromSchema)) {
+            expect(fromServer[key], `api.${key} must come from RestApiConfigSchema`).toEqual(value);
+        }
+    });
+
+    it('the normalized key set is exactly the declared key set — nothing added, nothing dropped', () => {
+        // The measurement the consumption decision rests on: a key the method
+        // read but the schema did not declare would be silently STRIPPED by a
+        // consumed parse, which is the failure #11637 avoided by discarding.
+        const declared = Object.keys(declaredApi().shape).sort();
+        const normalized = Object.keys(normalizedApi(construct({}))).sort();
+        expect(normalized).toEqual(declared);
+        expect(declared, 'the retired tombstone stays out of the parsed shape').not.toContain('requireAuth');
+    });
+
+    it('an authored value still wins over the schema default', () => {
+        const rest = construct({ version: 'v7', basePath: '/svc', enableSearch: false });
+        expect(normalizedApi(rest).version).toBe('v7');
+        expect(normalizedApi(rest).basePath).toBe('/svc');
+        expect(normalizedApi(rest).enableSearch).toBe(false);
+    });
+
+    it('THE BOUNDED DELTA: an authored `documentation` now carries its own declared inner defaults', () => {
+        // The single measured behaviour change of #14366, pinned rather than
+        // left to be rediscovered. The deleted `??` chain copied this object
+        // through untouched (`documentation: api.documentation`), so a partial
+        // one stayed partial; the parse fills the inner `.default()`s.
+        // `documentation` has ZERO read sites outside this block (the #14369
+        // census), so nothing observes it today — which is exactly why it needs
+        // a pin: an unobserved change is the kind that gets reverted by
+        // accident.
+        const doc = normalizedApi(construct({ documentation: { description: 'd' } }))
+            .documentation as Record<string, unknown>;
+        expect(doc).toEqual(
+            (declaredApi().parse({ documentation: { description: 'd' } }) as { documentation: unknown }).documentation,
+        );
+        expect(doc.description, 'the authored key survives').toBe('d');
+        expect(doc.enabled, 'and the declared inner default arrives with it').toBe(true);
+    });
+
+    it('THE BOUNDED DELTA: an authored `responseFormat` does the same', () => {
+        const rf = normalizedApi(construct({ responseFormat: { envelope: false } }))
+            .responseFormat as Record<string, unknown>;
+        expect(rf.envelope, 'the authored key survives').toBe(false);
+        expect(rf.includeMetadata).toBe(true);
+        expect(rf.includePagination).toBe(true);
+    });
+
+    it('an ABSENT optional object stays absent — the parse does not materialize it', () => {
+        // The bound on the delta above: `.optional()` without `.default()`
+        // means "missing stays missing". A parse that invented an empty
+        // `documentation` block would change what nothing-authored means.
+        const api = normalizedApi(construct({}));
+        expect(api.documentation).toBeUndefined();
+        expect(api.responseFormat).toBeUndefined();
+        expect(api.apiPath).toBeUndefined();
+    });
+
+    it('an undeclared key under `api` is not carried into the normalized config', () => {
+        // Unchanged by #14366 and pinned as the bound: the `??` chain copied a
+        // fixed list of 14 keys, and the non-strict parse strips anything not
+        // declared. Both drop it — so consuming cannot have widened the surface.
+        const api = normalizedApi(construct({ totallyUndeclared: 'x' } as never));
+        expect(api).not.toHaveProperty('totallyUndeclared');
+    });
+
+    it('KEEPS the #3963 warn-and-ignore posture: `requireAuth: false` constructs AND still warns', async () => {
+        // The pin the card names. The warning is emitted by `rest-api-plugin.ts`
+        // off the RAW config, so consuming the parse inside `RestServer` cannot
+        // reach it — measured here end to end rather than argued.
+        expect(() => construct({ requireAuth: false, version: 'v1' })).not.toThrow();
+
+        const ctx = bootCtx();
+        await expect(
+            createRestApiPlugin({ api: { api: { requireAuth: false, version: 'v1' } } as any }).start!(ctx),
+        ).resolves.toBeUndefined();
+        const warned = (ctx.logger.warn as { mock: { calls: unknown[][] } }).mock.calls
+            .map((args) => String(args[0]))
+            .join('\n');
+        expect(warned, 'the retired key must still be reported to the operator').toContain('`api.requireAuth` was removed');
+        expect(warned).toContain('IGNORED');
     });
 });
