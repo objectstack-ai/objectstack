@@ -158,8 +158,10 @@
  * assertion reads it rather than adding to it.
  */
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -201,11 +203,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the refusal has to SHOW its work (both counts, both classes, the diff)': 2,
   'WIRING: this gate, and its self-test, really run in CI': 2,
   'POPULATION DECLARATION: what the dispatch derivation is told this gate reads': 6,
+  '⭐ ROW REFERENCES: held by seam, and the insertion that was silent (#15869)': 23,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 17;
+const SELF_TEST_BATTERY_FLOOR = 18;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -316,41 +319,49 @@ export const NON_READ_ANCHORS = [
     file: 'packages/plugins/plugin-security/src/security-plugin.ts',
     needle: '3.5. [#3004]',
     why: 'row 2 -- the `owner_id` guard block that the row-1 short-circuit skips',
+    rowSeams: ['`owner_id` is not auto-stamped on INSERT', 'The whole security middleware short-circuits'],
   },
   {
     file: 'packages/objectql/src/engine.ts',
     needle: 'if (!hasTx && !hasTenant && !isSystem && !hasTz && !preserveAudit) return base;',
     why: 'row 23 -- the early return the tenant-audit read feeds',
+    rowSeams: ['Tenant-audit warning silenced'],
   },
   {
     file: 'packages/objectql/src/engine.ts',
     needle: 'if (isSystem && opts.bypassTenantAudit === undefined && !isTenantAuditInScope) {',
     why: 'row 23 -- where `bypassTenantAudit` is threaded to the driver',
+    rowSeams: ['Tenant-audit warning silenced'],
   },
   {
     file: 'packages/objectql/src/engine.ts',
     needle: 'if (options?.strictReadonlyWrites === true) {',
     why: 'row 21 -- the strict-drop refusal that never fires under elevation',
+    rowSeams: ['Strict-drop refusal never fires'],
   },
   {
     file: 'packages/objectql/src/readonly-strict-errors.ts',
     needle: 'const READONLY_CLASS_REASONS',
     why: 'row 21 -- the reason set the silent refusal would have used',
+    rowSeams: ['Strict-drop refusal never fires'],
   },
   {
     file: 'packages/plugins/plugin-security/src/system-write-guard.ts',
     needle: 'if (!isUserContextWrite(context)) return;',
     why: 'row 24 -- the bypass expressed through a helper rather than a direct read',
+    rowSeams: ['append-only write guard bypassed'],
   },
   {
     file: 'packages/plugins/plugin-sharing/src/sharing-service.ts',
     needle: "if (row.source != null && row.source !== 'manual') {",
     why: 'row 34 -- the CONFLICT guard `revoke()` deletes in front of',
+    rowSeams: ['`revoke()` deletes directly'],
   },
   {
     file: 'packages/services/service-automation/src/builtin/crud-nodes.ts',
     needle: 'stampSystemInsertOwner(fields, dataCtx, data, objectName);',
     why: 'row 60 -- the call site of the compensating owner stamp',
+    rowSeams: ['Automation flow data nodes re-add the `owner_id` stamp'],
   },
   {
     file: 'packages/objectql/src/registry.ts',
@@ -419,6 +430,402 @@ export const NON_READ_ANCHORS = [
     why: 'an action body cannot set the flag',
   },
 ];
+
+/* ─────────── Row references: the page's OTHER hand-maintained claim ─────────── */
+
+/**
+ * ── Holding every `row N` to the row it points at (#15869) ───────────────────
+ *
+ * The anchors above hold every `file:line` on this page to the tree. Two more
+ * hand-maintained claims sit on the same page and were held by NOTHING:
+ *
+ *   1. the page's own prose row references -- `Row 34 is correct for the rule`,
+ *      `row 50's doors`, `what row 30 is skipping`, `rows 1–61 above`;
+ *   2. the `why:` strings in `NON_READ_ANCHORS` above, which name a row by number.
+ *
+ * A row INSERTED into the behaviour table renumbers every row below it, so every
+ * reference past the insertion point becomes false -- with this gate GREEN, because
+ * nothing compared a number to a row. Measured, not argued: PR #15687 inserted one
+ * row and three references went stale at once (the page's `Row 34` sentence and the
+ * `why:` strings for rows 34 and 60); PR #15395 removed one row and all three became
+ * true again. ⭐ Neither the breaking nor the repair was observed by anything -- and
+ * a defect that repairs itself by coincidence is one whose next occurrence is
+ * unobserved too.
+ *
+ * ⚠️ A falsified row reference is worse than a dangling one, BECAUSE IT RESOLVES.
+ * After #15687 row 34 was `grant()` -- a seam whose rule is the opposite of the
+ * sentence pointing at it (`grant()` is explicitly not a bare skip) -- so a reader
+ * following the pointer landed on a row that contradicted the sentence, on a page
+ * that declares itself the authority.
+ *
+ * ## ⭐ The key is the SEAM, never the number
+ *
+ * A ledger that recorded "the reference at line L says row 34" would rot exactly
+ * like an anchor ledger: the renumbering that falsifies the reference makes the
+ * ledger stale in the same edit, so the two would agree while both were wrong.
+ *
+ * So each reference declares the SEAM it is talking about -- a literal that must
+ * occur in exactly one numbered row of the page's tables. The gate resolves the
+ * seam, reads the number the reference actually carries, and refuses when they
+ * disagree, naming the reference, the number it carries and the row the key
+ * resolves to. ⭐ Renumbering moves the seam's row and the refusal names the new
+ * number: the ledger itself never has to be renumbered, which is the whole point.
+ *
+ * Seams are taken from the referring sentence's OWN subject, never picked to make a
+ * number come out right: `**`revoke()` skips its own conflict guard.** Row 34` keys
+ * on `` `revoke()` deletes directly ``, the row that IS the `revoke()` seam. Where a
+ * sentence names no seam that picks exactly one row, the reference is declared
+ * UNHELD with its reason -- an honest hole, listed, rather than a guess that
+ * resolves. `unheld` entries are still LOCATED, so one cannot decay into "not there".
+ *
+ * ## Population, not just resolution
+ *
+ * ⭐ A ledger of the references that exist today can never see the reference someone
+ * writes tomorrow -- the same asymmetry that makes CENSUS -> PAGE the mandatory
+ * direction above. So every `row N` spelling ON the page must be claimed by exactly
+ * one entry below, and an unclaimed one is a refusal naming the line. Likewise every
+ * `row N` inside a `why:` must carry its seam, or the ledger row is refused.
+ *
+ * ## ⛔ Why `--fix` does not renumber prose
+ *
+ * `--fix` rewrites ANCHORS, which live on the page this gate maintains. Renumbering
+ * prose would mean writing `content/docs/permissions/system-context.mdx` as well --
+ * a `merge=os-regen` routed file held by several open PRs at the time this check was
+ * written. Refuse-only here, deliberately: the repair is a human edit, and the
+ * `--fix` leg for prose is a follow-up once the page is free.
+ */
+
+/**
+ * Every spelling either side uses: `Row 34`, `row 2's`, `row-1`, `rows 62–65`.
+ * Built fresh per call -- a shared `/g` regex carries `lastIndex` between scans.
+ */
+function rowReferenceRe() {
+  return /\b([Rr]ows?)[  -](\d+)(?:\s*[-–—]\s*(\d+))?/g;
+}
+
+/**
+ * The page's numbered table rows, with the section each belongs to.
+ *
+ * The behaviour rows are split across five markdown tables that share one numbering
+ * run, so a "table" is not the unit -- the SECTION is: everything at or below the
+ * `### 6.` heading is the carry-onward table, everything above it is behaviour.
+ *
+ * @param {string} pageText
+ * @returns {{ number: number, docLine: number, text: string, section: string }[]}
+ */
+export function extractTableRows(pageText) {
+  const lines = pageText.split('\n');
+  const carryAt = lines.findIndex((line) => line.startsWith('### 6.'));
+  const rows = [];
+  lines.forEach((line, i) => {
+    const m = /^\|\s*(\d+)\s*\|/.exec(line);
+    if (!m) return;
+    rows.push({
+      number: Number(m[1]),
+      docLine: i + 1,
+      text: line,
+      section: carryAt !== -1 && i > carryAt ? 'carry-onward' : 'behaviour',
+    });
+  });
+  return rows;
+}
+
+/**
+ * Every `row N` reference in a body of text, one entry per occurrence.
+ *
+ * @param {string} text
+ * @returns {{ docLine: number, raw: string, first: number, last: number|null, isRange: boolean }[]}
+ */
+export function extractRowReferences(text) {
+  const refs = [];
+  text.split('\n').forEach((line, i) => {
+    for (const m of line.matchAll(rowReferenceRe())) {
+      refs.push({
+        docLine: i + 1,
+        raw: m[0],
+        first: Number(m[2]),
+        last: m[3] === undefined ? null : Number(m[3]),
+        isRange: m[3] !== undefined,
+      });
+    }
+  });
+  return refs;
+}
+
+/** A row's own text, trimmed to something a refusal can quote on one line. */
+function rowExcerpt(row) {
+  const cells = row.text.split('|').map((c) => c.trim());
+  const body = cells.slice(2).find((c) => c.length > 0) ?? row.text.trim();
+  return body.length > 90 ? `${body.slice(0, 87)}…` : body;
+}
+
+/**
+ * The page's prose row references, each keyed to the row it is ABOUT.
+ *
+ * `context` is a number-free literal that must occur on exactly one line of the
+ * page -- number-free on purpose: a context carrying the number would stop matching
+ * in the very edit this check exists to catch, and the refusal would name a missing
+ * ledger row instead of a falsified sentence. That line must carry exactly one row
+ * reference; if it grows a second, the entry says so rather than silently claiming
+ * whichever came first.
+ *
+ * Then exactly one of:
+ *   `seam`     a literal occurring in exactly one numbered row -- the row this
+ *              reference is about, derived from the sentence's own subject.
+ *   `section`  for a RANGE (`rows 1–61`): the section whose extent it states. No
+ *              seam pair is invented for these; the endpoints are the section's own
+ *              min and max, which is mechanical rather than editorial.
+ *   `unheld`   the reason no key is derivable. ⛔ Listed, never guessed.
+ */
+export const PAGE_ROW_REFERENCES = [
+  {
+    context: 'at once — this is the single largest behaviour on the page',
+    unheld:
+      'a RANGE whose endpoints the sentence never names -- it says only that row 1 costs you "all of" ' +
+      'them at once. Nothing in it picks a first or a last row, and the two are not a section extent.',
+  },
+  {
+    context: 'the step 3.5 anchor guard is inside the block',
+    seam: 'The whole security middleware short-circuits',
+    why: 'the guard sits inside THE BLOCK, and the row that skips a whole block is the short-circuit row',
+  },
+  {
+    context: 'doors consult answers yes before any capability is examined',
+    seam: '`manage_metadata` bypassed on metadata writes',
+    why: 'the doors this shared verdict backs are the `manage_metadata` metadata-write doors',
+  },
+  {
+    context: 'gap is compensated inline',
+    seam: '`owner_id` is not auto-stamped on INSERT',
+    why: 'the compensated gap is the `owner_id` stamp this same cell re-adds',
+  },
+  {
+    context: 'is a real gap; the platform repairs it twice',
+    seam: '`owner_id` is not auto-stamped on INSERT',
+    why: 'the rough edge names the `owner_id` gap in its own bolded subject',
+  },
+  {
+    context: 'is now the `afterDelete` skip alone',
+    seam: 'on the record-`afterDelete` hook',
+    why: 'the sentence names the `afterDelete` hook, which is the row',
+  },
+  {
+    context: '**Strict write observability is inert under elevation.**',
+    seam: 'Strict-drop refusal never fires',
+    why: 'the rough edge is about the STRICT-DROP refusal, told nothing because nothing was dropped',
+  },
+  {
+    context: '**`revoke()` skips its own conflict guard.**',
+    seam: '`revoke()` deletes directly',
+    why: 'the bolded subject is `revoke()`, and exactly one row is the `revoke()` seam',
+  },
+  {
+    context: 'people attribute to it is row',
+    seam: '`owner_id` is not auto-stamped on INSERT',
+    why: 'the write-time OWNERSHIP behaviour being redirected is the `owner_id` stamp row',
+  },
+  {
+    context: 'behaviour-bearing (rows',
+    section: 'behaviour',
+    why: 'the extent of the behaviour-bearing rows -- everything above the carry-onward section',
+  },
+  {
+    context: 'carry the flag onward only (rows',
+    section: 'carry-onward',
+    why: 'the extent of section 6, the carry-onward table',
+  },
+  {
+    context: 'is skipping',
+    unheld:
+      'the bullet\'s only subject is the linked doc title "Sharing Rules", and several rows are about ' +
+      'sharing rules. No key in the sentence picks one of them, so this one is declared, not guessed.',
+  },
+];
+
+/**
+ * E. ROW REFERENCES -- resolve every `row N` against the row its key names.
+ *
+ * @returns {{ problems: string[], held: { page: number, why: number, unheld: number } }}
+ */
+export function checkRowReferences({ pageText, ledger = NON_READ_ANCHORS, pageRefs = PAGE_ROW_REFERENCES }) {
+  const problems = [];
+  const held = { page: 0, why: 0, unheld: 0 };
+  const wheres = ledger.flatMap((row) => (row.rowSeams ?? []).length);
+  if (pageRefs.length === 0 && wheres.every((n) => n === 0)) return { problems, held };
+
+  const rows = extractTableRows(pageText);
+  if (rows.length === 0) {
+    problems.push(
+      '[no-table-rows] the page yielded ZERO numbered table rows, so every `row N` reference ' +
+        'below would resolve to nothing and this check would pass by finding no table -- ' +
+        'refusing instead. The tables were renamed, reformatted, or the page was truncated.'
+    );
+    return { problems, held };
+  }
+
+  /** @returns {{ row: object }|{ error: string, matches: object[] }} */
+  const resolve = (seam) => {
+    const matches = rows.filter((row) => row.text.includes(seam));
+    if (matches.length === 1) return { row: matches[0] };
+    return { error: matches.length === 0 ? 'unresolved' : 'ambiguous', matches };
+  };
+  const numbered = (n) => {
+    const row = rows.find((r) => r.number === n);
+    return row ? `row ${n} is \`${rowExcerpt(row)}\` (${PAGE}:${row.docLine})` : `there is no row ${n}`;
+  };
+
+  const pageLines = pageText.split('\n');
+  const allRefs = extractRowReferences(pageText);
+  const claimed = new Set();
+
+  for (const entry of pageRefs) {
+    const kinds = ['seam', 'section', 'unheld'].filter((k) => entry[k] !== undefined);
+    if (kinds.length !== 1) {
+      problems.push(
+        `[row-ref-declaration] PAGE_ROW_REFERENCES entry \`${entry.context}\` declares ` +
+          `${kinds.length === 0 ? 'no' : kinds.join(' + ')} key -- exactly one of \`seam\`, ` +
+          '`section` or `unheld` is required, so an unkeyed entry cannot read as a held one.'
+      );
+      continue;
+    }
+    const hits = [];
+    pageLines.forEach((line, i) => {
+      if (line.includes(entry.context)) hits.push(i + 1);
+    });
+    if (hits.length !== 1) {
+      problems.push(
+        `[row-ref-context-${hits.length === 0 ? 'stale' : 'ambiguous'}] PAGE_ROW_REFERENCES context ` +
+          `\`${entry.context}\` matches ${hits.length} line(s) of ${PAGE}` +
+          `${hits.length > 1 ? ` (${hits.join(', ')}) -- lengthen it until it is unique` : ' -- the sentence was reworded or removed; update or drop the entry'}.`
+      );
+      continue;
+    }
+    const docLine = hits[0];
+    const onLine = allRefs.filter((ref) => ref.docLine === docLine);
+    if (onLine.length !== 1) {
+      problems.push(
+        `[row-ref-line-drifted] ${PAGE}:${docLine} is claimed by the entry \`${entry.context}\` but ` +
+          `carries ${onLine.length} row reference(s) (${onLine.map((r) => r.raw).join(', ') || 'none'}) -- ` +
+          'one entry holds one reference, so split the entry or fix the sentence.'
+      );
+      continue;
+    }
+    claimed.add(docLine);
+    const ref = onLine[0];
+
+    if (entry.unheld !== undefined) {
+      held.unheld += 1;
+      continue;
+    }
+    if (entry.seam !== undefined) {
+      if (ref.isRange) {
+        problems.push(
+          `[row-ref-shape] ${PAGE}:${docLine} now writes the RANGE \`${ref.raw}\`, but its entry ` +
+            `declares a single-row \`seam\` (\`${entry.seam}\`) -- a seam names one row and cannot ` +
+            'certify a range.'
+        );
+        continue;
+      }
+      const found = resolve(entry.seam);
+      if ('error' in found) {
+        problems.push(
+          `[row-ref-key-${found.error}] ${PAGE}:${docLine} writes \`${ref.raw}\` and its key ` +
+            `\`${entry.seam}\` matches ${found.matches.length} numbered row(s)` +
+            `${found.matches.length > 1 ? ` (rows ${found.matches.map((r) => r.number).join(', ')}) -- lengthen the seam` : ' -- the row it names was reworded or deleted, so the reference is now held by nothing'}.`
+        );
+        continue;
+      }
+      if (found.row.number !== ref.first) {
+        problems.push(
+          `[row-ref-falsified] ${PAGE}:${docLine} says \`${ref.raw}\`, but the seam that sentence is ` +
+            `about (\`${entry.seam}\`) is row ${found.row.number} (${PAGE}:${found.row.docLine}). ` +
+            `The table was renumbered under the sentence, so ${numbered(ref.first)} -- a DIFFERENT ` +
+            'seam. ⚠️ The reference still resolves, which is why nothing noticed: a reader who ' +
+            'follows it is told something false by a row that exists.'
+        );
+        continue;
+      }
+      held.page += 1;
+      continue;
+    }
+    // section: a RANGE, held to the extent of the section it states
+    if (!ref.isRange) {
+      problems.push(
+        `[row-ref-shape] ${PAGE}:${docLine} now writes \`${ref.raw}\`, a single row, but its entry ` +
+          `declares the extent of the \`${entry.section}\` section -- a range was expected.`
+      );
+      continue;
+    }
+    const inSection = rows.filter((row) => row.section === entry.section);
+    if (inSection.length === 0) {
+      problems.push(
+        `[row-ref-section-empty] ${PAGE}:${docLine} states the extent of the \`${entry.section}\` ` +
+          'section, which now holds ZERO numbered rows -- the section was renamed or emptied and the ' +
+          'range is checked against nothing.'
+      );
+      continue;
+    }
+    const first = Math.min(...inSection.map((row) => row.number));
+    const last = Math.max(...inSection.map((row) => row.number));
+    if (first !== ref.first || last !== ref.last) {
+      problems.push(
+        `[row-ref-falsified] ${PAGE}:${docLine} says \`${ref.raw}\`, but the \`${entry.section}\` ` +
+          `section runs rows ${first}–${last} (${inSection.length} rows). A row was inserted or ` +
+          'removed and the stated extent was not followed.'
+      );
+      continue;
+    }
+    held.page += 1;
+  }
+
+  for (const ref of allRefs) {
+    if (claimed.has(ref.docLine)) continue;
+    problems.push(
+      `[row-ref-undeclared] ${PAGE}:${ref.docLine} writes \`${ref.raw}\`, which no ` +
+        'PAGE_ROW_REFERENCES entry claims. ⭐ A row reference nobody declared is held by nothing ' +
+        'and goes stale on the next insertion: declare it with the seam it is about, or with ' +
+        '`unheld` and the reason no key is derivable.'
+    );
+  }
+
+  // ── the ledger's own `why:` strings, held the same way ──────────────────────
+  for (const row of ledger) {
+    const mentions = extractRowReferences(row.why ?? '');
+    const seams = row.rowSeams ?? [];
+    if (mentions.length !== seams.length) {
+      problems.push(
+        `[why-row-unkeyed] NON_READ_ANCHORS row for ${row.file} (needle \`${row.needle}\`) writes ` +
+          `${mentions.length} row reference(s) in its \`why\` (${row.why}) but declares ${seams.length} ` +
+          '`rowSeams`. Every `row N` in a `why` needs the seam it is about, in the order it is ' +
+          'written -- an unkeyed number is held by nothing and reads as current forever.'
+      );
+      continue;
+    }
+    mentions.forEach((ref, i) => {
+      const found = resolve(seams[i]);
+      if ('error' in found) {
+        problems.push(
+          `[why-row-key-${found.error}] NON_READ_ANCHORS row for ${row.file} says \`${ref.raw}\` and ` +
+            `its key \`${seams[i]}\` matches ${found.matches.length} numbered row(s)` +
+            `${found.matches.length > 1 ? ` (rows ${found.matches.map((r) => r.number).join(', ')}) -- lengthen the seam` : ' -- the row it names was reworded or deleted'}.`
+        );
+        return;
+      }
+      if (found.row.number !== ref.first) {
+        problems.push(
+          `[why-row-falsified] NON_READ_ANCHORS row for ${row.file} says \`${ref.raw}\` in its \`why\` ` +
+            `(${row.why}), but the seam it keys on (\`${seams[i]}\`) is row ${found.row.number} ` +
+            `(${PAGE}:${found.row.docLine}). The table was renumbered under the ledger, so ` +
+            `${numbered(ref.first)}.`
+        );
+        return;
+      }
+      held.why += 1;
+    });
+  }
+
+  return { problems, held };
+}
 
 /**
  * Numbers the page states ABOUT THE CURRENT TREE, each tied to the census value it
@@ -725,6 +1132,7 @@ export function evaluate({
   declaredCounts = DECLARED_COUNTS,
   unenforcedCounts = UNENFORCED_TEXT_COUNTS,
   measuredAt = UNENFORCED_MEASURED_AT,
+  pageRowReferences = PAGE_ROW_REFERENCES,
 }) {
   const problems = [];
 
@@ -881,6 +1289,11 @@ export function evaluate({
     );
   }
 
+  // ── E. ROW REFERENCES: the numbers that point INTO the table (#15869) ───────
+  // Held by their SEAM, never by the number they carry -- see PAGE_ROW_REFERENCES.
+  const rowRefs = checkRowReferences({ pageText, ledger, pageRefs: pageRowReferences });
+  problems.push(...rowRefs.problems);
+
   return {
     problems,
     stats: {
@@ -891,6 +1304,8 @@ export function evaluate({
       files: census.files.length,
       nonReadAnchors: located.size,
       missing: missing.length,
+      rowRefsHeld: rowRefs.held.page + rowRefs.held.why,
+      rowRefsUnheld: rowRefs.held.unheld,
     },
   };
 }
@@ -1110,7 +1525,8 @@ function run({ fix = false } = {}) {
   process.stdout.write(
     `check-system-context-census: OK — ${stats.sites} elevation read sites in ${stats.packages} ` +
       `packages across ${stats.files} files, all anchored; ${stats.anchors} anchors resolve, ` +
-      `${stats.nonReadAnchors} declared non-read.\n`
+      `${stats.nonReadAnchors} declared non-read; ${stats.rowRefsHeld} row reference(s) resolve to ` +
+      `their keyed row, ${stats.rowRefsUnheld} declared unheld.\n`
   );
   return 0;
 }
@@ -1230,6 +1646,104 @@ function fixturePage({ anchor = 'pkg/a.ts:2', helper = 'pkg/a.ts:7' } = {}) {
 }
 
 /**
+ * ── The ROW REFERENCE fixture (#15869) ──────────────────────────────────────
+ *
+ * A miniature of the real page's shape, and only its shape: one behaviour table
+ * whose numbering runs on into a `### 6.` carry-onward table, then the four
+ * spellings the real page uses to point back into them -- `Row N`,
+ * `row N's`, `row N`, and the two `rows N–M` extents.
+ *
+ * ⛔ Deliberately NOT a copy of the real page: the cases below drive one edit at
+ * a time, and a fixture small enough to read whole is the only way a reader can
+ * see that the edit is the only difference. The real page is exercised too, in
+ * the same battery, by the ablation.
+ */
+const ROW_FIXTURE_PAGE = [
+  '---',
+  'title: row fixture',
+  '---',
+  '',
+  '| # | Behaviour | Anchor |',
+  '|:--|:---|:---|',
+  '| 1 | **The short-circuit** runs first | `pkg/a.ts:2` |',
+  '| 2 | **`owner_id` is not stamped** on INSERT | `pkg/a.ts:3` |',
+  '| 3 | `revoke()` deletes directly, before the guard | `pkg/a.ts:4` |',
+  '',
+  '### 6. Reads that only carry the flag onward',
+  '',
+  '| # | Site | What it does |',
+  '|:--|:---|:---|',
+  '| 4 | `pkg/b.ts:5` | Propagates the flag onward |',
+  '| 5 | `pkg/b.ts:6` | Rebuilds the context |',
+  '',
+  '1. **`revoke()` skips its own conflict guard.** Row 3 is correct for the rule.',
+  "2. The shared verdict is the one function all of row 2's doors consult.",
+  '3. The step 3.5 guard is inside the block row 1 skips.',
+  '',
+  '| — behaviour-bearing (rows 1–3 above) | 9 |',
+  '| — carry the flag onward only (rows 4–5 above) | 2 |',
+  '',
+].join('\n');
+
+/** The fixture's own `PAGE_ROW_REFERENCES`: one entry per reference above. */
+const ROW_FIXTURE_REFS = [
+  {
+    context: '**`revoke()` skips its own conflict guard.**',
+    seam: '`revoke()` deletes directly',
+    why: 'the bolded subject is `revoke()`',
+  },
+  { context: 'doors consult', seam: '**`owner_id` is not stamped**', why: 'the doors are the stamp doors' },
+  { context: 'is inside the block', seam: '**The short-circuit** runs first', why: 'the block is the short-circuit' },
+  { context: 'behaviour-bearing (rows', section: 'behaviour', why: 'the behaviour extent' },
+  { context: 'carry the flag onward only (rows', section: 'carry-onward', why: 'the carry-onward extent' },
+];
+
+/**
+ * The fixture's own `NON_READ_ANCHORS`, carrying all three `why:` shapes: a plain
+ * `row N`, a `why` naming TWO rows in one string, and the hyphenated `row-N`.
+ */
+const ROW_FIXTURE_LEDGER = [
+  {
+    file: 'pkg/a.ts',
+    needle: 'a',
+    why: 'row 3 -- the guard `revoke()` deletes in front of',
+    rowSeams: ['`revoke()` deletes directly'],
+  },
+  {
+    file: 'pkg/a.ts',
+    needle: 'b',
+    why: 'row 2 -- the stamp guard the row-1 short-circuit skips',
+    rowSeams: ['**`owner_id` is not stamped**', '**The short-circuit** runs first'],
+  },
+  { file: 'pkg/a.ts', needle: 'c', why: 'rough edge 5 -- names no row at all', rowSeams: [] },
+];
+
+/**
+ * Insert one numbered row above row `n` and renumber every row at or below it --
+ * the edit PR #15687 made, which this gate used to be green through.
+ *
+ * @returns {{ text: string, inserted: boolean }}
+ */
+function insertRowAbove(pageText, n, cell) {
+  let inserted = false;
+  const out = [];
+  for (const line of pageText.split('\n')) {
+    const m = /^\|\s*(\d+)\s*\|(.*)$/.exec(line);
+    if (!m) {
+      out.push(line);
+      continue;
+    }
+    const number = Number(m[1]);
+    if (number === n && !inserted) {
+      out.push(`| ${n} |${cell}`);
+      inserted = true;
+    }
+    out.push(number >= n ? `| ${number + 1} |${m[2]}` : line);
+  }
+  return { text: out.join('\n'), inserted };
+}
+
+/**
  * The page's UNENFORCED decomposition, as a fixture: the six rows plus the dated
  * marker. Every knob is a way the page could decay -- a number going stale, a row
  * reworded away, the date dropped -- so the criterion can be driven from both sides.
@@ -1291,6 +1805,10 @@ function selfTest() {
       declaredCounts,
       unenforcedCounts,
       measuredAt: UNENFORCED_MEASURED_AT,
+      // The row-reference ledger is about the REAL page's tables; these fixtures
+      // carry no table at all. The battery below drives that check on its own
+      // fixtures and on the real page.
+      pageRowReferences: [],
     });
 
   // ── the GREEN control: a page that is correct ───────────────────────────────
@@ -1343,6 +1861,7 @@ function selfTest() {
   // ── ledger ─────────────────────────────────────────────────────────────────
   battery('ledger');
   const ledgerStale = evaluate({
+    pageRowReferences: [],
     pageText: fixturePage(),
     census: FIXTURE_CENSUS,
     tracked: FIXTURE_TRACKED,
@@ -1353,6 +1872,7 @@ function selfTest() {
   });
   t('LEDGER: a needle that matches nothing is a finding', ledgerStale.problems.some((p) => p.startsWith('[ledger-stale]')));
   const ledgerAmbig = evaluate({
+    pageRowReferences: [],
     pageText: fixturePage(),
     census: FIXTURE_CENSUS,
     tracked: FIXTURE_TRACKED,
@@ -1363,6 +1883,7 @@ function selfTest() {
   });
   t('LEDGER: a needle matching two lines is a finding', ledgerAmbig.problems.some((p) => p.startsWith('[ledger-ambiguous]')));
   const ledgerUnused = evaluate({
+    pageRowReferences: [],
     pageText: fixturePage({ helper: 'pkg/a.ts:2' }),
     census: FIXTURE_CENSUS,
     tracked: FIXTURE_TRACKED,
@@ -1411,6 +1932,7 @@ function selfTest() {
   t('COUNTS: the carry-onward split is read from section 6 itself', carryOnwardRowCount(sectionPage) === 2);
   t('COUNTS: a renamed section 6 is underivable, not zero', carryOnwardRowCount('nothing here') === -1);
   const underivable = evaluate({
+    pageRowReferences: [],
     pageText: fixturePage(),
     census: FIXTURE_CENSUS,
     tracked: FIXTURE_TRACKED,
@@ -1584,6 +2106,7 @@ function selfTest() {
   // touched cannot come back with a missing site, an unexplained anchor or an
   // unused ledger row. Pinned behaviourally rather than argued in a comment.
   const afterFix = evaluate({
+    pageRowReferences: [],
     pageText: bothShifted.text,
     census: FIXTURE_CENSUS,
     tracked: FIXTURE_TRACKED,
@@ -1693,6 +2216,223 @@ function selfTest() {
   // `check-aggregator-roster` and `check-ci-filter-parity` set -- and, like the second
   // docs root that gate added, this needed NO workflow edit: `lint.yml` already invokes
   // both legs, and it is the repo's busiest file.
+  // ── ⭐ ROW REFERENCES: held by SEAM, and the insertion that used to be silent ─
+  //
+  // The shape this battery exists for (#15869): a row INSERTED into the behaviour
+  // table renumbers every row below it, so every `row N` past the insertion point
+  // becomes false while this gate stays green -- because nothing compared a number
+  // to a row. It happened (#15687, three references), and it un-happened by
+  // coincidence (#15395, the same three), with nothing observing either event.
+  //
+  // ⭐ The ablation is run on a COPY of the REAL page, in a temp dir, because a
+  // toy fixture cannot show that the check reaches the references that actually
+  // rotted. The real page is never written -- asserted below, by bytes.
+  battery('⭐ ROW REFERENCES: held by seam, and the insertion that was silent (#15869)');
+
+  const rowRefs = (page, refs = ROW_FIXTURE_REFS, ledger = ROW_FIXTURE_LEDGER) =>
+    checkRowReferences({ pageText: page, ledger, pageRefs: refs });
+  const codes = (result) => result.problems.map((p) => p.slice(0, p.indexOf(']') + 1));
+
+  const rowGreen = rowRefs(ROW_FIXTURE_PAGE);
+  t(
+    '⭐ POSITIVE CONTROL: every reference whose number MATCHES its keyed row passes',
+    rowGreen.problems.length === 0,
+    rowGreen.problems.join(' | ')
+  );
+  t(
+    'the control really exercised all five page references and both `why:` mentions',
+    rowGreen.held.page === 5 && rowGreen.held.why === 3 && rowGreen.held.unheld === 0,
+    JSON.stringify(rowGreen.held)
+  );
+
+  // ── one case per SPELLING the page uses ────────────────────────────────────
+  const falsified = (page, expect) => {
+    const result = rowRefs(page);
+    return (
+      result.problems.some((p) => p.startsWith('[row-ref-falsified]') && p.includes(expect)) &&
+      result.problems.length === 1
+    );
+  };
+  t(
+    'SPELLING `Row N` (sentence-initial): a number that no longer matches its seam is falsified',
+    falsified(ROW_FIXTURE_PAGE.replace('Row 3 is correct', 'Row 2 is correct'), '`Row 2`')
+  );
+  t(
+    "SPELLING `row N's` (possessive): same",
+    falsified(ROW_FIXTURE_PAGE.replace("row 2's doors", "row 1's doors"), '`row 1`')
+  );
+  t(
+    'SPELLING `row N` (lowercase, mid-sentence): same',
+    falsified(ROW_FIXTURE_PAGE.replace('the block row 1 skips', 'the block row 3 skips'), '`row 3`')
+  );
+  t(
+    'SPELLING `rows N–M` (range): the behaviour extent is held to the section, not to a seam',
+    falsified(ROW_FIXTURE_PAGE.replace('(rows 1–3 above)', '(rows 1–4 above)'), '`rows 1–4`')
+  );
+  t(
+    'SPELLING `rows N–M` (range): and the carry-onward extent to ITS section',
+    falsified(ROW_FIXTURE_PAGE.replace('(rows 4–5 above)', '(rows 4–6 above)'), '`rows 4–6`')
+  );
+
+  // ── the incident shape, on the fixture: ONE insertion, several falsehoods ───
+  const inserted = insertRowAbove(ROW_FIXTURE_PAGE, 3, ' **An inserted row** | `pkg/a.ts:9` |');
+  const afterInsert = rowRefs(inserted.text);
+  t(
+    '⭐ THE INCIDENT SHAPE: inserting one row above row 3 falsifies every reference below it, ' +
+      'and the refusal names the reference, its number and the row the key resolves to',
+    inserted.inserted &&
+      afterInsert.problems.filter((p) => p.startsWith('[row-ref-falsified]')).length === 3 &&
+      afterInsert.problems.some((p) => p.includes('`Row 3`') && p.includes('is row 4')),
+    afterInsert.problems.join(' | ')
+  );
+
+  // ── keys that stop resolving ───────────────────────────────────────────────
+  t(
+    'a key that resolves to NO row is a refusal, not a pass -- the reference is now held by nothing',
+    codes(rowRefs(ROW_FIXTURE_PAGE.replace('`revoke()` deletes directly, before the guard', 'reworded'))).includes(
+      '[row-ref-key-unresolved]'
+    )
+  );
+  t(
+    'a key that resolves to TWO rows refuses and names both candidates',
+    (() => {
+      const twice = ROW_FIXTURE_PAGE.replace(
+        '| 2 | **`owner_id` is not stamped** on INSERT | `pkg/a.ts:3` |',
+        '| 2 | **`owner_id` is not stamped** and `revoke()` deletes directly | `pkg/a.ts:3` |'
+      );
+      const result = rowRefs(twice);
+      return result.problems.some((p) => p.startsWith('[row-ref-key-ambiguous]') && p.includes('rows 2, 3'));
+    })()
+  );
+  t(
+    'a context that no longer matches any line refuses rather than dropping the reference',
+    codes(rowRefs(ROW_FIXTURE_PAGE, [{ context: 'a sentence nobody wrote', seam: 'x', why: 'y' }])).includes(
+      '[row-ref-context-stale]'
+    )
+  );
+
+  // ── POPULATION: the reference nobody declared ──────────────────────────────
+  t(
+    '⭐ POPULATION: a `row N` the ledger does not claim is a refusal -- a ledger of what exists ' +
+      'today cannot see the reference someone writes tomorrow',
+    (() => {
+      const grown = `${ROW_FIXTURE_PAGE}\n4. And a brand new sentence about row 2.\n`;
+      const result = rowRefs(grown);
+      return result.problems.some((p) => p.startsWith('[row-ref-undeclared]') && p.includes('`row 2`'));
+    })()
+  );
+  t(
+    'an `unheld` entry is tolerated -- but still LOCATED, so it cannot decay into "not there"',
+    (() => {
+      const grown = `${ROW_FIXTURE_PAGE}\n4. And a sentence with no derivable key about row 2.\n`;
+      const declared = [...ROW_FIXTURE_REFS, { context: 'no derivable key about', unheld: 'no key' }];
+      const ok = rowRefs(grown, declared).problems.length === 0;
+      const gone = rowRefs(ROW_FIXTURE_PAGE, declared).problems;
+      return ok && gone.some((p) => p.startsWith('[row-ref-context-stale]'));
+    })()
+  );
+  t(
+    'ZERO numbered rows refuses instead of passing over a table it could not find',
+    codes(rowRefs(ROW_FIXTURE_PAGE.replace(/^\| \d+ \|/gm, '| x |'))).includes('[no-table-rows]')
+  );
+
+  // ── the ledger's own `why:` strings ────────────────────────────────────────
+  t(
+    "a `why:` string whose row number disagrees with its seam is falsified, naming the `why`",
+    (() => {
+      const drifted = ROW_FIXTURE_LEDGER.map((row) =>
+        row.why.startsWith('row 3') ? { ...row, why: 'row 2 -- the guard `revoke()` deletes in front of' } : row
+      );
+      const result = rowRefs(ROW_FIXTURE_PAGE, ROW_FIXTURE_REFS, drifted);
+      return result.problems.some((p) => p.startsWith('[why-row-falsified]') && p.includes('is row 3'));
+    })()
+  );
+  t(
+    "SPELLING `row-N` (hyphenated, inside a `why:`): held by its own seam like any other",
+    rowGreen.problems.length === 0 &&
+      ROW_FIXTURE_LEDGER.some((row) => row.why.includes('row-1')) &&
+      (() => {
+        const drifted = ROW_FIXTURE_LEDGER.map((row) =>
+          row.why.includes('row-1') ? { ...row, why: row.why.replace('row-1', 'row-3') } : row
+        );
+        return rowRefs(ROW_FIXTURE_PAGE, ROW_FIXTURE_REFS, drifted).problems.some((p) =>
+          p.startsWith('[why-row-falsified]')
+        );
+      })()
+  );
+  t(
+    'a `why:` that names a row and declares NO seam is refused -- an unkeyed number reads as current forever',
+    (() => {
+      const unkeyed = [{ file: 'pkg/a.ts', needle: 'n', why: 'row 3 -- unkeyed' }];
+      return codes(rowRefs(ROW_FIXTURE_PAGE, ROW_FIXTURE_REFS, unkeyed)).includes('[why-row-unkeyed]');
+    })()
+  );
+
+  // ── ⭐ THE REAL PAGE, and the ablation on a COPY of it ──────────────────────
+  let realPage = null;
+  try {
+    realPage = readFileSync(join(ROOT, PAGE), 'utf8');
+  } catch (err) {
+    t('⭐ the real page is readable', false, err.code ?? err.message);
+  }
+  if (realPage !== null) {
+    const realResult = checkRowReferences({ pageText: realPage });
+    t(
+      "⭐ TODAY'S TREE: every row reference on the real page and in the real ledger resolves to its keyed row",
+      realResult.problems.length === 0,
+      realResult.problems.join(' | ')
+    );
+    t(
+      'and the real run really resolved them (10 page references + 9 `why:` mentions, 2 declared unheld)',
+      realResult.held.page === 10 && realResult.held.why === 9 && realResult.held.unheld === 2,
+      JSON.stringify(realResult.held)
+    );
+
+    // ⛔ The ablation is written to a TEMP DIR and read back from disk. The real
+    // page is never opened for writing -- the byte assertion below is the proof.
+    const before = createHash('sha256').update(realPage).digest('hex');
+    const dir = mkdtempSync(join(tmpdir(), 'census-row-ablation-'));
+    try {
+      const mutated = insertRowAbove(
+        realPage,
+        34,
+        ' **An inserted row, for the ablation** | plugin-sharing | Get: nothing | `sharing-service.ts:1` |'
+      );
+      const copy = join(dir, 'system-context.mdx');
+      writeFileSync(copy, mutated.text);
+      const readBack = readFileSync(copy, 'utf8');
+      t(
+        'ABLATION: the mutated COPY really reached the disk, one row heavier and renumbered',
+        mutated.inserted &&
+          readBack !== realPage &&
+          extractTableRows(readBack).length === extractTableRows(realPage).length + 1,
+        `${extractTableRows(realPage).length} -> ${extractTableRows(readBack).length} rows`
+      );
+      const ablated = checkRowReferences({ pageText: readBack });
+      const falsifiedRefs = ablated.problems.filter((p) => p.startsWith('[row-ref-falsified]'));
+      const falsifiedWhy = ablated.problems.filter((p) => p.startsWith('[why-row-falsified]'));
+      t(
+        '⭐ ABLATION: one row inserted above row 34 turns the gate RED, naming the falsified page ' +
+          'references -- this is the exact edit #15687 made under a green gate',
+        falsifiedRefs.some((p) => p.includes('`Row 34`') && p.includes('is row 35')) &&
+          falsifiedRefs.some((p) => p.includes('`rows 1–61`')),
+        ablated.problems.join(' | ')
+      );
+      t(
+        '⭐ ABLATION: and the `why:` strings for rows 34 and 60 -- the other two references #15687 falsified',
+        falsifiedWhy.some((p) => p.includes('`row 34`') && p.includes('is row 35')) &&
+          falsifiedWhy.some((p) => p.includes('`row 60`') && p.includes('is row 61')),
+        falsifiedWhy.join(' | ')
+      );
+      t(
+        '⛔ ABLATION SAFETY: the REAL page was never written -- same bytes before and after',
+        createHash('sha256').update(readFileSync(join(ROOT, PAGE), 'utf8')).digest('hex') === before
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
   battery('WIRING: this gate, and its self-test, really run in CI');
   const SELF = 'scripts/check-system-context-census.mjs';
   let lintYml = null;

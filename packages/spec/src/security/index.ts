@@ -23,3 +23,4 @@ export * from './explain.zod';
 export * from './sharing.zod';
 export * from './rls.zod';
 export * from './tenancy-posture';
+export * from './tenant-layer0-verdict';

@@ -8,8 +8,8 @@ description: Misc protocol schemas
 ## TypeScript Usage
 
 ```typescript
-import { CapabilityDeclarationSchema, OrgScopingEntitlementSchema, PlatformGlobalObjectsSchema, TenancyPostureSchema } from '@objectstack/spec/security';
-import type { CapabilityDeclaration, OrgScopingEntitlement, PlatformGlobalObjects, TenancyPosture } from '@objectstack/spec/security';
+import { CapabilityDeclarationSchema, OrgScopingEntitlementSchema, PlatformGlobalObjectsSchema, TenancyPostureSchema, TenantLayer0VerdictSchema } from '@objectstack/spec/security';
+import type { CapabilityDeclaration, OrgScopingEntitlement, PlatformGlobalObjects, TenancyPosture, TenantLayer0Verdict } from '@objectstack/spec/security';
 
 // Validate data
 const result = CapabilityDeclarationSchema.parse(data);
@@ -66,6 +66,57 @@ const result = CapabilityDeclarationSchema.parse(data);
 * `single`
 * `group`
 * `isolated`
+
+
+---
+
+## TenantLayer0Verdict
+
+### Union Options
+
+This schema accepts one of the following structures:
+
+#### Option 1
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **kind** | `'none'` | ✅ |  |
+
+---
+
+#### Option 2
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **kind** | `'organization'` | ✅ |  |
+| **organizationId** | `string` | ✅ |  |
+
+---
+
+#### Option 3
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **kind** | `'organizations'` | ✅ |  |
+| **organizationIds** | `string[]` | ✅ |  |
+
+---
+
+#### Option 4
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **kind** | `'deny'` | ✅ |  |
+
+---
 
 
 ---

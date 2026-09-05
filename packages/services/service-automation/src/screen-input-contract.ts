@@ -142,3 +142,177 @@ export function validateScreenInputs(
 export function declaredScreenFieldNames(fields: readonly ScreenFieldSpec[]): string[] {
   return fields.map((f) => f?.name).filter((n): n is string => typeof n === 'string' && n.length > 0);
 }
+
+/**
+ * A screen field, reduced to the three keys a satisfaction verdict turns on.
+ * Structurally a {@link ScreenFieldSpec} subset, so the node executor can hand
+ * its parsed `config.fields` straight in.
+ */
+export interface ScreenFieldContract {
+  name: string;
+  required?: boolean;
+  visibleWhen?: string;
+}
+
+/** Why a screen was (or was not) satisfied without showing it — see {@link judgeHeadlessScreen}. */
+export interface HeadlessScreenVerdict {
+  /** `true` ⇒ the run may continue past this screen without suspending. */
+  satisfied: boolean;
+  /** Declared field names whose value this run's CALLER supplied (provenance-checked). */
+  supplied: string[];
+  /** Required fields with no usable bound value — the reason a candidate was refused. */
+  missing: string[];
+}
+
+const NOTHING_SUPPLIED: HeadlessScreenVerdict = { satisfied: false, supplied: [], missing: [] };
+
+/**
+ * Whether a screen field's value in `context.params` came from the run's
+ * CALLER rather than from the subject record the dispatcher seeded.
+ *
+ * This distinction is the whole safety story of {@link judgeHeadlessScreen},
+ * because the params bag a flow action reaches the engine with is NOT the
+ * caller's bag: `seedFlowActionParams` (`@objectstack/runtime`) returns
+ * `{ ...record, recordId, <objectName>Id, ...params }`, so every column of the
+ * subject row is in there whether the caller named it or not. Reading "the key
+ * is in `params`" as "the caller supplied it" would let an INTERACTIVE console
+ * run — which supplies nothing — skip a screen whose field happens to share a
+ * name with a column of the record it was launched from.
+ *
+ * The record is one seed. **The row ID is the other**, and it is the one a
+ * record leg alone cannot see: both doors put the launched row's id into
+ * `params` under names that are NOT columns — `recordId` and the camelCase
+ * `<object>Id` alias on the trigger door (`buildAutomationContext`, which sets
+ * NO `context.record` at all), plus the action's declared `recordIdParam` on
+ * the actions door (`seedFlowActionParams`). A screen field named like any of
+ * them would otherwise read as caller-supplied on a run that supplied nothing,
+ * and an interactive console launch would skip the screen. So those are
+ * refused up front, by NAME for the two the executor can derive and by VALUE
+ * (identical to the row id) for the third, whose name is action-level metadata
+ * this executor cannot see.
+ *
+ * What remains proves caller provenance:
+ *
+ *  - the record has no such key at all ⇒ the record leg cannot be the source;
+ *  - the record HAS the key but `params` holds a different value ⇒ the
+ *    caller's bag overwrote it. The record spread copies the record's own value
+ *    by reference/primitive, so a run that supplied nothing is `Object.is`-equal
+ *    here. Equality is therefore "indistinguishable", not "caller-set".
+ *
+ * The ambiguous case (same key, same value) resolves to NOT caller-supplied,
+ * which costs a headless run a pause it might have been allowed to skip and
+ * costs an interactive run nothing. That asymmetry is deliberate: every
+ * uncertainty in this module must land on today's behaviour.
+ *
+ * ⚠️ **The identity leg is weaker across a durable resume.** A suspended run
+ * persists its `context` as JSON (`suspended-run-store.ts`), so a run continued
+ * from the store judges against a `JSON.parse`d copy: a NON-primitive column
+ * value (an array, an object) is no longer `Object.is`-equal to the one in
+ * `params`, and a later wizard screen colliding with such a column can read as
+ * caller-supplied. Primitive columns are unaffected. Stated, not fixed here —
+ * the remedy is value comparison rather than identity, which is a different
+ * change and has its own card.
+ */
+function callerSupplied(
+  name: string,
+  context: { params?: Record<string, unknown>; record?: Record<string, unknown>; object?: string } | undefined,
+): boolean {
+  const params = context?.params;
+  if (!params || params[name] === undefined) return false;
+  // Row-id seeds first: neither leg below can disprove them, because the
+  // trigger door sets no record and none of these names is a column.
+  const objectName = typeof context?.object === 'string' ? context.object.trim() : '';
+  // The camelCase alias both doors seed, derived the same way they derive it.
+  const aliasKey = objectName
+    ? `${objectName.replace(/_([a-z])/g, (_m: string, c: string) => c.toUpperCase())}Id`
+    : undefined;
+  if (name === 'recordId' || (aliasKey !== undefined && name === aliasKey)) return false;
+
+  const record = context?.record;
+  const value = params[name];
+  // The action's declared `recordIdParam` seeds a THIRD name this executor
+  // cannot know — action-level metadata is not on the context — so its VALUE
+  // is what refuses it. The dispatcher seeds the SAME row id under every id
+  // key it knows, which makes the id recoverable from the bag itself:
+  //
+  //  - `params.recordId`, always seeded, and the only candidate that survives
+  //    a NON-DEFAULT `recordIdField`. That case is why this leg exists: with
+  //    `recordIdField: 'token'` the row id is `record.token`, so comparing
+  //    against `record.id` alone missed it and the screen was SKIPPED, not
+  //    paused — measured, then pinned.
+  //  - the camelCase alias's value, seeded the same way, as a second reading
+  //    of the same id for the case where a record column shadows `recordId`;
+  //  - `record.id`, which covers the record-bearing doors directly.
+  //
+  // A caller who genuinely sends the row id as a screen value only loses the
+  // skip, which is this module's standing failure direction.
+  const seededRowIds: unknown[] = [params.recordId, record?.id];
+  if (aliasKey !== undefined) seededRowIds.push(params[aliasKey]);
+  if (seededRowIds.some((id) => id !== undefined && Object.is(value, id))) return false;
+
+  if (!record || !Object.prototype.hasOwnProperty.call(record, name)) return true;
+  return !Object.is(value, record[name]);
+}
+
+/**
+ * Can this screen be treated as already answered, and the run continued,
+ * without suspending to show it? (#15705)
+ *
+ * The defect this answers: an `ai.exposed` action whose target is a screen
+ * flow could be STARTED over MCP and never finished. `run_action` seeds the
+ * flow's `isInput` variables from the caller's `params` — correctly — and the
+ * screen node then suspended anyway, because the only inputs to that decision
+ * were "does the node declare fields" and the author's `waitForInput` flag.
+ * The MCP tool set has no resume verb, so the run parked forever.
+ *
+ * ⛔ NOT a general "skip screens" switch. Three conditions must ALL hold, and
+ * the verdict is `false` the moment any of them is unproven:
+ *
+ *  1. **The caller supplied at least one of THIS screen's declared fields**
+ *     ({@link callerSupplied}) — which refuses the row-id keys both dispatch
+ *     doors seed, so a launch that carried only a `recordId` has supplied
+ *     nothing. Without this leg a screen whose fields are all
+ *     optional would be vacuously "satisfied" and would stop rendering for
+ *     everyone — the loudest way to break the interactive path. A run that
+ *     named none of this screen's fields is not driving it, so it pauses.
+ *  2. **Every `required` field has a usable value bound** in the live flow
+ *     variables — judged by {@link validateScreenInputs}, the same function
+ *     the resume door enforces the same contract with, so "present" cannot
+ *     drift into two meanings (an empty string is absent on both).
+ *  3. Only caller-supplied names enter the bag, so a required field bound
+ *     from the record, from a prior node or from a declared `defaultValue`
+ *     does NOT count as answered. Optional fields are free to come from
+ *     anywhere — they constrain nothing.
+ *
+ * **`visibleWhen` is enforced here, the OPPOSITE of the resume door**, and the
+ * asymmetry is the point rather than an oversight. On resume, an unevaluable
+ * predicate must not fire `required`: the client is the authority on what the
+ * user was shown, and demanding a hidden field dead-ends a run at Submit
+ * (#3528). Here the server has no client and no collected values, so it cannot
+ * evaluate the predicate either — but refusing costs nothing except a pause,
+ * which is exactly what this screen does today. So a conditional required field
+ * the caller did not name keeps the screen interactive.
+ */
+export function judgeHeadlessScreen(
+  fields: readonly ScreenFieldContract[],
+  variables: ReadonlyMap<string, unknown>,
+  context: { params?: Record<string, unknown>; record?: Record<string, unknown>; object?: string } | undefined,
+): HeadlessScreenVerdict {
+  const declared = fields.filter((f) => typeof f?.name === 'string' && f.name.length > 0);
+  if (declared.length === 0) return NOTHING_SUPPLIED;
+
+  const supplied: string[] = [];
+  const bag: Record<string, unknown> = {};
+  for (const field of declared) {
+    if (!callerSupplied(field.name, context)) continue;
+    supplied.push(field.name);
+    bag[field.name] = variables.get(field.name);
+  }
+  // Condition 1 — nobody drove this screen, so it stays interactive.
+  if (supplied.length === 0) return NOTHING_SUPPLIED;
+
+  // Condition 2/3 — `unknown_field` cannot fire: every bag key is a declared
+  // field by construction, so every issue returned here is a missing `required`.
+  const issues = validateScreenInputs(declared, bag, () => true);
+  return { satisfied: issues.length === 0, supplied, missing: issues.map((i) => i.field) };
+}

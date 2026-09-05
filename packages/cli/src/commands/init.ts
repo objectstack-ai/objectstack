@@ -677,12 +677,33 @@ export function detectPackageManager(env: NodeJS.ProcessEnv = process.env): 'npm
 }
 
 /**
+ * npm's hard ceiling on a package name, the scope included.
+ *
+ * Exported because `os create` does NOT validate the same string this file
+ * does: it composes its argument into a scoped name
+ * (`@objectstack/plugin-<name>`) and has to measure the COMPOSED string
+ * against this limit. Restating the number over there is exactly how the two
+ * scaffolders came to disagree in the first place.
+ */
+export const NPM_PACKAGE_NAME_MAX_LENGTH = 214;
+
+/**
  * Validate that `name` is a usable npm package name AND a safe directory
  * segment. Mirrors the subset of rules used by `npm init`/`create-vite`.
+ *
+ * Exported for `os create`, which took none of this and therefore accepted
+ * names npm refuses — `os create plugin "My App"` wrote `./plugin-My App/`
+ * carrying `name: "@objectstack/plugin-My App"`, while `os init "My App"`
+ * refused the same input before touching the disk. The rule set is shared
+ * rather than copied so a rule added here reaches both scaffolders; the one
+ * check `create` needs and `init` cannot (the length of the composed scoped
+ * name) lives next to the composition, in `create.ts`.
  */
-function validateProjectName(name: string): string | null {
+export function validateProjectName(name: string): string | null {
   if (!name) return 'Project name is required';
-  if (name.length > 214) return 'Project name must be ≤ 214 characters';
+  if (name.length > NPM_PACKAGE_NAME_MAX_LENGTH) {
+    return `Project name must be ≤ ${NPM_PACKAGE_NAME_MAX_LENGTH} characters`;
+  }
   if (/[A-Z]/.test(name)) return 'Project name must be lowercase';
   if (!/^[a-z0-9][a-z0-9._-]*$/.test(name)) {
     return 'Project name must start with a lowercase letter or digit and contain only [a-z0-9._-]';

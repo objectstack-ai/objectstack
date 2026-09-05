@@ -60,6 +60,10 @@ import {
 import { SESSION_ERASURE_PATHS } from './session-tombstone.js';
 import { envelopeVendorAdminRefusal } from './vendor-admin-refusal-envelope.js';
 import {
+  buildBetterAuthRouteOwnership,
+  type BetterAuthRouteOwnership,
+} from './better-auth-route-ownership.js';
+import {
   ADMIN_SESSION_COOKIE_KEY,
   STOP_IMPERSONATING_PATH,
   rotateCallerBearerOnImpersonation,
@@ -5379,6 +5383,45 @@ export class AuthManager {
 
     return response;
   }
+
+  /**
+   * [#15417] Does better-auth ROUTE this request — i.e. is the path one its own
+   * router owns, whatever it then answers?
+   *
+   * The auth catch-all yields the request to the rest of the Hono chain when
+   * better-auth answers 404 (#4088), and it needs this to tell the two very
+   * different 404s apart: "I do not serve this path" (yieldable — that is how
+   * `plugin-hono-server`'s `/auth/me/*` routes stay reachable in either
+   * registration order) from "I serve it and the answer is 404" (NOT yieldable
+   * — a disabled capability's refusal is an answer, and handing it to a
+   * downstream wildcard is how it becomes `200 {}`). The mechanism, the
+   * measurement and the matching rules live in
+   * `better-auth-route-ownership.ts`.
+   *
+   * Keyed on the live instance and rebuilt whenever that instance is replaced,
+   * so a re-created auth (config change, test re-boot) never answers from a
+   * stale table. Returns `false` — the yielding, pre-#15417 answer — for any
+   * request it cannot decide, so a failure to enumerate can never take the
+   * #4088 surface down with it.
+   */
+  async ownsRoute(request: Request): Promise<boolean> {
+    const endpointPath = this.betterAuthEndpointPath(request);
+    if (endpointPath === undefined) return false;
+    try {
+      const auth = await this.getOrCreateAuth();
+      if (this.routeOwnershipFor !== auth || !this.routeOwnership) {
+        this.routeOwnership = buildBetterAuthRouteOwnership((auth as any)?.api);
+        this.routeOwnershipFor = auth;
+      }
+      return this.routeOwnership.owns(request.method, endpointPath);
+    } catch {
+      return false;
+    }
+  }
+
+  /** Memoized `auth.api` ownership table, and the instance it was built from. */
+  private routeOwnership?: BetterAuthRouteOwnership;
+  private routeOwnershipFor?: unknown;
 
   /**
    * The better-auth endpoint path (`/admin/remove-user`) this request addresses,
