@@ -8837,6 +8837,212 @@ export function h47ReleaseRecordDesync(issue, commentRows) {
 }
 
 // ---------------------------------------------------------------------------
+// H48 — a GOVERNED open PR carrying a seat's ACCEPT verdict without the two
+// writes that verdict is defined to arrive with (#15895).
+//
+// ## The rule this row patrols
+//
+// A governed surface is landed by the maintainer, by hand (Prime Directive
+// #14), so the seat's review is not a merge — it is a HANDOFF, and the handoff
+// is one act with two writes: the `needs-user-decision` label puts the PR in
+// the maintainer's inbox, and a `## 维护者速读` comment is what makes reading
+// it a two-minute job rather than a diff review. One act, two writes means
+// exactly the shapes this row reads:
+//
+//   verdict ∧ ¬LABEL   accepted and UNFINDABLE — the inbox filter never lists
+//                      it, so the queue it is waiting in has no row for it.
+//   verdict ∧ ¬BRIEF   findable and UNREAD — the maintainer opens a governed
+//                      diff with no summary of what is being asked.
+//   verdict ∧ neither  both at once; ONE finding, naming both halves.
+//
+// ⛔ NO VERDICT is CLEAN here, and that is the boundary of this card: a
+// governed PR nobody has accepted yet is not the maintainer's, and this row
+// never asks a seat to hurry a verdict. Whether a governed PR carrying the
+// LABEL with no verdict behind it (the 代读 shape, live on two PRs the day this
+// landed) deserves a row is a DIFFERENT question and deliberately not answered
+// here.
+//
+// ## The three readings, each from the PR's own state
+//
+//   VERDICT  an issue-comment on the PR whose line begins `**ACCEPT**`.
+//   LABEL    `needs-user-decision` on the PR's labels — read off the LIST row,
+//            no request.
+//   BRIEF    an issue-comment on the PR whose line begins `## 维护者速读`.
+//
+// ⚠️ The BRIEF is a COMMENT and never the body. A dev's PR body may carry a
+// `## 维护者速读(草稿)` section — that is the DRAFT, written before the review
+// happened, and reading it as the brief would let the half this row exists to
+// find satisfy itself. So this row reads comment threads and nothing else, and
+// the sentence says so where a reader would otherwise assume a bug.
+//
+// ## The fetch class this row BUYS — and why it is genuinely new
+//
+// `commentCache` holds CARD threads only: every listing that feeds it filters
+// `!i.pull_request` (H44's clause says the same in the other direction — 「a
+// verdict posted on a PULL REQUEST is NOT in this corpus」). So there is no PR
+// thread already in hand to reuse, and this row declares its own class exactly
+// as H36 and H43 declare theirs:
+//
+//   GET /repos/{owner}/{repo}/issues/{pr}/comments?per_page=100  (paged)
+//
+// bought ONE thread per GOVERNED OPEN PR — never per open PR. On the board this
+// landed against, 31 open PRs, 30 changed-file pages already in hand, 11
+// governed: eleven thread walks, each a single page. `prCommentCache` is where
+// that read lands so a future PR-comment reader costs nothing on a PR this row
+// already bought.
+//
+// ## Two bounds, both stated rather than hidden
+//
+//   • A PR whose changed-file page went UNREAD is not in this population at all
+//     — the governed slice is H36's pages, so an unread page is an unjudged PR
+//     rather than a non-governed one.
+//   • A thread that reached `H48_COMMENT_PAGE_CEILING` is UNREADABLE, not
+//     short. A partial read can only INVENT a missing brief (the verdict is
+//     early, the brief is past the ceiling), and #4690's rule is that an input
+//     which could not be read must never render as one that was clean — so the
+//     truncated thread declines to judge and the coverage pair carries it.
+// ---------------------------------------------------------------------------
+
+/**
+ * The label half of the verdict's second write.
+ *
+ * ⚠️ On a PULL REQUEST this label means「awaiting the maintainer's review」and
+ * it is NOT one of the six card states — ⛔ never add it to a card-state table
+ * here (H24/H25/H29 own that vocabulary) and ⛔ never read a card's copy of it
+ * through this constant.
+ */
+export const GOVERNED_PR_DECISION_LABEL = 'needs-user-decision';
+
+/** One comment page, and the quota backstop on the walk. */
+export const H48_COMMENTS_PAGE_SIZE = 100;
+export const H48_COMMENT_PAGE_CEILING = 5;
+
+/** Governed globs named inline before the sentence degrades to a count — H43's. */
+export const H48_SURFACE_LIST_CAP = 4;
+
+/**
+ * The seat's ACCEPT verdict, as a line.
+ *
+ * Three of `CLAIM_COMMENT_MARKER`'s four properties are mirrored deliberately:
+ * LINE-ANCHORED with the `m` flag (the verdict is a line in a comment, exactly
+ * as a claim is), an OPTIONAL leading blockquote `>` (a seat quoting its own
+ * verdict writes one), and no `g` flag — a shared regex carrying `lastIndex`
+ * between callers is a state bug waiting for its second reader.
+ *
+ * ⚠️ The FOURTH is deliberately NOT carried: no `i` flag. `CLAIM_COMMENT_MARKER`
+ * is case-insensitive as an accommodation for spellings the fleet had already
+ * shipped; the ACCEPT verdict landed on 2026-09-05 with no dialect behind it, so
+ * it starts at the canonical spelling and NOTHING wider — `RELEASE_COMMENT_MARKER`'s
+ * stated reason, applied to the newest half of the same protocol. `**Accept**`
+ * and `ACCEPT` unbolded are MALFORMED verdicts, not unrecognised dialects, and
+ * the repair direction is the WRITE side (the 2026-08-11 ruling quoted at
+ * `CLAIM_COMMENT_MARKER`).
+ *
+ * The closing `**` is load-bearing: without it `**ACCEPTED**` — a word that
+ * says something else about a different act — would read as this verdict.
+ */
+export const ACCEPT_VERDICT_MARKER = /^\s*>?\s*\*\*ACCEPT\*\*/m;
+
+/**
+ * The final maintainer brief, as a heading line.
+ *
+ * Same three mirrored properties, and the same strictness on the spelling: the
+ * literal `## ` prefix, so a `###` sub-heading and a bare mention of 维护者速读
+ * inside a paragraph are both non-matches. A brief that is not a level-2
+ * heading is not the artefact the protocol asks for.
+ */
+export const MAINTAINER_BRIEF_MARKER = /^\s*>?\s*## 维护者速读/m;
+
+/**
+ * Which PRs this row can speak about AT ALL — exported for the reason every
+ * gathering policy here is: the predicate that decides what is even counted is
+ * where a silent hole would live, and the summary's coverage pair is
+ * `judged of these`.
+ *
+ * Governed is the imported matcher's verdict (`governedPathsIn`), never a hand
+ * list of paths. A DRAFT is IN: a governed PR waiting as a draft for the human
+ * merge is the CORRECT terminal state of this regime (H43's header), and it is
+ * still a state in which the maintainer has been handed half a handoff. A
+ * merged or closed PR is OUT — the handoff is over, and nothing here is fixable
+ * after it.
+ */
+export function h48SpeaksAbout(pr, governed) {
+  if ((governed?.length ?? 0) === 0) return false;
+  if (pr?.merged_at) return false;
+  return String(pr?.state ?? 'open') !== 'closed';
+}
+
+/**
+ * H48 — null when clean OR unjudged, else the finding sentence.
+ *
+ * Three input states, never two (#4690), the H4 contract verbatim:
+ *
+ *   undefined  the thread was never consulted. UNJUDGED.
+ *   null       the thread was consulted and could not be read — a failed
+ *              request, or a walk that hit the page ceiling. UNJUDGED.
+ *   rows       judged.
+ *
+ * @param {{ number?: number, state?: string, merged_at?: string|null, labels?: any[] }} pr
+ * @param {{ glob: string, files?: string[] }[]} governed — the matched slice.
+ * @param {{ body?: string, created_at?: string }[]|null|undefined} commentRows —
+ *   REST rows rather than bodies, so the sentence can date the verdict it found.
+ */
+export function h48GovernedVerdictWithoutBrief(pr, governed, commentRows) {
+  if (commentRows === undefined || commentRows === null) return null;
+  if (!h48SpeaksAbout(pr, governed)) return null;
+  const rows = Array.isArray(commentRows) ? commentRows : [];
+  // `latestMarkedComment` rather than a second scan idiom: H47's resolution is
+  // the file's one answer to "which comment carries this marker", and a second
+  // one here is a drift waiting to happen. Existence is all this row needs; the
+  // stamp it also returns is what lets the sentence point at the verdict.
+  const verdict = latestMarkedComment(rows, ACCEPT_VERDICT_MARKER);
+  if (!verdict) return null;
+  const hasBrief = latestMarkedComment(rows, MAINTAINER_BRIEF_MARKER) !== null;
+  const hasLabel = labelNames(pr ?? {}).includes(GOVERNED_PR_DECISION_LABEL);
+  if (hasLabel && hasBrief) return null;
+
+  const surfaces = governed ?? [];
+  const hits = surfaces.reduce((n, s) => n + (s.files?.length ?? 0), 0);
+  const named = surfaces
+    .slice(0, H48_SURFACE_LIST_CAP)
+    .map((s) => `\`${s.glob}\`×${s.files?.length ?? 0}`)
+    .join(', ');
+  const more =
+    surfaces.length > H48_SURFACE_LIST_CAP ? `, +${surfaces.length - H48_SURFACE_LIST_CAP} more` : '';
+  const when = verdict.createdAt ? ` (newest one ${verdict.createdAt})` : '';
+  const missing = [
+    hasLabel ? null : `no \`${GOVERNED_PR_DECISION_LABEL}\` label`,
+    hasBrief ? null : 'no comment whose line begins `## 维护者速读`',
+  ].filter(Boolean);
+  const remedy = [
+    hasLabel ? null : `add \`${GOVERNED_PR_DECISION_LABEL}\``,
+    hasBrief ? null : 'post the final 维护者速读 brief as a COMMENT',
+  ].filter(Boolean);
+  const cost = hasLabel
+    ? 'the maintainer opens a governed diff with nothing saying what is being asked of them'
+    : hasBrief
+      ? 'the inbox filter that lists what is waiting for a ruling does not list this PR'
+      : 'the PR is neither listed in the inbox nor readable in two minutes once it is found';
+  const briefClause = hasBrief
+    ? ''
+    : ' ⚠️ A `## 维护者速读(草稿)` section in the PR BODY does NOT satisfy this half and is not ' +
+      'read here: the draft is written before the review happens, while the brief is the seat\'s own ' +
+      'word after it — so this row reads COMMENT threads and nothing else.';
+  return (
+    `open and GOVERNED (${hits} changed file(s) on the register: ${named}${more}), carrying a seat's ` +
+    `\`**ACCEPT**\` verdict${when}, and ${missing.join(' and ')}. The verdict is a HANDOFF rather than ` +
+    'a merge — a governed surface is landed by the maintainer, by hand — and the handoff is ONE act ' +
+    'with two writes: the label puts the PR in the review inbox and the brief is what makes reading it ' +
+    `a two-minute job. With this half missing, ${cost}.` +
+    briefClause +
+    ` Remedy: ${remedy.join(', and ')}. ⚠️ No verdict at all is CLEAN on this row — a governed PR no ` +
+    'seat has accepted yet is not the maintainer\'s, and nothing here asks anyone to hurry one. ' +
+    'Report-only patrol INPUT, not a verdict and not a gate: nothing is blocked by this row, ⛔ no ' +
+    'label is written from here, and ⛔ no seat may substitute an approving review for the maintainer.'
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Report rendering — pure over (findings, counts), so `--self-test` pins both
 // media offline. The live sweep below picks a renderer and prints it; nothing
 // about WHAT is swept or WHICH predicates fire depends on the format.
@@ -8996,6 +9202,13 @@ export const SWEEP_COUNT_KEYS = [
   // from "almost nothing was read".
   'releaseCandidates',
   'releaseJudged',
+  // H48's coverage pair (#15895). `briefCandidates` is how many GOVERNED OPEN
+  // PRs the row could speak about and `briefJudged` how many of those had a
+  // readable comment thread — this row BUYS that thread, so unlike H47's pair
+  // a shortfall here means a failed or ceiling-bound walk rather than an
+  // unbought one, and either way an unjudged PR must not read as a clean one.
+  'briefCandidates',
+  'briefJudged',
   'commits',
   'commitBindings',
   'commitBindingMessages',
@@ -9368,6 +9581,22 @@ export function summaryLine(counts, findingCount) {
     'and the no-assignee `pm:queue` leg is the thinnest half of that corpus — H2 buys a thread ' +
     'only for an ASSIGNED card. A card that was never claimed is clean and indistinguishable from ' +
     'an exit nobody recorded, so this count is a LOWER BOUND. ' +
+    // H48's coverage pair (#15895). UNCONDITIONAL like every other window's,
+    // and the register's availability LEADS it for H43's reason: this row can be
+    // quiet because no governed PR carries a verdict, because no thread was
+    // readable, or because the register never loaded — and only the first is a
+    // clean board. The cost is stated per governed open PR because that is the
+    // bound a reader checks: this row is the file's only PR-comment fetch.
+    `Maintainer briefs (H48): ${
+      counts.governedRegisterReason
+        ? `NOT MEASURED — ${counts.governedRegisterReason}`
+        : `${counts.briefJudged ?? 0} of ${counts.briefCandidates ?? 0} governed open PRs judged, one ` +
+          `issue-comment thread bought per governed open PR (at most ${H48_COMMENT_PAGE_CEILING} page(s) ` +
+          `of ${H48_COMMENTS_PAGE_SIZE}). This is a NEW fetch class rather than a second reader of one ` +
+          'already in hand: `commentCache` holds CARD threads only. A thread that failed or reached that ' +
+          'ceiling is UNJUDGED rather than short, a PR whose changed-file page went unread is not in this ' +
+          'population at all, and a governed PR with NO `**ACCEPT**` verdict is CLEAN rather than quiet'
+    }. ` +
     `Report-only: findings are patrol input, not a gate verdict.`
   );
 }
@@ -9419,6 +9648,7 @@ export const SUMMARY_CLAUSE_ANCHORS = [
   ['h46Claimless', 'Claim-less implementations (H46): '],
   ['h45EpicParents', 'Epic parent reads (H45): '],
   ['h47Release', 'Release records (H47): '],
+  ['h48Brief', 'Maintainer briefs (H48): '],
   ['reportOnly', 'Report-only: '],
 ];
 
@@ -9785,6 +10015,7 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   H45: 'state',
   H46: 'state',
   H47: 'state',
+  H48: 'state',
 
   H5: 'inventory',
   H6: 'inventory',
@@ -12294,6 +12525,46 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     return rows;
   };
   const commentsFor = async (issue) => (await commentRowsFor(issue)).map((c) => c.body ?? '');
+
+  // The PULL-REQUEST comment cache (#15895), and it is a SECOND cache rather
+  // than a widening of the one above on purpose: `commentCache` is keyed by card
+  // number and fed by listings that all filter `!i.pull_request`, so a PR
+  // number colliding with a card number in one map would hand a card's thread to
+  // a PR row. H48 is its only reader today; a future PR-comment reader finds a
+  // thread this row already bought here and pays nothing for it.
+  //
+  // ⛔ Bought ONLY for the PRs H48 speaks about (governed and open), never for
+  // the open-PR listing at large — the caller enforces that, and this helper
+  // never fetches a number it was not handed.
+  //
+  // Returns REST ROWS, or `null` for a thread that could not be read — a failed
+  // request, or a walk still full at the page ceiling. Both are UNJUDGED
+  // (#4690): a partial thread can only INVENT a missing half, never miss one.
+  const prCommentCache = new Map();
+  const prCommentRowsFor = async (number) => {
+    if (prCommentCache.has(number)) return prCommentCache.get(number);
+    const rows = [];
+    let exhausted = false;
+    let value = null;
+    try {
+      for (let page = 1; page <= H48_COMMENT_PAGE_CEILING; page++) {
+        const batch = await rest(
+          `/repos/${OWNER_REPO}/issues/${number}/comments?per_page=${H48_COMMENTS_PAGE_SIZE}&page=${page}`,
+        );
+        const list = Array.isArray(batch) ? batch : [];
+        rows.push(...list);
+        if (list.length < H48_COMMENTS_PAGE_SIZE) {
+          exhausted = true;
+          break;
+        }
+      }
+      if (exhausted) value = rows;
+    } catch {
+      value = null;
+    }
+    prCommentCache.set(number, value);
+    return value;
+  };
   let lastHoldError = null;
 
   // The `Blocked-by:` comment fallback (#8941 / #10061). Same shared cache, so
@@ -12702,6 +12973,27 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
         reviewedByPr.get(pr.number) ?? null,
       );
       if (gap) findings.push([pr, 'H43', gap]);
+    }
+
+    // H48 (#15895) — the ACCEPT verdict whose second write never happened. It
+    // lives INSIDE this block because its population is `governedByPr`, the
+    // slice H43 just computed off H36's file pages: one matcher for the governed
+    // question, never a third. A register that would not load therefore silences
+    // this row exactly as it silences H43, and the summary clause says NOT
+    // MEASURED rather than printing `0 of 0` at a reader (#4690).
+    //
+    // This is the one pass in this file that buys a PULL-REQUEST comment thread,
+    // and it buys one per GOVERNED OPEN PR — 11 of 31 on the board it landed
+    // against. The candidate/judged pair below is what keeps a run whose walks
+    // all failed separable from a board where every handoff was complete.
+    for (const pr of seenPrs.values()) {
+      const governed = governedByPr.get(pr.number);
+      if (!h48SpeaksAbout(pr, governed)) continue;
+      stats.briefCandidates = (stats.briefCandidates ?? 0) + 1;
+      const rows = await prCommentRowsFor(pr.number);
+      if (rows !== null) stats.briefJudged = (stats.briefJudged ?? 0) + 1;
+      const handoff = h48GovernedVerdictWithoutBrief(pr, governed, rows);
+      if (handoff) findings.push([pr, 'H48', handoff]);
     }
   }
 
@@ -19032,6 +19324,129 @@ Mutual exclusion: \`get_comments\` page 747 → \`[]\`, page 746 = my own R+117 
   t('H47 summary: …and names the thin half of its own corpus', saidBy('h47Release', summaryLine({}, 0)).includes('only for an ASSIGNED card'), true);
   t('H47 summary: …and says the count is a LOWER BOUND', saidBy('h47Release', summaryLine({}, 0)).includes('LOWER BOUND'), true);
   t('H47 summary: a bare line renders numbers, never `undefined`', saidBy('h47Release', summaryLine({}, 0)).includes('undefined'), false);
+
+  // -- H48 — the ACCEPT verdict whose second write never happened (#15895) ----
+  // The live board carries ZERO of these the day this landed: PR #15908 and
+  // PR #15641 hold all three readings, and the two 代读 PRs (#15382, #15885)
+  // hold label+brief with no verdict, which this row is ruled to read as CLEAN.
+  // So these cases are the only thing pinning the row's behaviour, and they are
+  // written for the shapes a live board will produce rather than today's.
+  const GOV48 = [{ glob: '.claude/**', files: ['.claude/agents/os-dev.md'] }];
+  const VERDICT48 = '**ACCEPT** — lands #15894 as ruled. Governed (`.claude/**`), predicate exit 3.';
+  const BRIEF48 = '## 维护者速读\n\n一句话:巡查行,报告态,不写标签。';
+  const LABEL48 = GOVERNED_PR_DECISION_LABEL;
+  const cm48 = (body, at = '2026-09-05T14:30:00Z') => ({ body, created_at: at });
+  // ⚠️ The fixture BODY always carries the dev's 草稿 section, so every case
+  // below that fires with no brief COMMENT is simultaneously the "a draft in the
+  // body does not satisfy the brief half" case.
+  const pr48 = (labels, extra = {}) => ({
+    number: 15908,
+    state: 'open',
+    draft: true,
+    labels: labels.map((name) => ({ name })),
+    body: '## 维护者速读(草稿)\n\n这是 dev 的草稿,不是评审后的最终速读。',
+    ...extra,
+  });
+  const h48row = (...args) => String(h48GovernedVerdictWithoutBrief(...args) ?? '');
+
+  // The complete handoff, and each way it comes apart.
+  t('H48: verdict + label + brief -> clean', h48GovernedVerdictWithoutBrief(pr48([LABEL48]), GOV48, [cm48(VERDICT48), cm48(BRIEF48)]), null);
+  t('H48: verdict + label, NO brief -> finding', typeof h48GovernedVerdictWithoutBrief(pr48([LABEL48]), GOV48, [cm48(VERDICT48)]), 'string');
+  t('H48: …and the row names the brief half that is missing', h48row(pr48([LABEL48]), GOV48, [cm48(VERDICT48)]).includes('no comment whose line begins `## 维护者速读`'), true);
+  t('H48: …and the remedy is posting it as a COMMENT', h48row(pr48([LABEL48]), GOV48, [cm48(VERDICT48)]).includes('post the final 维护者速读 brief as a COMMENT'), true);
+  t('H48: …and never asks for the label, which is already there', h48row(pr48([LABEL48]), GOV48, [cm48(VERDICT48)]).includes('add `needs-user-decision`'), false);
+  t('H48: verdict + brief, NO label -> finding', typeof h48GovernedVerdictWithoutBrief(pr48([]), GOV48, [cm48(VERDICT48), cm48(BRIEF48)]), 'string');
+  t('H48: …and the row names the label half that is missing', h48row(pr48([]), GOV48, [cm48(VERDICT48), cm48(BRIEF48)]).includes('no `needs-user-decision` label'), true);
+  t('H48: …and the remedy is the label write', h48row(pr48([]), GOV48, [cm48(VERDICT48), cm48(BRIEF48)]).includes('Remedy: add `needs-user-decision`.'), true);
+  t('H48: …and never asks for a brief that is already posted', h48row(pr48([]), GOV48, [cm48(VERDICT48), cm48(BRIEF48)]).includes('as a COMMENT'), false);
+  t('H48: verdict and NEITHER half -> ONE finding naming both', h48row(pr48([]), GOV48, [cm48(VERDICT48)]).includes('no `needs-user-decision` label and no comment whose line begins `## 维护者速读`'), true);
+  t('H48: …and both remedies in one sentence, never two rows', h48row(pr48([]), GOV48, [cm48(VERDICT48)]).includes('add `needs-user-decision`, and post the final 维护者速读 brief as a COMMENT'), true);
+  t('H48: …and it really is ONE row', (h48row(pr48([]), GOV48, [cm48(VERDICT48)]).match(/Report-only patrol INPUT/gu) ?? []).length, 1);
+
+  // The BODY draft is not the brief — the half this row exists to find must not
+  // be allowed to satisfy itself out of the text the dev wrote before review.
+  t('H48: a `## 维护者速读(草稿)` section in the BODY does NOT satisfy the brief half', typeof h48GovernedVerdictWithoutBrief(pr48([LABEL48]), GOV48, [cm48(VERDICT48)]), 'string');
+  t('H48: …and the row SAYS so, where a reader would otherwise assume a bug', h48row(pr48([LABEL48]), GOV48, [cm48(VERDICT48)]).includes('PR BODY does NOT satisfy this half'), true);
+  t('H48: …and that clause is absent once the brief really is posted', h48row(pr48([]), GOV48, [cm48(VERDICT48), cm48(BRIEF48)]).includes('PR BODY does NOT satisfy'), false);
+  t('H48: a brief comment ANYWHERE on the thread counts, not only the newest', h48GovernedVerdictWithoutBrief(pr48([LABEL48]), GOV48, [cm48(BRIEF48, '2026-09-05T10:00:00Z'), cm48(VERDICT48), cm48('lgtm')]), null);
+
+  // ⛔ No verdict is CLEAN — the boundary of this card, pinned so a later reader
+  // does not "fix" it into the 代读 row it was ruled not to be.
+  t('H48: no verdict at all -> CLEAN, not quiet', h48GovernedVerdictWithoutBrief(pr48([]), GOV48, [cm48('rebased onto main')]), null);
+  t('H48: …the live 代读 shape (label + brief, no verdict) is CLEAN and deliberately not this card', h48GovernedVerdictWithoutBrief(pr48([LABEL48]), GOV48, [cm48(BRIEF48)]), null);
+  t('H48: …and an empty thread on a governed PR is clean', h48GovernedVerdictWithoutBrief(pr48([]), GOV48, []), null);
+  t('H48: …and the row states that boundary in its own sentence', h48row(pr48([]), GOV48, [cm48(VERDICT48)]).includes('No verdict at all is CLEAN on this row'), true);
+  t('H48 row: states its report-only posture', h48row(pr48([]), GOV48, [cm48(VERDICT48)]).includes('Report-only patrol INPUT'), true);
+  t('H48 row: …and refuses the one substitution a seat must never make', h48row(pr48([]), GOV48, [cm48(VERDICT48)]).includes('no seat may substitute an approving review'), true);
+  t('H48 row: names the governed surfaces it matched, from the imported matcher', h48row(pr48([]), GOV48, [cm48(VERDICT48)]).includes('`.claude/**`×1'), true);
+  const many48 = Array.from({ length: H48_SURFACE_LIST_CAP + 2 }, (_, i) => ({ glob: `g${i}/**`, files: ['f'] }));
+  t('H48 row: past the surface cap it counts the rest rather than growing', h48row(pr48([]), many48, [cm48(VERDICT48)]).includes('+2 more'), true);
+  t('H48 row: …and dates the verdict it found, so the reader can go to it', h48row(pr48([]), GOV48, [cm48(VERDICT48)]).includes('(newest one 2026-09-05T14:30:00Z)'), true);
+
+  // Population: governed-only, open-only, drafts IN.
+  t('H48: a NON-governed PR with a verdict and nothing else is out of population', h48GovernedVerdictWithoutBrief(pr48([]), [], [cm48(VERDICT48)]), null);
+  t('H48 population: …and the counting policy says so directly', h48SpeaksAbout(pr48([]), []), false);
+  t('H48 population: an undefined governed slice is out too, never a crash', h48SpeaksAbout(pr48([]), undefined), false);
+  t('H48: a CLOSED PR is out — the handoff is over and nothing here is fixable', h48GovernedVerdictWithoutBrief(pr48([], { state: 'closed' }), GOV48, [cm48(VERDICT48)]), null);
+  t('H48: a MERGED PR is out for the same reason', h48GovernedVerdictWithoutBrief(pr48([], { merged_at: '2026-09-05T14:29:00Z' }), GOV48, [cm48(VERDICT48)]), null);
+  t('H48 population: ⛔ a DRAFT is IN — the correct terminal state is still half a handoff', h48SpeaksAbout(pr48([], { draft: true }), GOV48), true);
+  t('H48 population: …and so is a non-draft governed PR', h48SpeaksAbout(pr48([], { draft: false }), GOV48), true);
+  t('H48 population: a closed PR is out', h48SpeaksAbout(pr48([], { state: 'closed' }), GOV48), false);
+  t('H48 population: a merged PR is out', h48SpeaksAbout(pr48([], { merged_at: '2026-09-05T14:29:00Z' }), GOV48), false);
+  t('H48 population: an absent state field is judged, not exempted', h48SpeaksAbout({ ...pr48([]), state: undefined }, GOV48), true);
+
+  // Three input states, never two (#4690) — and here the unreadable one is a
+  // thread this row BOUGHT and did not get, which is why it must not read clean.
+  t('H48: an unconsulted thread is UNJUDGED, never clean', h48GovernedVerdictWithoutBrief(pr48([]), GOV48, undefined), null);
+  t('H48: an UNREADABLE (failed or ceiling-bound) thread is UNJUDGED too', h48GovernedVerdictWithoutBrief(pr48([]), GOV48, null), null);
+  t('H48: a missing PR is judged on the slice it was handed, never a crash', typeof h48GovernedVerdictWithoutBrief(undefined, GOV48, [cm48(VERDICT48)]), 'string');
+
+  // The verdict marker — `CLAIM_COMMENT_MARKER`'s strictness minus the one
+  // property that was an accommodation for a shipped dialect.
+  t('accept marker: the canonical spelling matches', ACCEPT_VERDICT_MARKER.test(VERDICT48), true);
+  t('accept marker: a blockquoted verdict matches, as a claim does', ACCEPT_VERDICT_MARKER.test('> **ACCEPT** — quoted back on the thread'), true);
+  t('accept marker: it reads a line anywhere in the body, as the claim marker does', ACCEPT_VERDICT_MARKER.test('re-read after the merge\n\n**ACCEPT** — still stands'), true);
+  t('accept marker: it must BEGIN the line — prose about accepting is not a verdict', ACCEPT_VERDICT_MARKER.test('I will **ACCEPT** this once CI is green'), false);
+  t('accept marker: ⛔ `ACCEPT` without the bold is not a verdict', ACCEPT_VERDICT_MARKER.test('ACCEPT — lands as ruled'), false);
+  t('accept marker: ⛔ `**ACCEPTED**` says something else and does not match', ACCEPT_VERDICT_MARKER.test('**ACCEPTED** — merged by hand'), false);
+  t('accept marker: ⛔ no `i` flag — a lowercase verdict is MALFORMED, not a dialect', ACCEPT_VERDICT_MARKER.test('**Accept** — lands as ruled'), false);
+  t('accept marker: no `g` flag, so two reads of one body agree', [ACCEPT_VERDICT_MARKER.test(VERDICT48), ACCEPT_VERDICT_MARKER.test(VERDICT48)].join(','), 'true,true');
+
+  // The brief marker — the same three properties, on the literal heading.
+  t('brief marker: the canonical heading matches', MAINTAINER_BRIEF_MARKER.test(BRIEF48), true);
+  t('brief marker: …and the decorated spellings live on the board today', ['## 维护者速读(skills 席,2026-09-05T13:2xZ)', '## 维护者速读 · 待你一个字(代读)'].every((b) => MAINTAINER_BRIEF_MARKER.test(b)), true);
+  t('brief marker: a blockquoted brief matches', MAINTAINER_BRIEF_MARKER.test('> ## 维护者速读'), true);
+  t('brief marker: ⛔ 维护者速读 NOT at line start is a mention, not a brief', MAINTAINER_BRIEF_MARKER.test('见上面的 ## 维护者速读'), false);
+  t('brief marker: ⛔ a `###` sub-heading is not the artefact the protocol names', MAINTAINER_BRIEF_MARKER.test('### 维护者速读'), false);
+  t('brief marker: ⛔ a bare mention with no heading at all', MAINTAINER_BRIEF_MARKER.test('维护者速读:见评论区'), false);
+  t('brief marker: no `g` flag, so two reads of one body agree', [MAINTAINER_BRIEF_MARKER.test(BRIEF48), MAINTAINER_BRIEF_MARKER.test(BRIEF48)].join(','), 'true,true');
+  t('brief marker: a verdict is not a brief', MAINTAINER_BRIEF_MARKER.test(VERDICT48), false);
+  t('brief marker: …and a brief is not a verdict', ACCEPT_VERDICT_MARKER.test(BRIEF48), false);
+
+  // Adjacency: H43 reads WHO WAS ASKED, this row reads whether the handoff was
+  // completed — the same governed PR, two questions neither can answer for the
+  // other. Written with an explicit approver list so the case does not depend on
+  // the live register's contents.
+  const ASKED48 = { ...pr48([LABEL48]), requested_reviewers: [{ login: 'the-maintainer' }] };
+  t('H48 adjacency: H43 is silent once the maintainer is asked', h43GovernedReviewRequestGap(ASKED48, GOV48, ['the-maintainer'], []), null);
+  t('H48 adjacency: …while H48 still fires on that PR, because the brief is missing', typeof h48GovernedVerdictWithoutBrief(ASKED48, GOV48, [cm48(VERDICT48)]), 'string');
+
+  // Registry, counters and the clause.
+  t('H48 band: registered as a state row', familyBand('H48'), 'state');
+  t('H48 band: …and the sweep really pushes it, so the registry sees it', familyRegistryCoverage().emitted.includes('H48'), true);
+  t('H48 band: no code is left unregistered by this change', familyRegistryCoverage().missing.length, 0);
+  t('H48 band: …and no band names a family the sweep never emits', familyRegistryCoverage().extra.length, 0);
+  t('H48 band: the registry still fits inside the ledger ROW CAP', Object.keys(HALF_STATE_FAMILY_BAND).length <= FAMILY_LEDGER_ROW_CAP, true);
+  t('H48: both count keys ride the enumerated forwarding contract', ['briefCandidates', 'briefJudged'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
+  t('H48 summary: the coverage pair is reported', saidBy('h48Brief', summaryLine({ briefJudged: 10, briefCandidates: 11 }, 0)).includes('10 of 11 governed open PRs judged'), true);
+  t('H48 summary: the clause is rendered on EVERY run, not just interesting ones', saidBy('h48Brief', summaryLine({}, 0)).includes('0 of 0 governed open PRs judged'), true);
+  t('H48 summary: …and states the fetch class it BUYS, per governed open PR', saidBy('h48Brief', summaryLine({}, 0)).includes('one issue-comment thread bought per governed open PR'), true);
+  t('H48 summary: …and names it a NEW class rather than a reuse', saidBy('h48Brief', summaryLine({}, 0)).includes('NEW fetch class'), true);
+  t('H48 summary: …and says a ceiling-bound thread is UNJUDGED, not short', saidBy('h48Brief', summaryLine({}, 0)).includes('UNJUDGED rather than short'), true);
+  t('H48 summary: …and says a verdict-less governed PR is CLEAN, not quiet', saidBy('h48Brief', summaryLine({}, 0)).includes('CLEAN rather than quiet'), true);
+  t('H48 summary: an unloadable register reads NOT MEASURED, as H43 does', saidBy('h48Brief', summaryLine({ governedRegisterReason: 'the register is not installed beside this file' }, 0)).includes('NOT MEASURED'), true);
+  t('H48 summary: …and prints no count at all then, so nothing reads as a clean board', saidBy('h48Brief', summaryLine({ governedRegisterReason: 'the register is not installed beside this file' }, 0)).includes('0 of 0'), false);
+  t('H48 summary: a bare line renders numbers, never `undefined`', saidBy('h48Brief', summaryLine({}, 0)).includes('undefined'), false);
 
   // -- The `[::]` collapse (#12090): behaviour-preserving, asserted as such ---
   // The class held U+003A TWICE, never the fullwidth U+FF1A its shape implied.
