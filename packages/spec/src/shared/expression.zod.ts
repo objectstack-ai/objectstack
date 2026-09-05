@@ -19,8 +19,14 @@ import { z } from 'zod';
  * | dialect | engine | use |
  * |:---|:---|:---|
  * | `cel`      | `@objectstack/formula` (cel-js + ObjectStack stdlib) | formulas, predicates, seed dynamic values |
- * | `cron`     | `cron-parser` | job schedules |
+ * | `cron`     | none at parse time — `croner` fires it at schedule time, on the one wired slot | job schedules |
  * | `template` | `{{var}}` interpolation at evaluate time (same variable scope as CEL) | notification subjects/bodies, `titleFormat`, prompt templates |
+ *
+ * No cron syntax is judged at parse time: `croner` evaluates a cron slot only
+ * when `CronSchedule.expression` is scheduled (`toBoundaryJobSchedule` →
+ * `CronJobAdapter`, where an invalid pattern is refused); every other
+ * cron-typed slot is parsed and reaches no engine, and `@objectstack/formula`'s
+ * registered `cron` engine has no caller outside that package.
  *
  * Those three are the whole list — it is exactly the `ExpressionDialect` enum
  * below. Procedural JavaScript is **not** a dialect: it is the L2 authoring
