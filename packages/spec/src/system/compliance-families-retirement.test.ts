@@ -302,16 +302,26 @@ describe('[#15513] ADR-0087 registration', () => {
 // `packages/client-react`'s `realtime-hooks.test.tsx` (the `@objectstack/core`
 // entry records the measurement). A `.tsx` import of a retired name fails
 // `tsc` in its own package, which is the enforced channel for typed sources.
+// Under `examples/` NO code file is scanned at all (only JSON / MD / MDX /
+// YAML): every example is a workspace package with its own `typecheck`, and
+// the same self-test pins that no cross-package hint reaches a test file
+// outside `packages/**` — its `OUTSIDE_PACKAGES` specimen is the CRM example's
+// smoke test, which a bare `examples/**` glob covers and a `.json` / `.md`
+// glob cannot. (The specimen's path is deliberately not spelled here: the
+// inputs gate collects a quoted whole path as a named read and would demand
+// the very declaration the self-test refuses.)
 // The residue this leg covers is everything `tsc` does not compile: JSON,
-// YAML, MD, MDX, and untyped `.js` / `.mjs` / `.cjs`.
+// YAML, MD, MDX, and (under `packages/`) untyped `.js` / `.mjs` / `.cjs`.
 describe('[#15513] tree-scoped absence: nothing inside the declared radius references a retired name', () => {
   const REPO_ROOT = path.resolve(SPEC_ROOT, '../..');
   const THIS_FILE = path.relative(REPO_ROOT, fileURLToPath(import.meta.url)).split(path.sep).join('/');
 
   /** The walked roots — declared in `scripts/cross-package-test-inputs.mjs` under `@objectstack/spec`. */
   const WALK_ROOTS = ['packages', 'examples', 'skills', 'content', 'scripts'];
-  /** Per-extension under `packages/` (never `.tsx`, see above); the other roots are declared whole. */
+  /** Per-extension under `packages/` (never `.tsx`, see above); `content/`, `skills/`, `scripts/` are declared whole. */
   const SCANNED_EXT = new Set(['.ts', '.mts', '.cts', '.js', '.mjs', '.cjs', '.json', '.md', '.mdx', '.yaml', '.yml']);
+  /** Under `examples/` only the non-code extensions are scanned AND declared (see above). */
+  const EXAMPLES_EXT = new Set(['.json', '.md', '.mdx', '.yaml', '.yml']);
   /** Build, SCM and cache state — not authored sources. */
   const SKIPPED_DIRS = new Set(['node_modules', 'dist', '.git', '.turbo', '.cache', '.objectstack', 'coverage', '.next', '.source']);
 
@@ -383,7 +393,8 @@ describe('[#15513] tree-scoped absence: nothing inside the declared radius refer
           continue;
         }
         if (!entry.isFile()) continue;
-        if (!SCANNED_EXT.has(path.extname(entry.name))) continue;
+        const ext = path.extname(entry.name);
+        if (!(rel.startsWith('examples/') ? EXAMPLES_EXT : SCANNED_EXT).has(ext)) continue;
         if (entry.name === 'CHANGELOG.md') continue; // release prose records the removal
         if (EXCLUDED.has(rel) || EXCLUDED_PREFIXES.some((p) => rel.startsWith(p))) continue;
         visited += 1;

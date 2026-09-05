@@ -79,7 +79,11 @@
         "$TURBO_ROOT$/packages/**/*.mdx",
         "$TURBO_ROOT$/packages/**/*.yaml",
         "$TURBO_ROOT$/packages/**/*.yml",
-        "$TURBO_ROOT$/examples/**",
+        "$TURBO_ROOT$/examples/**/*.json",
+        "$TURBO_ROOT$/examples/**/*.md",
+        "$TURBO_ROOT$/examples/**/*.mdx",
+        "$TURBO_ROOT$/examples/**/*.yaml",
+        "$TURBO_ROOT$/examples/**/*.yml",
         "$TURBO_ROOT$/content/**"
       ]
     },

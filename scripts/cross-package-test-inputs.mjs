@@ -194,10 +194,19 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // `tsc` in its own package, which is the enforced channel there.
       // `packages/**/*.ts` and `*.mts` subsume this entry's narrower `.ts`
       // globs above, which are left as the tests that declared them spelled
-      // them. `examples/**` and `content/**` are declared whole (the pin scans
-      // their JSON / MD / MDX / YAML too; `content/**` subsumes the two
-      // `content/docs/...` rows above). `skills/**` and `scripts/**` were
-      // already declared by the tests named at their rows.
+      // them. `content/**` is declared whole (the pin scans its JSON / MD /
+      // MDX / YAML too; it subsumes the two `content/docs/...` rows above).
+      // `examples/` is declared per NON-CODE extension only: every example is
+      // a workspace package with its own `typecheck` (`tsc --noEmit`), so a
+      // typed resurrection there fails `tsc` in its own package, and the pin
+      // scans only JSON / MD / MDX / YAML under it. ⛔ Not `examples/**` — that
+      // glob covers the CRM example's smoke test, and the dispatch-gates
+      // self-test pins that no cross-package hint reaches a test file outside
+      // `packages/**` (its `OUTSIDE_PACKAGES` specimen; the path is not spelled
+      // here for the reason the `@objectstack/types` entry gives — a quoted
+      // whole path in this module becomes the very hint the case refuses);
+      // a `.json` / `.md` glob cannot match a `.ts` path. `skills/**` and
+      // `scripts/**` were already declared by the tests named at their rows.
       'packages/**/*.ts',
       'packages/**/*.mts',
       'packages/**/*.cts',
@@ -209,7 +218,11 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'packages/**/*.mdx',
       'packages/**/*.yaml',
       'packages/**/*.yml',
-      'examples/**',
+      'examples/**/*.json',
+      'examples/**/*.md',
+      'examples/**/*.mdx',
+      'examples/**/*.yaml',
+      'examples/**/*.yml',
       'content/**',
     ],
     heldBy: {
@@ -234,7 +247,11 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'packages/**/*.mdx': ['packages/spec/src/system/compliance-families-retirement.test.ts'],
       'packages/**/*.yaml': ['packages/spec/src/system/compliance-families-retirement.test.ts'],
       'packages/**/*.yml': ['packages/spec/src/system/compliance-families-retirement.test.ts'],
-      'examples/**': ['packages/spec/src/system/compliance-families-retirement.test.ts'],
+      'examples/**/*.json': ['packages/spec/src/system/compliance-families-retirement.test.ts'],
+      'examples/**/*.md': ['packages/spec/src/system/compliance-families-retirement.test.ts'],
+      'examples/**/*.mdx': ['packages/spec/src/system/compliance-families-retirement.test.ts'],
+      'examples/**/*.yaml': ['packages/spec/src/system/compliance-families-retirement.test.ts'],
+      'examples/**/*.yml': ['packages/spec/src/system/compliance-families-retirement.test.ts'],
     },
   },
   '@objectstack/core': {
