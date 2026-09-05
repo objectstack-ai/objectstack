@@ -53,13 +53,17 @@
  * ## What is compared, and the direction it fails in
  *
  * The identity captured at boot is `stat(path)` taken right after the driver
- * connected — the device+inode pair of the file at the configured path — not
+ * connected — the device+inode pair of the file at the configured path, plus
+ * its birth time where that field is trustworthy ({@link captureServedDatabaseFile}
+ * says what arms the second rung, and why inodes alone are not enough) — not
  * the inode behind the driver's own descriptor, which no portable Node API
  * exposes. If a swap happened in the window between the driver's `open()` and
  * that first `stat()`, the capture records the NEW file and the watch never
- * fires. That direction is deliberate: a missed report costs what today
- * already costs, while a false report would send an operator to restart a
- * server whose database is fine.
+ * fires. That direction is deliberate, and it is the direction every
+ * uncertainty here is resolved in: a missed report costs what today already
+ * costs, while a false report would send an operator to restart a server whose
+ * database is fine. Silence from this watch is therefore never a claim that
+ * the file is intact — it is only the absence of a claim that it is not.
  */
 
 import { statSync, type Stats } from 'node:fs';
@@ -72,6 +76,12 @@ export interface ServedDatabaseFile {
   dev: number;
   /** `stat.ino` at capture time. */
   ino: number;
+  /**
+   * `stat.birthtimeMs` at capture time — the SECOND rung, present only when
+   * this filesystem's birth time is trustworthy here. See
+   * {@link captureServedDatabaseFile} for what arms it and why.
+   */
+  birthtimeMs?: number;
 }
 
 /**
@@ -84,7 +94,7 @@ export interface ServedDatabaseFile {
 export type ServedDatabaseFileVerdict =
   | { kind: 'unchanged' }
   | { kind: 'missing' }
-  | { kind: 'replaced'; onDisk: { dev: number; ino: number } }
+  | { kind: 'replaced'; onDisk: { dev: number; ino: number }; inodeReused: boolean }
   | { kind: 'unreadable'; reason: string };
 
 /** Seam for tests — the real `statSync` by default. */
@@ -116,10 +126,42 @@ export function captureServedDatabaseFile(
   try {
     const s = stat(path);
     if (!Number.isFinite(s.ino) || s.ino === 0) return undefined;
-    return { path, dev: Number(s.dev), ino: Number(s.ino) };
+    return { path, dev: Number(s.dev), ino: Number(s.ino), birthtimeMs: armBirthtime(s) };
   } catch {
     return undefined;
   }
+}
+
+/**
+ * The birth time, when it can be trusted here — otherwise `undefined`.
+ *
+ * ⚠️ Inode numbers are RECYCLED, and the recycling is not exotic: measured on
+ * this repo's own CI-shaped filesystem, deleting a file and recreating one at
+ * the same path in the same millisecond handed back the SAME inode. So "a
+ * later boot created a brand-new database at this path" — the card's own
+ * second half — can be invisible to a dev+inode comparison alone. Birth time
+ * separates them: the same measurement showed it moving on the recreate
+ * (…634434.566 to …634438.940) while staying put across an ordinary write to
+ * a live inode, which is exactly the discrimination wanted.
+ *
+ * The hazard is that `birthtimeMs` is not universally real. Node documents
+ * two fallbacks for filesystems that do not store it: the epoch, or a copy of
+ * `ctime`. The epoch one is harmless (a constant compares equal forever); the
+ * `ctime` one is NOT — `ctime` moves on every write, so a healthy serving
+ * database would report itself replaced every interval.
+ *
+ * So the rung ARMS ITSELF on evidence, and only on evidence: if birth time is
+ * a copy of `ctime` it equals `ctime` by construction, and the two being
+ * different at capture proves this filesystem keeps them apart. A file whose
+ * `ctime` has not yet moved past its birth time is simply left on one rung —
+ * conservative, never wrong. The whole design is one-directional: it can only
+ * ever add detections, never a false one.
+ */
+function armBirthtime(s: Stats): number | undefined {
+  const birth = Number(s.birthtimeMs);
+  if (!Number.isFinite(birth)) return undefined;
+  if (birth === Number(s.ctimeMs)) return undefined;
+  return birth;
 }
 
 /** Ask whether the file at `opened.path` is still the file `opened` names. */
@@ -145,8 +187,17 @@ export function checkServedDatabaseFile(
   if (!Number.isFinite(ino) || ino === 0) {
     return { kind: 'unreadable', reason: 'filesystem reports no usable inode' };
   }
-  if (dev === opened.dev && ino === opened.ino) return { kind: 'unchanged' };
-  return { kind: 'replaced', onDisk: { dev, ino } };
+  if (dev !== opened.dev || ino !== opened.ino) {
+    return { kind: 'replaced', onDisk: { dev, ino }, inodeReused: false };
+  }
+  // Same dev+inode — which is NOT the same as the same file. Second rung.
+  if (opened.birthtimeMs !== undefined) {
+    const birth = Number(s.birthtimeMs);
+    if (Number.isFinite(birth) && birth !== opened.birthtimeMs) {
+      return { kind: 'replaced', onDisk: { dev, ino }, inodeReused: true };
+    }
+  }
+  return { kind: 'unchanged' };
 }
 
 /**
@@ -164,7 +215,9 @@ export function describeServedDatabaseFileDivergence(
     verdict.kind === 'missing'
       ? `nothing exists at ${opened.path} any more`
       : verdict.kind === 'replaced'
-        ? `${opened.path} is now a DIFFERENT file (opened dev/inode ${opened.dev}/${opened.ino}, on disk now ${verdict.onDisk.dev}/${verdict.onDisk.ino})`
+        ? (verdict.inodeReused
+            ? `${opened.path} is now a DIFFERENT file created since boot (the filesystem recycled inode ${opened.ino}, so only its creation time tells them apart)`
+            : `${opened.path} is now a DIFFERENT file (opened dev/inode ${opened.dev}/${opened.ino}, on disk now ${verdict.onDisk.dev}/${verdict.onDisk.ino})`)
         : undefined;
   if (!what) return undefined;
   return [
