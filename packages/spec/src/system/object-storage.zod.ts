@@ -194,7 +194,10 @@ export type ObjectMetadata = z.input<typeof ObjectMetadataSchema>;
  */
 export const PresignedUrlConfigSchema = lazySchema(() => z.object({
   operation: z.enum(['get', 'put', 'delete', 'head']).describe('Allowed operation'),
-  expiresIn: z.number().min(1).max(604800).describe('Expiration time in seconds (max 7 days)'),
+  // `externalVocabulary` mirror (#14478 ruling B): the AWS SDK presigner option
+  // name, and the `.max(604800)` above is that standard's own 7-day ceiling.
+  expiresIn: z.number().min(1).max(604800).describe('Expiration time in seconds (max 7 days)')
+    .meta({ externalVocabulary: 'AWS S3 presigned URL `expiresIn` (@aws-sdk/s3-request-presigner)' }),
   contentType: z.string().optional().describe('Required content type for PUT operations'),
   maxSize: z.number().min(0).optional().describe('Maximum file size in bytes for PUT operations'),
   responseContentType: z.string().optional().describe('Override content-type for GET operations'),

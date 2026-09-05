@@ -29,6 +29,8 @@ import { z } from 'zod';
  * }
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { EpochMs } from '../shared/epoch.zod';
+import { retiredKey } from '../shared/retired-key';
 export const StartupOptionsSchema = lazySchema(() => z.object({
   /**
    * Maximum time (ms) to wait for each plugin to start
@@ -95,7 +97,18 @@ export const HealthStatusSchema = lazySchema(() => z.object({
   /**
    * Health check timestamp (Unix milliseconds)
    */
-  timestamp: z.number().int().describe('Unix timestamp in milliseconds when health check was performed'),
+  // Renamed from `timestamp` and typed `EpochMs` (#15676, #14478 ruling B): the
+  // instant the health check ran, named for what it marks.
+  checkedAt: EpochMs.describe('Unix timestamp in milliseconds when health check was performed'),
+
+  /** Tombstone for the rename above (#15676, ruling B on #14478). */
+  timestamp: retiredKey(
+    '`HealthStatus.timestamp` was renamed to `checkedAt` in @objectstack/spec 17 '
+    + '(#14478 ruling B) — the instant the check RAN now carries the shared `EpochMs` '
+    + 'schema, which declares the epoch-millisecond unit the bare key name left to the '
+    + 'describe prose. Rename the key to `checkedAt`; the value is unchanged '
+    + '(`Date.now()`).',
+  ),
   
   /**
    * Optional health details (plugin-specific)

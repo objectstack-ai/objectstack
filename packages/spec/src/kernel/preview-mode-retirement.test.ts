@@ -87,7 +87,7 @@ describe("[#11846] RuntimeMode 'preview' retirement", () => {
       mode: 'preview',
       version: '1.0.0',
       cwd: '/app',
-      startTime: Date.now(),
+      startedAt: Date.now(),
     });
     expect(result.success).toBe(false);
     if (result.success) return;
@@ -113,7 +113,7 @@ describe('[#11846] KernelContext.previewMode retirement', () => {
     mode: 'production',
     version: '1.0.0',
     cwd: '/app',
-    startTime: Date.now(),
+    startedAt: Date.now(),
   } as const;
 
   /** The block exactly as the retired docs taught authors to write it. */

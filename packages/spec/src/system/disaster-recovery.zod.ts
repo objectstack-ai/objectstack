@@ -124,7 +124,11 @@ export const FailoverConfigSchema = lazySchema(() => z.object({
   })).min(2).describe('Multi-region configuration (minimum 2 regions)'),
   /** DNS failover configuration */
   dns: z.object({
-    ttl: z.number().default(60).describe('DNS TTL in seconds for failover'),
+    // `externalVocabulary` mirror (#14478 ruling B): the DNS resource-record TTL
+    // field, whose unit is fixed at seconds by the standard and spelled `ttl`
+    // by every provider API this key is forwarded to (Route 53, Cloudflare).
+    ttl: z.number().default(60).describe('DNS TTL in seconds for failover')
+      .meta({ externalVocabulary: 'DNS resource-record TTL (RFC 1035 §4.1.3)' }),
     provider: z.enum(['route53', 'cloudflare', 'azure_dns', 'custom']).optional()
       .describe('DNS provider for automatic failover'),
   }).optional().describe('DNS failover settings'),

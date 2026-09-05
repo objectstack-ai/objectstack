@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { TenantQuotaSchema } from '../system/tenant.zod.js';
 import { lazySchema } from '../shared/lazy-schema';
 import { retiredKey } from '../shared/retired-key';
+import { EpochMs } from '../shared/epoch.zod';
 
 // Retirement prescriptions (#11846, ADR-0049 enforce-or-remove; maintainer
 // ruling 2026-08-27). Declared with `//` (never `/** */`) and ABOVE the enum's
@@ -27,6 +28,14 @@ const RUNTIME_MODE_PREVIEW_RETIRED =
   + 'job (`OS_PREVIEW_MODE` is routing-only and never touched identity). If a preview '
   + 'experience becomes a product capability it re-declares fresh, with the '
   + 'production-posture hard-refusal as the first-landed half.';
+const START_TIME_RENAMED =
+  '`context.startTime` was renamed to `context.startedAt` in @objectstack/spec 17 '
+  + '(#14478 ruling B) — the boot INSTANT now carries the shared `EpochMs` schema, which '
+  + 'declares the epoch-millisecond unit the key name used to leave to the describe prose. '
+  + 'Rename the key to `startedAt`; the value is unchanged (`Date.now()`). `*At` rather '
+  + 'than `startTimeMs` deliberately: every `*Ms` key in this package is a DURATION, so '
+  + 'spelling an instant that way would move it into the family the rule exists to '
+  + 'separate it from.';
 const PREVIEW_MODE_RETIRED =
   '`context.previewMode` was removed in @objectstack/spec 17 (ADR-0049 '
   + 'enforce-or-remove) — nothing ever read the block: none of its six keys (`autoLogin`, '
@@ -103,7 +112,10 @@ export const KernelContextSchema = lazySchema(() => z.object({
   /**
    * Telemetry
    */
-  startTime: z.number().int().describe('Boot timestamp (ms)'),
+  // Renamed from `startTime` and typed `EpochMs` (#15676, #14478 ruling B): the
+  // boot INSTANT. Spelling it `startTimeMs` would have moved it into the `*Ms`
+  // duration family, which is the confusion the ruling separates.
+  startedAt: EpochMs.describe('Boot timestamp — Unix milliseconds'),
   
   /**
    * Feature Flags (Global)
@@ -120,6 +132,13 @@ export const KernelContextSchema = lazySchema(() => z.object({
    * inherits the tombstone.
    */
   previewMode: retiredKey(PREVIEW_MODE_RETIRED),
+
+  /**
+   * Tombstone for the epoch-instant rename (#15676, ruling B on #14478).
+   * `TenantRuntimeContextSchema` extends this shape and inherits it, which is
+   * why the retirement is registered under BOTH def keys.
+   */
+  startTime: retiredKey(START_TIME_RENAMED),
 }));
 
 export type KernelContext = z.input<typeof KernelContextSchema>;
