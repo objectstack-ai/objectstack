@@ -1082,6 +1082,69 @@ const MASKED_DEFS_GATE = [
 const MASKED_DEFS_EXPECTED = ['selfTest', 'runSelfTestTwice'];
 
 /**
+ * The HANDSHAKE DECOY: both spellings the recogniser reads, standing in the two
+ * texts the mask blanks -- a `selfTest() !== SELF_TEST_VERDICT` comparison in a
+ * COMMENT, and the flag's `= true` assignment inside a fixture TEMPLATE within
+ * the self-test's own body. Neither is a handshake the dispatch can perform, and
+ * the file's real dispatch is the bare `selfTest();` that notices nothing.
+ *
+ * The two decoys are un-hidden INDEPENDENTLY below, which is what makes this a
+ * reading of the MASK rather than of a fixture whose spellings were never
+ * recognisable: strip the comment marker and the same text reads `sentinel`;
+ * strip the template delimiters and it reads `flag`. Masked, both are gone and
+ * the answer is `none`.
+ */
+const HANDSHAKE_DECOY_GATE = [
+  '#!/usr/bin/env node',
+  "const SELF_TEST_VERDICT = 'reached';",
+  'let selfTestReachedVerdict = false;',
+  '// if (selfTest() !== SELF_TEST_VERDICT) process.exit(1);',
+  'function selfTest() {',
+  '  const FIXTURE = `',
+  '  selfTestReachedVerdict = true;',
+  '  `;',
+  "  if (FIXTURE.length < 1) { console.error('the fixture text went missing'); process.exit(1); }",
+  "  console.log('fixture self-test: 1 case passes');",
+  '}',
+  "if (process.argv.includes('--self-test')) {",
+  '  selfTest();',
+  '  if (!selfTestReachedVerdict) { console.error(\'no verdict\'); process.exit(1); }',
+  '}',
+  '',
+].join('\n');
+
+/** The two decoy texts, each looked up where it is hidden. */
+const DECOY_SENTINEL_TEXT = 'selfTest() !== SELF_TEST_VERDICT';
+const DECOY_FLAG_TEXT = 'selfTestReachedVerdict = true;';
+
+/**
+ * The COLUMN-ZERO BRACE gate, reduced: an inline arrow argument whose `});`
+ * closes at column 0 INSIDE the self-test, ahead of the line that sets the
+ * handshake flag. This is the shape `scripts/check-error-code-casing.mjs`
+ * carries -- and `check-optional-error-sink-contract.mjs` and
+ * `check-org-identifier.mjs` with it. Read with a "body ends at the first `}` at
+ * column 0" rule, the flag assignment falls outside its own function's body, the
+ * carrier never crosses anything, and all three ordinary handshakes read `none`.
+ * `definitionSpan` counts braces over masked text instead; this fixture is why.
+ */
+const EARLY_BRACE_GATE = [
+  '#!/usr/bin/env node',
+  'let selfTestReachedVerdict = false;',
+  'const check = (fn) => fn();',
+  'function selfTest() {',
+  '  check(() => {',
+  "    console.log('fixture self-test: 1 case passes');",
+  '});',
+  '  selfTestReachedVerdict = true;',
+  '}',
+  "if (process.argv.includes('--self-test')) {",
+  '  selfTest();',
+  "  if (!selfTestReachedVerdict) { console.error('no verdict'); process.exit(1); }",
+  '}',
+  '',
+].join('\n');
+
+/**
  * The SLOW gate, reduced: a self-test that outlasts the budget it is probed
  * under. It sleeps rather than spins -- a control that runs on EVERY invocation
  * of this tool may not take a core with it on a shared box.
@@ -1339,6 +1402,78 @@ export function runControls() {
     say(fields.every((k) => k === 'entry' || k === 'timeoutMs'),
       `LEDGER ROW INVALID: ${file} carries a field this reader does not read (${fields.join(', ')}); a misspelled \`timeoutMs\` is not a smaller budget, it is NO budget -- the default, and the SIGTERM this field exists to end`);
   }
+
+  // Instrument 3 -- WHICH handshake, one fixture per landed shape and both
+  // directions on each. What is at stake is the question the card was filed
+  // about: every handshake census in this family was a hand-written grep for one
+  // of three spellings, and three of them in one shift gave three wrong answers.
+  say(classifyHandshake(SOUND_GATE) === 'sentinel',
+    `HANDSHAKE CONTROL FAILED: a dispatch comparing the self-test's RETURN VALUE against a named verdict read ${classifyHandshake(SOUND_GATE)}, not sentinel`);
+  say(classifyHandshake(WALKING_GATE) === 'flag',
+    `HANDSHAKE CONTROL FAILED: a module-level flag set inside the self-test and read negated at the dispatch read ${classifyHandshake(WALKING_GATE)}, not flag`);
+  say(classifyHandshake(HELPER_HANDSHAKE_GATE) === 'helper',
+    `HANDSHAKE CONTROL FAILED: a flag handed to a refusing helper read ${classifyHandshake(HELPER_HANDSHAKE_GATE)}, not helper`);
+  say(classifyHandshake(HOLED_GATE) === 'none',
+    `HANDSHAKE CONTROL FAILED: a bare \`selfTest();\` dispatch that discards the completion read ${classifyHandshake(HOLED_GATE)}, not none`);
+  // ... and the pair that makes `helper` a reading of the HANDSHAKE rather than
+  // of the file: the SAME fixture with only the `requireReachedVerdict` call
+  // deleted. One line is the whole difference, and it is the handshake.
+  say(classifyHandshake(HELPER_HANDSHAKE_GATE_HOLED) === 'none',
+    `HANDSHAKE CONTROL FAILED: the helper fixture with only its handshake CALL deleted still read ${classifyHandshake(HELPER_HANDSHAKE_GATE_HOLED)}; the flag is still declared and still set, so anything but none is the NAME being read and not the mechanism`);
+  // The ACCIDENT boundary, which is the sharpest thing this recogniser has to
+  // get right: `runSelfTest() === 0` IS a comparison of the return value, and it
+  // is NOT a handshake -- an early return makes it `undefined === 0`, exit 1,
+  // ZERO bytes printed, nothing noticed. Reading it sentinel would publish the
+  // exact accident-versus-handshake confusion this file exists to expose.
+  say(classifyHandshake(ACCIDENT_GATE) === 'none',
+    `HANDSHAKE CONTROL FAILED: a return value compared against a LITERAL read ${classifyHandshake(ACCIDENT_GATE)}; that is the ACCIDENT shape, where a comparison against a missing return value exits non-zero having printed nothing`);
+  say(classifyHandshake(TERNARY_EXIT_GATE) === 'none',
+    `HANDSHAKE CONTROL FAILED: a bare \`process.exit(<expr> ? 0 : 1)\` dispatch read ${classifyHandshake(TERNARY_EXIT_GATE)}; nothing there compares the completion against anything`);
+  // ⭐ NAME-INDEPENDENCE, the direction the card is about. Every landed spelling
+  // is renamed out of all three fixtures -- `SELF_TEST_VERDICT`,
+  // `selfTestReachedVerdict`, `requireReachedVerdict` -- and the verdicts must
+  // not move. A recogniser keyed on those names passes every control above and
+  // fails all three of these; `classifyFloor` keyed on the NAME
+  // `SELF_TEST_BATTERIES` once and called a fixture floored with its roster gone.
+  const renamed = (fixture) => fixture
+    .replaceAll('SELF_TEST_VERDICT', 'FIXTURE_COMPLETION_TOKEN')
+    .replaceAll('VERDICT', 'COMPLETION_TOKEN')
+    .replaceAll('selfTestReachedVerdict', 'batteriesAllRan')
+    .replaceAll('requireReachedVerdict', 'insistTheyRan');
+  say(classifyHandshake(renamed(SOUND_GATE)) === 'sentinel',
+    'NAME-INDEPENDENCE CONTROL FAILED: the sentinel fixture stopped reading sentinel once its verdict constant was renamed; the recogniser is keyed on a NAME, which is the defect one level up');
+  say(classifyHandshake(renamed(WALKING_GATE)) === 'flag',
+    'NAME-INDEPENDENCE CONTROL FAILED: the flag fixture stopped reading flag once `selfTestReachedVerdict` was renamed; the recogniser is keyed on a NAME');
+  say(classifyHandshake(renamed(HELPER_HANDSHAKE_GATE)) === 'helper',
+    'NAME-INDEPENDENCE CONTROL FAILED: the helper fixture stopped reading helper once `requireReachedVerdict` was renamed; the recogniser is keyed on a NAME');
+
+  // The DECOY, and the fixture-validity guards without which it says nothing: a
+  // decoy that is not comment or literal content is testing something else.
+  const hsFlags = scanSource(HANDSHAKE_DECOY_GATE);
+  const sentinelDecoy = HANDSHAKE_DECOY_GATE.indexOf(DECOY_SENTINEL_TEXT);
+  const flagDecoy = HANDSHAKE_DECOY_GATE.indexOf(DECOY_FLAG_TEXT);
+  say(sentinelDecoy >= 0 && hsFlags.comment[sentinelDecoy] === 1,
+    'CONTROL FIXTURE INVALID: the sentinel decoy is not COMMENT content, so the decoy verdict below says nothing about comments being masked away');
+  say(flagDecoy >= 0 && hsFlags.literal[flagDecoy] === 1,
+    'CONTROL FIXTURE INVALID: the flag decoy is not LITERAL content, so the decoy verdict below says nothing about fixture STRINGS being masked away');
+  say(classifyHandshake(HANDSHAKE_DECOY_GATE) === 'none',
+    `HANDSHAKE DECOY CONTROL FAILED: a handshake spelled only inside a comment and a fixture template was recognised as ${classifyHandshake(HANDSHAKE_DECOY_GATE)}; a census reading raw text credits every gate that merely QUOTES the repair with having it`);
+  // ... and both decoys un-hidden INDEPENDENTLY, which is what makes the verdict
+  // above a reading of the mask rather than of two texts that were never
+  // recognisable in the first place.
+  say(classifyHandshake(HANDSHAKE_DECOY_GATE.replace('// ', '')) === 'sentinel',
+    'CONTROL FIXTURE INVALID: with its comment marker removed the sentinel decoy is still not recognised, so it was never a handshake spelling and the decoy verdict passes for the wrong reason');
+  say(classifyHandshake(HANDSHAKE_DECOY_GATE.replaceAll('`', '')) === 'flag',
+    'CONTROL FIXTURE INVALID: with the template delimiters removed the flag decoy is still not recognised, so it was never a handshake spelling and the decoy verdict passes for the wrong reason');
+
+  // The BODY EXTENT, on the shape that made three live files read `none`: an
+  // inline arrow argument closing with `});` at column 0 inside the self-test,
+  // ahead of the flag assignment.
+  const earlyBraceLines = EARLY_BRACE_GATE.split('\n');
+  say(earlyBraceLines.findIndex((l) => l.startsWith('}')) < earlyBraceLines.findIndex((l) => l.includes('selfTestReachedVerdict = true')),
+    'CONTROL FIXTURE INVALID: the fixture no longer closes a brace at column 0 AHEAD of its flag assignment, so a first-column-brace body rule would reach the assignment anyway and the verdict below tests nothing');
+  say(classifyHandshake(EARLY_BRACE_GATE) === 'flag',
+    `BODY EXTENT CONTROL FAILED: a self-test whose body contains a column-0 \`});\` read ${classifyHandshake(EARLY_BRACE_GATE)}; its flag is set INSIDE the function and the body extent is what says so -- three live files carry exactly this and read none without brace counting`);
 
   // Instrument 1, both directions.
   say(classifyFloor(maskComments(HOLED_GATE)) === 'NONE',
@@ -1697,10 +1832,74 @@ export function population() {
     if (!DISPATCH.test(code)) continue;
     const file = abs.slice(ROOT.length + 1).split(sep).join('/');
     if (file === CENSUS_SELF) continue;
-    rows.push({ file, abs, floor: classifyFloor(code), defs: selfTestDefs(src) });
+    rows.push({ file, abs, floor: classifyFloor(code), defs: selfTestDefs(src), handshake: classifyHandshake(src) });
   }
   if (rows.length === 0) throw new Error('the census found no self-test dispatch at all -- refusing rather than reporting zero');
   return rows;
+}
+
+/**
+ * The three LANDED NAMES, kept as the census's SECOND OPINION and never as its
+ * answer. Each is the grep a seat actually wrote when it needed this reading.
+ *
+ * ⛔ This is not a fallback recogniser and nothing reads it for a verdict. It
+ * exists so the live check below can ask the completeness question the card was
+ * filed about -- "does the population carrying a handshake match the population
+ * the recogniser can see?" -- against a reading that shares NO code with the
+ * recogniser. Agreement is the evidence; the moment they disagree, one of the
+ * two is incomplete and a census printed from either is a number nobody can
+ * check. Measured on this base: they agree on all 181 rows, file for file.
+ *
+ * A FIFTH shape therefore lands in TWO places -- here and in the recogniser --
+ * and that is deliberate. A shape only the recogniser knows would silently make
+ * this control weaker than the thing it controls.
+ */
+const LANDED_HANDSHAKE_NAMES = [
+  /!==\s*[A-Za-z_$][\w$]*VERDICT|===\s*[A-Za-z_$][\w$]*VERDICT/,
+  /[A-Za-z_$][\w$]*ReachedVerdict/,
+  /requireReachedVerdict\s*\(/,
+];
+
+/**
+ * THE LIVE COMPLETENESS CHECK, over the real census rather than over fixtures.
+ *
+ * ⛔ Deliberately NOT in `runControls()`, whose whole invariant is that nothing
+ * there reads the repo, so a control failure is always the instrument. This one
+ * reads the tree, and it can fail because of what LANDED in it -- which is
+ * exactly what it is for. It refuses rather than degrading: a census that quietly
+ * reports the smaller of two disagreeing populations commits the defect this
+ * instrument exists to measure, one level up.
+ *
+ * The card's own words for why the assertion is not enough: "a hand-written grep
+ * whose completeness nobody can check". This is the check.
+ */
+export function handshakeCensusFailures(rows) {
+  const failures = [];
+  const seenBy = { recogniser: [], names: [] };
+  for (const r of rows) {
+    const code = maskCommentsAndLiterals(readFileSync(r.abs, 'utf8'));
+    if (r.handshake !== 'none') seenBy.recogniser.push(r.file);
+    if (LANDED_HANDSHAKE_NAMES.some((re) => re.test(code))) seenBy.names.push(r.file);
+  }
+  const byName = new Set(seenBy.names);
+  const byShape = new Set(seenBy.recogniser);
+  const recogniserOnly = seenBy.recogniser.filter((f) => !byName.has(f));
+  const namesOnly = seenBy.names.filter((f) => !byShape.has(f));
+  if (recogniserOnly.length > 0) {
+    failures.push(
+      `${recogniserOnly.length} file(s) carry a shape the recogniser reads but no LANDED SPELLING knows: `
+        + `${recogniserOnly.join(', ')}. A new shape landed and the second opinion was not widened with it, `
+        + 'so this census no longer has one.',
+    );
+  }
+  if (namesOnly.length > 0) {
+    failures.push(
+      `${namesOnly.length} file(s) carry a landed handshake spelling the recogniser reads as \`none\`: `
+        + `${namesOnly.join(', ')}. The column would report those gates as having NO handshake -- the `
+        + 'exact wrong reading, in the flattering direction, that #14968 was filed about.',
+    );
+  }
+  return failures;
 }
 
 function main() {
@@ -1714,6 +1913,14 @@ function main() {
   }
 
   const rows = population();
+  const censusFailures = handshakeCensusFailures(rows);
+  if (censusFailures.length > 0) {
+    console.error('measure-self-test-floor: THE HANDSHAKE CENSUS IS NOT COMPLETE -- no census printed.\n');
+    for (const f of censusFailures) console.error(`  - ${f}`);
+    console.error('\nThe recogniser and the landed spellings disagree about WHICH files carry a handshake.');
+    console.error('Widen `classifyHandshake` and `LANDED_HANDSHAKE_NAMES` together, with a control on each.\n');
+    process.exit(1);
+  }
   const wantProbe = process.argv.includes('--probe');
   if (wantProbe) {
     for (const r of rows) {
@@ -1737,6 +1944,18 @@ function main() {
   console.log(`  ${byFloor.NONE.length} of ${rows.length}. Floored: ${byFloor.ROSTER.length} roster, ${byFloor.COUNT.length} count-candidate(s) to read.`);
   if (byFloor.ROSTER.length) console.log(`    roster: ${byFloor.ROSTER.join(', ')}`);
   if (byFloor.COUNT.length) console.log(`    count candidates: ${byFloor.COUNT.join(', ')}`);
+
+  const byShape = { sentinel: 0, flag: 0, helper: 0, none: 0 };
+  for (const r of rows) byShape[r.handshake]++;
+  console.log('\nHandshake SHAPE -- which verdict handshake each file carries, read from CODE (#14968):');
+  console.log(
+    `  ${byShape.sentinel} sentinel, ${byShape.flag} flag, ${byShape.helper} helper, `
+      + `${byShape.none} none, of ${rows.length}.`,
+  );
+  console.log('  ⛔ The shapes are RECOGNISED, not legislated: the flag form exists because those');
+  console.log('     self-tests\' own exit codes are load-bearing, so the handshake cannot BE the');
+  console.log('     return value. This column answers "which spelling", never "which is right".');
+  for (const r of rows) console.log(`    ${r.handshake.padEnd(8)} ${r.floor.padEnd(6)} ${r.file}`);
 
   if (!wantProbe) {
     console.log('\nHole 2 -- no verdict handshake: NOT MEASURED (pass --probe; it runs every self-test twice).');
