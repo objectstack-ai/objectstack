@@ -131,6 +131,10 @@ expect block "$MAIN/.changeset/x.md"
 expect block "$MAIN/pkg/x.ipynb"
 
 echo "== the SAME files inside a linked worktree are allowed =="
+# The POSITIVE twin of the `worktrees`-segment section below. $WT is a REAL linked worktree
+# (`git worktree add`) whose path carries NO `worktrees` segment, so these allows can only
+# come from the structural test and never from the path's spelling. Both depths are pinned
+# below — the repo toplevel and a subdirectory — because git answers them differently.
 expect allow "$WT/pkg/x.ts"
 expect allow "$WT/pkg/deep/y.ts"
 expect allow "$WT/README.md"
@@ -363,25 +367,21 @@ PROJ="$PLAIN"
 check block 'NotebookEdit, new file in a new dir under $MAIN' "$(nbpay "$MAIN/brand/new/nb.ipynb")"
 check allow 'NotebookEdit, new file in a new dir under $WT'   "$(nbpay "$WT/brand/new/nb.ipynb")"
 
-# ── KNOWN HOLES ─────────────────────────────────────────────────────────────────────────
-# The cases below pin what the hook does TODAY, and what it does today is WRONG. They are
-# here so the matrix says the hole out loud rather than being silent about it, and so that
-# fixing it is a mechanical edit to this file. They are NOT statements of intended
-# behaviour. Each names the issue that must flip it.
-echo "== KNOWN HOLE #11809: any git-dir path containing /worktrees/ reads as a linked worktree =="
-# `case "$gitdir" in */worktrees/*) exit 0` is a substring match on a path, not a test for a
-# linked worktree. $ODD is a PRIMARY checkout that merely lives under a directory named
-# `worktrees`. git prints a RELATIVE git-dir (`.git`) at a repo's toplevel and an ABSOLUTE
-# one from any subdirectory, so the same unguarded checkout gets opposite verdicts by depth.
-# When #11809 is fixed both of these become `block`.
-# The deciding detail, measured rather than assumed: it is the NEAREST EXISTING ANCESTOR
-# that is handed to git, so a path whose nearest existing ancestor is the repo toplevel gets
-# the relative git-dir and blocks, while anything resolving to a subdirectory gets the
-# absolute one and slips through.
-expect block "$ODD/README.md"          # correct today, but only because git-dir was relative
-expect block "$ODD/brand/new/f.ts"     # ditto — resolves up to the toplevel
-expect allow "$ODD/pkg/x.ts"           # ⛔ WRONG — an unguarded edit into a PRIMARY checkout
-expect allow "$ODD/pkg/brand/new/f.ts" # ⛔ WRONG — same hole, reached through the ancestor walk
+echo "== a PRIMARY checkout whose own path carries a 'worktrees' segment is BLOCKED =="
+# $ODD is a PRIMARY checkout that merely lives under a directory named `worktrees`. The
+# verdict comes from the STRUCTURE — git-dir differs from git-common-dir in a linked
+# worktree, and only there — never from the spelling of the path, so all four block. The two
+# SUBDIRECTORY cases were `allow` under the `*/worktrees/*` substring test this replaced:
+# unguarded edits into a primary checkout, which is the exact failure worktree-first exists
+# to stop (#11809). The pair of DEPTHS is what makes the section discriminating, and the
+# deciding detail was measured rather than assumed: it is the NEAREST EXISTING ANCESTOR that
+# is handed to git, so a path resolving to the repo toplevel got a RELATIVE git-dir and
+# blocked by accident, while anything resolving to a subdirectory got the absolute one and
+# slipped through.
+expect block "$ODD/README.md"          # nearest existing ancestor = the repo toplevel
+expect block "$ODD/brand/new/f.ts"     # ditto — the ancestor walk climbs to the toplevel
+expect block "$ODD/pkg/x.ts"           # a SUBDIRECTORY — the depth the substring test lost
+expect block "$ODD/pkg/brand/new/f.ts" # same depth, reached through the ancestor walk
 
 echo "== BOUNDARY: the jq-less fallback is a text scan, not a JSON parser =="
 # Not filed as a defect: jq is present wherever this hook runs, and Claude Code emits plain
@@ -403,11 +403,11 @@ printf '\n'
 #
 #   cp .claude/hooks/guard-main-checkout.sh /tmp/mutant.sh
 #   # e.g. delete the linked-worktree escape, which should redden every `allow` in a worktree:
-#   perl -0pi -e 's{^\s*\*/worktrees/\*\) exit 0 ;;\n}{}m' /tmp/mutant.sh
+#   perl -0pi -e 's{^\[ "\$\(canon_dir .*\n}{}m' /tmp/mutant.sh
 #   GUARD_MAIN_CHECKOUT_HOOK=/tmp/mutant.sh .claude/hooks/guard-main-checkout.selftest.sh
 #
-# The mutations used, one per class: drop the */worktrees/* arm (core verdict) · drop the
-# nearest-existing-ancestor walk (new-file class) · replace dirname "$file" with
+# The mutations used, one per class: drop the linked-worktree escape (core verdict) · drop
+# the nearest-existing-ancestor walk (new-file class) · replace dirname "$file" with
 # CLAUDE_PROJECT_DIR (the file's-own-repo class) · drop the OS_ALLOW_MAIN_EDITS line (escape
 # hatch) · turn the no-path else branch into exit 0 (the fails-closed class) · rename the key
 # in the grep fallback (the jq-less class) · change the final exit 2 to exit 0 (every block) ·
