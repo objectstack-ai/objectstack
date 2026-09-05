@@ -208,15 +208,31 @@ describe('#15389 — a restored approval suspension has an issuer again', () => 
     expect(generic.code).toBe('PERMISSION_DENIED');
     expect(generic.error).toMatch(/only its owning service may resume/);
 
-    // ── ⭐ And the half that names the MECHANISM: the pause is still there and
-    // still resumable. What the restored suspension lacks is not state — it is
-    // an issuer allowed to stamp the marker.
+    // ── The pause is still there through all of it.
     expect(await automation.hasSuspendedRun(runId)).toBe(true);
 
     // ── The only verb the card found: cancel. It works, and it is a loss —
     // `mark_rejected` never ran.
     expect(await automation.cancelRun(runId)).toBe(true);
     expect(marks, 'the reject branch never happened — what cancelling costs').toEqual([]);
+
+    // ── ⭐ THE MECHANISM, measured without any of this card's own code.
+    // A SECOND stranded-and-restored run (so the cancel above is undisturbed),
+    // driven with the very resume the doors would have issued — marker stamped,
+    // straight at the engine. It COMPLETES. So the restored suspension lacks
+    // nothing and the `resumeAuthority` gate is not in the way: what is missing
+    // is an ISSUER permitted to stamp that marker, and the four `pending`
+    // guards are the only thing standing between an operator and this call.
+    // That is why the repair belongs on the approvals side, not in the engine.
+    const other = await strandThenRestore(automation);
+    rejectBranchThrows = undefined;
+    const marked: any = await automation.resume(other.flow_run_id, {
+      branchLabel: 'reject',
+      output: { decision: 'reject', requestId: other.id },
+      [RESUME_AUTHORITY_SERVICE]: true,
+    } as never);
+    expect(marked.success, 'the re-armed pause IS resumable — the engine side is whole').toBe(true);
+    expect(marks, 'and the branch the cancel would have discarded runs').toEqual(['mark_rejected']);
   });
 
   it('PIN 2 — the fix: the recorded decision is re-issued and the flow completes', async () => {
@@ -354,7 +370,7 @@ describe('#15389 — a restored approval suspension has an issuer again', () => 
     }, { context: SYSTEM_CTX });
     await data.insert('sys_approval_action', {
       id: 'aact_revise_x', request_id: amb.id, action: 'revise', step_index: 0,
-    }, { context: SYSTEM_CTX });
+    });
 
     const ambiguous = await service.continueRestoredRun(amb.id).then(() => null, (e: Error) => e);
     expect(ambiguous?.message).toMatch(/cannot tell a decided rejection from an ADR-0044/);
