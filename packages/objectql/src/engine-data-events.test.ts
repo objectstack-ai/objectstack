@@ -637,8 +637,8 @@ describe('#14970 — a published DataEvent names the RECORD\'s organization', ()
 });
 
 /**
- * #15225 — the producer half of `BulkDataEvent.organizationId`: the bulk
- * sibling of the #14970 block above, and the remaining half of the
+ * #15225 / #15813 — the producer half of `BulkDataEvent.organizationId`: the
+ * bulk sibling of the #14970 block above, and the remaining half of the
  * cross-tenant webhook leak (#13566) whose single-record half #14970 closed.
  *
  * `BulkDataEventSchema.organizationId` (PR #15218) is ONE organization for the
@@ -646,33 +646,55 @@ describe('#14970 — a published DataEvent names the RECORD\'s organization', ()
  * write was composed under, or absent. ⚠️ `absent` means the OPPOSITE of what
  * it means one block up: on a `DataEvent` it is a statement about the ROW
  * ("belongs to no organization"); here it is a statement about PRODUCER
- * KNOWLEDGE ("no single organization was asserted for this batch"). A pin
- * written with the single-record intuition would assert the wrong thing, so
- * every absence pin below names WHY the producer could not assert.
+ * KNOWLEDGE ("no single organization was asserted for this batch").
+ *
+ * ## What the producer reads, and what it deliberately does NOT (#15813)
+ *
+ * The wall is computed by plugin-security and nowhere else. The producer
+ * reads the verdict the enforcement layer RECORDED on the operation context
+ * (`OperationContext.tenantLayer0Verdict`, `TenantLayer0VerdictSchema` in
+ * `@objectstack/spec/security`) — `organization` (or a one-member
+ * `organizations`) stamps the key; everything else, including NO recorded
+ * verdict, omits it. It reads NOTHING else: not the enforced posture, not the
+ * execution context's `tenantId` / `accessible_org_ids` / `posture`, not the
+ * object schema. The first edition of this block pinned a producer that
+ * re-derived the wall from those inputs; it could not see the deployment's
+ * #12699 carve-out and stamped a wrong key on that population (#15706, ruled
+ * 2026-09-05: the mirror is deleted, not taught one more clause). Those pins
+ * were RETARGETED here, deliberately and visibly — the object-shape and
+ * rung-shape populations now live where the wall is computed
+ * (`plugin-security/src/tenant-layer0-verdict-on-operation.test.ts`), and the
+ * one end-to-end weld — real engine, real plugin, real event — lives beside
+ * them.
  *
  * What makes these pins discriminate rather than pass against the live
  * defect ("the key is absent on every event" — an absence-only suite reported
  * 25/25 green against exactly that on #14970):
  *
- *  1. **The wall, not the active organization.** Under `group` the wall is the
- *     caller's MEMBERSHIP SET, so the positive `group` pin sets an active
- *     organization the caller is NOT asserting and expects the set's only
- *     member; the negative `group` pin keeps an active organization and two
- *     memberships and expects OMISSION — substituting `tenantId` fails both.
+ *  1. **The verdict, not the context.** The positive pins record a verdict
+ *     naming an organization the context does NOT carry as `tenantId`, and
+ *     expect the verdict's organization — substituting any context field
+ *     fails them.
  *  2. **The wall, not the rows.** The stub driver composes no wall at all, so
  *     the rows a sweep touches are whatever was seeded; the negative pins
  *     seed rows across two organizations on purpose, and the answer is still
- *     decided by the wall's inputs (posture, context), never by a row read.
- *  3. **Absence is asserted as OMISSION** (`hasOwnProperty === false`), never
- *     `=== undefined`: the schema refuses `''` outright (a fabricated empty
- *     value would throw at the publish site and drop the event), and an
- *     explicit `undefined` survives `parse` as a PRESENT key.
+ *     decided by the recorded verdict, never by a row read.
+ *  3. **No verdict ⇒ absent, whatever the posture and context say.** The
+ *     mirror-deleted pin: an engine handed `isolated` by its posture provider,
+ *     a member context with an active organization, and NO recording
+ *     middleware publishes the key ABSENT. Any re-derivation from posture +
+ *     context turns this pin red first.
+ *  4. **Absence is asserted as OMISSION** (`hasOwnProperty === false`), never
+ *     `=== undefined`: the schema refuses `''` outright, and an explicit
+ *     `undefined` survives `parse` as a PRESENT key.
  *
- * The posture the wall enforces reaches the engine the way SecurityPlugin
- * hands it over in a real composition — `setTenancyPostureProvider` — and an
- * engine that was handed none is pinned as "no wall to vouch for".
+ * The verdict reaches the engine the way plugin-security delivers it in a
+ * real composition — a registered middleware writing
+ * `ctx.tenantLayer0Verdict` before `next()` — with the posture provider set
+ * to `isolated` throughout so no pin below can pass by the posture being
+ * inert.
  */
-describe('#15225 — a published BulkDataEvent names the organization the tenant WALL named', () => {
+describe('#15225 / #15813 — a published BulkDataEvent names the organization the RECORDED Layer 0 verdict named', () => {
   /** Tenant-scoped: the kernel-injected `organization_id` is declared. */
   const invoice = {
     name: 'invoice',
@@ -695,8 +717,13 @@ describe('#15225 — a published BulkDataEvent names the organization the tenant
   let engine: ObjectQL;
   let published: RealtimeEventPayload[];
   let realtime: IRealtimeService;
-  /** What SecurityPlugin's injected provider answers; each pin sets it. */
-  let enforcedPosture: string | undefined;
+  /**
+   * What the recording middleware writes on the operation, per pin. `NOT_SET`
+   * = the middleware is present but records nothing (it never touched the
+   * member); the "no middleware at all" pin uses a bare engine instead.
+   */
+  const NOT_SET = Symbol('not-set');
+  let recorded: unknown = NOT_SET;
 
   const payloadOf = (i = 0) => published[i].payload as Record<string, unknown>;
   const hasOrgKey = (i = 0) =>
@@ -714,6 +741,7 @@ describe('#15225 — a published BulkDataEvent names the organization the tenant
 
   beforeEach(async () => {
     published = [];
+    recorded = NOT_SET;
     realtime = {
       publish: vi.fn(async (event: RealtimeEventPayload) => { published.push(event); }),
       subscribe: vi.fn(async () => 'sub-1'),
@@ -726,41 +754,49 @@ describe('#15225 — a published BulkDataEvent names the organization the tenant
     engine.registry.registerObject(invoice);
     engine.registry.registerObject(task);
     engine.setRealtimeService(realtime);
-    enforcedPosture = 'isolated';
-    engine.setTenancyPostureProvider(() => enforcedPosture);
+    engine.setTenancyPostureProvider(() => 'isolated');
+    // The enforcement layer's seam, as plugin-security drives it: the verdict
+    // is written on the operation context the executor closure holds, ahead
+    // of `next()`. A system context takes the plugin's first exit and records
+    // nothing (pinned on the plugin side); mirrored here so the harness never
+    // records a verdict the real middleware would not.
+    engine.registerMiddleware(async (ctx, next) => {
+      if (recorded !== NOT_SET && ctx.context?.isSystem !== true && ctx.ast) {
+        ctx.tenantLayer0Verdict = recorded as any;
+      }
+      await next();
+    });
     vi.spyOn((engine as any).logger, 'warn').mockImplementation(() => undefined);
   });
 
-  /**
-   * The env-fallback pin below sets `OS_TENANCY_POSTURE` on purpose; put it
-   * back whatever happened, so no later file in this process inherits a
-   * walled posture it never asked for.
-   */
   const savedPosture = process.env.OS_TENANCY_POSTURE;
   afterEach(() => {
     if (savedPosture === undefined) delete process.env.OS_TENANCY_POSTURE;
     else process.env.OS_TENANCY_POSTURE = savedPosture;
   });
 
-  it('isolated: a member\'s predicate UPDATE names the caller\'s organization — the wall\'s equality term', async () => {
+  it('a recorded `organization` verdict is stamped on a predicate UPDATE — the VERDICT\'s organization, not the context\'s', async () => {
+    // The discriminating case: the context's active organization is NOT the
+    // one the wall named. Only a reader of the verdict answers `org_plant_a`.
+    recorded = { kind: 'organization', organizationId: 'org_plant_a' };
     await seed([
-      { amount: '1', status: 'open', organization_id: ACTIVE_ORG },
-      { amount: '2', status: 'open', organization_id: ACTIVE_ORG },
+      { amount: '1', status: 'open', organization_id: 'org_plant_a' },
+      { amount: '2', status: 'open', organization_id: 'org_plant_a' },
     ]);
 
-    await sweepUpdate(member);
+    await sweepUpdate({ userId: 'usr_plant', tenantId: 'org_hq', posture: 'MEMBER' });
 
     expect(published).toHaveLength(1);
     expect(published[0].type).toBe('data.records.updated');
     const event = bulkEvent();
     expect(event.matched).toBe(2);
-    // PRESENT, and the wall's term: under `isolated` the Layer 0 wall is
-    // `organization_id = <active organization>`, so every affected row is in it.
     expect(hasOrgKey()).toBe(true);
-    expect(event.organizationId).toBe(ACTIVE_ORG);
+    expect(event.organizationId).toBe('org_plant_a');
+    expect(event.organizationId).not.toBe('org_hq');
   });
 
-  it('isolated: the predicate DELETE path stamps it too — the branch with no post-state', async () => {
+  it('the predicate DELETE path stamps it too — the branch with no post-state', async () => {
+    recorded = { kind: 'organization', organizationId: ACTIVE_ORG };
     await seed([
       { amount: '1', status: 'open', organization_id: ACTIVE_ORG },
       { amount: '2', status: 'kept', organization_id: ACTIVE_ORG },
@@ -775,69 +811,81 @@ describe('#15225 — a published BulkDataEvent names the organization the tenant
     expect(bulkEvent().organizationId).toBe(ACTIVE_ORG);
   });
 
-  it('group with a SINGLETON membership names that member — not the caller\'s active organization', async () => {
-    enforcedPosture = 'group';
-    // The discriminating case: the active organization is one the caller is
-    // NOT asserting for the batch. Under `group` the wall is the membership
-    // SET (`organization_id IN accessible_org_ids`), and `tenantId` is only the
-    // default write target — reading it here would name the wrong organization.
-    const plantAdmin = {
-      userId: 'usr_plant',
-      tenantId: 'org_hq',
-      accessible_org_ids: ['org_plant_a'],
-      posture: 'MEMBER',
-    };
+  it('a one-member `organizations` verdict (the `group` wall over a singleton membership) names that member', async () => {
+    recorded = { kind: 'organizations', organizationIds: ['org_plant_a'] };
     await seed([{ amount: '1', status: 'open', organization_id: 'org_plant_a' }]);
 
-    await sweepUpdate(plantAdmin);
+    await sweepUpdate({ userId: 'usr_plant', tenantId: 'org_hq', accessible_org_ids: ['org_plant_a'], posture: 'MEMBER' });
 
     expect(published).toHaveLength(1);
     expect(hasOrgKey()).toBe(true);
     expect(bulkEvent().organizationId).toBe('org_plant_a');
-    expect(bulkEvent().organizationId).not.toBe('org_hq');
   });
 
-  it('group: a membership set that repeats its one organization still names exactly one', async () => {
-    enforcedPosture = 'group';
-    const ctx = { userId: 'usr_plant', tenantId: 'org_plant_a', accessible_org_ids: ['org_plant_a', 'org_plant_a'], posture: 'MEMBER' };
-    await seed([{ amount: '1', status: 'open', organization_id: 'org_plant_a' }]);
-
-    await sweepUpdate(ctx);
-
-    expect(hasOrgKey()).toBe(true);
-    expect(bulkEvent().organizationId).toBe('org_plant_a');
-  });
-
-  it('group across TWO memberships publishes it ABSENT — never the active organization as a stand-in', async () => {
-    enforcedPosture = 'group';
+  it('an `organizations` verdict over TWO organizations publishes it ABSENT — never the active organization as a stand-in', async () => {
     // The option-C mislabel (PR #14635 open question 1, rejected): the caller
-    // HAS an active organization, and it must not label a sweep that the wall
-    // let reach two organizations' rows.
-    const hqAnalyst = {
-      userId: 'usr_hq',
-      tenantId: 'org_plant_a',
-      accessible_org_ids: ['org_plant_a', 'org_plant_b'],
-      posture: 'MEMBER',
-    };
+    // HAS an active organization, and it must not label a sweep the wall let
+    // reach two organizations' rows.
+    recorded = { kind: 'organizations', organizationIds: ['org_plant_a', 'org_plant_b'] };
     await seed([
       { amount: '1', status: 'open', organization_id: 'org_plant_a' },
       { amount: '2', status: 'open', organization_id: 'org_plant_b' },
     ]);
 
-    await sweepUpdate(hqAnalyst);
+    await sweepUpdate({ userId: 'usr_hq', tenantId: 'org_plant_a', accessible_org_ids: ['org_plant_a', 'org_plant_b'], posture: 'MEMBER' });
 
     expect(published).toHaveLength(1);
     expect(bulkEvent().matched).toBe(2);
-    // OMITTED, asserted as omission — "not asserted", not "no organization".
     expect(hasOrgKey()).toBe(false);
     expect(bulkEvent().organizationId).toBeUndefined();
   });
 
-  it('a system-context predicate write publishes it ABSENT — the middleware composes no wall for it', async () => {
-    // `isSystem` short-circuits the whole security middleware, so no Layer 0
-    // wall was composed and the sweep may reach every organization's rows —
-    // which is exactly what this seed makes it do. The caller's `tenantId` is
-    // set and must not be substituted.
+  it('a `none` verdict publishes it ABSENT under an armed posture and a member with an active organization — the #15706 population', async () => {
+    // The wall RAN and contributed nothing: a deployment-exempted object
+    // (#12699), a tenancy-disabled object, an exempt PLATFORM_ADMIN. The
+    // previous producer stamped `org_acme` here from the context; the batch
+    // below spans two organizations, so that key was WRONG.
+    recorded = { kind: 'none' };
+    await seed([
+      { amount: '1', status: 'open', organization_id: ACTIVE_ORG },
+      { amount: '2', status: 'open', organization_id: OTHER_ORG },
+    ]);
+
+    await sweepUpdate(member);
+
+    expect(published).toHaveLength(1);
+    expect(bulkEvent().matched).toBe(2);
+    expect(hasOrgKey()).toBe(false);
+  });
+
+  it('a `deny` verdict publishes it ABSENT (and the event still publishes if the driver matched rows)', async () => {
+    recorded = { kind: 'deny' };
+    await seed([{ amount: '1', status: 'open', organization_id: ACTIVE_ORG }]);
+
+    await sweepUpdate(member);
+
+    expect(published).toHaveLength(1);
+    expect(hasOrgKey()).toBe(false);
+  });
+
+  it('NO recorded verdict ⇒ ABSENT, whatever the posture provider and the context say — the mirror is deleted, not moved', async () => {
+    // `isolated` from the provider, a member with an active organization, rows
+    // all in that organization: every input the FORMER producer read says
+    // `org_acme`. The producer reads none of them.
+    await seed([
+      { amount: '1', status: 'open', organization_id: ACTIVE_ORG },
+      { amount: '2', status: 'open', organization_id: ACTIVE_ORG },
+    ]);
+
+    await sweepUpdate(member);
+
+    expect(published).toHaveLength(1);
+    expect(bulkEvent().matched).toBe(2);
+    expect(hasOrgKey()).toBe(false);
+  });
+
+  it('a system-context predicate write publishes it ABSENT — the middleware takes its first exit and records nothing', async () => {
+    recorded = { kind: 'organization', organizationId: ACTIVE_ORG };
     await seed([
       { amount: '1', status: 'open', organization_id: ACTIVE_ORG },
       { amount: '2', status: 'open', organization_id: OTHER_ORG },
@@ -848,34 +896,12 @@ describe('#15225 — a published BulkDataEvent names the organization the tenant
     expect(published).toHaveLength(1);
     expect(bulkEvent().matched).toBe(2);
     expect(hasOrgKey()).toBe(false);
-    expect(bulkEvent().organizationId).toBeUndefined();
   });
 
-  it('single posture (no wall) publishes it ABSENT even though the caller has an active organization', async () => {
-    enforcedPosture = 'single';
-    await seed([{ amount: '1', status: 'open', organization_id: ACTIVE_ORG }]);
-
-    await sweepUpdate(member);
-
-    expect(published).toHaveLength(1);
-    expect(hasOrgKey()).toBe(false);
-  });
-
-  it('no enforcement layer injected a posture ⇒ ABSENT even with OS_TENANCY_POSTURE=isolated in the env — the env fallback is not consulted', async () => {
-    // An engine no SecurityPlugin ever handed a posture: Layer 0 was never
-    // composed, and the memory driver reads no `DriverOptions.tenantId`
-    // either, so nothing constrained this sweep to one organization —
-    // whatever the operator's env says. The env fallback the #8844 write
-    // refusal consults (`resolveEnginePosture`) is deliberately NOT consulted
-    // here.
-    //
-    // ⚠️ The env is set to the WALLED posture on purpose. With it unset the
-    // test process resolves to `single`, and substituting
-    // `resolveEnginePosture()` at the publish site left every pin green
-    // (measured by the R1 contract review: 38/38 under the substitution).
-    // Under `isolated` in the env that substitution stamps the key, and
-    // THIS pin goes red — the only thing that makes "deliberately not the
-    // env fallback" a guarantee rather than a comment.
+  it('no enforcement layer at all ⇒ ABSENT even with OS_TENANCY_POSTURE=isolated in the env and a posture provider', async () => {
+    // A bare engine: no middleware ever records a verdict. The env fallback
+    // the #8844 write refusal consults (`resolveEnginePosture`) is deliberately
+    // not consulted, and neither is the provider — a posture is not a wall.
     process.env.OS_TENANCY_POSTURE = 'isolated';
     const bare = new ObjectQL();
     const { driver } = makeStubDriver();
@@ -883,6 +909,7 @@ describe('#15225 — a published BulkDataEvent names the organization the tenant
     await bare.init();
     bare.registry.registerObject(invoice);
     bare.setRealtimeService(realtime);
+    bare.setTenancyPostureProvider(() => 'isolated');
     vi.spyOn((bare as any).logger, 'warn').mockImplementation(() => undefined);
     await bare.insert('invoice', [{ amount: '1', status: 'open', organization_id: ACTIVE_ORG }], { context: sysCtx } as any);
     published.length = 0;
@@ -893,226 +920,27 @@ describe('#15225 — a published BulkDataEvent names the organization the tenant
     expect(hasOrgKey()).toBe(false);
   });
 
-  it('a carried PLATFORM_ADMIN rung publishes it ABSENT — the batch may have crossed the wall', async () => {
-    // ADR-0095 D3: a true PLATFORM_ADMIN crosses the wall where the object's
-    // posture permits. The engine holds the rung but not the superuser bypass
-    // bit the exemption also needs, so it declines to assert rather than
-    // guess which side of the wall this sweep ran on.
-    const platformAdmin = { userId: 'usr_platform', tenantId: ACTIVE_ORG, posture: 'PLATFORM_ADMIN' };
-    await seed([
-      { amount: '1', status: 'open', organization_id: ACTIVE_ORG },
-      { amount: '2', status: 'open', organization_id: OTHER_ORG },
-    ]);
-
-    await sweepUpdate(platformAdmin);
-
-    expect(published).toHaveLength(1);
-    expect(hasOrgKey()).toBe(false);
-  });
-
-  it('a context carrying NO rung publishes it ABSENT — the exemption is decided by a probe the engine cannot see', async () => {
-    // A hand-built context (no `posture`) is one the security plugin decides
-    // by a capability probe over its resolved permission sets. The engine has
-    // no view of that probe, so it asserts nothing. Every session context the
-    // authz resolver assembles carries the rung, so this is the hand-built
-    // population only.
-    const rungless = { userId: 'usr_member', tenantId: ACTIVE_ORG };
+  it.each([
+    ['an unknown kind', { kind: 'organisation', organizationId: ACTIVE_ORG }],
+    ['an empty organization id', { kind: 'organization', organizationId: '' }],
+    ['an empty set', { kind: 'organizations', organizationIds: [] }],
+    ['a duplicated set', { kind: 'organizations', organizationIds: [ACTIVE_ORG, ACTIVE_ORG] }],
+    ['a filter shape (the wall\'s output, not its verdict)', { organization_id: ACTIVE_ORG }],
+    ['a bare string', ACTIVE_ORG],
+  ])('a recorded value that is not a verdict — %s — publishes it ABSENT and still publishes', async (_label, junk) => {
+    // Junk reads as "no verdict", never as an organization: the schema is the
+    // gate, and the failure direction that matters is a WRONG key.
+    recorded = junk;
     await seed([{ amount: '1', status: 'open', organization_id: ACTIVE_ORG }]);
 
-    await sweepUpdate(rungless);
-
-    expect(published).toHaveLength(1);
-    expect(hasOrgKey()).toBe(false);
-  });
-
-  it('an object that opted OUT of tenancy publishes it ABSENT under the same wall', async () => {
-    // ⚠️ Not `task`: registering an object INJECTS the kernel `organization_id`
-    // column (registry.ts, `TENANT_SCOPE_FIELD_DEF`), and the security plugin
-    // reads that same injected field set — so a registered `task` IS walled.
-    // The declared way out is `tenancy: { enabled: false }` (ADR-0066): no
-    // column is injected, `resolveTenantFieldName` answers null, and Layer 0
-    // contributes nothing (`tenancyDisabled`) — there is no wall to name.
-    const globalSetting = {
-      name: 'global_setting',
-      label: 'Global setting',
-      tenancy: { enabled: false },
-      fields: {
-        id: { name: 'id', type: 'text' as const, primaryKey: true },
-        key: { name: 'key', type: 'text' as const },
-        status: { name: 'status', type: 'text' as const },
-      },
-    };
-    engine.registry.registerObject(globalSetting as any);
-    // Measured, not recalled: the opt-out really withheld the injected column.
-    expect((engine.registry.getObject('global_setting') as any).fields.organization_id).toBeUndefined();
-    await engine.insert('global_setting', [{ key: 'a', status: 'open' }], { context: sysCtx } as any);
-    published.length = 0;
-
-    await engine.update('global_setting', { key: 'swept' }, { multi: true, where: { status: 'open' }, context: member } as any);
-
-    expect(published).toHaveLength(1);
-    expect(published[0].type).toBe('data.records.updated');
-    expect(hasOrgKey()).toBe(false);
-  });
-
-  it('`systemFields.tenant: false` + an author-declared `organization_id` publishes it ABSENT — the wall composes nothing there (P1)', async () => {
-    // The R1 contract review's P1 probe. Layer 0's `tenancyDisabled` input
-    // folds `systemFields.tenant === false` in beside `tenancy.enabled ===
-    // false` (`getObjectSecurityMeta`, security-plugin.ts), so on this object
-    // `computeTenantLayer0Filter` returns null — NO wall — while the column
-    // the author declared is a perfectly readable `organization_id`. R1 read
-    // the column and stamped the caller's organization onto a batch that
-    // touched another organization's row: a MISLABEL, the one direction
-    // this card must never take. The object exit is now the wall's own
-    // predicate (`carriesTenantScopeColumn`), which answers "not walled".
-    const sharedCatalog = {
-      name: 'shared_catalog',
-      label: 'Shared catalog',
-      systemFields: { tenant: false },
-      fields: {
-        id: { name: 'id', type: 'text' as const, primaryKey: true },
-        status: { name: 'status', type: 'text' as const },
-        organization_id: { name: 'organization_id', type: 'text' as const },
-      },
-    };
-    engine.registry.registerObject(sharedCatalog as any);
-    // Measured: the opt-out withheld the INJECTED column and the author's
-    // declaration survived — the column is there to be misread.
-    expect((engine.registry.getObject('shared_catalog') as any).fields.organization_id).toBeDefined();
-    await engine.insert('shared_catalog', [
-      { status: 'open', organization_id: ACTIVE_ORG },
-      { status: 'open', organization_id: OTHER_ORG },
-      { status: 'open' },
-    ], { context: sysCtx } as any);
-    published.length = 0;
-
-    await engine.update('shared_catalog', { status: 'swept' }, { multi: true, where: { status: 'open' }, context: member } as any);
-
-    expect(published).toHaveLength(1);
-    expect(bulkEvent().matched).toBe(3);
-    expect(hasOrgKey()).toBe(false);
-  });
-
-  it('a FEDERATED object (`external` binding) publishes it ABSENT — the wall discounts the platform\'s phantom anchor', async () => {
-    // [#7835] The registry injects `organization_id` on an external object
-    // too, but the platform provisions no storage for it, so plugin-security
-    // reads that anchor as PHANTOM and Layer 0 composes no wall
-    // (`objectHasOrgIdField: false`). A key here would name an organization
-    // no wall constrained the batch to — the mislabel direction — so the
-    // producer answers absent on `external != null`. That exit is a SUPERSET
-    // of the wall's provenance test: a federated object whose author declared
-    // a real remote `organization_id` keeps its wall and is answered absent
-    // too (under-delivery, never a mislabel). That variant is deliberately
-    // NOT pinned: a future exact provenance predicate may legitimately answer
-    // it present, and a pin here would forbid that.
-    const remoteCustomer = {
-      name: 'remote_customer',
-      label: 'Remote customer',
-      external: { remoteName: 'customers', writable: true },
-      fields: {
-        id: { name: 'id', type: 'text' as const, primaryKey: true },
-        status: { name: 'status', type: 'text' as const },
-      },
-    };
-    engine.registry.registerObject(remoteCustomer as any);
-    // Measured: the anchor IS there (injected) — absence is decided by the
-    // binding, never by a missing column.
-    expect((engine.registry.getObject('remote_customer') as any).fields.organization_id).toBeDefined();
-    await engine.insert('remote_customer', [{ status: 'open', organization_id: ACTIVE_ORG }], { context: sysCtx } as any);
-    published.length = 0;
-
-    await engine.update('remote_customer', { status: 'swept' }, { multi: true, where: { status: 'open' }, context: member } as any);
-
-    expect(published).toHaveLength(1);
-    expect(published[0].type).toBe('data.records.updated');
-    expect(hasOrgKey()).toBe(false);
-  });
-
-  it('a custom `tenancy.tenantField` is NOT an exit by itself — PRESENT while the object still carries `organization_id`, the column the wall keys on', async () => {
-    // The wall never reads `tenancy.tenantField`: Layer 0 keys on the literal
-    // `organization_id` (`objectHasOrgIdField`). An object that declares a
-    // custom tenant column and still carries the kernel-injected
-    // `organization_id` is walled on `organization_id = <active org>`, so
-    // the batch IS one organization's and the producer says so. R1 answered
-    // absent here (an under-delivery); the wall's own predicate answers
-    // present. ⚠️ A claim about what the wall AND-composed, not about the
-    // driver's native scoping column.
-    const workspaceDoc = {
-      name: 'workspace_doc',
-      label: 'Workspace doc',
-      tenancy: { tenantField: 'workspace_id' },
-      fields: {
-        id: { name: 'id', type: 'text' as const, primaryKey: true },
-        status: { name: 'status', type: 'text' as const },
-        workspace_id: { name: 'workspace_id', type: 'text' as const },
-      },
-    };
-    engine.registry.registerObject(workspaceDoc as any);
-    // Measured: the registry still injected the kernel column beside the
-    // custom one — the declaration does not withhold it.
-    expect((engine.registry.getObject('workspace_doc') as any).fields.organization_id).toBeDefined();
-    await engine.insert('workspace_doc', [
-      { status: 'open', workspace_id: 'ws_1', organization_id: ACTIVE_ORG },
-      { status: 'open', workspace_id: 'ws_2', organization_id: ACTIVE_ORG },
-    ], { context: sysCtx } as any);
-    published.length = 0;
-
-    await engine.update('workspace_doc', { status: 'swept' }, { multi: true, where: { status: 'open' }, context: member } as any);
-
-    expect(published).toHaveLength(1);
-    expect(bulkEvent().matched).toBe(2);
-    expect(hasOrgKey()).toBe(true);
-    expect(bulkEvent().organizationId).toBe(ACTIVE_ORG);
-  });
-
-  it('a custom `tenancy.tenantField` on an object that carries NO `organization_id` publishes it ABSENT — the custom column is never a substitute', async () => {
-    // `systemFields: false` is the hard opt-out: the registry injects
-    // nothing, and — the #8608 shape the registry's predicate exists for —
-    // plugin-security does NOT read it as `tenancyDisabled`, so the wall is
-    // decided by the column clause alone: no `organization_id`
-    // (`objectHasOrgIdField: false`) ⇒ no wall ⇒ nothing to assert. The
-    // declared `workspace_id` is not read as a stand-in: the wall does not
-    // key on it either.
-    const workspaceNote = {
-      name: 'workspace_note',
-      label: 'Workspace note',
-      systemFields: false,
-      tenancy: { tenantField: 'workspace_id' },
-      fields: {
-        id: { name: 'id', type: 'text' as const, primaryKey: true },
-        status: { name: 'status', type: 'text' as const },
-        workspace_id: { name: 'workspace_id', type: 'text' as const },
-      },
-    };
-    engine.registry.registerObject(workspaceNote as any);
-    // Measured: no kernel column arrived.
-    expect((engine.registry.getObject('workspace_note') as any).fields.organization_id).toBeUndefined();
-    await engine.insert('workspace_note', [{ status: 'open', workspace_id: ACTIVE_ORG }], { context: sysCtx } as any);
-    published.length = 0;
-
-    await engine.update('workspace_note', { status: 'swept' }, { multi: true, where: { status: 'open' }, context: member } as any);
-
-    expect(published).toHaveLength(1);
-    expect(published[0].type).toBe('data.records.updated');
-    expect(hasOrgKey()).toBe(false);
-  });
-
-  it('an empty active organization OMITS the key AND still publishes — the empty string never reaches the validator', async () => {
-    // `''` is refused by `z.string().min(1)`: handed to the publish site's
-    // `parse` it would throw and the event would be dropped altogether. The
-    // gate is in the resolver, not the error handler — same rule as the
-    // per-record block.
-    const orgless = { userId: 'usr_member', tenantId: '', posture: 'MEMBER' };
-    await seed([{ amount: '1', status: 'open', organization_id: ACTIVE_ORG }]);
-
-    await sweepUpdate(orgless);
+    await sweepUpdate(member);
 
     expect(published).toHaveLength(1);
     expect(hasOrgKey()).toBe(false);
     expect(() => bulkEvent()).not.toThrow();
   });
 
-  it('BulkDataEventSchema.parse at the publish site stays the validator, and the key is fed THROUGH it', () => {
+  it('BulkDataEventSchema.parse at the publish site stays the validator, the key is fed THROUGH it, and the resolver reads the verdict ALONE', () => {
     // A source pin, on the same terms as the #7809 vocabulary weld next door:
     // the runtime pins above prove the key is emitted; this one proves it is
     // emitted INSIDE the `parse` call — a stamp added onto the envelope after
@@ -1126,9 +954,23 @@ describe('#15225 — a published BulkDataEvent names the organization the tenant
     const parseCalls = body.match(/BulkDataEventSchema\.parse\(\{[\s\S]*?\n\s*\}\);/g) ?? [];
     expect(parseCalls).toHaveLength(1);
     expect(parseCalls[0]).toContain('organizationId');
-    // And the value is resolved by the wall-based helper, never the row helper
-    // (there is no row) and never `tenantId` on its own.
+    // The value is resolved by the verdict reader, never the row helper (there
+    // is no row) and never `tenantId` on its own.
     expect(body).toContain('bulkEventOrganizationId(');
     expect(body).not.toContain('eventOrganizationId(');
+
+    // [#15813] The reader composes NOTHING: its body names the verdict schema
+    // and none of the wall's inputs. Comments stripped first — the docblock
+    // is allowed to NAME what is not read.
+    const fnStart = src.indexOf('\nfunction bulkEventOrganizationId(');
+    expect(fnStart).toBeGreaterThan(-1);
+    const fnBody = src
+      .slice(fnStart, src.indexOf('\n}\n', fnStart))
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/\/\/[^\n]*/g, '');
+    expect(fnBody).toContain('TenantLayer0VerdictSchema.safeParse(');
+    for (const input of ['tenantId', 'accessible_org_ids', 'posture', 'isSystem', 'carriesTenantScopeColumn', 'getObject(', 'enforcedTenancyPosture', 'resolveEnginePosture']) {
+      expect(fnBody, `bulkEventOrganizationId reads '${input}' — the mirror is back`).not.toContain(input);
+    }
   });
 });
