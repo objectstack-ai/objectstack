@@ -94,30 +94,65 @@ interface MountOptions {
     failUserRead?: boolean;
 }
 
+/**
+ * The `where` shapes these endpoints actually issue: scalar equality
+ * (`{ id }`, `{ namespace }`, `{ scope }`) and the one `$in` list on `key` the
+ * grouped settings read carries. Anything else — a combinator, another
+ * operator — is REFUSED loudly rather than answered silently wrong, which is
+ * the cheap correct answer for a double that never sees one (the defect class
+ * `check:where-matcher` exists for is silence, not incompleteness).
+ */
+function matchesWhere(row: Row, where: Row | undefined): boolean {
+    for (const [key, condition] of Object.entries(where ?? {})) {
+        if (key.startsWith('$')) {
+            throw new Error(`this double does not implement the where operator ${key}`);
+        }
+        if (condition !== null && typeof condition === 'object') {
+            const operators = Object.keys(condition);
+            if (operators.length !== 1 || operators[0] !== '$in') {
+                throw new Error(`this double does not implement the where operator(s) ${operators.join(', ')} on ${key}`);
+            }
+            if (!condition.$in.includes(row[key])) return false;
+            continue;
+        }
+        if (row[key] !== condition) return false;
+    }
+    return true;
+}
+
 function mount({ storedLocale, rules = [LOCALE_SHAPE_RULE], settingLocale, settingTimezone, settingCurrency, authenticated = true, failUserRead = false }: MountOptions = {}) {
     const reads: Array<{ object: string; opts: any }> = [];
     let sysUserReads = 0;
+    /**
+     * The rows each read draws from, held as a table rather than assembled per
+     * branch, so the double answers `where` and the caller's `limit` the way
+     * the engine does instead of by object name.
+     */
+    const tables: Record<string, Row[]> = {
+        sys_user: [{ id: USER, email: 'lang@example.com', locale: storedLocale }],
+        // The endpoint reads all three `localization` keys in ONE `$in` query,
+        // so the table carries whichever of them the fixture configured — and
+        // nothing for the rest.
+        sys_setting: ([
+            ['locale', settingLocale],
+            ['timezone', settingTimezone],
+            ['currency', settingCurrency],
+        ] as Array<[string, string | undefined]>)
+            .filter(([, value]) => value !== undefined)
+            .map(([key, value]) => ({ namespace: 'localization', key, value, scope: 'tenant' })),
+    };
     const ql = {
         find: async (object: string, opts: any) => {
             reads.push({ object, opts });
-            if (object === 'sys_user') {
-                if (failUserRead && ++sysUserReads > 1) throw new Error('sys_user unavailable');
-                return opts?.where?.id === USER ? [{ id: USER, email: 'lang@example.com', locale: storedLocale }] : [];
-            }
-            if (object === 'sys_setting') {
-                // The endpoint reads all three `localization` keys in ONE `$in`
-                // query, so the double answers whichever of them the fixture
-                // configured — and nothing for the rest.
-                const configured: Array<[string, string | undefined]> = [
-                    ['locale', settingLocale],
-                    ['timezone', settingTimezone],
-                    ['currency', settingCurrency],
-                ];
-                return configured
-                    .filter(([, value]) => value !== undefined)
-                    .map(([key, value]) => ({ namespace: 'localization', key, value, scope: 'tenant' }));
-            }
-            return [];
+            if (object === 'sys_user' && failUserRead && ++sysUserReads > 1) throw new Error('sys_user unavailable');
+            // The caller's bound is applied BY PRESENCE and AFTER the filter.
+            // Both reads this double serves carry one — `sys_user` at 1, the
+            // grouped `sys_setting` read at 10 — so a double that dropped it
+            // could not tell a bounded read from an unbounded one, and every
+            // bound change on those reads would be green by construction
+            // (`check:objectql-double-limit`).
+            const matched = (tables[object] ?? []).filter((row) => matchesWhere(row, opts?.where));
+            return typeof opts?.limit === 'number' ? matched.slice(0, opts.limit) : matched;
         },
         // The registry view the endpoint reads the column's rule off.
         getSchema: (name: string) => (name === 'sys_user' && rules !== null ? { name: 'sys_user', validations: rules } : undefined),
