@@ -408,15 +408,16 @@ export const TEXT_OPERATOR_DOOR_FIXTURE_FIELDS: readonly TextOperatorDoorFixture
 
 /**
  * The fixture object, in the `{ name, fields }` shape `registerObject`
- * takes. `id` is the primary key every registered object carries.
+ * takes — a legal `ObjectSchema` input (pinned). `id` is the row-identity
+ * text column the engine's own fixtures declare.
  */
 export const TEXT_OPERATOR_DOOR_FIXTURE = {
   name: TEXT_OPERATOR_DOOR_FIXTURE_OBJECT,
   label: 'Text-operator door probe',
   fields: Object.fromEntries([
-    ['id', { name: 'id', type: 'text', primaryKey: true }],
+    ['id', { name: 'id', type: 'text' }],
     ...TEXT_OPERATOR_DOOR_FIXTURE_FIELDS.map((f) => [f.name, f] as const),
-  ]) as Readonly<Record<string, TextOperatorDoorFixtureField & { primaryKey?: boolean }>>,
+  ]) as Readonly<Record<string, TextOperatorDoorFixtureField>>,
 } as const;
 
 interface TextOperatorDoorCaseBase {

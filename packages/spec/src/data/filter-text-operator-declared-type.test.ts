@@ -192,7 +192,8 @@ describe('[#15661] textOperatorDoorVerdict', () => {
   });
 
   it('H3: the return-type map is exactly FieldSchema.returnType\'s enum, and every value is a FieldType member', () => {
-    const declared = FieldSchema.shape.returnType.unwrap().unwrap().options as readonly string[];
+    // `.optional().describe()` — one ZodOptional around the enum.
+    const declared = FieldSchema.shape.returnType.unwrap().options as readonly string[];
     expect(sorted(FORMULA_RETURN_TYPE_AS_FIELD_TYPE.keys())).toEqual(sorted(declared));
     for (const [rt, ft] of FORMULA_RETURN_TYPE_AS_FIELD_TYPE) {
       expect(rt).toBe(ft);
