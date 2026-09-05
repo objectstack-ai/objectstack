@@ -83,28 +83,71 @@
  * ## What belongs here
  *
  * Text-operator semantics that every backend must agree on: which characters
- * fold, which characters are literal, and which spellings are refused. Anything
- * whose answer legitimately differs per backend does not belong — the same bar
- * the logic table sets, applied to a different axis.
+ * fold, which characters are literal, which spellings are refused — and, since
+ * #14079, what a text operator answers over a stored value that is NOT a
+ * string. Anything whose answer legitimately differs per backend does not
+ * belong — the same bar the logic table sets, applied to a different axis.
+ *
+ * ## A stored value that is not a string (#14079, maintainer ruling 2026-09-05)
+ *
+ * Measured on `origin/main` before this section existed, one filter over one
+ * numeric column answered FOUR ways: `driver-memory`'s reference matcher said
+ * NO to `$contains` AND to `$notContains` for the same row (a `typeof` test
+ * standing in for the predicate); its live mingo path, every other JS face
+ * and mongo's string-only `$regex` type-gated (`$contains` NO, `$notContains`
+ * YES); the SQLite family COERCED the number to text in its storage class's
+ * spelling (REAL renders `5` as `'5.0'`, so `$endsWith: '5'` was NO and
+ * `$contains: '.0'` was YES — answers to a query nobody wrote); and live
+ * Postgres REFUSED at query time with SQLSTATE 42883, a 500.
+ *
+ * The ruling took the type-gate (option A): a stored value that is not a
+ * string never satisfies a positive text operator (`$contains` /
+ * `$startsWith` / `$endsWith` / `$icontains` / `$like` / `$ilike`) and
+ * satisfies `$notContains` — complementarity holds, on every face. Coercion was
+ * refused on the measurement (unpassable on SQLite REAL without CAST rewrites),
+ * and a declared-type door that refuses the filter before any backend runs
+ * (option C) is deferred to its own decision card, not rejected — the rows
+ * here are what every face answers whether or not such a door is ever built.
+ *
+ * The JS faces answer off the VALUE. A SQL compiler cannot see the value at
+ * compile time, so it answers off the DECLARED type — the column classes in
+ * `NON_TEXT_STORED_VALUE_TYPES` (`field-value.zod.ts`) compile the positive
+ * operators to a never-true predicate and `$notContains` to an always-true one,
+ * which is what makes Postgres's runtime 500 the declared answer instead of a
+ * dialect accident. `$like` / `$ilike` follow the same rule but are pinned on
+ * the faces that answer them rather than here: this table is a driver's
+ * enrolment (rule 2 above), and `driver-mongodb` refuses those two operators.
  *
  * @see FILTER_LOGIC_CASES — combinator semantics, the sibling standard.
+ * @see NON_TEXT_STORED_VALUE_TYPES — the column classes the SQL faces type-gate by.
  * @see https://github.com/objectstack-ai/objectstack/issues/4706 (the ruling)
  * @see https://github.com/objectstack-ai/objectstack/issues/5701 (this table)
  * @see https://github.com/objectstack-ai/objectstack/issues/5702 (the SQL family — landed)
  * @see https://github.com/objectstack-ai/objectstack/issues/6520 ($icontains on the JS faces — landed)
  * @see https://github.com/objectstack-ai/objectstack/issues/6682 (the $contains family — mongodb and memory both landed)
+ * @see https://github.com/objectstack-ai/objectstack/issues/14079 (a stored value that is not a string)
  */
 
 import { parseFilterAST, type FilterCondition } from './filter.zod';
 
 /**
- * A row in the conformance fixture. One text column is enough: every case here
- * is a predicate on one string, and adding columns would only invite cases that
- * belong in the logic table.
+ * A row in the conformance fixture: one text column, and — since #14079 — one
+ * column that is NOT text.
+ *
+ * `name` carries every case about folding and literalness. `score` exists for
+ * exactly one class of case: a text operator aimed at a stored value that is
+ * not a string, which no fixture of strings can see (a `typeof` guard and the
+ * predicate give the same answer while the value IS a string — negation is
+ * what separates them). It is deliberately a NUMBER rather than a boolean or a
+ * date: a number is stored as a non-string on every backend the platform runs
+ * (REAL/INTEGER, a JS number, a BSON double), where a date's stored form is a
+ * dialect question (ADR-0053) this table does not rule on.
  */
 export interface FilterTextRow {
   id: string;
   name: string;
+  /** A stored NUMBER — never a string, on any backend. */
+  score: number;
 }
 
 /**
@@ -116,21 +159,28 @@ export interface FilterTextRow {
  * | non-ASCII case | 3, 4 | a fold WIDER than ASCII — the boundary #4706 Q1 pinned |
  * | `%` | 5, 6 | a comparand `%` reaching SQL as a LIKE wildcard |
  * | `_` / `.` | 7, 8, 9 | a comparand `_` reaching SQL as a wildcard, or `.` reaching a regex engine |
+ * | `score` (not a string) | all nine | a backend that COERCES a stored number to text and searches it, or one whose `typeof` guard answers NO to an operator and to its negation (#14079) |
  *
  * Each pair is deliberately near-identical apart from the one character under
  * test, so a case that matches the wrong member of a pair returns visibly wrong
  * ids rather than the same count by luck.
+ *
+ * The `score` values are chosen so that a coercing backend answers a VISIBLY
+ * non-empty set to the positive cases (seven of nine values render with a `5`
+ * in them; every value renders with a trailing `0` on a SQLite REAL column and
+ * five of nine on an INTEGER one), and so that a `0` is among them — a guard
+ * written as a truthiness test would drop that row.
  */
 export const FILTER_TEXT_ROWS: readonly FilterTextRow[] = [
-  { id: '1', name: 'ACME Corp' },
-  { id: '2', name: 'acme corp' },
-  { id: '3', name: 'CAFÉ' },
-  { id: '4', name: 'café' },
-  { id: '5', name: '100% match' },
-  { id: '6', name: '100X match' },
-  { id: '7', name: 'a_b' },
-  { id: '8', name: 'axb' },
-  { id: '9', name: 'a.b' },
+  { id: '1', name: 'ACME Corp', score: 5 },
+  { id: '2', name: 'acme corp', score: 50 },
+  { id: '3', name: 'CAFÉ', score: 0 },
+  { id: '4', name: 'café', score: 15 },
+  { id: '5', name: '100% match', score: 100 },
+  { id: '6', name: '100X match', score: 105 },
+  { id: '7', name: 'a_b', score: 25 },
+  { id: '8', name: 'axb', score: 250 },
+  { id: '9', name: 'a.b', score: 500 },
 ] as const;
 
 /** Fields every case carries, whatever its verdict. */
@@ -303,6 +353,53 @@ export const FILTER_TEXT_CASES: readonly FilterTextCase[] = [
     filter: { name: { $notContains: 'acme' } },
     expected: ['1', '3', '4', '5', '6', '7', '8', '9'],
     note: 'Row 1 is EXCLUDED from the negation only if the positive form excluded it — the case rule has to hold under $not too.',
+  },
+
+  // ── A stored value that is NOT a string (#14079, ruled 2026-09-05) ────────
+  //
+  // Every `score` is a number, so every positive text operator answers NO for
+  // every row and `$notContains` answers YES for every row — complementarity.
+  // The header's "A stored value that is not a string" section carries the
+  // measurement these rows replace. Two wrong answers to keep apart:
+  //
+  //   - COERCE: `String(5)` is `'5'`, so `$contains: '5'` returns rows 1, 2, 4,
+  //     6, 7, 8 and 9 — and on a SQLite REAL column `5` renders `'5.0'`, so
+  //     `$endsWith: '0'` returns ALL NINE there and five elsewhere. A coercing
+  //     backend answers a query nobody wrote, in a spelling the storage class
+  //     chose.
+  //   - A TYPE TEST IN PLACE OF THE PREDICATE: `typeof value !== 'string' ⇒
+  //     false` on `$notContains` answers NO to an operator AND to its negation
+  //     for the same row (rows 1–9 vanish from the negation) — the reference
+  //     matcher's measured answer before #14079.
+  {
+    name: '$contains never matches a stored value that is not a string',
+    filter: { score: { $contains: '5' } },
+    expected: [],
+    note: 'A number cannot contain a substring. A coercing backend returns [1,2,4,6,7,8,9]; live Postgres used to refuse this at query time (SQLSTATE 42883), which the type-gated compile turns into this declared answer.',
+  },
+  {
+    name: '$startsWith never matches a stored value that is not a string',
+    filter: { score: { $startsWith: '5' } },
+    expected: [],
+    note: 'A coercing backend returns [1,2,9].',
+  },
+  {
+    name: '$endsWith never matches a stored value that is not a string',
+    filter: { score: { $endsWith: '0' } },
+    expected: [],
+    note: 'The storage-class tell: a coercing SQLite REAL column returns ALL NINE (every value renders `…0.0`), an INTEGER column returns [2,3,5,8,9]. The declared answer depends on neither.',
+  },
+  {
+    name: '$icontains never matches a stored value that is not a string',
+    filter: { score: { $icontains: '5' } },
+    expected: [],
+    note: 'The fold has nothing to fold: the guard on the COLUMN VALUE is the same one `$contains` carries, applied before the fold rather than instead of it.',
+  },
+  {
+    name: '$notContains is satisfied by every stored value that is not a string — complementarity holds',
+    filter: { score: { $notContains: '5' } },
+    expected: ['1', '2', '3', '4', '5', '6', '7', '8', '9'],
+    note: 'The card\'s cell. A value that cannot contain the substring satisfies "does not contain" — the answer the live mingo path, formula, having, mongo and the analytics face already gave, and the one the reference matcher answered NO to. A coercing backend returns [3,5].',
   },
 
   // ── Refusals ──────────────────────────────────────────────────────────────

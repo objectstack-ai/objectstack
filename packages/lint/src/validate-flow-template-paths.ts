@@ -74,6 +74,7 @@ import {
   unprovisionedAnchorHint,
 } from './system-fields.js';
 import { walkFlowNodes } from './flow-walk.js';
+import { recordsOf } from './object-graph.js';
 
 export type FlowTemplatePathSeverity = 'error' | 'warning';
 
@@ -94,18 +95,6 @@ export const FLOW_TEMPLATE_LOOKUP_TRAVERSAL = 'flow-template-lookup-traversal';
 export const FLOW_TEMPLATE_FIELD_UNPROVISIONED = 'flow-template-field-unprovisioned';
 
 type AnyRec = Record<string, unknown>;
-
-/** Coerce an array-or-name-keyed-map collection to an array (name injected). */
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v as AnyRec[];
-  if (v && typeof v === 'object') {
-    return Object.entries(v as AnyRec).map(([name, def]) => ({
-      name,
-      ...(def as AnyRec),
-    }));
-  }
-  return [];
-}
 
 // Path heads addressable in a `{record.<col>}` template without being authored
 // fields: the package-shared registry-injected columns (`system-fields.ts`,
@@ -142,7 +131,7 @@ const FILTER_GUARDED_NODE_TYPES: ReadonlySet<string> = new Set([
 /** Build a `fieldName -> type` map for an object (declared fields only). */
 function fieldTypesOf(obj: AnyRec): Map<string, string> {
   const types = new Map<string, string>();
-  for (const f of asArray(obj.fields)) {
+  for (const f of recordsOf(obj.fields)) {
     if (typeof f.name === 'string') {
       types.set(f.name, typeof f.type === 'string' ? f.type : '');
     }
@@ -296,11 +285,11 @@ function declaredExpandOf(flow: AnyRec): Set<string> {
  */
 export function validateFlowTemplatePaths(stack: AnyRec): FlowTemplatePathFinding[] {
   const findings: FlowTemplatePathFinding[] = [];
-  const flows = asArray(stack.flows);
+  const flows = recordsOf(stack.flows);
   if (flows.length === 0) return findings;
 
   const objectsByName = new Map<string, AnyRec>();
-  for (const obj of asArray(stack.objects)) {
+  for (const obj of recordsOf(stack.objects)) {
     if (typeof obj.name === 'string') objectsByName.set(obj.name, obj);
   }
 

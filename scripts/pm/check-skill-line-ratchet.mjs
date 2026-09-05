@@ -705,7 +705,12 @@ export const CEILINGS = new Map([
   // machine-readable proxy. Measured both ways before reverting to the raise.
   // The density fix is legitimate on its own and belongs in a net-reducing PR
   // (2026-08-29 ruling), not this one. Landed count, headroom 0, same convention.
-  ['.claude/agents/os-dev.md', 469],
+  // Lowered 469 → 403 by the rules-only rewrite (maintainer ruling: provenance
+  // narratives, incident post-mortems and rationale tails leave the corpus; one
+  // rule per ≤120-byte line; the frontmatter, section order, pinned spellings and
+  // the report JSON keep their operative content). Landed count, headroom 0, same
+  // convention (lowering is always legitimate).
+  ['.claude/agents/os-dev.md', 403],
   // #9473: the other four `.claude/skills/` are read in full by the sessions
   // that use them too — the erosion mechanism the ratchet exists to stop
   // isn't specific to the pm-dispatch surface. Set at current counts on

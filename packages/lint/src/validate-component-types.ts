@@ -53,6 +53,7 @@ import {
 } from '@objectstack/spec/ui';
 import { findClosestMatches, formatSuggestion } from '@objectstack/spec/shared';
 import { walkPageComponents, type AnyRec } from './page-walk.js';
+import { recordsOf } from './object-graph.js';
 
 /** A component `type` inside a spec-reserved namespace that the vocabulary does not declare. */
 export const COMPONENT_TYPE_UNKNOWN = 'component-type-unknown';
@@ -79,20 +80,11 @@ function strName(v: unknown): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined;
 }
 
-/** Coerce a collection (array or name-keyed map) to an array of records. */
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v as AnyRec[];
-  if (v && typeof v === 'object') {
-    return Object.entries(v as AnyRec).map(([name, def]) => ({ name, ...(def as AnyRec) }));
-  }
-  return [];
-}
-
 export function validateComponentTypes(stack: AnyRec): ComponentTypeFinding[] {
   const findings: ComponentTypeFinding[] = [];
   if (!isRec(stack)) return findings;
 
-  const pages = asArray(stack.pages);
+  const pages = recordsOf(stack.pages);
   for (let pi = 0; pi < pages.length; pi++) {
     const page = pages[pi];
     if (!isRec(page)) continue;
