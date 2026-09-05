@@ -35,6 +35,69 @@
  * rule has no business loading. It is checked by `validate-react-page-props`
  * instead, against the naming convention `chartAggregateResultKeys`
  * (`@objectstack/spec/ui`) now pins down (#3701).
+ *
+ * ## Which positions are BINDINGS, and which are presentation (#15575)
+ *
+ * `chart-measure-unknown`'s message names a QUERY consequence — *"this series
+ * comes back empty"* — and that is only true where the position feeds the
+ * dataset query. Read at the pinned `@object-ui` revision (`.objectui-sha`),
+ * the three surfaces do not agree, so the tier and the consequence are per
+ * POSITION rather than per rule:
+ *
+ *  - **Report charts.** The chart runs its OWN query out of the two axis
+ *    strings — `useDatasetRows(dataset, [xAxis], [yAxis], …)` in
+ *    `plugin-report/src/DatasetReportRenderer.tsx`, and in that file's own
+ *    words *"the embedded chart queries only `chart.xAxis` × `chart.yAxis`"*.
+ *    So `chart.yAxis` IS the binding and keeps `error`. `chart.series[]` is
+ *    not: it is *"The author's per-chart override for ONE measure's display
+ *    name — the entry of `chart.series[]` whose `name` IS that measure"*,
+ *    lowered through `mergeAuthoredSeries`, for which *"an authored entry
+ *    naming a measure that is NOT in the dataset selection is **ignored** —
+ *    membership belongs to the dataset"* (`@object-ui/core`
+ *    `src/utils/chart-presentation.ts`).
+ *  - **List-view charts.** `ListChartConfigSchema` is a STRICT object of
+ *    `chartType` / `dataset` / `dimensions` / `values`: it declares no
+ *    `series` and no `yAxis`, so this rule has no presentation position on
+ *    that surface at all. Its one measure position is `values[]`, which
+ *    `app-shell/src/views/ObjectView.tsx` hands to the chart component as the
+ *    dataset measures (and synthesises the series list FROM). Query binding,
+ *    `error`, unchanged.
+ *  - **Dataset-bound page chart components.** `plugin-charts/src/ObjectChart.tsx`
+ *    queries `{ dimensions: schema.dimensions, measures: schema.values }` and
+ *    then REPLACES the authored series wholesale —
+ *    `{ ...schema, data, xAxisKey, series: datasetChart.series }`, one derived
+ *    entry per selected measure. An authored `properties.series[].name` reaches
+ *    the renderer not at all, and an authored `properties.yAxis[].field` is
+ *    inert for the same reason (`normalizeChartSchema` synthesises series from
+ *    `yAxis[].field` only when there are none, which on this surface means an
+ *    empty `values` — a chart with no measures to plot either way). Both are
+ *    presentation; `dimensions` / `values` are the binding.
+ *
+ * So the presentation positions drop to `warning` and state what actually
+ * happens, which is the resolution the maintainer ruling on
+ * `chart-field-unknown` reached for the same question one rule over (see "The
+ * three refused binding keys" in `validate-widget-bindings.ts`). Two things
+ * follow that differ from that sibling, and are worth stating rather than
+ * leaving to be re-derived:
+ *
+ *  - **There is no per-position suppression here.** `suppressWarnings` is
+ *    declared on the dashboard WIDGET only (`spec/src/ui/dashboard.zod.ts`),
+ *    and none of these three surfaces carries the key. A `warning` is advisory
+ *    (the consumers split on `severity === 'error'`) but cannot be silenced
+ *    individually; declaring the key on these surfaces would be a schema
+ *    change, which this rule has no standing to make.
+ *  - **The page surface's axis refs and series refs are separate limbs.** They
+ *    used to be concatenated into one `series` array before the measure walk,
+ *    so every `yAxis[].field` took the SERIES message. Reading both shapes on
+ *    that surface is deliberate (the props bag mixes them); giving them one
+ *    message was not — the pin refuses the two for different reasons, so they
+ *    now carry different sentences.
+ *
+ * `chart-axis-not-selected` (declared measure, outside the selection) rides the
+ * same walk and took the same one-size sentence — *"the query does not return
+ * it, so the series plots nothing"*. That is the truth at a query position and
+ * not at a presentation one, where no series is derived for the name in the
+ * first place, so its consequence is per position too.
  */
 
 export const CHART_DIMENSION_UNKNOWN = 'chart-dimension-unknown';
@@ -127,12 +190,82 @@ interface ChartBinding {
   xAxis?: { name: string; path: string };
   /** Single measure ref (report `yAxis`). */
   yAxis?: { name: string; path: string };
-  /** Series names — measure refs (ChartConfig shape). */
-  series?: Array<{ name: string; path: string }>;
+  /**
+   * `series[].name` refs (ChartConfig shape) — a display-name / presentation
+   * override on every surface that has one, never a binding (#15575). `kind`
+   * names the surface because the two are refused DIFFERENTLY at the pin: a
+   * report entry is matched against the derived series and dropped when it
+   * pairs with none; a page component's authored array is replaced wholesale.
+   */
+  series?: Array<{ name: string; path: string; kind: 'report-series' | 'page-series' }>;
+  /**
+   * Page-component `yAxis[].field` refs — axis PRESENTATION (#15575). A limb of
+   * its own rather than more entries of `series`: the axis keeps its slot and
+   * its scale/chrome while the plotted columns come from `values`, which is a
+   * different sentence from a series entry that pairs with nothing.
+   */
+  axes?: Array<{ name: string; path: string }>;
   where: string;
   /** Path of the chart container, for the dataset-level finding. */
   path: string;
 }
+
+/**
+ * What a measure name is DOING at the position it was written (#15575).
+ *
+ * `query` is the only one the dataset query reads; the rest are presentation
+ * the pinned renderer refuses as a binding. The distinction decides both the
+ * severity and the consequence sentence — see the module docblock for the
+ * per-surface read that produced it.
+ */
+type MeasurePosition = 'query' | 'report-series' | 'page-series' | 'page-axis';
+
+/** Presentation position → what actually happens when the name resolves to nothing. */
+const UNKNOWN_CONSEQUENCE: Record<Exclude<MeasurePosition, 'query'>, string> = {
+  'report-series':
+    'On this surface `chart.series[]` is a per-measure DISPLAY-NAME override, not a '
+    + 'binding: the renderer derives the series from the chart\'s own `xAxis`/`yAxis` '
+    + 'query and pairs an authored entry with the derived series whose key it EQUALS, so '
+    + 'an entry naming no declared measure is ignored. The override lands on nothing — '
+    + 'the series is still drawn from the dataset selection.',
+  'page-series':
+    'On this surface `series[]` is presentation, not a binding: the renderer derives one '
+    + 'series per selected measure and REPLACES the authored array with the derived one, '
+    + 'so this entry never reaches the chart at all. It lands on nothing — the chart is '
+    + 'still drawn from `dimensions`/`values`.',
+  'page-axis':
+    'On this surface `yAxis[].field` is axis PRESENTATION, not a binding: the entry keeps '
+    + 'its slot (the count is what turns on a secondary axis) and its scale/chrome, while '
+    + 'the plotted columns come from `values`. The key re-points nothing.',
+};
+
+/** Presentation position → the shape sentence in the hint. */
+const SHAPE_HINT: Record<Exclude<MeasurePosition, 'query'>, string> = {
+  'report-series':
+    '`series[].name` selects WHICH derived series the label and per-series presentation '
+    + 'land on; it cannot add, remove or re-point one.',
+  'page-series':
+    '`series[].name` cannot add, remove or re-point a series on a dataset-bound chart — '
+    + 'membership belongs to the dataset selection.',
+  'page-axis':
+    '`yAxis[]` carries presentation only (title, min/max, position, gridlines); the '
+    + 'plotted columns come from `values`.',
+};
+
+/** Position → the consequence of naming a DECLARED measure outside the selection. */
+const UNSELECTED_CONSEQUENCE: Record<MeasurePosition, string> = {
+  query: 'the query does not return it, so the series plots nothing.',
+  'report-series':
+    'this entry is a display-name override matched against the ONE series the chart '
+    + 'derives (from its own `chart.yAxis` query), so unless it names that measure the '
+    + 'override lands on nothing. The series drawn is unaffected.',
+  'page-series':
+    'the series are derived from `values`, so none is derived for it and this entry '
+    + 'lands on nothing. The chart drawn is unaffected.',
+  'page-axis':
+    'the plotted columns come from `values`, so the axis entry re-points nothing. The '
+    + 'chart drawn is unaffected.',
+};
 
 export function validateChartBindings(stack: AnyRec): ChartBindingFinding[] {
   const findings: ChartBindingFinding[] = [];
@@ -178,25 +311,40 @@ export function validateChartBindings(stack: AnyRec): ChartBindingFinding[] {
       });
     };
 
-    const measureRef = (name: string, path: string, selected?: Set<string>) => {
+    const measureRef = (
+      name: string,
+      path: string,
+      position: MeasurePosition,
+      selected?: Set<string>,
+    ) => {
       if (!ds.measures.has(name)) {
         findings.push({
-          severity: 'error',
+          // A query position is the only one where an unknown measure breaks
+          // the chart; the presentation positions are advisory (#15575, and
+          // the `chart-field-unknown` ruling one rule over).
+          severity: position === 'query' ? 'error' : 'warning',
           rule: CHART_MEASURE_UNKNOWN,
           where: binding.where,
           path,
           message:
             `"${name}" is not a measure declared by dataset "${dsName}". ` +
-            `Post-ADR-0021 result rows are keyed by MEASURE NAME (e.g. "sum_amount"), ` +
-            `not the base field (e.g. "amount"), so this series comes back empty.`,
+            (position === 'query'
+              ? `Post-ADR-0021 result rows are keyed by MEASURE NAME (e.g. "sum_amount"), ` +
+                `not the base field (e.g. "amount"), so this series comes back empty.`
+              : UNKNOWN_CONSEQUENCE[position]),
           hint:
             `Dataset measures: ${list(ds.measures)}.${suggestName(name, ds.measures)} ` +
-            `Declare the measure on the dataset, or bind an existing one.`,
+            (position === 'query'
+              ? `Declare the measure on the dataset, or bind an existing one.`
+              : `${SHAPE_HINT[position]} Correct the name or drop the entry — this ` +
+                `surface carries no \`suppressWarnings\` key to silence the advisory with.`),
         });
         return;
       }
-      // Declared but not part of this chart's selection: the query never asks
-      // for it, so the axis still plots nothing. Advisory — the selection may
+      // Declared, but outside this chart's selection. At a QUERY position that
+      // means the query never asks for it and the axis plots nothing; at a
+      // presentation position no series is derived for it at all, so the
+      // override lands on nothing. Advisory either way — the selection may
       // legitimately be widened at runtime.
       if (selected && selected.size > 0 && !selected.has(name)) {
         findings.push({
@@ -206,9 +354,13 @@ export function validateChartBindings(stack: AnyRec): ChartBindingFinding[] {
           path,
           message:
             `"${name}" is a declared measure of "${dsName}" but is not in this chart's ` +
-            `selected values (${list(selected)}) — the query does not return it, ` +
-            `so the series plots nothing.`,
-          hint: `Add "${name}" to \`values\`, or point the axis at a selected measure.`,
+            `selected values (${list(selected)}) — ${UNSELECTED_CONSEQUENCE[position]}`,
+          hint:
+            position === 'report-series'
+              ? `Point the entry at the measure this chart plots (\`chart.yAxis\`), or drop it.`
+              : `Add "${name}" to \`values\`, or point the ${
+                  position === 'query' ? 'axis' : 'entry'
+                } at a selected measure.`,
         });
       }
     };
@@ -223,12 +375,18 @@ export function validateChartBindings(stack: AnyRec): ChartBindingFinding[] {
     const selected = new Set(valSel?.names ?? []);
     if (valSel) {
       for (let i = 0; i < valSel.names.length; i++) {
-        measureRef(valSel.names[i], `${valSel.path}[${i}]`);
+        // The SELECTION itself — the names the dataset query asks for on every
+        // surface that has this limb. Always a binding.
+        measureRef(valSel.names[i], `${valSel.path}[${i}]`, 'query');
       }
     }
     if (binding.xAxis) dimensionRef(binding.xAxis.name, binding.xAxis.path);
-    if (binding.yAxis) measureRef(binding.yAxis.name, binding.yAxis.path, selected);
-    for (const s of binding.series ?? []) measureRef(s.name, s.path, selected);
+    if (binding.yAxis) measureRef(binding.yAxis.name, binding.yAxis.path, 'query', selected);
+    // Axes before series, the order the page surface reported them in when the
+    // two shared one limb — the split (#15575) changes the message, not the
+    // walk.
+    for (const a of binding.axes ?? []) measureRef(a.name, a.path, 'page-axis', selected);
+    for (const s of binding.series ?? []) measureRef(s.name, s.path, s.kind, selected);
   };
 
   // ── 1. Report charts (report.chart + report.blocks[].chart) ──
@@ -255,8 +413,12 @@ export function validateChartBindings(stack: AnyRec): ChartBindingFinding[] {
         xAxis: strName(chart.xAxis) ? { name: strName(chart.xAxis)!, path: `${path}.chart.xAxis` } : undefined,
         yAxis: strName(chart.yAxis) ? { name: strName(chart.yAxis)!, path: `${path}.chart.yAxis` } : undefined,
         series: asArray(chart.series)
-          .map((s, si) => ({ name: strName(s.name), path: `${path}.chart.series[${si}].name` }))
-          .filter((s): s is { name: string; path: string } => !!s.name),
+          .map((s, si) => ({
+            name: strName(s.name),
+            path: `${path}.chart.series[${si}].name`,
+            kind: 'report-series' as const,
+          }))
+          .filter((s): s is { name: string; path: string; kind: 'report-series' } => !!s.name),
         where,
         path: `${path}.chart`,
       });
@@ -344,13 +506,20 @@ export function validateChartBindings(stack: AnyRec): ChartBindingFinding[] {
         .map((a, ai) => ({ name: strName(a.field), path: `${path}.properties.yAxis[${ai}].field` }))
         .filter((a): a is { name: string; path: string } => !!a.name);
       const seriesRefs = asArray(props.series)
-        .map((s, si) => ({ name: strName(s.name), path: `${path}.properties.series[${si}].name` }))
-        .filter((s): s is { name: string; path: string } => !!s.name);
+        .map((s, si) => ({
+          name: strName(s.name),
+          path: `${path}.properties.series[${si}].name`,
+          kind: 'page-series' as const,
+        }))
+        .filter((s): s is { name: string; path: string; kind: 'page-series' } => !!s.name);
       check({
         dataset: strName(props.dataset),
         dimensions: { names: strList(props.dimensions), path: `${path}.properties.dimensions` },
         values: { names: strList(props.values), path: `${path}.properties.values` },
-        series: [...axisRefs, ...seriesRefs],
+        // #15575 — two limbs, not one concatenated `series` array: the pin
+        // refuses an axis `field` and a series `name` for different reasons.
+        axes: axisRefs,
+        series: seriesRefs,
         where: `page "${pageName}" · ${strName(component.type) ?? 'chart'}`,
         path: `${path}.properties`,
       });
