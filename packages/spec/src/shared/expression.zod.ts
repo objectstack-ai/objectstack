@@ -218,8 +218,8 @@ export const TYPED_EXPRESSION_DIALECT_ONLY: Readonly<Record<TypedExpressionDiale
 };
 
 /**
- * Build a typed input union: a bare, non-blank string (this dialect's
- * shorthand) or an {@link ExpressionSchema} envelope declaring this dialect.
+ * The two arms a typed input union shares, spelled once. Each typed schema
+ * below composes them around its own `z.literal(dialect)` envelope arm.
  *
  * The refusal shape is measured, not assumed (zod 4.4): a union reports the
  * one arm that did not abort, else `invalid_union`. Both arms here abort on a
@@ -234,18 +234,25 @@ export const TYPED_EXPRESSION_DIALECT_ONLY: Readonly<Record<TypedExpressionDiale
  * saying one thing. The one refusal `ExpressionSchema` carries — neither
  * `source` nor `ast` — still surfaces on its own, with its own message: that
  * arm does not abort on it.
+ *
+ * The string arm's transform returns the narrowed `{ dialect, source }`, not
+ * the wide `Expression`: the parsed value of a typed slot must stay assignable
+ * to its own input type (`ObjectStackDefinitionSchema.parse` output is handed
+ * to validators typed with the input shape), and it is — a same-dialect
+ * envelope is both.
  */
-function typedExpressionInput<D extends TypedExpressionDialect>(dialect: D) {
-  return z.union([
-    z.string()
-      .refine((source) => source.trim().length > 0, { message: TYPED_EXPRESSION_SOURCE_REQUIRED[dialect] })
-      .transform((source): Expression => ({ dialect, source })),
-    ExpressionSchema.safeExtend({ dialect: z.literal(dialect) }),
-  ], {
+function typedExpressionStringArm<D extends TypedExpressionDialect>(dialect: D) {
+  return z.string()
+    .refine((source) => source.trim().length > 0, { message: TYPED_EXPRESSION_SOURCE_REQUIRED[dialect] })
+    .transform((source) => ({ dialect, source }));
+}
+
+function typedExpressionUnionParams(dialect: TypedExpressionDialect): { error: (issue: { input?: unknown }) => string } {
+  return {
     error: (issue) => (typeof issue.input === 'string'
       ? TYPED_EXPRESSION_SOURCE_REQUIRED[dialect]
       : TYPED_EXPRESSION_DIALECT_ONLY[dialect]),
-  });
+  };
 }
 
 /**
@@ -263,7 +270,10 @@ function typedExpressionInput<D extends TypedExpressionDialect>(dialect: D) {
  * every other cron-typed slot reaches no engine, and no grammar is restated
  * here.
  */
-export const CronExpressionInputSchema = typedExpressionInput('cron');
+export const CronExpressionInputSchema = z.union([
+  typedExpressionStringArm('cron'),
+  ExpressionSchema.safeExtend({ dialect: z.literal('cron') }),
+], typedExpressionUnionParams('cron'));
 export type CronExpressionInput = z.input<typeof CronExpressionInputSchema>;
 
 /**
@@ -275,7 +285,10 @@ export type CronExpressionInput = z.input<typeof CronExpressionInputSchema>;
  * notification subjects/bodies, titleFormat, prompt templates — anything with
  * `{{var}}` interpolation. No template syntax is judged at parse time.
  */
-export const TemplateExpressionInputSchema = typedExpressionInput('template');
+export const TemplateExpressionInputSchema = z.union([
+  typedExpressionStringArm('template'),
+  ExpressionSchema.safeExtend({ dialect: z.literal('template') }),
+], typedExpressionUnionParams('template'));
 export type TemplateExpressionInput = z.input<typeof TemplateExpressionInputSchema>;
 
 /**
