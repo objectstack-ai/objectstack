@@ -417,6 +417,12 @@ export const ERROR_CODE_LEDGER = {
     'SSO_REGISTER_FAILED',
     'SSO_REGISTER_FORBIDDEN',
     'USER_ALREADY_EXISTS',        // pass-through from better-auth
+    // [#15587] Raised by US on `/sign-up/email` for an address that already
+    // carries a `sys_user` row, using better-auth's own BASE_ERROR_CODES entry
+    // so the refusal is byte-identical whichever lane produces it. Registered
+    // here because the platform now EMITS it rather than only passing it
+    // through: an emitted-but-unregistered code is the silent fourth state.
+    'USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL',
     'VALIDATION_FAILED',
   ],
   '@objectstack/plugin-sharing': [
