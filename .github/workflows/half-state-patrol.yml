@@ -289,6 +289,28 @@ jobs:
           # and it is load-bearing: a PR must never write to the board.
           SWEEP_MODE: ${{ github.event_name == 'pull_request' && '--dry-run' || '--write' }}
         run: |
+          # The judge's own cases first, and the sweep only if they hold: this
+          # step WRITES to other people's cards, and a broken predicate that
+          # still runs is the one failure mode that cannot be undone by the next
+          # run. `check:pm-closed-card-sweep` is the same command under a dev
+          # -facing name; this is the invocation CI holds.
+          set +e
+          node scripts/pm/sweep-closed-cards.mjs --self-test > "$RUNNER_TEMP/closed-cards-selftest.log" 2>&1
+          selftest=$?
+          set -e
+          cat "$RUNNER_TEMP/closed-cards-selftest.log"
+          if [ "$selftest" != "0" ]; then
+            echo "exit_code=$selftest" >> "$GITHUB_OUTPUT"
+            {
+              echo "### Closed-card sweep — SKIPPED: its own self-test failed (exit $selftest)"
+              echo
+              echo '```'
+              cat "$RUNNER_TEMP/closed-cards-selftest.log"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::closed-card sweep self-test failed (exit $selftest) — the sweep did NOT run and wrote nothing. Nothing here is a reading about the board."
+            exit 0
+          fi
           set +e
           node scripts/pm/sweep-closed-cards.mjs "$SWEEP_MODE" --provenance="$PROVENANCE" \
             > "$RUNNER_TEMP/closed-cards.md" 2> "$RUNNER_TEMP/closed-cards.err"
