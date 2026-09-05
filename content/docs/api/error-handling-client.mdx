@@ -28,7 +28,7 @@ interface ErrorResponse {
     httpStatus?: number; // HTTP status code
     retryable?: boolean; // Whether the request can be retried
     retryStrategy?: string;
-    retryAfter?: number; // Seconds to wait before retrying (rate limits)
+    retryAfterSeconds?: number; // Wait before retrying (rate limits)
     // One entry per offending value. Named `fields` on the wire AND in the spec
     // contract since ADR-0114 D4; the old `fieldErrors` is tombstoned.
     fields?: Array<{
@@ -69,7 +69,7 @@ import type { ErrorResponse } from '@objectstack/spec/api';
 class ObjectStackError extends Error {
   code: string;
   status: number;
-  retryAfter?: number;
+  retryAfterSeconds?: number;
   fields: ErrorResponse['error']['fields'];
   details: ErrorResponse['error']['details'];
   requestId?: string;
@@ -79,7 +79,7 @@ class ObjectStackError extends Error {
     this.name = 'ObjectStackError';
     this.code = response.error.code;
     this.status = response.error.httpStatus ?? 0;
-    this.retryAfter = response.error.retryAfter;
+    this.retryAfterSeconds = response.error.retryAfterSeconds;
     this.fields = response.error.fields;
     this.details = response.error.details;
     this.requestId = response.error.requestId ?? response.meta?.requestId;
@@ -241,7 +241,7 @@ Not all errors should be retried. Use this decision matrix:
 | Authentication errors | 401 | ⚠️ Once | Refresh token, then retry |
 | Permission errors | 403 | ❌ No | Show access denied message |
 | Not found | 404 | ❌ No | Show not found message |
-| Rate limited | 429 | ✅ Yes | Wait for `retryAfter` seconds, then retry |
+| Rate limited | 429 | ✅ Yes | Wait `retryAfterSeconds`, then retry |
 | Server errors | 500 | ✅ Yes | Exponential backoff |
 | Network errors | 0 | ✅ Yes | Exponential backoff |
 
@@ -266,12 +266,12 @@ async function withRetry<T>(
         }
 
         // Rate limited: honor the server's retry hint.
-        // `retryAfter` is in seconds; some responses instead carry an
+        // `retryAfterSeconds` names its own unit; some responses instead carry an
         // absolute `details.resetAt` timestamp.
         if (error.isRateLimit) {
           const resetAt = (error.details as any)?.resetAt;
-          const waitMs = error.retryAfter != null
-            ? error.retryAfter * 1000
+          const waitMs = error.retryAfterSeconds != null
+            ? error.retryAfterSeconds * 1000
             : resetAt
               ? Math.max(new Date(resetAt).getTime() - Date.now(), 1000)
               : baseDelay;

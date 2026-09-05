@@ -452,7 +452,8 @@ const result = ApiErrorSchema.parse(data);
 | **batchScheduleFn** | `Enum<'microtask' \| 'timeout' \| 'manual'>` | optional (default: `"microtask"`) | Scheduling strategy for collecting batch keys |
 | **cacheEnabled** | `boolean` | optional (default: `true`) | Enable per-request result caching |
 | **cacheKeyFn** | `string` | optional | Name or identifier of the cache key function |
-| **cacheTtl** | `number` | optional | Cache time-to-live in seconds (0 = no expiration) |
+| **cacheTtlSeconds** | `number` | optional | Cache time-to-live in seconds (0 = no expiration) |
+| **cacheTtl** | `never` | optional | [REMOVED] `DataLoaderConfig.cacheTtl` was renamed to `cacheTtlSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `cacheTtlSeconds`; the value (seconds) is unchanged. |
 | **coalesceRequests** | `boolean` | optional (default: `true`) | Deduplicate identical requests within a batch window |
 | **maxConcurrency** | `integer` | optional | Maximum parallel batch requests |
 
@@ -665,7 +666,8 @@ const result = ApiErrorSchema.parse(data);
 | **batchScheduleFn** | `Enum<'microtask' \| 'timeout' \| 'manual'>` | optional (default: `"microtask"`) | Scheduling strategy for collecting batch keys |
 | **cacheEnabled** | `boolean` | optional (default: `true`) | Enable per-request result caching |
 | **cacheKeyFn** | `string` | optional | Name or identifier of the cache key function |
-| **cacheTtl** | `number` | optional | Cache time-to-live in seconds (0 = no expiration) |
+| **cacheTtlSeconds** | `number` | optional | Cache time-to-live in seconds (0 = no expiration) |
+| **cacheTtl** | `never` | optional | [REMOVED] `DataLoaderConfig.cacheTtl` was renamed to `cacheTtlSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `cacheTtlSeconds`; the value (seconds) is unchanged. |
 | **coalesceRequests** | `boolean` | optional (default: `true`) | Deduplicate identical requests within a batch window |
 | **maxConcurrency** | `integer` | optional | Maximum parallel batch requests |
 

@@ -39,7 +39,8 @@ const result = ApiEndpointSchema.parse(data);
 | **outputMapping** | `{ source: string; target: string; transform?: string }[]` | optional | Map Internal Result to Response Body |
 | **authRequired** | `boolean` | optional (default: `true`) | Require authentication |
 | **rateLimit** | `{ enabled: boolean; windowMs: integer; maxRequests: integer }` | optional | Rate limiting policy |
-| **cacheTtl** | `number` | optional | Response cache TTL in seconds |
+| **cacheTtlSeconds** | `number` | optional | Response cache TTL in seconds |
+| **cacheTtl** | `never` | optional | [REMOVED] `ApiEndpoint.cacheTtl` was renamed to `cacheTtlSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `cacheTtlSeconds`; the value (seconds) is unchanged, and it stays GET-only. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
 | **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |

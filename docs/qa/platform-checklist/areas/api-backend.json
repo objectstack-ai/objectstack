@@ -842,7 +842,7 @@
         "object_operation target — the task feed (authed read)",
         "flow target — delegates to a flow",
         "policy: authRequired (default true)",
-        "policy: cacheTtl → Cache-Control",
+        "policy: cacheTtlSeconds → Cache-Control",
         "script/proxy target — answer 501 in the open framework"
       ],
       "steps": [
@@ -854,7 +854,7 @@
       ],
       "acceptance": [
         {
-          "clause": "the object_operation endpoint answers 200 authed with the delegated data, and carries the declared cache policy (Cache-Control: private, max-age=30 when cacheTtl is set)",
+          "clause": "the object_operation endpoint answers 200 authed with the delegated data, and carries the declared cache policy (Cache-Control: private, max-age=30 when cacheTtlSeconds is set)",
           "oracle": "api",
           "verify": "authed GET status 200 + body + Cache-Control header vs the declared policy",
           "evidence": "response + headers"
