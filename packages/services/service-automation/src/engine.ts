@@ -5740,16 +5740,79 @@ export class AutomationEngine implements IAutomationService {
                 // `forgetSuspendedRun`'s catch above for the full mechanism
                 // (#6299).
                 //
-                // #4632 verdict: FUNCTIONAL — stays `warn`: no false success
-                // is recorded anywhere — the parent either failed terminally
-                // (recorded in run history) or stays visibly parked and
-                // resumable — and the child's own completion, which is what
-                // its resumer was told, is genuine.
-                this.logger.warn(
-                    `[automation] subflow run '${run.runId}' completed but resuming parent '${parentRunId}' ` +
-                        `failed — the parent's failure envelope is in this record's meta.`,
-                    { error: parentRes.error ?? 'unknown error' },
-                );
+                // [#15556] The #4632 verdict is taken PER OUTCOME here, graded
+                // by the engine's own discriminator and never by this seam's
+                // guess at what went wrong upstream.
+                //
+                // The old verdict was FUNCTIONAL for the whole arm, on this
+                // enumeration: "the parent either failed terminally (recorded
+                // in run history) or stays visibly parked and resumable". A
+                // reproduction of the composition the enumeration never
+                // covered — a parent parked at a `subflow` node whose child
+                // hosts an approval, resumed by the approvals decision door —
+                // measured a THIRD outcome: `resumeInternal` answers
+                // `{ success: false, status: 'stranded' }` (and no `code`),
+                // because the parent consumed its suspension and then threw
+                // downstream. That exit journals a repair snapshot and records
+                // the parent `failed`, so the parent is neither parked nor
+                // merely failed: nothing in the engine will ever move it again
+                // and only {@link restoreConsumedSuspension} can re-arm it.
+                //
+                // That is AGENTS.md's DURABILITY class verbatim — persisted
+                // state and runtime state disagree and nothing looks broken
+                // from the outside: the approval row is durably terminal, the
+                // child's own resume genuinely succeeded, and the decision
+                // door therefore answered its caller success. ⛔ And the rule's
+                // third legal answer (a failure handed to the CALLER is not a
+                // degradation) does NOT apply: measured, no caller is told.
+                //
+                // ⛔ Deliberately NOT the whole arm. `RESUME_IN_PROGRESS` (a
+                // replica is already advancing the parent) and
+                // `STORE_UNAVAILABLE` (the parent's suspension was not
+                // consumed, so it stays parked and the identical resume works
+                // once the store recovers) are exactly the functional cases
+                // the old verdict was right about, and escalating those is how
+                // `error` becomes unreadable. `status === 'stranded'` is the
+                // ONE exit that journalled a snapshot, so it is the one an
+                // operator can and must act on.
+                //
+                // ⚠️ This is the LOG half only. What the child's resumer — and
+                // through it the approvals decision door — is TOLD is
+                // unchanged and still reads as full success; making that
+                // truthful moves a public contract (`AutomationResult`,
+                // `ApprovalDecisionResult`) and is #15556's open decision, the
+                // sibling one level up of the #13807 ruling (2026-09-04,
+                // decision batch #37). ⛔ Not decided here.
+                if (parentRes.status === 'stranded') {
+                    // THIRD argument per the `Logger` contract
+                    // (`error(message, error?, meta?)`); the `Error` slot stays
+                    // empty on purpose (#5575). The message owes the two things
+                    // AGENTS.md's durability rule asks of an `error`: the
+                    // CONSEQUENCE, concretely, and the FIX.
+                    this.logger.error(
+                        `[automation] subflow run '${run.runId}' completed, but its parent run ` +
+                            `'${parentRunId}' is STRANDED — the parent consumed its suspension and then failed ` +
+                            `downstream, so no resume, timer or restart will move it again, while this child's ` +
+                            `resumer (an approvals decision door, a wait timer) was told the resume SUCCEEDED and ` +
+                            `nothing else reports the parent. Repair it with ` +
+                            `restoreConsumedSuspension('${parentRunId}') and re-issue the continuation. The ` +
+                            `parent's failure envelope is in this record's meta.`,
+                        undefined,
+                        { error: parentRes.error ?? 'unknown error', parentRunId, status: parentRes.status },
+                    );
+                } else {
+                    // #4632 verdict: FUNCTIONAL — stays `warn`, unchanged: on
+                    // every other exit nothing claimed-persisted fails to land
+                    // — the parent either failed terminally (recorded in run
+                    // history) or stays visibly parked and resumable — and the
+                    // child's own completion, which is what its resumer was
+                    // told, is genuine.
+                    this.logger.warn(
+                        `[automation] subflow run '${run.runId}' completed but resuming parent '${parentRunId}' ` +
+                            `failed — the parent's failure envelope is in this record's meta.`,
+                        { error: parentRes.error ?? 'unknown error' },
+                    );
+                }
             }
         } catch (err) {
             // #6499 — thrown text to the structured slot; see
