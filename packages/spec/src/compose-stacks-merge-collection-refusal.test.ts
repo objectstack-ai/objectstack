@@ -163,7 +163,9 @@ describe("composeStacks objectConflict: 'merge' — what stays accepted", () => 
     const out = composeStacks([a, b], { objectConflict: 'merge' });
     const s = shared(out)!;
     expect((s.actions ?? []).map((x) => x.name)).toEqual(['approve']);
-    expect(s.indexes).toEqual([{ fields: ['title'] }]);
+    // The strict parse fills `unique: false`; the subject is one entry, carried once.
+    expect(s.indexes).toHaveLength(1);
+    expect(s.indexes?.[0].fields).toEqual(['title']);
   });
 
   it("keeps the earlier stack's collection when the later object does not declare it", () => {
