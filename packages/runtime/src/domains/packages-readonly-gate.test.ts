@@ -42,7 +42,7 @@
  * the same listing.
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -95,6 +95,30 @@ function make() {
         // Present so a DELETE that is ALLOWED reaches its persisted half too —
         // the allow-path must be exercised end to end, not just to the gate.
         deletePackage: async () => ({ deletedCount: 1 }),
+        // [#14451] This double MINTS THE TARGET PACKAGE RECORD, because the real
+        // `duplicatePackage` does: its `registry.installPackage` call runs ahead
+        // of the copy loop, which is why the reported defect left a real, empty
+        // `com.acme.dupbase` in `GET /packages`.
+        //
+        // ⚠️ Not decoration — it is what makes the refusal cases falsifiable. A
+        // double that only returned a value would leave "the target is not in
+        // the listing" true whether or not the gate exists, i.e. an assertion
+        // that can never go red. With the mint in place, deleting the gate makes
+        // those cases fail on the listing, not merely on the status.
+        duplicatePackage: vi.fn(async (req: any) => {
+            registry.installPackage(manifest(req.targetPackageId));
+            // The exact empty-success body the card measured on a running code
+            // package: HTTP 200, `success: false`, nothing copied, nothing named
+            // as failed.
+            return {
+                success: false,
+                copiedCount: 0,
+                failedCount: 0,
+                targetPackageId: req.targetPackageId,
+                copied: [],
+                failed: [],
+            };
+        }),
     };
     const kernel: any = {
         context: {
@@ -102,7 +126,7 @@ function make() {
                 name === 'objectql' ? objectql : name === 'protocol' ? protocol : null,
         },
     };
-    return { dispatcher: new HttpDispatcher(kernel), registry };
+    return { dispatcher: new HttpDispatcher(kernel), registry, protocol };
 }
 
 /** Authorized under #7033 — holds the write capability on every call below. */
@@ -291,4 +315,180 @@ describe('/packages lifecycle — an unknown package id keeps its 404 (#7560)', 
         const r = await d.handlePackages('/com.nobody.nothing/disable', 'PATCH', {}, {}, admin());
         expect(r.response?.status).toBe(404);
     });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 6. [#14451] POST /:id/duplicate — the SOURCE must be a base
+//
+// ## The defect this section pins
+//
+// `POST /api/v1/packages/com.example.todo/duplicate` against a RUNNING code
+// package answered **HTTP 200** with
+// `{"success":false,"copiedCount":0,"failedCount":0,"copied":[],"failed":[]}`
+// and left a real, empty `com.acme.dupbase` behind in `GET /packages`.
+// Reproduced independently twice on two separate `os dev` processes.
+//
+// `copiedCount: 0` there is BY CONSTRUCTION: `duplicatePackage` clones the
+// source's `sys_metadata` rows, and a code package's metadata is delivered as
+// code, so the scan is one that could never have found anything. That is the
+// #11063 ruling one route over — "a read that could not happen must not be
+// reported as a read that found nothing" — and the caller could not tell it
+// from a base that really is empty.
+//
+// ⛔ The fix is NOT to make duplicate clone code items. ADR-0070 D4 is declared
+// and NOT built ("D4–D6 remaining") and its object is a *base*; cloning a code
+// package would EXTEND D4, and the ADR still lists that as an open question
+// ("should customising a code item also fork it into a writable base?").
+//
+// ## What is asserted, and why it is not the status code
+//
+// The harm was the empty shell, so every refusal case asserts the listing —
+// and the protocol double MINTS that shell exactly as the real implementation
+// does, so these assertions can actually go red. A double that merely returned
+// a value would make "the target is absent" true with or without the gate.
+// ══════════════════════════════════════════════════════════════════════════════
+
+const DUP_TARGET = 'com.acme.dupbase';
+
+describe('/packages duplicate — a source that is not a base is refused (#14451)', () => {
+    for (const pkg of READ_ONLY_PACKAGES) {
+        it(`422s duplicate of the ${pkg.label} package AND mints no target record`, async () => {
+            const { dispatcher, registry, protocol } = make();
+            const before = listedIds(registry);
+
+            const r = await dispatcher.handlePackages(
+                `/${pkg.id}/duplicate`, 'POST', { targetPackageId: DUP_TARGET, targetName: 'Dup Base' }, {}, admin(),
+            );
+
+            expect(r.response?.status).toBe(422);
+            expect(r.response?.body?.error?.code).toBe('DUPLICATE_SOURCE_NOT_A_BASE');
+            // THE observable the card was written from: the pre-fix answer left
+            // a real, listed, `writable: true` package record behind.
+            expect(listedIds(registry)).toEqual(before);
+            expect(listedIds(registry)).not.toContain(DUP_TARGET);
+            expect(registry.getPackage(DUP_TARGET)).toBeUndefined();
+            // The refusal ran BEFORE the protocol call — which is the only
+            // placement that can keep the shell from being minted, since
+            // `duplicatePackage` installs it ahead of its own copy loop.
+            expect(protocol.duplicatePackage).not.toHaveBeenCalled();
+            // …and the source is untouched: this route never wrote to it, and
+            // the refusal must not have changed that.
+            expect(registry.getPackage(pkg.id)).toBeDefined();
+        });
+    }
+
+    it('answers the ADR-0112 envelope with the package id and the ADR pointer', async () => {
+        const { dispatcher } = make();
+        const r = await dispatcher.handlePackages(
+            `/${CODE_LOADED}/duplicate`, 'POST', { targetPackageId: DUP_TARGET }, {}, admin(),
+        );
+        const err = r.response?.body?.error;
+        expect(r.response?.status).toBe(422);
+        expect(err?.code).toBe('DUPLICATE_SOURCE_NOT_A_BASE');
+        expect(err?.httpStatus).toBe(422);
+        expect(err?.details?.packageId).toBe(CODE_LOADED);
+        expect(err?.details?.docs).toBe('docs/adr/0070-package-first-authoring.md');
+        // The remedy is the one that EXISTS for a code package (ADR-0005
+        // overlay), and the message says why the copy would be empty rather
+        // than only that it is refused.
+        expect(err?.message).toContain('ADR-0005');
+        expect(err?.message).toContain('read-only');
+    });
+
+    it('is its OWN code, not WRITABLE_PACKAGE_REQUIRED — the two conditions differ', async () => {
+        const { dispatcher } = make();
+        const dup = await dispatcher.handlePackages(
+            `/${CODE_LOADED}/duplicate`, 'POST', { targetPackageId: DUP_TARGET }, {}, admin(),
+        );
+        const del = await dispatcher.handlePackages(`/${CODE_LOADED}`, 'DELETE', {}, {}, admin());
+        // Same predicate (`isWritablePackage`), same status, different meaning:
+        // DELETE is refused because the package may not be WRITTEN to; duplicate
+        // is refused because the GESTURE does not apply to this source. A caller
+        // told `WRITABLE_PACKAGE_REQUIRED` here would hunt for a way to make a
+        // code package writable, which is neither possible nor the remedy.
+        expect(del.response?.body?.error?.code).toBe('WRITABLE_PACKAGE_REQUIRED');
+        expect(dup.response?.body?.error?.code).toBe('DUPLICATE_SOURCE_NOT_A_BASE');
+        expect(dup.response?.body?.error?.code).not.toBe(del.response?.body?.error?.code);
+    });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 7. [#14451] The gate is not an outage — the control that must be non-zero
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe('/packages duplicate — a WRITABLE base still duplicates (#14451)', () => {
+    it('reaches the protocol with the source and target it was given, and mints the target', async () => {
+        const { dispatcher, registry, protocol } = make();
+        expect(listedIds(registry)).not.toContain(DUP_TARGET);
+
+        const r = await dispatcher.handlePackages(
+            `/${WRITABLE}/duplicate`, 'POST', { targetPackageId: DUP_TARGET, targetName: 'Dup Base' }, {}, admin(),
+        );
+
+        expect(r.response?.status).toBe(200);
+        expect(protocol.duplicatePackage).toHaveBeenCalledTimes(1);
+        expect(protocol.duplicatePackage.mock.calls[0]?.[0]).toMatchObject({
+            sourcePackageId: WRITABLE,
+            targetPackageId: DUP_TARGET,
+            targetName: 'Dup Base',
+        });
+        // The non-zero control the refusal cases are read against: on the allow
+        // path the double really does mint the record, so their `not.toContain`
+        // is a measurement rather than a vacuous truth.
+        expect(listedIds(registry)).toContain(DUP_TARGET);
+    });
+
+    it('an EMPTY writable base still answers 200 / copiedCount 0 — that read HAPPENED', async () => {
+        // ⛔ Deliberately unchanged by this card. The axis is whether the gesture
+        // APPLIES to the source, never whether it found anything: a base that
+        // owns no active rows is a read that ran and came back empty, which is
+        // the legitimate arm of the #11063 ruling. Narrowing this to "refuse an
+        // empty result" would refuse a legitimate duplicate of a fresh base.
+        const { dispatcher } = make();
+        const r = await dispatcher.handlePackages(
+            `/${WRITABLE}/duplicate`, 'POST', { targetPackageId: DUP_TARGET }, {}, admin(),
+        );
+        expect(r.response?.status).toBe(200);
+        expect(r.response?.body?.data?.copiedCount).toBe(0);
+        expect(r.response?.body?.data?.success).toBe(false);
+    });
+
+    it('an UNKNOWN source id falls through to the protocol — the gate is no existence oracle', async () => {
+        // Same rule `requireWritablePackage` follows: an id that resolves to
+        // nothing is treated as writable, so it reaches the route's own answer
+        // instead of being re-labelled 422 by a gate that would then leak which
+        // ids exist.
+        const { dispatcher, protocol } = make();
+        const r = await dispatcher.handlePackages(
+            '/com.nobody.nothing/duplicate', 'POST', { targetPackageId: DUP_TARGET }, {}, admin(),
+        );
+        expect(r.response?.status).not.toBe(422);
+        expect(protocol.duplicatePackage).toHaveBeenCalledTimes(1);
+    });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 8. [#14451] The sibling refusal stops prescribing a dead end
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe('/packages lifecycle — the read-only refusal no longer sends callers at duplicate (#14451)', () => {
+    for (const verb of [
+        { label: 'DELETE', path: (id: string) => `/${id}`, method: 'DELETE' },
+        { label: 'disable', path: (id: string) => `/${id}/disable`, method: 'PATCH' },
+    ]) {
+        it(`${verb.label} prescribes the ADR-0005 overlay, not POST /:id/duplicate`, async () => {
+            const { dispatcher } = make();
+            const r = await dispatcher.handlePackages(verb.path(CODE_LOADED), verb.method, {}, {}, admin());
+            const message = String(r.response?.body?.error?.message ?? '');
+
+            expect(r.response?.body?.error?.code).toBe('WRITABLE_PACKAGE_REQUIRED');
+            // It used to read "…or duplicate this one into a writable base
+            // (POST /packages/<id>/duplicate) and change that" — a remedy that,
+            // for exactly the packages this refusal fires on, now answers 422
+            // and before that answered an empty 200. A refusal that prescribes a
+            // dead end is worse than one that prescribes nothing.
+            expect(message).not.toContain('/duplicate');
+            expect(message).toContain('ADR-0005');
+        });
+    }
 });

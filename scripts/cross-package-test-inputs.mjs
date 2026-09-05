@@ -360,6 +360,17 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     // merge queue would be the first signal -- the shape the three e2e pages
     // above were declared for.
     //
+    // The two pages added for #15818 are read by
+    // test/scaffold-emission-policy.e2e.test.ts, which holds the TypeScript range
+    // BOTH scaffolders emit equal to the floor those pages promise a reader
+    // ("ObjectStack works with TypeScript 5.3+", "TypeScript 5.3.0 or later").
+    // That promise is what settled which of three restated ranges survived the
+    // extraction, so the pin is the only thing that keeps the emitted value and
+    // the documented one from parting again. Same both-ways coupling as the
+    // #14824 trio: a range moved in `init.ts` must redden the pages that still
+    // promise the old floor, and a page rewritten to a new floor must redden
+    // until the scaffolders follow.
+    //
     // `connector-mcp-plugin.ts` is read by test/serve-capability-identity.test.ts,
     // which pins that the connector still registers the name the #7652 repro uses
     // rather than importing the class. It surfaced with the three above and has the
@@ -418,6 +429,8 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'examples/app-showcase/src/ui/pages/task-triage.page.ts',
       'content/docs/deployment/cli.mdx',
       'content/docs/deployment/index.mdx',
+      'content/docs/deployment/troubleshooting.mdx',
+      'content/docs/getting-started/index.mdx',
       'content/docs/permissions/authentication.mdx',
       'content/docs/plugins/index.mdx',
       'content/docs/protocol/kernel/index.mdx',

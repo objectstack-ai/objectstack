@@ -488,10 +488,17 @@
  *       second half of the contradiction is a FIELD — which is how 17 cards
  *       across three repos (2026-08-23 census: 6 objectstack, 10 objectui, 1
  *       cloud) sat in it with nothing reporting them. The measured origin is a
- *       state ROLLBACK that swaps the label and leaves the field: of the three
- *       rollback paths, only dead-claim reclamation ever named the assignee
- *       drop, so H8's and H19's remedy sentences now name it too (「同笔摘
- *       assignee」). ⚠️ The field carries two meanings — dead agent claims and
+ *       state ROLLBACK that swaps the label and leaves the field. What every
+ *       rollback path owes instead is the release ACT — ONE act with TWO
+ *       halves:
+ *       「释放是显式动作:让卡离手者同笔清 assignee + `Release:` 行(会话/因/去向);下一任重新认领。」
+ *       — clear the assignee AND post the `Release:` line, in one write. H8's
+ *       full-delivery remedy, H19's release text and H37's dispatched-residue
+ *       remedy all say exactly that, from one constant (`RELEASE_ACT_RULE`),
+ *       because a remedy naming only the FIELD half prescribes the other
+ *       half-state — the field cleared with no record of who let the card go —
+ *       which is the shape H47 reports.
+ *       ⚠️ The field carries two meanings — dead agent claims and
  *       genuine human ownership — and the row deliberately does NOT try to tell
  *       them apart: the ruling of 2026-08-23 puts the rule FIRST and any
  *       true-ownership exemption in an explicit marker LATER, never the other
@@ -1090,6 +1097,35 @@ export const CLAIM_COMMENT_MARKER = /^\s*>?\s*Claim(?:ed)?\s*:/mi;
  * `CLAIM_COMMENT_MARKER`, applied to the newer half of the same protocol).
  */
 export const RELEASE_COMMENT_MARKER = /^\s*>?\s*Release\s*:/mi;
+
+/**
+ * The release ACT, quoted from `.claude/skills/pm-dispatch/SKILL.md` VERBATIM
+ * and kept UNBROKEN on one line so it stays greppable against its source:
+ *
+ *   「释放是显式动作:让卡离手者同笔清 assignee + `Release:` 行(会话/因/去向);下一任重新认领。」
+ *
+ * ONE constant, because every remedy sentence that tells a seat how to let a
+ * card go has to say the SAME thing. Three of them — H8's full-delivery
+ * remedy, H19's release text on both branches, H37's dispatched-residue
+ * remedy — carried a shorthand of this file's own coining instead: a phrase
+ * wearing quotation brackets that appeared in NO SKILL.md, ever (`git log -S`
+ * over that file's whole history came back empty). In this file's register the
+ * brackets promise that these are the protocol's OWN words, so the shorthand
+ * was not a spelling nit — it made a promise the source could not answer.
+ *
+ * ⚠️ It is ONE act with TWO halves — clear the assignee AND post the
+ * `Release:` line (session, cause, destination) — and a remedy naming only the
+ * field half PRESCRIBES a half-state: the field cleared, no record of who let
+ * the card go or why, which is the exact shape H47 exists to report. ⛔ So do
+ * not paraphrase this line, and do not coin a shorthand for it again.
+ *
+ * `selfTest` keeps its OWN transcription of the same line (`RELEASE_RULE_LINE`)
+ * rather than reading this constant: two independent copies compared against
+ * each other is a real check, while a pin that reads the value it pins asserts
+ * nothing at all.
+ */
+const RELEASE_ACT_RULE =
+  '释放是显式动作:让卡离手者同笔清 assignee + `Release:` 行(会话/因/去向);下一任重新认领。';
 
 export function h2AssigneeNoClaimComment(issue, commentBodies) {
   const labels = labelNames(issue);
@@ -1757,7 +1793,10 @@ export function h8MergedPrStillDispatched(issue, mergedPrs, openPrs) {
     `delivering PR ${list} is MERGED but the card still carries \`pm:dispatched\` — ` +
     `the merge's paired write never landed. Drop \`pm:dispatched\` and re-grade the ` +
     `remainder (re-queue, close, or block the un-delivered half) in the same stroke, ` +
-    `and 「同笔摘 assignee」 — the landing re-label owes the ASSIGNEE DROP too. A ` +
+    `and let the card GO in the landed shape — 「${RELEASE_ACT_RULE}」 — ONE act with TWO ` +
+    `halves: clear the assignee AND post the \`Release:\` line (session, cause, destination). ` +
+    `Dropping the field alone leaves no record of who let the card go, which is the half-state ` +
+    `H47 reports. A ` +
     `re-graded card that keeps the finished dev's assignee lands straight in H24's ` +
     `two-views contradiction (\`pm:queue\` + assigned = dispatchable to the queue view, ` +
     `taken to the claim rule), which is how 17 cards across three repos got stuck where ` +
@@ -3468,7 +3507,10 @@ export function h19BlockOutlivedBlocker(issue, resolutions) {
     'to release when the card carries a MERGED PR newer than that conversion comment (the card moved on ' +
     'after the condition was written, so the cited fact can be true and no longer current). This row ' +
     'surfaces the candidate; the unlock sweep releases it — ⛔ never a label written from this script. ' +
-    'When that release does happen, its paired write includes 「同笔摘 assignee」: a card returned to ' +
+    `When that release does happen it is the landed ACT — 「${RELEASE_ACT_RULE}」 — ONE write with ` +
+    'TWO halves: it clears the assignee AND carries the `Release:` line (session, cause, destination). ' +
+    'Dropping the field alone leaves no record of who let the card go, the half-state H47 reports. ' +
+    'A card returned to ' +
     '`pm:queue` still carrying the assignee of the seat that parked it is dispatchable to the queue ' +
     'view and taken to the claim rule at the same time (H24), which is the state the unlock scan was ' +
     'measured leaving behind — ⚠️ agent identity only, a HUMAN assignment is ⛔ never cleared by an agent.';
@@ -6948,8 +6990,11 @@ export function h37FamilyMemberDrift(folds, openByNumber, closedByNumber) {
             'That is the same non-atomic family write failing in the MIRROR direction, and it reads to ' +
             'every per-card predicate as an ordinary in-flight card. Patrol input, NOT a verdict — this ' +
             'member may still have work of its own outstanding. Remedy: clear the residue in the write ' +
-            'that cleared the head (drop `pm:dispatched` and the assignee together — H24\'s ' +
-            '「同笔摘 assignee」), or re-dispatch it on its own card and its own branch if work remains. ' +
+            'that cleared the head, in the landed shape — letting a card go is ONE act with TWO ' +
+            `halves, 「${RELEASE_ACT_RULE}」 — so drop \`pm:dispatched\`, clear the assignee AND ` +
+            'post the `Release:` line (session, cause, destination) together; a kept assignee lands ' +
+            'in H24, a cleared field with no line in H47. Or re-dispatch it on its own card and its ' +
+            'own branch if work remains. ' +
             `Claimants seen on that branch: ${namedMembers(entry?.claimants ?? [])}.`,
         ]);
       }
@@ -13712,6 +13757,12 @@ function selfTest() {
   // holds is exactly the drift a shared constant cannot express.
   const RELEASE_RULE_LINE =
     '释放是显式动作:让卡离手者同笔清 assignee + `Release:` 行(会话/因/去向);下一任重新认领。';
+  // The retired coinage, ASSEMBLED rather than spelled. The measure of this
+  // repair is a `git grep -c` for that phrase over this file reading ZERO, so a
+  // literal needle in the negative cases below would be the single hit that
+  // defeats the check it exists to protect. Joining the halves keeps both the
+  // case and the grep honest.
+  const RETIRED_ASSIGNEE_COINAGE = ['同笔摘', 'assignee'].join(' ');
 
   // -- Row-text wrappers: every message assertion goes through one -----------
   //
@@ -17043,19 +17094,36 @@ function selfTest() {
   t('H24 adjacency: H3 is silent (only ONE label is present)', h3QueueAndDispatched(queued(['pm:queue'], ['os-elon'])), false);
   t('H24 adjacency: H2 is silent when the claim comment is complete', h2AssigneeNoClaimComment(queued(['pm:queue'], ['os-elon']), ['Claim: PM loop round 1\nSession: session_x']), false);
 
-  // -- The paired-write remedy texts (#11196 fix 2) ---------------------------
+  // -- The paired-write remedy texts (#11196 fix 2, re-pointed) ---------------
   // H8's landing re-label and H19's unlock scan are the two rollback paths that
-  // never named the assignee drop; both sentences name it now, and the
-  // half-delivered branch must NOT (there the label and the claim are CORRECT).
+  // never named the release act; both sentences name it now — and they name it
+  // in the spelling that LANDED, quoting the rule line UNBROKEN so the quote
+  // stays checkable against SKILL.md, and naming the SECOND half (the
+  // `Release:` line) that a bare field drop omits. The half-delivered branch
+  // must NOT prescribe it (there the label and the claim are CORRECT).
+  //
+  // Every re-pointed sentence also carries a negative case for the retired
+  // coinage: a re-pointing a later edit can silently undo is not a repair, and
+  // the whole-file grep that measures this one runs nowhere but in a reviewer's
+  // shell.
   const pairedMerged = [{ number: 900, merged_at: '2026-08-22T10:00:00Z', body: 'Fixes #10638', head: { ref: 'x' } }];
   const pairedOpenHalf = [{ number: 901, merged_at: null, draft: true, body: 'Part of #10638', head: { ref: 'y' } }];
-  t('H8: the full-delivery remedy names 同笔摘 assignee', h8row(queued(['pm:dispatched'], ['os-elon']), pairedMerged, []).includes('同笔摘 assignee'), true);
+  t('H8: the full-delivery remedy names the release act in the spelling that LANDED', h8row(queued(['pm:dispatched'], ['os-elon']), pairedMerged, []).includes('同笔清 assignee'), true);
+  t('H8: …quoting the rule line unbroken, so the quote stays checkable against SKILL.md', h8row(queued(['pm:dispatched'], ['os-elon']), pairedMerged, []).includes(RELEASE_RULE_LINE), true);
+  t('H8: …and names the SECOND half, the `Release:` line a bare field drop omits', h8row(queued(['pm:dispatched'], ['os-elon']), pairedMerged, []).includes('`Release:` line'), true);
+  t('H8: …and the retired coinage does not come back', h8row(queued(['pm:dispatched'], ['os-elon']), pairedMerged, []).includes(RETIRED_ASSIGNEE_COINAGE), false);
   t('H8: …and points at H24 as the state it prevents', h8row(queued(['pm:dispatched'], ['os-elon']), pairedMerged, []).includes('H24'), true);
   t('H8: …and keeps the human-assignment refusal', h8row(queued(['pm:dispatched'], ['os-elon']), pairedMerged, []).includes('never cleared by an agent'), true);
-  t('H8: the HALF-delivered branch prescribes no assignee drop', h8row(queued(['pm:dispatched'], ['os-elon']), pairedMerged, pairedOpenHalf).includes('同笔摘 assignee'), false);
+  t('H8: the HALF-delivered branch prescribes no assignee drop', h8row(queued(['pm:dispatched'], ['os-elon']), pairedMerged, pairedOpenHalf).includes('同笔清 assignee'), false);
+  t('H8: …nor the release rule line — nothing is being let go there', h8row(queued(['pm:dispatched'], ['os-elon']), pairedMerged, pairedOpenHalf).includes(RELEASE_RULE_LINE), false);
   t('H8: …and still says the label is correct there', h8row(queued(['pm:dispatched'], ['os-elon']), pairedMerged, pairedOpenHalf).includes('must NOT be dropped'), true);
-  t('H19: the release text names 同笔摘 assignee', h19row(queued(['pm:blocked']), [{ key: 'objectstack-ai/objectstack#2', number: 2, local: true, state: 'closed' }]).includes('同笔摘 assignee'), true);
-  t('H19: …on the unresolved branch too (one release contract, one sentence)', h19row(queued(['pm:blocked']), [{ key: 'objectstack-ai/cloud#2', number: 2, local: false, state: 'unresolved', detail: 'HTTP 404' }]).includes('同笔摘 assignee'), true);
+  t('H19: the release text names the release act in the spelling that LANDED', h19row(queued(['pm:blocked']), [{ key: 'objectstack-ai/objectstack#2', number: 2, local: true, state: 'closed' }]).includes('同笔清 assignee'), true);
+  t('H19: …quoting the rule line unbroken', h19row(queued(['pm:blocked']), [{ key: 'objectstack-ai/objectstack#2', number: 2, local: true, state: 'closed' }]).includes(RELEASE_RULE_LINE), true);
+  t('H19: …and names the SECOND half, the `Release:` line', h19row(queued(['pm:blocked']), [{ key: 'objectstack-ai/objectstack#2', number: 2, local: true, state: 'closed' }]).includes('`Release:` line'), true);
+  t('H19: …and the retired coinage does not come back', h19row(queued(['pm:blocked']), [{ key: 'objectstack-ai/objectstack#2', number: 2, local: true, state: 'closed' }]).includes(RETIRED_ASSIGNEE_COINAGE), false);
+  t('H19: …on the unresolved branch too (one release contract, one sentence)', h19row(queued(['pm:blocked']), [{ key: 'objectstack-ai/cloud#2', number: 2, local: false, state: 'unresolved', detail: 'HTTP 404' }]).includes('同笔清 assignee'), true);
+  t('H19: …with the rule line unbroken there too', h19row(queued(['pm:blocked']), [{ key: 'objectstack-ai/cloud#2', number: 2, local: false, state: 'unresolved', detail: 'HTTP 404' }]).includes(RELEASE_RULE_LINE), true);
+  t('H19: …and the retired coinage gone from that branch as well', h19row(queued(['pm:blocked']), [{ key: 'objectstack-ai/cloud#2', number: 2, local: false, state: 'unresolved', detail: 'HTTP 404' }]).includes(RETIRED_ASSIGNEE_COINAGE), false);
 
   // -- H25 + the `pm:awaiting-maintainer` vocabulary (#11196 fix 5) -----------
   t('the ruled spelling is pm:-prefixed', AWAITING_MAINTAINER_LABEL, 'pm:awaiting-maintainer');
@@ -18547,6 +18615,12 @@ function selfTest() {
   t('H37 mirror: …keyed to the member carrying the residue', h37key1(...residue37), 11679);
   t('H37 mirror: …and it says the head CLOSED', h37row1(...residue37).includes('CLOSED'), true);
   t('H37 mirror: …naming it as the same write failing the other way', h37row1(...residue37).includes('MIRROR direction'), true);
+  // The third re-pointed remedy sentence: this row prescribes letting a card
+  // go, so it owes the same landed act, both halves, as H8's and H19's do.
+  t('H37 mirror: …and the remedy names the release act in the spelling that LANDED', h37row1(...residue37).includes('同笔清 assignee'), true);
+  t('H37 mirror: …quoting the rule line unbroken', h37row1(...residue37).includes(RELEASE_RULE_LINE), true);
+  t('H37 mirror: …and names the SECOND half, the `Release:` line', h37row1(...residue37).includes('`Release:` line'), true);
+  t('H37 mirror: …and the retired coinage does not come back', h37row1(...residue37).includes(RETIRED_ASSIGNEE_COINAGE), false);
   const released37 = [
     h37FoldBranches([h37claim(11679, FOLD_37)]),
     h37map(h37card(11679, ['pm:dispatched']), h37card(11678, ['pm:queue'])),

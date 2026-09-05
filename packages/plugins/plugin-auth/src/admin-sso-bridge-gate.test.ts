@@ -135,10 +135,35 @@ const makeSsoVendor = () =>
 describe('#9653 the /admin/sso/* bridges run the ADR-0068 platform-admin gate before delegating', () => {
   // Session shapes are the exact ones platform-admin-gate.ts is unit-tested
   // for; here they drive the MOUNTED routes so the pin is on the wiring.
+  //
+  // [#15136] MIGRATED. The platform-admin shape used to be
+  // `positions: ['user','platform_admin']` with no `isPlatformAdmin` — it stood
+  // for a real payload back when the gate admitted on that NAME. It no longer
+  // does, and deliberately: `positions[]` is now the security axis, so the name
+  // can arrive from a tenant-writable ADR-0057 D4 `sys_user_position` row, and
+  // admitting on it would hand these operator routes to a tenant admin. The
+  // payload a real deployment produces carries the derived alias, which is the
+  // ADR-0095 D3 posture rung; that is what the gate reads, so that is what the
+  // fixture must carry. `positions` keeps the name because a genuine platform
+  // admin really does have it projected — which is exactly why the name alone
+  // cannot be the signal.
   const SESSIONS: Record<string, unknown> = {
     member: { user: { id: 'usr_member', positions: ['user'], role: 'user' } },
     'org-admin': { user: { id: 'usr_orgadmin', positions: ['user', 'org_admin', 'org_owner'], role: 'user' } },
-    'platform-admin': { user: { id: 'usr_admin', positions: ['user', 'platform_admin'], role: 'user' } },
+    'platform-admin': {
+      user: {
+        id: 'usr_admin',
+        positions: ['user', 'platform_admin'],
+        isPlatformAdmin: true,
+        role: 'user',
+      },
+    },
+    // The escalation shape, refused: the built-in NAME with no rung behind it.
+    // Without this, restoring the array leg would turn these bridges back into
+    // an open door and every case above would still pass.
+    'position-named-platform-admin': {
+      user: { id: 'usr_tenant', positions: ['org_member', 'platform_admin'], role: 'user' },
+    },
   };
 
   let app: Hono;
@@ -183,6 +208,19 @@ describe('#9653 the /admin/sso/* bridges run the ADR-0068 platform-admin gate be
       // owners/admins to the two register bridges.
       delegated.mockClear();
       const res = await fire(app, path, { session: 'org-admin' });
+      const body: any = await res.json();
+      expect(res.status).toBe(403);
+      expect(body.error?.code).toBe('PERMISSION_DENIED');
+      expect(delegated).not.toHaveBeenCalled();
+    });
+
+    it(`${path}: a \`platform_admin\` POSITION NAME with no rung → 403, never delegated`, async () => {
+      // [#15136] The escalation shape. `sys_user_position` is `apiEnabled`, so a
+      // tenant admin can put this exact name in their own `positions[]` now that
+      // the array is the security axis. The gate reads the rung-derived alias,
+      // which is absent here, so these operator routes stay shut.
+      delegated.mockClear();
+      const res = await fire(app, path, { session: 'position-named-platform-admin' });
       const body: any = await res.json();
       expect(res.status).toBe(403);
       expect(body.error?.code).toBe('PERMISSION_DENIED');
