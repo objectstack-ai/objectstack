@@ -69,6 +69,8 @@
 // through a typed helper is out of reach here exactly as it is for the ESLint
 // rule, and is stated in that rule's comment rather than implied.
 
+// dispatch-gates: wide-population -- SCAN_ROOTS is packages and examples, walked for every non-test TypeScript source -- 1898 of 4903 (39%) and 162 of 238 (68%), recorded REFUSE-WIDE in scripts/pm/bare-root-worklist.mjs on both halves. Refused together rather than split, for the reason recorded there: declaring only the smaller root would read as a claim about where the stand-ins land.
+
 import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
 import { join, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
