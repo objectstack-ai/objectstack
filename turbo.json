@@ -150,7 +150,8 @@
         "$TURBO_ROOT$/packages/plugins/plugin-auth/src/auth-route-ledger.conformance.test.ts",
         "$TURBO_ROOT$/scripts/check-route-envelope.mjs",
         "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
-        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts"
+        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts",
+        "$TURBO_ROOT$/scripts/**"
       ]
     },
     "@objectstack/lint#test": {

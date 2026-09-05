@@ -156,11 +156,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '22 — nowPinned, the DOC-REMOVED branch: the #9266/#9563 counterfactual,': 2,
   '23 — R5b: the body span is brace-BALANCED, and the braces it counts are': 3,
   '24 — R6, the ASSIGNMENT form, and the two bounds that keep it honest.': 4,
+  '25 — `z.enum([...])` members: the ONE extra segment `lookup` walks, and the': 3,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 25;
+const SELF_TEST_BATTERY_FLOOR = 26;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -193,9 +194,9 @@ const RATCHET_EXPANSION_OFFER = /admit it into\s+scripts\/error-status-unpinned-
 // ───────────────────────────────────────────────────────────────────────────
 
 /**
- * Index every `const NAME = <literal>` and `const OBJ = { key: <literal> }` in
- * the scanned sources, so a declaration written as `readonly code = SOME_CODE`
- * still resolves.
+ * Index every `const NAME = <literal>`, `const OBJ = { key: <literal> }` and
+ * `const NAME = z.enum([<literal>, ...])` in the scanned sources, so a
+ * declaration written as `readonly code = SOME_CODE` still resolves.
  *
  * A name bound to two different literals in two files is recorded as AMBIGUOUS
  * and refused at resolution time. Guessing there would let the gate assert a
@@ -230,11 +231,35 @@ export function buildConstantIndex(sources) {
   // (`external-errors.ts`), so not reading it left the deriver blind to a whole
   // error family and reporting three declarations it could have resolved.
   const COMPUTED_ENTRY = /\[\s*([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)?)\s*\]\s*:\s*(?:'([^'\n]*)'|"([^"\n]*)"|(\d{3}))/g;
+  // `export const NAME = z.enum(['A', 'B'])` — a Zod enum's members are reached
+  // as `NAME.enum.MEMBER`, and each member's VALUE equals its own name by
+  // construction, so the array IS the value table. Indexed one entry per
+  // literal: a member the array does not list stays absent from the index, and
+  // the declaration reaching for it is REPORTED unresolved rather than
+  // invented — the same refusal `ambiguous` draws, for the same reason.
+  //
+  // `StandardErrorCode` (`packages/spec/src/api/errors.zod.ts`) is the
+  // declaration this exists for. Without it the whole `z.enum` family recorded
+  // NOTHING, so 36 real producers across the drivers, objectql, formula and
+  // service-analytics — every one of them writing a literal status beside
+  // `code = StandardErrorCode.enum.SOME_CODE` — resolved to `undefined` and
+  // spent every run in the `unresolved` census.
+  const ZOD_ENUM = new RegExp(
+    `^\\s*(?:export\\s+)?const\\s+([A-Za-z_$][\\w$]*)\\s*(?::[^=\\n]+)?=\\s*z\\.enum\\(\\s*\\[([^\\]]*)\\]`,
+    'gm',
+  );
+  const ENUM_MEMBER = /'([^'\n]+)'|"([^"\n]+)"/g;
 
   const clean = [...sources.values()].map((src) => maskComments(src));
   const objectBodies = [];
   for (const src of clean) {
     for (const m of src.matchAll(SCALAR)) put(m[1], m[2] ?? m[3] ?? Number(m[4]));
+    for (const m of src.matchAll(ZOD_ENUM)) {
+      for (const lit of m[2].matchAll(ENUM_MEMBER)) {
+        const member = lit[1] ?? lit[2];
+        put(`${m[1]}.enum.${member}`, member);
+      }
+    }
     for (const m of src.matchAll(OBJECT)) {
       objectBodies.push([m[1], m[2]]);
       for (const kv of m[2].matchAll(LITERAL_ENTRY)) {
@@ -270,7 +295,12 @@ export function resolveStatus(expr, index) {
 }
 
 function lookup(e, index) {
-  if (/^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)?$/.test(e)) {
+  // `NAME`, `OBJ.key`, and ONE three-segment shape: `NAME.enum.MEMBER`, the way
+  // a `z.enum([...])` member is addressed. It is spelled out rather than folded
+  // into a general dotted-path walk on purpose — an arbitrary path would let
+  // this resolve members of objects the index never read, which is the
+  // guessing this file refuses. Anything else stays unresolved and is REPORTED.
+  if (/^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)?$/.test(e) || /^[A-Za-z_$][\w$]*\.enum\.[A-Za-z_$][\w$]*$/.test(e)) {
     return index.ambiguous.has(e) ? undefined : index.values.get(e);
   }
   // MAP[OBJ.key] / MAP[NAME] — resolve the subscript, then the member.
@@ -1382,7 +1412,54 @@ function selfTest() {
     !twoBlocks.emitted.has('TIMEOUT') && twoBlocks.unresolved.length === 0,
     JSON.stringify([...twoBlocks.emitted.keys(), ...twoBlocks.unresolved]));
 
-  const CASES = 47;
+  // 25 — `z.enum([...])` members: the ONE extra segment `lookup` walks, and the
+  //      refusal that keeps it from becoming a guess. `StandardErrorCode`
+  //      (`packages/spec/src/api/errors.zod.ts`) is written this way and 36 real
+  //      producers across the drivers, objectql, formula and service-analytics
+  //      spell their code as `StandardErrorCode.enum.SOME_CODE` — a shape the
+  //      index recorded nothing for, so every one of them sat in `unresolved`
+  //      beside a status that was already a literal.
+  battery('25 — `z.enum([...])` members: the ONE extra segment `lookup` walks, and the');
+  const ZOD_ENUM_DECL = "export const StandardErrorCode = z.enum([\n  'TIMEOUT',\n  'VALIDATION_ERROR',\n]);";
+  const zodEnum = runFixture({
+    files: {
+      'a/codes.ts': ZOD_ENUM_DECL,
+      'a/e.ts':
+        'function refuse(message) {\n  const err = new Error(message);\n'
+        + '  err.code = StandardErrorCode.enum.TIMEOUT;\n  err.status = 504;\n  return err;\n}',
+    },
+    handling: '#### `TIMEOUT`\n**HTTP Status:** 504  \n', catalog: '', members: ['TIMEOUT'],
+  });
+  check('25 a z.enum member resolves to its own name',
+    zodEnum.reconciledPairs === 1 && zodEnum.unresolved.length === 0
+    && zodEnum.emitted.get('TIMEOUT')?.has(504) === true,
+    JSON.stringify([zodEnum.reconciledPairs, zodEnum.unresolved]));
+  const notAMember = runFixture({
+    files: {
+      'a/codes.ts': ZOD_ENUM_DECL,
+      'a/e.ts':
+        'function refuse(message) {\n  const err = new Error(message);\n'
+        + '  err.code = StandardErrorCode.enum.NOT_A_MEMBER;\n  err.status = 504;\n  return err;\n}',
+    },
+    handling: '', catalog: '', members: ['TIMEOUT'],
+  });
+  check('25b a name the enum array does not list is REPORTED, never invented',
+    notAMember.unresolved.length === 1
+    && notAMember.unresolved[0].includes('StandardErrorCode.enum.NOT_A_MEMBER')
+    && notAMember.emitted.size === 0,
+    JSON.stringify([notAMember.unresolved, [...notAMember.emitted.keys()]]));
+  // The member is reachable through `.enum.` and NOTHING else: `lookup` walks
+  // that one shape, not dotted paths in general, so a two-segment reach at the
+  // same name stays undefined rather than resolving off a neighbouring entry.
+  const enumIndex = buildConstantIndex(new Map([['a/codes.ts', ZOD_ENUM_DECL]]));
+  check('25c the member is addressable through `.enum.` and nowhere else',
+    resolveString('StandardErrorCode.enum.TIMEOUT', enumIndex) === 'TIMEOUT'
+    && resolveString('StandardErrorCode.TIMEOUT', enumIndex) === undefined
+    && resolveString('StandardErrorCode.enum.NOT_A_MEMBER', enumIndex) === undefined,
+    JSON.stringify([resolveString('StandardErrorCode.enum.TIMEOUT', enumIndex),
+      resolveString('StandardErrorCode.TIMEOUT', enumIndex)]));
+
+  const CASES = 50;
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so
@@ -1441,8 +1518,8 @@ function selfTest() {
     + 'narrated envelopes in comments are not producers, unresolvable declarations are reported, a LEDGER code '
     + 'the docs publish a status for is reconciled in both directions while one no page publishes stays out of '
     + 'the vocabulary, an entry heading in an unrecognised shape is reported instead of silently dropped, the '
-    + 'baseline-expanding remedy stays maintainer-only, and a baselined code leaving the unpinned census is '
-    + 'named a producer or a removed doc entry — never the wrong one of the two.',
+    + 'baseline-expanding remedy stays maintainer-only, a baselined code leaving the unpinned census is '
+    + 'named a producer or a removed doc entry — never the wrong one of the two — and a `z.enum([...])` member resolves through `NAME.enum.MEMBER` while a name that array does not list stays unresolved.',
   );
   selfTestReachedVerdict = true;
   process.exit(0);
