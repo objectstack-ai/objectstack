@@ -27,6 +27,18 @@
     // — that package declares none — and a `paths` target matching nothing on
     // disk would silently fall back to node resolution.
     "paths": {
+      // [#15136] `@objectstack/formula` is imported as a VALUE by
+      // `src/session-positions-security-axis.test.ts` (`celEngine`, the real CEL
+      // engine the server evaluates formulas and RLS with — the pins drive it
+      // rather than a fixture because the defect lived in the seam). Same
+      // mechanism as the entry below and the same ONE-rule shape: the test layer
+      // reaches this specifier through `tsconfig.test.json`, which inherits this
+      // map rather than declaring its own, and `@objectstack/formula` publishes
+      // no subpath in its `exports`, so a subpath rule would match nothing on
+      // disk and fall back to node resolution. Without it tsc resolves the
+      // specifier to `dist/index.d.ts` — a BUILD ARTIFACT — which
+      // `check:type-source-resolution` refuses.
+      "@objectstack/formula": ["../../formula/src/index.ts"],
       "@objectstack/service-messaging": ["../../services/service-messaging/src/index.ts"]
     }
   },
