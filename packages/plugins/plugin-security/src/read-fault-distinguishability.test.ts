@@ -107,7 +107,7 @@ async function boot(): Promise<ObjectQL> {
  */
 function withFault(engine: any, overrides: Record<string, (...args: any[]) => any>): any {
   return new Proxy(engine, {
-    get(target, prop, receiver) {
+    get(target, prop) {
       const key = String(prop);
       if (Object.prototype.hasOwnProperty.call(overrides, key)) return overrides[key];
       const value = Reflect.get(target, prop, target);
@@ -216,7 +216,7 @@ describe('[#15840] reading 2 — auto-org-admin-grant tryFind', () => {
   it('a control: the demotion revoke DOES land when the grant table is readable', async () => {
     const engine = await boot();
     await seedStandingGrantAwaitingRevoke(engine);
-    const { lines, logger } = recordingLogger();
+    const { logger } = recordingLogger();
 
     const res = await reconcileOrgAdminGrant(engine, ADMIN, ORG, { logger: logger as any });
 
