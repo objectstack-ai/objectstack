@@ -145,17 +145,12 @@ export const CENSUS_15765 = {
  * The only admissible reason is the hot-file serial queue.
  */
 export const HELD_FILE_ALLOWANCES = Object.freeze([
-  Object.freeze({
-    file: 'scripts/check-adr-0087-registration.mjs',
-    dated: '2026-09-05',
-    heldBy: 'PR #15724 (#15627)',
-    why: 'A one-line docblock on `scripts/check-adr-0087-registration.mjs#parseSymbolRef` writes its '
-      + 'placeholder path-shaped, so a resolver reads the illustration as an anchor into a file this '
-      + 'tree does not have. The repair is the angle-bracket spelling `<dir>/<file>.ts#<Symbol>` that '
-      + '`scripts/symbol-anchors.mjs#ANCHOR_GRAMMAR` already uses, and it is one line — but the file '
-      + 'is held by a governed draft awaiting a human merge, and a comment-only edit landing under a '
-      + 'reviewed governed PR is exactly the conflict this queue exists to prevent.',
-  }),
+  // EMPTY, and empty is the healthy state: every row written so far has been
+  // retired by repairing the citation it held. The mechanism above is not dead
+  // code — `triage()` still takes rows, and the self-test still exercises it in
+  // BOTH directions against its OWN fixture row (`scripts/bad.mjs`), including
+  // the leg that proves a row is load-bearing rather than decorative. So an
+  // empty live array leaves that battery running, not vacuous.
 ]);
 
 export const CORPUS = defineCorpus({
@@ -244,10 +239,14 @@ function assert(cond, msg) { if (!cond) { console.error(`❌ check-scripts-symbo
 // exactness loop below runs four `check()`s over each row), so retiring a row
 // legitimately lowers this floor by 4 — and that is the ONLY reason it may be
 // lowered. 34 → 30 when the `scripts/check-react-page-adapter-contract.mjs`
-// row was retired (#15765). Any other drop is cases that STOPPED RUNNING; find what
-// stopped registering instead of moving the number.
+// row was retired, then 30 → 26 when the `scripts/check-adr-0087-registration.mjs`
+// row was retired and the array went EMPTY (#15765). Any other drop is cases that
+// STOPPED RUNNING; find what stopped registering instead of moving the number.
+// ⚠️ An empty array does NOT make the allowance battery vacuous: its five
+// fixture cases run off `scripts/bad.mjs`, never off the live rows, so they are
+// not part of this arithmetic and must never fall out of the count.
 const SELF_TEST_BATTERIES = Object.freeze({
-  'check-scripts-symbol-anchors self-test': 30,
+  'check-scripts-symbol-anchors self-test': 26,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as

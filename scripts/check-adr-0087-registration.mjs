@@ -2003,7 +2003,7 @@ const IDENT = '[A-Za-z_$][A-Za-z0-9_$]*';
 const MEMBER_PATH_RE = new RegExp(`^${IDENT}(?:\\.${IDENT})*$`);
 
 /**
- * `path/to/file.ts#Symbol` or `path/to/file.ts#a.b.member` -> its halves, or null.
+ * `<dir>/<file>.ts#<Symbol>` or `<dir>/<file>.ts#<a>.<b>.<member>` -> its halves, or null.
  *
  * ⚠️ The grammar was widened to a dotted member path (#15627), and the widening is
  * only sound because the READER was widened in the same commit. `packages/client/

@@ -328,11 +328,11 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked_at: {
         label: "Revoked At",
-        help: "When set, this session was revoked (idle / absolute-max / concurrent-cap / admin). System-managed."
+        help: "When set, this session was revoked (idle / absolute-max / concurrent-cap / admin / organization membership ended). System-managed."
       },
       revoke_reason: {
         label: "Revoke Reason",
-        help: "Why the session was revoked (idle_timeout, absolute_max, concurrent_cap, …)."
+        help: "Why the session was revoked (idle_timeout, absolute_max, concurrent_cap, user_revoked, admin, organization_membership_ended, …)."
       },
       active_organization_id: {
         label: "当前组织"
@@ -533,6 +533,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       require_mfa: {
         label: "强制多因素认证",
         help: "为 true 时，该组织的每位成员都必须注册身份验证器 App 才能访问数据。"
+      },
+      timezone: {
+        label: "时区",
+        help: "该组织计算日期边界所用的 IANA 时区（如 UTC、Asia/Shanghai）——所有未自行设置时区的业务单元都继承的根默认值。未设置表示 UTC。"
       },
       parent_organization_id: {
         label: "Parent Organization",
@@ -856,6 +860,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       parent_business_unit_id: {
         label: "上级业务单元",
         help: "组织树的自关联字段。Null 表示租户根节点。"
+      },
+      timezone: {
+        label: "时区",
+        help: "该业务单元计算日期边界所用的 IANA 时区（如 Asia/Shanghai）。留空则依次继承上级业务单元的时区、组织的时区，最后为 UTC。"
       },
       organization_id: {
         label: "组织",
