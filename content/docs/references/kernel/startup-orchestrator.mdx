@@ -52,7 +52,8 @@ const result = HealthStatusSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **plugin** | `{ name: string; version?: string } & Record<string, any>` | ✅ | Plugin metadata |
 | **success** | `boolean` | ✅ | Whether the plugin started successfully |
-| **duration** | `number` | ✅ | Time taken to start the plugin in milliseconds |
+| **durationMs** | `number` | ✅ | Time taken to start the plugin in milliseconds |
+| **duration** | `never` | optional | [REMOVED] `PluginStartupResult.duration` was renamed to `durationMs` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `durationMs`; the value (milliseconds) is unchanged. |
 | **error** | `{ name: string; message: string; stack?: string; code?: string }` | optional | Serializable error representation if startup failed |
 | **health** | `{ healthy: boolean; checkedAt: integer; details?: Record<string, any>; message?: string }` | optional | Health status after startup if health check was enabled |
 
@@ -84,7 +85,8 @@ const result = HealthStatusSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **timeout** | `integer` | optional (default: `30000`) | Maximum time in milliseconds to wait for each plugin to start |
+| **timeoutMs** | `integer` | optional (default: `30000`) | Maximum time in milliseconds to wait for each plugin to start |
+| **timeout** | `never` | optional | [REMOVED] `StartupOptions.timeout` was renamed to `timeoutMs` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `timeoutMs`; the value (milliseconds) is unchanged. |
 | **rollbackOnFailure** | `boolean` | optional (default: `true`) | Whether to rollback already-started plugins if any plugin fails |
 | **healthCheck** | `boolean` | optional (default: `false`) | Whether to run health checks after plugin startup |
 | **parallel** | `boolean` | optional (default: `false`) | Whether to start plugins in parallel when dependencies allow |
@@ -99,8 +101,9 @@ const result = HealthStatusSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **results** | `{ plugin: object; success: boolean; duration: number; error?: object; … }[]` | ✅ | Startup results for each plugin |
-| **totalDuration** | `number` | ✅ | Total time taken for all plugins in milliseconds |
+| **results** | `{ plugin: object; success: boolean; durationMs: number; error?: object; … }[]` | ✅ | Startup results for each plugin |
+| **totalDurationMs** | `number` | ✅ | Total time taken for all plugins in milliseconds |
+| **totalDuration** | `never` | optional | [REMOVED] `StartupOrchestrationResult.totalDuration` was renamed to `totalDurationMs` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `totalDurationMs`; the value (milliseconds) is unchanged. |
 | **allSuccessful** | `boolean` | ✅ | Whether all plugins started successfully |
 | **rolledBack** | `string[]` | optional | Names of plugins that were rolled back |
 
@@ -110,7 +113,8 @@ const result = HealthStatusSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **plugin** | `{ name: string; version?: string } & Record<string, any>` | ✅ | Plugin metadata |
 | **success** | `boolean` | ✅ | Whether the plugin started successfully |
-| **duration** | `number` | ✅ | Time taken to start the plugin in milliseconds |
+| **durationMs** | `number` | ✅ | Time taken to start the plugin in milliseconds |
+| **duration** | `never` | optional | [REMOVED] `PluginStartupResult.duration` was renamed to `durationMs` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `durationMs`; the value (milliseconds) is unchanged. |
 | **error** | `{ name: string; message: string; stack?: string; code?: string }` | optional | Serializable error representation if startup failed |
 | **health** | `{ healthy: boolean; checkedAt: integer; details?: Record<string, any>; message?: string }` | optional | Health status after startup if health check was enabled |
 
