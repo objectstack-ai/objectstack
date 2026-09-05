@@ -218,15 +218,49 @@ describe('[#13906 / 1A] the outage reaches the transport envelope as 503 SERVICE
         return { status: res.statusCode as number, body: res.body };
     }
 
-    it('on the wire (real route, real `errorResponseBase`): 503 with a declared `SERVICE_UNAVAILABLE` envelope, never a served 2xx', async () => {
+    // The wire route is `GET /automation` with the ex-member key, chosen by
+    // MEASUREMENT on the unrepaired tree so that each tenancy state answers
+    // differently and no domain-side 503 is in the way (`POST /keys` answers
+    // its own `503 Data service not available` against a fixture engine
+    // with no `insert`, so it cannot pin this seam):
+    //
+    //   tenancy service   | before (origin/main) | after
+    //   ------------------|----------------------|-------
+    //   healthy isolated  | 401 UNAUTHENTICATED  | 401 — the membership refusal, unchanged
+    //   never registered  | 501 NOT_IMPLEMENTED  | 501 — admitted, then "no automation service", unchanged
+    //   registered+FAILED | 501 NOT_IMPLEMENTED  | 503 SERVICE_UNAVAILABLE
+    //
+    // The 501 on the failed leg is the defect on the wire: byte-for-byte the
+    // "never registered" answer, i.e. the ex-member was ADMITTED.
+    const AUTOMATION = 'GET /api/v1/automation';
+    const withKey = { headers: { 'x-api-key': RAW_EXMEMBER }, query: {} };
+
+    it('POSITIVE CONTROL on the wire: healthy `isolated` tenancy → the ex-member key is refused on the anonymous floor (401)', async () => {
+        const handlers = await mountOn(kernelWith('healthy-isolated'));
+        const { status, body } = await drive(handlers[AUTOMATION], withKey);
+        expect(status).toBe(401);
+        expect(body?.error?.code).toBe('UNAUTHENTICATED');
+    });
+
+    it('REPAIRED on the wire (real route, real `errorResponseBase`): registered and FAILING → 503 with a declared `SERVICE_UNAVAILABLE` envelope', async () => {
+        // SUPERSEDED PIN, quoted — measured on origin/main:
+        //     expect(status).toBe(501);
+        //     expect(body?.error?.code).toBe('NOT_IMPLEMENTED');
         const handlers = await mountOn(kernelWith('factory-throws'));
-        const { status, body } = await drive(handlers['POST /api/v1/keys'], { headers: { 'x-api-key': RAW_EXMEMBER }, body: { name: 'k' }, query: {} });
+        const { status, body } = await drive(handlers[AUTOMATION], withKey);
         expect(status).toBe(503);
         expect(BaseResponseSchema.safeParse(body).success).toBe(true);
         expect(body?.success).toBe(false);
         const parsed = ApiErrorSchema.safeParse(body?.error);
         expect(parsed.error?.issues ?? []).toEqual([]);
         expect(body?.error?.code).toBe('SERVICE_UNAVAILABLE');
+    });
+
+    it('THE COLLAPSE IS ENDED on the wire: never registered keeps its 501 (admitted, no automation service) — only the FAILED leg moved', async () => {
+        const handlers = await mountOn(kernelWith('unregistered'));
+        const { status, body } = await drive(handlers[AUTOMATION], withKey);
+        expect(status).toBe(501);
+        expect(body?.error?.code).toBe('NOT_IMPLEMENTED');
     });
 
     it('CONTROL on the wire: with tenancy never registered the same door serves — the no-tenancy composition is untouched', async () => {

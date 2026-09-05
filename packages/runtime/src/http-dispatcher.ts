@@ -2,6 +2,11 @@
 
 import {
     ObjectKernel, getEnv, evaluateAuthGate, isAuthGateAllowlisted,
+    // [#13906 decision 1 A] The identity step's net re-raises ONLY the loud
+    // authz-store outage (the `.catch` shape `@objectstack/core` prescribes for
+    // every seam between `resolveAuthzContext` and a door), and the tenancy
+    // read is classified by the REGISTRY's own "never registered" brand.
+    rethrowAuthzStoreUnavailable, isServiceNotRegisteredError,
 } from '@objectstack/core';
 import { isMcpServerEnabled, looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE, resolveThrownHttpError, demotedDeclaredCode, declaredUserMessage } from '@objectstack/types';
 import { measureServerTiming, allowPerfDisclosure, isPerfDisclosurePrincipal } from '@objectstack/observability';
@@ -535,7 +540,20 @@ export class HttpDispatcher {
         // ctx.userId/roles/permissions/tenantId via opCtx.context.
         try {
             context.executionContext = await this.timedResolveExecutionContext({
-                getService: (n: string) => this.resolveService(this.requestKernel(context), n, context.environmentId),
+                // [#13906 decision 1 A] `resolveService` is a capability PROBE:
+                // its fallback chain absorbs every rejection at every step and
+                // answers `undefined`, which is the right shape for "is this
+                // optional service installed" and the wrong shape for the ONE
+                // authorization INPUT the resolver reads through this facade.
+                // For `tenancy` the resolver must see the registry's CLASSIFIED
+                // rejection — branded "never registered" (absorbed, the
+                // supported no-tenancy composition) versus unbranded
+                // "registered and failed to build" (re-raised, so the door
+                // answers 503 instead of admitting on a posture it could not
+                // read). Every other name keeps the probe.
+                getService: (n: string) => n === 'tenancy'
+                    ? this.resolveServiceOrLoud(this.requestKernel(context), n, context.environmentId)
+                    : this.resolveService(this.requestKernel(context), n, context.environmentId),
                 // Resolve ObjectQL from the per-request kernel DIRECTLY. The scoped
                 // `resolveService('objectql', envId)` factory can return a different
                 // instance that doesn't see THIS env's rows (the gotcha
@@ -564,7 +582,17 @@ export class HttpDispatcher {
                 // (the scoped prefix is stripped only by the caller, later).
                 acceptOAuthAccessToken: /^(?:\/projects\/[^/]+)?\/mcp(?:[/?]|$)/.test(cleanPath),
             });
-        } catch {
+        } catch (err) {
+            // [#13906 decision 1 A / #13279] The ONE fault that must stay loud:
+            // an authorization input that exists and could not be read (a
+            // failed permission-store read, a `tenancy` service that is
+            // registered and failed to build). Swallowing it here answered an
+            // outage as an anonymous request — a 401 byte-identical to a caller
+            // with no credential, which is the "changed disguise" the shared
+            // `rethrowAuthzStoreUnavailable` exists to end. It re-raises that
+            // class by brand and returns `undefined` for everything else, so
+            // every other fault still degrades exactly as before:
+            rethrowAuthzStoreUnavailable(err);
             // anonymous request — leave executionContext undefined
         }
     }
@@ -2118,6 +2146,52 @@ export class HttpDispatcher {
         }
         const services = this.getServicesMap(kernel);
         return services[name];
+    }
+
+    /**
+     * [#13906 decision 1 A] Resolve a service whose ABSENCE is a supported
+     * composition but whose FAILURE is an outage — today only the `tenancy`
+     * read the identity step feeds `resolveExecutionContext`.
+     *
+     * `resolveService` above is a capability probe: every step of its chain
+     * absorbs every rejection and falls through, so a factory that threw and a
+     * name nothing registered both come back as `undefined`. That collapse is
+     * the defect #13906 repaired one seam over (`rest-server.ts`), and the
+     * classification here is the same one, taken from the REGISTRY rather than
+     * from message text (#13905):
+     *
+     *  - branded "never registered" → `undefined`, quiet;
+     *  - every other rejection (a factory that threw, a scoped registration
+     *    resolved without a scope id, a circular service dependency) →
+     *    re-raised unbranded, for the resolver to answer as
+     *    `AuthzStoreUnavailableError` (503).
+     *
+     * The chain order is `resolveService`'s (scoped lookup on the host kernel
+     * first, then the request's own kernel), so WHICH registry answers is
+     * unchanged; only what a rejection MEANS is. A host with no async accessor
+     * (`KernelBase`-shaped, e.g. `LiteKernel`) supports no service factories,
+     * so "not registered" is the only fault it can report — it keeps the quiet
+     * probe, which is the same classification rather than a second collapse.
+     */
+    private async resolveServiceOrLoud(kernel: any, name: string, scopeId?: string): Promise<any> {
+        const classified = async (read: () => Promise<any>): Promise<{ found: boolean; value?: any }> => {
+            try {
+                const svc = await read();
+                return svc != null ? { found: true, value: svc } : { found: false };
+            } catch (err) {
+                if (isServiceNotRegisteredError(err)) return { found: false };
+                throw err;
+            }
+        };
+        if (scopeId && typeof this.defaultKernel.getServiceAsync === 'function') {
+            const scoped = await classified(() => this.defaultKernel.getServiceAsync(name, scopeId));
+            if (scoped.found) return scoped.value;
+        }
+        if (typeof kernel?.getServiceAsync === 'function') {
+            const own = await classified(() => kernel.getServiceAsync(name));
+            return own.found ? own.value : undefined;
+        }
+        return this.resolveService(kernel, name, scopeId);
     }
 
     /**
