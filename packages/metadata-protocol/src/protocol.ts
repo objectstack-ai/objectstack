@@ -71,7 +71,7 @@ import type {
 } from '@objectstack/spec/api';
 import type { MetadataCacheRequest, MetadataCacheResponse, ServiceInfo, ApiRoutes, WellKnownCapabilities, CapabilityDescriptor } from '@objectstack/spec/api';
 import type { ApiError, BatchOperationResult } from '@objectstack/spec/api';
-import { readServiceSelfInfo, ErrorCode, standardErrorCodeForHttpStatus, resolveDiscoveryEnvironment } from '@objectstack/spec/api';
+import { readServiceSelfInfo, readChannelRoute, isSubscribableChannel, CHANNEL_SURFACE_SLOTS, ErrorCode, standardErrorCodeForHttpStatus, resolveDiscoveryEnvironment } from '@objectstack/spec/api';
 import {
     parseFilterAST, isFilterAST, VALID_AST_OPERATORS, REFERENCE_VALUE_TYPES, referenceTargetOf,
     AggregationFunction, DateGranularity, resolveSearchFieldResolution,
@@ -3428,6 +3428,19 @@ const SERVICE_CONFIG: Record<string, {
     // kernel-internal slots above, the capability this slot advertises is
     // realtime push to clients — without a surface that IS reduced, so an
     // unmarked bus reports degraded. Message matches the dispatcher builder.
+    //
+    // [#14646] And it is the one CHANNEL SLOT (`CHANNEL_SURFACE_SLOTS`,
+    // `@objectstack/spec/api` — the one place that membership is declared, read
+    // by BOTH discovery producers, which is why it is not a field of this
+    // table). The row used to yield `enabled: true` ("the slot is filled")
+    // beside the message below ("no surface is mounted") — both true at once,
+    // which is how `enabled` came to carry two meanings and a console client
+    // came to subscribe to nothing. `enabled` is now `isSubscribableChannel`
+    // and the route is the one the occupant names, so the stock in-process bus
+    // advertises no channel while a host that really mounts one still does
+    // (maintainer ruling A, 2026-09-04 — realtime stays out of open core).
+    // `noHttpSurface` stays: it supplies the status and the sentence for the
+    // unmounted case, which is every host the open framework ships.
     realtime:     { noHttpSurface: { statusWhenUnmarked: 'degraded', message: 'In-process event bus only — no HTTP/WS realtime surface is mounted' } },
     notification: { route: '/api/v1/notifications' },
     ai:           { route: '/api/v1/ai' },
@@ -5569,6 +5582,43 @@ export class ObjectStackProtocolImplementation implements
                 // Registered — but honor a stub/dev/fallback self-description
                 // instead of blindly reporting 'available' (ADR-0076 D12).
                 const self = readServiceSelfInfo(registeredServices.get(serviceName));
+                // [#14646] Channel slots answer a different question than every
+                // other row here. `enabled` elsewhere means "the slot is
+                // filled"; for a slot whose advertised capability IS a
+                // subscribable channel that reading is what let `/discovery`
+                // report `enabled: true` beside "no HTTP/WS realtime surface is
+                // mounted" — both true, one field, two meanings. Here `enabled`
+                // is the shared predicate itself, evaluated on the very entry a
+                // consumer reads, so the field and the definition are one
+                // computation. The route comes from the occupant because no
+                // builder in the open framework mounts a realtime transport.
+                if (CHANNEL_SURFACE_SLOTS.has(serviceName)) {
+                    const channelRoute = readChannelRoute(registeredServices.get(serviceName));
+                    const handlerReady = channelRoute !== undefined;
+                    services[serviceName] = {
+                        enabled: isSubscribableChannel({ handlerReady, route: channelRoute }),
+                        // A mounted channel makes an unmarked occupant plainly
+                        // `available`; without one the slot keeps the reduced
+                        // status its row declares (`degraded` for realtime — the
+                        // capability it advertises IS the missing surface).
+                        status: self?.status
+                            ?? (handlerReady
+                                ? ('available' as const)
+                                : (config.noHttpSurface?.statusWhenUnmarked ?? ('available' as const))),
+                        route: channelRoute,
+                        provider: CORE_SERVICE_PROVIDER[serviceName] ?? undefined,
+                        handlerReady,
+                        // The "no surface" sentence is only true while there is
+                        // no surface; a mounted channel drops it and keeps only
+                        // whatever the occupant says about itself.
+                        ...(self?.message
+                            ? { message: self.message }
+                            : !handlerReady && config.noHttpSurface
+                                ? { message: config.noHttpSurface.message }
+                                : {}),
+                    };
+                    continue;
+                }
                 // No HTTP surface at all: the handler can never be ready, and
                 // the entry's own `noHttpSurface` declaration says whether that
                 // also degrades the slot (realtime) or not (cache/queue/job —
@@ -5653,8 +5703,13 @@ export class ObjectStackProtocolImplementation implements
 
         // Add routes for available plugin services. Services without an HTTP
         // surface (config.route undefined) advertise no route (D12, #2462).
-        for (const [serviceName, config] of Object.entries(SERVICE_CONFIG)) {
-            const route = advertisedRoute(serviceName, config.route);
+        for (const serviceName of Object.keys(SERVICE_CONFIG)) {
+            // [#14646] Read the route off the entry that was just built rather
+            // than re-deriving it from the table. Byte-identical for every
+            // table-routed slot, and it is the only spelling that stays correct
+            // for a channel slot, whose route comes from the occupant — two
+            // derivations of one fact is how `routes` and `services` drift.
+            const route = services[serviceName]?.route;
             if (registeredServices.has(serviceName) && route) {
                 const routeKey = serviceToRouteKey[serviceName];
                 if (routeKey) {
@@ -5764,13 +5819,17 @@ export class ObjectStackProtocolImplementation implements
             // already reads, so none of them is a "cannot deliver ⇒ false"
             // placeholder — they are measured, per key:
 
-            // No host mounts a WS/SSE surface: service-realtime is an in-process
-            // pub/sub bus, which is precisely why SERVICE_CONFIG.realtime
-            // declares `noHttpSurface` and no `routes.realtime` is ever
-            // advertised (ADR-0076 D12, #2462). A literal `false` is the honest
-            // answer here, not a stand-in for one — and it matches the runtime
-            // dispatcher's answer for the same reason, in the same words.
-            websockets: false,
+            // [#14646] Derived, not stated. This flag and `services.realtime`
+            // answer the same question — "is there a channel to subscribe to?"
+            // — so it is the same predicate applied to the same entry
+            // (`isSubscribableChannel`), and a host that mounts a transport
+            // flips both in one step. It was a literal `false` beside an entry
+            // saying `enabled: true`: two constants that happened to be right
+            // are not agreement, they are two places to forget. False on every
+            // host the open framework ships, because `service-realtime` is an
+            // in-process pub/sub bus that names no channel route (ADR-0076 D12,
+            // #2462; maintainer ruling A, 2026-09-04).
+            websockets: isSubscribableChannel(services['realtime']),
             // Storage: the `storage` slot (#9683), gated on serveability rather
             // than presence — a self-declared stub mounts nothing, and this
             // builder already withholds `routes.storage` from it.
