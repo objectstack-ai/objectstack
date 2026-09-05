@@ -413,6 +413,15 @@ const MUTATIONS = [
   },
 ];
 
+// Set by `selfTest()` only after a verdict is printed -- either verdict -- and
+// read at the dispatch below: a `return` that leaves the function above those
+// lines prints nothing and still exits 0, so a self-test that never finished
+// reports as one that passed. The self-test's own exit code stays load-bearing,
+// so the handshake is a flag rather than a returned sentinel. The failure path
+// sets it too: the refusal below must fire only when NEITHER verdict was
+// printed, never on a genuine red that already said what failed.
+let selfTestReachedVerdict = false;
+
 function selfTest() {
   const root = repoRoot();
   const failures = [];
@@ -465,16 +474,28 @@ function selfTest() {
 
   if (failures.length === 0) {
     console.log(`✓ check-closing-keyword-parity --self-test: ${checked} assertions, ${MUTATIONS.length} mutations of the shipped parsers each driven to red.`);
+    selfTestReachedVerdict = true;
     return 0;
   }
   console.error(`✗ check-closing-keyword-parity --self-test -- ${failures.length} failure(s)\n`);
   for (const f of failures) console.error(`  • ${f}`);
+  selfTestReachedVerdict = true;
   return 1;
 }
 
 if (isEntrypoint(import.meta.url)) {
   const arg = process.argv[2];
   if (arg === '--list') list();
-  else if (arg === '--self-test') process.exit(selfTest());
-  else process.exit(run());
+  else if (arg === '--self-test') {
+    const code = selfTest();
+    if (!selfTestReachedVerdict) {
+      console.error(
+        '\n✗ check-closing-keyword-parity self-test: selfTest() returned without reaching its verdict,\n'
+        + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+        + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
+    process.exit(code);
+  } else process.exit(run());
 }
