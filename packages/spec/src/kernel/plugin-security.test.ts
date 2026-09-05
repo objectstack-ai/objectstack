@@ -184,7 +184,7 @@ describe('Plugin Security Protocol', () => {
         conflicts: [],
         errors: [],
         installOrder: ['com.acme.app'],
-        resolvedIn: 150,
+        resolvedInMs: 150,
       };
 
       const result = PackageDependencyResolutionResultSchema.safeParse(validResult);

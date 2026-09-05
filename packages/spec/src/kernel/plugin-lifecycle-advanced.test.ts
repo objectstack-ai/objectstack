@@ -126,12 +126,12 @@ describe('Plugin Lifecycle Advanced Schemas', () => {
         timestamp: new Date().toISOString(),
         message: 'Plugin is operating normally',
         metrics: {
-          uptime: 3600000,
+          uptimeMs: 3600000,
           memoryUsage: 52428800,
           cpuUsage: 15.5,
           activeConnections: 10,
           errorRate: 0.1,
-          responseTime: 150,
+          responseTimeMs: 150,
         },
         checks: [
           {
@@ -153,7 +153,7 @@ describe('Plugin Lifecycle Advanced Schemas', () => {
       };
       const result = PluginHealthReportSchema.parse(report);
       expect(result.status).toBe('healthy');
-      expect(result.metrics?.uptime).toBe(3600000);
+      expect(result.metrics?.uptimeMs).toBe(3600000);
       expect(result.checks).toHaveLength(2);
     });
 

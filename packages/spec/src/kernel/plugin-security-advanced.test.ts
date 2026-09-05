@@ -243,7 +243,7 @@ describe('Plugin Security Advanced Schemas', () => {
         authentication: {
           required: true,
           methods: ['jwt' as const, 'api-key' as const],
-          tokenExpiration: 3600,
+          tokenExpirationSeconds: 3600,
         },
         encryption: {
           dataAtRest: true,
@@ -254,7 +254,7 @@ describe('Plugin Security Advanced Schemas', () => {
         auditLog: {
           enabled: true,
           events: ['auth', 'data-access', 'config-change'],
-          retention: 90,
+          retentionDays: 90,
         },
       };
       const result = KernelSecurityPolicySchema.parse(policy);

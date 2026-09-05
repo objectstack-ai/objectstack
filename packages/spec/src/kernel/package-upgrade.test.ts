@@ -107,7 +107,7 @@ describe('UpgradePlanSchema', () => {
       dependencyUpgrades: [
         { packageId: 'com.acme.base', fromVersion: '1.0.0', toVersion: '1.1.0' },
       ],
-      estimatedDuration: 120,
+      estimatedDurationSeconds: 120,
       summary: 'Major upgrade adding Deals module and restructuring Account object',
     };
     const parsed = UpgradePlanSchema.parse(plan);

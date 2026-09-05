@@ -350,7 +350,7 @@ describe('Plugin Versioning Schemas', () => {
           enabled: true,
           strategy: 'canary' as const,
           percentage: 10,
-          duration: 3600000,
+          durationMs: 3600000,
         },
       };
       const result = MultiVersionSupportSchema.parse(config);
