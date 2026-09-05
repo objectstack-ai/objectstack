@@ -130,6 +130,7 @@ import { tmpdir } from 'node:os';
 import { dirname, extname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isEntrypoint } from './invoked-as.mjs';
+import { requireDependency } from './import-prerequisite.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '..');
@@ -301,9 +302,25 @@ export async function loadMasker(maskerPath) {
   return module.scanSource;
 }
 
-/** The parser is loaded lazily so importing this module stays cheap. */
+/**
+ * The parser is loaded lazily so importing this module stays cheap — and through
+ * the prerequisite thunk, so an uninstalled tree gets a NAMED prerequisite and
+ * exit 3 instead of a raw `ERR_MODULE_NOT_FOUND` stack and exit 1. A dynamic
+ * import defers the resolution failure past linking, but it does not change what
+ * the failure LOOKS like: the rejection reaches the top level unhandled and node
+ * prints the same node-internals stack with the same exit 1 a finding uses.
+ *
+ * ⛔ `requireDependency`, not `requireDefaultExport`: this module wants the
+ * NAMESPACE (`parser.parse`). `@typescript-eslint/parser` has no default export
+ * worth reading, and the default-export helper reads `.default` strictly.
+ */
 async function loadParser() {
-  const parser = await import('@typescript-eslint/parser');
+  const parser = await requireDependency(
+    '@typescript-eslint/parser',
+    () => import('@typescript-eslint/parser'),
+    import.meta.url,
+    { measures: "`js-comment-mask.mjs` and an independent parser agree on every comment range in the tree" },
+  );
   return (source, options) => parser.parse(source, options);
 }
 
