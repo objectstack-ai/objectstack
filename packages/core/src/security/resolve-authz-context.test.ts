@@ -1624,7 +1624,7 @@ describe('[#15409] a session organization claim that no membership backs', () =>
   const dropLines = () =>
     warnSpy.mock.calls
       .map((c: unknown[]) => c.map(String).join(' '))
-      .filter((l) => l.includes('Session organization claim dropped'));
+      .filter((l: string) => l.includes('Session organization claim dropped'));
 
   it('CONTROL · a BACKED claim is adopted untouched — the guard is not a blanket', async () => {
     const ql = makeQl(tables());
