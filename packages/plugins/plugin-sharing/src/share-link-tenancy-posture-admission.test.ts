@@ -65,6 +65,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ObjectKernel, hashApiKey } from '@objectstack/core';
+import type { PluginContext } from '@objectstack/core';
 import type {
   IHttpServer,
   IHttpRequest,
@@ -266,29 +267,36 @@ async function boot(opts: { tenancy: TenancyArm; session?: () => Session | undef
     const kernel = kernelWith(opts.tenancy);
     const hooks: Record<string, Array<() => Promise<void> | void>> = {};
 
-    const ctx: any = {
+    // The host the plugin is started against. ⛔ Not typed `any`: the slot
+    // lookups this double serves are exactly the ones `check:slot-lookup`
+    // exists to keep contracted, and a wholesale `any` here would switch that
+    // off for the file. The cast is narrowed to the ONE place the shape is
+    // handed over, so the object itself stays checked.
+    const ctx = {
         logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
         hook: (event: string, handler: () => Promise<void> | void) => {
             (hooks[event] ??= []).push(handler);
         },
-        getService: (name: string) => {
-            if (name === 'objectql') return engine;
+        getService: <T>(name: string): T => {
+            if (name === 'objectql') return engine as unknown as T;
             // The CANONICAL slot name (#4251 B5); the plugin reads it first.
-            if (name === 'http.server') return http;
+            if (name === 'http.server') return http as unknown as T;
             if (name === 'auth') {
                 // No session path unless an arm asks for one: this matrix is
                 // about credentials, and a session that silently authenticated
                 // would make every API-key arm unreadable.
-                return { api: { getSession: async () => opts.session?.() } };
+                return { api: { getSession: async () => opts.session?.() } } as unknown as T;
             }
-            return kernel.getService(name);
+            // Everything else off the REAL registry, including the two throws
+            // the sync accessor draws its line with.
+            return kernel.getService<T>(name);
         },
         registerService: vi.fn(),
         getKernel: () => kernel,
     };
 
     const plugin = new SharingServicePlugin({ enforce: false });
-    await plugin.start(ctx);
+    await plugin.start(ctx as unknown as PluginContext);
     for (const handler of hooks['kernel:ready'] ?? []) await handler();
 
     return {
