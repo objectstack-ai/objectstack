@@ -1316,7 +1316,7 @@ function isAwaited(node) {
  *
  * Only `foo(...)` and `this.foo(...)` may resolve to a same-file body. Measured
  * cost of the looser rule, which resolved any dotted path by its LAST segment:
- * `packages/services/service-job/src/db-job-adapter.ts:139` calls
+ * `packages/services/service-job/src/db-job-adapter.ts#cancel` calls
  * `this.cron.cancel(name)` — the CronJobAdapter's method — and the loose rule
  * walked into the file's OWN `cancel()` method, reached `setActive()`'s
  * `engine.update(...)` two frames down, and reported a cron-registry cleanup as

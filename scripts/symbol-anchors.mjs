@@ -70,15 +70,21 @@
  *
  * An anchor is written inside a markdown code span. Three forms, and no others:
  *
- *     `path/to/file.ts#symbolName`     SYMBOL anchor    -- the default
- *     `path/to/file.ts`                FILE-LEVEL anchor
- *     `repo:path/to/file.ts#symbol`    CROSS-REPO anchor (e.g. `objectui:...`)
+ *     `<dir>/<file>.ts#<symbol>`       SYMBOL anchor    -- the default
+ *     `<dir>/<file>.ts`                FILE-LEVEL anchor
+ *     `<repo>:<dir>/<file>.ts#<sym>`   CROSS-REPO anchor (e.g. `objectui:...`)
+ *
+ * ⚠️ Those placeholders are deliberately NOT path-shaped, and that is the same
+ * discipline the `dispatch-gates: no-path-population` note further down states
+ * for `ANCHOR_GRAMMAR`: an illustration written as a real-looking path is read
+ * by a resolver as an anchor, and then reported as pointing at a file this tree
+ * does not have. A gate header that teaches the grammar must not fail it.
  *
  * plus a continuation form, so a sentence naming several symbols in one file
  * does not repeat the path -- it inherits the path from the anchor before it on
- * the SAME line:
+ * the SAME line. This module's own exports, so the example is itself checked:
  *
- *     (`packages/objectql/src/engine.ts#registerApp`, `#installPackage`)
+ *     (`scripts/symbol-anchors.mjs#extractAnchors`, `#defineCorpus`)
  *
  * Rules the forms exist to satisfy:
  *

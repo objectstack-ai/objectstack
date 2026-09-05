@@ -2995,8 +2995,9 @@ export function h17TriggerFileCandidates(text) {
  * checkout. A token the oracle does not recognise is DROPPED in silence: the
  * measured decoys are `Field` and `FIXTURE_CAPTURED_NEGATED` (backticked
  * identifiers sitting inside real trigger clauses on #8656 and #8662) and
- * `scripts/check-type-check-coverage.mjs:1679` (a real path with a line suffix
- * — tracked as a file, NOT as that token, so the suffix form correctly fails).
+ * `scripts/check-type-check-coverage.mjs` carrying a line suffix of 1679 (a real
+ * path with a line suffix — tracked as a file, NOT as that token, so the suffix
+ * form correctly fails).
  * Each of those is a row this index would otherwise have rendered wrong.
  *
  * @param {string[]} texts card body plus every hold-comment body
@@ -8031,7 +8032,7 @@ export function h43GovernedReviewRequestGap(pr, governed, approvers, reviewed = 
 //
 // ## The rule, and the gap that is NOT in the rule
 //
-// `.claude/skills/pm-dispatch/SKILL.md:164` carries a maintainer ruling of
+// `.claude/skills/pm-dispatch/SKILL.md` carries a maintainer ruling of
 // 2026-09-02 (「其他同意」): 「板面/树/队列读数自带取数时刻:写进认领、派发令、
 // 复核、轮次报告、座位贴段落的读数恒带 UTC 时间戳(形如 `2026-03T00:21Z`),树读
 // 数另带 ref 或 tip;无时间戳的读数是格式错误不是现值,读者按未取处理」.
