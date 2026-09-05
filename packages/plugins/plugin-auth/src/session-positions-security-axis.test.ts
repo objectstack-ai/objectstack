@@ -45,6 +45,16 @@ import { AuthManager } from './auth-manager';
 import { createMemoryEngine } from './impersonation-bearer-rotation.test';
 import { inviteForAudienceGate } from './audience-gate-test-support';
 
+// [#10126] Pay the first transform of this dist-resolved workspace dep at MODULE
+// LOAD. `@objectstack/core` is reached below only through a dynamic `import()`
+// inside an `it()` body (the `resolveUserAuthzGrants` parity pin), and vitest
+// clocks test bodies and hooks while collection is clocked against nothing. See
+// `scripts/check-test-source-alias.mjs` (the clocked-window rule) and #10115 /
+// PR #10120, where the same shape cost 30 ejected merge-queue builds in one
+// night. The dynamic call stays where it is -- this only decides WHERE the
+// first load is paid.
+import '@objectstack/core';
+
 const SECRET = 'test-secret-at-least-32-chars-long!!';
 const PASSWORD = 'S3cure!Passw0rd-15136';
 const BASE = 'http://localhost:3000/api/v1/auth';
