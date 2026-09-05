@@ -395,8 +395,14 @@ describe('a non-record entry in any other stack collection (#15636)', () => {
       });
 
       it('invents no finding about the entry no author wrote', () => {
-        const delta = findingCount(collection.stack(members(junk))) - findingCount(control());
-        expect(delta).toBe(RESIDUAL_INVENTED[key] ?? 0);
+        // A rule listed in `RESIDUAL_THROWS` is excluded from BOTH sides rather
+        // than counted as zero: it returns nothing because it crashed, and
+        // folding that into the population count would let a crash read as
+        // "reported nothing", which is the confusion this file exists to end.
+        const skip = RESIDUAL_THROWS[key] ?? [];
+        const count = (stack: AnyRec): number =>
+          AUTHORING_RULES.reduce((n, rule) => (skip.includes(rule.name) ? n : n + rule.run(stack, {}).length), 0);
+        expect(count(collection.stack(members(junk))) - count(control())).toBe(RESIDUAL_INVENTED[key] ?? 0);
       });
     });
   });
