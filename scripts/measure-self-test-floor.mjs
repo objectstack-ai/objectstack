@@ -604,6 +604,169 @@ export function probeEarlyReturn(absFile, entry, { timeout = 120000, placement =
 }
 
 // ---------------------------------------------------------------------------
+// Instrument 3 -- WHICH verdict handshake a self-test carries, read from code
+// ---------------------------------------------------------------------------
+
+/**
+ * The extent of one definition's BODY in masked code: from the `{` the anchor
+ * lands on to the `}` that closes it, by counting braces.
+ *
+ * ⛔ NOT "the first `}` at column 0". That rule is the tree's convention for
+ * where a top-level definition ENDS, and it is wrong often enough to matter:
+ * `scripts/check-error-code-casing.mjs` closes an inline arrow argument with
+ * `});` at column 0 inside `selfTest`, 107 lines before the function really
+ * ends. Read that way, the flag `selfTest` sets as its last act falls OUTSIDE
+ * its own body and the file classifies `none` -- measured, three files (also
+ * `check-optional-error-sink-contract`, `check-org-identifier`), all three
+ * carrying a perfectly ordinary handshake.
+ *
+ * Counting is safe HERE and only here because the text is already masked: every
+ * brace inside a comment, a string, a template or a regex literal has been
+ * blanked, so the ones that remain are the ones the parser sees.
+ */
+export function definitionSpan(code, name) {
+  const pats = [
+    new RegExp(
+      `^[ \\t]*(?:export\\s+(?:default\\s+)?)?(?:async\\s+)?function\\s+${name}\\s*\\([^)]*\\)` +
+        `\\s*(?::\\s*[A-Za-z_$][\\w$<>\\[\\]|. ]*\\s*)?\\{`,
+      'm',
+    ),
+    new RegExp(`^[ \\t]*(?:export\\s+)?const\\s+${name}\\s*=\\s*(?:async\\s*)?\\([^)]*\\)\\s*(?::[^=]*)?=>\\s*\\{`, 'm'),
+  ];
+  for (const re of pats) {
+    const m = code.match(re);
+    if (!m) continue;
+    const at = m.index + m[0].length;
+    let depth = 1;
+    for (let i = at; i < code.length; i++) {
+      if (code[i] === '{') depth++;
+      else if (code[i] === '}' && --depth === 0) return { at, end: i };
+    }
+  }
+  return null;
+}
+
+/**
+ * SENTINEL -- the self-test's RETURN VALUE is compared against a NAMED operand:
+ * `if (selfTest() !== SELF_TEST_VERDICT)`, `if ((await selfTest()) !== ...)`.
+ *
+ * BOUNDARY -- the operand must be an IDENTIFIER. A comparison against a LITERAL
+ * is the ACCIDENT shape this file's header is about: over a self-test that
+ * returned early, `runSelfTest() === 0` is `undefined === 0` -> false -> exit 1,
+ * having printed ZERO BYTES. Nothing noticed anything; the arithmetic of a
+ * comparison against a missing return value did it, and calling that a handshake
+ * is the mistake the DEFEATED/HELD/ACCIDENT verdict exists to refuse. The word
+ * literals are excluded for the same reason they are literals.
+ *
+ * ⚠️ So `selfTest() !== undefined` would read `none` here, and no file in this
+ * tree spells it that way today. Left unadmitted rather than written blind --
+ * the same protocol the DISPATCH criterion publishes for its two unwitnessed
+ * spellings: widen with a control in both directions, and publish the delta.
+ */
+const HANDSHAKE_RETURN_COMPARED =
+  /(?:await\s+)?\(?\s*(?:await\s+)?([A-Za-z_$][\w$]*)\s*\(\s*\)\s*\)?\s*(?:!==|===|!=|==)\s*([A-Za-z_$][\w$]*)\b/g;
+const LITERAL_OPERAND = /^(?:undefined|null|true|false|NaN)$/;
+
+/**
+ * The FLAG and HELPER shapes share one carrier and differ only in WHO reads it.
+ *
+ * The carrier is a variable that CROSSES THE BOUNDARY out of the self-test: a
+ * module-level binding, assigned `true` INSIDE the self-test's body as its last
+ * act, and read OUTSIDE it by the dispatch. Both halves are structural, and
+ * both are load-bearing:
+ *
+ *   MODULE-LEVEL  a `let`/`var` at column 0. A binding declared inside the
+ *                 self-test cannot outlive the call, so it can carry nothing --
+ *                 and the ordinary accumulator `let ok = true` is exactly that.
+ *                 Without this half `scripts/check-regen-pending.mjs` reads
+ *                 `flag`, on an `ok` set inside `decisionTableSelfTest` and an
+ *                 unrelated `(ok) => !ok` arrow PARAMETER 60 lines later. There
+ *                 is no scope analysis here; the column-0 declaration is what
+ *                 stands in for one.
+ *   CROSSES       set inside the body, read outside it. A boolean set and read
+ *                 within one function is a local decision, not a handshake.
+ *
+ * Then the two shapes:
+ *
+ *   FLAG    the DISPATCH reads it itself, negated -- `if (!selfTestReachedVerdict)`.
+ *   HELPER  the dispatch HANDS it to a callee that refuses on its behalf --
+ *           `requireReachedVerdict('selfTest', selfTestReachedVerdict)`. The
+ *           callee must be defined in this file and its body must PRODUCE A
+ *           FAILURE, which is what separates a refusal from any other function
+ *           that happens to take a boolean.
+ *
+ * ⭐ The helper is therefore not a third mechanism -- it is the FLAG with its
+ * refusal factored out of ten inlined copies, which is exactly the merit the
+ * ruling that admitted it turned on. Recognised as its own shape because the
+ * census question is "which spelling is this file written in", and answering it
+ * is this column's whole job.
+ */
+const MODULE_LEVEL_BINDING = /^(?:let|var)\s+([A-Za-z_$][\w$]*)/gm;
+const SET_TRUE = /([A-Za-z_$][\w$]*)\s*=\s*true\b/g;
+const negatedRead = (name) => new RegExp(String.raw`!\s*${name}\b`, 'g');
+const handedToCall = (name) => new RegExp(String.raw`([A-Za-z_$][\w$]*)\s*\(\s*[^()]*?\b${name}\s*\)`, 'g');
+
+/**
+ * ⭐ THE ONE RECOGNISER (#14968). Every caller -- `--json`, the human census
+ * column, the per-shape summary -- reads THIS, so a fifth landed shape is a
+ * change here and nowhere else. That is the whole point: the repair had landed
+ * in three spellings, every handshake question was answered by a hand-written
+ * grep, and three seats in one shift got three different wrong answers from
+ * three different greps whose completeness nobody could check.
+ *
+ * Returns `'sentinel' | 'flag' | 'helper' | 'none'`, read from the MASKED,
+ * line-anchored source -- the same text `selfTestDefs` and the injection anchor
+ * read. Masked, because a spelling quoted inside a fixture string or described
+ * in a docblock is not a handshake the dispatch can perform; this file is full
+ * of both, and so are the gates that reason about self-tests.
+ *
+ * ⛔ NOT keyed on the three landed NAMES. `SELF_TEST_VERDICT`,
+ * `selfTestReachedVerdict` and `requireReachedVerdict` appear nowhere in this
+ * function: what it reads is the value handed back and the comparison that
+ * consumes it. `classifyFloor` keyed on the NAME `SELF_TEST_BATTERIES` once and
+ * called a fixture floored after its roster had been removed; the control below
+ * renames every landed spelling out of a fixture and requires the same verdict.
+ *
+ * ORDER: sentinel, then helper, then flag. Measured on this base: NO file in the
+ * census carries two shapes, so the order decides nothing today -- the live
+ * check below publishes that overlap as a number rather than leaving it assumed.
+ *
+ * ⛔ It recognises the shapes; it does not legislate them. Two of the three are
+ * deliberate -- the flag exists because those self-tests' own exit codes are
+ * load-bearing, so the handshake cannot BE the return value -- and unifying the
+ * tree is explicitly not this instrument's business.
+ */
+export function classifyHandshake(src) {
+  const code = maskCommentsAndLiterals(src);
+
+  for (const m of code.matchAll(HANDSHAKE_RETURN_COMPARED)) {
+    if (/self.?test/i.test(m[1]) && !LITERAL_OPERAND.test(m[2])) return 'sentinel';
+  }
+
+  const spans = selfTestDefs(src)
+    .map((name) => definitionSpan(code, name))
+    .filter((s) => s !== null);
+  const insideSelfTest = (at) => spans.some((s) => at >= s.at && at < s.end);
+
+  const moduleLevel = new Set([...code.matchAll(MODULE_LEVEL_BINDING)].map((m) => m[1]));
+  const carried = new Set();
+  for (const m of code.matchAll(SET_TRUE)) {
+    if (moduleLevel.has(m[1]) && insideSelfTest(m.index)) carried.add(m[1]);
+  }
+
+  let flag = false;
+  for (const name of carried) {
+    for (const m of code.matchAll(handedToCall(name))) {
+      if (insideSelfTest(m.index) || /self.?test/i.test(m[1])) continue;
+      const def = definitionSpan(code, m[1]);
+      if (def && PRODUCES_FAILURE.test(code.slice(def.at, def.end))) return 'helper';
+    }
+    for (const m of code.matchAll(negatedRead(name))) if (!insideSelfTest(m.index)) flag = true;
+  }
+  return flag ? 'flag' : 'none';
+}
+
+// ---------------------------------------------------------------------------
 // The controls -- run on EVERY invocation, before any number is printed
 // ---------------------------------------------------------------------------
 
