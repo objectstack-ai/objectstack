@@ -58,6 +58,7 @@ import {
   type SecondaryStorageLike,
 } from './identity-write-guard.js';
 import { registerLastAdminGuard } from './last-admin-guard.js';
+import { registerMembershipEndedSessionTrigger } from './membership-ended-session.js';
 import { registerMemberRoleCanonicalization } from './member-role-canonical.js';
 import { SYS_USER_PROFILE_EDIT_FIELDS } from './sys-user-writable-fields.js';
 import { MANAGED_EXTENSION_EDITABLE_FIELDS } from './managed-extension-fields.js';
@@ -1395,6 +1396,20 @@ export class AuthPlugin implements Plugin {
         // callers. See last-admin-guard.ts.
         registerLastAdminGuard(engine, {
           packageId: 'com.objectstack.plugin-auth.last-admin-guard',
+          logger: ctx.logger,
+        });
+        // [#15784] The COURTESY half of #15409's ruling: when a membership
+        // ends, the session's claim on THAT organization ends with it —
+        // re-pointed if the user still belongs somewhere, revoked if not.
+        // Registered on `sys_member` for the same reason the guard above is:
+        // the census (posted on #15784) measured that better-auth's
+        // remove-member endpoint, a direct delete, a bulk delete, the cascade
+        // from a sys_user delete and an organization re-point ALL reach this
+        // seam, while an endpoint hook would have reached one of them.
+        // ⛔ This is never the enforcement — see the module header, and
+        // `resolve-authz-context.ts`, which stays untouched.
+        registerMembershipEndedSessionTrigger(engine, {
+          packageId: 'com.objectstack.plugin-auth.membership-ended-session',
           logger: ctx.logger,
         });
       } catch {
@@ -2968,7 +2983,20 @@ export class AuthPlugin implements Plugin {
         // Forward the original request to better-auth handler
         const response = await this.authManager!.handleRequest(c.req.raw);
 
-        if (response.status === 404) {
+        // [#15417] Yield only a 404 that DISCLAIMS OWNERSHIP. `ownsRoute` asks
+        // better-auth's live `auth.api` — the same seam the route ledger and the
+        // `/admin/` dogfood sweep read — whether its own router serves this
+        // path; see `better-auth-route-ownership.ts` for the mechanism and the
+        // measurement. A 404 from a path it DOES serve is its answer (a
+        // switched-off capability such as `delete-user`, a bad token, an
+        // unknown id) and must reach the caller, exactly like the
+        // 401/403 the block below already refuses to yield. Measured with the
+        // shipped handler on a real Hono app: with one broad downstream mount
+        // in the chain — the shape a composition adds — such an answer used to
+        // come back `200 {}`, which is the silent-success shape #15417 is
+        // about. ⛔ The mount is untouched and still claims `${basePath}/*`;
+        // what narrowed is which 404 may be handed on.
+        if (response.status === 404 && !(await this.authManager!.ownsRoute(c.req.raw))) {
           await next();
           // A non-404 downstream means something else answered — hand that back.
           // NOT `c.finalized`: reaching the end of the chain with nothing

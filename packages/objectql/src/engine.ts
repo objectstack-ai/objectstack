@@ -139,11 +139,10 @@ import {
 import { isPlatformObjectOutOfTenantAuditScope } from './tenancy/platform-object-tenancy.js';
 import { resolveTenancyPosture } from '@objectstack/types';
 import {
-  AuthzPostureSchema,
   normalizeTenancyPosture,
-  postureEnforcesWall,
-  postureUsesUnionScope,
+  TenantLayer0VerdictSchema,
   type TenancyPosture,
+  type TenantLayer0Verdict,
 } from '@objectstack/spec/security';
 
 /**
@@ -176,11 +175,7 @@ import {
   SECRET_MASK,
 } from './secret-fields.js';
 import { pluralToSingular, ExternalWriteForbiddenError } from '@objectstack/spec/shared';
-// [#15225] `carriesTenantScopeColumn` is the wall's own object predicate —
-// "does Layer 0 key on this object?" — read from the registry's binding of it
-// rather than re-spelled here (the R1 re-spelling mirrored one clause of three
-// and mislabelled a batch; see `bulkEventOrganizationId`).
-import { SchemaRegistry, computeFQN, carriesTenantScopeColumn, type ArtifactInstallScope } from './registry.js';
+import { SchemaRegistry, computeFQN, type ArtifactInstallScope } from './registry.js';
 import { expandSearchToFilter } from './search-filter.js';
 import { isSearchCompanionRequested, stripSearchCompanion } from './search-companion.js';
 import { ExpressionEngine } from '@objectstack/formula';
@@ -1883,6 +1878,29 @@ export interface OperationContext {
   options?: any;
   context?: ExecutionContext;
   result?: any;
+  /**
+   * [#15813 / ADR-0131 D8] What the Layer 0 tenant wall DECIDED for this
+   * operation — recorded by the enforcement layer (`@objectstack/plugin-security`)
+   * at the moment it composes the wall onto the operation's predicate, and
+   * read by the bulk data-event producer ({@link ObjectQL.publishBulkDataEvent})
+   * to stamp `BulkDataEvent.organizationId`.
+   *
+   * The seam ruled on #15706: the wall is computed ONCE, where every input is
+   * visible (the posture in force, the caller's organization scope, the
+   * object's tenancy clauses AND the deployment's #12699 carve-out, which no
+   * schema carries), and its decision travels here as a value. A reader
+   * answers from this member ALONE and re-derives nothing — a re-derivation
+   * is a mirror of the wall, and a mirror structurally sees only the clauses
+   * it was taught (the #15706 mislabel).
+   *
+   * Three states, all honest: ABSENT — no wall was composed on this
+   * operation (a system context, no enforcement layer mounted, a by-id write
+   * with no predicate); `{ kind: 'none' }` — the wall ran and contributed no
+   * predicate; a named verdict (`organization` / `organizations` / `deny`).
+   * The shape is `TenantLayer0VerdictSchema` (`@objectstack/spec/security`);
+   * a value that does not parse reads as absent, never as an organization.
+   */
+  tenantLayer0Verdict?: TenantLayer0Verdict;
 }
 
 /**
@@ -2256,9 +2274,10 @@ function eventOrganizationId(objectSchema: unknown, row: unknown): string | unde
  * The ONE coercion an organization value goes through before it becomes an
  * event's `organizationId` — shared by the per-record producer
  * ({@link eventOrganizationId}, which reads the row's column) and the bulk
- * producer ({@link bulkEventOrganizationId}, which reads the wall's inputs
- * off the execution context), so the two cannot disagree about what counts
- * as an organization (#15225: one ladder, two readers — never two ladders).
+ * producer ({@link bulkEventOrganizationId}, which reads the wall's RECORDED
+ * verdict off the operation context, #15813), so the two cannot disagree
+ * about what counts as an organization (#15225: one ladder, two readers —
+ * never two ladders).
  *
  * First the write path's own "actually supplied" predicate
  * ({@link carriesOrganization}), so producer and consumer cannot disagree
@@ -2290,103 +2309,61 @@ function eventOrganizationValue(value: unknown): string | undefined {
  * about a row). `packages/spec/src/api/events.zod.ts` records the divergence
  * on the member itself.
  *
- * **Why the wall answers it with no second query.** The security layer
- * AND-composes its Layer 0 tenant wall (ADR-0095 D1, `tenant-layer.ts`) onto
- * the caller's filter before the driver, and Layer 1 cannot widen it: under
- * `isolated` the wall is `organization_id = <caller's active organization>`,
- * under `group` it is `organization_id IN <caller's membership set>`
- * (ADR-0105 D2). So when the wall names exactly one organization, every
- * affected row belongs to it — one comparison, never a partition of the
- * batch — and the producer can state that from what it already holds: the
- * execution context the wall was computed from, and the posture the
- * enforcement layer told this engine it enforces.
+ * **What is read: the wall's RECORDED verdict, and nothing else** (#15813,
+ * the seam ruled on #15706 — option (i), ADR-0131 D8 「一道谓词，算一次」).
+ * The security layer AND-composes its Layer 0 tenant wall (ADR-0095 D1,
+ * `tenant-layer.ts`) onto the caller's predicate before the driver, and at
+ * that moment records what it decided on the operation context
+ * ({@link OperationContext.tenantLayer0Verdict}). Under `isolated` the wall
+ * is `organization_id = <one organization>`, under `group` it is
+ * `organization_id IN <membership set>` (ADR-0105 D2), and Layer 1 cannot
+ * widen it — so when the recorded verdict names exactly one organization,
+ * every affected row belongs to it, and this producer says so.
  *
- * **What is read, and what the answer is** (the posture table on the card,
- * read against `computeTenantLayer0Filter`'s inputs — an exact mirror on the
- * POSTURE and CONTEXT inputs, a PARTIAL one on the OBJECT input; the object
- * bullet below says which clauses are mirrored and which the seam carries):
+ * **What is deliberately NOT read.** The first edition of this producer
+ * re-derived the wall here — from the enforced posture, the execution
+ * context's `tenantId` / `accessible_org_ids` / `posture` rung, and the
+ * object schema's tenancy clauses. It could not see the third clause
+ * plugin-security folds into `tenancyDisabled` — the deployment-declared
+ * `platformGlobalObjects` carve-out (#12699), which no schema carries — and
+ * stamped the caller's organization onto a batch Layer 0 had never
+ * constrained: a WRONG key, the #13566 leak shape. The ruling's acceptance
+ * criterion, verbatim: the verdict recorded must be what the wall decided,
+ * not a re-statement of its inputs; if the recorded value can be derived by
+ * the reader from anything else on the context, the mirror has not been
+ * deleted — it has been moved. So this function reads the verdict ALONE:
  *
- *  - `enforcedPosture` is the SecurityPlugin-injected posture
- *    ({@link ObjectQL.enforcedTenancyPosture}), ⛔ never the env fallback
- *    `resolveEnginePosture()` also consults: no enforcement layer means no
- *    Layer 0 wall was composed at all, and the memory driver reads no
- *    `DriverOptions.tenantId` either, so a lean embedding has no wall
- *    ANYWHERE to vouch for. `single` (no wall) ⇒ absent.
- *  - `isSystem` short-circuits the whole security middleware ⇒ no wall ⇒
- *    absent. Same for an absent context.
- *  - The OBJECT exit. Layer 0 composes nothing when its `tenancyDisabled`
- *    input is true or the object carries no `organization_id`
- *    (`objectHasOrgIdField`), and `getObjectSecurityMeta`
- *    (`security-plugin.ts`) folds THREE clauses into `tenancyDisabled`:
- *    ① `tenancy.enabled === false`, ② `systemFields.tenant === false`,
- *    ③ `orgScopingEnabled && platformGlobalObjects.has(object)` — the
- *    deployment's #12699 carve-out. This producer reads
- *    {@link carriesTenantScopeColumn}, the registry's binding of the wall's
- *    predicate (2026-08-14 triage ruling: the wall's derivation is
- *    authoritative) — clauses ① and ② plus the column clause — so an
- *    object the wall does not key on answers absent, and a custom
- *    `tenancy.tenantField` is NOT an exit by itself (the wall never reads
- *    it; the object is walled iff it carries `organization_id`). ⛔ What is
- *    NOT mirrored: clause ③ is deployment-declared and invisible to the
- *    engine — no `platformGlobalObjects` reading exists here — so a
- *    deployment-exempted object under an armed wall is still stamped with
- *    the caller's organization while Layer 0 composed no wall. That
- *    population is the seam #15706 rules on, and the reason this producer's
- *    PR is Blocked-by it. The wall's fourth object input, the federated
- *    phantom anchor (#7835: an `external` object's injected
- *    `organization_id` is a column no storage carries, so
- *    `objectHasOrgIdField` is false), is answered by the superset
- *    `external != null` ⇒ absent — conservative for a federated object whose
- *    author declared a real remote column (the wall stands there; this
- *    under-delivers rather than re-spelling plugin-security's provenance
- *    test).
- *  - The Layer 0 EXEMPTION: a true `PLATFORM_ADMIN` crosses the wall where
- *    the object's posture permits (ADR-0095 D3). The engine holds the carried
- *    rung (`ExecutionContext.posture`) but not the superuser write-bypass bit
- *    the exemption also requires, so it answers conservatively: a carried
- *    `PLATFORM_ADMIN` rung ⇒ absent (the batch MAY have crossed). A context
- *    carrying NO rung is one the plugin decides by a capability probe over
- *    its resolved permission sets — invisible from here — so it is absent too:
- *    the engine asserts only what it can vouch for. Session contexts assembled
- *    by the authz resolver always carry the rung.
- *  - `group`: the membership set, deduplicated — present only when it names
- *    exactly one organization, and ⛔ never `tenantId` standing in for a
- *    multi-membership sweep (the option-C mislabel PR #14635's open question 1
- *    rejected). An unreadable member makes the set unvouchable ⇒ absent.
- *  - `isolated`: the caller's active organization (`tenantId`), which IS the
- *    wall's equality term; missing ⇒ the wall was the deny sentinel ⇒ absent
- *    (and no row matched anyway).
+ *  - `organization` ⇒ that organization;
+ *  - `organizations` naming exactly one (the set is deduplicated at the
+ *    source and the schema refuses duplicates) ⇒ that organization; two or
+ *    more ⇒ absent (⛔ never `tenantId` standing in for a multi-membership
+ *    sweep — the option-C mislabel PR #14635's open question 1 rejected);
+ *  - `none` (the wall ran and contributed nothing: `single` posture, a
+ *    non-tenant or deployment-exempted object, an exempt `PLATFORM_ADMIN`)
+ *    and `deny` (the fail-closed sentinel) ⇒ absent;
+ *  - NO recorded verdict (a system context exits the middleware first; no
+ *    enforcement layer is mounted; the plugin recorded nothing) ⇒ absent —
+ *    nothing composed a wall, so there is nothing to vouch for;
+ *  - a value that does not parse as a verdict ⇒ absent. Junk never reads as
+ *    an organization: an absent key under-delivers (a tenant-scoped consumer
+ *    declines to fan out), a wrong key delivers a cross-organization batch
+ *    inside the wrong wall.
  *
- * Returns `undefined` for every "not asserted" case and the caller OMITS the
- * key — omission is the schema's one spelling for absence (`''` is refused,
- * an explicit `undefined` survives `parse` as a present key), exactly as the
- * per-record site does.
+ * The organization value then goes through the ONE coercion ladder the
+ * per-record producer uses ({@link eventOrganizationValue}) — one ladder, two
+ * readers, never two ladders — and the caller OMITS the key on `undefined`:
+ * omission is the schema's one spelling for absence (`''` is refused, an
+ * explicit `undefined` survives `parse` as a present key).
  */
-function bulkEventOrganizationId(
-  objectSchema: unknown,
-  execCtx: ExecutionContext | undefined,
-  enforcedPosture: TenancyPosture | undefined,
-): string | undefined {
-  if (enforcedPosture === undefined || !postureEnforcesWall(enforcedPosture)) return undefined;
-  if (!execCtx || execCtx.isSystem === true) return undefined;
-  if (!objectSchema || typeof objectSchema !== 'object') return undefined;
-  if (!carriesTenantScopeColumn(objectSchema as ServiceObject)) return undefined;
-  if ((objectSchema as { external?: unknown }).external != null) return undefined;
-  const rung = AuthzPostureSchema.safeParse(execCtx.posture);
-  if (!rung.success || rung.data === 'PLATFORM_ADMIN') return undefined;
-  if (postureUsesUnionScope(enforcedPosture)) {
-    const memberships = execCtx.accessible_org_ids;
-    if (!Array.isArray(memberships) || memberships.length === 0) return undefined;
-    let named: string | undefined;
-    for (const member of memberships) {
-      const id = eventOrganizationValue(member);
-      if (id === undefined) return undefined;
-      if (named === undefined) named = id;
-      else if (named !== id) return undefined;
-    }
-    return named;
+function bulkEventOrganizationId(recordedVerdict: unknown): string | undefined {
+  const parsed = TenantLayer0VerdictSchema.safeParse(recordedVerdict);
+  if (!parsed.success) return undefined;
+  const verdict = parsed.data;
+  if (verdict.kind === 'organization') return eventOrganizationValue(verdict.organizationId);
+  if (verdict.kind === 'organizations' && verdict.organizationIds.length === 1) {
+    return eventOrganizationValue(verdict.organizationIds[0]);
   }
-  return eventOrganizationValue(execCtx.tenantId);
+  return undefined;
 }
 
 /**
@@ -4031,23 +4008,6 @@ export class ObjectQL implements IObjectQLEngine {
     } catch {
       return 'isolated';
     }
-  }
-
-  /**
-   * [#15225] The tenancy posture the ENFORCEMENT layer told this engine it
-   * enforces — the SecurityPlugin-injected provider's answer and nothing
-   * else, `undefined` when no enforcement layer injected one.
-   *
-   * Deliberately NOT {@link resolveEnginePosture}: that accessor falls back to
-   * the env resolution, which is the right fact for #8844's write REFUSAL (a
-   * lean embedding should still refuse an org-less system write on a walled
-   * install) and the wrong fact for asserting what a wall named. No
-   * SecurityPlugin ⇒ no Layer 0 wall composed ⇒ nothing to vouch for, whatever
-   * the operator configured. Read live per call, never cached — the same
-   * "no frozen verdict" rule the sibling accessor keeps.
-   */
-  private enforcedTenancyPosture(): TenancyPosture | undefined {
-    return normalizeTenancyPosture(this.tenancyPostureProvider?.());
   }
 
   /**
@@ -6014,13 +5974,14 @@ export class ObjectQL implements IObjectQLEngine {
    * internals to whatever external URL a webhook points at. See
    * `BulkDataEventSchema`'s TSDoc for the full reasoning.
    *
-   * [#15225] `organizationId` — the ONE organization the tenant wall named
-   * for this batch, stamped from the execution context and the enforced
-   * posture the producer already holds (⛔ no second query on the publish
-   * path), and OMITTED whenever the producer cannot assert one. See
-   * {@link bulkEventOrganizationId} for the derivation and for why `absent`
-   * here means "not asserted", not the per-record "belongs to no
-   * organization".
+   * [#15225 / #15813] `organizationId` — the ONE organization the tenant
+   * wall named for this batch, read off the Layer 0 verdict the enforcement
+   * layer RECORDED on the operation context ({@link OperationContext.tenantLayer0Verdict})
+   * — ⛔ no second query on the publish path, and ⛔ no re-derivation of the
+   * wall from posture, context or schema (the #15706 mirror) — and OMITTED
+   * whenever the producer cannot assert one. See {@link bulkEventOrganizationId}
+   * for what is read, what is deliberately not, and for why `absent` here
+   * means "not asserted", not the per-record "belongs to no organization".
    *
    * Same two disciplines as the per-record twin: validate before publish, and
    * never throw — a realtime transport problem must not roll back a committed
@@ -6029,7 +5990,7 @@ export class ObjectQL implements IObjectQLEngine {
   private async publishBulkDataEvent(
     action: 'updated' | 'deleted',
     object: string,
-    input: { matched: unknown; context?: ExecutionContext },
+    input: { matched: unknown; context?: ExecutionContext; tenantLayer0Verdict?: unknown },
   ): Promise<void> {
     if (!this.realtimeService) return;
 
@@ -6058,16 +6019,12 @@ export class ObjectQL implements IObjectQLEngine {
     try {
       const timestamp = new Date().toISOString();
       const userId = eventUserId(input.context);
-      // [#15225] The organization the WALL named for the whole batch — read
-      // off the context the wall was computed from, never off a row (there is
-      // none) and never `input.context.tenantId` on its own (under `group` the
-      // wall is the membership set). Omitted, never `''`/`undefined`, because
+      // [#15225 / #15813] The organization the WALL named for the whole batch
+      // — read off the verdict the wall RECORDED on the operation, never off
+      // a row (there is none), never the context, never the posture (the
+      // mirror #15706 deleted). Omitted, never `''`/`undefined`, because
       // absence has exactly one spelling in the schema.
-      const organizationId = bulkEventOrganizationId(
-        this._registry.getObject(object),
-        input.context,
-        this.enforcedTenancyPosture(),
-      );
+      const organizationId = bulkEventOrganizationId(input.tenantLayer0Verdict);
       const event: BulkDataEvent = BulkDataEventSchema.parse({
         id: generateEventUuid(),
         type: `data.records.${action}`,
@@ -12037,6 +11994,9 @@ export class ObjectQL implements IObjectQLEngine {
                await this.publishBulkDataEvent('updated', object, {
                  matched: result,
                  context: opCtx.context,
+                 // [#15813] The wall's recorded verdict rides the SAME operation
+                 // context the middleware wrote it on.
+                 tenantLayer0Verdict: opCtx.tenantLayer0Verdict,
                });
              } else {
                const resultId = (typeof result === 'object' && result && 'id' in result) ? (result as any).id : undefined;
@@ -13495,6 +13455,8 @@ export class ObjectQL implements IObjectQLEngine {
               await this.publishBulkDataEvent('deleted', object, {
                 matched: result,
                 context: opCtx.context,
+                // [#15813] Same seam as the update branch.
+                tenantLayer0Verdict: opCtx.tenantLayer0Verdict,
               });
             } else {
               const resultId = (typeof result === 'object' && result && 'id' in result) ? (result as any).id : undefined;

@@ -346,8 +346,20 @@ export interface AutomationResult {
      * a request's run and is deliberately NOT promoted to this status (same
      * ruling): it classifies WHY a request's run is unrecoverable, this names
      * the run's own lifecycle verdict.
+     *
+     * `'refused'` names the run that reached an `end` node declaring
+     * `outcome: 'refused'` (#14945; maintainer ruling 2026-09-05, option 2′):
+     * a successful evaluation that said no. Terminal exactly like
+     * `'completed'`, and DISTINCT from `'failed'` on purpose — nothing threw,
+     * the flow refused deliberately, and the authored reason is rendered
+     * per-record into {@link refusalMessage}. `success` stays `true` (the
+     * evaluation succeeded), `successMessage` is NOT set (there is nothing to
+     * toast), and the run is never resumed. A runner renders `refusalMessage`
+     * with Close only — no Submit, no completion toast. This member is the
+     * ruling's contract half; the engine begins stamping it when the
+     * services half (the `end` handling in `service-automation`) lands.
      */
-    status?: 'completed' | 'paused' | 'failed' | 'stranded';
+    status?: 'completed' | 'paused' | 'failed' | 'stranded' | 'refused';
     /** Run id — set when `status` is `'paused'`, so callers can resume it. */
     runId?: string;
     /**
@@ -365,6 +377,15 @@ export interface AutomationResult {
      */
     successMessage?: string;
     errorMessage?: string;
+    /**
+     * #14945: the rendered refusal, set when `status` is `'refused'` — the
+     * `end` node's `message` template interpolated against the run's
+     * variables, so it names the record (`Refused: Acme Corp is a confirmed
+     * duplicate`). Authored per-record text, not a copy of a flow-level
+     * string like the two above; absent on every other status. The runner
+     * shows it with Close only.
+     */
+    refusalMessage?: string;
     /**
      * #4354: what the run did — records selected / acted on, gate skips,
      * per-node status. Set on a TERMINAL result (a paused run has not finished

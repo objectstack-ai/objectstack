@@ -3187,11 +3187,18 @@ export class RestServer {
 
     /**
      * [#14882] The `ResolveOptions` every metadata-document translation in
-     * this server hands `@objectstack/spec/system`: the request's locale plus
-     * the deployment's DECLARED fallback chain.
+     * this server hands `@objectstack/spec/system`: the request's locale, the
+     * deployment's DECLARED fallback chain, and [#15711] the deployment's
+     * DEFAULT locale. This is the single seam; every resolver call in this
+     * file spreads it, so a rule about which locale answers lives in the
+     * resolvers (`packages/spec`) and this seam only threads declarations.
      *
-     * The resolvers walk `requested locale → fallbackChain → authored label`,
-     * and default the chain to a literal `['en']` when a caller passes none.
+     * The resolvers walk `requested locale → fallbackChain → authored label`
+     * for a NON-default request, and answer `requested locale → authored
+     * label` for a request that names `defaultLocale` (the authored label IS
+     * the default locale's text — ruled on #15711). A caller that declares
+     * no chain gets no chain: the resolver's own default is `[]`, not `en`.
+     *
      * Every seam here used to pass none, so the stack's `i18n.fallbackLocale`
      * never reached the chain: a `zh-CN` workspace that shipped a courtesy
      * `en` bundle served `Entry Sheet` to a `zh-CN` request, ahead of its own
@@ -3201,21 +3208,32 @@ export class RestServer {
      * locale its own `t()` falls back to, which `I18nServicePlugin` receives
      * as `fallbackLocale || defaultLocale || 'en'` from the stack config — so
      * a bundle label and a `t()` message agree on which locale comes second.
-     * Feature-detected like `getPackagedObjectBase`: a service that does not
-     * declare a fallback (the method is optional on `II18nService`, and the
-     * core in-memory fallback has no declared one) gets NO chain, so the
-     * resolver's own default applies exactly as before — the serving layer
-     * threads a declaration, it does not invent one. ⛔ Not derived from
-     * `getDefaultLocale()`: that would decide, for a stack declaring
-     * `defaultLocale: 'zh-CN'` with `fallbackLocale: 'en'`, whether the
-     * authored label or the `en` bundle answers a `zh-CN` request — a
-     * contract question this seam must not answer on its own.
+     * The default locale is read from `getDefaultLocale()`, the same accessor
+     * `extractLocale` already answers a header-less request from, so the
+     * request that falls to the default and the rule that recognises the
+     * default read one value. Both are feature-detected like
+     * `getPackagedObjectBase` (both methods are optional on `II18nService`;
+     * the core in-memory fallback declares neither): a service that does not
+     * declare a fallback gets NO chain, and one that does not declare a
+     * default gets NO default — the serving layer threads a declaration, it
+     * never invents one, and it never answers `'en'` on a provider's behalf.
+     *
+     * With `defaultLocale` threaded, a stack declaring `defaultLocale:
+     * 'zh-CN'` with a reflexive `fallbackLocale: 'en'` serves its authored
+     * `填报单` to a `zh-CN` request and its `en` bundle to every other one —
+     * the contract question this docblock once refused to answer on its own
+     * (#14882 left it to #15711, which ruled it).
      */
-    private static translateOptionsFor(i18n: any, locale: string): { locale: string; fallbackChain?: string[] } {
+    private static translateOptionsFor(
+        i18n: any,
+        locale: string,
+    ): { locale: string; fallbackChain?: string[]; defaultLocale?: string } {
         const fallback = i18n && typeof i18n.getFallbackLocale === 'function' ? i18n.getFallbackLocale() : undefined;
-        return typeof fallback === 'string' && fallback.length > 0
-            ? { locale, fallbackChain: [fallback] }
-            : { locale };
+        const def = i18n && typeof i18n.getDefaultLocale === 'function' ? i18n.getDefaultLocale() : undefined;
+        const opts: { locale: string; fallbackChain?: string[]; defaultLocale?: string } = { locale };
+        if (typeof fallback === 'string' && fallback.length > 0) opts.fallbackChain = [fallback];
+        if (typeof def === 'string' && def.length > 0) opts.defaultLocale = def;
+        return opts;
     }
 
     /**
@@ -3250,9 +3268,8 @@ export class RestServer {
         if (!item || typeof item !== 'object') return item;
         // [#6349] Normalize HERE, not at the call sites. `isTranslatableMetaType`
         // reads `TRANSLATABLE_METADATA_TYPES`, which is DERIVED from
-        // `METADATA_DOCUMENT_TRANSLATORS`' keys — and those are singular-only
-        // (`view`/`action`/`object`/`app`/`dashboard`/`page`), matching
-        // `translateMetadataDocument`'s "Canonical metadata type string". The
+        // `METADATA_DOCUMENT_TRANSLATORS`' keys — and those are singular-only,
+        // matching `translateMetadataDocument`'s "Canonical metadata type string". The
         // `/meta` handlers hand this helper the RAW `:type` path segment, and
         // Prime Directive #3 makes PLURAL the canonical REST spelling, so the
         // documented spelling missed the set and the whole localization was

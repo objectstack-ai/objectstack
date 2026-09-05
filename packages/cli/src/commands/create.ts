@@ -82,9 +82,11 @@ import path from 'path';
 import { PROTOCOL_MAJOR } from '@objectstack/spec/kernel';
 import {
   getCliVersion,
+  NPM_PACKAGE_NAME_MAX_LENGTH,
   renderPnpmWorkspaceYaml,
   sanitizeNamespace,
   SCAFFOLD_PNPM_RANGE,
+  validateProjectName,
 } from './init.js';
 
 /**
@@ -163,6 +165,52 @@ function defineTemplate(t: Omit<CreateTemplate, 'files'>): CreateTemplate {
       return t.filesFor(DEFAULT_PLACEMENT);
     },
   };
+}
+
+/**
+ * The scoped package name a scaffold is about to write, READ BACK off the
+ * rendered manifest rather than recomposed here.
+ *
+ * Recomposing it would be a second copy of `@objectstack/plugin-${name}` that
+ * nothing keeps in step with the renderer — the same restatement that let this
+ * command's emitted name drift away from what `os init` enforces. Reading the
+ * rendered object measures the string that actually lands on disk, and a
+ * template added later is covered without being told to declare anything.
+ *
+ * `null` when the template emits no `package.json`, or emits one without a
+ * string `name`: there is then no package name to judge, which is not the same
+ * as judging one and finding it fine.
+ */
+export function emittedPackageName(
+  template: CreateTemplate,
+  placement: ScaffoldPlacement,
+  name: string,
+): string | null {
+  const render = template.filesFor(placement)['package.json'];
+  if (!render) return null;
+  const manifest = render(name) as { name?: unknown } | null | undefined;
+  return typeof manifest?.name === 'string' ? manifest.name : null;
+}
+
+/**
+ * The one rule `os create` needs and `os init` cannot.
+ *
+ * `init`'s argument IS the package name, so measuring the argument is the same
+ * measurement. `create` composes its argument into a SCOPED name, and npm's
+ * 214-character ceiling counts the scope: `@objectstack/plugin-` spends 20 of
+ * them before the user's first character. A 200-character name is therefore
+ * legal for `init` (measured: accepted) and illegal for `create` (measured:
+ * emits a 220-character name npm refuses) — which is why the shared validator
+ * is shared and this check is not.
+ */
+export function validateEmittedPackageName(packageName: string): string | null {
+  const over = packageName.length - NPM_PACKAGE_NAME_MAX_LENGTH;
+  if (over <= 0) return null;
+  return (
+    `The package name this would emit is ${packageName.length} characters; npm's limit is `
+    + `${NPM_PACKAGE_NAME_MAX_LENGTH}. Shorten the project name by at least ${over} character`
+    + `${over === 1 ? '' : 's'}.`
+  );
 }
 
 function toCamelCase(str: string): string {
@@ -464,11 +512,38 @@ export default class Create extends Command {
       console.log(chalk.dim(`Usage: objectstack create ${args.type} <name>`));
       process.exit(1);
     }
-    
+
+    // ⛔ BEFORE the first write, which is the whole property — a refusal that
+    // arrives after `mkdirSync` has fixed the message and not the defect.
+    //
+    // This command used to validate nothing it emitted, so `os create plugin
+    // "My App"` exited 0 having written `./plugin-My App/` with a manifest
+    // reading `name: "@objectstack/plugin-My App"` — a name npm refuses —
+    // while `os init "My App"` refused the same input and wrote nothing. The
+    // rule set is `init`'s, imported rather than restated: the two scaffolders
+    // already share four symbols, and the one they did not share is the one
+    // they disagreed on.
+    const nameError = validateProjectName(args.name);
+    if (nameError) {
+      console.error(chalk.red(`\n❌ ${nameError}`));
+      console.log(chalk.dim(`  Usage: objectstack create ${args.type} <name>`));
+      process.exit(1);
+    }
+
     const template = templates[args.type as keyof typeof templates];
     const cwd = process.cwd();
     const placement: ScaffoldPlacement = flags['in-repo'] ? 'in-repo' : DEFAULT_PLACEMENT;
     const projectDirName = template.dirName(args.name);
+
+    // The check `init` cannot need, on the string `init` never composes. Also
+    // before any write, and read off the rendered manifest so it measures what
+    // would land rather than a second copy of how it is built.
+    const willEmit = emittedPackageName(template, placement, args.name);
+    const packageNameError = willEmit ? validateEmittedPackageName(willEmit) : null;
+    if (packageNameError) {
+      console.error(chalk.red(`\n❌ ${packageNameError}`));
+      process.exit(1);
+    }
 
     // Refuse `--in-repo` outside a workspace rather than emit the one thing
     // this command is no longer allowed to emit: a project that cannot install.

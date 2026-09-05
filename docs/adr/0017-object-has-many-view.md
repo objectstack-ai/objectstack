@@ -116,7 +116,7 @@ lists `view`, keeps `v.viewKind && v.object === object`, sorts by
 rows on top.
 
 ### 3.4 Runtime storage — `sys_view_definition`
-`packages/platform-objects/src/metadata/sys-view-definition.object.ts` —
+`packages/metadata-core/src/objects/sys-view-definition.object.ts` —
 a `sys_`-prefixed **system object** (auto-provisioned). Columns:
 `name`, `object`, `view_kind`, `label`, `is_default`, `view_order`,
 `scope` (`shared`|`personal`), `owner`, `hidden`, `config` (JSON),
@@ -137,7 +137,7 @@ bound to that object, sorted, handling both array and `{items:[]}`
 response shapes.
 
 ### 3.6 Runtime switcher — `../objectui`
-`packages/data-objectstack/src/index.ts` — the adapter's runtime-view
+`objectui:packages/data-objectstack/src/index.ts` — the adapter's runtime-view
 CRUD (`listViews` / `createView` / `updateView` / `deleteView`) is
 repointed from the legacy metadata `view` overlay onto
 `sys_view_definition` via the generic data API:
@@ -150,7 +150,7 @@ repointed from the legacy metadata `view` overlay onto
   the tab-bar consumes and the typed columns (config nested; identity
   hoisted).
 
-`packages/app-shell/src/views/ObjectView.tsx` — the console switcher
+`objectui:packages/app-shell/src/views/ObjectView.tsx` — the console switcher
 aggregates two sources it already merged: **package** views via
 `objectDef.listViews` (the dual-read aggregated container, surfaced by
 `MetadataProvider`) and **shared/personal** via `dataSource.listViews`.

@@ -2,13 +2,19 @@
 
 /**
  * [#14384] `AutomationResult.status` is exactly
- * `'completed' | 'paused' | 'failed' | 'stranded'`, and the wire mirror
+ * `'completed' | 'paused' | 'failed' | 'stranded' | 'refused'`, and the wire mirror
  * (`TriggerFlowResponseSchema.data.status`, `api/automation-api.zod.ts`) is
- * the same four — contract half of the #13937 shape-4 ruling (maintainer
+ * the same five. Four of them are the contract half of the #13937 shape-4 ruling (maintainer
  * 2026-09-01), which names the terminally-failed-but-repairable run on this
  * union: a resume consumed the suspension, a downstream node threw, the run is
  * recorded as failed and can be re-armed only by an explicit operator verb
  * (#13909's condition). The literal is `'stranded'`.
+ *
+ * [#14945] The fifth, `'refused'`, is the contract half of the 2026-09-05
+ * ruling (option 2′): the run reached an `end` node declaring
+ * `outcome: 'refused'` — a successful evaluation that said no, terminal,
+ * never resumed, distinct from `'failed'`, with the rendered per-record text
+ * on the new `refusalMessage` member (mirrored on the wire the same way).
  *
  * Three things are pinned, because each drifts on its own:
  *
@@ -62,6 +68,7 @@ export const AUTOMATION_RESULT_STATUSES = [
   'paused',
   'failed',
   'stranded',
+  'refused',
 ] as const satisfies readonly ContractStatus[];
 
 /**
@@ -69,7 +76,7 @@ export const AUTOMATION_RESULT_STATUSES = [
  * pin no program compiles is no pin at all (`check:test-typecheck` compiles
  * this file under `tsconfig.test.json`).
  */
-export type AutomationResultStatusIsExactlyTheFour = Assert< Eq< ContractStatus, (typeof AUTOMATION_RESULT_STATUSES)[number] > >;
+export type AutomationResultStatusIsExactlyTheFive = Assert< Eq< ContractStatus, (typeof AUTOMATION_RESULT_STATUSES)[number] > >;
 /** Wire ↔ contract: the Zod enum's inferred type IS the interface's union. */
 export type WireStatusMatchesContract = Assert< Eq< WireStatus, ContractStatus > >;
 
@@ -78,7 +85,7 @@ const wireStatusEnum = TriggerFlowResponseSchema.shape.data.shape.status.unwrap(
 
 describe('[#14384] AutomationResult.status names the stranded run', () => {
   it('reads a non-empty membership (anti-vacuity)', () => {
-    expect(AUTOMATION_RESULT_STATUSES.length).toBe(4);
+    expect(AUTOMATION_RESULT_STATUSES.length).toBe(5);
     expect(wireStatusEnum.options.length).toBeGreaterThan(0);
   });
 
@@ -108,7 +115,32 @@ describe('[#14384] AutomationResult.status names the stranded run', () => {
     expect(parsed.data.runId).toBe('run_stranded_001');
   });
 
-  it('refuses a status outside the four, at `data.status`, as an enum violation', () => {
+  it("names the refused run 'refused' (#14945) — beside `'failed'`, never folded into it", () => {
+    expect(AUTOMATION_RESULT_STATUSES).toContain('refused');
+    expect(wireStatusEnum.options).toContain('refused');
+    expect(wireStatusEnum.options).toContain('failed');
+  });
+
+  it('a refused terminal envelope parses and is PRESERVED on the wire — status, success and the rendered message', () => {
+    // Same #13078 lesson as the stranded case above: strip-mode would drop
+    // `refusalMessage` silently, and a runner would then have nothing to
+    // show — so the value must come back out, not merely parse.
+    const parsed = TriggerFlowResponseSchema.parse({
+      success: true,
+      data: {
+        success: true,
+        status: 'refused',
+        refusalMessage: 'Refused: Acme Corp is a confirmed duplicate of Acme Corporation',
+        durationMs: 12,
+      },
+    });
+    expect(parsed.data.status).toBe('refused');
+    expect(parsed.data.success).toBe(true);
+    expect(parsed.data.refusalMessage).toBe('Refused: Acme Corp is a confirmed duplicate of Acme Corporation');
+    expect(parsed.data.successMessage).toBeUndefined();
+  });
+
+  it('refuses a status outside the five, at `data.status`, as an enum violation', () => {
     const result = TriggerFlowResponseSchema.safeParse({
       success: true,
       data: { success: false, status: 'strand' },
@@ -122,7 +154,7 @@ describe('[#14384] AutomationResult.status names the stranded run', () => {
 
   it('the contract JSDoc names the condition beside the literal', () => {
     const source = readFileSync(fileURLToPath(new URL('./automation-service.ts', import.meta.url)), 'utf8');
-    const declaration = "status?: 'completed' | 'paused' | 'failed' | 'stranded';";
+    const declaration = "status?: 'completed' | 'paused' | 'failed' | 'stranded' | 'refused';";
     const at = source.indexOf(declaration);
     expect(at).toBeGreaterThan(-1);
     // The doc block immediately above the declaration — from its last `/**`.
@@ -136,5 +168,14 @@ describe('[#14384] AutomationResult.status names the stranded run', () => {
     expect(doc).toMatch(/explicit operator verb/i);
     // And the ruling's boundary: the plugin-local label is not promoted.
     expect(doc).toContain('StrandedRunState');
+    // [#14945] The refused run, in the ruling's terms: a successful
+    // evaluation that said no, distinct from failed, never resumed, rendered
+    // with Close only.
+    expect(doc).toContain("`'refused'`");
+    expect(doc).toMatch(/successful evaluation that said no/i);
+    expect(doc).toMatch(/DISTINCT from `'failed'`/);
+    expect(doc).toMatch(/never resumed/i);
+    expect(doc).toMatch(/Close only/);
+    expect(doc).toContain('refusalMessage');
   });
 });
