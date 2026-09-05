@@ -81,7 +81,7 @@ export type StartupOptionsParsed = z.infer<typeof StartupOptionsSchema>;
  * @example
  * {
  *   "healthy": true,
- *   "timestamp": 1706659200000,
+ *   "checkedAt": 1706659200000,
  *   "details": {
  *     "databaseConnected": true,
  *     "memoryUsage": 45.2
@@ -137,7 +137,7 @@ export type HealthStatus = z.input<typeof HealthStatusSchema>;
  *   "duration": 1250,
  *   "health": {
  *     "healthy": true,
- *     "timestamp": 1706659200000
+ *     "checkedAt": 1706659200000
  *   }
  * }
  */
