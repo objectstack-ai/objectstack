@@ -14,6 +14,7 @@ import { CoreServiceName, serviceUnavailableMessage, inProcessServiceMessage } f
 import type { IDataEngine, IObjectQLEngine } from '@objectstack/spec/contracts';
 import type { PrimaryDatasourceVerdict } from '@objectstack/objectql';
 import { readServiceSelfInfo, readChannelRoute, isSubscribableChannel, DispatcherErrorCode, resolveDiscoveryEnvironment } from '@objectstack/spec/api';
+import type { ServiceInfo } from '@objectstack/spec/api';
 import { apiErrorResponse } from './error-envelope.js';
 import { resolveRuntimeVersion } from './runtime-version.js';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
@@ -1612,7 +1613,12 @@ export class HttpDispatcher {
         // this document said `enabled: true` beside "no HTTP/WS realtime
         // surface is mounted", both true, and a console client keying on
         // `enabled` subscribed to nothing and silently lost its bell.
-        const realtimeEntry = realtimeSvc
+        // Annotated `ServiceInfo` rather than left to inference: the two arms
+        // below are structurally different objects (only one carries `route`),
+        // and an inferred union of them is not the declared wire shape — a
+        // consumer reading `services.realtime.route` off this document would be
+        // told the key does not exist.
+        const realtimeEntry: ServiceInfo = realtimeSvc
             ? (() => {
                 const handlerReady = realtimeChannelRoute !== undefined;
                 return {
