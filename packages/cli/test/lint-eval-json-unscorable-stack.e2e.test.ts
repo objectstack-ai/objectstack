@@ -39,6 +39,12 @@
  * directly, against the specific benign shape a swallow would produce
  * (`scoreMetadata({})` is 100 / A / `valid: true`).
  *
+ * That benign shape was not hypothetical on the OTHER failure path: a
+ * generator that THREW had the empty stack substituted for it and scored, so
+ * `meanScore` read 100 on a run where nothing was generated. Both paths now
+ * answer 0 / F / `valid: false`, and `every generation threw ⇒ meanScore 0`
+ * pins it on the same published `--json` face.
+ *
  * ## Why the negative controls are here
  *
  * The reachable class is narrow, and that narrowness is a MEASUREMENT: every
@@ -215,6 +221,41 @@ describe('os lint --eval --json — the negative controls still answer the same'
 
     expect(run.code).toBe(1);
     expect(payload.results[0].generationError).toBe('model unavailable');
+  }, 120_000);
+
+  /**
+   * ⭐ The machine face of the defect this file's sibling card names, driven
+   * here rather than reasoned about. Measured on this entry BEFORE the repair,
+   * with a generator that throws for every prompt:
+   *
+   *     exit 1 · ok: false · passed: 0 · failed: 5 · meanScore: 100
+   *     every case: score 100 · grade A · valid true · generationError set
+   *
+   * ⇒ the published `--json` payload's headline number read PERFECT exactly
+   * when the model under test produced nothing. The throwing path substituted
+   * an empty stack and scored it, and the empty stack is 100 / A / `valid`.
+   *
+   * ⛔ `passed` was never part of it and is asserted here unchanged — the
+   * report always said `ok: false`, which is what made the 100 survivable
+   * enough to sit on `main`.
+   */
+  it('⭐ every generation threw ⇒ meanScore 0 on the --json face, never 100', async () => {
+    const run = await runEval(
+      generator('throws-all', `export default function () { throw new Error('model unavailable'); }\n`),
+    );
+    const payload = payloadOf(run, 'throwing generator — mean');
+
+    expect(run.code).toBe(1);
+    expect(payload.meanScore).toBe(0);
+    expect(payload.results.every((r) => r.score.score === 0)).toBe(true);
+    expect(payload.results.every((r) => r.score.grade === 'F')).toBe(true);
+    expect(payload.results.every((r) => r.score.valid === false)).toBe(true);
+
+    // The half that was already correct, pinned so a repair to it goes red.
+    expect(payload.ok).toBe(false);
+    expect(payload.passed).toBe(0);
+    expect(payload.failed).toBe(payload.total);
+    expect(payload.results.every((r) => r.passed === false)).toBe(true);
   }, 120_000);
 
   it.each([

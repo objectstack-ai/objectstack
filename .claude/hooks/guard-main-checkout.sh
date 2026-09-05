@@ -15,6 +15,12 @@
 #      edited from this session are guarded too.
 #   3. Resolves the file's nearest EXISTING ancestor dir, so creating a new file in a
 #      new directory can't fail-open past the guard.
+#   4. Reads the path from the key the ROUTED TOOL actually carries — a per-tool table,
+#      not one hard-coded key — and blocks rather than guessing when a routed tool's
+#      payload does not carry it. A guard that learns nothing from the payload and falls
+#      back to judging the session's directory returns a verdict that is constant per
+#      session and wrong in BOTH directions, decided by where the session happens to be
+#      rooted rather than by anything about the edit.
 #
 # Deliberate exception (a human quick-fix that still lands via PR): OS_ALLOW_MAIN_EDITS=1.
 
@@ -23,12 +29,63 @@ set -uo pipefail
 [ "${OS_ALLOW_MAIN_EDITS:-}" = "1" ] && exit 0
 
 input="$(cat 2>/dev/null || true)"
+
+# WHICH tools reach this guard is the matcher's job, in .claude/settings.json; which KEY
+# each of them carries its path in is this table's. The two are one pair, and the pairing
+# is checked rather than assumed: a tool routed here with no row below would be read for a
+# key its payload never carries, so the guard would learn nothing and judge the session
+# instead of the file. The self-test's wiring section reads the line below and reds when
+# the matcher routes a tool that has no row in it. Add the tool AND its row together.
+known_path_keys='Edit=file_path Write=file_path MultiEdit=file_path NotebookEdit=notebook_path'
+
+have_jq=0; command -v jq >/dev/null 2>&1 && have_jq=1
+
+scan() { # scan <key-alternation> -> first "key": "value" a plain text scan finds, no jq.
+  # JSON escapes the quotes of any key name quoted inside a string value, so a payload that
+  # merely TALKS about one of these keys cannot outrank the real one.
+  printf '%s' "$input" | grep -oE "\"($1)\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" | head -1 |
+    sed 's/^.*"\([^"]*\)"$/\1/' || true
+}
+
+tool=""
+[ "$have_jq" = 1 ] && tool="$(printf '%s' "$input" | jq -r '.tool_name // empty' 2>/dev/null || true)"
+[ -n "$tool" ] || tool="$(scan 'tool_name')"
+
+key=""
+for row in $known_path_keys; do
+  case "$row" in "$tool="*) key="${row#*=}" ;; esac
+done
+
 file=""
-if command -v jq >/dev/null 2>&1; then
-  file="$(printf '%s' "$input" | jq -r '.tool_input.file_path // empty' 2>/dev/null || true)"
+if [ -n "$key" ]; then
+  # A tool the table names: read exactly the key that tool is contracted to carry.
+  [ "$have_jq" = 1 ] && file="$(printf '%s' "$input" | jq -r --arg k "$key" '.tool_input[$k] // empty' 2>/dev/null || true)"
+  [ -n "$file" ] || file="$(scan "$key")"
+else
+  # A tool the table does not name is not routed here by the matcher. Judge it by whichever
+  # known key it happens to carry, and fall back to the project dir when it carries none.
+  [ "$have_jq" = 1 ] && file="$(printf '%s' "$input" | jq -r '.tool_input.file_path // .tool_input.notebook_path // empty' 2>/dev/null || true)"
+  [ -n "$file" ] || file="$(scan 'file_path|notebook_path')"
 fi
-if [ -z "$file" ]; then
-  file="$(printf '%s' "$input" | grep -o '"file_path"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/^.*"\([^"]*\)"$/\1/' || true)"
+
+# A ROUTED tool that carries no path under its own key is schema drift, not a missing path:
+# the contract this guard was written against has moved. Report it instead of guessing.
+if [ -n "$key" ] && [ -z "$file" ]; then
+  cat >&2 <<EOF
+⛔ Blocked: a $tool payload carrying no "$key" — this guard cannot tell which file is being written.
+
+$tool is routed to this guard by .claude/settings.json, and this guard reads that tool's
+path from .tool_input.$key. An absent value means the tool's input schema has moved under
+the guard. Falling back to the session's directory would make the verdict a constant per
+session — right or wrong purely by where the session is rooted, not by the edit — so this
+blocks instead.
+
+Fix the row for $tool in this hook's known_path_keys table, then re-run
+.claude/hooks/guard-main-checkout.selftest.sh.
+
+Deliberate non-task exception: re-run with OS_ALLOW_MAIN_EDITS=1.
+EOF
+  exit 2
 fi
 
 # Judge the checkout at the file's nearest existing ancestor dir (handles new files in
