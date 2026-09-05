@@ -146,16 +146,6 @@ export const CENSUS_15765 = {
  */
 export const HELD_FILE_ALLOWANCES = Object.freeze([
   Object.freeze({
-    file: 'scripts/check-react-page-adapter-contract.mjs',
-    dated: '2026-09-05',
-    heldBy: 'PR #15770 (#15599)',
-    why: 'The citation is the WORKED EXAMPLE of the rot this whole gate exists for, and its own '
-      + 'paragraph declares every number in it a DATED ROT RECORD that must not be repaired. '
-      + 'The file is also held by a live PR of this lane, so it is not this card\'s to edit. '
-      + 'Both halves are resolved by the same follow-up: that paragraph names the file and the '
-      + 'numbers as data rather than in anchor form, on the PR that lands after #15770.',
-  }),
-  Object.freeze({
     file: 'scripts/check-adr-0087-registration.mjs',
     dated: '2026-09-05',
     heldBy: 'PR #15724 (#15627)',
@@ -250,8 +240,14 @@ function assert(cond, msg) { if (!cond) { console.error(`❌ check-scripts-symbo
 // The count is a FLOOR, not an equality — adding cases is ordinary work and must
 // not red. A battery BELOW its floor means cases stopped running; the remedy is
 // to find what stopped registering.
+// ⛔ Four of these cases are registered PER `HELD_FILE_ALLOWANCES` row (the
+// exactness loop below runs four `check()`s over each row), so retiring a row
+// legitimately lowers this floor by 4 — and that is the ONLY reason it may be
+// lowered. 34 → 30 when the `scripts/check-react-page-adapter-contract.mjs`
+// row was retired (#15765). Any other drop is cases that STOPPED RUNNING; find what
+// stopped registering instead of moving the number.
 const SELF_TEST_BATTERIES = Object.freeze({
-  'check-scripts-symbol-anchors self-test': 34,
+  'check-scripts-symbol-anchors self-test': 30,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
