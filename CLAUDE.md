@@ -7,10 +7,10 @@ inlined below as one sentence, its enforcing hook, and a pointer to the AGENTS.m
 ## ⛔ Claim the issue before you write any code
 
 Every agent shares one GitHub identity: the assignee field is a presence bit, the `Claim:`
-comment (session ID + branch) is the identity. The session that owns a card writes both — a
-seat picking for itself takes only an unassigned card, assigns itself and posts the claim
-before any other action; a PM dispatch sets the assignee (step 1, done) and claims for its dev,
-who still posts its own `Claim:` after checking the newest one names its branch, and ⛔ never
+comment (session ID + branch) is the identity. The session that owns a card performs both acts
+— a seat picking for itself takes only an unassigned card, assigns itself and posts the claim
+before any other action; a PM dispatch sets the assignee and posts the `Claim:` for its dev, who
+inherits both, checks the newest `Claim:` names its branch, posts no second claim, and ⛔ never
 writes the assignee or yields the card. The comments decide, not the field: a `Claim:` from
 another session or branch means taken — ⛔ never reassign; a bare assignee with no `Claim:` is
 a dispatch's first step, not a foreign claim. No hook enforces this one. Full rule: AGENTS.md →

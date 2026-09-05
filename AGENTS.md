@@ -393,19 +393,19 @@ tools that answer their own question.
 **Claim the issue BEFORE you write any code.** Every agent here shares one GitHub identity, so
 the assignee field is only a presence bit; the identity record is the `Claim:` comment — first
 line beginning `Claim:`, then the session ID and the branch (`claude/issue-<n>-<slug>`). Ownership
-is written by role. The session that OWNS a card writes both: a seat picking a card for itself
-takes only an unassigned card, assigns itself and posts the claim before any other action; a PM
-dispatch sets the assignee and posts the claim on the dev's behalf. A dispatched executor
-inherits that assignee — the dispatch's step 1, already done — and still performs the second act
-itself: it checks that the newest `Claim:` names its branch (on a mismatch it stops and reports),
-then posts its own `Claim:` with its session ID and branch; it ⛔ never writes the assignee and
-⛔ never yields a card it was dispatched to. Before writing code, re-read the comments — the
-comments decide, not the field: a `Claim:` from another session or branch (other than the
-dispatch that sent you) means taken whatever the field says — pick another or ask, ⛔ never
-reassign; a bare assignee with no `Claim:` under it is a dispatch's step 1, not a foreign claim
-— not taken for the executor it was dispatched to, and not free for a seat picking for itself.
-Release is an explicit act: whoever moves a card out of ownership clears the assignee and posts
-a `Release:` line. Findings are filed unassigned; assign at the moment you start. The
+is written by role. The session that OWNS a card performs both acts: a seat picking a card for
+itself takes only an unassigned card, assigns itself and posts the claim before any other action;
+a PM dispatch sets the assignee (step 1) and posts the `Claim:` naming the dev's branch (step 2),
+both on the dev's behalf. A dispatched executor inherits both records: it verifies that the
+newest `Claim:` names its branch (on a mismatch it stops and reports), posts no second claim —
+the dispatch's `Claim:` is its identity and its own record is the report comment — and it ⛔ never
+writes the assignee and ⛔ never yields a card it was dispatched to. Before writing code, re-read
+the comments — the comments decide, not the field: a `Claim:` from another session or branch
+(other than the dispatch that sent you) means taken whatever the field says — pick another or
+ask, ⛔ never reassign; a bare assignee with no `Claim:` under it is a dispatch's step 1, not a
+foreign claim — not taken for the executor it was dispatched to, and not free for a seat picking
+for itself. Release is an explicit act: whoever moves a card out of ownership clears the assignee
+and posts a `Release:` line. Findings are filed unassigned; assign at the moment you start. The
 maintainer's own work under the shared account carries no claim comment and is indistinguishable
 from a dispatch — an accepted blind spot; per-seat identities are not introduced.
 
