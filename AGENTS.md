@@ -7,33 +7,26 @@ in this repo (including `.claude/skills/**`) conflicts with this one, **AGENTS.m
 
 > **v5.0 breaking rename: `project` → `environment`** everywhere (CLI `-e`, `/api/v1/environments/:id`, header `X-Environment-Id`, `OS_ENVIRONMENT_ID`, DB column `environment_id` [control-plane tables; on the metadata tables since deprecated in favour of `organization_id`, ADR-0006 v4]). No aliases. See ADR-0006. "Project" now only means the npm/monorepo sense.
 
-This file carries principles, binding rules and lookup tables. Lessons from past
-incidents are distilled in place — failure mode, discipline, boundary — without
-issue-number citations (maintainer ruling, 2026-08-12: 「处理 issue 时犯的错应该总结成
-经验,保留 issue id没有意义」); maintainer rulings keep their date and verbatim quote.
-Where a hook or CI gate enforces a rule mechanically, the rule is stated once here and
-the script's own header is the authority on detail.
+This file carries principles, binding rules and lookup tables — rules only. A rule states
+what to do and what never to do, in one executable sentence; it carries no incident
+narrative, no ruling date or quotation, and no issue-number citation
+(`pnpm check:pm-skill-id-lint`) — a rule's provenance lives in the PR that landed it. Where
+a hook or CI gate enforces a rule mechanically, the rule is stated once here and the
+script's own header is the authority on detail.
 
 ---
 
 ## Communication
 
 语言规则分两件事:**和维护者说话用什么语言**,与**留在 GitHub 上的产物用什么语言**。
-它们可分,并且就在这里分开。
+一条规则一个通道,互不重叠。
 
 - **在 Claude Code 中与维护者对话一律使用中文**(对话回复、轮次报告等聊天通道里的内容)。
-- **GitHub 产物一律使用英文**:issue 与 PR 的标题、正文、评论。维护者裁决
-  (2026-08-08),原文引用、未翻译:
-
-  > issue 和 PR 必须用英文，在 claude code 中和我讨论可以用中文。
-
+- **GitHub 产物一律使用英文**:issue 与 PR 的标题、正文、评论。
 - **引用中文裁决时保持原文、不翻译**,即使承载它的 issue/PR 正文通篇是英文——改写引文
-  就是改写裁决。上面那段引用即是一例:它是维护者的原话,一个字未动。
+  就是改写裁决。
 - 代码、标识符、提交信息(commit messages)、ADR/文档正文等仓库产物保持现有语言惯例(以英文
   为主),不要因本节而改写。
-
-The rules are split per channel because a merged rule was measured to fail (it produced
-half-Chinese, half-English PR bodies in one day). One rule per channel, no overlap.
 
 ---
 
@@ -48,19 +41,15 @@ pnpm typecheck        # turbo typecheck — per-package `tsc --noEmit`; tsup/vit
 pnpm docs:dev         # docs site
 ```
 
-**No formatter of record — `pnpm lint` is the only style authority** (eslint, `eslint.config.mjs`). Prettier is
-deliberately absent: no `.prettierrc*`, no `format` script, nothing invokes or installs it. ⛔ Never
-`prettier --write` a file you touch — its double-quote default against this single-quoted codebase rewrites **every
-string literal**, burying a one-line fix in a whole-file reformat. Its `--check` verdict is no second opinion on your
-edit either: it warns on pristine `main` content for that same default, while the SAME bytes at an out-of-repo path
-(a `/tmp` copy) come back `All matched files use Prettier code style!` — a pass over ZERO files (`--file-info` there
-says `"ignored": true`, and deliberately mangled bytes green identically). `npx prettier --find-config-path AGENTS.md`
-answers `[error] Can not find configure file` at both paths — the honest one (measured 2026-09-01, prettier 3.8.1).
+**No formatter of record — `pnpm lint` is the only style authority** (eslint, `eslint.config.mjs`).
+Prettier is deliberately absent: no `.prettierrc*`, no `format` script, nothing invokes or installs
+it. ⛔ Never `prettier --write` a file you touch — its double-quote default against this
+single-quoted codebase rewrites every string literal. Its `--check` verdict is no second opinion on
+your edit either: it warns on pristine `main` content, and passes over zero files at an
+out-of-repo path.
 
 **⛔ Push a WIP commit before every step that takes minutes** — a build, a full test run, a
-gate sweep, an ablation. Not because you are about to wait: because you are about to stop
-being the only copy. The cost rises with how well you are working — a hard card defers
-committing *because it is not done yet*, and the one killed mid-measurement lost 2,081 lines.
+gate sweep, an ablation — because the working tree is otherwise the only copy of your work.
 
 Type-check coverage and its debt counts are ratcheted in CI
 (`pnpm check:type-check-coverage`, `pnpm check:type-check-debt`; the script headers are
@@ -70,14 +59,14 @@ that graduates deletes its entry in the same PR; when a re-measure forces a coun
 rewrite the entry's `note` too — a note naming only the old errors reads as "nearly
 graduated" to the next author.
 
-Three principles the ratchet's invariants encode, worth knowing before you fight them:
+Three principles the ratchet's invariants encode:
 
 - **A package's `tsconfig.json` reaches every `*.test.ts` / `*.spec.ts` in it** —
   `tsc --noEmit` reads that config, so a test it misses is hidden from the very check
-  the `typecheck` script advertises (a green gate over source nothing read).
-  `check:type-check-coverage` fails both spellings per file: an `exclude` naming it, an
-  `include` that never does. A sibling `tsconfig.test.json` named in the `typecheck`
-  script may carry its own *module* semantics for vitest, never its own *strictness*.
+  the `typecheck` script advertises. `check:type-check-coverage` fails both spellings
+  per file: an `exclude` naming it, an `include` that never does. A sibling
+  `tsconfig.test.json` named in the `typecheck` script may carry its own *module*
+  semantics for vitest, never its own *strictness*.
 - **A `@ts-expect-error` in a file no tsc program compiles is a phantom check** — it
   evaluates never, and deleting it leaves every gate just as green. Before writing
   one, check the file is compiled. Test-layer residue lives in the per-file,
@@ -93,15 +82,11 @@ Three principles the ratchet's invariants encode, worth knowing before you fight
 ### A test that reads outside its own package must be spelled so the gate can see it
 
 `pnpm check:cross-package-test-inputs` keeps CI's idea of a test's inputs equal to its
-real inputs. A test whose reads escape its package is invisible to **both**
+real inputs: a test whose reads escape its package is invisible to both
 `turbo ls --affected` and the `test` task's input hashing, so a pin written to catch
-cross-package drift sits green through exactly the drift it exists to catch — on `main`,
-with every PR reporting green. The gate finds those tests by **scanning source text**,
-deliberately: a detector with no dependencies cannot itself fail to resolve in CI.
-
-The price of a source scan is that it sees only the spellings it knows, and an
-unrecognised one produces no flag — which means no declaration, **silently**. So the
-recognised list is published rather than left inside the implementation. Seed from
+cross-package drift sits green through exactly the drift it exists to catch. The gate
+finds those tests by scanning source text, so it sees only the spellings it knows, and an
+unrecognised one produces no flag — no declaration, silently. Seed from
 `import.meta.url`, `__dirname` or a `findUp` walk, and write the escaping path as one of:
 
 ```ts
@@ -124,19 +109,15 @@ const REPO = findUp((dir) => existsSync(join(dir, 'pnpm-workspace.yaml')));
      be located from here, so the escape is flagged and the path is NOT named
 ```
 
-The gate prints this list in its failure text, where the notes that go with the spellings
-live too, and `check-published-list-mirrors` holds the block above equal to it. That gate
-can only ever go RED — this file is governed, so nothing repairs it for you. Reaching for
-a spelling that is not here? **Extend the detector, add a `--self-test` case, and correct
-the block in the same edit** — never route around it. An unseen read is the defect above,
-and a newly recognised shape with no pin is the next silent regression.
+The gate prints this list in its failure text, and `check-published-list-mirrors` holds
+the block above equal to it; this file is governed, so that gate can only ever go red.
+Need a spelling that is not here? **Extend the detector, add a `--self-test` case, and
+correct the block in the same edit** — ⛔ never route around it.
 
 Two things it deliberately does not flag: a path that climbs out and lands in
-`node_modules` (an installed dependency is not a repo source input, and no turbo glob can
-name it), and a path that climbs out and comes straight back in. What it *does* flag is
-judged on the **shallowest** point a path reaches, not where it ends — a literal that
-climbs past the package root and then descends into a sibling ends at a positive depth
-while addressing another package entirely.
+`node_modules` (an installed dependency is not a repo source input), and a path that
+climbs out and comes straight back in. What it does flag is judged on the **shallowest**
+point a path reaches, not where it ends.
 
 Clocked windows measure behaviour, never loading — a test that boots a real plugin chain
 pays its first load at module top; `pnpm check:test-source-alias` gates it.
@@ -152,12 +133,11 @@ pays its first load at module top; `pnpm check:test-source-alias` gates it.
 `admin@objectos.ai` / `admin123`, override via `--admin-email`/`--admin-password`). The seeded admin is auto-promoted to
 **platform admin** (the system seed identity `usr_system` is skipped), so Setup/Studio are reachable on first login.
 
-Rules: never run two backends on port 3000; for backend tasks pick a random port and tear it down; **never kill a server
-you didn't start** (other agents/the user may be using it — see Multi-agent discipline §8); always use a
-`pnpm dev`/`dev:crm`/`dev:showcase` script, not raw `pnpm --filter` — but note what pnpm actually does with `--`: it
-forwards the **separator itself** into the child's argv, so this spelling only works where the receiving CLI tolerates a
-leading `--`. ⛔ Do not carry it over to test commands — vitest silently discards everything after a bare `--`
-(measured; see `.claude/agents/os-dev.md` → Toolchain traps).
+Rules: never run two backends on port 3000; for backend tasks pick a random port and tear it down; **never kill a
+server you didn't start** (see Multi-agent discipline §8); always use a `pnpm dev`/`dev:crm`/`dev:showcase` script,
+not raw `pnpm --filter`. pnpm forwards the `--` separator itself into the child's argv, so this spelling only works
+where the receiving CLI tolerates a leading `--`. ⛔ Do not carry it over to test commands — vitest silently
+discards everything after a bare `--` (`.claude/agents/os-dev.md` → Toolchain traps).
 
 ```bash
 pnpm dev:crm -- --fresh -p 38421   # start; debug via curl
@@ -170,7 +150,7 @@ This repo ships **backend only**. All Studio/Console UI work happens in `../obje
 to `framework/`). Workflow: edit + commit + push in `../objectui`, then in `framework/` run `pnpm objectui:refresh` to
 pull its build into `packages/console/`.
 
-Other scripts: `objectui:bump` (pull only), `objectui:build`, `objectui:clean`. ⚠️ Never hand-edit
+Other scripts: `objectui:bump` (pull only), `objectui:build`, `objectui:clean`. ⛔ Never hand-edit
 `packages/console/dist/` or `.cache/objectui-*/` — regenerated.
 
 **Moving the pin has a second half: `pnpm sdui:manifest`.** ADR-0082 D4's spec↔registry declaration-parity ratchet
@@ -187,7 +167,6 @@ your `../objectui` src — only `:5180` reflects local UI edits. See `../objectu
 localStorage / auth gotchas.
 
 ---
-
 ## Prime Directives
 
 1. **Zod First.** All schemas start as Zod. Types via `z.infer<typeof X>`. JSON Schemas generated from Zod.
@@ -231,153 +210,106 @@ localStorage / auth gotchas.
    `*_CLIENT_ID/SECRET`, `RESEND_API_KEY`, `POSTMARK_TOKEN`, `AI_GATEWAY_*`, `SMTP_*`.
 10. **File issues for out-of-scope findings — don't silently expand scope or leave them buried.** When you hit a bug,
     gap, or unenforced capability that's unrelated to the current task, or too large to fix in scope, open a GitHub
-    issue (`gh issue create`) with a clear repro/decision and link it from your PR. Corollary: **never advertise or demo
-    a capability the runtime doesn't actually deliver** (declared ≠ enforced) — fix it, trim it, or file an issue,
-    but don't fake coverage. The recurring shape: a spec declaring more rule types than the write-path validator
-    enforced was closed by **trimming** what could never be enforced and **implementing** the rest — and even then the
-    claim had to stay narrow, because the evaluator was wired into insert and single-id update while bulk update
-    silently skipped every rule: the same declared-≠-enforced gap one layer down, at the **call site** rather than the
-    `switch`. A `case` label is not enforcement; check the **call site**.
+    issue with a clear repro/decision and link it from your PR. Corollary: **never advertise or demo a capability the
+    runtime doesn't actually deliver** (declared ≠ enforced) — fix it, trim it, or file an issue, but don't fake
+    coverage. Trim what can never be enforced, implement the rest, and keep the claim as narrow as the enforcement:
+    a `case` label is not enforcement; check every **call site**, bulk paths included.
 11. **Worktree-first — never edit on the shared `main` checkout.** This repo is edited by **multiple agents at once**;
     the shared tree has its HEAD switched and reset *under you*, silently clobbering uncommitted work — a feature
-    branch on the *shared* checkout is **not** enough (it still gets switched under you). Before your **first file
-    edit**, be in a dedicated worktree on a feature branch: `git fetch origin main && git worktree add --no-track
-    ../objectstack-<task> -b <branch> origin/main && cd ../objectstack-<task> && pnpm install`. Two
-    PreToolUse hooks **enforce** this — `.claude/hooks/guard-main-checkout.sh` blocks `Edit`/`Write`/`NotebookEdit`,
-    and `.claude/hooks/guard-main-checkout-bash.sh` blocks the identical write arriving through **Bash** (`>`/`>>`
+    branch on the *shared* checkout is **not** enough. Before your **first file edit**, be in a dedicated worktree on
+    a feature branch: `git fetch origin main && git worktree add --no-track ../objectstack-<task> -b <branch>
+    origin/main && cd ../objectstack-<task> && pnpm install`. Two PreToolUse hooks **enforce** this —
+    `.claude/hooks/guard-main-checkout.sh` blocks `Edit`/`Write`/`NotebookEdit`, and
+    `.claude/hooks/guard-main-checkout-bash.sh` blocks the identical write arriving through **Bash** (`>`/`>>`
     redirection, `sed -i`, `perl -i`, `tee`, `cp`, `mv`, `rm`, `touch`) — and both check the **target file's own
     repo**, so sibling repos (`objectui`/`cloud`) you touch are covered too (deliberate non-task override:
     `OS_ALLOW_MAIN_EDITS=1`, one switch for both). The Bash guard is precision-first: it never blocks reads, and any
     shape it cannot resolve with confidence (`bash -c …`, `xargs`, `node -e`, a `$VAR`/glob target) is allowed through
     — the rule still outranks the hook. **A worktree isolates neither the stash nor the build cache** — the
     third hook (`guard-shared-stash.sh`, `OS_ALLOW_STASH=1`) and the replacements live in Multi-agent discipline below.
-12. **Contract-first — fix the metadata, not the runtime.** This is a metadata-driven framework: `packages/spec` is
-    the one contract between metadata *producers* and the runtime/renderers that *consume* it. When a piece of metadata
-    "doesn't work," ask **first**: *is it spec-compliant? is this the long-term-correct direction?* If the metadata is
-    wrong, fix it at the **producer** and **reject it at authoring/publish** (validation / lint) so the error surfaces
-    loudly — do **not** add a lenient alias or `??` fallback in a consumer (a node executor, the REST layer, a
-    renderer) to tolerate off-spec input. A tolerant fallback fossilizes the wrong convention into a second de-facto
-    contract, dilutes the spec, and hides the producer's bug — one strict contract beats N dialects. This is an
-    **internal** contract (we own both ends), so "be liberal in what you accept" (Postel) does **not** apply — that's
-    for untrusted boundaries. Change the **spec** only when the spec itself is genuinely wrong, and then deliberately
-    (edit the Zod schema + migrate), never by accreting consumer-side fallbacks. When an alias must be tolerated at all,
-    declare it as an **ADR-0087 conversion-layer entry** (never a bare `??`, and no executor shims) so it is declared,
-    loud, tested, and *removable on a schedule* — the `cfg.filter ?? cfg.filters`-style fallbacks the flow executors
-    once carried were all paid down exactly that way, emptying and deleting the executor shim that read them. Stored
-    `sys_metadata` rows (data at rest) are covered from the other side: every rehydration seam replays the **full**
-    conversion chain — retired entries included — via `applyConversionsToStoredItem` (ADR-0087 addendum), so a
-    consumer never needs its own accommodation for a legacy stored shape either. *Worked example:* an AI-authored flow
-    node used wrong key names and template syntax for what the executor reads → the fix was correcting the authoring
-    skill + a publish-gate lint that rejects the wrong shape, **not** a runtime alias in the executor (that alias was
-    proposed and rejected). Strengthens #5.
+12. **Contract-first — fix the metadata, not the runtime.** `packages/spec` is the one contract between metadata
+    *producers* and the runtime/renderers that *consume* it. When a piece of metadata "doesn't work," ask **first**:
+    *is it spec-compliant? is this the long-term-correct direction?* If the metadata is wrong, fix it at the
+    **producer** and **reject it at authoring/publish** (validation / lint) so the error surfaces loudly — ⛔ never
+    add a lenient alias or `??` fallback in a consumer (a node executor, the REST layer, a renderer) to tolerate
+    off-spec input: one strict contract beats N dialects, and this is an **internal** contract (we own both ends), so
+    "be liberal in what you accept" does **not** apply. Change the **spec** only when the spec itself is genuinely
+    wrong, and then deliberately (edit the Zod schema + migrate). When an alias must be tolerated at all, declare it
+    as an **ADR-0087 conversion-layer entry** (never a bare `??`, no executor shims) so it is declared, loud, tested,
+    and *removable on a schedule*. Stored `sys_metadata` rows are covered from the other side: every rehydration seam
+    replays the **full** conversion chain — retired entries included — via `applyConversionsToStoredItem` (ADR-0087
+    addendum), so a consumer never needs its own accommodation for a legacy stored shape either. Strengthens #5.
 13. **An accepted ADR binds until a superseding ADR says otherwise.** Reversing a recorded decision is itself a
     decision: it needs a **new ADR** (or an amended status line on the old one), not a changeset that quietly does the
     opposite. Before changing behaviour in `docs/adr/`-governed territory, **grep the ADRs for the surface you are
-    touching** — the decision is often older and broader than the code comment in front of you. A reversal of three
-    accepted ADRs once landed as a patch-level changeset and held for a day; the mechanism was not carelessness —
-    **the file being edited never named the ADRs that governed it**, so the author could not have known. Hence the
-    corollary: when you implement an ADR's decision, **leave its id in the code**, and anchor load-bearing spots in
-    `scripts/adr-anchors/` (`pnpm check:adr-anchors`) — **one new JSON file per anchor, named for the path it anchors;
-    there is no index to register it in** — so the next author is told which decision they are standing on. A decision
-    nobody can find is a decision that will be reversed.
+    touching** — the file you are editing may not name the decisions that govern it. Corollary: when you implement an
+    ADR's decision, **leave its id in the code**, and anchor load-bearing spots in `scripts/adr-anchors/`
+    (`pnpm check:adr-anchors`) — **one new JSON file per anchor, named for the path it anchors; there is no index to
+    register it in**. A decision nobody can find is a decision that will be reversed.
+    **An ADR lives in the repository whose code it governs.** Decisions that draw the open/closed or commercial
+    boundary live in `objectstack-ai/cloud` and are cited from this repo as `cloud ADR-NNNN` — ⛔ never as a bare
+    number, which `scripts/check-adr-anchors.mjs` resolves against *this* registry (the two number independently).
+    When a cloud decision's **mechanism half** governs open code here, this repo carries its own ADR — own number, a
+    `## Provenance` section naming the cloud record and its date, the commercial half left in cloud — and the cloud
+    record gains a one-line pointer. Files never move between registries and numbers are never reassigned.
 14. **⛔ A governed surface is confirmed and merged by the maintainer, by hand — no AI seat merges, queues, or arms
-    auto-merge on a PR whose diff touches one.** Three maintainer rulings, verbatim and untranslated — each widens the
-    one before it, and the third *is* the current definition of the surface:
-
-    > **adr 只能由维护者自己确认,人工合并,ai 不得擅自合并。** (2026-08-08)
-
-    > **所有 skills 的更新和 adr 类似,需要人工审核** (2026-08-11)
-
-    > **`docs/adr/**` + `.claude/**`(含 agents/hooks/settings,不只 skills)+ `skills/**` + `AGENTS.md` + `CLAUDE.md`。混合 diff 照现行规则一条命中即整 PR 分叉** (2026-08-18)
-
-    **Which surfaces — and where that list actually lives.** The 2026-08-18 quotation above *is* the definition, and
-    it is wider than ADRs and wider than skills: the two repo-root instruction files are on it, so **the file you are
-    reading is itself a governed surface**, and so is `.claude/` entire — agents, hooks and settings, not only
-    `.claude/skills/`. ⚠️ Even so, treat that quotation as a reading aid rather than the register: the set has grown
-    three times in two days. The register is the `GOVERNED_SURFACES` table in `scripts/pm/check-governed-merges.mjs`,
-    and adding a surface is an edit *there*, never here. This directive no longer drifts from it in silence:
-    `pnpm check:pm-governed-prose` reds per-PR when the surfaces named here are fewer than the register's — or more,
-    the direction that manufactures enforcement nobody has. ⚠️ When it reds, name the surface **in this paragraph**;
-    ⛔ never edit the quotation above to satisfy a gate — a verbatim ruling rewritten is a ruling rewritten. Print
-    today's set rather than trusting this paragraph:
+    auto-merge on a PR whose diff touches one.** The governed surfaces are `docs/adr/**`, `.claude/**` (agents, hooks
+    and settings — not only skills), `skills/**`, `AGENTS.md` and `CLAUDE.md` — the file you are reading is one
+    — and a mixed diff is governed whole on a single path hit. The register is the `GOVERNED_SURFACES` table in
+    `scripts/pm/check-governed-merges.mjs`; adding a surface is an edit *there*, never here, and `pnpm
+    check:pm-governed-prose` reds per-PR when this paragraph names fewer surfaces than the register — or more. When
+    it reds, name the surface **in this paragraph**. Print today's set rather than trusting this paragraph:
     `node -e "import('./scripts/pm/check-governed-merges.mjs').then(m=>console.log(m.GOVERNED_SURFACES.map(s=>s.glob).join(' · ')))"`
 
-    **Authoring stays open to every seat** — drafting the ADR, the skill or the instruction edit, pushing the branch,
-    opening the PR, revising it under review. What is reserved is the **landing**: on any PR whose diff touches a
-    governed surface, ⛔ never merge it, ⛔ never add it to the merge queue, ⛔ never call `enable_pr_auto_merge`,
-    ⛔ never flip it out of draft to make any of those possible. Judge it on the PR's **file list**, not on its
-    description, and a **mixed diff is not a proportion question** — one path hit is enough; if the rest needs to
-    land, split the governed files into their own PR. **Those four lift only for an authorized APPROVED review** — by
-    an account in `GOVERNED_APPROVERS` (`scripts/pm/check-governed-queue-guard.mjs`), on ANY commit; the queue then
-    lands it. Approver set 2026-08-27; pin retired 2026-09-04:
-    「只需要有人工批准记录就行，不需要卡最新的提交。」 A later push no longer expires it, and
-    this gate does not re-review it. Hand-authored governed content needs that approval; a PR whose only governed paths
-    are register rows the queue leg regenerates byte-exact clears with zero approvals (2026-09-01) — an uncertified
-    recompute, drift or a hand-authored sibling keeps it governed. Unapproved, the bypass direct
-    merge (人工直合) is the only landing. ⛔ **No agent seat submits an approving review on a governed-surface PR,
-    under any account** — an authorized account is agent-operated too. Nothing else substitutes: under #13 an accepted
-    ADR *is* the decision, so merging one is the act of adopting a governance position — the one class of change about
-    which "CI is green" carries no information at all (a thorough, fully-green ADR draft has been closed by the
-    maintainer on demand grounds no gate could evaluate). The other surfaces are reserved for a reason of the same
-    shape, spelled out in the audit header below; the published catalog also lands in codebases this repo cannot see.
+    **Authoring stays open to every seat** — drafting the ADR, the skill or the instruction edit, pushing the
+    branch, opening the PR, revising it under review. What is reserved is the **landing**: on any PR whose diff
+    touches a governed surface, ⛔ never merge it, ⛔ never add it to the merge queue, ⛔ never call
+    `enable_pr_auto_merge`, ⛔ never flip it out of draft to make any of those possible. Judge it on the PR's **file
+    list**, not on its description, and a **mixed diff is not a proportion question** — one path hit is enough; if
+    the rest needs to land, split the governed files into their own PR. **Those four lift only for an authorized
+    APPROVED review** — by an account in `GOVERNED_APPROVERS` (`scripts/pm/check-governed-queue-guard.mjs`), on ANY
+    commit; the queue then lands it. A later push does not expire that approval, and this gate does not re-review it.
+    Hand-authored governed content needs that approval; a PR whose only governed paths are register rows the queue leg
+    regenerates byte-exact clears with zero approvals — an uncertified recompute, drift or a hand-authored sibling
+    keeps it governed. Unapproved, the bypass direct merge (人工直合) is the only landing. ⛔ **No agent seat
+    submits an approving review on a governed-surface PR, under any account** — an authorized account is
+    agent-operated too. Nothing else substitutes — "CI is green" carries no information about a governance change.
 
-    **Already armed or queued when you read this?** ⚠️ Converting the PR back to **draft** is the only action that
+    **Already armed or queued when you read this?** Converting the PR back to **draft** is the only action that
     reliably removes it from the merge queue; `disable_pr_auto_merge` alone drops the arming but **not** queue
     membership. Do both, then confirm from the remote that it is in neither the queue nor `origin/main` (§7's
-    draft-flip re-arm note, run backwards). ⚠️ **And do not read draft as a barrier that holds by itself** — a
-    drafted ADR PR has nevertheless been merged, twice, by two different AI seats within one hour of the first ruling
-    above (both ratified retroactively, explicitly setting no precedent), and a skill PR whose own body said it was
-    awaiting a human merge was flipped ready by an unidentified seat and landed by the merge queue with zero reviews of
-    any kind. **The barrier is this directive.** The per-PR approval check beside it retired under 2026-08-18's ruling
-    that a human merge IS the review record — 「人工合并即人工审核」; why, and why its successor is the
-    queue guard rather than a per-PR gate, is in that guard's header. ⛔ Not a relaxation. Behind the directive sit
-    prevention and detection: that guard refuses an unpinned governed diff in the queue, `docs/adr/` in CODEOWNERS
-    routes review requests — and it is the *only* governed surface routed there, so on the other four nothing summons
-    the maintainer automatically — while the report-only post-merge audit (`scripts/pm/check-governed-merges.mjs`,
-    whose header carries this rule's incident history) lists every governed-surface merge for the PM round report. Every
-    entry should be a merge the maintainer performed or ordered in person, and the audit reads the approver as well as
-    the merger; one he does not recognise, or any agent approval, is a seat violation, filed and rolled back. A seat
-    that has read this far is not thereby licensed to judge an exception; the rule has no exception to judge.
+    draft-flip re-arm note, run backwards). **Do not read draft as a barrier that holds by itself — the barrier is
+    this directive**, and a human merge IS the review record — ⛔ not a relaxation. Behind the directive sit
+    prevention and detection: the queue guard refuses an unpinned governed diff in the queue; `docs/adr/` in
+    CODEOWNERS routes review requests — the *only* governed surface routed there, so on the other four nothing
+    summons the maintainer automatically; the report-only post-merge audit (`scripts/pm/check-governed-merges.mjs`)
+    lists every governed-surface merge with its approver and merger for the PM round report — a merger the
+    maintainer does not recognise, or any agent approval, is a seat violation, filed and rolled back. The rule has no
+    exception for a seat to judge.
 
 15. **⛔ A version release is performed by the maintainer, by hand — no AI seat publishes, tags, cuts a Release, or
-    triggers a release workflow, and none merges the Version Packages PR.** Maintainer ruling, 2026-08-07, verbatim and
-    untranslated:
+    triggers a release workflow, and none merges the Version Packages PR.** A rule that binds every seat lives here,
+    not only in a lane-specific skill file. **Release-adjacent work stays open to every seat**: the release board,
+    `.objectui-sha` pin bumps, version reconciliation, writing changesets, compiling release notes when asked, and
+    *verifying* release state (`npm view`, `git ls-remote --tags`) are ordinary tasks. What is reserved is the
+    **release act itself**: ⛔ running `changeset publish` / `pnpm run release`, ⛔ pushing a version tag, ⛔
+    cutting a GitHub Release, ⛔ pushing a runtime image, ⛔ `workflow_dispatch`-ing `release.yml` or any other
+    publish-capable workflow, ⛔ **approving a pending `release` environment deployment** (ADR-0125: that click IS
+    the publish authorisation, and a deployment waiting for hours is the system working, not a state you clear), and
+    ⛔ merging — or queueing, or arming auto-merge on — the **Version Packages** PR (`chore: version packages`).
+    That PR is bot-authored and standing-open by design: it is regenerated six-hourly by `release.yml`'s `version-pr`
+    job — never on a push to `main`; push drives the publish lane — so "green, current, and nobody has objected"
+    is its permanent resting state, not a signal that it is due. When you find a publish nobody ordered — a tag or
+    an npm version that simply appeared — ⛔ do not "repair" it with a counter-publish: file it as an incident for
+    the maintainer.
 
-    > **刚才我也没提出要求,是哪个ai自己替我发了 rc.4,版本发布必须是人工的。这个要写入规范。**
-
-    Its last sentence is this directive's warrant: 「这个要写入规范」. A rule that binds every seat has to be
-    readable by every seat — which is why it lives here, not only in a lane-specific skill file. **Release-adjacent
-    work stays open to every seat.** The release board, `.objectui-sha` pin bumps, version reconciliation, writing
-    changesets, compiling release notes when asked, and *verifying* release state (`npm view`, `git ls-remote --tags`)
-    are ordinary tasks. What is reserved is the **release act itself**: ⛔ running `changeset publish` / `pnpm run
-    release`, ⛔ pushing a version tag, ⛔ cutting a GitHub Release, ⛔ pushing a runtime image, ⛔
-    `workflow_dispatch`-ing `release.yml` or any other publish-capable workflow, ⛔ **approving a pending `release`
-    environment deployment** (ADR-0125 — since 2026-08-20 that click IS the publish authorisation, and a deployment
-    waiting for hours is the system working, not a state you clear), and ⛔ merging — or queueing, or arming
-    auto-merge on — the **Version Packages** PR (`chore: version packages`). That PR is bot-authored and standing-open
-    by design: it is regenerated six-hourly by `release.yml`'s `version-pr` job — never on a push to `main`; push
-    drives the publish lane — so "green, current, and nobody has objected" is its permanent resting state, not a
-    signal that it is due. When you find a publish nobody ordered — a tag or an npm version that simply appeared —
-    ⛔ do not "repair" it with a counter-publish: file it as an incident for the maintainer.
-
-    **The precedent is that the mechanical channel fires with nobody deciding to use it.** The release workflow's
-    `on: push` lane once shipped a full release candidate end to end — 69 packages to npm, tags, GitHub Releases,
-    runtime image — with **no human, no dispatch, no seat clicking anything**, twice in one week. So the existence of
-    a path to a release is not authorization to walk it — the same sentence #14 makes about the queue button. ⚠️
-    **And do not read the YAML as a barrier that holds against you — since ADR-0125 (2026-08-20) it stops very
-    little.** The publish job is triggered by the **push that lands the Version Packages PR** and held at
-    `environment: release` until a required reviewer approves. Read what that costs: the old design's barrier was the
-    `workflow_dispatch` *event*, unforgeable by a push, a queue landing, a bot token or a schedule — never by you,
-    though, since a dispatch is precisely the event an authenticated seat *can* synthesise, which is why this directive
-    stood beside it. That event barrier is gone by choice; what remains is a **repo setting** (required reviewers on
-    `release`) that no file here can assert, that an unprotected environment mimics perfectly in the run log, and that
-    any admin can remove without touching tracked code. So the merge you are already forbidden to perform is now the
-    release trigger: merging `chore: version packages` no longer moves a version number, it **queues a deployment in the
-    maintainer's name** — the single most load-bearing prohibition in this directive. The YAML stops almost nothing
-    now; this directive is the part that stops you.
+    **The existence of a path to a release is not authorization to walk it, and the YAML is not a barrier that
+    holds against you.** The publish job is triggered by the **push that lands the Version Packages PR** and held at
+    `environment: release` until a required reviewer approves — a **repo setting** no file here can assert. So
+    merging `chore: version packages` is the release trigger: it **queues a deployment in the maintainer's name** —
+    the single most load-bearing prohibition in this directive.
 
 ---
-
 ## Multi-agent working discipline
 
 This repo is worked on by **multiple agents in parallel**, one worktree per task —
@@ -385,11 +317,10 @@ mandatory, hook-enforced, and specified in **Prime Directive #11**. What it does
 
 **⛔ `git stash` is the sharpest thing the worktree does NOT isolate — never run a bare
 `git stash push`/`pop`.** `refs/stash` lives in the **common** `.git` directory, so every
-linked worktree pushes onto and pops off **one shared LIFO stack**: two agents stashing
-at once swap entries — your `pop` restores the other agent's changes, your own work stays
-on the stack for them to take, and **`pop` reports success**. The only symptom is another
-agent's files in your `git status`, after which a `git add -A` commits their half-finished
-work into your PR; it has really happened, mid reverse-verification. A PreToolUse hook
+linked worktree pushes onto and pops off **one shared LIFO stack**: your `pop` restores
+another agent's changes, your own work stays on the stack for them to take, and `pop`
+reports success — the only symptom is another agent's files in your `git status`, and a
+following `git add -A` commits their work into your PR. A PreToolUse hook
 (`.claude/hooks/guard-shared-stash.sh`; details and the `OS_ALLOW_STASH=1` escape in its
 header, self-test alongside) blocks the mutating forms — including `stash@{N}`, a
 *position* in a stack you don't own — allows `list`/`show`/`create` and `apply`/`store`
@@ -404,24 +335,26 @@ git worktree add ../objectstack-<task>-cmp <ref>        # a second tree to compa
 
 **⛔ The stash is one CASE — a worktree isolates your checkout and exactly four ref
 namespaces (`HEAD`, `refs/bisect`, `refs/worktree`, `refs/rewritten`) and NOTHING else:**
-not the object store, not `.git/config`, not any other ref, so "worktrees isolate refs,
-except stash" is exactly backwards. **`refs/remotes/*` is shared** — a sibling's fetch
-advances **your** `origin/main` (measured next door: three moves in ten minutes), so
-`git checkout origin/main -- <paths>` restores wherever that ref points **now**, possibly
-newer than your base: another agent's merged work entering your tree under the name of a
-"revert", and **staged** on arrival by the rule below. **`FETCH_HEAD` is per CHECKOUT —
-the last fetch in this checkout wins** (⚠️ not per worktree: measured on git 2.43, a
-linked worktree has its own, so a sibling's fetch does **not** move yours and the hazard
-is the **shared primary checkout**, where every agent's first fetch lands before it builds
-one). It fails by **absence**, not wrong content: split from its `git fetch` by any
-intervening fetch, `git diff …FETCH_HEAD` **exits 0 printing nothing** — read as *"the
-change isn't there"*, a confidently wrong verdict on someone else's work, worst for
-**reviewing** seats. Practices: pin `BASE=$(git rev-parse HEAD)` at worktree creation and
-restore against that commit, never a moving ref name; verify a named remote-tracking
-ref's content by occurrence counts on disk; fetch into a ref you own (`git fetch origin
-<branch>:refs/<ns>/<id> -f`) and read that; diff restored paths against `BASE` before
-staging. ⛔ **No hook backs the moving-ref half** — safe and unsafe spellings are both ordinary
-`git checkout` / `git fetch`, so a mechanical block would fire on correct usage.
+not the object store, not `.git/config`, not any other ref. **`refs/remotes/*` is shared**
+— a sibling's fetch advances **your** `origin/main`, so `git checkout origin/main -- <paths>`
+restores wherever that ref points **now**, possibly newer than your base: another agent's
+merged work entering your tree under the name of a "revert", and **staged** on arrival by
+the rule below. **`FETCH_HEAD` is per CHECKOUT — the last fetch in this checkout wins**
+(a linked worktree has its own; the hazard is the shared primary checkout). It fails by
+**absence**, not wrong content: split from its `git fetch` by any intervening fetch,
+`git diff …FETCH_HEAD` **exits 0 printing nothing** — a confidently wrong "the change isn't
+there", worst for **reviewing** seats. Practices: pin `BASE=$(git rev-parse HEAD)` at
+worktree creation and restore against that commit, never a moving ref name; verify a
+named remote-tracking ref's content by occurrence counts on disk; fetch into a ref you
+own (`git fetch origin <branch>:refs/<ns>/<id> -f`) and read that; diff restored paths
+against `BASE` before staging. ⛔ **No hook backs the moving-ref half** — safe and unsafe
+spellings are both ordinary `git checkout` / `git fetch`, so a mechanical block would fire
+on correct usage.
+
+**A reading you cite is a count plus the tree it was taken against — repository and
+commit — or it is not a reading.** "Measured over the corpus" names `examples/app-crm` at
+its sha, never an application it is not; a moving ref is not an anchor, for a corpus
+exactly as for a `git diff`.
 
 **⛔ Nor the build cache** — turbo resolves the repo root through the **common** dir, so every
 worktree replays ONE `.turbo/cache`. Symptom: a typecheck failing on a package your diff never
@@ -432,10 +365,10 @@ that package. Ablating a build tool is a sanctioned producer; `--force` writes t
 FIRST.** Committed, restoring is `git checkout <your-branch> -- <path>`, out of a commit
 that really exists. Against an **uncommitted** edit there is no restore point at all: the
 working tree is the only copy, the stash is banned above, and discarding local
-modifications is a normal, silent, exit-0 operation that has cost changes repeatedly.
-Prove any retyped change identical with `git diff` against a saved patch or
-`git hash-object <path>` (a matching `--stat` insertion count is **not** byte-identity),
-then re-run from the committed state so your red/green numbers are trustworthy.
+modifications is a normal, silent, exit-0 operation. Prove any retyped change identical
+with `git diff` against a saved patch or `git hash-object <path>` (a matching `--stat`
+insertion count is **not** byte-identity), then re-run from the committed state so your
+red/green numbers are trustworthy.
 
 **⛔ And `git checkout <ref> -- <path>` STAGES what it retrieves — putting the file back
 with `cp` undoes only half of it.** It writes the **index** as well as the working tree,
@@ -444,12 +377,12 @@ shows `MM` and `git show :<path>` reads back the ref's copy, but `git diff HEAD`
 **clean** (it compares tree with HEAD and never consults the index), the tests pass
 because they read the tree, and a bare `git commit` builds from the **index** — a commit
 that deletes your own fix, in a PR whose body accurately describes a change it does not
-contain (one real PR: 157 such deletions, caught only by the `MM`). Restore with
-`git checkout HEAD -- <path>` or `git restore --source=HEAD --staged --worktree <path>` —
-both reset index *and* tree — read `git status --porcelain` before you commit, and ⛔
-never trust `git diff HEAD` alone after a checkout-from-ref. Better still, don't stage it
-at all: `git restore --source=<ref> -- <path>` (no `--staged`) writes the tree only, a
-lone unstaged `M`.
+contain. Restore with `git checkout HEAD -- <path>` or
+`git restore --source=HEAD --staged --worktree <path>` — both reset index *and* tree —
+read `git status --porcelain` before you commit, and ⛔ never trust `git diff HEAD` alone
+after a checkout-from-ref. Better still, don't stage it at all:
+`git restore --source=<ref> -- <path>` (no `--staged`) writes the tree only, a lone
+unstaged `M`.
 
 **A windowed history question ("how many commits on `<ref>` in `<window>`") goes through
 `scripts/pm/git-history.mjs` — answer, or REFUSE.** A shallow clone answers windowed
@@ -457,31 +390,32 @@ lone unstaged `M`.
 proves the window is covered first. `historyHorizon()` is the read-only predicate for
 tools that answer their own question.
 
-**Claim the issue BEFORE you write any code.** Assign it to yourself
-(`gh issue edit <n> --add-assignee @me`, or `issue_write` with `assignees`) as the
-*first* action of the task — before the worktree, before the first read. An unassigned
-issue reads as an open invitation: two agents burn the same hours twice, then race to
-land conflicting shapes for one problem. Already assigned to someone else? It is taken —
-pick another or ask; never reassign it to yourself. And because every agent here shares
-one GitHub identity, the assignee field alone cannot answer "is this claim *mine*?" — a
-claim is two acts: assign, **and a claim comment carrying your session ID and branch
-name** (`claude/issue-<n>-<slug>`). Before writing code, re-read the issue's comments; an
-earlier claim with a different session ID or branch means it is taken whatever the
-assignee field says — skipping that read is how one issue got implemented twice in one
-morning. The claim is also what makes the *finding* rule (Prime Directive #10) safe:
-findings become a real queue other agents read, so file unassigned when merely recording
-and assign at the moment you actually start.
+**Claim the issue BEFORE you write any code.** Every agent here shares one GitHub identity, so
+the assignee field is only a presence bit; the identity record is the `Claim:` comment — first
+line beginning `Claim:`, then the session ID and the branch (`claude/issue-<n>-<slug>`). Ownership
+is written by role. The session that OWNS a card writes both: a seat picking a card for itself
+takes only an unassigned card, assigns itself and posts the claim before any other action; a PM
+dispatch sets the assignee and posts the claim on the dev's behalf. A dispatched executor
+inherits that assignee — the dispatch's step 1, already done — and still performs the second act
+itself: it checks that the newest `Claim:` names its branch (on a mismatch it stops and reports),
+then posts its own `Claim:` with its session ID and branch; it ⛔ never writes the assignee and
+⛔ never yields a card it was dispatched to. Before writing code, re-read the comments — the
+comments decide, not the field: a `Claim:` from another session or branch (other than the
+dispatch that sent you) means taken whatever the field says — pick another or ask, ⛔ never
+reassign; a bare assignee with no `Claim:` under it is a dispatch's step 1, not a foreign claim
+— not taken for the executor it was dispatched to, and not free for a seat picking for itself.
+Release is an explicit act: whoever moves a card out of ownership clears the assignee and posts
+a `Release:` line. Findings are filed unassigned; assign at the moment you start. The
+maintainer's own work under the shared account carries no claim comment and is indistinguishable
+from a dispatch — an accepted blind spot; per-seat identities are not introduced.
 
 **State on your PR that you did not set belongs to another actor — ask, never "correct"
 it.** Under one shared identity every other participant's write arrives unsigned: the PM
 flipping your draft to ready and arming auto-merge, a bot re-labelling, the platform
-rewriting your body. The worked failure: a dev read its own rewritten footer as proof
-*something is rewriting my PR*, extended that to the **draft flag**, and flipped the PM's
-ready PR back to draft — destroying auto-merge and queue membership at once (§7's
-draft-flip re-arm note), invisibly (`pull_request_read` reports neither). The observation
-was right, the inference did not follow: body rewriting is a known platform behaviour and
-evidence of nothing else. Read the timeline event's actor, or ask; undo only once you
-know who set it and why.
+rewriting your body. A rewritten body is evidence about the body and of nothing else —
+⛔ never extend it to the draft flag, which flipped back destroys auto-merge and queue
+membership at once (§7's draft-flip re-arm note), invisibly. Read the timeline event's
+actor, or ask; undo only once you know who set it and why.
 
 **Write the attribution footer in the form the surface keeps — blank line, rule, ONE footer line:**
 
@@ -491,17 +425,23 @@ _Generated by [Claude Code](https://claude.ai/code)_                 ← bare: u
 _Generated by [Claude Code](https://claude.ai/code/session_<id>)_    ← session-URL: use in PR BODIES
 ```
 
-**PR body:** `create_pull_request` keeps the session-URL form and *rewrites* bare into it — how a body
-comes back in a shape nobody typed. On EDIT the promise inverts (measured 2026-08-26, three REST
-writes, per-write read-back): every `update_pull_request`/PATCH edit normalises the session-URL footer
-DOWN to bare, and that bare survives later edits verbatim. Treat the session id as create-only (⛔ no
-re-append loop); durable attribution lives in body prose or a comment. **Issue comment:** the platform APPENDS that
-block — blank line, `---`, bare footer — and recognises only that shape (measured 2026-08-20; re-measured
-2026-09-03, four probes — MCP `add_issue_comment` and direct REST agree: per-surface, not per-tool): a bare footer
-UNDER the rule line is stored byte-identical, one footer; a bare footer with NO rule line above it is not recognised
-and the whole block lands under it, leaving two; if yours is the session-URL form *it survives verbatim* and a bare
-one lands under it, leaving two. ⛔ A tail bare footer on a comment is the platform's, not your form downgraded.
-Which layer does this is unknown; don't go establishing it.
+**PR body:** `create_pull_request` keeps the session-URL form and rewrites bare into it. On EDIT
+(`update_pull_request` or a REST PATCH, measured in this repository) the session-URL footer
+survives verbatim and the platform APPENDS a bare footer block under whatever you send — so
+send an edited body with no footer of your own, read it back, and treat the appended block as
+the platform's; ⛔ never re-send a body that already carries an appended footer. Durable
+attribution lives in body prose or a comment. **Issue comment:** the platform APPENDS that
+block — blank line, `---`, bare footer — and recognises only that shape (MCP
+`add_issue_comment` and direct REST agree: per-surface, not per-tool): a bare footer UNDER the
+rule line is stored byte-identical, one footer; a bare footer with NO rule line above it is not
+recognised and the whole block lands under it, leaving two; the session-URL form survives
+verbatim and a bare one lands under it, leaving two. ⛔ A tail bare footer on a comment is the
+platform's, not your form downgraded. Which layer does this is unknown; don't go establishing
+it. **Commit message:** an agent commit ends with the model-free trailer pair
+`Claude-Session: https://claude.ai/code/session_<id>` and
+`Co-authored-by: Claude <noreply@anthropic.com>`; no model identifier lands in a PR title or
+body, a comment, a changeset, a doc or a code comment — the harness-written `Co-Authored-By`
+trailer (with its session link) is the one exemption.
 
 **GitHub mutates body BYTES — spell poison-shaped tokens out in words, never literally.**
 Regex literals and script-tag-shaped tokens go in fenced code with the dangerous character
@@ -536,28 +476,26 @@ Even inside your own worktree, operate defensively:
    accepted and non-draft, then let the queue merge it.** The queue rebuilds your PR
    *as merged onto the current `main`*, re-runs the subscribing workflows on that
    rebuilt generation, and lands it only if the required ones pass — the §10
-   re-verification, done by the platform, race-free. This sanctioned path supersedes
-   the older blanket auto-merge ban; the ban's true half survives as the precondition:
-   **arm only what is already green and accepted.**
+   re-verification, done by the platform, race-free. **Arm only what is already green
+   and accepted.**
 
    ⛔ **Two classes of PR never enter this path, however green:** (a) a diff touching any
    **governed surface** (**Prime Directive #14**, which names them and holds the current
-   list) — much longer than `docs/adr/**` and it grows fast, and **this file and
-   `CLAUDE.md` are on it**, so re-read it rather than recalling it; (b) the **Version
-   Packages** PR, or any PR whose merge performs a release (**Prime Directive #15**).
-   Read the PR's file list (`get_files`) **and its author** before you arm anything.
+   list — **this file and `CLAUDE.md` are on it**, so re-read it rather than recalling
+   it); (b) the **Version Packages** PR, or any PR whose merge performs a release
+   (**Prime Directive #15**). Read the PR's file list (`get_files`) **and its author**
+   before you arm anything.
 
    **Green means the gate-carrying jobs' `conclusion` is `success`** — not "no failure
    yet"; `in_progress` is not a pass. Arming a red PR does not queue it, it hides it:
    every poll then misreads "not on `main` yet" as "queued". Always read *two* things:
    the queue branch **and** `origin/main`. And **the queue enforces only the required
-   set** — six contexts block by maintainer decision (2026-08-07, extended 2026-08-09):
-   `Lint & Repo Gates` (all `check:*` gates), `TypeScript Type Check`, `Test Core`,
-   `Dogfood Regression Gate`, `Build Core` and `Temporal Conformance (live PG + MySQL)`.
-   A check outside those six is advisory and rides through, and an advisory red that
-   lands rides `main`'s merge ref into every later PR until stanched. A required context
-   is matched by check-run name, so a rename detaches its gate silently — treat those six
-   names as contract.
+   set** — six contexts block: `Lint & Repo Gates` (all `check:*` gates),
+   `TypeScript Type Check`, `Test Core`, `Dogfood Regression Gate`, `Build Core` and
+   `Temporal Conformance (live PG + MySQL)`. A check outside those six is advisory and
+   rides through, and an advisory red that lands rides `main`'s merge ref into every later
+   PR until stanched. A required context is matched by check-run name, so a rename
+   detaches its gate silently — treat those six names as contract.
 
    **Re-arm awareness** — none of these is a reason to avoid the queue; all are reasons to
    confirm a PR is still *in* it: a red queue build **ejects** your entry and drops
@@ -598,8 +536,7 @@ Even inside your own worktree, operate defensively:
    `pnpm install --frozen-lockfile && pnpm build && rm -rf packages/runtime/.objectstack`
    (add `rm -rf .cache` if you have run the console build). Note `OS_SKIP_DTS=1` keeps
    a build fast but leaves no `.d.ts`, so `gen:api-surface` cannot run at all under it —
-   that one needs a real build. None of this is CI-visible (CI checks out fresh), which
-   is why it is worth recognising in one step rather than re-diagnosing per gate. Only
+   that one needs a real build. None of this is CI-visible (CI checks out fresh). Only
    the first row has a gate: `check:dev-prereqs` refuses `pnpm dev` on a stale
    `packages/spec/dist` (content-hash, never mtime); for every other row the prescription
    above is the whole remedy — the gate's own pass line says "existence, not freshness"
@@ -608,9 +545,7 @@ Even inside your own worktree, operate defensively:
    Git conflicts on overlapping lines; nothing warns you when two changes are
    individually fine and jointly wrong. **Before opening a PR, pull `main`, refresh build
    state (§9), and run the full suite once.** For the *subsequent* pre-merge merges of
-   `main` — the ones you do only because `main` moved again while CI ran — the full suite
-   is usually re-proving what three identical runs already proved, at ~15 minutes per lap
-   while `main` lands a PR every few. Scope it instead:
+   `main` — the ones you do only because `main` moved again while CI ran — scope it:
    - **Always:** rebuild what the merge touched, and if `packages/spec` moved on either
      side, `pnpm --filter @objectstack/spec build && pnpm --filter @objectstack/spec
      check:generated` — generated snapshots (`api-surface`, baselines) are the classic
@@ -622,8 +557,7 @@ Even inside your own worktree, operate defensively:
      the same packages or the same behavior your diff does, or a conflict occurred
      outside trivially-mechanical files.
    - CI on the PR, and then the merge queue on its rebuilt generation (§7), validates the
-     merge commit itself — that second CI round is where joint breakage surfaces, and the
-     guards in `scripts/check-*.mjs` exist largely because it is invisible to `git merge`.
+     merge commit itself — that second CI round is where joint breakage surfaces.
 11. **Generated artifacts don't text-merge — a driver defers them and `pre-commit`
    collects the debt.** §10's "never trust git's textual merge of a generated file" is
    mechanical: `.gitattributes` routes the generator-owned artifacts to `merge=os-regen`
@@ -634,17 +568,16 @@ Even inside your own worktree, operate defensively:
    half-merged tree; instead it records each path in `$GIT_DIR/os-regen-pending` and
    `pre-commit` refuses the commit until those artifacts check clean. Sequence after a
    merge unchanged from §9: rebuild, then `check:generated --fix`. Worth knowing:
-   - **The MERGE commit itself is the one exemption, and it is a deferral, not a pass**
-     (maintainer ruling 2026-08-12). `scripts/pm/os-regen-merge.sh` is the in-repo
-     authority for landing one of these branches, and its step 3 commits the merge
-     **before** regenerating on purpose: the driver exits 0 while silently dropping one
-     side, so only a separate regeneration commit on a known-good base lets a reviewer
-     read "what main brought" apart from "what the change produces". `pre-commit` records
-     that merge as a deferral and then holds you to it — the immediately following commit
-     must discharge it (every commit until then is refused, and a second merge cannot
-     defer on top of an outstanding one), and `.githooks/pre-push` refuses a push that
-     still owes one. ⛔ So this step never needs `--no-verify`, the old spelling, which
-     skips *every* pre-commit check rather than this one.
+   - **The MERGE commit itself is the one exemption, and it is a deferral, not a pass.**
+     `scripts/pm/os-regen-merge.sh` is the in-repo authority for landing one of these
+     branches, and its step 3 commits the merge **before** regenerating on purpose: the
+     driver exits 0 while silently dropping one side, so only a separate regeneration
+     commit on a known-good base lets a reviewer read "what main brought" apart from
+     "what the change produces". `pre-commit` records that merge as a deferral and then
+     holds you to it — the immediately following commit must discharge it (every commit
+     until then is refused, and a second merge cannot defer on top of an outstanding
+     one), and `.githooks/pre-push` refuses a push that still owes one. ⛔ So this step
+     never needs `--no-verify`, which skips *every* pre-commit check rather than this one.
    - **The driver is a LOCAL facility** — the merge queue rebuilds server-side where no
      custom driver runs, so the three hottest artifacts are **sharded** per category/entry
      (`authorable-surface/`, `json-schema.manifest/`, `api-surface/`) to keep parallel
@@ -659,7 +592,6 @@ Even inside your own worktree, operate defensively:
      says why, per path).
 
 ---
-
 ## Monorepo Layout
 
 ```
@@ -727,8 +659,8 @@ Root also exports: `defineStack`, `composeStacks`, `defineView`, `defineApp`, `d
 | Path | Type | Rule |
 |:---|:---|:---|
 | `content/docs/references/` | **AUTO-GEN** | ❌ Never hand-edit. Regenerated by `packages/spec/scripts/build-docs.ts`. |
-| `content/docs/releases/` | **RELEASE-OWNED** | ❌ Never edit in a code PR. Release notes are written **centrally at release time**, compiled from changesets + the ADR-0087 registries — not accreted a row per PR. Per-PR appends made `releases/v<major>.mdx` the repo's hottest conflict magnet (three PRs raced the same table inside one afternoon), and every manual resolution risks dropping someone else's row. Your PR's input is its **changeset**; for spec removals also the D2/D3 registry entries. Factual error on a releases page → dedicated docs-only PR or an issue, never a rider on code changes. |
-| `**/translations/*.generated.ts` (nine packages — `platform-objects`, five plugins, three services) | **AUTO-GEN** | ❌ Never hand-edit the file *structure*. Run `node scripts/check-i18n-bundles.mjs --write` to regenerate all nine (merge mode preserves every existing **translated-locale** value; the default locale `en` is rewritten from the source on every run — it is a copy of the source, not a translation: when the extractor merged `en` too, a stale bundle entry always beat an edited source string, so the served text drifted from the source silently under a green gate. Hand-edits to `en.*.generated.ts` therefore do not survive and belong in the source metadata instead); `pnpm i18n:extract` still covers `platform-objects` alone. Translated-locale *values* (`zh-CN` / `ja-JP` / `es-ES`) are hand-written and expected to be: the gate compares against a merge-mode extract, so editing one of those strings is fine, while adding or dropping keys is drift. `pnpm check:i18n` gates all nine in CI, and `pnpm check:i18n-coverage` ratchets untranslated declared labels. |
+| `content/docs/releases/` | **RELEASE-OWNED** | ❌ Never edit in a code PR. Release notes are written **centrally at release time**, compiled from changesets + the ADR-0087 registries — never accreted a row per PR. Your PR's input is its **changeset**; for spec removals also the D2/D3 registry entries. Factual error on a releases page → dedicated docs-only PR or an issue, never a rider on code changes. |
+| `**/translations/*.generated.ts` (nine packages — `platform-objects`, five plugins, three services) | **AUTO-GEN** | ❌ Never hand-edit the file *structure*. Regenerate all nine with `node scripts/check-i18n-bundles.mjs --write` (merge mode keeps every existing **translated-locale** value; the default locale `en` is rewritten from the source on every run, so hand-edits to `en.*.generated.ts` do not survive and belong in the source metadata); `pnpm i18n:extract` still covers `platform-objects` alone. Translated-locale *values* (`zh-CN` / `ja-JP` / `es-ES`) are hand-written: editing one of those strings is fine, adding or dropping keys is drift. `pnpm check:i18n` gates all nine in CI, and `pnpm check:i18n-coverage` ratchets untranslated declared labels. |
 | `content/docs/<tree>/` — every tree except `references/` and `releases/` above | hand-written | ✅ Update that tree's own `meta.json` when adding a page: each is an explicit ordered `pages` array with no rest-spread, so a page you add but never list is absent from the nav. |
 
 ### Touched `packages/spec`? Regenerate its artifacts BEFORE pushing
@@ -737,8 +669,7 @@ Root also exports: `defineStack`, `composeStacks`, `defineView`, `defineApp`, `d
 gate. All of them live in one job — `TypeScript Type Check` in `lint.yml`, which is
 required and has no paths filter, so no gate can go dormant on the PR that breaks it.
 That job runs its gates **sequentially**, so the first stale artifact masks every one
-behind it, and you get one red build per artifact instead of one for all of them. Match
-the change to the gate and regenerate up front:
+behind it. Match the change to the gate and regenerate up front:
 
 | You changed | Gate that fails | Regenerate with `pnpm --filter @objectstack/spec …` |
 |:---|:---|:---|
@@ -751,8 +682,7 @@ the change to the gate and regenerate up front:
 
 A `.describe()` string counts — it lands in `content/docs/references/`. Adding one
 export counts — it lands in `api-surface/`. Don't match by hand — one command runs
-**every** gate and reports **all** stale artifacts at once, which is precisely what CI
-cannot do:
+**every** gate and reports **all** stale artifacts at once:
 
 ```bash
 pnpm --filter @objectstack/spec build             # REQUIRED first — see the dist caveat
@@ -774,7 +704,7 @@ Principles the wrapper encodes (its own output is the authority on detail):
   and on every PR (`--reconcile-only` in lint.yml's required typecheck job): a new
   `check:`/`gen:` script nobody classified fails its own PR instead of quietly dropping
   out of coverage.
-- ⚠️ **`check:api-surface` and `check:exported-any` read the built `dist/*.d.ts`, not
+- **`check:api-surface` and `check:exported-any` read the built `dist/*.d.ts`, not
   `src/`.** A stale `dist` makes the first report *other people's* exports as
   **removed** ("N breaking (removed/narrowed)") when nothing was removed at all —
   rebuild before you believe it, and before you file a bug about `main` being red.
@@ -791,26 +721,23 @@ Principles the wrapper encodes (its own output is the authority on detail):
   a name, with accepted cases in the shrink-only, hand-edited
   `dual-source-exports.baseline.json`.
 
-⚠️ **`check:react-declaration-parity` compares two DECLARATIONS, not a declaration
-against an implementation** — the props the spec zod schema declares vs the inputs the
-objectui registry config declares. A prop both sides declare and no renderer reads is,
-to this gate, perfect agreement (dead blocks have shipped through a green run under its
-earlier, over-claiming name). Its `spec-only` / `registry-only` / `missing` signals are
-real; just don't read it as proof anything renders. It is also the one gate
-`check:generated` cannot run at all (`EXTERNAL_INPUT_REQUIRED`): its right-hand side is
-objectui's `sdui.manifest.json`, produced only by `pnpm sdui:manifest` driving a real
-browser over objectui built at `.objectui-sha`, and it **exits 1** with no usable
-manifest — "could not run" is a failure, not a skip (Route & surface ownership §3).
-Where the manifest comes from is **settled** (maintainer ruling 2026-08-07): **not from
-CI** — it is an on-demand gate whose trigger is the **objectui pin bump**
-(`docs/releases-maintenance.md` carries the procedure). Do not "fix" the red by
+**`check:react-declaration-parity` compares two DECLARATIONS, not a declaration against
+an implementation** — the props the spec zod schema declares vs the inputs the objectui
+registry config declares. A prop both sides declare and no renderer reads is, to this
+gate, perfect agreement. Its `spec-only` / `registry-only` / `missing` signals are real;
+just don't read it as proof anything renders. It is also the one gate `check:generated`
+cannot run at all (`EXTERNAL_INPUT_REQUIRED`): its right-hand side is objectui's
+`sdui.manifest.json`, produced only by `pnpm sdui:manifest` driving a real browser over
+objectui built at `.objectui-sha`, and it **exits 1** with no usable manifest — "could not
+run" is a failure, not a skip (Route & surface ownership §3). The manifest comes **not
+from CI**: it is an on-demand gate whose trigger is the **objectui pin bump**
+(`docs/releases-maintenance.md` carries the procedure). ⛔ Do not "fix" the red by
 re-adding a skip, and do not wire the gate into a workflow either.
 
 Two generators have **no** gate at all — `gen:openapi` and `gen:sbom`. Nothing verifies
 their output is current; the wrapper reports that each run rather than staying silent.
 
 ---
-
 ## Context Routing — apply the right role per path
 
 | Path | Role | Key Constraints |
@@ -840,8 +767,7 @@ their output is current; the wrapper reports that each run rather than staying s
 ## Skills (`skills/`)
 
 Two roots; **the filesystem is the catalog**. Consult the matching `SKILL.md` when
-working in its domain — browse the directory, never a hand-written list here (two
-such lists drifted stale as skills landed):
+working in its domain — browse the directory, never a hand-written list here:
 
 - `skills/` — the **published** catalog (it ships to customer projects).
 - `.claude/skills/` — repo-internal agent playbooks; every entry must carry
@@ -866,9 +792,8 @@ export const FieldSchema = z.object({
 export type Field = z.infer<typeof FieldSchema>;
 ```
 
-**Plugin** (the kernel contract is `init`/`start`/`destroy` —
-`packages/core/src/types.ts`; an older `onInstall`/`onEnable`/`onDisable` example
-described hooks nothing ever called, and was retired for it):
+**Plugin** (the kernel contract is `init`/`start`/`destroy` — `packages/core/src/types.ts`;
+there are no `onInstall`/`onEnable`/`onDisable` hooks):
 ```ts
 export class MyPlugin implements Plugin {
   name = 'plugin.my-feature';
@@ -882,17 +807,14 @@ export class MyPlugin implements Plugin {
 
 ## Route & surface ownership
 
-Five rules, each paid for by a real bug. They matter more than usual here because this
-repo is largely written by agents, and every one of them is a trap that reads as
-reasonable code.
+Five rules. They matter more than usual here because this repo is largely written by
+agents, and every one of them is a trap that reads as reasonable code.
 
 **1. One route, one owner.** Never add a second implementation of a path that another
 package already serves, however convenient. A shadowed duplicate is code that `grep`
-finds and the runtime never runs — the exact input that makes an agent (or a human)
-reason confidently from dead code. It also silently forks every future invariant: a
-retired duplicate data surface had to re-learn the anonymous-deny gate, honest batch
-capability reporting and discovery accuracy, each after the fact, each because someone
-fixed the real owner and never knew about the copy.
+finds and the runtime never runs — dead code an agent reasons confidently from — and it
+silently forks every future invariant, because whoever fixes the real owner never knows
+about the copy.
 
 **2. Explicit composition over default magic.** A capability that appears because of a
 default nobody wrote down is invisible at every call site — and call sites are the
@@ -911,11 +833,8 @@ SDKs, codegen and AI clients. Advertise only what is actually mounted, and mount
 everything advertised (ADR-0076 D12) — a wrong answer here propagates into everything
 built on top of it.
 
-**5. A new REST route declares its CLOSED query-parameter set on the day it lands.**
-Maintainer ruling, 2026-08-12, verbatim and untranslated:
-
-> **裁定:政策 YES —— 闭合查询参数集成为 REST ingress 政策;采纳方式为增量,⛔ 不打大包。**
-
+**5. A new REST route declares its CLOSED query-parameter set on the day it lands.** The
+closed set is REST ingress policy, adopted incrementally — ⛔ never as one big batch.
 Open the handler with `refuseUnknownQueryParams(req, res, <EXPORTED_PARAMS>)`
 (`packages/rest/src/query-allowlist.ts` — its header is the authority on detail) so an
 unrecognised name gets a located `400` instead of being dropped. A handler that reads
@@ -925,20 +844,18 @@ zero rows, and no status, header or field distinguishes either from a real answe
 AI caller cannot see it at all. This is review-enforceable: a PR adding a `GET` route
 that reads `req.query` without declaring a closed set is incomplete.
 
-Three things to get right, all of them measured rather than assumed:
+Three things to get right:
 
 - ⛔ **Measure the set from the handler's ACTUAL read points, never from the docs or
   the card.** It is not "the filters" — it is paging, ordering, format, alias spellings
   and anything middleware reads. **Forgetting `limit` trades a silent-widening bug for
-  a loud pagination outage**, which is worse than the defect. ⚠️ **Read the helpers the
-  handler calls, not just the handler**: the export route's `?locale=` never appears in
-  its body — it is read a frame down, by `extractLocale` behind the call that localises
-  the header row — so a set measured from the handler alone would have 400'd every
-  localised export that works today. Pin **both halves** per route: a refusal pin
-  (status + nested `error.code` + **the service was never called**) beside a
-  preservation pin (**the arguments the service actually received**). Neither half is
-  optional, and a bare status assertion is not a pin — "still 200" is exactly what the
-  defect looked like, and the refusal's whole point is that the service never ran.
+  a loud pagination outage**, which is worse than the defect. **Read the helpers the
+  handler calls, not just the handler**: a parameter such as the export route's
+  `?locale=` is read a frame down (`extractLocale`), never in the handler body. Pin
+  **both halves** per route: a refusal pin (status + nested `error.code` + **the service
+  was never called**) beside a preservation pin (**the arguments the service actually
+  received**). Neither half is optional, and a bare status assertion is not a pin —
+  "still 200" is exactly what the defect looked like.
 - ⛔ **Routes whose parameter set is genuinely OPEN are excluded, by name.**
   `GET /data/:object` hands its whole query to the normalizer, which lowers every
   leftover key into an implicit field filter (`?status=open` *is* the filter) — the
@@ -949,25 +866,22 @@ Three things to get right, all of them measured rather than assumed:
   author's declaration). The test: *if an unrecognised name has a defined meaning on
   this route, the set is open* — gate it where the authority for the name lives.
 - **Existing routes convert per lane, ⛔ never as one sweep** (data read routes first).
-  A broad wave with thin pins is the failure mode the ruling rejected.
 
 Recognition runs **before** the arity gate (`refuseRepeatedQueryParams`); both answer
 the same nested ADR-0112 `VALIDATION_ERROR`, so composing them adds no dialect.
 
 **Verifying any of this:** "who serves this path" is a question about the composed,
 *provisioned* runtime — not about which plugin declares it, not about registration
-order, and not about a minimal harness that merely boots. The question has been
-answered wrongly three times in one investigation, once per each of those shortcuts.
-Boot the real composition with its real services, or do not claim an answer.
+order, and not about a minimal harness that merely boots. Boot the real composition with
+its real services, or do not claim an answer.
 
 ---
 
 ## Degradation log levels — `warn` vs `error`
 
-Nearly every `catch` in this repo is a best-effort degradation, and nearly every one of
-them logs `warn`. That default is wrong for a specific, recurring class, and the cost of
-getting it wrong is not noise — it is silent data loss. Decide the level with **one
-question**, not with an adjective:
+Nearly every `catch` in this repo is a best-effort degradation logged at `warn`; for one
+recurring class that level is silent data loss. Decide the level with **one question**,
+not with an adjective:
 
 > **After the degradation, does the system still look "normal" from the outside,
 > while something it claims is persisted has not actually landed?**
@@ -981,15 +895,10 @@ question**, not with an adjective:
 - **Durability / data-consistency degradation → `error`.** A write that claims to
   persist does not, DDL that was supposed to run did not, persisted state and runtime
   state disagree. Nothing looks broken; the loss surfaces a release later, to someone
-  who cannot connect it to this line.
-
-**Why this is a rule and not a preference.** The founding incident: a durable
-suspended-run store attached to a table that was never created, every write failed into
-a `warn` nobody read, and every restart dropped all in-flight approvals — the symptom
-surfaced a release after the cause. It is the same failure Prime Directive #10 names —
-advertising a capability (here: durability) the runtime does not deliver — and the same
-instinct as "Absence must be loud" above: **prefer failing to falling back**, and when
-you must fall back, say what was lost.
+  who cannot connect it to this line. It is the failure Prime Directive #10 names —
+  advertising a capability (durability) the runtime does not deliver — and the instinct
+  of "Absence must be loud" above: **prefer failing to falling back**, and when you must
+  fall back, say what was lost.
 
 **An `error` here owes two things**, both, in the first line it prints
 (`packages/services/service-automation/src/plugin.ts` `start()` is the reference text):
@@ -1000,14 +909,12 @@ restores durability, or the explicit opt-out that makes the degradation delibera
 degradation, not once per failed write.
 
 **Do not over-apply it.** Escalating a functional degradation to `error` trains
-everyone to skim `error` — which is what made the founding incident's `warn` unreadable
-in the first place. An `if (!service)` composition branch is usually functional and
-belongs at `warn`; a `catch` around a write, a DDL call, or a store initialization is
-where this rule bites. **And a failure handed to the CALLER is not a degradation at
+everyone to skim `error`. An `if (!service)` composition branch is usually functional
+and belongs at `warn`; a `catch` around a write, a DDL call, or a store initialization
+is where this rule bites. **And a failure handed to the CALLER is not a degradation at
 all** — the third legal answer: a `catch` that answers `errorFromThrown(e, 400)`, or a
 batch whose contract IS a per-item outcome report, does not look normal from the
-outside — the requester was told. Do **not** bolt a `logger.error` onto such a site
-(on a validation path that emits one durability `error` per rejected keystroke);
+outside — the requester was told. Do **not** bolt a `logger.error` onto such a site;
 declare **how it delivers** instead — `FAILURE_PROPAGATION_CALLEES` (repo-wide names)
 or the function-scoped `FAILURE_PROPAGATION_SITES` in the checker, which then proves
 structurally that *every* path out of the `catch` delivers.
@@ -1036,9 +943,8 @@ error's **type**. What it protects is DISTINGUISHABILITY, not the spelling of th
 returned value: fix by asking the error's type or reporting the failure once — never
 by inventing a different empty. Its scan surface is deliberately narrow —
 `packages/metadata/src`, `packages/metadata-protocol/src`, `packages/objectql/src`
-only (maintainer ruling 2026-08-06, 「裁 3 —— 收窄先行」: prove the false-positive
-surface on the persistence layer first; widening is its own issue) — which is also
-what lets names as generic as `find`/`findOne`/`count` mean "a storage seam" at all.
+only: the persistence layer first, widening is its own issue — which is also what
+lets names as generic as `find`/`findOne`/`count` mean "a storage seam" at all.
 Benign read failures are proven by the declared `READ_FAILURE_DISCRIMINATORS`
 predicates (today `isMissingTableError`) — a hand-rolled `if (e.code === '42P01')` is
 flagged on purpose; ask the shared predicate rather than growing a second vocabulary.
@@ -1075,15 +981,6 @@ Three parts, all three or it is not a finding:
 Part 3 is what makes this a rule and not noise. **A read-only probe is completely
 legal**: `AutomationEngine.getUnknownNodeTypeAudit()` reads the executor registry on
 every call, records nothing, and is correct.
-
-**Why this is a rule and not a preference.** One showcase cold start produced three
-instances in three unrelated subsystems: an auth plugin froze an `undefined` cache
-handle into its config for the life of the process (the printed warning sent operators
-to provision Redis for a problem they did not have); the automation service asserted
-eight flows "will fail at execution time" 0.8s before their executor registered —
-indistinguishable from a deployment that genuinely lacked the plugin; and the query
-engine persisted a schema attestation the same boot was still contradicting, so the
-next restart rejected its predecessor's data.
 
 **The three cures, in preference order:**
 
@@ -1139,7 +1036,7 @@ registry? Add it to `OPEN_CAPABILITY_REGISTRIES` in the same PR that fixes it.
    <!-- adr-0087: not-required (already-registered SOME-MIGRATION-ID) why -->
    <!-- adr-0087: not-required (no-migration-prescription) why -->
    ```
-   Why it is asked of you at all: the gate prints the argument when it fails — that output is the authority.
+   The gate prints the argument when it fails — that output is the authority.
 4. **A removal that breaks the pinned sibling checkout ships together with the sibling fix and the pin bump — or it
    does not ship.** The `Console Pin Gate` job builds objectui at the pinned `.objectui-sha` against **current** `main`,
    so a removal or rename the pinned sibling still imports turns `main` red for every PR in the repo the moment it

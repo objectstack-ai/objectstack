@@ -6,10 +6,15 @@ inlined below as one sentence, its enforcing hook, and a pointer to the AGENTS.m
 
 ## ⛔ Claim the issue before you write any code
 
-Claim it **before any other action**: assign yourself *and* comment your session ID and
-branch — the shared identity makes the assignee field no proof, so re-read the comments.
-No hook enforces this one. Full rule: AGENTS.md → **Multi-agent working discipline**, its
-paragraph **Claim the issue BEFORE you write any code.**
+Every agent shares one GitHub identity: the assignee field is a presence bit, the `Claim:`
+comment (session ID + branch) is the identity. The session that owns a card writes both — a
+seat picking for itself takes only an unassigned card, assigns itself and posts the claim
+before any other action; a PM dispatch sets the assignee (step 1, done) and claims for its dev,
+who still posts its own `Claim:` after checking the newest one names its branch, and ⛔ never
+writes the assignee or yields the card. The comments decide, not the field: a `Claim:` from
+another session or branch means taken — ⛔ never reassign; a bare assignee with no `Claim:` is
+a dispatch's first step, not a foreign claim. No hook enforces this one. Full rule: AGENTS.md →
+**Multi-agent working discipline**, its paragraph **Claim the issue BEFORE you write any code.**
 
 ## ⛔ Worktree-first — before your FIRST file edit (AGENTS.md Prime Directive #11)
 
