@@ -1,6 +1,6 @@
 ---
 title: Protocol Reference
-description: Every schema published by @objectstack/spec — 1591 schemas across 14 protocol modules
+description: Every schema published by @objectstack/spec — 1572 schemas across 14 protocol modules
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -31,9 +31,9 @@ counts are sums of the rows they head. Regenerate with
 | [Security Protocol](/docs/references/security) | 5 | 30 | Permission sets, row-level security, sharing rules, tenancy posture. |
 | [Shared Protocol](/docs/references/shared) | 8 | 27 | Primitives used across every protocol — identifiers, HTTP, expressions, error maps, enums. |
 | [Studio Protocol](/docs/references/studio) | 3 | 35 | Studio designer metadata — the authoring surfaces for the protocols above. |
-| [System Protocol](/docs/references/system) | 36 | 291 | The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance. |
+| [System Protocol](/docs/references/system) | 33 | 272 | The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance. |
 | [UI Protocol](/docs/references/ui) | 16 | 153 | Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer. |
-| **Total** | **200** | **1591** | 14 protocol modules |
+| **Total** | **197** | **1572** | 14 protocol modules |
 
 ---
 
@@ -319,7 +319,7 @@ Studio designer metadata — the authoring surfaces for the protocols above.
 
 ## System Protocol
 
-**Source:** `packages/spec/src/system/` · **Import:** `@objectstack/spec/system` · **36 pages, 291 schemas**
+**Source:** `packages/spec/src/system/` · **Import:** `@objectstack/spec/system` · **33 pages, 272 schemas**
 
 The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance.
 
@@ -329,7 +329,6 @@ The runtime environment — logging, jobs, cache, metrics, notifications, i18n a
 | [`auth-config.zod.ts`](/docs/references/system/auth-config) | `AdvancedAuthConfig`, `AudienceConfig`, `AuthConfig`, `AuthPluginConfig`, `AuthProviderConfig`, `EmailAndPasswordConfig`, `EmailVerificationConfig`, `MutualTLSConfig`, `OidcProviderConfig`, `OidcProvidersConfig`, `SocialProviderConfig` |
 | [`book.zod.ts`](/docs/references/system/book) | `Book`, `BookAudience`, `BookGroup`, `BookInclude`, `BookNode`, `ResolvedBook`, `ResolvedEntry`, `ResolvedGroup` |
 | [`cache.zod.ts`](/docs/references/system/cache) | `CacheAvalanchePrevention`, `CacheConfig`, `CacheConsistency`, `CacheInvalidation`, `CacheStrategy`, `CacheTier`, `CacheWarmup`, `DistributedCacheConfig` |
-| [`change-management.zod.ts`](/docs/references/system/change-management) | `ChangeImpact`, `ChangePriority`, `ChangeRequest`, `ChangeStatus`, `ChangeType`, `RollbackPlan` |
 | [`collaboration.zod.ts`](/docs/references/system/collaboration) | `AwarenessEvent`, `AwarenessSession`, `AwarenessUpdate`, `AwarenessUserState`, `CRDTMergeResult`, `CRDTState`, `CRDTType`, `CollaborationMode`, `CollaborationSession`, `CollaborationSessionConfig`, `CollaborativeCursor`, `CounterOperation`, `CursorColorPreset`, `CursorSelection`, `CursorStyle`, `CursorUpdate`, `GCounter`, `LWWRegister`, `ORSet`, `ORSetElement`, `OTComponent`, `OTOperation`, `OTOperationType`, `OTTransformResult`, `PNCounter`, `TextCRDTOperation`, `TextCRDTState`, `UserActivityStatus`, `VectorClock` |
 | [`core-services.zod.ts`](/docs/references/system/core-services) | `CoreServiceName`, `KernelServiceMap`, `KernelServiceStatus`, `ServiceConfig`, `ServiceCriticality` |
 | [`deploy-bundle.zod.ts`](/docs/references/system/deploy-bundle) | `DeployBundle`, `DeployDiff`, `DeployManifest`, `DeployStatusEnum`, `DeployValidationIssue`, `DeployValidationResult`, `MigrationPlan`, `MigrationStatement`, `SchemaChange` |
@@ -340,7 +339,6 @@ The runtime environment — logging, jobs, cache, metrics, notifications, i18n a
 | [`encryption.zod.ts`](/docs/references/system/encryption) | `EncryptionAlgorithm`, `EncryptionConfig`, `FieldEncryption`, `KeyManagementProvider`, `KeyRotationPolicy` |
 | [`environment-artifact.zod.ts`](/docs/references/system/environment-artifact) | `Sha256Digest` |
 | [`http-server.zod.ts`](/docs/references/system/http-server) | `MiddlewareConfig`, `MiddlewareType`, `RouteHandlerMetadata` |
-| [`incident-response.zod.ts`](/docs/references/system/incident-response) | `Incident`, `IncidentCategory`, `IncidentNotificationMatrix`, `IncidentNotificationRule`, `IncidentResponsePhase`, `IncidentResponsePolicy`, `IncidentSeverity`, `IncidentStatus` |
 | [`job.zod.ts`](/docs/references/system/job) | `CronSchedule`, `IntervalSchedule`, `Job`, `JobExecution`, `JobExecutionStatus`, `OnceSchedule`, `RetryPolicy`, `Schedule` |
 | [`license.zod.ts`](/docs/references/system/license) | `Feature`, `License`, `LicenseMetricType`, `Plan` |
 | [`logging.zod.ts`](/docs/references/system/logging) | `ConsoleDestinationConfig`, `ExtendedLogLevel`, `ExternalServiceDestinationConfig`, `FileDestinationConfig`, `HttpDestinationConfig`, `LogDestination`, `LogDestinationType`, `LogEnrichmentConfig`, `LogEntry`, `LogFormat`, `LogLevel`, `LoggerConfig`, `LoggingConfig`, `StructuredLogEntry` |
@@ -358,7 +356,6 @@ The runtime environment — logging, jobs, cache, metrics, notifications, i18n a
 | [`supplier-security.zod.ts`](/docs/references/system/supplier-security) | `SupplierAssessmentStatus`, `SupplierRiskLevel`, `SupplierSecurityAssessment`, `SupplierSecurityPolicy`, `SupplierSecurityRequirement` |
 | [`tenant.zod.ts`](/docs/references/system/tenant) | `DatabaseLevelIsolationStrategy`, `DatabaseProvider`, `QuotaEnforcementResult`, `RowLevelIsolationStrategy`, `SchemaLevelIsolationStrategy`, `Tenant`, `TenantConnectionConfig`, `TenantIsolationConfig`, `TenantIsolationLevel`, `TenantQuota`, `TenantSecurityPolicy`, `TenantUsage` |
 | [`tracing.zod.ts`](/docs/references/system/tracing) | `OpenTelemetryCompatibility`, `OtelExporterType`, `SamplingDecision`, `SamplingStrategyType`, `Span`, `SpanAttributeValue`, `SpanAttributes`, `SpanEvent`, `SpanKind`, `SpanLink`, `SpanStatus`, `TraceContext`, `TraceContextPropagation`, `TraceFlags`, `TracePropagationFormat`, `TraceSamplingConfig`, `TraceState`, `TracingConfig` |
-| [`training.zod.ts`](/docs/references/system/training) | `TrainingCategory`, `TrainingCompletionStatus`, `TrainingCourse`, `TrainingPlan`, `TrainingRecord` |
 | [`translation.zod.ts`](/docs/references/system/translation) | `ActionResultDialogTranslation`, `CoverageBreakdownEntry`, `FieldTranslation`, `Locale`, `ObjectTranslationData`, `TranslationBundle`, `TranslationConfig`, `TranslationCoverageResult`, `TranslationData`, `TranslationDiffItem`, `TranslationDiffStatus`, `TranslationItem` |
 | [`worker.zod.ts`](/docs/references/system/worker) | `BatchProgress`, `QueueConfig`, `Task`, `TaskExecutionResult`, `TaskPriority`, `TaskRetryPolicy`, `TaskStatus`, `WorkerStats` |
 
