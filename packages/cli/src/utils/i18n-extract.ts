@@ -14,12 +14,50 @@
  * scaffoldable but ungated, which is how English approval buttons shipped into
  * a zh-CN workspace unnoticed (#3370). Add a surface here and both sides get it.
  *
- * Two axes per entry, and they are not the same question:
- *   `sourceValue` — what extract seeds the skeleton with; may be a derived
- *                   fallback (an object's own name, a humanized field path).
- *   `inline`      — what the reader actually sees in the source locale; drives
- *                   the coverage gate, so a string nobody authored is never
- *                   reported as an untranslated one.
+ * Three axes per entry, and they are not the same question:
+ *   `sourceValue`   — what extract seeds the skeleton with; may be a derived
+ *                     fallback (an object's own name, a humanized field path).
+ *   `inline`        — what the reader actually sees in the source locale;
+ *                     drives the coverage gate, so a string nobody authored is
+ *                     never reported as an untranslated one.
+ *   `inlineLocales` — the inline LOCALE MAP the author wrote at this prop, if
+ *                     they wrote one; authored text that no bundle row can be
+ *                     scaffolded from. See the note below.
+ *
+ * ## Inline locale maps are NOT extracted — and are not "unauthored" either
+ *
+ * `I18nLabelSchema` authorizes two forms of a display label: a plain string,
+ * whose translations live in a bundle under the key this walk emits, and an
+ * inline locale map — `{ en: 'Members', 'zh-CN': '成员' }` — which the author
+ * writes out in place and the renderer picks from (`pickLocalized` /
+ * `resolveI18nLabel`). Rulings #5728, #10926 and #14412 make the map the ONE
+ * localisation route for the props that have no bundle key at all
+ * (`element:text`'s `content` among them), so a page localised that way is
+ * fully localised.
+ *
+ * **The map stays out of the bundle.** Nothing here scaffolds a row for it, no
+ * key family is added for one, and ⛔ no key is synthesised from a node's
+ * position in the component tree — an array index promoted to a bundle key
+ * turns reordering two sibling components into a silent, all-green swap of
+ * their translations, and `page:accordion` already delivers index identity as
+ * a contract (`component.zod.ts`, `panel-INDEX`). Maintainer ruling
+ * 2026-09-03 (#14749, Q3 = C3) settles that as a refusal, and records the
+ * direction if inline maps are ever to be extracted: **identity first** —
+ * `component.id` / `section.name` / `tabs item.value` made mandatory and
+ * gate-enforced, then the existing `pages.<page>.components.<id>.<key>` family
+ * reused. ⛔ Never array-index keys.
+ *
+ * **What the map does get is an honest coverage record** (#14749, Q2 = B1).
+ * The key this walk emits for the prop already exists; what was missing was
+ * evidence that the author had written anything at it. `inlineText` narrows a
+ * map to `undefined` — the same value an absent prop produces — so the two
+ * arrived here indistinguishable, and a prop written out in four languages was
+ * recorded exactly like one nobody had written. `inlineLocales` is that third
+ * axis: it says the prop IS authored and in which locales, so the gate can
+ * count the locales present as covered and the absent ones as gaps, with no
+ * bundle row and no new key. ⛔ Do not re-narrow an authored value with
+ * `inlineText` before handing it to a `push*` helper — that is precisely how
+ * the map used to be lost.
  *
  * Walk surface:
  *
@@ -93,7 +131,7 @@ import {
 } from '@objectstack/spec/system';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { deriveFieldGroupLayout } from '@objectstack/spec/data';
-import { expandViewContainer } from '@objectstack/spec/ui';
+import { expandViewContainer, InlineLocaleMapSchema } from '@objectstack/spec/ui';
 import { authorWarnedProperties, walkPageComponents } from '@objectstack/lint';
 import { collectFilledFromHashes } from '@objectstack/platform-objects/apps';
 
@@ -122,6 +160,32 @@ export interface ExpectedEntry {
    * the author never wrote.
    */
   inline?: string;
+  /**
+   * The **inline locale map** the author wrote at this prop, verbatim
+   * (`{ en: 'Members', 'zh-CN': '成员' }`) — the second form
+   * `I18nLabelSchema` authorizes, kept as a third axis beside
+   * {@link sourceValue} and {@link inline} because it answers a question
+   * neither of those can (#14749, maintainer ruling 2026-09-03, Q2 = B1).
+   *
+   * `inline` is a *plain-string* reading: `inlineText` narrows a map away to
+   * `undefined`, which is the same value an absent prop produces. That made
+   * one diagnostic carry two opposite facts — a label written out in four
+   * languages and a label nobody wrote were recorded identically, and the
+   * coverage gate reported the first as if it were the second.
+   *
+   * Set ⇒ the prop **is** authored, and the map says in which locales. Unset
+   * ⇒ nothing (or nothing map-shaped) is there. `sourceValue` stays
+   * `undefined` for a map-only entry on purpose: this is a *coverage* record,
+   * not a bundle row — see the "inline maps are not extracted" note in the
+   * module header.
+   *
+   * Only non-empty string values survive here, and only if
+   * `InlineLocaleMapSchema` accepts the object: the schema's own key
+   * refinement is the authority on what a locale tag is, so the retired
+   * `{ key, defaultValue }` key-reference dialect it rejects is not laundered
+   * into "authored" by this walk either.
+   */
+  inlineLocales?: Readonly<Record<string, string>>;
   /** What kind of metadata this entry was harvested from. */
   source:
     | 'object'
@@ -282,7 +346,7 @@ function defaultListViewKey(object: string, container: any): string | undefined 
  */
 function pushViewEntries(out: ExpectedEntry[], objectName: string, viewName: string, view: any): void {
   const root = ['objects', objectName, '_views', viewName];
-  pushDerived(out, [...root, 'label'], view?.label ?? viewName, inlineText(view?.label), 'view', { objectName });
+  pushDerived(out, [...root, 'label'], inlineText(view?.label) ?? viewName, view?.label, 'view', { objectName });
   pushOptional(out, [...root, 'description'], view?.description, 'view', { objectName });
   pushViewEmptyState(out, root, view, objectName);
   pushBulkActionDefs(out, root, view, objectName);
@@ -343,7 +407,7 @@ function pushBulkActionDefs(out: ExpectedEntry[], viewRoot: string[], view: any,
     // `inline` left unset so coverage never demands a translation of a string
     // nobody wrote.
     const authoredLabel = inlineText(def.label);
-    pushDerived(out, [...base, 'label'], authoredLabel ?? humanizeFieldPath(defName), authoredLabel, 'view', { objectName });
+    pushDerived(out, [...base, 'label'], authoredLabel ?? humanizeFieldPath(defName), def.label, 'view', { objectName });
     pushOptional(out, [...base, 'confirmText'], def.confirmText, 'view', { objectName });
     pushOptional(out, [...base, 'confirmLabel'], def.confirmLabel, 'view', { objectName });
     if (!Array.isArray(def.params)) continue;
@@ -355,7 +419,7 @@ function pushBulkActionDefs(out: ExpectedEntry[], viewRoot: string[], view: any,
       // The dialog renders `param.label ?? param.name` — the bare name, the
       // same fallback `pushActionParams` seeds an inline action param from.
       const literalLabel = inlineText(param.label);
-      pushDerived(out, [...pbase, 'label'], literalLabel ?? pname, literalLabel, 'view', { objectName });
+      pushDerived(out, [...pbase, 'label'], literalLabel ?? pname, param.label, 'view', { objectName });
       pushOptional(out, [...pbase, 'help'], param.help, 'view', { objectName });
       pushOptional(out, [...pbase, 'placeholder'], param.placeholder, 'view', { objectName });
     }
@@ -370,12 +434,11 @@ function pushBulkActionDefs(out: ExpectedEntry[], viewRoot: string[], view: any,
 function pushViewEmptyState(out: ExpectedEntry[], viewPath: string[], view: any, objectName: string): void {
   const emptyState = view?.emptyState;
   if (!emptyState || typeof emptyState !== 'object') return;
-  if (typeof emptyState.title === 'string' && emptyState.title.length > 0) {
-    pushEntry(out, [...viewPath, 'emptyState', 'title'], emptyState.title, 'view', { objectName });
-  }
-  if (typeof emptyState.message === 'string' && emptyState.message.length > 0) {
-    pushEntry(out, [...viewPath, 'emptyState', 'message'], emptyState.message, 'view', { objectName });
-  }
+  // No `typeof === 'string'` pre-filter: `pushEntry` is the one place that
+  // decides what counts as authored, and it accepts BOTH authorized forms of
+  // an `I18nLabel`. A guard here would re-narrow the map away (#14749).
+  pushEntry(out, [...viewPath, 'emptyState', 'title'], emptyState.title, 'view', { objectName });
+  pushEntry(out, [...viewPath, 'emptyState', 'message'], emptyState.message, 'view', { objectName });
 }
 
 type EntryScope = Pick<ExpectedEntry, 'objectName' | 'appName' | 'metadataType' | 'flowName'>;
@@ -386,18 +449,71 @@ function inlineText(value: unknown): string | undefined {
 }
 
 /**
+ * Narrow to the **inline locale map** form of an `I18nLabel`, or `undefined`.
+ *
+ * ⛔ Deliberately not a hand-written "looks like a locale map" test. The one
+ * definition of that shape is `InlineLocaleMapSchema` in
+ * `spec/src/ui/i18n.zod.ts`, whose key refinement is doing real work: it
+ * rejects the retired `{ key, defaultValue }` key-reference dialect BY NAME,
+ * because a map keyed that way reaches both resolvers' last-resort limb and
+ * renders the raw i18n key on screen (#5055 / #9925 / #10492). A second
+ * predicate here would be a second contract — the failure Prime Directive #12
+ * describes — and the one that drifted would be this one, silently promoting a
+ * shape the schema refuses into "authored".
+ *
+ * Two narrowings on top of a clean parse, both matching how this file already
+ * counts on the *bundle* side (`lookupKey` in `i18n-coverage.ts`):
+ *
+ *  - an empty-string value is not a translation, so those entries are dropped;
+ *  - a map left with no entries is not authored text, so it answers
+ *    `undefined` rather than an empty record — `{}` parses fine, and reporting
+ *    it as "authored in zero locales" would invent an authoring act.
+ */
+function inlineLocaleMap(value: unknown): Record<string, string> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  if (!InlineLocaleMapSchema.safeParse(value).success) return undefined;
+  const map: Record<string, string> = {};
+  for (const [tag, text] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof text === 'string' && text.length > 0) map[tag] = text;
+  }
+  return Object.keys(map).length > 0 ? map : undefined;
+}
+
+/**
+ * The evidence an authored value carries, read once so that every `push*`
+ * helper below files a locale map the same way. `authored` is the RAW prop —
+ * ⛔ never pre-narrowed with `inlineText` at the call site, which is precisely
+ * how a written map used to arrive here already flattened to `undefined`.
+ */
+function authoredEvidence(authored: unknown): Pick<ExpectedEntry, 'inline' | 'inlineLocales'> {
+  const inline = inlineText(authored);
+  if (inline !== undefined) return { inline };
+  const inlineLocales = inlineLocaleMap(authored);
+  return inlineLocales ? { inlineLocales } : {};
+}
+
+/**
  * Record a key whose displayed text *is* its seed — the common case, where the
  * author wrote the literal we scaffold from.
+ *
+ * A value in the inline-map form is recorded as **authored, with no seed**: it
+ * is already multilingual, so there is nothing for `os i18n extract` to
+ * scaffold (`sourceValue` unset ⇒ no bundle row), while `inlineLocales` tells
+ * the coverage gate which locales the author actually wrote.
  */
 function pushEntry(
   out: ExpectedEntry[],
   path: string[],
-  sourceValue: string | undefined,
+  sourceValue: unknown,
   source: ExpectedEntry['source'],
   extra?: EntryScope,
 ): void {
-  if (typeof sourceValue !== 'string') return;
-  out.push({ path, sourceValue, inline: sourceValue, source, ...extra });
+  if (typeof sourceValue === 'string') {
+    out.push({ path, sourceValue, inline: sourceValue, source, ...extra });
+    return;
+  }
+  const inlineLocales = inlineLocaleMap(sourceValue);
+  if (inlineLocales) out.push({ path, inlineLocales, source, ...extra });
 }
 
 /**
@@ -405,16 +521,32 @@ function pushEntry(
  * missing label, a param's machine name rendered as its caption. The seed keeps
  * the extracted skeleton usable, but `inline` stays unset so the coverage gate
  * does not demand translations of a string nobody authored.
+ *
+ * `authored` is the raw prop, not a pre-narrowed string: a derived seed and an
+ * inline locale map co-exist (the map is what a reader sees; the seed is what
+ * a skeleton would show), and only the raw value can tell the two apart from
+ * "the author wrote nothing".
  */
 function pushDerived(
   out: ExpectedEntry[],
   path: string[],
   seed: string,
-  authored: string | undefined,
+  authored: unknown,
   source: ExpectedEntry['source'],
   extra?: EntryScope,
 ): void {
-  out.push({ path, sourceValue: seed, inline: authored, source, ...extra });
+  const evidence = authoredEvidence(authored);
+  // `inline` is spelled out rather than spread, so a derived entry keeps the
+  // key present-with-`undefined` it has always had — `toMatchObject` in the
+  // existing pins reads the property's PRESENCE, not just its value.
+  out.push({
+    path,
+    sourceValue: seed,
+    inline: evidence.inline,
+    ...(evidence.inlineLocales ? { inlineLocales: evidence.inlineLocales } : {}),
+    source,
+    ...extra,
+  });
 }
 
 /**
@@ -429,9 +561,9 @@ function pushOptional(
   source: ExpectedEntry['source'],
   extra?: EntryScope,
 ): void {
-  const text = inlineText(value);
-  if (text === undefined) out.push({ path, source, ...extra });
-  else pushEntry(out, path, text, source, extra);
+  const evidence = authoredEvidence(value);
+  if (evidence.inline !== undefined) pushEntry(out, path, evidence.inline, source, extra);
+  else out.push({ path, ...evidence, source, ...extra });
 }
 
 /**
@@ -463,9 +595,9 @@ function pushActionParams(
     const base = [...actionRoot, 'params', pname];
     const literalLabel = inlineText(param.label);
     if (param.field) {
-      pushOptional(out, [...base, 'label'], literalLabel, kind, { objectName });
+      pushOptional(out, [...base, 'label'], param.label, kind, { objectName });
     } else {
-      pushDerived(out, [...base, 'label'], literalLabel ?? pname, literalLabel, kind, { objectName });
+      pushDerived(out, [...base, 'label'], literalLabel ?? pname, param.label, kind, { objectName });
     }
     pushOptional(out, [...base, 'helpText'], param.helpText, kind, { objectName });
     pushOptional(out, [...base, 'placeholder'], param.placeholder, kind, { objectName });
@@ -504,7 +636,6 @@ function pushActionResultDialog(
     for (const field of dialog.fields) {
       if (!field || typeof field !== 'object') continue;
       if (typeof field.path !== 'string' || field.path.length === 0) continue;
-      if (typeof field.label !== 'string' || field.label.length === 0) continue;
       pushEntry(out, [...base, 'fields', field.path], field.label, kind, { objectName });
     }
   }
@@ -562,7 +693,7 @@ function pushValidationMessages(
     pushEntry(
       out,
       ['objects', objectName, '_validations', ruleName, 'message'],
-      inlineText((rule as any).message),
+      (rule as any).message,
       'object',
       { objectName },
     );
@@ -598,8 +729,54 @@ function pushValidationMessages(
 // it would be noise. The `_sections` schema says the same ("Each section in
 // the page schema must declare a stable `name` for the lookup to fire").
 
-/** object name → section name → source label (undefined = none authored). */
-type SectionIndex = Map<string, Map<string, string | undefined>>;
+/**
+ * object name → section name → the authored label, RAW (undefined = none
+ * authored). Raw rather than narrowed to a string because an inline locale map
+ * is authored text too, and narrowing it here would erase that fact before the
+ * entry is ever built — the #14749 defect, one layer up from `pushDerived`.
+ */
+type SectionIndex = Map<string, Map<string, AuthoredLabel>>;
+
+/** Either authorized form of an `I18nLabel`, or nothing authored at all. */
+type AuthoredLabel = string | Record<string, unknown> | undefined;
+
+/** Is this value authored text in either authorized form? */
+function isAuthored(label: unknown): boolean {
+  return inlineText(label) !== undefined || inlineLocaleMap(label) !== undefined;
+}
+
+/** Narrow an arbitrary value to {@link AuthoredLabel} — anything else is nothing. */
+function asAuthoredLabel(label: unknown): AuthoredLabel {
+  return isAuthored(label) ? (label as AuthoredLabel) : undefined;
+}
+
+/**
+ * Do two authored labels say the same thing — in either authorized form?
+ *
+ * Used for the `page:header` de-duplication, whose rule is "a title that
+ * merely restates the page label resolves through the label's own key, so
+ * offering it a second key would offer one string under two keys". That rule
+ * is about the TEXT, not about the JavaScript value: two inline locale maps
+ * written out identically are the duplicate the rule means, and `!==` on two
+ * object references would answer `false` for every one of them.
+ *
+ * Key ORDER is deliberately not significant (the maps are compared as sets of
+ * entries) — `pickLocalized`'s insertion-order limbs decide which entry is
+ * shown for an unlisted locale, but two maps carrying the same entries show
+ * the same text for every locale either of them lists, which is the question
+ * here.
+ */
+function sameAuthored(a: unknown, b: unknown): boolean {
+  const aText = inlineText(a);
+  const bText = inlineText(b);
+  if (aText !== undefined || bText !== undefined) return aText === bText;
+  const aMap = inlineLocaleMap(a);
+  const bMap = inlineLocaleMap(b);
+  if (!aMap || !bMap) return aMap === bMap;
+  const aKeys = Object.keys(aMap).sort();
+  const bKeys = Object.keys(bMap).sort();
+  return aKeys.length === bKeys.length && aKeys.every((k, i) => bKeys[i] === k && aMap[k] === bMap[k]);
+}
 
 /**
  * Record one (object, section) pair.
@@ -615,7 +792,7 @@ function addSection(index: SectionIndex, objectName: unknown, sectionName: unkno
   if (typeof sectionName !== 'string' || sectionName.length === 0) return;
   let sections = index.get(objectName);
   if (!sections) index.set(objectName, (sections = new Map()));
-  const authored = inlineText(label);
+  const authored = asAuthoredLabel(label);
   if (!sections.has(sectionName)) sections.set(sectionName, authored);
   else if (sections.get(sectionName) === undefined && authored !== undefined) {
     sections.set(sectionName, authored);
@@ -723,7 +900,7 @@ function walkObjectSections(config: any, out: ExpectedEntry[]): void {
         out,
         ['objects', objectName, '_sections', sectionName, 'label'],
         // Seed mirrors the renderer's own fallback (`s.label || s.name`).
-        label ?? sectionName,
+        inlineText(label) ?? sectionName,
         label,
         'section',
         { objectName },
@@ -757,7 +934,7 @@ function walkObjectTabs(config: any, out: ExpectedEntry[]): void {
   // One tab name may be authored on several pages over the same object (a
   // shared "urgent" preset); collect first so the key is emitted once, the
   // same way `walkObjectSections` de-duplicates a heading.
-  const index = new Map<string, Map<string, string | undefined>>();
+  const index = new Map<string, Map<string, AuthoredLabel>>();
 
   for (const page of pages) {
     if (!page || typeof page !== 'object') continue;
@@ -776,10 +953,11 @@ function walkObjectTabs(config: any, out: ExpectedEntry[]): void {
       if (!tab || typeof tab !== 'object') continue;
       const tabName = inlineText(tab.name);
       if (tabName === undefined) continue;
-      // A localized-map label is already multilingual — `inlineText` drops it,
-      // so the entry is emitted with no seed and coverage does not demand a
-      // translation for a string nobody authored in plain text.
-      const authored = inlineText(tab.label);
+      // A localized-map label is already multilingual, so it seeds nothing —
+      // but it IS authored, and is carried through as such so coverage counts
+      // the locales it holds instead of filing it as a label nobody wrote
+      // (#14749).
+      const authored = asAuthoredLabel(tab.label);
       if (!tabsForObject.has(tabName)) tabsForObject.set(tabName, authored);
       else if (tabsForObject.get(tabName) === undefined && authored !== undefined) {
         tabsForObject.set(tabName, authored);
@@ -793,7 +971,7 @@ function walkObjectTabs(config: any, out: ExpectedEntry[]): void {
         out,
         ['objects', objectName, '_tabs', tabName, 'label'],
         // Seed mirrors the renderer's own fallback (`tab.label || tab.name`).
-        label ?? tabName,
+        inlineText(label) ?? tabName,
         label,
         'view',
         { objectName },
@@ -882,12 +1060,13 @@ function emitPageComponentCopy(out: ExpectedEntry[], page: any, name: string): v
     if (addressed && (nested || component.type !== PAGE_HEADER_COMPONENT_TYPE)) {
       const props = component.properties ?? {};
       for (const key of PAGE_COMPONENT_COPY_KEYS) {
-        const value = key === 'label' && typeof component.label === 'string' && component.label
+        const value = key === 'label' && isAuthored(component.label)
           ? component.label
           : props[key];
-        if (typeof value === 'string' && value) {
-          pushEntry(out, ['pages', name, 'components', id as string, key], value, 'page');
-        }
+        // `pushEntry` filters: a plain string seeds a bundle row, an inline
+        // locale map is recorded as authored-with-no-seed, anything else
+        // records nothing (#14749).
+        pushEntry(out, ['pages', name, 'components', id as string, key], value, 'page');
       }
     }
     return component;
@@ -928,7 +1107,7 @@ export function collectExpectedEntries(
     if (!obj?.name) continue;
     const objectName = obj.name as string;
 
-    pushDerived(out, ['objects', objectName, 'label'], obj.label ?? objectName, inlineText(obj.label), 'object', { objectName });
+    pushDerived(out, ['objects', objectName, 'label'], inlineText(obj.label) ?? objectName, obj.label, 'object', { objectName });
     pushOptional(out, ['objects', objectName, 'pluralLabel'], obj.pluralLabel, 'object', { objectName });
     pushOptional(out, ['objects', objectName, 'description'], obj.description, 'object', { objectName });
 
@@ -939,8 +1118,8 @@ export function collectExpectedEntries(
         pushDerived(
           out,
           ['objects', objectName, 'fields', fieldName, 'label'],
-          field.label ?? fieldName,
-          inlineText(field.label),
+          inlineText(field.label) ?? fieldName,
+          field.label,
           'field',
           { objectName },
         );
@@ -966,7 +1145,10 @@ export function collectExpectedEntries(
           if (authored !== undefined && authored !== value) {
             pushEntry(out, path, authored, 'option', { objectName });
           } else {
-            pushDerived(out, path, value, undefined, 'option', { objectName });
+            // A locale-map option label is authored text in every locale it
+            // carries — it cannot be "byte-equal to the machine value", so the
+            // #8543 derived rule above has nothing to say about it.
+            pushDerived(out, path, value, inlineLocaleMap(label) ? label : undefined, 'option', { objectName });
           }
         };
         const opts = field.options;
@@ -999,7 +1181,7 @@ export function collectExpectedEntries(
         if (!action?.name) continue;
         const aname = action.name as string;
         const aroot = ['objects', objectName, '_actions', aname];
-        pushDerived(out, [...aroot, 'label'], action.label ?? aname, inlineText(action.label), 'action', { objectName });
+        pushDerived(out, [...aroot, 'label'], inlineText(action.label) ?? aname, action.label, 'action', { objectName });
         pushOptional(out, [...aroot, 'description'], action.description, 'action', { objectName });
         pushOptional(out, [...aroot, 'confirmText'], action.confirmText, 'action', { objectName });
         pushOptional(out, [...aroot, 'successMessage'], action.successMessage, 'action', { objectName });
@@ -1076,7 +1258,7 @@ export function collectExpectedEntries(
       ? ['objects', objectName as string, '_actions', action.name]
       : ['globalActions', action.name];
     const kind: ExpectedEntry['source'] = objectName ? 'action' : 'globalAction';
-    pushDerived(out, [...root, 'label'], action.label ?? action.name, inlineText(action.label), kind, { objectName });
+    pushDerived(out, [...root, 'label'], inlineText(action.label) ?? action.name, action.label, kind, { objectName });
     // `description` is OPTIONAL-not-derived, exactly like confirmText: the
     // param dialog falls back to its own generic `actionDialog.description`
     // string when the action declares none, so an undeclared description is
@@ -1145,12 +1327,10 @@ export function collectExpectedEntries(
         const props = component.properties ?? {};
         // `title` duplicating `label` is the common case and resolves via the
         // label fallback — only emit it when the two genuinely differ.
-        if (typeof props.title === 'string' && props.title && props.title !== page.label) {
+        if (!sameAuthored(props.title, page.label)) {
           pushEntry(out, ['pages', name, 'title'], props.title, 'page');
         }
-        if (typeof props.subtitle === 'string' && props.subtitle) {
-          pushEntry(out, ['pages', name, 'subtitle'], props.subtitle, 'page');
-        }
+        pushEntry(out, ['pages', name, 'subtitle'], props.subtitle, 'page');
       }
     }
 
@@ -1384,9 +1564,11 @@ function walkScreenFlows(config: any, out: ExpectedEntry[]): void {
       const screenRoot = ['flows', flowName, 'screens', nodeId];
 
       for (const key of FLOW_SCREEN_COPY_KEYS) {
+        // Raw, not `inlineText`-narrowed: the fallback still picks the FIRST
+        // authored value, in either authorized form (#14749).
         const authored = key === 'title'
-          ? (inlineText(cfg[key]) ?? inlineText(node.label))
-          : inlineText(cfg[key]);
+          ? (asAuthoredLabel(cfg[key]) ?? asAuthoredLabel(node.label))
+          : asAuthoredLabel(cfg[key]);
         pushOptional(out, [...screenRoot, key], authored, 'flow', scope);
       }
 
@@ -1397,9 +1579,9 @@ function walkScreenFlows(config: any, out: ExpectedEntry[]): void {
         if (!fieldName) continue;
         const fieldRoot = [...screenRoot, 'fields', fieldName];
         for (const key of FLOW_SCREEN_FIELD_COPY_KEYS) {
-          const authored = inlineText(field[key]);
+          const authored = asAuthoredLabel(field[key]);
           if (key === 'label') {
-            pushDerived(out, [...fieldRoot, key], authored ?? fieldName, authored, 'flow', scope);
+            pushDerived(out, [...fieldRoot, key], inlineText(authored) ?? fieldName, authored, 'flow', scope);
           } else {
             pushOptional(out, [...fieldRoot, key], authored, 'flow', scope);
           }
