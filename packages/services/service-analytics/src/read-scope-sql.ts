@@ -3,6 +3,7 @@
 import type { FilterCondition } from '@objectstack/spec/data';
 import type { RegisteredErrorCode } from '@objectstack/spec/api';
 import { likePattern, LIKE_ESCAPE_CHAR, asciiLowerSqlExpr } from './like-pattern.js';
+import { textOperatorPolarity } from './non-text-column.js';
 import {
   CROSS_FIELD_COMPARISON_OPERATORS,
   fieldReferenceBetweenBoundMessage,
@@ -428,6 +429,34 @@ function readScopeCompileError(message: string): Error {
  */
 const FALSE_CLAUSE = '1 = 0';
 
+/**
+ * [#14079] The TRUE constant at OPERATOR level. `''` is this compiler's TRUE
+ * for a NODE (it drops out of a conjunction), but an operator's clause is
+ * joined with ` AND ` by {@link compileField} and cannot be empty — so the one
+ * operator that answers TRUE for every row of a non-text column
+ * (`$notContains`) needs a spelling of its own. `1 = 1` is the mirror of
+ * {@link FALSE_CLAUSE} and what `driver-sql` emits for the same cell.
+ */
+const TRUE_CLAUSE = '1 = 1';
+
+/**
+ * [#14079] What a caller can tell this compiler about the columns a read scope
+ * names, beyond the scope itself.
+ */
+export interface ReadScopeCompileOptions {
+  /**
+   * Is `field` a column whose STORED value is never text — a declared numeric
+   * or boolean scalar (`NON_TEXT_STORED_VALUE_TYPES`, `@objectstack/spec`)?
+   * When it answers `true`, a text operator over that column compiles to the
+   * contract's constant (`1 = 0` for the positive operators, `1 = 1` for
+   * `$notContains`) instead of a `LIKE` that coerces on SQLite and is refused
+   * at query time on Postgres (SQLSTATE 42883). Absent, or answering `false`,
+   * keeps the `LIKE` — the answer for a text column and for a caller that
+   * cannot classify one (`non-text-column.ts` carries the argument).
+   */
+  nonTextColumn?: (field: string) => boolean;
+}
+
 /** A node the compiler can walk: a plain object, not `null` and not an array. */
 function isFilterNode(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -443,10 +472,11 @@ function quoteIdent(name: string, kind: string): string {
 export function compileScopedFilterToSql(
   filter: FilterCondition,
   alias: string,
+  options: ReadScopeCompileOptions = {},
 ): { sql: string; params: unknown[] } {
   const quotedAlias = quoteIdent(alias, 'alias');
   const params: unknown[] = [];
-  const sql = compileNode(filter, quotedAlias, params);
+  const sql = compileNode(filter, quotedAlias, params, options);
   return { sql, params };
 }
 
@@ -588,14 +618,14 @@ export function assertReadScopeCannotVacate(scope: unknown, objectName: string):
  * wrong value: a read scope that binds the wrong tenant id is worse than one
  * that is merely too wide. Buffer per child, commit only what survives.
  */
-function compileSub(node: unknown, qAlias: string): { sql: string; params: unknown[] } {
+function compileSub(node: unknown, qAlias: string, opts: ReadScopeCompileOptions): { sql: string; params: unknown[] } {
   const params: unknown[] = [];
-  const sql = compileNode(node, qAlias, params);
+  const sql = compileNode(node, qAlias, params, opts);
   return { sql, params };
 }
 
 /** Compile a filter node into a boolean SQL expression ('' = TRUE, no constraint). */
-function compileNode(node: unknown, qAlias: string, params: unknown[]): string {
+function compileNode(node: unknown, qAlias: string, params: unknown[], opts: ReadScopeCompileOptions): string {
   if (!isFilterNode(node)) {
     throw readScopeCompileError('[read-scope-sql] read scope must be a filter object (fail-closed).');
   }
@@ -620,7 +650,7 @@ function compileNode(node: unknown, qAlias: string, params: unknown[]): string {
         if (key === '$or') clauses.push(FALSE_CLAUSE);
         continue;
       }
-      const compiled = (value as unknown[]).map((child) => compileSub(child, qAlias));
+      const compiled = (value as unknown[]).map((child) => compileSub(child, qAlias, opts));
       // A `''` branch is the constant TRUE. It ABSORBS a disjunction — one TRUE
       // disjunct makes the whole `$or` TRUE — so the group contributes nothing
       // rather than collapsing to its remaining branches, which would have
@@ -638,7 +668,7 @@ function compileNode(node: unknown, qAlias: string, params: unknown[]): string {
       // `driver-sql` / `driver-memory` / `formula` admit. A non-node operand is
       // left alone so `compileNode` still rejects it with its own message.
       const operand = isFilterNode(value) ? nullSafeNegationOperand(value) : value;
-      const inner = compileSub(operand, qAlias);
+      const inner = compileSub(operand, qAlias, opts);
       if (inner.sql.length === 0) {
         // `NOT TRUE ≡ FALSE`. Emitting nothing here is what let a `{$not: {}}`
         // read scope through `applyReadScope`'s `if (!sql) return;` and ran the
@@ -651,14 +681,14 @@ function compileNode(node: unknown, qAlias: string, params: unknown[]): string {
     } else if (key.startsWith('$')) {
       throw readScopeCompileError(`[read-scope-sql] unsupported top-level operator "${key}" (fail-closed).`);
     } else {
-      clauses.push(compileField(key, value, qAlias, params));
+      clauses.push(compileField(key, value, qAlias, params, opts));
     }
   }
   return clauses.join(' AND ');
 }
 
 /** Compile a single `field: value | { $op: ... }` entry. */
-function compileField(field: string, value: unknown, qAlias: string, params: unknown[]): string {
+function compileField(field: string, value: unknown, qAlias: string, params: unknown[], opts: ReadScopeCompileOptions): string {
   const col = `${qAlias}.${quoteIdent(field, 'field')}`;
 
   // [#6125] `undefined` in a comparand position, refused before anything binds —
@@ -705,7 +735,7 @@ function compileField(field: string, value: unknown, qAlias: string, params: unk
 
   const parts: string[] = [];
   for (const op of keys) {
-    parts.push(compileOperator(col, op, ops[op], field, params));
+    parts.push(compileOperator(col, op, ops[op], field, params, opts));
   }
   return parts.length === 1 ? parts[0] : `(${parts.join(' AND ')})`;
 }
@@ -734,6 +764,19 @@ function bindLike(params: unknown[], pattern: string): string {
   // Left-to-right evaluation of the template puts the pattern in `params` before
   // the escape character, which is the order the `?` appear.
   return `${bind(params, pattern)} ESCAPE ${bind(params, LIKE_ESCAPE_CHAR)}`;
+}
+
+/**
+ * [#14079] The contract's constant for a text operator over a column the
+ * caller declared non-text ({@link ReadScopeCompileOptions.nonTextColumn}), or
+ * `null` when the column is text or the caller could not classify it — the
+ * arm then binds its `LIKE` exactly as before. Binds nothing, so `params` stays
+ * aligned with the placeholders that ARE emitted. `non-text-column.ts` carries
+ * the ruling and why the two constants compose with the NULL-safe rules.
+ */
+function textOverNonTextColumn(op: string, field: string, opts: ReadScopeCompileOptions): string | null {
+  if (!opts.nonTextColumn || !opts.nonTextColumn(field)) return null;
+  return textOperatorPolarity(op) === 'negative' ? TRUE_CLAUSE : FALSE_CLAUSE;
 }
 
 /**
@@ -1171,7 +1214,14 @@ function assertNoFieldReferenceComparand(field: string, spec: unknown): void {
   }
 }
 
-function compileOperator(col: string, op: string, val: unknown, field: string, params: unknown[]): string {
+function compileOperator(
+  col: string,
+  op: string,
+  val: unknown,
+  field: string,
+  params: unknown[],
+  opts: ReadScopeCompileOptions,
+): string {
   switch (op) {
     case '$eq': return val === null ? `${col} IS NULL` : `${col} = ${bind(params, val)}`;
     // [#5298] `$ne: null` stays `IS NOT NULL` — already total, and "has any
@@ -1211,7 +1261,13 @@ function compileOperator(col: string, op: string, val: unknown, field: string, p
     // character is bound with it. See {@link bindLike}.
     // [#5234] …and it must be a value `String()` can render, which is asserted
     // BEFORE `likePattern` sees it — see {@link assertRenderableText}.
-    case '$contains': assertRenderableText(op, field, val); return `${col} LIKE ${bindLike(params, likePattern('contains', val))}`;
+    // [#14079] Every LIKE arm asks {@link textOverNonTextColumn} AFTER its
+    // comparand gate and BEFORE it binds: a comparand the contract refuses is
+    // still refused, and a column whose stored value is never text gets the
+    // contract's constant instead of a `LIKE` over a number.
+    case '$contains':
+      assertRenderableText(op, field, val);
+      return textOverNonTextColumn(op, field, opts) ?? `${col} LIKE ${bindLike(params, likePattern('contains', val))}`;
     /**
      * [#6520] `$icontains` on the READ-SCOPE lowering — the one compiler in this
      * package where a wrong answer is an ADR-0021 scope over-reach rather than a
@@ -1230,6 +1286,8 @@ function compileOperator(col: string, op: string, val: unknown, field: string, p
      */
     case '$icontains': {
       assertRenderableText(op, field, val);
+      const gated = textOverNonTextColumn(op, field, opts);
+      if (gated) return gated;
       // The two binds are spelled out rather than taken from `bindLike`, because
       // only the PATTERN placeholder is folded and the `ESCAPE` one must not be.
       // Left-to-right, so the values land in `params` in placeholder order —
@@ -1239,9 +1297,16 @@ function compileOperator(col: string, op: string, val: unknown, field: string, p
     }
     // [#5298] NULL-safe: `NOT LIKE` is UNKNOWN for a NULL column, and "does not
     // contain" is true of a value that is not there.
-    case '$notContains': assertRenderableText(op, field, val); return nullSafeNegative(col, `${col} NOT LIKE ${bindLike(params, likePattern('contains', val))}`);
-    case '$startsWith': assertRenderableText(op, field, val); return `${col} LIKE ${bindLike(params, likePattern('starts', val))}`;
-    case '$endsWith': assertRenderableText(op, field, val); return `${col} LIKE ${bindLike(params, likePattern('ends', val))}`;
+    case '$notContains':
+      assertRenderableText(op, field, val);
+      return textOverNonTextColumn(op, field, opts)
+        ?? nullSafeNegative(col, `${col} NOT LIKE ${bindLike(params, likePattern('contains', val))}`);
+    case '$startsWith':
+      assertRenderableText(op, field, val);
+      return textOverNonTextColumn(op, field, opts) ?? `${col} LIKE ${bindLike(params, likePattern('starts', val))}`;
+    case '$endsWith':
+      assertRenderableText(op, field, val);
+      return textOverNonTextColumn(op, field, opts) ?? `${col} LIKE ${bindLike(params, likePattern('ends', val))}`;
     // [#6387] `val` is a boolean here — {@link assertBooleanFlagComparands}
     // refused anything else at {@link compileField}, before this emitter runs.
     // So `=== true` is an exhaustive TWO-WAY choice over the declared domain,

@@ -115,7 +115,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 | `pm:retriage` | 等分诊改判:与现行 `pm:*` 并存、⛔ 不摘原标;带本标签的 `pm:queue` 卡跳过派发 |
 | `finding` | 观察类记录,恒 = 待首次定级;定级即离标;不占队列不进收件箱 |
 | `target:<major>` | 发版阻塞:每个 backlog 恰好一个生产者 |
-| `pm:epic`(父单) | 子树已委托 epic PM;其它 PM 不把其 sub-issue 当候选 |
+| `pm:epic`(父单或 sub-issue) | 已由 epic PM 保留;其它 PM 永不取;⛔ 永不与 `pm:queue` 同挂 |
 | `pm:seat` | 座位登记贴:协议载体,不是待分诊的工作 |
 | `priority:p0` | 插队:可超 `batch`、破轮次立即派发;⛔ 不豁免同文件串行与认领协议 |
 | open PR 引用该单 | 已实现,复核中 |
@@ -296,17 +296,17 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 ## Epic 子树车道
 
 - 大开发(父单 + sub-issue 树)整体委托一个专职 PM 会话:`/pm-dispatch epic:#<n>`。
-- 队列 = 子树 open 未认领 sub-issue,每轮重读不缓存。
 - 委托信号成对落地:父单打 `pm:epic` + 正文写会话 ID 与声明的文件领地。
-- 其它 PM 的候选获取跳过整棵子树。
-- 域座位批次选择时读一次 `label:pm:epic` 索引,避开领地相交。
-- epic PM 不同时持有 `domain:*` 座位;认领纪律全套照做。
-- 触 `packages/spec` 的 sub-issue 照旧转 spec 座位。
-- 衍生问题三分法,判据:不修它,epic 验收过不过得去。
-- in-scope ⇒ 挂父单 sub-issue 下轮自动入队。
-- 触 spec/公共契约 ⇒ 转 spec 座位队列,epic 侧写 `Blocked-by:`。
-- 顺带发现 ⇒ 独立立单进修复落地仓 backlog,查重先行。
-- ⛔ 不借 sub-issue 通道把未分诊的卡塞进池子。
+- epic 立卡挂父单、打 `pm:epic`,⛔ 永不 `pm:queue`;`label:pm:epic` 即父子保留全集,域座位不取。
+- 队列 = 子树 open 未认领 sub-issue,每轮重读不缓存;其它 PM 候选获取跳过整棵子树。
+- 域座位批次选择读一次 `label:pm:epic` 索引,避开领地相交;epic PM 不兼任 `domain:*` 座位。
+- 认领纪律全套照做:先写标签、再 `Claim:`、再全线程重读;认领后 `pm:epic` 留在卡上。
+- 离开子树(交车道或转 spec 座位)同一笔标签写摘 `pm:epic` 加 `pm:queue`。
+- `pm:epic` + `pm:queue` 同卡 = 半状态(保留兼移交);后者即已移交,取回走全套认领协议含重读。
+- 单车道仓(无 `domain:*`)开卡即认领合法;多车道仓域标签前置照旧,子树标记即保留。
+- 衍生问题三分,判据:不修它 epic 验收过不过得去;in-scope ⇒ 挂父单 sub-issue 下轮自动入队。
+- 触 `packages/spec`/公共契约(sub-issue 或衍生)⇒ 照旧转 spec 座位队列,epic 侧写 `Blocked-by:`。
+- 顺带发现 ⇒ 独立立单进修复落地仓,查重先行;⛔ 不借 sub-issue 通道塞未分诊卡进池子。
 - 每次分流留一行审计评论;父单维护 checklist 汇总评论,决策仍锚在具体 sub-issue。
 - 收尾四步、僵尸回收与领地防撞细则见 `references/seat-post-protocol.md`。
 

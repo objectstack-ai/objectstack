@@ -115,7 +115,14 @@ function declareTextCaseSweep(cell: DialectCell): void {
       // driver to get one. Nothing here needs that.
       knexInstance = driver.getKnex();
       await knexInstance.schema.dropTableIfExists(TEXT_OBJECT);
-      await driver.initObjects([{ name: TEXT_OBJECT, fields: { name: { type: 'string' } } }]);
+      // [#14079] `score` is the fixture's non-string column, declared as the
+      // number it is: REAL on SQLite (where `5` renders `'5.0'` to a coercing
+      // `GLOB`), `real` on Postgres (where a `LIKE` over it was refused at
+      // query time with SQLSTATE 42883 before the type-gated compile).
+      await driver.initObjects([{
+        name: TEXT_OBJECT,
+        fields: { name: { type: 'string' }, score: { type: 'number' } },
+      }]);
       for (const row of FILTER_TEXT_ROWS) {
         await driver.create(TEXT_OBJECT, { ...row }, BYPASS);
       }
@@ -145,6 +152,14 @@ function declareTextCaseSweep(cell: DialectCell): void {
       expect(byId.get('2')).toBe('acme corp');
       expect(byId.get('3')).toBe('CAFÉ');
       expect(byId.get('4')).toBe('café');
+    });
+
+    it('[#14079] stored `score` as a NUMBER on every row — the premise of the non-string rows', async () => {
+      const rows = await driver.find(TEXT_OBJECT, {}, BYPASS);
+      for (const r of rows) expect(typeof r.score, `row ${String(r.id)}`).toBe('number');
+      expect(rows.map((r) => [String(r.id), r.score]).sort()).toEqual(
+        FILTER_TEXT_ROWS.map((r) => [r.id, r.score]).sort(),
+      );
     });
 
     for (const testCase of FILTER_TEXT_CASES) {
@@ -234,6 +249,81 @@ describe('[#6518] the per-dialect construct, compiled', () => {
     // character can be touched (UTF-8 is self-synchronising).
     expect(icontains.match(/REPLACE\(/g) ?? []).toHaveLength(52);
     expect(icontains).not.toMatch(/LOWER\(/);
+  });
+
+  /**
+   * [#14079] A text operator over a column whose stored value is never text
+   * compiles to the contract's constant on EVERY dialect — including the two
+   * that never run here. Registered without DDL (`registerExternalObject` is
+   * the same registration `initObjects` performs after its DDL), so the pg and
+   * mysql probes know `score` is numeric the way a live driver would.
+   */
+  describe('[#14079] a declared numeric column compiles to the contract\'s constant, on every dialect', () => {
+    class TypedProbeDriver extends CompilerProbeDriver {
+      declareNumeric(): this {
+        this.registerExternalObject({
+          name: TEXT_OBJECT,
+          fields: { name: { type: 'string' }, score: { type: 'number' }, flag: { type: 'boolean' } },
+        });
+        return this;
+      }
+    }
+    const typed = (config: SqlDriverConfig) => new TypedProbeDriver(config).declareNumeric();
+    const DIALECTS: Array<[string, SqlDriverConfig]> = [
+      ['sqlite', { client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }],
+      ['postgres', { client: 'pg', connection: { host: '127.0.0.1' } }],
+      ['mysql', { client: 'mysql2', connection: { host: '127.0.0.1' } }],
+    ];
+
+    for (const [label, config] of DIALECTS) {
+      it(`${label}: the positive operators are FALSE, $notContains is TRUE, and no LIKE/GLOB is built`, () => {
+        const d = typed(config);
+        for (const op of ['$contains', '$startsWith', '$endsWith', '$icontains', '$like', '$ilike'] as const) {
+          const sql = d.compileWhere({ score: { [op]: '5' } } as FilterCondition);
+          expect(sql, op).toMatch(/where 1 = 0/);
+          expect(sql, op).not.toMatch(/LIKE|GLOB|lower\(|translate\(|CAST\(/);
+        }
+        const not = d.compileWhere({ score: { $notContains: '5' } });
+        expect(not).toMatch(/where 1 = 1/);
+        expect(not).not.toMatch(/LIKE|GLOB|IS NULL/);
+        // A boolean column is the same class: its stored value is never text.
+        expect(d.compileWhere({ flag: { $contains: 'true' } })).toMatch(/where 1 = 0/);
+        // …and the text column beside it is untouched by the gate.
+        expect(d.compileWhere({ name: { $contains: '5' } })).toMatch(/LIKE|GLOB/);
+      });
+    }
+
+    it('composes with the NULL-safe $not rewrite: NOT over the constant is total', () => {
+      const d = typed(DIALECTS[1][1]);
+      // `nullSafeNegationOperand` guards the leaf, then the constant replaces
+      // the LIKE: `NOT ("score" IS NOT NULL AND 1 = 0)` — TRUE for every row,
+      // what the JS faces answer for `!contains` on a number.
+      const notContains = d.compileWhere({ $not: { score: { $contains: '5' } } });
+      expect(notContains).toMatch(/not \(.*is not null.*1 = 0/);
+      expect(notContains).not.toMatch(/LIKE/);
+      const notNotContains = d.compileWhere({ $not: { score: { $notContains: '5' } } });
+      expect(notNotContains).toMatch(/not \(.*is null.*1 = 1/);
+    });
+
+    it('a comparand the contract refuses is STILL refused ahead of the constant', () => {
+      const d = typed(DIALECTS[0][1]);
+      for (const where of [
+        { score: { $icontains: '' } },
+        { score: { $icontains: 42 } },
+        { score: { $like: 'a\\' } },
+        { score: { $contains: { $field: 'name' } } },
+      ]) {
+        const err = (() => { try { d.compileWhere(where as never); return null; } catch (e) { return e as WireBearingError; } })();
+        expect(err, JSON.stringify(where)).toBeInstanceOf(Error);
+        expect(err!.code, JSON.stringify(where)).toBe('INVALID_FILTER');
+        expect(err!.status, JSON.stringify(where)).toBe(400);
+      }
+    });
+
+    it('a table this driver was never told about keeps the LIKE — the gate fires only on a KNOWN class', () => {
+      const d = probe(DIALECTS[1][1]);
+      expect(d.compileWhere({ score: { $contains: '5' } })).toMatch(/LIKE/);
+    });
   });
 
   it('an unmodelled dialect keeps the pre-#6518 shape rather than emitting invalid SQL', () => {
