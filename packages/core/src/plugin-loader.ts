@@ -94,8 +94,8 @@ export interface PluginStartupResult {
     /**
      * Elapsed milliseconds the plugin's `start()` took.
      *
-     * Named for the member the spec contract this result implements already
-     * declares -- `PluginStartupResultSchema.duration` in
+     * Named for the member `packages/spec` already declares for the same
+     * measure -- `PluginStartupResultSchema.duration` in
      * `packages/spec/src/kernel/startup-orchestrator.zod.ts` ("Time taken to
      * start the plugin in milliseconds") -- and matching `PluginLoadResult.loadTime`
      * above: the same `Date.now() - startTime` computation under a name that
