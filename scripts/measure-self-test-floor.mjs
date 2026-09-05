@@ -4,9 +4,10 @@
 /**
  * measure-self-test-floor -- can each `scripts/**` self-test prove it ran? (#13489)
  *
- *   node scripts/measure-self-test-floor.mjs           # static census (fast)
- *   node scripts/measure-self-test-floor.mjs --probe   # + the dynamic probe (minutes)
- *   node scripts/measure-self-test-floor.mjs --json    # machine-readable
+ *   node scripts/measure-self-test-floor.mjs                        # static census (fast)
+ *   node scripts/measure-self-test-floor.mjs --probe                # + the dynamic probe (minutes)
+ *   node scripts/measure-self-test-floor.mjs --probe --only <path>  # probe ONE census row (repeatable)
+ *   node scripts/measure-self-test-floor.mjs --json                 # machine-readable
  *
  * ## The two holes, which are ORTHOGONAL
  *
@@ -99,6 +100,35 @@
  * `classifyFloor` keyed on the NAME `SELF_TEST_BATTERIES` rather than on a
  * comparison that produces a failure, and called a fixture floored after the
  * roster had been removed. The control caught it; nothing else would have.
+ *
+ * ## `--only`: ONE row, taken through the SHIPPED decision (#15759)
+ *
+ * The full probe spawns every census row twice and does not fit a foreground
+ * turn -- `scripts/pm/dispatch-gates.mjs` alone was measured at 434.3 s. So every
+ * single-row reading this instrument has on record was taken by re-driving
+ * `main()`'s loop in a private throwaway, and a throwaway is a COPY of the
+ * decision the shipped sweep makes: which row, which entry, which budget. The
+ * repair's own evidence then comes from the copy while the original ships --
+ * exactly the class of mistake this tool's controls refuse elsewhere, and why
+ * `sitesInSource` was LIFTED rather than copied (#13874).
+ *
+ * `--only <path>` names census rows for the probe. Both paths run the SAME
+ * `population()` -> `probePlan()` -> `probeEarlyReturn()` chain through
+ * `probeRows()`, which IS the sweep's loop body, lifted -- there is no second
+ * copy of it to drift. Three properties, each controlled:
+ *
+ *   REFUSES     a selector naming no census row exits 2 and lists the nearest
+ *               rows by path substring. A silent empty sweep would print
+ *               `0 DEFEATED, 0 HELD, 0 ACCIDENT` -- a flattering reading
+ *               produced by measuring nothing, which is this file's whole
+ *               subject one level up.
+ *   NARROWS THE PROBE, NOT THE CENSUS. The row count, the floor column and the
+ *               handshake column are printed over the WHOLE population; only
+ *               hole 2 is restricted, and it says over how many of how many. A
+ *               selector that shrank the census would print `1 file(s) under
+ *               scripts/ dispatch on --self-test`, which is false.
+ *   INERT       with no `--only`, every byte of the output is what it was, and
+ *               the sweep's row set is the population object itself.
  */
 
 import { readFileSync, writeFileSync, rmSync, readdirSync, existsSync, mkdirSync, mkdtempSync, symlinkSync } from 'node:fs';
@@ -1403,6 +1433,90 @@ export function runControls() {
       `LEDGER ROW INVALID: ${file} carries a field this reader does not read (${fields.join(', ')}); a misspelled \`timeoutMs\` is not a smaller budget, it is NO budget -- the default, and the SIGTERM this field exists to end`);
   }
 
+  // ⭐ THE ROW SELECTOR (#15759), over a fixture population. What is at stake in
+  // every verdict here is a SWEEP THAT MEASURED NOTHING: an empty selection and a
+  // complete census print the same three numbers, and only one of them is a
+  // survey. So the selector's failure mode must be a REFUSAL, never a smaller run.
+  const selRows = [
+    { file: 'scripts/check-alpha.mjs', abs: join(ROOT, 'scripts/check-alpha.mjs'), defs: ['selfTest'] },
+    { file: 'scripts/check-beta.mjs', abs: join(ROOT, 'scripts/check-beta.mjs'), defs: ['selfTest'] },
+    { file: 'scripts/pm/check-beta.mjs', abs: join(ROOT, 'scripts/pm/check-beta.mjs'), defs: ['selfTest'] },
+  ];
+  say(new Set(selRows.map((r) => r.file)).size === selRows.length
+    && selRows.filter((r) => r.file.endsWith('/check-beta.mjs')).length === 2,
+    'CONTROL FIXTURE INVALID: the fixture population no longer holds three distinct rows, two of which share a basename; the exact-match and nearest-row verdicts below would both be reading a population that cannot tell them apart');
+
+  // (3) NO FLAG = THE WHOLE POPULATION, and the population OBJECT at that: the
+  // unrestricted sweep must not be a filtered copy that could differ from it.
+  say(parseOnly(['--probe', '--json']).selectors.length === 0,
+    'SELECTOR CONTROL FAILED: an argv carrying no `--only` produced selectors; the default sweep would then be restricted by something nobody passed');
+  say(selectRows(selRows, []).selected === selRows,
+    'SELECTOR CONTROL FAILED: with no selector the probe was handed a COPY of the population rather than the population itself');
+
+  // (1) ONE ROW SELECTED IS THAT ROW. Both spellings, repeatable, and the
+  // path forms a reader actually has: repo-relative, `./`-prefixed, absolute.
+  const onlyOne = parseOnly(['--probe', '--only', 'scripts/pm/check-beta.mjs']);
+  say(JSON.stringify(onlyOne.selectors) === JSON.stringify(['scripts/pm/check-beta.mjs']),
+    `SELECTOR CONTROL FAILED: \`--only <path>\` did not read its value (got ${JSON.stringify(onlyOne.selectors ?? onlyOne.refusal)})`);
+  const pickedOne = selectRows(selRows, onlyOne.selectors);
+  say(pickedOne.selected?.length === 1 && pickedOne.selected[0] === selRows[2],
+    'SELECTOR CONTROL FAILED: a selector naming one row exactly did not select exactly that row -- and the two rows sharing a basename are what makes that a reading of the PATH');
+  const twoSpellings = parseOnly(['--only', 'scripts/check-alpha.mjs', '--only=scripts/check-beta.mjs']);
+  say(twoSpellings.selectors?.length === 2 && selectRows(selRows, twoSpellings.selectors).selected?.length === 2,
+    'SELECTOR CONTROL FAILED: `--only` is not repeatable across its two spellings; a reader naming two rows would silently probe one');
+  say(selectRows(selRows, ['./scripts/check-alpha.mjs']).selected?.[0] === selRows[0]
+    && selectRows(selRows, [join(ROOT, 'scripts/check-alpha.mjs')]).selected?.[0] === selRows[0],
+    'SELECTOR CONTROL FAILED: a `./`-prefixed or ABSOLUTE path did not name the row the census prints as `scripts/check-alpha.mjs`');
+  say(selectRows(selRows, ['scripts/check-alpha.mjs', './scripts/check-alpha.mjs']).selected?.length === 1,
+    'SELECTOR CONTROL FAILED: the same row named twice was selected twice; that row would be spawned four times and reported as two');
+
+  // ... and the loop body RAN IT AND NOTHING ELSE. Counting the probe's calls is
+  // the only reading that separates "probed one row" from "swept everything and
+  // reported one row" -- the two are indistinguishable in the printed output.
+  const probeCalls = [];
+  const recorded = selRows.map((r) => ({ ...r }));
+  const pickedRecorded = selectRows(recorded, ['scripts/check-beta.mjs']);
+  probeRows(pickedRecorded.selected ?? [], {
+    plan: () => ({ entry: 'selfTest', timeoutMs: undefined }),
+    probe: (abs) => { probeCalls.push(abs); return { verdict: 'DEFEATED' }; },
+  });
+  say(probeCalls.length === 1 && probeCalls[0] === recorded[1].abs,
+    `SELECTOR CONTROL FAILED: probing ONE selected row called the probe ${probeCalls.length} time(s) (${probeCalls.join(', ') || 'none'}); a selector that still walked the population is a full sweep with a filtered report`);
+  say(recorded[0].probe === undefined && recorded[2].probe === undefined,
+    'SELECTOR CONTROL FAILED: an UNSELECTED row came back carrying a probe verdict');
+
+  // (2) AN UNKNOWN ROW REFUSES, and names candidates. A near-miss must not be
+  // guessed into a row either: running the row it guessed answers a question
+  // nobody asked, under a path the reader never typed.
+  const missed = selectRows(selRows, ['scripts/check-bet.mjs']);
+  say(missed.selected === undefined && typeof missed.refusal === 'string'
+    && missed.refusal.includes('names no census row'),
+    `SELECTOR CONTROL FAILED: a selector naming no row did not refuse (got ${JSON.stringify(missed.selected?.map((r) => r.file) ?? missed.refusal)})`);
+  say(missed.refusal?.includes('scripts/check-beta.mjs') && missed.refusal?.includes('scripts/pm/check-beta.mjs'),
+    `SELECTOR CONTROL FAILED: the refusal named no nearest row, so a typo leaves the reader with nothing to correct it to (${JSON.stringify(missed.refusal ?? '')})`);
+  // ... and one selector missing refuses the WHOLE invocation. A partial run that
+  // dropped the unmatched name would report a sweep the reader did not ask for.
+  say(typeof selectRows(selRows, ['scripts/check-alpha.mjs', 'scripts/check-bet.mjs']).refusal === 'string',
+    'SELECTOR CONTROL FAILED: one unmatched selector beside a matched one was dropped rather than refused; the reader would be shown a sweep missing a row they named');
+  // ... and a selector with nothing near it still refuses -- with a reading, not
+  // a bare list. A part every row carries (`scripts`, `mjs`) distinguishes
+  // nothing, so it is not scored; without that rule every miss "matches" all 182.
+  const nowhere = selectRows(selRows, ['scripts/zzz-nothing-alike.mjs']);
+  say(typeof nowhere.refusal === 'string' && nowhere.refusal.includes('contains any part of it'),
+    `SELECTOR CONTROL FAILED: a selector with no near row did not refuse (${JSON.stringify(nowhere.selected?.length ?? nowhere.refusal)})`);
+  say(!nowhere.refusal?.includes('check-alpha'),
+    'SELECTOR CONTROL FAILED: a path part every row carries was scored, so every miss lists the same rows and the nearest-row diagnostic says nothing');
+
+  // The ARGV shapes that must refuse rather than widen. `--only --probe` read
+  // permissively means "sweep everything": the outcome that takes hours and looks
+  // like success, reached by a typo.
+  say(parseOnly(['--only']).refusal !== undefined,
+    'SELECTOR CONTROL FAILED: a trailing `--only` with no value was read as no selector at all, which is the full sweep');
+  say(parseOnly(['--only', '--probe']).refusal !== undefined,
+    'SELECTOR CONTROL FAILED: `--only --probe` took the FLAG as the selector value; the selector then names no row -- or, unmatched, the run sweeps everything');
+  say(parseOnly(['--only=']).refusal !== undefined,
+    'SELECTOR CONTROL FAILED: `--only=` with an empty value was accepted');
+
   // Instrument 3 -- WHICH handshake, one fixture per landed shape and both
   // directions on each. What is at stake is the question the card was filed
   // about: every handshake census in this family was a hand-written grep for one
@@ -1671,6 +1785,30 @@ export function runControls() {
     // is only reachable through a green baseline) and this one exits 1.
     say(wk.baselineExit === 0 && wkBeside.baselineExit === 1,
       `CONTROL FIXTURE INVALID: the two placements did not separate the fixture's own baseline (relocated exit ${wk.baselineExit}, beside exit ${wkBeside.baselineExit}); with both alike, the verdicts above say nothing about WHERE the copy was written`);
+
+    // ⭐ THE SELECTOR THROUGH THE SHIPPED PROBE (#15759). Everything above drives
+    // `probeEarlyReturn` directly; this drives `probeRows`, the loop body `main()`
+    // itself runs, over a two-row fixture population with ONE row selected. That
+    // is the property the card is about: a single-row reading has to come from
+    // the shipped decision rather than from a private re-drive of it.
+    const selHoledRow = { file: 'scripts/holed-gate.mjs', abs: holed, defs: ['selfTest'] };
+    const selSoundRow = { file: 'scripts/sound-gate.mjs', abs: sound, defs: ['selfTest'] };
+    const selPicked = selectRows([selHoledRow, selSoundRow], ['scripts/sound-gate.mjs']);
+    probeRows(selPicked.selected ?? []);
+    say(selPicked.selected?.length === 1 && selPicked.selected[0] === selSoundRow,
+      'SELECTOR CONTROL FAILED: the selector did not pick exactly the named fixture row out of the fixture population');
+    // The ANTI-DRIFT reading, and it is the whole point: the SAME fixture, read
+    // through the sweep's loop body and read through a direct call, must agree.
+    // A private copy of the loop is what this card was filed about; if one ever
+    // grows here, these two verdicts separate.
+    say(selSoundRow.probe?.verdict === s.verdict && selSoundRow.probe?.mutatedHead === s.mutatedHead,
+      `SELECTOR CONTROL FAILED: the selected row read ${selSoundRow.probe?.verdict} (${JSON.stringify(selSoundRow.probe?.mutatedHead ?? selSoundRow.probe?.why ?? '')}) through the sweep's loop body but ${s.verdict} through a direct call to the probe; the two paths have drifted`);
+    // ... and the row was run TWICE: a baseline and a mutation, both reported.
+    // One spawn cannot produce this pair, and one spawn is not a probe.
+    say(selSoundRow.probe?.baselineExit === 0 && typeof selSoundRow.probe?.mutatedExit === 'number',
+      `SELECTOR CONTROL FAILED: the selected row published no baseline/mutated pair (baseline ${selSoundRow.probe?.baselineExit}, mutated ${selSoundRow.probe?.mutatedExit}); the probe is two runs of that file and a row missing either measured nothing`);
+    say(selHoledRow.probe === undefined,
+      'SELECTOR CONTROL FAILED: the UNSELECTED fixture row was probed anyway -- spawned twice, off the record, in a run the reader restricted');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -1902,7 +2040,172 @@ export function handshakeCensusFailures(rows) {
   return failures;
 }
 
+// ---------------------------------------------------------------------------
+// The row selector -- WHICH census rows the probe runs (#15759)
+// ---------------------------------------------------------------------------
+
+/** The only help text this file ships; printed by every refusal below. */
+const USAGE = [
+  'usage:',
+  '  node scripts/measure-self-test-floor.mjs                        static census (fast)',
+  '  node scripts/measure-self-test-floor.mjs --probe                + the dynamic probe (minutes)',
+  '  node scripts/measure-self-test-floor.mjs --probe --only <path>  probe ONE census row; repeatable',
+  '  node scripts/measure-self-test-floor.mjs --json                 machine-readable',
+  '',
+  '`--only` takes ONE census row path per occurrence -- the path the census prints',
+  '(`scripts/invoked-as.mjs`), repo-relative or absolute, `--only=<path>` accepted.',
+  'It restricts what the PROBE runs; the census, the floor column and the handshake',
+  'column are always printed over the whole population.',
+].join('\n');
+
+/**
+ * The `--only` selectors, in both spellings -- or WHY this argv cannot be read.
+ *
+ * ⛔ A flag given no value is a REFUSAL, never an empty selector list. Read
+ * permissively, `--only --probe` would mean "sweep everything": the one outcome a
+ * selector must never reach by accident, because it is also the outcome that
+ * takes hours and looks like success.
+ */
+export function parseOnly(argv) {
+  const selectors = [];
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === '--only') {
+      const value = argv[i + 1];
+      if (value === undefined || value.startsWith('-')) {
+        return {
+          refusal:
+            '`--only` was given no value (it is followed by '
+            + `${value === undefined ? 'nothing' : JSON.stringify(value)}).`,
+        };
+      }
+      selectors.push(value);
+      i += 1;
+    } else if (arg.startsWith('--only=')) {
+      const value = arg.slice('--only='.length);
+      if (value === '') return { refusal: '`--only=` was given an empty value.' };
+      selectors.push(value);
+    }
+  }
+  return { selectors };
+}
+
+/**
+ * One selector, read into the spelling a census row publishes: repo-relative,
+ * `/`-joined. An absolute path under the repo and a `./`-prefixed one name the
+ * same row as the census's own `scripts/x.mjs`, and a reader who copied the path
+ * out of a shell prompt has all three.
+ */
+export function normalizeSelector(selector, root = ROOT) {
+  let s = selector.split(sep).join('/').replace(/\/+$/, '');
+  const rootSlash = `${root.split(sep).join('/').replace(/\/+$/, '')}/`;
+  if (s.startsWith(rootSlash)) s = s.slice(rootSlash.length);
+  while (s.startsWith('./')) s = s.slice(2);
+  return s;
+}
+
+/**
+ * The rows a failed selector most likely meant, by PATH SUBSTRING -- the whole
+ * selector first, then its word-shaped parts, longest part first.
+ *
+ * This is a diagnostic, never a match: nothing here can select a row. A "nearest"
+ * rule that ran the row it guessed would answer a question nobody asked, under a
+ * path the reader never typed.
+ */
+export function nearestRows(rows, want, limit = 8) {
+  const needle = want.toLowerCase();
+  // ⛔ A part EVERY row carries (`scripts`, `mjs`) distinguishes nothing: scored,
+  // it makes every miss "near" the whole census and the diagnostic says nothing.
+  const parts = needle
+    .split(/[^a-z0-9]+/)
+    .filter((t) => t.length >= 3)
+    .filter((t) => !(rows.length > 0 && rows.every((r) => r.file.toLowerCase().includes(t))));
+  const scored = [];
+  for (const r of rows) {
+    const file = r.file.toLowerCase();
+    let score = 0;
+    if (needle.length >= 3 && file.includes(needle)) score += 1000;
+    for (const t of parts) if (file.includes(t)) score += t.length;
+    if (score > 0) scored.push({ file: r.file, score });
+  }
+  scored.sort((a, b) => b.score - a.score || a.file.localeCompare(b.file));
+  return scored.slice(0, limit).map((x) => x.file);
+}
+
+/**
+ * WHICH rows the probe runs. No selectors is the population ITSELF -- the same
+ * array object, so the unrestricted sweep cannot be a filtered copy of anything.
+ *
+ * A selector that names no row REFUSES, listing the nearest rows. The refusal is
+ * the point of this function: the alternative -- an empty selection swept
+ * silently -- prints `0 DEFEATED, 0 HELD, 0 ACCIDENT` and exits 0, which reads
+ * like a clean survey and is a survey that never ran.
+ */
+export function selectRows(rows, selectors) {
+  if (selectors.length === 0) return { selected: rows };
+  const selected = [];
+  const misses = [];
+  for (const selector of selectors) {
+    const want = normalizeSelector(selector);
+    const hit = rows.find((r) => r.file === want);
+    if (hit === undefined) {
+      const nearest = nearestRows(rows, want);
+      misses.push(
+        `\`--only ${selector}\` names no census row (read as \`${want}\`).\n`
+        + (nearest.length > 0
+          ? `  nearest rows by path: ${nearest.join(', ')}`
+          : `  no census row's path contains any part of it -- run without \`--only\` to print all ${rows.length} rows.`),
+      );
+      continue;
+    }
+    if (!selected.includes(hit)) selected.push(hit);
+  }
+  if (misses.length > 0) return { refusal: misses.join('\n') };
+  return { selected };
+}
+
+/**
+ * THE SWEEP'S LOOP BODY, lifted so the `--only` path and the full sweep are the
+ * same code and not two readings of it (#15759). Assigns each row's `probe`.
+ *
+ * `plan` and `probe` are injection points for the controls ONLY -- `main()` passes
+ * neither, so the shipped sweep and the shipped selector both run the real
+ * `probePlan` and the real `probeEarlyReturn`. A control that could not count the
+ * probe's calls could not tell "ran one row" from "ran the row and swept the rest".
+ */
+export function probeRows(rows, { plan = probePlan, probe = probeEarlyReturn } = {}) {
+  for (const r of rows) {
+    const p = plan(r);
+    if (p.entry === undefined) { r.probe = { verdict: 'NOT MEASURED', why: p.why }; continue; }
+    // `timeout: undefined` is the DEFAULT budget, not "no budget" -- the
+    // destructured default in `probeEarlyReturn` is what supplies 120 s.
+    r.probe = probe(r.abs, p.entry, { timeout: p.timeoutMs });
+  }
+  return rows;
+}
+
+/** A mis-invocation: exit 2, loudly, with the help text. Never a smaller sweep. */
+function refuse(message) {
+  console.error(`measure-self-test-floor: ${message}\n`);
+  console.error(USAGE);
+  console.error('');
+  process.exit(2);
+}
+
 function main() {
+  const wantProbe = process.argv.includes('--probe');
+  // Read BEFORE the controls run: an argv this file cannot read is not a
+  // measurement that came out small, it is a run that never started -- and the
+  // controls are a minute of spawning to reach the same refusal.
+  const only = parseOnly(process.argv.slice(2));
+  if (only.refusal !== undefined) refuse(only.refusal);
+  if (only.selectors.length > 0 && !wantProbe) {
+    refuse(
+      '`--only` selects rows for the PROBE, and `--probe` was not passed. There is no\n'
+      + 'sweep to restrict, and the census below it is printed whole either way.',
+    );
+  }
+
   const controlFailures = runControls();
   if (controlFailures.length > 0) {
     console.error('measure-self-test-floor: ITS OWN CONTROLS FAILED -- no census printed.\n');
@@ -1921,15 +2224,23 @@ function main() {
     console.error('Widen `classifyHandshake` and `LANDED_HANDSHAKE_NAMES` together, with a control on each.\n');
     process.exit(1);
   }
-  const wantProbe = process.argv.includes('--probe');
+  // WHICH rows the probe runs. With no `--only` this is the population object
+  // itself, so the full sweep is not a filtered copy of anything.
+  let probed = rows;
   if (wantProbe) {
-    for (const r of rows) {
-      const plan = probePlan(r);
-      if (plan.entry === undefined) { r.probe = { verdict: 'NOT MEASURED', why: plan.why }; continue; }
-      // `timeout: undefined` is the DEFAULT budget, not "no budget" -- the
-      // destructured default in `probeEarlyReturn` is what supplies 120 s.
-      r.probe = probeEarlyReturn(r.abs, plan.entry, { timeout: plan.timeoutMs });
+    const picked = selectRows(rows, only.selectors);
+    if (picked.refusal !== undefined) refuse(picked.refusal);
+    probed = picked.selected;
+    // An excluded row must SAY it was excluded. In `--json` a missing `probe`
+    // key is what a run WITHOUT `--probe` publishes, so leaving it off here
+    // would make "you did not ask for a sweep" and "this row was outside the
+    // sweep you asked for" the same payload.
+    if (probed.length !== rows.length) {
+      for (const r of rows) {
+        if (!probed.includes(r)) r.probe = { verdict: 'NOT PROBED', why: 'excluded by --only' };
+      }
     }
+    probeRows(probed);
   }
 
   if (process.argv.includes('--json')) {
@@ -1961,10 +2272,18 @@ function main() {
     console.log('\nHole 2 -- no verdict handshake: NOT MEASURED (pass --probe; it runs every self-test twice).');
     return;
   }
-  const defeated = rows.filter((r) => r.probe.verdict === 'DEFEATED');
-  const held = rows.filter((r) => r.probe.verdict === 'HELD');
-  const accidents = rows.filter((r) => r.probe.verdict === 'ACCIDENT');
-  const unmeasured = rows.filter((r) => r.probe.verdict === 'NOT MEASURED');
+  const defeated = probed.filter((r) => r.probe.verdict === 'DEFEATED');
+  const held = probed.filter((r) => r.probe.verdict === 'HELD');
+  const accidents = probed.filter((r) => r.probe.verdict === 'ACCIDENT');
+  const unmeasured = probed.filter((r) => r.probe.verdict === 'NOT MEASURED');
+  // ⛔ The restriction is announced BEFORE its numbers, never inferred from them:
+  // `0 DEFEATED, 0 HELD` over one selected row and over the whole census are the
+  // same three digits, and only one of them is a survey.
+  if (probed.length !== rows.length) {
+    console.log(`\n⚠ \`--only\` RESTRICTED this probe to ${probed.length} of ${rows.length} census row(s). The other`);
+    console.log(`   ${rows.length - probed.length} were NOT PROBED, and nothing below is a reading of them.`);
+    for (const r of probed) console.log(`    selected: ${r.file}`);
+  }
   // The shrink this INSTRUMENT is responsible for, reported as a number rather
   // than left as a silence -- printed even when it is zero, because a zero that
   // is printed is a reading and a line that appears only when non-zero is not
