@@ -58,12 +58,18 @@
  *
  * ## Why the standalone shape reuses `init`'s renderers
  *
- * `renderPnpmWorkspaceYaml()` and `SCAFFOLD_PNPM_RANGE` are `init.ts`'s, and
- * they are CALLED here rather than restated. A restatement is the two-producer
- * defect `test/scaffold-workspace-consistency.test.ts` exists to catch, and it
- * has already been paid for once in this repo: the build-approval block landed
- * in one scaffold path and not the other, and one of them shipped the pre-fix
- * shape for months.
+ * `renderPnpmWorkspaceYaml()`, `SCAFFOLD_PNPM_RANGE`, `renderScaffoldTsconfig()`
+ * and the `SCAFFOLD_*_RANGE` constants are `init.ts`'s, and they are CALLED here
+ * rather than restated. A restatement is the two-producer defect
+ * `test/scaffold-workspace-consistency.test.ts` exists to catch, and it has
+ * already been paid for twice in this repo: the build-approval block landed in
+ * one scaffold path and not the other, and one of them shipped the pre-fix shape
+ * for months; and the TypeScript range a scaffold installs was written in six
+ * places and split into three values — the two CLI values 210 days apart, the
+ * third 53 and recorded nowhere — on the value that decides whether the
+ * scaffold type-checks at all. The emission policy has
+ * one home now — see the block above `renderScaffoldPackageJson` in `init.ts`
+ * for the measurement and for which values survived.
  *
  * ## The pin
  *
@@ -84,8 +90,16 @@ import {
   getCliVersion,
   NPM_PACKAGE_NAME_MAX_LENGTH,
   renderPnpmWorkspaceYaml,
+  renderScaffoldTsconfig,
   sanitizeNamespace,
   SCAFFOLD_PNPM_RANGE,
+  SCAFFOLD_TSCONFIG_INCLUDE_SRC_ONLY,
+  SCAFFOLD_TSCONFIG_INCLUDE_WITH_ROOT_CONFIG,
+  SCAFFOLD_TSX_RANGE,
+  SCAFFOLD_TYPES_NODE_RANGE,
+  SCAFFOLD_TYPESCRIPT_RANGE,
+  SCAFFOLD_VITEST_RANGE,
+  SCAFFOLD_ZOD_RANGE,
   validateProjectName,
 } from './init.js';
 
@@ -120,22 +134,6 @@ export function rootTsconfigExtends(inRepoDir: string, projectDirName: string): 
   const depth = path.posix.join(inRepoDir, projectDirName).split('/').filter(Boolean).length;
   return `${'../'.repeat(depth)}tsconfig.json`;
 }
-
-/**
- * The compiler options a standalone scaffold carries in full, because it
- * extends nothing. Deliberately the same set `objectstack init` writes: two
- * scaffolders that disagree about `moduleResolution` is a support question
- * nobody can answer, and `bundler` is what resolves the `exports` subpaths
- * (`@objectstack/spec/contracts`, `/kernel`) the templates import.
- */
-const STANDALONE_COMPILER_OPTIONS = {
-  target: 'ES2022',
-  module: 'ESNext',
-  moduleResolution: 'bundler',
-  strict: true,
-  esModuleInterop: true,
-  skipLibCheck: true,
-} as const;
 
 /** A rendered file: JSON objects are stringified on write, strings land as-is. */
 type FileRenderer = (name: string) => unknown;
@@ -253,26 +251,20 @@ export const templates: Record<string, CreateTemplate> = {
           license: 'MIT',
           dependencies: {
             '@objectstack/spec': objectstackDependencySpec(placement),
-            zod: '^4.3.6',
+            zod: SCAFFOLD_ZOD_RANGE,
           },
           devDependencies: {
-            '@types/node': '^22.0.0',
-            typescript: '^5.8.0',
-            vitest: '^4.0.0',
+            '@types/node': SCAFFOLD_TYPES_NODE_RANGE,
+            typescript: SCAFFOLD_TYPESCRIPT_RANGE,
+            vitest: SCAFFOLD_VITEST_RANGE,
           },
         }),
         'tsconfig.json': (name: string) =>
           standalone
-            ? {
-                compilerOptions: {
-                  ...STANDALONE_COMPILER_OPTIONS,
-                  outDir: 'dist',
-                  rootDir: 'src',
-                  declaration: true,
-                },
-                include: ['src/**/*'],
-                exclude: ['dist', 'node_modules'],
-              }
+            ? renderScaffoldTsconfig({
+                rootDir: 'src',
+                include: SCAFFOLD_TSCONFIG_INCLUDE_SRC_ONLY,
+              })
             : {
                 extends: rootTsconfigExtends(PLUGIN_IN_REPO_DIR, `plugin-${name}`),
                 compilerOptions: {
@@ -367,13 +359,13 @@ MIT
           dependencies: {
             '@objectstack/spec': objectstackDependencySpec(placement),
             '@objectstack/cli': objectstackDependencySpec(placement),
-            zod: '^4.3.6',
+            zod: SCAFFOLD_ZOD_RANGE,
           },
           devDependencies: {
-            '@types/node': '^22.0.0',
-            tsx: '^4.21.0',
-            typescript: '^5.8.0',
-            vitest: '^4.0.0',
+            '@types/node': SCAFFOLD_TYPES_NODE_RANGE,
+            tsx: SCAFFOLD_TSX_RANGE,
+            typescript: SCAFFOLD_TYPESCRIPT_RANGE,
+            vitest: SCAFFOLD_VITEST_RANGE,
           },
         }),
         'objectstack.config.ts': (name: string) => {
@@ -445,16 +437,10 @@ ${
 }`,
         'tsconfig.json': (name: string) =>
           standalone
-            ? {
-                compilerOptions: {
-                  ...STANDALONE_COMPILER_OPTIONS,
-                  outDir: 'dist',
-                  rootDir: '.',
-                  declaration: true,
-                },
-                include: ['*.ts', 'src/**/*'],
-                exclude: ['dist', 'node_modules'],
-              }
+            ? renderScaffoldTsconfig({
+                rootDir: '.',
+                include: SCAFFOLD_TSCONFIG_INCLUDE_WITH_ROOT_CONFIG,
+              })
             : {
                 extends: rootTsconfigExtends(EXAMPLE_IN_REPO_DIR, name),
                 compilerOptions: {

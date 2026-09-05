@@ -51,6 +51,7 @@ import {
   E2E_SECRET_KEY,
   RUN_JS_RESOLVES_FROM_DIST,
   childEnv,
+  probeThroughChild,
   randomPort,
   requireBuiltCli,
 } from './helpers/serve-process.js';
@@ -349,23 +350,61 @@ describe('#7645: the stdio MCP transport answers over a spawned CLI process', ()
     // boot 2 sees the same row (`:memory:` would not survive the restart).
     const first = await boot({ OS_DATABASE_URL: join(dir, 'probe.db') }, /Server is ready/);
     const base = `http://localhost:${port}/api/v1`;
-    const signIn = await fetch(`${base}/auth/sign-in/email`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      // `serve --dev` seeds this admin on an empty DB.
-      body: JSON.stringify({ email: 'admin@objectos.ai', password: 'admin123' }),
+
+    // ⭐ #15653. `boot()`'s `child.on('exit')` handler feeds the READINESS promise
+    // ONLY — it returns early once `settled` — so a death AFTER readiness is
+    // invisible to it, and the two requests below used to reach vitest as a bare
+    // `TypeError: fetch failed` with no exit code, no stdout and no stderr.
+    // `probeThroughChild()` is where the child's fate is read instead; its own
+    // section in `helpers/serve-process.ts` carries the measurement, the bound
+    // and the fences (⛔ no skip, no quarantine, no timeout bump).
+    //
+    // Read at THROW time, so a failure carries what the child printed on its way
+    // down rather than the buffer as it stood at ready.
+    const transcript = () =>
+      `\n--- child stdout ---\n${first.stdout()}\n--- child stderr ---\n${first.stderr()}`;
+    const probe = <T>(what: string, request: () => Promise<T>): Promise<T> =>
+      probeThroughChild(
+        {
+          child: first.child,
+          transcript,
+          label: 'serve-mcp-stdio-answers',
+          what: `${what} on port ${port}`,
+        },
+        request,
+      );
+
+    // ⛔ The body read is INSIDE the thunk and cannot throw: a connection torn
+    // down mid-body rejects out of `res.json()` rather than out of `fetch()`, and
+    // the guard reads any throw as a transport failure — so an ASSERTION must
+    // never live in here or a wrong answer would be reported as a dropped socket.
+    const signIn = await probe('the sign-in probe', async () => {
+      const res = await fetch(`${base}/auth/sign-in/email`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        // `serve --dev` seeds this admin on an empty DB.
+        body: JSON.stringify({ email: 'admin@objectos.ai', password: 'admin123' }),
+      });
+      let body: unknown = null;
+      try { body = await res.json(); } catch { /* non-JSON error body */ }
+      return { status: res.status, body };
     });
     expect(signIn.status).toBe(200);
-    const token = ((await signIn.json()) as { token?: string }).token;
+    const token = (signIn.body as { token?: string } | null)?.token;
     expect(token).toBeTruthy();
 
-    const minted = await fetch(`${base}/keys`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-      body: JSON.stringify({ name: 'mcp-stdio-e2e' }),
+    const minted = await probe('the key-mint probe', async () => {
+      const res = await fetch(`${base}/keys`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+        body: JSON.stringify({ name: 'mcp-stdio-e2e' }),
+      });
+      let body: unknown = null;
+      try { body = await res.json(); } catch { /* non-JSON error body */ }
+      return { status: res.status, body };
     });
     expect(minted.status).toBe(201);
-    apiKey = String(((await minted.json()) as { data: { key: string } }).data.key);
+    apiKey = String((minted.body as { data: { key: string } }).data.key);
     expect(apiKey.startsWith('osk_')).toBe(true);
 
     await stop(first.child);

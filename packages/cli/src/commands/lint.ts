@@ -478,6 +478,10 @@ export default class Lint extends Command {
   static override flags = {
     json: Flags.boolean({ description: 'Output as JSON' }),
     fix: Flags.boolean({ description: 'Show what would be fixed (dry-run)' }),
+    strict: Flags.boolean({
+      description:
+        'Fail the run (exit 1) on warning-severity findings too, exactly as an error does; suggestions stay advisory. Without it only errors fail',
+    }),
     score: Flags.boolean({
       description: 'Print a 0–100 metadata-quality score (the lint rubric) for this project',
     }),
@@ -612,17 +616,38 @@ export default class Lint extends Command {
       // Metadata-quality score (the lint rubric expressed as 0–100).
       const score = flags.score ? scoreMetadata(normalized) : null;
 
+      // ── Verdict ──
+      // Only an `error` fails a run by default. `--strict` (#15935) makes a
+      // `warning` fail it too — so an app can rely on the warning-level rules
+      // this registry ships as its gate instead of re-implementing them
+      // locally at error level — while a `suggestion` stays advisory under
+      // both. `failing` is the ONE count the exit code is read from, computed
+      // here, above the two faces, so `--json` and the console cannot disagree
+      // about it. ⛔ The default is deliberately unchanged: promoting warnings
+      // for every app is a separate decision, not this flag's.
+      const strict = flags.strict ?? false;
+      const errors = issues.filter((i) => i.severity === 'error');
+      const warnings = issues.filter((i) => i.severity === 'warning');
+      const suggestions = issues.filter((i) => i.severity === 'suggestion');
+      const failing = errors.length + (strict ? warnings.length : 0);
+
       // ── JSON output ──
       if (flags.json) {
-        const errors = issues.filter((i) => i.severity === 'error');
-        const warnings = issues.filter((i) => i.severity === 'warning');
-        const suggestions = issues.filter((i) => i.severity === 'suggestion');
         await emitJson({
-          passed: errors.length === 0,
+          passed: failing === 0,
           total: issues.length,
           errors: errors.length,
           warnings: warnings.length,
           suggestions: suggestions.length,
+          // [#15935] The verdict, readable without re-deriving it from the
+          // counts: `strict` says whether the flag was in effect, `failing`
+          // is the count the exit code was read from — `errors`, or
+          // `errors + warnings` under `--strict` — and `passed` is
+          // `failing === 0`, the same statement the exit code makes. Both
+          // keys are unconditionally present so a gate keying off them never
+          // has to distinguish "not strict" from "this build does not say".
+          strict,
+          failing,
           ...(hiddenPlatform > 0 ? { hiddenPlatform } : {}),
           ...(score ? { score: score.score, grade: score.grade } : {}),
           issues,
@@ -635,7 +660,7 @@ export default class Lint extends Command {
           // distinguish "did not convert" from "this command does not tell me".
           conversions: conversionNotices,
           duration: timer.elapsed(),
-        }, errors.length > 0 ? 1 : 0);
+        }, failing > 0 ? 1 : 0);
         return;
       }
 
@@ -658,11 +683,6 @@ export default class Lint extends Command {
         console.log('');
         return;
       }
-
-      // Group by severity
-      const errors = issues.filter((i) => i.severity === 'error');
-      const warnings = issues.filter((i) => i.severity === 'warning');
-      const suggestions = issues.filter((i) => i.severity === 'suggestion');
 
       const printIssue = (issue: LintIssue) => {
         const color =
@@ -714,9 +734,20 @@ export default class Lint extends Command {
         printInfo('Dry-run mode: no files were modified.');
       }
 
+      // A run that fails ONLY because of `--strict` says so, naming the count
+      // and the flag: the summary line above reads identically with and
+      // without the flag, and exit 1 under a heading that says "Warnings" is
+      // otherwise a verdict with no stated reason.
+      if (strict && warnings.length > 0) {
+        console.log('');
+        printError(
+          `${warnings.length} warning(s) fail this run under --strict (a warning is advisory without the flag)`,
+        );
+      }
+
       console.log('');
 
-      if (errors.length > 0) process.exit(1);
+      if (failing > 0) process.exit(1);
 
     } catch (error: any) {
       if (isExitSignal(error)) throw error;

@@ -32,7 +32,7 @@ import type { IDataEngine } from '@objectstack/core';
 // `auth-manager` used to re-derive that standing itself, in two spellings
 // that had drifted from the declared authority and from each other; both
 // now ask the authority. Nothing in this file reads the grant tables.
-import { hasPlatformAdminStanding } from '@objectstack/core';
+import { hasPlatformAdminStanding, resolveUserAuthzGrants } from '@objectstack/core';
 import type { IEmailService, ISmsService } from '@objectstack/spec/contracts';
 import {
   readEnvWithDeprecation,
@@ -42,8 +42,6 @@ import {
 } from '@objectstack/types';
 import { resolveMembershipLimitOption } from './membership-limit.js';
 import {
-  mapMembershipRole,
-  BUILTIN_IDENTITY_PLATFORM_ADMIN,
   MEMBERSHIP_ROLE_DELEGATED_ADMIN,
 } from '@objectstack/spec';
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
@@ -3546,64 +3544,34 @@ export class AuthManager {
     }
 
     // customSession() — augments the session payload with the canonical
-    // `roles: string[]` array (ADR-0068 D1/D2): the stored `user.role` scalar
-    // split on commas, PLUS the active membership mapped to canonical
-    // `org_owner`/`org_admin`/`org_member`, PLUS `platform_admin` when the user
-    // resolves as a platform admin (ADR-0068 D2). `user.isPlatformAdmin` is a
-    // derived alias of `'platform_admin' in positions`.
+    // `positions: string[]` array (ADR-0068 D1/D2, renamed ADR-0090 D3) and its
+    // derived `isPlatformAdmin` alias.
     //
-    // IMPORTANT: `user.role` is NOT overwritten anymore — consumers must gate
-    // on `positions[]` / `isPlatformAdmin` (e.g. via objectui's useIsWorkspaceAdmin),
-    // never on `user.role === 'admin'`. Consumers that match individual role
-    // names (e.g. the Console approvals inbox resolving `role:<name>` approvers)
-    // also read `positions` — business names such as `manager` survive only there.
-    // The raw membership role stays on the organization plugin's `member` payload.
+    // [#15136] `positions[]` is the SECURITY axis — the same set
+    // `/auth/me/permissions` reports and every server-side evaluator resolves:
+    // the active organization's membership mapped to canonical
+    // `org_owner`/`org_admin`/`org_member`, the ADR-0057 D4 `sys_user_position`
+    // assignments, the ADR-0090 D5 `everyone` anchor, and `platform_admin`. It
+    // is not derived here; it is asked of `resolveUserAuthzGrants`, the ONE
+    // authority, for the reason spelled out at the call site below.
     //
-    // Better-auth's `sys_user` table doesn't carry a `role` column. We derive
-    // it from two sources:
+    // ⛔ The better-auth `user.role` scalar is NOT a source of it. It used to be
+    // (split on commas and unioned in), which put auth-layer role names on an
+    // array whose declared meaning — `EvalUserSchema`, "built-in identity names
+    // + position names" — is the security axis, and left the real position names
+    // off it entirely.
     //
-    //   1. **Platform admin** — the ADR-0068 D2 standing, resolved through
-    //      `core/security/resolve-authz-context.ts` (the single authority for
-    //      authorization derivation) and never re-read here. See
-    //      `isPlatformAdminUserId` below.
-    //   2. **Organization admin** — a `sys_member` row in the user's *active*
-    //      organization (`session.activeOrganizationId`) with role `owner` or
-    //      `admin`. Org owners/admins are entitled to manage org-scoped
-    //      metadata such as saved list views, dashboards, etc.
-    //
-    // ADR-0068 D2: rather than synthesizing `user.role = 'admin'`, both paths now
-    // contribute CANONICAL names to `user.positions` (platform_admin / org_*),
-    // and `user.isPlatformAdmin` is a derived alias. The raw membership role
-    // remains available via the `organization` plugin's `member` payload.
+    // IMPORTANT: `user.role` is NOT overwritten — consumers must gate on
+    // `positions[]` / `isPlatformAdmin` (e.g. via objectui's
+    // `useWorkspaceAdminStatus`), never on `user.role === 'admin'`. A consumer
+    // that genuinely wants the better-auth role reads `user.role`, which stays
+    // on the payload verbatim; the raw membership role stays on the organization
+    // plugin's `member` payload.
     const dataEngine = this.config.dataEngine;
     if (dataEngine) {
       const { customSession } = await import('better-auth/plugins/custom-session');
       plugins.push(customSession(async ({ user, session }) => {
         if (!user?.id) return { user, session };
-
-        // ADR-0068 D2 — surface CANONICAL org_* role names (not a boolean flag):
-        // a membership owner/admin/member maps to org_owner/org_admin/org_member.
-        const activeOrgRoles = async (): Promise<string[]> => {
-          try {
-            const orgId = (session as any)?.activeOrganizationId;
-            if (!orgId) return [];
-            const members = await dataEngine.find('sys_member', {
-              where: { user_id: user.id, organization_id: orgId },
-              limit: 5,
-            });
-            const out: string[] = [];
-            for (const m of (Array.isArray(members) ? members : [])) {
-              const raw = typeof m?.role === 'string' ? m.role : '';
-              for (const r of raw.split(',').map((s: string) => s.trim()).filter(Boolean)) {
-                const mapped = mapMembershipRole(r);
-                if (!out.includes(mapped)) out.push(mapped);
-              }
-            }
-            return out;
-          } catch {
-            return [];
-          }
-        };
 
         // ADR-0068 D1/D2 (renamed ADR-0090 D3) — emit ONE canonical
         // positions[] (identity names + position names), with NO singular
@@ -3612,14 +3580,71 @@ export class AuthManager {
         // [#10348] Asked through the ONE authority, exactly as `/sso/register`
         // and `/admin/impersonate-user` ask it — so the session payload can no
         // longer disagree with the gates about who a platform admin is.
-        const platformAdmin = await this.isPlatformAdminUserId(user.id);
-        const orgRoles = await activeOrgRoles();
-        const storedRole = typeof (user as any).role === 'string' ? (user as any).role : '';
-        const positions = Array.from(new Set([
-          ...storedRole.split(',').map((s: string) => s.trim()).filter(Boolean),
-          ...orgRoles,
-          ...(platformAdmin ? [BUILTIN_IDENTITY_PLATFORM_ADMIN] : []),
-        ]));
+        //
+        // [#15136 — maintainer ruling 2026-09-05, option A] ONE name, ONE
+        // meaning: `positions[]` is the SECURITY axis on every surface.
+        //
+        // This used to be a hand-rolled union — the better-auth `sys_user.role`
+        // scalar split on commas, plus the active membership mapped to `org_*`,
+        // plus `platform_admin`. It read NOTHING from `sys_user_position`, the
+        // ADR-0057 D4 table that is the source of truth for custom positions, so
+        // a user genuinely holding a business position got a payload without it
+        // and every client-side gate narrowed by that position answered FALSE —
+        // silently, because the root and the key were both bound and CEL raised
+        // nothing. `EvalUserSchema` had declared the opposite all along
+        // ("built-in identity names + position names", "evaluates identically
+        // wherever it is written"); the Console binds this array straight through
+        // as `current_user`, so the payload WAS the contract violation.
+        //
+        // The derivation is not repaired here — it is DELETED and asked of the
+        // authority instead. `resolve-authz-context.ts` states that every entry
+        // point must resolve authorization through it and never re-read the
+        // `sys_*` grant tables itself; this callback was doing exactly what that
+        // forbids, which is how it drifted out of agreement with
+        // `/auth/me/permissions` (served from the same `grants.positions`) and
+        // with every server-side evaluator (`ExecutionContext.positions`) in the
+        // first place. The same move `isPlatformAdminUserId` made at #10348.
+        //
+        // Scoped to the session's ACTIVE organization, so a position held in one
+        // organization does not answer while the caller operates in another —
+        // the resolver's own rule, now applied to the payload too.
+        //
+        // `isPlatformAdmin` comes from the posture RUNG on the same envelope,
+        // never from the array. ⛔ `positions.includes('platform_admin')` is the
+        // form `resolve-authz-context.ts` explicitly forbids, because an
+        // ADR-0057 D4 `sys_user_position` row MAY SPELL THAT VERY NAME and a
+        // platform-RBAC assignment is not the ADR-0068 D2 capability grant.
+        // Under ruling A that stopped being theoretical: moving `positions` to
+        // the security axis moved the string `platform_admin` into a space a
+        // tenant admin can WRITE (`sys_user_position` is `apiEnabled`), so an
+        // array read here would have let a tenant mint platform standing and
+        // pass the `/admin/*` mount gate. `grants.posture === 'PLATFORM_ADMIN'`
+        // is byte-for-byte what `hasPlatformAdminStanding` returns, so the
+        // payload, that predicate and `judgePlatformAdmin` cannot disagree.
+        // ADR-0068 D2 defines the alias as `'platform_admin' in roles`; that
+        // wording predates D4 rows being able to spell built-in names, and
+        // core's later ⛔ is the specific rule.
+        //
+        // Fail CLOSED on an unreadable grant store, matching what both halves of
+        // the old derivation already did (`isPlatformAdminUserId` returns false
+        // on any lookup error; `activeOrgRoles` caught to `[]`). Warned rather
+        // than swallowed — an empty `positions[]` hides UI, and this card is
+        // about exactly that going unannounced.
+        let positions: string[] = [];
+        let platformAdmin = false;
+        try {
+          const grants = await resolveUserAuthzGrants(dataEngine as any, user.id, {
+            tenantId: (session as any)?.activeOrganizationId ?? undefined,
+          });
+          positions = grants.positions;
+          platformAdmin = grants.posture === 'PLATFORM_ADMIN';
+        } catch (err: any) {
+          console.warn(
+            '[auth] could not resolve authorization grants for the session payload; '
+            + 'positions[] is empty and position-gated UI will be hidden:',
+            err?.message ?? String(err),
+          );
+        }
 
         // ADR-0069 — authentication-policy gate posture (password expiry,
         // enforced MFA). Computed only when a gate feature is enabled (else
