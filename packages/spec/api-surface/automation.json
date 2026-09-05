@@ -178,6 +178,7 @@
     "ORG_MEMBERSHIP_LEVELS (const)",
     "OS_CONSTRUCT_EXT (const)",
     "PARALLEL_NODE_TYPE (const)",
+    "PREDICATE_SLOT_STRING_REFUSAL (const)",
     "ParallelBranch (type)",
     "ParallelBranchParsed (type)",
     "ParallelBranchSchema (const)",
@@ -259,6 +260,7 @@
     "normalizeDecisionOutputs (function)",
     "normalizeFlowFunctionEntry (function)",
     "parseFlowNodeRegions (function)",
+    "predicateSlotRefusal (function)",
     "resolveFlowNodeExpressions (function)",
     "resolveFlowTriggerKind (function)",
     "validateControlFlow (function)"

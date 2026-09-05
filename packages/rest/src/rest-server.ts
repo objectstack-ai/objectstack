@@ -5607,60 +5607,72 @@ export class RestServer {
                             });
                             return;
                         }
-                        // [#13753] ⛔ STILL NO `organizationId`, and that is a
-                        // RECORDED GAP, not an omission nobody looked at. Read
-                        // this before adding the one-line repair that looks
-                        // obviously missing here.
+                        // ── [#13753] STATE THE ORG PARTITION — and pass it
+                        // RAW, which is the whole of the decision ───────────
                         //
-                        // The card prescribed the sibling call-site fix —
-                        // `organizationIdForMetaRead(canonicalMetaUrlType(
-                        // req.params.type), ctx?.tenantId)` — on the premise
-                        // that this door "takes one type". Measured on the
-                        // merged tree, it does not: `req.params.type` is the
-                        // TARGET, and `findReferencesToMeta` spends the
-                        // organization on the SOURCES. It resolves
+                        // The admin "Used by" panel renders its empty case as
+                        // "Nothing in the metadata graph points at this item.
+                        // Safe to delete." (objectui `metadata-admin/i18n.ts`),
+                        // shown to an operator about to delete something. With
+                        // no organization stated, the sweep read the env
+                        // partition only: an org-scoped `view` referencing the
+                        // item was invisible and the panel issued a false
+                        // clearance — the ADR-0110 D3 harm this route's own 501
+                        // refusal (#9326) exists to prevent, delivered by the
+                        // door after the protocol had refused to deliver it.
+                        //
+                        // ⛔ NOT pre-gated with `organizationIdForMetaRead(
+                        // canonicalMetaUrlType(req.params.type), ...)`, the way
+                        // the sibling `/meta` doors gate. Here `req.params.type`
+                        // is the TARGET, and `findReferencesToMeta` spends the
+                        // organization on the SOURCES: it resolves
                         // `REFERENCE_SITES.byTarget.get(target)`, groups the
-                        // sites by `fromType`, and reads each with
-                        // `getMetaItems({ type: matcher.fromType,
-                        // ...(organizationId ? { organizationId } : {}) })`. So
-                        // one request-level organization is applied to a SET of
-                        // types the target's own registry flag says nothing
-                        // about, and `getMetaItems` applies no gate of its own.
+                        // sites by `fromType` and reads each through
+                        // `getMetaItems({ type: matcher.fromType, ... })`. The
+                        // target's own registry flag therefore says nothing
+                        // about the types actually read, and gating on it would
+                        // suppress the organization for exactly the `object` /
+                        // `flow` / `app` deletes this card is about — the card's
+                        // own false clearance, left standing by a change that
+                        // looks like its repair.
                         //
-                        // Gating on the target would therefore answer a
-                        // question about the wrong type, in both directions:
+                        // ⭐ And RAW is not the unconditional tenant that
+                        // predicate exists to prevent, because since #14683
+                        // `getMetaItems` applies it ITSELF, to its OWN
+                        // `request.type`, after the fold. The per-SOURCE-type
+                        // decision is already the callee's: an overridable
+                        // source (`view`, `dashboard`, `report`, `translation`,
+                        // `email_template`) honours the organization, every
+                        // other source drops it and stays env-wide, so no
+                        // pre-#6190 phantom row is resurrected into a
+                        // destructive-action clearance. `request.organizationId`
+                        // has exactly ONE use inside `findReferencesToMeta` —
+                        // that `getMetaItems` spread — so passing it raw carries
+                        // no other consequence. Both halves are pinned in
+                        // `rest-server-meta-read-org-scope.test.ts`, the second
+                        // as the narrowness control.
                         //
-                        //  • target `allowOrgOverride: true` (`view`,
-                        //    `dashboard`, `report`, `translation`,
-                        //    `email_template`) ⇒ the org is named for EVERY
-                        //    source type, `object` / `flow` / `app` included —
-                        //    the unconditional tenant the read predicate exists
-                        //    to prevent, unioning pre-#6190 phantom rows back
-                        //    into a destructive-action clearance;
-                        //  • target `allowOrgOverride: false` (`object`,
-                        //    `flow`, `app`, `page`, …) ⇒ nothing is named, so
-                        //    an org-scoped `view` that references the object
-                        //    being deleted stays invisible and the "Used by"
-                        //    panel still renders "Nothing in the metadata graph
-                        //    points at this item. Safe to delete." That is the
-                        //    card's own false clearance, on the most common
-                        //    delete there is.
+                        // ⚠️ ADR-0131 D6/D7 retires the per-organization
+                        // metadata partition in v18 (#15206, C5), so this is a
+                        // repair inside a mechanism being removed: an existing
+                        // value handed to an existing parameter, no new contract
+                        // surface. ⛔ Nothing is to be built on it.
                         //
-                        // ⇒ The correct scope is per SOURCE type, and no value
-                        // this call site can pass expresses it. The repair
-                        // belongs where the type being read is known — the
-                        // predicate applied per `matcher.fromType` inside
-                        // `findReferencesToMeta`, or once inside `getMetaItems`
-                        // so read scope cannot drift from write scope for ANY
-                        // caller. Both are `metadata-protocol` changes that the
-                        // card fences off (⛔ "Do not change ... in
-                        // `protocol.ts`"), so this door is reported rather than
-                        // half-repaired: an org-awareness this door cannot
-                        // deliver must not be advertised by a gate that happens
-                        // to read `true` (Prime Directive #10).
+                        // The same memoised resolution the sibling read doors
+                        // share, in the same locally-caught spelling: this door
+                        // does not sit behind the shared anonymous floor, so it
+                        // decides an authz-store outage for itself rather than
+                        // laundering it into an org-unscoped 200.
+                        const referencesCtx = await this.resolveExecCtx(environmentId, req)
+                            .catch(rethrowAuthzStoreUnavailable);
                         const result = await (p as any).findReferencesToMeta({
                             type: req.params.type,
                             name: req.params.name,
+                            // SPREAD, never `organizationId: x ?? null` — the
+                            // implementation declares `organizationId?: string`
+                            // (optional plain string, not nullable), and it
+                            // forwards on truthiness.
+                            ...(referencesCtx?.tenantId ? { organizationId: referencesCtx.tenantId } : {}),
                             ...(environmentId ? { environmentId } : {}),
                         });
                         res.json(result);

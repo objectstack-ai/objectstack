@@ -22,6 +22,9 @@
  *                   multi-value field `[]` is an empty value (#9476 — the
  *                   #9447 ruling: required means non-empty array).
  *  - `maxLength` / `minLength`            (text/textarea/email/url/phone/password)
+ *  - `valueDomain`  a declared standard domain's membership, judged by the
+ *                   spec's shared `isValueDomainMember` — the WRITTEN value
+ *                   only (#14168, maintainer ruling 2026-09-02 option A)
  *  - `min` / `max`                        (number/currency/percent/rating/slider)
  *  - `scale`        more decimal places than declared → `max_scale` (#7501;
  *                   rejection, NEVER rounding — maintainer ruling 2026-08-11)
@@ -48,11 +51,13 @@ import {
   ALL_OPERATORS,
   RETIRED_FILTER_OPERATORS,
   BOUNDED_STRING_FIELD_TYPES,
+  VALUE_DOMAIN_FIELD_TYPES,
   REFERENCE_VALUE_TYPES,
   FILE_REFERENCE_TYPES,
   STRUCTURED_JSON_TYPES,
 } from '@objectstack/spec/data';
 import type { FieldErrorCode } from '@objectstack/spec/api';
+import { isValueDomainMember, type ValueDomain } from '@objectstack/spec/shared';
 import {
   renderValidationMessage,
   objectFieldLabelKey,
@@ -168,6 +173,15 @@ interface FieldDef {
   max?: number;
   /** Max decimal places for number types — enforced by rejection (#7501). */
   scale?: number;
+  /**
+   * Standard value domain the WRITTEN value must be a member of (#14168) —
+   * the same closed vocabulary and the same membership predicate a settings
+   * specifier's `valueDomain` uses, so a time zone accepted in Settings is the
+   * time zone accepted in a field. Typed as the spec's `ValueDomain` rather
+   * than `string`: an unknown domain word has no membership test to run, and
+   * `isValueDomainMember` is a total function over exactly this union.
+   */
+  valueDomain?: ValueDomain;
   options?: Array<{ value: string | number; label?: string } | string | number>;
 }
 
@@ -572,6 +586,51 @@ function validateOne(
     }
     if (def.minLength !== undefined && s.length < def.minLength) {
       return fail('min_length', { minLength: def.minLength, actual: s.length });
+    }
+    // ── `valueDomain` — membership in a published standard (#14168) ──
+    // Maintainer ruling 2026-09-02 (option A): ONE closed vocabulary and ONE
+    // membership predicate, shared by settings specifiers and object fields —
+    // so a currency code accepted in Settings is the code accepted in a field.
+    // The predicate is imported, never re-implemented: the repo already carries
+    // hand-rolled copies of the IANA probe, and a second opinion on membership
+    // is how "accepted in Settings, refused in a field" happens.
+    //
+    // The applicability door is the SPEC'S `VALUE_DOMAIN_FIELD_TYPES`, read as
+    // a constant for the same reason this branch reads `BOUNDED_STRING_FIELD_TYPES`
+    // (#11875): two seams reading one constant cannot drift into two opinions.
+    // The set is a strict subset of the bounded-string family (`text` alone
+    // today, against twelve) — which is why the check sits inside this branch
+    // and why the subset relation is pinned as a test rather than assumed.
+    // `FieldSchema` refuses the key outside the set at parse with a located
+    // issue at [valueDomain], and its refusal message states this seam's half
+    // of the contract verbatim: "the write-time validator applies `valueDomain`
+    // to exactly those types". Judging a hand-built runtime schema's key on the
+    // other eleven would make that sentence false.
+    //
+    // WRITTEN VALUE ONLY — the `min`/`max`/`maxLength` transition-gate class: a
+    // stored value outside a domain declared later is never re-read and survives
+    // unrelated edits (an omitted field never reaches here on update), and an
+    // absent/empty value is the `required` check's business above, not this one.
+    if (
+      def.valueDomain !== undefined &&
+      VALUE_DOMAIN_FIELD_TYPES.has(t) &&
+      !isValueDomainMember(def.valueDomain, s)
+    ) {
+      // One wire code — the ADR-0114 catalog member `value_domain`, with the
+      // domain shipped in `constraint` so a client can name it. The finer
+      // per-domain message key spells the standard out for a human ("a valid
+      // ISO 4217 currency code, e.g. CHF") in all four locales; it is a
+      // RENDERING choice and never reaches the wire, the same code/messageKey
+      // split `invalid_value_shape` and `required_cleared` use. The value is
+      // echoed because every one of those templates interpolates `{{value}}` —
+      // an uninterpolated placeholder ships `{{value}}` to the user verbatim.
+      return fail(
+        'value_domain',
+        { valueDomain: def.valueDomain },
+        `value_domain_${def.valueDomain}`,
+        undefined,
+        s,
+      );
     }
     if (t === 'email' && !EMAIL_RE.test(s)) {
       return fail('invalid_email');

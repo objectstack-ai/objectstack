@@ -349,6 +349,7 @@
     "automation/TryCatchConfig:errorVariable",
     "automation/TryCatchConfig:retry",
     "automation/TryCatchConfig:try",
+    "automation/TryCatchErrorValue:code",
     "automation/TryCatchErrorValue:item",
     "automation/TryCatchErrorValue:iteration",
     "automation/TryCatchErrorValue:message",

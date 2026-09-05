@@ -253,6 +253,15 @@ run reports success. `objectstack validate` names the offending template.
 > organization predicate reads and writes across every tenant. The tenant column
 > is platform-injected — filter on it, never re-declare it per object.
 
+> **A hook elevates itself with `runAs`, never with `sudo`.** An object hook
+> (objectstack-data) declares its own `runAs: 'system' | 'user' | 'inherit'` —
+> default `'inherit'`, the context of the write that fired it — scoping that
+> hook's `ctx.api` data operations only, on the in-process `handler` and the
+> sandboxed `body` alike. A `'user'` hook whose trigger resolved no user has
+> nothing to scope to: its `ctx.api` data operations are refused
+> (`HOOK_UNSCOPED_DATA_ACCESS`, 403) rather than run unscoped — declare
+> `runAs: 'system'` when the elevation is intended. `sudo` is not a hook key.
+
 ### Filter tokens (`config.filter`)
 
 The one slot where two `{…}` dialects meet, and the one whose failure **widens**
@@ -348,10 +357,12 @@ them right the first time:
    } });
    ```
 
-4. **Conditions are bare CEL — only the stdlib is callable.** `now()`,
+4. **Conditions are bare CEL — the stdlib is what you may call bare.** `now()`,
    `today()`, `daysFromNow(n)`, `daysAgo(n)`, `daysBetween(a, b)`, `isBlank(v)`,
    `coalesce(a, b)`, `abs/round/min/max`, `upper/lower/contains/matches`, plus CEL
-   built-ins (`has`, `size`, `int`, `string`, …) — see **objectstack-formula** for the full table.
+   built-ins (`has`, `size`, `int`, `string`, …) — see **objectstack-formula** for that
+   table: it is `CEL_STDLIB_FUNCTIONS`, the bare-callable public subset, so receiver
+   methods (called on a value, never bare) are not in it.
    An UNKNOWN function (`PRIOR()`, a typo'd name) and a `{…}`-wrapped field ref
    both **fail the build**: a brace is a template, not CEL — write `record.x`,
    not `{record.x}`.
@@ -715,7 +726,7 @@ Object-hook `ctx` is a different vocabulary — see **objectstack-data**
 | `approvalStatusField` | Business-object field to mirror `pending`/`approved`/`rejected`/`recalled` onto (should be readonly) |
 | `onEmptyApprovers` | What an EMPTY resolved slate does: `admin_rescue` (default — request opens, only a privileged admin can act via Reassign; never waves through, never kills the run), `fail` (node fails — treat an empty slate as a config bug), `auto_approve` (skip the request, continue down `approve` with `output.autoApproved = true` — opt-in because it silently waves the record through). Declare it explicitly on any node with an `expression` approver (linted) |
 | `decisionOutputs` | Decision outputs a decision may carry (author declares, approvers fill values). Entries are bare keys (free-text input) **or typed declarations** `{ key, label?, type: 'text'\|'user'\|'department'\|'position'\|'team', multiple?, required? }` — a typed entry renders the matching record picker in the decision dialog (`multiple` collects an id array). Accepted outputs resume the run as `<nodeId>.<key>` variables; undeclared keys reject the decision; `decision`/`requestId` reserved |
-| `escalation` | Optional per-node SLA — `{ enabled, timeoutHours, action: reassign\|auto_approve\|auto_reject\|notify, escalateTo?, notifySubmitter }`. `escalateTo` is a **position machine name** (expanded to its holders via `sys_user_position`, ADR-0090 D3) or a specific user id — never a membership tier. `reassign` without `escalateTo` degrades to notify (linted) |
+| `escalation` | Optional per-node SLA — `{ enabled, timeoutHours, action: reassign\|auto_approve\|auto_reject\|notify, escalateTo?, notifySubmitter }`. `timeoutHours` is **calendar (wall-clock) hours** — nights, weekends and holidays count; the platform ships no business-hours calendar. `escalateTo` is a **position machine name** (expanded to its holders via `sys_user_position`, ADR-0090 D3) or a specific user id — never a membership tier. `reassign` without `escalateTo` degrades to notify (linted) |
 | `maxRevisions` | ADR-0044 — max **send-backs-for-revision** per run before auto-reject. Default `3`; `0` disables send-back. Only meaningful when the node has a `revise` out-edge |
 
 ### Branching, side-effects & rejection
