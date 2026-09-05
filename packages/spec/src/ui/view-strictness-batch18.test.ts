@@ -146,12 +146,14 @@ describe('#4001 批 18 — closed sites reject unknown keys where they live', ()
       .toContain('notAnOptionKey');
   });
 
-  it('GanttConfigSchema.tooltipFields — a CLOSED entry inside a deliberately OPEN parent', () => {
+  it('GanttConfigSchema.tooltipFields — a CLOSED entry, and since #15469 a CLOSED parent too', () => {
     const gantt = { startDateField: 's', endDateField: 'e', titleField: 't' };
-    // The parent is `.passthrough()` on purpose (renderer-ahead knobs reach
-    // plugin-gantt). That openness must NOT leak into the entry.
-    const parsed = accept(GanttConfigSchema, { ...gantt, someRendererAheadKnob: true }) as Record<string, unknown>;
-    expect(parsed.someRendererAheadKnob, 'the parent stays open — this is the 批 18 non-goal').toBe(true);
+    // 批 18 closed this ENTRY while the parent stayed `.passthrough()` (its
+    // stated non-goal: renderer-ahead knobs reached plugin-gantt through the
+    // parent). #15469 closed the parent (maintainer ruling A), so both
+    // readings are pinned here and a reopen of either is loud.
+    expect(reject(GanttConfigSchema, { ...gantt, someRendererAheadKnob: true }))
+      .toContain('someRendererAheadKnob');
     expect(reject(GanttConfigSchema, { ...gantt, tooltipFields: [{ field: 'owner', notATooltipKey: 1 }] }))
       .toContain('notATooltipKey');
   });
