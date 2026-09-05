@@ -96,18 +96,18 @@ describe('MemoryConfigSchema', () => {
       persistence: {
         type: 'file',
         path: '/tmp/data.json',
-        autoSaveInterval: 10000,
+        autoSaveIntervalMs: 10000,
       },
     });
 
     expect(config.persistence).toBeDefined();
-    const p = config.persistence as { type: 'file'; path?: string; autoSaveInterval: number };
+    const p = config.persistence as { type: 'file'; path?: string; autoSaveIntervalMs: number };
     expect(p.type).toBe('file');
     expect(p.path).toBe('/tmp/data.json');
-    expect(p.autoSaveInterval).toBe(10000);
+    expect(p.autoSaveIntervalMs).toBe(10000);
   });
 
-  it('should apply file persistence autoSaveInterval default', () => {
+  it('should apply file persistence autoSaveIntervalMs default', () => {
     const config = MemoryConfigSchema.parse({
       persistence: {
         type: 'file',
@@ -115,8 +115,8 @@ describe('MemoryConfigSchema', () => {
       },
     });
 
-    const p = config.persistence as { type: 'file'; autoSaveInterval: number };
-    expect(p.autoSaveInterval).toBe(2000);
+    const p = config.persistence as { type: 'file'; autoSaveIntervalMs: number };
+    expect(p.autoSaveIntervalMs).toBe(2000);
   });
 
   it('should accept persistence with local object config', () => {
@@ -138,15 +138,15 @@ describe('MemoryConfigSchema', () => {
         type: 'auto',
         path: '/var/data/memory.json',
         key: 'myapp:db',
-        autoSaveInterval: 5000,
+        autoSaveIntervalMs: 5000,
       },
     });
 
-    const p = config.persistence as { type: 'auto'; path?: string; key?: string; autoSaveInterval?: number };
+    const p = config.persistence as { type: 'auto'; path?: string; key?: string; autoSaveIntervalMs?: number };
     expect(p.type).toBe('auto');
     expect(p.path).toBe('/var/data/memory.json');
     expect(p.key).toBe('myapp:db');
-    expect(p.autoSaveInterval).toBe(5000);
+    expect(p.autoSaveIntervalMs).toBe(5000);
   });
 
   it('should accept auto persistence without overrides', () => {
@@ -208,7 +208,7 @@ describe('MemoryConfigSchema', () => {
       persistence: {
         type: 'file',
         path: '/var/data/memory.json',
-        autoSaveInterval: 3000,
+        autoSaveIntervalMs: 3000,
       },
     });
 
@@ -218,12 +218,12 @@ describe('MemoryConfigSchema', () => {
     expect(p.path).toBe('/var/data/memory.json');
   });
 
-  it('should reject file persistence with invalid autoSaveInterval', () => {
+  it('should reject file persistence with invalid autoSaveIntervalMs', () => {
     expect(() => MemoryConfigSchema.parse({
       persistence: {
         type: 'file',
         path: '/tmp/data.json',
-        autoSaveInterval: 50, // Below minimum of 100
+        autoSaveIntervalMs: 50, // Below minimum of 100
       },
     })).toThrow();
   });
@@ -270,21 +270,21 @@ describe('FilePersistenceConfigSchema', () => {
     const config = FilePersistenceConfigSchema.parse({
       type: 'file',
       path: '/data/store.json',
-      autoSaveInterval: 10000,
+      autoSaveIntervalMs: 10000,
     });
 
     expect(config.type).toBe('file');
     expect(config.path).toBe('/data/store.json');
-    expect(config.autoSaveInterval).toBe(10000);
+    expect(config.autoSaveIntervalMs).toBe(10000);
   });
 
-  it('should apply default autoSaveInterval', () => {
+  it('should apply default autoSaveIntervalMs', () => {
     const config = FilePersistenceConfigSchema.parse({
       type: 'file',
       path: '/data/store.json',
     });
 
-    expect(config.autoSaveInterval).toBe(2000);
+    expect(config.autoSaveIntervalMs).toBe(2000);
   });
 
   it('should accept without path (uses default)', () => {
@@ -426,7 +426,7 @@ describe('AutoPersistenceConfigSchema', () => {
     expect(config.type).toBe('auto');
     expect(config.path).toBeUndefined();
     expect(config.key).toBeUndefined();
-    expect(config.autoSaveInterval).toBeUndefined();
+    expect(config.autoSaveIntervalMs).toBeUndefined();
   });
 
   it('should accept auto config with all overrides', () => {
@@ -434,19 +434,19 @@ describe('AutoPersistenceConfigSchema', () => {
       type: 'auto',
       path: '/data/store.json',
       key: 'myapp:db',
-      autoSaveInterval: 5000,
+      autoSaveIntervalMs: 5000,
     });
 
     expect(config.type).toBe('auto');
     expect(config.path).toBe('/data/store.json');
     expect(config.key).toBe('myapp:db');
-    expect(config.autoSaveInterval).toBe(5000);
+    expect(config.autoSaveIntervalMs).toBe(5000);
   });
 
-  it('should reject auto config with invalid autoSaveInterval', () => {
+  it('should reject auto config with invalid autoSaveIntervalMs', () => {
     expect(() => AutoPersistenceConfigSchema.parse({
       type: 'auto',
-      autoSaveInterval: 50, // Below minimum of 100
+      autoSaveIntervalMs: 50, // Below minimum of 100
     })).toThrow();
   });
 
@@ -454,7 +454,7 @@ describe('AutoPersistenceConfigSchema', () => {
   it('rejects an unrecognised key instead of silently stripping it', () => {
     const result = AutoPersistenceConfigSchema.safeParse({
       type: 'auto',
-      interval: 5000, // meant `autoSaveInterval`, not a real field
+      interval: 5000, // meant `autoSaveIntervalMs`, not a real field
     });
 
     expect(result.success).toBe(false);
@@ -486,7 +486,7 @@ describe('MemoryPersistenceConfigSchema', () => {
       type: 'file',
       path: '/tmp/data.json',
     });
-    expect(config).toEqual({ type: 'file', path: '/tmp/data.json', autoSaveInterval: 2000 });
+    expect(config).toEqual({ type: 'file', path: '/tmp/data.json', autoSaveIntervalMs: 2000 });
   });
 
   it('should accept local object config', () => {
@@ -537,5 +537,47 @@ describe('MemoryDriverSpec', () => {
 
   it('should have an icon', () => {
     expect(MemoryDriverSpec.icon).toBe('memory');
+  });
+});
+
+// #15680 (stack card 5/6 of #14478) — ruling B. Both old spellings are
+// `retiredKey()` tombstones; asserted on the issue CODE and the prescription,
+// never on a bare `toThrow()` — both shapes ARE `strictObject`, so a bare throw
+// assertion would pass identically on the unrecognized-key error the tombstone
+// exists to replace, which is exactly the case that cannot carry a rename.
+describe('memory persistence auto-save interval carries its unit (#15680)', () => {
+  it('REFUSES the retired `autoSaveInterval` on the file arm, with the rename in the message', () => {
+    const result = FilePersistenceConfigSchema.safeParse({ type: 'file', autoSaveInterval: 5000 });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'autoSaveInterval');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toContain('`FilePersistenceConfig.autoSaveInterval` was renamed to `autoSaveIntervalMs`');
+  });
+
+  // The `auto` arm was NOT on the gate's list — its describe named no unit, so
+  // the predicate never judged it. It moves anyway because it is the same value:
+  // `auto` resolves to the same Node.js file adapter and forwards this number to
+  // the same `FileSystemPersistenceAdapter` field. Renaming one arm and not the
+  // other would leave one value with two spellings across sibling arms of one
+  // union — the dialect Prime Directive #12 forbids. This pin is what stops a
+  // later reader "restoring" the bare spelling on the arm the gate never listed.
+  it('REFUSES the retired `autoSaveInterval` on the auto arm too, with its own prescription', () => {
+    const result = AutoPersistenceConfigSchema.safeParse({ type: 'auto', autoSaveInterval: 5000 });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'autoSaveInterval');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toContain('`AutoPersistenceConfig.autoSaveInterval` was renamed to `autoSaveIntervalMs`');
+  });
+
+  it('accepts `autoSaveIntervalMs` on both arms, keeps the 2000 default and the min(100) bound', () => {
+    expect(FilePersistenceConfigSchema.parse({ type: 'file', autoSaveIntervalMs: 5000 }).autoSaveIntervalMs).toBe(5000);
+    expect(FilePersistenceConfigSchema.parse({ type: 'file' }).autoSaveIntervalMs).toBe(2000);
+    expect(AutoPersistenceConfigSchema.parse({ type: 'auto', autoSaveIntervalMs: 5000 }).autoSaveIntervalMs).toBe(5000);
+    // 100 reads as a plausible number of SECONDS — the bound is the whole
+    // reason the bare name was dangerous rather than merely untidy.
+    expect(FilePersistenceConfigSchema.safeParse({ type: 'file', autoSaveIntervalMs: 50 }).success).toBe(false);
+    expect(AutoPersistenceConfigSchema.safeParse({ type: 'auto', autoSaveIntervalMs: 50 }).success).toBe(false);
   });
 });
