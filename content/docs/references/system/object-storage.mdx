@@ -44,7 +44,8 @@ const result = AccessControlConfigSchema.parse(data);
 | **allowedMethods** | `Enum<'GET' \| 'PUT' \| 'POST' \| 'DELETE' \| 'HEAD'>[]` | optional | CORS allowed HTTP methods |
 | **allowedHeaders** | `string[]` | optional | CORS allowed headers |
 | **exposeHeaders** | `string[]` | optional | CORS exposed headers |
-| **maxAge** | `number` | optional | CORS preflight cache duration in seconds |
+| **maxAgeSeconds** | `number` | optional | CORS preflight cache duration in seconds |
+| **maxAge** | `never` | optional | [REMOVED] `AccessControlConfig.maxAge` was renamed to `maxAgeSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Every bucket-CORS standard this value is forwarded to already spells the unit (S3 MaxAgeSeconds, GCS maxAgeSeconds, Azure MaxAgeInSeconds), so the bare name was a deviation from them rather than a mirror of them. Rename the key to `maxAgeSeconds`; the value (seconds) is unchanged. The unrelated `CorsConfig.maxAge` on the shared HTTP surface keeps its name — that one mirrors the Access-Control-Max-Age response header, which carries no unit token. |
 | **corsEnabled** | `boolean` | optional (default: `false`) | Enable CORS configuration |
 | **publicAccess** | `{ allowPublicRead: boolean; allowPublicWrite: boolean; allowPublicList: boolean }` | optional | Public access control |
 | **allowedIps** | `string[]` | optional | Allowed IP addresses/CIDR blocks |
@@ -100,7 +101,8 @@ const result = AccessControlConfigSchema.parse(data);
 | **allowedMethods** | `Enum<'GET' \| 'PUT' \| 'POST' \| 'DELETE' \| 'HEAD'>[]` | optional | CORS allowed HTTP methods |
 | **allowedHeaders** | `string[]` | optional | CORS allowed headers |
 | **exposeHeaders** | `string[]` | optional | CORS exposed headers |
-| **maxAge** | `number` | optional | CORS preflight cache duration in seconds |
+| **maxAgeSeconds** | `number` | optional | CORS preflight cache duration in seconds |
+| **maxAge** | `never` | optional | [REMOVED] `AccessControlConfig.maxAge` was renamed to `maxAgeSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Every bucket-CORS standard this value is forwarded to already spells the unit (S3 MaxAgeSeconds, GCS maxAgeSeconds, Azure MaxAgeInSeconds), so the bare name was a deviation from them rather than a mirror of them. Rename the key to `maxAgeSeconds`; the value (seconds) is unchanged. The unrelated `CorsConfig.maxAge` on the shared HTTP surface keeps its name — that one mirrors the Access-Control-Max-Age response header, which carries no unit token. |
 | **corsEnabled** | `boolean` | optional (default: `false`) | Enable CORS configuration |
 | **publicAccess** | `{ allowPublicRead: boolean; allowPublicWrite: boolean; allowPublicList: boolean }` | optional | Public access control |
 | **allowedIps** | `string[]` | optional | Allowed IP addresses/CIDR blocks |
@@ -280,7 +282,8 @@ Lifecycle policy action type
 | **endpoint** | `string` | optional | Custom endpoint URL |
 | **region** | `string` | optional | Default region |
 | **useSSL** | `boolean` | optional (default: `true`) | Use SSL/TLS for connections |
-| **timeout** | `number` | optional | Connection timeout in milliseconds |
+| **timeoutMs** | `number` | optional | Connection timeout in milliseconds |
+| **timeout** | `never` | optional | [REMOVED] `StorageConnection.timeout` was renamed to `timeoutMs` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `timeoutMs`; the value (milliseconds) is unchanged. |
 
 ### Nested Shape: `ObjectStorageConfig.buckets[number]`
 
@@ -369,7 +372,8 @@ Storage class/tier for cost optimization
 | **endpoint** | `string` | optional | Custom endpoint URL |
 | **region** | `string` | optional | Default region |
 | **useSSL** | `boolean` | optional (default: `true`) | Use SSL/TLS for connections |
-| **timeout** | `number` | optional | Connection timeout in milliseconds |
+| **timeoutMs** | `number` | optional | Connection timeout in milliseconds |
+| **timeout** | `never` | optional | [REMOVED] `StorageConnection.timeout` was renamed to `timeoutMs` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `timeoutMs`; the value (milliseconds) is unchanged. |
 
 
 ---
