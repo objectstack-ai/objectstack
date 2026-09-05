@@ -1,9 +1,10 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * A non-record entry in `stack.objects` must not throw out of ANY authoring
- * rule (#15552) — the family-level counterpart to `object-graph.test.ts`'s
- * seam case (#15494).
+ * A non-record entry in a stack collection must not throw out of ANY authoring
+ * rule — the family-level counterpart to `object-graph.test.ts`'s seam case
+ * (#15494). `stack.objects` first (#15552); every other collection in the
+ * parameterised sweep at the foot of this file (#15636).
  *
  * ## Why this is a family sweep and not thirteen per-rule cases
  *
@@ -226,5 +227,129 @@ describe('each `stack.objects` reader seam skips a non-record entry (#15552)', (
   it('object-field-groups — indexObjectFieldGroups', () => {
     expect(() => indexObjectFieldGroups(junked)).not.toThrow();
     expect(indexObjectFieldGroups(junked).get('crm_account')).toEqual(new Set(['general']));
+  });
+});
+
+/**
+ * The same sweep, every OTHER stack collection (#15636).
+ *
+ * ## Why the sweep had to be parameterised rather than trusted
+ *
+ * #15552 closed the class for ONE collection. The reader it fixed was not
+ * `stack.objects`'s reader, though — it was a hand-copied `asArray` that any
+ * rule pasted in front of any collection, and 23 more copies of it stood in
+ * front of `flows`, `pages`, `dashboards`, `datasets`, `apps`, `permissions`,
+ * `capabilities`, `data`, `hooks`, `views`, `actions`, `translations` and the
+ * per-object sub-collections. A `null` member of any of those reached the same
+ * dereference for the same reason: these rules are pure `(stack) => Finding[]`
+ * and run on the RAW `lint` path, so nothing upstream has judged an entry's
+ * shape, and a YAML list item left empty deserialises to `null`.
+ *
+ * The count per collection was UNKNOWN rather than zero when this was written —
+ * `lint-liveness-properties.test.ts` already pinned `translations: [null, …]`
+ * and `agents: [null, …]`, so some call sites were guarded downstream and some
+ * were not, and only a measurement could say which. This block is that
+ * measurement, kept as the pin.
+ *
+ * ## Where the collection list comes from
+ *
+ * Read off the readers, not off memory: every `recordsOf(stack.X)` in the 22
+ * modules #15636 re-pointed, plus the `TYPE_COLLECTIONS` table
+ * `lintLivenessProperties` drives its dynamic `stack[key]` read from, plus
+ * `positions` and `books`, which `validateSecurityPosture` reads. Adding a
+ * collection to any of those readers and not to this list is the gap this
+ * comment exists to make visible.
+ *
+ * ## What each case pins, and why the second one matters
+ *
+ * Not throwing is half the contract. A guard that dropped the whole collection
+ * would satisfy it, and so would one that invented a finding about an entry no
+ * author wrote — the shape `validateSecurityPosture` was actually caught in for
+ * `objects`. So each case also pins the finding count against a control holding
+ * the SAME collection without the junk member: dropping a non-record member
+ * must be invisible to every rule, in both directions.
+ */
+
+/** A collection under sweep: how to build a stack holding exactly these members. */
+interface SweptCollection {
+  readonly label: string;
+  readonly stack: (members: readonly unknown[]) => AnyRec;
+  /** A member this collection accepts, so the control is not merely empty. */
+  readonly valid?: AnyRec;
+}
+
+const topLevel = (key: string, valid?: AnyRec): SweptCollection => ({
+  label: `stack.${key}`,
+  stack: (members) => (key === 'objects' ? { [key]: members } : { objects: [VALID_OBJECT], [key]: members }),
+  valid,
+});
+
+const VALID_FIELD: AnyRec = { name: 'amount', type: 'number', label: 'Amount' };
+
+/** A stack whose single object carries `members` under one sub-collection key. */
+const underObject = (key: string, valid?: AnyRec): SweptCollection => ({
+  label: `objects[].${key}`,
+  stack: (members) => ({ objects: [{ ...VALID_OBJECT, [key]: members }] }),
+  valid,
+});
+
+const SWEPT_COLLECTIONS: readonly SweptCollection[] = [
+  // Top-level, read through `recordsOf(stack.X)` by the re-pointed readers.
+  topLevel('objects', VALID_OBJECT),
+  topLevel('flows'),
+  topLevel('pages'),
+  topLevel('dashboards'),
+  topLevel('datasets'),
+  topLevel('apps'),
+  topLevel('permissions'),
+  topLevel('capabilities'),
+  topLevel('actions'),
+  topLevel('views'),
+  topLevel('hooks'),
+  topLevel('data'),
+  topLevel('translations'),
+  // Top-level, reached by `lintLivenessProperties`'s dynamic `stack[key]` read.
+  topLevel('agents'),
+  topLevel('tools'),
+  topLevel('skills'),
+  topLevel('webhooks'),
+  topLevel('datasources'),
+  topLevel('books'),
+  topLevel('jobs'),
+  topLevel('emailTemplates'),
+  topLevel('mappings'),
+  // Top-level, read by `validateSecurityPosture` through `recordsOf`.
+  topLevel('positions'),
+  // Per-object sub-collections the same readers walk.
+  underObject('fields', VALID_FIELD),
+  underObject('actions'),
+  underObject('views'),
+  underObject('fieldGroups'),
+  underObject('validations'),
+];
+
+describe('a non-record entry in any other stack collection (#15636)', () => {
+  describe.each(SWEPT_COLLECTIONS.map((c) => [c.label, c] as const))('%s', (_label, collection) => {
+    const members = (junk: unknown): readonly unknown[] =>
+      collection.valid ? [junk, collection.valid] : [junk];
+    const control = (): AnyRec => collection.stack(collection.valid ? [collection.valid] : []);
+
+    describe.each(NON_RECORD_ENTRIES)('with %s', (_shape, junk) => {
+      it('no authoring rule throws', () => {
+        const threw: string[] = [];
+        for (const rule of AUTHORING_RULES) {
+          try {
+            rule.run(collection.stack(members(junk)), {});
+          } catch (e) {
+            threw.push(`${rule.name}: ${(e as Error).message}`);
+          }
+        }
+        expect(threw).toEqual([]);
+      });
+
+      it('invents no finding about the entry no author wrote', () => {
+        expect(findingCount(collection.stack(members(junk)))).toBe(findingCount(control()));
+      });
+    });
   });
 });
