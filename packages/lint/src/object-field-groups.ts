@@ -39,6 +39,8 @@
  * #13855, where it is offered for contract review.)
  */
 
+import { recordsOf } from './object-graph.js';
+
 type AnyRec = Record<string, unknown>;
 
 function isRec(v: unknown): v is AnyRec {
@@ -49,13 +51,6 @@ function strName(v: unknown): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined;
 }
 
-/** Coerce a collection (array or name-keyed map) to an array of records. */
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v as AnyRec[];
-  if (isRec(v)) return Object.entries(v).map(([name, def]) => ({ name, ...(isRec(def) ? def : {}) }));
-  return [];
-}
-
 /**
  * object name → its DECLARED field-group keys.
  *
@@ -64,19 +59,19 @@ function asArray(v: unknown): AnyRec[] {
  * data-dependent) finding from a reference to a group that was never declared.
  * This index answers only the second question — the one with a closed oracle.
  *
- * `fieldGroups` is an ARRAY on `ObjectSchema`, and `asArray` additionally
+ * `fieldGroups` is an ARRAY on `ObjectSchema`, and `recordsOf` additionally
  * resolves the name-keyed map shape that raw (non-`defineStack`) metadata can
  * carry, the same tolerance every other index in this package extends.
  */
 export function indexObjectFieldGroups(stack: unknown): Map<string, Set<string>> {
   const index = new Map<string, Set<string>>();
   if (!isRec(stack)) return index;
-  for (const obj of asArray(stack.objects)) {
+  for (const obj of recordsOf(stack.objects)) {
     const name = strName(obj.name);
     if (!name) continue;
     const keys = new Set<string>();
-    for (const group of asArray(obj.fieldGroups)) {
-      // `asArray` supplies `name` for the map shape; the declared key spelling
+    for (const group of recordsOf(obj.fieldGroups)) {
+      // `recordsOf` supplies `name` for the map shape; the declared key spelling
       // is `key`, so read it first and fall back to the synthesized map key.
       const key = strName(group.key) ?? strName(group.name);
       if (key) keys.add(key);

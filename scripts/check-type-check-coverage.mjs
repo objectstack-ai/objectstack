@@ -1033,6 +1033,59 @@ const EXEMPT = {
 // So the shrink-only guarantee did not loosen here; it moved to a strictly
 // sharper instrument, one that also reddens on a wholesale substitution of
 // error IDENTITY at a constant total, which a per-package integer cannot see.
+//
+// ── #15145: `@objectstack/verify` GRADUATED — and this one WAS paid down ───
+//
+// `verify` (3) left this ledger on 2026-09-04. ⛔ Do NOT read it through the
+// blocks above it: those all warn that a deleted entry left its population
+// undiminished, and this one is the other case (`plugin-security` is the
+// nearest precedent, and even it ledgered nothing only because its 9 residual
+// errors were repaired by hand). Here the entry recorded
+// TS2835 x3 for three extension-less `./harness` imports, all three were given
+// their `.js`, and the re-measure then read the entry at ZERO before anything
+// was wired -- this gate's own line, quoted: "@objectstack/verify: TEST_DEBT
+// records 3, and tsc now reports 0 -- graduation candidate". So there is no
+// `packages/verify/test-typecheck-debt.json`: at zero residue a bare
+// `tsc --noEmit -p tsconfig.test.json` is the stronger gate, the call
+// `plugin-security`, `metadata-core`, `metadata-fs` and `trigger-record-change`
+// made before it, and every error any of the package's 10 test files ever gains
+// is red on arrival with no ledger to be added to.
+//
+// ⚠️ MEASURED IN THAT ORDER ON PURPOSE, because the entry's own note predicted
+// the outcome ("the same one-line fix graduates this entry") and a prediction is
+// not a licence. Collapsing a TS2835 cascade EXPOSES errors as well as removing
+// them -- the #8612 lesson this ledger carries twice above -- and the card that
+// filed this had itself watched the entry drift 3 -> 5 (+2 TS7006) the moment
+// two `.then` callbacks were added behind that same unresolved specifier. The
+// honest move on an upward count is to RE-TALLY, not to delete. Here it went
+// down, and only the measurement could say which.
+//
+// THE WIRING IS THE OTHER HALF, and it is what the entry's disappearance now
+// rests on: `packages/verify/tsconfig.test.json` compiles `src/**/*` with
+// vitest-matching module semantics and `package.json`'s `typecheck` NAMES it,
+// so `hidesTests` is false. Measured with the closure built: the build config
+// puts 0 of the package's 10 `src/*.test.ts` in its program (and all 9 non-test
+// `src/**` files); the test config puts 10 of 10. The package's own advertised
+// `typecheck` was green over a layer it had never read -- which is the defect
+// the card was about, and which deleting a ledger entry alone would have left
+// exactly where it was.
+//
+// ⚠️ The pin half reported nothing here in either direction and still does not:
+// this package's test layer holds ZERO `@ts-expect-error` directives (grepped
+// with a positive control -- the same grep hits `packages/spec/src`), so
+// PINS_CHECKED had no subject. The card's sharpest line -- that a
+// `ts-expect-error` in those files is a phantom check -- is a statement about
+// what WOULD happen, not about an existing dead pin, exactly as `cli`'s
+// graduation recorded for its own 115 files.
+//
+// ⚠️ ROUTE (b) WAS AVAILABLE HERE and was still not taken. The #11491 note
+// above names `verify` as one of the 4 entries whose exclusion could be dropped
+// with `check:type-source-resolution` staying green, and that split was
+// re-measured on 2026-09-04 under a trap-restored mutation and still holds for
+// this package (exit 0; 124 programs across 78 packages). It was declined on
+// module semantics: `tsconfig.json` inherits NodeNext from the repo root and
+// would hold the test layer to a resolver vitest never runs it under. Onboard
+// by WIRING, not by widening the build config.
 const TEST_DEBT = {
 // ── #14710: `@objectstack/cli` GRADUATED, and it was not paid down ─────────
 //
@@ -1153,16 +1206,6 @@ const TEST_DEBT = {
       + '(173,52), where the local `ok()` helper pins its second argument to the exact shape of the '
       + 'module-level `VARS` and a partial context cannot satisfy it; the same file already carries a '
       + 'hand-widened copy of that helper (`filterOf`) written for exactly that reason.',
-  },
-  '@objectstack/verify': {
-    errors: 3,
-    note: 'TS2835 x3 -- `harness.host-resolution`, `harness.posture-only` and `harness.posture` each '
-      + 'import `./harness` without the `.js` extension. Re-tallied from the 8 measured at 5ab08428 '
-      + '(TS2835 x4, TS7006 x4) when `derive.test.ts` gained its own extension: that ONE unresolved '
-      + 'import was carrying 1 x TS2835 plus every TS7006 in the file, because a specifier that does '
-      + 'not resolve under NodeNext makes every symbol it names `any` and so every callback parameter '
-      + 'implicitly any. The remainder is the same NodeNext pair from the top-of-ledger note, and the '
-      + 'same one-line fix graduates this entry.',
   },
   '@objectstack/connector-mcp': { errors: 5, note: 'TS2339 x5. Re-measured 5 at 5ab08428, exact.' },
   '@objectstack/connector-openapi': { errors: 5, note: 'TS2339 x5. Re-measured 5 at 5ab08428, exact.' },

@@ -39,6 +39,7 @@ import {
   sectionGroupRefs,
 } from './object-field-groups.js';
 import { formViewSites, viewObjectName } from './view-walk.js';
+import { recordsOf } from './object-graph.js';
 
 export const FORM_FIELD_UNKNOWN = 'form-field-unknown';
 export const FORM_COLSPAN_ABSOLUTE = 'absolute-colspan-discouraged';
@@ -68,15 +69,6 @@ export interface FormLayoutFinding {
 }
 
 type AnyRec = Record<string, unknown>;
-
-/** Coerce a collection (array or name-keyed map) to an array of records. */
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v as AnyRec[];
-  if (v && typeof v === 'object') {
-    return Object.entries(v as AnyRec).map(([name, def]) => ({ name, ...(def as AnyRec) }));
-  }
-  return [];
-}
 
 function isRec(v: unknown): v is AnyRec {
   return !!v && typeof v === 'object' && !Array.isArray(v);
@@ -122,7 +114,7 @@ export function validateFormLayout(stack: AnyRec): FormLayoutFinding[] {
 
   // object name → its field-name set, for reference checking.
   const objectFields = new Map<string, Set<string>>();
-  for (const obj of asArray(stack.objects)) {
+  for (const obj of recordsOf(stack.objects)) {
     const name = typeof obj.name === 'string' ? obj.name : undefined;
     if (!name) continue;
     const fields = (obj.fields && typeof obj.fields === 'object' && !Array.isArray(obj.fields))

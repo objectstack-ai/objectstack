@@ -6575,6 +6575,10 @@ export class AutomationEngine implements IAutomationService {
                 acted: entry.summary.acted,
                 skipped: entry.summary.skipped,
                 unmeasured: entry.summary.unmeasured,
+                // #14456 — the structured half of the `failed=` token the line
+                // above now carries, so a log pipeline that reads `meta` and
+                // never parses the message sees the same fact.
+                failed: entry.summary.failed,
                 gates: entry.summary.gates,
             };
             if (this.runSummaryLog === 'debug') this.logger.debug(line, meta);
