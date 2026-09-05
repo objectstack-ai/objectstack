@@ -1357,11 +1357,13 @@ describe('translatePage', () => {
     it('resolves key by key across the locale chain, not entry by entry', () => {
       // `zh-CN` translates only `title` for this id; `description` must still
       // fall back to `en` rather than being dropped because the zh entry won.
+      // [#15711] The chain is DECLARED: a chain-less caller now gets the
+      // authored text for the omitted key, never a literal `en`.
       const partial: TranslationBundle = {
         'zh-CN': { pages: { sales_home_page: { components: { ai_briefing: { title: '询问 AI 助手' } } } } },
         en: { pages: { sales_home_page: { components: { ai_briefing: { description: 'Open the assistant panel.' } } } } },
       };
-      const out = translatePage(homePage(), partial, { locale: 'zh-CN' });
+      const out = translatePage(homePage(), partial, { locale: 'zh-CN', fallbackChain: ['en'] });
       expect(byId(out, 'ai_briefing').properties.title).toBe('询问 AI 助手');
       expect(byId(out, 'ai_briefing').properties.description).toBe('Open the assistant panel.');
     });
@@ -2933,13 +2935,15 @@ describe('translateFlow (#11287)', () => {
   });
 
   it('resolves KEY BY KEY across the locale chain — a partial zh entry still falls back to en', () => {
+    // [#15711] `en` is DECLARED on the chain; a chain-less caller now gets the
+    // authored text for the omitted key, never a literal `en`.
     const partialZh: FlowTestBundle = {
       'zh-CN': {
         flows: { lead_conversion: { screens: { screen_1: { title: '转化详情' } } } },
       },
       en: bundle.en,
     };
-    const out = translateFlow(leadConversion(), partialZh, { locale: 'zh-CN' });
+    const out = translateFlow(leadConversion(), partialZh, { locale: 'zh-CN', fallbackChain: ['en'] });
     const screen = screenOf(out);
     expect(screen.config.title).toBe('转化详情');
     expect(screen.config.fields.find((f: any) => f.name === 'createOpportunity').label)

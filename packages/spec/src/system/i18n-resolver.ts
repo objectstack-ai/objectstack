@@ -1445,9 +1445,9 @@ export type PageComponentCopyKey = typeof PAGE_COMPONENT_COPY_KEYS[number];
  * Per-component copy for one component id, resolved across the locale chain.
  *
  * Resolved KEY BY KEY rather than by taking the first locale that has an entry
- * for the id: a partially-translated `zh` entry must still fall back to `en`
- * for the keys it omits, which is how every other resolver on this surface
- * behaves.
+ * for the id: a partially-translated `zh` entry must still fall back to the
+ * next locale on the DECLARED chain (`en` in the pins) for the keys it omits,
+ * which is how every other resolver on this surface behaves.
  */
 function lookupPageComponentCopy(
   bundle: TranslationBundle | undefined,
@@ -2963,7 +2963,7 @@ function lookupFlowLabel(
 /**
  * Per-screen copy for one node id, resolved across the locale chain — KEY BY
  * KEY, like {@link lookupPageComponentCopy}: a partially-translated `zh` entry
- * must still fall back to `en` for the keys it omits.
+ * must still fall back to the next DECLARED locale for the keys it omits.
  */
 function lookupFlowScreenCopy(
   bundle: TranslationBundle | undefined,
