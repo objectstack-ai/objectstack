@@ -135,10 +135,13 @@ const PIN_FILE = path.join(REPO, '.objectui-sha');
  * gate's own SOURCE TEXT for path-shaped literals (`extractWatchHints`). Every
  * path this gate reads is COMPUTED — `PIN_FILE` from `REPO`, `SRC` from
  * `SPEC` — so the extractor found nothing here and this gate had no population
- * at all. Measured on `53edffe09`, before this declaration existed:
+ * at all. Measured on `7bf96cfd0`, before this declaration existed:
  *
  *     node scripts/pm/dispatch-gates.mjs --commands .objectui-sha --repo objectstack-ai/objectstack
- *     -> 12 commands, 0 of them naming check:objectui-pin-citations
+ *     -> 12 commands (5 matched by path), 0 of them naming check:objectui-pin-citations
+ *
+ * and on the same specimen with it, 13 commands (6 matched by path), the new
+ * one being `pnpm --filter @objectstack/spec run check:objectui-pin-citations`.
  *
  * A change set consisting only of the pin file is EXACTLY the class this gate
  * exists for — a pin bump is the one event that invalidates an asserting
