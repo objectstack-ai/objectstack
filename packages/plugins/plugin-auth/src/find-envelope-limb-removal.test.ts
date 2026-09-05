@@ -6,7 +6,7 @@
  *
  * ## What was removed, and why a test is owed for it
  *
- * Every block looked like `Array.isArray(x) ? x : x.records ?? []` (five of them
+ * Every block looked like `Array.isArray(x) ? x : x.records ?? []` (four of them
  * in the guard-clause spelling, one on a `data` limb). The envelope limb was
  * dead: nothing in this tree ever produced that shape. But "dead" is a claim
  * about RUNTIME, and the declared type cannot establish it — `IDataEngine.find`
@@ -35,8 +35,10 @@
  * goes red). That is also the reason removal is right rather than merely safe:
  * a hook that corrupted `find()` into `{ records }` would be a contract
  * violation, and the limb did not repair it — it silently absorbed it at these
- * fourteen sites while the ~140 other `find()` call sites in this package broke
- * anyway. Fourteen sites of false immunity is worse than one visible failure.
+ * fourteen sites while this package's remaining `find()` call sites broke anyway
+ * (47 `.find(` sites in its non-test source in total, a count that already
+ * includes `Array#find`). Fourteen sites of false immunity is worse than one
+ * visible failure.
  *
  * ## The fifteenth case is a different defect
  *
@@ -398,11 +400,23 @@ describe('#15597 — the blocks driven through their real production entry point
 describe('#15597 — settleSelfRegistrationGrant refuses on a malformed row instead of dropping it', () => {
   const USER = { id: 'usr_new', name: 'New Person', email: 'new@corp.example' };
 
-  async function settle(engine: ObjectQL, setName: string, lines: string[]): Promise<void> {
+  async function settle(
+    engine: ObjectQL,
+    setName: string,
+    lines: string[],
+    /**
+     * The organization `settleSelfRegistrationGrant` resolves, read the way the
+     * method itself reads it — `this.config.getTenancy?.()` then `defaultOrgId()`.
+     * Omitted, nothing resolves and `organizationId` stays null; supplied, the
+     * org-scoped arm of the row selection is the one that runs.
+     */
+    orgId?: string,
+  ): Promise<void> {
     const manager = new AuthManager({
       secret: SECRET,
       baseUrl: 'http://localhost:3000',
       dataEngine: engine as never,
+      ...(orgId ? { getTenancy: () => ({ defaultOrgId: async () => orgId }) } : {}),
       logger: { error: (m: string) => lines.push(String(m)), warn: (m: string) => lines.push(String(m)), info: () => {} },
     } as never);
     (manager as never as { stageSelfRegistrationGrant: Function }).stageSelfRegistrationGrant(USER.email, setName);
@@ -450,6 +464,14 @@ describe('#15597 — settleSelfRegistrationGrant refuses on a malformed row inst
     // dropped the org row, `rows.find((r) => r.organization_id == null)` then
     // matched the GLOBAL row, and the self-registrant was granted a permission
     // set their organization never declared — silently, with a success log.
+    //
+    // The organization is RESOLVED here (`getTenancy`), which is the shape that
+    // actually bit and the reason this case does not lean on its sibling: with
+    // an org in hand the wrong grant is not merely "some global row", it is
+    // `ps_global` STAMPED `organization_id: 'org_1'` — the write spreads the
+    // resolved org onto the row — so the store ends up asserting that org_1
+    // granted a set org_1 never declared. Asserted by column below, not just by
+    // row count, so the stamp itself is pinned.
     const engine = await bootEngine();
     await engine.insert('sys_user', USER, SYSTEM);
     await engine.insert('sys_organization', { id: 'org_1', name: 'Default', slug: 'default' }, SYSTEM);
@@ -457,7 +479,7 @@ describe('#15597 — settleSelfRegistrationGrant refuses on a malformed row inst
     await engine.insert('sys_permission_set', { id: 'ps_global', name: 'portal_user', label: 'Global' }, SYSTEM);
 
     const lines: string[] = [];
-    await settle(engine, 'portal_user', lines);
+    await settle(engine, 'portal_user', lines, 'org_1');
 
     // Reverse-verified by ablation (recorded because the pre-fix behaviour is
     // the whole argument): with the old trailing filter restored and nothing
@@ -471,6 +493,15 @@ describe('#15597 — settleSelfRegistrationGrant refuses on a malformed row inst
     // Refused, and in particular NOT granted the global set.
     const rows = await grants(engine);
     expect(rows, `granted anyway: ${JSON.stringify(rows)}`).toEqual([]);
+    // The specific wrong write, named: no row may claim org_1 granted ps_global.
+    expect(
+      rows.some(
+        (r) =>
+          (r as { permission_set_id?: unknown }).permission_set_id === 'ps_global' &&
+          (r as { organization_id?: unknown }).organization_id === 'org_1',
+      ),
+      'ps_global was granted STAMPED with org_1 — the organization is now recorded as having granted a set it never declared',
+    ).toBe(false);
     expect(lines.join('\n')).toContain('no usable id');
   });
 
