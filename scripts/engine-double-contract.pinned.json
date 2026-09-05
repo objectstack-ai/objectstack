@@ -2827,6 +2827,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-sharing/src/field-recipient.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-sharing/src/field-recipient.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-sharing/src/recipient-width.test.ts",
       "verb": "delete",
       "pinned": 1

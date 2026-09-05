@@ -164,15 +164,19 @@ export const SysSharingRule = ObjectSchema.create({
     recipient_type: Field.select(
       // `queue` was removed: it is declared-but-unenforced (the evaluator returns
       // no users for it), so offering it would author a silently-inert rule
-      // (ADR-0078). The five values below are the ones the evaluator expands.
-      ['user', 'team', 'business_unit', 'position', 'unit_and_subordinates'],
+      // (ADR-0078). The six values below are the ones the evaluator expands —
+      // `field` (#15072, the record-relative recipient ruled on #14103) per
+      // matched record, the other five once per rule. The list is held equal to
+      // the authorable `ShareRecipientType` by `field-recipient.test.ts`, so a
+      // stored row of any authorable kind is never refused at this select.
+      ['user', 'team', 'business_unit', 'position', 'unit_and_subordinates', 'field'],
       {
         label: 'Recipient Type',
         required: true,
         defaultValue: 'business_unit',
         // The engine detail this used to spell out (which tree is walked, which
         // expansion is flat, the ADRs behind each) lives in the class doc above.
-        description: 'Who receives access. Picking a team, business unit or position gives access to everyone in it. "Business unit and subordinates" also covers every unit below the one you pick.',
+        description: 'Who receives access. Picking a team, business unit or position gives access to everyone in it. "Business unit and subordinates" also covers every unit below the one you pick. "Field" shares each record with the user or users held in one of its own fields — name that field as the recipient.',
         group: 'Recipient',
       },
     ),
@@ -184,11 +188,14 @@ export const SysSharingRule = ObjectSchema.create({
       // Rendered as a record picker whose target object follows recipient_type
       // (dependsOn: recipient_type): sys_user / sys_team / sys_business_unit /
       // sys_position. Stores the value the evaluator matches on — a record id
-      // for user/team/business_unit, the position NAME for `position`. Falls
-      // back to a text input when the widget is unavailable.
+      // for user/team/business_unit, the position NAME for `position`, and for
+      // `field` (#15072) the NAME of a user-typed field of the shared object
+      // (the picker has no mapping for that kind and degrades to its text
+      // input, which is the right input for a field name). Falls back to a
+      // text input when the widget is unavailable.
       widget: 'recipient-picker',
       dependsOn: ['recipient_type'],
-      description: 'The specific user, team, business unit or position that receives access.',
+      description: 'The specific user, team, business unit or position that receives access — or, for the "Field" recipient type, the name of the record field that holds the user or users to share with.',
       group: 'Recipient',
     }),
 
