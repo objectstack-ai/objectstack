@@ -59,6 +59,7 @@ import type { Readable } from 'node:stream';
 import {
   CHILD_EXIT_SETTLE_MS,
   PROBE_ATTEMPTS,
+  childEnv,
   fateOf,
   probeThroughChild,
   reservePort,
@@ -143,6 +144,12 @@ function drive(mode: 'answer' | 'die' | 'live'): Promise<Driven> {
     const child = spawn(process.execPath, [DRIVER_PATH, mode], {
       cwd: dir,
       stdio: ['ignore', 'pipe', 'pipe'],
+      // `childEnv()`, not an omitted `env` and not a bare `...process.env`. This
+      // driver reads no variable of its own, so the declaration is not about what
+      // it needs — it is the one `check:cli-test-child-env` requires of every
+      // child spawned from this directory, and the honest answer here is "the
+      // environment minus the vitest worker family".
+      env: childEnv(),
     }) as ProbeChild;
     children.push(child);
 
