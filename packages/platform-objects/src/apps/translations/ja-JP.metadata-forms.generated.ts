@@ -555,8 +555,8 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       onError: {
         label: "エラー時"
       },
-      timeout: {
-        label: "Timeout",
+      timeoutMs: {
+        label: "Timeout Ms",
         helpText: "Abort the hook after N milliseconds"
       },
       runAs: {

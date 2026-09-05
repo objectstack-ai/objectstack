@@ -3928,6 +3928,24 @@ jobs:
           node packages/lint/scripts/check-reference-carrier-shape.mjs --self-test
           node packages/lint/scripts/check-reference-carrier-shape.mjs
 
+      # #14478 (maintainer ruling 2026-09-02, "ruled B"): a duration-shaped
+      # `z.number()` key in packages/spec/src/** whose `.describe()` names a
+      # time unit must carry that unit in its NAME (`Ms` / `Seconds` /
+      # `Minutes` / `Hours` / `Days`), or the schema uses a unit-carrying
+      # VALUE (`'14d'` literals, `{ value, unit }` pairs). The founding
+      # specimen was two keys spelled `ttl` fourteen lines apart, one in
+      # seconds and one in milliseconds, each unit named only in prose — an
+      # author copying the outer number into the inner block got a 3.6-second
+      # cache and no error anywhere. No baseline, by ruling: the gate is green
+      # only at zero offenders, and a red is a rename under an ADR-0087
+      # conversion (or a describe to fix), never a ledger row. Placed LAST in
+      # this job on purpose: it is a new tree-wide ratchet, and the job aborts
+      # at the first non-zero exit — nothing behind it would be masked by its
+      # red. Reads src/ through tsx (no build); self-tests first, wired into
+      # the package script as `check:self-test-wired` requires.
+      - name: Duration-shaped spec keys carry their unit in the key name
+        run: pnpm --filter @objectstack/spec check:duration-unit-keys
+
   # Lane 1 of 4 behind the required `TypeScript Type Check` context. The
   # aggregator job at the bottom of this file explains the split, holds the
   # contract, and is the thing the merge queue actually requires — read it

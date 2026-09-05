@@ -8530,6 +8530,98 @@ const connectorErrorMappingRemoved: MetadataConversion = {
   },
 };
 
+/**
+ * `hook.timeout` → `hook.timeoutMs` (protocol 18, #14478; maintainer ruling
+ * 2026-09-02, recorded on the card as "ruled B").
+ *
+ * The unit (milliseconds) lived only in the key's `.describe()` while the
+ * body-level `timeoutMs` and `retryPolicy.backoffMs` beside it spell theirs —
+ * one surface, two conventions, and an author who copied a seconds value in
+ * got a limit 1000× too short with no error anywhere. The spec-source gate
+ * `check:duration-unit-keys` now refuses a duration-shaped number whose unit
+ * lives in prose alone, and the ruling adopted NO grandfathering: every
+ * existing offender is renamed under a conversion like this one. **Retired
+ * from the load path** (no alias window — 「不考虑存量」, 「短期不考虑渐进」):
+ * the schema tombstones `timeout` with the rename, and this entry preserves
+ * the rewrite for `os migrate meta` and the stored-row rehydration seam.
+ * `renameKey` leaves an already-canonical `timeoutMs` alone and refuses a
+ * pair that disagrees (#4923).
+ */
+const hookTimeoutToTimeoutMs: MetadataConversion = {
+  id: 'hook-timeout-to-timeout-ms',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  surface: 'hook.timeout',
+  summary: "hook key 'timeout' → 'timeoutMs' (#14478 — the unit lived only in the description; the value, milliseconds, is unchanged)",
+  apply(stack, emit) {
+    return mapCollection(stack, 'hooks', (hook, path) => {
+      const renamed = renameKey(hook, 'timeout', 'timeoutMs');
+      if (!renamed) return hook;
+      emit({ from: 'timeout', to: 'timeoutMs', path: `${path}.timeoutMs` });
+      return renamed;
+    });
+  },
+  fixture: {
+    before: {
+      hooks: [
+        { name: 'audit_order', object: 'order', events: ['afterInsert'], handler: 'auditOrder', timeout: 5000 },
+        // A hook that never authored the key keeps its identity (copy-on-write).
+        { name: 'score_lead', object: 'lead', events: ['afterUpdate'], handler: 'scoreLead' },
+      ],
+    },
+    after: {
+      hooks: [
+        { name: 'audit_order', object: 'order', events: ['afterInsert'], handler: 'auditOrder', timeoutMs: 5000 },
+        { name: 'score_lead', object: 'lead', events: ['afterUpdate'], handler: 'scoreLead' },
+      ],
+    },
+    expectedNotices: 1,
+  },
+};
+
+/**
+ * `job.timeout` → `job.timeoutMs` (protocol 18, #14478) — the job half of the
+ * rename `hookTimeoutToTimeoutMs` documents. The sibling `retryPolicy.backoffMs`
+ * spelled its unit; the per-attempt limit did not. Same posture: retired from
+ * the load path, tombstoned at the schema, replayable here. The fixture stays
+ * clear of `retryPolicy` on purpose — `retry-policy-converged` is still in its
+ * live window on that block and would fire on it.
+ */
+const jobTimeoutToTimeoutMs: MetadataConversion = {
+  id: 'job-timeout-to-timeout-ms',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  surface: 'job.timeout',
+  summary: "job key 'timeout' → 'timeoutMs' (#14478 — the unit lived only in the description; the value, milliseconds, is unchanged)",
+  apply(stack, emit) {
+    return mapCollection(stack, 'jobs', (job, path) => {
+      const renamed = renameKey(job, 'timeout', 'timeoutMs');
+      if (!renamed) return job;
+      emit({ from: 'timeout', to: 'timeoutMs', path: `${path}.timeoutMs` });
+      return renamed;
+    });
+  },
+  fixture: {
+    before: {
+      jobs: [{
+        name: 'nightly_health_sweep',
+        schedule: { type: 'cron', expression: '0 1 * * *' },
+        handler: 'sweepProjectHealth',
+        timeout: 300000,
+      }],
+    },
+    after: {
+      jobs: [{
+        name: 'nightly_health_sweep',
+        schedule: { type: 'cron', expression: '0 1 * * *' },
+        handler: 'sweepProjectHealth',
+        timeoutMs: 300000,
+      }],
+    },
+    expectedNotices: 1,
+  },
+};
+
 export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConversion[]>> = {
   11: [flowNodeHttpRename, pageKindJsxToHtml, flowNodeFilterAlias, objectCompactLayoutRename],
   13: [stackRolesToPositions, owdLegacyReadAliases, sharingRecipientRoleToPosition],
@@ -8619,6 +8711,8 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     formViewOptionDefaultRemoved,
     fieldReferenceToAlias,
     connectorErrorMappingRemoved,
+    hookTimeoutToTimeoutMs,
+    jobTimeoutToTimeoutMs,
   ],
 };
 

@@ -235,6 +235,18 @@ const NO_GENERATOR: ReadonlyArray<{ check: string; why: string }> = [
     check: 'check:error-code-provenance',
     why: 'audits that packages stamping ledger-registered codes list them under their own owner key (or carry a recorded waiver) — no artifact',
   },
+  // #14478, maintainer ruling 2026-09-02 ("ruled B" — no grandfathered
+  // baseline). A pure source audit over `src/**`: a duration-shaped
+  // `z.number()` key whose describe names a time unit must carry that unit in
+  // its NAME. Reads source text through tsx and writes nothing. There is no
+  // ledger, no `--update` and deliberately no `gen:` — the one command a
+  // reader would reach for ("record today's offenders as the baseline") is
+  // exactly the option the ruling rejected, so a red here is always a rename
+  // (with its ADR-0087 conversion) or a describe to fix, never a command.
+  {
+    check: 'check:duration-unit-keys',
+    why: 'audits src/** for a duration-shaped `z.number()` key whose unit lives only in its describe — zero offenders by ruling, no baseline, no artifact',
+  },
   // `check:strictness-ledger` used to sit here — "the ledger it audits is a
   // hand-maintained doc, so there is no generator". #5107 gave it one (the ledger's
   // NUMBERS became an artifact; its VERDICTS stayed hand-written), so it moved to
