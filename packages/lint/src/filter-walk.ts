@@ -49,6 +49,7 @@
  */
 
 import { VALID_AST_OPERATORS } from '@objectstack/spec/data';
+import { recordsOf } from './object-graph.js';
 
 /** Any plain metadata record. */
 type AnyRec = Record<string, unknown>;
@@ -82,19 +83,6 @@ export interface AuthoredFilter {
   path: string;
   /** Human-readable location, e.g. `dashboard "sales" · widget "my_deals"`. */
   where: string;
-}
-
-/**
- * Coerce a collection (array or name-keyed map) to an array of records,
- * injecting `name` from the map key — so a rule works on both the parsed
- * (array) and normalized (map) stack shapes.
- */
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v as AnyRec[];
-  if (v && typeof v === 'object') {
-    return Object.entries(v as AnyRec).map(([name, def]) => ({ name, ...(def as AnyRec) }));
-  }
-  return [];
 }
 
 function label(v: unknown, fallback: string): string {
@@ -150,7 +138,7 @@ export function walkAuthoredFilters(
   if (!stack || typeof stack !== 'object') return;
 
   for (const { key, kind } of surfaces) {
-    const items = asArray((stack as AnyRec)[key]);
+    const items = recordsOf((stack as AnyRec)[key]);
     items.forEach((item, i) => {
       const name = label(item.name ?? item.id, `#${i}`);
       if (kind === 'dashboard') {
