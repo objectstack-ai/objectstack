@@ -749,7 +749,11 @@ parked forever.
 The screen is treated as answered only when **all** of these hold:
 
 - the caller named **at least one of this screen's own fields** — a run that
-  named none of them is not driving the screen, and it renders as always;
+  named none of them is not driving the screen, and it renders as always. The
+  row id a launch carries does **not** count as naming a field: both dispatch
+  doors seed it into the params bag under `recordId` and the camelCase
+  `<object>Id` alias (and under an action's declared `recordIdParam`), and none
+  of those is the caller supplying a screen value;
 - every `required` field has a value (an empty or blank string is no value),
   supplied by that caller. A value that came from the trigger record, from an
   earlier node or from a declared `defaultValue` does not answer a `required`
@@ -765,11 +769,18 @@ bag must not answer them vacuously: a **message-only** screen (no `fields`), and
 any screen whose author wrote `waitForInput: true` — that flag is an explicit
 "show this", and a confirmation step is not something a params bag may skip.
 
-**Interactive runs are unaffected.** A console run supplies none of the screen's
-fields, so it renders the form exactly as before — including when the subject
-record happens to carry a column named like one of them, which is not the caller
-speaking. ⛔ `waitForInput: false` remains the wrong tool for the headless case:
-it skips the form for interactive users too.
+**Interactive runs are unaffected.** A console launch carries the record it was
+launched from and that record's id — never a value for the screen's own fields —
+so the form renders exactly as before, including when the subject record carries
+a column named like one of the fields and including when a field is named like
+one of the seeded id keys. ⛔ `waitForInput: false` remains the wrong tool for
+the headless case: it skips the form for interactive users too.
+
+⚠️ One known gap, on the trigger-record leg only: a run continued from the
+**durable** suspended-run store judges against a JSON copy of its context, so a
+later wizard screen whose field collides with a **non-scalar** column (an array
+or object) of the trigger record can read as caller-supplied. Scalar columns are
+unaffected, as is any run that has not been through a pause.
 
 ⚠️ This does **not** make every screen flow completable from a headless caller. A
 call that omits the inputs still parks, and the MCP tool set has no verb to
