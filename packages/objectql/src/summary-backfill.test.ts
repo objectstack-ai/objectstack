@@ -534,7 +534,7 @@ describe('backfillSummaryNulls — pre-#6013 NULL roll-ups (#6063)', () => {
       expect(maxOutcome(report)).toBeUndefined();
     });
 
-    it('REFUSES a name it cannot resolve — FIELD_NOT_FOUND, 404 — before any row is read, on a dry run as on apply', async () => {
+    it('REFUSES a name it cannot resolve — INVALID_FIELD, 400, the code every axis naming a field answers — before any row is read, on a dry run as on apply', async () => {
       busyAndQuiet();
 
       const refusals: Array<[string[], Record<string, unknown>]> = [
@@ -548,8 +548,12 @@ describe('backfillSummaryNulls — pre-#6013 NULL roll-ups (#6063)', () => {
       for (const [named, rest] of refusals) {
         const err = await backfillSummaryNulls(engine, quietLogger, { ...rest, recomputeUndefinedOnEmpty: named }).catch((e) => e);
         expect(err, named.join(',')).toBeInstanceOf(Error);
-        expect(err.code, named.join(',')).toBe('FIELD_NOT_FOUND');
-        expect(err.status, named.join(',')).toBe(404);
+        expect(err.code, named.join(',')).toBe('INVALID_FIELD');
+        expect(err.status, named.join(',')).toBe(400);
+        // The engine's sibling producers' shape: `field` is the first entry
+        // that did not resolve, `fields` every one of them.
+        expect(err.field, named.join(',')).toBe(named[named.length - 1]);
+        expect(err.fields, named.join(',')).toEqual([named[named.length - 1]]);
         expect(err.message, named.join(',')).toContain(named[named.length - 1]);
       }
       // Refused BEFORE the walk: no write at all, and even the count/sum holes

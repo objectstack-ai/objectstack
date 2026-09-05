@@ -128,7 +128,10 @@ export interface SummaryBackfillReport {
   scannedObjects: string[];
   scannedRecords: number;
   fields: SummaryBackfillFieldOutcome[];
-  /** Parent rows found holding `NULL` in a `count`/`sum` roll-up. */
+  /** Parent rows found holding `NULL` in a roll-up this run fills — every
+   *  `count`/`sum`, plus the `min`/`max`/`avg` named in
+   *  `recomputeUndefinedOnEmpty` (there, a `NULL` whose recompute is the
+   *  empty-set reading is not a hole and is not counted). */
   nullRows: number;
   /** Values actually written (0 on a dry run). */
   filled: number;
@@ -186,9 +189,10 @@ export interface SummaryBackfillOptions {
    * value for it. Naming a `count`/`sum` is accepted and changes nothing —
    * those are in scope by default — so a caller can pass every column it just
    * declared without knowing the empty-set list. A name that resolves to no
-   * roll-up owned by an object this run walks is refused (`FIELD_NOT_FOUND`,
-   * 404) before any row is read. Omitted, the run is exactly the `count`/`sum`
-   * backfill it always was.
+   * roll-up owned by an object this run walks is refused (`INVALID_FIELD`,
+   * 400 — the code every other axis that names a field answers) before any
+   * row is read. Omitted, the run is exactly the `count`/`sum` backfill it
+   * always was.
    */
   recomputeUndefinedOnEmpty?: string[];
   /** Safety bound on parent rows read per object. */
@@ -252,9 +256,20 @@ function partitionDescriptors(
  * a roll-up, or an object `options.objects` left out of this run — is REFUSED
  * as a whole, with nothing written: the caller asserted a fact about a column
  * this run cannot see, and quietly walking the rest would hand back the
- * `filled: 0` false all-clear this option exists to end. `FIELD_NOT_FOUND`
- * (ADR-0112 standard catalog, 404) is the envelope: the named field is what
- * could not be found.
+ * `filled: 0` false all-clear this option exists to end.
+ *
+ * `INVALID_FIELD` / 400 is the envelope — not a new code, and not a 404. The
+ * engine's own rule for a field name that cannot be applied as written
+ * (`assertProjectionHasNoDottedPaths` for `select`,
+ * `undeclaredWriteFieldErrors` on a write, and `INVALID_SORT` beside them) is
+ * that ONE condition keeps ONE wire code however the caller reached it, so a
+ * host surfacing this error over HTTP answers the same envelope on both doors.
+ * Two of the shapes refused here name a field that EXISTS — a real non-summary
+ * field, or a roll-up on an object `objects` left out — so this is an option
+ * value that could not be applied, never an addressed resource that was not
+ * found (`FIELD_NOT_FOUND` has no producer in this repo, and gains none here).
+ * `field` carries the first unresolved entry and `fields` all of them, the
+ * sibling producers' shape (ADR-0112).
  */
 function resolveRecomputeScope(
   engine: SummaryBackfillEngine,
@@ -278,9 +293,10 @@ function resolveRecomputeScope(
         `${unresolved.join(', ')}. Each entry is spelled object.field and must name a summary field owned by one ` +
         `of the ${candidates.length} object(s) this run walks (an object left out by \`objects\` is not walked). ` +
         'Refused before any row was read; nothing was written.',
-    ) as Error & { code: string; status: number; fields: string[] };
-    err.code = 'FIELD_NOT_FOUND';
-    err.status = 404;
+    ) as Error & { code: string; status: number; field: string; fields: string[] };
+    err.code = 'INVALID_FIELD';
+    err.status = 400;
+    err.field = unresolved[0];
     err.fields = unresolved;
     throw err;
   }

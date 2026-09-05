@@ -129,9 +129,9 @@ describe('os migrate summary-nulls', () => {
     expect(options).toEqual({ apply: false, objects: undefined, recomputeUndefinedOnEmpty: undefined, maxRecordsPerObject: undefined });
   }, RUN_TIMEOUT);
 
-  it('a refused scope entry (FIELD_NOT_FOUND) reaches the --json error envelope with its code, and the command exits 1', async () => {
+  it('a refused scope entry (INVALID_FIELD) reaches the --json error envelope with its code, and the command exits 1', async () => {
     const refusal = Object.assign(new Error('[summary-backfill] recomputeUndefinedOnEmpty names 1 roll-up(s) this run cannot find: customer.nope.'), {
-      code: 'FIELD_NOT_FOUND', status: 404, fields: ['customer.nope'],
+      code: 'INVALID_FIELD', status: 400, field: 'customer.nope', fields: ['customer.nope'],
     });
     vi.mocked(backfillSummaryNulls).mockRejectedValue(refusal);
 
@@ -144,7 +144,7 @@ describe('os migrate summary-nulls', () => {
     expect((err as { oclif?: { exit?: number } }).oclif?.exit).toBe(1);
     const emitted = stdout.mock.calls.map((c: unknown[]) => String(c[0])).join('');
     const payload = JSON.parse(emitted);
-    expect(payload).toMatchObject({ code: 'FIELD_NOT_FOUND' });
+    expect(payload).toMatchObject({ code: 'INVALID_FIELD' });
     expect(payload.error).toContain('customer.nope');
   }, RUN_TIMEOUT);
 });
