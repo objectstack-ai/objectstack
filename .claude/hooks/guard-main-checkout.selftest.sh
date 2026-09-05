@@ -123,6 +123,31 @@ expect() { # expect <block|allow> <file_path> [env…] — the common case
   check "$want" "$f" "$(payload "$f")" "$@"
 }
 
+stderr_of() { # stderr_of <payload> [env…] -> the refusal text an agent actually reads
+  local payload="$1"; shift
+  ( cd "$CWD" && printf '%s' "$payload" | env CLAUDE_PROJECT_DIR="$PROJ" "$@" "$hook" 2>&1 >/dev/null )
+}
+
+says() { # says <needle> <label> <payload> [env…]
+  local needle="$1" label="$2" subject="$3"; shift 3
+  local out; out="$(stderr_of "$subject" "$@")"
+  case "$out" in
+    *"$needle"*) pass=$((pass + 1)); printf '  ok   says   %s\n' "$label" ;;
+    *) fail=$((fail + 1)); printf '  FAIL missing "%s"  %s\n' "$needle" "$label" ;;
+  esac
+}
+
+lacks() { # lacks <needle> <label> <payload> [env…]
+  # The direction only an ABSENCE assertion can hold: a remedy that stopped being true stays
+  # in the text a reader acts on long after the thing it described stopped working.
+  local needle="$1" label="$2" subject="$3"; shift 3
+  local out; out="$(stderr_of "$subject" "$@")"
+  case "$out" in
+    *"$needle"*) fail=$((fail + 1)); printf '  FAIL still says "%s"  %s\n' "$needle" "$label" ;;
+    *) pass=$((pass + 1)); printf '  ok   lacks  %s\n' "$label" ;;
+  esac
+}
+
 echo "== the core verdict: shared PRIMARY checkout is blocked =="
 expect block "$MAIN/pkg/x.ts"
 expect block "$MAIN/pkg/deep/y.ts"
@@ -193,6 +218,27 @@ check block 'OS_ALLOW_MAIN_EDITS=true'             "$(payload "$MAIN/pkg/x.ts")"
 check block 'OS_ALLOW_MAIN_EDITS=yes'              "$(payload "$MAIN/pkg/x.ts")" OS_ALLOW_MAIN_EDITS=yes
 check block 'OS_ALLOW_MAIN_EDITS=11'               "$(payload "$MAIN/pkg/x.ts")" OS_ALLOW_MAIN_EDITS=11
 check block 'OS_ALLOW_MAIN_EDITS=" 1" (padded)'    "$(payload "$MAIN/pkg/x.ts")" OS_ALLOW_MAIN_EDITS=" 1"
+
+echo "== the hatch names WHERE it works: this hook's own environment, never a prefix =="
+# The refusal used to end by telling the reader to re-run the same thing with the variable
+# as a VAR=1 command prefix — an instruction that cannot work where it is printed. A VAR=1
+# prefix sets the variable in the environment of THAT COMMAND; this hook is not that
+# command, and it reads the variable from its own environment, so the prefix changes
+# nothing and the refusal repeats (#15971). An instruction that does not work is an
+# invitation to route around the guard, so both directions are pinned: the dead remedy is
+# gone, and the sentence names the environment the hook actually reads. The `allow` rows
+# next door — the variable really in the hook's environment — are this pair's other half.
+# Both of this hook's message sites carry the sentence: the ordinary refusal and the
+# schema-drift refusal, which is why each is asserted separately here.
+CWD="$PLAIN"; PROJ="$PLAIN"
+lacks 're-run with' 'the block message no longer prints the prefix remedy' \
+  "$(payload "$MAIN/pkg/x.ts")"
+says 'hook itself runs in' 'the block message names the environment this hook reads' \
+  "$(payload "$MAIN/pkg/x.ts")"
+lacks 're-run with' 'the drift message no longer prints the prefix remedy' \
+  '{"tool_name":"Edit","tool_input":{}}'
+says 'hook itself runs in' 'the drift message names the environment this hook reads' \
+  '{"tool_name":"Edit","tool_input":{}}'
 
 echo "== a ROUTED tool whose payload lacks its own path key is drift — it blocks, never guesses =="
 # The dangerous branch is the one that turns an unreadable payload into a confident verdict.
