@@ -146,6 +146,7 @@ export const EvaluatedExpressionSchema = ExpressionSchema.safeExtend({
     .refine((source) => source.trim().length > 0, { message: EVALUATED_EXPRESSION_SOURCE_REQUIRED }),
 });
 export type EvaluatedExpression = z.input<typeof EvaluatedExpressionSchema>;
+export type EvaluatedExpressionParsed = z.infer<typeof EvaluatedExpressionSchema>;
 
 /**
  * Author-time input shape: a bare string is shorthand for `{ dialect: 'cel',

@@ -271,6 +271,7 @@ export {
 export type {
   Expression,
   EvaluatedExpression,
+  EvaluatedExpressionParsed,
   ExpressionMeta,
   ExpressionInput,
   Predicate,

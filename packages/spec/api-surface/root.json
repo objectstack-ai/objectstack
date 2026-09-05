@@ -61,6 +61,7 @@
     "EvalUser (type)",
     "EvalUserSchema (const)",
     "EvaluatedExpression (type)",
+    "EvaluatedExpressionParsed (type)",
     "EvaluatedExpressionSchema (const)",
     "ExpandViewResult (interface)",
     "ExpandedViewItem (interface)",
