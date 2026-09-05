@@ -9,7 +9,10 @@
   **errata only** — it registers the outside vocabulary (`fieldRuntimeType`,
   `FileRef`, `RecordRef`, "read-time expansion") against this ADR's names so a
   grep for those words lands here, and corrects three membership facts; it
-  changes no decision.
+  changes no decision. The 2026-09-05 addendum rules the media family's
+  physical column — a string column holding the bare `sys_file` id, switched
+  per deployment on the `adr-0104-file-references` flag, never per version;
+  driver card #15989 implements it.
 - **Date**: 2026-07-22
 - **Issue**: design follow-up generalizing #3405 / #3406 (inline lookup param
   silently stripped); relates #3407 (silently dropped writes), #1878 / #1891
