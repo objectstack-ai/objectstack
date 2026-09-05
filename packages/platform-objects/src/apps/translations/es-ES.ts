@@ -158,24 +158,6 @@ export const esES: TranslationData = {
   },
 
   pages: {
-    // The three shipped platform RECORD pages, contributed by plugin-auth
-    // (sys_user / sys_organization) and plugin-security (sys_position). Their
-    // page-level `label` is the ONLY key `collectExpectedEntries` offers for
-    // them — all three author `regions: []` and put every component under
-    // `slots.*`, which the shared walk does not descend. Measured: 3 entries
-    // emitted for the three pages, against 45 inline-locale-map sites under
-    // `slots` that the bundle face does not reach (those are the ruled
-    // authoring-site route, 2026-08-06; their extractor visibility is #14749).
-    // `packages/cli/test/platform-page-i18n-parity.test.ts` owns these keys.
-    sys_user_detail: {
-      label: 'Usuario',
-    },
-    sys_organization_detail: {
-      label: 'Organización',
-    },
-    sys_position_detail: {
-      label: 'Puesto',
-    },
     marketplace_installed: {
       label: 'Aplicaciones instaladas',
       subtitle: 'Paquetes del marketplace instalados actualmente en el kernel de este runtime.',

@@ -517,6 +517,27 @@ describe('i18n-extract ↔ translatePage walk parity (#13109)', () => {
 // listed here, so a fourth page joins this gate by existing; and the inline-map
 // assertion judges the authoring site, which is the half the bundle face
 // cannot see. Both directions of that sentence now red instead of shipping.
+//
+// ## What this block deliberately does NOT assert, and the measurement why
+//
+// It does not require a `pages.*` BUNDLE entry for these three. That was tried
+// and measured: the three page-level `label`s are the only keys the extractor
+// offers, so translating them is the one piece of real debt here (`User` /
+// `Organization` / `Position` render in English in every locale). Adding those
+// entries turns `check:app-nav-i18n` RED on two of the three --
+// `pages.sys_user_detail` and `pages.sys_organization_detail` are reported as
+// keys "the booted composition contains no page by that name", its phantom-key
+// verdict. That gate's `CONTRIBUTORS` roster is deliberately explicit and
+// deliberately a NAV roster: `@objectstack/plugin-auth`, which contributes
+// those two pages, is not in it, and adding it is not a one-line edit --
+// `new AuthPlugin({})` refuses to boot ("secret is required"), and the roster
+// separately requires every entry to land at least one nav id, which
+// plugin-auth's conditional `nav_sso_providers` cannot promise. Only
+// `sys_position_detail` (plugin-security, which IS in the roster) verifies
+// clean. Splitting that roster into a nav population and a page population is a
+// change to a gate's composition contract, so it is escalated rather than taken
+// here. Until it is ruled, a `pages.*` entry for the plugin-auth pages would be
+// exactly the unverifiable key `check:app-nav-i18n` exists to refuse.
 
 /** Every page the platform's own `pages` barrel exports, as the plugins take them. */
 const RECORD_PAGES: Array<Record<string, any>> = Object.values(
@@ -589,36 +610,6 @@ describe('shipped platform record pages -- i18n ownership (#14817)', () => {
     expect(SHIPPED_LOCALES.length).toBeGreaterThan(1);
   });
 
-  it('carries a bundle entry for every barrel page in every shipped locale', () => {
-    // The half that was missing entirely: these three pages had no `pages.*`
-    // entry in any locale, so nothing asked a translator for their titles and
-    // the Setup record header rendered "User" in every language.
-    for (const page of RECORD_PAGES) {
-      for (const locale of SHIPPED_LOCALES) {
-        const entry = pagesOf(locale)[page.name];
-        expect({ page: page.name, locale, hasLabel: typeof entry?.label === 'string' && entry.label.length > 0 })
-          .toEqual({ page: page.name, locale, hasLabel: true });
-      }
-    }
-  });
-
-  it('keeps the `en` bundle byte-identical to what the extractor reads off the metadata', () => {
-    // Same drift the block above guards for the plugin-carried pages: an edit
-    // to the page literal that leaves the bundle alone renders the STALE text,
-    // because `translatePage` applies the bundle for `en` too.
-    const en = pagesOf(EN);
-    const expected = collectExpectedEntries({ pages: RECORD_PAGES } as any)
-      .filter((e) => e.path[0] === 'pages');
-
-    expect(expected.length).toBeGreaterThan(0);
-    for (const entry of expected) {
-      const [, pageName, ...rest] = entry.path;
-      const key = rest.join('.');
-      expect({ page: pageName, key, value: read(en[pageName], key) })
-        .toEqual({ page: pageName, key, value: entry.sourceValue });
-    }
-  });
-
   it('records that the extractor reaches the page label and nothing under `slots`', () => {
     // A BOUNDARY PIN, not an endorsement. It states the measured fact that the
     // shared walk roots at `regions[].components[]` and these pages author
@@ -657,15 +648,4 @@ describe('shipped platform record pages -- i18n ownership (#14817)', () => {
     expect(incomplete).toEqual([]);
   });
 
-  it('localizes the page label through `translatePage` without mutating the singleton', () => {
-    for (const page of RECORD_PAGES) {
-      const before = page.label;
-      const translated = translatePage(page as any, SetupAppTranslations, { locale: 'zh-CN' }) as any;
-      expect({ page: page.name, changed: translated.label !== before })
-        .toEqual({ page: page.name, changed: true });
-      // These page objects are module-level singletons the kernel registers
-      // once; an overlay that mutated one would localize it process-wide.
-      expect({ page: page.name, label: page.label }).toEqual({ page: page.name, label: before });
-    }
-  });
 });
