@@ -61,7 +61,7 @@
  * Mirrors `@objectstack/rest`'s `req.params?.object` on the `/data/:object`
  * family — the only dispatcher routes whose path carries an object name.
  * Expects the dispatcher's already-cleaned path (trailing slash removed,
- * `/projects/:environmentId` prefix stripped).
+ * `/environments/:environmentId` prefix stripped).
  */
 export function routeObjectFromPath(cleanPath: string): string | undefined {
     const m = /^\/data\/([^/?#]+)/.exec(cleanPath);
