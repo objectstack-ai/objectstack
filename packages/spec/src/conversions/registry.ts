@@ -8683,6 +8683,317 @@ const apiEndpointCacheTtlToCacheTtlSeconds: MetadataConversion = {
   },
 };
 
+/**
+ * `dashboards[].refreshInterval` → `refreshIntervalSeconds` (protocol 18,
+ * #15680 for #14478) — the `ui` half of the same rename
+ * {@link hookTimeoutToTimeoutMs} documents, and the one key in this whole stack
+ * whose CONSUMER lives in another repository.
+ *
+ * Three rename-hint aliases already pointed at the old spelling — `refresh`,
+ * `autoRefresh`, `pollInterval` — which is the measure of how many spellings
+ * authors reach for; none of them named a unit either, so every door into the
+ * key left the cadence ambiguous. All three were repointed at the schema in the
+ * same edit, so an author arriving through any of them is now prescribed the
+ * unit-carrying name.
+ *
+ * ⚠️ objectui's dashboard renderer reads this key and multiplies by 1000, and
+ * republishes it as a registry input the console offers to authors. That reader
+ * could not move in this PR, so unlike every other rename in this card the
+ * consumer lags by a release: this conversion is what keeps stored dashboards
+ * and `os migrate meta` correct in the meantime.
+ *
+ * Same posture as its siblings: retired from the load path, tombstoned at the
+ * schema, replayable here.
+ */
+const dashboardRefreshIntervalToRefreshIntervalSeconds: MetadataConversion = {
+  id: 'dashboard-refresh-interval-to-refresh-interval-seconds',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  surface: 'dashboard.refreshInterval',
+  summary: "dashboard key 'refreshInterval' → 'refreshIntervalSeconds' (#14478 — the unit lived only in the description; the value, seconds, is unchanged)",
+  apply(stack, emit) {
+    return mapCollection(stack, 'dashboards', (dashboard, path) => {
+      const renamed = renameKey(dashboard, 'refreshInterval', 'refreshIntervalSeconds');
+      if (!renamed) return dashboard;
+      emit({ from: 'refreshInterval', to: 'refreshIntervalSeconds', path: `${path}.refreshIntervalSeconds` });
+      return renamed;
+    });
+  },
+  fixture: {
+    before: {
+      dashboards: [
+        { name: 'sales_overview', label: 'Sales Overview', widgets: [], refreshInterval: 300 },
+        // A dashboard that never authored the key keeps its identity (copy-on-write).
+        { name: 'ops_overview', label: 'Ops Overview', widgets: [] },
+      ],
+    },
+    after: {
+      dashboards: [
+        { name: 'sales_overview', label: 'Sales Overview', widgets: [], refreshIntervalSeconds: 300 },
+        { name: 'ops_overview', label: 'Ops Overview', widgets: [] },
+      ],
+    },
+    expectedNotices: 1,
+  },
+};
+
+/**
+ * The two connector duration keys whose name carried no unit → suffixed
+ * (protocol 18, #15680 for #14478): `health.circuitBreaker.monitoringWindow` →
+ * `monitoringWindowMs`, and `triggers[].interval` → `intervalSeconds`.
+ *
+ * One entry because they are one authored document and one authoring session —
+ * a connector and the resilience block that guards it. The circuit-breaker case
+ * is the sharpest in this card: `monitoringWindow` (ms) sat ONE key below
+ * `resetTimeoutMs`, which already spelled its unit, so a single six-key shape
+ * carried both conventions and a reader had no rule to apply, only two examples
+ * that disagreed. The trigger case is the widest: the bare token `interval`
+ * means MILLISECONDS elsewhere in this same spec, so the identical spelling
+ * carried two units a thousandfold apart.
+ *
+ * A published connector row lands whole in `sys_metadata` (`ConnectorSchema`'s
+ * own docblock says so, which is why #7990 forbids inline secrets on it), so
+ * the chain has a seam that sees both keys — hence a conversion rather than the
+ * semantic entries this card's two runtime-emitted keys took.
+ *
+ * The two are walked in one pass but emit SEPARATELY: a connector may author
+ * either, both, or neither, and an operator reading the notice list needs to see
+ * which of its own keys moved. Retired from the load path, tombstoned at the
+ * schema, replayable here.
+ */
+const connectorHealthAndTriggerDurationsUnitInKey: MetadataConversion = {
+  id: 'connector-health-and-trigger-durations-unit-in-key',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  surface: 'connector.health.circuitBreaker.monitoringWindow, connector.triggers[].interval',
+  summary: "connector keys 'health.circuitBreaker.monitoringWindow' → 'monitoringWindowMs' and 'triggers[].interval' → 'intervalSeconds' (#14478 — the unit lived only in the description; both values are unchanged)",
+  apply(stack, emit) {
+    return mapCollection(stack, 'connectors', (connector, path) => {
+      let next = connector;
+
+      const health = next.health;
+      if (isDict(health)) {
+        const breaker = health.circuitBreaker;
+        if (isDict(breaker)) {
+          const renamedBreaker = renameKey(breaker, 'monitoringWindow', 'monitoringWindowMs');
+          if (renamedBreaker) {
+            emit({
+              from: 'monitoringWindow',
+              to: 'monitoringWindowMs',
+              path: `${path}.health.circuitBreaker.monitoringWindowMs`,
+            });
+            next = { ...next, health: { ...health, circuitBreaker: renamedBreaker } };
+          }
+        }
+      }
+
+      const triggers = next.triggers;
+      if (Array.isArray(triggers)) {
+        let triggersChanged = false;
+        const nextTriggers = triggers.map((trigger, i) => {
+          if (!isDict(trigger)) return trigger;
+          const renamed = renameKey(trigger, 'interval', 'intervalSeconds');
+          if (!renamed) return trigger;
+          emit({
+            from: 'interval',
+            to: 'intervalSeconds',
+            path: `${path}.triggers[${i}].intervalSeconds`,
+          });
+          triggersChanged = true;
+          return renamed;
+        });
+        if (triggersChanged) next = { ...next, triggers: nextTriggers };
+      }
+
+      return next;
+    });
+  },
+  fixture: {
+    before: {
+      connectors: [
+        {
+          name: 'billing_api',
+          label: 'Billing API',
+          type: 'rest',
+          health: {
+            circuitBreaker: { enabled: true, resetTimeoutMs: 30000, monitoringWindow: 120000 },
+          },
+          triggers: [
+            { key: 'new_invoice', label: 'New invoice', type: 'polling', interval: 60 },
+            // A webhook trigger authors no interval and keeps its identity.
+            { key: 'invoice_paid', label: 'Invoice paid', type: 'webhook' },
+          ],
+        },
+        // A connector that authored neither key keeps its identity (copy-on-write).
+        { name: 'crm_catalog', label: 'CRM catalog', type: 'rest' },
+      ],
+    },
+    after: {
+      connectors: [
+        {
+          name: 'billing_api',
+          label: 'Billing API',
+          type: 'rest',
+          health: {
+            circuitBreaker: { enabled: true, resetTimeoutMs: 30000, monitoringWindowMs: 120000 },
+          },
+          triggers: [
+            { key: 'new_invoice', label: 'New invoice', type: 'polling', intervalSeconds: 60 },
+            { key: 'invoice_paid', label: 'Invoice paid', type: 'webhook' },
+          ],
+        },
+        { name: 'crm_catalog', label: 'CRM catalog', type: 'rest' },
+      ],
+    },
+    expectedNotices: 2,
+  },
+};
+
+/**
+ * `datasources[].config.persistence.autoSaveInterval` → `autoSaveIntervalMs`
+ * for the memory driver (protocol 18, #15680 for #14478).
+ *
+ * BOTH arms of the persistence union move, and that is the load-bearing detail.
+ * The gate listed only the `file` arm, because the `auto` arm's describe named
+ * no unit at all and the predicate judges prose against name. But `auto`
+ * resolves to the same Node.js file adapter and forwards the same value to the
+ * same `FileSystemPersistenceAdapter` field, in the same milliseconds, under the
+ * same `min(100)` bound — so converting one arm and not the other would leave
+ * ONE value with TWO spellings across sibling arms of one union, and the driver
+ * reading both. That is the consumer-side dialect Prime Directive #12 forbids.
+ *
+ * Driver-awareness is load-bearing here for the reason
+ * {@link datasourceConfigDriverKeyAliases} states: `persistence` is a memory
+ * driver key, and a `persistence` block under some other driver is not this
+ * shape. `resolveDriverId` keeps the rewrite where it belongs.
+ *
+ * A string `persistence` (`'file'` / `'local'` / `'auto'`) and a custom-adapter
+ * block carry no interval and pass through untouched.
+ */
+const memoryPersistenceAutoSaveIntervalToMs: MetadataConversion = {
+  id: 'memory-persistence-auto-save-interval-to-ms',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  surface: 'datasource.config.persistence.autoSaveInterval',
+  summary: "memory datasource key 'config.persistence.autoSaveInterval' → 'autoSaveIntervalMs', on both the file and auto arms (#14478 — the unit lived only in the description; the value, milliseconds, is unchanged)",
+  apply(stack, emit) {
+    return mapDatasources(stack, (ds, path) => {
+      if (resolveDriverId(ds.driver) !== 'memory') return ds;
+      const config = ds.config;
+      if (!isDict(config)) return ds;
+      const persistence = config.persistence;
+      if (!isDict(persistence)) return ds;
+      const renamed = renameKey(persistence, 'autoSaveInterval', 'autoSaveIntervalMs');
+      if (!renamed) return ds;
+      emit({
+        from: 'autoSaveInterval',
+        to: 'autoSaveIntervalMs',
+        path: `${path}.config.persistence.autoSaveIntervalMs`,
+      });
+      return { ...ds, config: { ...config, persistence: renamed } };
+    });
+  },
+  fixture: {
+    before: {
+      datasources: [
+        {
+          name: 'local_cache',
+          driver: 'memory',
+          config: { persistence: { type: 'file', path: '/var/data/db.json', autoSaveInterval: 5000 } },
+        },
+        {
+          name: 'auto_cache',
+          driver: 'memory',
+          config: { persistence: { type: 'auto', autoSaveInterval: 5000 } },
+        },
+        // A memory datasource with string persistence carries no interval.
+        { name: 'scratch', driver: 'memory', config: { persistence: 'file' } },
+        // Another driver's config is not this shape and is never touched.
+        { name: 'primary', driver: 'postgres', config: { url: 'postgres://db/app' } },
+      ],
+    },
+    after: {
+      datasources: [
+        {
+          name: 'local_cache',
+          driver: 'memory',
+          config: { persistence: { type: 'file', path: '/var/data/db.json', autoSaveIntervalMs: 5000 } },
+        },
+        {
+          name: 'auto_cache',
+          driver: 'memory',
+          config: { persistence: { type: 'auto', autoSaveIntervalMs: 5000 } },
+        },
+        { name: 'scratch', driver: 'memory', config: { persistence: 'file' } },
+        { name: 'primary', driver: 'postgres', config: { url: 'postgres://db/app' } },
+      ],
+    },
+    expectedNotices: 2,
+  },
+};
+
+/**
+ * `datasources[].config.timeout` → `timeoutMs` for the turso driver (protocol
+ * 18, #15680 for #14478).
+ *
+ * Driver-awareness is load-bearing exactly as it is for
+ * {@link datasourceConfigDriverKeyAliases}: a bare `config.timeout` under some
+ * OTHER driver is that driver's own key and must not be touched, so the rewrite
+ * is gated on `resolveDriverId(ds.driver) === 'turso'` (which also catches a
+ * stored `driver: 'libsql'` through the alias table).
+ *
+ * The neighbour is why this key was worth the rename: `sync.intervalSeconds`,
+ * two keys above, already spelled ITS unit. One shape, both conventions.
+ *
+ * ⚠️ This converts the SPEC's turso contract. The driver package ships its own
+ * parallel `turso.zod.ts` whose `timeout` is outside this card's declared
+ * population; it is renamed by the card that widens that population, and until
+ * then the two declarations disagree by design.
+ */
+const tursoConfigTimeoutToTimeoutMs: MetadataConversion = {
+  id: 'turso-config-timeout-to-timeout-ms',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  surface: 'datasource.config.timeout (turso)',
+  summary: "turso datasource key 'config.timeout' → 'config.timeoutMs' (#14478 — the unit lived only in the description and a .meta() title no parse reads; the value, milliseconds, is unchanged)",
+  apply(stack, emit) {
+    return mapDatasources(stack, (ds, path) => {
+      if (resolveDriverId(ds.driver) !== 'turso') return ds;
+      const renamed = renameConfigKey(ds, 'timeout', 'timeoutMs');
+      if (!renamed) return ds;
+      emit({ from: 'timeout', to: 'timeoutMs', path: `${path}.config.timeoutMs` });
+      return renamed;
+    });
+  },
+  fixture: {
+    before: {
+      datasources: [
+        {
+          name: 'edge_db',
+          driver: 'turso',
+          config: { url: 'libsql://app.turso.io', timeout: 30000 },
+        },
+        // A turso datasource that never authored the key keeps its identity.
+        { name: 'edge_replica', driver: 'turso', config: { url: 'libsql://replica.turso.io' } },
+        // `timeout` under another driver is that driver's own key — untouched.
+        { name: 'legacy', driver: 'mysql', config: { url: 'mysql://db/app', timeout: 1000 } },
+      ],
+    },
+    after: {
+      datasources: [
+        {
+          name: 'edge_db',
+          driver: 'turso',
+          config: { url: 'libsql://app.turso.io', timeoutMs: 30000 },
+        },
+        { name: 'edge_replica', driver: 'turso', config: { url: 'libsql://replica.turso.io' } },
+        { name: 'legacy', driver: 'mysql', config: { url: 'mysql://db/app', timeout: 1000 } },
+      ],
+    },
+    expectedNotices: 1,
+  },
+};
+
 export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConversion[]>> = {
   11: [flowNodeHttpRename, pageKindJsxToHtml, flowNodeFilterAlias, objectCompactLayoutRename],
   13: [stackRolesToPositions, owdLegacyReadAliases, sharingRecipientRoleToPosition],
@@ -8775,6 +9086,10 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     hookTimeoutToTimeoutMs,
     jobTimeoutToTimeoutMs,
     apiEndpointCacheTtlToCacheTtlSeconds,
+    dashboardRefreshIntervalToRefreshIntervalSeconds,
+    connectorHealthAndTriggerDurationsUnitInKey,
+    memoryPersistenceAutoSaveIntervalToMs,
+    tursoConfigTimeoutToTimeoutMs,
   ],
 };
 
