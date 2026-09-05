@@ -408,8 +408,8 @@ export const EnhancedApiErrorSchema = lazySchema(() => z.object({
 
   /** Tombstone for the rename above (#15677, ruling B on #14478). */
   retryAfter: retiredKey(
-    '`EnhancedApiError.retryAfter` was renamed to `retryAfterSeconds` in @objectstack/spec 17 '
-    + '(#14478 ruling B) — the unit of a duration-shaped number lives in the key name, not only '
+    '`EnhancedApiError.retryAfter` was renamed to `retryAfterSeconds` in @objectstack/spec 17 — '
+    + 'the unit of a duration-shaped number lives in the key name, not only '
     + 'in the describe prose. Rename the key to `retryAfterSeconds`; the value (seconds) is '
     + 'unchanged. This is the ADR-0112 error envelope, not the HTTP `Retry-After` response '
     + 'header — that header keeps its RFC 9110 name and is untouched.',

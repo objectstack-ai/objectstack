@@ -186,8 +186,8 @@ const result = ErrorHandlingConfigSchema.parse(data);
 | **rateLimit** | `string` | optional | Rate limit policy name |
 | **cacheable** | `boolean` | optional (default: `false`) | Whether response can be cached |
 | **cacheTtlSeconds** | `integer` | optional | Cache TTL in seconds |
-| **timeout** | `never` | optional | [REMOVED] `RestApiEndpoint.timeout` was renamed to `timeoutMs` in @objectstack/spec 17 (#14478 ruling B) — the unit of a duration-shaped number lives in the key name, not only in the describe prose, and the neighbouring cache TTL two lines below is in SECONDS. Rename the key to `timeoutMs`; the value (milliseconds) is unchanged. |
-| **cacheTtl** | `never` | optional | [REMOVED] `RestApiEndpoint.cacheTtl` was renamed to `cacheTtlSeconds` in @objectstack/spec 17 (#14478 ruling B) — the unit of a duration-shaped number lives in the key name, not only in the describe prose, and the neighbouring request timeout two lines above is in MILLISECONDS. Rename the key to `cacheTtlSeconds`; the value (seconds) is unchanged. |
+| **timeout** | `never` | optional | [REMOVED] `RestApiEndpoint.timeout` was renamed to `timeoutMs` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose, and the neighbouring cache TTL two lines below is in SECONDS. Rename the key to `timeoutMs`; the value (milliseconds) is unchanged. |
+| **cacheTtl** | `never` | optional | [REMOVED] `RestApiEndpoint.cacheTtl` was renamed to `cacheTtlSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose, and the neighbouring request timeout two lines above is in MILLISECONDS. Rename the key to `cacheTtlSeconds`; the value (seconds) is unchanged. |
 | **handlerStatus** | `never` | optional | [REMOVED] `RestApiEndpoint.handlerStatus` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read it: no registrar, dispatcher or adapter consulted the key, so an endpoint declared `stub` or `planned` was served exactly like an `implemented` one, and the `501 NOT_IMPLEMENTED` its docstring promised is raised by the declarative-endpoint executor for a target it cannot serve, never from this field. Delete the key. An endpoint that has no handler yet is simply not registered; a declared-but-unbuilt route answering 501 is not a platform capability (ruling record, 2026-09-01). |
 
 
@@ -305,7 +305,7 @@ const result = ErrorHandlingConfigSchema.parse(data);
 | **enableETag** | `boolean` | optional (default: `true`) | Enable ETag generation |
 | **enableCaching** | `boolean` | optional (default: `true`) | Enable HTTP caching |
 | **defaultCacheTtlSeconds** | `integer` | optional (default: `300`) | Default cache TTL in seconds |
-| **defaultCacheTtl** | `never` | optional | [REMOVED] `RestApiPluginConfig.performance.defaultCacheTtl` was renamed to `defaultCacheTtlSeconds` in @objectstack/spec 17 (#14478 ruling B) — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `defaultCacheTtlSeconds`; the value (seconds) is unchanged. |
+| **defaultCacheTtl** | `never` | optional | [REMOVED] `RestApiPluginConfig.performance.defaultCacheTtl` was renamed to `defaultCacheTtlSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `defaultCacheTtlSeconds`; the value (seconds) is unchanged. |
 
 
 ---
@@ -364,8 +364,8 @@ const result = ErrorHandlingConfigSchema.parse(data);
 | **rateLimit** | `string` | optional | Rate limit policy name |
 | **cacheable** | `boolean` | optional (default: `false`) | Whether response can be cached |
 | **cacheTtlSeconds** | `integer` | optional | Cache TTL in seconds |
-| **timeout** | `never` | optional | [REMOVED] `RestApiEndpoint.timeout` was renamed to `timeoutMs` in @objectstack/spec 17 (#14478 ruling B) — the unit of a duration-shaped number lives in the key name, not only in the describe prose, and the neighbouring cache TTL two lines below is in SECONDS. Rename the key to `timeoutMs`; the value (milliseconds) is unchanged. |
-| **cacheTtl** | `never` | optional | [REMOVED] `RestApiEndpoint.cacheTtl` was renamed to `cacheTtlSeconds` in @objectstack/spec 17 (#14478 ruling B) — the unit of a duration-shaped number lives in the key name, not only in the describe prose, and the neighbouring request timeout two lines above is in MILLISECONDS. Rename the key to `cacheTtlSeconds`; the value (seconds) is unchanged. |
+| **timeout** | `never` | optional | [REMOVED] `RestApiEndpoint.timeout` was renamed to `timeoutMs` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose, and the neighbouring cache TTL two lines below is in SECONDS. Rename the key to `timeoutMs`; the value (milliseconds) is unchanged. |
+| **cacheTtl** | `never` | optional | [REMOVED] `RestApiEndpoint.cacheTtl` was renamed to `cacheTtlSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose, and the neighbouring request timeout two lines above is in MILLISECONDS. Rename the key to `cacheTtlSeconds`; the value (seconds) is unchanged. |
 | **handlerStatus** | `never` | optional | [REMOVED] `RestApiEndpoint.handlerStatus` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read it: no registrar, dispatcher or adapter consulted the key, so an endpoint declared `stub` or `planned` was served exactly like an `implemented` one, and the `501 NOT_IMPLEMENTED` its docstring promised is raised by the declarative-endpoint executor for a target it cannot serve, never from this field. Delete the key. An endpoint that has no handler yet is simply not registered; a declared-but-unbuilt route answering 501 is not a platform capability (ruling record, 2026-09-01). |
 
 ### Nested Shape: `RestApiRouteRegistration.middleware[number]`

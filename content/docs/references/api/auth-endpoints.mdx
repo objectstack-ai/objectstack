@@ -89,7 +89,7 @@ const result = AuthEndpointSchema.parse(data);
 | **verificationUrl** | `string` | ✅ | URL the user should open in a browser |
 | **expiresAt** | `string` | ✅ | ISO timestamp when the code expires |
 | **intervalSeconds** | `number` | optional (default: `2`) | Recommended polling interval in seconds |
-| **interval** | `never` | optional | [REMOVED] `DeviceRequestResponse.interval` was renamed to `intervalSeconds` in @objectstack/spec 17 (#14478 ruling B) — the polling cadence is a duration and its unit lived only in the describe prose. Rename the key to `intervalSeconds`; the value (seconds) is unchanged. This response is not an RFC 8628 device-authorization payload — it renames every RFC field it carries — so the standard does not fix the bare spelling here. |
+| **interval** | `never` | optional | [REMOVED] `DeviceRequestResponse.interval` was renamed to `intervalSeconds` in @objectstack/spec 17 — the polling cadence is a duration and its unit lived only in the describe prose. Rename the key to `intervalSeconds`; the value (seconds) is unchanged. This response is not an RFC 8628 device-authorization payload — it renames every RFC field it carries — so the standard does not fix the bare spelling here. |
 
 
 ---

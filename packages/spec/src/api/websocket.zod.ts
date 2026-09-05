@@ -432,19 +432,19 @@ export const WebSocketConfigSchema = lazySchema(() => z.object({
   /** Tombstones for the three renames above (#15677, ruling B on #14478). */
   reconnectInterval: retiredKey(
     '`WebSocketConfig.reconnectInterval` was renamed to `reconnectIntervalMs` in '
-    + '@objectstack/spec 17 (#14478 ruling B) — the unit of a duration-shaped number lives in '
+    + '@objectstack/spec 17 — the unit of a duration-shaped number lives in '
     + 'the key name, not only in the describe prose. Rename the key to `reconnectIntervalMs`; '
     + 'the value (milliseconds) is unchanged.',
   ),
   pingInterval: retiredKey(
-    '`WebSocketConfig.pingInterval` was renamed to `pingIntervalMs` in @objectstack/spec 17 '
-    + '(#14478 ruling B) — the unit of a duration-shaped number lives in the key name, not only '
+    '`WebSocketConfig.pingInterval` was renamed to `pingIntervalMs` in @objectstack/spec 17 — '
+    + 'the unit of a duration-shaped number lives in the key name, not only '
     + 'in the describe prose. Rename the key to `pingIntervalMs`; the value (milliseconds) is '
     + 'unchanged.',
   ),
   timeout: retiredKey(
-    '`WebSocketConfig.timeout` was renamed to `timeoutMs` in @objectstack/spec 17 '
-    + '(#14478 ruling B) — the unit of a duration-shaped number lives in the key name, not only '
+    '`WebSocketConfig.timeout` was renamed to `timeoutMs` in @objectstack/spec 17 — '
+    + 'the unit of a duration-shaped number lives in the key name, not only '
     + 'in the describe prose. Rename the key to `timeoutMs`; the value (milliseconds) is '
     + 'unchanged.',
   ),
@@ -619,7 +619,7 @@ export const WebSocketServerConfigSchema = lazySchema(() => z.object({
   /** Tombstone for the rename above (#15677, ruling B on #14478). */
   heartbeatInterval: retiredKey(
     '`WebSocketServerConfig.heartbeatInterval` was renamed to `heartbeatIntervalMs` in '
-    + '@objectstack/spec 17 (#14478 ruling B) — the unit of a duration-shaped number lives in '
+    + '@objectstack/spec 17 — the unit of a duration-shaped number lives in '
     + 'the key name, not only in the describe prose. Rename the key to `heartbeatIntervalMs`; '
     + 'the value (milliseconds) is unchanged.',
   ),

@@ -295,8 +295,8 @@ export const DeviceRequestResponseSchema = lazySchema(() => z.object({
 
   /** Tombstone for the rename above (#15677, ruling B on #14478). */
   interval: retiredKey(
-    '`DeviceRequestResponse.interval` was renamed to `intervalSeconds` in @objectstack/spec 17 '
-    + '(#14478 ruling B) — the polling cadence is a duration and its unit lived only in the '
+    '`DeviceRequestResponse.interval` was renamed to `intervalSeconds` in @objectstack/spec 17 — '
+    + 'the polling cadence is a duration and its unit lived only in the '
     + 'describe prose. Rename the key to `intervalSeconds`; the value (seconds) is unchanged. '
     + 'This response is not an RFC 8628 device-authorization payload — it renames every RFC '
     + 'field it carries — so the standard does not fix the bare spelling here.',

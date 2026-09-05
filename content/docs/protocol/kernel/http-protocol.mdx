@@ -1198,8 +1198,8 @@ export default defineStack({
       objectParams: { object: 'acme_lead', operation: 'find' },
       // Defaults to `true`. Omitting it is safe; see the policy table below.
       authRequired: true,
-      // Seconds. GET-only, and only ever on a successful answer.
-      cacheTtl: 30,
+      // GET-only, and only ever on a successful answer. The unit is in the key.
+      cacheTtlSeconds: 30,
     },
   ],
 });
@@ -1213,7 +1213,7 @@ declaration to shadow a built-in route:
 
 1. **Match** — the request path must be under `<prefix>/apps/`, and `METHOD` + path
    (one trailing slash trimmed) must hit exactly one declaration.
-2. **Policy chain** — `rateLimit` → `authRequired` → `cacheTtl`, in that order. Metering
+2. **Policy chain** — `rateLimit` → `authRequired` → `cacheTtlSeconds`, in that order. Metering
    runs *before* the auth gate on purpose: the traffic that most needs a budget
    (credential stuffing, scraping) is exactly the traffic that ends in a 401, so a denied
    request still spends a token.
@@ -1228,8 +1228,8 @@ declaration to shadow a built-in route:
 | `type: 'flow'` | delegated to the same automation pipeline as `POST /api/v1/automation/{name}/trigger` — the same execution context builder, the same `execute` call, and **the same response contract**: a refused or failed run is classified into the same real status codes (404 / 409 `FLOW_DISABLED` / 422 `FLOW_NO_START_NODE` / 422 `FLOW_INPUT_SCHEMA_INVALID` / 400 `FLOW_FAILED`), from one shared definition all three flow doors read. Branch on the status and `error.code`, never on an inner success flag |
 | `authRequired: true` (or omitted) + anonymous caller | `401` `UNAUTHENTICATED`, the same envelope every seam answers |
 | `rateLimit` armed and exhausted | `429` + `Retry-After`, never with a cache directive |
-| `cacheTtl: 30` on a successful GET | `Cache-Control: private, max-age=30` — `private` is a security rule, not tuning: any response can be RLS-trimmed |
-| `cacheTtl: 0` | `Cache-Control: no-store` |
+| `cacheTtlSeconds: 30` on a successful GET | `Cache-Control: private, max-age=30` — `private` is a security rule, not tuning: any response can be RLS-trimmed |
+| `cacheTtlSeconds: 0` | `Cache-Control: no-store` |
 | an error answer (401/429/5xx) | never carries `Cache-Control`, and `outputMapping` is never applied to it |
 
 ### What an unmatched request answers
@@ -1263,7 +1263,7 @@ runs the same gates your publish path does:
 | **Namespace** (ADR-0121 D1/D2) | a `path` outside `/api/v1/apps/<manifest.namespace>/<subpath>`, or a stack declaring `apis:` with no explicit `manifest.namespace` |
 | **Supported target** | `type: 'script'` / `'proxy'` (neither executes in 17.x), an `object_operation` missing `objectParams.object` or `.operation`, a `flow` naming no `target` |
 | **Mapping** | a mapping `transform` (there is no transformation registry), an unusable dot path (empty segment, `__proto__`), two entries writing the same target path, or `inputMapping` on a `find` / `get` / `delete` operation that never reads a body |
-| **Policy** | `authRequired: false` without `rateLimit.enabled: true` (ADR-0121 D6), an unusable armed budget, a negative `cacheTtl`, or `cacheTtl` on a non-GET method |
+| **Policy** | `authRequired: false` without `rateLimit.enabled: true` (ADR-0121 D6), an unusable armed budget, a negative `cacheTtlSeconds`, or `cacheTtlSeconds` on a non-GET method |
 | **Uniqueness** | two endpoints in one stack claiming the same `METHOD` + path |
 
 <Callout type="warn">

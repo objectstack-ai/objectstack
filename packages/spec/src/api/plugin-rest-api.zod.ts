@@ -210,14 +210,14 @@ export const RestApiEndpointSchema = lazySchema(() => z.object({
 
   /** Tombstones for the two renames above (#15677, ruling B on #14478). */
   timeout: retiredKey(
-    '`RestApiEndpoint.timeout` was renamed to `timeoutMs` in @objectstack/spec 17 '
-    + '(#14478 ruling B) — the unit of a duration-shaped number lives in the key name, not only '
+    '`RestApiEndpoint.timeout` was renamed to `timeoutMs` in @objectstack/spec 17 — '
+    + 'the unit of a duration-shaped number lives in the key name, not only '
     + 'in the describe prose, and the neighbouring cache TTL two lines below is in SECONDS. '
     + 'Rename the key to `timeoutMs`; the value (milliseconds) is unchanged.',
   ),
   cacheTtl: retiredKey(
-    '`RestApiEndpoint.cacheTtl` was renamed to `cacheTtlSeconds` in @objectstack/spec 17 '
-    + '(#14478 ruling B) — the unit of a duration-shaped number lives in the key name, not only '
+    '`RestApiEndpoint.cacheTtl` was renamed to `cacheTtlSeconds` in @objectstack/spec 17 — '
+    + 'the unit of a duration-shaped number lives in the key name, not only '
     + 'in the describe prose, and the neighbouring request timeout two lines above is in '
     + 'MILLISECONDS. Rename the key to `cacheTtlSeconds`; the value (seconds) is unchanged.',
   ),
@@ -738,7 +738,7 @@ export const RestApiPluginConfigSchema = z.object({
     /** Tombstone for the rename above (#15677, ruling B on #14478). */
     defaultCacheTtl: retiredKey(
       '`RestApiPluginConfig.performance.defaultCacheTtl` was renamed to '
-      + '`defaultCacheTtlSeconds` in @objectstack/spec 17 (#14478 ruling B) — the unit of a '
+      + '`defaultCacheTtlSeconds` in @objectstack/spec 17 — the unit of a '
       + 'duration-shaped number lives in the key name, not only in the describe prose. Rename '
       + 'the key to `defaultCacheTtlSeconds`; the value (seconds) is unchanged.',
     ),

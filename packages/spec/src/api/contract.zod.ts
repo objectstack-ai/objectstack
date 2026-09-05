@@ -407,8 +407,8 @@ export const DataLoaderConfigSchema = lazySchema(() => z.object({
 
   /** Tombstone for the rename above (#15677, ruling B on #14478). */
   cacheTtl: retiredKey(
-    '`DataLoaderConfig.cacheTtl` was renamed to `cacheTtlSeconds` in @objectstack/spec 17 '
-    + '(#14478 ruling B) — the unit of a duration-shaped number lives in the key name, not only '
+    '`DataLoaderConfig.cacheTtl` was renamed to `cacheTtlSeconds` in @objectstack/spec 17 — '
+    + 'the unit of a duration-shaped number lives in the key name, not only '
     + 'in the describe prose. Rename the key to `cacheTtlSeconds`; the value (seconds) is unchanged.',
   ),
   coalesceRequests: z.boolean().default(true).describe('Deduplicate identical requests within a batch window'),

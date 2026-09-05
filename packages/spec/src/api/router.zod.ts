@@ -102,8 +102,8 @@ export const RouteDefinitionSchema = lazySchema(() => z.object({
 
   /** Tombstone for the rename above (#15677, ruling B on #14478). */
   timeout: retiredKey(
-    '`RouteDefinition.timeout` was renamed to `timeoutMs` in @objectstack/spec 17 '
-    + '(#14478 ruling B) — the unit of a duration-shaped number lives in the key name, not only '
+    '`RouteDefinition.timeout` was renamed to `timeoutMs` in @objectstack/spec 17 — '
+    + 'the unit of a duration-shaped number lives in the key name, not only '
     + 'in the describe prose. Rename the key to `timeoutMs`; the value (milliseconds) is unchanged.',
   ),
   rateLimit: z.string().optional().describe('Rate limit policy name'),

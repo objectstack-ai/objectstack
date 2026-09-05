@@ -196,8 +196,8 @@ export const ApiEndpointSchema = strictObject({
 
   /** Tombstone for the rename above (#15677, ruling B on #14478). */
   cacheTtl: retiredKey(
-    '`ApiEndpoint.cacheTtl` was renamed to `cacheTtlSeconds` in @objectstack/spec 17 '
-    + '(#14478 ruling B) — the unit of a duration-shaped number lives in the key name, not only '
+    '`ApiEndpoint.cacheTtl` was renamed to `cacheTtlSeconds` in @objectstack/spec 17 — '
+    + 'the unit of a duration-shaped number lives in the key name, not only '
     + 'in the describe prose. Rename the key to `cacheTtlSeconds`; the value (seconds) is '
     + 'unchanged, and it stays GET-only. '
     + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',

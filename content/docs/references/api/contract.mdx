@@ -453,7 +453,7 @@ const result = ApiErrorSchema.parse(data);
 | **cacheEnabled** | `boolean` | optional (default: `true`) | Enable per-request result caching |
 | **cacheKeyFn** | `string` | optional | Name or identifier of the cache key function |
 | **cacheTtlSeconds** | `number` | optional | Cache time-to-live in seconds (0 = no expiration) |
-| **cacheTtl** | `never` | optional | [REMOVED] `DataLoaderConfig.cacheTtl` was renamed to `cacheTtlSeconds` in @objectstack/spec 17 (#14478 ruling B) — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `cacheTtlSeconds`; the value (seconds) is unchanged. |
+| **cacheTtl** | `never` | optional | [REMOVED] `DataLoaderConfig.cacheTtl` was renamed to `cacheTtlSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `cacheTtlSeconds`; the value (seconds) is unchanged. |
 | **coalesceRequests** | `boolean` | optional (default: `true`) | Deduplicate identical requests within a batch window |
 | **maxConcurrency** | `integer` | optional | Maximum parallel batch requests |
 
@@ -667,7 +667,7 @@ const result = ApiErrorSchema.parse(data);
 | **cacheEnabled** | `boolean` | optional (default: `true`) | Enable per-request result caching |
 | **cacheKeyFn** | `string` | optional | Name or identifier of the cache key function |
 | **cacheTtlSeconds** | `number` | optional | Cache time-to-live in seconds (0 = no expiration) |
-| **cacheTtl** | `never` | optional | [REMOVED] `DataLoaderConfig.cacheTtl` was renamed to `cacheTtlSeconds` in @objectstack/spec 17 (#14478 ruling B) — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `cacheTtlSeconds`; the value (seconds) is unchanged. |
+| **cacheTtl** | `never` | optional | [REMOVED] `DataLoaderConfig.cacheTtl` was renamed to `cacheTtlSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `cacheTtlSeconds`; the value (seconds) is unchanged. |
 | **coalesceRequests** | `boolean` | optional (default: `true`) | Deduplicate identical requests within a batch window |
 | **maxConcurrency** | `integer` | optional | Maximum parallel batch requests |
 
