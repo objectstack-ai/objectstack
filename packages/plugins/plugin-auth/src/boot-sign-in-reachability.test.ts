@@ -399,6 +399,28 @@ describe('#15588/F1 — the carve-out ADMITS, it does not EXEMPT: the rider\u201
   });
 });
 
+describe('#15588 — remedy (b) cannot recover an EXISTING person, and the posture is not the lever', () => {
+  it('under `open` the gate ADMITS the address outright — so the posture is not what stops them', () => {
+    // The message says widening "cannot recover an EXISTING person at all …
+    // and NO posture changes that". This is the half that shows WHY the
+    // posture is not the lever: the audience gate is a CREATION gate and it
+    // already says yes for this address with no invitation at all. Whatever
+    // refuses an existing person therefore sits DOWNSTREAM of the posture, so
+    // moving the posture cannot reach it — which is exactly what the message
+    // now tells the operator, instead of sending them to widen it.
+    expect(invitedSignUp('open', false)).toMatchObject({ admit: true });
+  });
+
+  it('the message states it in MECHANISM terms — the operator is told WHY, not a status code', () => {
+    const msg = resolveNoSignInAccountReport(DEAD_END)!;
+    expect(msg).toContain('cannot recover an EXISTING person at all');
+    expect(msg).toContain('user-CREATION path');
+    expect(msg).toContain('NO posture changes that');
+    // and the half that IS about a new address survives beside it
+    expect(msg).toContain('Widening only ever admits a NEW address');
+  });
+});
+
 describe('#15588/N5 — the message NAMES every posture that widens, read off the vocabulary', () => {
   it('every self-registration-permitting posture appears in the message by name', () => {
     // The message's quantifier ("every posture other than 'invite_only'") is

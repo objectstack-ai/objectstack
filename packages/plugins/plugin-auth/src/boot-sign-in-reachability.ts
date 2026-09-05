@@ -63,13 +63,22 @@
  *    that would move #14353's diagnostic semantics. The message tells the
  *    truth about today's probe instead, and the pin fails the day the probe
  *    changes — which is the day this sentence must be rewritten.
- *  - **Widening the posture forces email verification on.**
+ *  - **Widening the posture cannot recover an EXISTING person at all, and
+ *    only half-works for a new one.** The operator reading this line is
+ *    usually trying to recover somebody the directory already holds, and for
+ *    them the posture is not the lever: self-registration is a user-CREATION
+ *    path, so it cannot attach a login to an address that already carries a
+ *    `sys_user` row, whatever the posture — the audience gate ADMITS such an
+ *    address under `open` (pinned), which is precisely why moving the posture
+ *    cannot reach what refuses them. ⚠️ Stated in MECHANISM terms on purpose:
+ *    what that refusal answers on the wire is #15587's surface, in flight, and
+ *    this line must stay true on both sides of it — a pin holds it there.
+ *    For a NEW address, widening does create the account, and then
  *    `audiencePermitsSelfRegistration(posture)` drives `createAuthInstance()`
  *    to wire `requireEmailVerification: true` (mirrored by
- *    `getPublicConfig()`), so a login registered under `open`/`email_domain`
- *    is refused `EMAIL_NOT_VERIFIED` at first sign-in — no login at all on a
- *    deployment with no mail transport, which is the shape a locked-out
- *    self-hosted install usually is.
+ *    `getPublicConfig()`), so that login is refused `EMAIL_NOT_VERIFIED` at
+ *    first sign-in — no login at all on a deployment with no mail transport,
+ *    which is the shape a locked-out self-hosted install usually is.
  *
  * The message deliberately does NOT describe what a SEEDED person's own
  * re-registration answers: that response is #15587's surface and is being
@@ -285,8 +294,11 @@ export function resolveNoSignInAccountReport(facts: SignInReachabilityFacts): st
     'depending on the row shape, never a session — and ' +
     `writing ANY '${SystemObjectName.ACCOUNT}' row SILENCES THIS REPORT, which asks only whether such ` +
     'a row EXISTS — the deployment stops being loudly broken and becomes quietly broken; and (b) ' +
-    "OPENING THE AUDIENCE POSTURE — every posture other than 'invite_only' ('open', 'email_domain') " +
-    'FORCES email verification ON, so a login registered that way is refused EMAIL_NOT_VERIFIED at ' +
+    'OPENING THE AUDIENCE POSTURE — which cannot recover an EXISTING person at all: ' +
+    'self-registration is a user-CREATION path, so it cannot hand a login to somebody whose ' +
+    `'${SystemObjectName.USER}' row already exists, and NO posture changes that. Widening only ever ` +
+    "admits a NEW address — and then every posture other than 'invite_only' ('open', " +
+    "'email_domain') FORCES email verification ON, so that login is refused EMAIL_NOT_VERIFIED at " +
     'its first sign-in until a mail transport delivers the link, and a locked-out self-hosted ' +
     'install usually has none. Nothing here happens by itself.'
   );
