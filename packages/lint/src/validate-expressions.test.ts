@@ -6,12 +6,16 @@ import { describe, it, expect } from 'vitest';
 // argument for the allowlist, and a hand-copied list would go green on exactly
 // the root the rule never saw.
 import { SCOPE_ROOTS } from '@objectstack/formula';
-import { ExpressionInputSchema, ObjectStackSchema } from '@objectstack/spec';
+import { EVALUATED_EXPRESSION_SOURCE_REQUIRED, ExpressionInputSchema, ObjectStackSchema } from '@objectstack/spec';
 import { FieldSchema, ObjectSchema, SelectOptionSchema } from '@objectstack/spec/data';
 import { SharingRuleSchema } from '@objectstack/spec/security';
 // [#15137] The published refusal sentence a `value`-slot finding must lead
 // with — asserted from the spec's own export, never re-spelled in a test.
-import { ASSIGNMENT_VALUE_ENVELOPE_REFUSAL, PREDICATE_SLOT_STRING_REFUSAL } from '@objectstack/spec/automation';
+import {
+  ASSIGNMENT_VALUE_ENVELOPE_REFUSAL,
+  PREDICATE_SLOT_STRING_REFUSAL,
+  STRUCTURAL_CONDITION_SHAPE_REFUSAL,
+} from '@objectstack/spec/automation';
 
 import {
   validateStackExpressions,
@@ -3729,6 +3733,9 @@ describe('assignment value envelope — located findings (#15137)', () => {
   it.each([
     ['no `source` — the shape only the spec schema catches', { dialect: 'cel' }],
     ['an empty `source`', { dialect: 'cel', source: '' }],
+    // #15430 — an `ast`-only envelope is a valid `ExpressionSchema` that no
+    // engine evaluates; the spec's evaluated-slot rule refuses it at `source`.
+    ['an `ast`-only envelope — no `source` the engine can evaluate', { dialect: 'cel', ast: { kind: 'const' } }],
     ['a non-`cel` dialect', { dialect: 'template', source: 'Hello {name}' }],
     ['CEL that does not parse', { dialect: 'cel', source: 'rows.map(r,' }],
     ['an unknown function', { dialect: 'cel', source: 'nosuchfn(rows)' }],
@@ -3755,16 +3762,24 @@ describe('assignment value envelope — located findings (#15137)', () => {
     })).toHaveLength(0);
   });
 
-  it('is silent on a whitespace-only `source` — the seam this pass cannot see (#15430)', () => {
-    // `ExpressionSchema.source` is `z.string().min(1)`, so `'   '` passes the
-    // shape rule, and `validateExpression` trims it to empty and answers
-    // `ok: true` ("not authored"). Build says nothing; the CEL engine parses it
-    // untrimmed and the run faults loudly (pinned in `service-automation`'s
-    // `assignment-value-envelope.test.ts`). Pinned as the BOUND of the
-    // build/run agreement, not as desired behaviour — ⛔ do not close it with a
-    // trim rule invented here: that is a third notion of "malformed", which is
-    // the defect this arm exists to avoid. The fix belongs in the shape rule.
-    expect(valueIssues({ digest: { dialect: 'cel', source: '   ' } })).toHaveLength(0);
+  it('reports a whitespace-only `source` — the seam is now visible through the shape pass (#15430)', () => {
+    // FLIPPED. This used to pin the seam this pass could NOT see: `'   '`
+    // passed `ExpressionSchema.source`'s `min(1)`, `validateExpression` trimmed
+    // it to empty and answered `ok: true` ("not authored"), and only the run
+    // faulted. The file said the fix belonged in the shape rule, not in a trim
+    // rule invented here — and it landed there: `AssignmentExpressionValueSchema`
+    // now composes the spec's `EvaluatedExpressionSchema`, so the object-level
+    // shape pass this arm already runs (`AssignmentValueSchema.safeParse`)
+    // refuses it, located at the author's variable, led by the published
+    // sentence and carrying the evaluated-slot rule's own — measured here, not
+    // assumed: nothing in this pass changed, the refusal arrives through the
+    // spec dependency.
+    const issues = valueIssues({ digest: { dialect: 'cel', source: '   ' } });
+    expect(issues).toHaveLength(1);
+    expect(issues[0]!.severity).toBe('error');
+    expect(issues[0]!.where).toContain('config.assignments.digest');
+    expect(issues[0]!.message.startsWith(ASSIGNMENT_VALUE_ENVELOPE_REFUSAL)).toBe(true);
+    expect(issues[0]!.message).toContain('`source`: ' + EVALUATED_EXPRESSION_SOURCE_REQUIRED);
   });
 
   it('says nothing about the legacy array form — it is not a declared slot', () => {
@@ -3792,5 +3807,127 @@ describe('assignment value envelope — located findings (#15137)', () => {
       }],
     });
     expect(issues.filter((i) => i.where.includes('assignment value'))).toHaveLength(0);
+  });
+});
+
+/**
+ * [#15662] The STRUCTURAL condition arm at author time — `objectstack
+ * validate`'s half of the refusal `registerFlow` throws.
+ *
+ * The gap: `evaluateCondition` reads its source as
+ * `typeof expression === 'string' ? expression : (expression?.source ?? '')`,
+ * so a value that is neither a string nor envelope-shaped lands in the
+ * empty-source arm and returns a silent `false`. Measured on `main`: `42`,
+ * `true` and `['a']` at a node's `config.condition` registered clean and ran
+ * `success: true` with nothing reported anywhere — on the same key the start
+ * node's TRIGGER GATE is read from.
+ *
+ * ⚠️ The rule is deliberately NOT `PREDICATE_SLOT_STRING_REFUSAL`. That arm's
+ * slots are declared `z.string()`; these are not. `FlowEdgeSchema.condition` is
+ * `ExpressionInputSchema`, so an envelope is a first-class authored spelling
+ * here, and a node's open `z.record` config passes one through verbatim. The
+ * controls below are those two shapes staying green.
+ */
+describe('structural condition shape (#15662)', () => {
+  const objects = [
+    { name: 'crm_lead', fields: { rating: { type: 'number' }, status: { type: 'text' } } },
+  ];
+
+  const flowWith = (opts: { startCondition?: unknown; decisionCondition?: unknown; edgeCondition?: unknown }) => ({
+    objects,
+    flows: [{
+      name: 'gate_flow',
+      nodes: [
+        {
+          id: 'start', type: 'start',
+          config: {
+            objectName: 'crm_lead',
+            ...('startCondition' in opts ? { condition: opts.startCondition } : {}),
+          },
+        },
+        {
+          id: 'branch', type: 'decision',
+          config: { ...('decisionCondition' in opts ? { condition: opts.decisionCondition } : {}) },
+        },
+      ],
+      edges: [{
+        id: 'e1', source: 'start', target: 'branch',
+        ...('edgeCondition' in opts ? { condition: opts.edgeCondition } : {}),
+      }],
+    }],
+  });
+
+  const condIssues = (opts: Parameters<typeof flowWith>[0], site: string) =>
+    validateStackExpressions(flowWith(opts)).filter((i) => i.where.includes(site));
+
+  it('RED CONTROL — the brace-trap string on this very arm still reports', () => {
+    // Not a shape violation, so it cannot be "the answer" to what is measured
+    // below; it proves this call reaches this slot and can emit. If it ever
+    // goes to zero, every zero in this block is void.
+    const control = condIssues({ decisionCondition: '{record.rating} >= 4' }, "node 'branch'");
+    expect(control).toHaveLength(1);
+    expect(control[0].severity).toBe('error');
+    expect(control[0].message).toContain('template brace');
+  });
+
+  it('reports every measured silent value on a node condition, naming what it found', () => {
+    for (const [value, found] of [[42, 'Found a number'], [true, 'Found a boolean'], [['a'], 'Found an array']] as const) {
+      const issues = condIssues({ decisionCondition: value }, "node 'branch'");
+      expect(issues).toHaveLength(1);
+      expect(issues[0].severity).toBe('error');
+      expect(issues[0].message.startsWith(STRUCTURAL_CONDITION_SHAPE_REFUSAL)).toBe(true);
+      expect(issues[0].message).toContain(found);
+      expect(issues[0].where).toContain("flow 'gate_flow'");
+    }
+  });
+
+  it('reports the same on the START node trigger gate', () => {
+    const issues = condIssues({ startCondition: 42 }, "node 'start'");
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message.startsWith(STRUCTURAL_CONDITION_SHAPE_REFUSAL)).toBe(true);
+  });
+
+  it('reports the same on an edge condition', () => {
+    const issues = condIssues({ edgeCondition: ['a'] }, "edge 'e1'");
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message.startsWith(STRUCTURAL_CONDITION_SHAPE_REFUSAL)).toBe(true);
+  });
+
+  it('refuses an object that is neither text nor an expression', () => {
+    const issues = condIssues({ decisionCondition: { source: 1 } }, "node 'branch'");
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message).toContain('neither a string `source` nor an `ast`');
+    // A non-string `source` is what is being refused, so it is never the
+    // attribution.
+    expect(issues[0].source).toBe('');
+  });
+
+  it('refuses ONCE — the value-reading passes do not re-report it as an empty condition', () => {
+    expect(condIssues({ decisionCondition: 42 }, 'condition')).toHaveLength(1);
+  });
+
+  describe('CONTROLS — the shapes that must stay accepted', () => {
+    it('an expression ENVELOPE on a node condition is legitimate here', () => {
+      expect(condIssues({ decisionCondition: { dialect: 'cel', source: 'record.rating >= 4' } }, "node 'branch'"))
+        .toHaveLength(0);
+      // No dialect — `evaluateCondition` reads it as CEL, so does this.
+      expect(condIssues({ decisionCondition: { source: 'record.rating >= 4' } }, "node 'branch'"))
+        .toHaveLength(0);
+    });
+
+    it('an envelope on an EDGE is legitimate — every parsed edge condition is one', () => {
+      expect(condIssues({ edgeCondition: { dialect: 'cel', source: 'record.rating >= 4' } }, "edge 'e1'"))
+        .toHaveLength(0);
+      expect(condIssues({ edgeCondition: 'record.rating >= 4' }, "edge 'e1'")).toHaveLength(0);
+    });
+
+    it('a whitespace-only STRING is untouched — ruled correct, not a defect', () => {
+      expect(condIssues({ decisionCondition: '   ' }, "node 'branch'")).toHaveLength(0);
+      expect(condIssues({ edgeCondition: '   ' }, "edge 'e1'")).toHaveLength(0);
+    });
+
+    it('a clean bare-CEL condition still passes', () => {
+      expect(condIssues({ decisionCondition: 'record.rating >= 4' }, "node 'branch'")).toHaveLength(0);
+    });
   });
 });

@@ -8,6 +8,8 @@
     "CorsConfigSchema": "shared/CorsConfig",
     "CronExpressionInput": "shared/CronExpressionInput",
     "CronExpressionInputSchema": "shared/CronExpressionInput",
+    "EvaluatedExpression": "shared/EvaluatedExpression",
+    "EvaluatedExpressionSchema": "shared/EvaluatedExpression",
     "Expression": "shared/Expression",
     "ExpressionDialect": "shared/ExpressionDialect",
     "ExpressionInput": "shared/ExpressionInput",

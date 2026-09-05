@@ -408,7 +408,8 @@ export const PROSE_COUNTS = [
  * ## The precedent the ruling rests on
  *
  * The sibling `isSystem` census gate already carries this split, and its docblock
- * (`scripts/check-system-context-census.mjs:77-84`) gives the reason:
+ * (`scripts/check-system-context-census.mjs#UNENFORCED_TEXT_COUNTS`, the paragraph
+ * beside it) gives the reason:
  *
  *   > *"The split is not a tolerance. Nothing about the CONTRACT stopped being
  *   > checked ... What stopped being checked is a set of numbers about a

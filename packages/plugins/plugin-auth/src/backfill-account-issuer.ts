@@ -118,8 +118,7 @@ export function oauthIssuerFor(providerId: string): string {
 
 async function tryFind(ql: any, object: string, where: any, limit: number): Promise<any[]> {
   try {
-    const rows = await ql.find(object, { where, limit }, { context: SYSTEM_CTX });
-    return Array.isArray(rows) ? rows : Array.isArray(rows?.records) ? rows.records : [];
+    return await ql.find(object, { where, limit }, { context: SYSTEM_CTX });
   } catch {
     return [];
   }

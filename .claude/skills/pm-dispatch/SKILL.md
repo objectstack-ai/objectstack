@@ -104,9 +104,9 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 
 | issue 上的信号 | 含义 |
 |---|---|
-| open + 队列标签 + 无 assignee | 可派发(同卡带 `pm:retriage` 的除外) |
-| assignee 已设 | 已认领/在飞,不是你的就永不碰 |
-| `pm:dispatched` | 已派发(派发评论记轮次);与摘 `pm:queue` 同一次标签写入成对落地 |
+| open + 队列标签 + 无 assignee | 可派发(同卡带 `pm:retriage` 的除外);`pm:queue` 卡恒无 assignee,有即半态 |
+| assignee 已设 | 已认领/在飞,不是你的就永不碰;离手恒走释放 —— 四因 = 改路由、前提证伪、弃飞无接管、跨车道移交,去向 = 新标签态或车道;⛔ 不静默摘 assignee |
+| `pm:dispatched` | 已派发(派发评论记轮次),恒带 assignee;与摘 `pm:queue` 同一次标签写入成对落地 |
 | `needs-user-decision` | 决定待做:永不派发、除代裁通道外永不代答;维护者的收件箱 |
 | `pm:on-hold` | 决定已做且答案是暂不做:不派发不催;仅当带机器可读 `Restart-when:` 行才合法 |
 | `pm:blocked` + 正文行 `Blocked-by: #N` | 等上游:选择期跳过,#N 关闭时由解锁扫描放回;工已完、PR 被外部门禁卡住的同用本态 |
@@ -462,8 +462,8 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 
 - 同账号多会话共享 GitHub 身份:assignee 只回答有 agent 认领了,认领评论承载身份。
 - assignee 字段归 PM:原子对 step 1 设,dev 席恒不写它;跨账号 assignee 不是你 ⇒ 永不碰。
-- 选中的单派发前按序执行一个原子对。
-- ① Assign @me,并把 `pm:dispatched` 与摘 `pm:queue` 放进同一次标签写入。
+- 释放是显式动作:让卡离手者同笔清 assignee + `Release:` 行(会话/因/去向);下一任重新认领。
+- 派发前按序执行原子对:① Assign @me,并把 `pm:dispatched` 与摘 `pm:queue` 放进同一次标签写入。
 - step ① 之后获得 assignee 的直接弃出本批。
 - ② 认领评论(英文),固定形状见 模板与表 节;首行以字面 `Claim:` 开头是机器判据。
 - 巡查谓词只认 `Claim:` 这一个拼写且保持严格,修法是全舰队向它收敛,⛔ 不放宽谓词。
@@ -490,7 +490,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 过栏后,派发 worktree 的未提交改动先 WIP commit 到派发分支并 push,sha 记进回收评论。
 - WIP commit 标 INCOMPLETE AND UNREVIEWED;续派者 diff 它,⛔ 不无审续建。
 - WIP 信息只写观察到的(脏路径/行数/sha),⛔ 不写席位行为的现在时断言。
-- 再评论询问,静默一窗后摘 assignee(注明原因)回队;有带提交活分支的认领永不回收。
+- 再评论询问,静默一窗后释放回队(`Release:` 行载因);有带提交活分支的认领永不回收。
 - 误伤活席位 ⇒ 令其追加式更正,落 PR 正文不落分支历史。
 
 ### 派发

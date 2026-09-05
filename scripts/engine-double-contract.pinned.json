@@ -1062,6 +1062,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.readonly-insert.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.record-not-found.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -3148,6 +3153,21 @@
     },
     {
       "file": "packages/runtime/src/domains/meta-save-destructive-remedy.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/domains/packages-seed-apply-org-scope.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/domains/packages-seed-apply-org-scope.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/domains/packages-seed-apply-org-scope.test.ts",
       "verb": "update",
       "pinned": 1
     },
