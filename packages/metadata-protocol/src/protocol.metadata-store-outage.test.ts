@@ -360,15 +360,24 @@ describe('[#5707] the layered read stops painting an outage as "nothing was cust
         // `try`, so the swallow hid BOTH: an env-wide overlay row that was
         // perfectly readable was reported as "no overlay" because the org read
         // failed ahead of it.
+        //
+        // ⚠️ [#14907] `view`, not `object` — and the type is now load-bearing
+        // rather than incidental. This verb gates its organization through
+        // `organizationIdForMetaRead`, so an `allowOrgOverride: false` type
+        // (`object`, which the rest of this file uses as its generic subject)
+        // resolves `orgId` to `undefined` and never issues an org-scope read at
+        // all. There would be no failing read to report, and this case would
+        // pass vacuously against a method that had stopped doing the thing it
+        // is about. `view` is tier-A, so the org arm is really taken.
         const err = connectionRefused();
         const engine = engineWithRows([]);
         engine.findOne = vi.fn(async (_o: string, opts: any) => {
             if (opts?.where?.organization_id === 'org_acme') throw err;
-            return { type: 'object', name: 'acct', state: 'active', metadata: JSON.stringify({ name: 'acct', label: 'Env overlay' }) };
+            return { type: 'view', name: 'acct', state: 'active', metadata: JSON.stringify({ name: 'acct', label: 'Env overlay' }) };
         });
 
         const caught = await rejection(
-            () => p_layered(engine, { type: 'object', name: 'acct', organizationId: 'org_acme' }),
+            () => p_layered(engine, { type: 'view', name: 'acct', organizationId: 'org_acme' }),
         );
         expectStoreUnavailable(caught, err);
     });
