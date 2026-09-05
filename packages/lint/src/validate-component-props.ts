@@ -107,6 +107,7 @@ import { ComponentPropsMap } from '@objectstack/spec/ui';
 import { lintUnknownKeysAgainstSchema } from '@objectstack/spec';
 import { walkPageComponents, type AnyRec } from './page-walk.js';
 import { describeIssue, type LintZodIssue } from './zod-issue-format.js';
+import { recordsOf } from './object-graph.js';
 
 /** A key authored in `properties` that the type's props schema does not declare. */
 export const COMPONENT_PROPS_UNKNOWN_KEY = 'component-props-unknown-key';
@@ -141,15 +142,6 @@ function isRec(v: unknown): v is AnyRec {
 
 function strName(v: unknown): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined;
-}
-
-/** Coerce a collection (array or name-keyed map) to an array of records. */
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v as AnyRec[];
-  if (v && typeof v === 'object') {
-    return Object.entries(v as AnyRec).map(([name, def]) => ({ name, ...(def as AnyRec) }));
-  }
-  return [];
 }
 
 /** A zod schema, as much of one as this file reads. */
@@ -231,7 +223,7 @@ export function validateComponentProps(stack: AnyRec): ComponentPropsFinding[] {
   const findings: ComponentPropsFinding[] = [];
   if (!isRec(stack)) return findings;
 
-  const pages = asArray(stack.pages);
+  const pages = recordsOf(stack.pages);
   for (let pi = 0; pi < pages.length; pi++) {
     const page = pages[pi];
     if (!isRec(page)) continue;

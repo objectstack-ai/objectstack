@@ -158,6 +158,21 @@ const PROBE_MARKER = 'OS_SELF_TEST_FLOOR_PROBE';
 /** "Did this run SAY anything": its first non-blank line, or '' if it said nothing. */
 const firstNonBlankLine = (out) => out.split('\n').find((l) => l.trim()) ?? '';
 
+/**
+ * Was this run killed by THIS TOOL'S OWN BUDGET? Published as `timedOut` so the
+ * shrink the budget causes is a NUMBER the sweep can report rather than a
+ * silence (#15573).
+ *
+ * ⛔ Read from `error.code`, NOT from the signal. `spawnSync` reports its own
+ * timeout as `{ status: null, signal: 'SIGTERM', error: { code: 'ETIMEDOUT' } }`
+ * -- measured -- and the SIGNAL half of that is not exclusive to it: a SIGTERM
+ * can arrive from anywhere, and a foreground wall-clock cap kills children in
+ * exactly this shape. Reading every SIGTERM as this budget would book rows
+ * against a number nobody set, in the direction that OVERSTATES how much of the
+ * survey this tool is responsible for shrinking.
+ */
+const budgetExpired = (run) => (run.error?.code === 'ETIMEDOUT' ? { timedOut: true } : {});
+
 // ---------------------------------------------------------------------------
 // Instrument 1 -- the static assertion-floor criterion
 // ---------------------------------------------------------------------------
@@ -232,23 +247,16 @@ export function classifyFloor(code) {
 // Instrument 2 -- the dynamic verdict-handshake probe
 // ---------------------------------------------------------------------------
 
-/** Every `/self.?test/i`-named function DEFINED in this source. */
-export function selfTestDefs(src) {
-  const names = new Set();
-  for (const m of src.matchAll(/(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(/g)) {
-    if (/self.?test/i.test(m[1])) names.add(m[1]);
-  }
-  for (const m of src.matchAll(/const\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>/g)) {
-    if (/self.?test/i.test(m[1])) names.add(m[1]);
-  }
-  return [...names];
-}
-
 /**
  * The source a DEFINITION may be anchored in: comments AND the content of every
  * string, template and regex literal blanked, every other byte -- and every
  * offset and line number -- left exactly where it was, so a match found here
  * slices the ORIGINAL text.
+ *
+ * BOTH halves of "where is the definition" read it: `selfTestDefs` below, which
+ * says WHICH definitions a file holds, and `injectEarlyReturn`, which says where
+ * ONE of them begins. They are one question asked twice, and asking them of two
+ * different texts is the drift #14963's repair exists to end (#15574).
  *
  * ⛔ NOT for the population criterion above, which must keep reading
  * `maskComments`. Every `--self-test` dispatch names the flag with a string
@@ -260,6 +268,44 @@ export function maskCommentsAndLiterals(source) {
   const both = new Uint8Array(source.length);
   for (let i = 0; i < both.length; i++) both[i] = comment[i] | literal[i];
   return blank(source, both);
+}
+
+/**
+ * Every `/self.?test/i`-named function DEFINED in this source, read from the
+ * masked text above -- the same text the injection anchor reads.
+ *
+ * Read RAW, a name written inside a fixture STRING counts as a definition of the
+ * file that quotes it: `scripts/pm/dispatch-gates.mjs` reported a
+ * `fixtureSelfTest` that nothing can call, from a name in a fixture array
+ * (#15574). The error direction is a phantom EXTRA name, which is why it never
+ * produced a wrong measurement -- an extra name only pushes a row from a
+ * mechanical entry into `ambiguous entry (...)`, i.e. NOT MEASURED. What it did
+ * do is put a name that CANNOT BE CALLED into a diagnostic whose whole
+ * instruction to the reader is "read the dispatch site".
+ *
+ * ⚠️ `defs` is PUBLISHED in `--json`, so this reading changes that payload, and
+ * that change IS the repair rather than a side effect of it. Measured over the
+ * census on 2026-09-05: exactly ONE row's `defs` differ (the row above, losing
+ * `fixtureSelfTest`) and NO row's ambiguity changes -- so no entry, no verdict
+ * and no row moves. That row was hand-read before and stays hand-read, for the
+ * three real definitions that remain.
+ *
+ * ⛔ NOT line-anchored, unlike the anchor. The anchor needs the ONE definition a
+ * dispatch calls, so a mid-line named function expression is not its answer;
+ * this half answers "how many self-test-shaped definitions does this file hold",
+ * where that expression is a real definition and dropping it would UNDERCOUNT --
+ * the direction that turns an ambiguous file into a confidently wrong entry.
+ */
+export function selfTestDefs(src) {
+  const code = maskCommentsAndLiterals(src);
+  const names = new Set();
+  for (const m of code.matchAll(/(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(/g)) {
+    if (/self.?test/i.test(m[1])) names.add(m[1]);
+  }
+  for (const m of code.matchAll(/const\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>/g)) {
+    if (/self.?test/i.test(m[1])) names.add(m[1]);
+  }
+  return [...names];
 }
 
 /**
@@ -452,6 +498,21 @@ export function relocateSource(source, absFile) {
  * doomed mutation would double a whole sweep of spawns to learn nothing. The
  * row still publishes what the baseline said, because `baselineHead` is usually
  * the whole diagnosis (`Cannot find package ...` reads as "run pnpm install").
+ *
+ * THE BUDGET IS THE INSTRUMENT'S, AND IT IS PER MEMBER. `timeout` is what
+ * `spawnSync` is given for EACH run, and a run that outlasts it is killed with
+ * `SIGTERM` and read -- correctly -- as NOT MEASURED. That is the safe
+ * direction, never a false HELD, and the row names its own reason. But the
+ * reason it names is a fact about THIS TOOL'S BUDGET, and it lands on the
+ * SLOWEST self-tests, which are the ones with the most cases to lose: the
+ * default 120 s is ~3.3x under `scripts/pm/dispatch-gates.mjs`'s own
+ * `--self-test`, the richest in the tree at 1,415 cases (#15573).
+ *
+ * ⛔ The repair is NOT a bigger default -- 180 of the 181 rows fit 120 s, and
+ * raising it for all of them makes every sweep slower to serve one member. The
+ * default stays, and a member measured to need more carries its own
+ * `timeoutMs` in `ENTRY_BY_HAND`, with the reading it came from. `main()`
+ * passes that through; nothing else may.
  */
 export function probeEarlyReturn(absFile, entry, { timeout = 120000, placement = 'relocated' } = {}) {
   const src = readFileSync(absFile, 'utf8');
@@ -493,7 +554,7 @@ export function probeEarlyReturn(absFile, entry, { timeout = 120000, placement =
 
     const base = spawnSync(cmd, [absFile, '--self-test'], { cwd: ROOT, timeout, encoding: 'utf8' });
     const baseOut = (base.stdout ?? '') + (base.stderr ?? '');
-    if (base.signal) return { verdict: 'NOT MEASURED', why: `killed by ${base.signal}`, ...beside };
+    if (base.signal) return { verdict: 'NOT MEASURED', why: `killed by ${base.signal}`, ...budgetExpired(base), ...beside };
     // PRECONDITION. A file the tree cannot run offered the mutation nothing to
     // defeat, so no verdict below is available -- however loudly the mutated run
     // would have exited and spoken. Read before the mutated run is spawned.
@@ -514,7 +575,7 @@ export function probeEarlyReturn(absFile, entry, { timeout = 120000, placement =
 
     const mut = spawnSync(cmd, [probePath, '--self-test'], { cwd: ROOT, timeout, encoding: 'utf8' });
     const mutOut = (mut.stdout ?? '') + (mut.stderr ?? '');
-    if (mut.signal) return { verdict: 'NOT MEASURED', why: `killed by ${mut.signal}`, ...beside };
+    if (mut.signal) return { verdict: 'NOT MEASURED', why: `killed by ${mut.signal}`, ...budgetExpired(mut), ...beside };
     // A mutation that changed nothing observable did not reach the executed
     // path, whatever its exit code says.
     if (baseOut === mutOut && base.status === mut.status) {
@@ -820,6 +881,70 @@ const DECOY_ANCHOR_GATE = [
 const DECOY_ANCHOR_TEXT = 'function selfTest() {';
 
 /**
+ * The MASKED-DEFINITIONS fixture: definition-shaped text that is not a
+ * definition, in BOTH shapes `selfTestDefs` collects and BOTH texts the mask
+ * blanks -- a `function` and an arrow inside a fixture STRING, and a `function`
+ * inside a COMMENT -- standing beside one real example of each.
+ *
+ * The decoy names differ from the real ones ON PURPOSE. The anchor fixture above
+ * spells every decoy `selfTest`, which is right for it (an anchor takes ONE
+ * match and the question is WHICH), but it cannot pin a collector: a `Set` of
+ * names collapses the decoys into the real name and the wrong answer and the
+ * right answer are the same list. Only a decoy with its OWN name can be seen to
+ * be absent -- which is the reading the census took on
+ * `scripts/pm/dispatch-gates.mjs`, where `fixtureSelfTest` is a name in a
+ * fixture array and nothing can call it (#15574).
+ *
+ * The fixture is READ, never spawned; `selfTestDefs` is a pure function of text.
+ */
+const MASKED_DEFS_GATE = [
+  '#!/usr/bin/env node',
+  '// The convention this tree writes: function commentSelfTest() { at column 0.',
+  'const FIXTURE = `',
+  'function fixtureSelfTest() {',
+  "  console.log('a fixture this gate scans, not a definition');",
+  '}',
+  'const fixtureSelfTestLater = () => {};',
+  '`;',
+  'function selfTest() {',
+  "  if (FIXTURE.length < 1) { console.error('the fixture text went missing'); process.exit(1); }",
+  "  console.log('fixture self-test: 1 case passes');",
+  '}',
+  'const runSelfTestTwice = () => { selfTest(); selfTest(); };',
+  "if (process.argv.includes('--self-test')) selfTest();",
+  '',
+].join('\n');
+
+/** What `selfTestDefs` must collect from the fixture above, and in this order. */
+const MASKED_DEFS_EXPECTED = ['selfTest', 'runSelfTestTwice'];
+
+/**
+ * The SLOW gate, reduced: a self-test that outlasts the budget it is probed
+ * under. It sleeps rather than spins -- a control that runs on EVERY invocation
+ * of this tool may not take a core with it on a shared box.
+ *
+ * The pair below probes THIS ONE FIXTURE under two budgets and nothing else
+ * differs: same file, same entry, same mutation. Under the smaller one the
+ * baseline is killed and no verdict is available; under a budget that fits, the
+ * same gate is read DEFEATED. That is the whole of #15573 in two spawns -- the
+ * row that reads `killed by SIGTERM` is reporting the INSTRUMENT'S budget, and
+ * a budget is a thing a ledger row can carry.
+ */
+const SLOW_GATE = [
+  '#!/usr/bin/env node',
+  'function selfTest() {',
+  '  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 900);',
+  "  console.log('fixture self-test: 1 case passes');",
+  '}',
+  "if (process.argv.includes('--self-test')) selfTest();",
+  '',
+].join('\n');
+
+/** A budget the fixture above cannot finish inside, and one it can. */
+const SLOW_GATE_BUDGET_TOO_SMALL = 250;
+const SLOW_GATE_BUDGET_THAT_FITS = 20_000;
+
+/**
  * The WALKING gate, reduced: a gate whose own self-test sweeps the directory it
  * lives in and refuses anything it did not expect to find there. That is not a
  * defect -- `check-pnpm-filter-targets` does exactly this over `scripts/` and is
@@ -986,6 +1111,72 @@ export function runControls() {
     && decoyInjected.includes(`function selfTest() {\n  return; /*${PROBE_MARKER}*/\n\n  const failures = [];`),
     'ANCHOR CONTROL FAILED: the early return was not injected at the REAL definition; a text that merely READS like one -- in a comment, in a fixture string, or mid-line in code -- was preferred over the function the dispatch calls');
 
+  // The DEFINITION LIST, over the same masked text the anchor reads. A phantom
+  // name here is not a wrong verdict -- an extra name only makes a row ambiguous,
+  // which is NOT MEASURED -- but it is a name that cannot be called, published in
+  // `--json` and named in a diagnostic that tells the reader to go read it
+  // (#15574).
+  const maskedDefsFlags = scanSource(MASKED_DEFS_GATE);
+  const commentDef = MASKED_DEFS_GATE.indexOf('function commentSelfTest() {');
+  const literalDef = MASKED_DEFS_GATE.indexOf('function fixtureSelfTest() {');
+  const literalArrowDef = MASKED_DEFS_GATE.indexOf('const fixtureSelfTestLater =');
+  const realFunctionDef = MASKED_DEFS_GATE.indexOf('\nfunction selfTest() {') + 1;
+  say(commentDef >= 0 && maskedDefsFlags.comment[commentDef] === 1,
+    'CONTROL FIXTURE INVALID: the comment decoy is not comment content, so the verdict below says nothing about comments being masked away');
+  say(literalDef >= 0 && maskedDefsFlags.literal[literalDef] === 1,
+    'CONTROL FIXTURE INVALID: the `function` decoy is not literal content, so the verdict below says nothing about fixture STRINGS being masked away -- the half the census actually tripped over');
+  say(literalArrowDef >= 0 && maskedDefsFlags.literal[literalArrowDef] === 1,
+    'CONTROL FIXTURE INVALID: the ARROW decoy is not literal content; `selfTestDefs` collects two shapes and only one of them would be under test');
+  say(realFunctionDef > 0 && maskedDefsFlags.comment[realFunctionDef] === 0 && maskedDefsFlags.literal[realFunctionDef] === 0,
+    'CONTROL FIXTURE INVALID: the real definition is itself masked away, so the fixture cannot show a definition SURVIVING beside the decoys');
+  say(JSON.stringify(selfTestDefs(MASKED_DEFS_GATE)) === JSON.stringify(MASKED_DEFS_EXPECTED),
+    `DEFINITION CONTROL FAILED: definition-shaped text inside a fixture string or a comment was collected as a definition of the file quoting it -- got ${JSON.stringify(selfTestDefs(MASKED_DEFS_GATE))}, expected ${JSON.stringify(MASKED_DEFS_EXPECTED)}`);
+  // ... and the other direction, which is what makes the verdict above a reading
+  // of the MASK rather than of a fixture whose decoys were never collectable:
+  // the SAME text with its literal delimiters removed puts both decoys in code,
+  // and the same collector must then collect them.
+  const unquotedDefs = selfTestDefs(MASKED_DEFS_GATE.replaceAll('`', ''));
+  say(unquotedDefs.includes('fixtureSelfTest') && unquotedDefs.includes('fixtureSelfTestLater'),
+    'CONTROL FIXTURE INVALID: with the fixture STRING delimiters removed the two decoys are still not collected, so they were never definition-shaped and the verdict above passes for the wrong reason');
+  say(selfTestDefs(MASKED_DEFS_GATE.replace('// ', '')).includes('commentSelfTest'),
+    'CONTROL FIXTURE INVALID: with the comment marker removed the comment decoy is still not collected, so it was never definition-shaped and the verdict above passes for the wrong reason');
+
+  // The LEDGER's two row spellings, and the reading `main()` takes from them.
+  // What is at stake is a NOT MEASURED whose stated reason is false: a record
+  // passed through as if it were an entry name asks for a definition of
+  // `[object Object]` and reports "no injectable definition of" it.
+  const rowOf = (defs) => ({ file: 'scripts/fixture-gate.mjs', defs });
+  const ledgerOf = (row) => ({ 'scripts/fixture-gate.mjs': row });
+  say(probePlan(rowOf(['selfTest']), {}).entry === 'selfTest' && probePlan(rowOf(['selfTest']), {}).timeoutMs === undefined,
+    'PLAN CONTROL FAILED: a file with exactly ONE self-test definition and no ledger row did not resolve mechanically to that definition at the default budget');
+  say(probePlan(rowOf(['selfTest', 'runSelfTest']), {}).entry === undefined
+    && /^ambiguous entry \(selfTest, runSelfTest\)/.test(probePlan(rowOf(['selfTest', 'runSelfTest']), {}).why ?? ''),
+    'PLAN CONTROL FAILED: two definitions and no ledger row is an ambiguous entry, which is NOT MEASURED with that reason -- never a guess at one of them');
+  say(/inline top-level block/.test(probePlan(rowOf([]), {}).why ?? ''),
+    'PLAN CONTROL FAILED: a file with no self-test definition at all lost its own NOT MEASURED reason');
+  say(probePlan(rowOf(['selfTest', 'runSelfTest']), ledgerOf('runSelfTest')).entry === 'runSelfTest',
+    'PLAN CONTROL FAILED: a hand-read ledger row did not override the mechanical reading; the ledger exists precisely for the files the mechanical path cannot resolve');
+  say(probePlan(rowOf(['selfTest']), ledgerOf(null)).entry === undefined
+    && /not probeable/.test(probePlan(rowOf(['selfTest']), ledgerOf(null)).why ?? ''),
+    'PLAN CONTROL FAILED: a `null` ledger row was probed anyway; a hand-read "there is no single entry" must stay NOT MEASURED');
+  const recordPlan = probePlan(rowOf(['selfTest']), ledgerOf({ entry: 'runSelfTest', timeoutMs: 5000 }));
+  say(recordPlan.entry === 'runSelfTest' && recordPlan.timeoutMs === 5000,
+    `PLAN CONTROL FAILED: the record row spelling did not yield its entry and budget (got ${JSON.stringify(recordPlan)})`);
+  say(typeof recordPlan.entry === 'string',
+    'PLAN CONTROL FAILED: the record row itself was passed through as the ENTRY; the probe would then report `no injectable definition of [object Object]` -- a NOT MEASURED whose stated reason is false');
+  // The SHIPPED ledger, read the way `main()` reads it. A row edited into a
+  // shape this reader does not understand is silently no budget at all.
+  for (const [file, row] of Object.entries(ENTRY_BY_HAND)) {
+    const { entry, timeoutMs } = readLedgerRow(row);
+    const fields = typeof row === 'object' && row !== null ? Object.keys(row) : [];
+    say(entry === null || (typeof entry === 'string' && entry.length > 0),
+      `LEDGER ROW INVALID: ${file} names no entry this reader can use (${JSON.stringify(row)})`);
+    say(timeoutMs === undefined || (Number.isInteger(timeoutMs) && timeoutMs > 0),
+      `LEDGER ROW INVALID: ${file} carries a budget that is not a positive whole number of milliseconds (${JSON.stringify(timeoutMs)})`);
+    say(fields.every((k) => k === 'entry' || k === 'timeoutMs'),
+      `LEDGER ROW INVALID: ${file} carries a field this reader does not read (${fields.join(', ')}); a misspelled \`timeoutMs\` is not a smaller budget, it is NO budget -- the default, and the SIGTERM this field exists to end`);
+  }
+
   // Instrument 1, both directions.
   say(classifyFloor(maskComments(HOLED_GATE)) === 'NONE',
     'POSITIVE CONTROL FAILED: a self-test deciding success by failures.length alone was not classified NONE');
@@ -1131,6 +1322,28 @@ export function runControls() {
     say(hhHoled.mutatedBytes === 0,
       'POSITIVE CONTROL FAILED: the helper-handshake gate with its handshake deleted printed something; without the call there is nothing left to notice the early return, so the run says NOTHING and exits 0');
 
+    // The BUDGET, in both directions: ONE fixture, two budgets, nothing else
+    // different -- same file, same entry, same mutation. Under a budget it
+    // cannot finish inside, the baseline is killed and NO verdict is available;
+    // under one that fits, the same gate is read DEFEATED. This is the pair that
+    // pins #15573: a row reading `killed by SIGTERM` reports the INSTRUMENT'S
+    // budget, and a budget is a thing a ledger row can carry.
+    const slow = join(dir, 'slow-gate.mjs');
+    writeFileSync(slow, SLOW_GATE);
+    const slowKilled = probeEarlyReturn(slow, 'selfTest', { timeout: SLOW_GATE_BUDGET_TOO_SMALL });
+    const slowFits = probeEarlyReturn(slow, 'selfTest', { timeout: SLOW_GATE_BUDGET_THAT_FITS });
+    say(slowKilled.verdict === 'NOT MEASURED' && /^killed by /.test(slowKilled.why ?? ''),
+      `BUDGET CONTROL FAILED: a self-test that outlasts its budget read ${slowKilled.verdict} (${slowKilled.why ?? ''}); a run that never produced an exit code measured nothing, and the safe direction is to say so`);
+    // ⛔ ... and it must be readable as THIS TOOL'S doing. Without that field the
+    // shrink is a silence: the sweep can count the NOT MEASURED rows but cannot
+    // say how many of them were killed by a number it chose itself.
+    say(slowKilled.timedOut === true,
+      'BUDGET CONTROL FAILED: a row killed by the probe\'s own timeout does not publish `timedOut`, so the population this instrument silences cannot be counted');
+    say(slowFits.verdict === 'DEFEATED',
+      `BUDGET CONTROL FAILED: the SAME fixture under a budget that fits read ${slowFits.verdict} (${slowFits.why ?? ''}); with both budgets alike the verdict above says nothing about the BUDGET being what ended the other run`);
+    say(slowFits.timedOut === undefined,
+      'BUDGET CONTROL FAILED: a run that finished inside its budget still published `timedOut`; the count of silenced rows would then include rows that were measured');
+
     // The WALKING gate, in both PLACEMENTS. This is the pair that pins the
     // repair: the same fixture, the same mutation, differing only in where the
     // copy was written. Its own directory is separate from the fixtures above,
@@ -1178,6 +1391,23 @@ export function runControls() {
  *
  * A row whose file no longer holds more than one `/self.?test/i` definition is
  * dead and should be deleted; the mechanical path then covers it.
+ *
+ * ## Two row spellings, and why the second one exists
+ *
+ *   'scripts/x.mjs': 'selfTest'                        the entry NAME alone.
+ *   'scripts/x.mjs': { entry: 'selfTest', timeoutMs }  the name, plus what THIS
+ *                                                      member needs from the
+ *                                                      probe to reach a verdict.
+ *
+ * `timeoutMs` is a per-member BUDGET, measured and recorded with the reading it
+ * came from -- never estimated, and never applied to a member nobody measured.
+ * It is here rather than in `probeEarlyReturn`'s default because a budget that
+ * one member needs is a cost every other member would pay: this ledger is the
+ * one place that already says "this file, for this stated reason" (#15573).
+ *
+ * ⛔ It is a BUDGET, not a deadline the probe aims for: a run that finishes
+ * sooner is not waited on, and a member that outgrows its recorded budget goes
+ * back to NOT MEASURED rather than being quietly given more.
  */
 export const ENTRY_BY_HAND = Object.freeze({
   'scripts/check-comment-mask-corpus.mjs': 'selfTest',
@@ -1196,9 +1426,15 @@ export const ENTRY_BY_HAND = Object.freeze({
   'scripts/check-platform-checklist.mjs': null,
   // The self-test is an inline top-level block calling several helpers.
   'scripts/check-regen-pending.mjs': null,
-  // Four self-test-shaped names in raw source (`selfTest`, `selfTestOnlyCallables`
-  // and two inside fixtures), so the entry is hand-read -- but for THIS FILE's
-  // reason. The row was a `null` until #14963, on the claim that injecting here
+  // Four self-test-shaped definitions in this file -- `selfTest`,
+  // `selfTestOnlyCallables`, `maskSelfTests`, `selfTestCaseLines` -- so the
+  // entry is hand-read, and stays hand-read: they are all real, and reading
+  // which one the DISPATCH calls is not something a count can do. (A fifth,
+  // `fixtureSelfTest`, was collected here until #15574 from a name inside a
+  // fixture array; `selfTestDefs` reads masked source now and it is gone. The
+  // row is unaffected either way -- four names are as ambiguous as five.)
+  //
+  // The row was a `null` until #14963, on the claim that injecting here
   // can only produce a SyntaxError: the anchor read raw source, where a docblock
   // sentence and then a FIXTURE STRING stand ahead of the real definition. That
   // was the INSTRUMENT's limit recorded as this file's property. Anchored on the
@@ -1207,13 +1443,66 @@ export const ENTRY_BY_HAND = Object.freeze({
   // failed (exit 1)` for as long as the copy was written under `scripts/`, where
   // this gate's own single-site sweep found the near-duplicate and refused: the
   // copy now lands outside that tree and this gate's baseline is clean (#15515).
-  // What is left is the BUDGET: at the default 120 s the self-test does not
-  // finish and the row reads `killed by SIGTERM` (#15573, not folded in here).
-  // Measured at 900 s on a shared box: baseline exit 0 after ~7 minutes, mutated
-  // exit 1 in 200 bytes, verdict HELD -- so the row is a budget away, not a
-  // property of the file.
-  'scripts/pm/dispatch-gates.mjs': 'selfTest',
+  // What was left was the BUDGET, and this row now carries it (#15573). At the
+  // default 120 s the self-test does not finish, the baseline is killed and the
+  // row reads `killed by SIGTERM` -- a limit of the INSTRUMENT recorded as a
+  // property of the FILE for the third time on this one row.
+  //
+  // THE READING THE BUDGET COMES FROM, and it is one measurement, not a margin:
+  //   `time node scripts/pm/dispatch-gates.mjs --self-test` -> real 6m39.690s,
+  //   exit 0, `✓ dispatch-gates self-test: 1415 cases pass.` (cf6b67164, an
+  //   installed worktree, one process at a time).
+  //   Probed ONCE at 900 000 ms on a shared box: verdict HELD, baselineExit=0
+  //   mutatedExit=1 mutatedBytes=200, head `✗ dispatch-gates self-test:
+  //   selfTest() returned without reaching its verdict,`; 425 s wall clock.
+  // 900 s is ~2.25x the measured wall clock, which is headroom for a SHARED box
+  // rather than for growth: a self-test that outgrows this budget must come back
+  // here and be measured again, not be topped up.
+  'scripts/pm/dispatch-gates.mjs': { entry: 'selfTest', timeoutMs: 900_000 },
 });
+
+/**
+ * One ledger row, in either spelling, read into the one shape the probe takes.
+ *
+ * A row is `null` (not probeable), an entry NAME, or a record carrying that name
+ * and this member's options -- see the ledger's own docblock. The union is read
+ * HERE and nowhere else: a caller that passed a record straight through as the
+ * entry would ask for a definition named `[object Object]`, get `no injectable
+ * definition of ...` back, and publish a NOT MEASURED whose stated reason is
+ * false. The controls drive both spellings.
+ */
+export function readLedgerRow(row) {
+  if (row === null || typeof row === 'string') return { entry: row, timeoutMs: undefined };
+  return { entry: row.entry, timeoutMs: row.timeoutMs };
+}
+
+/**
+ * What the probe should do with one census row: which definition to enter and
+ * under what budget, or WHY there is nothing to enter.
+ *
+ * `{ why }` is the NOT MEASURED reason, verbatim as the row publishes it;
+ * `{ entry, timeoutMs }` is a probe to run, `timeoutMs` undefined meaning "the
+ * default budget". Lifted out of `main()` so the ledger's two spellings and the
+ * mechanical fallback are decided by something the controls can drive: the
+ * decision is where a wrong entry becomes a wrong REASON, and `main()` cannot be
+ * called with a fixture ledger.
+ */
+export function probePlan(row, ledger = ENTRY_BY_HAND) {
+  const listed = Object.hasOwn(ledger, row.file) ? readLedgerRow(ledger[row.file]) : null;
+  if (listed !== null && listed.entry === null) {
+    return { why: 'entry read by hand as not probeable -- see ENTRY_BY_HAND' };
+  }
+  const entry = listed?.entry ?? (row.defs.length === 1 ? row.defs[0] : undefined);
+  if (entry === undefined) {
+    return {
+      why:
+        row.defs.length === 0
+          ? 'self-test is an inline top-level block; no callee to leave early'
+          : `ambiguous entry (${row.defs.join(', ')}) and no ENTRY_BY_HAND row -- read the dispatch site`,
+    };
+  }
+  return { entry, timeoutMs: listed?.timeoutMs };
+}
 
 /**
  * This file is not itself a member: the `--self-test` literals below live in
@@ -1265,16 +1554,11 @@ function main() {
   const wantProbe = process.argv.includes('--probe');
   if (wantProbe) {
     for (const r of rows) {
-      const named = Object.hasOwn(ENTRY_BY_HAND, r.file) ? ENTRY_BY_HAND[r.file] : undefined;
-      if (named === null) { r.probe = { verdict: 'NOT MEASURED', why: 'entry read by hand as not probeable -- see ENTRY_BY_HAND' }; continue; }
-      const entry = named ?? (r.defs.length === 1 ? r.defs[0] : undefined);
-      if (entry === undefined) {
-        r.probe = { verdict: 'NOT MEASURED', why: r.defs.length === 0
-          ? 'self-test is an inline top-level block; no callee to leave early'
-          : `ambiguous entry (${r.defs.join(', ')}) and no ENTRY_BY_HAND row -- read the dispatch site` };
-        continue;
-      }
-      r.probe = probeEarlyReturn(r.abs, entry);
+      const plan = probePlan(r);
+      if (plan.entry === undefined) { r.probe = { verdict: 'NOT MEASURED', why: plan.why }; continue; }
+      // `timeout: undefined` is the DEFAULT budget, not "no budget" -- the
+      // destructured default in `probeEarlyReturn` is what supplies 120 s.
+      r.probe = probeEarlyReturn(r.abs, plan.entry, { timeout: plan.timeoutMs });
     }
   }
 
@@ -1299,9 +1583,16 @@ function main() {
   const held = rows.filter((r) => r.probe.verdict === 'HELD');
   const accidents = rows.filter((r) => r.probe.verdict === 'ACCIDENT');
   const unmeasured = rows.filter((r) => r.probe.verdict === 'NOT MEASURED');
+  // The shrink this INSTRUMENT is responsible for, reported as a number rather
+  // than left as a silence -- printed even when it is zero, because a zero that
+  // is printed is a reading and a line that appears only when non-zero is not
+  // (#15573).
+  const timedOut = unmeasured.filter((r) => r.probe.timedOut === true);
   console.log('\nHole 2 -- silently defeated by an early `return` in the self-test (MEASURED):');
   console.log(`  ${defeated.length} DEFEATED, ${held.length} HELD, ${accidents.length} ACCIDENT, ${unmeasured.length} NOT MEASURED.`);
   console.log(`  of the defeated, ${defeated.filter((r) => r.probe.mutatedBytes === 0).length} printed NOTHING at all and still exited 0.`);
+  console.log(`  of the NOT MEASURED, ${timedOut.length} outlasted the probe's own budget and was killed --`);
+  console.log('   a shrink of this survey by a number THIS TOOL chose, not a property of those files.');
   for (const r of held) console.log(`    HELD  ${r.file} -- ${r.probe.mutatedHead.slice(0, 96)}`);
   for (const r of accidents) console.log(`    ACC   ${r.file} -- exited ${r.probe.mutatedExit} printing ${r.probe.mutatedBytes} byte(s); no refusal, so NOT a hold`);
   for (const r of unmeasured) console.log(`    n/m   ${r.file} -- ${r.probe.why}`);

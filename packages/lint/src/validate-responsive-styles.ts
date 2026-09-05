@@ -12,6 +12,8 @@
 // (contrast, balance, "is it ugly") is only catchable by rendering + a VLM gate,
 // which is a separate, render-time concern (ADR-0065 §Decision-5).
 
+import { recordsOf } from './object-graph.js';
+
 export type StyleSeverity = 'error' | 'warning';
 
 export interface StyleFinding {
@@ -91,14 +93,6 @@ function looksLikeTailwind(className: string): boolean {
     if (TW_BARE.test(tok)) return true;
     return false;
   });
-}
-
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v as AnyRec[];
-  if (v && typeof v === 'object') {
-    return Object.entries(v as AnyRec).map(([name, def]) => ({ name, ...(def as AnyRec) }));
-  }
-  return [];
 }
 
 /** Child nodes can hang off `children`, `properties.children`, `body`, or
@@ -192,13 +186,13 @@ function checkNode(node: AnyRec, pageName: string, path: string, findings: Style
  */
 export function validateResponsiveStyles(stack: AnyRec): StyleFinding[] {
   const findings: StyleFinding[] = [];
-  const pages = asArray(stack.pages);
+  const pages = recordsOf(stack.pages);
   for (let p = 0; p < pages.length; p++) {
     const page = pages[p];
     const pageName = typeof page.name === 'string' ? page.name : `pages[${p}]`;
-    const regions = asArray(page.regions);
+    const regions = recordsOf(page.regions);
     for (let r = 0; r < regions.length; r++) {
-      const components = asArray(regions[r].components);
+      const components = recordsOf(regions[r].components);
       for (let c = 0; c < components.length; c++) {
         checkNode(components[c], pageName, `pages[${p}].regions[${r}].components[${c}]`, findings);
       }
