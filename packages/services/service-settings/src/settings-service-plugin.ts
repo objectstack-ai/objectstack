@@ -1,7 +1,19 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
-import { resolveAuthzContext, isAuthzStoreUnavailableError } from '@objectstack/core';
+import {
+  resolveAuthzContext,
+  isAuthzStoreUnavailableError,
+  // [#15351] The posture-derivation trio. `effectiveTenancyPosture` reads the
+  // posture IN FORCE off the `tenancy` service (never the REQUESTED one an env
+  // var asks for); the other two carry decision-1-option-A's classification
+  // (#13906) at this seam — see `resolveAdmissionTenancyPosture`.
+  effectiveTenancyPosture,
+  isServiceNotRegisteredError,
+  AuthzStoreUnavailableError,
+  type TenancyPostureSource,
+} from '@objectstack/core';
+import type { TenancyPosture } from '@objectstack/spec/security';
 import type { IHttpServer, IDataEngine, IHttpRequest } from '@objectstack/spec/contracts';
 import type { SettingsContext } from './settings-service.types.js';
 import type { SettingsManifest } from '@objectstack/spec/system';
@@ -275,7 +287,14 @@ export class SettingsServicePlugin implements Plugin {
               return undefined;
             }
           };
-          const authz = await resolveAuthzContext({ ql, headers, getSession });
+          // [#15351] The tenancy posture is an authorization INPUT, resolved for
+          // THIS door before the shared resolver runs. Omitting it is what left
+          // both posture-conditional API-key refusals unreachable here — and
+          // this seam does not merely admit the principal, it hands
+          // `authz.tenantId` onward as the resolved settings tenant, so an
+          // unvetted claim became a verdict a consumer acts on.
+          const tenancyPosture = await this.resolveAdmissionTenancyPosture(ctx);
+          const authz = await resolveAuthzContext({ ql, headers, getSession, tenancyPosture });
           return {
             userId: authz.userId,
             tenantId: authz.tenantId,
@@ -302,6 +321,72 @@ export class SettingsServicePlugin implements Plugin {
         'SettingsServicePlugin: REST routes registered at ' + (this.opts.basePath ?? '/api/settings'),
       );
     });
+  }
+
+  /**
+   * [#15351] Derive the tenancy posture IN FORCE for this door, so
+   * `resolveAuthzContext` can run its two posture-conditional API-key
+   * refusals: `organization_required` (an organization-less key under a wall)
+   * and `organization_membership_ended` (a key stamped with an organization
+   * its owner has left). Both are gated on a posture the CALLER supplies, and
+   * this caller supplied none.
+   *
+   * ## ⛔ Not the requested posture
+   *
+   * `resolveTenancyPosture()` reads `OS_TENANCY_POSTURE` — what the deployment
+   * ASKED for. Under ADR-0093 D4/D5 a deployment that requests `isolated`
+   * without the enterprise organizations runtime is `single` in force, so the
+   * requested value would refuse legitimate automation over a wall that is not
+   * there. The posture the guards must see is the one the `tenancy` service
+   * reports, which is what {@link effectiveTenancyPosture} reads.
+   *
+   * ## The classification, decision 1 option A (#13906)
+   *
+   * - **Never registered** ⇒ branded (`isServiceNotRegisteredError`), quiet
+   *   `undefined`. A lean embedding with no `plugin-auth` is a SUPPORTED
+   *   composition; behaviour there is exactly what it was.
+   * - **Registered and unable to answer** ⇒ `AuthzStoreUnavailableError`
+   *   (ADR-0112 `SERVICE_UNAVAILABLE` / 503). Admission was never DECIDED, so
+   *   it must not be answered. ⛔ A `try { … } catch { undefined }` here
+   *   re-introduces exactly the permissive-on-failure defect #13906 exists to
+   *   repair — a failure reading as "this check does not apply". The caller's
+   *   own `catch` re-raises this brand rather than degrading it to a denial.
+   *
+   * ⚠️ The brand exists only on the ASYNC resolution path: `PluginContext.getService`
+   * throws two UNBRANDED plain `Error`s (`… not found` and `… is async - use
+   * await`), so a synchronous read cannot tell the two facts apart and would
+   * have to guess. Hence `getServiceAsync`, reached through `getKernel()`.
+   *
+   * ⚠️ The ASYNC ACCESSOR's presence is part of the wiring fact, exactly as on
+   * the REST and install-local seams: a `KernelBase`-shaped host (`LiteKernel`)
+   * exposes `getKernel()` but has no `getServiceAsync` at all, so dereferencing
+   * it would raise an unbranded — therefore LOUD — `TypeError`, turning "this
+   * host shape has no async registry" into an outage. Such a host has no
+   * service factories either (`registerServiceFactory` throws "not supported"),
+   * so absence is the only fault it could report anyway. It keeps the quiet
+   * answer, unchanged.
+   *
+   * ⛔ Deliberately NOT extracted into a shared helper: sibling repairs are in
+   * flight on the same seam across other packages, and this file's copy is the
+   * precedent set by `@objectstack/cloud-connection`'s install-local door.
+   */
+  private async resolveAdmissionTenancyPosture(
+    ctx: PluginContext,
+  ): Promise<TenancyPosture | undefined> {
+    const kernel = ctx.getKernel?.() as
+      | { getServiceAsync?: <T>(name: string, scopeId?: string) => Promise<T> }
+      | undefined;
+    if (!kernel || typeof kernel.getServiceAsync !== 'function') return undefined;
+    try {
+      return effectiveTenancyPosture(
+        await kernel.getServiceAsync<TenancyPostureSource>('tenancy'),
+      );
+    } catch (err) {
+      if (!isServiceNotRegisteredError(err)) {
+        throw new AuthzStoreUnavailableError('tenancy', err);
+      }
+      return undefined;
+    }
   }
 
   /**
