@@ -28,6 +28,13 @@ import { z } from 'zod';
  * cron-typed slot is parsed and reaches no engine, and `@objectstack/formula`'s
  * registered `cron` engine has no caller outside that package.
  *
+ * A TYPED slot — one declared with `CronExpressionInputSchema` or
+ * `TemplateExpressionInputSchema` — takes a bare, non-blank string (shorthand
+ * for its own dialect) or an envelope declaring that one dialect. An envelope
+ * naming any other dialect, and a blank string, are refused at the slot with
+ * one issue whose message names the dialect and the fix. Only the untyped
+ * `ExpressionInputSchema` takes every declared dialect in envelope form.
+ *
  * Those three are the whole list — it is exactly the `ExpressionDialect` enum
  * below. Procedural JavaScript is **not** a dialect: it is the L2 authoring
  * surface, the sandboxed, capability-gated `ScriptBody { language: 'js' }` in
@@ -168,25 +175,107 @@ export const ExpressionInputSchema = z.union([
 export type ExpressionInput = z.input<typeof ExpressionInputSchema>;
 
 /**
- * Cron-typed input shape: a bare string is shorthand for `{ dialect: 'cron',
- * source }` (not `cel`). Use this for `schedule` / `cronExpression` fields so
- * authors can write `'0 9 * * 1-5'` without manually wrapping.
+ * The dialects that have a TYPED input schema below. On a typed slot the bare
+ * string is shorthand for this dialect, and the envelope arm accepts this
+ * dialect only.
  */
-export const CronExpressionInputSchema = z.union([
-  z.string().min(1).transform((source): Expression => ({ dialect: 'cron', source })),
-  ExpressionSchema,
-]);
+export type TypedExpressionDialect = Extract<ExpressionDialect, 'cron' | 'template'>;
+
+/**
+ * The one sentence a TYPED slot refuses a blank string with — empty or
+ * whitespace-only, the notion of blank `EvaluatedExpressionSchema` applies
+ * (`source.trim()`), so the two typed schemas and the evaluated one share one
+ * rule. Its own words rather than {@link EVALUATED_EXPRESSION_SOURCE_REQUIRED},
+ * because that sentence prescribes `{ dialect: 'cel', source }` — the one
+ * envelope a typed slot refuses.
+ */
+export const TYPED_EXPRESSION_SOURCE_REQUIRED: Readonly<Record<TypedExpressionDialect, string>> = {
+  cron:
+    'A cron-typed slot needs a non-blank cron expression: a bare string is shorthand for '
+    + '`{ dialect: \'cron\', source }`, and a blank one would normalize to an envelope with nothing to schedule. '
+    + 'Write `\'0 9 * * 1-5\'` or `{ dialect: \'cron\', source: \'0 9 * * 1-5\' }`; no cron syntax is judged '
+    + 'here — `croner` refuses an invalid pattern where a schedule is wired.',
+  template:
+    'A template-typed slot needs a non-blank template: a bare string is shorthand for '
+    + '`{ dialect: \'template\', source }`, and a blank one would normalize to an envelope with nothing to '
+    + 'interpolate. Write `\'{{record.name}}\'` or `{ dialect: \'template\', source: \'{{record.name}}\' }`.',
+};
+
+/**
+ * The one sentence a TYPED slot refuses a foreign-dialect envelope with (and
+ * any value that is neither a string nor an envelope). It names the slot's
+ * dialect first, then the fix, so the prescription travels with the refusal.
+ */
+export const TYPED_EXPRESSION_DIALECT_ONLY: Readonly<Record<TypedExpressionDialect, string>> = {
+  cron:
+    'A cron-typed slot accepts a bare cron string or an envelope declaring `dialect: \'cron\'` only: an '
+    + 'envelope naming another dialect would validate and then have nothing to schedule. '
+    + 'Write `\'0 9 * * 1-5\'` or `{ dialect: \'cron\', source: \'0 9 * * 1-5\' }`.',
+  template:
+    'A template-typed slot accepts a bare template string or an envelope declaring `dialect: \'template\'` '
+    + 'only: an envelope naming another dialect would validate and then have nothing to interpolate. '
+    + 'Write `\'{{record.name}}\'` or `{ dialect: \'template\', source: \'{{record.name}}\' }`.',
+};
+
+/**
+ * Build a typed input union: a bare, non-blank string (this dialect's
+ * shorthand) or an {@link ExpressionSchema} envelope declaring this dialect.
+ *
+ * The refusal shape is measured, not assumed (zod 4.4): a union reports the
+ * one arm that did not abort, else `invalid_union`. Both arms here abort on a
+ * foreign value — the string arm is a pipe, whose transform aborts the arm on
+ * any issue, and the envelope arm's `z.literal` aborts on a foreign dialect —
+ * so every refusal is ONE `invalid_union` at the slot, and the union's own
+ * error map is where the message lives: the source-required sentence for a
+ * string input, the dialect-only sentence for everything else. A `.refine` on
+ * the envelope arm would surface as `custom` at `dialect` instead, but would
+ * leave the input TYPE, the JSON Schema and the generated reference page
+ * declaring every dialect on a typed slot; the literal keeps all four surfaces
+ * saying one thing. The one refusal `ExpressionSchema` carries — neither
+ * `source` nor `ast` — still surfaces on its own, with its own message: that
+ * arm does not abort on it.
+ */
+function typedExpressionInput<D extends TypedExpressionDialect>(dialect: D) {
+  return z.union([
+    z.string()
+      .refine((source) => source.trim().length > 0, { message: TYPED_EXPRESSION_SOURCE_REQUIRED[dialect] })
+      .transform((source): Expression => ({ dialect, source })),
+    ExpressionSchema.safeExtend({ dialect: z.literal(dialect) }),
+  ], {
+    error: (issue) => (typeof issue.input === 'string'
+      ? TYPED_EXPRESSION_SOURCE_REQUIRED[dialect]
+      : TYPED_EXPRESSION_DIALECT_ONLY[dialect]),
+  });
+}
+
+/**
+ * Cron-typed input shape: a bare, non-blank string is shorthand for
+ * `{ dialect: 'cron', source }`, and an envelope must declare `dialect: 'cron'`
+ * — a `cel` or `template` envelope is refused at the slot, naming the fix
+ * (`TYPED_EXPRESSION_DIALECT_ONLY.cron`), as is a blank string
+ * (`TYPED_EXPRESSION_SOURCE_REQUIRED.cron`). Use this for `schedule` /
+ * `cronExpression` fields so authors can write `'0 9 * * 1-5'` without
+ * manually wrapping.
+ *
+ * No cron syntax is judged at parse time — `'not a cron'` normalizes like any
+ * other string. `croner` judges the pattern where a schedule is wired
+ * (`CronSchedule.expression` → `toBoundaryJobSchedule` → `CronJobAdapter`);
+ * every other cron-typed slot reaches no engine, and no grammar is restated
+ * here.
+ */
+export const CronExpressionInputSchema = typedExpressionInput('cron');
 export type CronExpressionInput = z.input<typeof CronExpressionInputSchema>;
 
 /**
- * Template-typed input shape: a bare string is shorthand for
- * `{ dialect: 'template', source }`. Use this for notification subjects/bodies,
- * titleFormat, prompt templates — anything with `{{var}}` interpolation.
+ * Template-typed input shape: a bare, non-blank string is shorthand for
+ * `{ dialect: 'template', source }`, and an envelope must declare
+ * `dialect: 'template'` — a `cel` or `cron` envelope is refused at the slot,
+ * naming the fix (`TYPED_EXPRESSION_DIALECT_ONLY.template`), as is a blank
+ * string (`TYPED_EXPRESSION_SOURCE_REQUIRED.template`). Use this for
+ * notification subjects/bodies, titleFormat, prompt templates — anything with
+ * `{{var}}` interpolation. No template syntax is judged at parse time.
  */
-export const TemplateExpressionInputSchema = z.union([
-  z.string().min(1).transform((source): Expression => ({ dialect: 'template', source })),
-  ExpressionSchema,
-]);
+export const TemplateExpressionInputSchema = typedExpressionInput('template');
 export type TemplateExpressionInput = z.input<typeof TemplateExpressionInputSchema>;
 
 /**
