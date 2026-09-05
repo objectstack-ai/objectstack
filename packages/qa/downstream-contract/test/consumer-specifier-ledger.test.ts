@@ -42,39 +42,46 @@
  * of this workspace on its resolution path — `createRequire().resolve()` for the
  * `require` condition and `import.meta.resolve()` for the `import` condition.
  *
- * That is the same technique as the pin PR #15611 adds under `packages/cli`,
- * arrived at for the same reason. ⚠️ That file is NOT on this tree — #15611 is
- * open and unmerged — so this suite reproduces the technique rather than reusing
- * it, and the two are independent by construction: the pin asks "does the CLI's
- * map still spell the subpaths this repo ratified", this asks "does every
- * specifier a named out-of-repo consumer imports still resolve". A pin over one
- * package's map cannot see the next package that gains one.
+ * That is the technique `packages/cli/test/published-subpath-hook-body.pin.test.ts`
+ * uses (landed with #15611), arrived at here for the same reason. The two are
+ * deliberately NOT merged into one: the pin asks "does the CLI's map still spell
+ * the subpaths this repo ratified", and answers it from inside `packages/cli`,
+ * where a CLI PR is already looking. This asks "does every specifier a named
+ * OUT-OF-REPO consumer imports still resolve", and answers it from a package
+ * whose whole subject is downstream consumers. A pin over one package's map
+ * cannot see the next package that gains one; the ledger is keyed by consumer,
+ * so it grows a row rather than a file.
  *
- * ## SEALED_TODAY, and why the red is LEDGERED rather than simply asserted
+ * ## SEALED_TODAY, and why an EMPTY exception table is still load-bearing
  *
- * ⚠️ Two of the three seeded specifiers DO NOT RESOLVE on `origin/main` today.
- * `./hook-body` and `./package.json` are ratified by PR #15611, which is open and
- * unmerged — so hotcrm is broken right now, and a test that just asserted "every
- * ledgered specifier resolves" would be permanently red and could not land.
+ * When this suite was written, two of the three seeded specifiers did not
+ * resolve: `./hook-body` and `./package.json` were ratified by PR #15611, which
+ * was open and unmerged, so hotcrm was broken on `main` and a test that simply
+ * asserted "every ledgered specifier resolves" would have been permanently red
+ * and could not have landed. `SEALED_TODAY` recorded EXACTLY which ledgered
+ * specifiers this tree did not open, asserted as a SET EQUALITY rather than a
+ * count, so that the table could only ever shrink.
  *
- * A permanently red test is not an option and neither is dropping the two
- * entries, so the red is held the way this repo already holds a measured red
- * (`packages/cli/test/option-b-reader-acceptance.pin.test.ts`): `SEALED_TODAY`
- * records EXACTLY which ledgered specifiers this tree does not open, and the
- * assertion is set EQUALITY. That gives four directions where `toBe(0)` gives
- * one:
+ * #15611 then landed while this branch was in flight, and the equality did what
+ * it was built to do: the suite went red naming the two lines to DELETE. They
+ * are deleted. ⭐ The table is now EMPTY, which is the terminal state its own
+ * header called "done" — every specifier a named out-of-repo consumer imports
+ * resolves from a packed tarball today.
  *
- *   - a seal DROPS a resolving specifier          -> RED, naming the consumer.
- *     This is the #13662 / #15325 event, caught on the PR that causes it.
- *   - #15611 lands and the two doors open          -> RED, naming the lines to
- *     DELETE. The ledger of losses shrinks to empty; that is what "done" means.
- *   - a sealed one is re-sealed differently        -> RED, naming the row.
- *   - the probe quietly measures LESS              -> RED, because a specifier
- *     that stops being measured stops matching its line.
+ * The empty table is kept rather than deleted, and the equality assertion with
+ * it, because the two say different things and only one of them survives being
+ * folded into the other:
  *
- * ⛔ `SEALED_TODAY` is SHRINK-ONLY. Adding a line is never how a red is fixed:
- * a specifier that stops resolving is a broken consumer, which is the whole
- * subject. Every line cites the PR that removes it.
+ *   - "every ledgered specifier resolves" is the contract.
+ *   - "the sealed set is EXACTLY empty" is the RATCHET. It is the line a future
+ *     author has to edit, in a file that says ⛔ in front of the edit, to make a
+ *     red go green by recording a break instead of fixing it.
+ *
+ * ⛔ `SEALED_TODAY` is SHRINK-ONLY, and it has reached its floor. Adding a line
+ * is never how a red here is fixed: a ledgered specifier that stops resolving is
+ * a broken out-of-repo consumer, which is the entire subject of this file. The
+ * two remedies are to re-open the subpath in the package's `exports` map, or to
+ * migrate the consumer and cite that migration in the ledger.
  *
  * ## What makes this non-vacuous
  *
@@ -119,14 +126,18 @@ const ENTRIES = LEDGER.entries;
 
 /**
  * The ledgered specifiers this tree does NOT open, each with the reason and the
- * PR that removes the line. SHRINK-ONLY — see the header.
+ * PR that removes the line.
+ *
+ * ⛔ SHRINK-ONLY, and EMPTY is its floor — see the header. It held two entries
+ * while PR #15611 was unmerged; #15611 landed, the set-equality assertion below
+ * went red naming both lines, and they were deleted. An empty table asserts that
+ * every ledgered specifier resolves today.
+ *
+ * ⛔ A red below is NEVER fixed by adding a line here. That records a broken
+ * out-of-repo consumer as acceptable, which is the defect this whole file
+ * exists to make visible.
  */
-const SEALED_TODAY: Record<string, string> = {
-  '@objectstack/cli/hook-body':
-    'ratified by PR #15611 (#15325), open and unmerged on this tree — hotcrm action-sandbox is broken until it lands',
-  '@objectstack/cli/package.json':
-    'ratified by PR #15611 (#15325), open and unmerged on this tree — the same harness cannot read the CLI manifest',
-};
+const SEALED_TODAY: Record<string, string> = {};
 
 /** `@objectstack/cli/console` -> `@objectstack/cli`; `foo/bar` -> `foo`. */
 function packageNameOf(specifier: string): string {
@@ -368,6 +379,30 @@ describe('resolution from a consumer directory outside the workspace', () => {
       `not one ledgered specifier resolved. That is not a tree full of seals, it is a broken measurement — ` +
         `check that the packed tarballs unpacked.\n${ENTRIES.map(describeEntry).join('\n')}`,
     ).toBeGreaterThan(0);
+  });
+
+  /**
+   * Resolver failures that are NOT a seal. `ERR_PACKAGE_PATH_NOT_EXPORTED` means
+   * the map refused the specifier — the subject of this file. These two mean the
+   * opposite: the map ACCEPTED it and the file it named is not in the tarball.
+   */
+  const MISSING_FILE_CODES = new Set(['MODULE_NOT_FOUND', 'ERR_MODULE_NOT_FOUND']);
+
+  it('ships the file behind every ledgered door — a declared door leading nowhere is not a seal', () => {
+    for (const entry of ENTRIES) {
+      for (const condition of ['require', 'import'] as const) {
+        const seen = probe[entry.specifier][condition];
+        if (seen.ok) continue;
+        expect(
+          MISSING_FILE_CODES.has(seen.code ?? ''),
+          `${entry.specifier} is EXPORTED under the \`${condition}\` condition, but the file behind it is not in ` +
+            `the published tarball (${seen.code}). ⛔ Do NOT read this as a seal and do NOT ledger it as one: the ` +
+            `door is declared and leads nowhere, which a consumer meets as a crash rather than as a resolution ` +
+            `refusal. Either the package is not built, or its \`files\` array does not ship the path its \`exports\` ` +
+            `map names — the two failure modes an exports map cannot tell apart on its own.\n      ${describeEntry(entry)}`,
+        ).toBe(false);
+      }
+    }
   });
 
   it('resolves every ledgered specifier that is not recorded as sealed, under BOTH conditions', () => {

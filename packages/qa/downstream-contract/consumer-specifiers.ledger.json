@@ -36,15 +36,15 @@
       "specifier": "@objectstack/cli/hook-body",
       "consumer": "objectstack-ai/hotcrm — test/helpers/action-sandbox.ts, the hook-body fidelity harness that lowers a body with the platform's own extractor so a test runs what `os build` ships",
       "since": "2026-09-04",
-      "ratifiedBy": "#15325",
-      "note": "The same 17.3.0 seal, second consumer: `@objectstack/cli/dist/utils/extract-hook-body.js` went dead at type level (TS2307) and at run time (ERR_PACKAGE_PATH_NOT_EXPORTED) while the file still shipped in the tarball. Only the door was gone. Ratification is in flight as PR #15611."
+      "ratifiedBy": "#15325, ratified by PR #15611",
+      "note": "The same 17.3.0 seal, second consumer: `@objectstack/cli/dist/utils/extract-hook-body.js` went dead at type level (TS2307) and at run time (ERR_PACKAGE_PATH_NOT_EXPORTED) while the file still shipped in the tarball. Only the door was gone. PR #15611 opened `./hook-body` and landed while this ledger was being written — the entry stays, because what is ledgered is the CONSUMER'S NEED, which does not end when the door opens. That is the whole point: an open door with nothing recording who walks through it is what got sealed twice."
     },
     {
       "specifier": "@objectstack/cli/package.json",
       "consumer": "objectstack-ai/hotcrm — the same action-sandbox harness, reading the dependency's own manifest to assert the pinned CLI version the lowering came from",
       "since": "2026-09-04",
-      "ratifiedBy": "#15325",
-      "note": "Sealed by the same map, measured in #15325 as `require.resolve('@objectstack/cli/package.json') -> ERR_PACKAGE_PATH_NOT_EXPORTED`. ⚠️ hotcrm is the only CITED consumer: #15589's dispatch attributes this specifier to cloud as well, and no reading of #13123 / #13662 / #15325 records that, so it is not claimed here. Ratification is in flight as PR #15611."
+      "ratifiedBy": "#15325, ratified by PR #15611",
+      "note": "Sealed by the same map, measured in #15325 as `require.resolve('@objectstack/cli/package.json') -> ERR_PACKAGE_PATH_NOT_EXPORTED`, and re-opened by PR #15611 as `\"./package.json\": \"./package.json\"`. ⚠️ hotcrm is the only CITED consumer: #15589's dispatch attributes this specifier to cloud as well, and no reading of #13123 / #13662 / #15325 records that, so it is NOT claimed here — an uncited row would make this ledger exactly as trustworthy as the memory it replaces."
     }
   ]
 }
