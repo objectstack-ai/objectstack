@@ -4,7 +4,20 @@
 
 feat(core)!: retire `PluginSecurityScanner` — plugin security scanning is not a platform capability (#14919)
 
-<!-- adr-0087: registered plugin-security-scanner-retired The removed class has no spec schema and never had one, so there is no authorable key to tombstone and no stored `sys_metadata` row a D2 conversion could rewrite -- a scanner was constructed per call and every result lived in a per-instance Map discarded with the object, so `applyConversionsToStoredItem` has no seam that would ever see one. Hence a D3 SEMANTIC entry (`packages/spec/src/migrations/entries/semantic/18.plugin-security-scanner-retired.ts`, concatenated into `MIGRATIONS_BY_MAJOR[18].semantic` by `gen:migration-registry`) and NOT a metadata migration, which is what the ruling excludes. The entry is required rather than optional because this changeset carries a real consumer prescription: the enforced channel is tsc at the import site, and for any consumer it does not reach, the ledger and the generated upgrade guide are the only channel there is. Same disposition as `contracts.IDataDriver.findStream` and `actor-user-roles-to-positions`. -->
+<!-- adr-0087: registered plugin-security-scanner-retired -->
+
+**ADR-0087 disposition: registered**, as `plugin-security-scanner-retired` in
+`MIGRATIONS_BY_MAJOR[18].semantic` — a **D3 semantic** entry, not a D2 conversion,
+and so not the metadata migration the ruling excludes. The class has no spec schema
+and never had one, so there is no authorable key to tombstone with `retiredKey()`
+and no stored `sys_metadata` row a conversion could rewrite: a scanner was
+constructed per call and every result lived in a per-instance Map discarded with the
+object, so `applyConversionsToStoredItem` has no seam that would ever see one. An
+entry is nevertheless owed rather than optional, because this changeset carries a
+real consumer prescription — the enforced channel is tsc at the import site, and for
+any consumer it does not reach, the ledger and the generated upgrade guide are the
+only channel there is. Same disposition as `contracts.IDataDriver.findStream` and
+`actor-user-roles-to-positions`.
 
 **BREAKING** — `PluginSecurityScanner` is removed from `@objectstack/core`,
 together with its two companion types `ScanTarget` and `SecurityIssue`. Landing
