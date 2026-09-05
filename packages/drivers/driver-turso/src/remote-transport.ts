@@ -1046,6 +1046,20 @@ export type FilterColumnSqlResolver = (
 ) => string;
 
 /**
+ * [#14079] Is this column's STORED value never text — a declared numeric or
+ * boolean scalar? The declared-type half of the text-operator contract,
+ * injected by TursoDriver exactly the way {@link FilterColumnSqlResolver} is:
+ * this transport keeps no schema (`syncSchema` reads one and retains nothing),
+ * while the driver classifies every field at remote schema-sync time
+ * (`registerRemoteFieldMetadata` → `SqlDriver.registerExternalObject`) and
+ * answers from the same registries its local compiler reads
+ * (`SqlDriver.isNonTextColumn`). Absent (the default), every column reads as
+ * text and the text arms compile exactly as they did — a transport nobody
+ * handed the rule to cannot guess it from a value it will only see at run time.
+ */
+export type NonTextColumnResolver = (object: string, field: string) => boolean;
+
+/**
  * Remote transport that executes all queries via @libsql/client.
  *
  * Handles SQL generation, filter compilation, and result mapping for
@@ -1078,6 +1092,13 @@ export class RemoteTransport {
    * and every backfilled one resolves to anyway.
    */
   private filterColumnSql: FilterColumnSqlResolver | null = null;
+
+  /**
+   * [#14079] The driver's declared-type rule for a text operator's column —
+   * see {@link setNonTextColumnResolver}. Absent means "every column is text",
+   * which is what this transport could say before it was handed the rule.
+   */
+  private nonTextColumn: NonTextColumnResolver | null = null;
 
   /**
    * [#7929] Where the withheld half of a redacted refusal is written.
@@ -1207,6 +1228,20 @@ export class RemoteTransport {
    */
   setFilterColumnSql(resolver: FilterColumnSqlResolver): void {
     this.filterColumnSql = resolver;
+  }
+
+  /**
+   * [#14079] Hand this transport the driver's answer to "is this column's
+   * stored value never text?", so a text operator aimed at a declared numeric
+   * or boolean column compiles to the contract's constant
+   * ({@link RemoteTransport.pushTextOverNonTextColumn}) instead of a `GLOB`
+   * that coerces the number in the storage class's own spelling (`5` GLOBs
+   * as `'5.0'` on a REAL column). Same shape as {@link setFilterColumnSql} and
+   * for the same reason: the rule lives on the driver, which has the schema;
+   * this transport asks rather than re-deriving it from a value's shape.
+   */
+  setNonTextColumnResolver(resolver: NonTextColumnResolver): void {
+    this.nonTextColumn = resolver;
   }
 
   /**
@@ -2774,49 +2809,53 @@ export class RemoteTransport {
             // same valid-SQL-matching-nothing as the scalar operators did —
             // and refusing it in one family while tolerating it in the other
             // would leave the failure mode alive at a different spelling.
-            case '$contains':
-              this.pushLike(clauses, args, column, this.serializeComparand(object, key, op, opValue), 'contains');
+            //
+            // [#14079] Each arm asks {@link pushTextOverNonTextColumn} AFTER its
+            // own comparand gate and BEFORE its emitter: a comparand the
+            // contract refuses is still refused, and a column whose stored
+            // value is never text gets the contract's constant instead of a
+            // `GLOB` over the number's storage-class spelling.
+            case '$contains': {
+              const bind = this.serializeComparand(object, key, op, opValue);
+              if (this.pushTextOverNonTextColumn(clauses, object, key, op)) break;
+              this.pushLike(clauses, args, column, bind, 'contains');
               break;
+            }
             // [#5702] `$icontains` — the case-insensitive twin, and what
             // `RETIRED_FILTER_OPERATORS` prescribes in place of `$regex`. Same
             // `pushLike`, so the escape rule cannot fork between the two; the
             // fold is applied to BOTH operands (see {@link pushLike}).
-            case '$icontains':
+            case '$icontains': {
               if (typeof opValue !== 'string' || opValue === '') {
                 throw this.icontainsComparand(object, key, opValue);
               }
-              this.pushLike(
-                clauses,
-                args,
-                column,
-                this.serializeComparand(object, key, op, opValue),
-                'contains',
-                false,
-                false,
-                true,
-              );
+              const bind = this.serializeComparand(object, key, op, opValue);
+              if (this.pushTextOverNonTextColumn(clauses, object, key, op)) break;
+              this.pushLike(clauses, args, column, bind, 'contains', false, false, true);
               break;
-            case '$notContains':
+            }
+            case '$notContains': {
               // [#5298] NULL-safe: `NOT LIKE` is UNKNOWN for a NULL column, and
               // "does not contain" is true of a value that is not there. The
               // guard is applied INSIDE `pushLike` so the LIKE family keeps its
               // single emission point.
-              this.pushLike(
-                clauses,
-                args,
-                column,
-                this.serializeComparand(object, key, op, opValue),
-                'contains',
-                true,
-                true,
-              );
+              const bind = this.serializeComparand(object, key, op, opValue);
+              if (this.pushTextOverNonTextColumn(clauses, object, key, op)) break;
+              this.pushLike(clauses, args, column, bind, 'contains', true, true);
               break;
-            case '$startsWith':
-              this.pushLike(clauses, args, column, this.serializeComparand(object, key, op, opValue), 'starts');
+            }
+            case '$startsWith': {
+              const bind = this.serializeComparand(object, key, op, opValue);
+              if (this.pushTextOverNonTextColumn(clauses, object, key, op)) break;
+              this.pushLike(clauses, args, column, bind, 'starts');
               break;
-            case '$endsWith':
-              this.pushLike(clauses, args, column, this.serializeComparand(object, key, op, opValue), 'ends');
+            }
+            case '$endsWith': {
+              const bind = this.serializeComparand(object, key, op, opValue);
+              if (this.pushTextOverNonTextColumn(clauses, object, key, op)) break;
+              this.pushLike(clauses, args, column, bind, 'ends');
               break;
+            }
             // [#7536] `$like` / `$ilike` — the caller's OWN pattern, matched
             // against the whole value. Deliberately NOT `pushLike`: that method
             // escapes the comparand and wraps it in a shape's wildcards, which
@@ -2832,6 +2871,7 @@ export class RemoteTransport {
               if (hasDanglingLikeEscape(opValue)) {
                 throw this.danglingLikeEscape(object, key, op, opValue);
               }
+              if (this.pushTextOverNonTextColumn(clauses, object, key, op)) break;
               this.pushLikePattern(clauses, args, column, opValue, op === '$ilike');
               break;
             }
@@ -2947,6 +2987,35 @@ export class RemoteTransport {
       whereClauses: clauses.join(' AND '),
       args,
     };
+  }
+
+  /**
+   * [#14079] If `field` on `object` is a column whose stored value is never
+   * text (per the driver's injected {@link NonTextColumnResolver}), append the
+   * contract's constant — `1 = 0` for a positive text operator, `1 = 1` for
+   * `$notContains` — and answer `true` so the caller skips its emitter. `false`
+   * means "text column, or no rule injected": compile as before.
+   *
+   * The constants are the maintainer's 2026-09-05 ruling on #14079 compiled: a
+   * stored value that is not a string never satisfies a positive text operator
+   * and always satisfies `$notContains`, on every face. Measured before it,
+   * this transport's `GLOB` coerced a REAL `5` to `'5.0'` and searched THAT —
+   * an answer in the storage class's spelling to a query nobody wrote — while
+   * the local transport's Postgres cell refused the same filter with a 500.
+   * `SqlDriver.applyTextOperatorOverNonTextColumn` is the local twin, and the
+   * `turso-local-remote-text-parity` suite holds the two to one row set; its
+   * docblock carries why the constants compose with the NULL rules (#5298)
+   * and the `$not` rewrite instead of fighting them — the same argument holds
+   * here, since {@link nullSafeNegationOperand} is the same rewrite.
+   *
+   * No binding is appended, so `args` stays aligned with the `?`s that ARE
+   * emitted; the `clausesBefore` invariant (#1066) is satisfied because a
+   * constant is a clause.
+   */
+  private pushTextOverNonTextColumn(clauses: string[], object: string, field: string, op: string): boolean {
+    if (!this.nonTextColumn || !this.nonTextColumn(object, field)) return false;
+    clauses.push(op === '$notContains' ? '1 = 1' : SQL_FALSE);
+    return true;
   }
 
   /**
