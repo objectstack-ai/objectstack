@@ -7550,7 +7550,7 @@ export class ObjectStackProtocolImplementation implements
         //    hydration walks past.
         //
         // ⇒ What is left to move is the runtime callers that hand this method a
-        // RAW active organization. FOUR, across two files — the population is
+        // RAW active organization. THREE, all in one file — the population is
         // stated with the method that establishes it, because the first
         // enumeration of it named only the first file and was wrong: grep every
         // `getMetaItem(` / `getMetaItemCached(` invocation in the repo, then
@@ -7560,12 +7560,14 @@ export class ObjectStackProtocolImplementation implements
         //    be right about scope, by construction.
         //  • `runtime/src/domains/meta.ts:768` — `singularType` off the URL, so
         //    it moves only for the non-overridable half of what it serves.
-        //  • `runtime/src/domains/packages.ts:1239` (`applyPublishedSeeds`,
-        //    organization from `deps.resolveActiveOrganizationId`) — `type:
-        //    'seed'`, also non-overridable, so its org-first attempt now reads
-        //    the env-wide partition directly. It hand-rolls the same fallback
-        //    as a second attempt, so what it used to reach on the second try it
-        //    now gets on the first.
+        // A FOURTH used to sit here: `applyPublishedSeeds` in
+        // `runtime/src/domains/packages.ts`, `type: 'seed'`, equally
+        // non-overridable. It hand-rolled an org-then-env ladder that this gate
+        // had turned into a byte-identical repeat — both rungs asking the
+        // engine the same predicates and serving the same answer. #15068
+        // measured that (ablation: neutering the second rung reddened nothing
+        // on a pinned publish-then-read path) and collapsed it to a single read
+        // naming no organization at all, so it now belongs to the bucket below.
         // Every other invocation either names no organization at all or is a
         // REST door that already computed `organizationIdForMetaRead` — the
         // idempotence legs above are what make those two cases no-ops.
