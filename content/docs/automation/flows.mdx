@@ -734,6 +734,57 @@ producer), and `'service'` when the decision to continue belongs to your service
 rather than to whoever holds the run id. Declaring neither leaves your pauses
 refused on the generic route, and the engine warns about it at registration.
 
+### A screen the caller already answered does not pause
+
+A `screen` node exists to collect input. When the run's **caller already supplied
+it**, there is nothing left to collect, so the run continues past the screen
+instead of suspending.
+
+That is what makes a screen flow reachable from a headless invoker. An
+`ai.exposed` action whose target is a screen flow is started with `params`; those
+bind to the flow's `isInput` variables, and before this the screen suspended
+anyway — returning a form to a caller with no way to submit one, so the run
+parked forever.
+
+The screen is treated as answered only when **all** of these hold:
+
+- the caller named **at least one of this screen's own fields** — a run that
+  named none of them is not driving the screen, and it renders as always;
+- every `required` field has a value (an empty or blank string is no value),
+  supplied by that caller. A value that came from the trigger record, from an
+  earlier node or from a declared `defaultValue` does not answer a `required`
+  field; optional fields may come from anywhere;
+- the field has no `visibleWhen` the caller left unanswered. The server cannot
+  evaluate that predicate — it has no rendered form and no collected values — so
+  a conditional `required` field the caller did not name keeps the screen
+  interactive. (The resume door makes the opposite call for the opposite reason:
+  there, enforcing a hidden field's `required` would dead-end a run at Submit.)
+
+Two screens never take this path, because they declare nothing to satisfy and a
+bag must not answer them vacuously: a **message-only** screen (no `fields`), and
+any screen whose author wrote `waitForInput: true` — that flag is an explicit
+"show this", and a confirmation step is not something a params bag may skip.
+
+**Interactive runs are unaffected.** A console run supplies none of the screen's
+fields, so it renders the form exactly as before — including when the subject
+record happens to carry a column named like one of them, which is not the caller
+speaking. ⛔ `waitForInput: false` remains the wrong tool for the headless case:
+it skips the form for interactive users too.
+
+⚠️ This does **not** make every screen flow completable from a headless caller. A
+call that omits the inputs still parks, and the MCP tool set has no verb to
+resume a parked run.
+
+### `list_actions` publishes a flow action's inputs
+
+An action's `params` in the MCP action listing come from its declared
+`params[]`. A `type: 'flow'` action rarely declares any — its input contract is
+the **target flow's `isInput` variables**, which is what the caller's `params`
+bag binds into. Those are published instead, in declaration order, carrying the
+`label`, `type`, `required` and select `options` of the screen field that
+collects each one. An action that declares its own `params[]` keeps them: the
+flow is read only when the action itself declares nothing.
+
 ### Parallel approvals — one aggregating node, not two pauses
 
 "Finance **and** legal must both sign off, concurrently" is **one `approval`
