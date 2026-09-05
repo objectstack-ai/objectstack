@@ -1692,6 +1692,63 @@ function collectDuplicateActionKeyErrors(config: ObjectStackDefinition): string[
 }
 
 /**
+ * [ADR-0112] The cross-reference refusal `defineStack` raises when a stack's
+ * items name objects the stack does not define — carried as an envelope
+ * (`code` + `status`), never a bare `Error`.
+ *
+ * Before it carried one, all five REFUSED item classes of the ADR-0130 matrix
+ * (action `objectName`, view `data.object`, permission-set `objects`, seed
+ * dataset `object`, import mapping `targetObject`) plus the `hooks[].object`
+ * rule threw `new Error(message)` with `code` and `status` both `undefined`,
+ * so they were distinguishable only by MESSAGE TEXT — the fragile shape the
+ * ADR-0112 envelope exists to remove, and one that five message-substring pins
+ * had already come to depend on.
+ *
+ * ⭐ Why the code names the rule FAMILY and not one item class: there is
+ * exactly ONE raise site. {@link validateCrossReferences} returns every
+ * finding as a `string[]` and `defineStack` throws the whole set at once, so a
+ * single refusal can carry findings from several classes together — a
+ * per-class code would have to pick one of several true answers. The classes
+ * stay machine-readable in {@link StackCrossReferenceError.issues}, one entry
+ * per finding, which is the structured form of what was previously only
+ * newline-joined prose. The family is also WIDER than "undefined object": the
+ * same aggregate carries the duplicate-action-key, global-`update`-action and
+ * mapping `javascript`-transform findings, so a
+ * `…_UNDEFINED_OBJECT` spelling would be false for those.
+ *
+ * `status: 422` matches both precedents for this defect class
+ * (`ObjectOwnershipConflictError`, `NamespaceConflictError` in
+ * `packages/objectql/src/registry.ts`) — an unprocessable authored entity, not
+ * a server fault.
+ *
+ * ⛔ Deliberately NOT exported. `packages/spec/src/index.ts` re-exports this
+ * module with `export *`, so exporting this class would widen the PUBLISHED
+ * api-surface of the contract package; the ADR-0112 contract is the `code` /
+ * `status` fields, which every reader — `resolveThrownHttpError` and this
+ * repo's rejection pins alike — reads structurally rather than by `instanceof`.
+ * Export it the day a consumer needs the narrowed type, as its own change.
+ *
+ * ⛔ Not registered in the ADR-0112 ledger, for the same reason its two
+ * precedents are not: no wire door raises it. `defineStack` runs at authoring
+ * and boot time (`os validate`, `os build`, the `os serve` / `os migrate` host
+ * configs and `DevPlugin`); no HTTP domain handler calls it. The classification
+ * row lives in `packages/runtime/src/dispatcher-error-vocabulary.ts` as
+ * `door: 'none'` / `verdict: 'boot-refusal'`.
+ */
+class StackCrossReferenceError extends Error {
+  readonly code = 'STACK_CROSS_REFERENCE_INVALID';
+  readonly status = 422;
+  /** One entry per finding, in the order `validateCrossReferences` collected them. */
+  readonly issues: readonly string[];
+
+  constructor(message: string, issues: readonly string[]) {
+    super(message);
+    this.name = 'StackCrossReferenceError';
+    this.issues = issues;
+  }
+}
+
+/**
  * Perform strict cross-reference validation on a parsed stack definition.
  * Returns an array of error messages (empty if valid).
  */
@@ -2459,7 +2516,10 @@ export function defineStack(
   if (crossRefErrors.length > 0) {
     const header = `defineStack cross-reference validation failed (${crossRefErrors.length} issue${crossRefErrors.length === 1 ? '' : 's'}):`;
     const lines = crossRefErrors.map((e) => `  ✗ ${e}`);
-    throw new Error(`${header}\n\n${lines.join('\n')}`);
+    // [ADR-0112 · #14552] The message is byte-for-byte what the bare `Error`
+    // carried — this adds the envelope's fields, it does not reword a
+    // sentence. See {@link StackCrossReferenceError}.
+    throw new StackCrossReferenceError(`${header}\n\n${lines.join('\n')}`, crossRefErrors);
   }
 
   const nsErrors = validateNamespacePrefix(data);
