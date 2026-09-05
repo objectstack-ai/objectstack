@@ -395,6 +395,7 @@
     "MysqlConfig (type)",
     "MysqlConfigParsed (type)",
     "MysqlConfigSchema (const)",
+    "NON_TEXT_STORED_VALUE_TYPES (const)",
     "NOW_DEFAULT_LEGAL_TYPES (const)",
     "NUMERIC_VALUE_TYPES (const)",
     "NoSQLDataTypeMapping (type)",
