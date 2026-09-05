@@ -904,6 +904,35 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             'with this code itself, the verdict becomes pending-registration and it belongs in the ledger ' +
             'batch.'
     },
+    {
+        code: 'STACK_CROSS_REFERENCE_INVALID',
+        file: 'packages/spec/src/stack.zod.ts',
+        shape: 'classfield',
+        door: 'none',
+        verdict: 'boot-refusal',
+        why:
+            'ADR-0130 — the AUTHORING gate\'s cross-reference refusal, raised by `defineStack` when a ' +
+            'stack\'s items name objects the stack does not define. One raise site for the whole rule ' +
+            'family: `validateCrossReferences` returns every finding as a `string[]` and `defineStack` ' +
+            'throws the collected set once, so the code names the family and the individual classes ride ' +
+            'the error\'s `issues` field (the five REFUSED ADR-0130 matrix classes — action `objectName`, ' +
+            'view `data.object`, permission-set `objects`, seed dataset `object`, import mapping ' +
+            '`targetObject` — plus the `hooks[].object` rule, and the wider duplicate-action-key, ' +
+            'global-`update`-action and mapping `javascript`-transform findings the same aggregate ' +
+            'carries). Before this envelope it threw a bare `Error`, so those classes were separable only ' +
+            'by message text. ⭐ MEASURED, not inferred from the call graph: `defineStack` is an ' +
+            'authoring/boot-time entry point, and no HTTP domain handler calls it. Every non-test ' +
+            'occurrence of `defineStack` under `packages/runtime/src` and `packages/rest/src` (25 of them) ' +
+            'is a docstring or comment; the shipped callers are the CLI (`os validate`, `os build`) and ' +
+            'the `os serve` / `os migrate` host configs and `DevPlugin`, which load a stack module at ' +
+            'boot, where a throw aborts before any HTTP boundary exists. The two HTTP install sites — ' +
+            '`POST /packages` in `packages/runtime/src/domains/packages.ts` and `protocol.installPackage` ' +
+            '— call `SchemaRegistry.installPackage`, which never calls `defineStack`. So the code reaches ' +
+            'a reader only inside a message string, never as `error.code`. Its `status: 422` is the ' +
+            'ADR-0112 envelope shape this repo\'s rejection tests assert on, not evidence of a door. If a ' +
+            'door ever answers with this code itself, the verdict becomes pending-registration and it ' +
+            'belongs in the ledger batch.'
+    },
     // ── [#13233] field-level catalogs, reached by the OBJECT-LITERAL helper ──
     //
     // The 29 rows below are the whole verdict cost of widening `codehelper` to
