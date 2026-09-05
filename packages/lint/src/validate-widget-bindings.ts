@@ -9,6 +9,7 @@ import {
   indexObjectGraph,
   isUnjudgeable,
   joinablePrefixes,
+  recordsOf,
   resolveFieldPath,
   suggestName,
   type ObjectGraph,
@@ -432,15 +433,6 @@ export interface WidgetBindingFinding {
 
 type AnyRec = Record<string, unknown>;
 
-/** Coerce a collection (array or name-keyed map) to an array. */
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v as AnyRec[];
-  if (v && typeof v === 'object') {
-    return Object.entries(v as AnyRec).map(([name, def]) => ({ name, ...(def as AnyRec) }));
-  }
-  return [];
-}
-
 function asStrings(v: unknown): string[] {
   return Array.isArray(v) ? v.filter((s): s is string => typeof s === 'string') : [];
 }
@@ -559,7 +551,7 @@ function dashboardFilterDefs(dash: AnyRec): DashFilterDef[] {
     byName.set(DATE_RANGE_FILTER_NAME, { name: DATE_RANGE_FILTER_NAME, field });
   }
 
-  for (const f of asArray(dash.globalFilters)) {
+  for (const f of recordsOf(dash.globalFilters)) {
     if (typeof f.field !== 'string' || !f.field) continue;
     const name = typeof f.name === 'string' && f.name ? f.name : f.field;
     const targetWidgets = Array.isArray(f.targetWidgets)
@@ -607,7 +599,7 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
   const findings: WidgetBindingFinding[] = [];
 
   const datasets = new Map<string, AnyRec>();
-  for (const ds of asArray(stack.datasets)) {
+  for (const ds of recordsOf(stack.datasets)) {
     if (typeof ds.name === 'string') datasets.set(ds.name, ds);
   }
 
@@ -617,10 +609,10 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
   // does not depend on any widget), so it is checked once over every dataset
   // whose object's field types are known. Advisory — the page still renders.
   const objectFieldTypes = new Map<string, Map<string, string>>();
-  for (const o of asArray(stack.objects)) {
+  for (const o of recordsOf(stack.objects)) {
     if (typeof o.name !== 'string') continue;
     const fm = new Map<string, string>();
-    for (const f of asArray(o.fields)) {
+    for (const f of recordsOf(o.fields)) {
       if (typeof f.name === 'string' && typeof f.type === 'string') fm.set(f.name, f.type);
     }
     objectFieldTypes.set(o.name, fm);
@@ -634,12 +626,12 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
   // `validate-dataset-references.ts` does one level down — the same seam, so
   // the two positions cannot drift into two accounts of one object graph.
   const graph: ObjectGraph = indexObjectGraph(stack);
-  const datasetList = asArray(stack.datasets);
+  const datasetList = recordsOf(stack.datasets);
   for (let i = 0; i < datasetList.length; i++) {
     const ds = datasetList[i];
     const fieldTypes = typeof ds.object === 'string' ? objectFieldTypes.get(ds.object) : undefined;
     if (!fieldTypes) continue; // cannot judge without the object's field types
-    const dsMeasures = asArray(ds.measures);
+    const dsMeasures = recordsOf(ds.measures);
     for (let k = 0; k < dsMeasures.length; k++) {
       const m = dsMeasures[k];
       const field = typeof m.field === 'string' ? m.field : undefined;
@@ -664,7 +656,7 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
     }
   }
 
-  const dashboards = asArray(stack.dashboards);
+  const dashboards = recordsOf(stack.dashboards);
   for (let i = 0; i < dashboards.length; i++) {
     const dash = dashboards[i];
     const dashName = typeof dash.name === 'string' ? dash.name : `(dashboard ${i})`;
@@ -987,11 +979,11 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
       }
 
       const dimensionNames = new Set<string>();
-      for (const d of asArray(dataset.dimensions)) {
+      for (const d of recordsOf(dataset.dimensions)) {
         if (typeof d.name === 'string') dimensionNames.add(d.name);
       }
       const measures = new Map<string, AnyRec>();
-      for (const m of asArray(dataset.measures)) {
+      for (const m of recordsOf(dataset.measures)) {
         if (typeof m.name === 'string') measures.set(m.name, m);
       }
 
