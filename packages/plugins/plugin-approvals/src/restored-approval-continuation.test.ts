@@ -48,6 +48,7 @@ import { APPROVAL_REVISE_NODE_TYPE } from '@objectstack/spec/automation';
 import { strandedDecisionDetails } from '@objectstack/types';
 import { ApprovalService } from './approval-service.js';
 import { registerApprovalNode } from './approval-node.js';
+import { registerApprovalReviseNode } from './approval-revise-node.js';
 
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as any;
 const noopLogger = { info() {}, warn() {}, error() {}, debug() {} };
@@ -425,14 +426,21 @@ describe('#15389 — a restored approval suspension has an issuer again', () => 
       .toBe('INVALID_STATE: a newer approval request supersedes this one');
   });
 
-  it('PIN 7 — GUARD 1 + GUARD 3: a pause this outcome was not refused on, and a plain retry', async () => {
+  it('PIN 7 — GUARD 1 + GUARD 3: a pause this outcome was not issued at, and a plain retry', async () => {
     // POPULATION (a) — GUARD 3, the send-back rebuild. A `returned` request
     // (NOT `recalled`: a `recalled` row is refused by `resolveRecordedContinuation`
     // before any guard runs, so it can never reach guard 3 on the rebuild path)
     // whose run is parked at the revise window. Its recorded outcome is the
-    // send-back, which was issued at the approval node and LANDED — the pause
-    // now at the revise window is a fresh one, not the one that outcome was
-    // refused on. Before this guard the verb issued `revise` there.
+    // send-back, which was issued at the approval node and LANDED.
+    //
+    // ⚠️ NOTHING here was re-armed and nothing was refused: the send-back
+    // succeeded, so the pause now at the revise window is an ordinary fresh
+    // one that this verb was simply pointed at. The refusal's wording says
+    // exactly that — the pause it was ASKED to continue is not the one the
+    // outcome was ISSUED AT — because an earlier wording ("this re-armed pause
+    // is not the one that outcome was refused on") presumed a re-arm and a
+    // refusal that this population does not contain.
+    // Before this guard the verb issued `revise` there.
     const automation = boot();
     await automation.execute('revise_flow', {
       object: 'crm_deal', record: { id: 'd7', amount: 3 }, userId: 'submitter',
@@ -686,6 +694,153 @@ describe('#15389 — a restored approval suspension has an issuer again', () => 
     // (d) Unknown request.
     const missing = await service.continueRestoredRun('areq_nope').then(() => null, (e: Error) => e);
     expect(missing?.message).toBe('REQUEST_NOT_FOUND: areq_nope');
+  });
+
+
+  it('PIN 9 — a journal the row\'s status can no longer have issued is REFUSED, not replayed', async () => {
+    // ⭐ THE CLASS: the journal records what the LAST FAILED resume was
+    // carrying. Nothing rewrites it when a later door moves the row on, and it
+    // was returned before `raw.status` was looked at — so a stale signal
+    // outlived the state that issued it and got replayed onto a re-armed pause.
+    //
+    // ⛔ Neither limb below needs an injected failure beyond the strand itself.
+    // The recall is a REAL recall answering ordinarily: `cancelRun` on an
+    // already-stranded run answers `false`, so the row is marked `recalled`,
+    // the run stays parked, and `recall` returns `resumed: false` with no
+    // `resumeError`. Every step is an ordinary operator or submitter action.
+
+    // ── POPULATION (a) — P6b-ii. A stranded RESUBMIT, then a recall.
+    // ⚠️ SCOPE, measured rather than assumed. This limb is NEWLY ADMITTED by
+    // the signal-aware guard 3 of this revision: driven against the PREVIOUS
+    // revision of this file (blob 8514677bd) and against a mutation that
+    // removes only the signal-awareness, it is refused by guard 3 instead —
+    // "parked at node 'wait_revision' … issued from its own approval node
+    // 'review'". ⛔ That makes the signal-awareness the thing that EXPOSED it,
+    // not the thing that causes it: the stale journal was always being returned
+    // before the row's status was read, and widening guard 3 merely stopped
+    // being the accident that hid it. Which is why the check lives at the
+    // journal — and why removing the signal-awareness does NOT red this pin:
+    // the compatibility check refuses first, before guard 3 is reached. The
+    // reverse control that fires here is disabling the check itself; with it
+    // disabled this assertion reds, because the verb resumes instead.
+    const live = boot();
+    await live.execute('revise_flow', {
+      object: 'crm_deal', record: { id: 'd11', amount: 11 }, userId: 'submitter',
+    } as never);
+    const rq = (await data.find('sys_approval_request', { where: { record_id: 'd11', status: 'pending' } }))[0];
+    expect(rq?.flow_node_id, 'this leg owns its own run').toBe('review');
+    await service.sendBack(rq.id, { actorId: 'u1', comment: 'redo' } as any, SYSTEM_CTX);
+    data.failNextInsert = 'sys_approval_request';
+    const strandedResubmit = await service
+      .resubmit(rq.id, { actorId: 'submitter' } as any, SYSTEM_CTX)
+      .then(() => null, (e: Error) => e);
+    expect(strandedResubmit?.message, 'a REAL stranded resubmit').toMatch(/^RESUME_FAILED/);
+    expect(data.failNextInsert, 'the injected failure fired and was consumed').toBeUndefined();
+    expect(JSON.parse((await rowOf(rq.id)).node_config_json).__strandedContinuation?.decision,
+      'the door journalled `resubmit`').toBe('resubmit');
+
+    // The recall: no lever, no injected failure — the real door on a stranded run.
+    const recalled = await service.recall(rq.id, { actorId: 'submitter', reason: 'withdrawn' } as any, SYSTEM_CTX);
+    expect(recalled.resumed, 'cancelRun on an already-stranded run answers false').toBe(false);
+    expect((recalled as any).resumeError, 'and it is not an error path').toBeUndefined();
+    expect((await rowOf(rq.id)).status, 'the row is withdrawn').toBe('recalled');
+
+    const rearmed = await live.restoreConsumedSuspension(rq.flow_run_id, { requestedBy: 'ops' });
+    expect(rearmed.restored, 'the restore succeeds — it knows nothing about the recall').toBe(true);
+    expect((await live.listSuspendedRunsDurable()).find(r => r.runId === rq.flow_run_id)?.nodeId,
+      're-armed at the revise window, which is exactly where a resubmit is issued from').toBe('wait_revision');
+
+    const refusedStale = await service.continueRestoredRun(rq.id, { requestedBy: 'ops' })
+      .then(() => null, (e: Error) => e);
+    expect(refusedStale?.message,
+      '⭐ the stale `resubmit` is refused because a `recalled` row cannot have issued it').toMatch(
+      /is 'recalled' and its journalled continuation is the resubmit, which a 'recalled' request cannot have issued/,
+    );
+    expect(refusedStale?.message, 'and it names what the operator can do instead').toMatch(/cancelRun/);
+    expect(await data.find('sys_approval_request', { where: { flow_run_id: rq.flow_run_id } }),
+      '⭐ NO fresh pending round was opened on a withdrawn request').toHaveLength(1);
+    expect((await live.listSuspendedRunsDurable()).find(r => r.runId === rq.flow_run_id)?.nodeId,
+      'and the pause is intact, still cancellable').toBe('wait_revision');
+
+    // ── POPULATION (b) — P6c-ii, the revise sibling. A stranded SEND-BACK, then
+    // a recall. ⚠️ This limb PREDATES the widening: measured admitted at the
+    // previous revision of this file and under M8 as well, so it is not
+    // guard 3's doing and no change to guard 3 could have closed it.
+    const other = boot();
+    let reviseThrowArmed = true;
+    other.registerNodeExecutor({
+      type: APPROVAL_REVISE_NODE_TYPE,
+      async execute() {
+        if (reviseThrowArmed) { reviseThrowArmed = false; throw new Error('revise window unavailable'); }
+        return { success: true };
+      },
+    } as never);
+    await other.execute('revise_flow', {
+      object: 'crm_deal', record: { id: 'd12', amount: 12 }, userId: 'submitter',
+    } as never);
+    const rq2 = (await data.find('sys_approval_request', { where: { record_id: 'd12', status: 'pending' } }))[0];
+    const strandedSendBack = await service
+      .sendBack(rq2.id, { actorId: 'u1', comment: 'redo' } as any, SYSTEM_CTX)
+      .then(() => null, (e: Error) => e);
+    expect(strandedSendBack?.message, 'a REAL stranded send-back').toMatch(/^RESUME_FAILED/);
+    expect(reviseThrowArmed, 'the one-shot throw fired and was consumed').toBe(false);
+    // Put the real revise-window executor back: the throw was the strand, not
+    // the fixture — the replay under test must meet a working window.
+    registerApprovalReviseNode(other as any, noopLogger as any);
+    expect((await rowOf(rq2.id)).status, 'the send-back landed on the row').toBe('returned');
+    expect(JSON.parse((await rowOf(rq2.id)).node_config_json).__strandedContinuation?.decision,
+      'the door journalled `revise`').toBe('revise');
+
+    const recalled2 = await service.recall(rq2.id, { actorId: 'submitter', reason: 'withdrawn' } as any, SYSTEM_CTX);
+    expect(recalled2.resumed).toBe(false);
+    expect((await rowOf(rq2.id)).status).toBe('recalled');
+    await other.restoreConsumedSuspension(rq2.flow_run_id, { requestedBy: 'ops' });
+    expect((await other.listSuspendedRunsDurable()).find(r => r.runId === rq2.flow_run_id)?.nodeId,
+      're-armed at the approval node — which IS where a send-back is issued from, so guard 3 admits it')
+      .toBe('review');
+
+    const refusedStale2 = await service.continueRestoredRun(rq2.id, { requestedBy: 'ops' })
+      .then(() => null, (e: Error) => e);
+    expect(refusedStale2?.message,
+      '⭐ the stale `revise` is refused for the same reason, one signal over').toMatch(
+      /is 'recalled' and its journalled continuation is the revise, which a 'recalled' request cannot have issued/,
+    );
+    expect((await other.listSuspendedRunsDurable()).find(r => r.runId === rq2.flow_run_id)?.nodeId,
+      '⭐ the run was NOT walked into the revise window for a withdrawn request').toBe('review');
+
+    // ── POPULATION (c) — THE COMPATIBLE CONTROL, and it is what keeps (a)/(b)
+    // from being "a `recalled` row is refused". A recall taken on a PENDING
+    // request resumes down `reject`; strand that resume and the journal reads
+    // `recall` on a `recalled` row — the one continuation that status CAN have
+    // issued. It must still replay, or the new check has silently retired the
+    // journal-recoverable recall the previous round measured and shipped.
+    const third = boot();
+    rejectBranchThrows = DOWNSTREAM_FAILURE;
+    const req3 = await park(third);
+    // ⚠️ `recall` does not THROW its strand — it reports through `resumeError`
+    // and returns (the withdrawal is durable either way). Asserting a throw
+    // here measured nothing; the strand is the `resumeError` plus a consumed
+    // suspension, and both are asserted.
+    const strandedRecall = await service
+      .recall(req3.id, { actorId: 'submitter', reason: 'withdrawn' } as any, SYSTEM_CTX);
+    expect(strandedRecall.resumed, 'the resume down `reject` failed').toBe(false);
+    expect(strandedRecall.resumeError, 'a REAL stranded recall, reported not thrown')
+      .toContain(DOWNSTREAM_FAILURE);
+    expect(await third.hasSuspendedRun(req3.flow_run_id),
+      'the suspension was consumed by the failed resume').toBe(false);
+    expect((await rowOf(req3.id)).status).toBe('recalled');
+    expect(JSON.parse((await rowOf(req3.id)).node_config_json).__strandedContinuation?.decision,
+      'the door journalled `recall`').toBe('recall');
+    await third.restoreConsumedSuspension(req3.flow_run_id, { requestedBy: 'ops' });
+
+    rejectBranchThrows = undefined;
+    marks.length = 0;
+    const replayed = await service.continueRestoredRun(req3.id, { requestedBy: 'ops' });
+    expect(replayed.resumed, '⭐ a COMPATIBLE journal still replays — the check gates, it does not blanket-refuse')
+      .toBe(true);
+    expect(replayed.source).toBe('journal');
+    expect(replayed.decision).toBe('recall');
+    expect(marks, 'and the reject branch it was carrying actually ran').toEqual(['mark_rejected']);
   });
 
   it('PIN 5 — with no journal it rebuilds the signal, and refuses the one shape it cannot', async () => {

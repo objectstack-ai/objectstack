@@ -162,10 +162,10 @@ export interface ApprovalResumeSurface {
   hasSuspendedRun?(runId: string): Promise<boolean>;
   /**
    * [#15389] Where each suspended run is currently parked. Read by
-   * {@link ApprovalService.continueRestoredRun} to prove a re-armed pause is
-   * the pause THIS request's recorded outcome was refused on, and not merely
-   * some live pause on the same run — `hasSuspendedRun` answers a boolean and
-   * cannot tell the two apart. Which node that is depends on the signal, not
+   * {@link ApprovalService.continueRestoredRun} to prove the pause it was asked
+   * to continue is the one THIS request's recorded outcome was issued at, and
+   * not merely some live pause on the same run — `hasSuspendedRun` answers a
+   * boolean and cannot tell the two apart. Which node that is depends on the signal, not
    * only on the row: see {@link ApprovalService.expectedPauseNode}.
    *
    * ⚠️ Declares a method `AutomationEngine` ALREADY implements publicly
@@ -277,6 +277,53 @@ const STRANDABLE_REQUEST_STATUSES = ['approved', 'rejected', 'returned'] as cons
  * JSON reads named fields, so an extra underscore key is inert for all of them.
  */
 const STRANDED_CONTINUATION_KEY = '__strandedContinuation';
+
+/**
+ * Which continuations a request's CURRENT status can have issued (#15389) —
+ * the compatibility the journal is checked against before it is replayed.
+ *
+ * ## Why the journal alone is not enough
+ *
+ * {@link STRANDED_CONTINUATION_KEY} records what the LAST failed resume was
+ * carrying. It is written when that resume strands and it is never rewritten by
+ * anything that moves the row on afterwards — so a signal can outlive the state
+ * that issued it. Measured, with no injected failure beyond the strand itself:
+ * a `resubmit` strands and journals `resubmit`; the submitter then recalls, and
+ * a real `cancelRun` on an already-stranded run answers `false`, so the recall
+ * marks the row `recalled` and leaves the run parked; `restoreConsumedSuspension`
+ * re-arms the pause; and the verb replays the stale `resubmit`, opening a fresh
+ * `pending` round on a request somebody deliberately withdrew — statuses
+ * `["recalled","pending"]`. Every step is an ordinary operator or submitter
+ * action answering ordinarily.
+ *
+ * ⛔ Clearing the journal after a successful replay does NOT close this: the
+ * offending replay is the FIRST replay of that journal, so a clear that fires
+ * after a replay succeeds can never run before the advance it would prevent.
+ * Measured — with such a clear in place, both limbs still reach `resumed: true`.
+ * The check has to happen BEFORE the journal is returned, which is where it is.
+ *
+ * ## Reading the table
+ *
+ * Each row is "what a row in this status can have issued", not "how many
+ * writers the status has" — the two are different questions and only this one
+ * gates a replay. `returned` carries two issuers by construction (`sendBack`
+ * writes it and resumes down `revise`; a later `resubmit` on that same row
+ * resumes down `resubmit` and writes NO status, so the row still reads
+ * `returned`), so both signals are compatible with it and the journal says
+ * which one actually stranded. `recalled` admits `recall` alone: a recall
+ * stranded by a build that HAS the journal replays exactly, and that is the one
+ * population a `recalled` row is replayable for.
+ *
+ * ⛔ A status absent from this table (`pending`, `cancelled`, anything new)
+ * admits NOTHING, deliberately: a status whose replayable continuations nobody
+ * has enumerated is not a status this verb may guess at.
+ */
+const CONTINUATIONS_A_STATUS_CAN_ISSUE: Readonly<Record<string, readonly string[]>> = {
+  approved: ['approve'],
+  rejected: ['reject'],
+  returned: ['revise', 'resubmit'],
+  recalled: ['recall'],
+};
 
 /**
  * The second oracle's verdict: which unrecoverable shape this run is in, or
@@ -4410,13 +4457,34 @@ export class ApprovalService implements IApprovalService {
     requestId: string,
   ): Promise<{ signal: StrandedContinuationSignal; source: 'journal' | 'reconstructed' }> {
     const config = parseJson<Record<string, any>>(raw.node_config_json, {});
+    const status = String(raw.status ?? '');
     const stashed = config?.[STRANDED_CONTINUATION_KEY];
     if (stashed && typeof stashed === 'object' && typeof stashed.decision === 'string') {
+      // ⛔ The journal is a record of the last FAILED resume, not of the row's
+      // present state, and nothing clears it when a later door moves the row on.
+      // A stale signal is checked against what this status can have issued —
+      // see {@link CONTINUATIONS_A_STATUS_CAN_ISSUE} for the measured shape this
+      // closes and for why clearing the journal on replay does not close it.
+      const issuable = CONTINUATIONS_A_STATUS_CAN_ISSUE[status];
+      const journalled = String(stashed.decision);
+      if (!issuable?.includes(journalled)) {
+        throw new Error(
+          `INVALID_STATE: request ${requestId} is '${status || 'unknown'}' and its journalled continuation ` +
+          `is the ${journalled}, which a '${status || 'unknown'}' request cannot have issued — ` +
+          `${issuable
+            ? `a '${status}' row is replayable only for ${issuable.map(d => `'${d}'`).join(' or ')}`
+            : `no continuation is replayable for '${status || 'unknown'}'`}. The journal records what the ` +
+          `last FAILED resume was carrying, so a later recall (or any other door that moved this row on) ` +
+          `leaves a signal behind that the row's own status no longer stands behind, and replaying it ` +
+          `would advance a step nobody is waiting on. Refusing to replay it: cancel the run with the ` +
+          `engine's cancelRun('${raw.flow_run_id}') if the newer outcome should stand, or resume it by ` +
+          `hand with the signal the flow expects.`,
+        );
+      }
       return { signal: stashed as StrandedContinuationSignal, source: 'journal' };
     }
 
     const outputs: Record<string, unknown> = { ...(config?.__decisionOutputs ?? {}) };
-    const status = String(raw.status ?? '');
 
     if (status === 'approved' || status === 'rejected') {
       if (status === 'rejected') {
@@ -4552,9 +4620,22 @@ export class ApprovalService implements IApprovalService {
    * use (`getFlow`), and no engine change.
    *
    * ⚠️ It does not widen what guard 3 admits beyond that one signal: for every
-   * other decision the answer is byte-identical to the row's own node, so the
-   * recall-in-revise-window shape (row `recalled`, run at the revise window)
-   * stays refused — its journalled signal is `recall`, not `resubmit`.
+   * other decision the answer is byte-identical to the row's own node.
+   *
+   * ⛔ It is NOT what keeps the recall-in-revise-window shape (row `recalled`,
+   * run at the revise window) refused, and an earlier revision of this comment
+   * claimed it was — on the reasoning that such a row's journalled signal is
+   * `recall` rather than `resubmit`. That is false: a recall taken inside the
+   * revise window calls `cancelRun` and journals NOTHING, so the journal on
+   * such a row is whatever an EARLIER strand left there — a `resubmit`, most
+   * often, since the resubmit is what the window exists to receive. Measured:
+   * with the journal returned before the row's status was looked at, that
+   * stale `resubmit` reached this method, was answered with the revise window,
+   * matched the parked node, and opened a fresh `pending` round on a withdrawn
+   * request. What refuses it is the journal/status compatibility check in
+   * {@link ApprovalService.resolveRecordedContinuation} — see
+   * {@link CONTINUATIONS_A_STATUS_CAN_ISSUE} — which runs BEFORE this method
+   * and never hands it a signal the row's status cannot have issued.
    */
   private async expectedPauseNode(
     raw: any,
@@ -4766,8 +4847,9 @@ export class ApprovalService implements IApprovalService {
       throw new Error(
         `INVALID_STATE: run '${runId}' is parked at ` +
         `${parkedAt ? `node '${parkedAt}'` : 'no node this engine can see'}, but ${signal.what} on ` +
-        `request ${requestId} was issued from ${expected.describe} — this re-armed pause is not the one ` +
-        `that outcome was refused on, and continuing it would advance a step nobody decided`,
+        `request ${requestId} was issued from ${expected.describe} — so the pause this verb was asked to ` +
+        `continue is not the one that outcome was issued at, and continuing it would advance a step ` +
+        `nobody decided`,
       );
     }
 
