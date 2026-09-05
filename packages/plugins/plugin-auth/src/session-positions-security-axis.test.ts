@@ -256,6 +256,44 @@ describe('the payload agrees with the ONE authorization authority, set for set',
     const user = await payloadFor(manager, holderBearer);
     expect(user?.positions, JSON.stringify(user?.positions)).toContain('everyone');
   });
+
+  // [#15136 review — the standing guard's carve-out, measured rather than asserted
+  // in prose] With NO active organization the resolver projects EVERY membership
+  // (`resolve-authz-context.ts:815`), so membership-derived names are ADDED to a
+  // payload that previously carried none of them. That is a behaviour change in
+  // its own right and the changeset now names it; this pins the shape it names.
+  it('projects membership names even with no active organization on the session', async () => {
+    // `autoActiveOrganization: false` is the opt-out the manager documents; the
+    // default stamps an active org, which is a DIFFERENT branch (and the one the
+    // rest of this suite exercises).
+    const engine = createMemoryEngine();
+    const manager = new AuthManager({
+      secret: SECRET,
+      baseUrl: 'http://localhost:3000',
+      dataEngine: engine,
+      autoActiveOrganization: false,
+    } as any);
+
+    await signUp(manager, 'noorg@example.com', 'No Active Org');
+    const userId = userIdFor(engine, 'noorg@example.com');
+    await engine.insert('sys_organization', { id: ORG, name: 'Card Org', slug: 'card-org' });
+    await engine.insert('sys_member', { organization_id: ORG, user_id: userId, role: 'admin' });
+
+    const bearer = bearerFrom(await signIn(manager, 'noorg@example.com'));
+    const envelope = await sessionEnvelopeFor(manager, bearer);
+
+    // The population of this pin, stated: it is about the no-active-org branch.
+    const activeOrg = (envelope as any)?.session?.activeOrganizationId ?? null;
+    expect(activeOrg, `expected no active org, got ${activeOrg}`).toBeFalsy();
+
+    // The resolver projects EVERY membership when no tenant scopes it
+    // (`resolve-authz-context.ts:815`), so these names are ADDED to a payload
+    // that carried none of them before this card. That is the behaviour change
+    // the changeset's carve-out names.
+    const positions = (envelope as any)?.user?.positions ?? [];
+    expect(positions, JSON.stringify(positions)).toContain('org_admin');
+    expect(positions, JSON.stringify(positions)).toContain('everyone');
+  });
 });
 
 // ───────────────────────────────────────────────────────────────────────────

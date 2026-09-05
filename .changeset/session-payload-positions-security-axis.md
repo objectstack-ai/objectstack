@@ -59,21 +59,44 @@ consumer. Everything the old union contributed beyond the security axis was the
 `sys_user.role` scalar's own tokens — and that scalar is **already published,
 unchanged, as `user.role`** (the single exception ADR-0090 D3's "role" word ban
 carves out, for third-party schema this platform does not own). Minting a
-`roles` array would revive the exact banned identifier `check:role-word`
-ratchets against, to publish information the payload already carries. A
-consumer that wants the better-auth role reads `user.role`.
+`roles` array would revive that banned word to publish information the payload
+already carries. (Precisely: `check:role-word` ratchets the reserved word in
+`content/docs` and `skills/` PROSE, while the identifier ban over authored
+metadata lives in `packages/lint`; a TypeScript payload key trips neither
+mechanically until it is documented. The ADR-level prohibition is what rules
+here, not a gate that would have caught it.) A consumer that wants the
+better-auth role reads `user.role`.
 
 **What does NOT change:** `user.role` is still never overwritten (ADR-0068 D2);
 `platform_admin` still derives from the unscoped `admin_full_access` grant with
-its ADR-0091 validity window and ADR-0049 active flag intact — pinned shape for
-shape against both gates by `platform-admin-standing.consolidation.test.ts`
-PIN 6, which passes unchanged.
+its ADR-0091 validity window and ADR-0049 active flag intact —
+`platform-admin-standing.consolidation.test.ts` PIN 6 passes unchanged over
+those shapes.
+
+⚠️ **`isPlatformAdmin` is derived from the posture RUNG, never from the array.**
+`positions.includes('platform_admin')` is the form
+`resolve-authz-context.ts` forbids, because an ADR-0057 D4 `sys_user_position`
+row may spell that very name — and this card is what made that reachable, by
+moving `positions` onto an axis a tenant admin can write. Reading the name would
+have let a tenant mint platform standing and pass the `/admin/*` mount gate.
+`platform-admin-gate.ts` drops its positions leg for the same reason.
+`session-platform-admin-rung-agreement.test.ts` requires the payload alias, that
+gate and `hasPlatformAdminStanding` to agree, driven with such a row present and
+a genuine grant as the control.
 
 **Upgrade.** If you gate on the better-auth role scalar, read `user.role`
 instead of looking for its tokens in `user.positions`. Predicates written
 against real position names, built-in identity names, or `everyone` need no
 change — they start working. Deployments that stored business role names in
 `sys_user.role` rather than assigning positions should assign them through
-`sys_user_position` (the governed ADR-0090 D12 channel); a name in
-`sys_member.role` is still projected, so membership-derived names are
-unaffected.
+`sys_user_position` (the governed ADR-0090 D12 channel).
+
+A name in `sys_member.role` is still projected, **with one carve-out**: for a
+session carrying NO active organization, membership names are now *added*, from
+**every** membership the user holds — the resolver projects them all when no
+tenant scopes it, where the old derivation contributed none. Measured on the
+real pipeline (`autoActiveOrganization: false`, one `sys_member.role = 'admin'`):
+`[]` before, `[org_admin, everyone]` after, pinned by
+`session-positions-security-axis.test.ts`. With an active organization the
+projection is tenant-scoped exactly as `/auth/me/permissions` scopes it, so
+membership-derived names there are unchanged.
