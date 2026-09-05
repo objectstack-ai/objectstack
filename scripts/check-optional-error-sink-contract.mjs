@@ -228,6 +228,8 @@
  * numbers in this header are stated with the tree they were measured on.
  */
 
+// dispatch-gates: wide-population -- SCAN_ROOTS is packages, walked for every non-test .ts source under it -- 1898 of 4903 (39%), recorded REFUSE-WIDE in scripts/pm/bare-root-worklist.mjs. The population is not a part of that root, it IS every non-test source in it, so a true declaration would name this gate on every card touching a package. This gate's own failure text already prints the subtree spelling, which is how close the shape sits to declaring itself by accident.
+
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';

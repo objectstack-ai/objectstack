@@ -2346,6 +2346,91 @@ export function declaredWholeTreePopulation(scriptSource) {
 }
 
 /**
+ * A GATE SCRIPT's own declaration that CI runs it over a population TOO WIDE
+ * TO PLACE — a whole-line comment anywhere in the script's source:
+ *
+ *   // dispatch-gates: wide-population -- <reason>
+ *   #  dispatch-gates: wide-population -- <reason>      (shell gates)
+ *
+ * The THIRD derivation channel, and the one that is neither of the two above.
+ * `no-path-population` says "this gate reads NO file". `whole-tree-population`
+ * says "this gate reads EVERY file". This one says the thing that was true of
+ * eleven measured families and that neither of those could express: "this gate
+ * walks a real subtree — here is which — and NO subtree glob places it, so do
+ * not try to narrow me and do not read my silence as a clearance."
+ *
+ * ## The defect (#15341, ruled 2026-09-05)
+ *
+ * #15341 measured sixteen gates CI runs that declare no path literal at all and
+ * walk a subtree, so this derivation scored them `undetermined` for every card
+ * and no `--commands` harvest could contain them. The card's remedy — declare
+ * the subtree with the `ROOT_DIR_WATCH_HINTS` idiom — collided with a recorded
+ * triage it did not know about: `scripts/pm/bare-root-worklist.mjs` holds
+ * human-decided, per-row-measured verdicts for exactly this species, and eleven
+ * of the sixteen sit on its refused side. `REFUSE-WIDE` says the bare-root
+ * declaration would be TRUE and is refused anyway, because it names the gate
+ * for every card under a root the fleet already touches wholesale — 39%, 37%,
+ * 90% precision — and MATCHED is the one column whose entire value is
+ * precision. `REFUSE-UNSPELLABLE` says the population is a file-KIND filter
+ * inside the root that no glob spelling describes at all.
+ *
+ * Two lanes, wanting compatible things. The card wants a seat to be TOLD about
+ * a gate CI runs. The map refuses ONE WAY of telling them. What did not exist
+ * was a third thing for such a gate to BE. Maintainer ruling, 2026-09-05,
+ * decision batch #43, verbatim reply 「同意」 to the recommendation quoted here
+ * in the terms it was ruled in:
+ *
+ *   `dispatch-gates.mjs` gains a third derivation channel, `wide-population` —
+ *   a gate declares "CI runs me over a population too wide to place", which
+ *   lists it in the residue's declared column and keeps it OUT of the matched
+ *   column; the eleven `REFUSE-WIDE` / `REFUSE-UNSPELLABLE` families move onto
+ *   it; `bare-root-worklist.mjs`'s rows are not deleted.
+ *
+ * ## What the declaration DOES to the derivation
+ *
+ * A declaring family leaves `undetermined` for its own verdict, `wide-population`,
+ * and is rendered under its own heading with its reason — the DECLARED column
+ * the ruling names. Its command is ⛔ NOT in the runnable union `--commands`
+ * prints: that is the whole difference from the whole-tree channel beside it. A
+ * whole-tree gate is owed by every card, so its command belongs in every card's
+ * total; a wide-population gate is owed by CI and by no card in particular, and
+ * pasting it into every harvest is the same fabricated lead the map refused —
+ * arrived at one channel further along. The reason is what a seat reads.
+ *
+ * ⚠️ The one placement it does NOT suppress is the IDENTITY key: a card that
+ * edits the gate's own script still MATCHES it, and still gets its command.
+ * That is not a leak in "keeps it OUT of the matched column" — it is the
+ * boundary of what the declaration is ABOUT. The declaration is a claim about
+ * the gate's POPULATION (`coveringKey`'s docblock: the identity key is "an
+ * identity claim about a single FILE", not a population claim), the ruling's
+ * contrast is with declaring the ROOTS, and a card editing the gate is a 100%
+ * precise lead this channel has no business deleting — the gate you are editing
+ * is the one gate you certainly owe. Suppressing it would make a channel added
+ * to ADD information subtract some, silently, on the one card class where the
+ * derivation is exactly right. Pinned in both directions below.
+ *
+ * ⛔ Not an escape from declaring a real population, and refused rather than
+ * trusted: a gate that carries this marker AND names paths, or that carries
+ * either sibling marker, is REFUSED by `widePopulationRefusal` — a gate
+ * declares exactly ONE population shape, and picking between two would be the
+ * coin toss `wholeTreePopulationRefusal` refuses one channel over.
+ *
+ * The reason is REQUIRED, and it is required to do more work here than on
+ * either sibling: it must NAME the population in words — which root or roots
+ * the gate walks, and why no subtree glob places it — because that sentence is
+ * the entire content of this channel. A reader deciding whether to go run the
+ * gate has nothing else, and an opt-out with no reason reads exactly like a
+ * placeholder nobody will revisit.
+ */
+const WIDE_POPULATION_MARKER =
+  /^[ \t]*(?:\/\/|#)[ \t]*dispatch-gates:[ \t]*wide-population[ \t]*--[ \t]*(\S.*)$/m;
+
+export function declaredWidePopulation(scriptSource) {
+  const m = WIDE_POPULATION_MARKER.exec(String(scriptSource));
+  return m ? m[1].trim() : null;
+}
+
+/**
  * The recognised spellings of a REPO-ROOT WALK — the liveness half of the
  * declaration above, and PUBLISHED here rather than left inside the
  * implementation.
@@ -2460,6 +2545,17 @@ export function repoRootWalkSpelling(scriptSource) {
 export function wholeTreePopulationRefusal(entry) {
   const reason = entry?.wholeTreeReason ?? null;
   if (!reason) return null;
+  // The THIRD marker (#15341) reaches this refusal for the same reason the
+  // second does: a gate declares exactly ONE population shape, and these two
+  // carry opposite dispositions — a whole-tree family's command is inside every
+  // card's runnable total, a wide-population family's is inside none. Named
+  // from BOTH sides (`widePopulationRefusal` states the mirror), so whichever
+  // channel a reader arrives through, the pair is refused rather than resolved.
+  if (entry?.widePopulationReason) {
+    return 'declares BOTH whole-tree-population and wide-population — a gate declares exactly ONE population shape, and '
+      + 'these two place it in opposite columns: whole-tree is owed by every card, wide-population by none. Delete the '
+      + 'one that is not true; a derivation that picked either would be placing the family by a coin toss.';
+  }
   if (entry?.noPopulationReason) {
     return 'declares BOTH whole-tree-population and no-path-population — "my population is every file" and "my population '
       + 'is no file" cannot both be true of one gate. Delete the one that is not true; a derivation that picked either '
@@ -2470,6 +2566,54 @@ export function wholeTreePopulationRefusal(entry) {
       + `${REPO_ROOT_WALK_SPELLINGS.map((s) => s.label).join('; ')}. A declaration with no walk behind it puts a row on `
       + 'EVERY card on no evidence. If the walk is real and spelled some other way, EXTEND REPO_ROOT_WALK_SPELLINGS in '
       + 'scripts/pm/dispatch-gates.mjs with a self-test case beside it — never route around this refusal.';
+  }
+  return null;
+}
+
+/**
+ * Why this family's WIDE-population declaration must be refused, or null when
+ * it stands. Pure, and reading only what the discovery already put on the
+ * entry — the same contract `wholeTreePopulationRefusal` above states, and for
+ * the same reason: the live half of the self-test and any future caller cannot
+ * be allowed to disagree about what a bad declaration is.
+ *
+ * Three refusals, and every one of them is a gate claiming TWO population
+ * shapes at once. A gate declares exactly one:
+ *
+ *   BOTH markers   with `no-path-population`: "a population too wide to place"
+ *                  and "no population at all" are not both true of one gate.
+ *                  With `whole-tree-population`: a gate that reads EVERY file
+ *                  is placed by declaration and its command is owed by every
+ *                  card — the opposite disposition from this one — so the pair
+ *                  would place the family by whichever branch was read first.
+ *   NAMES PATHS    the declaration says no subtree glob places this gate, and
+ *                  the gate's own source spells one. One of the two is wrong
+ *                  and the derivation cannot tell which: the marker's whole
+ *                  content is the sentence a reader trusts, so a marker sitting
+ *                  above a live population is the rot direction that costs —
+ *                  the reader is told "nothing here can be narrowed" while the
+ *                  matched column narrows it.
+ */
+export function widePopulationRefusal(entry) {
+  const reason = entry?.widePopulationReason ?? null;
+  if (!reason) return null;
+  if (entry?.noPopulationReason) {
+    return 'declares BOTH wide-population and no-path-population — "my population is too wide to place" and "my population '
+      + 'is no file" cannot both be true of one gate. Delete the one that is not true; a derivation that picked either '
+      + 'would be placing the family by a coin toss.';
+  }
+  if (entry?.wholeTreeReason) {
+    return 'declares BOTH wide-population and whole-tree-population — a gate declares exactly ONE population shape, and '
+      + 'these two carry OPPOSITE dispositions: a whole-tree family is owed by every card and its command is inside every '
+      + "card's runnable total, a wide-population one is owed by CI and is in no card's. Delete the one that is not true.";
+  }
+  if ((entry?.hints ?? []).length > 0) {
+    return 'declares wide-population and its own source NAMES paths: '
+      + `${(entry.hints ?? []).slice(0, 4).join(', ')}${(entry.hints ?? []).length > 4 ? ', …' : ''}. `
+      + 'The declaration says no subtree glob places this gate and the gate spells one, so one of the two is wrong and '
+      + 'nothing here can tell which. If the literals are the real population, delete the marker and let the matched '
+      + 'column do its job; if they are artifacts rather than a population, the marker stands and the literals do not '
+      + 'belong in a scanned position.';
   }
   return null;
 }
@@ -2578,7 +2722,13 @@ export const ROOT_WALK_RESIDUE_REASONS = new Map(ROOT_WALK_RESIDUE_LEDGER);
  */
 export function unnamedRootWalk(entry, placement) {
   if (!entry?.rootWalk) return null;
-  if (entry.wholeTreeReason || entry.noPopulationReason) return null;
+  // All THREE declarations leave this population, and for one reason rather
+  // than three: this table holds the families nobody has looked at, and a
+  // family carrying any of the markers has been looked at. `wide-population`
+  // (#15341) is the answer for a walker whose population is real, is not the
+  // whole tree, and has no subtree spelling — the exact shape a row here would
+  // otherwise have to describe in prose nobody re-measures.
+  if (entry.wholeTreeReason || entry.noPopulationReason || entry.widePopulationReason) return null;
   if (placement === 'matched') return null;
   return entry.rootWalk;
 }
@@ -5662,7 +5812,29 @@ export function classifyEntry(entry, paths) {
  */
 export function placeFamily(entry, paths) {
   if (entry?.wholeTreeReason) return { verdict: 'always-runs', hits: [] };
-  return classifyEntry(entry, paths);
+  const placed = classifyEntry(entry, paths);
+  // The THIRD channel (#15341), and it is deliberately spelled the other way
+  // round from the one above: consulted AFTER the classifier, not before.
+  //
+  // Why the asymmetry is the design rather than an inconsistency. The
+  // whole-tree declaration is consulted first because such a gate would
+  // otherwise be `matched` on the card that edits its own script and `silent`
+  // on every other — one gate, two placements, which is the shape that channel
+  // exists to retire. This declaration has no such problem to solve: it is a
+  // claim about the gate's POPULATION, and the only way one of these families
+  // can be `matched` at all is through a key that is NOT a population claim —
+  // `coveringKey`'s identity key, "an identity claim about a single FILE". A
+  // card editing the gate's own script is a 100%-precise lead, and the ruling's
+  // "keeps it OUT of the matched column" is about the ROOTS the gate walks:
+  // suppressing the identity match too would make a channel added to ADD
+  // information subtract some, silently, on the one card class where this
+  // derivation is exactly right. `widePopulationRefusal` keeps the two apart by
+  // refusing a marker that sits above any scanned path population at all, so
+  // this branch can only ever override an UNPLACED verdict.
+  if (entry?.widePopulationReason && placed.verdict !== 'matched') {
+    return { verdict: 'wide-population', hits: [] };
+  }
+  return placed;
 }
 
 // ---------------------------------------------------------------------------
@@ -9062,23 +9234,69 @@ export function alwaysRunsPopulationLines(rows) {
   return lines;
 }
 
+/**
+ * The WIDE-population channel, rendered (#15341) — the residue's DECLARED
+ * column, printed BELOW the reconciliation because its commands are NOT inside
+ * that total.
+ *
+ * That placement is the claim, and it is the one line of difference from
+ * `alwaysRunsPopulationLines` above: everything under the reconciliation names
+ * something OUTSIDE this card's runnable answer. A whole-tree family is owed by
+ * every card, so it prints above the total and its command is in it. A
+ * wide-population family is run by CI over a population no card's paths can
+ * narrow — pasting it into every harvest would be the fabricated lead the
+ * recorded triage refused in the first place — so it prints here, named, with
+ * the reason that is the whole content of the channel.
+ *
+ * A refused declaration prints as REFUSED rather than vanishing, for the reason
+ * the sibling section states: a family dropped from every rendering because its
+ * declaration was malformed is the silent direction.
+ */
+export function widePopulationLines(rows) {
+  if (rows.length === 0) return [];
+  const lines = [
+    `Declared WIDE population — ${rows.length} famil(ies) DECLARE that CI runs them over a population too wide to place, so no`
+      + " path of yours can narrow them and their absence from the matched block above is NOT a clearance.",
+  ];
+  for (const row of rows) {
+    if (row.refused) {
+      lines.push(`  - ⚠ ${row.check}: REFUSED — ${row.refused}`);
+      continue;
+    }
+    lines.push(`  - ${row.command}   [${row.workflows.join(', ')}]   declared wide population — ${row.reason}`);
+  }
+  lines.push(
+    '  ⇒ Declared, and deliberately NOT in this card\'s runnable total: the population is real and every subtree spelling of it'
+      + ' is either false or so wide it would name the gate on every card under the root — the trade scripts/pm/bare-root-worklist.mjs'
+      + ' records per row as REFUSE-WIDE / REFUSE-UNSPELLABLE. CI runs them on every PR regardless, so read this block as "these'
+      + ' gates judge your diff and no derivation can tell you whether they bite" — go read the reason, not the absence.',
+  );
+  return lines;
+}
+
 export function residueLines(
   {
     discovered, matched, undetermined, silent, unfiltered, unreachable, swept,
-    artifactRosters, invertedRosters, documentedNoPopulation, alwaysRuns = 0,
+    artifactRosters, invertedRosters, documentedNoPopulation, alwaysRuns = 0, widePopulation = 0,
   },
   kinds = CHANGE_KIND_GATES,
 ) {
-  // FOUR verdicts now (#14189). The whole-tree channel is a term of the
-  // partition rather than a subset of one, and it is added HERE because the
-  // throw below is the thing that would otherwise absorb it silently: a fourth
+  // FIVE verdicts now (#14189, #15341). Each declaration channel is a term of
+  // the partition rather than a subset of one, and each is added HERE because
+  // the throw below is the thing that would otherwise absorb it silently: a
   // placement wired into the derivation and not into this sum shrinks the
   // residue by exactly the families it placed, and every count still prints.
-  const placed = matched + undetermined + silent + alwaysRuns;
+  const placed = matched + undetermined + silent + alwaysRuns + widePopulation;
   if (placed !== discovered) {
     throw new Error(
       `residue accounting is short: ${placed} famil(ies) placed of ${discovered} discovered ` +
-        '(matched + undetermined + silent + always-runs must cover every discovered family)',
+        '(matched + undetermined + silent + always-runs + wide-population must cover every discovered family)',
+    );
+  }
+  if (!Number.isInteger(widePopulation) || widePopulation < 0 || widePopulation > discovered) {
+    throw new Error(
+      `declared-wide-population count is not derivable: got ${String(widePopulation)} of ${discovered} discovered ` +
+        "(it is read from each gate's own marker — never omitted; a missing count would print as a missing line)",
     );
   }
   if (!Number.isInteger(alwaysRuns) || alwaysRuns < 0 || alwaysRuns > discovered) {
@@ -9140,12 +9358,19 @@ export function residueLines(
     `Residue — all ${discovered} discovered famil(ies) placed, derived at runtime:`,
     `  ${matched} matched above · ${undetermined} undetermined (their sources name no path at all — NOT known irrelevant)` +
       ` · ${silent} silent (their sources name paths, none of which cover yours)` +
-      ` · ${alwaysRuns} always-runs (they DECLARE a whole-tree population, so they are placed by declaration and not by your paths).`,
+      ` · ${alwaysRuns} always-runs (they DECLARE a whole-tree population, so they are placed by declaration and not by your paths)` +
+      ` · ${widePopulation} declared-wide (they DECLARE a population too wide to place, so no path of yours can narrow them either way).`,
     `  Those ${alwaysRuns} are not leads and not silences: a gate that reads EVERY file is named on every card, so naming it in the matched` +
       ' column would be a fabricated lead and leaving it silent would be a false clearance. It declares the fact in its own source' +
       ' (dispatch-gates: whole-tree-population -- REASON, the inverse of the no-path-population marker above), the declaration is checked' +
       " against a repo-root walk in that same source, and the family is listed under its own always-runs heading with its commands INSIDE" +
       ' this card\'s runnable total.',
+    `  Those ${widePopulation} are the THIRD channel (#15341) and the opposite disposition: CI runs each of them over a population too wide to place` +
+      ' — a whole top-level root, or a file-KIND filter inside one that no subtree glob spells — so a true declaration would name the gate on every' +
+      ' card under that root and the matched column would stop discriminating. They declare the fact in their own source' +
+      ' (dispatch-gates: wide-population -- REASON), are listed under their own heading with that reason, and are deliberately' +
+      " not in this card's runnable total: the per-row measured refusals behind them live in scripts/pm/bare-root-worklist.mjs." +
+      ' Their absence from the matched block is NOT a clearance — read the reason.',
     `  ${documentedNoPopulation} of those ${undetermined} undetermined famil(ies) DECLARE that they have no path population, each with its own` +
       ' reason, read from a marker in the gate\'s source and printed against it under --residue. Those have been examined; the rest of the bucket' +
       ' has not, and the two used to read alike. A declaration is not an escape from having a population: a gate that walks a subtree declares it' +
@@ -9665,6 +9890,11 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
       // different revision of the gate than the declaration it is grading.
       entry.wholeTreeReason ??= declaredWholeTreePopulation(source);
       entry.rootWalk ??= repoRootWalkSpelling(source);
+      // ONE read, and the TENTH answer off it (#15341). Same source text as
+      // every reader above, for the same reason: `widePopulationRefusal` grades
+      // this declaration against `entry.hints`, and hints and marker have to
+      // come out of one revision of the gate or the refusal is judging two.
+      entry.widePopulationReason ??= declaredWidePopulation(source);
       // ONE read, SIX answers now (#14004). The payload dependence is read off
       // the SAME source text as the five above, so this classification cannot
       // describe a different revision of the gate than the hints printed beside
@@ -9783,6 +10013,12 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
     // vouches for the declaration has to be in the source that carries it.
     entry.wholeTreeReason ??= null;
     entry.rootWalk ??= null;
+    // Read from the gate's own files only, for the reason the two declarations
+    // above it are: a followed module cannot declare on its caller's behalf
+    // that the CALLER's population is too wide to place — and a caller that
+    // inherited the marker would be excused from the matched column by a
+    // sentence written about a different gate.
+    entry.widePopulationReason ??= null;
     // Read from the gate's own files only, exactly like the declaration above
     // it: a followed module cannot make its caller CI-only, and a family that
     // reached no file at all reaches no classification either.
@@ -10553,7 +10789,7 @@ export function runReconciliationLines(recon) {
  * That distinction is the card's own subject matter: what is left out of a list
  * must be visible in the list.
  */
-export function derivationJson({ paths, matchedRows, kindGroups, pending, counts, identity, alwaysRunsRows = [], rosters = [] }) {
+export function derivationJson({ paths, matchedRows, kindGroups, pending, counts, identity, alwaysRunsRows = [], widePopulationRows = [], rosters = [] }) {
   const commands = commandsFor({ matchedRows, kindGroups, alwaysRunsRows });
   const { otherCommands, ...spelling } = spellingSplit(commands);
   return {
@@ -10572,6 +10808,13 @@ export function derivationJson({ paths, matchedRows, kindGroups, pending, counts
     // (that would be a lead on every card) and must not have to infer it from
     // the commands list either (#14189).
     alwaysRunsPopulation: alwaysRunsRows,
+    // IN this document and ⛔ NOT in `commands` (#15341) — the mirror of the
+    // key above it, and the pair is why both exist: a whole-tree family is owed
+    // by every card, a wide-population family by none, and a consumer must be
+    // able to read the difference rather than infer it from an absence. Its own
+    // key for the reason `artifactRosterSilences` has one: an omission a machine
+    // consumer has to deduce is the omission this document exists to state.
+    widePopulation: widePopulationRows,
     // IN this document and ⛔ NOT in `commands`, for the reason
     // `artifactRosterLines` states: these families are `silent`, so no path a
     // caller passes can move them, and merging them into the runnable union
@@ -10609,13 +10852,13 @@ export function derivationJson({ paths, matchedRows, kindGroups, pending, counts
  * LOUD. A quiet omission is the defect this mode was added to fix, and adding a
  * new one inside the fix is how that defect reproduces itself one layer up.
  */
-function machineReadableOutput(mode, { paths, matchedRows, kindGroups, pending, counts, alwaysRunsRows = [], rosters = [] }) {
+function machineReadableOutput(mode, { paths, matchedRows, kindGroups, pending, counts, alwaysRunsRows = [], widePopulationRows = [], rosters = [] }) {
   const identity = repoIdentity();
   const commands = commandsFor({ matchedRows, kindGroups, alwaysRunsRows });
   const split = spellingSplit(commands);
 
   if (mode === 'json') {
-    console.log(JSON.stringify(derivationJson({ paths, matchedRows, kindGroups, pending, counts, identity, alwaysRunsRows, rosters }), null, 2));
+    console.log(JSON.stringify(derivationJson({ paths, matchedRows, kindGroups, pending, counts, identity, alwaysRunsRows, widePopulationRows, rosters }), null, 2));
   } else {
     for (const command of commands) console.log(command);
   }
@@ -10638,6 +10881,19 @@ function machineReadableOutput(mode, { paths, matchedRows, kindGroups, pending, 
     console.error(
       `  + those ${alwaysRunsRunnable.length} are placed by their own whole-tree-population declaration, not by these paths — identical on every` +
         ' card, and outside the matched/silent/undetermined verdicts entirely. Run without --commands/--json to see each one with its reason.',
+    );
+  }
+  // Omitted OUT LOUD for the same reason as everything around it (#15341), and
+  // this one is the omission a reader is most likely to misread as a clearance:
+  // these gates DO judge the diff, CI runs every one of them, and no path
+  // derivation can narrow them — so the stream a consumer executes cannot carry
+  // them and the accounting beside it has to say they exist.
+  const wideRunnable = widePopulationRows.filter((row) => !row.refused);
+  if (wideRunnable.length) {
+    console.error(
+      `  + ${wideRunnable.length} famil(ies) DECLARE a population too wide to place and are ${mode === 'json' ? 'under widePopulation, not in commands' : 'NOT above'} — ` +
+        'CI runs them over a whole root (or a file-kind filter inside one) that no subtree glob spells, so no path of yours narrows them ' +
+        'and their absence here is not a clearance. Run without --commands/--json to see each one with its reason.',
     );
   }
   // The THIRD thing stdout deliberately omits, omitted OUT LOUD for the reason
@@ -10717,9 +10973,14 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
   // family lands in, so a family that declares nothing reaches exactly the
   // classifier it always reached.
   const alwaysRuns = [];
+  // The FIFTH bucket (#15341): families placed by their own wide-population
+  // declaration. Same seam, opposite disposition to the fourth — declared, and
+  // outside this card's runnable total.
+  const widePopulation = [];
   for (const [check, entry] of byCheck) {
     const { verdict, hits } = placeFamily(entry, paths);
     if (verdict === 'always-runs') alwaysRuns.push([check, entry]);
+    else if (verdict === 'wide-population') widePopulation.push([check, entry]);
     else if (verdict === 'matched') matched.set(check, { entry, hits });
     else if (verdict === 'undetermined') undetermined.push([check, entry]);
     else silent.push([check, entry]);
@@ -10787,6 +11048,18 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
     ciOnly: entry.ciOnly ?? null,
     notRunnable: entry.notRunnable ?? null,
   }));
+  // Built the same way the two row sets above are, and for the same reason: the
+  // human block and the `--json` document are readings of THESE rows, so they
+  // cannot disagree about which families declared a wide population or why
+  // (#15341). No `ciOnly`/`notRunnable` here — those two exist to subtract a
+  // command from the runnable union, and no row of this kind is ever in it.
+  const widePopulationRows = [...widePopulation].sort().map(([check, entry]) => ({
+    check,
+    command: runnableInvocation(entry),
+    workflows: [...entry.workflows],
+    reason: entry.widePopulationReason,
+    refused: widePopulationRefusal(entry),
+  }));
   const kindGroups = changeKindGates(paths, resolveInvocation);
   // The pending-changeset section is derived in BOTH input modes and is gated
   // on nothing but the answer itself: the PM's paths are a hypothesis with no
@@ -10830,6 +11103,7 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
       kindGroups,
       pending,
       alwaysRunsRows,
+      widePopulationRows,
       rosters,
       counts: {
         discovered: byCheck.size,
@@ -10838,6 +11112,7 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
         undetermined: undetermined.length,
         silent: silent.length,
         alwaysRuns: alwaysRuns.length,
+        widePopulation: widePopulation.length,
         unreachable: unreachable.length,
         swept: swept.length,
       },
@@ -11038,6 +11313,18 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
     for (const line of rosterOut) console.log(line);
   }
 
+  // BELOW the reconciliation for the reason the roster block is: every section
+  // under that total names something outside this card's runnable answer, and
+  // these commands are outside it by construction (#15341). Printed on EVERY
+  // run and not only under `--residue`, for the reason the roster block states
+  // and this card measured twice over: a dev reading a dispatch brief is never
+  // told to pass that flag, and a gate nobody is told about is the whole defect.
+  const wideOut = widePopulationLines(widePopulationRows);
+  if (wideOut.length) {
+    console.log('');
+    for (const line of wideOut) console.log(line);
+  }
+
   const pendingOut = pendingChangesetLines(pending);
   if (pendingOut.length) {
     console.log('');
@@ -11102,6 +11389,7 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
     undetermined: undetermined.length,
     silent: silent.length,
     alwaysRuns: alwaysRuns.length,
+    widePopulation: widePopulation.length,
     // Neither declaration reaches them: no workflow `paths:` trigger AND no job
     // `if:` that resolves to a paths-filter population (#12956). Counting only
     // the first would keep printing 'no path derivation can narrow them' about
@@ -16676,6 +16964,155 @@ function selfTest() {
     })(),
   );
 
+  // ── The gate-level WIDE-population declaration (#15341) ───────────────────
+  //
+  // The THIRD channel, and the pins below are written as the ruling framed it:
+  // one column it must reach (DECLARED, with its reason) and one it must not
+  // (MATCHED, on any card under the roots it walks). The discriminating pins
+  // are the placement ones; the mutation that reddens them is deleting the
+  // `widePopulationReason` branch from `placeFamily`.
+  t(
+    'a wide-population declaration reads its reason back',
+    declaredWidePopulation('// dispatch-gates: wide-population -- walks packages/ entire\n')
+      === 'walks packages/ entire',
+  );
+  t(
+    'the shell comment spelling is read too (all three markers tolerate the same comment forms, deliberately)',
+    declaredWidePopulation('#!/usr/bin/env bash\n# dispatch-gates: wide-population -- a shell gate reason\n')
+      === 'a shell gate reason',
+  );
+  t('no marker present reads as no declared wide population', declaredWidePopulation('// just a comment\n') === null);
+  t(
+    'the marker with no reason text does not count as declared — and the reason carries MORE here than on either sibling, since it is the whole content of the channel',
+    declaredWidePopulation('// dispatch-gates: wide-population\n') === null,
+  );
+  t(
+    'the marker must be its OWN line — prose ABOUT the convention is not a declaration under it',
+    declaredWidePopulation('// see the dispatch-gates: wide-population -- marker for the refused-wide case\n') === null,
+  );
+  // Three markers now share a prefix and a sibling regex, which is exactly the
+  // shape where one parser quietly answers for another. Every pair, both ways.
+  t(
+    'a no-path-population declaration does NOT read as a wide one, and a wide one does NOT read as no-path',
+    declaredWidePopulation('// dispatch-gates: no-path-population -- CI runs the self-test only\n') === null
+      && declaredNoPathPopulation('// dispatch-gates: wide-population -- walks packages/ entire\n') === null,
+  );
+  t(
+    'a whole-tree declaration does NOT read as a wide one, and a wide one does NOT read as whole-tree',
+    declaredWidePopulation('// dispatch-gates: whole-tree-population -- it sweeps git ls-files\n') === null
+      && declaredWholeTreePopulation('// dispatch-gates: wide-population -- walks packages/ entire\n') === null,
+  );
+
+  // The refusals — a gate declares exactly ONE population shape.
+  const wpLive = { widePopulationReason: 'walks packages/ entire', hints: [], noPopulationReason: null, wholeTreeReason: null };
+  t('a family declaring nothing is refused nothing', widePopulationRefusal({ widePopulationReason: null }) === null);
+  t('a wide declaration over an empty hint set stands', widePopulationRefusal(wpLive) === null);
+  t(
+    'declaring BOTH wide and no-path population is a contradiction, refused rather than resolved by a coin toss',
+    (widePopulationRefusal({ ...wpLive, noPopulationReason: 'CI runs the self-test only' }) ?? '')
+      .includes('BOTH wide-population and no-path-population'),
+  );
+  t(
+    'declaring BOTH wide and whole-tree population is refused too, and the refusal names the OPPOSITE dispositions that make it one',
+    (() => {
+      const why = widePopulationRefusal({ ...wpLive, wholeTreeReason: 'sweeps git ls-files' }) ?? '';
+      return why.includes('BOTH wide-population and whole-tree-population') && why.includes('runnable total');
+    })(),
+  );
+  t(
+    'a wide declaration sitting above a live path population is refused, and the refusal NAMES the literals so the reader can decide which half is wrong',
+    (() => {
+      const why = widePopulationRefusal({ ...wpLive, hints: ['packages/rest/src', 'docs/adr'] }) ?? '';
+      return why.includes('NAMES paths') && why.includes('packages/rest/src');
+    })(),
+  );
+
+  // Placement, column by column. The card path is under the very root these
+  // gates walk — the case the ruling is about.
+  const wpEntry = { files: ['scripts/check-wildcard-fallthrough.mjs'], hints: [], widePopulationReason: 'walks packages/ entire' };
+  t(
+    'DECLARED column: a declaring family is placed as wide-population, not undetermined — it has been READ',
+    placeFamily(wpEntry, ['README.md']).verdict === 'wide-population',
+  );
+  t(
+    'MATCHED column: a card under the root it walks does NOT match it — the whole point of the ruling',
+    placeFamily(wpEntry, ['packages/rest/src/server.ts']).verdict === 'wide-population'
+      && placeFamily(wpEntry, ['packages/rest/src/server.ts']).hits.length === 0,
+  );
+  t(
+    'NOT silent either: a gate that really does read your file must never print as a clearance',
+    !['silent', 'undetermined', 'matched'].includes(placeFamily(wpEntry, ['packages/core/src/kernel.ts']).verdict),
+  );
+  t(
+    'the IDENTITY key SURVIVES: a card editing the gate\'s own script still matches it, because the declaration is a claim about the POPULATION and not about that file',
+    placeFamily(wpEntry, ['scripts/check-wildcard-fallthrough.mjs']).verdict === 'matched',
+  );
+  t(
+    'and that is the DIFFERENCE from the whole-tree channel, which suppresses the identity match — pinned as a difference so neither can be "tidied" into the other',
+    placeFamily({ ...wpEntry, widePopulationReason: null, wholeTreeReason: 'sweeps the tree' }, ['scripts/check-wildcard-fallthrough.mjs']).verdict === 'always-runs',
+  );
+  t(
+    'a family that declares nothing is STILL placed byte-for-byte as classifyEntry places it, with the third channel wired in',
+    [
+      { files: ['scripts/check-silent.mjs'], hints: ['packages/spec/src'] },
+      { files: ['scripts/check-empty.mjs'], hints: [] },
+    ].every((e) => ['packages/rest/src/server.ts', 'scripts/check-empty.mjs', 'packages/spec/src/index.ts']
+      .every((p) => JSON.stringify(placeFamily(e, [p])) === JSON.stringify(classifyEntry(e, [p])))),
+  );
+
+  // The union: a wide-population family contributes NO command, which is the
+  // whole difference from the whole-tree rows one section up.
+  const wpRow = { check: 'check:wildcard-fallthrough', command: 'pnpm check:wildcard-fallthrough', workflows: ['lint.yml'], reason: 'walks packages/ entire', refused: null };
+  t(
+    'a wide-population family is NOT in the runnable union --commands prints — no card owes it on the basis of a population no card can narrow',
+    !commandsFor({ matchedRows: [], kindGroups: [], alwaysRunsRows: [] }).includes('pnpm check:wildcard-fallthrough'),
+  );
+  t(
+    'and the union is unmoved by the presence of wide rows: they are not one of its inputs at all',
+    commandsFor({ matchedRows: [{ check: 'check:x', command: 'pnpm check:x', ciOnly: null }], kindGroups: [], alwaysRunsRows: [] }).length === 1,
+  );
+
+  // The rendering — the DECLARED column the ruling names.
+  const wpLines = widePopulationLines([wpRow]);
+  t(
+    'the wide-population section names the gate and its reason',
+    wpLines.some((l) => l.includes('pnpm check:wildcard-fallthrough') && l.includes('walks packages/ entire')),
+  );
+  t('and says out loud that the absence from the matched block is not a clearance', wpLines.some((l) => l.includes('NOT a clearance')));
+  t(
+    'its heading cannot be confused with the whole-tree one, whose commands ARE in the total',
+    wpLines[0].includes('Declared WIDE population') && !wpLines[0].includes('Always runs'),
+  );
+  t(
+    'a REFUSED declaration prints as refused rather than vanishing from every rendering',
+    widePopulationLines([{ ...wpRow, refused: 'declares BOTH wide-population and no-path-population' }]).some((l) => l.includes('REFUSED')),
+  );
+  t('no declaring family, no section', widePopulationLines([]).length === 0);
+
+  // The residue partition. A FIFTH placement wired into the derivation and not
+  // into this sum shrinks the residue silently — the exact failure residueLines'
+  // own throw exists to catch, now one term further along.
+  const wpResidue = residueLines({
+    discovered: 98, documentedNoPopulation: 0, matched: 8, undetermined: 30, silent: 50, alwaysRuns: 5, widePopulation: 5,
+    unfiltered: 80, unreachable: 5, swept: 6000, artifactRosters: 4, invertedRosters: 1,
+  });
+  t('the residue accounts for the wide-population bucket as a fifth term', wpResidue.some((l) => l.includes('5 declared-wide')));
+  t(
+    'and REFUSES a derivation that placed wide families it did not count',
+    (() => {
+      try {
+        residueLines({ discovered: 98, documentedNoPopulation: 0, matched: 8, undetermined: 30, silent: 50, alwaysRuns: 5, widePopulation: 0, unfiltered: 80, unreachable: 5, swept: 6000, artifactRosters: 4, invertedRosters: 1 });
+        return false;
+      } catch (err) {
+        return /residue accounting is short/.test(err.message) && /wide-population/.test(err.message);
+      }
+    })(),
+  );
+  t(
+    'the residue prose states what the bucket IS — declared, unplaceable, and outside this card\'s runnable total',
+    wpResidue.some((l) => /too wide to place/.test(l) && /not in this card's runnable total/.test(l)),
+  );
+
   // ── The followed-module inherited-population declaration (#11556) ─────────
   //
   // The two markers above are a GATE's declarations about itself. This one is a
@@ -16910,6 +17347,41 @@ function selfTest() {
     'no live declaring family lands in matched, silent or undetermined for any card',
     ['packages/rest/src/server.ts', 'docs/adr/0112-x.md', 'scripts/check-nul-bytes.mjs'].every((p) =>
       declaredWholeTree.every(([, e]) => placeFamily(e, [p]).verdict === 'always-runs')),
+  );
+
+  // The live half of the WIDE-population channel (#15341), held to the same
+  // standard as the two above and for the same reason: a declaration is a claim
+  // about a gate, graded against the real tree. The direction that costs here
+  // is the one the recorded triage is guarding — a marker that rots into a lie
+  // by sitting above a population the gate later declares, so a reader is told
+  // "nothing can narrow this" while the matched column narrows it.
+  const declaredWide = [...liveDiscovery.byCheck].filter(([, e]) => e.widePopulationReason);
+  t(
+    `the live tree carries at least one wide-population declaration (the guard is not vacuous; found ${declaredWide.length})`,
+    declaredWide.length > 0,
+  );
+  t(
+    'every live wide-population declaration carries a non-empty reason',
+    declaredWide.every(([, e]) => typeof e.widePopulationReason === 'string' && e.widePopulationReason.length > 0),
+  );
+  const wpRefused = declaredWide
+    .map(([c, e]) => [c, widePopulationRefusal(e)])
+    .filter(([, why]) => why);
+  t(
+    `every live wide-population declaration names ONE population shape — no sibling marker, no scanned path population (refused: ${wpRefused.map(([c]) => c).join(', ') || 'none'})`,
+    wpRefused.length === 0,
+  );
+  // The two columns, live and per-card. The probe paths are under the roots
+  // these gates actually walk, which is the case the ruling is about: the
+  // family must be DECLARED there and must not be MATCHED there.
+  t(
+    'no live wide-population family is matched by a card under the roots it walks — it stays in its own declared column',
+    ['packages/rest/src/server.ts', 'packages/core/src/kernel.ts', 'examples/app-crm/src/index.ts', 'apps/docs/next.config.mjs']
+      .every((p) => declaredWide.every(([, e]) => placeFamily(e, [p]).verdict === 'wide-population')),
+  );
+  t(
+    'and none of them is left in `undetermined` for a card that touches nothing of theirs — the bucket the ruling moved them OUT of',
+    declaredWide.every(([, e]) => placeFamily(e, ['README.md']).verdict === 'wide-population'),
   );
 
   // ── The WHOLE-TREE RESIDUE (#15312) ───────────────────────────────────────
