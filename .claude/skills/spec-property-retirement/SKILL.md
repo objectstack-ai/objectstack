@@ -275,17 +275,19 @@ conversion 是消费者跟的。两个都要写。
       到的那个文件,漏网的恰是他不知道的引用(实测五处、三个包、两张卡,其中两处还
       是删除**之后**新写的)。排除 `**/CHANGELOG.md`、`.changeset/` 与 pin 自身,理由
       写在旁边,⛔ 不建允许清单文件;⛔ 缺席断言不是陈旧提及,「修好它」即删掉守卫。
+      ⭐ **半径按包申报一次**:写进 `scripts/cross-package-test-inputs.mjs` 的
+      `CROSS_PACKAGE_TEST_INPUTS` 并配齐 `turbo.json` 的 `<pkg>#test` inputs,turbo 才
+      hash 得到它、CI 分片并集才看得见;walk 降在循环变量上、门禁点不出名字,那条 glob
+      还要一条 `heldBy` 证人。⛔ 半径未申报的 tree-scoped pin 不是完成的退役。
 - [ ] **Examples** —— `examples/app-showcase/**` 必须停止编写该键。墓碑路线上
       `tsc` 替你找齐。
 - [ ] **已发布 skills** —— 教这个键的 `skills/*/SKILL.md`(表格、`defineX` 示例)
       —— 由 `check:skill-examples` 与 `check:skill-refs` 把门。
 - [ ] **Docs** —— `content/docs/**` 的散文、表格与代码块 —— **除了
       `content/docs/releases/`,代码 PR 永不碰它**(AGENTS.md Documentation
-      Guardrails)。release notes 在发布时从 changesets + D2/D3 registry 集中编写;本清单曾要求的逐 PR
-      加行,把 `releases/v<major>.mdx` 变成了全仓最热的冲突磁
-      铁。你的 changeset(下一项)才是通往它们的输入。`content/docs/**` 的其余部
-      分:先 grep 键名,再读周边文件 —— 被删的键会藏在离参考表三节远的一个
-      `defineFlow` 示例里。
+      Guardrails)。release notes 在发布时从 changesets + D2/D3 registry 集中编写,你的
+      changeset(下一项)才是通往它们的输入。`content/docs/**` 的其余部分:先 grep 键
+      名,再读周边文件 —— 被删的键会藏在离参考表三节远的一个 `defineFlow` 示例里。
 - [ ] **Changeset** —— `@objectstack/spec` 用 `major`。AGENTS.md:breaking
       changeset 必须带 FROM → TO 映射与一行修复;它作为 npm 包里的 `CHANGELOG.md`
       发出,是升级中的 agent 撞上墓碑报错后 grep 的东西。
@@ -294,19 +296,17 @@ conversion 是消费者跟的。两个都要写。
       `pnpm check:adr-0087-registration` 把门)—— 退役正是它点名的那一类。
 - [ ] **`check:generated` 明确不跑的源码审计 —— 整组跑,永不单点。** 它的输出会点名
       它们;陷阱是跑了五个漏了第六个。咬退役的是 `check:variant-docs`:删掉一个
-      discriminated union 会孤儿化它的 variant/doc-ledger 条目,本地跳过则只在 CI
-      变红(#5552 / PR #6078:`type:cast|constant|javascript|lookup|map` 条目比它的
-      union 多活了一轮复核)。
+      discriminated union 会孤儿化它的 variant/doc-ledger 条目(实测:条目比它的 union
+      多活了一轮复核),本地跳过则只在 CI 变红。
 - [ ] **`packages/qa/dogfood` 在退役的默认消费半径之内** —— 不只是 import 该
       schema 的那些包。它持有 ADR-0058 D7 表达式面 conformance 台账
       (`test/expression-conformance.test.ts`),删掉任何带表达式面的 schema 成员都
       会搁浅一条 `covers` 条目("STALE covers — surface no longer in source",同一
       个 PR,第二次漏)。推送前跑它的定向套件,不管你的 import 图怎么说。
 
-**更正(§1)也必须传播到上面每一行。** `form.data` 翻回 `live` 时,台账、
-conversion 与测试都改了 —— 但 release-notes 行与台账 README 行还写着它已删除,教作
-者去删一个 `defineForm` 会写的键。一个 PR 之后才被发现修掉。更正路径是没有人给它准
-备清单的那条;用这一份。
+**更正(§1)也必须传播到上面每一行。** `form.data` 翻回 `live` 时,台账、conversion
+与测试都改了 —— 但 release-notes 行与台账 README 行还写着它已删除,教作者去删一个
+`defineForm` 会写的键。更正路径是没有人给它准备清单的那条;用这一份。
 
 ## 5. 把门禁跑到真能失败
 
