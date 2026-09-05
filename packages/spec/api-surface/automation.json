@@ -195,6 +195,7 @@
     "RetryPolicyParsed (type)",
     "RetryPolicySchema (const)",
     "SCHEMALESS_NODE_CONFIG_SCHEMAS (const)",
+    "STRUCTURAL_CONDITION_SHAPE_REFUSAL (const)",
     "ScheduleState (type)",
     "ScheduleStateParsed (type)",
     "ScheduleStateSchema (const)",
@@ -266,6 +267,7 @@
     "predicateSlotRefusal (function)",
     "resolveFlowNodeExpressions (function)",
     "resolveFlowTriggerKind (function)",
+    "structuralConditionRefusal (function)",
     "validateControlFlow (function)"
   ]
 }
