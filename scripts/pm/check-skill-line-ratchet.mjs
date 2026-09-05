@@ -772,7 +772,11 @@ export const CEILINGS = new Map([
   // anything smaller drops ruled content), fold 0. Maintainer batch ruling
   // 2026-08-29, verbatim and untranslated: 「执行，批 #1 其他卡同意」 — recorded
   // on #12756 and quoted in the PR. Headroom is 0 again by construction.
-  ['AGENTS.md', 1162],
+  //
+  // 1162 → 1058: the rules-only rewrite — every incident narrative, ruling date and
+  // quotation out, every rule kept as one sentence; re-pinned at the landed count,
+  // headroom 0 (lowering is always legitimate).
+  ['AGENTS.md', 1058],
   // #9965: root CLAUDE.md is the other repo-root instruction file — same read
   // path (every seat session), same governance (Prime Directive #14). It is
   // structurally growth-prone in the way the ratchet is built for: it exists to
@@ -782,7 +786,9 @@ export const CEILINGS = new Map([
   // 5353931707) — rationale on record: a one-line ceiling now prevents compound
   // growth cheaply. Set at its line count on `origin/main` (headroom 0, same
   // convention as the entries above).
-  ['CLAUDE.md', 86],
+  // 86 → 41: the ownership excerpt rewritten by role in the same rules-only pass;
+  // re-pinned at the landed count, headroom 0.
+  ['CLAUDE.md', 41],
 ]);
 
 /**
@@ -984,7 +990,9 @@ export const MAX_TABLE_ROW_BYTES = new Map([
   ['.claude/skills/checklist-author/SKILL.md', 0],
   ['.claude/skills/dogfood-verification/SKILL.md', 0],
   ['.claude/skills/spec-property-retirement/SKILL.md', 328],
-  ['AGENTS.md', 1081],
+  // Lowered 1081 → 768 by the rules-only rewrite: the translations row lost its
+  // in-cell narrative; the widest survivor is that same row. Landed width, headroom 0.
+  ['AGENTS.md', 768],
   ['CLAUDE.md', 0],
 ]);
 

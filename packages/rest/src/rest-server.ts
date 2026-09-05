@@ -3250,9 +3250,8 @@ export class RestServer {
         if (!item || typeof item !== 'object') return item;
         // [#6349] Normalize HERE, not at the call sites. `isTranslatableMetaType`
         // reads `TRANSLATABLE_METADATA_TYPES`, which is DERIVED from
-        // `METADATA_DOCUMENT_TRANSLATORS`' keys — and those are singular-only
-        // (`view`/`action`/`object`/`app`/`dashboard`/`page`), matching
-        // `translateMetadataDocument`'s "Canonical metadata type string". The
+        // `METADATA_DOCUMENT_TRANSLATORS`' keys — and those are singular-only,
+        // matching `translateMetadataDocument`'s "Canonical metadata type string". The
         // `/meta` handlers hand this helper the RAW `:type` path segment, and
         // Prime Directive #3 makes PLURAL the canonical REST spelling, so the
         // documented spelling missed the set and the whole localization was

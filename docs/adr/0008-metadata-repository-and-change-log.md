@@ -482,7 +482,7 @@ The plan is intentionally staged so each milestone is **independently shippable*
 - [ ] All existing tests pass; new contract suite passes for both `InMemoryRepository` and `FileSystemRepository`
 - [ ] Cold start of the [HotCRM reference app](https://github.com/objectstack-ai/hotcrm) is ≤ current baseline (no eager full-load)
 - [ ] `MetadataEvent` stream visible in `apps/studio/Logs` panel
-- [ ] No code in `packages/objectql/src/protocol.ts` reads files or imports from `@objectstack/metadata-fs`
+- [ ] No code in `packages/metadata-protocol/src/protocol.ts` reads files or imports from `@objectstack/metadata-fs`
 
 **Out of scope for M0**
 
