@@ -328,11 +328,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked_at: {
         label: "Revoked At",
-        help: "When set, this session was revoked (idle / absolute-max / concurrent-cap / admin). System-managed."
+        help: "When set, this session was revoked (idle / absolute-max / concurrent-cap / admin / organization membership ended). System-managed."
       },
       revoke_reason: {
         label: "Revoke Reason",
-        help: "Why the session was revoked (idle_timeout, absolute_max, concurrent_cap, …)."
+        help: "Why the session was revoked (idle_timeout, absolute_max, concurrent_cap, user_revoked, admin, organization_membership_ended, …)."
       },
       active_organization_id: {
         label: "Active Organization"
