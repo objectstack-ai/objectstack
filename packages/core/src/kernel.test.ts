@@ -623,13 +623,15 @@ describe('ObjectKernel', () => {
                     startPluginWithTimeout(p: PluginMetadata): Promise<PluginStartupResult>;
                 }).startPluginWithTimeout(meta);
 
-            const ok = await callStart({
+            const okMeta: PluginMetadata = {
                 name: 'ok-plugin',
                 version: '1.0.0',
+                init: async () => {},
                 start: async () => {
                     await new Promise(resolve => setTimeout(resolve, 20));
                 },
-            } as PluginMetadata);
+            };
+            const ok = await callStart(okMeta);
 
             expect(ok.success).toBe(true);
             expect(ok.duration).toBeGreaterThan(0);
@@ -637,13 +639,15 @@ describe('ObjectKernel', () => {
             // The deprecated alias carries the same elapsed value, not an instant.
             expect(ok.startTime).toBe(ok.duration);
 
-            const failed = await callStart({
+            const failingMeta: PluginMetadata = {
                 name: 'failing-plugin',
                 version: '1.0.0',
+                init: async () => {},
                 start: async () => {
                     throw new Error('boom');
                 },
-            } as PluginMetadata);
+            };
+            const failed = await callStart(failingMeta);
 
             expect(failed.success).toBe(false);
             expect(failed.duration).toBeGreaterThanOrEqual(0);
