@@ -79,7 +79,12 @@
  */
 
 import { validateExpression, collectCelRootIdentifiers, parseCelToAst, SCOPE_ROOTS } from '@objectstack/formula';
-import { collectFlowGraphs, predicateSlotRefusal, resolveFlowNodeExpressions } from '@objectstack/spec/automation';
+import {
+  collectFlowGraphs,
+  predicateSlotRefusal,
+  resolveFlowNodeExpressions,
+  structuralConditionRefusal,
+} from '@objectstack/spec/automation';
 // [#15137] The `value`-role half. Same two published primitives the engine
 // composes at `registerFlow` (`AutomationEngine.valueEnvelopeRefusals`), in the
 // same order: the SHAPE rule lives in the spec's `AssignmentValueSchema` (it
@@ -1166,12 +1171,44 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
       }
     };
 
+    /**
+     * [#15662] A STRUCTURAL condition (`config.condition` on a node,
+     * `edge.condition`) refused on SHAPE before anything reads a source out of
+     * it. The refusal is the spec's, shared with the engine's `registerFlow`
+     * pass: `error`, because that pass throws, and a shape build refuses must
+     * not pass author time.
+     *
+     * ⚠️ Deliberately NOT `predicateSlotRefusal`, which the declared-slot arm
+     * above uses. A ledger `predicate` slot is declared `z.string()`; neither
+     * structural slot is — `FlowEdgeSchema.condition` is
+     * `ExpressionInputSchema`, so an envelope is the shape the parse itself
+     * produces, and a node's `config` is an open `z.record` that passes one
+     * through verbatim. Both are admitted here; a value that is neither text
+     * nor an expression is not, because the evaluator reads it as an EMPTY
+     * condition and answers a silent `false`.
+     *
+     * @returns whether the slot was refused, so the caller can skip the
+     *   value-reading passes that would otherwise re-report it as an empty one.
+     */
+    const checkStructuralCondition = (where: string, raw: unknown): { refused: boolean } => {
+      if (raw == null) return { refused: false };
+      const shapeRefusal = structuralConditionRefusal(raw);
+      if (shapeRefusal) {
+        issues.push({ where, message: shapeRefusal.message, source: shapeRefusal.source, severity: 'error' });
+        return { refused: true };
+      }
+      return { refused: false };
+    };
+
     for (const graph of graphs) {
       const at = graph.scope ? `flow '${flowName}' · ${graph.scope}` : `flow '${flowName}'`;
       for (const node of graph.nodes as unknown as AnyRec[]) {
         const cfg = (node.config ?? {}) as AnyRec;
-        check(`${at} · node '${node.id}' (${node.type}) condition`, cfg.condition, objectName);
-        warnShadowedFieldReads(`${at} · node '${node.id}' (${node.type}) condition`, cfg.condition);
+        const nodeCondWhere = `${at} · node '${node.id}' (${node.type}) condition`;
+        if (!checkStructuralCondition(nodeCondWhere, cfg.condition).refused) {
+          check(nodeCondWhere, cfg.condition, objectName);
+          warnShadowedFieldReads(nodeCondWhere, cfg.condition);
+        }
 
         // Descriptor-declared expression slots (#4027). Before this, the traversal
         // hardcoded `condition` and assumed every other node string was a `{var}`
@@ -1286,8 +1323,11 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
         }
       }
       for (const edge of graph.edges as unknown as AnyRec[]) {
-        check(`${at} · edge '${edge.id}' (${edge.source}→${edge.target}) condition`, edge.condition, objectName);
-        warnShadowedFieldReads(`${at} · edge '${edge.id}' (${edge.source}→${edge.target}) condition`, edge.condition);
+        const edgeCondWhere = `${at} · edge '${edge.id}' (${edge.source}→${edge.target}) condition`;
+        if (!checkStructuralCondition(edgeCondWhere, edge.condition).refused) {
+          check(edgeCondWhere, edge.condition, objectName);
+          warnShadowedFieldReads(edgeCondWhere, edge.condition);
+        }
       }
       // No `checkNullGuards` on node/edge conditions — and NOT for the reason
       // #4811 first recorded (#4811 re-measured it). The stated blocker was the

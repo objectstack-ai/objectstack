@@ -2,6 +2,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { AppPlugin } from './app-plugin';
+import { readSeedDatasets } from './seed-datasets.js';
 import { readSeedSettlement } from './seed-settlement.js';
 import type { PluginContext } from '@objectstack/core';
 
@@ -232,5 +233,116 @@ describe('AppPlugin inline-seed settle signal (app:seeded, #2996)', () => {
 
             expect(readSeedSettlement(ctx)).toEqual({ pending: 0, inFlight: 0, suppressed: [] });
         });
+    });
+});
+
+/**
+ * #15262 — a FLAT bundle (manifest fields written directly on the bundle, no
+ * `manifest:` key) had every seed dataset collected TWICE.
+ *
+ * `start()` reads seed data from two locations: the top-level `data` field and
+ * the legacy `manifest.data`. The legacy read resolves its base as
+ * `this.bundle.manifest || this.bundle`, so on a flat bundle it re-reads the
+ * very array the top-level read just contributed. `mergeSeedDatasets` is a
+ * plain `push` with no de-duplication, so both copies reach the shared
+ * `seed-datasets` registry AND the inline loader — for a `mode: 'insert'`
+ * dataset that is the row applied twice per boot, not merely doubled work.
+ *
+ * The sibling two-location collector for `translations` (`loadTranslations`)
+ * has always carried the reference guard that makes the same read safe. These
+ * tests pin BOTH halves of that guard: the flat bundle collects once, and a
+ * bundle whose `manifest.data` is a genuinely DIFFERENT array still collects
+ * both — a fix that simply deleted the legacy read would pass the first
+ * assertion and fail the second.
+ */
+describe('AppPlugin flat-bundle seed collection (#15262)', () => {
+    const OLD_BUDGET = process.env.OS_INLINE_SEED_BUDGET_MS;
+    const OLD_MULTI = process.env.OS_MULTI_ORG_ENABLED;
+
+    let insert: ReturnType<typeof vi.fn>;
+
+    /** A context with a real service map, so `seed-datasets` can be read back. */
+    const makeContext = (): PluginContext => {
+        const services = new Map<string, unknown>();
+        return {
+            logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() },
+            registerService: vi.fn((name: string, svc: unknown) => {
+                if (services.has(name)) throw new Error(`service '${name}' already registered`);
+                services.set(name, svc);
+            }),
+            getService: vi.fn((name: string) => {
+                if (name === 'objectql') return { insert };
+                if (services.has(name)) return services.get(name);
+                return undefined; // `metadata` absent → basic-insert fallback
+            }),
+            getServices: vi.fn(() => new Map()),
+            hook: vi.fn(),
+            trigger: vi.fn(),
+        } as unknown as PluginContext;
+    };
+
+    /** The shape the card names: NO `manifest` key, a top-level `data` array. */
+    const flatBundle = () => ({
+        id: 'com.test.flat-seed',
+        name: 'flat-seed',
+        data: [
+            {
+                object: 'sys_user',
+                mode: 'insert',
+                records: [{ id: 'flat_u1', name: 'Flat One' }],
+            },
+        ],
+    });
+
+    beforeEach(() => {
+        delete process.env.OS_MULTI_ORG_ENABLED;
+        process.env.OS_INLINE_SEED_BUDGET_MS = '8000';
+        insert = vi.fn(async () => undefined);
+    });
+
+    afterEach(() => {
+        if (OLD_BUDGET === undefined) delete process.env.OS_INLINE_SEED_BUDGET_MS;
+        else process.env.OS_INLINE_SEED_BUDGET_MS = OLD_BUDGET;
+        if (OLD_MULTI === undefined) delete process.env.OS_MULTI_ORG_ENABLED;
+        else process.env.OS_MULTI_ORG_ENABLED = OLD_MULTI;
+    });
+
+    it('collects a flat bundle seed dataset ONCE, not once per read location', async () => {
+        const ctx = makeContext();
+
+        await new AppPlugin(flatBundle()).start(ctx);
+
+        expect(readSeedDatasets(ctx)).toHaveLength(1);
+    });
+
+    it('applies a mode:insert record ONCE per boot on a flat bundle', async () => {
+        const ctx = makeContext();
+
+        await new AppPlugin(flatBundle()).start(ctx);
+
+        // The row consequence, not the collection count: the doubled dataset
+        // was applied twice by the inline seed — the #3434 end state reached
+        // by a different route.
+        expect(insert).toHaveBeenCalledTimes(1);
+        expect(insert).toHaveBeenCalledWith('sys_user', { id: 'flat_u1', name: 'Flat One' }, expect.anything());
+    });
+
+    it('still collects BOTH sources when manifest.data is a genuinely different array', async () => {
+        const ctx = makeContext();
+        const bundle = {
+            manifest: {
+                id: 'com.test.nested-seed',
+                data: [{ object: 'sys_user', mode: 'insert', records: [{ id: 'legacy_u1' }] }],
+            },
+            data: [{ object: 'sys_user', mode: 'insert', records: [{ id: 'top_u1' }] }],
+        };
+
+        await new AppPlugin(bundle).start(ctx);
+
+        // Anti-vacuity: the legacy fallback is GUARDED, not removed.
+        expect(readSeedDatasets(ctx)).toHaveLength(2);
+        expect(insert).toHaveBeenCalledTimes(2);
+        expect(insert).toHaveBeenCalledWith('sys_user', { id: 'top_u1' }, expect.anything());
+        expect(insert).toHaveBeenCalledWith('sys_user', { id: 'legacy_u1' }, expect.anything());
     });
 });

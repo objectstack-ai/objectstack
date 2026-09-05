@@ -11,7 +11,11 @@ import { FieldSchema, ObjectSchema, SelectOptionSchema } from '@objectstack/spec
 import { SharingRuleSchema } from '@objectstack/spec/security';
 // [#15137] The published refusal sentence a `value`-slot finding must lead
 // with — asserted from the spec's own export, never re-spelled in a test.
-import { ASSIGNMENT_VALUE_ENVELOPE_REFUSAL, PREDICATE_SLOT_STRING_REFUSAL } from '@objectstack/spec/automation';
+import {
+  ASSIGNMENT_VALUE_ENVELOPE_REFUSAL,
+  PREDICATE_SLOT_STRING_REFUSAL,
+  STRUCTURAL_CONDITION_SHAPE_REFUSAL,
+} from '@objectstack/spec/automation';
 
 import {
   validateStackExpressions,
@@ -3792,6 +3796,128 @@ describe('assignment value envelope — located findings (#15137)', () => {
       }],
     });
     expect(issues.filter((i) => i.where.includes('assignment value'))).toHaveLength(0);
+  });
+});
+
+/**
+ * [#15662] The STRUCTURAL condition arm at author time — `objectstack
+ * validate`'s half of the refusal `registerFlow` throws.
+ *
+ * The gap: `evaluateCondition` reads its source as
+ * `typeof expression === 'string' ? expression : (expression?.source ?? '')`,
+ * so a value that is neither a string nor envelope-shaped lands in the
+ * empty-source arm and returns a silent `false`. Measured on `main`: `42`,
+ * `true` and `['a']` at a node's `config.condition` registered clean and ran
+ * `success: true` with nothing reported anywhere — on the same key the start
+ * node's TRIGGER GATE is read from.
+ *
+ * ⚠️ The rule is deliberately NOT `PREDICATE_SLOT_STRING_REFUSAL`. That arm's
+ * slots are declared `z.string()`; these are not. `FlowEdgeSchema.condition` is
+ * `ExpressionInputSchema`, so an envelope is a first-class authored spelling
+ * here, and a node's open `z.record` config passes one through verbatim. The
+ * controls below are those two shapes staying green.
+ */
+describe('structural condition shape (#15662)', () => {
+  const objects = [
+    { name: 'crm_lead', fields: { rating: { type: 'number' }, status: { type: 'text' } } },
+  ];
+
+  const flowWith = (opts: { startCondition?: unknown; decisionCondition?: unknown; edgeCondition?: unknown }) => ({
+    objects,
+    flows: [{
+      name: 'gate_flow',
+      nodes: [
+        {
+          id: 'start', type: 'start',
+          config: {
+            objectName: 'crm_lead',
+            ...('startCondition' in opts ? { condition: opts.startCondition } : {}),
+          },
+        },
+        {
+          id: 'branch', type: 'decision',
+          config: { ...('decisionCondition' in opts ? { condition: opts.decisionCondition } : {}) },
+        },
+      ],
+      edges: [{
+        id: 'e1', source: 'start', target: 'branch',
+        ...('edgeCondition' in opts ? { condition: opts.edgeCondition } : {}),
+      }],
+    }],
+  });
+
+  const condIssues = (opts: Parameters<typeof flowWith>[0], site: string) =>
+    validateStackExpressions(flowWith(opts)).filter((i) => i.where.includes(site));
+
+  it('RED CONTROL — the brace-trap string on this very arm still reports', () => {
+    // Not a shape violation, so it cannot be "the answer" to what is measured
+    // below; it proves this call reaches this slot and can emit. If it ever
+    // goes to zero, every zero in this block is void.
+    const control = condIssues({ decisionCondition: '{record.rating} >= 4' }, "node 'branch'");
+    expect(control).toHaveLength(1);
+    expect(control[0].severity).toBe('error');
+    expect(control[0].message).toContain('template brace');
+  });
+
+  it('reports every measured silent value on a node condition, naming what it found', () => {
+    for (const [value, found] of [[42, 'Found a number'], [true, 'Found a boolean'], [['a'], 'Found an array']] as const) {
+      const issues = condIssues({ decisionCondition: value }, "node 'branch'");
+      expect(issues).toHaveLength(1);
+      expect(issues[0].severity).toBe('error');
+      expect(issues[0].message.startsWith(STRUCTURAL_CONDITION_SHAPE_REFUSAL)).toBe(true);
+      expect(issues[0].message).toContain(found);
+      expect(issues[0].where).toContain("flow 'gate_flow'");
+    }
+  });
+
+  it('reports the same on the START node trigger gate', () => {
+    const issues = condIssues({ startCondition: 42 }, "node 'start'");
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message.startsWith(STRUCTURAL_CONDITION_SHAPE_REFUSAL)).toBe(true);
+  });
+
+  it('reports the same on an edge condition', () => {
+    const issues = condIssues({ edgeCondition: ['a'] }, "edge 'e1'");
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message.startsWith(STRUCTURAL_CONDITION_SHAPE_REFUSAL)).toBe(true);
+  });
+
+  it('refuses an object that is neither text nor an expression', () => {
+    const issues = condIssues({ decisionCondition: { source: 1 } }, "node 'branch'");
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message).toContain('neither a string `source` nor an `ast`');
+    // A non-string `source` is what is being refused, so it is never the
+    // attribution.
+    expect(issues[0].source).toBe('');
+  });
+
+  it('refuses ONCE — the value-reading passes do not re-report it as an empty condition', () => {
+    expect(condIssues({ decisionCondition: 42 }, 'condition')).toHaveLength(1);
+  });
+
+  describe('CONTROLS — the shapes that must stay accepted', () => {
+    it('an expression ENVELOPE on a node condition is legitimate here', () => {
+      expect(condIssues({ decisionCondition: { dialect: 'cel', source: 'record.rating >= 4' } }, "node 'branch'"))
+        .toHaveLength(0);
+      // No dialect — `evaluateCondition` reads it as CEL, so does this.
+      expect(condIssues({ decisionCondition: { source: 'record.rating >= 4' } }, "node 'branch'"))
+        .toHaveLength(0);
+    });
+
+    it('an envelope on an EDGE is legitimate — every parsed edge condition is one', () => {
+      expect(condIssues({ edgeCondition: { dialect: 'cel', source: 'record.rating >= 4' } }, "edge 'e1'"))
+        .toHaveLength(0);
+      expect(condIssues({ edgeCondition: 'record.rating >= 4' }, "edge 'e1'")).toHaveLength(0);
+    });
+
+    it('a whitespace-only STRING is untouched — ruled correct, not a defect', () => {
+      expect(condIssues({ decisionCondition: '   ' }, "node 'branch'")).toHaveLength(0);
+      expect(condIssues({ edgeCondition: '   ' }, "edge 'e1'")).toHaveLength(0);
+    });
+
+    it('a clean bare-CEL condition still passes', () => {
+      expect(condIssues({ decisionCondition: 'record.rating >= 4' }, "node 'branch'")).toHaveLength(0);
+    });
   });
 });
 

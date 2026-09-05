@@ -1492,6 +1492,19 @@ jobs:
       - name: Build packages (excluding docs)
         run: pnpm build
 
+      # [#15042] The closure-wide declaration re-check. `check-dts-emitted` runs
+      # per package, immediately after that package's `tsup`, and is the LAST
+      # thing that ever looks: on the filing observation it reported
+      # `3/3 declared declaration file(s) present` and the files were gone later
+      # in the same tree, with no second build and no `rm`. Sits directly after
+      # the build so the tree the steps BELOW read is the tree this swept — a
+      # package whose declarations are absent makes an importing symbol `any`,
+      # and the direction that does NOT throw is a suite passing against a type
+      # nothing is checking (#7668, #12078). No `dist/` anywhere is exit 3
+      # PREREQUISITE NOT MET, never a pass.
+      - name: Sweep the built closure for vanished declarations
+        run: pnpm check:dts-closure
+
       # A package that builds with plain `tsc` and does not exclude tests emits
       # `dist/**/*.test.js`. Two costs, and the second is the dangerous one:
       #
