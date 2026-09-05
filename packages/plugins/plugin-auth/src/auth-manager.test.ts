@@ -3439,7 +3439,12 @@ describe('AuthManager', () => {
     // platform admin (a sys_user_permission_set row pointing at the
     // admin_full_access permission set with no organization scope).
     const makeDataEngine = (opts: { platformAdmin: boolean }) => ({
-      find: vi.fn(async (object: string) => {
+      // Two parameters because the seam has two: `IDataEngine.find(objectName,
+      // query?, options?)`, and every production read reaching this double goes
+      // through `resolve-authz-context.ts` `tryFind`, which always calls
+      // `ql.find(object, { where, limit, context })`. Declaring one parameter
+      // would force a delegating override to drop an argument the seam passes.
+      find: vi.fn(async (object: string, _query?: any) => {
         if (object === 'sys_user_permission_set') {
           return opts.platformAdmin
             ? [{ user_id: 'u-1', permission_set_id: 'ps-admin', organization_id: null }]
