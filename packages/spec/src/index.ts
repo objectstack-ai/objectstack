@@ -254,6 +254,8 @@ export {
   ExpressionDialect,
   ExpressionMetaSchema,
   ExpressionSchema,
+  EVALUATED_EXPRESSION_SOURCE_REQUIRED,
+  EvaluatedExpressionSchema,
   ExpressionInputSchema,
   CronExpressionInputSchema,
   TemplateExpressionInputSchema,
@@ -268,6 +270,7 @@ export {
 } from './shared/expression.zod';
 export type {
   Expression,
+  EvaluatedExpression,
   ExpressionMeta,
   ExpressionInput,
   Predicate,

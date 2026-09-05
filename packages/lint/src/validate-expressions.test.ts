@@ -6,7 +6,7 @@ import { describe, it, expect } from 'vitest';
 // argument for the allowlist, and a hand-copied list would go green on exactly
 // the root the rule never saw.
 import { SCOPE_ROOTS } from '@objectstack/formula';
-import { ExpressionInputSchema, ObjectStackSchema } from '@objectstack/spec';
+import { EVALUATED_EXPRESSION_SOURCE_REQUIRED, ExpressionInputSchema, ObjectStackSchema } from '@objectstack/spec';
 import { FieldSchema, ObjectSchema, SelectOptionSchema } from '@objectstack/spec/data';
 import { SharingRuleSchema } from '@objectstack/spec/security';
 // [#15137] The published refusal sentence a `value`-slot finding must lead
@@ -3729,6 +3729,9 @@ describe('assignment value envelope — located findings (#15137)', () => {
   it.each([
     ['no `source` — the shape only the spec schema catches', { dialect: 'cel' }],
     ['an empty `source`', { dialect: 'cel', source: '' }],
+    // #15430 — an `ast`-only envelope is a valid `ExpressionSchema` that no
+    // engine evaluates; the spec's evaluated-slot rule refuses it at `source`.
+    ['an `ast`-only envelope — no `source` the engine can evaluate', { dialect: 'cel', ast: { kind: 'const' } }],
     ['a non-`cel` dialect', { dialect: 'template', source: 'Hello {name}' }],
     ['CEL that does not parse', { dialect: 'cel', source: 'rows.map(r,' }],
     ['an unknown function', { dialect: 'cel', source: 'nosuchfn(rows)' }],
@@ -3755,16 +3758,24 @@ describe('assignment value envelope — located findings (#15137)', () => {
     })).toHaveLength(0);
   });
 
-  it('is silent on a whitespace-only `source` — the seam this pass cannot see (#15430)', () => {
-    // `ExpressionSchema.source` is `z.string().min(1)`, so `'   '` passes the
-    // shape rule, and `validateExpression` trims it to empty and answers
-    // `ok: true` ("not authored"). Build says nothing; the CEL engine parses it
-    // untrimmed and the run faults loudly (pinned in `service-automation`'s
-    // `assignment-value-envelope.test.ts`). Pinned as the BOUND of the
-    // build/run agreement, not as desired behaviour — ⛔ do not close it with a
-    // trim rule invented here: that is a third notion of "malformed", which is
-    // the defect this arm exists to avoid. The fix belongs in the shape rule.
-    expect(valueIssues({ digest: { dialect: 'cel', source: '   ' } })).toHaveLength(0);
+  it('reports a whitespace-only `source` — the seam is now visible through the shape pass (#15430)', () => {
+    // FLIPPED. This used to pin the seam this pass could NOT see: `'   '`
+    // passed `ExpressionSchema.source`'s `min(1)`, `validateExpression` trimmed
+    // it to empty and answered `ok: true` ("not authored"), and only the run
+    // faulted. The file said the fix belonged in the shape rule, not in a trim
+    // rule invented here — and it landed there: `AssignmentExpressionValueSchema`
+    // now composes the spec's `EvaluatedExpressionSchema`, so the object-level
+    // shape pass this arm already runs (`AssignmentValueSchema.safeParse`)
+    // refuses it, located at the author's variable, led by the published
+    // sentence and carrying the evaluated-slot rule's own — measured here, not
+    // assumed: nothing in this pass changed, the refusal arrives through the
+    // spec dependency.
+    const issues = valueIssues({ digest: { dialect: 'cel', source: '   ' } });
+    expect(issues).toHaveLength(1);
+    expect(issues[0]!.severity).toBe('error');
+    expect(issues[0]!.where).toContain('config.assignments.digest');
+    expect(issues[0]!.message.startsWith(ASSIGNMENT_VALUE_ENVELOPE_REFUSAL)).toBe(true);
+    expect(issues[0]!.message).toContain('`source`: ' + EVALUATED_EXPRESSION_SOURCE_REQUIRED);
   });
 
   it('says nothing about the legacy array form — it is not a declared slot', () => {
