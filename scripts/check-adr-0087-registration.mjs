@@ -401,6 +401,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'TSO-6048: THE REGRESSION PIN -- the founding case must never admit': 8,
   'TSO-N: the predicate set is pinned BY NAME, never by count': 3,
   'TSO-U: unit pins on predicate 4\'s readers': 30,
+  'TSO-D (#15627): a DOTTED member path resolves through the object-literal nesting': 21,
   'G6: a changeset that was ALREADY breaking at base is inherited': 1,
   'R15: a changeset RENAMED AND turned breaking in the same commit': 5,
   'G10: a PURE rename of an ALREADY-breaking stock changeset': 3,
@@ -425,7 +426,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 48;
+const SELF_TEST_BATTERY_FLOOR = 49;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1997,16 +1998,39 @@ function metadataSurfaceFilesAt(rev, cwd) {
 }
 
 const IDENT = '[A-Za-z_$][A-Za-z0-9_$]*';
-const IDENT_RE = new RegExp(`^${IDENT}$`);
+// A DOTTED MEMBER PATH: `oauth.applications.get`. The leading segments are the
+// object-literal nesting the member sits in; the last one is the member itself.
+const MEMBER_PATH_RE = new RegExp(`^${IDENT}(?:\\.${IDENT})*$`);
 
-/** `path/to/file.ts#Symbol` -> its two halves, or null when it is not that shape. */
+/**
+ * `path/to/file.ts#Symbol` or `path/to/file.ts#a.b.member` -> its halves, or null.
+ *
+ * ⚠️ The grammar was widened to a dotted member path (#15627), and the widening is
+ * only sound because the READER was widened in the same commit. `packages/client/
+ * src/index.ts` declares `get` 14 times and `delete` 10 times, and a bare reference
+ * resolves to the FIRST same-named definition in the file — so the members PR
+ * #15445 and #15451 actually narrowed (`oauth.applications.get` at line 3184,
+ * `oauth.applications.delete` at 3243) had NO addressable spelling at all: #15451's
+ * whole category was closed by the grammar rather than by a judgement about it.
+ * ⛔ A wider grammar over the old first-same-name reader would be strictly worse
+ * than that refusal — writable but wrong — so `dotted` references are resolved
+ * STRUCTURALLY (`resolveMemberPath`) and refused, never guessed, when the walk
+ * finds zero or more than one candidate. ⛔ A line number is never the
+ * disambiguator: this file's line numbers were measured to rot within one day.
+ *
+ * @returns {{ path: string, symbol: string, segments: string[], dotted: boolean }|null}
+ *   `symbol` is the LAST segment — the member's own name; `segments` is the whole
+ *   path. A caller that can only read a top-level declaration must branch on
+ *   `dotted` rather than silently reading `symbol` out of its nesting.
+ */
 export function parseSymbolRef(ref) {
   const at = ref.indexOf('#');
   if (at <= 0) return null;
   const path = ref.slice(0, at);
-  const symbol = ref.slice(at + 1);
-  if (!IDENT_RE.test(symbol) || path.includes('#') || symbol.length === 0) return null;
-  return { path, symbol };
+  const spelling = ref.slice(at + 1);
+  if (!MEMBER_PATH_RE.test(spelling) || path.includes('#') || spelling.length === 0) return null;
+  const segments = spelling.split('.');
+  return { path, symbol: segments[segments.length - 1], segments, dotted: segments.length > 1 };
 }
 
 /**
@@ -2131,6 +2155,21 @@ export function verifyRuntimeInterfaceOnly(refs, { rev, cwd, packages }) {
     const parsedRef = parseSymbolRef(ref);
     if (!parsedRef) {
       problems.push(`\`runtime-interface-only\` names "${ref}", which is not a \`<path>#<Symbol>\` reference.\n${HOW(ref)}`);
+      continue;
+    }
+    // A DOTTED member path is meaningful only where a MEMBER is read (predicate 4).
+    // This category reads an exported `interface` / `type` / `class` / `enum`, which
+    // is top-level by construction, so a nesting walk has nothing to walk. Refused
+    // by name rather than silently read as its last segment: `a.b.Result` quietly
+    // becoming `Result` is exactly the "writable but wrong" reference #15627's
+    // widening exists to prevent.
+    if (parsedRef.dotted) {
+      problems.push(
+        `\`runtime-interface-only\` names "${ref}", a DOTTED member path. This category names an\n` +
+        '      exported type declaration, which is top-level -- there is no object-literal nesting to\n' +
+        '      resolve through. The dotted spelling is accepted only by `type-surface-only`, which\n' +
+        `      reads a member.\n${HOW(ref)}`,
+      );
       continue;
     }
     const { path, symbol } = parsedRef;
@@ -2445,10 +2484,47 @@ function maskCommentsAndLiterals(source) {
  */
 export function memberReturnAnnotation(text, symbol) {
   const masked = maskCommentsAndLiterals(text);
+  const found = memberDefinitionsIn(text, masked, symbol, 0, masked.length);
+  return found.length === 0 ? null : { annotation: found[0].annotation };
+}
+
+/**
+ * Every DEFINITION of `symbol` whose name starts inside `[from, to)`, in file order.
+ *
+ * The shared core of `memberReturnAnnotation` (whole file, first hit wins — the
+ * behaviour bare references have always had) and of the dotted-path reader below
+ * (one nesting region, and a count that is refused unless it is exactly one).
+ *
+ * The declaration shapes it reads, and nothing else:
+ *
+ * ```text
+ *   name(...)              method shorthand / function-ish
+ *   name: (...)            an arrow property
+ *   name = (...)           a class field holding an arrow
+ *   name: async (...)      the `async` spelling of either
+ *   name: <T>(...)         a generic type-parameter list ahead of the params
+ * ```
+ *
+ * followed, after the balanced parameter list, by a return annotation (`: T`), an
+ * arrow (`=>`) or a body brace (`{`). A `(...)` with none of those after it is a
+ * CALL, not a declaration, and the scan moves on — otherwise every consumer of a
+ * method would read as a definition of it.
+ *
+ * @returns {{ index: number, annotation: string|null }[]} `annotation: null` when
+ *   the definition is there and carries NO return annotation.
+ */
+function memberDefinitionsIn(text, masked, symbol, from, to) {
+  const out = [];
   // `[^\w$.]` excludes a leading dot, so `client.analytics.query(` -- a CALL --
-  // is never mistaken for a declaration of `query`.
-  const head = new RegExp(`(?:^|[^\\w$.])${symbol}\\s*(?:[:=]\\s*)?(?:async\\s+)?(?:<[^<>]*>\\s*)?\\(`, 'g');
+  // is never mistaken for a declaration of `query`. Group 1 exists so the
+  // identifier's own offset is computable: the prefix is `^` (zero-width) on the
+  // first byte of the file and one character everywhere else, and a region test
+  // that guessed which of the two it got would be off by one at exactly one
+  // position in the file.
+  const head = new RegExp(`(?:^|[^\\w$.])(${symbol}\\s*(?:[:=]\\s*)?(?:async\\s+)?(?:<[^<>]*>\\s*)?\\()`, 'g');
   for (const m of masked.matchAll(head)) {
+    const identStart = m.index + m[0].length - m[1].length;
+    if (identStart < from || identStart >= to) continue;
     const open = m.index + m[0].length - 1;
     let depth = 0;
     let close = -1;
@@ -2463,7 +2539,7 @@ export function memberReturnAnnotation(text, symbol) {
     if (!colon) {
       // No annotation. It is a DEFINITION only if a body or an arrow follows;
       // otherwise this was a call expression and the next candidate is scanned.
-      if (/^\s*(?:=>|\{)/.test(tail)) return { annotation: null };
+      if (/^\s*(?:=>|\{)/.test(tail)) out.push({ index: identStart, annotation: null });
       continue;
     }
     // Walk the type text to the arrow / body / terminator, at bracket depth 0.
@@ -2485,9 +2561,114 @@ export function memberReturnAnnotation(text, symbol) {
     // (`'a' | 'b'`) would otherwise be reported back as blanks.
     const rawStart = close + 1 + colon[0].length;
     const raw = text.slice(rawStart, rawStart + acc.length).trim();
-    return { annotation: raw.length === annotation.length ? raw : annotation };
+    out.push({ index: identStart, annotation: raw.length === annotation.length ? raw : annotation });
   }
-  return null;
+  return out;
+}
+
+/**
+ * Every `{ … }` an object-literal property named `name` opens inside `[from, to)`.
+ *
+ * The two spellings a namespace on this repo's SDK client actually uses:
+ * `applications: {` (a property of an object literal) and `oauth = {` (a class
+ * field holding one). A leading dot is excluded for the same reason as above --
+ * `this.oauth = {` reached through a receiver is an assignment the walk does not
+ * claim to read, and claiming it would be guessing.
+ *
+ * @returns {{ open: number, close: number }[]}
+ */
+function objectLiteralBodiesFor(structural, name, from, to) {
+  const out = [];
+  const key = new RegExp(`(?:^|[^\\w$.])(${name}\\s*[:=]\\s*\\{)`, 'g');
+  for (const m of structural.matchAll(key)) {
+    const identStart = m.index + m[0].length - m[1].length;
+    if (identStart < from || identStart >= to) continue;
+    const open = m.index + m[0].length - 1;
+    const close = matchBracket(structural, open);
+    if (close === -1) continue;
+    out.push({ open, close });
+  }
+  return out;
+}
+
+/**
+ * The region of `text` a dotted path's LEADING segments narrow the search to.
+ *
+ * Walked STRUCTURALLY on the comment- and literal-masked projection (offsets
+ * preserved), from the top of the file: `oauth` -> `applications` narrows to the
+ * bytes between that literal's braces, and the member is then looked for THERE.
+ * ⛔ Never a line number, and never "the first same-named definition in the file":
+ * both are what #15627 measured as unusable on `packages/client/src/index.ts`.
+ *
+ * A segment that opens zero or more than one object literal in the region is
+ * REPORTED, never guessed at -- `packages` opens three in that file, and picking
+ * one of them would be the "writable but wrong" reference this widening exists to
+ * avoid.
+ *
+ * @returns {{ ok: true, from: number, to: number }|{ ok: false, reason: string }}
+ */
+export function resolveMemberPath(text, segments) {
+  const structural = maskCommentsAndLiterals(text);
+  let from = 0;
+  let to = structural.length;
+  const walked = [];
+  for (const seg of segments.slice(0, -1)) {
+    const where = walked.length === 0 ? 'at the top of the file' : `inside \`${walked.join('.')}\``;
+    const bodies = objectLiteralBodiesFor(structural, seg, from, to);
+    if (bodies.length === 0) {
+      return { ok: false, reason: `no \`${seg}\` object literal (\`${seg}: {\` or \`${seg} = {\`) is declared ${where}` };
+    }
+    if (bodies.length > 1) {
+      return { ok: false, reason: `\`${seg}\` opens ${bodies.length} object literals ${where}, so the path is AMBIGUOUS` };
+    }
+    from = bodies[0].open + 1;
+    to = bodies[0].close;
+    walked.push(seg);
+  }
+  return { ok: true, from, to };
+}
+
+/**
+ * What predicate 4 can read about ONE parsed reference, or why it is refused.
+ *
+ * A bare reference is `readDeclaredTypeSurface` verbatim -- unchanged behaviour,
+ * including its "first same-named definition" reading, which is what every marker
+ * written before #15627 means. A DOTTED reference is resolved through the nesting
+ * and read only inside it; a dotted path never names an exported `interface` /
+ * `type` / `class` / `enum`, so only the member branch applies to it.
+ *
+ * @returns {{ surface: {shape: string, type: string|null, erased: boolean}|null,
+ *             refusal: string|null }} at most one of the two is non-null.
+ */
+export function readTypeSurfaceRef(text, parsed) {
+  if (!parsed.dotted) return { surface: readDeclaredTypeSurface(text, parsed.symbol), refusal: null };
+  const spelling = parsed.segments.join('.');
+  const parent = parsed.segments.slice(0, -1).join('.');
+  const region = resolveMemberPath(text, parsed.segments);
+  if (!region.ok) return { surface: null, refusal: `\`${spelling}\` does not resolve: ${region.reason}.`, };
+  const masked = maskCommentsAndLiterals(text);
+  const defs = memberDefinitionsIn(text, masked, parsed.symbol, region.from, region.to);
+  if (defs.length === 0) {
+    return {
+      surface: null,
+      refusal: `\`${spelling}\` does not resolve: \`${parent}\` is declared, but no \`${parsed.symbol}\` ` +
+        'definition sits inside it.',
+    };
+  }
+  if (defs.length > 1) {
+    return {
+      surface: null,
+      refusal: `\`${spelling}\` is AMBIGUOUS: ${defs.length} \`${parsed.symbol}\` definitions sit inside ` +
+        `\`${parent}\`. Name a deeper path that resolves to exactly one.`,
+    };
+  }
+  const { annotation } = defs[0];
+  return {
+    surface: annotation === null
+      ? { shape: `\`${spelling}\`, which carries NO return annotation`, type: null, erased: true }
+      : { shape: `the return annotation of \`${spelling}\``, type: annotation, erased: isErasedType(annotation) },
+    refusal: null,
+  };
 }
 
 /** A declared surface as a message prints it: one line, comment spans collapsed. */
@@ -2816,6 +2997,10 @@ export function verifyTypeSurfaceOnly(refs, { base, head, cwd, bumps, packages, 
     '      fix: name the narrowed symbol as `<repo-relative-path>#<Symbol>`, e.g.\n' +
     '        <!-- adr-0087: not-required (type-surface-only ' +
     'packages/client/src/index.ts#queryDataset) why -->\n' +
+    '      ...or, when the name is not unique in the file, as a DOTTED MEMBER PATH through the\n' +
+    '      object-literal nesting the member sits in (#15627):\n' +
+    '        <!-- adr-0087: not-required (type-surface-only ' +
+    'packages/client/src/index.ts#oauth.applications.get) why -->\n' +
     `      The symbol is what predicate 4 reads at BOTH revs${badRef ? ` (got: ${badRef})` : ''}.`;
 
   if (refs.length === 0) {
@@ -2837,7 +3022,11 @@ export function verifyTypeSurfaceOnly(refs, { base, head, cwd, bumps, packages, 
       );
       continue;
     }
-    const { path, symbol } = parsedRef;
+    const { path } = parsedRef;
+    // The spelling the author wrote, which is what every message below has to name:
+    // `symbol` alone is the LAST segment, and reporting a verdict about `get` when
+    // the marker said `oauth.applications.get` is the reading #15627 was filed on.
+    const symbol = parsedRef.segments.join('.');
 
     const headText = showOrNull(head, path, cwd);
     if (headText === null) {
@@ -2859,7 +3048,20 @@ export function verifyTypeSurfaceOnly(refs, { base, head, cwd, bumps, packages, 
       continue;
     }
 
-    const at = readDeclaredTypeSurface(headText, symbol);
+    const read = readTypeSurfaceRef(headText, parsedRef);
+    if (read.refusal) {
+      problems.push(
+        `\`type-surface-only ${ref}\` [predicate 4] cannot be resolved at HEAD in ${path}:\n` +
+        `      ${read.refusal}\n` +
+        '      A dotted member path is walked through the object-literal nesting it names, and a walk\n' +
+        '      that lands on zero or on several candidates is REPORTED rather than guessed at -- a\n' +
+        '      reference that resolves to the wrong same-named member reads as a true sentence about\n' +
+        '      a member the diff never touched (#15627).\n' +
+        HOW(null),
+      );
+      continue;
+    }
+    const at = read.surface;
     if (!at) {
       problems.push(
         `\`type-surface-only ${ref}\` [predicate 4]: ${path} declares no readable \`${symbol}\` at HEAD.\n` +
@@ -2880,7 +3082,18 @@ export function verifyTypeSurfaceOnly(refs, { base, head, cwd, bumps, packages, 
       continue;
     }
 
-    const before = readDeclaredTypeSurface(baseText, symbol);
+    const readBase = readTypeSurfaceRef(baseText, parsedRef);
+    if (readBase.refusal) {
+      problems.push(
+        `\`type-surface-only ${ref}\` [predicate 4] cannot be resolved at the merge base in\n` +
+        `      ${path}: ${readBase.refusal}\n` +
+        '      Predicate 4 is a comparison, and a base side that cannot be resolved is not evidence\n' +
+        '      that the surface was erased -- it is no evidence at all. Refused rather than assumed\n' +
+        '      true (#4690). If the nesting was renamed, name the path that existed at the base.',
+      );
+      continue;
+    }
+    const before = readBase.surface;
     if (!before) {
       problems.push(
         `\`type-surface-only ${ref}\` [predicate 4] cannot be read at the merge base: ${path} exists\n` +
@@ -4492,6 +4705,190 @@ function selfTest() {
       `length -- so an author can tell "long" from "all of it"; a short one is printed byte-identical. Got: ${JSON.stringify(shown)}`,
     );
   }
+
+  // ---- TSO-D (#15627): a DOTTED member path, resolved through the nesting ---
+  //
+  // The grammar and the reader were widened in ONE commit, and this battery is
+  // where that pairing is pinned. `packages/client/src/index.ts` declares `get` 14
+  // times and `delete` 10 times, so `<path>#get` names the FIRST same-named
+  // definition in the file -- a member PR #15445 and PR #15451 never touched --
+  // while the members they DID narrow (`oauth.applications.get`,
+  // `oauth.applications.delete`) had no addressable spelling at all. #15451's whole
+  // category was closed by the grammar rather than by a judgement about the claim.
+  //
+  // ⛔ The dangerous repair is a wider GRAMMAR over the old first-same-name READER:
+  // that reference is writable and wrong, which is strictly worse than the refusal
+  // it replaces. TSO-D5/D6 are the pins that a dotted path reads the NESTED
+  // definition, and TSO-D5 is the negative control that a BARE name still reads the
+  // first one -- both halves, or neither proves anything.
+  //
+  // ⛔ And a line number is never the disambiguator: the two measurements on this
+  // card, one day apart, disagree about every line number in that file.
+  battery('TSO-D (#15627): a DOTTED member path resolves through the object-literal nesting');
+  const DOT_CLIENT =
+    'export class ObjectStackClient {\n' +
+    '  packages = {\n' +
+    '    get: async (name: string) => {\n' +
+    "      const res = await this.fetch('/packages');\n" +
+    '      return res.json();\n' +
+    '    },\n' +
+    '  };\n' +
+    '\n' +
+    '  oauth = {\n' +
+    '    applications: {\n' +
+    '      get: async (clientId: string): Promise<OAuthApplication> => {\n' +
+    "        const res = await this.fetch('/oauth2/get-client');\n" +
+    '        return res.json();\n' +
+    '      },\n' +
+    '      delete: async (clientId: string) => {\n' +
+    "        const res = await this.fetch('/oauth2/delete-client');\n" +
+    '        return res.json();\n' +
+    '      },\n' +
+    '    },\n' +
+    '  };\n' +
+    '\n' +
+    '  organizations = {\n' +
+    '    invitations: {\n' +
+    '      list: async (): Promise<Invitation[]> => {\n' +
+    "        const res = await this.fetch('/invitations');\n" +
+    '        return res.json();\n' +
+    '      },\n' +
+    '    },\n' +
+    '    teams: {\n' +
+    '      list: async (): Promise<Team[]> => {\n' +
+    "        const res = await this.fetch('/teams');\n" +
+    '        return res.json();\n' +
+    '      },\n' +
+    '    },\n' +
+    '  };\n' +
+    '}\n';
+  const readRef = (text, ref) => readTypeSurfaceRef(text, parseSymbolRef(ref));
+  const DOT = (spelling) => `packages/client/src/index.ts#${spelling}`;
+
+  // -- the grammar half -------------------------------------------------------
+  assert(
+    parseSymbolRef(DOT('oauth.applications.get'))?.segments.join('|') === 'oauth|applications|get',
+    'TSO-D1: a dotted member path parses into its segments',
+  );
+  assert(
+    parseSymbolRef(DOT('oauth.applications.get'))?.symbol === 'get' && parseSymbolRef(DOT('oauth.applications.get'))?.dotted === true,
+    'TSO-D2: `symbol` stays the MEMBER name and `dotted` is set -- a caller that can only read a top-level declaration has to branch on it, never read `symbol` out of its nesting',
+  );
+  assert(
+    parseSymbolRef(DOT('get'))?.dotted === false && parseSymbolRef(DOT('get'))?.symbol === 'get',
+    'TSO-D3: a BARE identifier is unchanged -- every marker written before this widening keeps its exact previous meaning',
+  );
+  assert(
+    parseSymbolRef(DOT('a..b')) === null && parseSymbolRef(DOT('a.')) === null && parseSymbolRef(DOT('.a')) === null,
+    'TSO-D4: an empty segment is not a member path -- the widening is a dotted IDENT chain, not "anything with a dot in it"',
+  );
+
+  // -- the reader half: the nested definition, never the first same-named one --
+  {
+    const r = readRef(DOT_CLIENT, DOT('get'));
+    assert(
+      r.refusal === null && r.surface?.type === null && r.surface?.erased === true &&
+      r.surface?.shape === '`get`, which carries NO return annotation',
+      `TSO-D5: THE NEGATIVE CONTROL -- a BARE \`get\` still reads the FIRST definition in the file (\`packages.get\`, unannotated), NOT the annotated \`oauth.applications.get\` below it. If this moves, the widening silently changed what every marker written before it means. Got: ${JSON.stringify(r)}`,
+    );
+  }
+  assert(
+    readRef(DOT_CLIENT, DOT('oauth.applications.get')).surface?.type === 'Promise<OAuthApplication>',
+    'TSO-D6: THE VICTIM -- the dotted path reads the NESTED definition, not the first same-named one the bare reference lands on',
+  );
+  assert(
+    readRef(DOT_CLIENT, DOT('oauth.applications.get')).surface?.erased === false,
+    'TSO-D7: ...and predicate 4 therefore reads it as CONCRETE at HEAD, which is the whole reading the grammar was blocking',
+  );
+  {
+    const r = readRef(DOT_CLIENT, DOT('oauth.applications.delete'));
+    assert(
+      r.surface?.type === null && r.surface?.erased === true && r.surface?.shape.includes('`oauth.applications.delete`'),
+      `TSO-D8: the #15451 member reads as UNANNOTATED and the verdict NAMES THE DOTTED SPELLING -- a message about \`delete\` when the marker said \`oauth.applications.delete\` is the reading this card was filed on. Got: ${JSON.stringify(r)}`,
+    );
+  }
+
+  // -- any depth, and two same-named members under DIFFERENT parents (#14314) --
+  assert(
+    readRef(DOT_CLIENT, DOT('organizations.invitations.list')).surface?.type === 'Promise<Invitation[]>' &&
+    readRef(DOT_CLIENT, DOT('organizations.teams.list')).surface?.type === 'Promise<Team[]>',
+    'TSO-D9: two same-named members under DIFFERENT parents each resolve to their OWN definition -- this is not a special case for `oauth.applications.*`, and #14313 / #14314 bind exactly this shape',
+  );
+
+  // -- and the refusals, which are what make the widening sound ---------------
+  {
+    const r = readRef(DOT_CLIENT, DOT('oauth.applications.nosuch'));
+    assert(
+      r.surface === null && /no `nosuch` definition sits inside it/.test(r.refusal ?? ''),
+      `TSO-D10: a member that does not exist under a RESOLVED parent is refused with a named finding, never resolved outward to a same-named member elsewhere. Got: ${JSON.stringify(r)}`,
+    );
+  }
+  {
+    const r = readRef(DOT_CLIENT, DOT('oauth.missing.get'));
+    assert(
+      r.surface === null && /no `missing` object literal/.test(r.refusal ?? '') && /inside `oauth`/.test(r.refusal ?? ''),
+      `TSO-D11: a PARENT segment that does not exist is refused, and the message says which segment and where the walk was. Got: ${JSON.stringify(r)}`,
+    );
+  }
+  {
+    const twice = DOT_CLIENT.replace('  organizations = {', '  packages = {\n    list: async (): Promise<Row[]> => { return []; },\n  };\n\n  organizations = {');
+    const r = readRef(twice, DOT('packages.get'));
+    assert(
+      r.surface === null && /AMBIGUOUS/.test(r.refusal ?? '') && /opens 2 object literals/.test(r.refusal ?? ''),
+      `TSO-D12: a segment opening SEVERAL object literals is refused as AMBIGUOUS -- the real file opens three named \`packages\`, and picking one of them is the "writable but wrong" reference this widening exists to prevent. Got: ${JSON.stringify(r)}`,
+    );
+  }
+  {
+    const r = readRef(DOT_CLIENT, DOT('organizations.list'));
+    assert(
+      r.surface === null && /AMBIGUOUS/.test(r.refusal ?? '') && /2 `list` definitions/.test(r.refusal ?? ''),
+      `TSO-D13: a member name that resolves to SEVERAL definitions inside the region is refused, with the count -- the fix is a deeper path, not a guess. Got: ${JSON.stringify(r)}`,
+    );
+  }
+
+  // -- end to end, through the shipping scan ----------------------------------
+  const DOT_BASE = DOT_CLIENT.replace('(clientId: string): Promise<OAuthApplication> =>', '(clientId: string) =>');
+  const DOT_BODY =
+    'fix(client): bind the OAuth application reader, whose published type was `Promise< any >`\n\n' +
+    '**BREAKING**: `any` is assignable to everything, so a consumer can stop compiling.\n\n' +
+    '## Migration\n\n' +
+    '| you wrote | write instead |\n| --- | --- |\n' +
+    '| `(await client.oauth.applications.get(id)).client` | `(await client.oauth.applications.get(id)).clientId` |\n';
+  const DOT_CS = (inParens) =>
+    CS({ bumps: [['@objectstack/client', 'minor']], body: `${DOT_BODY}\n<!-- adr-0087: not-required (${inParens}) ${TSO_WHY} -->\n` });
+  const DOT_FIXTURE = (marker) => ({
+    pkgs: TSO_PKGS,
+    baseFiles: { 'packages/client/src/index.ts': DOT_BASE },
+    files: { 'packages/client/src/index.ts': DOT_CLIENT, '.changeset/x.md': DOT_CS(marker) },
+  });
+
+  green('TSO-D14 the #15451 shape, finally claimable: a dotted marker naming the member that actually narrowed',
+    run(mk(DOT_FIXTURE(`type-surface-only ${DOT('oauth.applications.get')}`))));
+
+  // The same diff, named BARELY: `packages.get` is first in the file, is untouched
+  // by this diff and is still unannotated -- so the gate answers a TRUE sentence
+  // about a member the diff never touched. That refusal is the defect, preserved
+  // here as the reason the dotted spelling had to exist.
+  red('TSO-D15 the bare spelling still lands on the FIRST same-named definition, which this diff never touched',
+    run(mk(DOT_FIXTURE(`type-surface-only ${DOT('get')}`))), [/is still UNANNOTATED/]);
+
+  red('TSO-D16 a dotted path that does not resolve is refused by predicate 4, never guessed at',
+    run(mk(DOT_FIXTURE(`type-surface-only ${DOT('oauth.applications.nosuch')}`))),
+    [/cannot be resolved at HEAD/, /no `nosuch` definition sits inside it/]);
+
+  // TSO-D17: the widened grammar does NOT leak into the category that reads a
+  // top-level type declaration. Refused BY NAME rather than silently read as its
+  // last segment -- `a.PackagePublishResult` quietly becoming `PackagePublishResult`
+  // is the same "writable but wrong" reference, one category over.
+  red('TSO-D17 `runtime-interface-only` refuses a DOTTED path by name -- it reads a top-level type declaration, which has no nesting to walk',
+    run(mk({
+      pkgs: RIO_PKGS,
+      files: {
+        ...RIO_FILES,
+        '.changeset/x.md': RIO_CS('runtime-interface-only packages/services/service-package/src/index.ts#outer.PackagePublishResult'),
+      },
+    })),
+    [/a DOTTED member path/]);
 
   // ---- G6: a changeset that was ALREADY breaking at base is inherited -------
   battery('G6: a changeset that was ALREADY breaking at base is inherited');
