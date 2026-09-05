@@ -2,7 +2,8 @@
 
 import type { FilterCondition } from '@objectstack/spec/data';
 import type { RegisteredErrorCode } from '@objectstack/spec/api';
-import { likePattern, LIKE_ESCAPE_CHAR, asciiLowerSqlExpr } from './like-pattern.js';
+import { likePattern, LIKE_ESCAPE_CHAR, asciiLowerSqlExpr, type LikeShape } from './like-pattern.js';
+import { textMatchPredicateSql, normalizeSqlDialect } from './text-match-sql.js';
 import { textOperatorPolarity } from './non-text-column.js';
 import {
   CROSS_FIELD_COMPARISON_OPERATORS,
@@ -95,6 +96,23 @@ import {
  * admitting rows the policy did not is over-reach, not a degraded filter. Note
  * the file was fail-closed everywhere else — the LIKE family was the one place an
  * author's literal was silently reinterpreted rather than refused.
+ *
+ * ## The case-EXACT family is compiled per DIALECT (#15684)
+ *
+ * The escaping above closed one half of "the comparand means what the author
+ * wrote"; the KEYWORD was the other half and kept the same over-reach for two
+ * more years. `$contains` / `$notContains` / `$startsWith` / `$endsWith` are
+ * case-SENSITIVE by ruling (#4706 Q2 = A), and a plain `LIKE` is that only on
+ * Postgres: SQLite folds ASCII case unconditionally and MySQL follows the
+ * column's collation. Measured on sql.js over the shared `FILTER_TEXT_ROWS`
+ * fixture, `{name: {$contains: 'acme'}}` compiled here ADMITTED `ACME Corp` —
+ * a row the policy excludes, which is the #3948 reading this file already
+ * applies to its escaping, applied to its keyword.
+ *
+ * `text-match-sql.ts` carries the per-dialect construct table (#6518's, arm for
+ * arm), and {@link ReadScopeCompileOptions.dialect} is how the executing
+ * engine's name reaches it. A caller that does not name a dialect keeps the
+ * plain `LIKE` — "cannot answer, do not block" — so this is purely additive.
  *
  * ## Every refusal here is a SERVER fault, and says so (#5367, maintainer ruling 2026-08-06)
  *
@@ -455,6 +473,19 @@ export interface ReadScopeCompileOptions {
    * cannot classify one (`non-text-column.ts` carries the argument).
    */
   nonTextColumn?: (field: string) => boolean;
+  /**
+   * [#15684] The SQL dialect that will EXECUTE this scope — `'sqlite'` /
+   * `'postgres'` / `'mysql'`. Anything else, including absent, is `'unknown'`
+   * and keeps the plain `LIKE` this compiler always emitted.
+   *
+   * The case-EXACT text family (#4706 Q2 = A) needs it: SQLite's `LIKE` folds
+   * ASCII case unconditionally, so a policy written `{ name: { $contains:
+   * 'acme' } }` ADMITTED `ACME Corp` there — rows the predicate excludes,
+   * which on a read scope is over-reach (#3948), not a loose filter. The
+   * per-dialect construct table lives in `text-match-sql.ts`; both of this
+   * compiler's consumers fill this in from the driver that owns the object.
+   */
+  dialect?: string;
 }
 
 /** A node the compiler can walk: a plain object, not `null` and not an array. */
@@ -746,24 +777,38 @@ function bind(params: unknown[], v: unknown): string {
 }
 
 /**
- * [#5567] Bind a LIKE pattern together with its escape character: `? ESCAPE ?`.
+ * [#15684] Compile one case-EXACT text predicate for the dialect that will run
+ * this scope — `text-match-sql.ts` picks the construct, this wrapper supplies
+ * the placeholder plumbing.
  *
- * Both are ordinary bound values, so this whole concern stays inside the
- * predicate: `applyReadScope` (`native-sql-strategy.ts`) and `generateSql`
- * (`objectql-strategy.ts`) rewrite `?` → `$N` while pushing the matching value
- * from `params`, and they carry the escape character for free — neither consumer
- * needed a change. A SQL literal `ESCAPE '\'` would have pushed the problem up a
- * layer AND been unportable: MySQL strips one backslash inside a string literal,
- * so the literal spelling differs per dialect while a bound value does not.
+ * `bind` pushes left to right, which is the order the `?` appear, and both
+ * consumers of this compiler (`NativeSQLStrategy.applyReadScope`,
+ * `ObjectQLStrategy.generateSql`) renumber `?` into `$N` while pushing the
+ * matching value — so a dialect arm that binds ONE value (SQLite's `GLOB`,
+ * which has no `ESCAPE` clause) is carried by that rewrite with no change at
+ * the upper layer, exactly as the two-value `LIKE ? ESCAPE ?` shape was.
  *
- * The clause is not optional decoration. SQLite honours no default escape
- * character, so the escaped pattern alone would search for a literal backslash
- * there and match nothing — the two halves are one fix (see `like-pattern.ts`).
+ * [#5567] The escaping travels with the construct and is NOT optional: an
+ * escaped LIKE pattern with no escape character in force is a search for a
+ * literal backslash on SQLite (no default one there), and the GLOB arm's
+ * escaped character class is a DIFFERENT one — see `text-match-sql.ts`.
  */
-function bindLike(params: unknown[], pattern: string): string {
-  // Left-to-right evaluation of the template puts the pattern in `params` before
-  // the escape character, which is the order the `?` appear.
-  return `${bind(params, pattern)} ESCAPE ${bind(params, LIKE_ESCAPE_CHAR)}`;
+function textMatch(
+  col: string,
+  shape: LikeShape,
+  val: unknown,
+  negate: boolean,
+  params: unknown[],
+  opts: ReadScopeCompileOptions,
+): string {
+  return textMatchPredicateSql({
+    dialect: normalizeSqlDialect(opts.dialect),
+    column: col,
+    shape,
+    value: val,
+    negate,
+    bind: (v) => bind(params, v),
+  });
 }
 
 /**
@@ -1258,16 +1303,19 @@ function compileOperator(
       return `${col} BETWEEN ${bind(params, val[0])} AND ${bind(params, val[1])}`;
     }
     // [#5567] The comparand is a LITERAL, so it is escaped and the escape
-    // character is bound with it. See {@link bindLike}.
+    // character is bound with it. See {@link textMatch}.
     // [#5234] …and it must be a value `String()` can render, which is asserted
-    // BEFORE `likePattern` sees it — see {@link assertRenderableText}.
-    // [#14079] Every LIKE arm asks {@link textOverNonTextColumn} AFTER its
+    // BEFORE a pattern is built from it — see {@link assertRenderableText}.
+    // [#14079] Every text arm asks {@link textOverNonTextColumn} AFTER its
     // comparand gate and BEFORE it binds: a comparand the contract refuses is
     // still refused, and a column whose stored value is never text gets the
-    // contract's constant instead of a `LIKE` over a number.
+    // contract's constant instead of a match over a number.
+    // [#15684] …and the four case-EXACT arms take their construct from the
+    // DIALECT ({@link textMatch}): a plain `LIKE` folds ASCII case on SQLite,
+    // so this scope ADMITTED rows the policy excludes — over-reach (#3948).
     case '$contains':
       assertRenderableText(op, field, val);
-      return textOverNonTextColumn(op, field, opts) ?? `${col} LIKE ${bindLike(params, likePattern('contains', val))}`;
+      return textOverNonTextColumn(op, field, opts) ?? textMatch(col, 'contains', val, false, params, opts);
     /**
      * [#6520] `$icontains` on the READ-SCOPE lowering — the one compiler in this
      * package where a wrong answer is an ADR-0021 scope over-reach rather than a
@@ -1288,10 +1336,11 @@ function compileOperator(
       assertRenderableText(op, field, val);
       const gated = textOverNonTextColumn(op, field, opts);
       if (gated) return gated;
-      // The two binds are spelled out rather than taken from `bindLike`, because
-      // only the PATTERN placeholder is folded and the `ESCAPE` one must not be.
-      // Left-to-right, so the values land in `params` in placeholder order —
-      // the ordering invariant `bindLike`'s own comment states.
+      // The two binds are spelled out rather than taken from {@link textMatch},
+      // because only the PATTERN placeholder is folded, the `ESCAPE` one must
+      // not be, and this operator is case-INSENSITIVE by ruling so it never
+      // wants the per-dialect case-exact construct. Left-to-right, so the
+      // values land in `params` in placeholder order.
       const patternRef = asciiLowerSqlExpr(bind(params, likePattern('contains', val)));
       return `${asciiLowerSqlExpr(col)} LIKE ${patternRef} ESCAPE ${bind(params, LIKE_ESCAPE_CHAR)}`;
     }
@@ -1300,13 +1349,13 @@ function compileOperator(
     case '$notContains':
       assertRenderableText(op, field, val);
       return textOverNonTextColumn(op, field, opts)
-        ?? nullSafeNegative(col, `${col} NOT LIKE ${bindLike(params, likePattern('contains', val))}`);
+        ?? nullSafeNegative(col, textMatch(col, 'contains', val, true, params, opts));
     case '$startsWith':
       assertRenderableText(op, field, val);
-      return textOverNonTextColumn(op, field, opts) ?? `${col} LIKE ${bindLike(params, likePattern('starts', val))}`;
+      return textOverNonTextColumn(op, field, opts) ?? textMatch(col, 'starts', val, false, params, opts);
     case '$endsWith':
       assertRenderableText(op, field, val);
-      return textOverNonTextColumn(op, field, opts) ?? `${col} LIKE ${bindLike(params, likePattern('ends', val))}`;
+      return textOverNonTextColumn(op, field, opts) ?? textMatch(col, 'ends', val, false, params, opts);
     // [#6387] `val` is a boolean here — {@link assertBooleanFlagComparands}
     // refused anything else at {@link compileField}, before this emitter runs.
     // So `=== true` is an exhaustive TWO-WAY choice over the declared domain,
