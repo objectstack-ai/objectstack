@@ -80,41 +80,38 @@
  * character. A third hand-copy of this logic anywhere is the thing to refuse —
  * import from here, or add a consumer to that test.
  *
- * ## [#6518] Case sensitivity: why this file still emits a plain `LIKE`
+ * ## [#6518 / #15684] Case sensitivity: this file builds the PATTERN, not the keyword
  *
- * #4706 Q2 = A rules the `$contains` family case-SENSITIVE on every backend, and
- * #6518 moved the driver family onto that answer — `SqlDriver`'s
- * `textMatchPredicate` now picks the construct per DIALECT, because `LIKE` folds
- * ASCII on SQLite and follows the collation on MySQL. The obvious question is
- * why the compilers here did not move with it, and the answer is measured
- * rather than assumed:
+ * #4706 Q2 = A rules the `$contains` family case-SENSITIVE on every backend,
+ * and #6518 moved the driver family onto that answer — `SqlDriver`'s
+ * `textMatchPredicate` picks the construct per DIALECT, because `LIKE` folds
+ * ASCII on SQLite and follows the collation on MySQL.
  *
- *   1. **These compilers emit Postgres-shaped SQL, and on Postgres `LIKE` is
- *      already exactly the ruled semantics.** Both consumers number their
- *      placeholders `$1`, `$2`, … (`native-sql-strategy.ts`'s `buildFilterClause`
- *      and `objectql-strategy.ts`'s filter render), and `applyReadScope` /
- *      `generateSql` rewrite this file's `?` into `$N` on the way out;
- *      identifiers are `"double quoted"`. Measured on a live PostgreSQL 16
- *      against the shared nine-row fixture: `LIKE '%acme%'` answers row 2 alone
- *      and `LIKE '%ACME%'` answers row 1 alone — case-exact, which is the
- *      contract. So there is no divergence to close HERE, and changing the
- *      construct would create one.
- *   2. **The RLS fork the issue warned about does not open.** #6518's concern
- *      was that a driver-only fix would compile one permission rule into two row
- *      sets. It does not, because the two paths meet only on Postgres — where
- *      `textMatchPredicate`'s postgres arm is also a plain `LIKE`, unchanged.
+ * This file did not move with it, and the argument for staying was written
+ * here: that these compilers emit Postgres-shaped SQL, so `LIKE` was already
+ * exactly the ruled semantics and changing the construct would create a
+ * divergence rather than close one. **That argument was wrong, and #15684
+ * measured how.** The placeholders are Postgres-shaped; the STATEMENT is not
+ * addressed to Postgres. `plugin.ts`'s raw-SQL auto-bridge rewrites `$N` into
+ * `?` and hands the statement to whichever driver owns the object — so on a
+ * SQLite datasource these compilers' output runs on SQLite. Measured on sql.js
+ * over the shared `FILTER_TEXT_ROWS` fixture: `{name: {$contains: 'acme'}}`
+ * answered `['1','2']` — `ACME Corp` AND `acme corp` — where
+ * `FILTER_TEXT_CASES` says `['2']`. On `read-scope-sql.ts`'s output that is
+ * ADR-0021 read-scope over-reach, not a loose filter (#3948).
  *
- * What that reasoning DEPENDS on is the dialect, so it is the thing to re-open
- * rather than the code: **if these compilers ever emit for SQLite or MySQL, this
- * file is wrong and `$contains` silently over-matches there** — on
- * `read-scope-sql.ts`'s output that is ADR-0021 read-scope over-reach, not a
- * loose filter (#3948). Two things would have to arrive together: a dialect
- * input reaching these three compilers, and the per-dialect construct table
- * `textMatchPredicate` already carries. Neither exists today and neither is
- * invented here on speculation. `__tests__/like-metacharacter-escape.test.ts`
- * pins both halves of the claim — that the emitted statement is
- * Postgres-shaped, and that the family is compiled case-EXACT — so this
- * paragraph goes red rather than merely stale.
+ * The two things that had to arrive together arrived together: a dialect input
+ * reaching these three compilers (`DatasetScopedStrategyContext.sqlDialect`,
+ * answered by the driver that will execute the statement) and the per-dialect
+ * construct table (`text-match-sql.ts`, #6518's arm for arm). So the division
+ * of labour here is now explicit:
+ *
+ *   - {@link likePattern} / {@link escapeLikePattern} build the LIKE PATTERN,
+ *     and are used by the `LIKE` arms — Postgres, MySQL, and the `unknown`
+ *     residue — plus `$icontains` on every dialect.
+ *   - Which KEYWORD those patterns hang off, and whether a GLOB pattern with a
+ *     different escaped character class is built instead, is
+ *     `text-match-sql.ts`'s answer. ⛔ Do not re-derive it here.
  *
  * `$icontains` IS implemented here since #6520, and it is a separate construct
  * rather than a flag on the family above: it folds ASCII case on BOTH sides via

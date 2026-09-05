@@ -10616,8 +10616,27 @@ export class SqlDriver implements IDataDriver {
 
   // ── Managed-schema drift & reconcile (#2186) ───────────────────────────────
 
-  /** Canonical dialect name for the drift differ. */
-  protected get dialectName(): SqlDialectName {
+  /**
+   * Canonical dialect name for the drift differ — and, since #15684, the one
+   * answer to "which SQL does this driver speak" that anything outside the
+   * driver may read.
+   *
+   * PUBLIC for exactly one consumer: `service-analytics` compiles its own
+   * statements (an analytics `where`, an ADR-0021 D-C read scope, the
+   * `/analytics/sql` echo) and executes them through this driver, so it needs
+   * the same per-dialect construct choices {@link textMatchPredicate} makes —
+   * a plain `LIKE` folds ASCII case on SQLite, which made a case-SENSITIVE
+   * `$contains` admit rows the predicate excludes, over-reach (#3948) on the
+   * read scope. That package depends on no driver and reads this structurally
+   * through `IDataEngine.getDriverForObject`; exposing the getter is what
+   * keeps the answer THIS driver's rather than a second dialect-resolution
+   * table drifting one knex spelling behind {@link SQLITE_EMIT_CLIENTS} and
+   * friends.
+   *
+   * Read-only and derived: there is nothing to set, and `'unknown'` is a real
+   * answer (a client neither emission set names), not a missing one.
+   */
+  public get dialectName(): SqlDialectName {
     if (this.isSqlite) return 'sqlite';
     if (this.isPostgres) return 'postgres';
     if (this.isMysql) return 'mysql';
