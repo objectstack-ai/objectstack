@@ -172,6 +172,58 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // `coversDirectory` is the check, and it is why the narrower spelling was
       // tried first and rejected by this gate.
       'skills/**',
+      // src/system/compliance-families-retirement.test.ts is the #15513
+      // tree-scoped absence pin (ADR-0049 whole-family retirement). It walks
+      // FIVE repo roots -- `packages`, `examples`, `skills`, `content`,
+      // `scripts` -- seeded off `import.meta.url` and descending with
+      // `readdirSync(dir)` on a LOOP VARIABLE, so the escape verdict resolves
+      // and no name does; every glob below that no roster path holds names
+      // the pin in `heldBy`. The declaration is what puts the pin into
+      // `turbo ls --affected` and the `test` task's cache key for a
+      // resurrection anywhere inside the radius -- the half the retirement
+      // playbook mandates (its ⭐ 半径按包申报一次 rule, #15566) and the
+      // #14477 pin lacked (#15528).
+      //
+      // ⛔ Per EXTENSION under `packages/`, never `packages/**`: the
+      // dispatch-gates self-test pins that no cross-package hint reaches
+      // `packages/client-react`'s `realtime-hooks.test.tsx`, and a bare
+      // `packages/**` was the one entry that covered a `.tsx` file (the
+      // `@objectstack/core` entry above records the measurement). The pin's
+      // scanner skips `.tsx` for the same reason -- extensions and globs widen
+      // together or not at all; a typed `.tsx` import of a retired name fails
+      // `tsc` in its own package, which is the enforced channel there.
+      // `packages/**/*.ts` and `*.mts` subsume this entry's narrower `.ts`
+      // globs above, which are left as the tests that declared them spelled
+      // them. `content/**` is declared whole (the pin scans its JSON / MD /
+      // MDX / YAML too; it subsumes the two `content/docs/...` rows above).
+      // `examples/` is declared per NON-CODE extension only: every example is
+      // a workspace package with its own `typecheck` (`tsc --noEmit`), so a
+      // typed resurrection there fails `tsc` in its own package, and the pin
+      // scans only JSON / MD / MDX / YAML under it. ⛔ Not `examples/**` — that
+      // glob covers the CRM example's smoke test, and the dispatch-gates
+      // self-test pins that no cross-package hint reaches a test file outside
+      // `packages/**` (its `OUTSIDE_PACKAGES` specimen; the path is not spelled
+      // here for the reason the `@objectstack/types` entry gives — a quoted
+      // whole path in this module becomes the very hint the case refuses);
+      // a `.json` / `.md` glob cannot match a `.ts` path. `skills/**` and
+      // `scripts/**` were already declared by the tests named at their rows.
+      'packages/**/*.ts',
+      'packages/**/*.mts',
+      'packages/**/*.cts',
+      'packages/**/*.js',
+      'packages/**/*.mjs',
+      'packages/**/*.cjs',
+      'packages/**/*.json',
+      'packages/**/*.md',
+      'packages/**/*.mdx',
+      'packages/**/*.yaml',
+      'packages/**/*.yml',
+      'examples/**/*.json',
+      'examples/**/*.md',
+      'examples/**/*.mdx',
+      'examples/**/*.yaml',
+      'examples/**/*.yml',
+      'content/**',
     ],
     heldBy: {
       // The two repo-wide `*.object.ts` walkers. Each seeds a recognised
@@ -183,6 +235,23 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
         'packages/spec/src/data/api-methods-batch-conformance.test.ts',
         'packages/spec/src/system/constants/platform-object-names.test.ts',
       ],
+      // The #15513 absence pin's walk radius (see the globs' comment above):
+      // one witness per glob no literal path on this package's roster holds.
+      'packages/**/*.mts': ['packages/spec/src/system/compliance-families-retirement.test.ts'],
+      'packages/**/*.cts': ['packages/spec/src/system/compliance-families-retirement.test.ts'],
+      'packages/**/*.js': ['packages/spec/src/system/compliance-families-retirement.test.ts'],
+      'packages/**/*.mjs': ['packages/spec/src/system/compliance-families-retirement.test.ts'],
+      'packages/**/*.cjs': ['packages/spec/src/system/compliance-families-retirement.test.ts'],
+      'packages/**/*.json': ['packages/spec/src/system/compliance-families-retirement.test.ts'],
+      'packages/**/*.md': ['packages/spec/src/system/compliance-families-retirement.test.ts'],
+      'packages/**/*.mdx': ['packages/spec/src/system/compliance-families-retirement.test.ts'],
+      'packages/**/*.yaml': ['packages/spec/src/system/compliance-families-retirement.test.ts'],
+      'packages/**/*.yml': ['packages/spec/src/system/compliance-families-retirement.test.ts'],
+      'examples/**/*.json': ['packages/spec/src/system/compliance-families-retirement.test.ts'],
+      'examples/**/*.md': ['packages/spec/src/system/compliance-families-retirement.test.ts'],
+      'examples/**/*.mdx': ['packages/spec/src/system/compliance-families-retirement.test.ts'],
+      'examples/**/*.yaml': ['packages/spec/src/system/compliance-families-retirement.test.ts'],
+      'examples/**/*.yml': ['packages/spec/src/system/compliance-families-retirement.test.ts'],
     },
   },
   '@objectstack/core': {

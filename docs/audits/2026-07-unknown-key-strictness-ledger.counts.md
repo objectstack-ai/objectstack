@@ -264,4 +264,4 @@ directory rather than per file.
 | `kernel/` | 260 |
 | `qa/` | 6 |
 | `shared/` | 20 |
-| `system/` | 370 |
+| `system/` | 350 |
