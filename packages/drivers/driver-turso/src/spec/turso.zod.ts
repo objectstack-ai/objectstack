@@ -46,6 +46,22 @@ export const TursoSyncConfigSchema = lazySchema(() => z.object({
 // 2. Connection Configuration
 // ==========================================================================
 
+/**
+ * The prescription the retired `timeout` key raises, and the text `tsc` and the
+ * parse both carry. Standardized closing sentence — the `os migrate meta`
+ * wording states a property of the TOOL and is not a choice (see
+ * `retired-key.ts` in `@objectstack/spec`, whose header owns that ruling).
+ *
+ * ⛔ No internal issue id in this string: it is customer-facing text and
+ * `check:doc-authoring` refuses one. The ids live in the comments beside the
+ * keys below.
+ */
+const TIMEOUT_RETIRED =
+  '`turso config.timeout` was renamed to `timeoutMs` in @objectstack/driver-turso 17 — the unit of a '
+  + 'duration-shaped number lives in the key name, not only in the describe prose. Rename the key to '
+  + '`timeoutMs`; the value (milliseconds) is unchanged. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+
 export const TursoConfigSchema = lazySchema(() => z.object({
   /**
    * Database URL.
@@ -100,8 +116,34 @@ export const TursoConfigSchema = lazySchema(() => z.object({
 
   /**
    * Timeout for database operations in milliseconds.
+   *
+   * Renamed from `timeout` (#15682, ruling B on #14478): the unit lived only in
+   * the describe prose, while `sync.intervalSeconds` — the same shape, three
+   * keys above — already spelled ITS unit. One published connection config
+   * carrying both conventions is what made the bare name dangerous rather than
+   * untidy. `@objectstack/spec`'s own turso contract renamed the same authored
+   * key in #15680; this mirror now agrees with it, and with the ADR-0087
+   * conversion (`turso-config-timeout-to-timeout-ms`) that rewrites the stored
+   * spelling on load.
    */
-  timeout: z.number().int().min(0).optional().describe('Operation timeout in milliseconds'),
+  timeoutMs: z.number().int().min(0).optional().describe('Operation timeout in milliseconds'),
+
+  /**
+   * Tombstone for the rename above (#15682, ruling B on #14478).
+   *
+   * This is a plain `z.object`, so zod's default STRIP posture would make a
+   * bare deletion SILENT: an author's `timeout: 30000` would vanish and the
+   * parse would still succeed. `z.never()` keeps the key DECLARED and
+   * unwritable, so the old spelling raises the prescription instead of
+   * disappearing — the two channels an upgrading author actually meets (`tsc`
+   * sees `never` at the authoring site; the parse raises the text itself).
+   *
+   * Spelled inline rather than through `@objectstack/spec`'s `retiredKey()`:
+   * that helper is internal to the spec package and is not on its published
+   * `./shared` entry point, so this package cannot import it. The shape is the
+   * same one-liner.
+   */
+  timeout: z.never({ error: () => TIMEOUT_RETIRED }).optional().describe(`[REMOVED] ${TIMEOUT_RETIRED}`),
 
   /**
    * Enable WASM mode.
