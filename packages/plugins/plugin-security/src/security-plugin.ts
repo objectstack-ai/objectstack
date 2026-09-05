@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { Plugin, PluginContext, POSTURE_LADDER, isRowActive } from '@objectstack/core';
-import type { PermissionSet, RowLevelSecurityPolicy } from '@objectstack/spec/security';
+import type { PermissionSet, RowLevelSecurityPolicy, TenantLayer0Verdict } from '@objectstack/spec/security';
 import { describeHighPrivilegeBits, describeAnchorForbiddenBits, PUBLIC_FORM_SERVER_MANAGED_FIELDS } from '@objectstack/spec/security';
 import { MCP_AGENT_PERMISSION_SET_RESTRICTED } from '@objectstack/spec/ai';
 // [#8220] The read-scope provenance mark: this middleware is one of the two
@@ -65,7 +65,12 @@ import { bootstrapSystemCapabilities } from './bootstrap-system-capabilities.js'
 import { normalizeManagedByVocab } from './normalize-managed-by.js';
 import { bootstrapDeclaredCapabilities } from './bootstrap-declared-capabilities.js';
 import { RLSCompiler, RLS_DENY_FILTER, policyDeclaresClause } from './rls-compiler.js';
-import { computeTenantLayer0Filter, andComposeLayers } from './tenant-layer.js';
+import {
+  computeTenantLayer0Verdict,
+  tenantLayer0FilterOf,
+  andComposeLayers,
+  intersectTenantLayer0Verdicts,
+} from './tenant-layer.js';
 import {
   PLATFORM_OWNER_WALL_BYPASS_EVENT,
   isVerifiedPlatformOwnerRow,
@@ -3114,13 +3119,19 @@ export class SecurityPlugin implements Plugin {
       // below are what must normalise before it can go green again.
       if (opCtx.ast) {
         const extra: Record<string, unknown>[] = [];
-        const rlsFilter = await this.computeRlsFilter(
+        // [#15813] The layered split rather than `computeRlsFilter`, composed
+        // here with the SAME `andComposeLayers` that wrapper uses — so the
+        // injected predicate is byte-identical to before, and the Layer 0
+        // verdict that produced it is in hand to be RECORDED below.
+        const layered = await this.computeLayeredRlsFilter(
           permissionSets,
           opCtx.object,
           opCtx.operation,
           opCtx.context,
         );
+        const rlsFilter = andComposeLayers(layered.layer0, layered.layer1);
         if (rlsFilter) extra.push(rlsFilter);
+        let tenantLayer0Verdict = layered.tenantLayer0Verdict;
         // ADR-0055: a controlled_by_parent object derives its read scope from the
         // master record — `masterFK IN (accessible master ids)`, AND-ed in.
         const cbpFilter = await this.computeControlledByParentFilter(
@@ -3134,11 +3145,30 @@ export class SecurityPlugin implements Plugin {
         // against the delegator's own context so its userId/tenant substitutions
         // are faithful.
         if (delegatorSets) {
-          const delRls = await this.computeRlsFilter(delegatorSets, opCtx.object, opCtx.operation, delegatorContext);
+          const delLayered = await this.computeLayeredRlsFilter(delegatorSets, opCtx.object, opCtx.operation, delegatorContext);
+          const delRls = andComposeLayers(delLayered.layer0, delLayered.layer1);
           if (delRls) extra.push(delRls);
+          // [#15813] Two Layer 0 walls are AND-ed onto this operation; the
+          // recorded verdict is their intersection — what the composed wall
+          // decided, not the caller's half alone.
+          tenantLayer0Verdict = intersectTenantLayer0Verdicts(tenantLayer0Verdict, delLayered.tenantLayer0Verdict);
           const delCbp = await this.computeControlledByParentFilter(delegatorSets, opCtx.object, delegatorContext);
           if (delCbp) extra.push(delCbp);
         }
+        // [#15813 / ADR-0131 D8] RECORD the Layer 0 verdict on the operation —
+        // the seam ruled on #15706 (option (i)): the wall states what it
+        // decided, and the bulk data-event producer in the engine
+        // (`publishBulkDataEvent` → `bulkEventOrganizationId`) reads it
+        // instead of re-deriving the wall from posture + context + schema,
+        // which structurally could not see the deployment's #12699 carve-out
+        // and mislabelled that population. Written for every operation whose
+        // predicate the wall was composed onto (this branch: reads and
+        // predicate writes); a system context exits before this point and a
+        // by-id write carries no `ast`, so neither records anything — absence
+        // is a distinct, honest state ("no wall was composed"), never `none`.
+        // The member is declared on `OperationContext` (`@objectstack/objectql`)
+        // and its shape by `TenantLayer0VerdictSchema` (`@objectstack/spec`).
+        opCtx.tenantLayer0Verdict = tenantLayer0Verdict;
         // [#8220, A of #7929] This is one of the two read-scope MERGE
         // BOUNDARIES, and the only frame that knows which subtree the caller
         // did not write — so the provenance mark is stamped here, before the
@@ -5514,7 +5544,17 @@ export class SecurityPlugin implements Plugin {
     operation: string,
     context: any,
     opts?: RlsFilterOptions,
-  ): Promise<{ layer0: Record<string, unknown> | null; layer1: Record<string, unknown> | null }> {
+  ): Promise<{
+    layer0: Record<string, unknown> | null;
+    layer1: Record<string, unknown> | null;
+    /**
+     * [#15813] What Layer 0 DECIDED — `layer0` is this verdict's projection
+     * (`tenantLayer0FilterOf`), never a sibling computation. The engine
+     * middleware records it on the operation context so a producer downstream
+     * reads the wall's decision instead of re-deriving the wall.
+     */
+    tenantLayer0Verdict: TenantLayer0Verdict;
+  }> {
     // [ADR-0095 D1] Effective filter = Layer0(tenant) AND Layer1(business RLS).
     // The two are computed independently and never share a compiler, a merge
     // step, or a bypass bit (closes W1 by construction, W2 structurally).
@@ -5767,7 +5807,9 @@ export class SecurityPlugin implements Plugin {
     // Decides "tenant object?" directly from the field set + tenancy posture (NOT
     // via extractTargetField's `=`-only shape match), so a `tenancy.enabled:false`
     // global object correctly contributes nothing (ADR-0095 delta c).
-    const layer0 = computeTenantLayer0Filter({
+    // [#15813] The verdict is computed ONCE; the filter injected below is its
+    // projection. Recording the verdict costs no second computation.
+    const tenantLayer0Verdict = computeTenantLayer0Verdict({
       tenancyPosture: this.tenancyPosture,
       organizationId: context?.tenantId,
       // [ADR-0105 D2] The `group` wall's predicate. Resolved by
@@ -5796,6 +5838,7 @@ export class SecurityPlugin implements Plugin {
       posturePermitsCrossTenant: posturePermits,
       isPlatformAdmin,
     });
+    const layer0 = tenantLayer0FilterOf(tenantLayer0Verdict);
 
     // [#12974] Verified platform OWNER crosses the Layer 0 org wall — READS
     // ONLY. Maintainer ruling 2026-08-29, verbatim and untranslated: 「能不能
@@ -5847,10 +5890,13 @@ export class SecurityPlugin implements Plugin {
           suppressedFilter: layer0,
         },
       );
-      return { layer0: null, layer1 };
+      // [#15813] The recorded verdict follows the wall as APPLIED: lifted here,
+      // so `none` — a reader must not learn an organization from a wall that
+      // was not appended.
+      return { layer0: null, layer1, tenantLayer0Verdict: { kind: 'none' } };
     }
 
-    return { layer0, layer1 };
+    return { layer0, layer1, tenantLayer0Verdict };
   }
 
   /**

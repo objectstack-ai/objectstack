@@ -446,6 +446,7 @@ Review existing `sys_oauth_application`, `sys_webhook`, `sys_two_factor` — kee
 
 - `packages/platform-objects/src/identity/sys-user-preference.object.ts` — original config-resolution comment
 - `packages/services/service-tenant/src/objects/sys-environment-credential.object.ts` — encrypted-creds reference impl
+  *(Path note, 2026-09: historical and deliberately unlinked — the `packages/services/service-tenant/` package left this repository with the control-plane split to `objectstack-ai/cloud` (`473fce590`, 2026-05-21).)*
 - `packages/spec/src/data/field.zod.ts` — existing field type catalogue
 - `packages/platform-objects/src/apps/setup.app.ts` — Setup app shell
 - Apple "Implementing an iOS Settings Bundle" — https://developer.apple.com/documentation/foundation/userdefaults/implementing_an_ios_settings_bundle

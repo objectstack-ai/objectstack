@@ -550,6 +550,11 @@ No new ADR-0011 surface is needed. The Action Registry, agent runtime, and tool-
 
 The following are clean enough to copy verbatim; each goes into `packages/messaging-utils/` with a NOTICE entry:
 
+> **Path note (2026-09):** the three `packages/messaging-utils/src/…` paths in the *Our path* column
+> are **proposed** destinations, not citations — no `packages/messaging-utils/` package has ever
+> existed in this repository's history. They record where this ADR intended the borrowed artifacts
+> to land.
+
 | openclaw source | Our path | Why borrowed |
 |:---|:---|:---|
 | `plugin-sdk/security-runtime.ts::safeEqualSecret` | `packages/messaging-utils/src/safe-equal.ts` | Constant-time secret compare; well-tested, no objectstack-specific shape needed |

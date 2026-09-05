@@ -74,7 +74,8 @@ state the invariant its ADR decided, and this number decided nothing.
 
 The citations that exist today all discuss the withdrawal itself:
 
-- `.changeset/withdraw-adr-0107-drop-writes-proposal.md` — the changeset that withdrew it;
+- `.changeset/withdraw-adr-0107-drop-writes-proposal.md` — the changeset that withdrew it (since
+  consumed by the release, `24c1b91e4`);
 - `docs/audits/2026-07-app-metadata-reference-integrity-assessment.md` §5 D4 — the audit whose open decision it recorded, which carries the revision;
 - `scripts/check-adr-anchors.mjs` — the gate, describing this case.
 
