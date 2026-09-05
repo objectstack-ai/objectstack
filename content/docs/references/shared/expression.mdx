@@ -44,8 +44,8 @@ See also: content/docs/concepts/north-star.mdx §8 "No private expression DSL"
 ## TypeScript Usage
 
 ```typescript
-import { CronExpressionInputSchema, ExpressionSchema, ExpressionDialect, ExpressionInputSchema, ExpressionMetaSchema, PredicateSchema, PredicateInputSchema, TemplateExpressionInputSchema } from '@objectstack/spec/shared';
-import type { CronExpressionInput, Expression, ExpressionDialect, ExpressionInput, ExpressionMeta, Predicate, PredicateInput, TemplateExpressionInput } from '@objectstack/spec/shared';
+import { CronExpressionInputSchema, EvaluatedExpressionSchema, ExpressionSchema, ExpressionDialect, ExpressionInputSchema, ExpressionMetaSchema, PredicateSchema, PredicateInputSchema, TemplateExpressionInputSchema } from '@objectstack/spec/shared';
+import type { CronExpressionInput, EvaluatedExpression, Expression, ExpressionDialect, ExpressionInput, ExpressionMeta, Predicate, PredicateInput, TemplateExpressionInput } from '@objectstack/spec/shared';
 
 // Validate data
 const result = CronExpressionInputSchema.parse(data);
@@ -77,6 +77,20 @@ Type: `string`
 | **meta** | `{ rationale?: string; generatedBy?: string }` | optional |  |
 
 ---
+
+
+---
+
+## EvaluatedExpression
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **dialect** | `Enum<'cel' \| 'cron' \| 'template'>` | ✅ |  |
+| **source** | `string` | ✅ |  |
+| **ast** | `any` | optional |  |
+| **meta** | `{ rationale?: string; generatedBy?: string }` | optional |  |
 
 
 ---

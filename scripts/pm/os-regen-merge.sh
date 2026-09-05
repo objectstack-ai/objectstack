@@ -122,6 +122,54 @@
 #   os-regen: all deferred artifacts are current - marker cleared
 # So step 3 needs no bypass, and step 4 is what clears the marker.
 #
+# ## ⛔ A local `merge-tree` says NOTHING about GitHub's mergeability (#15815)
+#
+# The corollary AGENTS.md §11 leaves unstated, and it costs a round trip:
+# **a local `merge-tree` of any `merge=os-regen` path, in a clone where the driver
+# is registered, is not evidence about whether GitHub can merge the PR.**
+# `git merge-tree --write-tree` runs the same merge-ort machinery as `git merge`,
+# so it HONOURS the driver — and GitHub runs no custom merge driver at all. The two
+# are answering different questions. Already paid for once: a probe read MERGES
+# CLEAN where the PR page read `dirty`, and a merge-conflict card was dispatched
+# for a contradiction that was really an instrument mismatch.
+#
+# The sound probe is one where the driver is genuinely ABSENT — a throwaway bare
+# clone sharing the object store, which is GitHub's actual condition:
+#
+#   git clone --bare --shared . PROBE.git
+#   git --git-dir=PROBE.git merge-tree --write-tree --name-only <base> <head>
+#   rm -rf PROBE.git                       # exit 1 + the paths = really conflicted
+#
+# ⛔ NOT `git -c merge.os-regen.driver= merge-tree --write-tree <base> <head>`. The
+# empty string does not DISABLE the driver — git still tries to RUN it, fails, and
+# marks the path conflicted, so that spelling reports a conflict for EVERY routed
+# path including ones whose text merges perfectly. MEASURED (git 2.43.0, two pairs
+# over packages/spec/spec-changes.json, ground truth = `git merge-file` on the
+# three blobs, which is what a driver-less server-side merge runs):
+#
+#   pair                     truth   driver ON   `-c …driver=`   bare shared clone
+#   same line, both sides    exit 1  exit 0 ✗    exit 1 ✓        exit 1 ✓
+#   1996 lines apart         exit 0  exit 0 ✓    exit 1 ✗        exit 0 ✓
+#
+# The middle column is the trap this section is about; the third is a false
+# POSITIVE instrument that agrees with the truth only by coincidence, printing
+# `error: cannot run : No such file or directory` while it does. Only the last
+# column tracks the truth in both rows.
+#
+# ⚠️ Which way the driver errs is input-dependent, so the trap is intermittent: on
+# a MIXED row it defers (exit 0) only when the incoming side carries nothing but
+# the generated half, and text-merges deliberately when it carries prose. "Is
+# `merge-tree` lying here" therefore has no fixed answer, and a probe that agreed
+# with GitHub once proves nothing about the next one. Use the driver-free
+# instrument always rather than reasoning about when the driver is trustworthy.
+#
+# A probe with the driver ON also used to leave `$GIT_DIR/os-regen-pending`
+# behind, and the next ORDINARY commit in that checkout was refused by
+# `pre-commit` for a merge that never happened. `git-merge-regen.mjs` now declines
+# to record a marker when no index lock is held (i.e. under `merge-tree`); the
+# measurement, and why the two obvious env-var signals are wrong, are in that
+# file's `isProbeInvocation()`. The driver-free probe above never had the problem.
+#
 # The os-regen path list is read from .gitattributes AT RUN TIME — the one copy
 # that cannot rot is the one that does not exist.
 

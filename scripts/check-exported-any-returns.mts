@@ -118,7 +118,10 @@
 // them to the rest of the program — which is why landing this file lowered the
 // ledger entry by 54 errors it did not author. See the PR body.
 
-import ts from 'typescript';
+// `ts` is the RUNTIME namespace, loaded through the prerequisite thunk below; `TS`
+// is the same namespace as TYPES ONLY. `import type` is erased before the module
+// graph is linked, so it cannot bring back the `ERR_MODULE_NOT_FOUND` this closes.
+import type TS from 'typescript';
 import fs from 'node:fs';
 import path from 'node:path';
 import url from 'node:url';
@@ -126,6 +129,11 @@ import os from 'node:os';
 
 import { distIsStale } from './check-regen-pending.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
+
+import { requireDefaultExport } from './import-prerequisite.mjs';
+const ts = await requireDefaultExport('typescript', () => import('typescript'), import.meta.url, {
+  measures: 'any exported callable of an SDK package resolves to `any`',
+});
 
 const HERE = path.dirname(url.fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
@@ -200,7 +208,7 @@ export type ScanResult = {
   anyReturns: Map<string, string>;
 };
 
-function makeProgram(files: string[], extra: ts.CompilerOptions = {}): ts.Program {
+function makeProgram(files: string[], extra: TS.CompilerOptions = {}): TS.Program {
   return ts.createProgram(files, {
     module: ts.ModuleKind.NodeNext,
     moduleResolution: ts.ModuleResolutionKind.NodeNext,
@@ -224,7 +232,7 @@ function makeProgram(files: string[], extra: ts.CompilerOptions = {}): ts.Progra
  * refuses. A named class that IS part of the surface (`RealtimeAPI`,
  * `QueryBuilder`) is reached anyway, as its own module export.
  */
-export function scan(program: ts.Program, entryFile: string): ScanResult {
+export function scan(program: TS.Program, entryFile: string): ScanResult {
   const checker = program.getTypeChecker();
   const result: ScanResult = { callables: 0, generics: 0, anyReturns: new Map() };
 
@@ -236,19 +244,19 @@ export function scan(program: ts.Program, entryFile: string): ScanResult {
     );
   }
 
-  const isAny = (t: ts.Type | undefined): boolean => Boolean(t && t.flags & ts.TypeFlags.Any);
-  const unalias = (s: ts.Symbol): ts.Symbol =>
+  const isAny = (t: TS.Type | undefined): boolean => Boolean(t && t.flags & ts.TypeFlags.Any);
+  const unalias = (s: TS.Symbol): TS.Symbol =>
     s.getFlags() & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(s) : s;
 
   /** A `{ … }` type literal — the namespacing shape, not a named data type. */
-  const isAnonymousObject = (t: ts.Type): boolean => {
+  const isAnonymousObject = (t: TS.Type): boolean => {
     if (!(t.flags & ts.TypeFlags.Object)) return false;
-    if (!((t as ts.ObjectType).objectFlags & ts.ObjectFlags.Anonymous)) return false;
+    if (!((t as TS.ObjectType).objectFlags & ts.ObjectFlags.Anonymous)) return false;
     const decl = t.getSymbol()?.declarations?.[0];
     return Boolean(decl && ts.isTypeLiteralNode(decl));
   };
 
-  const record = (key: string, sig: ts.Signature): void => {
+  const record = (key: string, sig: TS.Signature): void => {
     result.callables++;
     if ((sig.getTypeParameters() ?? []).length > 0) result.generics++;
     const ret = checker.getReturnTypeOfSignature(sig);
@@ -272,7 +280,7 @@ export function scan(program: ts.Program, entryFile: string): ScanResult {
   // walk happened to reach first, so the second path's sites are invisible to the
   // ratchet and the ledger keys silently depend on walk order. A per-branch set
   // still terminates (a cycle must revisit an ancestor) and reports every path.
-  const walk = (type: ts.Type, path: string, depth: number, ancestors: ReadonlySet<ts.Type>): void => {
+  const walk = (type: TS.Type, path: string, depth: number, ancestors: ReadonlySet<TS.Type>): void => {
     if (depth > 8 || ancestors.has(type)) return;
     const branch = new Set(ancestors).add(type);
     for (const prop of checker.getPropertiesOfType(type)) {

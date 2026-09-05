@@ -861,6 +861,14 @@ describe('managed extension fields (ADR-0105 D7)', () => {
     expect(managedExtensionEditableFields('sys_organization')).toContain('sort_order');
   });
 
+  it('#14238 — `sys_organization.timezone` (the hierarchy root default) is declared AND editable', () => {
+    // Declared: the D7 collision check above judges it against better-auth's
+    // organization schema. Editable: a root default an administrator cannot
+    // set through the generic path is a declared-but-unusable column.
+    expect(managedExtensionFields('sys_organization')).toContain('timezone');
+    expect(managedExtensionEditableFields('sys_organization')).toContain('timezone');
+  });
+
   it('admin-surface-only sys_user fields are declared but NOT generically editable', () => {
     // `manager_id` / `ai_access` drive authorization and AI seating;
     // `primary_business_unit_id` is a projection plugin-sharing maintains.
