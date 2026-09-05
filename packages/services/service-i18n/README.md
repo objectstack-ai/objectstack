@@ -43,7 +43,7 @@ locale" to set: every call names the locale it wants.
 |:---|:---|:---|:---|
 | `defaultLocale` | `string` | `'en'` | Reported by `getDefaultLocale()`; used as the adapter's default. |
 | `localesDir` | `string` | none | Directory of `{locale}.json` files loaded at construction. |
-| `fallbackLocale` | `string` | none | Consulted when a key is missing in the requested locale. |
+| `fallbackLocale` | `string` | none | Consulted when a key is missing in the requested locale; reported by `getFallbackLocale()`, which the REST metadata reads pass to the document translators as their fallback chain (#14882). |
 | `registerRoutes` | `boolean` | `true` | Register the REST routes at `kernel:ready`. |
 | `basePath` | `string` | `'/api/v1/i18n'` | Base path for those routes. |
 
@@ -83,7 +83,7 @@ number / relative-time formatting in this package — use `Intl` for those.
 ## Service API
 
 `II18nService` (from `@objectstack/spec/contracts`) declares four required members plus
-optional ones; `FileI18nAdapter` implements the required four and three of the optional.
+optional ones; `FileI18nAdapter` implements the required four and four of the optional.
 
 ```typescript
 import type { II18nService } from '@objectstack/spec/contracts';
@@ -95,6 +95,7 @@ import type { II18nService } from '@objectstack/spec/contracts';
 //   getLocales()                          -> string[]
 // optional, implemented here
 //   getDefaultLocale() / setDefaultLocale(locale)
+//   getFallbackLocale()                   -> string | undefined  (the locale t() consults second)
 //   setSupportedLocales(locales | undefined)
 ```
 
