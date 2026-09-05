@@ -558,7 +558,7 @@ describe('CircuitBreakerConfigSchema', () => {
     expect(config.failureThreshold).toBe(5);
     expect(config.resetTimeoutMs).toBe(30000);
     expect(config.halfOpenMaxRequests).toBe(1);
-    expect(config.monitoringWindow).toBe(60000);
+    expect(config.monitoringWindowMs).toBe(60000);
   });
 
   it('should accept full circuit breaker config', () => {
@@ -567,7 +567,7 @@ describe('CircuitBreakerConfigSchema', () => {
       failureThreshold: 10,
       resetTimeoutMs: 60000,
       halfOpenMaxRequests: 3,
-      monitoringWindow: 120000,
+      monitoringWindowMs: 120000,
       fallbackStrategy: 'cache',
     });
 

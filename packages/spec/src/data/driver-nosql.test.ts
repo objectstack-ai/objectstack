@@ -224,7 +224,7 @@ describe('NoSQL Driver Protocol', () => {
         consistency: 'quorum' as const,
         readFromSecondary: true,
         projection: { name: 1, email: 1, _id: 0 },
-        timeout: 5000,
+        timeoutMs: 5000,
         useCursor: true,
         batchSize: 100,
         profile: true,
@@ -232,7 +232,7 @@ describe('NoSQL Driver Protocol', () => {
       };
       
       const result = NoSQLQueryOptionsSchema.parse(options);
-      expect(result.timeout).toBe(5000);
+      expect(result.timeoutMs).toBe(5000);
       expect(result.batchSize).toBe(100);
       expect(result.hint).toBe('name_1_email_1');
     });

@@ -427,7 +427,7 @@ describe('ConversationAnalyticsSchema', () => {
       summarizationEvents: 1,
       tokensSavedByPruning: 500,
       tokensSavedBySummarization: 2000,
-      duration: 1800,
+      durationSeconds: 1800,
       firstMessageAt: '2024-01-15T10:00:00Z',
       lastMessageAt: '2024-01-15T10:30:00Z',
     };

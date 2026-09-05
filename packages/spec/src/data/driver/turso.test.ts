@@ -27,7 +27,7 @@ describe('TursoConfigSchema', () => {
       { url: 'file:./data/objectstack.db' },
       { url: ':memory:' },
       { url: 'file:./local.db', syncUrl: 'libsql://my-db.turso.io', sync: { intervalSeconds: 60 } },
-      { url: 'libsql://x.turso.io', concurrency: 10, timeout: 5000, mode: 'remote' },
+      { url: 'libsql://x.turso.io', concurrency: 10, timeoutMs: 5000, mode: 'remote' },
     ]) {
       const result = TursoConfigSchema.safeParse(config);
       expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
