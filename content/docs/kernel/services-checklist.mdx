@@ -207,6 +207,15 @@ The `services` map still reports a registered stub as
 it to `unavailable` — "something is in this slot, and it is a fake" says more
 than "install a plugin".
 
+Exactly one slot answers `enabled` by a different question, and the exception is
+declared rather than incidental: `realtime` is a **channel slot**
+(`CHANNEL_SURFACE_SLOTS`, `@objectstack/spec/api`), so its `enabled` is
+`isSubscribableChannel()` — `handlerReady: true` **and** a connectable route — instead of
+"the slot is filled" (#14646). A registered realtime stub therefore reads
+`{ enabled: false, status: "stub", handlerReady: false }`. `status` still carries the
+"something is in this slot" half, which is why the entry is not collapsed to
+`unavailable`. Every other slot follows the sentence above.
+
 ---
 
 ## 2. data Service ✅ Implemented
@@ -584,8 +593,11 @@ When a plugin registers a service, the discovery endpoint automatically updates:
   `__serviceInfo`, which is reported verbatim instead)
 - `routes.auth` → `"/api/v1/auth"` appears in routes
 - `features` flags follow for the slots that have one — `search`, `files`,
-  `analytics`, `ai`, `workflow`, `notifications`, `i18n` (`websockets` is hardcoded
-  `false`; there is no `features.auth`)
+  `analytics`, `ai`, `workflow`, `notifications`, `i18n` (`websockets` does **not**
+  follow slot presence: it is `isSubscribableChannel(services.realtime)` — `handlerReady:
+  true` **and** a connectable route — so registering a realtime service does not flip it,
+  and it reads `false` on every host the open framework ships, #14646; there is no
+  `features.auth`)
 
 ---
 
